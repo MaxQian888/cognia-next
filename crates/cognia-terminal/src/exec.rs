@@ -244,7 +244,7 @@ pub async fn terminal_exec_inner(
 /// Tauri command wrapper so the desktop shell can drive one-shot exec through
 /// the same `transport.call("terminal_exec", …)` client path the mobile client
 /// uses (the Companion dispatch arm calls [`terminal_exec_inner`] directly).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn terminal_exec(
     cwd: Option<String>,
     command: String,

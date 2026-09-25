@@ -146,7 +146,7 @@ pub fn complete_paths_inner(
 }
 
 /// Tauri command — see module docs. `limit` defaults to 50.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn terminal_complete_paths(
     cwd: String,
     fragment: String,

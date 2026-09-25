@@ -12,11 +12,18 @@
 //! All commands are stateless wrappers around `TerminalState` lookups;
 //! every retainable session truth lives in the store.
 
+// Without `tauri-host` the commands and the `AppHandle` path resolvers compile
+// out (ADR-0196), leaving imports and helpers only they use; the feature build
+// still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use serde::Serialize;
+#[cfg(feature = "tauri-host")]
 use tauri::ipc::Channel;
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, Manager, Runtime, State};
 
 use super::session::{
@@ -24,6 +31,7 @@ use super::session::{
 };
 use super::TerminalState;
 
+#[cfg(feature = "tauri-host")]
 /// Locate the bundled shell-integration script directory. In dev
 /// (`pnpm tauri dev`) this resolves to the workspace path; in production
 /// it's the Tauri resource dir.
@@ -47,6 +55,7 @@ pub(super) fn resolve_script_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
         .join("terminal")
 }
 
+#[cfg(feature = "tauri-host")]
 /// Locate a directory that contains the `cognia` plugin-author CLI shipped
 /// with the app, if any. We don't bundle the binary into installers today —
 /// users acquire it via the in-app download (registered as a managed dir,
@@ -122,6 +131,7 @@ pub(super) fn assemble_path_injection(
     PathInjection { prepend, append }
 }
 
+#[cfg(feature = "tauri-host")]
 /// The app's current view of where `cognia` can be found.
 ///
 /// `pub` (not `pub(super)`) because `src-tauri` is a separate crate and has to
@@ -145,6 +155,7 @@ pub struct SpawnResult {
 /// Open a new PTY session and start streaming `{seq, event}` envelopes
 /// through `on_event`. The renderer persists the last seen `seq` so it can
 /// resume via `terminal_reattach` after a reload.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn terminal_spawn<R: Runtime>(
     app: AppHandle<R>,
@@ -165,6 +176,7 @@ pub fn terminal_spawn<R: Runtime>(
 /// rewires the byte stream and replays everything with `seq > resume_from`.
 /// Returns the session info, or an error when the session is gone (e.g. a
 /// full app restart, where sessions are not restored).
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn terminal_reattach(
     state: State<'_, TerminalState>,
@@ -181,6 +193,7 @@ pub fn terminal_reattach(
 
 /// Pipe bytes into the PTY stdin. `data` is base64-decoded automatically
 /// by Tauri when typed as `Vec<u8>` on the Rust side.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn terminal_write(
     state: State<'_, TerminalState>,
@@ -195,6 +208,7 @@ pub fn terminal_write(
         .map_err(|e| format!("write failed: {e}"))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn terminal_resize(
     state: State<'_, TerminalState>,
@@ -216,6 +230,7 @@ pub fn terminal_resize(
 ///
 /// Drop on the removed `Arc<PtySession>` ensures the child is actually
 /// killed even if the explicit `kill()` racied with natural exit.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn terminal_kill(state: State<'_, TerminalState>, id: String) -> Result<(), String> {
     if let Some(session) = state.remove(&id) {
@@ -224,6 +239,7 @@ pub fn terminal_kill(state: State<'_, TerminalState>, id: String) -> Result<(), 
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn terminal_list_for_project(
     state: State<'_, TerminalState>,
@@ -232,6 +248,7 @@ pub fn terminal_list_for_project(
     Ok(state.list_for_project(&project_id))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn terminal_list_all(
     state: State<'_, TerminalState>,
@@ -245,7 +262,7 @@ pub fn terminal_list_all(
 /// listening PID(s) via the platform's standard tool (`netstat` on Windows,
 /// `lsof` elsewhere) and signals them. Returns the PIDs that were signalled,
 /// possibly empty (nothing was listening / the tool was unavailable).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn terminal_kill_port(port: u16) -> Result<Vec<u32>, String> {
     if port == 0 {
         return Err("invalid port".into());

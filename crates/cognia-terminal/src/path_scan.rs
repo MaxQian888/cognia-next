@@ -140,7 +140,7 @@ pub fn __clear_cache_for_testing() {
 
 /// Tauri command: one page of the executables on the current PATH that
 /// start with `prefix` (ADR-0175 B3).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn terminal_list_path_executables(
     prefix: String,
     page_size: Option<u32>,

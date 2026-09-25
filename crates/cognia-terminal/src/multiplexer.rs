@@ -313,17 +313,17 @@ async fn run(program: &str, args: &[String]) -> Result<String, String> {
 // so the value of the command layer is the argument names on the wire and
 // nothing else.
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn terminal_detect_multiplexer() -> Result<MultiplexerInfo, String> {
     Ok(detect_multiplexer().await)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn terminal_list_tmux_sessions() -> Result<Vec<TmuxSession>, String> {
     Ok(list_tmux_sessions().await)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn terminal_list_tmux_windows(session_name: String) -> Result<Vec<TmuxWindow>, String> {
     Ok(list_tmux_windows(&session_name).await)
 }

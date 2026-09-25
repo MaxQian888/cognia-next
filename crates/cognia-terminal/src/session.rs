@@ -27,7 +27,6 @@ use std::thread;
 
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
-use tauri::ipc::Channel;
 use uuid::Uuid;
 
 use super::integration::{self, ShellKind};
@@ -222,6 +221,24 @@ pub struct SeqEvent {
     pub event: TerminalEvent,
 }
 
+/// Where the desktop dock's events go. In the app it is the renderer's
+/// `tauri::ipc::Channel` (implemented below, behind `tauri-host`); the
+/// session only needs "send this, tell me if it failed", so the crate itself
+/// stays Tauri-free (ADR-0196) and tests capture events in memory.
+pub trait DeskSink: Send + Sync {
+    /// Deliver one event. An `Err` (a channel torn down by a webview reload)
+    /// leaves the slot's `last_seq` untouched, so the event is replayed on
+    /// reattach.
+    fn send(&self, event: SeqEvent) -> Result<(), String>;
+}
+
+#[cfg(feature = "tauri-host")]
+impl DeskSink for tauri::ipc::Channel<SeqEvent> {
+    fn send(&self, event: SeqEvent) -> Result<(), String> {
+        tauri::ipc::Channel::send(self, event).map_err(|error| error.to_string())
+    }
+}
+
 /// Swappable Channel consumer for the desktop dock. The reader/waiter sink
 /// sends through whatever Channel is currently installed; `terminal_reattach`
 /// swaps in a fresh Channel (new webview) and replays the missed events.
@@ -231,7 +248,7 @@ pub struct SeqEvent {
 /// or the desktop spawn path.
 #[derive(Default)]
 pub struct ChannelSlot {
-    channel: Option<Channel<SeqEvent>>,
+    channel: Option<Arc<dyn DeskSink>>,
     last_seq: u64,
 }
 
@@ -374,14 +391,14 @@ pub fn spawn_session(
     req: SpawnRequest,
     script_dir: &Path,
     path: &PathInjection,
-    event_channel: Channel<SeqEvent>,
+    event_channel: impl DeskSink + 'static,
 ) -> Result<PtySession, String> {
     // Desktop path: the sink sends through a *swappable* Channel slot so a
     // reload can reattach (see `PtySession::reattach`). `last_seq` dedupes
     // replay-vs-live for the current channel; a failed send (dead channel
     // after reload) leaves `last_seq` untouched so the event is replayed.
     let slot: DeskChannel = Arc::new(StdMutex::new(ChannelSlot {
-        channel: Some(event_channel),
+        channel: Some(Arc::new(event_channel)),
         last_seq: 0,
     }));
     let slot_for_sink = slot.clone();
@@ -936,13 +953,13 @@ impl PtySession {
     /// the sink: a concurrently-pushed event is either in the snapshot
     /// (replayed) or sent by the (blocked) sink afterwards — `last_seq`
     /// dedupes the overlap, preserving order with no duplicates.
-    pub fn reattach(&self, channel: Channel<SeqEvent>, resume_from: u64) {
+    pub fn reattach(&self, channel: impl DeskSink + 'static, resume_from: u64) {
         let mut slot = match self.channel_slot.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
         slot.last_seq = resume_from;
-        slot.channel = Some(channel);
+        slot.channel = Some(Arc::new(channel));
         for (seq, event) in self.replay.since(resume_from) {
             if seq > slot.last_seq {
                 if let Some(ch) = slot.channel.as_ref() {
@@ -1037,23 +1054,20 @@ mod tests {
         assert!(gate.wait_for_resume());
     }
 
-    fn capture_channel() -> (Channel<SeqEvent>, Arc<StdMutex2<Vec<TerminalEvent>>>) {
-        let sink = Arc::new(StdMutex2::new(Vec::<TerminalEvent>::new()));
-        let sink_clone = sink.clone();
-        let channel = Channel::<SeqEvent>::new(move |body| {
-            // The Channel emits InvokeResponseBody::Json(serde_json::Value)
-            // in tests when constructed this way; deserialise the SeqEvent
-            // envelope and keep the inner event so assertions match variants.
-            let value = match body {
-                tauri::ipc::InvokeResponseBody::Json(s) => s,
-                _ => return Ok(()),
-            };
-            if let Ok(seqev) = serde_json::from_str::<SeqEvent>(&value) {
-                sink_clone.lock().unwrap().push(seqev.event);
-            }
+    /// An in-memory [`DeskSink`] that keeps each delivered event, so the
+    /// assertions match on variants exactly as the renderer would see them.
+    struct CaptureSink(Arc<StdMutex2<Vec<TerminalEvent>>>);
+
+    impl DeskSink for CaptureSink {
+        fn send(&self, event: SeqEvent) -> Result<(), String> {
+            self.0.lock().unwrap().push(event.event);
             Ok(())
-        });
-        (channel, sink)
+        }
+    }
+
+    fn capture_channel() -> (CaptureSink, Arc<StdMutex2<Vec<TerminalEvent>>>) {
+        let sink = Arc::new(StdMutex2::new(Vec::<TerminalEvent>::new()));
+        (CaptureSink(sink.clone()), sink)
     }
 
     fn detect_default_shell() -> Option<String> {

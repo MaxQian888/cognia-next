@@ -95,7 +95,7 @@ cognia-provider-diagnostics = { path = "../crates/cognia-provider-diagnostics" }
 cognia-media = { path = "../crates/cognia-media", features = ["tauri-host"] }
 # ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased
 # as `crate::terminal`; commands referenced from generate_handler!.
-cognia-terminal = { path = "../crates/cognia-terminal" }
+cognia-terminal = { path = "../crates/cognia-terminal", features = ["tauri-host"] }
 # Background-job supervisor — the non-interactive sibling of cognia-terminal.
 # Owns `bash(run_in_background)` and scheduled-task background work.
 cognia-jobs = { path = "../crates/cognia-jobs" }

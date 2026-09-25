@@ -21,6 +21,11 @@
 //! dropped. Best-effort by construction — when shell integration is
 //! broken the run ends by timeout with the stripped raw tail instead.
 
+// Without `tauri-host` the headless-terminal commands compile out (ADR-0196),
+// leaving the state methods and imports only they use; the feature build
+// still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,6 +33,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, Runtime};
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 use uuid::Uuid;
@@ -581,6 +587,7 @@ impl Drop for HeadlessSession {
 
 // --- Tauri commands --------------------------------------------------------
 
+#[cfg(feature = "tauri-host")]
 fn resolve_dirs<R: Runtime>(app: &AppHandle<R>) -> (PathBuf, super::session::PathInjection) {
     (
         super::commands::resolve_script_dir(app),
@@ -590,6 +597,7 @@ fn resolve_dirs<R: Runtime>(app: &AppHandle<R>) -> (PathBuf, super::session::Pat
 
 /// One-shot: spawn a private shell, run one line, kill. The workhorse for
 /// the unattended workflow terminal node.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn terminal_headless_exec<R: Runtime>(
     app: AppHandle<R>,
@@ -615,6 +623,7 @@ pub async fn terminal_headless_exec<R: Runtime>(
 }
 
 /// Spawn a persistent headless session for multi-step runs.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn terminal_headless_spawn<R: Runtime>(
     app: AppHandle<R>,
@@ -642,6 +651,7 @@ pub fn terminal_headless_spawn<R: Runtime>(
 }
 
 /// Run one command line in a persistent headless session.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn terminal_headless_run(
     state: tauri::State<'_, HeadlessTerminalState>,
@@ -656,6 +666,7 @@ pub async fn terminal_headless_run(
 }
 
 /// Kill + forget a persistent headless session. Idempotent.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn terminal_headless_kill(
     state: tauri::State<'_, HeadlessTerminalState>,

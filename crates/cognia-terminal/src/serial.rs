@@ -491,8 +491,10 @@ pub fn serial_status(session_id: &str) -> &'static str {
 
 /// Publishes onto the desktop event bus, one topic per session, the same shape
 /// `connectors://ws/<id>/message` uses.
+#[cfg(feature = "tauri-host")]
 struct AppHandleSink<R: tauri::Runtime>(tauri::AppHandle<R>);
 
+#[cfg(feature = "tauri-host")]
 impl<R: tauri::Runtime> SerialEventSink for AppHandleSink<R> {
     fn emit(&self, topic: &str, payload: serde_json::Value) {
         use tauri::Emitter as _;
@@ -500,7 +502,7 @@ impl<R: tauri::Runtime> SerialEventSink for AppHandleSink<R> {
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn terminal_list_serial_ports() -> Result<Vec<SerialPortInfo>, String> {
     // Enumeration walks the OS device tree, so it stays off the async runtime.
     tokio::task::spawn_blocking(list_serial_ports)
@@ -508,6 +510,7 @@ pub async fn terminal_list_serial_ports() -> Result<Vec<SerialPortInfo>, String>
         .map_err(|error| error.to_string())?
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn terminal_open_serial<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -516,23 +519,23 @@ pub async fn terminal_open_serial<R: tauri::Runtime>(
     open_serial(config, Arc::new(AppHandleSink(app))).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn terminal_close_serial(session_id: String) -> Result<(), String> {
     close_serial(&session_id);
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn terminal_serial_write(session_id: String, data: String) -> Result<(), String> {
     write_serial(&session_id, &data).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn terminal_serial_attach(session_id: String) -> Result<bool, String> {
     Ok(attach_serial(&session_id))
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn terminal_serial_status(session_id: String) -> Result<&'static str, String> {
     Ok(serial_status(&session_id))
 }
