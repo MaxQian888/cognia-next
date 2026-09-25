@@ -58,6 +58,7 @@ import type {
   PluginTerminalLifecycleEvent,
   GoalHookPayload,
   ShareLinkHookPayload,
+  ConnectorDecisionOutcome,
   ConnectorHookDecision,
   ConnectorInboundHookPayload,
   ConnectorOutboundHookPayload,
@@ -86,6 +87,8 @@ export {
 import { extractSessionIdFromPayload, recordPluginHookEvent } from "./hook-telemetry"
 import { dispatchTransform } from "@/lib/plugin/interceptors/dispatch"
 import type { ToolResultProjectValue } from "@/lib/plugin/interceptors/normalize"
+import { capInboundLabels, normalizeInboundLabels } from "@/lib/connectors/inbound-labels"
+import type { InboundLabel } from "@/types/connectors/inbound-label"
 
 // =============================================================================
 // Unified Types
@@ -1620,7 +1623,7 @@ export class PluginEventHooks {
   async dispatchConnectorDecision(
     hookName: "onConnectorInbound" | "onConnectorOutbound",
     payload: ConnectorInboundHookPayload | ConnectorOutboundHookPayload
-  ): Promise<ConnectorHookDecision> {
+  ): Promise<ConnectorDecisionOutcome> {
     const results = await this.executeHook(hookName, (hooks) => {
       const fn = hooks[hookName] as
         | ((
@@ -1630,14 +1633,25 @@ export class PluginEventHooks {
       return fn?.(payload)
     })
     let transformed: unknown[] | null = null
+    const labels: InboundLabel[] = []
+    const now = Date.now()
     for (const r of results) {
       if (!r.success) continue
+      // Raw plugin output (a python hook's return value is not normalized on
+      // the way in), so every field is re-checked here.
       const value = r.result as ConnectorHookDecision | undefined | void
-      if (!value || value.action === "allow") continue
+      if (!value || typeof value !== "object" || value.action === "allow") continue
       if (value.action === "block") return { action: "block", reason: value.reason }
       if (value.action === "transform") transformed = value.segments
+      else if (value.action === "annotate" && hookName === "onConnectorInbound") {
+        labels.push(...normalizeInboundLabels(value.labels, r.pluginId, now))
+      }
     }
-    return transformed ? { action: "transform", segments: transformed } : { action: "allow" }
+    const capped = capInboundLabels(labels)
+    const withLabels = capped.length ? { labels: capped } : {}
+    return transformed
+      ? { action: "transform", segments: transformed, ...withLabels }
+      : { action: "allow", ...withLabels }
   }
 
   /**

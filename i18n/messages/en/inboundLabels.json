@@ -1,0 +1,10 @@
+{
+  "ariaLabel": "Plugin labels",
+  "keys": {
+    "harassment": "Harassment",
+    "spam": "Spam",
+    "threat": "Threat",
+    "toxic": "Toxic"
+  },
+  "tooltip": "Labelled by {source} · {score}%"
+}

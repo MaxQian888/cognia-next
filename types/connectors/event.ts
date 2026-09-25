@@ -129,6 +129,13 @@ export interface NormalizedInboundEvent {
   raw: unknown
   channelData?: Record<string, unknown>
   /**
+   * Labels plugins attached through `onConnectorInbound` → `annotate`
+   * (ADR-0194), already validated and stamped by the host. Top-level, not in
+   * `channelData`: `compactTerminalEvent` drops `channelData`, and the
+   * recovery replay must persist the same labels onto the message row.
+   */
+  inboundLabels?: import("@/types/connectors/inbound-label").InboundLabel[]
+  /**
    * Defaults to `"create"` when omitted, preserving the Phase 1 contract.
    * See {@link InboundEventKind}.
    */

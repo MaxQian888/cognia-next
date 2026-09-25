@@ -2841,6 +2841,12 @@ export interface StoredMessage {
      * / cards / lists / images as structured UI rather than plaintext.
      */
     inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
+    /**
+     * Labels plugins attached to this inbound message via
+     * `onConnectorInbound` → `annotate` (ADR-0194), validated and stamped by
+     * the host. Cleared when the platform edits the message.
+     */
+    inboundLabels?: import("@/types/connectors/inbound-label").InboundLabel[]
     /** Set on outbound (assistant) messages once enqueued. */
     outboundJobId?: string
     /**

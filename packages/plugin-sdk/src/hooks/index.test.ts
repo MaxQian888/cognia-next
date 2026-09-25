@@ -141,6 +141,7 @@ describe("plugin-sdk: hooks", () => {
       "ConnectorOutboundHookPayload",
       "ConnectorHookDecision",
       "ConnectorHookEvents",
+      "InboundLabelInput",
       "UIHookEvents",
     ]
 

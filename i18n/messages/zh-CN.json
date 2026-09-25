@@ -16041,6 +16041,16 @@
       "title": "导入完成"
     }
   },
+  "inboundLabels": {
+    "ariaLabel": "插件标签",
+    "keys": {
+      "harassment": "骚扰",
+      "spam": "垃圾信息",
+      "threat": "威胁",
+      "toxic": "不友善"
+    },
+    "tooltip": "由 {source} 标注 · {score}%"
+  },
   "inbox": {
     "activeDelegations": {
       "count": "{count, plural, other {# 个运行中}}",

@@ -358,9 +358,11 @@ export type AuditKind =
   // `*_transformed` when it rewrote the segments (and the rewrite PASSED the
   // PII re-gate). `transform_pii_blocked` when a transform was REJECTED because
   // it would have leaked PII (the original is kept). Carries `fields.pluginId`
-  // when known + `reason`.
+  // when known + `reason`. `inbound_annotated` when plugins attached labels
+  // (ADR-0194); `reason` lists `source:key` pairs.
   | "plugin.inbound_blocked"
   | "plugin.inbound_transformed"
+  | "plugin.inbound_annotated"
   | "plugin.outbound_blocked"
   | "plugin.outbound_transformed"
   | "plugin.transform_pii_blocked"

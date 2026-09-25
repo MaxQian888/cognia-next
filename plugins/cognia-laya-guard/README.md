@@ -10,10 +10,12 @@ the checkpoint is cached.
 
 - **`onConnectorInbound` hook** — scores inbound messages on `spam` /
   `threat` / `harassment` / `toxic` before they reach an agent run. Ships in
-  `inboundMode: "observe"`: nothing is dropped; flagged messages increment
-  `wouldBlock` in `laya_status` so you can watch the score distribution on
-  real traffic. Flip to `"enforce"` to actually drop. The hook fails open
-  (allows) while the model is loading or on any error.
+  `inboundMode: "observe"`: nothing is dropped; a flagged message keeps
+  flowing with its scores attached as labels (`{ action: "annotate" }`,
+  ADR-0194 — shown as chips on the message) and increments `wouldBlock` in
+  `laya_status`, so you can watch the score distribution on real traffic.
+  Flip to `"enforce"` to actually drop. The hook fails open (allows) while the
+  model is loading or on any error.
 - **`laya_moderate_check` tool** — the same verdict on arbitrary text, for
   inspection and tuning.
 - **`laya_status` tool** — checkpoint readiness, configured backend, counters

@@ -116,6 +116,20 @@ therefore declares no set: with laya selected the copilot reports
 for everything it does measure well (inbound moderation) and for plugins'
 own questions.
 
+### 7. An inbound hook can annotate, not only block
+
+`onConnectorInbound` gains a fourth decision, `{ action: "annotate", labels }`:
+keep the message and attach labels (a key, a 0..1 score, an optional
+severity / label / note). The dispatcher validates the raw plugin output
+(key shape, finite score, redacted notes), caps it (8 per plugin, 16 per
+message), stamps the source plugin, and returns the labels alongside allow or
+transform; a block still wins. The bus carries them on the event's top-level
+`inboundLabels` (not `channelData`, which recovery compaction drops),
+`insertInboundMessage` persists them as `metadata.inboundLabels`, an edit
+clears them, and the transcript renders them as chips. Outbound ignores
+annotate. Laya's observe mode uses it: a would-be block now shows its scores on
+the message instead of only bumping a counter.
+
 ## Alternatives rejected
 
 - **Emulate the judge with the chat LLM.** Cheap to build, but it yields model

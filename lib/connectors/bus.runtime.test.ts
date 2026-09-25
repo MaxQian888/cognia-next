@@ -281,6 +281,23 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     expect(auditRows.some((r) => r.kind === "plugin.inbound_transformed")).toBe(true)
   })
 
+  it("plugin onConnectorInbound annotate labels ride on the event the route sees", async () => {
+    const labels = [
+      { key: "spam", score: 0.97, severity: "high", label: "Spam", source: "laya", at: 1 },
+    ]
+    mockConnectorDecision.mockResolvedValue({ action: "allow", labels })
+    const bus = getBus()
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_labels"))
+    await bus.flushInboundTurns()
+    expect(routeHandler).toHaveBeenCalledTimes(1)
+    const [evt] = routeHandler.mock.calls[0] as [NormalizedInboundEvent]
+    expect(evt.inboundLabels).toEqual(labels)
+    const auditRows = await listRecent(autoAdapterId)
+    expect(
+      auditRows.some((r) => r.kind === "plugin.inbound_annotated" && r.reason === "laya:spam")
+    ).toBe(true)
+  })
+
   it("a PII-injecting inbound transform is rejected; the original is kept", async () => {
     mockConnectorDecision.mockResolvedValue({
       action: "transform",

@@ -133,6 +133,29 @@ describe("ConnectorBus.applyMessageEdit (v49 indexed lookup)", () => {
     expect(updated?.metadata?.editCount).toBe(1)
   })
 
+  it("drops inbound labels that judged the pre-edit text", async () => {
+    const db = getDb()
+    // The edit path refuses rows whose session is gone (SESSION_NOT_FOUND).
+    await db.sessions.add({ id: "s-test", title: "t", createdAt: 1, updatedAt: 1 } as never)
+    const row = makeStoredMessage({
+      id: "msg-labels",
+      platformMessageId: "tg:77",
+      platform: "telegram",
+    })
+    row.metadata = {
+      ...row.metadata,
+      inboundLabels: [
+        { key: "spam", score: 0.9, severity: "high", label: "Spam", source: "laya", at: 1 },
+      ],
+    }
+    await db.messages.put(row)
+    await getBus().dispatchInboundFull(makeEditEvent("telegram", "tg:77", "edited"))
+    const updated = await db.messages.get("msg-labels")
+    expect(updated?.metadata?.editedAt).toBeDefined()
+    expect(updated?.metadata).not.toHaveProperty("inboundLabels")
+    expect(updated?.metadata?.platformMessage).toBeDefined()
+  })
+
   it("does not match across platforms (Telegram edit cannot hit Discord row)", async () => {
     const db = getDb()
     // Both rows share the same platformMessageId but live on different

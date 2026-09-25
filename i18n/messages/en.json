@@ -16041,6 +16041,16 @@
       "title": "Import complete"
     }
   },
+  "inboundLabels": {
+    "ariaLabel": "Plugin labels",
+    "keys": {
+      "harassment": "Harassment",
+      "spam": "Spam",
+      "threat": "Threat",
+      "toxic": "Toxic"
+    },
+    "tooltip": "Labelled by {source} · {score}%"
+  },
   "inbox": {
     "activeDelegations": {
       "count": "{count, plural, one {# run} other {# runs}}",

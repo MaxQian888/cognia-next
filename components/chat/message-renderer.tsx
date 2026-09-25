@@ -25,6 +25,7 @@ import {
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
 import { AsyncQuestionsCard } from "@/components/chat/message-parts/async-questions-card"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
+import { InboundLabelChips } from "@/components/chat/message-parts/inbound-label-chips"
 import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
 import { SquadRunPart } from "@/components/chat/message-parts/squad-run-part"
@@ -834,6 +835,12 @@ function MessageRendererInner({
                   if (!inboundA2UI) return null
                   return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
                 })()}
+                {/* ADR-0194: labels plugins attached to an inbound IM message
+                    (e.g. laya observe-mode moderation scores). */}
+                <InboundLabelChips
+                  metadata={(message as { metadata?: Record<string, unknown> }).metadata}
+                  className="mb-1.5"
+                />
                 {/* Segment the parts so runs of ≥2 consecutive tool calls collapse */}
                 {/* into one activity group. Subagent parts are transparent here and */}
                 {/* render once below as a dispatch tree. */}

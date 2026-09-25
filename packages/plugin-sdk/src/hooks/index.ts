@@ -56,3 +56,9 @@ export type {
   HookRegistrationOptions,
   HookSandboxExecutionResult,
 } from "@/types/plugin/plugin-hooks"
+/** Labels an `onConnectorInbound` hook may attach via `{ action: "annotate", labels }` (ADR-0194). */
+export type {
+  InboundLabel,
+  InboundLabelInput,
+  InboundLabelSeverity,
+} from "@/types/connectors/inbound-label"

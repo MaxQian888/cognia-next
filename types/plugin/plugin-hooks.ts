@@ -621,6 +621,12 @@ export interface TerminalHookEvents {
  *       short-circuits remaining subscribers).
  *     - `{ action: "transform", segments }` — replace the segments. Transforms
  *       chain in priority order.
+ *     - `{ action: "annotate", labels }` — inbound only: keep the message and
+ *       attach labels (e.g. moderation scores). The host validates and caps
+ *       them (`lib/connectors/inbound-labels.ts`), stamps the source plugin,
+ *       and persists them as `metadata.inboundLabels` (ADR-0194). Labels from
+ *       every plugin accumulate; a block still wins. Outbound treats it as
+ *       allow.
  *   * Any transform's result is re-checked by the host through the PII gate
  *     (fail-closed): a transform that injects leaking PII is REJECTED (the
  *     original is kept) and audited — a plugin can never smuggle PII past the
@@ -663,6 +669,17 @@ export type ConnectorHookDecision =
   | { action: "allow" }
   | { action: "block"; reason?: string }
   | { action: "transform"; segments: unknown[] }
+  | { action: "annotate"; labels: import("@/types/connectors/inbound-label").InboundLabelInput[] }
+
+/** What the host dispatcher resolves the subscribers' decisions to. */
+export type ConnectorDecisionOutcome =
+  | { action: "allow"; labels?: import("@/types/connectors/inbound-label").InboundLabel[] }
+  | { action: "block"; reason?: string }
+  | {
+      action: "transform"
+      segments: unknown[]
+      labels?: import("@/types/connectors/inbound-label").InboundLabel[]
+    }
 
 export interface ConnectorHookEvents {
   onConnectorInbound?: (

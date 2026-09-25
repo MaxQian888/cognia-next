@@ -1292,6 +1292,115 @@ describe("PluginEventHooks - dispatchConnectorDecision (plugin⇄IM)", () => {
     expect(fn).toHaveBeenCalledWith(outbound)
     expect(d).toEqual({ action: "allow" })
   })
+
+  it("accumulates validated annotate labels from every plugin, stamped with the source", async () => {
+    seedPlugins({
+      plugins: {
+        laya: {
+          status: "enabled",
+          hooks: {
+            onConnectorInbound: () => ({
+              action: "annotate",
+              labels: [
+                { key: "spam", score: 0.97, label: "Spam" },
+                { key: "BAD KEY", score: 1 },
+              ],
+            }),
+          },
+        },
+        other: {
+          status: "enabled",
+          hooks: {
+            onConnectorInbound: () => ({
+              action: "annotate",
+              labels: [{ key: "promo", score: 0.4 }],
+            }),
+          },
+        },
+      },
+    })
+    const d = await hooks.dispatchConnectorDecision("onConnectorInbound", inbound)
+    expect(d.action).toBe("allow")
+    const labels = d.action === "allow" ? d.labels : undefined
+    expect(labels?.map((l) => [l.key, l.source, l.severity])).toEqual([
+      ["spam", "laya", "high"],
+      ["promo", "other", "info"],
+    ])
+  })
+
+  it("keeps labels alongside a transform, and a block still wins over annotate", async () => {
+    seedPlugins({
+      plugins: {
+        a: {
+          status: "enabled",
+          hooks: {
+            onConnectorInbound: () => ({
+              action: "annotate",
+              labels: [{ key: "spam", score: 0.8 }],
+            }),
+          },
+        },
+        b: {
+          status: "enabled",
+          hooks: {
+            onConnectorInbound: () => ({
+              action: "transform",
+              segments: [{ type: "text", text: "B" }],
+            }),
+          },
+        },
+      },
+    })
+    const d = await hooks.dispatchConnectorDecision("onConnectorInbound", inbound)
+    expect(d).toMatchObject({ action: "transform", labels: [{ key: "spam", source: "a" }] })
+
+    seedPlugins({
+      plugins: {
+        a: {
+          status: "enabled",
+          hooks: {
+            onConnectorInbound: () => ({
+              action: "annotate",
+              labels: [{ key: "spam", score: 0.8 }],
+            }),
+          },
+        },
+        b: {
+          status: "enabled",
+          hooks: { onConnectorInbound: () => ({ action: "block", reason: "x" }) },
+        },
+      },
+    })
+    expect(await hooks.dispatchConnectorDecision("onConnectorInbound", inbound)).toEqual({
+      action: "block",
+      reason: "x",
+    })
+  })
+
+  it("ignores annotate on outbound", async () => {
+    seedPlugins({
+      plugins: {
+        p: {
+          status: "enabled",
+          hooks: {
+            onConnectorOutbound: () => ({
+              action: "annotate",
+              labels: [{ key: "spam", score: 1 }],
+            }),
+          },
+        },
+      },
+    })
+    const d = await hooks.dispatchConnectorDecision("onConnectorOutbound", {
+      adapterId: "tg",
+      conversationKey: "telegram:tg:1",
+      platform: "telegram",
+      segments: [],
+      source: "manual",
+      idempotencyKey: "i",
+    })
+    expect(d).toEqual({ action: "allow" })
+  })
 })
 
 // ── W3.7: the executeHook timeout racer must not leak timers ─────────────────

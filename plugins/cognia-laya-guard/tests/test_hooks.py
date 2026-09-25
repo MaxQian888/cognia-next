@@ -97,12 +97,30 @@ def _inbound(text="buy my tokens"):
     }
 
 
-def test_inbound_observe_default_allows_but_counts(monkeypatch):
-    # Observe is the install default: a flag-worthy message still passes, and
-    # the hook (not moderate()) records it as a would-be block.
+def test_inbound_observe_default_annotates_but_counts(monkeypatch):
+    # Observe is the install default: a flag-worthy message still passes, with
+    # its scores attached as labels, and the hook records a would-be block.
     engine = _swap(monkeypatch, StubEngine(verdict=MOD_BLOCK_VERDICT))
-    assert main.moderate_inbound(_inbound()) is None
+    result = main.moderate_inbound(_inbound())
+    assert result == {
+        "action": "annotate",
+        "labels": [
+            {
+                "key": "spam",
+                "score": 0.96,
+                "label": "Spam",
+                "note": "laya observe mode · threshold 0.75",
+            }
+        ],
+    }
     assert engine.recorded == [(MOD_BLOCK_VERDICT, "observe")]
+
+
+def test_observe_labels_mark_truncation():
+    verdict = dict(MOD_BLOCK_VERDICT, truncated=True, triggered=["spam", "threat"])
+    labels = main.observe_labels(verdict, {"inboundThreshold": 0.8})
+    assert [label["key"] for label in labels] == ["spam", "threat"]
+    assert labels[0]["note"].endswith("message truncated to the head window")
 
 
 def test_inbound_enforce_blocks(monkeypatch):

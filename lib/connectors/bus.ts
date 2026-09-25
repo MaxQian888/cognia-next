@@ -823,6 +823,19 @@ export class ConnectorBus {
         await markConnectorInboundJobHistoryOnly(inboundJob.id, "plugin_blocked", { now })
         return
       }
+      // Annotations ride along with allow / transform (a block returned above).
+      // Already validated + capped by the dispatcher; persisted onto the
+      // message row by `insertInboundMessage`.
+      if (decision.labels?.length) {
+        event = { ...event, inboundLabels: decision.labels }
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "plugin.inbound_annotated",
+          at: now,
+          conversationKey: event.conversationKey,
+          reason: decision.labels.map((label) => `${label.source}:${label.key}`).join(","),
+        })
+      }
       if (decision.action === "transform") {
         const segments = decision.segments as MessageSegment[]
         if (hasNoLeakingPiiDeep(segments)) {
@@ -1595,8 +1608,10 @@ export class ConnectorBus {
         })
       const finalParts =
         parts.length > 0 ? parts : [{ type: "text" as const, text: event.plainText }]
+      // Labels judged the old text; an edit makes them stale (ADR-0194).
+      const { inboundLabels: _staleLabels, ...keptMetadata } = target.metadata ?? {}
       const editedMetadata: StoredMessage["metadata"] = {
-        ...target.metadata,
+        ...keptMetadata,
         editedAt: now,
         editCount: ((target.metadata?.editCount as number | undefined) ?? 0) + 1,
       }

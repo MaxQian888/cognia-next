@@ -89,10 +89,11 @@ def moderate_inbound(payload: Any) -> Optional[Dict[str, Any]]:
         if verdict is None or not verdict["block"]:
             return None
         if mode != "enforce":
-            # Observe mode: counted into status()["wouldBlock"], but the
-            # message passes — shadow-run on real traffic before enforcing.
+            # Observe mode: counted into status()["wouldBlock"], and the
+            # message passes with the scores attached as labels (ADR-0194) so
+            # the operator sees them on the message while shadow-running.
             cognia.log(f"laya-guard: observe-mode match (not dropped): {verdict['triggered']}")
-            return None
+            return {"action": "annotate", "labels": observe_labels(verdict, config)}
         reason = "laya-guard inbound moderation: " + ", ".join(
             f"{name}={verdict['scores'][name]:.2f}" for name in verdict["triggered"]
         ) + f" (threshold {config['inboundThreshold']}, {verdict['latencyMs']} ms)"
@@ -102,6 +103,25 @@ def moderate_inbound(payload: Any) -> Optional[Dict[str, Any]]:
     except Exception as exc:
         cognia.log(f"laya-guard: onConnectorInbound failed open: {exc}")
         return None
+
+
+_LABEL_TEXT = {"spam": "Spam", "toxic": "Toxic", "harassment": "Harassment", "threat": "Threat"}
+
+
+def observe_labels(verdict: Dict[str, Any], config: Dict[str, Any]) -> list:
+    """Inbound labels for the fields that crossed the threshold (host-translated keys)."""
+    note = f"laya observe mode · threshold {config['inboundThreshold']}"
+    if verdict.get("truncated"):
+        note += " · message truncated to the head window"
+    return [
+        {
+            "key": name,
+            "score": verdict["scores"][name],
+            "label": _LABEL_TEXT.get(name, name),
+            "note": note,
+        }
+        for name in verdict["triggered"]
+    ]
 
 
 # ---------------------------------------------------------------------------

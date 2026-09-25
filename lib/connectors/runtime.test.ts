@@ -434,6 +434,25 @@ describe("installRuntime — ai-run (happy path)", () => {
     )
   })
 
+  it("persists plugin inbound labels onto the message row", async () => {
+    const session = await getDb().sessions.add({
+      id: "session-labels",
+      title: "Labels",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    const labels = [
+      { key: "spam", score: 0.97, severity: "high" as const, label: "Spam", source: "laya", at: 1 },
+    ]
+    const row = await insertInboundMessage(
+      { ...makeEvent({ messageId: "msg_labels" }), inboundLabels: labels },
+      String(session)
+    )
+    expect(row.metadata?.inboundLabels).toEqual(labels)
+    const plain = await insertInboundMessage(makeEvent({ messageId: "msg_plain" }), String(session))
+    expect(plain.metadata).not.toHaveProperty("inboundLabels")
+  })
+
   it("keeps an inbound reply as a replyTo reference, resolved to the stored parent", async () => {
     const session = await getDb().sessions.add({
       id: "session-reply",

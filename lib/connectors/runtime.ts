@@ -853,6 +853,7 @@ export async function insertInboundMessage(
       },
       ...(inboundA2UI ? { inboundA2UI } : {}),
       ...(replyTo ? { replyTo } : {}),
+      ...(event.inboundLabels?.length ? { inboundLabels: event.inboundLabels } : {}),
     },
     createdAt: now,
   }
