@@ -942,6 +942,23 @@ pub fn clear_for_account(local_account_id: &str, provider: ProviderId) -> Result
     Ok(())
 }
 
+/// Builtins cover legacy keyring migration; dynamic ids come only from this
+/// local account's encrypted service, including disabled/uninstalled providers.
+pub fn list_provider_ids(local_account_id: &str) -> Result<Vec<ProviderId>, String> {
+    let service = service_name_for_account(local_account_id)?;
+    let mut ids = ProviderId::builtin_ids();
+    for key in cognia_secrets::secret_store::list_accounts(&service)? {
+        let id = ProviderId::parse(&key)?;
+        if id.as_str() != key {
+            return Err("noncanonical stored provider id".into());
+        }
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1467,17 +1484,4 @@ mod tests {
         );
         assert_eq!(AccountSummary::from_account(&zen).variant, "opencode-zen");
     }
-}
-
-/// Builtins cover legacy keyring migration; dynamic ids come only from this
-/// local account's encrypted service, including disabled/uninstalled providers.
-pub fn list_provider_ids(local_account_id: &str) -> Result<Vec<ProviderId>, String> {
-    let service = service_name_for_account(local_account_id)?;
-    let mut ids = ProviderId::builtin_ids();
-    for key in cognia_secrets::secret_store::list_accounts(&service)? {
-        let id = ProviderId::parse(&key)?;
-        if id.as_str() != key { return Err("noncanonical stored provider id".into()); }
-        if !ids.contains(&id) { ids.push(id); }
-    }
-    Ok(ids)
 }

@@ -148,7 +148,7 @@ fn discover_at_path(
         Err(error) => Some(error),
     };
 
-    match load_file(&path) {
+    match load_file(path) {
         Ok(Some(from_file)) => {
             if let Some(found) = materialise(DiscoverySource::File, path_str.clone(), from_file) {
                 return Ok(Some(found));

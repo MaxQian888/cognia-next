@@ -659,13 +659,11 @@ mod tests {
             assert!(!port.path.is_empty());
             assert!(["usb", "bluetooth", "pci", "unknown"].contains(&port.port_type.as_str()));
             assert!(is_offerable(&port.path));
-            for hex in [&port.vendor_id, &port.product_id] {
-                if let Some(hex) = hex {
-                    assert_eq!(hex.len(), 4, "{hex} is not four hex digits");
-                    assert!(hex
-                        .chars()
-                        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
-                }
+            for hex in [&port.vendor_id, &port.product_id].into_iter().flatten() {
+                assert_eq!(hex.len(), 4, "{hex} is not four hex digits");
+                assert!(hex
+                    .chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
             }
         }
     }

@@ -1408,10 +1408,10 @@ fn normalize_human_message(
     member: &crate::chat::SessionMembership,
     payload: &mut serde_json::Value,
 ) -> Result<(), ChatFailure> {
-    if !payload
+    if payload
         .get("messageId")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|id| !id.trim().is_empty())
+        .is_none_or(|id| id.trim().is_empty())
         || !payload
             .get("parts")
             .is_some_and(serde_json::Value::is_array)
@@ -2801,6 +2801,23 @@ mod tests {
             &mut serde_json::json!({"role":"user"})
         )
         .is_err());
+        // A blank or non-string id is as incomplete as a missing one.
+        normalize_human_message(
+            &session,
+            &member,
+            &mut serde_json::json!({"messageId":"m", "role":"user", "parts":[]}),
+        )
+        .unwrap();
+        for message_id in [serde_json::json!("   "), serde_json::json!(7)] {
+            assert!(matches!(
+                normalize_human_message(
+                    &session,
+                    &member,
+                    &mut serde_json::json!({"messageId": message_id, "role":"user", "parts":[]})
+                ),
+                Err(ChatFailure::BadRequest(reason)) if reason == "message is incomplete"
+            ));
+        }
     }
 
     #[test]

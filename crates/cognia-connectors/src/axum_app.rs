@@ -2009,7 +2009,7 @@ mod tests {
         let body = lark_event_body(
             "vtok",
             "signed-old-event",
-            chrono::Utc::now().timestamp_millis() - 3600_000,
+            chrono::Utc::now().timestamp_millis() - 3_600_000,
         );
         assert!(
             verify_webhook(&state, id, &lark_signature_headers(&body), &body)

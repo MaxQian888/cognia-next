@@ -1476,7 +1476,9 @@ mod tests {
             vec![0.1, 0.2, 0.3],
             json!({"content": "original"}),
         );
-        store.upsert_points("c", &[original.clone()]).unwrap();
+        store
+            .upsert_points("c", std::slice::from_ref(&original))
+            .unwrap();
         store
             .conn
             .lock()

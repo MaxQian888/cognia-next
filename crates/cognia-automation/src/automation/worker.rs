@@ -51,6 +51,20 @@ pub const MAX_RESTARTS_PER_WINDOW: u32 = 3;
 /// Rolling window length for the restart counter (seconds).
 pub const RESTART_WINDOW_SECS: u64 = 60;
 
+/// Inputs of one `get_app_state` capture, carried by `Request::GetAppState`.
+struct AppStateRequest {
+    session_id: String,
+    turn_binding: String,
+    locator: AppLocator,
+    options: GetAppStateOptions,
+    /// `AutomationSettings::redact_screenshots`. The credential-window
+    /// probe itself runs next to the capture, on this thread.
+    redact_credential_windows: bool,
+    /// `AutomationSettings::screenshot_scaling`. Bounds the frame the
+    /// caller is shown. The captured frame is kept as the zoom source.
+    scaling: ScreenshotScalingSettings,
+}
+
 /// Single union of every backend call. Each variant carries its own reply
 /// channel because Tauri commands are async — the worker can't be made async
 /// (it must own a non-Send COM state on Windows), so we hop via channels.
@@ -153,16 +167,7 @@ enum Request {
         reply: oneshot::Sender<Result<crate::automation::backend::SelectionPreflight>>,
     },
     GetAppState {
-        session_id: String,
-        turn_binding: String,
-        locator: AppLocator,
-        options: GetAppStateOptions,
-        /// `AutomationSettings::redact_screenshots`. The credential-window
-        /// probe itself runs next to the capture, on this thread.
-        redact_credential_windows: bool,
-        /// `AutomationSettings::screenshot_scaling`. Bounds the frame the
-        /// caller is shown. The captured frame is kept as the zoom source.
-        scaling: ScreenshotScalingSettings,
+        request: AppStateRequest,
         reply: oneshot::Sender<Result<UiStateRevision>>,
     },
     QueryElements {
@@ -431,25 +436,8 @@ fn dispatch(
         Request::SelectionPreflight { reply } => {
             let _ = reply.send(backend.selection_preflight());
         }
-        Request::GetAppState {
-            session_id,
-            turn_binding,
-            locator,
-            options,
-            redact_credential_windows,
-            scaling,
-            reply,
-        } => {
-            let _ = reply.send(capture_app_state(
-                backend,
-                sessions,
-                session_id,
-                turn_binding,
-                locator,
-                options,
-                redact_credential_windows,
-                scaling,
-            ));
+        Request::GetAppState { request, reply } => {
+            let _ = reply.send(capture_app_state(backend, sessions, request));
         }
         Request::QueryElements {
             session_id,
@@ -655,13 +643,16 @@ fn split_model_frame(
 fn capture_app_state(
     backend: &dyn AutomationBackend,
     sessions: &mut UiSessionManager,
-    session_id: String,
-    turn_binding: String,
-    locator: AppLocator,
-    options: GetAppStateOptions,
-    redact_credential_windows: bool,
-    scaling: ScreenshotScalingSettings,
+    request: AppStateRequest,
 ) -> Result<UiStateRevision> {
+    let AppStateRequest {
+        session_id,
+        turn_binding,
+        locator,
+        options,
+        redact_credential_windows,
+        scaling,
+    } = request;
     let (requested_bundle, requested_process) = match &locator {
         AppLocator::BundleId { bundle_id } => (Some(bundle_id.as_str()), None),
         AppLocator::Path { path } => (
@@ -1422,12 +1413,14 @@ impl AutomationHandle {
         scaling: ScreenshotScalingSettings,
     ) -> Result<UiStateRevision> {
         round_trip(&self.tx, |reply| Request::GetAppState {
-            session_id,
-            turn_binding,
-            locator,
-            options,
-            redact_credential_windows,
-            scaling,
+            request: AppStateRequest {
+                session_id,
+                turn_binding,
+                locator,
+                options,
+                redact_credential_windows,
+                scaling,
+            },
             reply,
         })
         .await

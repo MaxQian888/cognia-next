@@ -587,11 +587,11 @@ mod tests {
     use crate::workflow::state::WorkflowState;
     use serde_json::json;
 
-    /// Tauri's `State<'_, T>` is opaque, so the unit tests poke the underlying
-    /// mirror + cron through `WorkflowState` directly. The command bodies
-    /// themselves are 1-3 lines of pass-through, so the value of each test is
-    /// the IPC contract: which inputs succeed / fail and which side effects
-    /// they produce in the mirror or daemon.
+    // Tauri's `State<'_, T>` is opaque, so the unit tests poke the underlying
+    // mirror + cron through `WorkflowState` directly. The command bodies
+    // themselves are 1-3 lines of pass-through, so the value of each test is
+    // the IPC contract: which inputs succeed / fail and which side effects
+    // they produce in the mirror or daemon.
 
     /// The service-plane arm reaches the daemons and the mirror through the
     /// `_for_state` bodies with no Tauri `State` in hand. A cron registration

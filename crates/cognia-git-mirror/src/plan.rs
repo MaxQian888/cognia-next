@@ -456,7 +456,6 @@ mod tests {
         }
     }
 
-    #[test]
     /// One repository is one directory name in both trees. The checkout and
     /// the mirror differ only by the bare-repository suffix, so `sources/` and
     /// `mirrors/` can be paired by eye, and a caller cannot accidentally
