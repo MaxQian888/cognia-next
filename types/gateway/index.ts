@@ -9,6 +9,20 @@
 /** Which interface the listener binds to. */
 export type GatewayBindInterface = "loopback" | "lan"
 
+/**
+ * Config fields the listener reads once when it binds; every other field is
+ * read live per request. Mirrors Rust `BindTimeField` (its serialization is
+ * pinned by `bind_time_fields_serialize_as_renderer_config_keys`).
+ */
+export const GATEWAY_BIND_TIME_FIELDS = [
+  "port",
+  "bindInterface",
+  "allowlist",
+  "rateLimitPerMin",
+  "connectTimeoutSecs",
+] as const satisfies readonly (keyof GatewayConfig)[]
+export type GatewayBindTimeField = (typeof GATEWAY_BIND_TIME_FIELDS)[number]
+
 /** Persisted gateway configuration. */
 export interface GatewayConfig {
   enabled: boolean
@@ -139,7 +153,15 @@ export interface GatewayStatus extends GatewayAccountScope {
   boundPort: number | null
   /** Whether at least one usable API key exists. */
   hasToken: boolean
+  /** Interface the running listener is bound to; the configured one while stopped. */
   bindInterface: GatewayBindInterface
+  /**
+   * Bind-time fields edited since the running listener started, in the order
+   * of {@link GATEWAY_BIND_TIME_FIELDS}. Empty while stopped. Computed by Rust
+   * against the copy the listener was spawned with, so it survives the
+   * settings page being closed and reopened.
+   */
+  pendingRestartFields: GatewayBindTimeField[]
   callsTotal: number
   lastCallAt: string | null
   snapshotGeneratedAtMs: number | null

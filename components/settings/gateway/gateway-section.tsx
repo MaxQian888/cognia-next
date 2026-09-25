@@ -6,7 +6,7 @@
  * A master/detail shell over the persisted `gateway_*` config. It used to be
  * six stacked cards in one ~2000px scroll with no secondary nav; the panels now
  * live under `./panels/` and this file owns only the shared data (config,
- * status, cooldowns), the deep link, and the layout.
+ * status, cooldowns), the deep link, the restart action and the layout.
  *
  * Layout mirrors `appearance-section.tsx`: `SettingsMasterDetail` owns the nav/detail split: the rail tiers off
  * the pane's own width (full → compact → icon → drawer) rather than the
@@ -14,6 +14,11 @@
  * minus the settings sidebar. The detail pane owns its
  * scroll and declares `@container/gateway-pane` so panel internals size off the
  * pane rather than the window.
+ *
+ * Status is polled while the page is visible. Before, it was read on mount and
+ * after a key edit only, so the listener could crash or serve a thousand
+ * requests while the Overview kept showing the numbers from when it opened —
+ * and the animated counters there never had a new value to roll to.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -22,13 +27,16 @@ import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, NetworkIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import {
   SETTINGS_DETAIL_PANE_CLASS,
   SettingsMasterDetail,
 } from "@/components/settings/common/settings-master-detail"
+import { isGatewayAccountLocked } from "@/lib/gateway/status"
 import { isTauri } from "@/lib/tauri"
 import {
   gatewayGetConfig,
@@ -38,15 +46,19 @@ import {
   gatewayStop,
   gatewayUpdateConfig,
 } from "@/lib/tauri/gateway"
+import { cn } from "@/lib/utils"
 import {
   DEFAULT_GATEWAY_CONFIG,
+  type GatewayBindTimeField,
   type GatewayConfig,
   type GatewayKeyCooldown,
   type GatewayStatus,
 } from "@/types/gateway"
 
 import { GatewayNav, type GatewayNavBadge } from "./components/gateway-nav"
+import { GatewayRestartBanner } from "./components/restart-banner"
 import {
+  BIND_TIME_FIELD_PANEL,
   GATEWAY_NAV_GROUPS,
   GATEWAY_PANEL_PARAM,
   resolveGatewayPanel,
@@ -68,11 +80,24 @@ export interface GatewayPanelContext {
   status: GatewayStatus | null
   persist: (patch: Partial<GatewayConfig>) => Promise<void>
   replace: (config: GatewayConfig) => Promise<void>
-  restartRequired: boolean
+  /** Bind-time fields saved but not yet served — see `BindTimeBadge`. */
+  pendingRestartFields: readonly GatewayBindTimeField[]
 }
 
+/** How often live status is re-read while the page is visible. */
+const STATUS_POLL_MS = 5_000
 /** How often the cooldown list is refetched so the nav badge stays honest. */
 const COOLDOWN_POLL_MS = 15_000
+
+const NO_PENDING_FIELDS: readonly GatewayBindTimeField[] = []
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
+function isPageVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden"
+}
 
 export function GatewaySection() {
   const t = useTranslations("settings.gateway")
@@ -84,9 +109,10 @@ export function GatewaySection() {
   const [status, setStatus] = useState<GatewayStatus | null>(null)
   const [cooldowns, setCooldowns] = useState<GatewayKeyCooldown[]>([])
   const [starting, setStarting] = useState(false)
-  const [restartRequired, setRestartRequired] = useState(false)
+  const [restarting, setRestarting] = useState(false)
 
   const activePanel = resolveGatewayPanel(searchParams.get(GATEWAY_PANEL_PARAM))
+  const pendingRestartFields = status?.pendingRestartFields ?? NO_PENDING_FIELDS
 
   const refreshStatus = useCallback(
     () =>
@@ -117,11 +143,28 @@ export function GatewaySection() {
 
   useEffect(() => {
     if (!desktop) return
-    // Cooldowns lift on their own, so the badge would otherwise sit stale until
-    // the user opened the panel and hit refresh by hand.
-    const timer = setInterval(() => void refreshCooldowns().catch(() => {}), COOLDOWN_POLL_MS)
-    return () => clearInterval(timer)
-  }, [desktop, refreshCooldowns])
+    // Cooldowns lift on their own and the listener serves traffic on its own,
+    // so both are re-read on a timer — but only while someone can see them.
+    // A hidden window skips the tick and catches up the moment it is shown.
+    const pollStatus = () => {
+      if (isPageVisible()) void refreshStatus()
+    }
+    const pollCooldowns = () => {
+      if (isPageVisible()) void refreshCooldowns().catch(() => {})
+    }
+    const onVisibility = () => {
+      pollStatus()
+      pollCooldowns()
+    }
+    const statusTimer = setInterval(pollStatus, STATUS_POLL_MS)
+    const cooldownTimer = setInterval(pollCooldowns, COOLDOWN_POLL_MS)
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      clearInterval(statusTimer)
+      clearInterval(cooldownTimer)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [desktop, refreshStatus, refreshCooldowns])
 
   // Mirror of `config` for `persist`, which must read the *current* config
   // synchronously without re-creating itself on every edit. Reading it out of a
@@ -140,32 +183,24 @@ export function GatewaySection() {
 
   const persist = useCallback(
     async (patch: Partial<GatewayConfig>) => {
-      const previous = configRef.current
-      const next: GatewayConfig = { ...previous, ...patch }
+      const next: GatewayConfig = { ...configRef.current, ...patch }
       try {
         await gatewayUpdateConfig(next)
         configRef.current = next
         setConfig(next)
-        if (
-          status?.running &&
-          next.enabled &&
-          (next.port !== previous.port ||
-            next.bindInterface !== previous.bindInterface ||
-            next.allowlist.join("\n") !== previous.allowlist.join("\n"))
-        ) {
-          setRestartRequired(true)
-        }
+        // Rust decides whether the edit is served live or pending a restart;
+        // re-read rather than guess.
+        await refreshStatus()
       } catch (e) {
         await refreshConfigAndStatus().catch(() => {})
-        toast.error(e instanceof Error ? e.message : String(e))
+        toast.error(errorMessage(e))
       }
     },
-    [refreshConfigAndStatus, status]
+    [refreshConfigAndStatus, refreshStatus]
   )
 
   const replace = useCallback(
     async (next: GatewayConfig) => {
-      const previous = configRef.current
       if (next.enabled && !status?.hasToken) {
         const error = new Error(t("requiresKey"))
         toast.error(error.message)
@@ -179,20 +214,11 @@ export function GatewaySection() {
         }
         configRef.current = next
         setConfig(next)
-        if (
-          status?.running &&
-          next.enabled &&
-          (next.port !== previous.port ||
-            next.bindInterface !== previous.bindInterface ||
-            next.allowlist.join("\n") !== previous.allowlist.join("\n"))
-        ) {
-          setRestartRequired(true)
-        }
         await refreshConfigAndStatus()
         toast.success(t("customApplied"))
       } catch (e) {
         await refreshConfigAndStatus().catch(() => {})
-        toast.error(e instanceof Error ? e.message : String(e))
+        toast.error(errorMessage(e))
         throw e
       }
     },
@@ -211,13 +237,29 @@ export function GatewaySection() {
         else await gatewayStop()
         await refreshConfigAndStatus()
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : String(e))
+        toast.error(errorMessage(e))
       } finally {
         setStarting(false)
       }
     },
     [status?.hasToken, refreshConfigAndStatus, t]
   )
+
+  const onRestart = useCallback(async () => {
+    setRestarting(true)
+    try {
+      await gatewayStop()
+      await gatewayStart()
+      toast.success(t("restarted"))
+    } catch (e) {
+      toast.error(errorMessage(e))
+    } finally {
+      // Either way the authoritative state changed (a failed start leaves the
+      // listener stopped), so the banner and the switch must re-read it.
+      await refreshConfigAndStatus().catch(() => {})
+      setRestarting(false)
+    }
+  }, [refreshConfigAndStatus, t])
 
   const onSelect = useCallback(
     (id: GatewayPanelId) => {
@@ -246,20 +288,15 @@ export function GatewaySection() {
         ariaLabel: t("nav.badgeParkedKeysAria", { count: cooldowns.length }),
       }
     }
-    if (restartRequired) {
-      result.listener = {
-        text: "!",
-        variant: "destructive",
-        ariaLabel: t("nav.badgeRestartRequiredAria"),
-      }
-      result.custom = {
+    for (const field of pendingRestartFields) {
+      result[BIND_TIME_FIELD_PANEL[field]] = {
         text: "!",
         variant: "destructive",
         ariaLabel: t("nav.badgeRestartRequiredAria"),
       }
     }
     return result
-  }, [status, cooldowns, restartRequired, t])
+  }, [status, cooldowns, pendingRestartFields, t])
 
   if (!desktop) {
     return (
@@ -270,7 +307,13 @@ export function GatewaySection() {
     )
   }
 
-  const panelContext: GatewayPanelContext = { config, status, persist, replace, restartRequired }
+  const panelContext: GatewayPanelContext = {
+    config,
+    status,
+    persist,
+    replace,
+    pendingRestartFields,
+  }
 
   const navNode = (
     <GatewayNav
@@ -284,13 +327,14 @@ export function GatewaySection() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4" data-testid="gateway-section">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
           <Label className="flex items-center gap-2">
             <NetworkIcon className="size-4" />
             {t("title")}
           </Label>
           <p className="text-xs text-muted-foreground">{t("description")}</p>
         </div>
+        {status ? <GatewayHeaderStatus status={status} /> : null}
       </div>
 
       <SettingsMasterDetail
@@ -302,12 +346,17 @@ export function GatewaySection() {
         navWidth={320}
         triggerTestId="gateway-mobile-nav-trigger"
       >
-        {/* `@container/gateway-pane`: the detail pane is a fraction of the
-            window, so anything multi-column inside a panel must size off this
-            box rather than the viewport. */}
-        <div className={SETTINGS_DETAIL_PANE_CLASS}>
+        {/* `@container/gateway-shell` sizes the banner; the body below keeps
+            its own `@container/gateway-pane` for the panels. Both are the
+            detail pane, not the window. */}
+        <div className={cn(SETTINGS_DETAIL_PANE_CLASS, "@container/gateway-shell")}>
+          <GatewayRestartBanner
+            pending={pendingRestartFields}
+            restarting={restarting}
+            onRestart={() => void onRestart()}
+          />
           <div
-            className="min-h-0 flex-1 overflow-y-auto p-3 @container/gateway-pane"
+            className="min-h-0 flex-1 overflow-y-auto p-3 @container/gateway-pane @lg/gateway-shell:p-4"
             data-testid="gateway-panel-body"
           >
             <PanelTransition activeKey={activePanel}>
@@ -324,16 +373,42 @@ export function GatewaySection() {
                 onToggleEnabled={onToggleEnabled}
                 refreshStatus={refreshStatus}
                 refreshCooldowns={refreshCooldowns}
-                onRestarted={async () => {
-                  setRestartRequired(false)
-                  await refreshConfigAndStatus()
-                }}
               />
             </PanelTransition>
           </div>
         </div>
       </SettingsMasterDetail>
     </div>
+  )
+}
+
+/**
+ * Run state beside the section title, so "is it up, and where" is answered
+ * from every panel — the Overview switch is one click away at most, but the
+ * question comes up on all nine.
+ */
+function GatewayHeaderStatus({ status }: { status: GatewayStatus }) {
+  const t = useTranslations("settings.gateway")
+  const running = status.running
+
+  return (
+    <MotionStatusSwap swapKey={running ? `on-${status.boundPort}` : "off"}>
+      <Badge
+        variant={running ? "success" : "outline"}
+        className="gap-1.5 font-normal tabular-nums"
+        data-testid="gateway-header-status"
+      >
+        <span
+          aria-hidden
+          className={cn("size-1.5 rounded-full", running ? "bg-current" : "bg-muted-foreground/60")}
+        />
+        {!running
+          ? t("badgeStopped")
+          : status.boundPort != null
+            ? t("headerRunningOn", { port: status.boundPort })
+            : t("badgeRunning")}
+      </Badge>
+    </MotionStatusSwap>
   )
 }
 
@@ -345,7 +420,6 @@ interface RenderArgs {
   onToggleEnabled: (next: boolean) => Promise<void>
   refreshStatus: () => Promise<void>
   refreshCooldowns: () => Promise<void>
-  onRestarted: () => Promise<void>
 }
 
 function GatewayPanelBody(args: RenderArgs) {
@@ -357,7 +431,6 @@ function GatewayPanelBody(args: RenderArgs) {
     onToggleEnabled,
     refreshStatus,
     refreshCooldowns,
-    onRestarted,
   } = args
   switch (panel) {
     case "overview":
@@ -370,11 +443,12 @@ function GatewayPanelBody(args: RenderArgs) {
         />
       )
     case "listener":
-      return <GatewayListenerPanel ctx={panelContext} onRestarted={onRestarted} />
+      return <GatewayListenerPanel ctx={panelContext} />
     case "keys":
       return (
         <GatewayKeysCard
           legacyKeyCount={panelContext.status?.legacyKeyCount}
+          accountLocked={isGatewayAccountLocked(panelContext.status)}
           onChanged={() => void refreshStatus()}
         />
       )

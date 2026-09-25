@@ -390,7 +390,13 @@ impl GatewayState {
 
     pub fn status(&self) -> GatewayStatus {
         let account = self.account.read();
-        let mut status = self.inner.lock().status.clone();
+        let (mut status, running_bind_time) = {
+            let inner = self.inner.lock();
+            (
+                inner.status.clone(),
+                inner.server.as_ref().map(|handle| handle.bind_time.clone()),
+            )
+        };
         status.owner_account_id = account.owner_account_id.clone();
         status.account_generation = account.generation;
         status.account_required = account.required;
@@ -409,7 +415,20 @@ impl GatewayState {
             .read()
             .iter()
             .any(|key| account.permits_key(key) && key.is_usable(now));
-        status.bind_interface = self.config.read().bind_interface;
+        let config = self.config.read();
+        match running_bind_time {
+            // A running listener serves what it was spawned with, not what
+            // has been persisted since.
+            Some(bound) => {
+                status.bind_interface = bound.bind_interface;
+                status.pending_restart_fields =
+                    bound.diverged_fields(&types::BindTimeConfig::of(&config));
+            }
+            None => {
+                status.bind_interface = config.bind_interface;
+                status.pending_restart_fields = Vec::new();
+            }
+        }
         status
     }
 
@@ -1213,6 +1232,87 @@ mod tests {
         assert_eq!(state.cooldowns()[0].provider_id, "b");
         assert_eq!(state.reset_cooldowns(None), 1);
         assert_eq!(state.reset_cooldowns(None), 0);
+    }
+
+    #[tokio::test]
+    async fn status_reports_bind_time_edits_until_the_listener_restarts() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        // `stop` flushes the key store, which is process-global under cfg(test).
+        // The guard is scoped to that synchronous call: a std guard held
+        // across the `start().await`s would trip `await_holding_lock`.
+        let stop = |state: &GatewayState| {
+            let _guard = api_keys::STORE_TEST_GUARD
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            state.stop().unwrap();
+        };
+        let state = GatewayState::new();
+        *state.keys.write() = serde_json::from_value(serde_json::json!([
+            { "id":"a", "name":"A", "secret":"synthetic-a", "enabled":true, "createdAtMs":0 }
+        ]))
+        .unwrap();
+        state.config.write().port = 0;
+        let host = || -> Arc<dyn GatewayHost> { Arc::new(host::RecordingGatewayHost::new(false)) };
+
+        state.start(host()).await.unwrap();
+        assert!(state.status().pending_restart_fields.is_empty());
+
+        state
+            .update_config(GatewayConfig {
+                bind_interface: types::BindInterface::Lan,
+                rate_limit_per_min: 42,
+                // Request-time: read live, so never pending.
+                max_retries: 5,
+                ..state.config()
+            })
+            .unwrap();
+        let status = state.status();
+        assert_eq!(
+            status.pending_restart_fields,
+            vec![
+                types::BindTimeField::BindInterface,
+                types::BindTimeField::RateLimitPerMin
+            ]
+        );
+        // The listener still serves the interface it bound, not the edit.
+        assert_eq!(status.bind_interface, types::BindInterface::Loopback);
+
+        // Reverting a field takes it back off the list.
+        state
+            .update_config(GatewayConfig {
+                bind_interface: types::BindInterface::Loopback,
+                ..state.config()
+            })
+            .unwrap();
+        assert_eq!(
+            state.status().pending_restart_fields,
+            vec![types::BindTimeField::RateLimitPerMin]
+        );
+
+        stop(&state);
+        assert!(state.status().pending_restart_fields.is_empty());
+
+        // Stopped, the status reports the configured interface, not a stale
+        // bound one, and an edit is never "pending".
+        state
+            .update_config(GatewayConfig {
+                bind_interface: types::BindInterface::Lan,
+                ..state.config()
+            })
+            .unwrap();
+        let status = state.status();
+        assert_eq!(status.bind_interface, types::BindInterface::Lan);
+        assert!(status.pending_restart_fields.is_empty());
+        state
+            .update_config(GatewayConfig {
+                bind_interface: types::BindInterface::Loopback,
+                ..state.config()
+            })
+            .unwrap();
+
+        state.start(host()).await.unwrap();
+        assert!(state.status().pending_restart_fields.is_empty());
+        stop(&state);
     }
 
     #[tokio::test]

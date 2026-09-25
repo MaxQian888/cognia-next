@@ -379,6 +379,77 @@ impl GatewayConfig {
     }
 }
 
+/// A config field the listener snapshots when it binds. Editing one on a
+/// running gateway is persisted but changes nothing until the listener is
+/// restarted. Serialized names are the `GatewayConfig` field names the
+/// renderer uses (`GATEWAY_BIND_TIME_FIELDS` in `types/gateway/index.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BindTimeField {
+    Port,
+    BindInterface,
+    Allowlist,
+    RateLimitPerMin,
+    ConnectTimeoutSecs,
+}
+
+/// The bind-time slice of [`GatewayConfig`]: exactly what
+/// `server::spawn_server_with_account` reads once at startup. The running
+/// listener keeps the copy it was spawned with, so a later edit can be
+/// reported as pending instead of looking like it took effect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindTimeConfig {
+    pub port: u16,
+    pub bind_interface: BindInterface,
+    pub allowlist: Vec<String>,
+    pub rate_limit_per_min: u32,
+    pub connect_timeout_secs: u32,
+}
+
+impl BindTimeConfig {
+    pub fn of(config: &GatewayConfig) -> Self {
+        Self {
+            port: config.port,
+            bind_interface: config.bind_interface,
+            allowlist: config.allowlist.clone(),
+            rate_limit_per_min: config.rate_limit_per_min,
+            connect_timeout_secs: config.connect_timeout_secs,
+        }
+    }
+
+    /// Fields whose value in `current` differs from this (the running) copy,
+    /// in declaration order.
+    pub fn diverged_fields(&self, current: &Self) -> Vec<BindTimeField> {
+        let mut fields = Vec::new();
+        if self.port != current.port {
+            fields.push(BindTimeField::Port);
+        }
+        if self.bind_interface != current.bind_interface {
+            fields.push(BindTimeField::BindInterface);
+        }
+        // Order and surrounding whitespace do not change what the listener
+        // admits, and removing then re-adding a chip in the settings UI
+        // reorders the list — neither is a pending change.
+        if normalized_allowlist(&self.allowlist) != normalized_allowlist(&current.allowlist) {
+            fields.push(BindTimeField::Allowlist);
+        }
+        if self.rate_limit_per_min != current.rate_limit_per_min {
+            fields.push(BindTimeField::RateLimitPerMin);
+        }
+        if self.connect_timeout_secs != current.connect_timeout_secs {
+            fields.push(BindTimeField::ConnectTimeoutSecs);
+        }
+        fields
+    }
+}
+
+fn normalized_allowlist(entries: &[String]) -> Vec<&str> {
+    let mut normalized: Vec<&str> = entries.iter().map(|entry| entry.trim()).collect();
+    normalized.sort_unstable();
+    normalized.dedup();
+    normalized
+}
+
 /// Live status surfaced to the settings UI.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -393,6 +464,10 @@ pub struct GatewayStatus {
     pub has_token: bool,
     /// Interface the running (or last-configured) listener binds to.
     pub bind_interface: BindInterface,
+    /// Bind-time fields edited since the running listener started; empty
+    /// while stopped. Non-empty means the persisted config is not what is
+    /// being served until a restart.
+    pub pending_restart_fields: Vec<BindTimeField>,
     pub calls_total: u64,
     pub last_call_at: Option<String>,
     /// When the routing snapshot was last pushed by the renderer (ms epoch).
@@ -688,6 +763,78 @@ mod tests {
         ] {
             assert_eq!(normalize_public_origin(raw), None, "refusing {raw:?}");
         }
+    }
+
+    #[test]
+    fn bind_time_config_reports_only_the_fields_that_changed() {
+        let running = BindTimeConfig::of(&GatewayConfig::default());
+        assert!(running.diverged_fields(&running.clone()).is_empty());
+
+        let edited = GatewayConfig {
+            port: 50001,
+            allowlist: vec!["10.0.0.0/8".into()],
+            connect_timeout_secs: 5,
+            // Request-time fields never count as pending.
+            request_timeout_secs: 1,
+            max_retries: 3,
+            ..GatewayConfig::default()
+        };
+        assert_eq!(
+            running.diverged_fields(&BindTimeConfig::of(&edited)),
+            vec![
+                BindTimeField::Port,
+                BindTimeField::Allowlist,
+                BindTimeField::ConnectTimeoutSecs,
+            ]
+        );
+    }
+
+    #[test]
+    fn bind_time_allowlist_ignores_order_whitespace_and_duplicates() {
+        let running = BindTimeConfig::of(&GatewayConfig {
+            allowlist: vec!["127.0.0.1/32".into(), "10.0.0.0/8".into()],
+            ..GatewayConfig::default()
+        });
+        let reordered = BindTimeConfig::of(&GatewayConfig {
+            allowlist: vec![
+                " 10.0.0.0/8".into(),
+                "127.0.0.1/32".into(),
+                "10.0.0.0/8".into(),
+            ],
+            ..GatewayConfig::default()
+        });
+        assert!(running.diverged_fields(&reordered).is_empty());
+    }
+
+    #[test]
+    fn bind_time_fields_serialize_as_renderer_config_keys() {
+        let names: Vec<String> = [
+            BindTimeField::Port,
+            BindTimeField::BindInterface,
+            BindTimeField::Allowlist,
+            BindTimeField::RateLimitPerMin,
+            BindTimeField::ConnectTimeoutSecs,
+        ]
+        .iter()
+        .map(|field| {
+            serde_json::to_value(field)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+        // Must match `GATEWAY_BIND_TIME_FIELDS` in `types/gateway/index.ts`.
+        assert_eq!(
+            names,
+            [
+                "port",
+                "bindInterface",
+                "allowlist",
+                "rateLimitPerMin",
+                "connectTimeoutSecs"
+            ]
+        );
     }
 
     #[test]

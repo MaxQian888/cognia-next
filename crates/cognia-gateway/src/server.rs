@@ -64,7 +64,7 @@ use super::translate::errors::{error_body, InboundFormat};
 use super::translate::responses as responses_translate;
 use super::translate::stream::{Direction, SseOut, StreamTranscoder};
 use super::translate::{request_from_ir, request_to_ir, response_from_ir, response_to_ir};
-use super::types::{BindInterface, GatewayConfig, GatewayError};
+use super::types::{BindInterface, BindTimeConfig, GatewayConfig, GatewayError};
 use super::DecisionRegistry;
 
 pub const REQUEST_LOG_EVENT: &str = "gateway://request-log";
@@ -141,6 +141,9 @@ where
 pub struct ServerHandle {
     pub bound_port: u16,
     pub shutdown: watch::Sender<()>,
+    /// The bind-time config this listener was spawned with. Compared against
+    /// the persisted config to report edits that still need a restart.
+    pub bind_time: BindTimeConfig,
     /// The live server's state, so out-of-band callers (the settings
     /// self-check, via Tauri IPC) probe through the SAME rotation cursors,
     /// cooldown map and in-flight tally the serving path uses. Private: the
@@ -541,26 +544,18 @@ pub async fn spawn_server_with_account(
     leases: Arc<CredentialLeaseMap>,
     runs: crate::runs::RunsState,
 ) -> Result<ServerHandle, GatewayError> {
-    // Snapshot the bind-time config (these apply only on start).
-    let (port, bind_interface, allowlist_raw, rate_limit_per_min, connect_timeout_secs) = {
-        let cfg = config.read();
-        (
-            cfg.port,
-            cfg.bind_interface,
-            cfg.allowlist.clone(),
-            cfg.rate_limit_per_min,
-            cfg.connect_timeout_secs,
-        )
-    };
+    // Snapshot the bind-time config (these apply only on start). The handle
+    // keeps this copy so a later edit is reported as pending a restart.
+    let bind_time = BindTimeConfig::of(&config.read());
 
     let parsed_allowlist =
-        ParsedAllowlist::parse(&allowlist_raw).map_err(GatewayError::InvalidConfig)?;
+        ParsedAllowlist::parse(&bind_time.allowlist).map_err(GatewayError::InvalidConfig)?;
 
-    let bind_ip = match bind_interface {
+    let bind_ip = match bind_time.bind_interface {
         BindInterface::Loopback => IpAddr::V4(Ipv4Addr::LOCALHOST),
         BindInterface::Lan => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
     };
-    let bind_addr = SocketAddr::new(bind_ip, port);
+    let bind_addr = SocketAddr::new(bind_ip, bind_time.port);
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await
         .map_err(|source| GatewayError::Bind {
@@ -576,7 +571,7 @@ pub async fn spawn_server_with_account(
         .port();
 
     let http = Arc::new(UpstreamClients::new(Duration::from_secs(
-        connect_timeout_secs.max(1) as u64,
+        bind_time.connect_timeout_secs.max(1) as u64,
     )));
 
     // Clone the key handle for the periodic quota-flush task before the
@@ -589,9 +584,9 @@ pub async fn spawn_server_with_account(
         keys,
         config,
         allowlist: Arc::new(parsed_allowlist),
-        rate_limiter: Arc::new(FixedWindowRateLimiter::new(rate_limit_per_min)),
+        rate_limiter: Arc::new(FixedWindowRateLimiter::new(bind_time.rate_limit_per_min)),
         key_rate_limiter: Arc::new(KeyedRateLimiter::new()),
-        bind_is_lan: bind_interface.is_lan(),
+        bind_is_lan: bind_time.bind_interface.is_lan(),
         on_request,
         snapshot,
         decisions,
@@ -659,6 +654,7 @@ pub async fn spawn_server_with_account(
     Ok(ServerHandle {
         bound_port,
         shutdown: tx,
+        bind_time,
         state: probe_state,
     })
 }

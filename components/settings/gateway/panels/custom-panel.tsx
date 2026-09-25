@@ -9,6 +9,11 @@ import { parseGatewayConfig } from "@/lib/gateway/config-schema"
 import type { GatewayPanelContext } from "../gateway-section"
 import { GatewayPanelSection } from "../shared/panel-section"
 
+/**
+ * Settings → Gateway → Custom — the whole `GatewayConfig` as one validated
+ * JSON/YAML document. Bind-time edits made here surface in the section-level
+ * restart banner like any other, so this panel carries no restart state.
+ */
 export function GatewayCustomPanel({ ctx }: { ctx: GatewayPanelContext }) {
   const t = useTranslations("settings.gateway")
 
@@ -17,8 +22,6 @@ export function GatewayCustomPanel({ ctx }: { ctx: GatewayPanelContext }) {
       icon={<FileSlidersIcon className="size-4" />}
       title={t("customHeading")}
       description={t("customHelp")}
-      badge={ctx.restartRequired ? t("restartRequiredBadge") : undefined}
-      badgeVariant={ctx.restartRequired ? "destructive" : "secondary"}
     >
       <StructuredConfigEditor
         value={ctx.config}

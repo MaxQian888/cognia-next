@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { GatewaySection } from "./gateway-section"
@@ -10,6 +10,7 @@ import { DEFAULT_GATEWAY_CONFIG, type GatewayConfig, type GatewayStatus } from "
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${Object.values(values).join(",")}` : key,
+  useFormatter: () => ({ list: (items: string[]) => items.join(", ") }),
 }))
 
 let searchString = ""
@@ -67,10 +68,11 @@ jest.mock("./panels/overview-panel", () => ({
 jest.mock("./panels/listener-panel", () => ({
   GatewayListenerPanel: ({
     ctx,
-    onRestarted,
   }: {
-    ctx: { persist: (patch: Partial<GatewayConfig>) => Promise<void> }
-    onRestarted: () => Promise<void>
+    ctx: {
+      persist: (patch: Partial<GatewayConfig>) => Promise<void>
+      pendingRestartFields: readonly string[]
+    }
   }) => (
     <div data-testid="panel-listener">
       <button
@@ -80,17 +82,21 @@ jest.mock("./panels/listener-panel", () => ({
       >
         persist listener
       </button>
-      <button type="button" data-testid="stub-restarted" onClick={() => void onRestarted()}>
-        restarted
-      </button>
+      <span data-testid="stub-pending">{ctx.pendingRestartFields.join(",")}</span>
     </div>
   ),
 }))
 // The keys and logs panels are self-contained, so the section renders them
 // directly.
 jest.mock("./gateway-keys-card", () => ({
-  GatewayKeysCard: ({ onChanged }: { onChanged: () => void }) => (
-    <div data-testid="panel-keys">
+  GatewayKeysCard: ({
+    onChanged,
+    accountLocked,
+  }: {
+    onChanged: () => void
+    accountLocked: boolean
+  }) => (
+    <div data-testid="panel-keys" data-account-locked={String(accountLocked)}>
       <button type="button" data-testid="stub-keys-changed" onClick={onChanged}>
         keys changed
       </button>
@@ -186,6 +192,7 @@ const status = (over: Partial<GatewayStatus> = {}): GatewayStatus => ({
   snapshotGeneratedAtMs: null,
   snapshotProviderCount: 0,
   snapshotAliasCount: 0,
+  pendingRestartFields: [],
   ...over,
 })
 
@@ -514,47 +521,93 @@ describe("GatewaySection", () => {
       expect(mockStart).toHaveBeenCalled()
     })
 
-    it("marks listener and custom navigation when a running bind changes", async () => {
-      searchString = "gatewayPanel=custom"
-      mockGetStatus.mockResolvedValue(status({ running: true, boundPort: 47823 }))
-      const user = userEvent.setup()
+    it("badges the panel that owns a field Rust reports as pending a restart", async () => {
+      mockGetStatus.mockResolvedValue(
+        status({
+          running: true,
+          boundPort: 47823,
+          pendingRestartFields: ["port", "connectTimeoutSecs"],
+        })
+      )
       render(<GatewaySection />)
-      await screen.findByTestId("panel-custom")
-
-      await user.click(screen.getByTestId("stub-replace"))
 
       expect(await screen.findByTestId("gateway-nav-badge-listener")).toHaveTextContent("!")
-      expect(screen.getByTestId("gateway-nav-badge-custom")).toHaveTextContent("!")
+      expect(screen.getByTestId("gateway-nav-badge-reliability")).toHaveTextContent("!")
+      // The raw editor can change any field but owns none of them.
+      expect(screen.queryByTestId("gateway-nav-badge-custom")).not.toBeInTheDocument()
     })
 
-    it("marks a running listener for restart after a guided bind edit", async () => {
+    it("re-reads status after a write, so a bind-time edit shows up as pending", async () => {
       mockGetConfig.mockResolvedValue(config({ enabled: true }))
       mockGetStatus.mockResolvedValue(status({ running: true, boundPort: 47823 }))
       const user = userEvent.setup()
       render(<GatewaySection />)
       await screen.findByTestId("panel-overview")
       await waitFor(() => expect(screen.getByTestId("stub-running")).toHaveTextContent("true"))
+      expect(screen.queryByTestId("gateway-restart-banner")).not.toBeInTheDocument()
 
+      mockGetStatus.mockResolvedValue(
+        status({ running: true, boundPort: 47823, pendingRestartFields: ["port"] })
+      )
       await user.click(screen.getByTestId("stub-persist"))
 
-      expect(await screen.findByTestId("gateway-nav-badge-listener")).toHaveTextContent("!")
+      expect(await screen.findByTestId("gateway-restart-banner")).toBeInTheDocument()
+      expect(screen.getByTestId("gateway-nav-badge-listener")).toHaveTextContent("!")
     })
 
-    it.each(["stub-persist-bind", "stub-persist-allowlist"])(
-      "marks a running listener after the %s network setting changes",
-      async (testId) => {
-        mockGetConfig.mockResolvedValue(config({ enabled: true }))
-        mockGetStatus.mockResolvedValue(status({ running: true, boundPort: 47823 }))
-        const user = userEvent.setup()
-        render(<GatewaySection />)
-        await screen.findByTestId("panel-overview")
-        await waitFor(() => expect(screen.getByTestId("stub-running")).toHaveTextContent("true"))
+    it("hands the pending fields to the panels", async () => {
+      searchString = "gatewayPanel=listener"
+      mockGetStatus.mockResolvedValue(
+        status({ running: true, boundPort: 47823, pendingRestartFields: ["allowlist"] })
+      )
+      render(<GatewaySection />)
 
-        await user.click(screen.getByTestId(testId))
+      await waitFor(() => expect(screen.getByTestId("stub-pending")).toHaveTextContent("allowlist"))
+    })
 
-        expect(await screen.findByTestId("gateway-nav-badge-listener")).toHaveTextContent("!")
-      }
-    )
+    it("restarts from the banner on any panel and re-reads the authoritative state", async () => {
+      const { toast } = jest.requireMock("sonner")
+      searchString = "gatewayPanel=custom"
+      mockGetStatus.mockResolvedValue(
+        status({ running: true, boundPort: 47823, pendingRestartFields: ["port"] })
+      )
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("gateway-restart-banner")
+
+      mockGetStatus.mockResolvedValue(status({ running: true, boundPort: 50001 }))
+      await user.click(screen.getByTestId("gateway-restart-listener"))
+
+      await waitFor(() =>
+        expect(screen.queryByTestId("gateway-restart-banner")).not.toBeInTheDocument()
+      )
+      expect(mockStop.mock.invocationCallOrder[0]).toBeLessThan(
+        mockStart.mock.invocationCallOrder[0]
+      )
+      expect(toast.success).toHaveBeenCalledWith("restarted")
+      expect(screen.queryByTestId("gateway-nav-badge-listener")).not.toBeInTheDocument()
+    })
+
+    it("reports a failed restart and still re-reads state, since the listener may now be down", async () => {
+      const { toast } = jest.requireMock("sonner")
+      mockGetStatus.mockResolvedValue(
+        status({ running: true, boundPort: 47823, pendingRestartFields: ["port"] })
+      )
+      mockStart.mockRejectedValue(new Error("address already in use"))
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("gateway-restart-banner")
+      mockGetConfig.mockClear()
+
+      mockGetStatus.mockResolvedValue(status({ running: false }))
+      await user.click(screen.getByTestId("gateway-restart-listener"))
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("address already in use"))
+      await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
+      await waitFor(() =>
+        expect(screen.getByTestId("gateway-header-status")).toHaveTextContent("badgeStopped")
+      )
+    })
 
     it("normalizes non-Error guided config failures", async () => {
       const { toast } = jest.requireMock("sonner")
@@ -609,22 +662,105 @@ describe("GatewaySection", () => {
       await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
       expect(toast.error).toHaveBeenCalledWith("write failed")
     })
+  })
 
-    it("clears restart state after the listener reports a restart", async () => {
-      searchString = "gatewayPanel=listener"
-      mockGetConfig.mockResolvedValue(config({ enabled: true }))
-      mockGetStatus.mockResolvedValue(status({ running: true, boundPort: 47823 }))
-      const user = userEvent.setup()
+  describe("header status", () => {
+    it("shows where a running listener is bound, from every panel", async () => {
+      searchString = "gatewayPanel=logs"
+      mockGetStatus.mockResolvedValue(status({ running: true, boundPort: 50505 }))
       render(<GatewaySection />)
-      await screen.findByTestId("panel-listener")
-      await user.click(screen.getByTestId("stub-listener-persist"))
-      await screen.findByTestId("gateway-nav-badge-listener")
 
-      await user.click(screen.getByTestId("stub-restarted"))
-
-      await waitFor(() =>
-        expect(screen.queryByTestId("gateway-nav-badge-listener")).not.toBeInTheDocument()
+      expect(await screen.findByTestId("gateway-header-status")).toHaveTextContent(
+        "headerRunningOn:50505"
       )
+    })
+
+    it("still says running when the bound port is not known yet", async () => {
+      mockGetStatus.mockResolvedValue(status({ running: true, boundPort: null }))
+      render(<GatewaySection />)
+
+      expect(await screen.findByTestId("gateway-header-status")).toHaveTextContent("badgeRunning")
+    })
+
+    it("says stopped otherwise", async () => {
+      render(<GatewaySection />)
+
+      expect(await screen.findByTestId("gateway-header-status")).toHaveTextContent("badgeStopped")
+    })
+  })
+
+  it("tells the keys panel when the local account is locked", async () => {
+    searchString = "gatewayPanel=keys"
+    mockGetStatus.mockResolvedValue(
+      status({ accountRequired: true, ownerAccountId: null, hasToken: false })
+    )
+    render(<GatewaySection />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("panel-keys")).toHaveAttribute("data-account-locked", "true")
+    )
+  })
+
+  describe("live polling", () => {
+    afterEach(() => {
+      jest.useRealTimers()
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => "visible",
+      })
+    })
+
+    it("re-reads status on a timer while the page is visible", async () => {
+      jest.useFakeTimers()
+      render(<GatewaySection />)
+      await act(async () => {})
+      mockGetStatus.mockClear()
+
+      await act(async () => {
+        jest.advanceTimersByTime(5_000)
+      })
+
+      expect(mockGetStatus).toHaveBeenCalledTimes(1)
+    })
+
+    it("skips ticks while hidden and catches up the moment the page is shown", async () => {
+      jest.useFakeTimers()
+      let visibility: DocumentVisibilityState = "hidden"
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => visibility,
+      })
+      render(<GatewaySection />)
+      await act(async () => {})
+      mockGetStatus.mockClear()
+      mockListCooldowns.mockClear()
+
+      await act(async () => {
+        jest.advanceTimersByTime(20_000)
+      })
+      expect(mockGetStatus).not.toHaveBeenCalled()
+      expect(mockListCooldowns).not.toHaveBeenCalled()
+
+      visibility = "visible"
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"))
+      })
+      expect(mockGetStatus).toHaveBeenCalledTimes(1)
+      expect(mockListCooldowns).toHaveBeenCalledTimes(1)
+    })
+
+    it("stops polling on unmount", async () => {
+      jest.useFakeTimers()
+      const { unmount } = render(<GatewaySection />)
+      await act(async () => {})
+      unmount()
+      mockGetStatus.mockClear()
+
+      await act(async () => {
+        jest.advanceTimersByTime(30_000)
+      })
+
+      expect(mockGetStatus).not.toHaveBeenCalled()
     })
   })
 })

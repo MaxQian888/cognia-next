@@ -29,7 +29,7 @@ it("applies a complete validated GatewayConfig through the replacement seam", as
         status: null,
         persist: jest.fn(),
         replace,
-        restartRequired: false,
+        pendingRestartFields: [],
       }}
     />
   )
@@ -48,20 +48,4 @@ it("applies a complete validated GatewayConfig through the replacement seam", as
       expect.objectContaining({ retryBackoffBaseMs: 800, respectRetryAfter: false })
     )
   )
-})
-
-it("surfaces the listener restart requirement beside custom configuration", () => {
-  render(
-    <GatewayCustomPanel
-      ctx={{
-        config: DEFAULT_GATEWAY_CONFIG,
-        status: null,
-        persist: jest.fn(),
-        replace: jest.fn(),
-        restartRequired: true,
-      }}
-    />
-  )
-
-  expect(screen.getByText("restartRequiredBadge")).toBeInTheDocument()
 })

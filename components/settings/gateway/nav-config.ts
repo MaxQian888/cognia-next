@@ -27,6 +27,7 @@ import type {
   SettingsNavGroup,
   SettingsNavItem,
 } from "@/components/settings/common/settings-panel-nav"
+import type { GatewayBindTimeField } from "@/types/gateway"
 
 export type GatewayPanelId =
   | "overview"
@@ -87,4 +88,17 @@ export const DEFAULT_GATEWAY_PANEL: GatewayPanelId = "overview"
 /** Narrow an untrusted deep-link value, falling back to the overview. */
 export function resolveGatewayPanel(raw: string | null | undefined): GatewayPanelId {
   return resolvePanelId(raw, PANEL_IDS, DEFAULT_GATEWAY_PANEL)
+}
+
+/**
+ * Which panel edits each bind-time field, so a pending restart badges the
+ * panel the user would go back to. The Custom editor can change any of them,
+ * but it is never where a field *lives*.
+ */
+export const BIND_TIME_FIELD_PANEL: Record<GatewayBindTimeField, GatewayPanelId> = {
+  port: "listener",
+  bindInterface: "listener",
+  allowlist: "listener",
+  rateLimitPerMin: "listener",
+  connectTimeoutSecs: "reliability",
 }

@@ -17,7 +17,7 @@ function setup(over: Partial<GatewayConfig> = {}) {
         status: null,
         persist,
         replace: jest.fn(),
-        restartRequired: false,
+        pendingRestartFields: [],
       }}
     />
   )

@@ -1,12 +1,19 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { GatewayOverviewPanel } from "./overview-panel"
-import { DEFAULT_GATEWAY_CONFIG, type GatewayStatus } from "@/types/gateway"
+import { gatewayClientOrigin, GatewayOverviewPanel } from "./overview-panel"
+import { DEFAULT_GATEWAY_CONFIG, type GatewayConfig, type GatewayStatus } from "@/types/gateway"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${Object.values(values).join(",")}` : key,
+  // Deterministic stand-ins: the assertions care which instant is formatted
+  // and relative to what, not how a locale words it.
+  useFormatter: () => ({
+    relativeTime: (date: Date, now: Date) => `rel:${date.toISOString()}@${now.toISOString()}`,
+    dateTime: (date: Date) => `abs:${date.toISOString()}`,
+  }),
+  useNow: () => new Date("2026-07-28T10:05:00.000Z"),
 }))
 
 const mockProbe = jest.fn()
@@ -31,21 +38,26 @@ const status = (over: Partial<GatewayStatus> = {}): GatewayStatus => ({
   snapshotGeneratedAtMs: null,
   snapshotProviderCount: 0,
   snapshotAliasCount: 0,
+  pendingRestartFields: [],
   ...over,
 })
 
-function setup(statusOver: GatewayStatus | null = status(), starting = false) {
+function setup(
+  statusOver: GatewayStatus | null = status(),
+  starting = false,
+  config: Partial<GatewayConfig> = {}
+) {
   const persist = jest.fn().mockResolvedValue(undefined)
   const onToggleEnabled = jest.fn().mockResolvedValue(undefined)
   const onRefreshStatus = jest.fn().mockResolvedValue(undefined)
   render(
     <GatewayOverviewPanel
       ctx={{
-        config: DEFAULT_GATEWAY_CONFIG,
+        config: { ...DEFAULT_GATEWAY_CONFIG, ...config },
         status: statusOver,
         persist,
         replace: jest.fn(),
-        restartRequired: false,
+        pendingRestartFields: [],
       }}
       starting={starting}
       onToggleEnabled={onToggleEnabled}
@@ -71,9 +83,12 @@ describe("GatewayOverviewPanel", () => {
     setup(status({ callsTotal: 42, lastCallAt: "2026-07-28T10:00:00.000Z" }))
 
     expect(screen.getByTestId("gateway-stat-calls")).toHaveTextContent("42")
-    expect(screen.getByTestId("gateway-stat-last-call")).toHaveTextContent(
-      new Date("2026-07-28T10:00:00.000Z").toLocaleTimeString()
-    )
+    // Relative to "now" with the absolute instant on hover — a bare time of day
+    // read yesterday's last request as today's.
+    const lastCall = screen.getByTestId("gateway-stat-last-call").querySelector("time")
+    expect(lastCall).toHaveTextContent("rel:2026-07-28T10:00:00.000Z@2026-07-28T10:05:00.000Z")
+    expect(lastCall).toHaveAttribute("title", "abs:2026-07-28T10:00:00.000Z")
+    expect(lastCall).toHaveAttribute("dateTime", "2026-07-28T10:00:00.000Z")
   })
 
   it("says so when no request has ever been served", () => {
@@ -94,7 +109,7 @@ describe("GatewayOverviewPanel", () => {
     expect(screen.getByTestId("gateway-stat-providers")).toHaveTextContent("3")
     expect(screen.getByTestId("gateway-stat-aliases")).toHaveTextContent("7")
     expect(screen.getByTestId("gateway-snapshot-age")).toHaveTextContent(
-      `snapshotGeneratedAt:${new Date(generated).toLocaleString()}`
+      `snapshotGeneratedAt:rel:${new Date(generated).toISOString()}`
     )
   })
 
@@ -138,7 +153,7 @@ describe("GatewayOverviewPanel", () => {
           status: status(),
           persist: jest.fn(),
           replace: jest.fn(),
-          restartRequired: false,
+          pendingRestartFields: [],
         }}
         starting={false}
         onToggleEnabled={jest.fn()}
@@ -154,7 +169,7 @@ describe("GatewayOverviewPanel", () => {
           status: status({ localRoutingEnabled: true, routingPolicyRevision: null }),
           persist: jest.fn(),
           replace: jest.fn(),
-          restartRequired: false,
+          pendingRestartFields: [],
         }}
         starting={false}
         onToggleEnabled={jest.fn()}
@@ -293,6 +308,49 @@ describe("GatewayOverviewPanel", () => {
     expect(screen.getByText("requiresKey")).toBeInTheDocument()
   })
 
+  it("keeps a running listener stoppable after its last usable key is gone", () => {
+    // Regression: the key check disabled the switch outright, so deleting the
+    // last key left a running gateway with no way to stop it from here.
+    const { onToggleEnabled } = setup(status({ running: true, hasToken: false }))
+
+    const toggle = screen.getByRole("switch", { name: "enabled" })
+    expect(toggle).toBeEnabled()
+    fireEvent.click(toggle)
+    expect(onToggleEnabled).toHaveBeenCalledWith(false)
+  })
+
+  it("explains a locked account instead of asking for a key it cannot use", () => {
+    setup(status({ accountRequired: true, ownerAccountId: null, hasToken: false }))
+
+    expect(screen.getByTestId("gateway-account-locked")).toHaveTextContent("accountLocked")
+    expect(screen.queryByText("requiresKey")).not.toBeInTheDocument()
+  })
+
+  it("points the snippets at the public origin when one is configured", () => {
+    setup(status({ running: true, boundPort: 50505 }), false, {
+      publicOrigin: "https://gw.example.com/",
+    })
+
+    expect(screen.getByRole("textbox", { name: "openaiSnippet" })).toHaveValue(
+      "OPENAI_BASE_URL=https://gw.example.com/v1"
+    )
+    expect(screen.getByTestId("gateway-origin-note")).toHaveTextContent("connectUsesPublicOrigin")
+  })
+
+  it("offers a connection check that lists models with the key from the environment", () => {
+    setup(status({ running: true, boundPort: 50505 }))
+
+    expect(screen.getByRole("textbox", { name: "verifySnippet" })).toHaveValue(
+      'curl -H "Authorization: Bearer $COGNIA_GATEWAY_KEY" http://127.0.0.1:50505/v1/models'
+    )
+  })
+
+  it("tells LAN users the loopback URL is for this machine only", () => {
+    setup(status({ running: true, bindInterface: "lan" }))
+
+    expect(screen.getByTestId("gateway-origin-note")).toHaveTextContent("connectLanNote")
+  })
+
   it("shows a pending indicator and blocks the switch mid-flight", () => {
     // Without this a double-click queues a stop behind a start and the UI ends
     // up disagreeing with Rust.
@@ -344,7 +402,9 @@ describe("GatewayOverviewPanel", () => {
       expect(mockProbe).toHaveBeenCalledWith("fast")
       expect(screen.getByText(/openai · gpt-4o/)).toBeInTheDocument()
       expect(screen.getByText(/groq · llama-3.3-70b/)).toBeInTheDocument()
-      expect(screen.getByText(/rate limited/)).toBeInTheDocument()
+      // The error sits on its own row, not in a detached second list.
+      expect(screen.getByTestId("gateway-probe-error-groq")).toHaveTextContent("rate limited")
+      expect(screen.getByTestId("gateway-probe-summary")).toHaveTextContent("selfCheckSummary:1,2")
       // A probe counts toward callsTotal, so status must be re-read.
       expect(onRefreshStatus).toHaveBeenCalled()
     })
@@ -389,5 +449,23 @@ describe("GatewayOverviewPanel", () => {
       )
       expect(screen.queryByTestId("gateway-probe-results")).not.toBeInTheDocument()
     })
+  })
+})
+
+describe("gatewayClientOrigin", () => {
+  const base = DEFAULT_GATEWAY_CONFIG
+
+  it("prefers the public origin, without a trailing slash", () => {
+    expect(gatewayClientOrigin({ ...base, publicOrigin: "https://gw.test//" }, null)).toBe(
+      "https://gw.test"
+    )
+  })
+
+  it("falls back to loopback on the bound port, then the configured one", () => {
+    expect(gatewayClientOrigin(base, status({ boundPort: 50505 }))).toBe("http://127.0.0.1:50505")
+    expect(gatewayClientOrigin(base, null)).toBe("http://127.0.0.1:47823")
+    expect(gatewayClientOrigin({ ...base, publicOrigin: "   " }, null)).toBe(
+      "http://127.0.0.1:47823"
+    )
   })
 })

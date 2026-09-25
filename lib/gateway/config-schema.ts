@@ -22,6 +22,38 @@ export function isValidPublicOrigin(value: string): boolean {
   return authority.length > 0 && !/[\s/?#@\\]|[\u0000-\u001f\u007f]/.test(authority)
 }
 
+/** A dotted quad as Rust's `Ipv4Addr::from_str` reads it: no leading zeros. */
+const IPV4_ADDRESS =
+  /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/
+/** A prefix as Rust's `u8::from_str` reads it: optional `+`, leading zeros allowed. */
+const PREFIX = /^\+?\d+$/
+
+/**
+ * One IPv4 allowlist entry: an address with an optional `/0`–`/32` prefix
+ * (a bare address means `/32`). Mirrors `parse_cidr` in
+ * `crates/cognia-net/src/inbound_policy/allowlist.rs`, which refuses the whole
+ * config on the first bad entry — so a typo caught here is a field error
+ * instead of an opaque "invalid config" toast.
+ */
+export function isValidAllowlistEntry(value: string): boolean {
+  const trimmed = value.trim()
+  const slash = trimmed.indexOf("/")
+  if (slash === -1) return IPV4_ADDRESS.test(trimmed)
+  const prefix = trimmed.slice(slash + 1)
+  return IPV4_ADDRESS.test(trimmed.slice(0, slash)) && PREFIX.test(prefix) && Number(prefix) <= 32
+}
+
+/**
+ * A field-strip exception, `providerId:field`. Rust matches it as a literal
+ * `"{providerId}:{field}"`, so an entry without both halves is not refused —
+ * it silently never matches anything.
+ */
+export function isValidFieldStripException(value: string): boolean {
+  const trimmed = value.trim()
+  const separator = trimmed.indexOf(":")
+  return separator > 0 && separator < trimmed.length - 1 && !/\s/.test(trimmed)
+}
+
 const publicOrigin = z.string().refine(isValidPublicOrigin, {
   message: "publicOrigin must be http://host[:port] or https://host[:port], with no path",
 })
@@ -30,7 +62,11 @@ export const gatewayConfigSchema = z
   .object({
     enabled: z.boolean(),
     port: z.number().int().min(0).max(65_535),
-    allowlist: z.array(nonEmptyString),
+    allowlist: z.array(
+      z.string().refine(isValidAllowlistEntry, {
+        message: "allowlist entries must be IPv4 addresses with an optional /0-/32 prefix",
+      })
+    ),
     rateLimitPerMin: u32.min(1),
     bindInterface: z.enum(["loopback", "lan"]),
     publicOrigin: publicOrigin.nullable(),
@@ -53,7 +89,11 @@ export const gatewayConfigSchema = z
     concurrencyWaitMs: u32,
     streamIdleTimeoutSecs: u32,
     strippedRequestFields: z.array(nonEmptyString),
-    fieldStripAllow: z.array(nonEmptyString),
+    fieldStripAllow: z.array(
+      z.string().refine(isValidFieldStripException, {
+        message: "fieldStripAllow entries must be written providerId:field",
+      })
+    ),
   })
   .strict()
   .superRefine((config, context) => {

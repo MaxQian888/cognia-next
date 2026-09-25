@@ -45,10 +45,14 @@ export async function listGatewayRequestLog(
   const limit = filter.limit ?? 200
   // Fetch a generous newest-first window, then filter — the table is capped so
   // this stays bounded, and cross-field filtering doesn't map to one index.
+  // Unfiltered reads skip the over-fetch: every row qualifies, and live
+  // queries (the log viewer, the keys panel's usage line) re-run this on each
+  // logged request.
+  const filtered = Boolean(filter.outcome || filter.keyId || filter.model?.trim())
   const window = await getDb()
     .gatewayRequestLog.orderBy("at")
     .reverse()
-    .limit(Math.max(limit * 4, 400))
+    .limit(filtered ? Math.max(limit * 4, 400) : limit)
     .toArray()
   return filterGatewayRequestLog(window, filter).slice(0, limit)
 }

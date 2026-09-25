@@ -3,7 +3,7 @@
 /**
  * Gateway API keys manager (desktop only).
  *
- * Issues, scopes, edits, toggles, reveals, and deletes the keyring-backed API
+ * Issues, scopes, edits, toggles, copies, and deletes the keyring-backed API
  * keys the inbound gateway authenticates against — the newapi "Tokens"
  * equivalent. Each key carries an optional model allowlist, expiry, per-minute
  * rate limit, and a cumulative token quota (drawn down per request; the gateway
@@ -14,13 +14,20 @@
  * A key also carries Run API scopes (ADR-0188 D8). A new key gets none, so it
  * is passthrough-only — the chat endpoints exactly as before — until someone
  * grants it what it needs here. Nothing about a scopeless key changes.
+ *
+ * Each row also shows what the key has done recently, rolled up from the
+ * durable request log by `summarizePerKeyUsage` — which was written for this
+ * surface and had never been called.
  */
 
-import { useEffect, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useEffect, useMemo, useState } from "react"
+import { useFormatter, useNow, useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
 import {
-  EyeIcon,
+  CopyIcon,
   KeyRoundIcon,
+  Loader2Icon,
+  LockIcon,
   PencilIcon,
   PlusIcon,
   RotateCcwIcon,
@@ -31,20 +38,15 @@ import { toast } from "sonner"
 import { Snippet, SnippetCopyButton, SnippetInput } from "@/components/ai-elements/snippet"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemTitle,
-} from "@/components/ui/item"
+import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item"
+import { Progress } from "@/components/ui/progress"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { MotionCollapse, MotionReveal } from "@/components/chat/motion/motion-reveal"
 import { SettingsEmptyState } from "@/components/settings/common/settings-section"
+import { listGatewayRequestLog, summarizePerKeyUsage } from "@/lib/db/gateway-request-log"
 import {
   gatewayCreateKey,
   gatewayDeleteKey,
@@ -53,6 +55,7 @@ import {
   gatewayRevealKey,
   gatewayUpdateKey,
 } from "@/lib/tauri/gateway"
+import { cn } from "@/lib/utils"
 import {
   GATEWAY_RUN_API_SCOPES,
   type GatewayApiKey,
@@ -61,6 +64,13 @@ import {
 } from "@/types/gateway"
 
 import { GatewayPanelSection, GatewayPanelStack } from "./shared/panel-section"
+import { SinceTime } from "./shared/since-time"
+
+/** How many of the newest log rows the per-key usage line is computed over. */
+export const KEY_USAGE_WINDOW = 500
+
+/** Quota share at which the usage bar turns to a warning. */
+const QUOTA_WARN_RATIO = 0.8
 
 function parseCsv(value: string): string[] {
   return value
@@ -94,95 +104,109 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-interface EditDraft {
+interface KeyDraft {
   name: string
   models: string
   expiry: string
   rate: string
   quota: string
+}
+
+interface EditDraft extends KeyDraft {
   scopes: GatewayRunApiScope[]
 }
+
+const EMPTY_DRAFT: KeyDraft = { name: "", models: "", expiry: "", rate: "", quota: "" }
 
 export function GatewayKeysCard({
   onChanged,
   legacyKeyCount = 0,
+  accountLocked = false,
 }: {
   onChanged?: () => void
   legacyKeyCount?: number
+  /**
+   * An account-scoped gateway with no unlocked account: Rust lists no keys and
+   * refuses to create one, so an empty list here means "locked", not "none".
+   */
+  accountLocked?: boolean
 }) {
   const t = useTranslations("settings.gateway")
+  const format = useFormatter()
+  const now = useNow({ updateInterval: 60_000 })
   const [keys, setKeys] = useState<GatewayApiKeyRedacted[]>([])
-  // Snapshot of "now" captured whenever keys (re)load — used to flag expired
-  // keys without calling Date.now() during render (react-hooks/purity).
-  const [now, setNow] = useState(0)
   const [freshKey, setFreshKey] = useState<GatewayApiKey | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [editId, setEditId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
+  const [editNameError, setEditNameError] = useState(false)
+  /** The key whose mutation is in flight; its controls lock until it lands. */
+  const [busyId, setBusyId] = useState<string | null>(null)
 
-  const [name, setName] = useState("")
-  const [models, setModels] = useState("")
-  const [expiry, setExpiry] = useState("")
-  const [rate, setRate] = useState("")
-  const [quota, setQuota] = useState("")
+  const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT)
+  const [nameError, setNameError] = useState(false)
+  const [creating, setCreating] = useState(false)
+
+  const recentRows = useLiveQuery(() => listGatewayRequestLog({ limit: KEY_USAGE_WINDOW }), [])
+  const usageByKey = useMemo(() => summarizePerKeyUsage(recentRows ?? []), [recentRows])
 
   const refresh = () =>
     gatewayListKeys()
-      .then((k) => {
-        setKeys(k)
-        setNow(Date.now())
-      })
+      .then(setKeys)
       .catch(() => {})
 
   useEffect(() => {
     // setState in the promise callback — an external-system update, not a
     // synchronous effect-body write (react-hooks/set-state-in-effect).
     gatewayListKeys()
-      .then((k) => {
-        setKeys(k)
-        setNow(Date.now())
-      })
+      .then(setKeys)
       .catch(() => {})
   }, [])
 
-  const onCreate = async () => {
-    if (!name.trim()) {
-      toast.error(t("keyName"))
-      return
-    }
+  /** Run one key's mutation with its controls locked; report failures. */
+  const mutate = async (id: string, run: () => Promise<void>) => {
+    setBusyId(id)
     try {
-      const created = await gatewayCreateKey({
-        name: name.trim(),
-        modelAllowlist: parseCsv(models),
-        expiresAtMs: parseExpiry(expiry),
-        rateLimitPerMin: parsePositiveInt(rate),
-        quotaTokens: parsePositiveInt(quota),
-      })
-      setFreshKey(created)
-      setName("")
-      setModels("")
-      setExpiry("")
-      setRate("")
-      setQuota("")
+      await run()
       await refresh()
       onChanged?.()
+      return true
     } catch (e) {
       toast.error(errMsg(e))
+      return false
+    } finally {
+      setBusyId(null)
     }
   }
 
-  const onToggle = async (id: string, enabled: boolean) => {
+  const onCreate = async () => {
+    if (!draft.name.trim()) {
+      setNameError(true)
+      return
+    }
+    setCreating(true)
     try {
-      await gatewayUpdateKey(id, { enabled })
+      const created = await gatewayCreateKey({
+        name: draft.name.trim(),
+        modelAllowlist: parseCsv(draft.models),
+        expiresAtMs: parseExpiry(draft.expiry),
+        rateLimitPerMin: parsePositiveInt(draft.rate),
+        quotaTokens: parsePositiveInt(draft.quota),
+      })
+      setFreshKey(created)
+      setDraft(EMPTY_DRAFT)
       await refresh()
       onChanged?.()
     } catch (e) {
       toast.error(errMsg(e))
+    } finally {
+      setCreating(false)
     }
   }
 
   const startEdit = (k: GatewayApiKeyRedacted) => {
     setConfirmDeleteId(null)
+    setEditNameError(false)
     setEditId(k.id)
     setEditDraft({
       name: k.name,
@@ -194,14 +218,20 @@ export function GatewayKeysCard({
     })
   }
 
+  const closeEdit = () => {
+    setEditId(null)
+    setEditDraft(null)
+    setEditNameError(false)
+  }
+
   const onSaveEdit = async (id: string) => {
     if (!editDraft) return
     if (!editDraft.name.trim()) {
-      toast.error(t("keyName"))
+      setEditNameError(true)
       return
     }
-    try {
-      await gatewayUpdateKey(id, {
+    const saved = await mutate(id, () =>
+      gatewayUpdateKey(id, {
         name: editDraft.name.trim(),
         modelAllowlist: parseCsv(editDraft.models),
         scopes: editDraft.scopes,
@@ -210,50 +240,45 @@ export function GatewayKeysCard({
         rateLimitPerMin: parsePositiveInt(editDraft.rate),
         quotaTokens: parsePositiveInt(editDraft.quota),
       })
-      setEditId(null)
-      setEditDraft(null)
-      await refresh()
-      onChanged?.()
+    )
+    if (saved) {
+      closeEdit()
       toast.success(t("saved"))
-    } catch (e) {
-      toast.error(errMsg(e))
     }
   }
 
   const onResetQuota = async (id: string) => {
-    try {
-      await gatewayResetKeyQuota(id)
-      await refresh()
-      toast.success(t("quotaReset"))
-    } catch (e) {
-      toast.error(errMsg(e))
-    }
+    if (await mutate(id, () => gatewayResetKeyQuota(id))) toast.success(t("quotaReset"))
   }
 
   const onDelete = async (id: string) => {
-    try {
-      await gatewayDeleteKey(id)
-      setConfirmDeleteId(null)
-      await refresh()
-      onChanged?.()
-    } catch (e) {
-      toast.error(errMsg(e))
-    }
+    if (await mutate(id, () => gatewayDeleteKey(id))) setConfirmDeleteId(null)
   }
 
-  const onReveal = async (id: string) => {
+  const onCopySecret = async (id: string) => {
     try {
       const secret = await gatewayRevealKey(id)
-      if (!secret) return
-      await navigator.clipboard.writeText(secret).catch(() => {})
+      if (!secret) {
+        toast.error(t("copyFailed"))
+        return
+      }
+      await navigator.clipboard.writeText(secret)
       toast.success(t("keyCopied"))
     } catch (e) {
-      toast.error(errMsg(e))
+      // Reported as a failure, not swallowed: the old path toasted "copied"
+      // even when the clipboard write had been refused.
+      toast.error(e instanceof Error ? e.message : t("copyFailed"))
     }
   }
 
   return (
     <GatewayPanelStack>
+      {accountLocked ? (
+        <Alert data-testid="gateway-keys-locked">
+          <LockIcon />
+          <AlertDescription>{t("accountLocked")}</AlertDescription>
+        </Alert>
+      ) : null}
       {legacyKeyCount > 0 && (
         <Alert>
           <KeyRoundIcon />
@@ -303,23 +328,33 @@ export function GatewayKeysCard({
           ) : null}
         </MotionCollapse>
 
-        {/* Key list */}
         {keys.length === 0 ? (
           <SettingsEmptyState
             icon={<KeyRoundIcon className="size-5" />}
-            title={t("keysEmpty")}
+            title={t(accountLocked ? "keysLockedEmpty" : "keysEmpty")}
             className="py-6"
           />
         ) : (
           <ItemGroup className="gap-2" data-testid="gateway-keys">
             {keys.map((k, index) => {
-              const expired = k.expiresAtMs != null && k.expiresAtMs <= now
+              const expired = k.expiresAtMs != null && k.expiresAtMs <= now.getTime()
               const overQuota = k.quotaTokens != null && k.quotaUsedTokens >= k.quotaTokens
+              const quotaRatio =
+                k.quotaTokens != null && k.quotaTokens > 0
+                  ? Math.min(k.quotaUsedTokens / k.quotaTokens, 1)
+                  : null
+              const usage = usageByKey.get(k.id)
               const isEditing = editId === k.id
+              const busy = busyId === k.id
               return (
                 <MotionReveal key={k.id} index={index}>
-                  <Item role="listitem" variant="muted" className="items-start">
-                    <ItemContent className="min-w-0">
+                  <Item
+                    role="listitem"
+                    variant="muted"
+                    className={cn("items-start gap-3", !k.enabled && "opacity-75")}
+                    aria-busy={busy || undefined}
+                  >
+                    <ItemContent className="min-w-0 basis-60 gap-2">
                       <ItemTitle className="w-full min-w-0 flex-wrap">
                         <span className="truncate">{k.name}</span>
                         <Badge
@@ -328,107 +363,152 @@ export function GatewayKeysCard({
                         >
                           {k.secretPreview}
                         </Badge>
+                        {!k.enabled && <Badge variant="outline">{t("keyDisabled")}</Badge>}
                         {expired && <Badge variant="destructive">{t("keyExpired")}</Badge>}
                         {overQuota && <Badge variant="destructive">{t("quotaExceeded")}</Badge>}
                       </ItemTitle>
-                      <ItemDescription className="flex max-w-full flex-wrap items-center gap-1.5 text-[11px]">
-                        <span>
+
+                      <dl
+                        className="grid grid-cols-1 gap-x-4 gap-y-1 text-[11px] @md/gateway-pane:grid-cols-2 @2xl/gateway-pane:grid-cols-3"
+                        data-testid={`gateway-key-meta-${k.id}`}
+                      >
+                        <KeyMeta label={t("keyModels")}>
                           {k.modelAllowlist.length === 0
                             ? t("keyModelsAll")
                             : k.modelAllowlist.join(", ")}
-                        </span>
-                        <span>·</span>
-                        <span>
-                          {t("keyExpiry")}:{" "}
+                        </KeyMeta>
+                        <KeyMeta label={t("keyScopes")}>
+                          {k.scopes.length === 0 ? t("keyScopesNone") : k.scopes.join(", ")}
+                        </KeyMeta>
+                        <KeyMeta label={t("keyRateLimit")}>
+                          {k.rateLimitPerMin ?? t("keyRateLimitNone")}
+                        </KeyMeta>
+                        <KeyMeta label={t("keyExpiry")}>
                           {k.expiresAtMs
-                            ? new Date(k.expiresAtMs).toLocaleDateString()
+                            ? format.dateTime(new Date(k.expiresAtMs), { dateStyle: "medium" })
                             : t("keyNeverExpires")}
-                        </span>
-                        <span>·</span>
-                        <span>
-                          {t("keyRateLimit")}: {k.rateLimitPerMin ?? t("keyRateLimitNone")}
-                        </span>
-                        <span>·</span>
-                        <span>
+                        </KeyMeta>
+                        <KeyMeta label={t("keyLastUsed")}>
+                          {k.lastUsedAtMs ? (
+                            <SinceTime date={new Date(k.lastUsedAtMs)} now={now} />
+                          ) : (
+                            t("keyNeverUsed")
+                          )}
+                        </KeyMeta>
+                        <KeyMeta label={t("keyCreated")}>
+                          {format.dateTime(new Date(k.createdAtMs), { dateStyle: "medium" })}
+                        </KeyMeta>
+                        <KeyMeta label={t("keyRecentUsage")}>
+                          <span data-testid={`gateway-key-usage-${k.id}`}>
+                            {t("keyRecentUsageValue", {
+                              requests: usage?.requests ?? 0,
+                              errors: usage?.errors ?? 0,
+                            })}
+                          </span>
+                        </KeyMeta>
+                      </dl>
+
+                      <div className="flex flex-col gap-1">
+                        <p className="text-[11px] text-muted-foreground">
                           {t("keyQuota")}:{" "}
                           {k.quotaTokens != null
                             ? t("keyQuotaUsed", {
-                                used: k.quotaUsedTokens.toLocaleString(),
-                                total: k.quotaTokens.toLocaleString(),
+                                used: format.number(k.quotaUsedTokens),
+                                total: format.number(k.quotaTokens),
                               })
                             : t("keyQuotaNone")}
-                        </span>
-                        <span>·</span>
-                        <span>
-                          {t("keyScopes")}:{" "}
-                          {k.scopes.length === 0 ? t("keyScopesNone") : k.scopes.join(", ")}
-                        </span>
-                        <span>·</span>
-                        <span>
-                          {k.lastUsedAtMs
-                            ? `${t("keyLastUsed")}: ${new Date(k.lastUsedAtMs).toLocaleString()}`
-                            : t("keyNeverUsed")}
-                        </span>
-                      </ItemDescription>
+                        </p>
+                        {quotaRatio != null ? (
+                          <Progress
+                            value={Math.round(quotaRatio * 100)}
+                            aria-label={t("keyQuota")}
+                            className={cn(
+                              "h-1.5",
+                              quotaRatio >= 1
+                                ? "[&_[data-slot=progress-indicator]]:bg-destructive"
+                                : quotaRatio >= QUOTA_WARN_RATIO &&
+                                    "[&_[data-slot=progress-indicator]]:bg-warning"
+                            )}
+                            data-testid={`gateway-key-quota-${k.id}`}
+                          />
+                        ) : null}
+                      </div>
                     </ItemContent>
+
                     <ItemActions className="max-w-full flex-wrap justify-end">
                       <Switch
                         checked={k.enabled}
-                        onCheckedChange={(v) => void onToggle(k.id, v)}
+                        disabled={busy}
+                        onCheckedChange={(enabled) =>
+                          void mutate(k.id, () => gatewayUpdateKey(k.id, { enabled }))
+                        }
                         aria-label={`${k.enabled ? t("disable") : t("enable")} ${k.name}`}
                       />
                       {k.quotaTokens != null && (
                         <Button
-                          size="sm"
+                          size="icon-sm"
                           variant="ghost"
+                          disabled={busy}
                           onClick={() => void onResetQuota(k.id)}
                           aria-label={`${t("resetQuota")} ${k.name}`}
                           title={t("resetQuota")}
                         >
-                          <RotateCcwIcon className="h-3.5 w-3.5" />
+                          <RotateCcwIcon className="size-3.5" aria-hidden />
                         </Button>
                       )}
                       <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => (isEditing ? setEditId(null) : startEdit(k))}
+                        size="icon-sm"
+                        variant={isEditing ? "secondary" : "ghost"}
+                        disabled={busy}
+                        onClick={() => (isEditing ? closeEdit() : startEdit(k))}
                         aria-label={`${t("editKey")} ${k.name}`}
+                        aria-expanded={isEditing}
+                        title={t("editKey")}
                       >
-                        <PencilIcon className="h-3.5 w-3.5" />
+                        <PencilIcon className="size-3.5" aria-hidden />
                       </Button>
                       <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void onReveal(k.id)}
-                        aria-label={`${t("reveal")} ${k.name}`}
+                        size="icon-sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void onCopySecret(k.id)}
+                        aria-label={`${t("copyKey")} ${k.name}`}
+                        title={t("copyKey")}
                       >
-                        <EyeIcon className="h-3.5 w-3.5" />
+                        <CopyIcon className="size-3.5" aria-hidden />
                       </Button>
                       {/* The trigger stays put whether or not the confirmation
                           is open. It used to be REPLACED by a wide destructive
                           button, so asking to delete visibly re-flowed the row
                           and moved every other control under the cursor. */}
                       <Button
-                        size="sm"
+                        size="icon-sm"
                         variant={confirmDeleteId === k.id ? "secondary" : "ghost"}
+                        disabled={busy}
                         onClick={() => setConfirmDeleteId((cur) => (cur === k.id ? null : k.id))}
                         aria-label={`${t("deleteKey")} ${k.name}`}
                         aria-expanded={confirmDeleteId === k.id}
+                        title={t("deleteKey")}
                       >
-                        <Trash2Icon className="h-3.5 w-3.5" />
+                        <Trash2Icon className="size-3.5" aria-hidden />
                       </Button>
                     </ItemActions>
+
                     <div className="w-full basis-full">
                       <MotionCollapse open={confirmDeleteId === k.id}>
-                        <Alert variant="destructive" className="mt-2">
+                        <Alert variant="destructive" className="mt-1">
                           <AlertDescription className="flex w-full flex-col gap-2 @md/gateway-pane:flex-row @md/gateway-pane:items-center">
                             <p className="flex-1">{t("deleteKeyConfirm")}</p>
                             <div className="flex flex-wrap gap-2">
                               <Button
                                 size="sm"
                                 variant="destructive"
+                                disabled={busy}
                                 onClick={() => void onDelete(k.id)}
                               >
+                                {busy ? (
+                                  <Loader2Icon className="size-3.5 animate-spin" aria-hidden />
+                                ) : null}
                                 {t("deleteKey")}
                               </Button>
                               <Button
@@ -449,76 +529,18 @@ export function GatewayKeysCard({
                             // detail pane, which is a fraction of the window, so a
                             // viewport breakpoint would split it into two columns
                             // while the pane itself is still narrow.
-                            className="mt-3 grid gap-3 @lg/gateway-pane:grid-cols-2"
+                            className="mt-2 grid gap-3 border-t pt-3 @lg/gateway-pane:grid-cols-2"
                             data-testid={`gateway-key-edit-${k.id}`}
                           >
-                            <Field>
-                              <FieldLabel htmlFor={`edit-name-${k.id}`}>{t("keyName")}</FieldLabel>
-                              <Input
-                                id={`edit-name-${k.id}`}
-                                value={editDraft.name}
-                                onChange={(e) =>
-                                  setEditDraft({ ...editDraft, name: e.target.value })
-                                }
-                              />
-                            </Field>
-                            <Field>
-                              <FieldLabel htmlFor={`edit-models-${k.id}`}>
-                                {t("keyModels")}
-                              </FieldLabel>
-                              <Input
-                                id={`edit-models-${k.id}`}
-                                value={editDraft.models}
-                                placeholder={t("keyModelsPlaceholder")}
-                                onChange={(e) =>
-                                  setEditDraft({ ...editDraft, models: e.target.value })
-                                }
-                              />
-                            </Field>
-                            <Field>
-                              <FieldLabel htmlFor={`edit-expiry-${k.id}`}>
-                                {t("keyExpiry")}
-                              </FieldLabel>
-                              <Input
-                                id={`edit-expiry-${k.id}`}
-                                type="date"
-                                value={editDraft.expiry}
-                                onChange={(e) =>
-                                  setEditDraft({ ...editDraft, expiry: e.target.value })
-                                }
-                              />
-                            </Field>
-                            <Field>
-                              <FieldLabel htmlFor={`edit-rate-${k.id}`}>
-                                {t("keyRateLimit")}
-                              </FieldLabel>
-                              <Input
-                                id={`edit-rate-${k.id}`}
-                                type="number"
-                                min={1}
-                                value={editDraft.rate}
-                                placeholder={t("keyRateLimitNone")}
-                                onChange={(e) =>
-                                  setEditDraft({ ...editDraft, rate: e.target.value })
-                                }
-                              />
-                            </Field>
-                            <Field>
-                              <FieldLabel htmlFor={`edit-quota-${k.id}`}>
-                                {t("keyQuota")}
-                              </FieldLabel>
-                              <Input
-                                id={`edit-quota-${k.id}`}
-                                type="number"
-                                min={1}
-                                value={editDraft.quota}
-                                placeholder={t("keyQuotaNone")}
-                                onChange={(e) =>
-                                  setEditDraft({ ...editDraft, quota: e.target.value })
-                                }
-                              />
-                              <FieldDescription>{t("keyQuotaHelp")}</FieldDescription>
-                            </Field>
+                            <KeyFormFields
+                              idPrefix={`edit-${k.id}`}
+                              draft={editDraft}
+                              nameError={editNameError}
+                              onChange={(patch) => {
+                                setEditDraft({ ...editDraft, ...patch })
+                                if (patch.name !== undefined) setEditNameError(false)
+                              }}
+                            />
                             <Field className="@lg/gateway-pane:col-span-2">
                               <FieldLabel>{t("keyScopes")}</FieldLabel>
                               <div
@@ -551,17 +573,17 @@ export function GatewayKeysCard({
                               <FieldDescription>{t("keyScopesHelp")}</FieldDescription>
                             </Field>
                             <div className="flex flex-wrap items-center gap-2 @lg/gateway-pane:col-span-2">
-                              <Button size="sm" onClick={() => void onSaveEdit(k.id)}>
-                                {t("save")}
-                              </Button>
                               <Button
                                 size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  setEditId(null)
-                                  setEditDraft(null)
-                                }}
+                                disabled={busy}
+                                onClick={() => void onSaveEdit(k.id)}
                               >
+                                {busy ? (
+                                  <Loader2Icon className="size-3.5 animate-spin" aria-hidden />
+                                ) : null}
+                                {t("save")}
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={closeEdit}>
                                 {t("cancel")}
                               </Button>
                             </div>
@@ -577,62 +599,29 @@ export function GatewayKeysCard({
         )}
       </GatewayPanelSection>
 
-      {/* Create form */}
-      <GatewayPanelSection title={t("createKey")}>
+      <GatewayPanelSection
+        icon={<PlusIcon className="size-4" />}
+        title={t("createKey")}
+        description={t("createKeyHelp")}
+      >
         <FieldGroup className="grid gap-3 @lg/gateway-pane:grid-cols-2">
-          <Field>
-            <FieldLabel htmlFor="gw-key-name">{t("keyName")}</FieldLabel>
-            <Input
-              id="gw-key-name"
-              value={name}
-              placeholder={t("keyNamePlaceholder")}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="gw-key-models">{t("keyModels")}</FieldLabel>
-            <Input
-              id="gw-key-models"
-              value={models}
-              placeholder={t("keyModelsPlaceholder")}
-              onChange={(e) => setModels(e.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="gw-key-expiry">{t("keyExpiry")}</FieldLabel>
-            <Input
-              id="gw-key-expiry"
-              type="date"
-              value={expiry}
-              onChange={(e) => setExpiry(e.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="gw-key-rate">{t("keyRateLimit")}</FieldLabel>
-            <Input
-              id="gw-key-rate"
-              type="number"
-              min={1}
-              value={rate}
-              placeholder={t("keyRateLimitNone")}
-              onChange={(e) => setRate(e.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="gw-key-quota">{t("keyQuota")}</FieldLabel>
-            <Input
-              id="gw-key-quota"
-              type="number"
-              min={1}
-              value={quota}
-              placeholder={t("keyQuotaNone")}
-              onChange={(e) => setQuota(e.target.value)}
-            />
-            <FieldDescription>{t("keyQuotaHelp")}</FieldDescription>
-          </Field>
+          <KeyFormFields
+            idPrefix="gw-key"
+            draft={draft}
+            nameError={nameError}
+            placeholders
+            onChange={(patch) => {
+              setDraft((current) => ({ ...current, ...patch }))
+              if (patch.name !== undefined) setNameError(false)
+            }}
+          />
           <div className="@lg/gateway-pane:col-span-2">
-            <Button size="sm" onClick={() => void onCreate()}>
-              <PlusIcon className="mr-1.5 h-4 w-4" />
+            <Button size="sm" disabled={creating || accountLocked} onClick={() => void onCreate()}>
+              {creating ? (
+                <Loader2Icon className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <PlusIcon className="size-4" aria-hidden />
+              )}
               {t("createKey")}
             </Button>
           </div>
@@ -642,4 +631,95 @@ export function GatewayKeysCard({
   )
 }
 
-export default GatewayKeysCard
+function KeyMeta({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 gap-1.5">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 truncate">{children}</dd>
+    </div>
+  )
+}
+
+/**
+ * The five fields a key is created with and edited through. One component for
+ * both forms: they had drifted into two hand-copied blocks, and only the edit
+ * copy had lost its help text.
+ */
+function KeyFormFields({
+  idPrefix,
+  draft,
+  nameError,
+  placeholders = false,
+  onChange,
+}: {
+  idPrefix: string
+  draft: KeyDraft
+  nameError: boolean
+  /** Example values in the empty create form; the edit form holds real ones. */
+  placeholders?: boolean
+  onChange: (patch: Partial<KeyDraft>) => void
+}) {
+  const t = useTranslations("settings.gateway")
+  const nameErrorId = `${idPrefix}-name-error`
+
+  return (
+    <>
+      <Field data-invalid={nameError || undefined}>
+        <FieldLabel htmlFor={`${idPrefix}-name`}>{t("keyName")}</FieldLabel>
+        <Input
+          id={`${idPrefix}-name`}
+          value={draft.name}
+          placeholder={placeholders ? t("keyNamePlaceholder") : undefined}
+          aria-invalid={nameError}
+          aria-describedby={nameError ? nameErrorId : undefined}
+          onChange={(e) => onChange({ name: e.target.value })}
+        />
+        {nameError ? <FieldError id={nameErrorId}>{t("keyNameRequired")}</FieldError> : null}
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${idPrefix}-models`}>{t("keyModels")}</FieldLabel>
+        <Input
+          id={`${idPrefix}-models`}
+          value={draft.models}
+          placeholder={t("keyModelsPlaceholder")}
+          onChange={(e) => onChange({ models: e.target.value })}
+        />
+        <FieldDescription>{t("keyModelsHelp")}</FieldDescription>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${idPrefix}-expiry`}>{t("keyExpiry")}</FieldLabel>
+        <Input
+          id={`${idPrefix}-expiry`}
+          type="date"
+          value={draft.expiry}
+          onChange={(e) => onChange({ expiry: e.target.value })}
+        />
+        <FieldDescription>{t("keyExpiryHelp")}</FieldDescription>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${idPrefix}-rate`}>{t("keyRateLimit")}</FieldLabel>
+        <Input
+          id={`${idPrefix}-rate`}
+          type="number"
+          min={1}
+          value={draft.rate}
+          placeholder={t("keyRateLimitNone")}
+          onChange={(e) => onChange({ rate: e.target.value })}
+        />
+        <FieldDescription>{t("keyRateLimitHelp")}</FieldDescription>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${idPrefix}-quota`}>{t("keyQuota")}</FieldLabel>
+        <Input
+          id={`${idPrefix}-quota`}
+          type="number"
+          min={1}
+          value={draft.quota}
+          placeholder={t("keyQuotaNone")}
+          onChange={(e) => onChange({ quota: e.target.value })}
+        />
+        <FieldDescription>{t("keyQuotaHelp")}</FieldDescription>
+      </Field>
+    </>
+  )
+}

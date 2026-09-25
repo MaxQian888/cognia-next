@@ -1,14 +1,39 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
-import { GatewayKeysCard } from "./gateway-keys-card"
+import { GatewayKeysCard, KEY_USAGE_WINDOW } from "./gateway-keys-card"
 import {
   GATEWAY_RUN_API_SCOPES,
   type GatewayApiKey,
   type GatewayApiKeyRedacted,
+  type GatewayRequestLogRow,
 } from "@/types/gateway"
 
-jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${Object.values(values).join(",")}` : key,
+  useFormatter: () => ({
+    dateTime: (date: Date) => `date:${date.toISOString()}`,
+    relativeTime: (date: Date) => `rel:${date.toISOString()}`,
+    number: (value: number) => String(value),
+  }),
+  useNow: () => new Date("2026-09-01T00:00:00.000Z"),
+}))
+
+// The per-key usage line reads the durable request log through a live query;
+// return a fixed window and keep the real (pure) roll-up.
+let liveLogRows: GatewayRequestLogRow[] = []
+const mockListLog = jest.fn()
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: (query: () => unknown) => {
+    query()
+    return liveLogRows
+  },
+}))
+jest.mock("@/lib/db/gateway-request-log", () => ({
+  ...jest.requireActual("@/lib/db/gateway-request-log"),
+  listGatewayRequestLog: (filter: unknown) => mockListLog(filter),
+}))
 
 const mockList = jest.fn()
 const mockCreate = jest.fn()
@@ -60,6 +85,12 @@ const fullKey = (over: Partial<GatewayApiKey> = {}): GatewayApiKey => ({
 })
 
 beforeEach(() => {
+  liveLogRows = []
+  mockListLog.mockReset().mockResolvedValue([])
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: jest.fn().mockResolvedValue(undefined) },
+    configurable: true,
+  })
   mockList.mockReset().mockResolvedValue([redacted()])
   mockCreate.mockReset().mockResolvedValue(fullKey())
   mockUpdate.mockReset().mockResolvedValue(undefined)
@@ -75,7 +106,7 @@ describe("GatewayKeysCard", () => {
     render(<GatewayKeysCard legacyKeyCount={2} />)
     await screen.findByText("CLI")
     expect(screen.getByText("legacyKeysHeading")).toBeInTheDocument()
-    expect(screen.getByText("legacyKeysHelp")).toBeInTheDocument()
+    expect(screen.getByText("legacyKeysHelp:2")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "createKey" })).toBeEnabled()
   })
 
@@ -145,13 +176,97 @@ describe("GatewayKeysCard", () => {
     expect(mockDelete).toHaveBeenCalledWith("k1")
   })
 
-  it("reveals a key secret and confirms the copy", async () => {
+  it("copies a key's secret and confirms only once the clipboard accepted it", async () => {
     const user = userEvent.setup()
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
     render(<GatewayKeysCard />)
     await screen.findByText("CLI")
-    await user.click(screen.getByRole("button", { name: "reveal CLI" }))
+    await user.click(screen.getByRole("button", { name: "copyKey CLI" }))
     await waitFor(() => expect(mockReveal).toHaveBeenCalledWith("k1"))
+    expect(writeText).toHaveBeenCalledWith("sk-cognia-FULLSECRET0000")
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("keyCopied"))
+  })
+
+  it("reports a refused clipboard write instead of claiming the key was copied", async () => {
+    // Regression: the write's rejection was swallowed and "copied" toasted anyway.
+    const writeText = jest.fn().mockRejectedValue(new Error("clipboard denied"))
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+
+    fireEvent.click(screen.getByRole("button", { name: "copyKey CLI" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("clipboard denied"))
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it("rolls each key's recent requests up from the request log", async () => {
+    const logRow = (over: Partial<GatewayRequestLogRow>): GatewayRequestLogRow => ({
+      id: Math.random().toString(36),
+      at: "2026-08-31T00:00:00Z",
+      route: "/v1/messages",
+      remoteIp: "127.0.0.1",
+      keyId: "k1",
+      model: "fast",
+      providerId: "anthropic",
+      status: 200,
+      latencyMs: 10,
+      inputTokens: 1,
+      outputTokens: 1,
+      error: null,
+      stream: false,
+      ...over,
+    })
+    liveLogRows = [logRow({}), logRow({ status: 429 }), logRow({ keyId: "someone-else" })]
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+
+    expect(mockListLog).toHaveBeenCalledWith({ limit: KEY_USAGE_WINDOW })
+    expect(screen.getByTestId("gateway-key-usage-k1")).toHaveTextContent("keyRecentUsageValue:2,1")
+  })
+
+  it("draws the quota as a bar that turns destructive once spent", async () => {
+    mockList.mockResolvedValue([redacted({ quotaTokens: 100, quotaUsedTokens: 100 })])
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+
+    const bar = screen.getByTestId("gateway-key-quota-k1")
+    expect(bar).toHaveAttribute("aria-valuenow", "100")
+    expect(bar.className).toContain("bg-destructive")
+  })
+
+  it("shows when a key was created, which was carried but never rendered", async () => {
+    mockList.mockResolvedValue([redacted({ createdAtMs: Date.UTC(2026, 7, 1) })])
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+
+    expect(screen.getByTestId("gateway-key-meta-k1")).toHaveTextContent(
+      "keyCreateddate:2026-08-01T00:00:00.000Z"
+    )
+  })
+
+  it("says the account is locked rather than that no keys exist", async () => {
+    mockList.mockResolvedValue([])
+    render(<GatewayKeysCard accountLocked />)
+
+    expect(await screen.findByText("keysLockedEmpty")).toBeInTheDocument()
+    expect(screen.getByTestId("gateway-keys-locked")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "createKey" })).toBeDisabled()
+  })
+
+  it("locks a key's controls while its mutation is in flight", async () => {
+    let finish!: () => void
+    mockUpdate.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)))
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+
+    fireEvent.click(screen.getByRole("switch", { name: "disable CLI" }))
+
+    expect(screen.getByRole("switch", { name: "disable CLI" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "deleteKey CLI" })).toBeDisabled()
+    finish()
+    await waitFor(() => expect(screen.getByRole("switch", { name: "disable CLI" })).toBeEnabled())
   })
 
   it("edits a key and saves the patch", async () => {
@@ -249,14 +364,19 @@ describe("GatewayKeysCard", () => {
       await waitFor(() => expect(screen.queryByTestId("gateway-fresh-key")).not.toBeInTheDocument())
     })
 
-    it("refuses to create a key with no name", async () => {
+    it("refuses to create a key with no name, flagging the field itself", async () => {
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")
 
       fireEvent.click(screen.getByRole("button", { name: "createKey" }))
 
       expect(mockCreate).not.toHaveBeenCalled()
-      expect(toast.error).toHaveBeenCalledWith("keyName")
+      expect(screen.getByLabelText("keyName")).toHaveAttribute("aria-invalid", "true")
+      expect(screen.getByLabelText("keyName")).toHaveAccessibleDescription("keyNameRequired")
+
+      // Typing clears the error.
+      fireEvent.change(screen.getByLabelText("keyName"), { target: { value: "L" } })
+      expect(screen.getByLabelText("keyName")).toHaveAttribute("aria-invalid", "false")
     })
   })
 
@@ -387,7 +507,7 @@ describe("GatewayKeysCard", () => {
       fireEvent.click(within(panel).getByRole("button", { name: "save" }))
 
       expect(mockUpdate).not.toHaveBeenCalled()
-      expect(toast.error).toHaveBeenCalledWith("keyName")
+      expect(within(panel).getByLabelText("keyName")).toHaveAccessibleDescription("keyNameRequired")
     })
 
     it("closes on cancel without saving", async () => {
@@ -504,24 +624,24 @@ describe("GatewayKeysCard", () => {
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("keyring locked"))
     })
 
-    it("surfaces a failed reveal", async () => {
+    it("surfaces a failed secret read", async () => {
       mockReveal.mockRejectedValue(new Error("keyring locked"))
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")
 
-      fireEvent.click(screen.getByRole("button", { name: "reveal CLI" }))
+      fireEvent.click(screen.getByRole("button", { name: "copyKey CLI" }))
 
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("keyring locked"))
     })
 
-    it("stays quiet when a reveal returns no secret", async () => {
+    it("reports a copy failure when the keyring returns no secret", async () => {
       mockReveal.mockResolvedValue(null)
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")
 
-      fireEvent.click(screen.getByRole("button", { name: "reveal CLI" }))
+      fireEvent.click(screen.getByRole("button", { name: "copyKey CLI" }))
 
-      await waitFor(() => expect(mockReveal).toHaveBeenCalled())
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("copyFailed"))
       expect(toast.success).not.toHaveBeenCalled()
     })
 

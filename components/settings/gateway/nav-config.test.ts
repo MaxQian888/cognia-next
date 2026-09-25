@@ -1,4 +1,7 @@
+import { GATEWAY_BIND_TIME_FIELDS } from "@/types/gateway"
+
 import {
+  BIND_TIME_FIELD_PANEL,
   DEFAULT_GATEWAY_PANEL,
   GATEWAY_NAV_GROUPS,
   GATEWAY_NAV_ITEMS,
@@ -39,5 +42,13 @@ describe("gateway nav-config", () => {
     expect(resolveGatewayPanel("")).toBe(DEFAULT_GATEWAY_PANEL)
     expect(resolveGatewayPanel(null)).toBe(DEFAULT_GATEWAY_PANEL)
     expect(resolveGatewayPanel(undefined)).toBe(DEFAULT_GATEWAY_PANEL)
+  })
+
+  it("routes every bind-time field to a real panel other than the raw editor", () => {
+    const ids = new Set(GATEWAY_NAV_ITEMS.map((i) => i.id))
+    for (const field of GATEWAY_BIND_TIME_FIELDS) {
+      expect(ids.has(BIND_TIME_FIELD_PANEL[field])).toBe(true)
+      expect(BIND_TIME_FIELD_PANEL[field]).not.toBe("custom")
+    }
   })
 })

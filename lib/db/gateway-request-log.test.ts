@@ -69,6 +69,21 @@ describe("gateway-request-log CRUD", () => {
     expect((await listGatewayRequestLog({ limit: 1 })).map((r) => r.id)).toEqual(["b"])
   })
 
+  it("still fills a filtered page from beyond the first `limit` rows", async () => {
+    // Unfiltered reads fetch exactly `limit`; a filtered one must look further
+    // back, or a page of errors would come up short behind recent successes.
+    await appendGatewayRequestLog(row("old-err", "2026-07-03T00:00:01Z", { status: 500 }))
+    await appendGatewayRequestLog(row("new-ok-1", "2026-07-03T00:00:02Z"))
+    await appendGatewayRequestLog(row("new-ok-2", "2026-07-03T00:00:03Z"))
+    expect((await listGatewayRequestLog({ limit: 1, outcome: "errors" })).map((r) => r.id)).toEqual(
+      ["old-err"]
+    )
+    expect((await listGatewayRequestLog({ limit: 2 })).map((r) => r.id)).toEqual([
+      "new-ok-2",
+      "new-ok-1",
+    ])
+  })
+
   it("clears the table", async () => {
     await appendGatewayRequestLog(row("a", "2026-07-03T00:00:01Z"))
     await clearGatewayRequestLog()

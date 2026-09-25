@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
 
-import { GatewayUpstreamPanel } from "./upstream-panel"
+import { groupCooldownsByProvider, GatewayUpstreamPanel } from "./upstream-panel"
 import { DEFAULT_GATEWAY_CONFIG, type GatewayKeyCooldown } from "@/types/gateway"
 import { gatewayResetCooldowns } from "@/lib/tauri/gateway"
 
@@ -33,7 +33,7 @@ function setup(cooldowns: GatewayKeyCooldown[] = []) {
         status: null,
         persist,
         replace: jest.fn(),
-        restartRequired: false,
+        pendingRestartFields: [],
       }}
       cooldowns={cooldowns}
       onRefreshCooldowns={onRefreshCooldowns}
@@ -125,6 +125,42 @@ describe("GatewayUpstreamPanel", () => {
     expect(persist).toHaveBeenCalledWith({ streamIdleTimeoutSecs: 0 })
   })
 
+  it("restores one provider's parked keys without touching the others", async () => {
+    const { onRefreshCooldowns } = setup([
+      parkedKey,
+      { providerId: "groq", keyHint: "…2", untilMs: 0, permanent: true, reason: "401" },
+    ])
+
+    fireEvent.click(screen.getByRole("button", { name: "cooldownsRestoreProviderAria:groq" }))
+
+    await waitFor(() => expect(gatewayResetCooldowns).toHaveBeenCalledWith("groq"))
+    expect(onRefreshCooldowns).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith("cooldownsResetSuccess:1")
+  })
+
+  it("groups parked keys by provider, since that is what a restore acts on", () => {
+    setup([
+      parkedKey,
+      { providerId: "groq", keyHint: "…2", untilMs: 0, permanent: true, reason: "401" },
+      { providerId: "openai", keyHint: "…5678", untilMs: 0, permanent: true, reason: "quota" },
+    ])
+
+    expect(screen.getByRole("region", { name: "openai" })).toHaveTextContent("…1234")
+    expect(screen.getByRole("region", { name: "openai" })).toHaveTextContent("…5678")
+    expect(screen.getByRole("region", { name: "groq" })).toHaveTextContent("…2")
+  })
+
+  it("refuses a field-strip exception that could never match a provider", () => {
+    const { persist } = setup()
+
+    const input = screen.getByLabelText("fieldStripAllow")
+    fireEvent.change(input, { target: { value: "service_tier" } })
+    fireEvent.blur(input)
+
+    expect(persist).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent("fieldStripAllowInvalid")
+  })
+
   it.each([
     ["disableKeywords", "billing_hard_limit_reached", "disableKeywords"],
     ["strippedFields", "metadata.user_id", "strippedRequestFields"],
@@ -162,7 +198,7 @@ describe("GatewayUpstreamPanel", () => {
       { providerId: "openai", keyHint: "…1234", untilMs: 0, permanent: true, reason: "quota" },
     ])
 
-    expect(screen.getByText(/openai · …1234/)).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "openai" })).toHaveTextContent("…1234")
     expect(screen.getByText("cooldownsPermanent")).toBeInTheDocument()
     expect(screen.queryByTestId("gateway-cooldown-remaining")).not.toBeInTheDocument()
   })
@@ -217,5 +253,76 @@ describe("GatewayUpstreamPanel", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  it("reads a long cooldown in minutes and seconds", () => {
+    jest.useFakeTimers()
+    try {
+      setup([
+        {
+          providerId: "anthropic",
+          keyHint: "…7d13",
+          untilMs: Date.now() + 471_000,
+          permanent: false,
+          reason: "529 overloaded",
+        },
+      ])
+
+      expect(screen.getByTestId("gateway-cooldown-remaining")).toHaveTextContent(
+        "cooldownsRecoversInMinutes:7,51"
+      )
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("re-reads the parked list once a countdown lifts, so the row does not linger", () => {
+    jest.useFakeTimers()
+    try {
+      const { onRefreshCooldowns } = setup([
+        {
+          providerId: "openai",
+          keyHint: "…9999",
+          untilMs: Date.now() + 1_500,
+          permanent: false,
+          reason: "rate limited",
+        },
+      ])
+      expect(onRefreshCooldowns).not.toHaveBeenCalled()
+
+      act(() => {
+        jest.advanceTimersByTime(2000)
+      })
+      expect(onRefreshCooldowns).toHaveBeenCalledTimes(1)
+
+      // Elapsed once, refreshed once — the stopped tick does not keep firing.
+      act(() => {
+        jest.advanceTimersByTime(5000)
+      })
+      expect(onRefreshCooldowns).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("groupCooldownsByProvider", () => {
+  it("keeps providers in first-seen order and rows in input order", () => {
+    const row = (providerId: string, keyHint: string): GatewayKeyCooldown => ({
+      providerId,
+      keyHint,
+      untilMs: 0,
+      permanent: true,
+      reason: "",
+    })
+
+    expect(
+      groupCooldownsByProvider([row("b", "1"), row("a", "2"), row("b", "3")]).map(
+        ([provider, rows]) => [provider, rows.map((r) => r.keyHint)]
+      )
+    ).toEqual([
+      ["b", ["1", "3"]],
+      ["a", ["2"]],
+    ])
   })
 })

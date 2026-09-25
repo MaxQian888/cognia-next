@@ -21,8 +21,9 @@ type Story = StoryObj<typeof meta>
  * `GatewaySection` returns the desktop-only notice *before* it builds the
  * master/detail shell, so the browser preview cannot reach the nav rail or any
  * panel — a per-panel story here would just render this notice N times. The
- * panels are previewable only in the desktop build; their behaviour is pinned
- * by the co-located tests instead.
+ * panels themselves are previewed with fixture data in
+ * `gateway-panels.stories.tsx`; their behaviour is pinned by the co-located
+ * tests.
  */
 export const Default: Story = {
   decorators: [

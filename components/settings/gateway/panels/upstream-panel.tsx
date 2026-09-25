@@ -8,14 +8,15 @@
  * permanent-disable keyword list (W3.1), outbound field stripping (W3.2), and
  * the SSE idle timeout.
  *
- * The parked-key list also renders each row's `reason` and counts its recovery
- * down live. Both were already returned by `gateway_list_cooldowns`: `reason`
- * was dropped on the floor, and the recovery time was a static timestamp behind
- * a manual refresh button, so a cooldown that had already lifted still looked
- * active until the user clicked.
+ * The parked-key list renders each row's `reason` and counts its recovery down
+ * live; when a countdown reaches zero it re-reads the list so the row (and the
+ * nav badge) goes away instead of sitting on "recovered" until the next poll.
+ * Rows are grouped per provider because that is the granularity
+ * `gateway_reset_cooldowns` restores at — the command always took an optional
+ * provider id, but only the restore-everything form was ever reachable.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2Icon, RefreshCwIcon, ShieldIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -26,8 +27,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
-import type { GatewayKeyCooldown } from "@/types/gateway"
+import { useStableCallback } from "@/hooks/ui/use-stable-callback"
+import { isValidFieldStripException } from "@/lib/gateway/config-schema"
 import { gatewayResetCooldowns } from "@/lib/tauri/gateway"
+import { cn } from "@/lib/utils"
+import type { GatewayKeyCooldown } from "@/types/gateway"
 
 import { ChipInput } from "../shared/chip-input"
 import { NumberRow } from "../../common/number-row"
@@ -40,6 +44,24 @@ export interface GatewayUpstreamPanelProps {
   onRefreshCooldowns: () => Promise<void>
 }
 
+/** `"refresh"`, `"reset:*"` (every provider) or `"reset:<providerId>"`. */
+type CooldownAction = "refresh" | `reset:${string}`
+
+const RESET_ALL: CooldownAction = "reset:*"
+
+/** Parked rows grouped by provider, providers in first-seen order. */
+export function groupCooldownsByProvider(
+  cooldowns: readonly GatewayKeyCooldown[]
+): Array<[string, GatewayKeyCooldown[]]> {
+  const groups = new Map<string, GatewayKeyCooldown[]>()
+  for (const row of cooldowns) {
+    const rows = groups.get(row.providerId)
+    if (rows) rows.push(row)
+    else groups.set(row.providerId, [row])
+  }
+  return [...groups.entries()]
+}
+
 export function GatewayUpstreamPanel({
   ctx,
   cooldowns,
@@ -47,7 +69,8 @@ export function GatewayUpstreamPanel({
 }: GatewayUpstreamPanelProps) {
   const t = useTranslations("settings.gateway")
   const { config, persist } = ctx
-  const [cooldownAction, setCooldownAction] = useState<"refresh" | "reset" | null>(null)
+  const [cooldownAction, setCooldownAction] = useState<CooldownAction | null>(null)
+  const groups = useMemo(() => groupCooldownsByProvider(cooldowns), [cooldowns])
 
   async function refreshCooldowns() {
     try {
@@ -57,11 +80,13 @@ export function GatewayUpstreamPanel({
     }
   }
 
-  async function runCooldownAction(action: "refresh" | "reset") {
+  async function runCooldownAction(action: CooldownAction) {
     setCooldownAction(action)
     try {
-      if (action === "reset") {
-        const count = await gatewayResetCooldowns()
+      if (action !== "refresh") {
+        const provider = action.slice("reset:".length)
+        const count =
+          provider === "*" ? await gatewayResetCooldowns() : await gatewayResetCooldowns(provider)
         toast.success(t("cooldownsResetSuccess", { count }))
       }
       await refreshCooldowns()
@@ -71,6 +96,11 @@ export function GatewayUpstreamPanel({
       setCooldownAction(null)
     }
   }
+
+  // A countdown reaching zero is Rust's cue to drop the row; re-read quietly.
+  const onCooldownElapsed = useStableCallback(() => {
+    void onRefreshCooldowns().catch(() => {})
+  })
 
   return (
     <GatewayPanelStack>
@@ -119,7 +149,12 @@ export function GatewayUpstreamPanel({
         />
       </GatewayPanelSection>
 
-      <GatewayPanelSection title={t("cooldownHeading")} description={t("cooldownHelp")}>
+      <GatewayPanelSection
+        title={t("cooldownHeading")}
+        description={t("cooldownHelp")}
+        badge={t("liveBadge")}
+        badgeVariant="secondary"
+      >
         <NumberRow
           id="gw-cooldown-fallback"
           label={t("cooldownFallback")}
@@ -156,6 +191,8 @@ export function GatewayUpstreamPanel({
       <GatewayPanelSection
         title={t("cooldownsHeading")}
         description={t("cooldownsHelp")}
+        badge={cooldowns.length > 0 ? String(cooldowns.length) : undefined}
+        badgeVariant={cooldowns.some((c) => c.permanent) ? "destructive" : "secondary"}
         action={
           <div className="flex flex-wrap gap-2">
             <Button
@@ -165,19 +202,22 @@ export function GatewayUpstreamPanel({
               onClick={() => void runCooldownAction("refresh")}
               data-testid="gateway-cooldowns-refresh"
             >
-              <RefreshCwIcon className="mr-1.5 size-3.5" aria-hidden />
+              <RefreshCwIcon
+                className={cn("mr-1.5 size-3.5", cooldownAction === "refresh" && "animate-spin")}
+                aria-hidden
+              />
               {t("cooldownsRefresh")}
             </Button>
             <Button
               size="sm"
               variant="outline"
               disabled={cooldownAction !== null || cooldowns.length === 0}
-              onClick={() => void runCooldownAction("reset")}
+              onClick={() => void runCooldownAction(RESET_ALL)}
             >
-              {cooldownAction === "reset" && (
+              {cooldownAction === RESET_ALL && (
                 <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
               )}
-              {t(cooldownAction === "reset" ? "cooldownsResetting" : "cooldownsReset")}
+              {t(cooldownAction === RESET_ALL ? "cooldownsResetting" : "cooldownsReset")}
             </Button>
           </div>
         }
@@ -189,38 +229,79 @@ export function GatewayUpstreamPanel({
             className="py-6"
           />
         ) : (
-          <ItemGroup data-testid="gateway-cooldowns">
-            {cooldowns.map((c, index) => (
-              <MotionReveal key={`${c.providerId}-${c.keyHint}`} index={index}>
-                <Item role="listitem" size="sm" variant="muted">
-                  <ItemContent className="min-w-0">
-                    <ItemTitle className="truncate font-mono text-xs">
-                      {c.providerId} · {c.keyHint}
-                    </ItemTitle>
-                    {c.reason && (
-                      <ItemDescription
-                        className="line-clamp-none text-[11px]"
-                        data-testid={`gateway-cooldown-reason-${c.providerId}`}
+          <div className="flex flex-col gap-3" data-testid="gateway-cooldowns">
+            {groups.map(([providerId, rows], groupIndex) => {
+              const action: CooldownAction = `reset:${providerId}`
+              return (
+                <MotionReveal key={providerId} index={groupIndex}>
+                  <section
+                    aria-label={providerId}
+                    className="overflow-hidden rounded-md border"
+                    data-testid={`gateway-cooldown-group-${providerId}`}
+                  >
+                    <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-1.5">
+                      <span className="min-w-0 truncate font-mono text-xs font-medium">
+                        {providerId}
+                      </span>
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        disabled={cooldownAction !== null}
+                        onClick={() => void runCooldownAction(action)}
+                        aria-label={t("cooldownsRestoreProviderAria", { provider: providerId })}
                       >
-                        {c.reason}
-                      </ItemDescription>
-                    )}
-                  </ItemContent>
-                  {c.permanent ? (
-                    <Badge variant="destructive" className="shrink-0">
-                      {t("cooldownsPermanent")}
-                    </Badge>
-                  ) : (
-                    <CooldownCountdown untilMs={c.untilMs} />
-                  )}
-                </Item>
-              </MotionReveal>
-            ))}
-          </ItemGroup>
+                        {cooldownAction === action ? (
+                          <Loader2Icon className="size-3 animate-spin" aria-hidden />
+                        ) : null}
+                        {t("cooldownsRestoreProvider")}
+                      </Button>
+                    </div>
+                    <ItemGroup>
+                      {rows.map((c) => (
+                        <Item
+                          key={`${c.providerId}-${c.keyHint}`}
+                          role="listitem"
+                          size="sm"
+                          className="rounded-none"
+                        >
+                          <ItemContent className="min-w-0">
+                            {/* The group header already names the provider. */}
+                            <ItemTitle className="w-full truncate font-mono text-xs">
+                              {c.keyHint}
+                            </ItemTitle>
+                            {c.reason && (
+                              <ItemDescription
+                                className="line-clamp-none break-words text-[11px]"
+                                data-testid={`gateway-cooldown-reason-${c.providerId}`}
+                              >
+                                {c.reason}
+                              </ItemDescription>
+                            )}
+                          </ItemContent>
+                          {c.permanent ? (
+                            <Badge variant="destructive" className="shrink-0">
+                              {t("cooldownsPermanent")}
+                            </Badge>
+                          ) : (
+                            <CooldownCountdown untilMs={c.untilMs} onElapsed={onCooldownElapsed} />
+                          )}
+                        </Item>
+                      ))}
+                    </ItemGroup>
+                  </section>
+                </MotionReveal>
+              )
+            })}
+          </div>
         )}
       </GatewayPanelSection>
 
-      <GatewayPanelSection title={t("fieldStripHeading")} description={t("fieldStripHelp")}>
+      <GatewayPanelSection
+        title={t("fieldStripHeading")}
+        description={t("fieldStripHelp")}
+        badge={t("liveBadge")}
+        badgeVariant="secondary"
+      >
         <div className="space-y-2">
           <Label>{t("strippedFields")}</Label>
           <ChipInput
@@ -239,6 +320,9 @@ export function GatewayUpstreamPanel({
           <ChipInput
             values={config.fieldStripAllow}
             onCommit={(next) => void persist({ fieldStripAllow: next })}
+            validate={(value) =>
+              isValidFieldStripException(value) ? null : t("fieldStripAllowInvalid")
+            }
             placeholder={t("fieldStripAllowPlaceholder")}
             ariaLabel={t("fieldStripAllow")}
             addLabel={t("add")}
@@ -256,19 +340,25 @@ export function GatewayUpstreamPanel({
  *
  * Isolated into its own component so the once-a-second tick re-renders a single
  * `<span>` rather than the whole panel — the list sits beside a dozen
- * controlled inputs whose draft state must not be disturbed.
+ * controlled inputs whose draft state must not be disturbed. The tick stops
+ * once the cooldown has lifted.
  */
-export function CooldownCountdown({ untilMs }: { untilMs: number }) {
+function CooldownCountdown({ untilMs, onElapsed }: { untilMs: number; onElapsed: () => void }) {
   const t = useTranslations("settings.gateway")
   const [now, setNow] = useState(() => Date.now())
+  const elapsed = untilMs - now <= 0
 
   useEffect(() => {
+    if (elapsed) return
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [])
+  }, [elapsed])
 
-  const remainingMs = untilMs - now
-  if (remainingMs <= 0) {
+  useEffect(() => {
+    if (elapsed) onElapsed()
+  }, [elapsed, onElapsed])
+
+  if (elapsed) {
     return (
       <Badge variant="outline" className="shrink-0" data-testid="gateway-cooldown-recovered">
         {t("cooldownsRecovered")}
@@ -276,13 +366,19 @@ export function CooldownCountdown({ untilMs }: { untilMs: number }) {
     )
   }
 
+  const remaining = Math.ceil((untilMs - now) / 1000)
   return (
     <Badge
       variant="secondary"
       className="shrink-0 tabular-nums"
       data-testid="gateway-cooldown-remaining"
     >
-      {t("cooldownsRecoversIn", { seconds: Math.ceil(remainingMs / 1000) })}
+      {remaining < 60
+        ? t("cooldownsRecoversIn", { seconds: remaining })
+        : t("cooldownsRecoversInMinutes", {
+            minutes: Math.floor(remaining / 60),
+            seconds: remaining % 60,
+          })}
     </Badge>
   )
 }

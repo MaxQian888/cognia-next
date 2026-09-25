@@ -1,58 +1,33 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { GatewayListenerPanel } from "./listener-panel"
-import { DEFAULT_GATEWAY_CONFIG, type GatewayConfig, type GatewayStatus } from "@/types/gateway"
+import { allowlistIsLoopbackOnly, GatewayListenerPanel } from "./listener-panel"
+import {
+  DEFAULT_GATEWAY_CONFIG,
+  type GatewayBindTimeField,
+  type GatewayConfig,
+} from "@/types/gateway"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${Object.values(values).join(",")}` : key,
 }))
 
-const mockStart = jest.fn()
-const mockStop = jest.fn()
-jest.mock("@/lib/tauri/gateway", () => ({
-  gatewayStart: () => mockStart(),
-  gatewayStop: () => mockStop(),
-}))
-
-jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
-
-const status = (over: Partial<GatewayStatus> = {}): GatewayStatus => ({
-  running: false,
-  boundPort: null,
-  hasToken: true,
-  bindInterface: "loopback",
-  callsTotal: 0,
-  lastCallAt: null,
-  snapshotGeneratedAtMs: null,
-  snapshotProviderCount: 0,
-  snapshotAliasCount: 0,
-  ...over,
-})
-
-function setup(config: Partial<GatewayConfig> = {}, statusOver?: GatewayStatus | null) {
+function setup(config: Partial<GatewayConfig> = {}, pending: GatewayBindTimeField[] = []) {
   const persist = jest.fn().mockResolvedValue(undefined)
-  const onRestarted = jest.fn().mockResolvedValue(undefined)
   render(
     <GatewayListenerPanel
       ctx={{
         config: { ...DEFAULT_GATEWAY_CONFIG, ...config },
-        status: statusOver === undefined ? status() : statusOver,
+        status: null,
         persist,
         replace: jest.fn(),
-        restartRequired: false,
+        pendingRestartFields: pending,
       }}
-      onRestarted={onRestarted}
     />
   )
-  return { persist, onRestarted }
+  return { persist }
 }
-
-beforeEach(() => {
-  mockStart.mockReset().mockResolvedValue(undefined)
-  mockStop.mockReset().mockResolvedValue(undefined)
-})
 
 describe("GatewayListenerPanel", () => {
   it("lets a port below the clamp floor be typed out before committing", () => {
@@ -124,60 +99,84 @@ describe("GatewayListenerPanel", () => {
     expect(persist).toHaveBeenCalledWith({ allowlist: [] })
   })
 
-  it("stays quiet about restarting while the listener is stopped", () => {
-    setup({ port: 50001 }, status({ running: false }))
-    expect(screen.queryByTestId("gateway-restart-required")).not.toBeInTheDocument()
+  it("marks every bind-time field, and only those, with the restart badge", () => {
+    setup()
+
+    for (const field of ["port", "bindInterface", "allowlist", "rateLimitPerMin"]) {
+      expect(screen.getByTestId(`gateway-bind-time-${field}`)).toHaveTextContent("bindTimeBadge")
+    }
+    // Public origin is read per request.
+    expect(screen.queryByTestId("gateway-bind-time-publicOrigin")).not.toBeInTheDocument()
   })
 
-  it("flags a restart when the configured port diverges from the bound one", () => {
-    // The whole point of the bind-time/live split: editing the port on a
-    // running listener previously looked like it had taken effect.
-    setup({ port: 50001 }, status({ running: true, boundPort: 47823 }))
+  it("flips a field's badge to pending when Rust reports it as diverged", () => {
+    setup({ port: 50001 }, ["port", "allowlist"])
 
-    expect(screen.getByTestId("gateway-restart-required")).toBeInTheDocument()
-    expect(screen.getByTestId("gateway-restart-listener")).toBeInTheDocument()
-  })
-
-  it("flags a restart when the configured interface diverges", () => {
-    setup(
-      { bindInterface: "lan" },
-      status({ running: true, boundPort: 47823, bindInterface: "loopback" })
+    expect(screen.getByTestId("gateway-bind-time-port")).toHaveAttribute("data-pending", "true")
+    expect(screen.getByTestId("gateway-bind-time-allowlist")).toHaveAttribute(
+      "data-pending",
+      "true"
     )
-
-    expect(screen.getByTestId("gateway-restart-required")).toBeInTheDocument()
+    expect(screen.getByTestId("gateway-bind-time-bindInterface")).toHaveAttribute(
+      "data-pending",
+      "false"
+    )
   })
 
-  it("flags a restart after the allowlist is edited on a running listener", () => {
-    // The allowlist has no mirror on GatewayStatus, so divergence cannot be
-    // derived — it is tracked from the edit instead.
-    setup({}, status({ running: true, boundPort: 47823 }))
-    expect(screen.queryByTestId("gateway-restart-required")).not.toBeInTheDocument()
+  it("edits the global rate limit, which is bind-time and so lives here", () => {
+    const { persist } = setup()
+    const input = screen.getByLabelText("rateLimit")
 
-    const input = screen.getByLabelText("allowlist")
-    fireEvent.change(input, { target: { value: "10.0.0.0/8" } })
+    fireEvent.change(input, { target: { value: "120" } })
     fireEvent.blur(input)
 
-    expect(screen.getByTestId("gateway-restart-required")).toBeInTheDocument()
+    expect(persist).toHaveBeenCalledWith({ rateLimitPerMin: 120 })
   })
 
-  it("restarts by stopping then starting, and reports back", async () => {
-    const { onRestarted } = setup({ port: 50001 }, status({ running: true, boundPort: 47823 }))
+  it("refuses an allowlist entry Rust would reject, with the reason inline", async () => {
+    const user = userEvent.setup()
+    const { persist } = setup()
 
-    fireEvent.click(screen.getByTestId("gateway-restart-listener"))
+    await user.type(screen.getByLabelText("allowlist"), "10.0.0.0/33{Enter}")
 
-    await waitFor(() => expect(mockStart).toHaveBeenCalled())
-    expect(mockStop).toHaveBeenCalled()
-    expect(onRestarted).toHaveBeenCalled()
+    expect(persist).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent("allowlistInvalid")
   })
 
-  it("surfaces a failed restart rather than clearing the banner", async () => {
-    const { toast } = jest.requireMock("sonner")
-    mockStart.mockRejectedValue(new Error("address already in use"))
-    setup({ port: 50001 }, status({ running: true, boundPort: 47823 }))
+  it("warns that an empty allowlist refuses every caller", () => {
+    setup({ allowlist: [] })
 
-    fireEvent.click(screen.getByTestId("gateway-restart-listener"))
+    expect(screen.getByTestId("gateway-allowlist-empty")).toBeInTheDocument()
+  })
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("address already in use"))
-    expect(screen.getByTestId("gateway-restart-required")).toBeInTheDocument()
+  it("warns when LAN binding still only admits loopback callers", () => {
+    setup({ bindInterface: "lan", allowlist: ["127.0.0.1/32"] })
+
+    expect(screen.getByTestId("gateway-lan-unreachable")).toBeInTheDocument()
+  })
+
+  it("does not warn once the allowlist admits a LAN range", () => {
+    setup({ bindInterface: "lan", allowlist: ["127.0.0.1/32", "192.168.1.0/24"] })
+
+    expect(screen.queryByTestId("gateway-lan-unreachable")).not.toBeInTheDocument()
+  })
+
+  it("rejects a malformed public origin before it reaches Rust", () => {
+    const { persist } = setup()
+    const input = screen.getByTestId("gateway-public-origin")
+
+    fireEvent.change(input, { target: { value: "gateway.example.com/path" } })
+    fireEvent.blur(input)
+
+    expect(persist).not.toHaveBeenCalled()
+    expect(screen.getByTestId("gateway-public-origin-error")).toBeInTheDocument()
+  })
+})
+
+describe("allowlistIsLoopbackOnly", () => {
+  it("is true only for a non-empty list of 127.x entries", () => {
+    expect(allowlistIsLoopbackOnly(["127.0.0.1/32", "127.0.0.0/8"])).toBe(true)
+    expect(allowlistIsLoopbackOnly(["127.0.0.1/32", "10.0.0.0/8"])).toBe(false)
+    expect(allowlistIsLoopbackOnly([])).toBe(false)
   })
 })

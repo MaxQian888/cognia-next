@@ -2,16 +2,19 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
-import {
-  GatewayRouteTicketsPanel,
-  routeTicketsDisabledDuringPrerender,
-} from "./route-tickets-panel"
+import { GatewayRouteTicketsPanel } from "./route-tickets-panel"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${Object.values(values).join(",")}` : key,
+  useFormatter: () => ({
+    relativeTime: (date: Date) => `rel:${date.getTime()}`,
+    dateTime: (date: Date) => `abs:${date.getTime()}`,
+    number: (value: number) => String(value),
+  }),
+  useNow: () => new Date(0),
 }))
 
 const mockList = jest.fn()
@@ -47,15 +50,6 @@ beforeEach(() => {
 
 afterEach(() => {
   window.localStorage.clear()
-})
-
-describe("routeTicketsDisabledDuringPrerender", () => {
-  it("reports the capability off, so the static export and hydration agree", () => {
-    // localStorage does not exist during the static export. Any other answer
-    // would render "on" server-side for a user who had enabled it, which React
-    // reports as a hydration mismatch.
-    expect(routeTicketsDisabledDuringPrerender()).toBe(false)
-  })
 })
 
 describe("GatewayRouteTicketsPanel", () => {
@@ -155,9 +149,103 @@ describe("GatewayRouteTicketsPanel", () => {
     await screen.findByText("rt_abc123")
 
     fireEvent.click(screen.getByRole("button", { name: "revokeAria:rt_abc123" }))
+    // Revoking cuts a live agent session off, so the first click only asks.
+    expect(mockRevoke).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole("button", { name: "revokeConfirmAction" }))
 
     await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith("rt_abc123"))
     expect(mockList).toHaveBeenCalledTimes(2)
+  })
+
+  it("says a lapsed ticket has expired instead of 'expires … ago'", async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ gatewayAgentRouteTickets: true }))
+    // `useNow` is pinned to the epoch in this file; -1 is already in the past.
+    mockList.mockResolvedValue([ticket({ expiresAtMs: -1 })])
+
+    render(<GatewayRouteTicketsPanel />)
+
+    expect(await screen.findByText("ticketMetaExpired:sess_9,1")).toBeInTheDocument()
+  })
+
+  it("can back out of a revoke", async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ gatewayAgentRouteTickets: true }))
+    mockList.mockResolvedValue([ticket()])
+
+    render(<GatewayRouteTicketsPanel />)
+    await screen.findByText("rt_abc123")
+
+    fireEvent.click(screen.getByRole("button", { name: "revokeAria:rt_abc123" }))
+    fireEvent.click(await screen.findByRole("button", { name: "cancel" }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "revokeConfirmAction" })).not.toBeInTheDocument()
+    )
+    expect(mockRevoke).not.toHaveBeenCalled()
+  })
+
+  it("expands a ticket into what it actually grants", async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ gatewayAgentRouteTickets: true }))
+    mockList.mockResolvedValue([
+      ticket({
+        operations: ["chat", "embeddings"],
+        budget: { maxTokens: 1000, spentTokens: 250, maxRequestsPerMin: 30 },
+        modelBindings: { primary: "gpt-4o", haiku: "gpt-4o-mini" },
+        parentSessionId: "sess_parent",
+        profileVersion: 7,
+      }),
+    ])
+
+    render(<GatewayRouteTicketsPanel />)
+    await screen.findByText("rt_abc123")
+    expect(screen.queryByTestId("gateway-ticket-detail-rt_abc123")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /details/ }))
+
+    const detail = await screen.findByTestId("gateway-ticket-detail-rt_abc123")
+    expect(detail).toHaveTextContent("embeddings")
+    expect(within(detail).queryByText("models")).not.toBeInTheDocument()
+    expect(screen.getByTestId("gateway-ticket-budget-rt_abc123")).toHaveTextContent(
+      "budgetTokens:250,1000"
+    )
+    expect(detail).toHaveTextContent("budgetRate:30")
+    expect(detail).toHaveTextContent("dep_1 · gpt-4o")
+    expect(detail).toHaveTextContent("haiku → gpt-4o-mini")
+    expect(detail).toHaveTextContent("sess_parent")
+    expect(detail).toHaveTextContent("7")
+  })
+
+  it("shows the legacy default scope and an unmetered budget for older tickets", async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ gatewayAgentRouteTickets: true }))
+    mockList.mockResolvedValue([ticket()])
+
+    render(<GatewayRouteTicketsPanel />)
+    await screen.findByText("rt_abc123")
+    fireEvent.click(screen.getByRole("button", { name: /details/ }))
+
+    const detail = await screen.findByTestId("gateway-ticket-detail-rt_abc123")
+    for (const operation of ["chat", "count-tokens", "models"]) {
+      expect(within(detail).getByText(operation)).toBeInTheDocument()
+    }
+    expect(screen.getByTestId("gateway-ticket-budget-rt_abc123")).toHaveTextContent(
+      "budgetUnmetered"
+    )
+  })
+
+  it("re-reads the list on a timer while enabled, since tickets expire on their own", async () => {
+    jest.useFakeTimers()
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ gatewayAgentRouteTickets: true }))
+      render(<GatewayRouteTicketsPanel />)
+      await act(async () => {})
+      expect(mockList).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        jest.advanceTimersByTime(15_000)
+      })
+      expect(mockList).toHaveBeenCalledTimes(2)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("surfaces a failed revoke instead of silently leaving the row", async () => {
@@ -170,6 +258,7 @@ describe("GatewayRouteTicketsPanel", () => {
     await screen.findByText("rt_abc123")
 
     fireEvent.click(screen.getByRole("button", { name: "revokeAria:rt_abc123" }))
+    fireEvent.click(await screen.findByRole("button", { name: "revokeConfirmAction" }))
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("gateway is not running"))
     expect(screen.getByText("rt_abc123")).toBeInTheDocument()

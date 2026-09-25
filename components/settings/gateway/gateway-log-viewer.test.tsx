@@ -4,10 +4,12 @@ import { GatewayLogViewer } from "./gateway-log-viewer"
 import type { GatewayRequestLogRow } from "@/types/gateway"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    key === "logRowDetailAria" || !values ? key : `${key}:${Object.values(values).join(",")}`,
   useFormatter: () => ({
     number: (value: number, opts?: Intl.NumberFormatOptions) =>
       new Intl.NumberFormat("en-US", opts).format(value),
+    dateTime: (date: Date) => `time:${date.toISOString()}`,
   }),
 }))
 
@@ -25,9 +27,15 @@ jest.mock("dexie-react-hooks", () => ({
 const mockClear = jest.fn()
 const mockSummary = jest.fn()
 jest.mock("@/lib/db/gateway-request-log", () => ({
+  GATEWAY_REQUEST_LOG_CAP: 250,
   listGatewayRequestLog: (filter: unknown) => filter,
   clearGatewayRequestLog: () => mockClear(),
   summarizeGatewayUsage: (...a: unknown[]) => mockSummary(...a),
+}))
+
+const mockDownload = jest.fn()
+jest.mock("@/lib/gateway/request-log-export", () => ({
+  downloadGatewayRequestLog: (...a: unknown[]) => mockDownload(...a),
 }))
 
 const mockListKeys = jest.fn()
@@ -60,6 +68,7 @@ const row = (over: Partial<GatewayRequestLogRow> = {}): GatewayRequestLogRow => 
 })
 
 beforeEach(() => {
+  mockDownload.mockReset()
   liveRows = []
   lastFilter = undefined
   mockEstimateCost.mockReset().mockReturnValue(undefined)
@@ -97,12 +106,165 @@ describe("GatewayLogViewer", () => {
     expect(log).toHaveTextContent("429")
   })
 
-  it("clears the log", async () => {
+  it("clears the log only after an explicit confirmation", async () => {
+    const { toast } = jest.requireMock("sonner")
     liveRows = [row()]
     const user = userEvent.setup()
     render(<GatewayLogViewer />)
+
     await user.click(screen.getByRole("button", { name: "clearLog" }))
-    expect(mockClear).toHaveBeenCalled()
+    expect(mockClear).not.toHaveBeenCalled()
+    expect(screen.getByTestId("gateway-log-clear-confirm")).toHaveTextContent("clearLogConfirm")
+
+    await user.click(screen.getByRole("button", { name: "clearLogConfirmAction" }))
+    await waitFor(() => expect(mockClear).toHaveBeenCalled())
+    expect(toast.success).toHaveBeenCalledWith("logCleared")
+  })
+
+  it("reports a failed clear instead of claiming success", async () => {
+    const { toast } = jest.requireMock("sonner")
+    toast.success.mockClear()
+    mockClear.mockRejectedValue(new Error("database is locked"))
+    liveRows = [row()]
+    const user = userEvent.setup()
+    render(<GatewayLogViewer />)
+
+    await user.click(screen.getByRole("button", { name: "clearLog" }))
+    await user.click(screen.getByRole("button", { name: "clearLogConfirmAction" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("database is locked"))
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(screen.getByTestId("gateway-log-clear-confirm")).toBeInTheDocument()
+  })
+
+  it("exports the rows on screen as CSV or JSON", async () => {
+    liveRows = [row(), row({ id: "r2" })]
+    const user = userEvent.setup()
+    render(<GatewayLogViewer />)
+
+    await user.click(screen.getByRole("button", { name: "logExport" }))
+    await user.click(await screen.findByRole("menuitem", { name: "logExportCsv" }))
+
+    expect(mockDownload).toHaveBeenCalledWith(liveRows, "csv")
+  })
+
+  it("has nothing to export from an empty log", () => {
+    render(<GatewayLogViewer />)
+    expect(screen.getByRole("button", { name: "logExport" })).toBeDisabled()
+  })
+
+  it("loads the next page once the current window is full, up to the table cap", async () => {
+    liveRows = Array.from({ length: 100 }, (_, i) => row({ id: `r${i}` }))
+    const user = userEvent.setup()
+    render(<GatewayLogViewer />)
+    expect(screen.getByTestId("gateway-log-window")).toHaveTextContent("logShowing:100")
+
+    await user.click(screen.getByRole("button", { name: "logLoadMore" }))
+    await waitFor(() => expect(lastFilter).toEqual({ limit: 200 }))
+  })
+
+  it("offers no further page when the window is not full", () => {
+    liveRows = [row()]
+    render(<GatewayLogViewer />)
+    expect(screen.queryByRole("button", { name: "logLoadMore" })).not.toBeInTheDocument()
+  })
+
+  it("totals the estimated cost of the priced rows", () => {
+    mockEstimateCost.mockReturnValueOnce(0.5).mockReturnValueOnce(undefined)
+    liveRows = [row(), row({ id: "r2" })]
+    render(<GatewayLogViewer />)
+
+    expect(screen.getByTestId("gateway-usage-cost")).toHaveTextContent("$0.5000")
+  })
+
+  it("says the cost is unknown when no row could be priced", () => {
+    liveRows = [row()]
+    render(<GatewayLogViewer />)
+
+    expect(screen.getByTestId("gateway-usage-cost")).toHaveTextContent("costUnknown")
+  })
+
+  it("sheds secondary columns in a narrow pane and repeats them in the detail row", async () => {
+    const user = userEvent.setup()
+    liveRows = [row()]
+    render(<GatewayLogViewer />)
+
+    const costCell = screen.getByTestId("gateway-log-cost-r1")
+    expect(costCell.className).toContain("hidden")
+    expect(costCell.className).toContain("@2xl/gateway-pane:table-cell")
+
+    await user.click(screen.getByRole("button", { name: "logRowDetailAria" }))
+    const detail = await screen.findByTestId("gateway-log-detail-r1")
+    expect(detail).toHaveTextContent("colProvider")
+    expect(detail).toHaveTextContent("groq")
+  })
+
+  it("draws no rule under a collapsed detail row", () => {
+    liveRows = [row()]
+    render(<GatewayLogViewer />)
+
+    const rows = within(screen.getByTestId("gateway-log")).getAllByRole("row")
+    // header, request row, (collapsed) detail row
+    expect(rows[2].className).toContain("border-0")
+  })
+
+  it("shows how a request was routed, including the whole failover walk", async () => {
+    const user = userEvent.setup()
+    liveRows = [
+      row({
+        strategy: "least-busy",
+        distribution: "weighted",
+        selectedDeployment: "dep-2",
+        routingLatencyMs: 3,
+        policyRevision: "rev-9",
+        decisionId: "dec-1",
+        fallbackReason: "primary rate limited",
+        keyFingerprint: "…ab12",
+        attempts: [
+          { providerId: "openai", modelId: "gpt-4o", status: 429, latencyMs: 40, reason: "429" },
+          { providerId: "groq", modelId: "llama", status: 200, latencyMs: 12 },
+        ],
+      }),
+    ]
+    render(<GatewayLogViewer />)
+
+    await user.click(screen.getByRole("button", { name: "logRowDetailAria" }))
+    const detail = await screen.findByTestId("gateway-log-detail-r1")
+    for (const text of [
+      "least-busy",
+      "weighted",
+      "dep-2",
+      "rev-9",
+      "dec-1",
+      "primary rate limited",
+      "…ab12",
+    ]) {
+      expect(detail).toHaveTextContent(text)
+    }
+    const attempts = screen.getByTestId("gateway-log-attempts-r1")
+    expect(attempts).toHaveTextContent("logAttempts:2")
+    expect(within(attempts).getAllByRole("listitem")).toHaveLength(2)
+    expect(attempts).toHaveTextContent("openai · gpt-4o")
+    expect(attempts).toHaveTextContent("429")
+  })
+
+  it("formats the row time through the app locale, not the OS one", () => {
+    liveRows = [row()]
+    render(<GatewayLogViewer />)
+
+    expect(screen.getByTestId("gateway-log")).toHaveTextContent("time:2026-07-03T00:00:00.000Z")
+  })
+
+  it("marks a locally synthesized answer, which never reached an upstream", async () => {
+    const user = userEvent.setup()
+    liveRows = [row({ synthesized: true })]
+    render(<GatewayLogViewer />)
+
+    await user.click(screen.getByRole("button", { name: "logRowDetailAria" }))
+
+    expect(await screen.findByTestId("gateway-log-detail-r1")).toHaveTextContent(
+      "logSynthesizedValue"
+    )
   })
 
   it("queries the newest 100 with no filters by default", () => {
