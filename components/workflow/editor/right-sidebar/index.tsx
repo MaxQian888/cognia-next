@@ -277,6 +277,7 @@ function WorkflowContextWorkbench({
     requestedInspectorPanel,
     requestedRunsPanelStepId,
     requestedCopilotPrompt,
+    requestedTemplateId,
     requestedFieldFocusSeq,
   } = useStore(
     useShallow((state: EditorState) => ({
@@ -291,6 +292,7 @@ function WorkflowContextWorkbench({
       requestedInspectorPanel: state.requestedInspectorPanel ?? false,
       requestedRunsPanelStepId: state.requestedRunsPanelStepId ?? null,
       requestedCopilotPrompt: state.requestedCopilotPrompt ?? null,
+      requestedTemplateId: state.requestedTemplateId ?? null,
       requestedFieldFocusSeq: state.requestedFieldFocus?.seq ?? null,
     }))
   )
@@ -349,6 +351,13 @@ function WorkflowContextWorkbench({
     if (requestedCopilotPrompt === null) return
     smartReveal(scopeKey, "chat", "wide")
   }, [requestedCopilotPrompt, scopeKey, smartReveal])
+
+  // Same contract as the copilot prompt: reveal only, the Templates panel
+  // opens that template's slot form and clears the request once mounted.
+  useEffect(() => {
+    if (requestedTemplateId === null) return
+    smartReveal(scopeKey, "templates", "wide")
+  }, [requestedTemplateId, scopeKey, smartReveal])
 
   const handleOpenSettings = useCallback(
     (tab?: string) => {

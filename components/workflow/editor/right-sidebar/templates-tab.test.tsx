@@ -143,6 +143,8 @@ const editorState = {
   viewport: { x: 0, y: 0, zoom: 1 },
   insertNodeGroup: mockInsertNodeGroup,
   upgradeNodeGroup: mockUpgradeNodeGroup,
+  requestedTemplateId: null as string | null,
+  clearRequestedTemplate: jest.fn(),
 }
 
 const useStore = Object.assign(
@@ -165,6 +167,18 @@ function renderTab(workflowId: string | undefined) {
 describe("TemplatesTab", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+  })
+
+  it("opens the slot form of a template the editor was opened for, once", () => {
+    // `/workflows/editor?template=starter` from Discover's "Open".
+    editorState.requestedTemplateId = "starter"
+    try {
+      renderTab("workflow-1")
+      expect(screen.getByTestId("workflow-templates-form-starter")).toBeInTheDocument()
+      expect(editorState.clearRequestedTemplate).toHaveBeenCalled()
+    } finally {
+      editorState.requestedTemplateId = null
+    }
   })
 
   it("shows the empty state until a workflow is available", () => {

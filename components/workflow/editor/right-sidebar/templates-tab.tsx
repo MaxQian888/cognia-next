@@ -22,7 +22,7 @@
  *     mounted so they can apply more than one back-to-back).
  */
 
-import { useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
 import { toast } from "sonner"
@@ -72,6 +72,20 @@ export function TemplatesTab({ useStore, workflowId }: Props) {
     [templateSnapshot]
   )
   const [activeId, setActiveId] = useState<string | null>(null)
+
+  // A template the editor was opened for (`?template=<id>`, Discover's
+  // "Open"): open its slot form. Derived during render so the form is up on
+  // the panel's first frame; the store request is cleared once consumed.
+  const requestedTemplateId = useStore((state: EditorState) => state.requestedTemplateId ?? null)
+  const [consumedRequest, setConsumedRequest] = useState<string | null>(null)
+  if (requestedTemplateId === null && consumedRequest !== null) setConsumedRequest(null)
+  if (requestedTemplateId !== null && requestedTemplateId !== consumedRequest) {
+    setConsumedRequest(requestedTemplateId)
+    if (templates.some((tpl) => tpl.id === requestedTemplateId)) setActiveId(requestedTemplateId)
+  }
+  useEffect(() => {
+    if (requestedTemplateId !== null) useStore.getState().clearRequestedTemplate()
+  }, [requestedTemplateId, useStore])
   const selectedGroup = useStore(
     useShallow((state: EditorState) => {
       if (state.selectedNodeIds.length !== 1) return null
@@ -330,13 +344,6 @@ function SlotForm({ template, useStore, workflowId, onClose }: SlotFormProps) {
     (s) => s.required && s.defaultValue === undefined && (values[s.key] ?? "").trim() === ""
   )
 
-  const existing = useStore(
-    useShallow((s: EditorState) => ({
-      nodeIds: new Set(s.nodes.map((n) => n.id)),
-      edgeIds: new Set(s.edges.map((e) => e.id)),
-    }))
-  )
-
   const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault()
     if (missingRequired) {
@@ -356,6 +363,15 @@ function SlotForm({ template, useStore, workflowId, onClose }: SlotFormProps) {
       }
       let counter = 0
       const reserveId = (): string => `${Date.now().toString(36)}_${counter++}`
+      // Read at submit, not subscribed: the ids only matter now, and the old
+      // `useShallow` selector built two fresh Sets per call — a snapshot that
+      // never settled, so opening any template's form crashed the panel
+      // ("Maximum update depth exceeded").
+      const graph = useStore.getState()
+      const existing = {
+        nodeIds: new Set(graph.nodes.map((n) => n.id)),
+        edgeIds: new Set(graph.edges.map((e) => e.id)),
+      }
       const { ops } = templateToProposalOps(materialize.workflow, existing, reserveId)
       const proposalId = `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
       const summary = `Apply template "${template.label.en}" — ${

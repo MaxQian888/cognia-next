@@ -1298,17 +1298,25 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
 export interface WorkflowEditorCanvasProps {
   workflow: VisualWorkflow
   onRequestRun?: () => void
+  /** Open this copilot template's slot form in the Templates panel on load. */
+  initialTemplateId?: string
 }
 
-export function WorkflowEditorCanvas({ workflow, onRequestRun }: WorkflowEditorCanvasProps) {
+export function WorkflowEditorCanvas({
+  workflow,
+  onRequestRun,
+  initialTemplateId,
+}: WorkflowEditorCanvasProps) {
   // One store per (component instance × workflow id). When the user navigates
   // to a different workflow the lazy initializer + render-time reset rebuild
   // the store + history stack.
-  const [store, setStore] = useState<EditorStore>(() => createEditorStore(workflow))
+  const [store, setStore] = useState<EditorStore>(() =>
+    seedEditorStore(workflow, initialTemplateId)
+  )
   const [storedWorkflowId, setStoredWorkflowId] = useState(workflow.id)
   if (storedWorkflowId !== workflow.id) {
     setStoredWorkflowId(workflow.id)
-    setStore(createEditorStore(workflow))
+    setStore(seedEditorStore(workflow, initialTemplateId))
   }
   const noop = useMemo(() => () => undefined, [])
 
@@ -1319,4 +1327,11 @@ export function WorkflowEditorCanvas({ workflow, onRequestRun }: WorkflowEditorC
       </EditorStoreProvider>
     </ReactFlowProvider>
   )
+}
+
+/** A fresh editor store, asked to open `templateId` in the Templates panel. */
+function seedEditorStore(workflow: VisualWorkflow, templateId: string | undefined): EditorStore {
+  const store = createEditorStore(workflow)
+  if (templateId) store.getState().requestTemplate(templateId)
+  return store
 }

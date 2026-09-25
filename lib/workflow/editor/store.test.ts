@@ -582,6 +582,17 @@ describe("editor store — drag history coalescing", () => {
   })
 })
 
+describe("editor store — template request", () => {
+  it("holds a requested template until the Templates panel clears it", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().requestedTemplateId).toBeNull()
+    useStore.getState().requestTemplate("cron-report")
+    expect(useStore.getState().requestedTemplateId).toBe("cron-report")
+    useStore.getState().clearRequestedTemplate()
+    expect(useStore.getState().requestedTemplateId).toBeNull()
+  })
+})
+
 describe("editor store — bookkeeping changes", () => {
   it("applies a measurement or selection without dirtying or recording it", () => {
     const useStore = createEditorStore(emptyWorkflow())

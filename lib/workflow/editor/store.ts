@@ -370,6 +370,14 @@ export interface EditorState extends EditorStateSnapshot {
   requestCopilot: (prompt?: string) => void
   clearRequestedCopilot: () => void
   /**
+   * A copilot template to open in the Templates panel (`/workflows/editor
+   * ?template=<id>`, which Discover's "Open" lands on). The sidebar reveals
+   * the panel; the panel opens that template's slot form and clears it.
+   */
+  requestedTemplateId: string | null
+  requestTemplate: (templateId: string) => void
+  clearRequestedTemplate: () => void
+  /**
    * Signal → Inspector to focus one field of one node. `requestFieldFocus`
    * selects the node and brings its validation up to date synchronously, so
    * the form it reveals already carries the `data-invalid` markers the focus
@@ -774,6 +782,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         requestedProblemsPanel: false,
         requestedRunsPanelStepId: null,
         requestedCopilotPrompt: null,
+        requestedTemplateId: null,
         requestedInspectorPanel: false,
         requestedFieldFocus: null,
 
@@ -849,6 +858,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         clearRequestedRunsPanel: () => set({ requestedRunsPanelStepId: null }),
         requestCopilot: (prompt = "") => set({ requestedCopilotPrompt: prompt }),
         clearRequestedCopilot: () => set({ requestedCopilotPrompt: null }),
+        requestTemplate: (templateId) => set({ requestedTemplateId: templateId }),
+        clearRequestedTemplate: () => set({ requestedTemplateId: null }),
         requestInspectorPanel: () => set({ requestedInspectorPanel: true }),
         clearRequestedInspectorPanel: () => set({ requestedInspectorPanel: false }),
         requestFieldFocus: ({ nodeId, field }) => {

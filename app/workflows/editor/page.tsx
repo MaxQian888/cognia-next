@@ -11,7 +11,7 @@
  */
 
 import { Suspense, useEffect, useState } from "react"
-import { notFound, useSearchParams } from "next/navigation"
+import { notFound, useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WorkflowEditorCanvas } from "@/components/workflow/editor/canvas"
@@ -26,8 +26,20 @@ function WorkflowEditorInner() {
   // desktop window otherwise fell through to the desktop 3-pane resizable
   // canvas, which is unusable below ~700px.
   const isMobile = useIsMobile()
-  const id = useSearchParams().get("id")
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const id = searchParams.get("id")
   const [workflow, setWorkflow] = useState<WorkflowRow | null | undefined>(undefined)
+
+  // `?template=<id>` (Discover's "Open" on a workflow template): captured once
+  // for the editor to open that template's slot form, then dropped from the
+  // URL so a reload returns to the plain workflow.
+  const templateParam = searchParams.get("template")
+  const [initialTemplateId] = useState(templateParam ?? undefined)
+  useEffect(() => {
+    if (!templateParam || !id) return
+    router.replace(`/workflows/editor?id=${encodeURIComponent(id)}`, { scroll: false })
+  }, [templateParam, id, router])
 
   useEffect(() => {
     if (!id) return
@@ -76,7 +88,7 @@ function WorkflowEditorInner() {
 
   return (
     <div className="h-full w-full overflow-hidden" data-bg-target="canvas">
-      <WorkflowEditorCanvas workflow={workflow} />
+      <WorkflowEditorCanvas workflow={workflow} initialTemplateId={initialTemplateId} />
     </div>
   )
 }

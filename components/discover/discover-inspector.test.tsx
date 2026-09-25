@@ -10,6 +10,18 @@ import type { PluginRow } from "@/lib/db/plugin-types"
 import type { TwinDraft, TwinProfile, TwinSource } from "@/types/twin"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 
+const mockRouterPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockRouterPush, replace: jest.fn(), back: jest.fn() }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}))
+
+const mockCreateWorkflow = jest.fn()
+jest.mock("@/lib/db/workflows", () => ({
+  createWorkflow: (...args: unknown[]) => mockCreateWorkflow(...args),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => {
     const t = (key: string, vars?: Record<string, unknown>) => {
@@ -620,8 +632,30 @@ describe("<DiscoverInspector />", () => {
     expect(screen.getByText("Auto-review pull requests.")).toBeInTheDocument()
     expect(screen.getByText("github")).toBeInTheDocument()
     expect(screen.getByText("review")).toBeInTheDocument()
-    const link = screen.getByTestId("discover-inspector-open-template")
-    expect(link).toHaveAttribute("href", "/workflows?template=github-pr")
+  })
+
+  it("opens a workflow template in a new workflow's Templates panel", async () => {
+    // The link used to be `/workflows?template=` — a param nothing read.
+    mockCreateWorkflow.mockResolvedValue({ id: "wf_new" })
+    const template = {
+      id: "github-pr",
+      label: { en: "GitHub PR", "zh-CN": "GitHub PR" },
+      description: { en: "Auto-review pull requests.", "zh-CN": "自动评审 PR。" },
+      slots: [],
+      build: () => ({}) as never,
+    }
+    render(
+      <DiscoverInspector
+        category="workflowTemplates"
+        itemId={template.id}
+        items={[{ kind: "workflowTemplate", id: template.id, data: template }]}
+        onClose={jest.fn()}
+      />
+    )
+    await userEvent.click(screen.getByTestId("discover-inspector-open-template"))
+    // Empty: the template brings its own trigger.
+    expect(mockCreateWorkflow).toHaveBeenCalledWith({ name: "GitHub PR", nodes: [], edges: [] })
+    expect(mockRouterPush).toHaveBeenCalledWith("/workflows/editor?id=wf_new&template=github-pr")
   })
 
   // ── Phase 4 — plugin marketplace wiring ────────────────────────────────

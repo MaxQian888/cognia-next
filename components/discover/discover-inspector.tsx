@@ -24,6 +24,7 @@ import { toast } from "sonner"
 import {
   ExternalLinkIcon,
   MessageSquarePlusIcon,
+  WorkflowIcon,
   MessagesSquareIcon,
   PencilIcon,
   SettingsIcon,
@@ -78,6 +79,7 @@ import { listAdapterInstancesByType } from "@/lib/db/adapter-instances"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { listPlugins } from "@/lib/db/plugins"
+import { createWorkflow } from "@/lib/db/workflows"
 import { getDb } from "@/lib/db/schema"
 import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import { setSkillStatus } from "@/lib/db/skills"
@@ -995,8 +997,33 @@ function OcrProviderInspector({ provider }: { provider: OcrProvider }) {
 function WorkflowTemplateInspector({ template }: { template: WorkflowCopilotTemplate }) {
   const t = useTranslations("discover")
   const locale = useLocale()
+  const router = useRouter()
+  const [opening, setOpening] = useState(false)
   const key: "en" | "zh-CN" = locale === "zh-CN" ? "zh-CN" : "en"
   const description = template.description[key] ?? template.description.en
+
+  // A copilot template fills a workflow in the editor's Templates panel (its
+  // slots need answers), so "Open" makes the workflow to fill and lands there
+  // with the template's form open. It used to link to `/workflows?template=`,
+  // a param the library never read — the template was simply dropped.
+  // Empty on purpose: the template brings its own trigger.
+  const openInEditor = async () => {
+    if (opening) return
+    setOpening(true)
+    try {
+      const workflow = await createWorkflow({
+        name: template.label[key] ?? template.label.en,
+        nodes: [],
+        edges: [],
+      })
+      router.push(
+        `/workflows/editor?id=${encodeURIComponent(workflow.id)}&template=${encodeURIComponent(template.id)}`
+      )
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+      setOpening(false)
+    }
+  }
   return (
     <>
       <p className="text-sm text-muted-foreground">{description}</p>
@@ -1010,15 +1037,14 @@ function WorkflowTemplateInspector({ template }: { template: WorkflowCopilotTemp
         </div>
       ) : null}
       <Button
-        asChild
         variant="default"
         className="self-start"
+        disabled={opening}
+        onClick={() => void openInEditor()}
         data-testid="discover-inspector-open-template"
       >
-        <Link href={`/workflows?template=${encodeURIComponent(template.id)}`}>
-          <ExternalLinkIcon className="size-4" />
-          {t("inspector.openFull")}
-        </Link>
+        <WorkflowIcon className="size-4" />
+        {t("inspector.useTemplate")}
       </Button>
     </>
   )
