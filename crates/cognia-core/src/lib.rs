@@ -13,4 +13,6 @@ pub mod command_error;
 pub mod fs_atomic;
 pub mod installed;
 pub mod node_runtime;
+#[cfg(feature = "rt")]
+pub mod rt;
 pub mod supervision_backoff;

@@ -15,17 +15,24 @@ publish.workspace = true
 name = "cognia_core"
 path = "src/lib.rs"
 
+[features]
+# `rt::spawn` — spawn onto the app's Tokio runtime without naming Tauri
+# (ADR-0196). Off by default: most dependents never spawn.
+rt = ["dep:tokio"]
+
 [dependencies]
 # ADR-0175. `CommandError` converts into the plane-level `Problem`.
 cognia-problem = { path = "../cognia-problem" }
 # command_error serializes as a 3-key object for the renderer.
 serde = { workspace = true, features = ["derive"] }
 wait-timeout.workspace = true
+tokio = { workspace = true, optional = true, features = ["rt", "rt-multi-thread"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 serde_json.workspace = true
 tempfile.workspace = true
 
