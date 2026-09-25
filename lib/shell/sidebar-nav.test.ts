@@ -55,7 +55,40 @@ describe("getSidebarCatalog", () => {
     expect(ids).not.toContain("performance")
     expect(ids).not.toContain("source-control")
     expect(ids).not.toContain("browser")
+    expect(ids).not.toContain("pet")
     expect(ids).toContain("workflows")
+  })
+
+  it("keeps the desktop pet on the desktop rail", () => {
+    expect(getSidebarCatalog("tauri").map((item) => item.id)).toContain("pet")
+  })
+
+  it.each<[string, RuntimeSnapshot]>([
+    [
+      "a standalone browser",
+      {
+        target: { id: "local", kind: "standalone", platform: "web" },
+        vaultState: "unlocked",
+        connectionState: "online",
+      } as RuntimeSnapshot,
+    ],
+    [
+      "a snapshot with no target yet",
+      { target: null, vaultState: "unavailable", connectionState: "offline" },
+    ],
+    [
+      "a paired Companion",
+      {
+        target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "web" },
+        vaultState: "unlocked",
+        connectionState: "online",
+        host: { compatible: true, operations: ["browser_session_ensure"], grants: ["agent.run"] },
+      },
+    ],
+  ])("never restores the pet on the web from %s (ADR-0058 D9)", (_label, runtime) => {
+    // The pet has no host operation a companion could serve; the web branch
+    // used to consult only the surface contract, which lets `explain` through.
+    expect(getSidebarCatalog("web", runtime).map((item) => item.id)).not.toContain("pet")
   })
 
   it("restores a host-owned surface when the active Companion advertises it", () => {

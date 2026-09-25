@@ -114,4 +114,12 @@ describe("NumberRow", () => {
 
     expect(screen.getByText("Bounds a hung connect.")).toBeInTheDocument()
   })
+
+  it("renders an adornment beside the label without renaming the input", () => {
+    setup({ adornment: <span data-testid="adornment">needs restart</span> })
+
+    expect(screen.getByTestId("adornment")).toBeInTheDocument()
+    // Outside the <label>, so the accessible name stays exactly the label.
+    expect(screen.getByRole("spinbutton", { name: "Port" })).toBeInTheDocument()
+  })
 })

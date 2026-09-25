@@ -69,9 +69,17 @@ export function canHearInvalidations(state: EventPlaneState): boolean {
   return state === "ready" || state === "replaying"
 }
 
-/** Paired, not revoked, not paused: the devices this Host still serves. */
+/**
+ * Paired, not revoked, not paused: the devices this Host still serves.
+ *
+ * A paired browser extension is not one of them. It holds only `browser.submit`
+ * and `browser.read-own` (ADR-0154) and never opens the event plane, so
+ * counting it here would show a device that can never be "connected" to sync.
+ */
 export function activePairedDevices(rows: readonly PairedDeviceRow[]): PairedDeviceRow[] {
-  return rows.filter((row) => row.revokedAt === undefined && row.pausedAt === undefined)
+  return rows.filter(
+    (row) => row.revokedAt === undefined && row.pausedAt === undefined && row.platform !== "browser"
+  )
 }
 
 /**

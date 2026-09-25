@@ -106,6 +106,11 @@ export interface ShareableDevice {
  * `undefined` on shells that cannot ask the host, in which case the Dexie
  * mirror's `allowRemoteTerminal` is used — same fallback as the paired-devices
  * card). Pure; ordering is preserved from `devices`.
+ *
+ * A paired browser extension is left out entirely. It holds exactly
+ * `browser.submit` and `browser.read-own` (ADR-0154) and can never open a
+ * terminal, so offering it a terminal grant here would be offering to widen a
+ * device class the design keeps closed.
  */
 export function mergeDevicesWithRoster(
   devices: readonly PairedDeviceRow[],
@@ -117,19 +122,21 @@ export function mergeDevicesWithRoster(
     const deviceId = participant.deviceId ?? deviceIdOfClient(participant.clientId)
     if (deviceId) byDevice.set(deviceId, participant)
   }
-  return devices.map((row) => {
-    const attached = byDevice.get(row.deviceId)
-    const grant = grants?.get(row.deviceId)
-    return {
-      deviceId: row.deviceId,
-      label: row.label,
-      platform: row.platform,
-      terminalGranted: grant ? grant.terminal : row.allowRemoteTerminal === true,
-      blocked: row.revokedAt !== undefined || row.pausedAt !== undefined,
-      attached: attached !== undefined,
-      role: attached?.role ?? null,
-    }
-  })
+  return devices
+    .filter((row) => row.platform !== "browser")
+    .map((row) => {
+      const attached = byDevice.get(row.deviceId)
+      const grant = grants?.get(row.deviceId)
+      return {
+        deviceId: row.deviceId,
+        label: row.label,
+        platform: row.platform,
+        terminalGranted: grant ? grant.terminal : row.allowRemoteTerminal === true,
+        blocked: row.revokedAt !== undefined || row.pausedAt !== undefined,
+        attached: attached !== undefined,
+        role: attached?.role ?? null,
+      }
+    })
 }
 
 /**

@@ -203,6 +203,27 @@ describe("A2UISurface", () => {
     expect(container.querySelector(".animate-spin")).toBeInTheDocument()
   })
 
+  it("announces the not-ready state instead of drawing a silent spinner", () => {
+    const { useA2UIStore } = jest.requireMock("@/stores/a2ui")
+    useA2UIStore.mockImplementationOnce((selector: (state: Record<string, unknown>) => unknown) =>
+      selector({
+        surfaces: {
+          "test-surface": { ...mockSurface, ready: false },
+        },
+        loadingSurfaces: new Set(),
+        errors: {},
+      })
+    )
+
+    const { container } = render(<A2UISurface surfaceId="test-surface" />)
+    // `a2ui.surface.preparing` — the English text once the message bundle is
+    // built, the key itself before (the jest next-intl mock echoes misses).
+    const status = screen.getByRole("status", { name: /^(Preparing…|surface\.preparing)$/ })
+    expect(status).toBeInTheDocument()
+    // The icon is decoration; the label is what is announced.
+    expect(container.querySelector(".animate-spin")).toHaveAttribute("aria-hidden")
+  })
+
   it("should show no content message when no root component", () => {
     const { useA2UIStore } = jest.requireMock("@/stores/a2ui")
     useA2UIStore.mockImplementationOnce((selector: (state: Record<string, unknown>) => unknown) =>

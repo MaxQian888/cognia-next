@@ -268,13 +268,19 @@ export function ToolSettingsSection() {
               aria-label={t("toggleAriaLabel", { name: t("templateToolsTitle") })}
             />
           </div>
+          {/* The pet runs only in the desktop app (ADR-0058 D9), so off desktop
+              the flag is inert: `build-options.ts` surfaces neither the tools
+              nor their consent tier, and this switch says so. */}
           <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
             <div className="min-w-0">
               <p className="text-[12px] font-medium">{t("petToolsTitle")}</p>
-              <p className="text-[11px] leading-snug text-muted-foreground">{t("petToolsDesc")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {desktop ? t("petToolsDesc") : t("petToolsDesktopOnly")}
+              </p>
             </div>
             <Switch
               checked={petToolsEnabled}
+              disabled={!desktop}
               onCheckedChange={(next) => setPetToolsEnabled(next)}
               aria-label={t("toggleAriaLabel", { name: t("petToolsTitle") })}
             />

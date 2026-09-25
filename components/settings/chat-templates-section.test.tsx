@@ -598,6 +598,15 @@ describe("ChatTemplatesSection — layout tiers", () => {
     const preview = screen.getByTestId("chat-template-body-preview")
     await waitFor(() => expect(preview.textContent).toContain("{{today}}"))
   })
+
+  it("drops the stacked picker while there is nothing to pick", async () => {
+    listDensity = "stacked"
+    await mount()
+    await waitFor(() =>
+      expect(screen.queryByTestId("chat-templates-stacked-picker")).not.toBeInTheDocument()
+    )
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
+  })
 })
 
 describe("ChatTemplatesSection — parameter declarations", () => {

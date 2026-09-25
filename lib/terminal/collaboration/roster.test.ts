@@ -117,6 +117,17 @@ describe("mergeDevicesWithRoster", () => {
     expect(rows[0].role).toBe("controller")
     expect(rows[0].terminalGranted).toBe(false)
   })
+
+  it("never offers a terminal to a paired browser extension", () => {
+    // A browser holds only `browser.submit` and `browser.read-own`; a terminal
+    // grant would widen a device class the design keeps closed.
+    const rows = mergeDevicesWithRoster(
+      [device(), device({ deviceId: "browser-1", label: "Chrome", platform: "browser" })],
+      undefined,
+      { participants: [] }
+    )
+    expect(rows.map((row) => row.deviceId)).toEqual([device().deviceId])
+  })
 })
 
 describe("participantLabel", () => {

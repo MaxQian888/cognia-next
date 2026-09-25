@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { KeyboardIcon, RotateCcwIcon } from "lucide-react"
 import { isTauri } from "@/lib/tauri"
+import { PET_INTERACTION_COMMAND_IDS, PET_WINDOW_COMMAND_ID } from "@/lib/pet/command-ids"
 import { CHAT_COPILOT_COMMAND_ID } from "@/lib/reply-copilot/screen/overlay-client"
 import { Button } from "@/components/ui/button"
 import { useShortcutStore } from "@/lib/shortcuts/registry"
@@ -92,10 +93,14 @@ const SELECTION_SHORTCUT_DEFAULTS = [
  * never seeds these — see `seed_builtins`) — the row starts unbound ("Not
  * set") until the user records one. `id` must match a command registered in
  * `lib/plugin/commands/registry.ts` so the bound chord actually dispatches
- * somewhere (see `lib/pet/commands.ts:registerPetCommands`).
+ * somewhere. The pet's ids come from the same list `lib/pet/commands.ts`
+ * registers from, and `PetMount` registers all of them on the main desktop
+ * window even while the pet is off, so a bound chord always answers (a
+ * summon for the toggle, a "pet is off" notification for the rest).
  */
 const OPTIONAL_SHORTCUT_IDS = [
-  "pet.toggle-window",
+  PET_WINDOW_COMMAND_ID,
+  ...PET_INTERACTION_COMMAND_IDS,
   // Registered by `ChatCopilotInitializer` in the main desktop window.
   CHAT_COPILOT_COMMAND_ID,
 ] as const
@@ -206,6 +211,12 @@ export function ShortcutsSection() {
 
   const optionalLabels: Record<(typeof OPTIONAL_SHORTCUT_IDS)[number], string> = {
     "pet.toggle-window": t("petToggleWindow", { fallback: "Toggle desktop pet" }),
+    "pet.feed": t("petFeed", { fallback: "Pet: feed" }),
+    "pet.play": t("petPlay", { fallback: "Pet: play" }),
+    "pet.pet": t("petPet", { fallback: "Pet: pet" }),
+    "pet.sleep": t("petSleep", { fallback: "Pet: sleep" }),
+    "pet.clean": t("petClean", { fallback: "Pet: clean" }),
+    "pet.treat": t("petTreat", { fallback: "Pet: treat" }),
     "chat-copilot.capture": t("chatCopilotCapture"),
   }
   const optionalShortcutRows: Array<{ id: string; label: string; chord: Chord | null }> =

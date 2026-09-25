@@ -40,7 +40,14 @@ export function AboutCard({
         className
       )}
     >
-      <CardHeader className="flex flex-row items-center gap-3 border-b bg-muted/40 px-4 py-3 sm:px-5">
+      {/* `[.border-b]:pb-3` and the panel `px-3`: the shared CardHeader pads a
+          bordered header to pb-6 and zeroes its sides inside a settings
+          panel, which left this tinted rail twice as tall below the title
+          and its icon plate flush against the rail's edge. */}
+      <CardHeader
+        className="flex flex-row items-center gap-3 border-b bg-muted/40 px-4 py-3 sm:px-5 [.border-b]:pb-3 [[data-settings-panel]_&]:px-3"
+        data-testid={testid ? `${testid}-header` : undefined}
+      >
         <span
           aria-hidden
           className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-card text-muted-foreground shadow-sm"

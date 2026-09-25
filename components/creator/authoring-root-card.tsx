@@ -9,7 +9,7 @@
  * that a model cannot talk Creator into a directory the user did not pick.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useId, useState } from "react"
 import { useTranslations } from "next-intl"
 import { FolderOpen, ShieldCheck } from "lucide-react"
 
@@ -47,6 +47,15 @@ export function AuthoringRootCard() {
   }, [grantAuthoringRoot, t])
 
   const hostSupported = canUseTauriInvoke()
+  // A disabled picker with no reason reads as broken. Every later step on the
+  // page waits on this grant, so say why it cannot be made here.
+  const unsupportedHintId = useId()
+  const hintProps = hostSupported ? {} : { "aria-describedby": unsupportedHintId }
+  const unsupportedHint = hostSupported ? null : (
+    <p id={unsupportedHintId} className="text-xs text-muted-foreground">
+      {t("desktopOnly")}
+    </p>
+  )
 
   return (
     <SettingsBlock
@@ -66,21 +75,29 @@ export function AuthoringRootCard() {
             {t("pathLabel")}: {root.path}
           </p>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={choose} disabled={busy || !hostSupported}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={choose}
+              disabled={busy || !hostSupported}
+              {...hintProps}
+            >
               {t("change")}
             </Button>
             <Button size="sm" variant="ghost" onClick={revokeAuthoringRoot}>
               {t("revoke")}
             </Button>
           </div>
+          {unsupportedHint}
         </div>
       ) : (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">{t("empty")}</p>
-          <Button size="sm" onClick={choose} disabled={busy || !hostSupported}>
+          <Button size="sm" onClick={choose} disabled={busy || !hostSupported} {...hintProps}>
             <FolderOpen className="size-4" aria-hidden />
             {t("choose")}
           </Button>
+          {unsupportedHint}
         </div>
       )}
 

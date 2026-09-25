@@ -289,7 +289,8 @@ describe("settings-nav-config", () => {
         expect(reachable.has(id)).toBe(true)
       }
       // Recorded physical boundaries and local-shell surfaces stay desktop-only.
-      for (const id of ["automation", "desktop", "sidebar"] as const) {
+      // The pet is the desktop shell's own subsystem (ADR-0058 D9).
+      for (const id of ["automation", "desktop", "sidebar", "pet"] as const) {
         expect(reachable.has(id)).toBe(false)
       }
       // Transitional pins: renderer path still bypasses the transport seam.
@@ -300,7 +301,7 @@ describe("settings-nav-config", () => {
 
     it("a web-standalone client reaches only what runs in the webview", () => {
       const reachable = reachableSettingsSections(webStandalone)
-      for (const id of ["terminal", "source-control", "subscription", "desktop"] as const) {
+      for (const id of ["terminal", "source-control", "subscription", "desktop", "pet"] as const) {
         expect(reachable.has(id)).toBe(false)
       }
       for (const id of [

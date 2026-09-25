@@ -38,6 +38,16 @@ import { SkillMarketplaceSheet } from "@/components/discover/skill-marketplace-s
 import { TwinProfileCard } from "@/components/discover/twin-profile-card"
 import { DiscoverShareButton } from "@/components/discover/discover-share-button"
 import { useShellNav } from "@/components/shell/use-shell-nav"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { SheetDescription, SheetTitle } from "@/components/ui/sheet"
@@ -448,12 +458,18 @@ function PluginInspector({ plugin }: { plugin: PluginRow }) {
     const result = await setPluginEnabledForHost(plugin.id, next)
     if (!result.ok && result.error) toast.error(result.error)
   }
+  // Uninstall is destructive (files, tools, scheduled jobs), so it asks first
+  // with the same copy as the plugin panel's confirmation.
+  const tDelete = useTranslations("plugins.delete")
+  const [confirmingUninstall, setConfirmingUninstall] = useState(false)
   const onUninstall = async () => {
     try {
       await market.uninstall(plugin.id)
       toast.success(t("marketplace.uninstallSuccess", { name: plugin.name || plugin.id }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setConfirmingUninstall(false)
     }
   }
   // Built-in plugins ship inside the desktop binary — uninstall would brick
@@ -482,13 +498,38 @@ function PluginInspector({ plugin }: { plugin: PluginRow }) {
           variant="destructive"
           className="self-start gap-2"
           disabled={market.installingId === plugin.id}
-          onClick={() => void onUninstall()}
+          onClick={() => setConfirmingUninstall(true)}
           data-testid="discover-inspector-plugin-uninstall"
         >
           <Trash2Icon className="size-4" />
           {t("marketplace.uninstall")}
         </Button>
       ) : null}
+      <AlertDialog open={confirmingUninstall} onOpenChange={setConfirmingUninstall}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{tDelete("title")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {tDelete("body", { name: plugin.name || plugin.id })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tDelete("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={market.installingId === plugin.id}
+              onClick={(event) => {
+                // Keep the dialog up until the uninstall settles.
+                event.preventDefault()
+                void onUninstall()
+              }}
+              data-testid="discover-inspector-plugin-uninstall-confirm"
+            >
+              {market.installingId === plugin.id ? tDelete("confirming") : tDelete("confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

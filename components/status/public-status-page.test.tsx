@@ -40,6 +40,9 @@ describe("PublicStatusPage", () => {
       screen.getByLabelText(/Agent Runtime on Aug 11, 2026: Degraded, 99.18% uptime/)
     ).toBeInTheDocument()
     expect(screen.getByText("99.98%", { exact: false })).toBeInTheDocument()
+    // A monospace "." takes a full digit cell and split the figure apart.
+    expect(screen.getByTestId("status-uptime-value")).not.toHaveClass("font-mono")
+    expect(screen.getByTestId("status-uptime-value")).toHaveClass("tabular-nums")
   })
 
   it("shows the hero without waiting for an animation to run", () => {

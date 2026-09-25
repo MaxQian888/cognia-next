@@ -13,14 +13,17 @@ import {
   useReducedMotionVariants,
 } from "./motion"
 
-const reduceMotionRef = { current: false }
+// The hooks honour the APP's reduce-motion setting (the `reduce-motion` class
+// the motion applier writes on <html>), not only the OS query motion's own
+// `useReducedMotion` reads — so the tests drive that class.
+const reduceMotionRef = {
+  set current(on: boolean) {
+    document.documentElement.classList.toggle("reduce-motion", on)
+  },
+}
 
-jest.mock("motion/react", () => ({
-  useReducedMotion: () => reduceMotionRef.current,
-}))
-
-beforeEach(() => {
-  reduceMotionRef.current = false
+afterEach(() => {
+  document.documentElement.classList.remove("reduce-motion")
 })
 
 describe("mobile motion tokens", () => {

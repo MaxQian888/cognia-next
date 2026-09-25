@@ -191,7 +191,13 @@ function HomeStrip({
         <h2 className="text-sm font-semibold">{title}</h2>
         {action}
       </div>
-      <ul className="flex gap-3 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden">
+      {/* The scrollbar is hidden, so without the edge fade the last card was
+          simply cut mid-word at the pane edge and read as clipped, not as a
+          strip that scrolls. Same utility `ScrollShadowRow` uses. */}
+      <ul
+        className="scroll-fade-x flex gap-3 overflow-x-auto overscroll-x-contain pb-1 [&::-webkit-scrollbar]:hidden"
+        data-testid={`${testid}-strip`}
+      >
         {items.map((item) => (
           <li key={`${item.kind}-${item.id}`} className="w-56 shrink-0">
             <DiscoverItemCard

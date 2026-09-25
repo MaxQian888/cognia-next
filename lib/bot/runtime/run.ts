@@ -10,8 +10,10 @@
  *
  *   - FAILED: the work ran and did not succeed. The delivery backs off.
  *   - UNAVAILABLE: nothing could run at all (a disabled plugin, a Bot with no
- *     working directory). Retrying the same delivery changes nothing, so it is
- *     dismissed with a reason rather than burning the attempt budget.
+ *     working directory), or the run stopped where only a person can move it
+ *     (a `blocked` result, a turn denied a tool for want of an approver).
+ *     Retrying the same delivery changes nothing, so it is dismissed with a
+ *     reason rather than burning the attempt budget.
  *   - CANCELLED: somebody stopped it. Not a failure and not retried.
  */
 
@@ -32,6 +34,7 @@ import {
 import { getDb } from "@/lib/db/schema"
 import { completeBotRunStep, getBotRunStep } from "@/lib/db/bot-run-steps"
 import { BOT_RUN_POLICY_STEP } from "@/lib/bot/policy/run-authority"
+import { NEEDS_APPROVAL_STATUS } from "@/lib/claude/unattended-permission-responder"
 import { expireRunInterruptFromSource } from "@/lib/execution/run-control"
 import { writeBotTriggerState } from "@/lib/db/bot-installations"
 import { projectBotComposition } from "@/lib/bot/composition/project-bot-composition"
@@ -326,7 +329,12 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
     const endedAt = now()
     if (result) await completeBotRunStep(runId, "__host:result", result, endedAt)
     await persistTimedTriggerState(resolved, delivery.triggerId, result, endedAt)
-    if ((result?.output as { status?: string } | undefined)?.status === "blocked") {
+    // Not done, and not worth replaying: `blocked` waits on the author, and
+    // `needs_approval` on a person to allow a tool the unattended turn was
+    // denied. A re-run stops in the same place, so the delivery is dismissed
+    // with the reason instead of completed or backed off.
+    const resultStatus = (result?.output as { status?: string } | undefined)?.status
+    if (resultStatus === "blocked" || resultStatus === NEEDS_APPROVAL_STATUS) {
       const error = result?.summary ?? "Bot result requires attention"
       await runEventJournal.append(
         runId,

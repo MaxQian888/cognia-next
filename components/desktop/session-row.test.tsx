@@ -59,6 +59,15 @@ jest.mock("dexie-react-hooks", () => ({
   },
 }))
 
+// The move itself (planner, writes, toasts) is the hook's suite. Here only the
+// menu that reaches it.
+const mockMoveToWorkspace = jest.fn(async () => true)
+let mockMoveBusy = false
+jest.mock("@/hooks/workspace/use-move-session-workspace", () => ({
+  useMoveSessionWorkspace: () => ({ move: mockMoveToWorkspace, busy: mockMoveBusy }),
+}))
+
+import { useProjectStore } from "@/stores/project/project-store"
 import { SessionRow, sessionRowPropsEqual } from "./session-row"
 
 const baseSession: ChatSession = {
@@ -966,4 +975,63 @@ test("shows the source platform as an accessible corner badge on IM session avat
     "-bottom-1",
     "-end-1"
   )
+})
+
+describe("move to workspace", () => {
+  function seedWorkspaces(extra: Array<{ id: string; name: string; isArchived?: boolean }>) {
+    act(() => {
+      useProjectStore.setState({
+        projects: [{ id: "w1", name: "Alpha" }, ...extra] as never,
+      })
+    })
+  }
+
+  afterEach(() => {
+    act(() => useProjectStore.setState({ projects: [] }))
+    mockMoveToWorkspace.mockClear()
+    mockMoveBusy = false
+  })
+
+  test("holds the entry while a move is already in flight", async () => {
+    const user = userEvent.setup()
+    mockMoveBusy = true
+    seedWorkspaces([{ id: "w2", name: "Beta" }])
+    setup({ session: { ...baseSession, projectId: "w1" } })
+
+    await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+    expect(await screen.findByTestId("session-row-move-workspace-s-1")).toHaveAttribute(
+      "data-disabled"
+    )
+  })
+
+  test("moves the conversation from its row, marking where it already is", async () => {
+    const user = userEvent.setup()
+    seedWorkspaces([
+      { id: "w2", name: "Beta" },
+      { id: "w3", name: "Shelved", isArchived: true },
+    ])
+    const session = { ...baseSession, projectId: "w1" }
+    setup({ session })
+
+    await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+    await user.click(await screen.findByTestId("session-row-move-workspace-s-1"))
+
+    // Archived workspaces are not destinations.
+    expect(screen.queryByTestId("session-row-workspace-w3")).not.toBeInTheDocument()
+    expect(await screen.findByTestId("session-row-workspace-w1")).toHaveAttribute("data-disabled")
+    // Radix selects a menu item on click; user-event's pointer sequence inside
+    // a portalled sub-menu does not reach it in jsdom.
+    fireEvent.click(screen.getByTestId("session-row-workspace-w2"))
+    expect(mockMoveToWorkspace).toHaveBeenCalledWith(session, "w2")
+  })
+
+  test("offers no move when there is nowhere else to go", async () => {
+    const user = userEvent.setup()
+    seedWorkspaces([{ id: "w3", name: "Shelved", isArchived: true }])
+    setup({ session: { ...baseSession, projectId: "w1" } })
+
+    await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+    await screen.findByText("rename")
+    expect(screen.queryByTestId("session-row-move-workspace-s-1")).not.toBeInTheDocument()
+  })
 })

@@ -70,6 +70,9 @@ jest.mock("@/lib/pet/commands", () => ({
   toggleDesktopPetWindow: () => toggleDesktopPetWindow(),
 }))
 
+let mockPlatform: "tauri" | "web" | "mobile" = "tauri"
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
+
 jest.mock("@/components/account/account-manage-dialog", () => ({
   AccountManageDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="manage-dialog" /> : null,
@@ -92,6 +95,7 @@ beforeEach(() => {
   lock.mockClear()
   toggleDesktopPetWindow.mockClear()
   toggleDesktopPetWindow.mockResolvedValue(true)
+  mockPlatform = "tauri"
   activeAccount = { id: "a-1", displayName: "Irma Salazar" }
   identity = { displayName: null, email: null, standing: "local", usagePercent: null }
 })
@@ -175,6 +179,16 @@ describe("SidebarUserCard", () => {
     fireEvent.click(screen.getByTestId("sidebar-user-pet"))
     await waitFor(() => expect(toggleDesktopPetWindow).toHaveBeenCalledTimes(1))
   })
+
+  it.each(["web", "mobile"] as const)(
+    "does not offer the desktop pet on %s, where it cannot run (ADR-0058 D9)",
+    async (platform) => {
+      mockPlatform = platform
+      await open()
+      expect(screen.queryByTestId("sidebar-user-pet")).toBeNull()
+      expect(screen.getByTestId("sidebar-user-settings")).toBeInTheDocument()
+    }
+  )
 
   it("says so when the pet window refuses", async () => {
     toggleDesktopPetWindow.mockRejectedValue(new Error("no window"))

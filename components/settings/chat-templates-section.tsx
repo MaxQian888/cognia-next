@@ -832,26 +832,30 @@ function RailWrapper({
         {/* The rail's pinned header only — the scroll list is replaced by the
             picker so the auto-height row stays small. */}
         {railHeader}
-        <div className="border-t p-2">
-          <Select
-            value={selectedId ?? ""}
-            onValueChange={(id) => {
-              const next = items.find((i) => i.row.id === id)
-              if (next) onSelect(next)
-            }}
-          >
-            <SelectTrigger className="h-8 text-xs" aria-label={chooseLabel}>
-              <SelectValue placeholder={chooseLabel} />
-            </SelectTrigger>
-            <SelectContent>
-              {items.map((i) => (
-                <SelectItem key={i.row.id} value={i.row.id} className="text-xs">
-                  {i.row.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* A picker with nothing in it is a dead control; the empty detail
+            pane below already offers New and Import. */}
+        {items.length === 0 ? null : (
+          <div className="border-t p-2" data-testid="chat-templates-stacked-picker">
+            <Select
+              value={selectedId ?? ""}
+              onValueChange={(id) => {
+                const next = items.find((i) => i.row.id === id)
+                if (next) onSelect(next)
+              }}
+            >
+              <SelectTrigger className="h-8 text-xs" aria-label={chooseLabel}>
+                <SelectValue placeholder={chooseLabel} />
+              </SelectTrigger>
+              <SelectContent>
+                {items.map((i) => (
+                  <SelectItem key={i.row.id} value={i.row.id} className="text-xs">
+                    {i.row.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
     )
   }

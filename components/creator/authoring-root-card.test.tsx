@@ -97,6 +97,34 @@ describe("AuthoringRootCard", () => {
     expect(screen.getByRole("button", { name: /Choose a directory/ })).toBeDisabled()
   })
 
+  it("says why the picker is disabled instead of leaving a dead button", () => {
+    mockCanUseTauriInvoke.mockReturnValue(false)
+    renderCard()
+    const button = screen.getByRole("button", { name: /Choose a directory/ })
+    expect(button).toHaveAccessibleDescription(creatorMessages.root.desktopOnly)
+  })
+
+  it("explains the disabled Change button once a root is already granted", () => {
+    mockCanUseTauriInvoke.mockReturnValue(false)
+    useCreatorStore.setState({
+      authoringRoot: {
+        path: "/work/authoring",
+        label: "authoring",
+        origin: "selected",
+        grantedAt: 0,
+      },
+    })
+    renderCard()
+    const change = screen.getByRole("button", { name: creatorMessages.root.change })
+    expect(change).toBeDisabled()
+    expect(change).toHaveAccessibleDescription(creatorMessages.root.desktopOnly)
+  })
+
+  it("keeps the desktop-only hint out of a host that can pick", () => {
+    renderCard()
+    expect(screen.queryByText(creatorMessages.root.desktopOnly)).not.toBeInTheDocument()
+  })
+
   it("does not open a dialog when the host is unsupported", async () => {
     mockCanUseTauriInvoke.mockReturnValue(false)
     renderCard()

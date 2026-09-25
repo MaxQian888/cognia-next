@@ -80,6 +80,33 @@ describe("BotListPane", () => {
     expect(screen.getByText("No Bot matches this search and filter.")).toBeInTheDocument()
   })
 
+  it("offers the install flow under an empty, unfiltered list", () => {
+    // On a phone the list is the page; "install a plugin to get started"
+    // with no button under it left only a corner glyph to find.
+    const onInstall = jest.fn()
+    renderPane({ rows: [], onInstall })
+    fireEvent.click(screen.getByTestId("bot-list-install"))
+    expect(onInstall).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the install button out of an empty filter result", () => {
+    renderPane({ rows: [row()], search: "nothing-matches", onInstall: jest.fn() })
+    expect(screen.queryByTestId("bot-list-install")).not.toBeInTheDocument()
+  })
+
+  it("keeps the install button out while a search or status filter is set, even on an empty install", () => {
+    const { unmount } = renderPane({ rows: [], search: "x", onInstall: jest.fn() })
+    expect(screen.queryByTestId("bot-list-install")).not.toBeInTheDocument()
+    unmount()
+    renderPane({ rows: [], statusFilter: "needs_setup", onInstall: jest.fn() })
+    expect(screen.queryByTestId("bot-list-install")).not.toBeInTheDocument()
+  })
+
+  it("renders no install button when the host gives it nothing to open", () => {
+    renderPane({ rows: [] })
+    expect(screen.queryByTestId("bot-list-install")).not.toBeInTheDocument()
+  })
+
   it("shows placeholder bars rather than an empty state while loading", () => {
     // An empty state during the first read tells the user they have no Bots.
     renderPane({ rows: [], loading: true })

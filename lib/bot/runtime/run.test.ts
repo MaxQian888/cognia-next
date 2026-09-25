@@ -239,6 +239,33 @@ describe("runBotDelivery", () => {
     expect((await getBotRunStep(botRunId(delivery.id), "__host:result"))?.output).toEqual(result)
     expect((await getExecutionRun(botRunId(delivery.id)))?.latestSnapshot?.status).toBe("failed")
   })
+  it("settles a turn that needed approval as failed and does not replay it", async () => {
+    const { delivery, resolved } = await seed()
+    const result = {
+      summary: "needs approval: Bash",
+      output: {
+        sessionId: "s1",
+        status: "needs_approval",
+        needsApproval: [{ requestId: "r1", toolName: "Bash", at: 1, reason: "x" }],
+      },
+    }
+    const outcome = await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: { handler: async () => result },
+    })
+    expect(outcome).toEqual({
+      status: "unavailable",
+      runId: botRunId(delivery.id),
+      error: "needs approval: Bash",
+    })
+    // The denials stay on the run for whoever clears them.
+    expect((await getBotRunStep(botRunId(delivery.id), "__host:result"))?.output).toEqual(result)
+    expect((await getExecutionRun(botRunId(delivery.id)))?.latestSnapshot?.status).toBe("failed")
+    // Dismissed, not backed off: a retry would stop at the same denial.
+    expect((await getDb().botEventDeliveries.get(delivery.id))?.status).toBe("dismissed")
+  })
   it("cancels an installation's active execution and keeps its host signal authoritative", async () => {
     const { delivery, resolved } = await seed()
     const outcome = await runBotDelivery({

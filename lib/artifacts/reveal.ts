@@ -1,7 +1,9 @@
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useChatStore } from "@/stores/chat"
 import { useUIStore } from "@/stores/ui"
 import type { Artifact, CanvasDocument } from "@/types"
+import type { ContextPanelMode } from "@/types/context-workbench"
 
 export function revealArtifactInWorkspace(id: string): Artifact | null {
   const store = useArtifactStore.getState()
@@ -22,6 +24,29 @@ export function revealArtifactInWorkspace(id: string): Artifact | null {
   // parked on (say) the workspace panel follows the artifact you just revealed.
   dock.requestReveal({ panelId: "preview", mode: "narrow" })
   return artifact
+}
+
+/**
+ * Bring one of the dock's *session-surface* panels (Plan, Sources, Memory, …)
+ * forward for `sessionId`.
+ *
+ * Those panel ids belong to the session surface only, which the dock shows
+ * when no artifact is active, so the conversation is focused and its active
+ * artifact dropped before the reveal intent is published. `setDockCollapsed`
+ * puts the dock on screen on both form factors (desktop dock and the mobile
+ * Sheet move together).
+ */
+export function revealSessionPanel(
+  sessionId: string,
+  panelId: string,
+  mode: ContextPanelMode = "wide"
+): void {
+  const chat = useChatStore.getState()
+  if (chat.activeSessionId !== sessionId) chat.setActiveSession(sessionId)
+  useArtifactStore.getState().setActiveArtifact(null, sessionId)
+  const dock = useArtifactDockLayoutStore.getState()
+  dock.requestReveal({ panelId, mode })
+  dock.setDockCollapsed(false)
 }
 
 /**

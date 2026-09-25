@@ -92,6 +92,7 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
 
     // A denied tool is not a completed job. Say so in the run list and keep
     // the denials on the output so a later step (or a human) can act on them.
+    // The runtime settles this status `failed` and never replays it (run.ts).
     if (result.status === "needs_approval") {
       const tools = [...new Set((result.needsApproval ?? []).map((denial) => denial.toolName))]
       return {

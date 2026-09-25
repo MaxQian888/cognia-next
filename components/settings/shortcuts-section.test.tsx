@@ -110,9 +110,35 @@ describe("ShortcutsSection", () => {
     it("renders 'Not set' with no Clear button until the user records one", () => {
       render(<ShortcutsSection />)
       expect(screen.getByText("Toggle desktop pet")).toBeInTheDocument()
-      // The pet toggle and the chat copilot.
-      expect(screen.getAllByText("Not set")).toHaveLength(2)
+      // The window toggle, the six nurture commands and the chat copilot.
+      expect(screen.getAllByText("Not set")).toHaveLength(8)
       expect(screen.queryByLabelText("Clear")).toBeNull()
+    })
+
+    it("offers every pet nurture command as a bindable row", () => {
+      render(<ShortcutsSection />)
+      for (const label of [
+        "Pet: feed",
+        "Pet: play",
+        "Pet: pet",
+        "Pet: sleep",
+        "Pet: clean",
+        "Pet: treat",
+      ]) {
+        expect(screen.getByText(label)).toBeInTheDocument()
+      }
+    })
+
+    it("binds and clears a nurture command like any other optional row", async () => {
+      invoke.mockResolvedValue(undefined)
+      useShortcutStore.setState({ bindings: { "pet.feed": "ctrl+alt+f" }, hydrated: true })
+      render(<ShortcutsSection />)
+      expect(screen.getAllByText("Not set")).toHaveLength(7)
+      fireEvent.click(screen.getByLabelText("Clear"))
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(invoke).toHaveBeenCalledWith("shortcut_unbind", { id: "pet.feed" })
     })
 
     it("offers the desktop chat copilot's capture as a bindable row", async () => {
@@ -138,8 +164,8 @@ describe("ShortcutsSection", () => {
         hydrated: true,
       })
       render(<ShortcutsSection />)
-      // Only the unbound chat copilot row still says so.
-      expect(screen.getAllByText("Not set")).toHaveLength(1)
+      // Only the six unbound nurture rows and the chat copilot still say so.
+      expect(screen.getAllByText("Not set")).toHaveLength(7)
       const clearButton = screen.getByLabelText("Clear")
       fireEvent.click(clearButton)
       await act(async () => {

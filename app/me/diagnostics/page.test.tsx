@@ -19,4 +19,11 @@ describe("MobileDiagnosticsPage", () => {
     expect(screen.getByTestId("mobile-diagnostics-page")).toBeInTheDocument()
     expect(screen.getByTestId("stub-diagnostics")).toBeInTheDocument()
   })
+
+  it("keeps side padding so the section does not run to the phone's edges", () => {
+    render(<Page />)
+    const body = screen.getByTestId("stub-diagnostics").closest("section")
+    expect(body).toHaveClass("px-4")
+    expect(body).not.toHaveClass("p-0")
+  })
 })

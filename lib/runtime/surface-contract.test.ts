@@ -9,6 +9,7 @@ import {
   getSurfaceContract,
   getSurfaceContractForRoute,
   isInternalRouteExempt,
+  petRequiresDesktopShell,
   resolveSurfaceAvailability,
   shouldShowSurface,
 } from "./surface-contract"
@@ -89,6 +90,31 @@ it("shows a host surface only when the Companion advertises the operation", () =
       host: { ...companion.host!, operations: [] },
     })
   ).toBe(false)
+})
+
+describe("/pet (desktop shell only, ADR-0058 D9)", () => {
+  const pet = getSurfaceContract("pet")!
+
+  it("explains itself on both columns and has no host operation to advertise", () => {
+    expect(pet.standalone).toBe("explain")
+    expect(pet.companion).toBe("explain")
+    expect(pet.operation).toBeUndefined()
+    expect(petRequiresDesktopShell).toEqual({
+      surfaceId: "pet",
+      reason: "desktop-shell-only",
+      remedy: "desktop-app",
+    })
+  })
+
+  it("stays deep-linkable in a standalone browser, so the console renders its own explanation", () => {
+    // Not `hidden`: that would put a misleading "pair a host" wall in front of
+    // the console's desktop-only notice.
+    expect(resolveSurfaceAvailability(pet, snapshot()).state).toBe("available")
+  })
+
+  it("is a desktop-only rail entry, which is what keeps it out of browser rails", () => {
+    expect(SIDEBAR_NAV_META.find((m) => m.id === "pet")?.desktopOnly).toBe(true)
+  })
 })
 
 describe("resolveSurfaceAvailability reads the contract's companion column", () => {

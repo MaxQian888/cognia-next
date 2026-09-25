@@ -187,7 +187,7 @@ export function BotConsole({
       centerClassName="min-h-0"
     >
       <div className="flex h-full min-h-0 flex-col">
-        <BotRuntimeNotice />
+        <BotRuntimeNotice hasBots={rows.length > 0} />
         {failed ? (
           // A persistent read failure, not an event — a toast would fire once
           // and leave the stale rows unmarked. Kept inline but compact, in
@@ -206,6 +206,8 @@ export function BotConsole({
             row={selected}
             loading={loading}
             missing={Boolean(selectedId) && !loading && !failed && !selected}
+            empty={!loading && !failed && rows.length === 0}
+            onInstall={() => setInstallOpen(true)}
             {...(onDeselect ? { onUninstalled: onDeselect } : {})}
           />
         </div>

@@ -16,7 +16,13 @@ import { SearchIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
@@ -44,6 +50,12 @@ export interface BotListPaneProps {
   onSearchChange: (value: string) => void
   onStatusFilterChange: (value: BotStatusFilter) => void
   onSelect: (installationId: string) => void
+  /**
+   * Opens the install sheet from an empty (unfiltered) list. On the phone the
+   * list IS the page, and "install a plugin to get started" with no button
+   * under it left only a corner glyph to find.
+   */
+  onInstall?: () => void
 }
 
 export function BotListPane({
@@ -55,6 +67,7 @@ export function BotListPane({
   onSearchChange,
   onStatusFilterChange,
   onSelect,
+  onInstall,
 }: BotListPaneProps) {
   const t = useTranslations("bots")
   const searchRef = useRef<HTMLInputElement>(null)
@@ -194,6 +207,18 @@ export function BotListPane({
                   : t("listPane.emptyBody")}
               </EmptyDescription>
             </EmptyHeader>
+            {onInstall && !search.trim() && statusFilter === "all" && rows.length === 0 ? (
+              <EmptyContent>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onInstall}
+                  data-testid="bot-list-install"
+                >
+                  {t("install.title")}
+                </Button>
+              </EmptyContent>
+            ) : null}
           </Empty>
         ) : (
           <div className="flex flex-col gap-0.5">

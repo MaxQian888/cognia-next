@@ -2821,6 +2821,41 @@ describe("onboarding actions", () => {
     expect(Date.parse(savedProgress()!.completedAt!)).not.toBeNaN()
   })
 
+  it("completeOnboarding clears a skip left by an earlier exit", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        onboardingProgress: {
+          version: 2,
+          path: "provider_skipped",
+          lastStep: "provider",
+          skippedAt: "2026-08-01T00:00:00.000Z",
+        },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().completeOnboarding()
+    })
+    expect(savedProgress()).toMatchObject({ path: "completed" })
+    expect(savedProgress()?.skippedAt).toBeUndefined()
+  })
+
+  it("skipOnboarding clears the completion of a Settings re-run it cut short", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        onboardingProgress: {
+          version: 2,
+          path: "completed",
+          completedAt: "2026-08-01T00:00:00.000Z",
+        },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().skipOnboarding("provider_skipped", "provider")
+    })
+    expect(savedProgress()).toMatchObject({ path: "provider_skipped", lastStep: "provider" })
+    expect(savedProgress()?.completedAt).toBeUndefined()
+  })
+
   it("skipOnboarding records why and where, so re-entry can resume", async () => {
     await act(async () => {
       await useSettingsStore.getState().skipOnboarding("provider_skipped", "provider")

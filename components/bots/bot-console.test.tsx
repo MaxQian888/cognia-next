@@ -23,7 +23,9 @@ jest.mock("@/hooks/ui", () => ({
   useBreakpoint: () => breakpointValue,
 }))
 jest.mock("./bot-runtime-notice", () => ({
-  BotRuntimeNotice: () => <div data-testid="bot-runtime-notice-stub" />,
+  BotRuntimeNotice: ({ hasBots }: { hasBots?: boolean }) => (
+    <div data-testid="bot-runtime-notice-stub" data-has-bots={String(hasBots)} />
+  ),
 }))
 // The sheet has its own suite. Stubbed here so the console's tests are about
 // the console, and so a Dexie read does not have to be stood up for each one.
@@ -66,6 +68,44 @@ beforeEach(() => {
 })
 
 describe("BotConsole", () => {
+  describe("with nothing installed", () => {
+    beforeEach(() => {
+      rows = []
+      summary = { total: 0, armed: 0, needsAttention: 0, deadLetters: 0 }
+    })
+
+    it("offers the install flow in the detail pane instead of asking to pick", () => {
+      render(<BotConsole onSelect={jest.fn()} />)
+      expect(screen.getByTestId("bot-detail-none-installed")).toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("bot-detail-install"))
+      expect(screen.getByTestId("install-bot-sheet-stub")).toBeInTheDocument()
+    })
+
+    it("does not claim the list is empty while it is still loading or failed to read", () => {
+      loading = true
+      const { unmount } = render(<BotConsole onSelect={jest.fn()} />)
+      expect(screen.queryByTestId("bot-detail-none-installed")).not.toBeInTheDocument()
+      unmount()
+      loading = false
+      failed = true
+      render(<BotConsole onSelect={jest.fn()} />)
+      expect(screen.queryByTestId("bot-detail-none-installed")).not.toBeInTheDocument()
+    })
+
+    it("tells the runtime notice there is no Bot to strand", () => {
+      render(<BotConsole onSelect={jest.fn()} />)
+      expect(screen.getByTestId("bot-runtime-notice-stub")).toHaveAttribute(
+        "data-has-bots",
+        "false"
+      )
+    })
+  })
+
+  it("tells the runtime notice once a Bot would be stranded", () => {
+    render(<BotConsole onSelect={jest.fn()} />)
+    expect(screen.getByTestId("bot-runtime-notice-stub")).toHaveAttribute("data-has-bots", "true")
+  })
+
   it("summarizes how many of the installed Bots are actually armed", () => {
     summary = { total: 3, armed: 1, needsAttention: 0, deadLetters: 0 }
     render(<BotConsole onSelect={jest.fn()} />)

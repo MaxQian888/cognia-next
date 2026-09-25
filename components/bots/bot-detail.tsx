@@ -41,7 +41,14 @@ import {
 import { ConsoleSection } from "@/components/surface/console-section"
 import { FactList, FactRow } from "@/components/surface/fact-list"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 
@@ -66,6 +73,13 @@ export interface BotDetailProps {
   missing?: boolean
   /** Called after the installation is removed, so the console can deselect. */
   onUninstalled?: () => void
+  /**
+   * Nothing is installed at all. "Pick a Bot from the list" is a dead end
+   * when the list is empty, so the pane offers the install flow instead.
+   */
+  empty?: boolean
+  /** Opens the install sheet from the empty pane. */
+  onInstall?: () => void
 }
 
 export function BotDetail({
@@ -73,6 +87,8 @@ export function BotDetail({
   loading = false,
   missing = false,
   onUninstalled,
+  empty = false,
+  onInstall,
 }: BotDetailProps) {
   const t = useTranslations("bots")
   const relative = useBotRelativeTime()
@@ -95,6 +111,24 @@ export function BotDetail({
           <Skeleton className="h-40 w-full" />
         </div>
       </div>
+    )
+  }
+
+  if (!row && empty && !missing) {
+    return (
+      <Empty className="h-full border-none" data-testid="bot-detail-none-installed">
+        <EmptyHeader>
+          <EmptyTitle>{t("detail.noneInstalledTitle")}</EmptyTitle>
+          <EmptyDescription>{t("detail.noneInstalledBody")}</EmptyDescription>
+        </EmptyHeader>
+        {onInstall ? (
+          <EmptyContent>
+            <Button size="sm" onClick={onInstall} data-testid="bot-detail-install">
+              {t("install.title")}
+            </Button>
+          </EmptyContent>
+        ) : null}
+      </Empty>
     )
   }
 

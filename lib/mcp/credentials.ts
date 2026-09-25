@@ -3,10 +3,17 @@ import { createKeyringStore } from "@/lib/credentials/keyring-store"
 import type { McpSecretRef, McpServer } from "@cognia/agent-config-types"
 
 const MCP_CREDENTIAL_NAMESPACE = "mcp-credentials/v1"
+/*
+ * Each pattern also matches any name ENDING in `api[_-]?key`, case-blind.
+ * Vendors prefix their key names — `modelApiKey`, `browserbaseApiKey`,
+ * `--model-api-key` — and the segment-bounded alternatives alone let a
+ * camelCase prefix through, which left the value persisted in plaintext.
+ */
 const SENSITIVE_NAME =
-  /(?:^|[_-])(token|secret|password|passwd|api[_-]?key|authorization|credential)(?:$|[_-])/i
-const SENSITIVE_ARG = /^--?(?:token|secret|password|api[_-]?key|authorization|credential)(?:=|$)/i
-const SENSITIVE_QUERY = /^(?:access_token|token|api[_-]?key|key|secret|password)$/i
+  /(?:^|[_-])(token|secret|password|passwd|api[_-]?key|authorization|credential)(?:$|[_-])|api[_-]?key$/i
+const SENSITIVE_ARG =
+  /^--?(?:token|secret|password|api[_-]?key|authorization|credential|[a-z0-9_-]*api[_-]?key)(?:=|$)/i
+const SENSITIVE_QUERY = /^(?:access_token|token|api[_-]?key|key|secret|password)$|api[_-]?key$/i
 
 function sensitiveArgumentValueIndexes(args: unknown[]): Set<number> {
   const indexes = new Set<number>()

@@ -88,4 +88,22 @@ describe("useTemplateRouteState", () => {
     expect(params.has("trust")).toBe(false)
     expect(params.has("scope")).toBe(false)
   })
+
+  it("keeps the search text unless asked to clear it too", () => {
+    params = new URLSearchParams("q=notes&domain=skill")
+    state().clearFilters()
+    expect(params.get("q")).toBe("notes")
+  })
+
+  // One URL write: a separate setQuery would rebuild from the render-time
+  // params and put the facets straight back.
+  it("clears the facets and the search text together in one write", () => {
+    params = new URLSearchParams("definition=a&q=notes&domain=skill&scope=mine")
+    state().clearFilters({ includeQuery: true })
+    expect(replace).toHaveBeenCalledTimes(1)
+    expect(params.has("q")).toBe(false)
+    expect(params.has("domain")).toBe(false)
+    expect(params.has("scope")).toBe(false)
+    expect(params.get("definition")).toBe("a")
+  })
 })

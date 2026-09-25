@@ -42,6 +42,24 @@ describe("BotRuntimeNotice", () => {
     expect(notice).toHaveTextContent("Nothing is running these Bots")
   })
 
+  it("does not draw the no-runner notice as an error when nothing is installed", () => {
+    // With no Bot installed nothing is stranded yet; the notice is advice
+    // about a future install, not a failure.
+    alwaysOn = false
+    paired = false
+    render(<BotRuntimeNotice hasBots={false} />)
+    const notice = screen.getByTestId("bot-runtime-notice")
+    expect(notice).toHaveAttribute("data-reach", "none")
+    expect(notice.className).not.toMatch(/text-destructive/)
+  })
+
+  it("draws the no-runner notice as an error once a Bot would be stranded", () => {
+    alwaysOn = false
+    paired = false
+    render(<BotRuntimeNotice hasBots />)
+    expect(screen.getByTestId("bot-runtime-notice").className).toMatch(/text-destructive/)
+  })
+
   it("names the paired Host as the one draining, rather than warning", () => {
     alwaysOn = false
     render(<BotRuntimeNotice />)

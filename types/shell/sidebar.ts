@@ -51,7 +51,13 @@ export interface SidebarNavMeta {
    * name people still type — searching the retired name has to land somewhere.
    */
   aliasKey?: string
-  /** Hidden entirely on the mobile (Capacitor) shell. */
+  /**
+   * Hidden off the desktop shell: always on mobile (Capacitor), and on the
+   * web unless a paired host advertises the surface's `operation` (see
+   * `getSidebarCatalog`). A desktop-only surface with no host operation, like
+   * the pet, is a constraint of the desktop shell no companion can lift, so
+   * it never appears off desktop.
+   */
   desktopOnly?: boolean
 }
 
@@ -97,7 +103,16 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
     category: "agents",
   },
   { id: "goals", route: "/goals", i18nKey: "goals", group: "feature", category: "agents" },
-  { id: "pet", route: "/pet", i18nKey: "pet", group: "feature", category: "agents" },
+  // The pet runs only in the desktop shell (ADR-0058 D9); off desktop its
+  // route renders an explanation, which is not worth a rail slot.
+  {
+    id: "pet",
+    route: "/pet",
+    i18nKey: "pet",
+    group: "feature",
+    category: "agents",
+    desktopOnly: true,
+  },
   {
     id: "browser",
     route: "/browser",

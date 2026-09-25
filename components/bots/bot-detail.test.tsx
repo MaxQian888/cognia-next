@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 import { resolveBotPolicy } from "@/lib/bot/policy/ceilings"
@@ -51,6 +51,28 @@ describe("BotDetail", () => {
   it("explains an empty pane rather than rendering a blank one", () => {
     render(<BotDetail row={null} />)
     expect(screen.getByTestId("bot-detail-empty")).toBeInTheDocument()
+  })
+
+  it("offers the install flow when nothing is installed, instead of asking to pick", () => {
+    // "Pick a Bot from the list" beside an empty list is a dead end.
+    const onInstall = jest.fn()
+    render(<BotDetail row={null} empty onInstall={onInstall} />)
+    expect(screen.getByText("No Bots installed yet")).toBeInTheDocument()
+    expect(screen.queryByTestId("bot-detail-empty")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("bot-detail-install"))
+    expect(onInstall).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers no install button when the host passes no handler", () => {
+    render(<BotDetail row={null} empty />)
+    expect(screen.getByText("No Bots installed yet")).toBeInTheDocument()
+    expect(screen.queryByTestId("bot-detail-install")).not.toBeInTheDocument()
+  })
+
+  it("keeps the missed-link copy even when the list is empty", () => {
+    render(<BotDetail row={null} empty missing />)
+    expect(screen.getByText("That Bot is not here")).toBeInTheDocument()
+    expect(screen.queryByTestId("bot-detail-none-installed")).not.toBeInTheDocument()
   })
 
   it("skeletons while the first installations read is in flight", () => {

@@ -27,6 +27,21 @@ describe("<AboutCard />", () => {
     expect(screen.getByTestId("c")).toHaveTextContent("act")
   })
 
+  // The shared CardHeader pads a bordered header to pb-6 and zeroes its sides
+  // in a settings panel; the tinted rail must keep its own even padding.
+  it("keeps the header rail's own padding over the shared card defaults", () => {
+    render(
+      <AboutCard icon={TagIcon} title="Version" testid="c">
+        body
+      </AboutCard>
+    )
+    const header = screen.getByTestId("c-header")
+    expect(header.className).toContain("[.border-b]:pb-3")
+    expect(header.className).not.toContain("[.border-b]:pb-6")
+    expect(header.className).toContain("[[data-settings-panel]_&]:px-3")
+    expect(header.className).not.toContain("[[data-settings-panel]_&]:px-0")
+  })
+
   it("omits the action slot by default", () => {
     render(
       <AboutCard icon={TagIcon} title="Version" testid="c">

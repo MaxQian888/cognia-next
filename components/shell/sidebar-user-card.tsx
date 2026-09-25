@@ -43,6 +43,7 @@ import { AccountManageDialog } from "@/components/account/account-manage-dialog"
 import { RuntimeTargetMenuSection } from "@/components/account/runtime-target-menu-section"
 import { unlocksWithoutPrompt } from "@/lib/accounts/desktop-local-account"
 import { useSidebarIdentity } from "@/hooks/shell/use-sidebar-identity"
+import { usePlatform } from "@/hooks/use-platform"
 import { toggleDesktopPetWindow } from "@/lib/pet/commands"
 import { avatarColor } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
@@ -104,6 +105,7 @@ export function SidebarUserCard({ className }: { className?: string }) {
     [router]
   )
 
+  const desktopShell = usePlatform() === "tauri"
   const togglePet = useCallback(() => {
     setOpen(false)
     void toggleDesktopPetWindow().catch((cause: unknown) => {
@@ -241,12 +243,16 @@ export function SidebarUserCard({ className }: { className?: string }) {
               install that has never paired sees no dead section. */}
           <RuntimeTargetMenuSection requireCompanion onSwitched={() => setOpen(false)} />
           <Separator className="my-1" />
-          <MenuRow
-            icon={<span aria-hidden>🐾</span>}
-            label={t("showPet")}
-            onClick={togglePet}
-            testId="sidebar-user-pet"
-          />
+          {/* The pet runs only in the desktop app (ADR-0058 D9): off desktop
+              the toggle quietly did nothing, so it is not offered there. */}
+          {desktopShell ? (
+            <MenuRow
+              icon={<span aria-hidden>🐾</span>}
+              label={t("showPet")}
+              onClick={togglePet}
+              testId="sidebar-user-pet"
+            />
+          ) : null}
           <MenuRow
             icon={<SettingsIcon className="size-4" />}
             label={t("settings")}

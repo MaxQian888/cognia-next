@@ -66,6 +66,65 @@ describe("MCP credential externalization", () => {
     expect(stdio.migrated).toBe(1)
   })
 
+  it("vaults vendor-prefixed API key names in URLs, args, env and headers", async () => {
+    // Stagehand's hosted endpoint takes `?modelApiKey=`, its CLI takes
+    // `--modelApiKey`; the segment-bounded patterns alone missed both.
+    const store = memoryStore()
+    const hosted = base({
+      url: "https://mcp.browserbase.com/mcp?modelName=gpt-4o&modelApiKey=sk-secret",
+      headers: { browserbaseApiKey: "bb-secret", Accept: "application/json" },
+    })
+    hosted.transport = "http"
+    const remote = await externalizeMcpSecrets(hosted, store)
+    expect(remote.migrated).toBe(2)
+    expect(remote.server.config).toEqual({
+      url: { secretRef: "mcp/mcp_a/url" },
+      headers: {
+        browserbaseApiKey: { secretRef: "mcp/mcp_a/headers/browserbaseApiKey" },
+        Accept: "application/json",
+      },
+    })
+
+    const stdio = await externalizeMcpSecrets(
+      base({
+        command: "npx",
+        args: ["-y", "@browserbasehq/mcp", "--modelApiKey", "sk-a", "--model-api-key=sk-b"],
+        env: { modelApiKey: "sk-c", MODEL_NAME: "gpt-4o" },
+      }),
+      store
+    )
+    expect(stdio.migrated).toBe(3)
+    expect(stdio.server.config).toEqual({
+      command: "npx",
+      args: [
+        "-y",
+        "@browserbasehq/mcp",
+        "--modelApiKey",
+        { secretRef: "mcp/mcp_a/args/3" },
+        { secretRef: "mcp/mcp_a/args/4" },
+      ],
+      env: { modelApiKey: { secretRef: "mcp/mcp_a/env/modelApiKey" }, MODEL_NAME: "gpt-4o" },
+    })
+  })
+
+  it("keeps non-secret neighbours of key-like names in place", async () => {
+    const result = await externalizeMcpSecrets(
+      base({
+        command: "tool",
+        args: ["--apikeys-file", "keys.txt", "--keyboard", "us"],
+        env: { API_KEY_ID_HINT: "x", KEYBOARD: "us" },
+      }),
+      memoryStore()
+    )
+    // `API_KEY_ID_HINT` still carries the bounded `API_KEY` segment and stays
+    // vaulted, exactly as before this pattern was widened.
+    expect(result.server.config).toEqual({
+      command: "tool",
+      args: ["--apikeys-file", "keys.txt", "--keyboard", "us"],
+      env: { API_KEY_ID_HINT: { secretRef: "mcp/mcp_a/env/API_KEY_ID_HINT" }, KEYBOARD: "us" },
+    })
+  })
+
   it("externalizes the value after a separated sensitive CLI flag", async () => {
     const store = memoryStore()
     const result = await externalizeMcpSecrets(

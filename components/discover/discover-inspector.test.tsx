@@ -685,6 +685,9 @@ describe("<DiscoverInspector />", () => {
       />
     )
     await user.click(screen.getByTestId("discover-inspector-plugin-uninstall"))
+    // Destructive: nothing happens until the user confirms.
+    expect(marketUninstallMock).not.toHaveBeenCalled()
+    await user.click(await screen.findByTestId("discover-inspector-plugin-uninstall-confirm"))
     expect(marketUninstallMock).toHaveBeenCalledWith(plugin.id)
     // Sonner toast fires after the await resolves
     await new Promise((r) => setTimeout(r, 0))

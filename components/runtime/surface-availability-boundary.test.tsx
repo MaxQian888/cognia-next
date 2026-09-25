@@ -1,12 +1,17 @@
 import { render, screen } from "@testing-library/react"
 
-import { SurfaceAvailabilityBoundary } from "./surface-availability-boundary"
+import { SurfaceAvailabilityBoundary, exitFor } from "./surface-availability-boundary"
 
 let pathname = "/browser"
 let snapshot: Record<string, unknown>
 
 jest.mock("next/navigation", () => ({
   usePathname: () => pathname,
+}))
+
+let compact = false
+jest.mock("@/hooks/ui/use-compact-layout", () => ({
+  useCompactLayout: () => compact,
 }))
 
 jest.mock("@/hooks/use-runtime-snapshot", () => ({
@@ -19,6 +24,7 @@ jest.mock("next-intl", () => ({
 }))
 
 beforeEach(() => {
+  compact = false
   pathname = "/browser"
   snapshot = {
     target: { id: "web-standalone", kind: "standalone", platform: "web" },
@@ -76,6 +82,41 @@ it("still offers chat as the exit from a top-level capability route", () => {
     </SurfaceAvailabilityBoundary>
   )
   expect(screen.getByRole("link", { name: "backToChat" })).toHaveAttribute("href", "/")
+})
+
+it("on the phone shell, sends a hub-opened screen back to its hub, not into chat", () => {
+  // Source Control is opened from Me; "Back to chat" dropped the reader into
+  // a tab they never came from while the bar lit Me.
+  compact = true
+  pathname = "/source-control"
+  render(
+    <SurfaceAvailabilityBoundary>
+      <div>scm implementation</div>
+    </SurfaceAvailabilityBoundary>
+  )
+  expect(screen.getByRole("link", { name: "back" })).toHaveAttribute("href", "/me")
+  expect(screen.queryByRole("link", { name: "backToChat" })).not.toBeInTheDocument()
+})
+
+describe("exitFor", () => {
+  it("keeps chat as the desktop exit for top-level routes", () => {
+    expect(exitFor("/source-control", false)).toEqual({ href: "/", label: "backToChat" })
+  })
+  it("keeps chat for routes the Chat tab owns on the phone", () => {
+    expect(exitFor("/browser", true)).toEqual({ href: "/", label: "backToChat" })
+  })
+  it("sends a Discover-owned screen back to Discover on the phone", () => {
+    expect(exitFor("/twin", true)).toEqual({ href: "/discover", label: "back" })
+  })
+  it("sends /me sub-pages to /me everywhere", () => {
+    expect(exitFor("/me/terminal", false)).toEqual({ href: "/me", label: "back" })
+  })
+  // A blocked hub is its own tab's href; an exit to itself goes nowhere.
+  it("never links a blocked hub back to itself", () => {
+    for (const hub of ["/me", "/discover", "/workflows"]) {
+      expect(exitFor(hub, true)).toEqual({ href: "/", label: "backToChat" })
+    }
+  })
 })
 
 it("keeps the standalone plugin library fully available without a read-only banner", () => {

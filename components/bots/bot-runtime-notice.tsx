@@ -40,7 +40,16 @@ function useBotRuntimeReach(): BotRuntimeReach {
   )
 }
 
-export function BotRuntimeNotice() {
+export interface BotRuntimeNoticeProps {
+  /**
+   * Whether any Bot is installed. With none, "nothing will run" is advice
+   * about a future install rather than a stranded Bot, so it is not drawn as
+   * an error.
+   */
+  hasBots?: boolean
+}
+
+export function BotRuntimeNotice({ hasBots = true }: BotRuntimeNoticeProps = {}) {
   const t = useTranslations("bots")
   const reach = useBotRuntimeReach()
 
@@ -52,7 +61,7 @@ export function BotRuntimeNotice() {
       // banner ends 24px too wide and its right edge is clipped by the pane.
       // `w-auto` lets flex stretch subtract the margins back out.
       className="m-3 mb-0 w-auto py-2"
-      variant={reach === "none" ? "destructive" : "default"}
+      variant={reach === "none" && hasBots ? "destructive" : "default"}
       data-testid="bot-runtime-notice"
       data-reach={reach}
     >

@@ -537,6 +537,10 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "pet",
     group: "appearance",
     icon: PawPrintIcon,
+    // The pet runs only in the desktop shell (ADR-0058 D9). Off desktop every
+    // control here would configure a pet that never mounts, so the section is
+    // unreachable there and a deep link renders the desktop-only notice.
+    profiles: ["desktop"],
   },
   {
     id: "notifications",

@@ -116,6 +116,19 @@ describe("<DiscoverHome />", () => {
     expect(screen.getByTestId("stub-card-character-c1")).toBeInTheDocument()
   })
 
+  it("fades a strip's clipped edge so it reads as scrollable, not cut off", () => {
+    render(
+      <DiscoverHome
+        home={baseHome({ featured: [character("f1")] })}
+        query=""
+        selectedItemId={null}
+        onSelectItem={noop}
+        onSelectCategory={noop}
+      />
+    )
+    expect(screen.getByTestId("discover-home-featured-strip")).toHaveClass("scroll-fade-x")
+  })
+
   it("fires onSelectCategory from a section's View all affordance", async () => {
     const onSelectCategory = jest.fn()
     const user = userEvent.setup()

@@ -35,8 +35,18 @@ function ConversationInner() {
 
   if (!conversationKey || session === null) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center p-4">
-        <StateCard.Empty title={t("unavailableTitle")} description={t("unavailableDescription")} />
+      <div
+        className="flex flex-1 flex-col items-center justify-center p-4"
+        data-testid="inbox-conversation-unavailable"
+      >
+        {/* `flex-none`: Empty is `flex-1` by default, and in this column it
+            took every spare pixel, leaving the way out pinned to the bottom
+            of a desktop window, far from the message it answers. */}
+        <StateCard.Empty
+          className="flex-none"
+          title={t("unavailableTitle")}
+          description={t("unavailableDescription")}
+        />
         <Button variant="outline" onClick={() => router.replace("/")}>
           {t("openConversations")}
         </Button>

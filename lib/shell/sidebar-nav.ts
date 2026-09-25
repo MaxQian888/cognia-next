@@ -95,8 +95,11 @@ export interface SidebarCatalogItem extends SidebarNavMeta {
  * The customizable nav catalog with icons attached, filtered for the platform.
  * Off the desktop shell (mobile AND plain/cloud-companion browsers — ADR-0059
  * F5), `desktopOnly` items are dropped so they never surface in the rail or
- * the customizer as dead ends. Falls back to a question-mark-free no-op icon
- * only if a mapping is missing (shouldn't happen — covered by tests).
+ * the customizer as dead ends. On the web a paired host can bring one back,
+ * but only a surface with a host `operation` it can advertise; one without
+ * (the pet) is a shell constraint and stays dropped. Falls back to a
+ * question-mark-free no-op icon only if a mapping is missing (shouldn't
+ * happen — covered by tests).
  */
 export function getSidebarCatalog(
   platform: Platform,
@@ -110,6 +113,12 @@ export function getSidebarCatalog(
     // desktop shell. Check this before the runtime contract so the initial
     // target-less snapshot cannot temporarily reveal them either.
     if (platform === "mobile" && meta.desktopOnly) return false
+    // A desktop-only surface with no host operation cannot be served by any
+    // companion, so no runtime snapshot can make it reachable here. Without
+    // this the web path below consulted only the surface contract, and the pet
+    // (`standalone: "explain"`) showed in a browser's rail and ⌘K as a page
+    // that could only explain it does not run there.
+    if (meta.desktopOnly && !getSurfaceContract(meta.id)?.operation) return false
     if (runtimeSnapshot) {
       const contract = getSurfaceContract(meta.id)
       // No `platform !== "tauri"` guard: the `tauri` case returned above, so it

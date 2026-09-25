@@ -1,8 +1,9 @@
 /** @jest-environment jsdom */
-import { revealArtifactInWorkspace, revealCanvasDocument } from "./reveal"
+import { revealArtifactInWorkspace, revealCanvasDocument, revealSessionPanel } from "./reveal"
 import { selectActiveArtifactId, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useUIStore } from "@/stores/ui"
+import { useChatStore } from "@/stores/chat"
 
 afterEach(() => {
   // Reset the store between tests; persist hydration is namespace-scoped
@@ -73,6 +74,33 @@ describe("revealArtifactInWorkspace", () => {
     revealArtifactInWorkspace(artifact.id)
 
     expect(useArtifactDockLayoutStore.getState().revealIntent?.panelId).toBe("preview")
+  })
+})
+
+describe("revealSessionPanel", () => {
+  it("focuses the conversation, drops its active artifact and reveals the panel", () => {
+    const artifact = useArtifactStore.getState().createArtifact({
+      sessionId: "s-plan",
+      messageId: "m",
+      type: "code",
+      title: "t",
+      content: "x",
+    })
+    expect(selectActiveArtifactId(useArtifactStore.getState(), "s-plan")).toBe(artifact.id)
+    useArtifactDockLayoutStore.getState().setDockCollapsed(true)
+    const setActiveSession = jest.spyOn(useChatStore.getState(), "setActiveSession")
+
+    revealSessionPanel("s-plan", "plan")
+
+    expect(setActiveSession).toHaveBeenCalledWith("s-plan")
+    // The session surface owns the panel id, so no artifact may stay active.
+    expect(selectActiveArtifactId(useArtifactStore.getState(), "s-plan")).toBeNull()
+    const dock = useArtifactDockLayoutStore.getState()
+    expect(dock.revealIntent).toEqual({ panelId: "plan", mode: "wide" })
+    // Both renderings of "the dock is on screen" move together.
+    expect(dock.dockCollapsed).toBe(false)
+    expect(dock.mobileSheetOpen).toBe(true)
+    setActiveSession.mockRestore()
   })
 })
 

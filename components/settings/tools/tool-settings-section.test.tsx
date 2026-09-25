@@ -271,4 +271,12 @@ describe("the desktop pet tools switch", () => {
     fireEvent.click(petSwitch)
     expect(setPetToolsEnabled).toHaveBeenCalledWith(true)
   })
+
+  it("is disabled off-desktop and says why, since the flag is inert there (ADR-0058 D9)", () => {
+    isTauriMock.mockReturnValue(false)
+    render(<ToolSettingsSection />)
+    expect(screen.getByLabelText("toggleAriaLabel:petToolsTitle")).toBeDisabled()
+    expect(screen.getByText("petToolsDesktopOnly")).toBeInTheDocument()
+    expect(screen.queryByText("petToolsDesc")).not.toBeInTheDocument()
+  })
 })

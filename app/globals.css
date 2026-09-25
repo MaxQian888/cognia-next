@@ -3932,9 +3932,10 @@ html[data-reduce-motion="true"] .boot-preview__block {
 
 /* In-app browser: indeterminate top progress bar. A short segment sweeps left
  * to right while the previewed page loads (the native webview can't paint its
- * own chrome, so this lives in the React toolbar seam). */
+ * own chrome, so this lives in the React toolbar seam). Timed through the speed
+ * preference like every other motion here. */
 .browser-progress-bar {
-  animation: browser-progress 1.1s ease-in-out infinite;
+  animation: browser-progress calc(1.1s * var(--motion-duration-scale, 1)) ease-in-out infinite;
 }
 
 @keyframes browser-progress {
@@ -3943,6 +3944,29 @@ html[data-reduce-motion="true"] .boot-preview__block {
   }
   100% {
     transform: translateX(400%);
+  }
+}
+
+/* Reduced motion, tier 3 of the policy near the top of this file: the bar is
+ * status, not decoration, so it must not freeze as a stray third-width stub
+ * parked at the left edge. The sweep goes; a full-width fade keeps saying
+ * "loading". Repeated for all three guard paths, as that policy requires. */
+html.reduce-motion .browser-progress-bar,
+html[data-reduce-motion="true"] .browser-progress-bar {
+  width: 100% !important;
+  animation-name: motion-safe-fade-pulse !important;
+  animation-duration: calc(1.4s * var(--motion-duration-scale, 1)) !important;
+  animation-timing-function: ease-in-out !important;
+  animation-iteration-count: infinite !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion-respect="off"]) .browser-progress-bar {
+    width: 100% !important;
+    animation-name: motion-safe-fade-pulse !important;
+    animation-duration: calc(1.4s * var(--motion-duration-scale, 1)) !important;
+    animation-timing-function: ease-in-out !important;
+    animation-iteration-count: infinite !important;
   }
 }
 
@@ -4387,6 +4411,26 @@ html[data-reduce-motion="true"] .boot-preview__block {
 
 .onboarding-breathe {
   animation: onboarding-breathe 4s ease-in-out infinite;
+}
+
+/* A guide pointing at something on the page (ADR-0193) — the provider page's
+   quick-setup chips jump to a row and mark it for a moment. The outline is the
+   durable part and carries the meaning on its own; the ripple is decoration,
+   so the reduce-motion guards collapsing it to 1ms loses nothing. Brand cyan
+   is a stroke here, never text, per the palette rule above. */
+@keyframes guide-highlight {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--brand-action) 45%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 10px color-mix(in oklab, var(--brand-action) 0%, transparent);
+  }
+}
+
+[data-guide-highlight="true"] {
+  outline: 2px solid var(--brand-action);
+  outline-offset: 2px;
+  animation: guide-highlight 900ms cubic-bezier(0.22, 0.61, 0.36, 1) 2;
 }
 
 /* Ultracode only. The dot lattice marches one cell to the right and loops

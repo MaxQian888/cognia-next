@@ -112,6 +112,7 @@ describe("sidebar nav meta", () => {
     const desktopOnly = SIDEBAR_NAV_META.filter((m) => m.desktopOnly).map((m) => m.id)
     // `browser` is a feature-group entry rather than an auxiliary one, but the
     // embedded webview only exists in the Tauri shell, so it is desktop-only too.
-    expect(desktopOnly.sort()).toEqual(["browser", "performance"])
+    // `pet` is the desktop shell's own subsystem (ADR-0058 D9).
+    expect(desktopOnly.sort()).toEqual(["browser", "performance", "pet"])
   })
 })

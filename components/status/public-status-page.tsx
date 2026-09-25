@@ -210,7 +210,13 @@ export function PublicStatusPage({
               <GaugeIcon className="size-5 text-muted-foreground" aria-hidden />
             </div>
             <div className="relative">
-              <div className="font-mono text-[clamp(3.25rem,8vw,6.5rem)] leading-none font-medium tracking-[-0.08em] tabular-nums">
+              {/* Sans with tabular digits, not mono: a monospace "." takes a
+                  full digit cell, and at this size and tracking the figure
+                  read "99 . 98%". */}
+              <div
+                className="text-[clamp(3.25rem,8vw,6.5rem)] leading-none font-medium tracking-[-0.06em] tabular-nums"
+                data-testid="status-uptime-value"
+              >
                 {t("hero.uptimeValue", { value: platformUptime.toFixed(2) })}
               </div>
               <div className="mt-6 grid grid-cols-[repeat(18,minmax(0,1fr))] gap-1" aria-hidden>

@@ -120,6 +120,13 @@ describe("pure helpers", () => {
     expect(activePairedDevices(rows).map((row) => row.deviceId)).toEqual(["a"])
   })
 
+  it("does not count a paired browser extension as a device to sync", () => {
+    // It never opens the event plane, so it could only ever read as "not
+    // connected" here.
+    const rows = [device({ deviceId: "a" }), device({ deviceId: "b", platform: "browser" })]
+    expect(activePairedDevices(rows).map((row) => row.deviceId)).toEqual(["a"])
+  })
+
   it("publishes every table and then flushes the coalescing window", () => {
     const calls: string[] = []
     requestDeviceSync(

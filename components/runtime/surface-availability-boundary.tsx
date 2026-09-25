@@ -15,6 +15,8 @@ import {
   EmptyMedia,
 } from "@/components/ui/empty"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { pickActiveTabId, tabHref } from "@/components/mobile/shell/mobile-tab-bar"
 import {
   getSurfaceContractForRoute,
   isInternalRouteExempt,
@@ -25,8 +27,8 @@ export function SurfaceAvailabilityBoundary({ children }: { children: React.Reac
   const pathname = usePathname()
   const snapshot = useRuntimeSnapshot()
   const t = useTranslations("runtime.surfaceBoundary")
-  const tCommon = useTranslations("common")
   const contract = getSurfaceContractForRoute(pathname)
+  const compact = useCompactLayout()
 
   if (!contract || isInternalRouteExempt(pathname) || !snapshot.target) {
     return <>{children}</>
@@ -93,19 +95,42 @@ export function SurfaceAvailabilityBoundary({ children }: { children: React.Reac
               blocked /me sub-page lost its back arrow and the only way out was
               a button that dropped the reader into chat. Under /me the exit
               goes back to /me. */}
-          {pathname.startsWith("/me/") ? (
-            <Button asChild variant="outline">
-              <Link href="/me">{tCommon("back")}</Link>
-            </Button>
-          ) : (
-            <Button asChild variant="outline">
-              <Link href="/">{t("backToChat")}</Link>
-            </Button>
-          )}
+          {(() => {
+            const exit = exitFor(pathname, compact)
+            return (
+              <Button asChild variant="outline">
+                <Link href={exit.href}>{exit.label === "back" ? t("back") : t("backToChat")}</Link>
+              </Button>
+            )
+          })()}
         </EmptyContent>
       </Empty>
     </main>
   )
+}
+
+/**
+ * Where the boundary's exit leads. It replaces the whole route, page chrome
+ * included, so this button is often the only way out.
+ *
+ *  - A `/me` sub-page goes back to `/me`.
+ *  - On the phone shell, a screen a tab hub opened goes back to that hub:
+ *    Source Control is reached from Me, and "Back to chat" dropped the reader
+ *    into a tab they never came from while the bar lit Me.
+ *  - Everything else keeps the chat exit.
+ */
+export function exitFor(
+  pathname: string,
+  compact: boolean
+): { href: string; label: "back" | "backToChat" } {
+  if (pathname.startsWith("/me/")) return { href: "/me", label: "back" }
+  if (compact) {
+    const hub = tabHref(pickActiveTabId(pathname))
+    // A blocked hub (`/me`, `/discover`, `/workflows`) is its own tab's
+    // href; linking it to itself would be an exit that goes nowhere.
+    if (hub !== "/" && hub !== pathname) return { href: hub, label: "back" }
+  }
+  return { href: "/", label: "backToChat" }
 }
 
 function recoveryForState(

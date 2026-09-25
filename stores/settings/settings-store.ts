@@ -1849,8 +1849,10 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       const cur = get().settings?.onboardingProgress ?? initialOnboardingProgress()
       // `lastStep` is dropped on completion: there is nothing left to resume,
       // and leaving it set would make a Settings re-run reopen the final step
-      // instead of the flow.
-      const { lastStep: _dropped, ...rest } = cur
+      // instead of the flow. An earlier `skippedAt` goes too — the two stamps
+      // are mutually exclusive, and a stale skip would keep telling every
+      // setup surface that something was left unfinished.
+      const { lastStep: _dropped, skippedAt: _skipped, ...rest } = cur
       const next = await saveSettings({
         onboardingProgress: {
           ...rest,
@@ -1863,8 +1865,11 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
 
     skipOnboarding: async (path, lastStep) => {
       const cur = get().settings?.onboardingProgress ?? initialOnboardingProgress()
+      // A Settings re-run of a finished setup starts from a completed record;
+      // leaving it early must not keep that stamp beside the new skip.
+      const { completedAt: _completed, ...rest } = cur
       const next = await saveSettings({
-        onboardingProgress: { ...cur, path, lastStep, skippedAt: new Date().toISOString() },
+        onboardingProgress: { ...rest, path, lastStep, skippedAt: new Date().toISOString() },
       })
       set({ settings: next })
     },

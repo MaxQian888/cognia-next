@@ -37,6 +37,8 @@ import {
   conversationTimestampShape,
 } from "@/lib/chat/conversation-timestamp"
 import { folderAcceptsSession } from "@/lib/chat/conversation-list-model"
+import { useMoveSessionWorkspace } from "@/hooks/workspace/use-move-session-workspace"
+import { useProjectStore } from "@/stores/project/project-store"
 import type { AvatarSubject } from "@/lib/ui/avatar"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
@@ -54,6 +56,7 @@ import {
   CheckIcon,
   FolderIcon,
   FolderInputIcon,
+  FolderKanbanIcon,
   ExternalLinkIcon,
   GitBranchIcon,
   GripVerticalIcon,
@@ -395,6 +398,18 @@ function SessionRowImpl({
       ),
     [folders, sessionProjectId]
   )
+
+  // Attribution is correctable from where a misplaced conversation is noticed:
+  // the list. Archived workspaces are not destinations. Read as the stable
+  // store array and filtered here, so a row does not re-render per keystroke
+  // elsewhere in the store.
+  const workspaces = useProjectStore((s) => s.projects)
+  const workspaceTargets = useMemo(
+    () => workspaces.filter((workspace) => !workspace.isArchived),
+    [workspaces]
+  )
+  const canMoveWorkspace = workspaceTargets.some((workspace) => workspace.id !== sessionProjectId)
+  const { move: moveToWorkspace, busy: movingWorkspace } = useMoveSessionWorkspace()
 
   const isArchived = session.archivedAt != null
   const handleArchive = () => {
@@ -856,6 +871,37 @@ function SessionRowImpl({
                           </DropdownMenuItem>
                         </>
                       ) : null}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                ) : null}
+                {canMoveWorkspace ? (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger
+                      disabled={movingWorkspace}
+                      data-testid={`session-row-move-workspace-${session.id}`}
+                    >
+                      <FolderKanbanIcon className="mr-2 size-4" />
+                      {t("moveToWorkspace")}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
+                      {workspaceTargets.map((workspace) => {
+                        const current = workspace.id === sessionProjectId
+                        return (
+                          <DropdownMenuItem
+                            key={workspace.id}
+                            disabled={current}
+                            onSelect={() => void moveToWorkspace(session, workspace.id)}
+                            data-testid={`session-row-workspace-${workspace.id}`}
+                          >
+                            {current ? (
+                              <CheckIcon className="mr-2 size-4" />
+                            ) : (
+                              <FolderIcon className="mr-2 size-4" />
+                            )}
+                            <span className="truncate">{workspace.name}</span>
+                          </DropdownMenuItem>
+                        )
+                      })}
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
                 ) : null}

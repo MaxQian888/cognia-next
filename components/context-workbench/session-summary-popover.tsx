@@ -26,10 +26,10 @@ import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
 import { SessionEnvironmentChip } from "@/components/chat/session-environment-chip"
 import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
 import { RoomParticipantsChip } from "@/components/chat/room-participants-chip"
-import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore, useSessionMessages } from "@/stores/chat"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
+import { revealSessionPanel } from "@/lib/artifacts/reveal"
 import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { SessionCapabilitiesSection } from "./session-capabilities-section"
 import { SessionResultsSection } from "./session-results-section"
@@ -81,12 +81,7 @@ export function SessionSummaryPopover({ session, onManage }: Props) {
   }, [open, desktop, closeSummary])
   const navigate = (panelId: string) => {
     closeSummary()
-    const chat = useChatStore.getState()
-    if (chat.activeSessionId !== session.id) chat.setActiveSession(session.id)
-    useArtifactStore.getState().setActiveArtifact(null, session.id)
-    const dock = useArtifactDockLayoutStore.getState()
-    dock.requestReveal({ panelId, mode: "wide" })
-    dock.setDockCollapsed(false)
+    revealSessionPanel(session.id, panelId)
   }
   const manage = () => {
     closeSummary()

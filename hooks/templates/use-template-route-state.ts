@@ -54,7 +54,12 @@ export interface TemplateRouteState {
   setDomain: (value: TemplateDomain | "all") => void
   setTrust: (value: TemplateTrust | "all") => void
   setScope: (value: TemplateScopeTier | "all") => void
-  clearFilters: () => void
+  /**
+   * Drop every facet. `includeQuery` also clears the search text in the SAME
+   * URL write: two back-to-back setters would each rebuild from the
+   * render-time params, and the second would put the first one's facets back.
+   */
+  clearFilters: (options?: { includeQuery?: boolean }) => void
 }
 
 function oneOf<T extends string>(value: string | null, allowed: readonly T[]): T | undefined {
@@ -105,6 +110,12 @@ export function useTemplateRouteState(): TemplateRouteState {
     setDomain: (value) => setParams({ domain: value === "all" ? undefined : value }),
     setTrust: (value) => setParams({ trust: value === "all" ? undefined : value }),
     setScope: (value) => setParams({ scope: value === "all" ? undefined : value }),
-    clearFilters: () => setParams({ domain: undefined, trust: undefined, scope: undefined }),
+    clearFilters: (options) =>
+      setParams({
+        domain: undefined,
+        trust: undefined,
+        scope: undefined,
+        ...(options?.includeQuery ? { q: undefined } : {}),
+      }),
   }
 }

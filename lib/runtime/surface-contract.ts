@@ -177,15 +177,18 @@ export const SURFACE_CONTRACTS = [
   },
   {
     id: "pet",
-    // The desktop pet is a renderer subsystem excluded from the Capacitor
-    // shell outright (ADR-0059), so a companion cannot drive it through the
-    // host the way `"remote"` promises. It said `"remote"` while `PetMount`
+    // The desktop pet runs only in the Tauri desktop shell (ADR-0058 D9): web
+    // and mobile never mount its controller, so neither a companion nor a
+    // standalone browser can drive it. It said `"remote"` while `PetMount`
     // refused to initialize the profile on mobile and the console rendered a
     // loading state that could never resolve: a route the user could reach and
-    // then wait at forever. `"explain"` is what it actually is.
+    // then wait at forever. `"explain"` is what it actually is on both
+    // columns. The route stays deep-linkable and `PetConsole` says why; the
+    // rail and ⌘K drop it off desktop (`desktopOnly` with no `operation`).
+    // See {@link petRequiresDesktopShell}.
     route: "/pet",
     navigation: true,
-    standalone: "full",
+    standalone: "explain",
     companion: "explain",
     offline: "local",
   },
@@ -378,6 +381,29 @@ export const standaloneInboxRequiresHost = {
   surfaceId: "inbox",
   reason: "connector-runtime-absent",
   remedy: "/pair",
+} as const
+
+/**
+ * `/pet` anywhere but the desktop app: the pet is the desktop shell's own
+ * subsystem, and no host, pairing or setting lifts that.
+ *
+ * Intentional and permanent, so documented on all three axes (CLAUDE.md
+ * rule 7):
+ *
+ *  1. **Type** — the `pet` contract above is `explain` on both columns, the
+ *     `pet` rail entry is `desktopOnly` with no `operation`, and this constant
+ *     carries the reason.
+ *  2. **UI** — `components/pet/console/pet-console.tsx` renders its
+ *     `unsupportedHost` explanation, and the rail, ⌘K and Settings → Pet
+ *     (`profiles: ["desktop"]`) never offer the surface off desktop.
+ *  3. **Test** — pinned by `lib/shell/sidebar-nav.test.ts`,
+ *     `components/pet/console/pet-console.test.tsx` and
+ *     `lib/runtime/surface-contract.test.ts`.
+ */
+export const petRequiresDesktopShell = {
+  surfaceId: "pet",
+  reason: "desktop-shell-only",
+  remedy: "desktop-app",
 } as const
 
 /**

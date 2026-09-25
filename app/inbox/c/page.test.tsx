@@ -45,6 +45,14 @@ it("rejects missing conversation keys and unresolved targets", () => {
   expect(mockFocus).not.toHaveBeenCalled()
   expect(screen.getByText("Conversation unavailable")).toBeInTheDocument()
 })
+it("keeps the way out next to the message instead of letting the empty state push it away", () => {
+  mockParams = new URLSearchParams()
+  render(<ConversationPage />)
+  const empty = screen.getByText("Conversation unavailable").closest('[data-slot="empty"]')
+  expect(empty).toHaveClass("flex-none")
+  expect(empty).not.toHaveClass("flex-1")
+})
+
 it("focuses the exact resolved session before replacing the legacy route", () => {
   mockSession = { id: "older session" } as ChatSession
   render(<ConversationPage />)

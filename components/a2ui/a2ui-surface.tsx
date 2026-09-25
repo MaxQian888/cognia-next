@@ -116,11 +116,16 @@ export function A2UISurface({
     )
   }
 
-  // Not ready yet
+  // Not ready yet — announced, not just drawn: a bare spinner is silent to a
+  // screen reader, which then hears an empty region.
   if (!surface.ready) {
     return (
-      <div className={cn("flex items-center justify-center p-4", className)}>
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      <div
+        role="status"
+        aria-label={t("surface.preparing")}
+        className={cn("flex items-center justify-center p-4", className)}
+      >
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
       </div>
     )
   }

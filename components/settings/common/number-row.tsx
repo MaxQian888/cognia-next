@@ -16,6 +16,8 @@
  * IPC plus a disk write.
  */
 
+import type { ReactNode } from "react"
+
 import { ClampedNumberInput } from "./clamped-number-input"
 import { Label } from "@/components/ui/label"
 
@@ -23,19 +25,34 @@ export interface NumberRowProps {
   id: string
   label: string
   help?: string
+  /**
+   * Rendered beside the label but outside the `<label>`, so a status badge
+   * (e.g. "needs restart") never becomes part of the input's accessible name.
+   */
+  adornment?: ReactNode
   value: number
   min: number
   max: number
   onCommit: (v: number) => void
 }
 
-export function NumberRow({ id, label, help, value, min, max, onCommit }: NumberRowProps) {
+export function NumberRow({
+  id,
+  label,
+  help,
+  adornment,
+  value,
+  min,
+  max,
+  onCommit,
+}: NumberRowProps) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-4">
-        <Label htmlFor={id} className="flex-1">
-          {label}
-        </Label>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          <Label htmlFor={id}>{label}</Label>
+          {adornment}
+        </div>
         <ClampedNumberInput
           id={id}
           className="w-28"
