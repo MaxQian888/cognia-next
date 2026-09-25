@@ -24,12 +24,12 @@ use crate::vault::{
     self, Account, OpencodeDiscoveredData, OpencodeZenData, ProviderCredential, ProviderVault,
 };
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn opencode_oauth_discover() -> Result<Option<DiscoveredOpencodeAuth>, String> {
     discovery::discover_opencode_auth()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn opencode_save_zen_key(
     local_account_id: String,
     access_token: String,

@@ -116,7 +116,7 @@ cognia-headless-contract = { path = "../crates/cognia-headless-contract" }
 cognia-problem = { path = "../crates/cognia-problem", features = ["axum"] }
 # ADR-0067 Tier B — subscription vault/providers (ADR-0025); `subscription/`
 # stays as an app-side facade holding the top-level command surface.
-cognia-subscription = { path = "../crates/cognia-subscription" }
+cognia-subscription = { path = "../crates/cognia-subscription", features = ["tauri-host"] }
 # ADR-0067 Tier B — Platform Connectors (matrix E2EE stack). Re-aliased as
 # `crate::connectors`; the BusEventEmitter impl stays in companion_api.
 cognia-connectors = { path = "../crates/cognia-connectors" }
@@ -135,7 +135,7 @@ cognia-tts = { path = "../crates/cognia-tts", features = ["tauri-host"] }
 cognia-gateway = { path = "../crates/cognia-gateway", features = ["tauri-host"] }
 # ADR-0067 follow-up — CCSwitch provider-relay switcher. Re-aliased as
 # `crate::ccswitch`.
-cognia-ccswitch = { path = "../crates/cognia-ccswitch" }
+cognia-ccswitch = { path = "../crates/cognia-ccswitch", features = ["tauri-host"] }
 # ADR-0067 follow-up — embedded MCP server. Re-aliased as `crate::mcp_server`.
 cognia-mcp-server = { path = "../crates/cognia-mcp-server" }
 # ADR-0067 follow-up — external agent exec backends (bollard/kube isolated

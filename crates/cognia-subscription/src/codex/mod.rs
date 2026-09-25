@@ -7,6 +7,9 @@
 // external agent. Active-account switches therefore don't need a sidecar
 // restart — they take effect on the next external-agent spawn.
 
+/// The Codex Tauri command shells (most take `State`); only `src-tauri`
+/// enables them (ADR-0196).
+#[cfg(feature = "tauri-host")]
 pub mod commands;
 pub mod credential;
 pub mod discovery;

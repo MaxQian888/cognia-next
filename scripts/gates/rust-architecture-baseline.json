@@ -4,12 +4,10 @@
     "direct-only: cognia-subscription depends on keyring",
     "direct-only: cognia-terminal depends on keyring",
     "tauri-default: cognia-automation",
-    "tauri-default: cognia-ccswitch",
     "tauri-default: cognia-connectors",
     "tauri-default: cognia-mcp-server",
     "tauri-default: cognia-plugin-runtime",
     "tauri-default: cognia-scheduling",
-    "tauri-default: cognia-subscription",
     "tauri-default: cognia-terminal"
   ]
 }

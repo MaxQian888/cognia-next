@@ -41,7 +41,7 @@ pub struct CcswitchStatus {
     pub resolution_source: Option<CcswitchResolutionSource>,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn ccswitch_status(manual_data_dir: Option<String>) -> CcswitchStatus {
     let Some(resolved) = resolve_ccswitch_db(manual_data_dir.as_deref()) else {
         return CcswitchStatus {
@@ -80,28 +80,28 @@ pub fn ccswitch_status(manual_data_dir: Option<String>) -> CcswitchStatus {
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn ccswitch_list_providers(
     manual_data_dir: Option<String>,
 ) -> Result<Vec<CcswitchProvider>, String> {
     with_conn(manual_data_dir.as_deref(), db_list_providers)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn ccswitch_list_mcp_servers(
     manual_data_dir: Option<String>,
 ) -> Result<Vec<CcswitchMcpServer>, String> {
     with_conn(manual_data_dir.as_deref(), db_list_mcp_servers)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn ccswitch_list_prompts(
     manual_data_dir: Option<String>,
 ) -> Result<Vec<CcswitchPrompt>, String> {
     with_conn(manual_data_dir.as_deref(), db_list_prompts)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn ccswitch_list_skills(manual_data_dir: Option<String>) -> Result<Vec<CcswitchSkill>, String> {
     with_conn(manual_data_dir.as_deref(), db_list_skills)
 }
@@ -168,20 +168,20 @@ pub struct OpencodeAuthWriteResult {
 /// codex-cli's auth file shape.
 ///
 /// Semantics:
-///   - `env_updates["OPENAI_API_KEY"] = Some(v)` (non-empty)
-///       → set `OPENAI_API_KEY = v`, set `auth_mode = "ApiKey"`
-///   - `env_updates["OPENAI_API_KEY"] = None` or empty
-///       → remove `OPENAI_API_KEY`. If the file still has a `tokens` object,
-///         flip `auth_mode` back to `"ChatGPT"`; otherwise clear `auth_mode`.
-///   - Any other keys are passed through as top-level JSON string fields
-///     (codex-cli ignores unknown top-level keys, so they're harmless and
-///     useful for forward compatibility).
+/// - `env_updates["OPENAI_API_KEY"] = Some(v)` (non-empty)
+///   → set `OPENAI_API_KEY = v`, set `auth_mode = "ApiKey"`
+/// - `env_updates["OPENAI_API_KEY"] = None` or empty
+///   → remove `OPENAI_API_KEY`. If the file still has a `tokens` object,
+///   flip `auth_mode` back to `"ChatGPT"`; otherwise clear `auth_mode`.
+/// - Any other keys are passed through as top-level JSON string fields
+///   (codex-cli ignores unknown top-level keys, so they're harmless and
+///   useful for forward compatibility).
 ///
 /// `tokens`, `last_refresh`, `agent_identity`, and unknown top-level keys
 /// are preserved verbatim. Atomic write with mtime drift detection — the
 /// special error string `"drift_detected"` is returned when codex-cli (or
 /// another writer) touched the file between read and write.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn write_codex_auth_env(
     env_updates: HashMap<String, Option<String>>,
 ) -> Result<CodexAuthWriteResult, String> {
@@ -321,7 +321,7 @@ fn apply_codex_env_updates(
 /// The `env` object is created if absent; all other top-level keys
 /// (`theme`, `selectedAuthType`, `mcpServers`, …) are preserved verbatim.
 /// Atomic write + mtime drift detection + bounded backup rotation.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn write_gemini_settings_env(
     env_updates: HashMap<String, Option<String>>,
 ) -> Result<GeminiSettingsWriteResult, String> {
@@ -432,7 +432,7 @@ fn apply_gemini_env_updates(
 /// (consumed here, never written) telling us which provider entry to target.
 /// Defaulting to `anthropic` keeps the common Claude-relay case working when
 /// the caller omits it.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn write_opencode_auth_env(
     env_updates: HashMap<String, Option<String>>,
 ) -> Result<OpencodeAuthWriteResult, String> {

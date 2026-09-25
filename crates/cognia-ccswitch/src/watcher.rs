@@ -9,27 +9,16 @@
 //! `Mutex<Option<RecommendedWatcher>>` — there is exactly one db, so unlike
 //! the git subsystem we don't key by path.
 
+#[cfg(any(test, feature = "tauri-host"))]
 use std::path::Path;
-use std::time::Duration;
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::RecommendedWatcher;
 use parking_lot::Mutex;
-use serde::Serialize;
-use tauri::{AppHandle, Emitter};
 
+#[cfg(any(test, feature = "tauri-host"))]
 use super::paths::resolve_ccswitch_db;
 
 pub const DB_CHANGED_EVENT: &str = "ccswitch://db-changed";
-
-/// Trailing debounce window — coalesces the db + WAL/SHM write burst into a
-/// single refresh signal.
-const DEBOUNCE_MS: u64 = 250;
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DbChangedPayload {
-    db_path: String,
-}
 
 /// Managed Tauri state: the single active cc-switch.db watcher. Dropping it
 /// stops the OS watch and closes the channel, which ends the debounce task.
@@ -49,6 +38,7 @@ impl CcswitchWatcherState {
     }
 }
 
+#[cfg(any(test, feature = "tauri-host"))]
 /// Whether a changed path under the watched directory is the cc-switch
 /// database (including its `-wal` / `-shm` sidecars). Anything else in the
 /// `.cc-switch/` directory (logs, the app store, temp files) is ignored.
@@ -65,84 +55,117 @@ fn path_is_db(db_path: &Path, changed: &Path) -> bool {
         || changed_name == format!("{db_name}-journal")
 }
 
-/// Start (or replace) the cc-switch.db watcher, emitting debounced
-/// `ccswitch://db-changed` events on `app`. Returns an error string when the
-/// db path can't be resolved or the parent dir doesn't exist yet (cc-switch
-/// not installed). We watch the *parent directory* non-recursively rather
-/// than the file itself: SQLite atomic-replaces / re-creates the db on some
-/// operations, and watching a not-yet-existing file fails outright.
-pub fn start(
-    state: &CcswitchWatcherState,
-    app: &AppHandle,
-    manual_data_dir: Option<&str>,
-) -> Result<(), String> {
-    let resolved = resolve_ccswitch_db(manual_data_dir)
-        .ok_or_else(|| "could not resolve cc-switch.db".to_string())?;
-    let db_path = resolved.path;
-    let watch_dir = db_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .ok_or_else(|| "cc-switch.db has no parent dir".to_string())?;
-    if !watch_dir.exists() {
-        return Err(format!(
-            "cc-switch data dir does not exist: {}",
-            watch_dir.display()
-        ));
-    }
-
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-    let db_for_filter = db_path.clone();
-    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res {
-            let relevant = event.paths.iter().any(|p| path_is_db(&db_for_filter, p));
-            if relevant {
-                let _ = tx.send(());
-            }
-        }
-    })
-    .map_err(|e| format!("notify init: {e}"))?;
-
-    watcher
-        .watch(&watch_dir, RecursiveMode::NonRecursive)
-        .map_err(|e| format!("watch start: {e}"))?;
-
-    // Debounce emitter: after the first event, wait for DEBOUNCE_MS of quiet
-    // before emitting a single refresh signal.
-    let app_for_task = app.clone();
-    let db_str = db_path.to_string_lossy().into_owned();
-    tauri::async_runtime::spawn(async move {
-        while rx.recv().await.is_some() {
-            loop {
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_millis(DEBOUNCE_MS)) => break,
-                    msg = rx.recv() => {
-                        if msg.is_none() { return; } // channel closed
-                    }
-                }
-            }
-            let _ = app_for_task.emit(
-                DB_CHANGED_EVENT,
-                DbChangedPayload {
-                    db_path: db_str.clone(),
-                },
-            );
-        }
-    });
-
-    // Replaces (and drops) any prior watcher.
-    *state.watcher.lock() = Some(watcher);
-    Ok(())
-}
-
 /// Stop watching. Dropping the watcher ends its debounce task. Idempotent.
 pub fn stop(state: &CcswitchWatcherState) {
     *state.watcher.lock() = None;
 }
 
+/// The event-emitting half of the watcher and its two commands: the only part
+/// that needs Tauri, to emit `ccswitch://db-changed` on an `AppHandle` and to
+/// read managed `State`. Behind `tauri-host` (ADR-0196); the watcher state,
+/// `stop` and the db-path filter above are Tauri-free.
+#[cfg(feature = "tauri-host")]
+mod host {
+    use std::time::Duration;
+
+    use notify::{RecursiveMode, Watcher};
+    use serde::Serialize;
+    use tauri::{AppHandle, Emitter};
+
+    use super::{path_is_db, resolve_ccswitch_db, CcswitchWatcherState, DB_CHANGED_EVENT};
+
+    /// Trailing debounce window — coalesces the db + WAL/SHM write burst into a
+    /// single refresh signal.
+    const DEBOUNCE_MS: u64 = 250;
+
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DbChangedPayload {
+        db_path: String,
+    }
+
+    /// Start (or replace) the cc-switch.db watcher, emitting debounced
+    /// `ccswitch://db-changed` events on `app`. Returns an error string when the
+    /// db path can't be resolved or the parent dir doesn't exist yet (cc-switch
+    /// not installed). We watch the *parent directory* non-recursively rather
+    /// than the file itself: SQLite atomic-replaces / re-creates the db on some
+    /// operations, and watching a not-yet-existing file fails outright.
+    pub fn start(
+        state: &CcswitchWatcherState,
+        app: &AppHandle,
+        manual_data_dir: Option<&str>,
+    ) -> Result<(), String> {
+        let resolved = resolve_ccswitch_db(manual_data_dir)
+            .ok_or_else(|| "could not resolve cc-switch.db".to_string())?;
+        let db_path = resolved.path;
+        let watch_dir = db_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .ok_or_else(|| "cc-switch.db has no parent dir".to_string())?;
+        if !watch_dir.exists() {
+            return Err(format!(
+                "cc-switch data dir does not exist: {}",
+                watch_dir.display()
+            ));
+        }
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let db_for_filter = db_path.clone();
+        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                let relevant = event.paths.iter().any(|p| path_is_db(&db_for_filter, p));
+                if relevant {
+                    let _ = tx.send(());
+                }
+            }
+        })
+        .map_err(|e| format!("notify init: {e}"))?;
+
+        watcher
+            .watch(&watch_dir, RecursiveMode::NonRecursive)
+            .map_err(|e| format!("watch start: {e}"))?;
+
+        // Debounce emitter: after the first event, wait for DEBOUNCE_MS of quiet
+        // before emitting a single refresh signal.
+        let app_for_task = app.clone();
+        let db_str = db_path.to_string_lossy().into_owned();
+        tauri::async_runtime::spawn(async move {
+            while rx.recv().await.is_some() {
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(DEBOUNCE_MS)) => break,
+                        msg = rx.recv() => {
+                            if msg.is_none() { return; } // channel closed
+                        }
+                    }
+                }
+                let _ = app_for_task.emit(
+                    DB_CHANGED_EVENT,
+                    DbChangedPayload {
+                        db_path: db_str.clone(),
+                    },
+                );
+            }
+        });
+
+        // Replaces (and drops) any prior watcher.
+        *state.watcher.lock() = Some(watcher);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "tauri-host")]
+pub use host::start;
+
+// The two commands stay at this module's top level: `generate_handler!`
+// resolves each command's generated `__cmd__…` macro at the path it names
+// (`ccswitch::watcher::…`), which a re-export from `host` would not carry.
+
 /// Start the cc-switch.db watcher. Returns whether a watch is now active.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn ccswitch_watch_start(
-    app: AppHandle,
+    app: tauri::AppHandle,
     state: tauri::State<'_, CcswitchWatcherState>,
     manual_data_dir: Option<String>,
 ) -> Result<bool, String> {
@@ -151,6 +174,7 @@ pub fn ccswitch_watch_start(
 }
 
 /// Stop the cc-switch.db watcher.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn ccswitch_watch_stop(state: tauri::State<'_, CcswitchWatcherState>) {
     stop(&state);

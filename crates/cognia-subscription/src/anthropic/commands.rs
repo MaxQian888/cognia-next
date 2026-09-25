@@ -15,11 +15,11 @@ use crate::vault::{Account, AnthropicCredentialData, ProviderCredential};
 /// (`~/.claude/.credentials.json` or the `"Claude Code-credentials"` keyring
 /// entry). Used by the "Reuse" mode of the Anthropic login dialog and the
 /// providers-tab one-click reuse card.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn anthropic_oauth_discover(
     allow_keychain_prompt: Option<bool>,
 ) -> Result<Option<DiscoveredAnthropicAuth>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         discovery::discover_anthropic_auth_with_prompt(allow_keychain_prompt.unwrap_or(false))
     })
     .await
@@ -37,7 +37,7 @@ pub async fn anthropic_oauth_discover(
 /// `label` is the optional user-provided alias (the new-account dialog can
 /// prompt for one). When `None`, the provider's `default_label` derives one
 /// from the credential claims.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn anthropic_oauth_save_pkce_result(
     local_account_id: String,
     payload: AnthropicCredentialData,

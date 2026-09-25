@@ -16,10 +16,17 @@ publish.workspace = true
 name = "cognia_subscription"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the `#[tauri::command]` shells in `anthropic`/`codex`/`opencode`
+# `::commands`. Those taking `State` compile only with it; the rest stay
+# ordinary fns. Only `src-tauri` enables it.
+default = []
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 cognia-secrets = { path = "../cognia-secrets" }
 cognia-net = { path = "../cognia-net" }
-tauri = { workspace = true }
+tauri = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 base64.workspace = true
