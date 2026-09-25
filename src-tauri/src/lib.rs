@@ -41,9 +41,6 @@ mod cli_bridge;
 pub use cognia_git::code_adoption;
 mod codeserver;
 mod codex_app_dispatch;
-// ADR-0067 Phase 6 — extracted to cognia-core; re-aliased so `crate::command_error`
-// (claude, logging, plugin_api/vscode, top-level) resolves unchanged.
-pub use cognia_core::command_error;
 mod commands;
 pub mod companion_api;
 // ADR-0067 Tier B — extracted to `crates/cognia-connectors` (isolates the
@@ -131,7 +128,6 @@ mod pi_sessions;
 // wasmtime/cranelift); re-aliased so `crate::plugin_api::…` (companion_api,
 // cli_bridge, generate_handler! + .manage()) resolves unchanged.
 pub use cognia_plugin_runtime as plugin_api;
-mod plugins;
 // Unified managed-process registry — aggregates cognia-spawned child processes
 // (external agents, chat sidecar, ACP + PTY terminals, MCP server) for the
 // performance panel's "Managed Processes" tab and the graceful teardown arm.
@@ -157,7 +153,8 @@ pub mod recovery;
 mod wake_on_lan;
 pub use cognia_automation::sandbox;
 // ADR-0067 Phase 6 — scheduler/workflow/timing extracted to the
-// cognia-scheduling cluster; re-aliased so all three module paths resolve.
+// cognia-scheduling cluster; `scheduler` and `workflow` are re-aliased so their
+// `crate::` paths resolve unchanged.
 pub use cognia_scheduling::scheduler;
 // ADR-0067 Tier B prep — extracted to `crates/cognia-secrets`; re-aliased so
 // every `crate::secret_store::…` call site (subscription, connectors, gateway,
@@ -199,7 +196,6 @@ pub use cognia_observability::telemetry;
 // ADR-0067 Tier B — extracted to `crates/cognia-terminal`; re-aliased so
 // `crate::terminal::…` (companion_api rpc/ws_terminal, plugin_api cli_exec,
 // generate_handler! + .manage()) resolves unchanged.
-pub use cognia_scheduling::timing;
 pub use cognia_terminal as terminal;
 pub mod sftp_service;
 pub mod terminal_host_bridge;

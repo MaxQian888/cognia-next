@@ -1,9 +1,16 @@
 # Cargo workspace root for cognia-next.
 #
 # Members share one Cargo.lock + one target/ directory at the repo root:
-#   - src-tauri/           — main Tauri app (`cognia-next`) + headless
-#                            server binary (`cognia-server`).
-#   - crates/cognia-cli/   — plugin-author CLI (`cognia`).
+#   - src-tauri/           — the Tauri desktop app (`cognia-next`, lib
+#                            `app_lib`) + the headless `cognia-server` binary.
+#   - crates/*             — library crates and standalone services. Every
+#                            member has a layer in
+#                            `scripts/gates/rust-architecture.json`, and
+#                            `pnpm audit:rust-architecture` keeps the edges
+#                            pointing down and library crates Tauri-free by
+#                            default (ADR-0196). New Rust logic goes into the
+#                            lowest-layer crate that can own it, not
+#                            `src-tauri/src`.
 #
 # Intentionally excluded:
 #   - services/signaling-server/, services/share-server/
@@ -86,11 +93,15 @@ members = [
   # agent's `bash(run_in_background)` and for scheduled tasks. Linked by both
   # src-tauri and the headless `cognia-server` binary.
   "crates/cognia-jobs",
+  # Crash capture, logging and telemetry. Created with the diagnostic service;
+  # the app's crash/logging/telemetry cluster moved in under ADR-0067 Tier C.
   "crates/cognia-observability",
   # ADR-0067 Tier C — leaves lifted out of the regrown `app_lib`.
   "crates/cognia-agents",
   "crates/cognia-files",
   "crates/cognia-agent-state",
+  # The provider-neutral deploy target contract, and the controller and signed
+  # agent built on it. New crates, not extractions from `app_lib`.
   "crates/cognia-deployment",
   "crates/cognia-ops-controller",
   "crates/cognia-deploy-agent",

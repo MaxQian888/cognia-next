@@ -136,7 +136,6 @@
       "pet_window",
       "pi_extension.rs",
       "pi_sessions.rs",
-      "plugins",
       "power_assertion.rs",
       "process_registry",
       "project_environment.rs",

@@ -48,7 +48,7 @@
  *   node scripts/gates/check-rust-architecture.mjs --print-tauri-host-features
  */
 
-import { readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { dirname, join, relative, sep } from "node:path"
@@ -404,7 +404,12 @@ function readAppShell(config) {
     encoding: "utf8",
   })
   if (listed.status !== 0) throw new Error(`git ls-files failed:\n${listed.stderr}`)
-  const files = listed.stdout.split("\0").filter(Boolean)
+  // `git ls-files` still lists a tracked file whose deletion is not staged yet;
+  // a path that is gone from disk is not part of the shell any more.
+  const files = listed.stdout
+    .split("\0")
+    .filter(Boolean)
+    .filter((file) => existsSync(join(REPO_ROOT, file)))
   let loc = 0
   for (const file of files) {
     if (!file.endsWith(".rs")) continue
