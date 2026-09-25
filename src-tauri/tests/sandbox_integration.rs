@@ -48,6 +48,7 @@ async fn backend_can_run_trivially(backend: &impl SandboxedExec) -> bool {
         network: NetworkPolicy::Off,
         max_cpu_seconds: 0,
         max_memory_mb: 0,
+        max_processes: 0,
     };
     matches!(
         backend
@@ -82,6 +83,7 @@ mod linux {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let result = backend
             .run(cmd, policy)
@@ -139,6 +141,7 @@ mod linux {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let result = backend
             .run(cmd, policy)
@@ -184,6 +187,7 @@ mod macos {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let result = backend
             .run(cmd, policy)

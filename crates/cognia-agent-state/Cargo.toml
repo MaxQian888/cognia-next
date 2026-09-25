@@ -37,7 +37,11 @@ dirs.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 thiserror.workspace = true
 # Routing-snapshot + credential types and the static-header policy check.
-cognia-gateway = { path = "../cognia-gateway" }
+# `default-features = false`: this crate only reads the gateway's credential,
+# header-policy and routing-snapshot types, and the gateway's default
+# `tauri-host` feature would otherwise pull Tauri into a crate the headless
+# server links directly.
+cognia-gateway = { path = "../cognia-gateway", default-features = false }
 
 [lints]
 workspace = true

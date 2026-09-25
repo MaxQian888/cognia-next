@@ -10,7 +10,6 @@
     "layer: cognia-plugin-runtime -> cognia-automation",
     "layer: cognia-plugin-runtime -> cognia-connectors",
     "layer: cognia-terminal -> cognia-automation",
-    "tauri-default: cognia-agent-state",
     "tauri-default: cognia-agents",
     "tauri-default: cognia-automation",
     "tauri-default: cognia-ccswitch",
