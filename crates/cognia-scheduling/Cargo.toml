@@ -16,12 +16,20 @@ publish.workspace = true
 name = "cognia_scheduling"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the Tauri command shells (all take `State`) and the
+# `AppHandle`-bound event emitters. Off by default so the scheduler and
+# workflow engine build and test Tauri-free; only `src-tauri` enables it.
+default = []
+tauri-host = ["dep:tauri"]
+
 [dependencies]
-cognia-core = { path = "../cognia-core" }
+# `rt::spawn` starts the alarm/cron/file-watch loops on the app runtime.
+cognia-core = { path = "../cognia-core", features = ["rt"] }
 cognia-secrets = { path = "../cognia-secrets" }
 # The page envelope desktop list commands answer (ADR-0175 B3).
 cognia-problem = { path = "../cognia-problem" }
-tauri = { workspace = true }
+tauri = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "fs", "io-util", "sync", "time"] }
 cron = "0.17"
 rusqlite = { workspace = true, features = ["bundled"] }

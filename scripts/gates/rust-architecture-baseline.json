@@ -7,7 +7,6 @@
     "tauri-default: cognia-connectors",
     "tauri-default: cognia-mcp-server",
     "tauri-default: cognia-plugin-runtime",
-    "tauri-default: cognia-scheduling",
     "tauri-default: cognia-terminal"
   ]
 }

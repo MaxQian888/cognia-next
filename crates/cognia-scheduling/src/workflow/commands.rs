@@ -4,6 +4,7 @@
 //! `lib/workflow/runtime/tauri-bridge.ts` — five TS→Rust commands plus the
 //! Rust→TS `workflow:trigger` event (emitted by the daemon, not a command).
 
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::run_mirror::MirrorError;
@@ -21,6 +22,7 @@ fn map_mirror_err(e: MirrorError) -> String {
 /// `workflow_register_trigger` — add or update a trigger entry. The cron
 /// daemon (or the eventual webhook router / inbound tap) reads the registry
 /// to decide what to fire.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_register_trigger(
     state: State<'_, WorkflowState>,
@@ -138,6 +140,7 @@ pub fn workflow_register_trigger_for_state(
 /// `workflow_unregister_trigger` — remove a trigger by id. Idempotent;
 /// missing ids are a no-op. Sweeps both the cron daemon and the webhook
 /// router so callers don't have to remember which kind they registered.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_unregister_trigger(
     state: State<'_, WorkflowState>,
@@ -170,6 +173,7 @@ pub fn workflow_unregister_trigger_for_state(
 /// A lost ack is not fatal. The daemon's `mute_timeout_ms` lifts the mute with
 /// a warning, so a crashed webview costs a late re-arm rather than a dead
 /// trigger.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_file_watch_ack(
     state: State<'_, WorkflowState>,
@@ -192,6 +196,7 @@ pub fn workflow_file_watch_ack_for_state(
 /// `workflow_get_webhook_url` — returns the http URL the user can hit to
 /// fire a registered webhook trigger. Returns `None` when the trigger is
 /// not registered or the router has not yet bound a port.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_get_webhook_url(
     state: State<'_, WorkflowState>,
@@ -214,6 +219,7 @@ pub fn workflow_get_webhook_url_for_state(
 /// node executor with the correlation id the trigger payload carried. Returns
 /// `true` when a request was still waiting (false if it already timed out or
 /// the id is unknown), so the executor can surface delivery status.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_webhook_respond(
     state: State<'_, WorkflowState>,
@@ -242,6 +248,7 @@ pub fn workflow_webhook_respond_for_state(
     ))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn integration_ingress_register(
     state: State<'_, WorkflowState>,
@@ -257,6 +264,7 @@ pub fn integration_ingress_register_for_state(
     state.webhook.upsert_integration(input)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn integration_ingress_unregister(
     state: State<'_, WorkflowState>,
@@ -273,6 +281,7 @@ pub fn integration_ingress_unregister_for_state(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn integration_ingress_get_url(
     state: State<'_, WorkflowState>,
@@ -288,6 +297,7 @@ pub fn integration_ingress_get_url_for_state(
     Ok(state.webhook.integration_url(&route_id))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn integration_ingress_poll(
     state: State<'_, WorkflowState>,
@@ -306,6 +316,7 @@ pub fn integration_ingress_poll_for_state(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn integration_ingress_ack(
     state: State<'_, WorkflowState>,
@@ -326,6 +337,7 @@ pub fn integration_ingress_ack_for_state(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn integration_ingress_nack(
     state: State<'_, WorkflowState>,
@@ -348,6 +360,7 @@ pub fn integration_ingress_nack_for_state(
 
 /// One page of dead letters (ADR-0175 B3). The spool answers its newest 500
 /// at most and the page walks them.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn integration_ingress_deadletters(
     state: State<'_, WorkflowState>,
@@ -375,6 +388,7 @@ pub fn integration_ingress_deadletters_for_state(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn integration_ingress_deadletter(
     state: State<'_, WorkflowState>,
@@ -402,6 +416,7 @@ pub fn integration_ingress_deadletter_for_state(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn integration_ingress_requeue(
     state: State<'_, WorkflowState>,
@@ -431,6 +446,7 @@ pub fn integration_ingress_requeue_for_state(
 
 /// `workflow_persist_run_state` — upsert the SQLite mirror. Called from the
 /// orchestrator after every step transition.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_persist_run_state(
     state: State<'_, WorkflowState>,
@@ -449,6 +465,7 @@ pub fn workflow_persist_run_state_for_state(
 /// `workflow_reload_in_flight_runs` — return rows whose status is still
 /// `running` / `waiting` / `paused` / `pending`. Called once on app boot;
 /// the TS resume controller turns each row into a `workflow:resume` event.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_reload_in_flight_runs(
     state: State<'_, WorkflowState>,
@@ -463,6 +480,7 @@ pub fn workflow_reload_in_flight_runs_for_state(
 }
 
 /// `workflow_ack_completed` — drop a mirror row after a successful run.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_ack_completed(
     state: State<'_, WorkflowState>,
@@ -478,6 +496,7 @@ pub fn workflow_ack_completed_for_state(
     state.mirror.ack_completed(&run_id).map_err(map_mirror_err)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_waitpoint_create(
     state: State<'_, WorkflowState>,
@@ -496,6 +515,7 @@ pub fn workflow_waitpoint_create_for_state(
         .map_err(map_mirror_err)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_waitpoint_get(
     state: State<'_, WorkflowState>,
@@ -514,6 +534,7 @@ pub fn workflow_waitpoint_get_for_state(
         .map_err(map_mirror_err)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_waitpoint_list_pending(
     state: State<'_, WorkflowState>,
@@ -530,6 +551,7 @@ pub fn workflow_waitpoint_list_pending_for_state(
         .map_err(map_mirror_err)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_waitpoint_decide(
     state: State<'_, WorkflowState>,
@@ -548,6 +570,7 @@ pub fn workflow_waitpoint_decide_for_state(
         .map_err(map_mirror_err)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_wait_event_persist(
     state: State<'_, WorkflowState>,
@@ -566,6 +589,7 @@ pub fn workflow_wait_event_persist_for_state(
         .map_err(map_mirror_err)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn workflow_wait_event_prune(
     state: State<'_, WorkflowState>,

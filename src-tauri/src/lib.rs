@@ -334,6 +334,12 @@ impl cognia_vector::CredentialStore for KeyringVectorCredentialStore {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // ADR-0196 — library crates spawn through `cognia_core::rt` rather than
+    // `tauri::async_runtime`. Give them the runtime `main.rs` handed Tauri, so
+    // a daemon started from `setup()` (main thread, no runtime entered) runs
+    // on the same runtime as everything else. `run()` is entered once.
+    let _ = cognia_core::rt::install(tauri::async_runtime::handle().inner().clone());
+
     #[cfg(desktop)]
     proxy_config::install_uninitialized_proxy_environment();
 

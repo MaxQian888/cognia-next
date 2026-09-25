@@ -47,10 +47,13 @@ pub use daemon::{AlarmDaemon, TaskDueEmitter};
 /// daemon can fire `scheduler:task-due` events without holding a `&AppHandle`
 /// (which doesn't satisfy the daemon's `'static` bound). Mirrors
 /// `crate::workflow::AppHandleEmitter`.
+/// Behind `tauri-host` (ADR-0196); the daemon itself only knows the trait.
+#[cfg(feature = "tauri-host")]
 pub struct AppHandleTaskDueEmitter {
     pub handle: tauri::AppHandle,
 }
 
+#[cfg(feature = "tauri-host")]
 impl TaskDueEmitter for AppHandleTaskDueEmitter {
     fn emit(&self, event: TaskDueEvent) {
         if let Err(err) = tauri::Emitter::emit(&self.handle, "scheduler:task-due", event) {

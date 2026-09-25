@@ -32,10 +32,13 @@ pub use triggers::cron_daemon::{CronDaemon, TriggerEmitter};
 /// AppHandle-bound TriggerEmitter — wraps `tauri::Emitter::emit` so the cron
 /// daemon can fire `workflow:trigger` events without holding a `&AppHandle`
 /// reference (which doesn't satisfy the daemon's 'static bound).
+/// Behind `tauri-host` (ADR-0196); the daemons only know the trait.
+#[cfg(feature = "tauri-host")]
 pub struct AppHandleEmitter {
     pub handle: tauri::AppHandle,
 }
 
+#[cfg(feature = "tauri-host")]
 impl TriggerEmitter for AppHandleEmitter {
     fn emit(&self, event: types::TriggerEvent) {
         if let Err(err) = tauri::Emitter::emit(&self.handle, "workflow:trigger", event) {

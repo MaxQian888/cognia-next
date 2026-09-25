@@ -2,7 +2,13 @@
 //!
 //! Provides commands for creating, managing, and executing system-level scheduled tasks.
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving the
+// `_impl` helpers and imports they share with the tests unused in the
+// library build; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use log::{debug, error, info};
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use crate::scheduler::{
@@ -141,18 +147,21 @@ fn scheduler_validate_task_impl(
 }
 
 /// Get scheduler capabilities for the current platform
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn scheduler_get_capabilities(state: State<'_, SchedulerState>) -> SchedulerCapabilities {
     state.capabilities()
 }
 
 /// Check if the system scheduler is available
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn scheduler_is_available(state: State<'_, SchedulerState>) -> bool {
     state.is_available()
 }
 
 /// Check if running with elevated privileges
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn scheduler_is_elevated(state: State<'_, SchedulerState>) -> bool {
     state.is_elevated()
@@ -162,6 +171,7 @@ pub fn scheduler_is_elevated(state: State<'_, SchedulerState>) -> bool {
 ///
 /// If confirmation is required (high-risk operations), returns ConfirmationRequired.
 /// Set `confirmed` to true after user confirmation.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_create_task(
     state: State<'_, SchedulerState>,
@@ -196,6 +206,7 @@ pub async fn scheduler_create_task(
 }
 
 /// Update an existing system task
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_update_task(
     state: State<'_, SchedulerState>,
@@ -231,6 +242,7 @@ pub async fn scheduler_update_task(
 }
 
 /// Delete a system task
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_delete_task(
     state: State<'_, SchedulerState>,
@@ -253,6 +265,7 @@ pub async fn scheduler_delete_task(
 }
 
 /// Get a system task by ID
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_get_task(
     state: State<'_, SchedulerState>,
@@ -268,6 +281,7 @@ pub async fn scheduler_get_task(
 }
 
 /// List all Cognia-managed system tasks
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_list_tasks(
     state: State<'_, SchedulerState>,
@@ -285,6 +299,7 @@ pub async fn scheduler_list_tasks(
 }
 
 /// Enable a system task
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_enable_task(
     state: State<'_, SchedulerState>,
@@ -307,6 +322,7 @@ pub async fn scheduler_enable_task(
 }
 
 /// Disable a system task
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_disable_task(
     state: State<'_, SchedulerState>,
@@ -329,6 +345,7 @@ pub async fn scheduler_disable_task(
 }
 
 /// Run a system task immediately
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_run_task_now(
     state: State<'_, SchedulerState>,
@@ -352,6 +369,7 @@ pub async fn scheduler_run_task_now(
 }
 
 /// Cancel a pending confirmation
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_cancel_confirmation(
     state: State<'_, SchedulerState>,
@@ -363,6 +381,7 @@ pub async fn scheduler_cancel_confirmation(
 }
 
 /// Get all pending confirmations
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_get_pending_confirmations(
     state: State<'_, SchedulerState>,
@@ -371,6 +390,7 @@ pub async fn scheduler_get_pending_confirmations(
 }
 
 /// Request admin elevation
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_request_elevation(
     state: State<'_, SchedulerState>,
@@ -382,6 +402,7 @@ pub async fn scheduler_request_elevation(
 }
 
 /// Confirm a pending task operation
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn scheduler_confirm_task(
     state: State<'_, SchedulerState>,
@@ -406,6 +427,7 @@ pub async fn scheduler_confirm_task(
 }
 
 /// Validate a system task input without creating it
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn scheduler_validate_task(
     state: State<'_, SchedulerState>,
@@ -432,6 +454,7 @@ fn scheduler_disarm_task_impl(state: &SchedulerState, task_id: &str) {
 /// whenever it (re)schedules a task; the daemon emits `scheduler:task-due` when
 /// the instant elapses. No-op when the alarm daemon is not installed (e.g. the
 /// data dir was unavailable at boot) so the renderer never hard-fails.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn scheduler_arm_task(
     state: State<'_, SchedulerState>,
@@ -443,6 +466,7 @@ pub fn scheduler_arm_task(
 
 /// Cancel a previously-armed task in the alarm daemon. No-op for unknown ids
 /// or when the daemon is not installed.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn scheduler_disarm_task(
     state: State<'_, SchedulerState>,

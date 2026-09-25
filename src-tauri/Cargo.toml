@@ -79,7 +79,7 @@ schemars.workspace = true
 # own HMAC/replay logic but reuses these structs to prevent wire-format drift.
 cognia-signaling-core = { path = "../services/signaling-server/core" }
 # ADR-0067 — foundation utilities (fs_atomic). Re-aliased as `crate::fs_atomic`.
-cognia-core = { path = "../crates/cognia-core" }
+cognia-core = { path = "../crates/cognia-core", features = ["rt"] }
 # ADR-0067 Tier B prep — secret_store/keyring_secrets/api_key foundation.
 # Re-aliased as crate::{secret_store,api_key}; keyring_secrets keeps an
 # app-side facade for its command shells. The `test-inmemory` feature is
@@ -302,7 +302,7 @@ base64.workspace = true
 # ADR-0067 Phase 6 — scheduler + workflow + timing (and the `cron` expression
 # parser) live in `crates/cognia-scheduling`; re-aliased as
 # crate::{scheduler,workflow}.
-cognia-scheduling = { path = "../crates/cognia-scheduling" }
+cognia-scheduling = { path = "../crates/cognia-scheduling", features = ["tauri-host"] }
 
 # HTTP listeners in the app shell (companion API, codeserver relay, CLI
 # bridge): axum for the routers, subtle for constant-time token comparison in

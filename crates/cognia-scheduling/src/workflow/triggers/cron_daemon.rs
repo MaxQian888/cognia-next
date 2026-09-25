@@ -294,12 +294,12 @@ impl CronDaemon {
     /// Spawn the long-running tokio task that drives firing. Should be called
     /// once during app boot.
     ///
-    /// Uses `tauri::async_runtime::spawn` so it is safe to call from the
-    /// Tauri `setup` closure (which runs on the main thread without a Tokio
+    /// Uses `cognia_core::rt::spawn` so it is safe to call from the Tauri
+    /// `setup` closure (which runs on the main thread without a Tokio
     /// runtime entered). `tokio::spawn` would panic with
     /// "there is no reactor running" in that context.
     pub fn spawn(self) {
-        tauri::async_runtime::spawn(async move {
+        cognia_core::rt::spawn(async move {
             self.run_loop().await;
         });
     }

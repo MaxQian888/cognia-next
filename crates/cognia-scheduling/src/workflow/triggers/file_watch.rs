@@ -470,7 +470,7 @@ impl FileWatchDaemon {
         let workflow_id = input.workflow_id.clone();
         let trigger_id = input.trigger_id.clone();
         let binding = input.binding.clone();
-        tauri::async_runtime::spawn(async move {
+        cognia_core::rt::spawn(async move {
             while let Some(first_kind) = rx.recv().await {
                 let mut last_kind = first_kind;
                 // Trailing debounce: keep draining until the burst goes quiet.
