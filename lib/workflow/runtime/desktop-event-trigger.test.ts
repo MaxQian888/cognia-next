@@ -170,6 +170,9 @@ describe("desktop-event fan-out", () => {
   })
 
   it("routes distinct kind/scope subscriptions back to only their owning trigger nodes", async () => {
+    // `["scope-a"]` is how a scope was persisted while `elementRef()` wrapped
+    // it in a tuple. Such a node still resolves, and the backend is sent the
+    // bare string the Rust `ElementRef(String)` newtype actually deserializes.
     const focus = wf("wf_focus", { kinds: ["focus-changed"], scope: ["scope-a"] })
     const structure = wf("wf_structure", {
       kinds: ["structure-changed"],
@@ -188,11 +191,11 @@ describe("desktop-event fan-out", () => {
     expect(deps.subscribe).toHaveBeenCalledTimes(2)
     expect(deps.subscribe).toHaveBeenNthCalledWith(1, {
       kinds: ["focus-changed"],
-      scope: ["scope-a"],
+      scope: "scope-a",
     })
     expect(deps.subscribe).toHaveBeenNthCalledWith(2, {
       kinds: ["structure-changed"],
-      scope: ["scope-b"],
+      scope: "scope-b",
     })
 
     await _injectUiaEventForTest({
