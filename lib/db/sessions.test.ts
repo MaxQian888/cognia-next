@@ -1365,13 +1365,11 @@ describe("countWorkspaceConversations", () => {
   })
 
   it("re-emits in a liveQuery when a message lands or a conversation joins", async () => {
-    // Its own workspace id: Dexie's liveQuery cache keeps a reversed
-    // `[projectId+updatedAt]` range an earlier test subscribed to, and the
-    // fixture's restore does not evict it, so a reused id replays that test's rows.
-    const own = await createSession({ title: "own", projectId: "proj-live" })
+    await saveSettings({ activeProjectId: "proj-A" })
+    const own = await createSession({ title: "own" })
     await putMessages(own.id, 1)
     const emissions: Array<{ conversations: number; messages: number }> = []
-    const sub = Dexie.liveQuery(() => countWorkspaceConversations("proj-live")).subscribe({
+    const sub = Dexie.liveQuery(() => countWorkspaceConversations("proj-A")).subscribe({
       next: (counts) => emissions.push(counts),
     })
     await waitUntil(() => emissions.at(-1)?.messages === 1)
@@ -1387,9 +1385,9 @@ describe("countWorkspaceConversations", () => {
     await waitUntil(() => emissions.at(-1)?.messages === 2)
 
     // A conversation moved in from another workspace brings its messages.
-    const moved = await createSession({ title: "moved", projectId: "proj-elsewhere" })
+    const moved = await createSession({ title: "moved", projectId: "proj-B" })
     await putMessages(moved.id, 4)
-    await getDb().sessions.update(moved.id, { projectId: "proj-live" })
+    await getDb().sessions.update(moved.id, { projectId: "proj-A" })
     await waitUntil(() => emissions.at(-1)?.messages === 6)
 
     sub.unsubscribe()

@@ -1,5 +1,6 @@
 import "fake-indexeddb/auto"
 
+import Dexie from "dexie"
 import {
   __enableDbRuntimeForTesting,
   __resetDbForTesting,
@@ -57,6 +58,28 @@ async function captureDatabase(db: CogniaDB): Promise<TableSnapshot[]> {
       }))
     )
   )
+}
+
+/**
+ * Drop Dexie's liveQuery result cache for one database.
+ *
+ * The cache (`Dexie.cache`, keyed `idb://<db>/<table>`) is module-global and
+ * outlives a restore: an entry stays reusable for 3s after its last subscriber
+ * leaves, writes outside an explicit transaction are patched into its result,
+ * and an explicit transaction evicts only entries whose observed parts overlap
+ * what it mutated. A restore's `clear()` marks just the primary-key parts, and
+ * an index query that matched nothing when it ran observed no primary keys, so
+ * nothing evicts it: the next test's liveQuery over the same index would read
+ * the previous test's rows. A restored database starts with no cached reads.
+ *
+ * Deleting the database needs none of this: Dexie drops every cached read of a
+ * database when it creates that database anew.
+ */
+function evictLiveQueryCache(dbName: string): void {
+  const prefix = `idb://${dbName}/`
+  for (const part of Object.keys(Dexie.cache)) {
+    if (part.startsWith(prefix)) delete Dexie.cache[part]
+  }
 }
 
 async function restoreDatabase(db: CogniaDB, snapshots: readonly TableSnapshot[]): Promise<void> {
@@ -139,6 +162,7 @@ export function createDbTestFixture(options: DbTestFixtureOptions = {}): DbTestF
         db.close()
         await db.open()
         await restoreDatabase(db, snapshots)
+        evictLiveQueryCache(db.name)
       } catch (error) {
         poisoned = error
         await deleteCurrentDatabase()

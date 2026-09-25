@@ -1,5 +1,20 @@
+import Dexie from "dexie"
 import { getDb } from "./schema"
 import { createDbTestFixture, DB_TEST_TIMEOUT_MS } from "./test-fixture"
+
+/** The first value a liveQuery emits, with the subscription closed behind it. */
+function firstEmission<T>(query: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    // `Dexie.liveQuery`, not a named import: see `lib/db/sessions.test.ts`.
+    const subscription = Dexie.liveQuery(query).subscribe({
+      next: (value) => {
+        subscription.unsubscribe()
+        resolve(value)
+      },
+      error: reject,
+    })
+  })
+}
 
 describe("createDbTestFixture", () => {
   it("exposes the finite full-schema hook budget", () => {
@@ -33,6 +48,35 @@ describe("createDbTestFixture", () => {
     expect(await getDb().skills.count()).toBe(seededSkillCount)
     expect(await getDb().table("settings").get("leaked-setting")).toBeUndefined()
     await fixture.dispose()
+  })
+
+  // Dexie keeps a liveQuery's cached result for 3s after its last subscriber
+  // leaves, patches later non-transactional writes into it, and a restore's
+  // explicit `clear()` marks only primary-key parts — which never overlap an
+  // index query that matched nothing when it ran. Unevicted, the next test's
+  // liveQuery over that index replays the previous test's rows.
+  it("drops the liveQuery cache so the next test's live read sees the restored rows", async () => {
+    const fixture = createDbTestFixture()
+    await fixture.initialize()
+    try {
+      const probe = () => getDb().sessions.where("projectId").equals("fixture-probe").toArray()
+      expect(await firstEmission(probe)).toEqual([])
+      await getDb().sessions.put({
+        id: "fixture-probe-row",
+        projectId: "fixture-probe",
+        createdAt: 1,
+        updatedAt: 1,
+      } as never)
+      // A plain read: a live one would refresh the cache entry and hide the gap.
+      expect((await probe()).map((row) => row.id)).toEqual(["fixture-probe-row"])
+
+      await fixture.restore()
+
+      expect(await getDb().sessions.get("fixture-probe-row")).toBeUndefined()
+      expect(await firstEmission(probe)).toEqual([])
+    } finally {
+      await fixture.dispose()
+    }
   })
 
   it("captures requested seed tables as empty", async () => {
