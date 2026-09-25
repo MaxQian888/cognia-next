@@ -42,10 +42,17 @@ beforeEach(() => {
   liveQueryCallIdx = 0
 })
 
+/**
+ * A skill the validator accepts as-is. The portable checks grew `slug` and
+ * `description` after this fixture was written, so the old one was never
+ * valid — the "no write" cases had been failing for that reason alone.
+ */
 function makeSkill(over: Partial<Skill>): Skill {
   return {
     id: "s1",
     name: "Valid Name",
+    slug: "valid-name",
+    description: "A skill the validator accepts.",
     content: "body",
     createdAt: 0,
     updatedAt: 0,
@@ -90,6 +97,31 @@ describe("useSkillValidation", () => {
     rerender()
     await new Promise((r) => setTimeout(r, 20))
     expect(updateSkillMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("reads the skill's slug, so opening a valid skill does not mark it broken", async () => {
+    // Omitting `slug` made every opened skill persist "slug is required".
+    skillRowRef.current = makeSkill({})
+    renderHook(() => useSkillValidation("s1"))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(updateSkillMock).not.toHaveBeenCalled()
+  })
+
+  it("clears a stale missing-slug error left by the old check", async () => {
+    skillRowRef.current = makeSkill({
+      validationErrors: [
+        {
+          code: "missing-slug",
+          field: "slug",
+          message: "A portable skill slug is required.",
+          severity: "portability",
+        },
+      ],
+    })
+    renderHook(() => useSkillValidation("s1"))
+    await waitFor(() =>
+      expect(updateSkillMock).toHaveBeenCalledWith("s1", { validationErrors: [] })
+    )
   })
 
   it("re-validates when resources change", async () => {

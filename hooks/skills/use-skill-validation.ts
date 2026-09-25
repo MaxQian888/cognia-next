@@ -28,9 +28,16 @@ export function useSkillValidation(skillId: string | undefined): void {
 
   useEffect(() => {
     if (!skill || !skillId) return
+    // Every field the validator checks, the same set the editor passes. This
+    // used to omit `slug`, so merely opening a skill persisted a "portable
+    // skill slug is required" error onto it — the red badge a built-in picked
+    // up just by being the first row selected.
     const errors = validateSkill({
       name: skill.name,
+      slug: skill.slug,
       description: skill.description,
+      compatibility: skill.compatibility,
+      metadata: skill.metadata,
       content: skill.content,
       resources: (resources ?? []).map((r) => ({ id: r.id, path: r.path })),
     })
