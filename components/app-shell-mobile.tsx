@@ -63,6 +63,7 @@ import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layo
 import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
+import { useSharedChatEnabled } from "@/hooks/collab/use-shared-chat-enabled"
 import { SharedSessionJoin } from "@/components/chat/shared-session-join"
 import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
 import { MobileActiveRunsCard } from "@/components/mobile/home/mobile-active-runs-card"
@@ -333,6 +334,7 @@ export function AppShellMobile() {
   })
 
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
+  const sharedChatEnabled = useSharedChatEnabled()
 
   // Was a count of `inboundLedger` rows newer than `lastInboxViewedAt`. That
   // ledger is host-only and never syncs, so the dot was permanently dark on a
@@ -642,7 +644,9 @@ export function AppShellMobile() {
           streaming={chatStatus === "streaming"}
         />
 
-        <MobileWorkspaceChip className="ml-2 min-w-0 shrink" />
+        {/* No `ml-2`: the header's own `gap-2` already spaces it, and the
+            doubled 16px came straight out of the title's width. */}
+        <MobileWorkspaceChip className="min-w-0 shrink" />
 
         {/* A phone shows one conversation, so turns started and navigated away
             from had no representation at all here. Tapping goes to one. */}
@@ -855,8 +859,14 @@ export function AppShellMobile() {
           </DropdownMenu>
         </div>
       </header>
-      {activeSession ? (
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b px-3 py-1">
+      {/* Only while sharing is on. With it off the panel is one disabled lock
+          icon, and on a phone that spent a whole bordered row of the chat's
+          height on a control that cannot be pressed. */}
+      {activeSession && sharedChatEnabled ? (
+        <div
+          className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b px-3 py-1"
+          data-testid="mobile-shared-session-strip"
+        >
           <SharedSessionPanel session={activeSession} />
         </div>
       ) : null}

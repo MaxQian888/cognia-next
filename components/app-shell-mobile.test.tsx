@@ -14,6 +14,10 @@ jest.mock("@/components/chat/shared-session-panel", () => ({
     <div data-testid="shared-mobile-controls">{session.id}</div>
   ),
 }))
+let mockSharedChatEnabled = true
+jest.mock("@/hooks/collab/use-shared-chat-enabled", () => ({
+  useSharedChatEnabled: () => mockSharedChatEnabled,
+}))
 jest.mock("@/components/chat/shared-session-join", () => ({
   SharedSessionJoin: () => <div data-testid="shared-mobile-join" />,
 }))
@@ -970,6 +974,27 @@ describe("<AppShellMobile />", () => {
     render(<AppShellMobile />)
     expect(screen.getByTestId("mobile-active-title")).toHaveTextContent("Greetings")
     expect(screen.getByTestId("shared-mobile-controls")).toHaveTextContent("s-1")
+  })
+
+  it("spends no row on the sharing control while shared chat is off", () => {
+    mockSharedChatEnabled = false
+    try {
+      sessionsRef.current = [
+        {
+          id: "s-1",
+          title: "Greetings",
+          kind: "direct",
+          createdAt: 0,
+          updatedAt: 0,
+        } as ChatSession,
+      ]
+      activeSessionId = "s-1"
+      render(<AppShellMobile />)
+      expect(screen.queryByTestId("mobile-shared-session-strip")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("shared-mobile-controls")).not.toBeInTheDocument()
+    } finally {
+      mockSharedChatEnabled = true
+    }
   })
 
   it("delegates plan continuation to the shared conversation surface", () => {

@@ -66,6 +66,24 @@ it("shows the active workspace name", () => {
   expect(screen.getByTestId("mobile-workspace-chip")).toHaveTextContent("Backend")
 })
 
+it("drops the visible name on the narrowest phones but keeps it in the label", () => {
+  act(() => {
+    useProjectStore.setState({
+      projects: [{ id: "p1", name: "Backend", roots: [] } as never],
+      activeProjectId: "p1",
+    })
+  })
+  render(<MobileWorkspaceChip />)
+  // Icon-only below 26rem, so the conversation title keeps the room.
+  expect(screen.getByTestId("mobile-workspace-chip-name")).toHaveClass(
+    "hidden",
+    "min-[26rem]:inline-block"
+  )
+  expect(screen.getByTestId("mobile-workspace-chip").getAttribute("aria-label")).toContain(
+    "Backend"
+  )
+})
+
 function activateWorkspace() {
   act(() => {
     useProjectStore.setState({

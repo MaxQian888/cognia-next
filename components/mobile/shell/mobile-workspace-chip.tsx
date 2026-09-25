@@ -68,7 +68,16 @@ export function MobileWorkspaceChip({ className }: { className?: string }) {
             )}
           >
             <FolderIcon className="size-3 shrink-0" />
-            <span className="max-w-24 truncate">{name}</span>
+            {/* Icon-only below 26rem, the same tier the app bar folds its inbox
+                at. At 375px with the credential warning showing, the name was
+                clipped to "D…" while squeezing the conversation title to one
+                letter; the aria-label and the drawer still say which one. */}
+            <span
+              className="hidden max-w-24 truncate min-[26rem]:inline-block"
+              data-testid="mobile-workspace-chip-name"
+            >
+              {name}
+            </span>
             <ChevronDownIcon className="size-3 shrink-0" />
           </button>
         </DrawerTrigger>
