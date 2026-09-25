@@ -548,6 +548,10 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
 
       {selectedMemory && conflictPartner ? (
         <MemoryConflictResolver
+          // The merge draft seeds from `memory.text` at mount; keyed so
+          // moving to another conflicting memory cannot merge the previous
+          // one's text into it.
+          key={selectedMemory.id}
           open={resolverOpen}
           onOpenChange={setResolverOpen}
           memory={selectedMemory}

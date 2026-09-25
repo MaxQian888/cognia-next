@@ -39,8 +39,19 @@ jest.mock("@/components/chat/dialogs/single-export-trigger", () => ({
   SingleExportTrigger: () => null,
 }))
 
+// Seeds from `session` at mount like the real sheet's policy/draft state, so a
+// reused instance shows up as a stale `data-seeded-session`.
 jest.mock("./session-communication-sheet", () => ({
-  SessionCommunicationSheet: () => null,
+  SessionCommunicationSheet: function StubCommunicationSheet({
+    session,
+  }: {
+    session: { id: string; crossSessionInboundPolicy?: string }
+  }) {
+    const [seeded] = jest
+      .requireActual<typeof import("react")>("react")
+      .useState(() => `${session.id}:${session.crossSessionInboundPolicy ?? "hold"}`)
+    return <span data-testid="communication-sheet-stub" data-seeded-session={seeded} hidden />
+  },
 }))
 
 // Branch + active-session + toast are exercised by the branch action tests.
@@ -199,6 +210,32 @@ describe("SessionSettingsSheet", () => {
       </Wrapper>
     )
     expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument()
+  })
+
+  it("re-seeds the communication sheet when the phone switches sessions", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { rerender } = render(
+      <Wrapper>
+        <SessionSettingsSheet
+          session={mkSession({ id: "ses_a", crossSessionInboundPolicy: "accept" })}
+          open={false}
+          onOpenChange={jest.fn()}
+        />
+      </Wrapper>
+    )
+    rerender(
+      <Wrapper>
+        <SessionSettingsSheet
+          session={mkSession({ id: "ses_b", crossSessionInboundPolicy: "hold" })}
+          open={false}
+          onOpenChange={jest.fn()}
+        />
+      </Wrapper>
+    )
+    expect(screen.getByTestId("communication-sheet-stub")).toHaveAttribute(
+      "data-seeded-session",
+      "ses_b:hold"
+    )
   })
 
   it("renders the form sections when open", () => {

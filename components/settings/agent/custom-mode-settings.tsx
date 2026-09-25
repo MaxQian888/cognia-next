@@ -147,6 +147,11 @@ export function CustomModeSettings() {
   const [filterCategory, setFilterCategory] = useState<FilterCategory>("all")
   const [showEditor, setShowEditor] = useState(false)
   const [editingMode, setEditingMode] = useState<CustomModeConfig | undefined>()
+  // Bumped by every open. The editor seeds its fields from `mode` at mount and
+  // stays mounted, so without a fresh key "Edit B" after "Edit A" showed A,
+  // and "Create" after a save opened pre-filled. Bumped on open only, so the
+  // close animation still plays.
+  const [editorSession, setEditorSession] = useState(0)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [selectedModes, setSelectedModes] = useState<Set<string>>(new Set())
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -204,12 +209,14 @@ export function CustomModeSettings() {
   // Handle create new
   const handleCreateNew = useCallback(() => {
     setEditingMode(undefined)
+    setEditorSession((n) => n + 1)
     setShowEditor(true)
   }, [])
 
   // Handle edit
   const handleEdit = useCallback((mode: CustomModeConfig) => {
     setEditingMode(mode)
+    setEditorSession((n) => n + 1)
     setShowEditor(true)
   }, [])
 
@@ -744,6 +751,7 @@ export function CustomModeSettings() {
 
       {/* Mode Editor Dialog */}
       <CustomModeEditor
+        key={editorSession}
         open={showEditor}
         onOpenChange={setShowEditor}
         mode={editingMode}

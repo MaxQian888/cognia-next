@@ -17,7 +17,18 @@
  * cut a dialog's close animation short, and the invariant that matters is the
  * one this preserves: exactly one dialog is open, so cross-platform form state
  * cannot leak between them.
+ *
+ * Staying mounted has a cost the forms cannot pay themselves: each seeds its
+ * fields from `row` once, at mount, when `row` is still null. Editing an
+ * existing adapter opened on the placeholder name and default transport, mute
+ * and quiet hours — already "dirty", so Save wrote those defaults over the
+ * row. Each open of a platform therefore bumps that platform's key (the row
+ * id is part of what counts as a new open), remounting its form onto the row
+ * it is editing. Only an open bumps it: the key holds through the close, so
+ * the exit animation still plays.
  */
+
+import { useState } from "react"
 
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -122,6 +133,16 @@ export function AdapterConfigDialog({
   // rule the bespoke dialogs get for free by being separate components.
   const pluginKind = kind && !isConfigurableKind(kind) ? kind : null
 
+  // Derived during render (the previous-props pattern) so the remount happens
+  // before the dialog paints its first open frame.
+  const openKey = kind ? `${kind}:${row?.id ?? "new"}` : null
+  const [lastOpenKey, setLastOpenKey] = useState<string | null>(null)
+  const [openCount, setOpenCount] = useState<Readonly<Partial<Record<string, number>>>>({})
+  if (openKey !== lastOpenKey) {
+    setLastOpenKey(openKey)
+    if (kind) setOpenCount((counts) => ({ ...counts, [kind]: (counts[kind] ?? 0) + 1 }))
+  }
+
   return (
     <>
       {pluginKind && (
@@ -138,7 +159,7 @@ export function AdapterConfigDialog({
         const Dialog = BESPOKE[configurable]
         return (
           <Dialog
-            key={configurable}
+            key={`${configurable}:${openCount[configurable] ?? 0}`}
             open={kind === configurable}
             onOpenChange={onOpenChange}
             {...(onCreated ? { onCreated } : {})}

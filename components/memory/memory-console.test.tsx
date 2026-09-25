@@ -149,6 +149,41 @@ describe("MemoryConsole — layout", () => {
   })
 })
 
+describe("MemoryConsole — conflict resolver", () => {
+  it("drafts a merge from the memory now selected, not the one resolved before", async () => {
+    mockData = [
+      mem({ id: "a", text: "Alpha fact", reviewStatus: "conflict", conflictWithIds: ["a2"] }),
+      mem({ id: "a2", text: "Alpha rival" }),
+      mem({ id: "b", text: "Beta fact", reviewStatus: "conflict", conflictWithIds: ["b2"] }),
+      mem({ id: "b2", text: "Beta rival" }),
+    ]
+    render(<MemoryConsole />)
+    const row = (id: string) => rows().find((r) => r.dataset.memoryId === id)!
+
+    await userEvent.click(row("a"))
+    await userEvent.click(await screen.findByRole("button", { name: "Resolve conflict…" }))
+    // Close with the dialog's own button — Escape also clears the console's
+    // selection, which would unmount the resolver and hide the bug.
+    await userEvent.click(
+      within(screen.getByTestId("memory-conflict-resolver")).getByRole("button", { name: "Close" })
+    )
+    await waitFor(() =>
+      expect(screen.queryByTestId("memory-conflict-resolver")).not.toBeInTheDocument()
+    )
+
+    await userEvent.click(row("b"))
+    await userEvent.click(await screen.findByRole("button", { name: "Resolve conflict…" }))
+    await userEvent.click(
+      within(screen.getByTestId("memory-conflict-resolver")).getByRole("button", {
+        name: "Merge by hand…",
+      })
+    )
+    expect(within(screen.getByTestId("memory-conflict-resolver")).getByRole("textbox")).toHaveValue(
+      "Beta fact"
+    )
+  })
+})
+
 describe("MemoryConsole — quick views", () => {
   it("counts each view and narrows the list when one is picked", async () => {
     mockData = [

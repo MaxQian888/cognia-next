@@ -7,9 +7,23 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 // Each bespoke dialog renders only when open, so the dispatcher's job is
 // visible from the ids alone: exactly one is open, and the right one.
+// Telegram's mock also seeds state from `row` at mount, like the real forms,
+// and counts its mounts — the remount-per-open contract is observable there.
+let mockTelegramMounts = 0
 jest.mock("@/components/settings/connections/forms/telegram-config", () => ({
-  TelegramConfigDialog: (p: { open: boolean; row: unknown }) =>
-    p.open ? <div data-testid="telegram-config-dialog" data-row={String(Boolean(p.row))} /> : null,
+  TelegramConfigDialog: function MockTelegram(p: { open: boolean; row: { id?: string } | null }) {
+    const [seeded] = jest.requireActual<typeof import("react")>("react").useState(() => {
+      mockTelegramMounts += 1
+      return p.row?.id ?? "none"
+    })
+    return p.open ? (
+      <div
+        data-testid="telegram-config-dialog"
+        data-row={String(Boolean(p.row))}
+        data-seeded={seeded}
+      />
+    ) : null
+  },
 }))
 jest.mock("@/components/settings/connections/forms/lark-config", () => ({
   LarkConfigDialog: (p: { open: boolean }) =>
@@ -128,5 +142,40 @@ describe("isConfigurableKind", () => {
 
   it("rejects a contributed kind, which is what routes it to the fallback", () => {
     expect(isConfigurableKind("acme" as never)).toBe(false)
+  })
+})
+
+describe("each open seeds the form from the row it edits", () => {
+  beforeEach(() => {
+    mockTelegramMounts = 0
+  })
+
+  it("opens an existing adapter on its own values, not the mount-time blank", () => {
+    // The dialogs stay mounted with `row: null`; a form that seeded then kept
+    // the placeholder name and default settings, and Save wrote them back.
+    const { rerender } = render(
+      <AdapterConfigDialog kind={null} row={null} onOpenChange={jest.fn()} />
+    )
+    rerender(<AdapterConfigDialog kind="telegram" row={row} onOpenChange={jest.fn()} />)
+    expect(screen.getByTestId("telegram-config-dialog")).toHaveAttribute("data-seeded", "a1")
+  })
+
+  it("reseeds when the next open edits a different adapter", () => {
+    const other = { id: "a2", type: "telegram" } as AdapterInstanceRow
+    const { rerender } = render(
+      <AdapterConfigDialog kind="telegram" row={row} onOpenChange={jest.fn()} />
+    )
+    rerender(<AdapterConfigDialog kind={null} row={null} onOpenChange={jest.fn()} />)
+    rerender(<AdapterConfigDialog kind="telegram" row={other} onOpenChange={jest.fn()} />)
+    expect(screen.getByTestId("telegram-config-dialog")).toHaveAttribute("data-seeded", "a2")
+  })
+
+  it("keeps the instance through the close, so the exit animation can play", () => {
+    const { rerender } = render(
+      <AdapterConfigDialog kind="telegram" row={row} onOpenChange={jest.fn()} />
+    )
+    const mountsWhileOpen = mockTelegramMounts
+    rerender(<AdapterConfigDialog kind={null} row={null} onOpenChange={jest.fn()} />)
+    expect(mockTelegramMounts).toBe(mountsWhileOpen)
   })
 })

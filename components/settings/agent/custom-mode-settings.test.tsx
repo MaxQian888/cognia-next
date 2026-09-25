@@ -85,7 +85,9 @@ jest.mock("@/hooks/agent/use-agent-mode", () => ({
 // CustomModeEditor pulls in many side-effect-heavy components; stub it so
 // these focused row tests don't need to mount the full editor tree.
 jest.mock("@/components/agent/mode/custom-mode-editor", () => ({
-  CustomModeEditor: ({
+  // Seeds from `mode` at mount, as the real editor's form state does, so a
+  // reused instance shows up as a stale `data-seeded-id`.
+  CustomModeEditor: function StubModeEditor({
     open,
     mode,
     onSave,
@@ -93,14 +95,16 @@ jest.mock("@/components/agent/mode/custom-mode-editor", () => ({
     open: boolean
     mode?: { id: string }
     onSave: () => void
-  }) =>
-    open ? (
-      <div data-testid="stub-mode-editor" data-mode-id={mode?.id ?? ""}>
+  }) {
+    const [seeded] = jest.requireActual<typeof import("react")>("react").useState(mode?.id ?? "")
+    return open ? (
+      <div data-testid="stub-mode-editor" data-mode-id={mode?.id ?? ""} data-seeded-id={seeded}>
         <button type="button" onClick={onSave}>
           stub-save
         </button>
       </div>
-    ) : null,
+    ) : null
+  },
 }))
 
 const toastSuccess = jest.fn()
@@ -424,6 +428,20 @@ describe("CustomModeSettings — polish-phase", () => {
 
     await user.click(screen.getByTestId("mode-edit-polish-a"))
     expect(screen.getByTestId("stub-mode-editor")).toHaveAttribute("data-mode-id", "polish-a")
+  })
+
+  it("reopens the editor on the next mode, not the one edited before", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    await user.click(screen.getByTestId("mode-edit-polish-a"))
+    await user.click(screen.getByRole("button", { name: "stub-save" }))
+    await user.click(screen.getByTestId("custom-mode-row-polish-b"))
+    await user.click(screen.getByTestId("mode-edit-polish-b"))
+    expect(screen.getByTestId("stub-mode-editor")).toHaveAttribute("data-seeded-id", "polish-b")
+    await user.click(screen.getByRole("button", { name: "stub-save" }))
+    // …and Create after a save opens empty, not pre-filled with the last mode.
+    await user.click(screen.getByRole("button", { name: "Create Custom Mode" }))
+    expect(screen.getByTestId("stub-mode-editor")).toHaveAttribute("data-seeded-id", "")
   })
 
   it("creates a new mode with an empty editor", async () => {

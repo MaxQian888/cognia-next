@@ -1495,6 +1495,10 @@ export function SessionSettingsSheet({
           chart button is gone, and this sheet is the only thing that opens it. */}
       <SessionInsightsSheet session={session} open={insightsOpen} onOpenChange={setInsightsOpen} />
       <SessionCommunicationSheet
+        // Its inbound policy and drafts seed from `session` at mount, and this
+        // sheet outlives a session switch on the phone: keyed, so session B
+        // never opens on session A's policy or half-written peer message.
+        key={session.id}
         session={session}
         open={communicationOpen}
         onOpenChange={setCommunicationOpen}
