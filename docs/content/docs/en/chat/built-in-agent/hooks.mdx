@@ -8,7 +8,7 @@ description: Capability-aware lifecycle Hooks for the built-in Claude Agent SDK 
 Cognia loads Claude-Code-compatible lifecycle Hooks from `settings.json`. The built-in Claude Agent SDK uses native SDK callbacks; Codex and external agents use provider adapters. All paths share the same event, decision, trust, and audit semantics without executing the same event twice.
 
 <TLDR>
-  Runtime capabilities are evidence-based. The pinned Claude Agent SDK exposes **31 events** and
+  Runtime capabilities are evidence-based. The pinned Claude Agent SDK exposes **33 events** and
   five handler kinds. Codex installation probes the local schema before registering its audited
   **11-event** ceiling. User Hooks fail open with diagnostics; managed Hooks fail closed. Every
   outbound or model-backed handler passes through redaction plus a residual PII gate, and every
@@ -16,7 +16,7 @@ Cognia loads Claude-Code-compatible lifecycle Hooks from `settings.json`. The bu
 </TLDR>
 
 <StatGrid>
-  <Stat label="Claude events" value="31" hint="Pinned SDK 0.3.220 surface" />
+  <Stat label="Claude events" value="33" hint="Pinned SDK 0.3.269 surface" />
   <Stat label="Codex ceiling" value="11" hint="Intersected with the local runtime schema" />
   <Stat label="Handler kinds" value="5" hint="command, http, mcp_tool, prompt, agent" />
   <Stat label="Nested depth" value="1" hint="Model-backed Hooks cannot recurse" />
@@ -45,7 +45,7 @@ A provider manifest is only an audited ceiling. Cognia enables the intersection 
 
 The pinned SDK catalog contains:
 
-`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `Notification`, `UserPromptSubmit`, `UserPromptExpansion`, `SessionStart`, `SessionEnd`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `PreCompact`, `PostCompact`, `PermissionRequest`, `PermissionDenied`, `Setup`, `TeammateIdle`, `TaskCreated`, `TaskCompleted`, `Elicitation`, `ElicitationResult`, `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`, `InstructionsLoaded`, `CwdChanged`, `FileChanged`, `DirectoryAdded`, and `MessageDisplay`.
+`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `Notification`, `UserPromptSubmit`, `UserPromptExpansion`, `SessionStart`, `SessionEnd`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `PreCompact`, `PostCompact`, `PermissionRequest`, `PermissionDenied`, `Setup`, `TeammateIdle`, `TaskCreated`, `TaskCompleted`, `Elicitation`, `ElicitationResult`, `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`, `InstructionsLoaded`, `CwdChanged`, `FileChanged`, `DirectoryAdded`, `MessageDisplay`, `PreModelSwitch`, and `PostModelSwitch`.
 
 The SDK callback is the sole owner of built-in execution. Cognia does not pre-run `UserPromptSubmit` or `PreToolUse` in Rust and then register them again in the SDK.
 

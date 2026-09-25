@@ -10,7 +10,7 @@ describe("hook runtime capabilities", () => {
     const capabilities = knownHookRuntimeCapabilities("claude")
 
     expect(capabilities.contractVersion).toBe(HOOK_CAPABILITY_CONTRACT_VERSION)
-    expect(capabilities.events).toHaveLength(31)
+    expect(capabilities.events).toHaveLength(33)
     // `plugin` runs an installed plugin's own hook handler through the
     // renderer round-trip. Sidecar-only, which is why the codex/opencode
     // manifests below do not carry it.

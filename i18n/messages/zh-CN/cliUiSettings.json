@@ -342,6 +342,9 @@
     "hook:tool-provenance-guard": {
       "description": "按声明该工具的来源面拒绝调用 — 选择器由 COGNIA_DENY_TOOL_PROVENANCE 配置。"
     },
+    "hook:command-auth-gate": {
+      "description": "当 shell 命令命中的规则其 `ensure` 凭证检查未通过时拒绝执行 — 规则来自 .cognia/command-auth.json / COGNIA_COMMAND_AUTH_RULES。"
+    },
     "hooksPanel": {
       "label": "钩子管理…",
       "description": "浏览钩子来源、查看详情、编辑并重新加载配置。"

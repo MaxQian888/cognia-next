@@ -9946,6 +9946,9 @@
       "hook:auto-context-loader-prompt": {
         "description": "每次提示时注入 .cognia/agent-context.md 作为持续上下文。"
       },
+      "hook:command-auth-gate": {
+        "description": "当 shell 命令命中的规则其 `ensure` 凭证检查未通过时拒绝执行 — 规则来自 .cognia/command-auth.json / COGNIA_COMMAND_AUTH_RULES。"
+      },
       "hook:cost-quota-guard": {
         "description": "会话 token 预算耗尽后拒绝新的对话轮次。"
       },

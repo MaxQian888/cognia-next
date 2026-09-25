@@ -342,6 +342,9 @@
     "hook:tool-provenance-guard": {
       "description": "Deny a tool call by which surface declared it — selectors come from COGNIA_DENY_TOOL_PROVENANCE."
     },
+    "hook:command-auth-gate": {
+      "description": "Deny a shell command when its rule's `ensure` credential check fails — rules come from .cognia/command-auth.json / COGNIA_COMMAND_AUTH_RULES."
+    },
     "hooksPanel": {
       "label": "Hooks…",
       "description": "Browse hook sources, inspect details, edit and reload configuration."

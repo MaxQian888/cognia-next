@@ -8,14 +8,14 @@ description: 面向内置 Claude Agent SDK 与外部 Agent 的能力感知生命
 Cognia 从 `settings.json` 加载兼容 Claude Code 的生命周期 Hooks。内置 Claude Agent SDK 使用 SDK 原生 callback；Codex 与外部 Agent 使用 provider adapter。所有路径共享事件、决策、信任和审计语义，并保证同一事件不会重复执行。
 
 <TLDR>
-  运行时能力必须有证据。固定版本 Claude Agent SDK 暴露 **31 个事件**和五种处理器。
+  运行时能力必须有证据。固定版本 Claude Agent SDK 暴露 **33 个事件**和五种处理器。
   Codex 安装会先探测本机 schema，再注册审计过的 **11 事件**上限。用户 Hook 失败时
   fail-open 并产生诊断；受管 Hook fail-closed。所有出站或模型驱动处理器都经过脱敏与
   残余 PII 门禁，每个匹配处理器都会发出结构化规范审计事件。
 </TLDR>
 
 <StatGrid>
-  <Stat label="Claude 事件" value="31" hint="固定 SDK 0.3.220 surface" />
+  <Stat label="Claude 事件" value="33" hint="固定 SDK 0.3.269 surface" />
   <Stat label="Codex 上限" value="11" hint="与本机 runtime schema 求交集" />
   <Stat label="处理器类型" value="5" hint="command、http、mcp_tool、prompt、agent" />
   <Stat label="嵌套深度" value="1" hint="模型驱动 Hook 不允许递归" />
@@ -44,7 +44,7 @@ Provider manifest 只是审计过的安全上限。Cognia 只启用 manifest、�
 
 固定版本 SDK 的事件目录为：
 
-`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`PostToolBatch`、`Notification`、`UserPromptSubmit`、`UserPromptExpansion`、`SessionStart`、`SessionEnd`、`Stop`、`StopFailure`、`SubagentStart`、`SubagentStop`、`PreCompact`、`PostCompact`、`PermissionRequest`、`PermissionDenied`、`Setup`、`TeammateIdle`、`TaskCreated`、`TaskCompleted`、`Elicitation`、`ElicitationResult`、`ConfigChange`、`WorktreeCreate`、`WorktreeRemove`、`InstructionsLoaded`、`CwdChanged`、`FileChanged`、`DirectoryAdded`、`MessageDisplay`。
+`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`PostToolBatch`、`Notification`、`UserPromptSubmit`、`UserPromptExpansion`、`SessionStart`、`SessionEnd`、`Stop`、`StopFailure`、`SubagentStart`、`SubagentStop`、`PreCompact`、`PostCompact`、`PermissionRequest`、`PermissionDenied`、`Setup`、`TeammateIdle`、`TaskCreated`、`TaskCompleted`、`Elicitation`、`ElicitationResult`、`ConfigChange`、`WorktreeCreate`、`WorktreeRemove`、`InstructionsLoaded`、`CwdChanged`、`FileChanged`、`DirectoryAdded`、`MessageDisplay`、`PreModelSwitch`、`PostModelSwitch`。
 
 SDK callback 是内置执行的唯一 owner。Cognia 不会先在 Rust 预执行 `UserPromptSubmit` 或 `PreToolUse`，再在 SDK 中重复注册。
 

@@ -33,7 +33,8 @@ const commandAndHttpHandlers: Record<HookHandlerType, "supported" | "unsupported
 export const HOOK_RUNTIME_CAPABILITIES: Readonly<Record<HookRuntimeId, HookRuntimeDescriptor>> = {
   "claude-agent-sdk": {
     id: "claude-agent-sdk",
-    version: "0.3.220",
+    // The pinned SDK (`sidecar/package.json`) whose hook surface `events` is.
+    version: "0.3.269",
     events: HOOK_EVENTS,
     // The model-backed handlers ARE implemented on this rail:
     // `sidecar/dispatch/hook-native-executor.mjs` runs them as nested `query()`

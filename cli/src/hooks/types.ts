@@ -48,6 +48,8 @@ export type HookEvent =
   | "TeammateIdle"
   | "UserPromptExpansion"
   | "MessageDisplay"
+  | "PreModelSwitch"
+  | "PostModelSwitch"
 
 /** Every recognized {@link HookEvent} name, for runtime validation. */
 export const HOOK_EVENTS: readonly HookEvent[] = [
@@ -82,6 +84,8 @@ export const HOOK_EVENTS: readonly HookEvent[] = [
   "TeammateIdle",
   "UserPromptExpansion",
   "MessageDisplay",
+  "PreModelSwitch",
+  "PostModelSwitch",
 ]
 
 /**

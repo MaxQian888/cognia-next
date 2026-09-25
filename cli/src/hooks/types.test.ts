@@ -1,4 +1,5 @@
 /** @jest-environment node */
+import { HOOK_EVENTS as APP_HOOK_EVENTS } from "@/lib/claude/hooks/event-catalog"
 import { HOOK_EVENTS, HooksConfigSchema, hookGroupSchema, type HooksConfig } from "./types"
 
 describe("HOOK_EVENTS", () => {
@@ -10,11 +11,25 @@ describe("HOOK_EVENTS", () => {
     expect(HOOK_EVENTS).toContain("StopFailure")
     expect(HOOK_EVENTS).toContain("PostToolUseFailure")
     expect(HOOK_EVENTS).toEqual(
-      expect.arrayContaining(["Setup", "SubagentStart", "DirectoryAdded", "MessageDisplay"])
+      expect.arrayContaining([
+        "Setup",
+        "SubagentStart",
+        "DirectoryAdded",
+        "MessageDisplay",
+        "PreModelSwitch",
+        "PostModelSwitch",
+      ])
     )
-    expect(HOOK_EVENTS).toHaveLength(31)
+    expect(HOOK_EVENTS).toHaveLength(33)
     // No duplicates.
     expect(new Set(HOOK_EVENTS).size).toBe(HOOK_EVENTS.length)
+  })
+
+  // The CLI walks its own list to validate a hooks config and to show it in
+  // `/hooks`. When the app's catalog gained the model-switch events this list
+  // did not, so hooks configured for them were silently left out of both.
+  it("recognizes exactly the app's hook events", () => {
+    expect([...HOOK_EVENTS].sort()).toEqual([...APP_HOOK_EVENTS].sort())
   })
 })
 

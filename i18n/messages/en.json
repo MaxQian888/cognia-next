@@ -9946,6 +9946,9 @@
       "hook:auto-context-loader-prompt": {
         "description": "Inject .cognia/agent-context.md as standing context on every prompt."
       },
+      "hook:command-auth-gate": {
+        "description": "Deny a shell command when its rule's `ensure` credential check fails — rules come from .cognia/command-auth.json / COGNIA_COMMAND_AUTH_RULES."
+      },
       "hook:cost-quota-guard": {
         "description": "Deny a turn once the session token budget is exceeded."
       },
