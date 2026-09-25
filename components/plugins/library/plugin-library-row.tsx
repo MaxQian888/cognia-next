@@ -166,9 +166,12 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
           >
             {displayName}
           </button>
+          {/* Joins line one only from `@md`: at `@sm` (the usual ~390px column
+              beside the detail pane) it took the name's room, and two
+              "Clipboard …" rows became indistinguishable. */}
           <PluginVersionBadge
             version={plugin.version}
-            className="hidden shrink-0 @sm/plugin-list:inline-flex"
+            className="hidden shrink-0 @md/plugin-list:inline-flex"
           />
           {/*
             Only development origins are badged here. Every row saying
@@ -178,7 +181,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
           {developmentSource && (
             <PluginSourceBadge
               source={plugin.source}
-              className="hidden shrink-0 @sm/plugin-list:inline-flex"
+              className="hidden shrink-0 @md/plugin-list:inline-flex"
             />
           )}
           {updateAvailable && (
@@ -223,10 +226,10 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
           {/* Narrow rows: line one belongs to the name, so these live here. */}
           <PluginVersionBadge
             version={plugin.version}
-            className="shrink-0 @sm/plugin-list:hidden"
+            className="shrink-0 @md/plugin-list:hidden"
           />
           {developmentSource && (
-            <PluginSourceBadge source={plugin.source} className="shrink-0 @sm/plugin-list:hidden" />
+            <PluginSourceBadge source={plugin.source} className="shrink-0 @md/plugin-list:hidden" />
           )}
           {updateAvailable && (
             <Badge variant="secondary" className="shrink-0 text-xs @sm/plugin-list:hidden">

@@ -360,8 +360,10 @@ describe("PluginLibraryRow", () => {
     const [wide, narrow] = screen
       .getAllByText("v1.0.0")
       .map((el) => el.closest("[data-slot=badge]"))
-    expect(wide).toHaveClass("hidden", "@sm/plugin-list:inline-flex")
-    expect(narrow).toHaveClass("@sm/plugin-list:hidden")
+    // Line one gets the version only from `@md`: the usual ~390px column
+    // beside the detail pane is past `@sm`, and there it cost the name.
+    expect(wide).toHaveClass("hidden", "@md/plugin-list:inline-flex")
+    expect(narrow).toHaveClass("@md/plugin-list:hidden")
     // The status pill already says "Error"; the icon only returns with room.
     expect(screen.getByLabelText("erroredAria")).toHaveClass("hidden", "@sm/plugin-list:block")
   })
