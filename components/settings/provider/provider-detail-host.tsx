@@ -40,7 +40,7 @@ import { ProviderModelsTab, type ModelCompareSelection } from "./provider-models
 import { ProviderParametersTab } from "./provider-parameters-tab"
 import type { getBuiltInProviderReadiness, getCustomProviderReadiness } from "./provider-readiness"
 import { ProviderSetupChecklist } from "./provider-setup-checklist"
-import { deriveStatus } from "./provider-status-utils"
+import { deriveStatus, isLocalEngineConfigured } from "./provider-status-utils"
 import { preferLiveHealth } from "./use-provider-rows"
 
 const LocalProviderSettings = dynamic(
@@ -242,9 +242,13 @@ export function ProviderDetailHost({
                 (s.readinessProviderSettings?.[selectedId] ?? selectedSettings)?.baseURL,
                 effectiveTest.ok,
                 effectiveTest.outcome,
-                selectedId === "bedrock" && !!selectedSettings?.bedrock
+                // Same configured rule as the rail row: a keyless local
+                // engine with no base URL is configured once it is enabled
+                // or verified, or the header reads "Not configured" beside
+                // a "Connected" rail row.
+                (selectedId === "bedrock" && !!selectedSettings?.bedrock
                   ? validateBedrockConnectionSettings(selectedSettings.bedrock).valid
-                  : false,
+                  : false) || isLocalEngineConfigured(selectedId, selectedSettings),
                 selectedReadiness?.verificationStatus ??
                   selectedSettings?.verificationStatus ??
                   null

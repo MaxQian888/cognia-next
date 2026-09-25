@@ -115,7 +115,9 @@ jest.mock("./cliproxyapi-settings", () => ({
   CLIProxyAPISettings: () => <div data-testid="cliproxyapi-settings" />,
 }))
 
-jest.mock("./provider-status-utils", () => ({ deriveStatus: () => "connected" }))
+// `./provider-status-utils` stays real: the header status pill is derived
+// here, and a stub that always says "connected" hid the header disagreeing
+// with the rail about a keyless local engine.
 jest.mock("@cognia/provider-core/providers/provider-parameter-schemas", () => ({
   getSchemaForProvider: () => undefined,
 }))
@@ -291,6 +293,79 @@ describe("ProviderDetailHost", () => {
     it("has no usage tab today", () => {
       renderHost(local)
       expect(screen.getByTestId("slot-usage")).toHaveTextContent("no-usage-tab")
+    })
+  })
+
+  // The rail row and this header pill must agree. A local engine is keyless
+  // and defaults to a well-known port, so an empty key and base URL do not
+  // mean "not configured" once it is enabled or verified. The rail already
+  // applied that rule; the header did not, and read "Not configured" beside a
+  // "Connected" rail row.
+  describe("header connection status for a local engine", () => {
+    const ollama = {
+      id: "ollama",
+      name: "Ollama",
+      defaultModel: "llama3.2",
+      models: [],
+    } as unknown as ProviderDetailHostProps["selectedBuiltIn"]
+    const local = {
+      isLocalProvider: true,
+      selectedId: "ollama",
+      selectedBuiltIn: ollama,
+      selectedName: "Ollama",
+    }
+    const status = () => screen.getByTestId("panel").getAttribute("data-connection-status")
+
+    it("reads an enabled keyless engine with no base URL as untested", () => {
+      renderHost({
+        ...local,
+        selectedSettings: { providerId: "ollama", enabled: true, defaultModel: "llama3.2" },
+      })
+      expect(status()).toBe("untested")
+    })
+
+    it("reads an engine verified in this session as connected", () => {
+      renderHost({
+        ...local,
+        selectedSettings: { providerId: "ollama", enabled: true, defaultModel: "llama3.2" },
+        settings: {
+          ...settings,
+          testResults: { ollama: { success: true } },
+        } as unknown as UseProviderSettingsResult,
+      })
+      expect(status()).toBe("connected")
+    })
+
+    // A persisted verification configures the engine on its own, even with
+    // the enable switch off.
+    it("reads a previously verified engine as connected", () => {
+      renderHost({
+        ...local,
+        selectedSettings: {
+          providerId: "ollama",
+          enabled: false,
+          defaultModel: "llama3.2",
+          verificationStatus: "verified",
+        },
+      })
+      expect(status()).toBe("connected")
+    })
+
+    it("still reads a disabled, unverified engine as not configured", () => {
+      renderHost({
+        ...local,
+        selectedSettings: { providerId: "ollama", enabled: false, defaultModel: "llama3.2" },
+      })
+      expect(status()).toBe("not-configured")
+    })
+
+    // The keyless rule is scoped to the local category. An enabled cloud
+    // provider with no key is still not configured.
+    it("does not extend the keyless rule to a cloud provider", () => {
+      renderHost({
+        selectedSettings: { providerId: "openai", enabled: true, defaultModel: "gpt-4.1" },
+      })
+      expect(status()).toBe("not-configured")
     })
   })
 
