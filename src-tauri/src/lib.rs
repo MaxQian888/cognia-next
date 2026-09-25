@@ -233,6 +233,8 @@ mod window_utils;
 #[cfg(desktop)]
 mod menu;
 mod shortcuts;
+// The single setup hook's ordered boot steps.
+mod startup;
 mod tray;
 
 use api_key::ApiKeyState;
@@ -580,75 +582,6 @@ pub fn run() {
             // setup hook below; this `.manage(...)` just registers the state
             // wrapper so the handle survives for the app's lifetime.
             .manage(cli_bridge::CliBridgeServerState::new())
-        .setup(|app| {
-            // Phase B follow-up — install the keyring-backed push credential
-            // store and reinstate any FCM/APNs dispatchers the user uploaded
-            // in a prior session.
-            //
-            // Deferred off the synchronous startup path via `spawn_blocking`:
-            // keyring access (store init + dispatcher reinstall) is blocking
-            // OS-credential I/O that can spike to hundreds of ms on a cold
-            // credential subsystem, which would delay window paint (setup()
-            // runs before the event loop / window show). No push command fires
-            // during boot — a connector has to be running first — and the
-            // pre-install push path already warns gracefully, so installing a
-            // moment later is safe.
-            tauri::async_runtime::spawn_blocking(|| {
-                companion_api::push_creds::install(
-                    companion_api::push_creds::KeyringPushCredStore::new(),
-                );
-                if let Err(err) = companion_api::push_creds::reinstall_persisted_dispatchers() {
-                    log::warn!("push-creds reinstall failed: {err}");
-                }
-            });
-            // Seed the FS allowed-roots registry (shadow-mode containment for the
-            // raw read/write/ensure_dir commands). Pure in-memory inserts — the
-            // renderer extends it with the active workspace roots once it loads.
-            files::seed_default_allowed_roots();
-            // Mirror the narrow static backup scope in the dynamic scope used
-            // by the atomic stream helper; existing deny patterns still win.
-            {
-                use tauri::Manager as _;
-                use tauri_plugin_fs::FsExt as _;
-                app.fs_scope()
-                    .allow_directory(app.path().app_data_dir()?.join("backups"), true)?;
-            }
-            task_workspace::start_workspace_maintenance();
-
-            // Give the gateway its link to the brain (ADR-0188 D9). Installing
-            // it does not switch anything on: `/v1/runs` stays refused until the
-            // renderer pushes a snapshot saying the `gatewayRuns` surface is on.
-            {
-                use tauri::Manager as _;
-                app.state::<gateway::GatewayState>()
-                    .runs
-                    .install_bridge(gateway_brain_bridge::DesktopBrainBridge::new(
-                        app.handle().clone(),
-                    ));
-            }
-
-            // Hand the WASM plugin host its Tauri-backed surfaces (ADR-0013,
-            // api-version 0.2). Clipboard and notifications are served
-            // in-process; AI and workflow go through the renderer bridge this
-            // also creates. Headless hosts (`cognia-server`) never run this, so
-            // their `WasmPluginState::services` stays `None` and every
-            // capability needing a backend answers HOST_UNAVAILABLE while
-            // logger / secrets / process keep working.
-            {
-                use tauri::Manager as _;
-                let wasm_state = app.state::<plugin_api::wasm::WasmPluginState>();
-                plugin_api::wasm::WasmPluginHost::install_host_services(
-                    &wasm_state,
-                    std::sync::Arc::new(
-                        plugin_api::wasm::services::tauri::TauriWasmHostServices::new(
-                            app.handle().clone(),
-                        ),
-                    ),
-                );
-            }
-            let _ = app;
-            Ok(())
-        })
         .manage(external_agent::commands::ExternalAgentState::default())
         .manage(external_agent::commands::AcpTerminalState::default())
         .manage(scheduler::SchedulerState::new(
@@ -1964,6 +1897,11 @@ pub fn run() {
             if let Err(error) = logging::bootstrap(app) {
                 log::warn!("native_logging bootstrap failed: {error}");
             }
+
+            // Host services right after the logger, so their failures are
+            // recorded, and before the gateway auto-start step below spawns,
+            // which needs the brain bridge in place.
+            startup::host_services::install(app);
 
             // Crash subsystem. Register the app handle so capture paths can emit
             // `crash://captured` to the webview; detect an abnormal previous
