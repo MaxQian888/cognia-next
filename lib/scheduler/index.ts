@@ -3,7 +3,9 @@
  *
  * Executor coverage and per-host support are declared in
  * `./host-support.ts` (`TASK_TYPE_HOST_REQUIREMENTS`, `DEPRECATED_TASK_TYPES`);
- * `./executors/index.ts` registers the built-in executors and lists them.
+ * `./executors/index.ts` registers the built-in executors and lists them;
+ * `./executor-owners.ts` names the subsystem modules the scheduler loads on
+ * demand when one of their tasks comes due before `initSchedulerSystem` ran.
  */
 
 import { loggers } from "@cognia/logging"

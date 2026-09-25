@@ -41,6 +41,7 @@ import {
 import { notifyTaskEvent } from "./notification-integration"
 import { emitSchedulerEvent } from "./event-integration"
 import { SchedulerError } from "./errors"
+import { hasTaskExecutorOwner, loadTaskExecutorOwner } from "./executor-owners"
 import { RendererTimingDriver } from "./timing/renderer-driver"
 import { RustDaemonTimingDriver } from "./timing/rust-daemon-driver"
 import { NodeTimingDriver } from "./timing/node-driver"
@@ -2027,6 +2028,23 @@ class TaskSchedulerImpl {
       // chunk, so shortly after scheduler start a persisted task can come due
       // before its executor exists — wait (bounded) instead of failing.
       let executor = executors.get(task.type)
+      // A type with a declared owner is loaded rather than waited for: the boot
+      // that registers it may never run in this context (`executor-owners.ts`).
+      if (!executor && hasTaskExecutorOwner(task.type)) {
+        try {
+          await loadTaskExecutorOwner(task.type)
+        } catch (error) {
+          execution.logs.push(
+            this.createLog(
+              "warn",
+              `Loading the executor for "${task.type}" failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            )
+          )
+        }
+        executor = executors.get(task.type)
+      }
       if (!executor) {
         const graceRemaining = this.startedAtMs + EXECUTOR_REGISTRATION_GRACE_MS - Date.now()
         if (graceRemaining > 0 && !isDeprecatedTaskType(task.type)) {

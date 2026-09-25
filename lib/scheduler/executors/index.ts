@@ -30,8 +30,10 @@
  *   - twin / wiki-rebuild / wiki-lint / radar-report / agent-team / goal / plan
  *                     → subsystem executors registered here as well.
  *
- * Connector task types (`connection:*`) and `provider-diagnostics-refresh`
- * are registered by their own subsystems at boot.
+ * Connector task types (`connection:*`) are registered by the `integrations`
+ * boot bundle. `provider-diagnostics-refresh` is registered by
+ * `lib/provider-diagnostics/refresh.ts`, which the scheduler loads on demand
+ * through `../executor-owners.ts` when the boot that installs it never ran.
  */
 
 import type {

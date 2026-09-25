@@ -340,11 +340,24 @@ export async function ensureProviderDiagnosticsRefreshStates(): Promise<void> {
   if (states.length > 0) await getDb().providerDiagnosticsRefreshState.bulkPut(states)
 }
 
-export async function installProviderDiagnosticsRefreshSchedule(): Promise<void> {
+/**
+ * Register the scheduler executor for the refresh clock.
+ *
+ * Separate from {@link installProviderDiagnosticsRefreshSchedule} because the
+ * persisted task outlives the boot that seeded it. A scheduler started by a
+ * lifecycle write (plugin activation, another subsystem's schedule) never runs
+ * that boot, so the scheduler loads this on demand through
+ * `lib/scheduler/executor-owners.ts` when the task comes due.
+ */
+export function registerProviderDiagnosticsRefreshExecutor(): void {
   registerTaskExecutor(PROVIDER_DIAGNOSTICS_REFRESH_TASK_TYPE, async () => ({
     success: true,
     output: await runProviderDiagnosticsRefreshClock(),
   }))
+}
+
+export async function installProviderDiagnosticsRefreshSchedule(): Promise<void> {
+  registerProviderDiagnosticsRefreshExecutor()
   const scheduler = getTaskScheduler()
   const existing = (await scheduler.getAllTasks()).filter(
     (task) => task.type === PROVIDER_DIAGNOSTICS_REFRESH_TASK_TYPE

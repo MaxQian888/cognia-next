@@ -14,6 +14,7 @@ import {
   installProviderDiagnosticsRefreshSchedule,
   nextProviderDiagnosticsRefreshState,
   providerDiagnosticsNotificationTransition,
+  registerProviderDiagnosticsRefreshExecutor,
   runProviderDiagnosticsRefreshClock,
 } from "./refresh"
 
@@ -146,6 +147,46 @@ describe("provider diagnostics refresh clock", () => {
       "zero-balance",
       expect.objectContaining({ lastNotificationAt: 1_000, lastObservedRemaining: 0 })
     )
+  })
+})
+
+describe("refresh executor registration", () => {
+  it("registers the refresh clock under the task type without touching the schedule", async () => {
+    const { getTaskScheduler, registerTaskExecutor } =
+      await import("@/lib/scheduler/task-scheduler")
+    jest.mocked(registerTaskExecutor).mockClear()
+    jest.mocked(getTaskScheduler).mockClear()
+
+    registerProviderDiagnosticsRefreshExecutor()
+
+    expect(registerTaskExecutor).toHaveBeenCalledTimes(1)
+    expect(registerTaskExecutor).toHaveBeenCalledWith(
+      "provider-diagnostics-refresh",
+      expect.any(Function)
+    )
+    // The on-demand path (`lib/scheduler/executor-owners.ts`) must not seed or
+    // migrate rows: only the boot install owns the schedule.
+    expect(getTaskScheduler).not.toHaveBeenCalled()
+  })
+
+  it("registers the executor at install before reading the schedule", async () => {
+    const { getTaskScheduler, registerTaskExecutor } =
+      await import("@/lib/scheduler/task-scheduler")
+    const order: string[] = []
+    jest.mocked(registerTaskExecutor).mockImplementationOnce(() => {
+      order.push("register")
+    })
+    jest.mocked(getTaskScheduler).mockReturnValue({
+      getAllTasks: async () => {
+        order.push("read-schedule")
+        return [{ id: "existing", type: "provider-diagnostics-refresh", notification: {} }]
+      },
+      updateTask: jest.fn().mockResolvedValue(undefined),
+    } as never)
+
+    await installProviderDiagnosticsRefreshSchedule()
+
+    expect(order).toEqual(["register", "read-schedule"])
   })
 })
 
