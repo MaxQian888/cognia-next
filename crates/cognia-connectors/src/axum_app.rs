@@ -1149,7 +1149,6 @@ mod tests {
     use axum::body::to_bytes;
     use axum::http::Request;
     use parking_lot::Mutex;
-    use std::time::{Duration, Instant};
     use tower::ServiceExt;
 
     /// Recording emitter for tests — captures every webhook event so assertions
@@ -2975,13 +2974,7 @@ mod tests {
         let (token, _) = state
             .stage_lark_app_avatar(b"x".to_vec(), "image/png".into(), 60)
             .unwrap();
-        state
-            .inner
-            .lock()
-            .staged_avatars
-            .get_mut(&token)
-            .unwrap()
-            .expires_at = Instant::now() - Duration::from_secs(1);
+        assert!(state.expire_staged_lark_app_avatar(&token));
         assert!(state.staged_lark_app_avatar(&token).is_none());
     }
 }

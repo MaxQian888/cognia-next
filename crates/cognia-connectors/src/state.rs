@@ -199,6 +199,20 @@ impl ConnectorsState {
         Some((entry.bytes.clone(), entry.content_type.clone()))
     }
 
+    /// Test seam: backdate a staged avatar's expiry so expiry handling can be
+    /// asserted without sleeping past the 60s TTL floor. Returns `false` when
+    /// no entry is staged under `token`.
+    #[cfg(test)]
+    pub(crate) fn expire_staged_lark_app_avatar(&self, token: &str) -> bool {
+        match self.inner.lock().staged_avatars.get_mut(token) {
+            Some(entry) => {
+                entry.expires_at = Instant::now() - Duration::from_secs(1);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Acquire or refresh the host-scoped connector-runtime lease.
     ///
     /// The lease lives in the Rust host rather than the renderer, so multiple
