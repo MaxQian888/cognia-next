@@ -344,6 +344,7 @@ async fn execute_ocr_http_request(request: OcrHttpRequest) -> Result<OcrHttpResp
     }
     let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, url.as_str())
         .map_err(|error| error.to_string())?;
+    cognia_net::proxy_config::ensure_crypto_provider();
     let client = builder
         .build()
         .map_err(|_| "failed to build OCR HTTP client".to_string())?;
@@ -788,12 +789,8 @@ async fn download_model_inner(
         .await
         .map_err(|e| format!("create model dir: {e}"))?;
 
-    let builder = reqwest::Client::builder();
-    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, spec[0].url)
+    let client = cognia_net::proxy_config::managed_client(reqwest::Client::builder(), spec[0].url)
         .map_err(|error| error.to_string())?;
-    let client = builder
-        .build()
-        .map_err(|e| format!("reqwest client: {e}"))?;
     let file_count = spec.len();
     let mut files = Vec::with_capacity(file_count);
     for (idx, entry) in spec.iter().enumerate() {

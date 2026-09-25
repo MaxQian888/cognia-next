@@ -395,11 +395,8 @@ pub async fn telemetry_otlp_export(
     }
     let headers = build_headers(sanitize_renderer_headers(headers)?, credential)?;
     let builder = reqwest::Client::builder().timeout(EXPORT_TIMEOUT);
-    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, endpoint.as_str())
+    let client = cognia_net::proxy_config::managed_client(builder, endpoint.as_str())
         .map_err(|error| error.to_string())?;
-    let client = builder
-        .build()
-        .map_err(|e| format!("telemetry client build failed: {e}"))?;
     let mut request = client
         .post(endpoint)
         .header(reqwest::header::CONTENT_TYPE, "application/json")

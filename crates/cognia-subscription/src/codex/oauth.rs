@@ -289,11 +289,8 @@ pub async fn refresh_token(refresh_token: &str) -> Result<TokenResponse, String>
 
 fn http_client() -> Result<reqwest::Client, String> {
     let builder = reqwest::Client::builder().user_agent(CODEX_USER_AGENT);
-    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, DEVICE_USERCODE_URL)
-        .map_err(|error| error.to_string())?;
-    builder
-        .build()
-        .map_err(|e| format!("http client build: {e}"))
+    cognia_net::proxy_config::managed_client(builder, DEVICE_USERCODE_URL)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

@@ -336,11 +336,8 @@ fn client_builder() -> reqwest::ClientBuilder {
 }
 
 fn build_policy_client(url: &str) -> Result<reqwest::Client, String> {
-    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(client_builder(), url)
-        .map_err(|error| error.to_string())?;
-    builder
-        .build()
-        .map_err(|error| format!("client build failed: {error}"))
+    cognia_net::proxy_config::managed_client(client_builder(), url)
+        .map_err(|error| error.to_string())
 }
 
 fn cancellations() -> &'static cognia_net::request_cancellation::RequestCancellationRegistry {

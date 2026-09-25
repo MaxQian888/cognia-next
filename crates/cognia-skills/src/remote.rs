@@ -27,9 +27,8 @@ pub async fn skills_fetch_remote_md(url: String) -> Result<String, String> {
     let builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(TIMEOUT_SECS))
         .user_agent("cognia-next-skills/0.1");
-    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, &url)
-        .map_err(|error| error.to_string())?;
-    let client = builder.build().map_err(|e| format!("http client: {}", e))?;
+    let client = cognia_net::proxy_config::managed_client(builder, &url)
+        .map_err(|error| format!("http client: {}", error))?;
     let resp = client
         .get(&url)
         .send()
@@ -79,9 +78,8 @@ pub async fn skills_fetch_remote_json(req: RemoteGetRequest) -> Result<RemoteGet
     let builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(TIMEOUT_SECS))
         .user_agent("cognia-next-skills/0.1");
-    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, &req.url)
-        .map_err(|error| error.to_string())?;
-    let client = builder.build().map_err(|e| format!("http client: {}", e))?;
+    let client = cognia_net::proxy_config::managed_client(builder, &req.url)
+        .map_err(|error| format!("http client: {}", error))?;
     let mut builder = client.get(&req.url).header(
         reqwest::header::ACCEPT,
         req.accept.as_deref().unwrap_or("application/json"),

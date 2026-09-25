@@ -103,12 +103,11 @@ impl DiagnosticTransport for NativeTransport {
             .method
             .parse()
             .map_err(|_| format!("invalid HTTP method {}", request.method))?;
-        let (builder, _route) = cognia_net::proxy_config::apply_reqwest_policy(
+        let client = cognia_net::proxy_config::managed_client(
             reqwest::Client::builder().timeout(std::time::Duration::from_secs(120)),
             &request.url,
         )
         .map_err(|error| error.to_string())?;
-        let client = builder.build().map_err(|error| error.to_string())?;
 
         let mut pending = client.request(method, &request.url);
         for (name, value) in &request.headers {
