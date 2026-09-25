@@ -17,19 +17,17 @@ const callTool = jest.fn(async () => ({
 const close = jest.fn(async () => undefined)
 const connect = jest.fn(async () => undefined)
 
-jest.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
-  Client: jest.fn().mockImplementation(() => ({ connect, callTool, close })),
-}))
-jest.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
-  StdioClientTransport: jest.fn().mockImplementation(() => ({})),
-}))
+// The v2 client runtime (`lib/mcp/transport.ts`) loads these lazily, so the
+// factories run after the consts below are initialised.
 const StreamableHTTPClientTransport = jest.fn().mockImplementation(() => ({ __kind: "http" }))
 const SSEClientTransport = jest.fn().mockImplementation(() => ({ __kind: "sse" }))
-jest.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
+jest.mock("@modelcontextprotocol/client", () => ({
+  Client: jest.fn().mockImplementation(() => ({ connect, callTool, close })),
   StreamableHTTPClientTransport,
-}))
-jest.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
   SSEClientTransport,
+}))
+jest.mock("@modelcontextprotocol/client/stdio", () => ({
+  StdioClientTransport: jest.fn().mockImplementation(() => ({})),
 }))
 
 import { getDb } from "@/lib/db/schema"
