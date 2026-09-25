@@ -20,6 +20,10 @@ import { useTranslations } from "next-intl"
 
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { DiffPreview } from "@/components/chat/message-parts/mcp-renderers/diff-preview"
+import {
+  isScheduleApprovalTool,
+  ScheduledTaskApprovalPreview,
+} from "@/components/chat/decisions/scheduled-task-approval-preview"
 import { cn } from "@/lib/utils"
 import type { PendingApproval } from "@cognia/agent-config-types"
 
@@ -50,6 +54,14 @@ export function bareToolName(toolName: string | undefined): string {
 export function ToolInputPreview({ approval }: { approval: PendingApproval }) {
   const name = bareToolName(approval.toolName)
   const input = (approval.input ?? {}) as Record<string, unknown>
+
+  // A schedule write (built-in `schedule.*` skill): name the task and say the
+  // schedule in words instead of dumping `{ "taskId": "…" }`.
+  // The SDK's own permission prompt names it through the plugin-tools bridge.
+  const scheduleName = name.replace(/^mcp__cognia-plugin-tools__/, "")
+  if (isScheduleApprovalTool(scheduleName)) {
+    return <ScheduledTaskApprovalPreview toolName={scheduleName} input={input} />
+  }
 
   if ((name === "bash" || name === "Bash") && typeof input.command === "string") {
     return (

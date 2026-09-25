@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
+import { LinkIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -20,9 +21,10 @@ import { syncSharedSession } from "@/lib/collab/shared-chat-sync"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useShellNav } from "@/components/shell/use-shell-nav"
+import { cn } from "@/lib/utils"
 
 /** Entry point for invitees who do not yet have a conversation to open. */
-export function SharedSessionJoin() {
+export function SharedSessionJoin({ className }: { className?: string } = {}) {
   const t = useTranslations("chatCollaboration")
   const { switchToDm } = useShellNav()
   const [open, setOpen] = useState(false)
@@ -66,7 +68,19 @@ export function SharedSessionJoin() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm">
+        {/* A secondary row, not a centred text button: bare, it read as a
+            stray banner at the top of the phone drawer and under the
+            desktop account card. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            "w-full justify-start gap-2 font-normal text-muted-foreground hover:text-foreground",
+            className
+          )}
+          data-testid="shared-session-join-trigger"
+        >
+          <LinkIcon className="size-4" aria-hidden="true" />
           {t("acceptInvite")}
         </Button>
       </DialogTrigger>

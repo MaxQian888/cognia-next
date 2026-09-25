@@ -11,6 +11,14 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+jest.mock("@/components/chat/decisions/scheduled-task-approval-preview", () => ({
+  isScheduleApprovalTool: (name: string) =>
+    ["scheduler_create_task", "scheduler_delete_task"].includes(name),
+  ScheduledTaskApprovalPreview: ({ toolName }: { toolName: string }) => (
+    <div data-testid="schedule-preview" data-tool={toolName} />
+  ),
+}))
+
 function approval(overrides: Partial<PendingApproval> = {}): PendingApproval {
   return {
     sessionId: "s1",
@@ -105,5 +113,34 @@ describe("<ToolDecisionContent />", () => {
     expect(screen.queryByTestId("approval-bash-preview")).not.toBeInTheDocument()
     expect(screen.queryByText(/ls -la/)).not.toBeInTheDocument()
     expect(screen.getByText("Bash")).toBeInTheDocument()
+  })
+})
+
+describe("<ToolDecisionContent /> · schedule writes", () => {
+  it("shows a schedule write as the task it touches, not its JSON", () => {
+    render(
+      <ToolDecisionContent
+        approval={approval({ toolName: "scheduler_delete_task", input: { taskId: "t1" } })}
+      />
+    )
+    expect(screen.getByTestId("schedule-preview")).toHaveAttribute(
+      "data-tool",
+      "scheduler_delete_task"
+    )
+  })
+
+  it("recognises the same tool when the SDK names it through the plugin bridge", () => {
+    render(
+      <ToolDecisionContent
+        approval={approval({
+          toolName: "mcp__cognia-plugin-tools__scheduler_create_task",
+          input: { name: "n" },
+        })}
+      />
+    )
+    expect(screen.getByTestId("schedule-preview")).toHaveAttribute(
+      "data-tool",
+      "scheduler_create_task"
+    )
   })
 })

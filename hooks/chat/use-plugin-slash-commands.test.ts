@@ -4,7 +4,8 @@
 
 import { act, renderHook } from "@testing-library/react"
 
-import { usePluginSlashCommands } from "./use-plugin-slash-commands"
+import { describePluginCommand, usePluginSlashCommands } from "./use-plugin-slash-commands"
+import { __resetPluginI18nForTesting, registerPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import {
   registerSlashCommand,
   unregisterSlashCommand,
@@ -13,6 +14,7 @@ import {
 
 afterEach(() => {
   __resetSlashCommandsForTesting()
+  __resetPluginI18nForTesting()
 })
 
 describe("usePluginSlashCommands", () => {
@@ -202,5 +204,42 @@ describe("usePluginSlashCommandExecution", () => {
       expect(await run).toBe(false)
     })
     expect(pending.command.handler).not.toHaveBeenCalled()
+  })
+})
+
+describe("describePluginCommand", () => {
+  const def = {
+    id: "acme.template",
+    name: "/template",
+    description: "Insert a template.",
+    descriptionKey: "commands.template.description",
+    source: "plugin" as const,
+    pluginId: "acme",
+    handler: () => ({}),
+  }
+
+  beforeEach(() => {
+    registerPluginI18n({
+      pluginId: "acme",
+      messages: {
+        en: { "plugin.acme.commands.template.description": "Insert a template." },
+        "zh-CN": { "plugin.acme.commands.template.description": "插入一个模板。" },
+      },
+    })
+  })
+
+  it("reads the description from the plugin's own bundle for the UI language", () => {
+    expect(describePluginCommand(def, "zh-CN")).toBe("插入一个模板。")
+  })
+
+  it("falls back to English when the UI language has no entry", () => {
+    expect(describePluginCommand(def, "ja")).toBe("Insert a template.")
+  })
+
+  it("leaves the declared description in charge without a key or a bundle entry", () => {
+    expect(describePluginCommand({ ...def, descriptionKey: undefined }, "zh-CN")).toBeUndefined()
+    expect(
+      describePluginCommand({ ...def, descriptionKey: "commands.missing.description" }, "zh-CN")
+    ).toBeUndefined()
   })
 })

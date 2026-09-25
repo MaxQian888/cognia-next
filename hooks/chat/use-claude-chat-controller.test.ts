@@ -4,8 +4,9 @@ import {
   userPromptText,
   rewriteUserPromptText,
   externalTurnPrompt,
+  redirectSendToBundleAliases,
 } from "./use-claude-chat-controller"
-import type { SendContentBlock } from "@cognia/agent-config-types"
+import type { SendContentBlock, SendOptions } from "@cognia/agent-config-types"
 
 describe("Claude chat controller seam", () => {
   it("exports the public hook implementation", () => {
@@ -142,5 +143,68 @@ describe("externalTurnPrompt", () => {
       ...none,
       unnamed: 1,
     })
+  })
+})
+
+describe("redirectSendToBundleAliases", () => {
+  // The owning workspace's two roots, as a canonical bundle checks them out.
+  const lease = { primaryAlias: "/isolated/app", additionalAliases: ["/isolated/docs"] }
+  const aliasesBySource = new Map([
+    ["/repo", "/isolated/app"],
+    ["/docs", "/isolated/docs"],
+  ])
+  const sourceSend: SendOptions = {
+    model: "sonnet",
+    cwd: "/repo",
+    additionalDirectories: ["/docs"],
+    trustedWorkspaceRoots: ["/repo", "/docs"],
+  }
+  /** What the sidecar honours: a trusted root that is also active for the send. */
+  const honoured = (options: SendOptions) => {
+    const active = [options.cwd, ...(options.additionalDirectories ?? [])]
+    return (options.trustedWorkspaceRoots ?? []).filter((root) => active.includes(root))
+  }
+
+  it("moves the trust proof onto the aliases the send now runs in", () => {
+    const redirected = redirectSendToBundleAliases(sourceSend, lease, aliasesBySource)
+
+    expect(redirected).toEqual({
+      model: "sonnet",
+      cwd: "/isolated/app",
+      additionalDirectories: ["/isolated/docs"],
+      trustedWorkspaceRoots: ["/isolated/app", "/isolated/docs"],
+    })
+    // Without the remap the source paths are inactive and prove nothing, so
+    // the sidecar refused every requested claudeAgentSdk skill or plugin.
+    expect(honoured({ ...redirected, trustedWorkspaceRoots: ["/repo", "/docs"] })).toEqual([])
+    expect(honoured(redirected)).toEqual(["/isolated/app", "/isolated/docs"])
+  })
+
+  it("grants an alias only the trust of the exact source root it checks out", () => {
+    const redirected = redirectSendToBundleAliases(
+      // "/docs" was never trusted; "/repo/packages/app" is a different root
+      // from "/repo" and its grant was never given for "/isolated/app".
+      { ...sourceSend, trustedWorkspaceRoots: ["/repo/packages/app", " /repo "] },
+      lease,
+      aliasesBySource
+    )
+
+    expect(redirected.trustedWorkspaceRoots).toEqual(["/repo/packages/app", "/isolated/app"])
+    expect(honoured(redirected)).toEqual(["/isolated/app"])
+  })
+
+  it("keeps an aliased proof when the turn lease re-points the same bundle again", () => {
+    const bound = redirectSendToBundleAliases(sourceSend, lease, aliasesBySource)
+    const leased = redirectSendToBundleAliases(bound, lease, aliasesBySource)
+
+    expect(leased.trustedWorkspaceRoots).toEqual(["/isolated/app", "/isolated/docs"])
+  })
+
+  it("adds no proof to a send that carried none", () => {
+    const { trustedWorkspaceRoots: _dropped, ...untrusted } = sourceSend
+    const redirected = redirectSendToBundleAliases(untrusted, lease, aliasesBySource)
+
+    expect(redirected).not.toHaveProperty("trustedWorkspaceRoots")
+    expect(redirected.cwd).toBe("/isolated/app")
   })
 })

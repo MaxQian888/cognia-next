@@ -7,7 +7,8 @@
  * see `composer.tsx`'s `onPickPopoverItem`.
  *
  * Only ENABLED skills are surfaced (disabled rows would enable to a no-op),
- * mirroring the composer's skill flyout (`components/chat/skill-picker.tsx`).
+ * mirroring the composer's skill flyout (`components/chat/skill-picker.tsx`),
+ * plus the skills enabled plugins contribute (`usePluginSkills`).
  * The list is a thin projection over `listSkills()`; `useLiveQuery` keeps it
  * current as the user adds / removes / toggles skills in Settings.
  */
@@ -15,6 +16,7 @@
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { usePluginSkills } from "@/hooks/skills/use-plugin-skills"
 import { listSkills } from "@/lib/db/skills"
 
 /** Minimal skill shape the `@skill:` picker row needs. */
@@ -31,11 +33,16 @@ export function useMentionableSkills(enabled = true): SkillMentionTarget[] {
   // Gate the query so the picker only reads Dexie when the combined `@`
   // composer is actually mounted (parity with the subagent / preset hooks).
   const rows = useLiveQuery(() => (enabled ? listSkills() : Promise.resolve([])), [enabled])
+  // Plugin-contributed skills are mentionable too: the send path resolves
+  // their registry ids exactly like it does a chat skill's Dexie id.
+  const pluginSkills = usePluginSkills("session", enabled)
   return useMemo(
-    () =>
-      (rows ?? [])
+    () => [
+      ...(rows ?? [])
         .filter((s) => (s.status ?? "enabled") === "enabled")
         .map((s) => ({ id: s.id, name: s.name, description: s.description })),
-    [rows]
+      ...pluginSkills.map((s) => ({ id: s.id, name: s.name, description: s.description })),
+    ],
+    [rows, pluginSkills]
   )
 }

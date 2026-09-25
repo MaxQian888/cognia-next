@@ -15,6 +15,7 @@ import {
   KeyRoundIcon,
   MoonIcon,
   PanelLeftIcon,
+  PawPrintIcon,
   PlusIcon,
   RefreshCwIcon,
   ServerIcon,
@@ -46,6 +47,8 @@ export type BuiltinCommandId =
   | "manage-workspace-roots"
   | "open-recorder"
   | "open-browser"
+  | "toggle-desktop-pet"
+  | "open-pet-console"
   | "check-updates"
   | "open-settings"
   | "manage-api-key"
@@ -167,6 +170,39 @@ export function actionCandidates(ctx: GlobalSearchContext): ActionCandidate[] {
       icon: { lucide: GlobeIcon },
       extra: ctx.isTauri ? undefined : { disabledReason: t("globalSearch.actions.desktopOnly") },
     },
+    // The desktop pet (ADR-0058). Hidden, not disabled, off the desktop main
+    // window: the pet never runs on the web or mobile, so a greyed row there
+    // would advertise a feature the host cannot have. Summoning switches a
+    // disabled pet on (D9), so the pet's own setting does not gate these.
+    ...(ctx.host.petHostAvailable
+      ? [
+          {
+            id: "toggle-desktop-pet" as const,
+            title: t("globalSearch.actions.toggleDesktopPet"),
+            keywords: [
+              "pet",
+              "desktop pet",
+              "companion",
+              "mascot",
+              "overlay",
+              "show",
+              "hide",
+              "宠物",
+              "桌宠",
+              "显示",
+              "隐藏",
+            ],
+            icon: { lucide: PawPrintIcon },
+          },
+          {
+            id: "open-pet-console" as const,
+            title: t("globalSearch.actions.openPetConsole"),
+            subtitle: t("globalSearch.actions.openPetConsoleHint"),
+            keywords: ["pet", "console", "panel", "nurture", "feed", "宠物", "面板", "喂养"],
+            icon: { lucide: PawPrintIcon },
+          },
+        ]
+      : []),
     {
       id: "open-settings",
       title: t("globalSearch.actions.openSettings"),

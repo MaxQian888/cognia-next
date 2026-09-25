@@ -10,12 +10,16 @@ import { getAllProviders } from "@cognia/provider-types/provider"
 
 import { additionalDirsOf, allRootPaths } from "@/lib/workspace/roots"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
+import { buildWorkspaceInstructionsSection } from "@/lib/workspace/workspace-instructions"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import type { MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
 import type { IVectorStore } from "@cognia/vector/store"
-import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
+import {
+  RESTRICTED_MODE_DENIED_TOOLS,
+  withRestrictedModeDenials,
+} from "@/lib/workspace/restricted-tools"
 import {
   externalAgentIdFromProviderId,
   isExternalAgentProviderId,
@@ -427,6 +431,16 @@ function buildWorkflowSnapshotBlock(
 }
 
 export interface BuildOptionsContext {
+  /**
+   * The turn is a person chatting in the app's own chat pane, the one surface
+   * where a built-in skill's desktop approval dialog can be answered. Set only
+   * by `hooks/chat/claude-chat-send-options.ts`. Offers the scheduler family
+   * (`schedule.*`) when the user's scheduler policy allows agents to manage
+   * the schedule. Scheduled runs, the CLI, teams, eval and twin leave it unset:
+   * nobody is there to confirm a write, and a scheduled run must not grow its
+   * own schedule.
+   */
+  interactiveChat?: boolean
   /** Host-owned OS launcher for built-in coding processes (CLI). */
   builtinProcessSandbox?: SendOptions["builtinProcessSandbox"]
   /** Host filesystem and managed installation policy for agent LSP. */
@@ -2387,6 +2401,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     baseSystem,
     personaSection,
     instructionSection,
+    // The turn's own workspace (`activeProject` is `resolveSessionWorkspace`),
+    // not whichever one is on screen.
+    buildWorkspaceInstructionsSection(ctx.activeProject),
     memorySection,
     projectContinuitySection,
     projectKnowledgeSection,
@@ -2507,13 +2524,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const templateToolsEnabled =
     artifactsChannelAvailable && appSettings?.selfInvokeTools?.templates === true
   // Desktop pet (ADR-0058). Opt-in and off by default. The host check belongs
-  // in the flag itself rather than only on the manifest append: the pet is
-  // excluded from the Capacitor shell outright (ADR-0059), and a ruleset
-  // merged there without its tools is the inert payload this file warns about
-  // twice. The runner re-checks availability at call time as well, because a
+  // in the flag itself rather than only on the manifest append: the pet runs
+  // only in the desktop shell (ADR-0058 D9), and a ruleset merged elsewhere
+  // without its tools is the inert payload this file warns about twice. This
+  // asked `!isNativeMobile()`, which is also true in a plain browser, the CLI
+  // and a headless brain, so the tools surfaced where every call could only
+  // refuse `unsupported-host` (or where the renderer relay cannot run at
+  // all). The runner re-checks availability at call time as well, because a
   // setting can change between the manifest being built and a tool being run.
-  const { isNativeMobile: petHostCheck } = await import("@/lib/platform/detect")
-  const petToolsSurfaced = appSettings?.selfInvokeTools?.pet === true && !petHostCheck()
+  const petToolsSurfaced =
+    appSettings?.selfInvokeTools?.pet === true && (await import("@/lib/tauri")).isTauri()
   const { buildTemplateToolRuleset } = await import("@/lib/claude/permissions/template-tool-rules")
   const { buildPetToolRuleset } = await import("@/lib/claude/permissions/pet-tool-rules")
   const mergedRuleset = mergeRulesets(
@@ -2565,9 +2585,22 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Agent mode tools union in too — picking "Code Generator" should grant
   // execute_code without forcing the user to also tweak the character.
   for (const t of activePreset?.defaultToolSet ?? []) allowed.add(t)
+  // The user's "may agents manage the schedule" switch, read once and only
+  // for turns that could be offered scheduler tools. Read from settings at
+  // call time rather than `appSettings`, which the scheduler store's policy
+  // writes do not refresh.
+  let agentSchedulerToolsEnabled: Promise<boolean> | null = null
+  const readAgentSchedulerToolsEnabled = (): Promise<boolean> =>
+    (agentSchedulerToolsEnabled ??= import("@/lib/scheduler/write-authority")
+      .then(({ loadSchedulerPolicy }) => loadSchedulerPolicy())
+      .then((policy) => policy.agentToolsEnabled !== false)
+      // Fail closed: a policy that cannot even be loaded must not be read as
+      // the user saying yes to agents reading and changing their schedule.
+      .catch(() => false))
   if (
     imOverrideRow?.allowScheduleTools === true &&
-    adapterAllowsHostCapability(imAdapterRow, "schedule_tools")
+    adapterAllowsHostCapability(imAdapterRow, "schedule_tools") &&
+    (await readAgentSchedulerToolsEnabled())
   ) {
     for (const tool of SCHEDULER_AGENT_TOOL_NAMES) allowed.add(tool)
   }
@@ -2656,10 +2689,23 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // user hasn't enabled.
   const builtInSkillsRequested =
     Boolean(session?.platformBinding?.adapterId) || character?.enableBuiltInSkills === true
+  // Scheduler family on its own (ADR-0167 amendment): a person chatting in the
+  // app can ask the assistant to manage their schedule without the character
+  // also opening Lark, IM and issues. Each write still goes through the
+  // approval dialog and the scheduler's permission policy. Restricted Mode
+  // withholds the family with the other mutators: it can create and run a
+  // `background-command` task, i.e. host shell execution.
+  const schedulerToolsAllowed = ctx.workspaceRestricted
+    ? false
+    : builtInSkillsRequested || ctx.interactiveChat === true
+      ? await readAgentSchedulerToolsEnabled()
+      : true
+  const schedulerFamilyOnly =
+    !builtInSkillsRequested && ctx.interactiveChat === true && schedulerToolsAllowed
   let builtInSkillsManifest: Awaited<
     ReturnType<typeof import("@/lib/skills/built-in/manifest").buildBuiltInSkillManifest>
   > = []
-  if (builtInSkillsRequested) {
+  if (builtInSkillsRequested || schedulerFamilyOnly) {
     try {
       // Lazily loaded together — resolving the projection pulls in every
       // adapter's capability const, and a desktop turn with no IM binding
@@ -2686,7 +2732,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           : "none"
       const skillsCacheKey = `${session?.platformBinding?.platform ?? "none"}:${Boolean(
         session?.platformBinding?.adapterId
-      )}:${imOverrideRow?.id ?? "none"}:${imOverrideRow?.updatedAt ?? 0}:${capabilityKey}`
+      )}:${imOverrideRow?.id ?? "none"}:${imOverrideRow?.updatedAt ?? 0}:${capabilityKey}:${
+        schedulerFamilyOnly ? "family:schedule" : "all"
+      }`
       const cachedManifest = builtInSkillsManifestCache.get(skillsCacheKey)
       if (cachedManifest !== undefined) {
         builtInSkillsManifest = cachedManifest
@@ -2721,6 +2769,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           imOverrideRow: imOverrideRow ?? undefined,
           imAdapterRow: imAdapterRow ?? undefined,
           channelCapabilities,
+          ...(schedulerFamilyOnly ? { families: ["schedule"] } : {}),
         })
         lruSet(
           builtInSkillsManifestCache,
@@ -2734,10 +2783,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // below. A character's broad enableBuiltInSkills switch must not expose
       // filesystem write tools that the user did not select.
       builtInSkillsManifest = builtInSkillsManifest.filter(
-        (entry) => !entry.skillId.startsWith("plugin.conversion.")
+        (entry) =>
+          !entry.skillId.startsWith("plugin.conversion.") &&
+          // The user turned "Allow agents to manage scheduled tasks" off.
+          (schedulerToolsAllowed || !entry.skillId.startsWith("schedule."))
       )
-      for (const entry of builtInSkillsManifest) {
-        allowed.add(entry.name)
+      // Family-only entries reach the sidecar through `pluginTools` alone. The
+      // allowlist is a narrowing: adding them to an EMPTY one would turn "every
+      // tool" into "these nine", and flip `surfaceNarrowed` for web search. A
+      // turn something else already narrowed gets them added like any skill.
+      if (!schedulerFamilyOnly || allowed.size > 0) {
+        for (const entry of builtInSkillsManifest) {
+          allowed.add(entry.name)
+        }
       }
     } catch {
       // Best-effort — registry import failure shouldn't break sends.
@@ -3867,15 +3925,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // --- Workspace Restricted Mode -------------------------------------------
   // An untrusted active workspace denies every disk/host-mutating tool. Mirrors
   // the sandbox deny above; read-only tools stay allowed. Computer-use plugin
-  // tools (if present in the allow list) are stripped too.
+  // tools (if present in the allow list) are stripped too, by the one predicate
+  // that knows their prefix.
   if (ctx.workspaceRestricted) {
-    const denied = new Set(opts.disallowedTools ?? [])
-    for (const t of RESTRICTED_MODE_DENIED_TOOLS) denied.add(t)
-    for (const t of opts.allowedTools ?? []) {
-      if (t.startsWith("mcp__cognia-plugin-tools__")) denied.add(t)
-    }
-    opts.disallowedTools = [...denied]
-    if (opts.allowedTools) opts.allowedTools = opts.allowedTools.filter((t) => !denied.has(t))
+    const restricted = withRestrictedModeDenials(opts)
+    opts.disallowedTools = restricted.disallowedTools
+    if (restricted.allowedTools) opts.allowedTools = restricted.allowedTools
   }
 
   // --- Per-session account / proxy env (ADR-0028) --------------------------

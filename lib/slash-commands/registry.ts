@@ -53,6 +53,11 @@ export interface SlashCommandDefinition {
   name: string
   /** Description shown in the palette / autocomplete. */
   description?: string
+  /**
+   * Plugin commands only: a key into the owning plugin's locale bundle,
+   * resolved by the picker for the UI language. `description` is the fallback.
+   */
+  descriptionKey?: string
   /** Optional keyboard shortcut hint (purely cosmetic in the UI). */
   shortcut?: string | null
   /** The function invoked when the user runs the command. */

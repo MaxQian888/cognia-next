@@ -543,6 +543,10 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       ctx.pushSystemMessage(result.system)
     },
   },
+  // Desktop-app only, like the pet itself (ADR-0058 D9). It stays listed on
+  // every host, following `/record-skill`, and answers honestly where the pet
+  // cannot run instead of confirming care nothing received: the handler goes
+  // through the pet's access gate (`lib/slash-commands/actions/pet.ts`).
   {
     name: "pet",
     description: "Check on or care for your desktop pet (feed, play, clean, …).",

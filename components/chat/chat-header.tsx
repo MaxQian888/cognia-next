@@ -23,6 +23,7 @@ import { SessionSummaryPopover } from "@/components/context-workbench/session-su
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { ImportedOriginChip } from "@/components/chat/imported-origin-chip"
+import { ScheduledOriginChip } from "@/components/chat/scheduled-origin-chip"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import { MentionBacklinksChip } from "@/components/chat/mention-backlinks-chip"
 import { sessionBacklinkTarget } from "@/lib/chat/mentions/backlinks"
@@ -189,6 +190,9 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
             warning for a frozen import — the badge `lib/data/import-merge.ts`
             promised while nothing in the app read `importFrozen` at all. */}
         <ImportedOriginChip session={session} />
+        {/* Self-hides unless a scheduled task's run opened this conversation;
+            opens that task and run on the scheduler page. */}
+        <ScheduledOriginChip session={session} />
         {/* Self-hides unless another conversation has referenced this one with
             `@chat:`. The fourth provenance question in this row: where did this
             come from, what came out of it, and who else reached for it. */}

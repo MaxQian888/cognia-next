@@ -80,6 +80,7 @@ import {
   registerBackgroundReplaySend,
 } from "./background-result-runtime"
 import { registerChatRetryBridge, registerChatSendBridge } from "./chat-send-bridge"
+import { registerChatApprovalBridge, registerChatStopBridge } from "./chat-control-bridge"
 import { tagBranchSiblings, tagEditSibling } from "@/lib/chat/branch-regen"
 import {
   approveTool,
@@ -91,6 +92,7 @@ import {
   setSessionModel,
 } from "@/lib/claude/ipc"
 import { recordChatToolApprovalDecision } from "@/lib/policy/action-review/chat-tool-channel"
+import { recordChatCanonicalEvents } from "@/lib/chat/canonical-sink"
 import { isEmbeddedSession } from "@/lib/chat/session-exposure"
 import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-payload"
 import { clearSessionGrants } from "@/lib/claude/computer-use-session-grants"
@@ -155,6 +157,7 @@ import {
   captureEventFromCanonical,
 } from "@/lib/ai/agent/execution/event-envelope"
 import { openWorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
+import { remapExactRoots } from "@/lib/task-workspace/root-aliases"
 import {
   ensureSessionExecutionBundle,
   type SessionBundleBinding,
@@ -402,6 +405,34 @@ export function resolveChatTurnAttemptIdentity(input: {
   const ordinal = (input.attempts.get(attemptKey) ?? 0) + 1
   input.attempts.set(attemptKey, ordinal)
   return { runId: input.runId, turnId, attemptId: `a${ordinal}` }
+}
+
+/**
+ * Re-point a send at a Registry Bundle's aliases, and carry its Workspace
+ * Trust proof along in the same step.
+ *
+ * `resolveSendOptions` stamps `trustedWorkspaceRoots` with the owning
+ * workspace's SOURCE roots. The sidecar honours only a trusted root that is
+ * also active for the send, so once cwd and additionalDirectories name the
+ * aliases, an un-remapped proof intersects to nothing and every requested
+ * `claudeAgentSdk` skill or plugin is refused. Each alias inherits the grant of
+ * the exact source root it checks out; one whose source was not trusted stays
+ * unproven. A proof already on the aliases passes through, so a second
+ * redirect over the same bundle is a no-op for it.
+ */
+export function redirectSendToBundleAliases(
+  options: SendOptions,
+  aliases: { primaryAlias: string; additionalAliases: string[] },
+  aliasesBySource: ReadonlyMap<string, string>
+): SendOptions {
+  return {
+    ...options,
+    cwd: aliases.primaryAlias,
+    additionalDirectories: aliases.additionalAliases,
+    ...(options.trustedWorkspaceRoots?.length
+      ? { trustedWorkspaceRoots: remapExactRoots(options.trustedWorkspaceRoots, aliasesBySource) }
+      : {}),
+  }
 }
 
 /**
@@ -1644,7 +1675,17 @@ export function useClaudeChat() {
             // This controller creates the Router + Fusion run before dispatch.
             // An addressed turn runs exactly where it was addressed, so it is
             // never turned into a cascade or panel run.
-            turnRoute ? {} : { routerFusionSurface: "chat" },
+            // Typed here, so the approval dialog for a schedule write is here too.
+            // Only a turn a person typed (or regenerated) counts: goal/loop
+            // continuations, plan steps and peer triggers re-send with
+            // `skipUserAppend`, and a shared-queue drain is a collaborator's
+            // request, not this user's.
+            {
+              ...(turnRoute ? {} : { routerFusionSurface: "chat" as const }),
+              interactive:
+                !callOptions?.sharedRequest &&
+                (!callOptions?.skipUserAppend || Boolean(callOptions?.regenerateBranch)),
+            },
             routeLane
               ? routeLane.member
                 ? (() => {
@@ -2871,6 +2912,7 @@ export function useClaudeChat() {
       }
       let bundlePrimaryRootId: string | undefined
       let managedBundle: SessionBundleBinding["bundle"] | undefined
+      let managedAliasesBySource: SessionBundleBinding["aliasesBySource"] | undefined
       if (turnUsesWorkingCopy && executionContext?.location === "managedWorktree") {
         const project = useProjectStore
           .getState()
@@ -2895,11 +2937,8 @@ export function useClaudeChat() {
           executionContext = binding.context
           bundlePrimaryRootId = binding.primaryLogicalRootId
           managedBundle = binding.bundle
-          sendOptions = {
-            ...sendOptions,
-            cwd: binding.primaryAlias,
-            additionalDirectories: binding.additionalAliases,
-          }
+          managedAliasesBySource = binding.aliasesBySource
+          sendOptions = redirectSendToBundleAliases(sendOptions, binding, binding.aliasesBySource)
           await updateSession(sessionId, { executionContext })
         } catch (error) {
           console.error("managed workspace bundle acquisition failed", error)
@@ -3127,11 +3166,16 @@ export function useClaudeChat() {
         sendOptions = { ...sendOptions, taskWorkspace: taskEnvelope }
         if (taskLease) {
           sendOptions = bundleTurnLease
-            ? {
-                ...sendOptions,
-                cwd: bundleTurnLease.primaryAlias,
-                additionalDirectories: bundleTurnLease.additionalAliases,
-              }
+            ? redirectSendToBundleAliases(
+                sendOptions,
+                bundleTurnLease,
+                // A turn lease hands back its bundle's own lease aliases. The
+                // canonical bundle's are keyed by root id, which the binding
+                // resolved to source paths; the legacy bundle has one root,
+                // `workspaceRoot`, checked out at the primary alias.
+                managedAliasesBySource ??
+                  new Map([[workspaceRoot.trim(), bundleTurnLease.primaryAlias]])
+              )
             : { ...sendOptions, cwd: taskLease.run.executionRoot }
           if (executionContext?.location === "managedWorktree") {
             const bound = bundleTurnLease
@@ -5179,6 +5223,17 @@ export function useClaudeChat() {
       const handle = getExecutionHandle(approval.sessionId)
       if (handle) {
         await handle.resolvePermission(approval.requestId, decision)
+        // `approveTool` journals the matching `permission-resolved`; this
+        // branch never reaches it. Without the record the run's canonical log
+        // (and the live Fleet / island rows folded from it) kept the ask open
+        // until the turn ended.
+        recordChatCanonicalEvents(approval.sessionId, [
+          {
+            kind: "permission-resolved",
+            requestId: approval.requestId,
+            behavior: decision === "deny" ? "deny" : "allow",
+          },
+        ])
       } else {
         await approveTool(
           approval.sessionId,
@@ -5196,6 +5251,12 @@ export function useClaudeChat() {
     },
     [store, getExecutionHandle]
   )
+
+  // Surfaces outside this provider's tree (the island overlay's main-window
+  // half) answer approvals and stop turns through the same two closures the
+  // approval card and the composer use — see `chat-control-bridge.ts`.
+  useEffect(() => registerChatApprovalBridge(respondToApproval), [respondToApproval])
+  useEffect(() => registerChatStopBridge(stop), [stop])
 
   useEffect(() => {
     sharedApprovalResponseRef.current = respondToApproval

@@ -45,6 +45,14 @@ const part = (type: string, output?: unknown, input?: unknown): ToolUIPart =>
   }) as unknown as ToolUIPart
 
 describe("isStructuredMcpToolPart", () => {
+  it("routes the schedule.* tools to their card, bare or through the plugin bridge", () => {
+    expect(isStructuredMcpToolPart(part("tool-scheduler_create_task"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-scheduler_list_tasks"))).toBe(true)
+    expect(
+      isStructuredMcpToolPart(part("tool-mcp__cognia-plugin-tools__scheduler_delete_task"))
+    ).toBe(true)
+  })
+
   it("recognises cognia tools", () => {
     expect(isStructuredMcpToolPart(part("tool-wiki_search"))).toBe(true)
     expect(isStructuredMcpToolPart(part("tool-wiki_read"))).toBe(true)
@@ -433,15 +441,20 @@ describe("plugin-contributed tool cards", () => {
     expect(isStructuredMcpToolPart(part("tool-demo_lookup"))).toBe(true)
   })
 
-  it("contains a crashing plugin card instead of taking down the message", () => {
+  // The crash used to replace the tool's result with an error card; the result
+  // is the user's data, so the generic body comes back with a retry strip.
+  it("falls back to the generic tool output when a plugin card crashes", () => {
     const Boom = () => {
       throw new Error("plugin exploded")
     }
     registerToolResultRenderer("p1", "boom_tool", Boom as never)
     const spy = jest.spyOn(console, "error").mockImplementation(() => {})
     render(<MCPToolCard part={part("tool-boom_tool", "x")} />)
-    expect(screen.getByRole("alert")).toHaveAttribute("data-plugin-surface-error", "true")
-    expect(screen.getByText("p1 could not render")).toBeInTheDocument()
+    expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    const strip = document.querySelector("[data-plugin-surface-fallback]")
+    expect(strip).toHaveTextContent("p1's card failed to render, so the plain result is shown.")
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
     spy.mockRestore()
   })
 

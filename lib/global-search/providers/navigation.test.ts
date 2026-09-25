@@ -12,6 +12,14 @@ describe("navigation provider", () => {
     expect(mobile.some((r) => r.id === "page:browser")).toBe(false)
   })
 
+  it("offers the pet page only on the desktop (ADR-0058 D9)", () => {
+    const has = (platform: "tauri" | "web" | "mobile") =>
+      navigationCandidates(makeTestContext({ platform })).some((r) => r.id === "page:pet")
+    expect(has("tauri")).toBe(true)
+    expect(has("web")).toBe(false)
+    expect(has("mobile")).toBe(false)
+  })
+
   it("matches labels, ids and routes", async () => {
     const byLabel = await navigationProvider.search(
       makeProviderInput("desktop.guildRail.workflows", { ctx: makeTestContext() })

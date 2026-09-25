@@ -9,8 +9,7 @@ import {
 } from "@/stores/agent/external-elicitation-store"
 import { ExternalAgentElicitationDialog } from "@/components/agent/external-agent/elicitation-dialog"
 import { ToolApprovalDialog } from "./tool-approval-dialog"
-import { decodeSubSession } from "@/lib/claude/team-session-id"
-import { isCompanionShell } from "@/lib/chat/room/shell"
+import { routeChatApprovalDecision } from "@/lib/chat/approval-routing"
 
 /** Blocking decisions belong to the conversation, independent of its host page. */
 export function ChatSessionGates({
@@ -26,14 +25,7 @@ export function ChatSessionGates({
   const respond = useCallback(
     async (decision: ApprovalDecision) => {
       if (!approval) return
-      if (decodeSubSession(approval.sessionId)) {
-        const { getHostRoomRunner, getCompanionRoomProjector } =
-          await import("@/lib/chat/room/runner-host")
-        const runner = isCompanionShell() ? getCompanionRoomProjector().runner : getHostRoomRunner()
-        await runner.respondToApproval(approval, decision)
-      } else {
-        await respondToApproval(approval, decision)
-      }
+      await routeChatApprovalDecision(approval, decision, respondToApproval)
     },
     [approval, respondToApproval]
   )

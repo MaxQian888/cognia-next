@@ -328,6 +328,18 @@ describe("ChatPane shared blocking capabilities", () => {
     expect(screen.getByTestId("plan-decision")).toBeInTheDocument()
     expect(mockPlanDockProps.at(-1)?.onResume).toBe(mockPaneRuntime.resumePlan)
   })
+  it("reviews a plan in the slot above the composer, not at the top of the pane", () => {
+    mockPaneRuntime.ownsDecisions = true
+    render(<ChatPane {...makeProps()} />)
+    const dock = screen.getByTestId("plan-decision")
+    const stage = document.querySelector('[data-slot="chat-surface-stage"]')
+    // Inside the transcript stage, and before the composer it resumes.
+    expect(stage).toContainElement(dock)
+    expect(
+      dock.compareDocumentPosition(screen.getByTestId("composer")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
   it("does not offer direct plan continuation for a team", () => {
     render(
       <ChatPane {...makeProps()} activeSession={{ ...mockSession, kind: "team", teamId: "team" }} />

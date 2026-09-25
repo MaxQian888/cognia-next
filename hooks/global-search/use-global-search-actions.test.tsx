@@ -21,6 +21,7 @@ const clearMessages = jest.fn()
 const recordRecentItem = jest.fn()
 const clearAllRecents = jest.fn()
 const isTauriMock = jest.fn(() => true)
+const toggleDesktopPetWindow = jest.fn(async () => true)
 const trackEvent = jest.fn(async () => true)
 
 jest.mock("next-intl", () => ({
@@ -64,6 +65,9 @@ jest.mock("@/lib/plugin/registries/quick-action-registry", () => ({
   getQuickAction: (...a: unknown[]) => getQuickAction(...a),
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+jest.mock("@/lib/pet/commands", () => ({
+  toggleDesktopPetWindow: () => toggleDesktopPetWindow(),
+}))
 jest.mock("@/lib/tauri/updater", () => ({
   checkForUpdate: (...a: unknown[]) => checkForUpdate(...a),
 }))
@@ -336,6 +340,26 @@ describe("useGlobalSearchActions", () => {
     const { result } = setup()
     await act(() => result.current.runCommand("open-browser"))
     expect(push).toHaveBeenCalledWith("/browser")
+  })
+
+  it("summons the desktop pet through the one shared summon path", async () => {
+    const { result } = setup()
+    await act(() => result.current.runCommand("toggle-desktop-pet"))
+    expect(toggleDesktopPetWindow).toHaveBeenCalledTimes(1)
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it("says so when the desktop pet cannot be toggled", async () => {
+    toggleDesktopPetWindow.mockRejectedValueOnce(new Error("no window"))
+    const { result } = setup()
+    await act(() => result.current.runCommand("toggle-desktop-pet"))
+    expect(toast.error).toHaveBeenCalledWith('toasts.petToggleFailed:{"message":"no window"}')
+  })
+
+  it("opens the pet console by route, so it works while the pet is switched off", async () => {
+    const { result } = setup()
+    await act(() => result.current.runCommand("open-pet-console"))
+    expect(push).toHaveBeenCalledWith("/pet")
   })
 
   it("delegates new-chat to the host when it owns it", async () => {

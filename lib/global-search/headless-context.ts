@@ -121,6 +121,7 @@ export async function buildHeadlessSearchContext(
       // to check.
       reachableSettingsSections: new Set<string>(),
       recorderAvailable: false,
+      petHostAvailable: false,
       theme: undefined,
       hasApiKey: false,
       pluginQuickActions: [],

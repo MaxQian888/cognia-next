@@ -312,6 +312,11 @@ function GenericBottomToolbar({
       limit={1}
       className="flex min-w-0 items-center"
       overflowLabel={t("pluginExtensionOverflow")}
+      // What the host chip below knows, so a replacing dial can act on this
+      // composer's session, go inert while a reply streams, and fold to a
+      // glyph with the toolbar (`ChatInputEffortSlotContext`).
+      context={{ sessionId: session?.id, disabled: isStreaming, compact: glyphForm }}
+      compact={glyphForm}
       fallback={
         <EffortChip
           session={session}

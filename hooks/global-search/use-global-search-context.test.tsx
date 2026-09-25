@@ -16,7 +16,8 @@ jest.mock("next-intl", () => {
   return { useTranslations: () => t, useLocale: () => "zh-CN", useNow: () => now }
 })
 jest.mock("next-themes", () => ({ useTheme: () => ({ theme: "dark" }) }))
-jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => "web" }))
+let mockPlatform: "web" | "tauri" | "mobile" = "web"
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
 jest.mock("@/hooks/settings/use-settings-section-reachability", () => {
   const sections = new Set(["appearance"])
@@ -64,6 +65,7 @@ import { resolvePanelLabel, useGlobalSearchContext } from "./use-global-search-c
 describe("useGlobalSearchContext", () => {
   beforeEach(() => {
     panels.length = 0
+    mockPlatform = "web"
   })
 
   it("assembles the context from hooks and stores", () => {
@@ -87,6 +89,8 @@ describe("useGlobalSearchContext", () => {
     expect(ctx.t("a.b", { n: 1 })).toBe('a.b:{"n":1}')
     expect(ctx.host).toMatchObject({
       recorderAvailable: true,
+      // A browser can never host the desktop pet (ADR-0058 D9).
+      petHostAvailable: false,
       theme: "dark",
       hasApiKey: true,
       pluginQuickActions: quickActions,
@@ -97,6 +101,19 @@ describe("useGlobalSearchContext", () => {
       { id: "plugin:x", label: "Raw", activity: "plugins" },
       { id: "plugin:y", label: "plugin.known.panel", activity: "plugins" },
     ])
+  })
+
+  it("lets the desktop main window host the pet, whatever the pet's own setting", () => {
+    // Summoning switches the pet on, so only the host and window role count.
+    mockPlatform = "tauri"
+    const { result } = renderHook(() => useGlobalSearchContext({ sessions: [], scope: "all" }))
+    expect(result.current.host.petHostAvailable).toBe(true)
+  })
+
+  it("keeps the pet actions away from the mobile shell", () => {
+    mockPlatform = "mobile"
+    const { result } = renderHook(() => useGlobalSearchContext({ sessions: [], scope: "all" }))
+    expect(result.current.host.petHostAvailable).toBe(false)
   })
 
   it("keeps the context identity stable across re-renders with the same inputs", () => {

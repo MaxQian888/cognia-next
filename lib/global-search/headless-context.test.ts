@@ -63,6 +63,8 @@ describe("buildHeadlessSearchContext", () => {
     const ctx = await buildHeadlessSearchContext({})
     expect(ctx.host.reachableSettingsSections.size).toBe(0)
     expect(ctx.host.recorderAvailable).toBe(false)
+    // A workflow graph never hosts the desktop pet.
+    expect(ctx.host.petHostAvailable).toBe(false)
     expect(ctx.host.hasApiKey).toBe(false)
     expect(ctx.host.pluginQuickActions).toEqual([])
     expect(ctx.host.workbenchPanels).toEqual([])

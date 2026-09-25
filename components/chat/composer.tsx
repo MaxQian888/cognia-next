@@ -3561,6 +3561,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   const pushSystemMessage = useCallback(
     (payload: string | SystemMessageBlock | SlashCommandResultBlock) => {
+      // With no conversation yet (the home composer), an appended message
+      // lands in the pre-session projection, which the empty state never
+      // renders, so a command's answer (`/template-list`, a plugin's reply)
+      // vanished. Say it where the user is looking instead.
+      if (!session?.id && typeof payload === "string") {
+        toast.message(<div className="max-h-48 overflow-y-auto whitespace-pre-line">{payload}</div>)
+        return
+      }
       // Strings render as markdown text; any structured block (diagnostics card
       // or slash-result chip) rides the same data part and is dispatched by the
       // message renderer on its `kind`.

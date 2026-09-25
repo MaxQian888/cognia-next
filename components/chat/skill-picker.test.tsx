@@ -107,3 +107,46 @@ describe("SkillPickerContent", () => {
     expect(listSkillsMock).toHaveBeenCalled()
   })
 })
+
+describe("SkillPickerContent — plugin skills", () => {
+  const { registerSkill, unregisterSkillsByPlugin } = jest.requireActual<
+    typeof import("@/lib/plugin/registries/skill-registry")
+  >("@/lib/plugin/registries/skill-registry")
+
+  afterEach(() => {
+    unregisterSkillsByPlugin("acme")
+  })
+
+  it("lists skills contributed by enabled plugins and toggles their registry id", () => {
+    registerSkill(
+      "acme:review",
+      {
+        id: "acme:review",
+        name: "Acme review",
+        description: "Reviews a diff",
+        source: { kind: "inline", markdown: "# review" },
+      },
+      { pluginId: "acme" }
+    )
+    const onChange = jest.fn()
+    renderPicker(true, [], onChange)
+    fireEvent.click(screen.getByText("Acme review"))
+    expect(onChange).toHaveBeenCalledWith(["acme:review"])
+  })
+
+  it("does not offer a character-only plugin skill in the composer", () => {
+    registerSkill(
+      "acme:persona",
+      {
+        id: "acme:persona",
+        name: "Persona only",
+        description: "",
+        scope: "character",
+        source: { kind: "inline", markdown: "# persona" },
+      },
+      { pluginId: "acme" }
+    )
+    renderPicker(true)
+    expect(screen.queryByText("Persona only")).toBeNull()
+  })
+})

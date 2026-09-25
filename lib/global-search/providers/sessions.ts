@@ -43,8 +43,12 @@ export function visibleSessions(
   return exposed.filter((session) => {
     if (session.platformBinding) return false
     if (!filters.archived && isArchived(session)) return false
-    if (filters.workspace === "current" && ctx.activeProjectId) {
-      if ((session.projectId ?? "") !== ctx.activeProjectId) return false
+    // A conversation with no workspace is shared, not foreign (`byProjectId`):
+    // the chat list shows it in whichever workspace is open
+    // (`listWorkspaceSessions`), so a search scoped to that workspace must not
+    // be the one place it cannot be found.
+    if (filters.workspace === "current" && ctx.activeProjectId && session.projectId) {
+      if (session.projectId !== ctx.activeProjectId) return false
     }
     return true
   })

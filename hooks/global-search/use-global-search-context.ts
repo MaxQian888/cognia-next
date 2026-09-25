@@ -27,6 +27,8 @@ import {
   subscribeActiveContext,
 } from "@/lib/context-workbench/active-context"
 import type { GlobalSearchContext, GlobalSearchScope } from "@/lib/global-search/types"
+import { isPetAvailable } from "@/lib/pet/access/availability"
+import { getPetWindowRole } from "@/lib/pet/window-role"
 import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -67,6 +69,12 @@ export function useGlobalSearchContext({
   const { theme } = useTheme()
   const { sections } = useSettingsSectionReachability()
   const recorderAvailable = useRecorderAvailable()
+  // The structural question only (host + window role): summoning the pet from
+  // the palette switches it on, so its current setting must not hide the way.
+  const petHostAvailable = useMemo(
+    () => isPetAvailable({ enabled: true, role: getPetWindowRole(), platform }),
+    [platform]
+  )
   const workspaceDirGate = useWorkspaceCommandGate()
   const pluginQuickActions = usePluginQuickActions("palette")
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
@@ -117,6 +125,7 @@ export function useGlobalSearchContext({
       host: {
         reachableSettingsSections: sections as ReadonlySet<string>,
         recorderAvailable,
+        petHostAvailable,
         theme,
         hasApiKey,
         pluginQuickActions,
@@ -139,6 +148,7 @@ export function useGlobalSearchContext({
       scope,
       sections,
       recorderAvailable,
+      petHostAvailable,
       workspaceDirGate,
       theme,
       hasApiKey,

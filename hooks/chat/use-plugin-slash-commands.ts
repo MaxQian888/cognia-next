@@ -13,10 +13,31 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useLocale } from "next-intl"
 
 import type { SlashCommand, SlashContext } from "@/lib/slash-commands/builtin"
 import { getPluginSlashCommands } from "@/lib/slash-commands/plugin-commands"
-import { getSlashCommandsVersion, subscribeSlashCommands } from "@/lib/slash-commands/registry"
+import {
+  getSlashCommandsVersion,
+  subscribeSlashCommands,
+  type SlashCommandDefinition,
+} from "@/lib/slash-commands/registry"
+import { translatePluginMessage } from "@/lib/plugin/api/i18n-api"
+import { getPluginI18nSnapshot, subscribeToPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
+
+/**
+ * A plugin command's description in `locale`, from the owning plugin's own
+ * bundle (`descriptionKey`). Undefined when there is no key or the bundle has
+ * no entry for it, so the declared `description` stays the fallback.
+ */
+export function describePluginCommand(
+  def: SlashCommandDefinition,
+  locale: string
+): string | undefined {
+  if (!def.descriptionKey || !def.pluginId) return undefined
+  const text = translatePluginMessage(def.pluginId, locale, def.descriptionKey)
+  return text && text !== def.descriptionKey ? text : undefined
+}
 
 export function usePluginSlashCommands(): SlashCommand[] {
   const version = useSyncExternalStore(
@@ -25,10 +46,21 @@ export function usePluginSlashCommands(): SlashCommand[] {
     // Server snapshot: the registry is empty during SSR/static export.
     getSlashCommandsVersion
   )
-  // `version` is the change signal: it isn't read inside, but re-deriving the
-  // projection when the registry mutates is the whole point.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => getPluginSlashCommands(), [version])
+  const locale = useLocale()
+  // A plugin's locale bundle can register after its commands, so the
+  // descriptions re-resolve when it does.
+  const i18nVersion = useSyncExternalStore(
+    subscribeToPluginI18n,
+    getPluginI18nSnapshot,
+    getPluginI18nSnapshot
+  )
+  // `version` / `i18nVersion` are change signals: they aren't read inside,
+  // but re-deriving the projection when either registry mutates is the point.
+  return useMemo(
+    () => getPluginSlashCommands((def) => describePluginCommand(def, locale)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [version, i18nVersion, locale]
+  )
 }
 
 /** One command run owned by this composer and its session. */

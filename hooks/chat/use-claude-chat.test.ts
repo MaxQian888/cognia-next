@@ -58,6 +58,12 @@ jest.mock("./background-result-runtime", () => ({
   ...jest.requireActual("./background-result-runtime"),
   maybeDrainBackgroundResults: (sessionId: string) => backgroundDrainMock(sessionId),
 }))
+// Call-through spy: the real sink stays in charge of the journal, the test only
+// observes what the approval paths record into it.
+jest.mock("@/lib/chat/canonical-sink", () => {
+  const actual = jest.requireActual("@/lib/chat/canonical-sink")
+  return { ...actual, recordChatCanonicalEvents: jest.fn(actual.recordChatCanonicalEvents) }
+})
 jest.mock("@/lib/chat/session-peer-messaging", () => ({
   ...jest.requireActual("@/lib/chat/session-peer-messaging"),
   drainSessionPeerMessages: (sessionId: string) => (peerDrainMock as jest.Mock)(sessionId),
@@ -940,6 +946,12 @@ import type { TurnRoute } from "@/lib/chat/turn-route/types"
 import { subscribeDiagnostic } from "@/lib/diagnostics/bus"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { useClaudeChat } from "./use-claude-chat-controller"
+import { recordChatCanonicalEvents } from "@/lib/chat/canonical-sink"
+import { answerChatApproval, stopChatTurn } from "./chat-control-bridge"
+import {
+  AgentExecutionHandleProvider,
+  useAgentExecutionHandleDirectory,
+} from "@/components/providers/agent-execution-handle-provider"
 import { ClaudeChatRuntimeProvider, useClaudeChat as useSharedClaudeChat } from "./use-claude-chat"
 import {
   hasSessionGrant,
@@ -1045,6 +1057,7 @@ beforeEach(() => {
       primaryAlias: "/managed/sess-1",
       additionalAliases: [],
       primaryLogicalRootId: "root-1",
+      aliasesBySource: new Map([["/repo", "/managed/sess-1"]]),
     }))
   getProjectEnvironmentMock.mockReset().mockResolvedValue(undefined)
   executeProjectEnvironmentMock.mockReset().mockResolvedValue({ success: true, bypassed: false })
@@ -1466,6 +1479,92 @@ describe("useClaudeChat — actions", () => {
     )?.[1]?.executionContext
     expect(persistedContext).not.toHaveProperty("worktreePath")
     expect(persistedContext).not.toHaveProperty("branch")
+  })
+
+  it("carries the Workspace Trust proof onto the managed-worktree alias the turn runs in", async () => {
+    // `resolveSendOptions` stamps the trusted SOURCE root; the sidecar honours
+    // only a trusted root that is also cwd or an additional directory.
+    resolveSendOptionsMock.mockResolvedValue({
+      model: "sonnet",
+      systemPrompt: "sys",
+      cwd: "/repo",
+      trustedWorkspaceRoots: ["/repo"],
+    })
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Managed",
+      model: "sonnet",
+      executionContext: {
+        location: "managedWorktree",
+        projectId: "project-1",
+        projectRoot: "/repo",
+        taskWorkspace: { taskId: "task-workspace:sess-1", workspaceKey: "sess-1" },
+        lifecycle: { state: "ready", createdAt: 1, updatedAt: 2, pinned: false },
+      },
+    })
+    openWorkspaceBundleTurnLeaseMock.mockResolvedValue({
+      bundleTurnId: "bundle-turn-1",
+      run: { runId: "run:sess-1:1", executionRoot: "/physical/workspace-1" },
+      primaryAlias: "/managed/sess-1",
+      additionalAliases: [],
+      settle: jest.fn(),
+    })
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("use the repo skill")
+    })
+
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.anything(),
+      expect.objectContaining({
+        cwd: "/managed/sess-1",
+        trustedWorkspaceRoots: ["/managed/sess-1"],
+      })
+    )
+  })
+
+  it("carries the Workspace Trust proof onto a legacy working-copy alias", async () => {
+    const workspace = await import("@/lib/task-workspace/client")
+    ;(workspace.acquireWorkspaceBundle as jest.Mock).mockResolvedValueOnce({
+      bundleId: "legacy-bundle",
+      leases: [],
+    })
+    resolveSendOptionsMock.mockResolvedValue({
+      model: "sonnet",
+      systemPrompt: "sys",
+      cwd: "/repo",
+      trustedWorkspaceRoots: ["/repo"],
+    })
+    openWorkspaceBundleTurnLeaseMock.mockResolvedValue({
+      bundleTurnId: "legacy-turn",
+      run: { runId: "legacy-run", executionRoot: "/physical/legacy" },
+      primaryAlias: "/isolated/legacy",
+      additionalAliases: [],
+      settle: jest.fn(),
+    })
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("use the repo skill")
+    })
+
+    expect(openWorkspaceBundleTurnLeaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({ bundleId: "legacy-bundle" }),
+      "primary",
+      expect.objectContaining({ workspaceRoot: "/repo" })
+    )
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.anything(),
+      expect.objectContaining({
+        cwd: "/isolated/legacy",
+        trustedWorkspaceRoots: ["/isolated/legacy"],
+      })
+    )
   })
 
   it("fails closed instead of falling back to Local when managed isolation is unavailable", async () => {
@@ -3523,6 +3622,27 @@ describe("useClaudeChat — actions", () => {
     expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "cancelled")
   })
 
+  it("registers its stop and approval responder for surfaces outside the provider", async () => {
+    const { unmount } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await expect(stopChatTurn("sess-bg")).resolves.toBe(true)
+    })
+    expect(interruptSessionMock).toHaveBeenCalledWith("sess-bg")
+    await act(async () => {
+      await expect(
+        answerChatApproval(
+          { sessionId: "sess-bg", requestId: "r-bg", toolName: "read" } as never,
+          "deny"
+        )
+      ).resolves.toBe(true)
+    })
+    expect(approveToolMock).toHaveBeenCalledWith("sess-bg", "r-bg", "deny")
+    unmount()
+    // Unmounted runtime: nothing left to deliver through.
+    await expect(stopChatTurn("sess-bg")).resolves.toBe(false)
+  })
+
   it("stop() durably queues an attached HostState abort instead of direct interrupt", async () => {
     enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "abort-action", status: "pending" })
     const { result } = renderHook(() => useClaudeChat())
@@ -3622,6 +3742,39 @@ describe("useClaudeChat — actions", () => {
     })
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
     expect(chatState.clearApproval).toHaveBeenCalledWith("r-1", "sess-1")
+  })
+
+  it("respondToApproval through an execution handle journals the resolution approveTool would have", async () => {
+    const resolvePermission = jest.fn(async () => undefined)
+    const { result } = renderHook(
+      () => ({ chat: useClaudeChat(), directory: useAgentExecutionHandleDirectory() }),
+      { wrapper: AgentExecutionHandleProvider }
+    )
+    await flush()
+    act(() => {
+      result.current.directory.register({ sessionId: "sess-h", resolvePermission } as never)
+    })
+    await act(async () => {
+      await result.current.chat.respondToApproval(
+        { sessionId: "sess-h", requestId: "r-h", toolName: "read" } as never,
+        "allow_always"
+      )
+    })
+    expect(resolvePermission).toHaveBeenCalledWith("r-h", "allow_always")
+    expect(approveToolMock).not.toHaveBeenCalled()
+    expect(recordChatCanonicalEvents).toHaveBeenCalledWith("sess-h", [
+      { kind: "permission-resolved", requestId: "r-h", behavior: "allow" },
+    ])
+    expect(chatState.clearApproval).toHaveBeenCalledWith("r-h", "sess-h")
+    await act(async () => {
+      await result.current.chat.respondToApproval(
+        { sessionId: "sess-h", requestId: "r-h2", toolName: "read" } as never,
+        "deny"
+      )
+    })
+    expect(recordChatCanonicalEvents).toHaveBeenLastCalledWith("sess-h", [
+      { kind: "permission-resolved", requestId: "r-h2", behavior: "deny" },
+    ])
   })
 
   it("keeps a manual approval pending when permission dispatch fails", async () => {
@@ -5877,6 +6030,29 @@ describe("useClaudeChat — Router + Fusion dispatch (ADR-0188)", () => {
     expect(sendPromptMock.mock.calls.at(-1)?.[2]).not.toHaveProperty("routerFusion")
     expect(resolveSendOptionsMock).toHaveBeenCalledWith(
       expect.objectContaining({ routerFusionSurface: "chat" })
+    )
+  })
+
+  it("marks a turn a person typed as interactive", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ interactiveChat: true })
+    )
+  })
+
+  it("does not mark a continuation re-send interactive: nobody typed it", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("next iteration", undefined, { skipUserAppend: true })
+    })
+    expect(resolveSendOptionsMock).toHaveBeenCalled()
+    expect(resolveSendOptionsMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ interactiveChat: true })
     )
   })
 

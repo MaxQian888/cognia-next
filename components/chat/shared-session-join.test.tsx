@@ -78,6 +78,12 @@ it("explains missing configuration", async () => {
   fillInvite()
   await waitFor(() => expect(mockError).toHaveBeenCalledWith("notConfigured"))
 })
+it("reads as a secondary row with an icon, and takes the host's layout classes", () => {
+  render(<SharedSessionJoin className="border-t" />)
+  const trigger = screen.getByTestId("shared-session-join-trigger")
+  expect(trigger).toHaveClass("justify-start", "border-t")
+  expect(trigger.querySelector("svg")).not.toBeNull()
+})
 it("hides entry when collaboration is disabled", () => {
   mockEnabled = false
   const { container } = render(<SharedSessionJoin />)

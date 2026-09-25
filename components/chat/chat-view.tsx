@@ -867,16 +867,6 @@ export function ChatPane({
       {activeSession?.platformBinding && (
         <PlatformConversationContext session={activeSession} showHeader={!showHeader} />
       )}
-      {boundId && ownsDecisions && directSession && (
-        <ChatColumn>
-          <PlanApprovalDock
-            sessionId={boundId}
-            session={activeSession}
-            onResume={resumeAfterPlanApproval}
-            onSendPlanFeedback={onSendPlanFeedback ?? onSend}
-          />
-        </ChatColumn>
-      )}
       {runtimeNotice && <ChatColumn className="mt-3">{runtimeNotice}</ChatColumn>}
       {/* ADR-0030 — surfaces a destructive Alert when session.characterId
           no longer resolves (plugin disabled, local pack deleted). Renders
@@ -1012,6 +1002,21 @@ export function ChatPane({
                 <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
               </ChatColumn>
               {errorAndFooter}
+              {/* The plan slot above the composer — three docks, mutually
+                exclusive by plan status. A plan awaiting a decision is reviewed
+                here, beside the composer its decisions resume, so the document
+                never pushes the transcript down from the top of the pane. Only
+                the pane that owns this session's decisions renders it. */}
+              {boundId && ownsDecisions && directSession && (
+                <ChatColumn>
+                  <PlanApprovalDock
+                    sessionId={boundId}
+                    session={activeSession}
+                    onResume={resumeAfterPlanApproval}
+                    onSendPlanFeedback={onSendPlanFeedback ?? onSend}
+                  />
+                </ChatColumn>
+              )}
               {/* Executing/paused plans surface the live tracker in the same slot
                 (statuses are mutually exclusive with awaiting_approval). */}
               {boundId && (

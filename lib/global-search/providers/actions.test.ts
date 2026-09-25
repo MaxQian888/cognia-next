@@ -4,6 +4,7 @@ import { actionCandidates, actionsProvider } from "./actions"
 const hostDefaults: ReturnType<typeof makeTestContext>["host"] = {
   reachableSettingsSections: new Set(),
   recorderAvailable: false,
+  petHostAvailable: false,
   theme: "light",
   hasApiKey: false,
   pluginQuickActions: [],
@@ -64,6 +65,31 @@ describe("actions provider", () => {
     expect(ids).toEqual(
       expect.arrayContaining(["new-workspace", "adopt-workspaces", "manage-workspace-roots"])
     )
+  })
+
+  it("offers the pet actions only where the desktop pet can run (ADR-0058 D9)", () => {
+    const off = actionCandidates(host())
+    expect(off.some((c) => c.id === "toggle-desktop-pet")).toBe(false)
+    expect(off.some((c) => c.id === "open-pet-console")).toBe(false)
+
+    const on = actionCandidates(host({ petHostAvailable: true }))
+    expect(on.find((c) => c.id === "toggle-desktop-pet")).toMatchObject({
+      title: "globalSearch.actions.toggleDesktopPet",
+    })
+    expect(on.find((c) => c.id === "open-pet-console")).toMatchObject({
+      title: "globalSearch.actions.openPetConsole",
+      subtitle: "globalSearch.actions.openPetConsoleHint",
+    })
+    // Hidden rather than disabled where they cannot run, so no greyed row.
+    expect(on.find((c) => c.id === "toggle-desktop-pet")!.extra).toBeUndefined()
+  })
+
+  it("finds the pet actions by their Chinese and English names", async () => {
+    const ctx = makeTestContext()
+    const zh = await actionsProvider.search(makeProviderInput("桌宠", { ctx }))
+    expect(zh.items[0]!.action).toEqual({ type: "command", id: "toggle-desktop-pet" })
+    const en = await actionsProvider.search(makeProviderInput("nurture", { ctx }))
+    expect(en.items.map((i) => i.id)).toContain("action:open-pet-console")
   })
 
   it("matches by keyword (bilingual) and produces command actions", async () => {

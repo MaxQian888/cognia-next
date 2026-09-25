@@ -120,6 +120,17 @@ jest.mock("@/lib/platform/capabilities", () => {
   }
 })
 
+// The scheduler's "may agents manage the schedule" switch, controllable per test.
+const mockSchedulerPolicy = jest.fn(async (..._args: unknown[]): Promise<unknown> => ({
+  agentToolsEnabled: true,
+}))
+jest.mock("@/lib/scheduler/write-authority", () => ({
+  ...jest.requireActual<typeof import("@/lib/scheduler/write-authority")>(
+    "@/lib/scheduler/write-authority"
+  ),
+  loadSchedulerPolicy: (...args: unknown[]) => mockSchedulerPolicy(...args),
+}))
+
 jest.mock("@/lib/db/conversation-overrides", () => ({
   readForResolution: jest.fn(),
 }))
@@ -3242,6 +3253,23 @@ describe("resolveSendOptions — activeProject (workspace)", () => {
     })
     expect(opts.additionalDirectories).toEqual(["/only/extra"])
   })
+
+  it("sends the workspace's own instructions, and nothing when it has none", async () => {
+    const withInstructions = await resolveSendOptions({
+      activeProject: {
+        ...makeProject([{ path: "/ws", isPrimary: true }]),
+        customInstructions: "Run pnpm, never npm.",
+      },
+    })
+    expect(withInstructions.systemPrompt).toContain(
+      "## Workspace instructions (WS)\n\nRun pnpm, never npm."
+    )
+
+    const without = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }]),
+    })
+    expect(without.systemPrompt ?? "").not.toContain("## Workspace instructions")
+  })
 })
 
 describe("resolveSendOptions — workspace Restricted Mode", () => {
@@ -3579,6 +3607,93 @@ describe("resolveSendOptions — surface-aware built-in skills", () => {
       }),
     })
     expect(opts.allowedTools).not.toContain("surface_tool_x")
+  })
+})
+
+describe("resolveSendOptions — scheduler family for interactive chat", () => {
+  const SCHEDULE_TOOLS = ["scheduler_list_tasks", "scheduler_create_task", "scheduler_delete_task"]
+
+  beforeEach(() => {
+    mockSchedulerPolicy.mockResolvedValue({ agentToolsEnabled: true })
+  })
+  // The rest of the file reads the switch as on, its default.
+  afterEach(() => {
+    mockSchedulerPolicy.mockImplementation(async () => ({ agentToolsEnabled: true }))
+  })
+
+  it("fails closed when the policy cannot be read at all", async () => {
+    mockSchedulerPolicy.mockRejectedValue(new Error("settings unavailable"))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-f" }),
+      interactiveChat: true,
+    })
+    for (const tool of SCHEDULE_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+  })
+
+  it("offers the schedule tools to a person chatting in the app", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-sched" }),
+      interactiveChat: true,
+    })
+    expect(toolNames(opts)).toEqual(expect.arrayContaining(SCHEDULE_TOOLS))
+    // The scheduler family alone, not Lark / IM / issues along with it.
+    expect(toolNames(opts).some((name) => name.startsWith("lark_"))).toBe(false)
+    expect(toolNames(opts).some((name) => name.startsWith("issue_"))).toBe(false)
+  })
+
+  it("does not narrow the turn's allowlist to the nine tools it added", async () => {
+    const base = await resolveSendOptions({ session: makeSession({ id: "s-a" }) })
+    const offered = await resolveSendOptions({
+      session: makeSession({ id: "s-a" }),
+      interactiveChat: true,
+    })
+    expect(offered.allowedTools).toEqual(base.allowedTools)
+    for (const tool of SCHEDULE_TOOLS) expect(offered.allowedTools ?? []).not.toContain(tool)
+  })
+
+  it("adds them to an allowlist something else already narrowed", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-b" }),
+      character: { id: "c", name: "c", allowedTools: ["Read"] } as never,
+      interactiveChat: true,
+    })
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["Read", ...SCHEDULE_TOOLS]))
+  })
+
+  it("offers nothing to a turn nobody can confirm (scheduled runs, CLI, teams)", async () => {
+    const opts = await resolveSendOptions({ session: makeSession({ id: "s-c" }) })
+    for (const tool of SCHEDULE_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+  })
+
+  it("offers nothing once the user turns agent access off", async () => {
+    mockSchedulerPolicy.mockResolvedValue({ agentToolsEnabled: false })
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-d" }),
+      interactiveChat: true,
+    })
+    for (const tool of SCHEDULE_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+  })
+
+  it("strips the family even from a character that opened every built-in skill", async () => {
+    mockSchedulerPolicy.mockResolvedValue({ agentToolsEnabled: false })
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-e" }),
+      character: { id: "c", name: "c", enableBuiltInSkills: true } as never,
+      interactiveChat: true,
+    })
+    for (const tool of SCHEDULE_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+  })
+
+  it("withholds the family in Restricted Mode, where it would reach host shell", async () => {
+    for (const character of [undefined, { id: "c", name: "c", enableBuiltInSkills: true }]) {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s-r" }),
+        character: character as never,
+        interactiveChat: true,
+        workspaceRestricted: true,
+      })
+      for (const tool of SCHEDULE_TOOLS) expect(toolNames(opts)).not.toContain(tool)
+    }
   })
 })
 
@@ -5904,45 +6019,58 @@ describe("agent self-invocation tools (Skill / SlashCommand / spawn_task / sessi
   })
 
   it("appends the pet tools only when opted in, with their consent tier", async () => {
-    const off = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
-    expect(toolNames(off)).not.toContain("pet_status")
-    // The tier must not be surfaced apart from the tools it governs: a rule for
-    // a tool the turn never offers is inert payload, and it would break the
-    // "no rules configured, no ruleset at all" invariant that keeps
-    // SendOptions byte-identical for the provider prompt cache.
-    expect(off.permissionRuleset?.pet_status).toBeUndefined()
-
-    const on = await resolveSendOptions({
-      character: makeChar({ id: "c1" }),
-      appSettings: { selfInvokeTools: { pet: true } } as AppSettings,
-    })
-    for (const name of ["pet_status", "pet_care", "pet_say", "pet_reward"]) {
-      expect(toolNames(on)).toContain(name)
-      expect(on.permissionRuleset?.[name]).toBe("allow")
-    }
-    // The one that raises an always-on-top window over the user's screen.
-    expect(toolNames(on)).toContain("pet_show")
-    expect(on.permissionRuleset?.pet_show).toBe("ask")
-  })
-
-  it("withholds BOTH the tools and their tier on the mobile shell", async () => {
-    // The pet is excluded from the Capacitor shell outright, so surfacing the
-    // tier there would leave ten permission rules governing zero tools: the
-    // inert payload this file warns about twice.
-    const mobile = isNativeMobile as jest.Mock
-    mobile.mockReturnValue(true)
+    const tauri = isTauri as jest.Mock
+    tauri.mockReturnValue(true)
     try {
-      const opts = await resolveSendOptions({
+      const off = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+      expect(toolNames(off)).not.toContain("pet_status")
+      // The tier must not be surfaced apart from the tools it governs: a rule for
+      // a tool the turn never offers is inert payload, and it would break the
+      // "no rules configured, no ruleset at all" invariant that keeps
+      // SendOptions byte-identical for the provider prompt cache.
+      expect(off.permissionRuleset?.pet_status).toBeUndefined()
+
+      const on = await resolveSendOptions({
         character: makeChar({ id: "c1" }),
         appSettings: { selfInvokeTools: { pet: true } } as AppSettings,
       })
-      expect(toolNames(opts)).not.toContain("pet_status")
-      expect(opts.permissionRuleset?.pet_status).toBeUndefined()
-      expect(opts.permissionRuleset?.pet_show).toBeUndefined()
+      for (const name of ["pet_status", "pet_care", "pet_say", "pet_reward"]) {
+        expect(toolNames(on)).toContain(name)
+        expect(on.permissionRuleset?.[name]).toBe("allow")
+      }
+      // The one that raises an always-on-top window over the user's screen.
+      expect(toolNames(on)).toContain("pet_show")
+      expect(on.permissionRuleset?.pet_show).toBe("ask")
     } finally {
-      mobile.mockReturnValue(false)
+      tauri.mockReturnValue(false)
     }
   })
+
+  it.each([
+    ["a plain browser", false],
+    ["the mobile shell", true],
+  ])(
+    "withholds BOTH the tools and their tier off the desktop shell: %s (ADR-0058 D9)",
+    async (_label, nativeMobile) => {
+      // The pet runs only in the desktop app, so surfacing the tier anywhere else
+      // would leave ten permission rules governing tools that can only refuse:
+      // the inert payload this file warns about twice. `isTauri` stays false
+      // (the suite default) for both hosts.
+      const mobile = isNativeMobile as jest.Mock
+      mobile.mockReturnValue(nativeMobile)
+      try {
+        const opts = await resolveSendOptions({
+          character: makeChar({ id: "c1" }),
+          appSettings: { selfInvokeTools: { pet: true } } as AppSettings,
+        })
+        expect(toolNames(opts)).not.toContain("pet_status")
+        expect(opts.permissionRuleset?.pet_status).toBeUndefined()
+        expect(opts.permissionRuleset?.pet_show).toBeUndefined()
+      } finally {
+        mobile.mockReturnValue(false)
+      }
+    }
+  )
 
   it("appends spawn_task only when opted in and not on native mobile", async () => {
     const opts = await resolveSendOptions({

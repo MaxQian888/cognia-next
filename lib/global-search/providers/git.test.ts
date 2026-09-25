@@ -157,6 +157,16 @@ describe("git worktrees provider", () => {
     expect(sourceControlHref(null)).toBe("/source-control")
   })
 
+  it("carries a file to select, and its staged side, after the root", () => {
+    expect(sourceControlHref("/repo", { path: "src/a b.ts" })).toBe(
+      "/source-control?root=%2Frepo&path=src%2Fa%20b.ts"
+    )
+    expect(sourceControlHref("/repo", { path: "a.ts", staged: true })).toBe(
+      "/source-control?root=%2Frepo&path=a.ts&staged=1"
+    )
+    expect(sourceControlHref(null, { path: "a.ts" })).toBe("/source-control?path=a.ts")
+  })
+
   it("returns nothing where Source Control is not offered", async () => {
     const items = await search(
       createGitWorktreesProvider(deps({ available: () => false })),

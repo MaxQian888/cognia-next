@@ -80,16 +80,39 @@ const defaultDeps: GitProviderDeps = {
  * where the branch actually is rather than on a panel that then has to explain
  * it is looking somewhere else.
  */
-export function sourceControlHref(target: string | null): string {
-  return target
-    ? `${SOURCE_CONTROL_PATH}?${SOURCE_CONTROL_ROOT_PARAM}=${encodeURIComponent(target)}`
-    : SOURCE_CONTROL_PATH
+export function sourceControlHref(
+  target: string | null,
+  selection?: SourceControlSelection
+): string {
+  const query: string[] = []
+  if (target) query.push(`${SOURCE_CONTROL_ROOT_PARAM}=${encodeURIComponent(target)}`)
+  if (selection) {
+    query.push(`${SOURCE_CONTROL_PATH_PARAM}=${encodeURIComponent(selection.path)}`)
+    if (selection.staged) query.push(`${SOURCE_CONTROL_STAGED_PARAM}=1`)
+  }
+  return query.length > 0 ? `${SOURCE_CONTROL_PATH}?${query.join("&")}` : SOURCE_CONTROL_PATH
+}
+
+/**
+ * A file to open on arrival. A surface that lists changes (the project
+ * overview) links to one of them; carrying it in the URL rather than only in
+ * the store means it survives the route binding its repository first, which
+ * clears the selection whenever the repository changes.
+ */
+export interface SourceControlSelection {
+  path: string
+  /** The index side of the file rather than the working tree. */
+  staged?: boolean
 }
 
 const SOURCE_CONTROL_PATH = "/source-control"
 
 /** `?root=` on `/source-control`: which repository or worktree to bind to. */
 export const SOURCE_CONTROL_ROOT_PARAM = "root"
+/** `?path=` on `/source-control`: the repo-relative file to select. */
+export const SOURCE_CONTROL_PATH_PARAM = "path"
+/** `?staged=1` on `/source-control`: select that file's staged side. */
+export const SOURCE_CONTROL_STAGED_PARAM = "staged"
 
 export function createGitBranchesProvider(deps: GitProviderDeps = defaultDeps) {
   return createListProvider<GitBranch>({

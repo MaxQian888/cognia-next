@@ -10,6 +10,7 @@ const ctxAll = () =>
     host: {
       reachableSettingsSections: allSections,
       recorderAvailable: false,
+      petHostAvailable: false,
       theme: "light",
       hasApiKey: false,
       pluginQuickActions: [],
@@ -30,6 +31,7 @@ describe("settings provider", () => {
         host: {
           reachableSettingsSections: new Set(["appearance"]),
           recorderAvailable: false,
+          petHostAvailable: false,
           theme: "light",
           hasApiKey: false,
           pluginQuickActions: [],
@@ -149,6 +151,7 @@ describe("settings provider", () => {
       host: {
         reachableSettingsSections: new Set(["ghost", "appearance"]),
         recorderAvailable: false,
+        petHostAvailable: false,
         theme: "light",
         hasApiKey: false,
         pluginQuickActions: [],

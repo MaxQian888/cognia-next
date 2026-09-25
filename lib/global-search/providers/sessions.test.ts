@@ -72,8 +72,14 @@ describe("sessions provider", () => {
     expect(visibleSessions(ctx(), {}).some((s) => s.id === "im")).toBe(false)
   })
 
-  it("restricts to the active workspace with workspace:current", () => {
-    expect(visibleSessions(ctx(), { workspace: "current" }).map((s) => s.id)).toEqual(["a", "c"])
+  it("restricts to the active workspace with workspace:current, keeping shared rows", () => {
+    // `e` names no workspace. The chat list shows it in every workspace, so a
+    // scoped search that dropped it made it unfindable from all of them.
+    expect(visibleSessions(ctx(), { workspace: "current" }).map((s) => s.id)).toEqual([
+      "a",
+      "c",
+      "e",
+    ])
     // No active project → no restriction.
     expect(
       visibleSessions(ctx({ activeProjectId: null }), { workspace: "current" }).map((s) => s.id)

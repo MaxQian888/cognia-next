@@ -38,6 +38,7 @@ import { WebFetchCard } from "./mcp-renderers/web-fetch-card"
 import { WebSearchCard } from "./mcp-renderers/web-search-card"
 import { ComputerUseCard } from "./mcp-renderers/computer-use-card"
 import { SpawnTaskCard } from "./mcp-renderers/spawn-task-card"
+import { SCHEDULED_TASK_CARDS } from "./mcp-renderers/scheduled-task-card"
 import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
 import { ManagedMcpAppCard } from "@/components/mcp-apps/managed-mcp-app-card"
 
@@ -51,6 +52,10 @@ const REGISTRY: Record<string, CardComponent> = {
   runtime_query: RuntimeQueryCard,
   spawn_task: SpawnTaskCard,
   "mcp__cognia-plugin-tools__spawn_task": SpawnTaskCard,
+  // The `schedule.*` built-in skills (scheduler_list_tasks … scheduler_delete_task).
+  // They reach the sidecar as `mcp__cognia-plugin-tools__scheduler_*`, which
+  // `toolNameOf` folds onto these bare keys.
+  ...SCHEDULED_TASK_CARDS,
   // Plan-mode signal tools. `exit_plan_mode` also covers the namespaced
   // cognia form (`mcp__cognia-tools__exit_plan_mode`) via normalizeToolName;
   // `ExitPlanMode` is the native Anthropic equivalent. Both carry the plan as
@@ -207,6 +212,10 @@ export function MCPToolCard({ part, sessionId }: { part: ToolPart; sessionId?: s
         pluginId={pluginEntry.pluginId}
         surfaceId={`tool-renderer:${pluginEntry.toolName}`}
         formFactor="block"
+        // A card that throws must not take the tool's result with it: the
+        // generic rendering comes back, with a small "card failed · Retry"
+        // strip, instead of an error card replacing the user's data.
+        blockFallback={<McpToolBodyOrContent part={part} sessionId={sessionId} />}
       >
         <PluginCard part={part as ToolUIPart} sessionId={sessionId} />
       </PluginSurface>

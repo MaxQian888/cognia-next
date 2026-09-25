@@ -183,6 +183,22 @@ describe("Claude chat send-option seam", () => {
     )
   })
 
+  it("marks a turn typed in this chat pane as interactive, so it is offered the schedule tools", async () => {
+    await buildSendOptions({ id: "s1" } as never, "remind me", undefined, undefined, undefined, {
+      interactive: true,
+    })
+    expect(jest.mocked(resolveSendOptions)).toHaveBeenCalledWith(
+      expect.objectContaining({ interactiveChat: true })
+    )
+  })
+
+  it("does not mark a relayed turn interactive: its sender cannot see the approval dialog", async () => {
+    await buildSendOptions({ id: "s1" } as never, "remind me")
+    expect(jest.mocked(resolveSendOptions)).toHaveBeenCalledWith(
+      expect.objectContaining({ interactiveChat: false })
+    )
+  })
+
   it("carries routing hints — attachment kinds and transcript depth — into the routing context", async () => {
     await buildSendOptions({ id: "s1" } as never, "Describe this picture", undefined, undefined, {
       attachmentKinds: ["image", "document"],

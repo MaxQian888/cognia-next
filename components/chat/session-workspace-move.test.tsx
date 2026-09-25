@@ -95,6 +95,23 @@ describe("SessionWorkspaceMove", () => {
     expect(updateSession).not.toHaveBeenCalled()
   })
 
+  it("still names an archived workspace the conversation is in, without offering it", async () => {
+    seed()
+    useProjectStore.setState((state) => ({
+      projects: state.projects.map((project) =>
+        project.id === "project-a" ? { ...project, isArchived: true } : project
+      ),
+    }))
+    render(<SessionWorkspaceMove session={session} />)
+
+    expect(screen.getByLabelText("label")).toHaveTextContent("Alpha")
+    fireEvent.click(screen.getByLabelText("label"))
+    expect(await screen.findByRole("option", { name: "Alpha" })).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+  })
+
   it("stays out of the way when there is nowhere to move to", () => {
     useProjectStore.setState({
       loaded: true,

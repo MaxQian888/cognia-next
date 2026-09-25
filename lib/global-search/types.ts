@@ -359,6 +359,14 @@ export interface GlobalSearchHostContext {
   reachableSettingsSections: ReadonlySet<string>
   /** Skill recorder plugin present → its palette entry is offered. */
   recorderAvailable: boolean
+  /**
+   * This webview can host the desktop pet: the Tauri main window. Asked the
+   * way `PetMount` asks it for its own global-hotkey commands, with the user's
+   * `PetSettings.enabled` held on, because summoning the pet switches it on
+   * (ADR-0058 D9). Gates the palette's pet actions; off desktop they are not
+   * offered at all, since the pet never runs there.
+   */
+  petHostAvailable: boolean
   theme: "light" | "dark" | "system" | string | undefined
   hasApiKey: boolean
   /** Plugin quick actions already filtered for the palette surface + `when`. */

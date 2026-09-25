@@ -134,7 +134,17 @@ export async function buildSendOptions(
    * `sendPrompt` must leave this unset, or its turn would ask the ledger about a
    * run nobody created.
    */
-  dispatch?: { routerFusionSurface?: "chat" },
+  dispatch?: {
+    routerFusionSurface?: "chat"
+    /**
+     * A person typed this turn into THIS app's chat pane, where a built-in
+     * skill's approval dialog is shown. Only the live chat controller sets it.
+     * Turns relayed from a paired phone (`host-state-service`,
+     * `use-remote-session-stream`) leave it unset: their user cannot see the
+     * desktop dialog, so a schedule write would wait out its timeout.
+     */
+    interactive?: boolean
+  },
   /** An addressed turn's lane and persona. See {@link TurnSendOverrides}. */
   overrides?: TurnSendOverrides
 ): Promise<SendOptions> {
@@ -394,6 +404,9 @@ export async function buildSendOptions(
       : undefined
 
   return resolveSendOptions({
+    // Only a turn typed in this chat pane can answer a built-in skill's
+    // approval dialog; see `dispatch.interactive`.
+    interactiveChat: dispatch?.interactive === true,
     postCompaction,
     session: turnSession,
     character: turnCharacter,

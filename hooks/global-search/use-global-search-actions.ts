@@ -194,6 +194,30 @@ export function useGlobalSearchActions({
         case "open-browser":
           router.push("/browser")
           return
+        case "toggle-desktop-pet": {
+          // The one summon path the hotkey and the tray also run: saved
+          // overlay geometry, and a summon switches the pet on (ADR-0058 D9).
+          // Dynamic import keeps the pet/Tauri graph out of this hook's eager
+          // imports.
+          try {
+            const { toggleDesktopPetWindow } = await import("@/lib/pet/commands")
+            await toggleDesktopPetWindow()
+          } catch (err) {
+            log.error("global-search toggle-desktop-pet failed", err)
+            toast.error(
+              t("toasts.petToggleFailed", {
+                message: err instanceof Error ? err.message : String(err),
+              })
+            )
+          }
+          return
+        }
+        case "open-pet-console":
+          // A route push rather than the pet's console request: that listener
+          // only runs while the pet is on, and the console is worth opening
+          // (to switch it on, or to read its record) either way.
+          router.push("/pet")
+          return
         case "check-updates": {
           if (!isTauri()) {
             toast.info(t("toasts.updatesDesktopOnly"))

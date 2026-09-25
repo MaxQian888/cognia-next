@@ -10,6 +10,7 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { useLiveQueryState } from "@/hooks/ui/use-live-query-state"
+import { usePluginSkills } from "@/hooks/skills/use-plugin-skills"
 import { listSkills } from "@/lib/db/skills"
 
 interface SkillPickerContentProps {
@@ -40,15 +41,19 @@ export function SkillPickerContent({ active, value, onChange }: SkillPickerConte
   const enabled = (skills ?? []).filter((s) => (s.status ?? "enabled") === "enabled")
   const custom = enabled.filter((s) => !s.isBuiltIn)
   const builtin = enabled.filter((s) => s.isBuiltIn)
+  // Skills contributed by enabled plugins. Picking one puts its registry id in
+  // the session's ephemeral skills, which the send path resolves through the
+  // plugin skill registry.
+  const pluginSkills = usePluginSkills("session", active)
 
   const toggle = (id: string) => {
     onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
   }
 
-  const renderItem = (s: (typeof enabled)[number]) => (
+  const renderItem = (s: { id: string; name: string; description?: string }) => (
     <CommandItem
       key={s.id}
-      value={`${s.name} ${s.description ?? ""}`}
+      value={`${s.name} ${s.description ?? ""} ${s.id}`}
       onSelect={() => toggle(s.id)}
     >
       <SparklesIcon className="mr-2 size-4" />
@@ -69,6 +74,11 @@ export function SkillPickerContent({ active, value, onChange }: SkillPickerConte
         )}
         {builtin.length > 0 && (
           <CommandGroup heading={t("builtinGroupHeading")}>{builtin.map(renderItem)}</CommandGroup>
+        )}
+        {pluginSkills.length > 0 && (
+          <CommandGroup heading={t("pluginGroupHeading")}>
+            {pluginSkills.map(renderItem)}
+          </CommandGroup>
         )}
       </CommandList>
     </>
