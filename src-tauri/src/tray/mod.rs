@@ -383,20 +383,6 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
                 crate::automation::kill_switch::KillSwitchCause::Tray,
             );
         }
-        "pet-toggle" => {
-            // Toggle the desktop pet: hide if visible, otherwise open with
-            // defaults. The tray has no PetWindowOpts from the renderer, so
-            // the open path uses the persisted-size-agnostic defaults.
-            let handle = app.app_handle();
-            if crate::pet_window::is_pet_window_open_inner(handle) {
-                let _ = crate::pet_window::close_pet_window_inner(handle);
-            } else {
-                let _ = crate::pet_window::open_pet_window_inner(
-                    handle,
-                    crate::pet_window::PetWindowOpts::default(),
-                );
-            }
-        }
         "pet-disable-click-through" => {
             // Click-through recovery path — re-enable cursor events so a
             // pointer-trapped overlay becomes interactive again. Routed
@@ -406,7 +392,7 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
         }
         "island-toggle" => {
             // Toggle the fleet agent-monitor island (hide if visible, else
-            // open at defaults) — mirrors "pet-toggle".
+            // open at defaults).
             let handle = app.app_handle();
             if crate::fleet::island_window::is_island_window_open_inner(handle) {
                 let _ = crate::fleet::island_window::close_island_window_inner(handle);

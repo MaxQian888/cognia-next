@@ -11,6 +11,7 @@ import type {
 import type { IslandActionDeps } from "@/lib/island/actions"
 import type { AttentionItem } from "@/lib/attention/types"
 import type { PendingGate } from "@/stores/agent/pending-gates-store"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 const pushMock = jest.fn<Promise<boolean>, [IslandState]>(async (_state: IslandState) => true)
 const actionResultMock = jest.fn(async () => true)
@@ -66,10 +67,24 @@ const showWindowMock = jest.fn()
 const focusWindowMock = jest.fn()
 const getWindowMock = jest.fn()
 jest.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => getWindowMock() }))
-const expireInterruptMock = jest.fn()
-jest.mock("@/lib/execution/run-control", () => ({
-  expireRunInterruptFromSource: (...args: unknown[]) => expireInterruptMock(...args),
+jest.mock("@/lib/island/main-window-controls", () => ({
+  dismissStaleRow: jest.fn(),
+  respondToChatApproval: jest.fn(),
+  decideGate: jest.fn(),
+  decideRunApproval: jest.fn(),
+  stopConversation: jest.fn(),
+  replyToConversation: jest.fn(),
 }))
+// Session rows behind the candidate conversations, as the live query answers.
+const liveRows: { current: ChatSession[] | undefined } = { current: [] }
+const liveQueryKeys: unknown[][] = []
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: (_query: () => unknown, deps: unknown[]) => {
+    liveQueryKeys.push(deps)
+    return liveRows.current
+  },
+}))
+jest.mock("@/lib/db/sessions", () => ({ getSessionsByIds: jest.fn(async () => []) }))
 const navigateMock = jest.fn()
 jest.mock("next/navigation", () => ({ useRouter: () => ({ push: navigateMock }) }))
 
@@ -90,23 +105,24 @@ jest.mock("@/lib/attention/attention-store", () => ({
 }))
 const setActiveSessionMock = jest.fn()
 const setSelectedGuildMock = jest.fn()
-const clearApprovalMock = jest.fn()
 const selectExternalAgentMock = jest.fn()
+const chatSessions: { current: Record<string, { status: string }> } = { current: {} }
 jest.mock("@/lib/agent/external-agent-selection", () => ({
   selectExternalAgent: (...args: unknown[]) => selectExternalAgentMock(...args),
 }))
-jest.mock("@/stores/chat/chat-store", () => ({
-  useChatStore: {
-    getState: () => ({ setActiveSession: setActiveSessionMock, clearApproval: clearApprovalMock }),
-  },
-}))
+jest.mock("@/stores/chat/chat-store", () => {
+  const getState = () => ({
+    setActiveSession: setActiveSessionMock,
+    sessions: chatSessions.current,
+  })
+  return {
+    useChatStore: Object.assign((selector: (state: unknown) => unknown) => selector(getState()), {
+      getState,
+    }),
+  }
+})
 jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: { getState: () => ({ setSelectedGuild: setSelectedGuildMock }) },
-}))
-const gates: { current: PendingGate[] } = { current: [] }
-const closeGateMock = jest.fn()
-jest.mock("@/stores/agent/pending-gates-store", () => ({
-  usePendingGatesStore: { getState: () => ({ gates: gates.current, close: closeGateMock }) },
 }))
 
 const hydrate = jest.fn(async () => {})
@@ -119,6 +135,7 @@ jest.mock("@/lib/island/store", () => ({
     }),
 }))
 
+import * as controls from "@/lib/island/main-window-controls"
 import { IslandInitializer } from "./island-initializer"
 
 function session(overrides: Partial<FleetSession> = {}): FleetSession {
@@ -160,12 +177,9 @@ beforeEach(() => {
   setActiveSessionMock.mockClear()
   setSelectedGuildMock.mockClear()
   selectExternalAgentMock.mockClear()
-  closeGateMock.mockClear()
-  clearApprovalMock.mockClear()
   showWindowMock.mockReset().mockResolvedValue(undefined)
   focusWindowMock.mockReset().mockResolvedValue(undefined)
   getWindowMock.mockReset().mockReturnValue({ show: showWindowMock, setFocus: focusWindowMock })
-  expireInterruptMock.mockReset().mockResolvedValue(undefined)
   stateOff.mockClear()
   actionOff.mockClear()
   detailOff.mockClear()
@@ -174,8 +188,10 @@ beforeEach(() => {
   environment.tauri = true
   environment.hydrated = true
   environment.detailVisibility = "click-to-reveal"
-  gates.current = []
   attention.current = []
+  chatSessions.current = {}
+  liveRows.current = []
+  liveQueryKeys.length = 0
   fleet.current = { sessions: [session()], generatedAt: 1 }
 })
 
@@ -326,7 +342,6 @@ describe("non-Squad approval gates", () => {
   }
 
   async function mountGate(pending: PendingGate) {
-    gates.current = [pending]
     attention.current = [
       {
         id: `team:${pending.key.scope}:${pending.key.id}`,
@@ -369,31 +384,6 @@ describe("non-Squad approval gates", () => {
     }
   )
 
-  it("dismisses only the exact interrupted gate, excluding same-id gates in another scope", async () => {
-    const pending = gate()
-    const { row, deps } = await mountGate(pending)
-    gates.current = [gate({ key: { scope: "cost-budget", id: "step-a" } }), pending]
-    expect(await deps.dismissStale(row)).toBe(true)
-    expect(closeGateMock).toHaveBeenCalledTimes(1)
-    expect(closeGateMock).toHaveBeenCalledWith(pending.key)
-  })
-
-  it("refuses a stale dismissal after the same gate has reopened", async () => {
-    const { row, deps } = await mountGate(gate())
-    gates.current = [gate({ status: "open", openedAt: 2 })]
-    expect(await deps.dismissStale(row)).toBe(false)
-    expect(closeGateMock).not.toHaveBeenCalled()
-  })
-
-  it("refuses dismissal when the gate is gone or the row is live", async () => {
-    const { row, deps } = await mountGate(gate())
-    gates.current = []
-    expect(await deps.dismissStale(row)).toBe(false)
-    gates.current = [gate()]
-    expect(await deps.dismissStale({ ...row, stale: false })).toBe(false)
-    expect(closeGateMock).not.toHaveBeenCalled()
-  })
-
   it("answers detail from the pending gate behind the projected row", async () => {
     const { row, state } = await mountGate(gate({ status: "open" }))
     await act(async () =>
@@ -407,7 +397,7 @@ describe("non-Squad approval gates", () => {
       expect.objectContaining({
         requestId: "gate-detail",
         rowId: row.id,
-        detail: expect.objectContaining({ prompt: "Approve the next step" }),
+        detail: expect.objectContaining({ decisionDetail: "Approve the next step" }),
       })
     )
   })
@@ -590,56 +580,104 @@ describe("main-window lifecycle", () => {
   })
 })
 
-describe("stale clearing adapters", () => {
-  it("clears a chat approval in its exact session and refuses one without a request id", async () => {
-    const { row, deps } = await mountWithDeps()
-    expect(
-      await deps.dismissStale({
-        ...row,
-        owner: { kind: "chat", sessionId: "chat-b", requestId: "approval-b" },
-        stale: true,
-      })
-    ).toBe(true)
-    expect(clearApprovalMock).toHaveBeenCalledWith("approval-b", "chat-b")
-    expect(await deps.dismissStale({ ...row, owner: { kind: "chat", sessionId: "chat-b" } })).toBe(
-      false
-    )
-    expect(await deps.dismissStale(row)).toBe(false)
+describe("owning surfaces", () => {
+  it("hands every decision to the main window's own controls", async () => {
+    const { deps } = await mountWithDeps()
+    expect(deps).toMatchObject({
+      dismissStale: controls.dismissStaleRow,
+      respondToChatApproval: controls.respondToChatApproval,
+      decideGate: controls.decideGate,
+      decideRunApproval: controls.decideRunApproval,
+      stopConversation: controls.stopConversation,
+      replyToConversation: controls.replyToConversation,
+    })
   })
 
-  it.each([{ teamId: "team-b", runId: "run-b" }, { teamId: "team-b" }, { runId: "run-b" }])(
-    "clears the matching legacy team gate for %j",
-    async (ownerIds) => {
-      const { row, deps } = await mountWithDeps()
-      const target: PendingGate = {
-        key: { scope: "legacy-team", id: "gate-b" },
-        gateType: "budget",
-        title: "Review budget",
-        status: "interrupted",
-        openedAt: 1,
-        teamId: "team-b",
-        runId: "run-b",
-      }
-      gates.current = [{ ...target, teamId: "different", runId: "different" }, target]
-      const teamRow = { ...row, owner: { kind: "team" as const, ...ownerIds }, stale: true }
-      expect(await deps.dismissStale(teamRow)).toBe(true)
-      expect(closeGateMock).toHaveBeenCalledWith(target.key)
-      gates.current = []
-      expect(await deps.dismissStale(teamRow)).toBe(false)
-      expect(closeGateMock).toHaveBeenCalledTimes(1)
+  it("gives a conversation's turn to the conversation, named and stoppable", async () => {
+    fleet.current = {
+      sessions: [
+        session({
+          agent: "cognia",
+          sessionId: "chat-1",
+          executionRunId: "run-1",
+          projectName: "cognia-next",
+        }),
+      ],
+      generatedAt: 1,
     }
-  )
+    chatSessions.current = { "chat-1": { status: "streaming" } }
+    liveRows.current = [{ id: "chat-1", title: "Refactor auth", kind: "direct" } as ChatSession]
+    await mount()
+    const state = pushMock.mock.calls.at(-1)![0]
+    expect(state.rows).toHaveLength(1)
+    expect(state.rows[0]).toMatchObject({
+      id: "chat:chat-1",
+      source: "chat",
+      title: "Refactor auth",
+      capabilities: expect.objectContaining({ interrupt: true, reply: true, openOwner: true }),
+    })
+    // The session rows are read for exactly the candidates, keyed stably.
+    expect(liveQueryKeys.at(-1)).toEqual(["chat-1"])
 
-  it("expires the exact durable interrupt and propagates a source failure", async () => {
-    const { row, deps } = await mountWithDeps()
-    const runRow = {
-      ...row,
-      owner: { kind: "run" as const, runId: "run-b", interruptId: "interrupt-b" },
+    // Detail finds the turn under the conversation's row id.
+    await act(async () =>
+      onDetailRequest({ requestId: "d-chat", revision: state.revision, rowId: "chat:chat-1" })
+    )
+    expect(detailResponseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rowId: "chat:chat-1",
+        detail: expect.objectContaining({ cwd: "/w" }),
+      })
+    )
+  })
+
+  it("does not re-publish when the session rows re-emit unchanged facts", async () => {
+    fleet.current = {
+      sessions: [session({ agent: "cognia", sessionId: "chat-1", executionRunId: "run-1" })],
+      generatedAt: 1,
     }
-    expect(await deps.dismissStale(runRow)).toBe(true)
-    expect(expireInterruptMock).toHaveBeenCalledWith("run-b", "interrupt-b")
-    expireInterruptMock.mockRejectedValueOnce(new Error("source unavailable"))
-    await expect(deps.dismissStale(runRow)).rejects.toThrow("source unavailable")
-    expect(await deps.dismissStale({ ...row, owner: { kind: "run", runId: "run-b" } })).toBe(false)
+    liveRows.current = [{ id: "chat-1", title: "Refactor auth", kind: "direct" } as ChatSession]
+    const view = await mount()
+    const pushes = pushMock.mock.calls.length
+    // A streamed message bumps the row's `updatedAt`: a new array, the same facts.
+    liveRows.current = [
+      { id: "chat-1", title: "Refactor auth", kind: "direct", updatedAt: 99 } as ChatSession,
+    ]
+    view.rerender(<IslandInitializer />)
+    await act(async () => {})
+    expect(pushMock.mock.calls.length).toBe(pushes)
+    // A real change (a new title) does re-publish.
+    liveRows.current = [{ id: "chat-1", title: "Auth, done", kind: "direct" } as ChatSession]
+    view.rerender(<IslandInitializer />)
+    await act(async () => {})
+    expect(pushMock.mock.calls.at(-1)![0].rows[0].title).toBe("Auth, done")
+  })
+
+  it("withdraws Stop when the conversation's turn settles", async () => {
+    fleet.current = {
+      sessions: [session({ agent: "cognia", sessionId: "chat-1", executionRunId: "run-1" })],
+      generatedAt: 1,
+    }
+    liveRows.current = [{ id: "chat-1", title: "Refactor auth", kind: "direct" } as ChatSession]
+    chatSessions.current = { "chat-1": { status: "streaming" } }
+    const view = await mount()
+    expect(pushMock.mock.calls.at(-1)![0].rows[0].capabilities.interrupt).toBe(true)
+    chatSessions.current = { "chat-1": { status: "idle" } }
+    view.rerender(<IslandInitializer />)
+    await act(async () => {})
+    const row = pushMock.mock.calls.at(-1)![0].rows[0]
+    expect(row.capabilities).toMatchObject({ interrupt: false, reply: true })
+  })
+
+  it("keeps a Cognia run that no session row proves is a conversation", async () => {
+    fleet.current = {
+      sessions: [session({ agent: "cognia", sessionId: "ephemeral", executionRunId: "run-2" })],
+      generatedAt: 1,
+    }
+    liveRows.current = undefined
+    await mount()
+    const state = pushMock.mock.calls.at(-1)![0]
+    expect(state.rows[0]).toMatchObject({ id: "run:run-2", source: "run" })
+    expect(state.rows[0].capabilities).toMatchObject({ interrupt: false, reply: false })
   })
 })

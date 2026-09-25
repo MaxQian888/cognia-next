@@ -1,6 +1,14 @@
 /** @jest-environment jsdom */
-import { executeIslandAction, type IslandActionDeps } from "./actions"
-import type { IslandActionIntent, IslandRowProjection, IslandState } from "./types"
+import type { ApprovalKey } from "@/lib/runtime/approval-bus"
+import { executeIslandAction, type IslandActionDeps, type IslandActionReason } from "./actions"
+import type {
+  IslandActionIntent,
+  IslandDecisionBehavior,
+  IslandRowProjection,
+  IslandState,
+} from "./types"
+
+type Reason = IslandActionReason | null
 
 const respond = jest.fn<Promise<boolean>, [string, "allow" | "deny"]>()
 const questionRespond = jest.fn<Promise<boolean>, [string, number[][]]>()
@@ -57,8 +65,15 @@ function row(over: Partial<IslandRowProjection> = {}): IslandRowProjection {
       dismissStale: false,
       detail: true,
     },
-    permission: { requestId: "p1", toolName: "Bash", requestedAt: 0 },
-    question: { requestId: "q1", requestedAt: 0, questions: [] },
+    permission: {
+      requestId: "p1",
+      kind: "tool",
+      toolName: "Bash",
+      requestedAt: 0,
+      deadline: { at: 20_000, fallback: "terminal" },
+      allowAlways: false,
+    },
+    question: { requestId: "q1", requestedAt: 0, deadline: null, questions: [] },
     stale: false,
     ...over,
   }
@@ -76,8 +91,18 @@ function state(rows: IslandRowProjection[] = [row()], revision = 5): IslandState
   }
 }
 
-function deps(): IslandActionDeps {
-  return { navigate: jest.fn(), dismissStale: jest.fn(async () => true) }
+function deps(): jest.Mocked<IslandActionDeps> {
+  return {
+    navigate: jest.fn(),
+    dismissStale: jest.fn<Promise<boolean>, [IslandRowProjection]>(async () => true),
+    respondToChatApproval: jest.fn<Promise<Reason>, [string, string, IslandDecisionBehavior]>(
+      async () => null
+    ),
+    decideGate: jest.fn<Reason, [ApprovalKey, boolean]>(() => null),
+    decideRunApproval: jest.fn<Promise<Reason>, [string, string, boolean]>(async () => null),
+    stopConversation: jest.fn<Promise<Reason>, [string]>(async () => null),
+    replyToConversation: jest.fn<Reason, [string, string]>(() => null),
+  }
 }
 
 function intent(over: Partial<IslandActionIntent> & { kind: string }): IslandActionIntent {
@@ -114,7 +139,7 @@ describe("executeIslandAction validation", () => {
   it.each(["reply", "interrupt", "focus-terminal", "open-transcript"] as const)(
     "never sends %s to an external adapter for an internal owner",
     async (kind) => {
-      const internal = row({ owner: { kind: "chat", sessionId: "chat-1" } })
+      const internal = row({ owner: { kind: "run", runId: "run-1" } })
       const result = await executeIslandAction(
         intent({ kind, text: "hello" }),
         state([internal]),
@@ -405,10 +430,18 @@ describe("executeIslandAction ACP routing", () => {
       id: "external:devin:ext-1",
       owner: acpOwner,
       agent: "devin",
-      permission: { requestId: "p1", toolName: "Bash", requestedAt: 0 },
+      permission: {
+        requestId: "p1",
+        kind: "tool",
+        toolName: "Bash",
+        requestedAt: 0,
+        deadline: null,
+        allowAlways: false,
+      },
       question: {
         requestId: "q1",
         requestedAt: 0,
+        deadline: null,
         questions: [{ question: "Pick", options: ["a", "b"], multiSelect: false }],
       },
       ...over,
@@ -479,5 +512,164 @@ describe("executeIslandAction ACP routing", () => {
       deps()
     )
     expect(result).toMatchObject({ outcome: "failed", reason: "callFailed" })
+  })
+})
+
+describe("executeIslandAction Cognia owners", () => {
+  const chatRow = row({
+    id: "chat:chat-1",
+    source: "chat",
+    owner: { kind: "chat", sessionId: "chat-1", requestId: "req-1" },
+    agent: undefined,
+    permission: {
+      requestId: "req-1",
+      kind: "tool",
+      toolName: "Bash",
+      requestedAt: 0,
+      deadline: null,
+      allowAlways: true,
+    },
+  })
+  const chatIntent = (over: Record<string, unknown>) =>
+    intent({ rowId: "chat:chat-1", ...over } as never)
+
+  it("answers a conversation's approval through its own responder, always-allow included", async () => {
+    const d = deps()
+    const result = await executeIslandAction(
+      chatIntent({
+        kind: "permission-decision",
+        permissionRequestId: "req-1",
+        behavior: "allow_always",
+      }),
+      state([chatRow]),
+      d
+    )
+    expect(result).toMatchObject({ outcome: "completed" })
+    expect(d.respondToChatApproval).toHaveBeenCalledWith("chat-1", "req-1", "allow_always")
+    expect(respond).not.toHaveBeenCalled()
+    expect(acpRespond).not.toHaveBeenCalled()
+  })
+
+  it("passes the conversation's refusal through as the failure reason", async () => {
+    const d = deps()
+    d.respondToChatApproval.mockResolvedValueOnce("noLongerWaiting")
+    const result = await executeIslandAction(
+      chatIntent({ kind: "permission-decision", permissionRequestId: "req-1", behavior: "deny" }),
+      state([chatRow]),
+      d
+    )
+    expect(result).toMatchObject({ outcome: "failed", reason: "noLongerWaiting" })
+  })
+
+  it("refuses always-allow where the ask does not permit a standing rule", async () => {
+    const d = deps()
+    const result = await executeIslandAction(
+      intent({ kind: "permission-decision", permissionRequestId: "p1", behavior: "allow_always" }),
+      state(),
+      d
+    )
+    expect(result).toMatchObject({ outcome: "rejected", reason: "notPermitted" })
+    expect(respond).not.toHaveBeenCalled()
+  })
+
+  it("sends an external decision to the hook ingress unchanged", async () => {
+    respond.mockResolvedValueOnce(true)
+    await executeIslandAction(
+      intent({ kind: "permission-decision", permissionRequestId: "p1", behavior: "deny" }),
+      state(),
+      deps()
+    )
+    expect(respond).toHaveBeenCalledWith("p1", "deny")
+  })
+
+  it("decides a gate by its key", async () => {
+    const d = deps()
+    const gateRow = row({
+      id: "gate:agent-plan:p%3As",
+      source: "gate",
+      owner: { kind: "gate", gateKey: { scope: "agent-plan", id: "p:s" } },
+      permission: { ...chatRow.permission!, requestId: "p:s", kind: "plan", allowAlways: false },
+    })
+    const result = await executeIslandAction(
+      intent({
+        rowId: gateRow.id,
+        kind: "permission-decision",
+        permissionRequestId: "p:s",
+        behavior: "deny",
+      }),
+      state([gateRow]),
+      d
+    )
+    expect(result).toMatchObject({ outcome: "completed" })
+    expect(d.decideGate).toHaveBeenCalledWith({ scope: "agent-plan", id: "p:s" }, false)
+  })
+
+  it("decides a durable run approval through the run control plane", async () => {
+    const d = deps()
+    d.decideRunApproval.mockResolvedValueOnce("hostConsent")
+    const runRow = row({
+      id: "run:r",
+      source: "run",
+      owner: { kind: "run", runId: "r", interruptId: "i" },
+      permission: { ...chatRow.permission!, requestId: "i", kind: "review", allowAlways: false },
+    })
+    const result = await executeIslandAction(
+      intent({
+        rowId: "run:r",
+        kind: "permission-decision",
+        permissionRequestId: "i",
+        behavior: "allow",
+      }),
+      state([runRow]),
+      d
+    )
+    expect(d.decideRunApproval).toHaveBeenCalledWith("r", "i", true)
+    expect(result).toMatchObject({ outcome: "failed", reason: "hostConsent" })
+  })
+
+  it("refuses a decision on a row whose ask vanished even if the flag lingers", async () => {
+    const d = deps()
+    const result = await executeIslandAction(
+      intent({ kind: "permission-decision", permissionRequestId: "p1", behavior: "allow" }),
+      state([row({ permission: undefined })]),
+      d
+    )
+    expect(result).toMatchObject({ outcome: "rejected", reason: "notPermitted" })
+    expect(respond).not.toHaveBeenCalled()
+  })
+
+  it("never decides for a team row, which has no inline decision", async () => {
+    const teamRow = row({ id: "team:t:", source: "team", owner: { kind: "team", teamId: "t" } })
+    const result = await executeIslandAction(
+      intent({
+        rowId: "team:t:",
+        kind: "permission-decision",
+        permissionRequestId: "p1",
+        behavior: "allow",
+      }),
+      state([teamRow]),
+      deps()
+    )
+    expect(result).toMatchObject({ outcome: "rejected", reason: "notPermitted" })
+  })
+
+  it("stops a conversation's turn and sends it a trimmed reply", async () => {
+    const d = deps()
+    d.stopConversation.mockResolvedValueOnce("turnFinished")
+    expect(
+      await executeIslandAction(chatIntent({ kind: "interrupt" }), state([chatRow]), d)
+    ).toMatchObject({ outcome: "failed", reason: "turnFinished" })
+    expect(d.stopConversation).toHaveBeenCalledWith("chat-1")
+
+    expect(
+      await executeIslandAction(
+        chatIntent({ kind: "reply", text: "  keep going  " }),
+        state([chatRow]),
+        d
+      )
+    ).toMatchObject({ outcome: "completed" })
+    expect(d.replyToConversation).toHaveBeenCalledWith("chat-1", "keep going")
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(interrupt).not.toHaveBeenCalled()
   })
 })

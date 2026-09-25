@@ -20,6 +20,7 @@ import {
   TRAY_LAYOUT_PREF,
   TRAY_TOOLTIP_PREF,
 } from "./defaults"
+import { retiredNativeReplacement } from "./native-actions"
 import type { TrayDisplayPrefs, TrayIconState, TrayMenuItem } from "./types"
 
 interface TrayState {
@@ -64,6 +65,36 @@ export function ensureSyntheticEntries(stored: TrayMenuItem[]): TrayMenuItem[] {
   return out
 }
 
+/**
+ * Rewrite payloads that name a retired native action into the command that
+ * replaced it (`RETIRED_NATIVE_TRAY_ACTIONS`), recursing into submenus.
+ *
+ * The layout persists whole payloads, so without this a layout saved before a
+ * native action was retired would keep naming it, and the Rust menu builder
+ * rejects a push with an unknown native action outright: the user's whole
+ * tray would stop updating. Returns the same array reference when nothing
+ * changed, like {@link ensureSyntheticEntries}, and writes nothing back: the
+ * next `setItems` persists the migrated shape, and until then every hydrate
+ * migrates it again, which is idempotent.
+ */
+export function migrateRetiredNativePayloads(stored: TrayMenuItem[]): TrayMenuItem[] {
+  let changed = false
+  const out = stored.map((item): TrayMenuItem => {
+    if (item.kind === "submenu") {
+      const items = migrateRetiredNativePayloads(item.items)
+      if (items === item.items) return item
+      changed = true
+      return { ...item, items }
+    }
+    if (item.kind !== "action" || item.payload.kind !== "native") return item
+    const commandId = retiredNativeReplacement(item.payload.action)
+    if (!commandId) return item
+    changed = true
+    return { ...item, payload: { kind: "command", commandId } }
+  })
+  return changed ? out : stored
+}
+
 /** Merge a stored (possibly partial / stale-shaped) prefs blob over defaults. */
 function mergeDisplay(stored: Partial<TrayDisplayPrefs> | null | undefined): TrayDisplayPrefs {
   return { ...DEFAULT_TRAY_DISPLAY, ...(stored ?? {}) }
@@ -84,7 +115,9 @@ export const useTrayStore = create<TrayState>((set, get) => ({
         getPref<Partial<TrayDisplayPrefs>>(TRAY_DISPLAY_PREF),
       ])
       set({
-        items: storedItems?.length ? ensureSyntheticEntries(storedItems) : DEFAULT_TRAY_ITEMS,
+        items: storedItems?.length
+          ? ensureSyntheticEntries(migrateRetiredNativePayloads(storedItems))
+          : DEFAULT_TRAY_ITEMS,
         tooltip: storedTooltip ?? "Cognia",
         display: mergeDisplay(storedDisplay),
         hydrated: true,

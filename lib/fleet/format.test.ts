@@ -1,4 +1,6 @@
 import {
+  answerWindow,
+  formatRemaining,
   activityLine,
   attentionCount,
   attentionSeverity,
@@ -257,5 +259,43 @@ describe("normalizeIslandGeometry", () => {
     expect(normalizeIslandGeometry({ fullscreen: 1 }).fullscreen).toBe(false)
     expect(normalizeIslandGeometry({ fullscreen: false }).fullscreen).toBe(false)
     expect(normalizeIslandGeometry({ fullscreen: true }).fullscreen).toBe(true)
+  })
+})
+
+describe("answerWindow", () => {
+  it("drains from full to expired across the window", () => {
+    expect(answerWindow(0, 20_000, 0)).toEqual({
+      expired: false,
+      remainingSec: 20,
+      fraction: 1,
+      urgent: false,
+    })
+    expect(answerWindow(0, 20_000, 15_500)).toMatchObject({ remainingSec: 5, urgent: true })
+    expect(answerWindow(0, 20_000, 20_000)).toEqual({
+      expired: true,
+      remainingSec: 0,
+      fraction: 0,
+      urgent: true,
+    })
+  })
+
+  it("measures long windows against their own span, not the hook window", () => {
+    const hour = 60 * 60 * 1000
+    expect(answerWindow(0, hour, hour / 2).fraction).toBeCloseTo(0.5)
+  })
+
+  it("stays finite for a window that closed before it opened", () => {
+    const state = answerWindow(10_000, 5_000, 0)
+    expect(Number.isFinite(state.fraction)).toBe(true)
+    expect(state.fraction).toBeLessThanOrEqual(1)
+  })
+})
+
+describe("formatRemaining", () => {
+  it("uses the compact elapsed shape", () => {
+    expect(formatRemaining(42)).toBe("42s")
+    expect(formatRemaining(185)).toBe("3m05s")
+    expect(formatRemaining(5_820)).toBe("1h37m")
+    expect(formatRemaining(-3)).toBe("0s")
   })
 })

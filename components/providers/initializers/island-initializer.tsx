@@ -4,21 +4,25 @@
  * Main-window half of the task control island.
  *
  * The island window owns no Dexie and no app stores, so this initializer is
- * what gives it something to paint. It subscribes to the two live sources the
- * main window already runs (the unified Fleet snapshot and the Control Center
- * attention aggregation), projects them into one read-only `IslandState`, and
- * pushes it over `island://state`.
+ * what gives it something to paint. It subscribes to the live sources the main
+ * window already runs (the unified Fleet snapshot, the Control Center
+ * attention aggregation, and the chat store and session rows behind the
+ * conversations those mention), projects them into one read-only
+ * `IslandState`, and pushes it over `island://state`.
  *
  * It is also the only place island intents are executed. The overlay may ask,
  * this window decides: every intent is re-validated against the current
- * projection and the current capabilities before a single Fleet command runs.
+ * projection and the current capabilities before anything runs, and the
+ * decision itself goes through the owning surface's own path
+ * (`lib/island/main-window-controls.ts`).
  *
  * Same shape as `UsageDockInitializer`, for the same reason. One window feeds
  * a least-privilege overlay, the overlay asks to be seeded when it mounts, and
  * ordering is settled by a monotonic revision rather than by luck.
  */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { useRouter } from "next/navigation"
 
 import {
@@ -26,6 +30,7 @@ import {
   getAttentionSnapshot,
   subscribeAttention,
 } from "@/lib/attention/attention-store"
+import { getSessionsByIds } from "@/lib/db/sessions"
 import { unifiedFleetStore } from "@/lib/fleet/unified-fleet-store"
 import { executeIslandAction, type IslandActionDeps } from "@/lib/island/actions"
 import {
@@ -36,19 +41,22 @@ import {
   sendIslandDetailResponse,
   sendIslandState,
 } from "@/lib/island/client"
+import { chatStatusOf, conversationCandidates, conversationFacts } from "@/lib/island/conversations"
 import { detailFromAttention, detailFromSession } from "@/lib/island/detail"
+import {
+  decideGate,
+  decideRunApproval,
+  dismissStaleRow,
+  replyToConversation,
+  respondToChatApproval,
+  stopConversation,
+} from "@/lib/island/main-window-controls"
 import { attentionOwner, fleetSessionOwner, taskIdentity } from "@/lib/island/owner"
-import { projectIslandState } from "@/lib/island/projection"
+import { projectIslandState, type IslandConversationFacts } from "@/lib/island/projection"
 import { useIslandStore } from "@/lib/island/store"
-import type {
-  IslandActionIntent,
-  IslandDetailRequest,
-  IslandRowProjection,
-  IslandState,
-} from "@/lib/island/types"
+import type { IslandActionIntent, IslandDetailRequest, IslandState } from "@/lib/island/types"
 import { isTauri } from "@/lib/tauri"
 import { selectExternalAgent } from "@/lib/agent/external-agent-selection"
-import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useUIStore } from "@/stores/ui/ui-store"
 
@@ -73,6 +81,44 @@ export function IslandInitializer() {
     void hydrate()
   }, [hydrate])
 
+  // The conversations the inputs mention. Keyed by one stable string, so the
+  // row read below re-runs only when the SET changes, not on every snapshot.
+  const candidatesKey = useMemo(
+    () => conversationCandidates(fleet, attention).join("\n"),
+    [fleet, attention]
+  )
+  // Their chat statuses as one stable string: the chat store updates on every
+  // streamed token, and a fresh object per update would re-project per token.
+  const statusesKey = useChatStore((store) =>
+    candidatesKey
+      ? candidatesKey
+          .split("\n")
+          .map((id) => store.sessions[id]?.status ?? "")
+          .join("\n")
+      : ""
+  )
+  const sessionRows = useLiveQuery(
+    () => getSessionsByIds(candidatesKey ? candidatesKey.split("\n") : []),
+    [candidatesKey]
+  )
+  // Keyed by VALUE: the row query re-emits on any write to a session row (an
+  // `updatedAt` bump per streamed message), and a fresh object each time would
+  // re-project and re-push the island for facts that did not change.
+  const conversationsKey = useMemo(() => {
+    const ids = candidatesKey ? candidatesKey.split("\n") : []
+    const statuses = statusesKey.split("\n")
+    return JSON.stringify(
+      conversationFacts(
+        Object.fromEntries(ids.map((id, index) => [id, chatStatusOf(statuses[index])])),
+        sessionRows ?? []
+      )
+    )
+  }, [candidatesKey, statusesKey, sessionRows])
+  const conversations = useMemo(
+    () => JSON.parse(conversationsKey) as Record<string, IslandConversationFacts>,
+    [conversationsKey]
+  )
+
   // Monotonic per main-window session. A revision only ever rises, which is
   // what lets the overlay discard an out-of-order projection and this window
   // refuse an action built against one that no longer exists.
@@ -90,12 +136,13 @@ export function IslandInitializer() {
       projectIslandState({
         fleet,
         attention,
+        conversations,
         detailVisibility,
         epoch: epochRef.current,
         revision: revisionRef.current,
       })
     )
-  }, [fleet, attention, detailVisibility, hydrated])
+  }, [fleet, attention, conversations, detailVisibility, hydrated])
 
   // Push on every change. A closed island makes the emit resolve false, which
   // is the normal case rather than an error.
@@ -110,49 +157,6 @@ export function IslandInitializer() {
   useEffect(() => {
     latest.current = state
   }, [state])
-
-  /**
-   * Clear a pending item whose waiter is gone.
-   *
-   * Only sources that own a clearing path are reachable here, and
-   * the projection only sets `dismissStale` for those, so a refusal below is a
-   * belt-and-braces check rather than the primary gate.
-   */
-  const dismissStale = useCallback(async (row: IslandRowProjection): Promise<boolean> => {
-    if (row.owner.kind === "gate") {
-      if (!row.stale) return false
-      const { gateKey } = row.owner
-      const store = usePendingGatesStore.getState()
-      const gate = store.gates.find(
-        (candidate) => candidate.key.scope === gateKey.scope && candidate.key.id === gateKey.id
-      )
-      if (!gate || gate.status !== "interrupted") return false
-      store.close(gate.key)
-      return true
-    }
-    if (row.owner.kind === "chat" && row.owner.requestId) {
-      useChatStore.getState().clearApproval(row.owner.requestId, row.owner.sessionId)
-      return true
-    }
-    if (row.owner.kind === "team") {
-      const { teamId, runId } = row.owner
-      const gate = usePendingGatesStore
-        .getState()
-        .gates.find(
-          (candidate) =>
-            (!teamId || candidate.teamId === teamId) && (!runId || candidate.runId === runId)
-        )
-      if (!gate) return false
-      usePendingGatesStore.getState().close(gate.key)
-      return true
-    }
-    if (row.owner.kind === "run" && row.owner.interruptId) {
-      const { expireRunInterruptFromSource } = await import("@/lib/execution/run-control")
-      await expireRunInterruptFromSource(row.owner.runId, row.owner.interruptId)
-      return true
-    }
-    return false
-  }, [])
 
   const deps = useRef<IslandActionDeps | null>(null)
   useEffect(() => {
@@ -184,9 +188,14 @@ export function IslandInitializer() {
           // Focusing is a courtesy. The navigation already happened.
         }
       },
-      dismissStale,
+      dismissStale: dismissStaleRow,
+      respondToChatApproval,
+      decideGate,
+      decideRunApproval,
+      stopConversation,
+      replyToConversation,
     }
-  }, [router, dismissStale])
+  }, [router])
 
   /**
    * Answer a detail request.
@@ -215,8 +224,11 @@ export function IslandInitializer() {
       const row = current.rows.find((candidate) => candidate.id === request.rowId)
       if (!row || !row.capabilities.detail) return refuse("unknownRow")
 
+      // The same conversation lookup the projection used, or a conversation's
+      // turn would not be found under the row id it was projected as.
       const session = fleet.sessions.find(
-        (candidate) => taskIdentity(fleetSessionOwner(candidate)) === row.id
+        (candidate) =>
+          taskIdentity(fleetSessionOwner(candidate, (id) => id in conversations)) === row.id
       )
       if (session) {
         void sendIslandDetailResponse({
@@ -241,7 +253,7 @@ export function IslandInitializer() {
         detail: detailFromAttention(item),
       })
     },
-    [attention, fleet]
+    [attention, conversations, fleet]
   )
 
   const answerDetailRef = useRef(answerDetail)

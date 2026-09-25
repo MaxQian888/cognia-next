@@ -110,13 +110,20 @@ export const ISLAND_STATUS_RANK: Record<IslandRowStatus, number> = {
  * projection time against the underlying capability, so a button that exists
  * here is a button whose intent the main window will actually accept.
  *
- * Deliberate dormancy: `permissionDecision`, `questionResponse`, `reply` and
- * `interrupt` are only ever proven for EXTERNAL sessions (Claude Code, Codex,
- * OpenCode) today. A Cognia chat approval, an Agent Team gate or a workflow
- * interrupt reaches the island as a blocked row with `openOwner` only; the
- * decision itself is made in the main window, and the row says so
- * (`fleet.island.decideInMain`). Routing those decisions through the main
- * window's approval and gate stores is the follow-up that flips them on.
+ * Who can be answered from here:
+ *   - External sessions (Claude Code, Codex, OpenCode, ACP agents): the
+ *     decisions, answers, replies and interrupts their integration proves.
+ *   - A Cognia conversation: its live tool approvals (allow once, always
+ *     allow unless the ask forbids a standing rule, deny), a stop while a turn
+ *     is in flight, and a reply that steers a running turn or starts the next.
+ *   - A plan-step or cost-budget gate: approve or reject.
+ *   - A durable run approval whose answer carries no payload (plan, delegation,
+ *     bot, fusion, capability audit, connector tool asks).
+ *
+ * Still decided in the main window, and labelled so on the row
+ * (`fleet.island.decideInMain`): Squad reviews that need a typed answer
+ * (budget extension, deadlock, repair, re-plan, recovery), a human handoff,
+ * an ask-user question, a workflow approval, and free-form external asks.
  */
 export interface IslandRowCapabilities {
   openOwner: boolean
@@ -141,6 +148,29 @@ export const NO_ISLAND_CAPABILITIES: IslandRowCapabilities = {
   openTranscript: false,
   dismissStale: false,
   detail: false,
+}
+
+/**
+ * What a pending decision is about, which is what decides its wording: a
+ * tool permission, a plan step, spending past a budget, or any other durable
+ * run approval.
+ */
+export type IslandDecisionKind = "tool" | "plan" | "budget" | "review"
+
+/**
+ * How a decision may be answered. `allow_always` also records a standing rule
+ * and is only accepted where the row's permission says the ask allows one.
+ */
+export type IslandDecisionBehavior = "allow" | "allow_always" | "deny"
+
+/**
+ * When an unanswered ask stops waiting. `at` is epoch ms. `fallback` says what
+ * happens then: an external hook hands the prompt back to the agent's own
+ * terminal, anything else simply lapses.
+ */
+export interface IslandAnswerDeadline {
+  at: number
+  fallback: "terminal" | "lapse"
 }
 
 /** A parked question, redacted and length-capped by the projection. */
@@ -181,8 +211,23 @@ export interface IslandRowProjection {
   /** When the human wait began. Drives the "waiting 4m12s" label. */
   waitingSince?: number
   capabilities: IslandRowCapabilities
-  permission?: { requestId: string; toolName: string | null; requestedAt: number }
-  question?: { requestId: string; requestedAt: number; questions: IslandQuestion[] }
+  permission?: {
+    requestId: string
+    kind: IslandDecisionKind
+    /** Tool name for a `tool` ask. Redacted and truncated. */
+    toolName: string | null
+    requestedAt: number
+    /** `null` when the ask waits for the user indefinitely. */
+    deadline: IslandAnswerDeadline | null
+    /** Whether "always allow" is honoured for this ask. */
+    allowAlways: boolean
+  }
+  question?: {
+    requestId: string
+    requestedAt: number
+    deadline: IslandAnswerDeadline | null
+    questions: IslandQuestion[]
+  }
   hostRef?: string
   /** Which terminal launched it. An app id and a product name, both safe. */
   terminal?: TerminalSource
@@ -244,7 +289,11 @@ export interface IslandActionEnvelope {
 export type IslandActionIntent = IslandActionEnvelope &
   (
     | { kind: "open-owner" }
-    | { kind: "permission-decision"; permissionRequestId: string; behavior: "allow" | "deny" }
+    | {
+        kind: "permission-decision"
+        permissionRequestId: string
+        behavior: IslandDecisionBehavior
+      }
     | { kind: "question-response"; questionRequestId: string; selections: number[][] }
     | { kind: "question-reject"; questionRequestId: string }
     | { kind: "reply"; text: string }
@@ -306,6 +355,12 @@ export interface IslandRowDetail {
   /** Tool name plus its redacted argument. Named apart from `FleetSession.activity`,
    * which is an object, so a whole session stays assignable to this type. */
   activityLabel?: string
+  /**
+   * What the pending decision would let happen — the tool's redacted target,
+   * the gate's body. Revealed only on request, so the person deciding can see
+   * what they are approving without the hover projection carrying it.
+   */
+  decisionDetail?: string
 }
 
 export interface IslandDetailResponse {

@@ -43,7 +43,11 @@ export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
     id: "tray.pet-toggle",
     label: "tray.petToggle",
     iconHint: "pet",
-    payload: { kind: "native", action: "pet-toggle" },
+    // The same command the global hotkey and ⌘K run, so there is one summon
+    // path: it opens at the saved overlay geometry and switches the pet on
+    // (ADR-0058 D9). Deliberately no `when`: summoning must stay reachable
+    // while the pet is switched off, which is exactly when it is needed.
+    payload: { kind: "command", commandId: "pet.toggle-window" },
   },
   {
     // Unconditional click-through recovery: while the overlay ignores the

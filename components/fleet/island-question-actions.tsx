@@ -1,42 +1,41 @@
 "use client"
 
 /**
- * IslandQuestionActions — the answerable AskUserQuestion card. Renders each
- * parked question with selectable options (single- or multi-select) and a
- * Submit control, plus a live countdown of the island's answer window. On
- * submit the user's per-question option selections are posted to
- * `fleet_question_respond`; the Rust side turns them into the hook's `allow` +
- * `updatedInput.answers` decision so the agent resolves without touching the
- * terminal. After the window lapses the Rust side fails open (the agent's own
- * terminal picker takes over), so the card disables rather than lie.
+ * IslandQuestionActions — the answerable question card. Renders each parked
+ * question with selectable options (single- or multi-select), a Submit and a
+ * Reject control, and — only for an ask that actually lapses — a countdown.
+ * The selections travel as an island intent; the main window routes them to
+ * the owning runtime (the Rust hook ingress, or the ACP manager). A hook ask
+ * fails open to the agent's own terminal picker when its window lapses, so the
+ * card disables rather than lie; an ACP ask waits for the person and never
+ * counts down.
  */
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { CheckIcon, XIcon } from "lucide-react"
 import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
-import { fleetQuestionReject, fleetQuestionRespond } from "@/lib/tauri/fleet"
-import { truncateLine } from "@/lib/fleet/format"
-import {
-  FLEET_PERMISSION_WAIT_MS,
-  type PendingQuestion,
-  type PendingQuestionRequest,
-} from "@/lib/fleet/types"
+import { answerWindow, formatRemaining, truncateLine } from "@/lib/fleet/format"
+import type { PendingQuestion, PendingQuestionRequest } from "@/lib/fleet/types"
+import type { IslandAnswerDeadline } from "@/lib/island/types"
 import { cn } from "@/lib/utils"
 
 export function IslandQuestionActions({
   request,
   questions,
+  deadline,
   className,
-  respond: respondVia = fleetQuestionRespond,
-  reject: rejectVia = fleetQuestionReject,
+  respond: respondVia,
+  reject: rejectVia,
 }: {
   request: PendingQuestionRequest
   questions: PendingQuestion[]
+  /** When the ask stops waiting; `null` when it waits for the person. */
+  deadline: IslandAnswerDeadline | null
   className?: string
-  /** See `IslandPermissionActions` for why these are injectable. */
-  respond?: (requestId: string, selections: number[][]) => Promise<boolean>
-  reject?: (requestId: string) => Promise<boolean>
+  /** Both travel as island intents: this window holds no business permissions. */
+  respond: (requestId: string, selections: number[][]) => Promise<boolean>
+  reject: (requestId: string) => Promise<boolean>
 }) {
   const t = useTranslations("fleet")
   // Countdown ticks off the shared fleet ticker (one interval for the whole
@@ -47,15 +46,8 @@ export function IslandQuestionActions({
   const [submitted, setSubmitted] = useState(false)
   const [rejected, setRejected] = useState(false)
 
-  const remainingSec = useMemo(() => {
-    const deadline = request.requestedAt + FLEET_PERMISSION_WAIT_MS
-    return Math.max(0, Math.ceil((deadline - nowMs) / 1000))
-  }, [request.requestedAt, nowMs])
-  const expired = remainingSec <= 0
-  const remainingFraction = Math.min(
-    1,
-    Math.max(0, (remainingSec * 1000) / FLEET_PERMISSION_WAIT_MS)
-  )
+  const countdown = deadline ? answerWindow(request.requestedAt, deadline.at, nowMs) : null
+  const expired = countdown?.expired ?? false
 
   const locked = submitting || submitted || rejected || expired
 
@@ -169,18 +161,22 @@ export function IslandQuestionActions({
           <span className="text-[11px] text-white/60" data-testid="question-rejected">
             {t("question.rejected")}
           </span>
-        ) : expired ? (
+        ) : expired && deadline ? (
           <span className="text-[11px] text-white/40" data-testid="question-expired">
-            {t("question.expired")}
+            {t(deadline.fallback === "terminal" ? "question.expired" : "permission.lapsed")}
           </span>
         ) : (
           <>
-            <span
-              className="text-[10px] tabular-nums text-white/40"
-              data-testid="question-countdown"
-            >
-              {t("permission.countdown", { seconds: remainingSec })}
-            </span>
+            {countdown ? (
+              <span
+                className="text-[10px] tabular-nums text-white/40"
+                data-testid="question-countdown"
+              >
+                {t("permission.remaining", { duration: formatRemaining(countdown.remainingSec) })}
+              </span>
+            ) : (
+              <span aria-hidden />
+            )}
             <span className="flex items-center gap-1">
               <button
                 type="button"
@@ -206,7 +202,7 @@ export function IslandQuestionActions({
         )}
       </div>
 
-      {!submitted && !rejected && !expired ? (
+      {countdown && !submitted && !rejected && !expired ? (
         <div
           className="h-0.5 w-full overflow-hidden rounded-full bg-white/10"
           data-testid="question-progress-track"
@@ -216,9 +212,9 @@ export function IslandQuestionActions({
             data-testid="question-progress"
             className={cn(
               "h-full rounded-full transition-[width] duration-1000 ease-linear motion-reduce:transition-none",
-              remainingSec <= 5 ? "bg-red-400" : "bg-amber-400"
+              countdown.urgent ? "bg-red-400" : "bg-amber-400"
             )}
-            style={{ width: `${remainingFraction * 100}%` }}
+            style={{ width: `${countdown.fraction * 100}%` }}
           />
         </div>
       ) : null}

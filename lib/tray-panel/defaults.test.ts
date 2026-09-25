@@ -4,6 +4,7 @@ import {
   DELEGATE_PROMPT_FIELD,
   TRAY_PANEL_ACTIONS_PREF,
   ensureBuiltInActions,
+  migrateRetiredNativeEffects,
   resolveLabel,
 } from "./defaults"
 import { resolveAction, resolvePrimaryAction, validateActionDraft } from "./resolve"
@@ -104,6 +105,35 @@ describe("ensureBuiltInActions", () => {
 
   it("rebuilds the whole catalogue from an empty list", () => {
     expect(ensureBuiltInActions([]).map((a) => a.id)).toEqual(BUILT_IN_ACTION_IDS)
+  })
+})
+
+describe("migrateRetiredNativeEffects", () => {
+  // A custom action persisted while `pet-toggle` was still a native action.
+  const legacy = {
+    id: "mine.pet",
+    label: "Summon pet",
+    icon: "PawPrint",
+    fields: [],
+    trigger: { kind: "hotkey", chord: "mod+9" },
+    effect: { kind: "native", action: "pet-toggle" },
+    focusMainWindow: false,
+  } as unknown as TrayPanelAction
+
+  it("rewrites the retired effect into the summon command, keeping everything else", () => {
+    expect(migrateRetiredNativeEffects([legacy])).toEqual([
+      { ...legacy, effect: { kind: "command", commandId: "pet.toggle-window" } },
+    ])
+  })
+
+  it("returns the same reference when nothing is retired", () => {
+    expect(migrateRetiredNativeEffects(DEFAULT_TRAY_PANEL_ACTIONS)).toBe(DEFAULT_TRAY_PANEL_ACTIONS)
+  })
+
+  it("does not mutate the input", () => {
+    const stored = [legacy]
+    migrateRetiredNativeEffects(stored)
+    expect(stored[0].effect).toEqual({ kind: "native", action: "pet-toggle" })
   })
 })
 

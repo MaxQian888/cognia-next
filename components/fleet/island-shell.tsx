@@ -32,22 +32,30 @@
  * an approval is never hidden behind the collapsed pill. Derived straight from
  * the projection, so no event or effect plumbing is needed.
  *
- * Notch handling: the window is anchored to the TRUE top edge of the display
- * (Space-independent, see `island_window.rs`) and spans the camera-housing
- * strip so slam-to-top hover always lands on it. Inside that strip only a
- * column as wide as the housing itself is painted (`notchWidth`, from the
- * auxiliary areas macOS reports beside the housing), so the card grows out of
- * the housing like a Dynamic Island while the menu bar's titles and status
- * items beside it stay visible. The card's surface starts below the top
- * safe-area inset (both returned by `island_resize` and pushed via
- * `fleet://island-geometry`), so nothing is ever hidden behind the housing.
- * When the OS reports no housing width the whole strip is painted, the
- * pre-`notchWidth` look.
+ * Notch handling (`lib/island/layout.ts`): the window is anchored to the TRUE
+ * top edge of the display (Space-independent, see `island_window.rs`) and
+ * spans the camera-housing strip so slam-to-top hover always lands on it. Where
+ * macOS reported the housing's width, the island IS the housing grown wider:
+ * compact and minimal live entirely inside the menu-bar strip, as ears either
+ * side of the camera (nothing is drawn where the camera is), and the expanded
+ * card grows downward out of it. An idle island shrinks to exactly the housing
+ * — black on black — so it costs the menu bar nothing until it has something
+ * to say. Before, the pill hung a whole pill-height below the menu bar,
+ * covering the frontmost app's toolbar, with only a column joining it to the
+ * housing. Where the housing's width is unknown the flat pill is used, its
+ * content padded below the inset (`island_resize` and `fleet://island-geometry`
+ * both carry the geometry) so nothing is ever hidden behind the camera.
+ *
+ * Completion: a task that just finished keeps the island out for
+ * {@link ISLAND_ANNOUNCE_MS}, naming it, so a result is noticed rather than
+ * lingering unseen in a tucked island. Derived from the pushed projection and
+ * the shared clock, like the force-expand below.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 
+import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
 import { useIslandActions } from "@/hooks/island/use-island-actions"
 import { useIslandDetail } from "@/hooks/island/use-island-detail"
 import { useIslandState } from "@/hooks/island/use-island-state"
@@ -58,19 +66,22 @@ import {
   type IslandGeometry,
   type IslandHover,
 } from "@/lib/fleet/types"
+import {
+  ISLAND_PILL_HEIGHT,
+  islandContentHeight,
+  islandLayout,
+  islandWidth,
+  type IslandPresentation,
+} from "@/lib/island/layout"
 import type { IslandRowProjection } from "@/lib/island/types"
 import { isTauri } from "@/lib/tauri"
 import { islandResize, islandSetTucked } from "@/lib/tauri/fleet"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { cn } from "@/lib/utils"
+import { IslandHeader } from "./island-header"
 import { IslandTaskRow } from "./island-task-row"
 
-/** Logical widths for the two shapes (heights are measured). */
-export const ISLAND_COLLAPSED_WIDTH = 420
-export const ISLAND_EXPANDED_WIDTH = 560
-/** Collapsed pill height (kept in lockstep with the `h-11` pill button). */
-export const ISLAND_PILL_HEIGHT = 44
-/** Sliver left visible at the top edge while the island is tucked away. */
+/** Sliver left visible at the top edge while a flat island is tucked away. */
 export const ISLAND_PEEK_HEIGHT = 6
 /** Grace delay before an idle, empty island tucks itself away. */
 export const ISLAND_TUCK_DELAY_MS = 1500
@@ -92,6 +103,13 @@ export const ISLAND_ROW_STAGGER_MS = 30
  * rows keep only what the user must act on and fold the rest behind their pin.
  */
 export const ISLAND_COMPACT_THRESHOLD = 4
+/** How long a just-finished task keeps the island out, named. */
+export const ISLAND_ANNOUNCE_MS = 4_000
+
+/** Identity of one completion, so acknowledging it never silences the next. */
+function announcementKey(row: IslandRowProjection): string {
+  return `${row.id}:${row.updatedAt}`
+}
 
 /** A row the user can answer from here, which is what force-expands the island. */
 function isActionable(row: IslandRowProjection): boolean {
@@ -109,6 +127,7 @@ export function IslandShell() {
   const [focused, setFocused] = useState(false)
   const [manuallyCollapsed, setManuallyCollapsed] = useState(false)
   const [dismissedAttention, setDismissedAttention] = useState<string[]>([])
+  const [acknowledged, setAcknowledged] = useState<string[]>([])
   const [pinnedOpen, setPinnedOpen] = useState(false)
   const [tucked, setTucked] = useState(false)
   const [topInset, setTopInset] = useState(0)
@@ -128,6 +147,19 @@ export function IslandShell() {
   const waiting = state.attentionCount
   const empty = rows.length === 0
   const top = rows[0]
+  const nowMs = useNowTicker()
+  const layout = islandLayout({ topInset, notchWidth })
+  // The most recent completion still inside its announcement window. Only a
+  // finished task: a failing tool on a running session keeps updating and
+  // would hold the island out indefinitely.
+  const announced = rows
+    .filter(
+      (row) =>
+        row.status === "done" &&
+        nowMs - row.updatedAt < ISLAND_ANNOUNCE_MS &&
+        !acknowledged.includes(announcementKey(row))
+    )
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0]
   const updateHover = useCallback((inside: boolean) => {
     setHovering(inside)
     if (inside) setManuallyCollapsed(false)
@@ -239,6 +271,7 @@ export function IslandShell() {
     setPinnedOpen(false)
     setManuallyCollapsed(true)
     setDismissedAttention(attentionKeys)
+    if (announced) setAcknowledged((keys) => [...keys, announcementKey(announced)])
     pillRef.current?.focus({ preventScroll: true })
   }
 
@@ -279,7 +312,8 @@ export function IslandShell() {
   // cancels the pending tuck and slides the pill back out immediately. The reset
   // is a render-time state adjustment, React's "adjusting state when props
   // change" pattern. The effect only ever arms and disarms the tuck timer.
-  const shouldTuck = waiting === 0 && !hovering && !focused && !pinnedOpen && !forceExpanded
+  const shouldTuck =
+    waiting === 0 && !hovering && !focused && !pinnedOpen && !forceExpanded && !announced
   if (tucked && !shouldTuck) {
     setTucked(false)
   }
@@ -338,17 +372,34 @@ export function IslandShell() {
   // resize is instant. Growing ahead of the animation is invisible, because the
   // extra area is transparent. Shrinking instantly would clip the still
   // animating card at the window edge, so a shrink is deferred.
-  const width = expanded ? ISLAND_EXPANDED_WIDTH : ISLAND_COLLAPSED_WIDTH
+  const presentation: IslandPresentation = tucked ? "minimal" : expanded ? "expanded" : "compact"
+  const width = islandWidth(
+    layout,
+    presentation,
+    notchWidth,
+    waiting > 0 || state.activeCount > 0 || Boolean(announced)
+  )
 
   // Growth the signature cannot see (an action-error line, a wrapped detail
   // body) is caught by observing the content node itself; the tick joins the
-  // resize effect's deps. jsdom has no ResizeObserver, so the signature above
-  // remains the tested path.
+  // resize effect's deps.
+  //
+  // Only a HEIGHT change counts. The width is ours — the card animates it on
+  // every expand, collapse and notch tuck — and the observer fires on each
+  // frame of that transition. Ticking on those re-ran the resize effect per
+  // frame, and a pending shrink turned every run into two click-through IPC
+  // round-trips for a measurement that had not changed.
   const [contentTick, setContentTick] = useState(0)
   useEffect(() => {
     const node = contentRef.current
     if (!node || typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(() => setContentTick((tick) => tick + 1))
+    let lastHeight = Math.ceil(node.getBoundingClientRect().height)
+    const observer = new ResizeObserver(() => {
+      const height = Math.ceil(node.getBoundingClientRect().height)
+      if (height === lastHeight) return
+      lastHeight = height
+      setContentTick((tick) => tick + 1)
+    })
     observer.observe(node)
     return () => observer.disconnect()
   }, [hiddenEntirely])
@@ -370,12 +421,11 @@ export function IslandShell() {
     const measured = content ? Math.ceil(content.getBoundingClientRect().height) : 0
     const height = hiddenEntirely
       ? ISLAND_HIDDEN_HEIGHT
-      : expanded
-        ? Math.max(ISLAND_PILL_HEIGHT, measured)
-        : ISLAND_PILL_HEIGHT
+      : islandContentHeight(layout, presentation, measured, topInset)
     // `height` is the CONTENT height Rust is told about (it grows the window by
-    // the inset itself). The card also covers the notch strip above that
-    // content, so its own box is taller by exactly the inset.
+    // the inset itself). The card also covers the housing strip above that
+    // content — as its header in the notch layout, as padding in the flat one
+    // — so its own box is taller by exactly the inset.
     if (card) card.style.height = `${height + topInset}px`
 
     const prev = lastSizeRef.current
@@ -413,7 +463,8 @@ export function IslandShell() {
     }
   }, [
     width,
-    expanded,
+    layout,
+    presentation,
     hiddenEntirely,
     hovering,
     focused,
@@ -441,13 +492,17 @@ export function IslandShell() {
   }
 
   const severity = rows.some((row) => row.permission) ? "permission" : "input"
+  const notch = layout === "notch"
+  // The task the compact presentation names: a completion being announced
+  // outranks the queue, which is the whole point of announcing it.
+  const focus = announced ?? top
 
   return (
     <div
       data-testid="island-hover-zone"
       className="w-full"
       data-fullscreen={fullscreen ? "true" : "false"}
-      style={{ minHeight: ISLAND_PILL_HEIGHT + topInset }}
+      style={{ minHeight: notch ? topInset : ISLAND_PILL_HEIGHT + topInset }}
       onMouseEnter={() => updateHover(true)}
       onMouseLeave={() => updateHover(false)}
       onFocusCapture={() => setFocused(true)}
@@ -459,73 +514,72 @@ export function IslandShell() {
     >
       {/*
        * Clip container: starts at the window's top edge, which IS the display's
-       * top edge, and clips the tucked card's upward slide so a tuck leaves
-       * exactly `ISLAND_PEEK_HEIGHT` visible instead of a notch-height black
-       * band beside the camera housing.
+       * top edge, and clips the tucked flat card's upward slide so a tuck
+       * leaves exactly `ISLAND_PEEK_HEIGHT` visible.
        */}
       <div data-testid="island-clip" className="overflow-hidden">
         <div
           ref={cardRef}
           data-testid="island-shell"
+          data-layout={layout}
           data-expanded={expanded ? "true" : "false"}
           data-tucked={tucked ? "true" : "false"}
-          data-presentation={tucked ? "minimal" : expanded ? "expanded" : "compact"}
-          // Height joins transform and width in the transition: it is written
-          // imperatively by the layout effect above, so expanding and
-          // collapsing ease together instead of the width sliding while the
-          // height jumps in one frame.
-          // The card box itself paints nothing: its surface is the child below,
-          // which starts under the notch strip, so the strip stays transparent
-          // beside the housing and the menu bar there remains visible.
-          className="relative mx-auto select-none overflow-hidden rounded-2xl text-white transition-[transform,width,height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none"
+          data-presentation={presentation}
+          data-announcing={announced ? "true" : "false"}
+          // Height joins width in the transition: it is written imperatively
+          // by the layout effect above, so expanding and collapsing ease
+          // together instead of the width sliding while the height jumps.
+          className={cn(
+            "relative mx-auto select-none overflow-hidden text-white transition-[transform,width,height,border-radius] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none",
+            notch
+              ? // The housing grown wider: true black so it reads as one shape
+                // with the camera, square at the screen edge, rounded below.
+                cn("bg-black", expanded ? "rounded-b-[22px] shadow-2xl" : "rounded-b-xl")
+              : // The flat card paints nothing itself; its surface is the child
+                // below, which starts under any inset strip.
+                "rounded-2xl"
+          )}
           style={{
             width,
-            // Seed the pill height (plus the notch strip the card covers) so the
-            // first painted frame is not zero-height. The layout effect takes
-            // over immediately after.
-            height: ISLAND_PILL_HEIGHT + topInset,
-            // Only the CONTENT clears the camera housing; the housing column
-            // above it is what joins the surface to the notch.
-            paddingTop: topInset,
-            transform: tucked
-              ? `translateY(${ISLAND_PEEK_HEIGHT - (ISLAND_PILL_HEIGHT + topInset)}px)`
-              : "translateY(0px)",
+            // Seed the first painted frame; the layout effect takes over.
+            height: notch ? topInset : ISLAND_PILL_HEIGHT + topInset,
+            // Flat: only the CONTENT clears an inset of unknown width.
+            ...(notch ? {} : { paddingTop: topInset }),
+            transform:
+              tucked && !notch
+                ? `translateY(${ISLAND_PEEK_HEIGHT - (ISLAND_PILL_HEIGHT + topInset)}px)`
+                : "translateY(0px)",
           }}
         >
-          {/*
-           * The painted surface. Below the notch strip on a notched display,
-           * the whole card elsewhere. Beside a housing it is the housing's true
-           * black so column and card read as one shape; without one it is the
-           * glass. Behind the content (negative z inside the card's stacking
-           * context), so the rows and the pill sit on it.
-           */}
-          <div
-            aria-hidden
-            data-testid="island-surface"
-            className={cn(
-              "absolute inset-x-0 bottom-0 -z-10 rounded-2xl border border-white/10 shadow-2xl",
-              topInset > 0 ? "bg-black" : "bg-black/85 backdrop-blur-xl"
-            )}
-            style={{ top: topInset }}
-          />
-
-          {/*
-           * Housing column: the one part of the notch strip that is painted.
-           * Exactly as wide as the camera housing (never wider than the card),
-           * one pixel into the surface so the join has no seam. With no
-           * reported housing width the whole strip is painted, as before.
-           */}
-          {topInset > 0 ? (
-            <div
-              aria-hidden
-              data-testid="island-notch-fill"
-              className="absolute top-0 left-1/2 -translate-x-1/2 bg-black"
-              style={{
-                width: notchWidth > 0 ? Math.min(notchWidth, width) : width,
-                height: topInset + 1,
-              }}
-            />
-          ) : null}
+          {notch ? null : (
+            <>
+              {/*
+               * The flat card's painted surface: below any inset strip, as
+               * glass, or black when an inset exists so it joins the strip.
+               */}
+              <div
+                aria-hidden
+                data-testid="island-surface"
+                className={cn(
+                  "absolute inset-x-0 bottom-0 -z-10 rounded-2xl border border-white/10 shadow-2xl",
+                  topInset > 0 ? "bg-black" : "bg-black/85 backdrop-blur-xl"
+                )}
+                style={{ top: topInset }}
+              />
+              {/*
+               * An inset whose housing width is unknown: paint the whole strip,
+               * one pixel into the surface so the join has no seam.
+               */}
+              {topInset > 0 ? (
+                <div
+                  aria-hidden
+                  data-testid="island-notch-fill"
+                  className="absolute top-0 left-0 bg-black"
+                  style={{ width, height: topInset + 1 }}
+                />
+              ) : null}
+            </>
+          )}
 
           {/*
            * Screen-reader announcement of the one number that matters. Polite,
@@ -537,9 +591,11 @@ export function IslandShell() {
             aria-atomic="true"
             className="sr-only"
           >
-            {waiting > 0
-              ? t("announceWaiting", { count: rows.length, waiting })
-              : t("announceActive", { count: state.activeCount })}
+            {announced
+              ? t("announceFinished", { title: announced.title })
+              : waiting > 0
+                ? t("announceWaiting", { count: rows.length, waiting })
+                : t("announceActive", { count: state.activeCount })}
           </p>
 
           <div ref={contentRef} data-testid="island-content">
@@ -552,64 +608,22 @@ export function IslandShell() {
               aria-controls="island-task-body"
               aria-label={t("toggle")}
               className={cn(
-                "flex h-11 w-full items-center gap-2 px-4 text-xs text-white/80 transition-opacity duration-200",
-                top && !tucked ? "justify-start" : "justify-center",
-                tucked && "opacity-0"
+                "flex w-full items-center text-xs text-white/80 transition-opacity duration-200",
+                notch ? "px-0" : "h-11 px-4",
+                tucked && !notch && "opacity-0"
               )}
+              style={notch ? { height: topInset } : undefined}
             >
-              <span
-                aria-hidden
-                className={cn(
-                  "size-1.5 shrink-0 rounded-full transition-colors duration-300",
-                  waiting > 0
-                    ? "animate-pulse bg-amber-400"
-                    : rows.length > 0
-                      ? "bg-emerald-400"
-                      : "bg-white/30"
-                )}
+              <IslandHeader
+                layout={layout}
+                presentation={presentation}
+                focus={focus}
+                announcing={Boolean(announced)}
+                total={rows.length}
+                waiting={waiting}
+                active={state.activeCount}
+                notchWidth={notchWidth}
               />
-              {/*
-               * Compact: the single highest-priority task, named. A count alone
-               * makes the user open the island to learn anything at all.
-               */}
-              {top && !tucked ? (
-                <>
-                  <span
-                    data-testid="island-compact-source"
-                    className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-white/60"
-                  >
-                    {t(`source.${top.source}`)}
-                  </span>
-                  <span
-                    data-testid="island-compact-title"
-                    className="min-w-0 shrink truncate font-medium text-white/90"
-                  >
-                    {top.title}
-                  </span>
-                  <span
-                    data-testid="island-compact-summary"
-                    className="min-w-0 shrink truncate text-white/50"
-                  >
-                    {top.summary || t(`state.${top.statusKey ?? top.status}`)}
-                  </span>
-                  {rows.length > 1 ? (
-                    <span
-                      data-testid="island-compact-more"
-                      className="ml-auto shrink-0 tabular-nums text-white/40"
-                    >
-                      {t("more", { count: rows.length - 1 })}
-                    </span>
-                  ) : null}
-                </>
-              ) : (
-                <span data-testid="island-summary">
-                  {rows.length === 0
-                    ? t("empty")
-                    : waiting > 0
-                      ? t("summaryWaiting", { count: rows.length, waiting })
-                      : t("summary", { count: rows.length })}
-                </span>
-              )}
             </button>
 
             {/*
@@ -626,6 +640,7 @@ export function IslandShell() {
                 inert={!expanded}
                 className={cn(
                   "transition-opacity duration-200 ease-out motion-reduce:transition-none",
+                  notch && "pt-1",
                   expanded ? "opacity-100" : "pointer-events-none opacity-0"
                 )}
               >
@@ -683,14 +698,15 @@ export function IslandShell() {
           </div>
 
           {/*
-           * Minimal presentation: while tucked the card is a bare sliver, and
-           * this is the only thing painted in it. A count, nothing else. The
-           * tuck slides the card UP by everything but `ISLAND_PEEK_HEIGHT`, so
-           * the strip left on screen is the card's BOTTOM edge: the count is
-           * anchored there, not below the notch, or it would sit above the
-           * clip and the sliver would paint blank.
+           * Flat minimal presentation: while tucked the card is a bare sliver,
+           * and this is the only thing painted in it. A count, nothing else.
+           * The tuck slides the card UP by everything but
+           * `ISLAND_PEEK_HEIGHT`, so the strip left on screen is the card's
+           * BOTTOM edge: the count is anchored there, or it would sit above
+           * the clip and the sliver would paint blank. The notch layout keeps
+           * its minimal count in the trailing ear instead.
            */}
-          {tucked && (waiting > 0 || state.activeCount > 0) ? (
+          {!notch && tucked && (waiting > 0 || state.activeCount > 0) ? (
             <span
               data-testid="island-minimal"
               aria-hidden
@@ -704,18 +720,20 @@ export function IslandShell() {
           {/*
            * Attention ring: a breathing amber (or red) inset ring while a task
            * needs the user. A pointer-events-none overlay so it never blocks the
-           * pill or list, painted last so it sits above the content edges, and
-           * offset below the notch so it rings the content rather than drawing a
-           * glowing bar across the menu bar.
+           * pill or list, painted last so it sits above the content edges. The
+           * flat card offsets it below any inset strip so it rings the content
+           * rather than drawing a glowing bar across the menu bar; the notch
+           * card IS the strip, so it rings the whole shape.
            */}
           {waiting > 0 && !tucked ? (
             <span
               aria-hidden
               data-testid="island-attention-ring"
               data-severity={severity}
-              style={{ top: topInset }}
+              style={{ top: notch ? 0 : topInset }}
               className={cn(
-                "pointer-events-none absolute inset-0 rounded-2xl",
+                "pointer-events-none absolute inset-0",
+                notch ? (expanded ? "rounded-b-[22px]" : "rounded-b-xl") : "rounded-2xl",
                 severity === "permission"
                   ? "island-attention-ring--danger"
                   : "island-attention-ring"

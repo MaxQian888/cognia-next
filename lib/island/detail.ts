@@ -20,6 +20,7 @@ const PLAN_MAX = 400
 const ERROR_MAX = 200
 const ACTIVITY_MAX = 120
 const PATH_MAX = 160
+const DECISION_MAX = 240
 
 function safe(value: string | null | undefined, max: number): string | undefined {
   if (!value) return undefined
@@ -58,14 +59,18 @@ export function detailFromSession(session: FleetSession): IslandRowDetail {
             .join(": "),
         }
       : {}),
+    ...(safe(session.pendingPermission?.detail, DECISION_MAX)
+      ? { decisionDetail: safe(session.pendingPermission?.detail, DECISION_MAX) }
+      : {}),
   }
 }
 
 /**
  * Redacted facts for a pending item that has no monitored session behind it.
  *
- * Chat approvals, team gates and run interrupts do not carry a runtime, so the
- * counters are zero and the useful part is the ask itself.
+ * Chat approvals, gates and run interrupts do not carry a runtime, so the
+ * counters are zero and the useful part is the ask itself: the approval's
+ * title, the gate's body, the run approval's tool.
  */
 export function detailFromAttention(item: AttentionItem): IslandRowDetail {
   return {
@@ -77,6 +82,6 @@ export function detailFromAttention(item: AttentionItem): IslandRowDetail {
     status: "waiting-input",
     model: null,
     permissionMode: null,
-    ...(safe(item.detail, PROMPT_MAX) ? { prompt: safe(item.detail, PROMPT_MAX) } : {}),
+    ...(safe(item.detail, DECISION_MAX) ? { decisionDetail: safe(item.detail, DECISION_MAX) } : {}),
   }
 }

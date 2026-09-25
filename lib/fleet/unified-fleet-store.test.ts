@@ -5,8 +5,13 @@ const subscribeAgentEventsMock = jest.fn()
 jest.mock("@/lib/claude/ipc", () => ({
   subscribeAgentEvents: (...a: unknown[]) => subscribeAgentEventsMock(...a),
 }))
+const journalListeners = new Set<(envelopes: readonly AgentEventEnvelope[]) => void>()
 jest.mock("@/lib/ai/agent/recovery/canonical-log", () => ({
   appendCanonicalEnvelopes: jest.fn(async () => {}),
+  subscribeCanonicalAppends: (listener: (envelopes: readonly AgentEventEnvelope[]) => void) => {
+    journalListeners.add(listener)
+    return () => journalListeners.delete(listener)
+  },
 }))
 jest.mock("@/lib/ai/agent/execution/event-envelope", () => ({
   redactAgentEventEnvelope: (envelope: unknown) => envelope,
@@ -178,5 +183,54 @@ describe("canonical result state", () => {
     const again = await attach()
     expect(unifiedFleetStore.getSnapshot().sessions).toHaveLength(0)
     again()
+  })
+
+  describe("resolutions only the journal carries", () => {
+    const journal = (envelopes: AgentEventEnvelope[]) =>
+      journalListeners.forEach((listener) => listener(envelopes))
+
+    it("releases a permission an ALLOW answered in this renderer", async () => {
+      const off = await attach()
+      emit(envelope({ kind: "permission-request", requestId: "p1", toolName: "Bash" }))
+      emit(envelope({ kind: "tool-call", toolName: "Bash" }))
+      // The stream never says the ask was allowed, so the row stays blocked.
+      expect(unifiedFleetStore.getSnapshot().sessions[0].status).toBe("waiting-permission")
+
+      journal([envelope({ kind: "permission-resolved", requestId: "p1", behavior: "allow" })])
+      const [row] = unifiedFleetStore.getSnapshot().sessions
+      expect(row.status).toBe("working")
+      expect(row.pendingPermission).toBeNull()
+      off()
+    })
+
+    it("releases an elicitation answered in this renderer", async () => {
+      const off = await attach()
+      emit(envelope({ kind: "elicitation-request", requestId: "e1", prompt: "which?" }))
+      journal([envelope({ kind: "elicitation-resolved", requestId: "e1", outcome: "answered" })])
+      expect(unifiedFleetStore.getSnapshot().sessions[0].status).toBe("working")
+      off()
+    })
+
+    it("ignores echoes, other requests and sessions the stream never opened", async () => {
+      const off = await attach()
+      emit(envelope({ kind: "permission-request", requestId: "p1", toolName: "Bash" }))
+      const before = unifiedFleetStore.getSnapshot()
+      journal([
+        envelope({ kind: "tool-call", toolName: "Bash" }),
+        envelope({ kind: "permission-resolved", requestId: "other", behavior: "allow" }),
+        envelope({ kind: "permission-resolved", requestId: "p1", behavior: "allow" }, "unknown"),
+      ])
+      // Nothing matched, so no new snapshot was published and no row was seeded.
+      expect(unifiedFleetStore.getSnapshot()).toBe(before)
+      expect(unifiedFleetStore.getSnapshot().sessions).toHaveLength(1)
+      off()
+    })
+
+    it("stops listening to the journal once the last subscriber leaves", async () => {
+      const off = await attach()
+      expect(journalListeners.size).toBe(1)
+      off()
+      expect(journalListeners.size).toBe(0)
+    })
   })
 })

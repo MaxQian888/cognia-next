@@ -30,11 +30,13 @@ import {
   fleetQuestionRespond,
   fleetRevealTranscript,
 } from "@/lib/tauri/fleet"
+import type { ApprovalKey } from "@/lib/runtime/approval-bus"
 import { ownerRoute } from "./owner"
 import type {
   FleetOwnerRef,
   IslandActionIntent,
   IslandActionResult,
+  IslandDecisionBehavior,
   IslandRowProjection,
   IslandState,
 } from "./types"
@@ -48,14 +50,43 @@ export type IslandActionReason =
   | "noRoute"
   | "callFailed"
   | "emptyInput"
+  /** The ask was answered, withdrawn or expired before this press landed. */
+  | "noLongerWaiting"
+  /** The turn a Stop was aimed at had already finished. */
+  | "turnFinished"
+  /** The execution host needs this device approved before it takes control. */
+  | "hostConsent"
 
+/**
+ * The main window's authorities, injected so the validation here stays
+ * testable without them. Each resolves `null` when the action happened, else
+ * the reason it did not (see `main-window-controls.ts`).
+ */
 export interface IslandActionDeps {
   /** Select the owner context and navigate the main window. */
   navigate(path: string, owner: FleetOwnerRef): void
   /** Bring the main window forward after an owner navigation. */
   focusMainWindow?(): void | Promise<void>
-  /** Clear a stale pending item. Supplied by the initializer. */
+  /** Clear a stale pending item. */
   dismissStale(row: IslandRowProjection): Promise<boolean>
+  /** Answer a conversation's live tool approval. */
+  respondToChatApproval(
+    sessionId: string,
+    requestId: string,
+    behavior: IslandDecisionBehavior
+  ): Promise<IslandActionReason | null>
+  /** Approve or reject an open plan-step or budget gate. */
+  decideGate(key: ApprovalKey, approve: boolean): IslandActionReason | null
+  /** Approve or deny a durable run approval. */
+  decideRunApproval(
+    runId: string,
+    interruptId: string,
+    approve: boolean
+  ): Promise<IslandActionReason | null>
+  /** Stop a conversation's in-flight turn. */
+  stopConversation(sessionId: string): Promise<IslandActionReason | null>
+  /** Send a reply into a conversation. */
+  replyToConversation(sessionId: string, text: string): IslandActionReason | null
 }
 
 function reject(
@@ -76,6 +107,15 @@ function fail(
 
 function ok(intent: IslandActionIntent, revision: number): IslandActionResult {
   return { requestId: intent.requestId, revision, outcome: "completed" }
+}
+
+/** Report an authority's answer: `null` means it happened. */
+function settled(
+  intent: IslandActionIntent,
+  revision: number,
+  reason: IslandActionReason | null
+): IslandActionResult {
+  return reason === null ? ok(intent, revision) : fail(intent, revision, reason)
 }
 
 /**
@@ -113,15 +153,46 @@ export async function executeIslandAction(
     }
 
     case "permission-decision": {
-      if (!row.capabilities.permissionDecision) return reject(intent, revision, "notPermitted")
-      if (row.permission?.requestId !== intent.permissionRequestId) {
+      if (!row.capabilities.permissionDecision || !row.permission) {
+        return reject(intent, revision, "notPermitted")
+      }
+      if (row.permission.requestId !== intent.permissionRequestId) {
         return reject(intent, revision, "requestChanged")
       }
-      const acp = acpManagedOwner(row.owner)
-      const accepted = acp
-        ? await respondAcpFleetPermission(intent.permissionRequestId, intent.behavior)
-        : await fleetPermissionRespond(intent.permissionRequestId, intent.behavior)
-      return accepted ? ok(intent, revision) : fail(intent, revision, "callFailed")
+      if (intent.behavior === "allow_always" && !row.permission.allowAlways) {
+        return reject(intent, revision, "notPermitted")
+      }
+      const approve = intent.behavior !== "deny"
+      const owner = row.owner
+      switch (owner.kind) {
+        case "external": {
+          const behavior = approve ? "allow" : "deny"
+          const accepted = acpManagedOwner(owner)
+            ? await respondAcpFleetPermission(intent.permissionRequestId, behavior)
+            : await fleetPermissionRespond(intent.permissionRequestId, behavior)
+          return accepted ? ok(intent, revision) : fail(intent, revision, "callFailed")
+        }
+        case "chat":
+          return settled(
+            intent,
+            revision,
+            await deps.respondToChatApproval(
+              owner.sessionId,
+              intent.permissionRequestId,
+              intent.behavior
+            )
+          )
+        case "gate":
+          return settled(intent, revision, deps.decideGate(owner.gateKey, approve))
+        case "run":
+          return settled(
+            intent,
+            revision,
+            await deps.decideRunApproval(owner.runId, intent.permissionRequestId, approve)
+          )
+        case "team":
+          return reject(intent, revision, "notPermitted")
+      }
     }
 
     case "question-response": {
@@ -150,6 +221,9 @@ export async function executeIslandAction(
       if (!row.capabilities.reply) return reject(intent, revision, "notPermitted")
       const text = intent.text.trim()
       if (!text) return reject(intent, revision, "emptyInput")
+      if (row.owner.kind === "chat") {
+        return settled(intent, revision, deps.replyToConversation(row.owner.sessionId, text))
+      }
       if (row.owner.kind !== "external") return reject(intent, revision, "notPermitted")
       const accepted = row.owner.agentId
         ? await sendAcpFleetMessage(row.owner.agentId, row.owner.sessionId, text)
@@ -159,6 +233,9 @@ export async function executeIslandAction(
 
     case "interrupt": {
       if (!row.capabilities.interrupt) return reject(intent, revision, "notPermitted")
+      if (row.owner.kind === "chat") {
+        return settled(intent, revision, await deps.stopConversation(row.owner.sessionId))
+      }
       if (row.owner.kind !== "external") return reject(intent, revision, "notPermitted")
       const result = row.owner.agentId
         ? await interruptAcpFleetSession(row.owner.agentId, row.owner.sessionId)

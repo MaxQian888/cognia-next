@@ -2,7 +2,10 @@
 
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
-import { appendCanonicalEnvelopes } from "@/lib/ai/agent/recovery/canonical-log"
+import {
+  appendCanonicalEnvelopes,
+  subscribeCanonicalAppends,
+} from "@/lib/ai/agent/recovery/canonical-log"
 import { redactAgentEventEnvelope } from "@/lib/ai/agent/execution/event-envelope"
 import { subscribeAgentEvents } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
@@ -48,6 +51,7 @@ function createUnifiedFleetStore(): TauriEventStore<FleetSnapshot> {
   let detachExternal: (() => void) | undefined
   let detachCanonical: (() => void) | undefined
   let detachAcp: (() => void) | undefined
+  let detachJournal: (() => void) | undefined
   let generation = 0
   /** Per-session sweep timers for finished rows. Keyed by canonical sessionId. */
   const sweeps = new Map<string, ReturnType<typeof setTimeout>>()
@@ -110,11 +114,42 @@ function createUnifiedFleetStore(): TauriEventStore<FleetSnapshot> {
     refresh()
   }
 
+  /**
+   * Fold the resolutions the live stream never delivers.
+   *
+   * The sidecar streams `permission-request`, but an ALLOW is decided in this
+   * renderer (the modal, the allowlist, auto-mode) and only reaches the
+   * canonical journal. Folding the stream alone left every answered ask
+   * showing "waiting for your approval" until the turn ended. Only resolutions
+   * are taken from the journal, and only into rows the stream already opened:
+   * everything else there is an echo of what `onEnvelope` just folded.
+   */
+  const onJournalAppend = (envelopes: readonly AgentEventEnvelope[]) => {
+    let changed = false
+    for (const envelope of envelopes) {
+      const kind = (envelope.event as { kind?: string }).kind
+      if (kind !== "permission-resolved" && kind !== "elicitation-resolved") continue
+      const previous = canonical.get(envelope.sessionId)
+      if (!previous) continue
+      const next = projectCanonicalFleetSession(previous, envelope)
+      if (
+        next.pendingPermission === previous.pendingPermission &&
+        next.pendingQuestionRequest === previous.pendingQuestionRequest
+      ) {
+        continue
+      }
+      canonical.set(envelope.sessionId, next)
+      changed = true
+    }
+    if (changed) refresh()
+  }
+
   const attach = () => {
     const currentGeneration = generation
     evictExpired()
     detachExternal = fleetStreamStore.subscribe(refresh)
     detachAcp = acpFleetProjection.subscribe(refresh)
+    detachJournal = subscribeCanonicalAppends(onJournalAppend)
     refresh()
     void subscribeAgentEvents(onEnvelope).then((unlisten) => {
       if (currentGeneration !== generation) unlisten()
@@ -126,9 +161,11 @@ function createUnifiedFleetStore(): TauriEventStore<FleetSnapshot> {
     detachExternal?.()
     detachCanonical?.()
     detachAcp?.()
+    detachJournal?.()
     detachExternal = undefined
     detachCanonical = undefined
     detachAcp = undefined
+    detachJournal = undefined
     for (const timer of sweeps.values()) clearTimeout(timer)
     sweeps.clear()
   }

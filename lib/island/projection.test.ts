@@ -1,6 +1,6 @@
 import type { AttentionItem } from "@/lib/attention/types"
 import type { FleetSession, FleetSnapshot } from "@/lib/fleet/types"
-import { projectIslandState, sortIslandRows } from "./projection"
+import { projectIslandState, sortIslandRows, type IslandConversationFacts } from "./projection"
 import { ISLAND_DONE_LINGER_MS, type IslandRowProjection } from "./types"
 
 const NOW = 1_000_000
@@ -42,12 +42,14 @@ function snapshot(sessions: FleetSession[]): FleetSnapshot {
 function project(
   sessions: FleetSession[],
   attention: AttentionItem[] = [],
-  visibility: "click-to-reveal" | "hover" | "summary-only" = "click-to-reveal"
+  visibility: "click-to-reveal" | "hover" | "summary-only" = "click-to-reveal",
+  conversations: Record<string, IslandConversationFacts> = {}
 ) {
   return projectIslandState(
     {
       fleet: snapshot(sessions),
       attention,
+      conversations,
       detailVisibility: visibility,
       epoch: 1,
       revision: 7,
@@ -81,7 +83,15 @@ describe("projectIslandState privacy", () => {
     ]).rows[0]
     expect(row.hostRef!.length).toBeLessThanOrEqual(32)
     expect(row.terminal!.label.length).toBeLessThanOrEqual(24)
-    expect(row.permission).toEqual({ requestId: "p", toolName: null, requestedAt: NOW })
+    expect(row.permission).toEqual({
+      requestId: "p",
+      kind: "tool",
+      toolName: null,
+      requestedAt: NOW,
+      // The hook ingress holds the ask for its window, then the terminal takes over.
+      deadline: { at: NOW + 20_000, fallback: "terminal" },
+      allowAlways: false,
+    })
     expect(row.question!.questions[0]).toMatchObject({ multiSelect: true })
     expect(row.question!.questions[0].question.length).toBeLessThanOrEqual(200)
     expect(row.question!.questions[0].header!.length).toBeLessThanOrEqual(24)
@@ -206,7 +216,7 @@ describe("projectIslandState capabilities", () => {
     })
   })
 
-  it("never offers interrupt for a cognia session", () => {
+  it("never offers interrupt for a cognia run that is not a conversation", () => {
     const state = project([
       session({
         agent: "cognia",
@@ -351,12 +361,12 @@ describe("stale dismissal", () => {
     } as AttentionItem
   }
 
-  it("permits clearing stale teams and non-handoff runs only with their clearing identity", () => {
+  it("permits clearing stale non-handoff runs only with their clearing identity", () => {
     const state = project(
       [],
       [
+        // A team item without its gate has no owner at all, so no row either.
         staleItem({ id: "team:t", source: "team", kind: "hitl-gate", teamId: "t" }),
-        staleItem({ id: "team:r", source: "team", kind: "hitl-gate", runId: "r" }),
         staleItem({
           id: "run:r",
           source: "run",
@@ -372,7 +382,8 @@ describe("stale dismissal", () => {
         .filter((row) => row.capabilities.dismissStale)
         .map((row) => row.id)
         .sort()
-    ).toEqual(["run:r", "team::r", "team:t:"])
+    ).toEqual(["run:r"])
+    expect(state.rows.some((row) => row.source === "team")).toBe(false)
     expect(state.rows.find((row) => row.id === "run:missing")!.capabilities.dismissStale).toBe(
       false
     )
@@ -479,6 +490,7 @@ describe("projectIslandState lifecycle", () => {
             stale: false,
           } as AttentionItem,
         ],
+        conversations: {},
         detailVisibility: "summary-only",
         epoch: 1,
         revision: 1,
@@ -583,9 +595,10 @@ describe("sortIslandRows", () => {
 })
 
 describe("projectIslandState cognia sources", () => {
-  it("projects a blocked Cognia session as open-only (deliberate dormancy)", () => {
-    // Pinned on purpose: approve/deny and question answering are only proven
-    // for external agents today. See IslandRowCapabilities.
+  it("keeps a blocked Cognia run that is not a conversation open-only", () => {
+    // A run no conversation owns (an IM job, a subagent) has nothing the island
+    // could drive: its approval, if any, arrives through the durable run
+    // approvals below. See IslandRowCapabilities.
     const state = project([
       session({
         agent: "cognia",
@@ -801,5 +814,259 @@ describe("projectIslandState ACP sessions", () => {
     expect(row.status).toBe("blocked")
     expect(row.capabilities.reply).toBe(false)
     expect(row.capabilities.interrupt).toBe(true)
+  })
+})
+
+describe("projectIslandState conversations", () => {
+  const conversation: IslandConversationFacts = {
+    direct: true,
+    status: "streaming",
+    title: "Refactor the auth module",
+  }
+  const turn = session({
+    agent: "cognia",
+    sessionId: "chat-1",
+    executionRunId: "run-1",
+    projectName: "cognia-next",
+    status: "waiting-permission",
+    pendingPermission: { requestId: "req", toolName: "Bash", detail: null, requestedAt: NOW },
+    capabilities: {
+      approvePermission: false,
+      sendMessage: false,
+      focusTerminal: false,
+      openTranscript: false,
+      interrupt: false,
+    },
+  })
+  function approval(over: Record<string, unknown> = {}): AttentionItem {
+    return {
+      id: "chat:req",
+      source: "chat",
+      kind: "tool-approval",
+      title: "Bash",
+      openedAt: NOW - 2_000,
+      stale: false,
+      sessionId: "chat-1",
+      approval: {
+        sessionId: "chat-1",
+        requestId: "req",
+        toolUseID: "tu",
+        toolName: "Bash",
+        displayName: "Run command",
+        input: { command: "rm -rf secret" },
+      },
+      ...over,
+    } as AttentionItem
+  }
+
+  it("folds a conversation's turn and its approval into one answerable row", () => {
+    const state = project([turn], [approval()], "click-to-reveal", { "chat-1": conversation })
+    expect(state.rows).toHaveLength(1)
+    const [row] = state.rows
+    expect(row.owner).toEqual({ kind: "chat", sessionId: "chat-1", requestId: "req" })
+    expect(row.title).toBe("Refactor the auth module")
+    expect(row.permission).toEqual({
+      requestId: "req",
+      kind: "tool",
+      toolName: "Run command",
+      requestedAt: NOW - 2_000,
+      // A conversation's ask waits for the person; its backstop is not a window.
+      deadline: null,
+      allowAlways: true,
+    })
+    expect(row.capabilities).toMatchObject({
+      openOwner: true,
+      permissionDecision: true,
+      interrupt: true,
+      reply: true,
+    })
+    expect(JSON.stringify(row)).not.toContain("rm -rf")
+  })
+
+  it("takes a conversation's approval from the chat store, never the stream", () => {
+    // The stream still reports the ask, but the chat store answered it.
+    const row = project([turn], [], "click-to-reveal", { "chat-1": conversation }).rows[0]
+    expect(row.permission).toBeUndefined()
+    expect(row.capabilities.permissionDecision).toBe(false)
+  })
+
+  it("withholds Always allow when the ask forbids a standing rule", () => {
+    const item = approval()
+    item.approval!.suppressAlwaysAllowRule = true
+    const row = project([], [item], "click-to-reveal", { "chat-1": conversation }).rows[0]
+    expect(row.permission?.allowAlways).toBe(false)
+  })
+
+  it("offers Stop only while a turn is in flight, and reply whenever the chat can be driven", () => {
+    const idle = project([{ ...turn, status: "idle", pendingPermission: null }], [], "hover", {
+      "chat-1": { ...conversation, status: "idle" },
+    }).rows[0]
+    expect(idle.capabilities).toMatchObject({ interrupt: false, reply: true })
+
+    const unloaded = project([{ ...turn, status: "working" }], [], "hover", {
+      "chat-1": { ...conversation, status: null },
+    }).rows[0]
+    expect(unloaded.capabilities).toMatchObject({ interrupt: false, reply: true })
+
+    const waiting = project([], [approval()], "hover", {
+      "chat-1": { ...conversation, status: "awaiting_approval" },
+    }).rows[0]
+    expect(waiting.capabilities.interrupt).toBe(true)
+  })
+
+  it("leaves team rooms and workbenches to their own pages", () => {
+    const row = project([turn], [approval()], "hover", {
+      "chat-1": { ...conversation, direct: false },
+    }).rows[0]
+    expect(row.capabilities).toMatchObject({
+      permissionDecision: true,
+      interrupt: false,
+      reply: false,
+    })
+  })
+
+  it("does not stop a finished turn or offer anything on an interrupted approval", () => {
+    const ended = project([{ ...turn, status: "ended", pendingPermission: null }], [], "hover", {
+      "chat-1": { ...conversation, status: "streaming" },
+    }).rows[0]
+    expect(ended.capabilities.interrupt).toBe(false)
+
+    const interrupted = approval({ stale: true })
+    interrupted.approval!.status = "interrupted"
+    const stale = project([], [interrupted], "hover", { "chat-1": conversation }).rows[0]
+    expect(stale.permission).toBeUndefined()
+    expect(stale.capabilities).toMatchObject({
+      permissionDecision: false,
+      interrupt: false,
+      reply: false,
+      dismissStale: true,
+    })
+  })
+})
+
+describe("projectIslandState answer windows", () => {
+  it("counts down only where the ask actually lapses", () => {
+    const pendingPermission = { requestId: "p", toolName: "Bash", detail: null, requestedAt: NOW }
+    const pendingQuestionRequest = { requestId: "q", requestedAt: NOW }
+    const pendingQuestions = [{ question: "Go?", options: ["Yes"], multiSelect: false }]
+    const hook = project([session({ pendingPermission, pendingQuestionRequest, pendingQuestions })])
+      .rows[0]
+    expect(hook.permission?.deadline).toEqual({ at: NOW + 20_000, fallback: "terminal" })
+    expect(hook.question?.deadline).toEqual({ at: NOW + 20_000, fallback: "terminal" })
+
+    // An ACP ask waits for the person: no countdown to disable its buttons.
+    const acp = project([
+      session({
+        agent: "acp",
+        externalAgentId: "agent-1",
+        pendingPermission,
+        pendingQuestionRequest,
+        pendingQuestions,
+      }),
+    ]).rows[0]
+    expect(acp.permission?.deadline).toBeNull()
+    expect(acp.question?.deadline).toBeNull()
+
+    // A Cognia run's ask waits for the person too, even outside a conversation.
+    const cognia = project([
+      session({ agent: "cognia", executionRunId: "run-9", pendingPermission }),
+    ]).rows[0]
+    expect(cognia.permission?.deadline).toBeNull()
+  })
+})
+
+describe("projectIslandState gate and run decisions", () => {
+  function gate(gateType: "plan_step" | "budget", status: "open" | "interrupted"): AttentionItem {
+    const key =
+      gateType === "plan_step"
+        ? { scope: "agent-plan", id: "p:s" }
+        : { scope: "cost-budget", id: "daily" }
+    return {
+      id: `team:${key.scope}:${key.id}`,
+      source: "team",
+      kind: "hitl-gate",
+      title: "Gate",
+      openedAt: NOW,
+      stale: status === "interrupted",
+      gate: { key, gateType, title: "Gate", openedAt: NOW, status },
+    } as AttentionItem
+  }
+
+  it("lets an open plan-step or budget gate be decided inline", () => {
+    const plan = project([], [gate("plan_step", "open")]).rows[0]
+    expect(plan.permission).toMatchObject({
+      requestId: "p:s",
+      kind: "plan",
+      deadline: null,
+      allowAlways: false,
+    })
+    expect(plan.capabilities.permissionDecision).toBe(true)
+    expect(project([], [gate("budget", "open")]).rows[0].permission?.kind).toBe("budget")
+
+    const restored = project([], [gate("plan_step", "interrupted")]).rows[0]
+    expect(restored.permission).toBeUndefined()
+    expect(restored.capabilities.permissionDecision).toBe(false)
+  })
+
+  function runItem(over: Record<string, unknown>, stale = false): AttentionItem {
+    return {
+      id: "run:i",
+      source: "run",
+      kind: "run-approval",
+      title: "Approve delegation",
+      runId: "r",
+      openedAt: NOW,
+      stale,
+      interrupt: {
+        id: "i",
+        runId: "r",
+        type: "delegation_approval",
+        status: "pending",
+        title: "Approve delegation",
+        createdAt: NOW - 1_000,
+        expiresAt: NOW + 3_600_000,
+        ...over,
+      },
+    } as AttentionItem
+  }
+
+  it("answers payload-free run approvals with their real deadline", () => {
+    const row = project([], [runItem({})]).rows[0]
+    expect(row.permission).toEqual({
+      requestId: "i",
+      kind: "review",
+      toolName: null,
+      requestedAt: NOW - 1_000,
+      deadline: { at: NOW + 3_600_000, fallback: "lapse" },
+      allowAlways: false,
+    })
+    expect(row.capabilities.permissionDecision).toBe(true)
+    expect(project([], [runItem({ type: "plan_approval" })]).rows[0].permission?.kind).toBe("plan")
+    for (const type of ["squad_capability_audit", "bot_approval", "fusion_approval"]) {
+      expect(project([], [runItem({ type })]).rows[0].permission?.kind).toBe("review")
+    }
+    expect(
+      project([], [runItem({ type: "tool_approval", requestDigest: "d", toolName: "Bash" })])
+        .rows[0].permission
+    ).toMatchObject({ kind: "tool", toolName: "Bash" })
+  })
+
+  it.each([
+    ["a conversation's durable twin", { type: "tool_approval" }],
+    ["a typed Squad review", { type: "squad_budget" }],
+    ["a human handoff", { type: "human_handoff" }],
+    ["an ask-user question", { type: "ask_user" }],
+    ["a workflow approval", { type: "workflow_approval" }],
+    ["a settled approval", { status: "approved" }],
+  ])("leaves %s to the main window", (_label, over) => {
+    const row = project([], [runItem(over)]).rows[0]
+    expect(row.permission).toBeUndefined()
+    expect(row.capabilities.permissionDecision).toBe(false)
+    expect(row.statusKey).toBe("awaitingApproval")
+  })
+
+  it("offers nothing on an approval past its deadline", () => {
+    const row = project([], [runItem({ expiresAt: NOW - 1 }, true)]).rows[0]
+    expect(row.capabilities.permissionDecision).toBe(false)
   })
 })

@@ -14,7 +14,12 @@ import {
   TRAY_DISPLAY_PREF,
   TRAY_LAYOUT_PREF,
 } from "./defaults"
-import { ensureSyntheticEntries, useTrayStore, __resetTrayStoreForTesting } from "./store"
+import {
+  ensureSyntheticEntries,
+  migrateRetiredNativePayloads,
+  useTrayStore,
+  __resetTrayStoreForTesting,
+} from "./store"
 import type { TrayMenuItem } from "./types"
 
 const getPrefMock = getPref as jest.Mock
@@ -48,6 +53,65 @@ describe("ensureSyntheticEntries", () => {
     ]
     const repaired = ensureSyntheticEntries(tiny)
     expect(repaired.map((it) => ("id" in it ? it.id : ""))).toEqual(["only", "tray.usage"])
+  })
+})
+
+describe("migrateRetiredNativePayloads", () => {
+  // A layout persisted before `pet-toggle` was retired. Typed loosely on
+  // purpose: the union no longer admits the old action, but stored JSON can.
+  const legacyToggle = {
+    kind: "action",
+    id: "tray.pet-toggle",
+    label: "tray.petToggle",
+    iconHint: "pet",
+    payload: { kind: "native", action: "pet-toggle" },
+  } as unknown as TrayMenuItem
+
+  it("rewrites a retired native payload into its command, keeping the rest", () => {
+    const [migrated] = migrateRetiredNativePayloads([legacyToggle])
+    expect(migrated).toEqual({
+      kind: "action",
+      id: "tray.pet-toggle",
+      label: "tray.petToggle",
+      iconHint: "pet",
+      payload: { kind: "command", commandId: "pet.toggle-window" },
+    })
+  })
+
+  it("reaches into submenus", () => {
+    const layout = [
+      { kind: "submenu", id: "tray.mine", label: "Mine", items: [legacyToggle] },
+    ] as TrayMenuItem[]
+    const out = migrateRetiredNativePayloads(layout)
+    const sub = out[0] as Extract<TrayMenuItem, { kind: "submenu" }>
+    expect(sub.items[0]).toMatchObject({
+      payload: { kind: "command", commandId: "pet.toggle-window" },
+    })
+  })
+
+  it("returns the same reference when nothing is retired", () => {
+    expect(migrateRetiredNativePayloads(DEFAULT_TRAY_ITEMS)).toBe(DEFAULT_TRAY_ITEMS)
+  })
+
+  it("leaves live native actions alone", () => {
+    const recover = DEFAULT_TRAY_ITEMS.find(
+      (it) => "id" in it && it.id === "tray.pet-disable-click-through"
+    )!
+    expect(migrateRetiredNativePayloads([recover])[0]).toBe(recover)
+  })
+
+  it("is applied at hydrate, before the synthetic backfill", async () => {
+    // No usage placeholder AND a retired action: both repairs must land.
+    const legacy = [legacyToggle]
+    getPrefMock.mockImplementation((key: string) =>
+      Promise.resolve(key === TRAY_LAYOUT_PREF ? legacy : undefined)
+    )
+    await useTrayStore.getState().hydrate()
+    const items = useTrayStore.getState().items
+    expect(items.find((it) => "id" in it && it.id === "tray.pet-toggle")).toMatchObject({
+      payload: { kind: "command", commandId: "pet.toggle-window" },
+    })
+    expect(items.some((it) => "id" in it && it.id === "tray.usage")).toBe(true)
   })
 })
 

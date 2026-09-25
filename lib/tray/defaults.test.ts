@@ -92,10 +92,14 @@ describe("DEFAULT_TRAY_ITEMS", () => {
     const recover = DEFAULT_TRAY_ITEMS.find(
       (it) => it.kind === "action" && it.id === "tray.pet-disable-click-through"
     )
+    // The toggle runs the one summon path (ADR-0058 D9) rather than a native
+    // opener that ignored the saved geometry, and has no `when`: summoning has
+    // to stay reachable while the pet is switched off.
     expect(toggle).toMatchObject({
       label: "tray.petToggle",
-      payload: { kind: "native", action: "pet-toggle" },
+      payload: { kind: "command", commandId: "pet.toggle-window" },
     })
+    expect((toggle as { when?: string }).when).toBeUndefined()
     expect(recover).toMatchObject({
       label: "tray.petClickThroughOff",
       payload: { kind: "native", action: "pet-disable-click-through" },

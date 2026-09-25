@@ -53,15 +53,19 @@ jest.mock("@/hooks/island/use-island-detail", () => ({
 
 import {
   IslandShell,
-  ISLAND_COLLAPSED_WIDTH,
+  ISLAND_ANNOUNCE_MS,
   ISLAND_COMPACT_THRESHOLD,
-  ISLAND_EXPANDED_WIDTH,
   ISLAND_PEEK_HEIGHT,
-  ISLAND_PILL_HEIGHT,
   ISLAND_TUCK_DELAY_MS,
   ISLAND_HIDDEN_HEIGHT,
   ISLAND_SHRINK_SETTLE_MS,
 } from "./island-shell"
+import {
+  ISLAND_COLLAPSED_WIDTH,
+  ISLAND_EXPANDED_WIDTH,
+  ISLAND_NOTCH_MINIMAL_EAR,
+  ISLAND_PILL_HEIGHT,
+} from "@/lib/island/layout"
 import { FLEET_ISLAND_GEOMETRY_EVENT, FLEET_ISLAND_HOVER_EVENT } from "@/lib/fleet/types"
 import {
   EMPTY_ISLAND_STATE,
@@ -178,25 +182,35 @@ describe("presentations", () => {
     expect(screen.queryByTestId("island-notch-fill")).toBeNull()
   })
 
-  it("paints only a housing-wide black column in the notch strip", async () => {
-    setState([row({ status: "working" })])
+  it("grows the housing into a compact island that lives in the menu-bar strip", async () => {
+    setState([row({ status: "working", title: "proj", summary: "Bash" })])
     resizeMock.mockResolvedValue({ topInset: 37, notchWidth: 200, fullscreen: false })
     render(<IslandShell />)
     await act(async () => {})
     const shell = screen.getByTestId("island-shell")
-    // The card box is transparent: the menu bar beside the housing shows.
-    expect(shell.className).not.toContain("bg-black")
-    expect(shell.style.paddingTop).toBe("37px")
-    // The surface starts below the housing and is its true black, not glass.
-    const surface = screen.getByTestId("island-surface")
-    expect(surface.style.top).toBe("37px")
-    expect(surface.className.split(" ")).toContain("bg-black")
-    expect(surface.className).not.toContain("backdrop-blur-xl")
-    // The column is exactly the housing, joined one pixel into the surface.
-    const column = screen.getByTestId("island-notch-fill")
-    expect(column.style.width).toBe("200px")
-    expect(column.style.height).toBe("38px")
-    expect(column.className).toContain("left-1/2")
+    expect(shell).toHaveAttribute("data-layout", "notch")
+    // True black, square at the screen edge, rounded below: one shape with the housing.
+    expect(shell.className.split(" ")).toContain("bg-black")
+    expect(shell.className).toContain("rounded-b-xl")
+    expect(shell.style.paddingTop).toBe("")
+    // Exactly the strip's height: nothing hangs below the menu bar.
+    expect(shell.style.height).toBe("37px")
+    expect(shell.style.width).toBe(`${ISLAND_COLLAPSED_WIDTH}px`)
+    // The flat pill's height is released once the collapse animation settles.
+    act(() => {
+      jest.advanceTimersByTime(ISLAND_SHRINK_SETTLE_MS)
+    })
+    expect(resizeMock).toHaveBeenLastCalledWith(ISLAND_COLLAPSED_WIDTH, 0)
+    // The facts sit in the ears either side of the housing, never over it.
+    expect(screen.getByTestId("island-header")).toHaveStyle({
+      gridTemplateColumns: "minmax(0, 1fr) 200px minmax(0, 1fr)",
+    })
+    expect(screen.getByTestId("island-ear-leading").textContent).toContain("proj")
+    expect(screen.getByTestId("island-ear-trailing").textContent).toContain("Bash")
+    expect(screen.getByTestId("island-pill").style.height).toBe("37px")
+    // No flat surface, no strip fill: the card itself is the shape.
+    expect(screen.queryByTestId("island-surface")).toBeNull()
+    expect(screen.queryByTestId("island-notch-fill")).toBeNull()
   })
 
   it("paints the whole strip when the OS reported no housing width", async () => {
@@ -204,15 +218,77 @@ describe("presentations", () => {
     resizeMock.mockResolvedValue({ topInset: 37, notchWidth: 0, fullscreen: false })
     render(<IslandShell />)
     await act(async () => {})
+    const shell = screen.getByTestId("island-shell")
+    // A camera of unknown width: the flat pill, padded below the strip.
+    expect(shell).toHaveAttribute("data-layout", "flat")
+    expect(shell.style.paddingTop).toBe("37px")
+    expect(screen.getByTestId("island-surface").style.top).toBe("37px")
     expect(screen.getByTestId("island-notch-fill").style.width).toBe(`${ISLAND_COLLAPSED_WIDTH}px`)
   })
 
-  it("never paints a column wider than the card", async () => {
+  it("tucks into the housing: ears for activity, exactly the camera when idle", async () => {
     setState([row({ status: "working" })])
-    resizeMock.mockResolvedValue({ topInset: 37, notchWidth: 9_000, fullscreen: false })
+    resizeMock.mockResolvedValue({ topInset: 37, notchWidth: 200, fullscreen: false })
+    const { unmount } = render(<IslandShell />)
+    await act(async () => {})
+    act(() => {
+      jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS)
+    })
+    const shell = screen.getByTestId("island-shell")
+    expect(shell).toHaveAttribute("data-presentation", "minimal")
+    // No slide: the notch island shrinks in place instead of leaving a sliver.
+    expect(shell.style.transform).toBe("translateY(0px)")
+    expect(shell.style.width).toBe(`${200 + 2 * ISLAND_NOTCH_MINIMAL_EAR}px`)
+    expect(screen.getByTestId("island-minimal").textContent).toBe("1")
+    expect(setTuckedMock).toHaveBeenCalledWith(true)
+    unmount()
+
+    setState([])
     render(<IslandShell />)
     await act(async () => {})
-    expect(screen.getByTestId("island-notch-fill").style.width).toBe(`${ISLAND_COLLAPSED_WIDTH}px`)
+    act(() => {
+      jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS)
+    })
+    expect(screen.getByTestId("island-shell").style.width).toBe("200px")
+    expect(screen.queryByTestId("island-minimal")).toBeNull()
+    expect(screen.queryByTestId("island-status-dot")).toBeNull()
+  })
+
+  it("rings the whole notch shape, and the flat card only below its inset", async () => {
+    const waiting = row({ status: "blocked", statusKey: "awaitingInput", summary: "" })
+    setState([waiting])
+    resizeMock.mockResolvedValue({ topInset: 37, notchWidth: 200, fullscreen: false })
+    const { unmount } = render(<IslandShell />)
+    await act(async () => {})
+    const ring = screen.getByTestId("island-attention-ring")
+    expect(ring.style.top).toBe("0px")
+    expect(ring.className).toContain("rounded-b-xl")
+    unmount()
+
+    resizeMock.mockResolvedValue({ topInset: 37, notchWidth: 0, fullscreen: false })
+    render(<IslandShell />)
+    await act(async () => {})
+    expect(screen.getByTestId("island-attention-ring").style.top).toBe("37px")
+    expect(screen.getByTestId("island-attention-ring").className).toContain("rounded-2xl")
+  })
+
+  it("grows the expanded card down out of the housing", async () => {
+    setState([row({ status: "working" }), row({ id: "b", title: "beta" })])
+    resizeMock.mockResolvedValue({ topInset: 37, notchWidth: 200, fullscreen: false })
+    render(<IslandShell />)
+    await act(async () => {})
+    act(() => {
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+    })
+    const shell = screen.getByTestId("island-shell")
+    expect(shell).toHaveAttribute("data-presentation", "expanded")
+    expect(shell.className).toContain("rounded-b-[22px]")
+    expect(shell.style.width).toBe(`${ISLAND_EXPANDED_WIDTH}px`)
+    // jsdom measures nothing, so the list below the strip reports as empty.
+    act(() => {
+      jest.advanceTimersByTime(ISLAND_SHRINK_SETTLE_MS)
+    })
+    expect(resizeMock).toHaveBeenLastCalledWith(ISLAND_EXPANDED_WIDTH, 0)
   })
 
   it("switches rows to their compact shape past the threshold", () => {
@@ -231,7 +307,14 @@ describe("attention", () => {
     statusKey: "awaitingPermission",
     summary: "",
     waitingSince: 4_000,
-    permission: { requestId: "p1", toolName: "Bash", requestedAt: 9_995 },
+    permission: {
+      requestId: "p1",
+      kind: "tool",
+      toolName: "Bash",
+      requestedAt: 9_995,
+      deadline: { at: 9_995 + 20_000, fallback: "terminal" },
+      allowAlways: false,
+    },
     capabilities: { ...NO_ISLAND_CAPABILITIES, permissionDecision: true },
   })
 
@@ -410,7 +493,14 @@ describe("keyboard", () => {
   it("lets the user collapse an approval but expands for a new request", () => {
     const blocked = row({
       status: "blocked",
-      permission: { requestId: "p1", toolName: "Bash", requestedAt: 9995 },
+      permission: {
+        requestId: "p1",
+        kind: "tool",
+        toolName: "Bash",
+        requestedAt: 9995,
+        deadline: { at: 9995 + 20_000, fallback: "terminal" },
+        allowAlways: false,
+      },
       capabilities: { ...NO_ISLAND_CAPABILITIES, permissionDecision: true },
     })
     setState([blocked])
@@ -549,8 +639,10 @@ describe("native window lifecycle", () => {
     const geometry = { topInset: 37, notchWidth: 180, fullscreen: false }
     resizeMock.mockResolvedValue(geometry).mockClear()
     await act(async () => handlers.get(FLEET_ISLAND_GEOMETRY_EVENT)!({ payload: geometry }))
-    expect(screen.getByTestId("island-shell").style.height).toBe(`${ISLAND_PILL_HEIGHT + 37}px`)
-    expect(screen.getByTestId("island-notch-fill").style.width).toBe("180px")
+    // Moved onto a notched display: the compact island now lives in the strip.
+    expect(screen.getByTestId("island-shell")).toHaveAttribute("data-layout", "notch")
+    expect(screen.getByTestId("island-shell").style.height).toBe("37px")
+    expect(screen.queryByTestId("island-notch-fill")).toBeNull()
     expect(resizeMock).toHaveBeenCalledTimes(1)
     await act(async () => handlers.get(FLEET_ISLAND_GEOMETRY_EVENT)!({ payload: geometry }))
     expect(resizeMock).toHaveBeenCalledTimes(1)
@@ -637,6 +729,37 @@ describe("content growth and shrinking", () => {
     }
   })
 
+  it("ignores the frames of its own width animation", async () => {
+    const originalObserver = globalThis.ResizeObserver
+    let resized!: ResizeObserverCallback
+    globalThis.ResizeObserver = jest.fn().mockImplementation((callback: ResizeObserverCallback) => {
+      resized = callback
+      return { observe: jest.fn(), disconnect: jest.fn(), unobserve: jest.fn() }
+    })
+    const bounds = jest
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => ({ height: 160 }) as DOMRect)
+    try {
+      setState([row(), row({ id: "b" })])
+      render(<IslandShell />)
+      await act(async () => {})
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+      fireEvent.mouseLeave(screen.getByTestId("island-hover-zone"))
+      // The collapse is now a pending shrink. Each animation frame fires the
+      // observer with the same height; none may cost an IPC round-trip.
+      resizeMock.mockClear()
+      setTuckedMock.mockClear()
+      for (let frame = 0; frame < 18; frame += 1) {
+        act(() => resized([], {} as ResizeObserver))
+      }
+      expect(resizeMock).not.toHaveBeenCalled()
+      expect(setTuckedMock).not.toHaveBeenCalled()
+    } finally {
+      globalThis.ResizeObserver = originalObserver
+      bounds.mockRestore()
+    }
+  })
+
   it("temporarily passes through a collapsing window then restores its current hover state", async () => {
     setState([row()])
     const { unmount } = render(<IslandShell />)
@@ -668,5 +791,66 @@ describe("content growth and shrinking", () => {
     expect(screen.getByTestId("island-shell")).toHaveAttribute("data-expanded", "true")
     expect(setTuckedMock).toHaveBeenLastCalledWith(false)
     unmount()
+  })
+})
+
+describe("completion announcement", () => {
+  it("keeps a just-finished task out, named, instead of tucking it away unseen", () => {
+    // The shared clock reads 10_000, so this finished one second ago.
+    setState([row({ status: "done", title: "deploy", updatedAt: 9_000 })])
+    render(<IslandShell />)
+    act(() => {
+      jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS * 2)
+    })
+    const shell = screen.getByTestId("island-shell")
+    expect(shell).toHaveAttribute("data-announcing", "true")
+    expect(shell).toHaveAttribute("data-tucked", "false")
+    expect(screen.getByTestId("island-announce-done")).toBeInTheDocument()
+    expect(screen.getByTestId("island-compact-title").textContent).toBe("deploy")
+    expect(screen.getByTestId("island-compact-summary").textContent).toBe("state.done")
+    expect(screen.getByTestId("island-announce").textContent).toContain("announceFinished")
+  })
+
+  it("names the announced task ahead of the queue", () => {
+    setState([
+      row({ id: "busy", status: "working", title: "busy", updatedAt: 9_900 }),
+      row({ id: "fin", status: "done", title: "finished", updatedAt: 9_500, priority: 3 }),
+    ])
+    render(<IslandShell />)
+    expect(screen.getByTestId("island-compact-title").textContent).toBe("finished")
+  })
+
+  it("lets an old completion tuck, and never announces a failure", () => {
+    setState([
+      row({ id: "old", status: "done", updatedAt: 10_000 - ISLAND_ANNOUNCE_MS - 1 }),
+      row({ id: "bad", status: "failed", updatedAt: 9_900, priority: 1 }),
+    ])
+    render(<IslandShell />)
+    act(() => {
+      jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS)
+    })
+    expect(screen.getByTestId("island-shell")).toHaveAttribute("data-announcing", "false")
+    expect(screen.getByTestId("island-shell")).toHaveAttribute("data-tucked", "true")
+  })
+
+  it("stops announcing once the person collapses it", () => {
+    setState([row({ status: "done", updatedAt: 9_000 })])
+    render(<IslandShell />)
+    act(() => {
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+    })
+    act(() => {
+      fireEvent.click(screen.getByText("collapse"))
+      fireEvent.mouseLeave(screen.getByTestId("island-hover-zone"))
+    })
+    expect(screen.getByTestId("island-shell")).toHaveAttribute("data-announcing", "false")
+    // Collapse hands keyboard focus to the pill, which keeps it out until it goes.
+    act(() => {
+      window.dispatchEvent(new Event("blur"))
+    })
+    act(() => {
+      jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS)
+    })
+    expect(screen.getByTestId("island-shell")).toHaveAttribute("data-tucked", "true")
   })
 })

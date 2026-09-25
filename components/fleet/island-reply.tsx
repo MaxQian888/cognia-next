@@ -1,24 +1,26 @@
 "use client"
 
 /**
- * IslandReply — a compact inline "send a prompt" affordance for OpenCode
- * sessions (the only agent whose plugin can inject a message into the running
- * session). Collapsed to a small button; clicking reveals a one-line input
- * that expands the island. Enter sends; Escape/blur collapses.
+ * IslandReply — a compact inline "send a message" affordance for a row whose
+ * agent can take one: an OpenCode session (its plugin injects the prompt), an
+ * ACP session, or a Cognia conversation, where the chat runtime turns it into
+ * a live steer while a turn runs and a new turn when it is idle. Collapsed to
+ * a small button; clicking reveals a one-line input that expands the island.
+ * Enter sends; Escape/blur collapses.
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { SendHorizontalIcon } from "lucide-react"
-import { fleetOpencodeSendMessage } from "@/lib/tauri/fleet"
 
 export function IslandReply({
-  sessionId,
-  send: sendVia = fleetOpencodeSendMessage,
+  send: sendVia,
 }: {
-  sessionId: string
-  /** See `IslandPermissionActions` for why this is injectable. */
-  send?: (sessionId: string, text: string) => Promise<string | null>
+  /**
+   * Deliver the text; resolves true once the main window reports it sent.
+   * Travels as an island intent: this window holds no business permissions.
+   */
+  send: (text: string) => Promise<boolean>
 }) {
   const t = useTranslations("fleet.reply")
   const [open, setOpen] = useState(false)
@@ -30,8 +32,7 @@ export function IslandReply({
     if (!trimmed || sending) return
     setSending(true)
     try {
-      const id = await sendVia(sessionId, trimmed)
-      if (id) {
+      if (await sendVia(trimmed)) {
         setText("")
         setOpen(false)
       }

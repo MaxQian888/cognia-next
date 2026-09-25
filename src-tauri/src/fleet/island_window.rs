@@ -29,6 +29,24 @@
 //! Windows/Linux the work area is the correct taskbar-aware anchor and the
 //! inset is always 0.
 //!
+//! ## Units (macOS)
+//!
+//! Every placement is applied in LOGICAL px on macOS. tao converts a
+//! `Physical*` value with the window's CURRENT backing scale, not the target
+//! display's, so a physical frame computed for a 1x external display landed
+//! at half its coordinates (and half its size) while the window still sat on
+//! the 2x notched panel. tao also resizes through `-setContentSize:`, which
+//! keeps the frame's bottom-left corner fixed: resizing after positioning let
+//! the top edge drift off the top of the screen, taking the card with it. The
+//! size is therefore applied first and the top-left pinned after it. The
+//! cursor hit test is logical for the same reason — tao scales the cursor by
+//! the PRIMARY display and the window frame by its own. Windows keeps physical
+//! coordinates, in the old order (position, then size): its monitor and window
+//! spaces are physical, and a cross-DPI move rescales the window itself. Linux
+//! shares that path; its GDK model is logical like macOS, but X11 applies one
+//! scale to every monitor and Wayland cannot position windows at all, so the
+//! physical path is exact there in practice.
+//!
 //! Live window ops can't run under `tauri::test::mock_app()` on this
 //! project's toolchains (same constraint documented in `pet_window/mod.rs`),
 //! so only the pure placement math is unit-tested; the runtime behavior is
@@ -41,7 +59,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
 
 pub const ISLAND_LABEL: &str = "island";
 
@@ -148,9 +166,10 @@ pub struct IslandGeometry {
     /// the notch height on built-in notched displays, 0 everywhere else.
     pub top_inset: f64,
     /// Width (logical px) of the camera housing itself, so the renderer can
-    /// paint the housing's column and leave the menu bar beside it visible.
-    /// 0 when the display has no housing, or when the OS could not report the
-    /// auxiliary areas — the renderer then falls back to the full card width.
+    /// draw its compact presentation as ears either side of the camera inside
+    /// the menu-bar strip. 0 when the display has no housing, or when the OS
+    /// could not report the auxiliary areas — the renderer then falls back to
+    /// its flat pill, padded below the inset.
     pub notch_width: f64,
     /// Whether the island should withdraw because a full-screen app owns its
     /// display. This is the *effective* flag, not the raw verdict: it is only
@@ -196,10 +215,29 @@ fn island_config_path() -> Option<std::path::PathBuf> {
     crate::agents::paths::cognia_home().map(|home| home.join("island-window.json"))
 }
 
+/// The last config read from, or written to, `island-window.json`.
+///
+/// Every placement reads the config, and the hover loop places the window on a
+/// geometry tick about twice a second, so reading the file each time was a
+/// disk read and a JSON parse per tick for the life of the app. The file is
+/// only written through [`update_island_config`], which refreshes this, so
+/// the cache cannot go stale behind the app's back (a hand edit while the app
+/// runs is picked up on the next launch).
+static ISLAND_CONFIG_CACHE: Mutex<Option<IslandConfig>> = Mutex::new(None);
+
 fn load_island_config() -> IslandConfig {
-    island_config_path()
+    if let Ok(cache) = ISLAND_CONFIG_CACHE.lock() {
+        if let Some(cfg) = cache.as_ref() {
+            return cfg.clone();
+        }
+    }
+    let cfg = island_config_path()
         .and_then(|path| read_island_config(&path).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if let Ok(mut cache) = ISLAND_CONFIG_CACHE.lock() {
+        *cache = Some(cfg.clone());
+    }
+    cfg
 }
 
 fn read_island_config(path: &Path) -> Result<IslandConfig, String> {
@@ -216,9 +254,20 @@ static ISLAND_CONFIG_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 fn update_island_config(update: impl FnOnce(&mut IslandConfig)) -> Result<(), String> {
     let path = island_config_path().ok_or_else(|| "cannot resolve cognia home".to_string())?;
-    update_island_config_at(&path, update)
+    let _guard = ISLAND_CONFIG_WRITE_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let cfg = update_island_config_locked(&path, update)?;
+    // Refreshed under the write lock, after the publish: writers land in lock
+    // order, so the cache always ends on the config that is on disk, and a
+    // failed write leaves it untouched.
+    if let Ok(mut cache) = ISLAND_CONFIG_CACHE.lock() {
+        *cache = Some(cfg);
+    }
+    Ok(())
 }
 
+#[cfg(test)]
 fn update_island_config_at(
     path: &Path,
     update: impl FnOnce(&mut IslandConfig),
@@ -226,6 +275,15 @@ fn update_island_config_at(
     let _guard = ISLAND_CONFIG_WRITE_LOCK
         .lock()
         .map_err(|error| error.to_string())?;
+    update_island_config_locked(path, update).map(|_| ())
+}
+
+/// Read-modify-publish `path`, returning the config now on disk. The caller
+/// holds [`ISLAND_CONFIG_WRITE_LOCK`] for the whole transaction.
+fn update_island_config_locked(
+    path: &Path,
+    update: impl FnOnce(&mut IslandConfig),
+) -> Result<IslandConfig, String> {
     let expected_mtime = std::fs::metadata(path)
         .and_then(|meta| meta.modified())
         .ok();
@@ -233,7 +291,7 @@ fn update_island_config_at(
     let previous = cfg.clone();
     update(&mut cfg);
     if cfg == previous {
-        return Ok(());
+        return Ok(cfg);
     }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -250,7 +308,7 @@ fn update_island_config_at(
     )
     .map_err(|error| error.to_string())?;
     rotate_backups(path, 1);
-    Ok(())
+    Ok(cfg)
 }
 
 /// Collapsed pill footprint (logical px) used when the renderer passes no
@@ -323,52 +381,76 @@ impl IslandAnchor {
     fn geometry(&self) -> IslandGeometry {
         IslandGeometry {
             top_inset: self.top_inset_logical(),
-            notch_width: self.notch_width / self.scale,
+            notch_width: self.notch_width / self.scale(),
             fullscreen: self.fullscreen,
         }
     }
 
+    /// Backing scale, never zero: a display that reports no scale is 1x.
+    fn scale(&self) -> f64 {
+        if self.scale > 0.0 {
+            self.scale
+        } else {
+            1.0
+        }
+    }
+
     fn top_inset_logical(&self) -> f64 {
-        self.top_inset / self.scale
-    }
-
-    /// Max content size (logical px) the renderer card may occupy: the full
-    /// frame minus the notch strip the card is padded below.
-    fn content_max_logical(&self) -> (f64, f64) {
-        (
-            self.w / self.scale,
-            self.h / self.scale - self.top_inset_logical(),
-        )
+        self.top_inset / self.scale()
     }
 }
 
-/// Top-center placement against the anchor rect. `anchor` is `(x, y, w)` and
-/// `win_w` the window width, all physical pixels. The window's y always hugs
-/// the anchor top — on macOS the notch offset lives INSIDE the window (the
-/// renderer pads the card's content below it) so the strip level with the
-/// camera housing still catches slam-to-top hover. Pure for unit tests.
-fn resolve_island_position(anchor: (f64, f64, f64), win_w: f64) -> (f64, f64) {
-    let (anchor_x, anchor_y, anchor_w) = anchor;
-    let x = (anchor_x + (anchor_w - win_w) / 2.0).max(anchor_x);
-    (x, anchor_y)
+/// The island window's target frame in LOGICAL px, in global top-left-origin
+/// coordinates. macOS places it as is — the only unit tao converts correctly
+/// when the target display is not the one the window is on (see the module
+/// docs); Windows and Linux convert it to the target display's physical px
+/// ([`island_physical_frame`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct IslandFrame {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
 }
 
-/// Clamp the renderer-requested logical content size to the monitor's usable
-/// logical area so an expanded island can never spill past the screen (which
-/// would otherwise clip rows and paint scrollbars). Pure for unit tests.
-fn clamp_island_size(width: f64, height: f64, area_logical: (f64, f64)) -> (f64, f64) {
-    let (area_w, area_h) = area_logical;
-    (width.min(area_w).max(1.0), height.min(area_h).max(1.0))
+/// Top-center frame for the renderer's requested logical CONTENT size.
+///
+/// The window always hugs the anchor top and grows by the display's notch
+/// inset: on macOS the housing strip lives INSIDE the window, so the strip
+/// level with the camera housing still catches slam-to-top hover, and the
+/// renderer paints its compact presentation there. The content is clamped to
+/// the area below the inset so an expanded island can never spill past the
+/// screen. A content height of 0 is legitimate — on a notched display the
+/// compact island lives entirely in the housing strip — so only the whole
+/// window is kept at least 1 px tall. Pure for unit tests.
+fn island_frame(anchor: IslandAnchor, requested: (f64, f64)) -> IslandFrame {
+    let scale = anchor.scale();
+    let inset = anchor.top_inset_logical();
+    let area_x = anchor.x / scale;
+    let area_w = anchor.w / scale;
+    let content_max = (anchor.h / scale - inset).max(0.0);
+    // `f64::min` returns the other operand for NaN, so a garbage request is
+    // clamped to the area rather than propagated.
+    let w = requested.0.min(area_w).max(1.0);
+    let content_h = requested.1.min(content_max).max(0.0);
+    IslandFrame {
+        x: (area_x + (area_w - w) / 2.0).max(area_x),
+        y: anchor.y / scale,
+        w,
+        h: (content_h + inset).max(1.0),
+    }
 }
 
-fn island_physical_size(anchor: IslandAnchor, requested: (f64, f64)) -> (u32, u32) {
-    let (width, height) = clamp_island_size(requested.0, requested.1, anchor.content_max_logical());
-    (
-        (width * anchor.scale).round().max(1.0) as u32,
-        ((height + anchor.top_inset_logical()) * anchor.scale)
-            .round()
-            .max(1.0) as u32,
-    )
+/// [`island_frame`] in the anchor display's physical px, for the platforms
+/// whose window space is physical. Size is rounded first and the position is
+/// centred on the rounded width, so the strip never straddles a pixel.
+#[cfg(any(not(target_os = "macos"), test))]
+fn island_physical_frame(anchor: IslandAnchor, frame: IslandFrame) -> (f64, f64, u32, u32) {
+    let scale = anchor.scale();
+    let width = (frame.w * scale).round().max(1.0);
+    let height = (frame.h * scale).round().max(1.0);
+    let x = (anchor.x + (anchor.w - width) / 2.0).max(anchor.x);
+    (x, anchor.y, width as u32, height as u32)
 }
 
 /// The monitor the island should live on: `preferred` when that monitor is
@@ -505,20 +587,30 @@ fn raw_notch_metrics<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) -
         NotchMetrics::default()
     };
 
-    if MainThreadMarker::new().is_some() {
-        return compute();
+    appkit_query(app, compute).unwrap_or_default()
+}
+
+/// Run an AppKit query on the main thread and wait for its answer.
+///
+/// NSScreen and friends are main-thread-only. Every placement path here can
+/// run on a tokio worker (async commands, the hover loop), so the query is
+/// bridged through `run_on_main_thread` with a fail-open timeout — never a
+/// deadlock risk, because off-main implies the main loop is free. `None` when
+/// the bridge failed or timed out.
+#[cfg(target_os = "macos")]
+fn appkit_query<R: Runtime, T: Send + 'static>(
+    app: &AppHandle<R>,
+    compute: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    if objc2::MainThreadMarker::new().is_some() {
+        return Some(compute());
     }
     let (tx, rx) = std::sync::mpsc::channel();
-    if app
-        .run_on_main_thread(move || {
-            let _ = tx.send(compute());
-        })
-        .is_err()
-    {
-        return NotchMetrics::default();
-    }
-    rx.recv_timeout(std::time::Duration::from_millis(500))
-        .unwrap_or_default()
+    app.run_on_main_thread(move || {
+        let _ = tx.send(compute());
+    })
+    .ok()?;
+    rx.recv_timeout(std::time::Duration::from_millis(500)).ok()
 }
 
 fn island_anchor<R: Runtime>(app: &AppHandle<R>) -> IslandAnchor {
@@ -571,8 +663,8 @@ fn island_anchor<R: Runtime>(app: &AppHandle<R>) -> IslandAnchor {
     }
 }
 
-/// Whether a global cursor point sits inside a window rect. All physical px.
-/// Pure for unit tests.
+/// Whether a global cursor point sits inside a window rect, all in one space
+/// (logical px, as [`cursor_hits_window`] passes them). Pure for unit tests.
 fn point_in_rect(point: (f64, f64), origin: (f64, f64), size: (f64, f64)) -> bool {
     point.0 >= origin.0
         && point.0 < origin.0 + size.0
@@ -580,10 +672,81 @@ fn point_in_rect(point: (f64, f64), origin: (f64, f64), size: (f64, f64)) -> boo
         && point.1 < origin.1 + size.1
 }
 
+/// Whether a cursor sample lands on a window, each expressed in its own
+/// physical space: the cursor scaled by `cursor_scale`, the window frame by
+/// `window_scale`. Both are divided back to logical px before comparing, so
+/// the two spaces only have to agree on logical coordinates. Pure for unit
+/// tests.
+fn cursor_hits_window(
+    cursor: (f64, f64),
+    cursor_scale: f64,
+    origin: (f64, f64),
+    size: (f64, f64),
+    window_scale: f64,
+) -> bool {
+    let cursor_scale = if cursor_scale > 0.0 {
+        cursor_scale
+    } else {
+        1.0
+    };
+    let window_scale = if window_scale > 0.0 {
+        window_scale
+    } else {
+        1.0
+    };
+    point_in_rect(
+        (cursor.0 / cursor_scale, cursor.1 / cursor_scale),
+        (origin.0 / window_scale, origin.1 / window_scale),
+        (size.0 / window_scale, size.1 / window_scale),
+    )
+}
+
+/// The scale tao applied to the cursor position it reports. On macOS that is
+/// the PRIMARY display's backing scale (`CGMainDisplayID`, the screen with the
+/// menu bar, `NSScreen.screens[0]`) whatever display the cursor is on, while
+/// the window frame is scaled by the window's own display; elsewhere both are
+/// the same space and no rescale is needed. Read through AppKit on the main
+/// thread: `AppHandle::primary_monitor` would enumerate NSScreen on the
+/// calling tokio worker.
+fn cursor_space_scale<R: Runtime>(app: &AppHandle<R>) -> f64 {
+    #[cfg(target_os = "macos")]
+    {
+        appkit_query(app, || {
+            let mtm = objc2::MainThreadMarker::new()?;
+            let screens = objc2_app_kit::NSScreen::screens(mtm);
+            let primary = screens.iter().next()?;
+            Some(primary.backingScaleFactor())
+        })
+        .flatten()
+        .unwrap_or(1.0)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        1.0
+    }
+}
+
+/// The scale tao applied to the window frame it reports; see
+/// [`cursor_space_scale`].
+fn window_space_scale<R: Runtime>(window: &tauri::WebviewWindow<R>) -> f64 {
+    #[cfg(target_os = "macos")]
+    {
+        window.scale_factor().unwrap_or(1.0)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        1.0
+    }
+}
+
 /// Is the global cursor currently over the island window? `false` on any
 /// query failure (treat unknown as "not hovering" so a broken query can only
-/// tuck the island, never pin it).
-fn cursor_inside_island<R: Runtime>(window: &tauri::WebviewWindow<R>) -> bool {
+/// tuck the island, never pin it). `cursor_scale` comes from
+/// [`cursor_space_scale`], sampled by the caller at geometry cadence rather
+/// than on every hover tick.
+fn cursor_inside_island<R: Runtime>(window: &tauri::WebviewWindow<R>, cursor_scale: f64) -> bool {
     let (Ok(cursor), Ok(pos), Ok(size)) = (
         window.cursor_position(),
         window.outer_position(),
@@ -591,10 +754,12 @@ fn cursor_inside_island<R: Runtime>(window: &tauri::WebviewWindow<R>) -> bool {
     ) else {
         return false;
     };
-    point_in_rect(
+    cursor_hits_window(
         (cursor.x, cursor.y),
+        cursor_scale,
         (pos.x as f64, pos.y as f64),
         (size.width as f64, size.height as f64),
+        window_space_scale(window),
     )
 }
 
@@ -618,6 +783,7 @@ fn spawn_hover_monitor<R: Runtime>(app: &AppHandle<R>) {
         // `None` until the first sample, so the renderer always receives an
         // initial geometry push shortly after mount even if nothing changes.
         let mut last_geometry: Option<IslandAnchor> = None;
+        let mut cursor_scale = cursor_space_scale(&app);
         let mut tick: u32 = 0;
         loop {
             let Some(window) = app.get_webview_window(ISLAND_LABEL) else {
@@ -630,7 +796,7 @@ fn spawn_hover_monitor<R: Runtime>(app: &AppHandle<R>) {
                 tokio::time::sleep(std::time::Duration::from_millis(HOVER_POLL_HIDDEN_MS)).await;
                 continue;
             }
-            let inside = cursor_inside_island(&window);
+            let inside = cursor_inside_island(&window, cursor_scale);
             if inside != was_inside {
                 was_inside = inside;
                 let _ = app.emit_to(
@@ -646,6 +812,9 @@ fn spawn_hover_monitor<R: Runtime>(app: &AppHandle<R>) {
             // leave the strip anchored to stale numbers until the next content
             // change happened to call `island_resize`.
             if tick.is_multiple_of(GEOMETRY_SAMPLE_EVERY_TICKS) {
+                // A display rearrangement can change which display is primary,
+                // and with it the cursor's scale.
+                cursor_scale = cursor_space_scale(&app);
                 let anchor = island_anchor(&app);
                 if last_geometry != Some(anchor)
                     && reposition_island_with(&app, &window, anchor).is_ok()
@@ -700,6 +869,13 @@ fn reposition_island<R: Runtime>(
     reposition_island_with(app, window, island_anchor(app))
 }
 
+/// Whether two content requests are the same one. Bitwise, so a NaN request
+/// (which [`island_frame`] clamps) compares equal to itself. Pure for unit
+/// tests.
+fn same_request(a: (f64, f64), b: (f64, f64)) -> bool {
+    a.0.to_bits() == b.0.to_bits() && a.1.to_bits() == b.1.to_bits()
+}
+
 /// [`reposition_island`] against an anchor the caller already computed — the
 /// watch loop samples one per tick and must not pay for a second full-screen
 /// sweep just to apply it.
@@ -708,21 +884,77 @@ fn reposition_island_with<R: Runtime>(
     window: &tauri::WebviewWindow<R>,
     anchor: IslandAnchor,
 ) -> Result<(), String> {
-    let requested = *ISLAND_CONTENT_SIZE
-        .lock()
-        .map_err(|error| error.to_string())?;
-    let (width, height) = island_physical_size(anchor, requested);
-    let size = tauri::PhysicalSize::new(width, height);
-    let (x, y) = resolve_island_position((anchor.x, anchor.y, anchor.w), width as f64);
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())?;
-    if window.inner_size().map_err(|error| error.to_string())? != size {
-        // Apply the target's physical footprint after moving, so the old
-        // display's logical dimensions cannot enlarge it beyond the new area.
-        window.set_size(size).map_err(|error| error.to_string())?;
+    // Never held across the apply. On Windows/Linux the apply reads the window
+    // size, a blocking round trip to the main thread when this runs on a tokio
+    // worker, while the tray's open path takes this lock ON the main thread:
+    // holding it there could deadlock the two. Instead, a placement that read a
+    // request `island_resize` has since replaced applies again with the new
+    // one, so the last request still wins. Bounded, in case the renderer keeps
+    // resizing faster than a frame lands.
+    let read_request = || {
+        ISLAND_CONTENT_SIZE
+            .lock()
+            .map(|size| *size)
+            .map_err(|error| error.to_string())
+    };
+    let mut requested = read_request()?;
+    for _ in 0..3 {
+        apply_island_frame(window, anchor, island_frame(anchor, requested))?;
+        let latest = read_request()?;
+        if same_request(latest, requested) {
+            break;
+        }
+        requested = latest;
     }
     emit_island_geometry(app, &anchor);
+    Ok(())
+}
+
+/// Move and size the window to `frame`.
+///
+/// macOS: logical units, size FIRST. tao resizes with `-setContentSize:`,
+/// which keeps the bottom-left corner fixed, so a resize after the move would
+/// push the top edge off the top of the screen; pinning the top-left last
+/// undoes that drift. Logical units because tao converts physical ones with
+/// the window's current display scale rather than the target's.
+///
+/// The size is applied unconditionally. tao queues the resize on the main
+/// dispatch queue while size getters answer from the event loop, so a
+/// "skip if unchanged" read could see the size from before a still-queued
+/// resize and leave the window at that size. Setting an unchanged content size
+/// is a no-op in AppKit, and skipping the read saves two blocking round trips.
+#[cfg(target_os = "macos")]
+fn apply_island_frame<R: Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    _anchor: IslandAnchor,
+    frame: IslandFrame,
+) -> Result<(), String> {
+    window
+        .set_size(tauri::LogicalSize::new(frame.w, frame.h))
+        .map_err(|error| error.to_string())?;
+    window
+        .set_position(tauri::LogicalPosition::new(frame.x, frame.y))
+        .map_err(|error| error.to_string())
+}
+
+/// Windows / Linux: physical units, position FIRST. Their window space is
+/// physical, and moving across a DPI boundary rescales the window, so the
+/// target display's footprint is applied after the move or the old display's
+/// scale would enlarge it beyond the new area.
+#[cfg(not(target_os = "macos"))]
+fn apply_island_frame<R: Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    anchor: IslandAnchor,
+    frame: IslandFrame,
+) -> Result<(), String> {
+    let (x, y, width, height) = island_physical_frame(anchor, frame);
+    window
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())?;
+    let size = tauri::PhysicalSize::new(width, height);
+    if window.inner_size().map_err(|error| error.to_string())? != size {
+        window.set_size(size).map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 
@@ -767,7 +999,7 @@ fn open_island_window_claimed<R: Runtime>(
     *ISLAND_CONTENT_SIZE
         .lock()
         .map_err(|error| error.to_string())? = (opts.width, opts.height);
-    let (width, height) = island_physical_size(anchor, (opts.width, opts.height));
+    let frame = island_frame(anchor, (opts.width, opts.height));
 
     let window = tauri::WebviewWindowBuilder::new(
         app,
@@ -787,7 +1019,7 @@ fn open_island_window_claimed<R: Runtime>(
     // The window includes the notch strip; the renderer pads its card's
     // content below the inset (it learns the value from `island_resize`'s
     // return) while the card's body covers the strip itself.
-    .inner_size(width as f64 / anchor.scale, height as f64 / anchor.scale)
+    .inner_size(frame.w, frame.h)
     .build()
     .map_err(|error| {
         crate::pet_window::cancel_overlay_panel_reveal(role);
@@ -1038,6 +1270,12 @@ pub struct IslandDebugGeometry {
     pub window_position: Option<[f64; 2]>,
     /// Island window outer size (physical px), when the window exists.
     pub window_size: Option<[f64; 2]>,
+    /// Backing scale the two numbers above were converted with — the
+    /// window's CURRENT display, which is not necessarily the target's.
+    pub window_scale: Option<f64>,
+    /// Where placement wants the window: x, y, width, height in logical px
+    /// (global, top-left origin), for the retained content request.
+    pub target_frame: [f64; 4],
     pub window_visible: bool,
     /// The geometry currently being pushed to the renderer.
     pub geometry: IslandGeometry,
@@ -1096,6 +1334,11 @@ pub async fn island_debug_geometry(app: AppHandle) -> Result<IslandDebugGeometry
         .collect();
 
     let window = app.get_webview_window(ISLAND_LABEL);
+    let anchor = island_anchor(&app);
+    let requested = *ISLAND_CONTENT_SIZE
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let target = island_frame(anchor, requested);
     Ok(IslandDebugGeometry {
         displays,
         preferred_monitor: preferred,
@@ -1107,11 +1350,13 @@ pub async fn island_debug_geometry(app: AppHandle) -> Result<IslandDebugGeometry
             .as_ref()
             .and_then(|w| w.outer_size().ok())
             .map(|s| [s.width as f64, s.height as f64]),
+        window_scale: window.as_ref().and_then(|w| w.scale_factor().ok()),
+        target_frame: [target.x, target.y, target.w, target.h],
         window_visible: window
             .as_ref()
             .map(|w| w.is_visible().unwrap_or(false))
             .unwrap_or(false),
-        geometry: island_anchor(&app).geometry(),
+        geometry: anchor.geometry(),
     })
 }
 
@@ -1270,6 +1515,15 @@ mod tests {
     }
 
     #[test]
+    fn a_replaced_content_request_is_detected_and_nan_settles() {
+        assert!(same_request((420.0, 44.0), (420.0, 44.0)));
+        assert!(!same_request((420.0, 44.0), (420.0, 120.0)));
+        assert!(!same_request((420.0, 44.0), (380.0, 44.0)));
+        // A garbage request must not keep the re-apply loop spinning.
+        assert!(same_request((f64::NAN, 44.0), (f64::NAN, 44.0)));
+    }
+
+    #[test]
     fn geometry_change_detection_includes_height_and_scale() {
         let original = IslandAnchor::fallback();
         assert_ne!(
@@ -1288,76 +1542,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn native_size_clamps_to_shorter_display_and_restores_requested_size() {
-        let requested = (560.0, 900.0);
-        let large = IslandAnchor::fallback();
-        let short = IslandAnchor { h: 600.0, ..large };
-        assert_eq!(island_physical_size(large, requested), (560, 900));
-        assert_eq!(island_physical_size(short, requested), (560, 600));
-        assert_eq!(island_physical_size(large, requested), (560, 900));
-    }
-
-    #[test]
-    fn native_size_uses_target_dpi_and_accounts_for_the_notch() {
-        let retina = IslandAnchor {
-            w: 3024.0,
-            h: 1964.0,
-            scale: 2.0,
-            top_inset: 74.0,
-            ..IslandAnchor::fallback()
-        };
-        assert_eq!(island_physical_size(retina, (560.0, 300.0)), (1120, 674));
-        assert_eq!(island_physical_size(retina, (4000.0, 4000.0)), (3024, 1964));
-        assert_eq!(
-            island_physical_size(IslandAnchor::fallback(), (560.0, 300.0)),
-            (560, 300)
-        );
-    }
-
-    #[test]
-    fn centers_horizontally_and_hugs_the_anchor_top() {
-        // 1x display 1920 wide, 420px strip → x = (1920-420)/2, y = frame top.
-        let (x, y) = resolve_island_position((0.0, 0.0, 1920.0), 420.0);
-        assert_eq!(x, 750.0);
-        assert_eq!(y, 0.0);
-    }
-
-    #[test]
-    fn respects_anchor_origin_and_retina_scale() {
-        // Secondary-monitor offset + 2x Retina (physical window width).
-        let (x, y) = resolve_island_position((100.0, 50.0, 3456.0), 420.0 * 2.0);
-        assert_eq!(x, 100.0 + (3456.0 - 840.0) / 2.0);
-        assert_eq!(y, 50.0);
-    }
-
-    #[test]
-    fn oversized_strip_pins_to_anchor_left() {
-        let (x, _) = resolve_island_position((0.0, 0.0, 400.0), 800.0);
-        assert_eq!(x, 0.0);
-    }
-
-    #[test]
-    fn clamp_keeps_content_inside_the_area() {
-        // Fits → untouched.
-        assert_eq!(
-            clamp_island_size(560.0, 300.0, (1512.0, 950.0)),
-            (560.0, 300.0)
-        );
-        // Overflows → clamped to the logical area.
-        assert_eq!(
-            clamp_island_size(2000.0, 1200.0, (1512.0, 950.0)),
-            (1512.0, 950.0)
-        );
-        // Degenerate input can't produce a zero/negative window.
-        assert_eq!(clamp_island_size(0.0, -5.0, (1512.0, 950.0)), (1.0, 1.0));
-    }
-
-    #[test]
-    fn anchor_inset_conversions_are_logical() {
-        // 2x Retina notch of 74 physical px → 37 logical; content max loses
-        // exactly the inset strip.
-        let anchor = IslandAnchor {
+    /// A 14" MacBook Pro: 1512x982 logical at 2x with a 37-pt housing strip.
+    fn retina_notched() -> IslandAnchor {
+        IslandAnchor {
             x: 0.0,
             y: 0.0,
             w: 3024.0,
@@ -1366,9 +1553,122 @@ mod tests {
             top_inset: 74.0,
             notch_width: 400.0,
             fullscreen: false,
+        }
+    }
+
+    #[test]
+    fn frame_clamps_to_a_shorter_display_and_restores_the_request() {
+        let requested = (560.0, 900.0);
+        let large = IslandAnchor::fallback();
+        let short = IslandAnchor { h: 600.0, ..large };
+        assert_eq!(island_frame(large, requested).h, 900.0);
+        assert_eq!(island_frame(short, requested).h, 600.0);
+        // The request is retained, so returning to the larger display grows back.
+        assert_eq!(island_frame(large, requested).h, 900.0);
+    }
+
+    #[test]
+    fn frame_is_logical_and_grows_by_the_notch_strip() {
+        let frame = island_frame(retina_notched(), (560.0, 300.0));
+        assert_eq!(
+            frame,
+            IslandFrame {
+                x: (1512.0 - 560.0) / 2.0,
+                y: 0.0,
+                w: 560.0,
+                h: 337.0,
+            }
+        );
+        // Oversized requests stop at the display, content below the strip.
+        let huge = island_frame(retina_notched(), (4000.0, 4000.0));
+        assert_eq!((huge.w, huge.h), (1512.0, 982.0));
+    }
+
+    #[test]
+    fn zero_content_height_is_exactly_the_housing_strip() {
+        // The compact island on a notched display lives inside the strip.
+        let frame = island_frame(retina_notched(), (420.0, 0.0));
+        assert_eq!((frame.w, frame.h), (420.0, 37.0));
+        // Without a strip the window still never collapses to nothing.
+        assert_eq!(island_frame(IslandAnchor::fallback(), (420.0, 0.0)).h, 1.0);
+    }
+
+    #[test]
+    fn degenerate_requests_cannot_produce_an_empty_or_invalid_frame() {
+        let anchor = IslandAnchor::fallback();
+        let frame = island_frame(anchor, (0.0, -5.0));
+        assert_eq!((frame.w, frame.h), (1.0, 1.0));
+        let frame = island_frame(anchor, (f64::NAN, f64::NAN));
+        assert!(frame.w.is_finite() && frame.h.is_finite());
+        // A display reporting no scale is treated as 1x rather than dividing by 0.
+        let unscaled = IslandAnchor {
+            scale: 0.0,
+            ..anchor
         };
+        assert_eq!(island_frame(unscaled, (420.0, 44.0)).w, 420.0);
+    }
+
+    #[test]
+    fn frame_centers_on_the_display_and_hugs_its_top() {
+        // 1x display 1920 wide, 420 strip: x = (1920-420)/2, y = frame top.
+        let frame = island_frame(IslandAnchor::fallback(), (420.0, 44.0));
+        assert_eq!((frame.x, frame.y), (750.0, 0.0));
+    }
+
+    #[test]
+    fn a_secondary_display_is_placed_in_its_own_logical_space() {
+        // External 1x display to the right of a 1512-pt-wide 2x panel. tao
+        // reports its origin as logical x scaled by ITS scale (1512 * 1).
+        let external = IslandAnchor {
+            x: 1512.0,
+            y: 0.0,
+            w: 2560.0,
+            h: 1440.0,
+            scale: 1.0,
+            ..IslandAnchor::fallback()
+        };
+        let frame = island_frame(external, (420.0, 44.0));
+        assert_eq!((frame.x, frame.y), (1512.0 + (2560.0 - 420.0) / 2.0, 0.0));
+        // And a 2x display offset by 1920 physical (960 logical) px.
+        let retina = IslandAnchor {
+            x: 1920.0,
+            y: 100.0,
+            ..retina_notched()
+        };
+        let frame = island_frame(retina, (420.0, 0.0));
+        assert_eq!((frame.x, frame.y), (960.0 + (1512.0 - 420.0) / 2.0, 50.0));
+    }
+
+    #[test]
+    fn an_oversized_strip_pins_to_the_display_left() {
+        let narrow = IslandAnchor {
+            w: 400.0,
+            ..IslandAnchor::fallback()
+        };
+        let frame = island_frame(narrow, (800.0, 44.0));
+        assert_eq!((frame.x, frame.w), (0.0, 400.0));
+    }
+
+    #[test]
+    fn physical_frame_rounds_the_size_and_centers_on_it() {
+        let anchor = IslandAnchor {
+            x: 100.0,
+            y: 50.0,
+            w: 3456.0,
+            h: 2234.0,
+            scale: 2.0,
+            ..IslandAnchor::fallback()
+        };
+        let frame = island_frame(anchor, (420.25, 44.0));
+        let (x, y, width, height) = island_physical_frame(anchor, frame);
+        assert_eq!((width, height), (841, 88));
+        assert_eq!((x, y), (100.0 + (3456.0 - 841.0) / 2.0, 50.0));
+    }
+
+    #[test]
+    fn anchor_inset_conversions_are_logical() {
+        let anchor = retina_notched();
         assert_eq!(anchor.top_inset_logical(), 37.0);
-        assert_eq!(anchor.content_max_logical(), (1512.0, 982.0 - 37.0));
         assert_eq!(
             anchor.geometry(),
             IslandGeometry {
@@ -1377,6 +1677,45 @@ mod tests {
                 fullscreen: false
             }
         );
+    }
+
+    #[test]
+    fn cursor_and_window_are_compared_in_logical_space() {
+        // macOS: the cursor is scaled by the PRIMARY display (2x built-in
+        // panel), the window by its own (1x external). Logical (1600, 10) is
+        // inside a window at logical x 1512..1932.
+        assert!(cursor_hits_window(
+            (3200.0, 20.0),
+            2.0,
+            (1512.0, 0.0),
+            (420.0, 44.0),
+            1.0
+        ));
+        // Comparing the raw physical numbers would have missed it entirely.
+        assert!(!point_in_rect((3200.0, 20.0), (1512.0, 0.0), (420.0, 44.0)));
+        // Equal scales reduce to a plain rect test, edges half-open.
+        assert!(cursor_hits_window(
+            (100.0, 0.0),
+            2.0,
+            (100.0, 0.0),
+            (840.0, 88.0),
+            2.0
+        ));
+        assert!(!cursor_hits_window(
+            (940.0, 10.0),
+            2.0,
+            (100.0, 0.0),
+            (840.0, 88.0),
+            2.0
+        ));
+        // A zero scale cannot divide by zero.
+        assert!(cursor_hits_window(
+            (10.0, 10.0),
+            0.0,
+            (0.0, 0.0),
+            (20.0, 20.0),
+            0.0
+        ));
     }
 
     #[test]
@@ -1480,6 +1819,32 @@ mod tests {
             json,
             r#"{"topInset":37.0,"notchWidth":200.0,"fullscreen":true}"#
         );
+    }
+
+    #[test]
+    fn debug_dump_payload_is_camel_case() {
+        let json = serde_json::to_value(IslandDebugGeometry {
+            displays: Vec::new(),
+            preferred_monitor: None,
+            window_position: Some([10.0, 0.0]),
+            window_size: Some([840.0, 74.0]),
+            window_scale: Some(2.0),
+            target_frame: [5.0, 0.0, 420.0, 37.0],
+            window_visible: true,
+            geometry: IslandGeometry {
+                top_inset: 37.0,
+                notch_width: 200.0,
+                fullscreen: false,
+            },
+        })
+        .unwrap();
+        assert_eq!(json["windowScale"], 2.0);
+        assert_eq!(
+            json["targetFrame"],
+            serde_json::json!([5.0, 0.0, 420.0, 37.0])
+        );
+        assert_eq!(json["windowVisible"], true);
+        assert!(json.get("window_scale").is_none());
     }
 
     #[test]

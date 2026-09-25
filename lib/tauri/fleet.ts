@@ -433,12 +433,15 @@ export async function isIslandWindowOpen(): Promise<boolean> {
 /**
  * Resize the island to its measured content size (logical px). Returns the
  * display's {@link IslandGeometry}: the top safe-area inset (logical px — the
- * notch height) that Rust grew the window by, and whether the island should
- * withdraw for a full-screen app on that display.
+ * notch height) that Rust grew the window by, the housing's width, and whether
+ * the island should withdraw for a full-screen app on that display.
  *
- * The shell pads its card below the inset so the content clears the camera
- * housing while the window still spans the notch strip (keeping slam-to-top
- * hover on target), and suppresses the idle pill entirely while `fullscreen`.
+ * `height` is what hangs BELOW the housing strip, and may be 0: on a display
+ * whose housing was located the compact island lives entirely inside the strip
+ * (`lib/island/layout.ts`). Where it was not, the shell pads its content below
+ * the inset so nothing is hidden behind the camera. Either way the window spans
+ * the strip, keeping slam-to-top hover on target, and the shell suppresses the
+ * idle island entirely while `fullscreen`.
  * That flag is already gated by {@link islandSetHideOnFullscreen} — it is false
  * on a full-screen Space unless the user opted into hiding there, so the shell
  * never has to know about the preference.
@@ -588,6 +591,10 @@ export interface IslandDebugGeometry {
   preferredMonitor: string | null
   windowPosition: [number, number] | null
   windowSize: [number, number] | null
+  /** Scale the window position and size above were converted with. */
+  windowScale: number | null
+  /** Target frame (logical px, global top-left origin): x, y, width, height. */
+  targetFrame: [number, number, number, number]
   windowVisible: boolean
   geometry: IslandGeometry
 }

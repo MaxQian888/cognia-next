@@ -11,12 +11,8 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-const respondMock = jest.fn()
-const rejectMock = jest.fn()
-jest.mock("@/lib/tauri/fleet", () => ({
-  fleetQuestionRespond: (...args: unknown[]) => respondMock(...args),
-  fleetQuestionReject: (...args: unknown[]) => rejectMock(...args),
-}))
+const respondMock = jest.fn<Promise<boolean>, [string, number[][]]>()
+const rejectMock = jest.fn<Promise<boolean>, [string]>()
 
 const SINGLE: PendingQuestion = {
   question: "Which auth method?",
@@ -30,8 +26,14 @@ const MULTI: PendingQuestion = {
   multiSelect: true,
 }
 
-function request(requestedAt = Date.now()) {
-  return { requestId: "q-1", requestedAt }
+/** A hook-ingress ask: answerable for its window, then back to the terminal. */
+function props(requestedAt = Date.now()) {
+  return {
+    request: { requestId: "q-1", requestedAt },
+    deadline: { at: requestedAt + FLEET_PERMISSION_WAIT_MS, fallback: "terminal" as const },
+    respond: respondMock,
+    reject: rejectMock,
+  }
 }
 
 beforeEach(() => {
@@ -43,7 +45,7 @@ beforeEach(() => {
 
 describe("IslandQuestionActions", () => {
   it("renders each question with header, options, countdown and submit", () => {
-    render(<IslandQuestionActions request={request()} questions={[SINGLE, MULTI]} />)
+    render(<IslandQuestionActions {...props()} questions={[SINGLE, MULTI]} />)
     expect(screen.getByText("Which auth method?")).toBeInTheDocument()
     expect(screen.getByText("Auth")).toBeInTheDocument()
     // Only the multi-select question shows the multi hint.
@@ -56,14 +58,14 @@ describe("IslandQuestionActions", () => {
   })
 
   it("rejects the native question without requiring a selection", async () => {
-    render(<IslandQuestionActions request={request()} questions={[SINGLE]} />)
+    render(<IslandQuestionActions {...props()} questions={[SINGLE]} />)
     fireEvent.click(screen.getByTestId("question-reject"))
     await waitFor(() => expect(rejectMock).toHaveBeenCalledWith("q-1"))
     expect(await screen.findByTestId("question-rejected")).toBeInTheDocument()
   })
 
   it("keeps submit disabled until every question is answered", () => {
-    render(<IslandQuestionActions request={request()} questions={[SINGLE, MULTI]} />)
+    render(<IslandQuestionActions {...props()} questions={[SINGLE, MULTI]} />)
     const submit = screen.getByTestId("question-submit")
     expect(submit).toBeDisabled()
     // Answer only the first question — still disabled.
@@ -75,7 +77,7 @@ describe("IslandQuestionActions", () => {
   })
 
   it("single-select replaces the prior choice; posts option indices", async () => {
-    render(<IslandQuestionActions request={request()} questions={[SINGLE]} />)
+    render(<IslandQuestionActions {...props()} questions={[SINGLE]} />)
     fireEvent.click(screen.getByTestId("question-option-0-0")) // OAuth
     expect(screen.getByTestId("question-option-0-0")).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(screen.getByTestId("question-option-0-1")) // API key replaces
@@ -88,7 +90,7 @@ describe("IslandQuestionActions", () => {
   })
 
   it("multi-select accumulates and toggles off selections", async () => {
-    render(<IslandQuestionActions request={request()} questions={[MULTI]} />)
+    render(<IslandQuestionActions {...props()} questions={[MULTI]} />)
     fireEvent.click(screen.getByTestId("question-option-0-0")) // Intro
     fireEvent.click(screen.getByTestId("question-option-0-2")) // Outro
     fireEvent.click(screen.getByTestId("question-option-0-0")) // toggle Intro off
@@ -98,7 +100,7 @@ describe("IslandQuestionActions", () => {
 
   it("stays un-submitted when the Rust side reports the request already gone", async () => {
     respondMock.mockResolvedValue(false)
-    render(<IslandQuestionActions request={request()} questions={[SINGLE]} />)
+    render(<IslandQuestionActions {...props()} questions={[SINGLE]} />)
     fireEvent.click(screen.getByTestId("question-option-0-0"))
     fireEvent.click(screen.getByTestId("question-submit"))
     await waitFor(() => expect(respondMock).toHaveBeenCalled())
@@ -110,7 +112,7 @@ describe("IslandQuestionActions", () => {
     try {
       render(
         <IslandQuestionActions
-          request={request(Date.now() - FLEET_PERMISSION_WAIT_MS + 1500)}
+          {...props(Date.now() - FLEET_PERMISSION_WAIT_MS + 1500)}
           questions={[SINGLE]}
         />
       )
@@ -121,6 +123,45 @@ describe("IslandQuestionActions", () => {
       expect(screen.getByTestId("question-expired")).toBeInTheDocument()
       expect(screen.getByTestId("question-option-0-0")).toBeDisabled()
       expect(screen.queryByTestId("question-submit")).toBeNull()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("waits without a countdown for an ask that never lapses", () => {
+    jest.useFakeTimers()
+    try {
+      render(
+        <IslandQuestionActions
+          {...props(Date.now() - 10 * FLEET_PERMISSION_WAIT_MS)}
+          deadline={null}
+          questions={[SINGLE]}
+        />
+      )
+      expect(screen.queryByTestId("question-countdown")).toBeNull()
+      expect(screen.queryByTestId("question-progress-track")).toBeNull()
+      expect(screen.queryByTestId("question-expired")).toBeNull()
+      expect(screen.getByTestId("question-option-0-0")).toBeEnabled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("says a lapsing ask lapsed instead of pointing at a terminal", () => {
+    jest.useFakeTimers()
+    try {
+      const now = Date.now()
+      render(
+        <IslandQuestionActions
+          {...props(now)}
+          deadline={{ at: now + 1_000, fallback: "lapse" }}
+          questions={[SINGLE]}
+        />
+      )
+      act(() => {
+        jest.advanceTimersByTime(2_000)
+      })
+      expect(screen.getByTestId("question-expired")).toHaveTextContent("permission.lapsed")
     } finally {
       jest.useRealTimers()
     }

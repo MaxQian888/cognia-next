@@ -9,14 +9,7 @@ import {
 } from "@/lib/fleet/acp-session-registry"
 import type { FleetSession } from "@/lib/fleet/types"
 import type { ExternalAgentPermissionRequestEvent } from "@/types/agent/external-agent"
-import {
-  attentionOwner,
-  fleetSessionOwner,
-  ownerRoute,
-  ownerSource,
-  sameOwner,
-  taskIdentity,
-} from "./owner"
+import { attentionOwner, fleetSessionOwner, ownerRoute, taskIdentity } from "./owner"
 import type { FleetOwnerRef } from "./types"
 
 function session(overrides: Partial<FleetSession> = {}): FleetSession {
@@ -104,6 +97,24 @@ describe("fleetSessionOwner", () => {
       sessionId: "chat-7",
     })
   })
+
+  it("gives a conversation's run to the conversation, not the run cockpit", () => {
+    const turn = session({ agent: "cognia", sessionId: "chat-7", executionRunId: "run-7" })
+    const isConversation = (id: string) => id === "chat-7"
+    expect(fleetSessionOwner(turn, isConversation)).toEqual({ kind: "chat", sessionId: "chat-7" })
+    // A run that is not a conversation (an IM job, a subagent) keeps its run.
+    expect(fleetSessionOwner({ ...turn, sessionId: "ephemeral" }, isConversation)).toEqual({
+      kind: "run",
+      runId: "run-7",
+    })
+    // Team lineage still wins, and external agents never consult the lookup.
+    expect(fleetSessionOwner({ ...turn, agentTeamRunId: "team-run" }, isConversation).kind).toBe(
+      "team"
+    )
+    expect(
+      fleetSessionOwner(session({ agent: "codex", sessionId: "chat-7" }), isConversation).kind
+    ).toBe("external")
+  })
 })
 
 describe("attentionOwner", () => {
@@ -118,19 +129,20 @@ describe("attentionOwner", () => {
     }
   )
 
+  it("gives a team item without its gate no owner, since nothing could answer it", () => {
+    expect(
+      attentionOwner({
+        ...base,
+        id: "team:x",
+        kind: "hitl-gate",
+        source: "team",
+        teamId: "t",
+        runId: "r",
+      } as AttentionItem)
+    ).toBeNull()
+  })
+
   it.each([
-    [
-      { source: "team", teamId: "t" },
-      { kind: "team", teamId: "t" },
-    ],
-    [
-      { source: "team", runId: "r" },
-      { kind: "team", runId: "r" },
-    ],
-    [
-      { source: "team", teamId: "t", runId: "r" },
-      { kind: "team", teamId: "t", runId: "r" },
-    ],
     [
       { source: "run", runId: "r" },
       { kind: "run", runId: "r" },
@@ -285,7 +297,7 @@ describe("attentionOwner", () => {
       kind: "fleet-waiting",
       fleetSession,
     } as AttentionItem
-    expect(sameOwner(attentionOwner(item)!, fleetSessionOwner(fleetSession))).toBe(true)
+    expect(taskIdentity(attentionOwner(item)!)).toBe(taskIdentity(fleetSessionOwner(fleetSession)))
   })
 })
 
@@ -296,7 +308,6 @@ describe("taskIdentity", () => {
     { kind: "gate", gateKey: { scope: "plan", id: "" } },
   ] satisfies FleetOwnerRef[])("does not merge owners missing a required identity: %j", (owner) => {
     expect(taskIdentity(owner)).toBeNull()
-    expect(sameOwner(owner, owner)).toBe(false)
   })
 
   it.each([
@@ -306,10 +317,9 @@ describe("taskIdentity", () => {
     { kind: "run", runId: "r" },
     { kind: "gate", gateKey: { scope: "plan", id: "g" } },
     { kind: "external", agent: "codex", sessionId: "s" },
-  ] satisfies FleetOwnerRef[])("classifies and recognizes each owner kind: %j", (owner) => {
-    expect(ownerSource(owner)).toBe(owner.kind)
-    expect(sameOwner(owner, { ...owner })).toBe(true)
-    expect(sameOwner(owner, { kind: "chat", sessionId: "different" })).toBe(false)
+  ] satisfies FleetOwnerRef[])("recognizes each owner kind by its own identity: %j", (owner) => {
+    expect(taskIdentity(owner)).toBe(taskIdentity({ ...owner }))
+    expect(taskIdentity(owner)).not.toBe(taskIdentity({ kind: "chat", sessionId: "different" }))
   })
   it("keeps gate keys distinct even when their scopes and ids contain separators", () => {
     expect(taskIdentity({ kind: "gate", gateKey: { scope: "a:b", id: "c" } })).not.toBe(

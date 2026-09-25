@@ -85,6 +85,12 @@ impl TrayIconState {
 /// The set of native actions a tray item may carry. Anything outside this
 /// list is rejected by the menu builder so a malformed plugin payload can't
 /// silently no-op.
+///
+/// `pet-toggle` was retired: it was a second pet opener that ignored the saved
+/// overlay geometry and never switched the pet on. The tray now runs the
+/// renderer's `pet.toggle-window` command, and the renderer migrates persisted
+/// layouts and panel actions that still name it (`RETIRED_NATIVE_TRAY_ACTIONS`
+/// in `lib/tray/native-actions.ts`) before they reach this list.
 pub const NATIVE_ACTIONS: &[&str] = &[
     "show",
     "hide",
@@ -100,7 +106,6 @@ pub const NATIVE_ACTIONS: &[&str] = &[
     "check-updates",
     "toggle-autostart",
     "automation-kill",
-    "pet-toggle",
     "pet-disable-click-through",
     "island-toggle",
     "noop",
@@ -191,7 +196,6 @@ mod tests {
             "check-updates",
             "toggle-autostart",
             "automation-kill",
-            "pet-toggle",
             "pet-disable-click-through",
             "noop",
             "quit",
@@ -201,6 +205,14 @@ mod tests {
                 "{action} is referenced by defaults but missing from NATIVE_ACTIONS"
             );
         }
+    }
+
+    #[test]
+    fn retired_pet_toggle_is_not_a_native_action() {
+        // The renderer migrates stored payloads to the `pet.toggle-window`
+        // command; accepting the old name here would keep a second opener
+        // alive that ignores the saved overlay geometry and the master switch.
+        assert!(!NATIVE_ACTIONS.contains(&"pet-toggle"));
     }
 
     #[test]

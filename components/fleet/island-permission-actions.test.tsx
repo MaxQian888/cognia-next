@@ -46,7 +46,7 @@ describe("IslandPermissionActions", () => {
     render(<IslandPermissionActions pending={pending()} />)
     fireEvent.click(screen.getByTestId("permission-allow"))
     await waitFor(() => expect(respondMock).toHaveBeenCalledWith("req-1", "allow"))
-    expect(screen.getByTestId("permission-answered")).toHaveTextContent("allowed")
+    expect(screen.getByTestId("permission-answered")).toHaveTextContent("answered.allow")
     expect(screen.queryByTestId("permission-allow")).toBeNull()
   })
 
@@ -54,7 +54,7 @@ describe("IslandPermissionActions", () => {
     render(<IslandPermissionActions pending={pending()} />)
     fireEvent.click(screen.getByTestId("permission-deny"))
     await waitFor(() => expect(respondMock).toHaveBeenCalledWith("req-1", "deny"))
-    expect(screen.getByTestId("permission-answered")).toHaveTextContent("denied")
+    expect(screen.getByTestId("permission-answered")).toHaveTextContent("answered.deny")
   })
 
   it("keeps the buttons when the Rust side reports the request already gone", async () => {
@@ -113,5 +113,105 @@ describe("IslandPermissionActions", () => {
     expect(screen.getByTestId("permission-progress-track")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("permission-allow"))
     await waitFor(() => expect(screen.queryByTestId("permission-progress-track")).toBeNull())
+  })
+
+  it("waits without a countdown for an ask that never lapses", () => {
+    jest.useFakeTimers()
+    try {
+      render(
+        <IslandPermissionActions
+          pending={pending({ requestedAt: Date.now() - 10 * FLEET_PERMISSION_WAIT_MS })}
+          deadline={null}
+        />
+      )
+      expect(screen.queryByTestId("permission-countdown")).toBeNull()
+      expect(screen.queryByTestId("permission-progress-track")).toBeNull()
+      expect(screen.queryByTestId("permission-expired")).toBeNull()
+      // Long past the hook window, still answerable.
+      expect(screen.getByTestId("permission-allow")).toBeEnabled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("counts a long deadline in minutes and says it lapsed rather than moved to a terminal", () => {
+    jest.useFakeTimers()
+    try {
+      const now = Date.now()
+      render(
+        <IslandPermissionActions
+          pending={pending({ requestedAt: now })}
+          deadline={{ at: now + 185_000, fallback: "lapse" }}
+        />
+      )
+      expect(screen.getByTestId("permission-countdown")).toHaveTextContent(
+        'remaining:{"duration":"3m05s"}'
+      )
+      act(() => {
+        jest.advanceTimersByTime(186_000)
+      })
+      expect(screen.getByTestId("permission-expired")).toHaveTextContent("lapsed")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("offers Always allow only where the ask permits a standing rule", async () => {
+    const respond = jest.fn(async () => true)
+    const { unmount } = render(
+      <IslandPermissionActions pending={pending()} deadline={null} respond={respond} />
+    )
+    expect(screen.queryByTestId("permission-allow-always")).toBeNull()
+    unmount()
+
+    render(
+      <IslandPermissionActions pending={pending()} deadline={null} allowAlways respond={respond} />
+    )
+    fireEvent.click(screen.getByTestId("permission-allow-always"))
+    await waitFor(() => expect(respond).toHaveBeenCalledWith("req-1", "allow_always"))
+    expect(screen.getByTestId("permission-answered")).toHaveTextContent("allowedAlways")
+    expect(respondMock).not.toHaveBeenCalled()
+  })
+
+  it.each(["plan", "budget", "review"] as const)(
+    "words a %s decision as approve or reject",
+    async (kind) => {
+      const respond = jest.fn(async () => true)
+      render(
+        <IslandPermissionActions
+          pending={pending({ toolName: null })}
+          kind={kind}
+          deadline={null}
+          respond={respond}
+        />
+      )
+      expect(screen.getByText(`ask.${kind}`)).toBeInTheDocument()
+      expect(screen.getByTestId("permission-allow")).toHaveTextContent("approve")
+      expect(screen.getByTestId("permission-deny")).toHaveTextContent("reject")
+      fireEvent.click(screen.getByTestId("permission-deny"))
+      await waitFor(() => expect(respond).toHaveBeenCalledWith("req-1", "deny"))
+      expect(screen.getByTestId("permission-answered")).toHaveTextContent("answered.reject")
+    }
+  )
+
+  it("confirms an approved decision in its own words", async () => {
+    const respond = jest.fn(async () => true)
+    render(
+      <IslandPermissionActions
+        pending={pending()}
+        kind="budget"
+        deadline={null}
+        respond={respond}
+      />
+    )
+    fireEvent.click(screen.getByTestId("permission-allow"))
+    await waitFor(() => expect(respond).toHaveBeenCalledWith("req-1", "allow"))
+    expect(screen.getByTestId("permission-answered")).toHaveTextContent("answered.approve")
+  })
+
+  it("answers a hook ask through the direct command, never with always-allow", async () => {
+    render(<IslandPermissionActions pending={pending()} />)
+    fireEvent.click(screen.getByTestId("permission-allow"))
+    await waitFor(() => expect(respondMock).toHaveBeenCalledWith("req-1", "allow"))
   })
 })

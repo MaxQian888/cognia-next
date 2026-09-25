@@ -41,6 +41,21 @@ describe("hydrate", () => {
     expect(ids).toContain("trayPanel.delegate")
   })
 
+  it("migrates a retired native effect before the built-in backfill", async () => {
+    getPrefMock.mockResolvedValue([
+      custom("mine.pet", {
+        effect: { kind: "native", action: "pet-toggle" } as unknown as TrayPanelAction["effect"],
+      }),
+    ])
+    await useTrayPanelStore.getState().hydrate()
+    const actions = useTrayPanelStore.getState().actions
+    expect(actions.find((a) => a.id === "mine.pet")?.effect).toEqual({
+      kind: "command",
+      commandId: "pet.toggle-window",
+    })
+    expect(actions.map((a) => a.id)).toContain("trayPanel.delegate")
+  })
+
   it("reads the versioned pref key", async () => {
     await useTrayPanelStore.getState().hydrate()
     expect(getPrefMock).toHaveBeenCalledWith(TRAY_PANEL_ACTIONS_PREF)

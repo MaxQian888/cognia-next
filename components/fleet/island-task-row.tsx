@@ -48,6 +48,19 @@ const STATUS_DOT: Record<IslandRowProjection["status"], string> = {
   stale: "bg-slate-400/40",
 }
 
+/** Every intent a row can dispatch, in the order their errors are reported. */
+const ROW_ACTION_KINDS: readonly IslandActionRequest["kind"][] = [
+  "permission-decision",
+  "question-response",
+  "question-reject",
+  "reply",
+  "interrupt",
+  "open-owner",
+  "focus-terminal",
+  "open-transcript",
+  "dismiss-stale",
+]
+
 export interface IslandTaskRowProps {
   row: IslandRowProjection
   revision: number
@@ -90,8 +103,11 @@ export function IslandTaskRow({
   const focus = statusOf("focus-terminal")
   const transcript = statusOf("open-transcript")
   const dismiss = statusOf("dismiss-stale")
+  // Every control reports through the same line, decisions and replies
+  // included: a refused approval must say why ("no longer waiting", "approve
+  // this device on the host first") instead of leaving the buttons silent.
   const actionError =
-    openOwner.error ?? interrupt.error ?? focus.error ?? transcript.error ?? dismiss.error
+    ROW_ACTION_KINDS.map((kind) => statusOf(kind).error).find((error) => error !== null) ?? null
 
   const waitedFor = row.waitingSince ? formatElapsed(row.waitingSince, nowMs) : null
   const showSecondary = !compact || pinned
@@ -207,7 +223,9 @@ export function IslandTaskRow({
           <button
             type="button"
             data-testid="island-interrupt"
-            aria-label={t("interrupt")}
+            // A conversation's Stop ends its turn the way the composer's does;
+            // an external CLI only receives a Ctrl-C and keeps its session.
+            aria-label={t(row.owner.kind === "chat" ? "stopTurn" : "interrupt")}
             disabled={interrupt.pending}
             onClick={() => void send({ kind: "interrupt" })}
             className="shrink-0 rounded-md p-0.5 text-white/50 transition-colors hover:bg-red-500/20 hover:text-red-300 disabled:opacity-40"
@@ -229,19 +247,24 @@ export function IslandTaskRow({
           </button>
         ) : null}
 
-        {row.capabilities.reply && row.owner.kind === "external" ? (
-          <IslandReply
-            sessionId={row.owner.sessionId}
-            send={async (_sessionId, text) =>
-              (await send({ kind: "reply", text })) ? "sent" : null
-            }
-          />
+        {row.capabilities.reply ? (
+          <IslandReply send={(text) => send({ kind: "reply", text })} />
         ) : null}
       </div>
 
       {row.permission && row.capabilities.permissionDecision ? (
         <IslandPermissionActions
-          pending={{ ...row.permission, detail: null }}
+          // Keyed by the ask: a new request must not inherit the answered state.
+          key={row.permission.requestId}
+          pending={{
+            requestId: row.permission.requestId,
+            toolName: row.permission.toolName,
+            requestedAt: row.permission.requestedAt,
+            detail: null,
+          }}
+          kind={row.permission.kind}
+          deadline={row.permission.deadline}
+          allowAlways={row.permission.allowAlways}
           className="pl-3.5"
           respond={(requestId, behavior) =>
             send({ kind: "permission-decision", permissionRequestId: requestId, behavior })
@@ -252,6 +275,7 @@ export function IslandTaskRow({
           key={row.question.requestId}
           className="ml-3.5"
           request={{ requestId: row.question.requestId, requestedAt: row.question.requestedAt }}
+          deadline={row.question.deadline}
           questions={row.question.questions.map((question) => ({
             question: question.question,
             header: question.header ?? null,
@@ -303,6 +327,15 @@ export function IslandTaskRow({
       {pinned && showSecondary ? (
         detail ? (
           <>
+            {detail.decisionDetail ? (
+              <p
+                data-testid="island-decision-detail"
+                className="ml-3.5 rounded-lg border border-amber-400/25 bg-amber-500/10 px-2 py-1 text-[10px] leading-snug text-amber-100/90"
+              >
+                <span className="mr-1 font-semibold text-amber-200">{t("detail.asking")}</span>
+                {detail.decisionDetail}
+              </p>
+            ) : null}
             <SessionMetaChips session={detail} className="pl-3.5" />
             <SessionDetail session={detail} />
             {detail.prompt ? (

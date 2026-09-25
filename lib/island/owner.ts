@@ -15,17 +15,26 @@ import {
 import type { AttentionItem } from "@/lib/attention/types"
 import { acpSessionOwnerFacts } from "@/lib/fleet/acp-session-registry"
 import type { FleetSession } from "@/lib/fleet/types"
-import type { FleetOwnerRef, IslandSource } from "./types"
+import type { FleetOwnerRef } from "./types"
 
 /**
  * Owner of a monitored session.
  *
  * A `cognia` session is one of our own runtimes observed through the canonical
- * journal, so it belongs to a Cognia surface: a team run, an execution run, or
- * the chat session it was started from. Every other agent is an external CLI
- * whose own terminal is the owner.
+ * journal, so it belongs to a Cognia surface: a team run, the conversation it
+ * runs in, or an execution run. Every other agent is an external CLI whose own
+ * terminal is the owner.
+ *
+ * `isConversation` says whether a session id is a Cognia conversation. A chat
+ * turn always carries a run id, so without it every chat turn resolved to the
+ * run cockpit — a second row beside the conversation's own approval, a Stop
+ * nothing could honour, and an "open" that left the chat behind. Callers that
+ * pass it must pass the same answer everywhere they compare identities.
  */
-export function fleetSessionOwner(session: FleetSession): FleetOwnerRef {
+export function fleetSessionOwner(
+  session: FleetSession,
+  isConversation: (sessionId: string) => boolean = () => false
+): FleetOwnerRef {
   if (session.agent !== "cognia") {
     return {
       kind: "external",
@@ -43,6 +52,7 @@ export function fleetSessionOwner(session: FleetSession): FleetOwnerRef {
       ...(session.agentTeamRunId ? { runId: session.agentTeamRunId } : {}),
     }
   }
+  if (isConversation(session.sessionId)) return { kind: "chat", sessionId: session.sessionId }
   if (session.executionRunId) return { kind: "run", runId: session.executionRunId }
   return { kind: "chat", sessionId: session.sessionId }
 }
@@ -83,13 +93,9 @@ export function attentionOwner(item: AttentionItem): FleetOwnerRef | null {
         : null
     }
     case "team":
-      return item.teamId || item.runId
-        ? {
-            kind: "team",
-            ...(item.teamId ? { teamId: item.teamId } : {}),
-            ...(item.runId ? { runId: item.runId } : {}),
-          }
-        : null
+      // Only gates carry this source, and they resolved above. A team row
+      // without its gate has no surface that could answer it.
+      return null
     case "run":
       return item.runId
         ? {
@@ -101,11 +107,6 @@ export function attentionOwner(item: AttentionItem): FleetOwnerRef | null {
     case "fleet":
       return item.fleetSession ? fleetSessionOwner(item.fleetSession) : null
   }
-}
-
-/** Which task or approval surface an owner belongs to. */
-export function ownerSource(owner: FleetOwnerRef): IslandSource {
-  return owner.kind
 }
 
 /**
@@ -160,10 +161,4 @@ export function ownerRoute(owner: FleetOwnerRef): string | null {
       if (owner.chatSessionId) return "/"
       return owner.agentId ? "/me/external-agents" : null
   }
-}
-
-/** Whether two owner refs designate the same task. */
-export function sameOwner(a: FleetOwnerRef, b: FleetOwnerRef): boolean {
-  const left = taskIdentity(a)
-  return left !== null && left === taskIdentity(b)
 }

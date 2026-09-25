@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { NATIVE_TRAY_ACTIONS, isNativeTrayAction } from "./native-actions"
+import {
+  NATIVE_TRAY_ACTIONS,
+  RETIRED_NATIVE_TRAY_ACTIONS,
+  isNativeTrayAction,
+  retiredNativeReplacement,
+} from "./native-actions"
 
 describe("NATIVE_TRAY_ACTIONS", () => {
   it("has no duplicates", () => {
@@ -22,6 +27,25 @@ describe("NATIVE_TRAY_ACTIONS", () => {
 
   it("includes the quick-panel toggle", () => {
     expect(NATIVE_TRAY_ACTIONS).toContain("tray-panel-toggle")
+  })
+})
+
+describe("retired native actions", () => {
+  it("are gone from both whitelists, so nothing can still emit them", () => {
+    for (const retired of Object.keys(RETIRED_NATIVE_TRAY_ACTIONS)) {
+      expect(NATIVE_TRAY_ACTIONS as readonly string[]).not.toContain(retired)
+      expect(isNativeTrayAction(retired)).toBe(false)
+    }
+  })
+
+  it("map pet-toggle onto the one summon command", () => {
+    expect(retiredNativeReplacement("pet-toggle")).toBe("pet.toggle-window")
+  })
+
+  it("answer nothing for live or unknown actions, including prototype keys", () => {
+    expect(retiredNativeReplacement("show")).toBeUndefined()
+    expect(retiredNativeReplacement("self-destruct")).toBeUndefined()
+    expect(retiredNativeReplacement("toString")).toBeUndefined()
   })
 })
 

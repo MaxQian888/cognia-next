@@ -88,7 +88,14 @@ describe("capability gating", () => {
       status: "blocked",
       statusKey: "awaitingPermission",
       summary: "",
-      permission: { requestId: "p1", toolName: "Bash", requestedAt: 0 },
+      permission: {
+        requestId: "p1",
+        kind: "tool",
+        toolName: "Bash",
+        requestedAt: 0,
+        deadline: null,
+        allowAlways: false,
+      },
     })
     expect(screen.queryByTestId("island-permission-actions")).toBeNull()
     expect(screen.getByTestId("island-status-line").textContent).toContain(
@@ -96,9 +103,9 @@ describe("capability gating", () => {
     )
   })
 
-  it("tells the user a blocked Cognia row is decided in the main window", () => {
-    // Deliberate dormancy (see IslandRowCapabilities): chat approvals, team
-    // gates and run interrupts have no decision controls in the island yet.
+  it("tells the user a blocked Cognia row without an inline decision is decided in the main window", () => {
+    // A Squad review needing a typed answer, a human handoff or an ask-user
+    // question has no island control (see IslandRowCapabilities).
     renderRow({
       id: "chat:s1",
       source: "chat",
@@ -126,7 +133,14 @@ describe("capability gating", () => {
       status: "blocked",
       statusKey: "awaitingPermission",
       summary: "",
-      permission: { requestId: "p1", toolName: "Bash", requestedAt: 0 },
+      permission: {
+        requestId: "p1",
+        kind: "tool",
+        toolName: "Bash",
+        requestedAt: 0,
+        deadline: null,
+        allowAlways: false,
+      },
       capabilities: { ...NO_ISLAND_CAPABILITIES, permissionDecision: true },
     })
     expect(screen.queryByTestId("island-decide-in-main")).toBeNull()
@@ -149,7 +163,14 @@ describe("intent dispatch", () => {
   it("routes a permission decision through an intent, never a direct command", async () => {
     const dispatch = renderRow({
       status: "blocked",
-      permission: { requestId: "p1", toolName: "Bash", requestedAt: 9_995 },
+      permission: {
+        requestId: "p1",
+        kind: "tool",
+        toolName: "Bash",
+        requestedAt: 9_995,
+        deadline: { at: 29_995, fallback: "terminal" },
+        allowAlways: false,
+      },
       capabilities: { ...NO_ISLAND_CAPABILITIES, permissionDecision: true },
     })
     fireEvent.click(screen.getByTestId("permission-allow"))
@@ -171,6 +192,87 @@ describe("intent dispatch", () => {
     expect(screen.getByTestId("island-interrupt")).toBeDisabled()
   })
 
+  it("offers a conversation's approval with always-allow, and its Stop and reply", async () => {
+    const dispatch = renderRow({
+      id: "chat:c1",
+      source: "chat",
+      owner: { kind: "chat", sessionId: "c1", requestId: "r1" },
+      agent: undefined,
+      status: "blocked",
+      permission: {
+        requestId: "r1",
+        kind: "tool",
+        toolName: "Bash",
+        requestedAt: 0,
+        deadline: null,
+        allowAlways: true,
+      },
+      capabilities: {
+        ...NO_ISLAND_CAPABILITIES,
+        permissionDecision: true,
+        interrupt: true,
+        reply: true,
+      },
+    })
+    // No countdown: a conversation's ask waits for the person.
+    expect(screen.queryByTestId("permission-countdown")).toBeNull()
+    expect(screen.getByTestId("island-interrupt")).toHaveAttribute("aria-label", "stopTurn")
+    fireEvent.click(screen.getByTestId("permission-allow-always"))
+    expect(dispatch).toHaveBeenCalledWith({
+      kind: "permission-decision",
+      permissionRequestId: "r1",
+      behavior: "allow_always",
+      rowId: "chat:c1",
+      revision: 9,
+    })
+    fireEvent.click(screen.getByTestId("island-reply-open"))
+    fireEvent.change(screen.getByTestId("island-reply-input"), { target: { value: "go on" } })
+    fireEvent.click(screen.getByTestId("island-reply-send"))
+    expect(dispatch).toHaveBeenCalledWith({
+      kind: "reply",
+      text: "go on",
+      rowId: "chat:c1",
+      revision: 9,
+    })
+    expect(await screen.findByTestId("permission-answered")).toBeInTheDocument()
+  })
+
+  it("words a gate decision as approve or reject", () => {
+    renderRow({
+      id: "gate:agent-plan:s",
+      source: "gate",
+      owner: { kind: "gate", gateKey: { scope: "agent-plan", id: "s" } },
+      agent: undefined,
+      status: "blocked",
+      permission: {
+        requestId: "s",
+        kind: "plan",
+        toolName: null,
+        requestedAt: 0,
+        deadline: null,
+        allowAlways: false,
+      },
+      capabilities: { ...NO_ISLAND_CAPABILITIES, permissionDecision: true },
+    })
+    expect(screen.getByTestId("island-permission-actions")).toHaveAttribute("data-kind", "plan")
+    expect(screen.getByTestId("permission-allow")).toHaveTextContent("approve")
+  })
+
+  it("reports why a decision was refused", () => {
+    renderRow(
+      { capabilities: { ...NO_ISLAND_CAPABILITIES, interrupt: true } },
+      {
+        statusOf: (kind) =>
+          kind === "permission-decision"
+            ? { pending: false, error: "noLongerWaiting" }
+            : IDLE_ACTION_STATUS,
+      }
+    )
+    expect(screen.getByTestId("island-action-error").textContent).toContain(
+      "actionError.noLongerWaiting"
+    )
+  })
+
   it("surfaces a retryable error and keeps the row in place", () => {
     renderRow(
       { capabilities: { ...NO_ISLAND_CAPABILITIES, interrupt: true } },
@@ -187,6 +289,27 @@ describe("privacy", () => {
     expect(screen.getByTestId("island-detail-status").textContent).toBe("detail.loading")
     expect(screen.queryByTestId("island-prompt")).toBeNull()
     expect(screen.queryByTestId("session-detail")).toBeNull()
+  })
+
+  it("shows what a pending decision would allow once revealed", () => {
+    renderRow(
+      { status: "blocked" },
+      {
+        pinned: true,
+        detail: {
+          cwd: null,
+          toolUseCount: 0,
+          turnCount: 0,
+          agentPid: null,
+          startedAt: 0,
+          status: "waiting-permission",
+          model: null,
+          permissionMode: null,
+          decisionDetail: "git push --force",
+        },
+      }
+    )
+    expect(screen.getByTestId("island-decision-detail").textContent).toContain("git push --force")
   })
 
   it("renders the redacted detail once the main window answers", () => {

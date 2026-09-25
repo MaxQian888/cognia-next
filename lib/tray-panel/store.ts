@@ -17,6 +17,7 @@ import {
   DEFAULT_TRAY_PANEL_ACTIONS,
   TRAY_PANEL_ACTIONS_PREF,
   ensureBuiltInActions,
+  migrateRetiredNativeEffects,
 } from "./defaults"
 import type { TrayPanelAction } from "./types"
 
@@ -57,7 +58,9 @@ export const useTrayPanelStore = create<TrayPanelState>((set, get) => ({
     try {
       const stored = await getPref<TrayPanelAction[]>(TRAY_PANEL_ACTIONS_PREF)
       set({
-        actions: stored?.length ? ensureBuiltInActions(stored) : DEFAULT_TRAY_PANEL_ACTIONS,
+        actions: stored?.length
+          ? ensureBuiltInActions(migrateRetiredNativeEffects(stored))
+          : DEFAULT_TRAY_PANEL_ACTIONS,
         hydrated: true,
       })
     } catch (err) {

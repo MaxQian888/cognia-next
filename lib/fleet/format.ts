@@ -52,6 +52,48 @@ export function formatElapsed(fromMs: number, nowMs: number): string {
   return `${seconds}s`
 }
 
+/** Where an answer window stands at `nowMs`. */
+export interface AnswerWindowState {
+  expired: boolean
+  /** Whole seconds left, 0 once expired. */
+  remainingSec: number
+  /** Share of the window left in [0, 1], for a draining progress bar. */
+  fraction: number
+  /** The last few seconds, when the bar turns red. */
+  urgent: boolean
+}
+
+/** Seconds left at which a countdown switches to its urgent colour. */
+const ANSWER_WINDOW_URGENT_SEC = 5
+
+/**
+ * The state of an ask that stops waiting at `deadline` (epoch ms), opened at
+ * `requestedAt`. Shared by every countdown so the permission and question
+ * cards cannot disagree about when the same kind of ask lapses. Pure.
+ */
+export function answerWindow(
+  requestedAt: number,
+  deadline: number,
+  nowMs: number
+): AnswerWindowState {
+  const remainingSec = Math.max(0, Math.ceil((deadline - nowMs) / 1000))
+  const span = Math.max(1, deadline - requestedAt)
+  return {
+    expired: remainingSec <= 0,
+    remainingSec,
+    fraction: Math.min(1, Math.max(0, (remainingSec * 1000) / span)),
+    urgent: remainingSec <= ANSWER_WINDOW_URGENT_SEC,
+  }
+}
+
+/**
+ * Compact remaining time for a countdown: `42s`, `3m05s`, `1h37m`. Same shape
+ * as {@link formatElapsed}, measured the other way.
+ */
+export function formatRemaining(remainingSec: number): string {
+  return formatElapsed(0, Math.max(0, remainingSec) * 1000)
+}
+
 /** Single-line truncation with an ellipsis, grapheme-safe enough for UI. */
 export function truncateLine(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim()

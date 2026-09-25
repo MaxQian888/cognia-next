@@ -1,6 +1,7 @@
 /**
- * Pure projection from the two live inputs (the unified Fleet snapshot and the
- * Control Center attention aggregation) to the read-only island state.
+ * Pure projection from the live inputs (the unified Fleet snapshot, the
+ * Control Center attention aggregation and what the main window knows about
+ * its conversations) to the read-only island state.
  *
  * Runs in the MAIN window only. The island window receives the result and
  * nothing else, which is what keeps the overlay away from stores, Dexie and
@@ -17,13 +18,16 @@
 import { redactText } from "@cognia/redact"
 
 import type { AttentionItem } from "@/lib/attention/types"
-import type { FleetSession, FleetSnapshot } from "@/lib/fleet/types"
 import { truncateLine } from "@/lib/fleet/format"
+import { FLEET_PERMISSION_WAIT_MS, type FleetSession, type FleetSnapshot } from "@/lib/fleet/types"
+import type { ExecutionRunInterrupt } from "@/types/execution/run"
 import { attentionOwner, fleetSessionOwner, ownerRoute, taskIdentity } from "./owner"
 import {
   ISLAND_DONE_LINGER_MS,
   ISLAND_STATUS_RANK,
   NO_ISLAND_CAPABILITIES,
+  type IslandAnswerDeadline,
+  type IslandDecisionKind,
   type IslandQuestion,
   type IslandRowCapabilities,
   type IslandRowProjection,
@@ -36,6 +40,7 @@ import {
 /** Caps for everything that crosses the window boundary. */
 const TITLE_MAX = 64
 const SUMMARY_MAX = 96
+const TOOL_MAX = 48
 const QUESTION_MAX = 200
 const OPTION_MAX = 48
 const MAX_OPTIONS = 8
@@ -47,9 +52,29 @@ function safe(value: string | null | undefined, max: number): string {
   return truncateLine(redactText(value).redacted, max)
 }
 
+/**
+ * What the main window knows about one Cognia conversation.
+ *
+ * `direct` says the chat runtime drives it, which is what its Stop and its
+ * send can reach: team rooms and workbench sessions run on other engines, so
+ * the island leaves those controls to their own pages. `status` is the chat
+ * store's, or `null` while no pane has loaded the conversation.
+ */
+export interface IslandConversationFacts {
+  direct: boolean
+  status: "idle" | "streaming" | "awaiting_approval" | "error" | null
+  /** The conversation's own title, when it has one. Redacted here. */
+  title?: string
+}
+
 export interface IslandProjectionInputs {
   fleet: FleetSnapshot
   attention: readonly AttentionItem[]
+  /**
+   * Conversations the other inputs mention, keyed by chat session id. A Cognia
+   * run whose session is listed belongs to that conversation.
+   */
+  conversations: Readonly<Record<string, IslandConversationFacts>>
   detailVisibility: IslandDetailVisibility
   /** Main-window session id. See {@link IslandState.epoch}. */
   epoch: number
@@ -101,21 +126,51 @@ function questionsOf(session: FleetSession): IslandQuestion[] {
 }
 
 /**
+ * The answer window of a session's parked ask.
+ *
+ * Only the Rust hook ingress (Claude Code, Codex, OpenCode) holds an ask open
+ * for a bounded window, after which the agent's own terminal prompt takes
+ * over. An ACP ask and a Cognia ask wait for the user, so they carry no
+ * deadline — a countdown there disabled the buttons while the ask was still
+ * live.
+ */
+function hookDeadline(session: FleetSession, requestedAt: number): IslandAnswerDeadline | null {
+  if (session.agent === "cognia" || session.externalAgentId) return null
+  return { at: requestedAt + FLEET_PERMISSION_WAIT_MS, fallback: "terminal" }
+}
+
+/** What a conversation lets the island do beyond answering its approvals. */
+function conversationControls(
+  owner: FleetOwnerRef,
+  conversations: IslandProjectionInputs["conversations"]
+): { interrupt: boolean; reply: boolean } {
+  if (owner.kind !== "chat") return { interrupt: false, reply: false }
+  const facts = conversations[owner.sessionId]
+  if (!facts?.direct) return { interrupt: false, reply: false }
+  return {
+    interrupt: facts.status === "streaming" || facts.status === "awaiting_approval",
+    reply: true,
+  }
+}
+
+/**
  * Capabilities for a monitored session, narrowed to what can actually be
  * honoured today.
  *
- * `interrupt` is hard-false for a `cognia` session: the Rust process-signal
- * path targets an external CLI's pid, and a Cognia run has none. Until a real
- * Cognia control adapter exists, the honest affordance is "open the page that
- * owns it", not a stop button that sends a signal to nobody.
+ * External sessions offer what their integration proves. A Cognia run offers a
+ * Stop and a reply only through the conversation that runs it: a chat turn
+ * never registers with the run control plane, so a stop sent there would be
+ * refused, and a run with no conversation (an IM job, a subagent) is opened in
+ * its cockpit instead.
  */
 function sessionCapabilities(
   session: FleetSession,
   owner: FleetOwnerRef,
-  detailVisibility: IslandDetailVisibility
+  inputs: IslandProjectionInputs
 ): IslandRowCapabilities {
   const live = session.status !== "ended" && session.status !== "detached"
   const external = session.agent !== "cognia"
+  const conversation = conversationControls(owner, inputs.conversations)
   const questions = session.pendingQuestions ?? []
   // Never consume a parked request using only the visible prefix of its
   // questions/options. The terminal remains available for larger requests.
@@ -134,30 +189,38 @@ function sessionCapabilities(
       session.capabilities.approvePermission,
     questionResponse:
       external && live && Boolean(session.pendingQuestionRequest) && completeQuestions,
-    reply: external && session.capabilities.sendMessage && live,
-    interrupt: external && session.capabilities.interrupt && live,
+    reply: (external && session.capabilities.sendMessage && live) || conversation.reply,
+    interrupt:
+      (external && session.capabilities.interrupt && live) || (live && conversation.interrupt),
     focusTerminal: external && session.capabilities.focusTerminal,
     openTranscript:
       external && session.capabilities.openTranscript && Boolean(session.transcriptPath),
     dismissStale: false,
-    detail: detailVisibility !== "summary-only",
+    detail: inputs.detailVisibility !== "summary-only",
   }
 }
 
 function rowFromSession(
   session: FleetSession,
-  detailVisibility: IslandDetailVisibility
+  inputs: IslandProjectionInputs
 ): IslandRowProjection | null {
-  const owner = fleetSessionOwner(session)
+  const owner = fleetSessionOwner(session, (id) => id in inputs.conversations)
   const id = taskIdentity(owner)
   if (!id) return null
 
   const status = sessionStatus(session)
-  const permission = session.pendingPermission
+  // A conversation's approvals belong to the chat store, which is the only
+  // side that knows whether one is still live and how it may be answered. The
+  // attention row carries it and folds in below.
+  const pending = owner.kind === "chat" ? null : session.pendingPermission
+  const permission = pending
     ? {
-        requestId: session.pendingPermission.requestId,
-        toolName: safe(session.pendingPermission.toolName, 48) || null,
-        requestedAt: session.pendingPermission.requestedAt,
+        requestId: pending.requestId,
+        kind: "tool" as const,
+        toolName: safe(pending.toolName, TOOL_MAX) || null,
+        requestedAt: pending.requestedAt,
+        deadline: hookDeadline(session, pending.requestedAt),
+        allowAlways: false,
       }
     : undefined
   const questions = questionsOf(session)
@@ -166,6 +229,7 @@ function rowFromSession(
       ? {
           requestId: session.pendingQuestionRequest.requestId,
           requestedAt: session.pendingQuestionRequest.requestedAt,
+          deadline: hookDeadline(session, session.pendingQuestionRequest.requestedAt),
           questions,
         }
       : undefined
@@ -173,6 +237,8 @@ function rowFromSession(
   // Tool NAME only. `activity.detail` carries the command or path the tool was
   // called with, which is exactly what must not survive a hover.
   const summary = status === "working" ? safe(session.activity?.toolName, SUMMARY_MAX) : ""
+  const conversationTitle =
+    owner.kind === "chat" ? inputs.conversations[owner.sessionId]?.title : undefined
 
   const row: IslandRowProjection = {
     id,
@@ -182,11 +248,13 @@ function rowFromSession(
     ...(session.agentLabel ? { agentLabel: safe(session.agentLabel, 32) } : {}),
     status,
     priority: ISLAND_STATUS_RANK[status],
-    // A Cognia session id is an opaque UUID, not a name: leave the title empty
-    // so an attention item folded in below can supply one. External agents keep
-    // the session id as the last resort, as their fleet list does.
+    // A conversation is named by its own title. Otherwise a Cognia session id
+    // is an opaque UUID, not a name: leave the title empty so an attention
+    // item folded in below can supply one. External agents keep the session
+    // id as the last resort, as their fleet list does.
     title: safe(
-      session.projectName ??
+      conversationTitle ??
+        session.projectName ??
         session.agentLabel ??
         (session.agent === "cognia" ? "" : session.sessionId),
       TITLE_MAX
@@ -195,7 +263,7 @@ function rowFromSession(
     startedAt: session.startedAt,
     updatedAt: session.lastEventAt,
     ...(status === "blocked" ? { waitingSince: session.lastEventAt } : {}),
-    capabilities: sessionCapabilities(session, owner, detailVisibility),
+    capabilities: sessionCapabilities(session, owner, inputs),
     ...(permission ? { permission } : {}),
     ...(question ? { question } : {}),
     ...(session.hostRef ? { hostRef: safe(session.hostRef, 32) } : {}),
@@ -227,18 +295,85 @@ function canDismissStale(item: AttentionItem, owner: FleetOwnerRef): boolean {
       return item.gate?.status === "interrupted"
     case "chat":
       return Boolean(owner.requestId)
-    case "team":
-      return Boolean(owner.teamId ?? owner.runId)
     case "run":
       return Boolean(owner.interruptId) && item.interrupt?.type !== "human_handoff"
+    case "team":
     case "external":
       return false
   }
 }
 
+/**
+ * Durable run approvals the island can answer: their approve carries no
+ * payload, so a plain approve / deny through the run control plane is the
+ * whole answer. Squad reviews that need a typed decision, a human handoff, an
+ * ask-user question and a workflow approval stay in the main window.
+ */
+const PAYLOAD_FREE_RUN_APPROVALS: ReadonlyMap<ExecutionRunInterrupt["type"], IslandDecisionKind> =
+  new Map([
+    ["plan_approval", "plan"],
+    ["tool_approval", "tool"],
+    ["squad_capability_audit", "review"],
+    ["delegation_approval", "review"],
+    ["bot_approval", "review"],
+    ["fusion_approval", "review"],
+  ])
+
+function runApprovalKind(interrupt: ExecutionRunInterrupt): IslandDecisionKind | null {
+  if (interrupt.status !== "pending") return null
+  const kind = PAYLOAD_FREE_RUN_APPROVALS.get(interrupt.type)
+  if (!kind) return null
+  // A tool approval without a digest is the durable twin of a conversation's
+  // own approval: only the conversation can release its waiter.
+  if (interrupt.type === "tool_approval" && !interrupt.requestDigest) return null
+  return kind
+}
+
+/** The decision the island can make for a pending item, if any. */
+function attentionDecision(
+  item: AttentionItem,
+  owner: FleetOwnerRef
+): IslandRowProjection["permission"] | undefined {
+  if (item.stale) return undefined
+  if (owner.kind === "chat" && item.approval && item.approval.status !== "interrupted") {
+    const approval = item.approval
+    return {
+      requestId: approval.requestId,
+      kind: "tool",
+      toolName: safe(approval.displayName ?? approval.toolName, TOOL_MAX) || null,
+      requestedAt: item.openedAt,
+      deadline: null,
+      allowAlways: !approval.suppressAlwaysAllowRule,
+    }
+  }
+  if (owner.kind === "gate" && item.gate?.status === "open") {
+    return {
+      requestId: item.gate.key.id,
+      kind: item.gate.gateType === "plan_step" ? "plan" : "budget",
+      toolName: null,
+      requestedAt: item.gate.openedAt,
+      deadline: null,
+      allowAlways: false,
+    }
+  }
+  if (owner.kind === "run" && item.interrupt) {
+    const kind = runApprovalKind(item.interrupt)
+    if (!kind) return undefined
+    return {
+      requestId: item.interrupt.id,
+      kind,
+      toolName: safe(item.interrupt.toolName, TOOL_MAX) || null,
+      requestedAt: item.interrupt.createdAt,
+      deadline: { at: item.interrupt.expiresAt, fallback: "lapse" },
+      allowAlways: false,
+    }
+  }
+  return undefined
+}
+
 function rowFromAttention(
   item: AttentionItem,
-  detailVisibility: IslandDetailVisibility
+  inputs: IslandProjectionInputs
 ): IslandRowProjection | null {
   const owner = attentionOwner(item)
   if (!owner) return null
@@ -246,13 +381,19 @@ function rowFromAttention(
   if (!id) return null
 
   const status: IslandRowStatus = item.stale ? "stale" : "blocked"
+  const permission = attentionDecision(item, owner)
+  const conversation = item.stale
+    ? { interrupt: false, reply: false }
+    : conversationControls(owner, inputs.conversations)
+  const conversationTitle =
+    owner.kind === "chat" ? inputs.conversations[owner.sessionId]?.title : undefined
   const row: IslandRowProjection = {
     id,
     source: owner.kind,
     owner,
     status,
     priority: ISLAND_STATUS_RANK[status],
-    title: safe(item.title, TITLE_MAX) || item.source,
+    title: safe(conversationTitle ?? item.title, TITLE_MAX) || item.source,
     // The attention detail line is a gate body or an approval title, which can
     // quote a command. Only the tool name from the fleet branch is safe, and
     // that arrives through the merge below.
@@ -263,9 +404,13 @@ function rowFromAttention(
     capabilities: {
       ...NO_ISLAND_CAPABILITIES,
       openOwner: ownerRoute(owner) !== null,
+      permissionDecision: Boolean(permission),
+      interrupt: conversation.interrupt,
+      reply: conversation.reply,
       dismissStale: item.stale && canDismissStale(item, owner),
-      detail: detailVisibility !== "summary-only",
+      detail: inputs.detailVisibility !== "summary-only",
     },
+    ...(permission ? { permission } : {}),
     stale: item.stale,
   }
   return { ...row, statusKey: statusKeyFor(row) }
@@ -358,7 +503,7 @@ export function projectIslandState(
   const byId = new Map<string, IslandRowProjection>()
 
   for (const session of inputs.fleet.sessions) {
-    const row = rowFromSession(session, inputs.detailVisibility)
+    const row = rowFromSession(session, inputs)
     if (!row) continue
     // A finished session lingers so the user sees the result, then leaves.
     if (row.status === "done" && now - row.updatedAt > ISLAND_DONE_LINGER_MS) continue
@@ -367,7 +512,7 @@ export function projectIslandState(
   }
 
   for (const item of inputs.attention) {
-    const row = rowFromAttention(item, inputs.detailVisibility)
+    const row = rowFromAttention(item, inputs)
     if (!row) continue
     const existing = byId.get(row.id)
     byId.set(row.id, existing ? mergeRows(existing, row) : row)

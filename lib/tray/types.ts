@@ -31,7 +31,6 @@ export type TrayNativeAction =
   | "check-updates"
   | "toggle-autostart"
   | "automation-kill"
-  | "pet-toggle"
   | "pet-disable-click-through"
   | "island-toggle"
   | "noop"

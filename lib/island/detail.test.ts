@@ -58,7 +58,24 @@ describe("detailFromSession", () => {
     const detail = detailFromSession(session({ lastPrompt: null, activity: null, cwd: null }))
     expect(detail).not.toHaveProperty("prompt")
     expect(detail).not.toHaveProperty("activityLabel")
+    expect(detail).not.toHaveProperty("decisionDetail")
     expect(detail.cwd).toBeNull()
+  })
+
+  it("reveals what a pending permission would allow, redacted and capped", () => {
+    const detail = detailFromSession(
+      session({
+        pendingPermission: {
+          requestId: "p",
+          toolName: "Bash",
+          detail: `curl -H "x: person@example.com" ${"y".repeat(400)}`,
+          requestedAt: 1,
+        },
+      })
+    )
+    expect(detail.decisionDetail).toContain("curl")
+    expect(detail.decisionDetail).not.toContain("person@example.com")
+    expect(detail.decisionDetail!.length).toBeLessThanOrEqual(240)
   })
 })
 
@@ -76,6 +93,8 @@ describe("detailFromAttention", () => {
     expect(detail.toolUseCount).toBe(0)
     expect(detail.turnCount).toBe(0)
     expect(detail.startedAt).toBe(900)
-    expect(detail.prompt).toBe("deploy to prod")
+    // The ask is what the person is deciding on, not a prompt they wrote.
+    expect(detail.decisionDetail).toBe("deploy to prod")
+    expect(detail).not.toHaveProperty("prompt")
   })
 })

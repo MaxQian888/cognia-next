@@ -7,6 +7,7 @@
 // `labelKey`-over-`label` precedence in `resolveLabel` is what keeps the two
 // kinds in one list.
 
+import { retiredNativeReplacement } from "@/lib/tray/native-actions"
 import type { TrayPanelAction } from "./types"
 
 /** Tauri-store keys. Versioned so a future shape change can migrate cleanly. */
@@ -170,6 +171,27 @@ export function ensureBuiltInActions(stored: readonly TrayPanelAction[]): TrayPa
     out.splice(Math.min(defIndex, out.length), 0, def)
   })
   return out
+}
+
+/**
+ * Rewrite effects that name a retired native tray action into the command
+ * that replaced it (`RETIRED_NATIVE_TRAY_ACTIONS`, shared with the menu's own
+ * migration in `lib/tray/store.ts`). A custom panel action the user built on
+ * a native action persists that effect whole, and `tray_run_native_action`
+ * refuses an action Rust no longer knows. Returns the same array reference
+ * when nothing changed. Everything else about the action (label, icon,
+ * trigger, `focusMainWindow`) is kept as the user left it.
+ */
+export function migrateRetiredNativeEffects(stored: readonly TrayPanelAction[]): TrayPanelAction[] {
+  let changed = false
+  const out = stored.map((action): TrayPanelAction => {
+    if (action.effect.kind !== "native") return action
+    const commandId = retiredNativeReplacement(action.effect.action)
+    if (!commandId) return action
+    changed = true
+    return { ...action, effect: { kind: "command", commandId } }
+  })
+  return changed ? out : (stored as TrayPanelAction[])
 }
 
 /**
