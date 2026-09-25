@@ -123,7 +123,7 @@ cognia-connectors = { path = "../crates/cognia-connectors", features = ["tauri-h
 # ADR-0067 Tier B — plugin runtime (wasmtime/cranelift). Re-aliased as
 # `crate::plugin_api`; the vscode LSP host's sidecar-dir resolver is
 # registered from run().
-cognia-plugin-runtime = { path = "../crates/cognia-plugin-runtime" }
+cognia-plugin-runtime = { path = "../crates/cognia-plugin-runtime", features = ["tauri-host"] }
 # ADR-0067 follow-up — skills subsystem. Re-aliased as `crate::skills`.
 cognia-skills = { path = "../crates/cognia-skills", features = ["tauri-host"] }
 # ADR-0067 follow-up — TTS subsystem. Re-aliased as `crate::tts`.

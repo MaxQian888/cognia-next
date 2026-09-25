@@ -135,7 +135,7 @@
     "ide:check": "node packages/plugin-sdk/scripts/generate-ide-contract.mjs --check",
     "ide:generate": "node packages/plugin-sdk/scripts/generate-ide-contract.mjs",
     "sdk:python:test": "uv run --project plugin-sdk/python pytest plugin-sdk/python",
-    "sdk:rust:test": "cargo test --locked -p cognia-plugin-runtime",
+    "sdk:rust:test": "cargo test --locked -p cognia-plugin-runtime --features tauri-host",
     "sdk:scaffold:test": "node scripts/plugin/test-author-scaffold.mjs",
     "sdk:ts:build": "pnpm --dir packages/provider-types run build && pnpm --dir packages/plugin-sdk run build && pnpm --dir packages/agent run build",
     "sdk:ts:pack:test": "pnpm --dir packages/plugin-sdk run pack:test && pnpm --dir packages/agent run pack:test",

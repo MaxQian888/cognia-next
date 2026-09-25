@@ -10,7 +10,12 @@
 //! For platforms where the global-shortcut plugin isn't compiled in
 //! (mobile), the registration is a soft no-op that still records intent.
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::{PluginError, PluginRuntimeState, Result};
@@ -38,6 +43,7 @@ fn key(plugin_id: &str, shortcut: &str) -> String {
     format!("{plugin_id}:{shortcut}")
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_shortcut_register(
     state: State<'_, PluginRuntimeState>,
@@ -59,6 +65,7 @@ pub async fn plugin_shortcut_register(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_shortcut_unregister(
     state: State<'_, PluginRuntimeState>,

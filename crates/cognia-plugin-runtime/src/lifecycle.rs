@@ -8,6 +8,10 @@
 //! doesn't try to re-implement manifest validation (TS owns that) but it
 //! does enforce the install directory boundary so callers can't escape it.
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -15,6 +19,7 @@ use std::process::Stdio;
 use base64::Engine as _;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri-host")]
 use tauri::{Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -65,6 +70,7 @@ fn read_state_file(state: &PluginRuntimeState, plugin_id: &str) -> Result<serde_
     Ok(serde_json::from_slice(&bytes)?)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_load(
     state: State<'_, PluginRuntimeState>,
@@ -143,17 +149,20 @@ fn upsert_status(state: &PluginRuntimeState, plugin_id: &str, status: &str) -> R
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_enable(state: State<'_, PluginRuntimeState>, plugin_id: String) -> Result<()> {
     flip_status(&state, &plugin_id, "enabled")
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_disable(state: State<'_, PluginRuntimeState>, plugin_id: String) -> Result<()> {
     stop_node_plugin_process(state.inner(), &plugin_id, None).await?;
     flip_status(&state, &plugin_id, "disabled")
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_unload(state: State<'_, PluginRuntimeState>, plugin_id: String) -> Result<()> {
     stop_node_plugin_process(state.inner(), &plugin_id, None).await?;
@@ -794,6 +803,7 @@ fn spawn_reserved_node_process(
 
 /// Launch an installed Node plugin entirely in the native host. This keeps
 /// `node:*` imports and process handles out of the static-export renderer.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_launch_js(
     app: tauri::AppHandle,
@@ -985,6 +995,7 @@ async fn run_node_plugin_action(
     parse_node_plugin_frame(frame)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 #[allow(
     clippy::too_many_arguments,
@@ -1049,6 +1060,7 @@ pub async fn plugin_invoke_js_callback_for_state(
         .unwrap_or(serde_json::Value::Null))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_deactivate_js(
     app: tauri::AppHandle,
@@ -1096,6 +1108,7 @@ pub async fn plugin_deactivate_js_for_state(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_stop_js(
     state: State<'_, PluginRuntimeState>,
@@ -1116,6 +1129,7 @@ pub async fn plugin_stop_js_for_state(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_js_status(
     state: State<'_, PluginRuntimeState>,
@@ -1193,6 +1207,7 @@ fn read_plugin_entry_inner(
 
 /// Read one installed JavaScript bundle through a no-follow host handle.
 /// Renderer code never fetches arbitrary `file://` paths directly.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_read_entry(
     state: State<'_, PluginRuntimeState>,
@@ -1212,6 +1227,7 @@ pub async fn plugin_read_entry(
 
 /// Read a binary plugin asset with the same no-follow containment guarantees
 /// and return base64 for renderer-side data URLs.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_read_entry_base64(
     state: State<'_, PluginRuntimeState>,
@@ -1266,6 +1282,7 @@ fn validate_install_manifest(plugin_id: &str, payload: &InstallPayload) -> Resul
     Ok(manifest.version)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_install(
     state: State<'_, PluginRuntimeState>,
@@ -1319,6 +1336,7 @@ pub async fn plugin_install_for_state(
     Ok(snapshot)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_uninstall(
     state: State<'_, PluginRuntimeState>,
@@ -1358,6 +1376,7 @@ pub async fn plugin_uninstall_for_state(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_get_all(
     state: State<'_, PluginRuntimeState>,
@@ -1377,6 +1396,7 @@ pub async fn plugin_get_all_for_state(
         .collect())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_runtime_snapshot(
     state: State<'_, PluginRuntimeState>,
@@ -1398,6 +1418,7 @@ pub async fn plugin_runtime_snapshot_for_state(
         .ok_or(PluginError::NotFound(plugin_id))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_set_state(
     state: State<'_, PluginRuntimeState>,
@@ -1429,6 +1450,7 @@ pub async fn plugin_set_state(
 /// treats it as a downstream mirror, never as a source of truth for liveness:
 /// see `syncRuntimeState` in lib/plugin/core/manager.ts for which statuses it
 /// may safely adopt and why.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_set_status(
     state: State<'_, PluginRuntimeState>,
@@ -1447,6 +1469,7 @@ pub fn plugin_set_status_for_state(
     upsert_status(state, &plugin_id, &status)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_get_state(
     state: State<'_, PluginRuntimeState>,

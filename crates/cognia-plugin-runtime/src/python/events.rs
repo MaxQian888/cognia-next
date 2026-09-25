@@ -37,6 +37,7 @@ pub struct PythonEvent {
 /// Where python events go. Production: [`tauri_sink`]. Tests: a collector.
 pub type EventSink = Arc<dyn Fn(PythonEvent) + Send + Sync>;
 
+#[cfg(feature = "tauri-host")]
 /// Production sink: forward to the renderer via `app.emit` (mirrors the
 /// sidecar event pattern in `claude/sidecar.rs`).
 pub fn tauri_sink(app: tauri::AppHandle) -> EventSink {
@@ -75,6 +76,7 @@ pub struct PythonHostRequest {
 /// Headless and tests supply their own.
 pub type HostRequestSink = Arc<dyn Fn(PythonHostRequest) + Send + Sync>;
 
+#[cfg(feature = "tauri-host")]
 /// Production sink: forward to the renderer, which routes the call onto the
 /// permission-guarded `ctx.*` APIs.
 pub fn tauri_host_request_sink(app: tauri::AppHandle) -> HostRequestSink {

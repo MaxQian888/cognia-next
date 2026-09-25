@@ -9,7 +9,12 @@
 //! this command records the kill intent in state without effect — that
 //! way the TS catch path stays satisfied.
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::{PluginRuntimeState, Result};
@@ -21,6 +26,7 @@ pub struct ProcessRecord {
     pub pid: Option<u32>,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_process_kill(
     state: State<'_, PluginRuntimeState>,

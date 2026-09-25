@@ -15,6 +15,7 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use serde::Serialize;
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::{PluginError, PluginRuntimeState, Result};
@@ -40,6 +41,7 @@ fn ensure_backups_dir(state: &PluginRuntimeState) -> Result<PathBuf> {
     Ok(dir)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_backup_create(
     state: State<'_, PluginRuntimeState>,
@@ -92,6 +94,7 @@ pub async fn plugin_backup_create_for_state(
     })
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_backup_restore(
     state: State<'_, PluginRuntimeState>,
@@ -209,6 +212,7 @@ fn restore_renamed_tree(source: &Path, target: &Path) -> std::io::Result<()> {
     fs::rename(source, target)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_backup_delete(
     state: State<'_, PluginRuntimeState>,

@@ -23,6 +23,7 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::super::PluginRuntimeState;
@@ -378,6 +379,7 @@ pub(crate) fn copy_plugin_tree(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_install_from_github(
     state: State<'_, PluginRuntimeState>,

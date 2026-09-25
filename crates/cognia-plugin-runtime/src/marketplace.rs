@@ -8,10 +8,15 @@
 //! integration lands in a follow-up — the contract here is "command
 //! exists so TS no longer silent-fails on desktop."
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::github::installer::{
@@ -406,7 +411,7 @@ fn parse_marketplace_versions(value: &serde_json::Value) -> Vec<MarketplaceVersi
         .unwrap_or_default()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_marketplace_versions(
     plugin_id: String,
     registry_url: Option<String>,
@@ -439,6 +444,7 @@ pub async fn plugin_marketplace_versions(
     Ok(parse_marketplace_versions(&json))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_get_directory(state: State<'_, PluginRuntimeState>) -> Result<String> {
     Ok(state.plugin_install_dir.to_string_lossy().into_owned())
@@ -457,6 +463,7 @@ pub(crate) fn read_verification_receipt(
     serde_json::from_str(&raw).ok()
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_read_verification(
     state: State<'_, PluginRuntimeState>,
@@ -906,6 +913,7 @@ pub fn finalize_staged_update_for_state(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn plugin_download_version(
@@ -976,6 +984,7 @@ async fn download_verified_archive(
     Ok((bytes, integrity))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn plugin_stage_version(
@@ -1028,6 +1037,7 @@ pub async fn plugin_stage_version_for_state(
     stage_archive_update_for_state(state, &plugin_id, &version, &bytes, &integrity)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_commit_staged_update(
     state: State<'_, PluginRuntimeState>,
@@ -1037,6 +1047,7 @@ pub async fn plugin_commit_staged_update(
     commit_staged_update_for_state(state.inner(), &plugin_id, &transaction_id)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_discard_staged_update(
     state: State<'_, PluginRuntimeState>,
@@ -1046,6 +1057,7 @@ pub async fn plugin_discard_staged_update(
     discard_staged_update_for_state(state.inner(), &plugin_id, &transaction_id)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_finalize_staged_update(
     state: State<'_, PluginRuntimeState>,
@@ -1062,6 +1074,7 @@ pub struct InvalidateCacheArgs {
     pub scope: Option<String>,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_invalidate_cache(
     state: State<'_, PluginRuntimeState>,

@@ -44,7 +44,7 @@ fn compute_digest(plugin_id: &str, version: &str, file_bytes: &[u8]) -> [u8; 32]
     hasher.finalize().into()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_generate_keypair() -> Result<KeypairPayload> {
     let mut seed = [0u8; 32];
     rand::fill(&mut seed);
@@ -56,7 +56,7 @@ pub async fn plugin_generate_keypair() -> Result<KeypairPayload> {
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_create_signature(
     plugin_id: String,
     version: String,
@@ -85,7 +85,7 @@ pub async fn plugin_create_signature(
 /// SHA-256 fingerprint of a base64-encoded Ed25519 public key. Returned
 /// as a lowercase hex digest so the UI can show "ed25519:9f3a:...:" style
 /// identities to the user during first-install trust-on-first-use.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_public_key_fingerprint(public_key_base64: String) -> Result<String> {
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
@@ -102,7 +102,7 @@ pub async fn plugin_public_key_fingerprint(public_key_base64: String) -> Result<
 /// (which signs the `<id>:<ver>:<bytes>` digest), this is a direct
 /// `verify_strict` over the bundle so the same `.sig` works regardless of
 /// whether the host knows the plugin id yet.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_verify_detached_signature(
     artifact_path: String,
     signature_base64: String,
@@ -192,7 +192,7 @@ pub struct PackSignatureVerdict {
 /// canonicalises it (`lib/plugin/character-pack/canonical-json.ts`) so the bytes
 /// verified are the bytes registered — that equality is the whole point of
 /// taking a payload here rather than a file path.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 #[allow(clippy::too_many_arguments)]
 pub async fn plugin_verify_pack_signature(
     request_id: String,
@@ -282,7 +282,7 @@ pub(crate) fn verify_artifact_signature_bytes(
     Ok(verifying_key.verify(&digest, &signature).is_ok())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_verify_signature(
     plugin_id: String,
     version: String,

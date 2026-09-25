@@ -6,7 +6,12 @@
 //! events, so the Rust side is just the persistence layer for the registration
 //! intent (matches the shortcut model).
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::{PluginError, PluginRuntimeState, Result};
@@ -33,6 +38,7 @@ pub struct ContextMenuRecord {
     pub item: ContextMenuItemPayload,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_context_menu_register(
     state: State<'_, PluginRuntimeState>,
@@ -49,6 +55,7 @@ pub async fn plugin_context_menu_register(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_context_menu_unregister(
     state: State<'_, PluginRuntimeState>,

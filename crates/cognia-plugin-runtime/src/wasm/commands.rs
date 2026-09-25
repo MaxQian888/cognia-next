@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Serialize;
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::super::PluginRuntimeState;
@@ -36,6 +37,7 @@ pub struct WasmLoadResult {
     pub generation: String,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_wasm_load(
     state: State<'_, WasmPluginState>,
@@ -113,6 +115,7 @@ fn granted_shell_commands(runtime: &PluginRuntimeState, plugin_id: &str) -> Vec<
         .unwrap_or_default()
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_wasm_activate(
     state: State<'_, WasmPluginState>,
@@ -238,6 +241,7 @@ pub async fn plugin_wasm_activate_generation_for_state(
     })
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_wasm_deactivate(
     state: State<'_, WasmPluginState>,
@@ -376,6 +380,7 @@ fn encode_output(bytes: Vec<u8>) -> String {
     })
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_wasm_call(
     state: State<'_, WasmPluginState>,
@@ -532,6 +537,7 @@ fn extract_kind(payload: &[u8]) -> String {
         .unwrap_or_default()
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_wasm_unload(
     state: State<'_, WasmPluginState>,
@@ -565,6 +571,7 @@ pub async fn plugin_wasm_unload_generation_for_state(
     WasmPluginHost::unload_generation(state, &plugin_id, &generation)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_wasm_renderer_response(
     state: State<'_, WasmPluginState>,
@@ -590,6 +597,7 @@ pub async fn plugin_wasm_renderer_response_for_state(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_wasm_list(
     state: State<'_, WasmPluginState>,

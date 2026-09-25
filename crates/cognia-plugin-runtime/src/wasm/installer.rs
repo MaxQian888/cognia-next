@@ -6,6 +6,10 @@
 //! verification (Ed25519 detached) and manifest sanity-checks happen
 //! before the bundle is unpacked.
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,6 +18,7 @@ use base64::Engine as _;
 use ed25519_dalek::{Signature, VerifyingKey, SIGNATURE_LENGTH};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::super::PluginRuntimeState;
@@ -211,6 +216,7 @@ fn assert_wasm_manifest(parsed: &PartialManifest) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_wasm_install_from_url(
     state: State<'_, PluginRuntimeState>,
@@ -318,6 +324,7 @@ pub async fn plugin_wasm_install_from_url(
 /// HOST, so publishing it remotely would hand a paired client a read primitive
 /// over the host filesystem. That is a decision to take on its own evidence,
 /// not as a side effect of adding a local installer.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_wasm_install_from_file(
     state: State<'_, PluginRuntimeState>,
@@ -612,6 +619,7 @@ pub(crate) fn atomically_install_tree(
 /// Clone a Git repo (shallow) and install an already-built WASM component.
 /// The host never runs repository build scripts or proc macros; authors build
 /// and sign release bundles outside the app trust boundary.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_wasm_install_from_git(
     state: State<'_, PluginRuntimeState>,

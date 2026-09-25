@@ -35,6 +35,8 @@ use super::bridge::WasmRendererBridge;
 use super::capabilities::notification::PendingNotification;
 use super::errors::WasmErrorCode;
 
+/// The desktop's Tauri-backed host services; `tauri-host` only (ADR-0196).
+#[cfg(feature = "tauri-host")]
 pub mod tauri;
 pub mod test_support;
 

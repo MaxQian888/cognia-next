@@ -6,10 +6,15 @@
 //! crate to emit those exact event names so the existing TS contract works
 //! unchanged.
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use std::path::Path;
 
 use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, Emitter, State};
 
 use super::{PluginError, PluginRuntimeState, Result};
@@ -39,6 +44,7 @@ impl FsWatchPayload {
     }
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_fs_watch(
     state: State<'_, PluginRuntimeState>,
@@ -73,6 +79,7 @@ pub async fn plugin_fs_watch(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_fs_unwatch(
     state: State<'_, PluginRuntimeState>,

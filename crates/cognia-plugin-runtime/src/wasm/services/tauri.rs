@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_notification::NotificationExt;

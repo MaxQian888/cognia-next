@@ -6,6 +6,7 @@
 //! `recordSilentFailure` (Tier 1.1) when this rejects.
 
 use serde::Deserialize;
+#[cfg(feature = "tauri-host")]
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 
@@ -21,6 +22,7 @@ pub struct ShowNotificationArgs {
     pub icon: Option<String>,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_show_notification(app: AppHandle, args: ShowNotificationArgs) -> Result<()> {
     let mut builder = app.notification().builder().title(&args.title);

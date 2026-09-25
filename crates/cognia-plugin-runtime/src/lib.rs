@@ -39,6 +39,8 @@ pub mod generated_files;
 pub mod github;
 pub mod lifecycle;
 pub mod marketplace;
+/// OS notifications through the Tauri plugin; `tauri-host` only (ADR-0196).
+#[cfg(feature = "tauri-host")]
 pub mod notification;
 pub mod permissions;
 pub mod process_ops;
@@ -49,6 +51,8 @@ pub mod signature;
 pub mod tray_items;
 pub mod vscode;
 pub mod wasm;
+/// Plugin-owned webview windows; `tauri-host` only (ADR-0196).
+#[cfg(feature = "tauri-host")]
 pub mod window_ops;
 
 use std::collections::HashMap;

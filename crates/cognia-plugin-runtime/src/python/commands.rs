@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::PythonRuntimeState;
@@ -162,6 +163,7 @@ fn max_inflight_host_calls(settings: &PythonHostSettings) -> usize {
 // Commands (thin wrappers around testable `*_inner` fns, per lifecycle.rs)
 // ============================================================================
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_initialize(
     app: tauri::AppHandle,
@@ -202,6 +204,7 @@ pub async fn plugin_python_initialize_for_state(
     apply_initialize(state, interpreter)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_runtime_info(
     state: State<'_, PythonRuntimeState>,
@@ -213,6 +216,7 @@ pub fn plugin_python_runtime_info_for_state(state: &PythonRuntimeState) -> Pytho
     runtime_info_inner(state)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 #[allow(
     clippy::too_many_arguments,
@@ -277,6 +281,7 @@ pub async fn plugin_python_load_for_state(
 }
 
 /// Dispatch one registered `@hook` handler inside the plugin's host.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_call_hook(
     state: State<'_, PythonRuntimeState>,
@@ -332,6 +337,7 @@ pub async fn plugin_python_call_hook_generation_for_state(
 }
 
 /// Push the plugin's persisted config into the host (`on_config_updated`).
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_push_config(
     state: State<'_, PythonRuntimeState>,
@@ -369,6 +375,7 @@ pub async fn plugin_python_push_config_generation_for_state(
     push_config_generation_inner(state, plugins, plugin_id, config, Some(generation)).await
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_get_tools(
     state: State<'_, PythonRuntimeState>,
@@ -397,6 +404,7 @@ pub async fn plugin_python_get_tools_generation_for_state(
     host.request("get_tools", json!({}), CONTROL_TIMEOUT).await
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_call_tool(
     state: State<'_, PythonRuntimeState>,
@@ -438,6 +446,7 @@ pub async fn plugin_python_call_tool_generation_for_state(
     call_tool_generation_inner(state, plugins, plugin_id, tool_name, args, Some(generation)).await
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_call(
     state: State<'_, PythonRuntimeState>,
@@ -489,6 +498,7 @@ pub async fn plugin_python_call_generation_for_state(
 
 /// Evaluate a Python expression (or run a statement block) in the plugin host.
 /// Backs `ctx.python.eval(code, locals)`. Gated by `python:execute`.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_eval(
     state: State<'_, PythonRuntimeState>,
@@ -547,6 +557,7 @@ pub async fn plugin_python_eval_generation_for_state(
 
 /// Import a module by name into the plugin host's on-demand module registry.
 /// Backs `ctx.python.import(moduleName)`. Gated by `python:execute`.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_import(
     state: State<'_, PythonRuntimeState>,
@@ -602,6 +613,7 @@ pub async fn plugin_python_import_generation_for_state(
 
 /// Call a function on a previously-imported module. Backs the proxy returned
 /// by `ctx.python.import(...).call(...)`. Gated by `python:execute`.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_module_call(
     state: State<'_, PythonRuntimeState>,
@@ -663,6 +675,7 @@ pub async fn plugin_python_module_call_generation_for_state(
 
 /// Read an attribute off a previously-imported module. Backs
 /// `ctx.python.import(...).getattr(...)`. Gated by `python:execute`.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_module_getattr(
     state: State<'_, PythonRuntimeState>,
@@ -719,6 +732,7 @@ pub async fn plugin_python_module_getattr_generation_for_state(
     .await
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_is_initialized(
     state: State<'_, PythonRuntimeState>,
@@ -753,6 +767,7 @@ pub async fn plugin_python_is_initialized_generation_for_state(
     }
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_get_info(
     state: State<'_, PythonRuntimeState>,
@@ -786,6 +801,7 @@ pub fn plugin_python_get_info_generation_for_state(
 /// Create the plugin's venv (if missing) and `pip install` its declared
 /// dependencies, streaming progress events. The renderer invokes this only
 /// after explicit user consent.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_install_deps(
     state: State<'_, PythonRuntimeState>,
@@ -832,6 +848,7 @@ pub async fn plugin_python_install_deps_for_state(
 /// permission-guarded `ctx.*` API. `generation` is checked so a reply meant
 /// for a host that has since been respawned is rejected rather than delivered
 /// to its replacement, where the request id would mean something else.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_host_response(
     state: State<'_, PythonRuntimeState>,
@@ -888,6 +905,7 @@ pub async fn plugin_python_host_response_for_state(
 /// a shell is a different trust decision from installing a package, and this
 /// host already installs packages from PyPI for every plugin that declares
 /// `pythonDependencies`. Same boundary, no new one.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_install_uv(state: State<'_, PythonRuntimeState>) -> Result<String> {
     plugin_python_install_uv_for_state(state.inner()).await
@@ -898,6 +916,7 @@ pub async fn plugin_python_install_uv_for_state(state: &PythonRuntimeState) -> R
     super::venv::install_uv(&base, &state.sink()).await
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_unload(
     state: State<'_, PythonRuntimeState>,
@@ -922,6 +941,7 @@ pub async fn plugin_python_unload_generation_for_state(
     unload_generation_inner(state, plugin_id, Some(generation)).await
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_python_list(state: State<'_, PythonRuntimeState>) -> Result<Vec<String>> {
     Ok(plugin_python_list_for_state(state.inner()))

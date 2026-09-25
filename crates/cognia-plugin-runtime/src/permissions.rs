@@ -12,6 +12,7 @@ use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir, OpenOptions};
 use chrono::Utc;
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::{PermissionGrant, PluginError, PluginRuntimeState, Result};
@@ -186,6 +187,7 @@ pub fn revoke_permission_for_state(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_permission_grant(
     state: State<'_, PluginRuntimeState>,
@@ -197,6 +199,7 @@ pub async fn plugin_permission_grant(
     grant_permission_for_state(&state, plugin_id, permission, granted_by, expires_at)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_permission_list(
     state: State<'_, PluginRuntimeState>,
@@ -225,6 +228,7 @@ pub fn list_permissions_for_state(
     Ok(from_disk)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_permission_revoke(
     state: State<'_, PluginRuntimeState>,

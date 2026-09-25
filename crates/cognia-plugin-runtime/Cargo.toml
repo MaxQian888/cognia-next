@@ -18,6 +18,19 @@ publish.workspace = true
 name = "cognia_plugin_runtime"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the Tauri surface: every `#[tauri::command]` that takes `State`,
+# `AppHandle` or a window, the Tauri-backed WASM host services, and the
+# notification / clipboard / opener plugins they use. Off by default so the
+# plugin runtime builds and tests Tauri-free; only `src-tauri` enables it.
+default = []
+tauri-host = [
+  "dep:tauri",
+  "dep:tauri-plugin-notification",
+  "dep:tauri-plugin-clipboard-manager",
+  "dep:tauri-plugin-opener",
+]
+
 [dependencies]
 cognia-core = { path = "../cognia-core" }
 # Proxy-aware outbound config + the shared streaming/hashing downloader the
@@ -27,10 +40,10 @@ cognia-secrets = { path = "../cognia-secrets" }
 # Sandboxed Python plugin launches (bwrap/sandbox-exec prefixes, env filter).
 cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
 cognia-terminal = { path = "../cognia-terminal" }
-tauri = { workspace = true }
-tauri-plugin-notification = "2"
-tauri-plugin-clipboard-manager.workspace = true
-tauri-plugin-opener.workspace = true
+tauri = { workspace = true, optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
+tauri-plugin-clipboard-manager = { workspace = true, optional = true }
+tauri-plugin-opener = { workspace = true, optional = true }
 # The WASM component host — the compile monster this crate isolates.
 wasmtime = { version = "=47.0.3", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
 wasmtime-wasi = "=47.0.3"

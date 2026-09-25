@@ -42,6 +42,10 @@
 //! canonical filesystem, secrets, network, database, and allowlisted
 //! `shell:execute` backends.
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,9 +57,21 @@ use sha2::{Digest, Sha256};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tauri::AppHandle;
+#[cfg(feature = "tauri-host")]
 use tauri::State;
+#[cfg(feature = "tauri-host")]
 use tauri_plugin_clipboard_manager::ClipboardExt;
+
+/// The desktop app handle the bridge borrows for clipboard, plugin windows
+/// and opening paths. Headless hosts always pass `None`. Without `tauri-host`
+/// there is no desktop at all, so the type is uninhabited: every `Some` arm
+/// is statically unreachable and the `None` handling is the only path
+/// (ADR-0196).
+#[cfg(feature = "tauri-host")]
+pub type AppHandle = tauri::AppHandle;
+/// See the `tauri-host` definition above.
+#[cfg(not(feature = "tauri-host"))]
+pub enum AppHandle {}
 
 use super::{NetworkAccessRule, PluginError, PluginRuntimeState, Result};
 
@@ -1042,6 +1058,7 @@ fn handle_managed_ide_secrets(
     }
 }
 
+#[cfg(feature = "tauri-host")]
 async fn handle_clipboard(
     app: &AppHandle,
     op: &str,
@@ -1081,6 +1098,7 @@ async fn handle_clipboard(
     }
 }
 
+#[cfg(feature = "tauri-host")]
 async fn handle_window(
     app: &AppHandle,
     plugin_id: &str,
@@ -1355,6 +1373,7 @@ async fn handle_shell(
     op: &str,
     payload: &Value,
 ) -> std::result::Result<Value, PluginApiError> {
+    #[cfg(feature = "tauri-host")]
     use tauri_plugin_opener::OpenerExt;
     match op {
         "execute" => {
@@ -1392,18 +1411,34 @@ async fn handle_shell(
         "open" => {
             let path = payload_str(payload, "path")?;
             let app = app.ok_or_else(|| PluginApiError::not_supported("shell:open"))?;
-            app.opener()
-                .open_path(path.clone(), None::<&str>)
-                .map_err(|e| PluginApiError::internal(format!("shell:open: {e}")))?;
-            Ok(json!({ "opened": path }))
+            #[cfg(not(feature = "tauri-host"))]
+            {
+                let _ = path;
+                match *app {}
+            }
+            #[cfg(feature = "tauri-host")]
+            {
+                app.opener()
+                    .open_path(path.clone(), None::<&str>)
+                    .map_err(|e| PluginApiError::internal(format!("shell:open: {e}")))?;
+                Ok(json!({ "opened": path }))
+            }
         }
         "showInFolder" => {
             let path = payload_str(payload, "path")?;
             let app = app.ok_or_else(|| PluginApiError::not_supported("shell:showInFolder"))?;
-            app.opener()
-                .reveal_item_in_dir(&path)
-                .map_err(|e| PluginApiError::internal(format!("shell:showInFolder: {e}")))?;
-            Ok(json!({ "revealed": path }))
+            #[cfg(not(feature = "tauri-host"))]
+            {
+                let _ = path;
+                match *app {}
+            }
+            #[cfg(feature = "tauri-host")]
+            {
+                app.opener()
+                    .reveal_item_in_dir(&path)
+                    .map_err(|e| PluginApiError::internal(format!("shell:showInFolder: {e}")))?;
+                Ok(json!({ "revealed": path }))
+            }
         }
         _ => Err(PluginApiError::not_supported(&format!("shell:{op}"))),
     }
@@ -1548,11 +1583,17 @@ async fn dispatch(
         "managedIdeState" => handle_managed_ide_state(state, plugin_id, op, payload),
         "managedIdeSecrets" => handle_managed_ide_secrets(state, plugin_id, op, payload),
         "clipboard" => match app {
+            #[cfg(feature = "tauri-host")]
             Some(app) => handle_clipboard(app, op, payload).await,
+            #[cfg(not(feature = "tauri-host"))]
+            Some(app) => match *app {},
             None => Err(PluginApiError::not_supported(api)),
         },
         "window" => match app {
+            #[cfg(feature = "tauri-host")]
             Some(app) => handle_window(app, plugin_id, op, payload).await,
+            #[cfg(not(feature = "tauri-host"))]
+            Some(app) => match *app {},
             None => Err(PluginApiError::not_supported(api)),
         },
         "network" => handle_network(state, plugin_id, op, payload).await,
@@ -1617,6 +1658,7 @@ pub async fn plugin_api_invoke_for_state(
     plugin_api_invoke_for_host(None, state, request).await
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_api_invoke(
     app: AppHandle,
@@ -1724,6 +1766,7 @@ pub async fn plugin_api_batch_invoke_for_state(
     plugin_api_batch_invoke_for_host(None, state, request).await
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_api_batch_invoke(
     app: AppHandle,
@@ -1809,6 +1852,7 @@ pub fn plugin_workspace_repo_remove_for_state(
 /// [`plugin_workspace_repo_dir`], so a plugin cannot aim the delete anywhere
 /// but its own cache. `Ok(false)` means there was nothing there — releasing
 /// twice is not an error.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn plugin_workspace_repo_remove(
     state: State<'_, PluginRuntimeState>,
@@ -1823,6 +1867,7 @@ pub fn plugin_workspace_repo_remove(
 /// Under the plugin's own data directory, so uninstalling it reclaims the
 /// disk, and so one plugin cannot read another's checkouts. The directory
 /// itself is not created — `git clone` wants to make it — but its parent is.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn plugin_workspace_repo_dir(
     state: State<'_, PluginRuntimeState>,
@@ -1916,7 +1961,7 @@ pub fn plugin_get_capabilities_for_host(has_desktop_ui: bool) -> Vec<PluginApiCa
     capabilities
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_get_capabilities() -> Result<Vec<PluginApiCapability>> {
     Ok(plugin_get_capabilities_for_host(true))
 }
@@ -1925,6 +1970,7 @@ pub async fn plugin_get_capabilities() -> Result<Vec<PluginApiCapability>> {
 /// `shell:execute` gate can enforce its deny-by-default allowlist. Called by
 /// the renderer at plugin load; an empty list (or never calling this) leaves
 /// the plugin unable to run any command.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_set_shell_allowlist(
     state: State<'_, PluginRuntimeState>,
@@ -1940,6 +1986,7 @@ pub async fn plugin_set_shell_allowlist(
 /// plugin load. A plugin that never calls this (declares no allowlist) is
 /// denied all egress by default — declaring an allowlist (or `["*"]` to opt
 /// into unrestricted egress) is required to reach any host.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_set_network_allowlist(
     state: State<'_, PluginRuntimeState>,

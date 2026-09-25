@@ -4,7 +4,12 @@
 //! dispatches clicks through `plugin-tray-item:<plugin_id>:<item_id>` window
 //! events (set up by `lib/plugin/api/tray-api.ts` on the TS side).
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
 use super::{PluginError, PluginRuntimeState, Result};
@@ -38,6 +43,7 @@ pub struct TrayItemRecord {
     pub item: TrayItemPayload,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_tray_item_register(
     state: State<'_, PluginRuntimeState>,
@@ -54,6 +60,7 @@ pub async fn plugin_tray_item_register(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_tray_item_unregister(
     state: State<'_, PluginRuntimeState>,
@@ -69,6 +76,7 @@ pub async fn plugin_tray_item_unregister(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_tray_item_list(
     state: State<'_, PluginRuntimeState>,
@@ -84,6 +92,7 @@ pub async fn plugin_tray_item_list(
 /// Bulk-removal for the plugin disable / unload lifecycle. Mirrors the
 /// `unregisterCommandsByPlugin` pattern used by every other plugin
 /// contribution surface.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_tray_item_unregister_by_plugin(
     state: State<'_, PluginRuntimeState>,

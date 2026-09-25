@@ -21,11 +21,16 @@
 //! `Vec<PathBuf>`. Filesystem events emit `plugin:file-change` with the same
 //! payload shape `lib/plugin/devtools/file-watch.ts` expects.
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use std::path::{Path, PathBuf};
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, Emitter, State};
 
 use super::{PluginError, PluginRuntimeState, Result};
@@ -116,6 +121,7 @@ pub struct DevServerWatchArgs {
     pub paths: Option<Vec<String>>,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_dev_server_watch(app: AppHandle, args: DevServerWatchArgs) -> Result<()> {
     let plugin_id = args.plugin_id.clone().unwrap_or_default();
@@ -154,7 +160,7 @@ pub async fn plugin_dev_server_watch(app: AppHandle, args: DevServerWatchArgs) -
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_dev_server_unwatch(plugin_id: String) -> Result<()> {
     let mut state = WATCHERS.lock();
     state.per_plugin.remove(&plugin_id);
@@ -168,6 +174,7 @@ pub struct WatchStartArgs {
     pub paths: Vec<String>,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_watch_start(app: AppHandle, args: WatchStartArgs) -> Result<()> {
     if args.paths.is_empty() {
@@ -185,7 +192,7 @@ pub async fn plugin_watch_start(app: AppHandle, args: WatchStartArgs) -> Result<
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_watch_stop() -> Result<()> {
     let mut state = WATCHERS.lock();
     // Dropping the watchers stops the underlying file-system event stream.
@@ -195,6 +202,7 @@ pub async fn plugin_watch_stop() -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_list_dev_plugins(state: State<'_, PluginRuntimeState>) -> Result<Vec<String>> {
     Ok(state.plugins.read().keys().cloned().collect())
@@ -202,6 +210,7 @@ pub async fn plugin_list_dev_plugins(state: State<'_, PluginRuntimeState>) -> Re
 
 // ---- helpers ----------------------------------------------------------------
 
+#[cfg(feature = "tauri-host")]
 /// Create a `notify::RecommendedWatcher` that emits `plugin:file-change`
 /// events on the given Tauri app. Each filesystem event is converted into one
 /// or more `FileChangePayload` entries and broadcast to the renderer.

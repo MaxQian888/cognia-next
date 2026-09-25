@@ -32,7 +32,7 @@ pub struct ScannedPlugin {
 
 const MANIFEST_CANDIDATES: [&str; 2] = ["plugin.json", "manifest.json"];
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_scan_directory(directory: String) -> Result<Vec<ScannedPlugin>> {
     Ok(scan_directory_inner(Path::new(&directory)))
 }

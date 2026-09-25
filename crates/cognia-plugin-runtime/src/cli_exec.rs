@@ -53,7 +53,7 @@ pub struct PluginCliExecResult {
     pub truncated: bool,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn plugin_cli_exec(request: PluginCliExecRequest) -> Result<PluginCliExecResult, String> {
     cli_exec_inner(request).await
 }

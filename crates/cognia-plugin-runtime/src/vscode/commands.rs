@@ -28,6 +28,11 @@
 //! `dead_code` is silenced module-wide: every command in this file IS
 //! registered in `tauri::generate_handler!` (see `src/lib.rs`), but the
 //! macro hides its callsites from rustc's dead-code analyser.
+
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// only they use; the feature build still lints them. (Dead code is allowed
+// file-wide below already.)
+#![cfg_attr(not(feature = "tauri-host"), allow(unused_imports))]
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -37,6 +42,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 
@@ -230,6 +236,7 @@ fn sidecar_for_generation(
     Ok(sidecar)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_vscode_install_vsix(
     vsix_base64: String,
@@ -252,6 +259,7 @@ pub async fn plugin_vscode_install_vsix(
 ///
 /// The bytes still went through the renderer (that's where permission
 /// inference has to run); this only avoids re-encoding them to hand back.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_vscode_install_vsix_from_path(
     temp_path: String,
@@ -312,6 +320,7 @@ fn ensure_staged(install_root: &Path, path: &Path) -> Result<(), VscodeCommandEr
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 #[allow(
     clippy::too_many_arguments,
@@ -513,20 +522,24 @@ fn lsp_host_script_path(sidecar_dir: &Path) -> PathBuf {
         .join("host.js")
 }
 
+#[cfg(feature = "tauri-host")]
 /// ADR-0067 Tier-B inversion: the sidecar-directory resolver lives app-side
 /// in `claude::sidecar` (it owns the resource-dir vs manifest-walk split).
 /// The app shell registers it at startup, before any `plugin_load_vscode` /
 /// LSP-host spawn can run.
 type SidecarDirResolver = fn(&AppHandle) -> Result<PathBuf, String>;
 
+#[cfg(feature = "tauri-host")]
 static SIDECAR_DIR_RESOLVER: std::sync::OnceLock<SidecarDirResolver> = std::sync::OnceLock::new();
 
+#[cfg(feature = "tauri-host")]
 /// Register the app-side sidecar-directory resolver. First registration wins;
 /// later calls are no-ops.
 pub fn set_sidecar_dir_resolver(resolver: fn(&AppHandle) -> Result<PathBuf, String>) {
     let _ = SIDECAR_DIR_RESOLVER.set(resolver);
 }
 
+#[cfg(feature = "tauri-host")]
 /// Resolve the absolute path to `sidecar/vscode-ext-host/dist/host.js` in
 /// both dev and release builds. Delegates to the registered app-side
 /// resolver (`claude::sidecar::sidecar_dir`), which already handles the
@@ -553,6 +566,7 @@ fn resolve_lsp_host_script(app: &AppHandle) -> Result<PathBuf, String> {
 /// `lsp:*` frame with no activation handshake, so `extension_path` is unused
 /// at boot. Without this, `plugin_invoke_vscode_rpc(LSP_HOST_KEY, …)` returns
 /// `not_loaded` and the whole editor LSP data plane stays dormant.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn ensure_system_lsp_host(
     app_handle: AppHandle,
@@ -650,6 +664,7 @@ pub struct ActivateResult {
     pub registered_language_providers: Vec<String>,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_activate_vscode(
     plugin_id: String,
@@ -728,6 +743,7 @@ fn extract_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_deactivate_vscode(
     plugin_id: String,
@@ -760,6 +776,7 @@ pub async fn plugin_deactivate_vscode_generation_for_state(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_unload_vscode(
     plugin_id: String,
@@ -812,6 +829,7 @@ pub async fn plugin_unload_vscode_generation_for_state(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_invoke_vscode_rpc(
     plugin_id: String,
@@ -870,6 +888,7 @@ pub async fn plugin_invoke_vscode_rpc_generation_for_state(
     .map(|result| result.to_string())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_vscode_send_response(
     plugin_id: String,

@@ -1,5 +1,9 @@
 //! Shared resource ceilings for untrusted plugin downloads and archives.
 
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// and helpers only they use; the feature build still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use std::io::{Read, Write};
 
 use futures_util::StreamExt as _;

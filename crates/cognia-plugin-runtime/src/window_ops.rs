@@ -5,6 +5,7 @@
 //! `.catch(...)` blocks that now record diagnostics on rejection.
 
 use serde_json::Value;
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use super::{PluginError, Result};
@@ -169,6 +170,7 @@ pub async fn plugin_window_op(
     }
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_window_minimize(app: AppHandle) -> Result<()> {
     main_window(&app)?
@@ -176,6 +178,7 @@ pub async fn plugin_window_minimize(app: AppHandle) -> Result<()> {
         .map_err(|e| PluginError::Internal(e.to_string()))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_window_maximize(app: AppHandle) -> Result<()> {
     main_window(&app)?
@@ -183,6 +186,7 @@ pub async fn plugin_window_maximize(app: AppHandle) -> Result<()> {
         .map_err(|e| PluginError::Internal(e.to_string()))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_window_unmaximize(app: AppHandle) -> Result<()> {
     main_window(&app)?
@@ -190,6 +194,7 @@ pub async fn plugin_window_unmaximize(app: AppHandle) -> Result<()> {
         .map_err(|e| PluginError::Internal(e.to_string()))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_window_set_always_on_top(app: AppHandle, flag: bool) -> Result<()> {
     main_window(&app)?

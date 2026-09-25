@@ -27,12 +27,18 @@
 //! `dead_code` is silenced module-wide for the same reason as the sibling
 //! `commands` module: `tauri::generate_handler!` hides the command's callsite
 //! from rustc's dead-code analyser.
+
+// Without `tauri-host` the commands compile out (ADR-0196), leaving imports
+// only they use; the feature build still lints them. (Dead code is allowed
+// file-wide below already.)
+#![cfg_attr(not(feature = "tauri-host"), allow(unused_imports))]
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Serialize;
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 use url::Url;
 
@@ -190,6 +196,7 @@ pub struct DownloadedVsix {
 ///
 /// `sha256_url` is `files.sha256` from the Open VSX API — a **URL to a digest
 /// file**, not a digest.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_vscode_download_vsix(
     download_url: String,
