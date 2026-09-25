@@ -207,19 +207,33 @@ fn events_for(report: &serde_json::Value) -> Vec<serde_json::Value> {
     })]
 }
 
+/// Captures the primary screen as PNG bytes, or `None` when the platform
+/// refuses.
+pub type ScreenshotCapture = fn() -> Option<Vec<u8>>;
+
+/// The screen-capture backend. The desktop app installs one from
+/// `cognia-automation` at boot, so this crate does not link the whole
+/// UI-automation stack for a single call (ADR-0196). Left empty — the headless
+/// server, a unit test — it behaves like a platform that refuses: the
+/// submission goes out without a screenshot and says so.
+pub static SCREENSHOT_CAPTURE: cognia_core::installed::Installed<ScreenshotCapture> =
+    cognia_core::installed::Installed::new(
+        "cognia_observability::crash::submit::SCREENSHOT_CAPTURE",
+    );
+
 /// Capture a screenshot of the current screen into `dir`.
 ///
 /// Returns `None` when the platform refuses — screen recording permission is
-/// not granted, no monitor is attached, a headless session. A refused
-/// screenshot never fails the submission: the report is worth more than the
-/// optional attachment, and the caller reports the omission instead.
+/// not granted, no monitor is attached, a headless session, no capture
+/// backend installed. A refused screenshot never fails the submission: the
+/// report is worth more than the optional attachment, and the caller reports
+/// the omission instead.
 fn capture_screenshot(dir: &Path) -> Option<PathBuf> {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
-    use cognia_automation::automation::platform::shared::screenshot::capture_primary;
-    use cognia_automation::automation::types::ScreenshotOpts;
+    capture_screenshot_with(SCREENSHOT_CAPTURE.try_get().copied(), dir)
+}
 
-    let shot = capture_primary(&ScreenshotOpts::default()).ok()?;
-    let bytes = STANDARD.decode(shot.bytes).ok()?;
+fn capture_screenshot_with(capture: Option<ScreenshotCapture>, dir: &Path) -> Option<PathBuf> {
+    let bytes = capture?()?;
     let path = dir.join("screenshot.png");
     std::fs::write(&path, bytes).ok()?;
     Some(path)
@@ -599,6 +613,29 @@ pub async fn crash_delete_submission(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screenshot_is_skipped_without_a_capture_backend_or_when_it_refuses() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(capture_screenshot_with(None, dir.path()), None);
+
+        fn refuses() -> Option<Vec<u8>> {
+            None
+        }
+        assert_eq!(capture_screenshot_with(Some(refuses), dir.path()), None);
+        assert!(!dir.path().join("screenshot.png").exists());
+    }
+
+    #[test]
+    fn screenshot_bytes_from_the_backend_land_as_screenshot_png() {
+        let dir = tempfile::tempdir().unwrap();
+        fn png() -> Option<Vec<u8>> {
+            Some(b"\x89PNG fake".to_vec())
+        }
+        let path = capture_screenshot_with(Some(png), dir.path()).expect("written");
+        assert_eq!(path, dir.path().join("screenshot.png"));
+        assert_eq!(std::fs::read(path).unwrap(), b"\x89PNG fake");
+    }
 
     #[test]
     fn rejects_report_stems_that_could_escape_the_crash_directory() {

@@ -35,7 +35,7 @@ desktop-host = [
   "dep:base64",
   "dep:url",
   "dep:tempfile",
-  "dep:cognia-automation",
+  "dep:cognia-core",
   "dep:cognia-instrument",
   "dep:cognia-net",
   "dep:cognia-secrets",
@@ -88,8 +88,10 @@ base64 = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 # `crash::submit` stages a package in a TempDir at runtime — not a dev-only dep.
 tempfile = { workspace = true, optional = true }
-# The crash reporter attaches a screenshot; telemetry feeds the metrics registry.
-cognia-automation = { path = "../cognia-automation", optional = true }
+# `Installed` for the crash reporter's screen-capture slot, which the desktop
+# app fills from `cognia-automation` (this crate used to link all of it).
+cognia-core = { path = "../cognia-core", optional = true }
+# Telemetry feeds the metrics registry.
 cognia-instrument = { path = "../cognia-instrument", optional = true }
 # `proxy_config` for outbound uploads, `secret_store` for the telemetry token.
 cognia-net = { path = "../cognia-net", optional = true }

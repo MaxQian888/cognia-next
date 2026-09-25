@@ -17,13 +17,14 @@ use tauri_plugin_fs::FsExt as _;
 
 /// The installs [`install`] runs, in order. Pinned by a test so a step cannot
 /// be dropped from the boot silently again.
-pub(crate) const STEP_NAMES: [&str; 6] = [
+pub(crate) const STEP_NAMES: [&str; 7] = [
     "push_credentials",
     "default_allowed_roots",
     "backup_fs_scope",
     "task_workspace_maintenance",
     "gateway_brain_bridge",
     "wasm_host_services",
+    "crash_screenshot_capture",
 ];
 
 /// The directory the atomic backup stream writes into, mirrored into the
@@ -54,9 +55,7 @@ pub(crate) fn install(app: &tauri::App) {
     // Documents, plus Pi's config dir wherever `$PI_CODING_AGENT_DIR` puts it.
     // Pure in-memory inserts; the renderer adds the active workspace roots
     // once it loads.
-    crate::files::seed_default_allowed_roots(&[
-        crate::agents::paths::vendor_roots().pi_agent_dir,
-    ]);
+    crate::files::seed_default_allowed_roots(&[crate::agents::paths::vendor_roots().pi_agent_dir]);
 
     // Mirror the narrow static backup scope in the dynamic scope used by the
     // atomic stream helper; existing deny patterns still win.
@@ -107,7 +106,24 @@ pub(crate) fn install(app: &tauri::App) {
         ),
     );
 
+    // Give the crash reporter its screen capture. `cognia-observability`
+    // declares the slot so it does not link the UI-automation stack for this
+    // one call (ADR-0196); unset, reports go out without a screenshot.
+    if let Err(err) = crate::crash::submit::SCREENSHOT_CAPTURE.install(capture_primary_screen_png) {
+        log::warn!("{err}");
+    }
+
     log::info!("host services installed: {}", STEP_NAMES.join(", "));
+}
+
+/// The primary screen as PNG bytes, for the crash reporter's attachment.
+fn capture_primary_screen_png() -> Option<Vec<u8>> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let shot = crate::automation::platform::shared::screenshot::capture_primary(
+        &crate::automation::types::ScreenshotOpts::default(),
+    )
+    .ok()?;
+    STANDARD.decode(shot.bytes).ok()
 }
 
 #[cfg(test)]
@@ -142,6 +158,7 @@ mod tests {
                 "task_workspace_maintenance",
                 "gateway_brain_bridge",
                 "wasm_host_services",
+                "crash_screenshot_capture",
             ]
         );
     }
