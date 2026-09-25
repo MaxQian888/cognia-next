@@ -1219,12 +1219,14 @@ describe("action.plan.*", () => {
   })
 
   it("updates drafts, controls lifecycle, sets step status, and deletes plans", async () => {
+    // Two steps: resuming an in-session plan drives its next step, so with the
+    // only step done a resume would finish the plan instead of executing it.
     const created = await exec(
       "action.plan.create" as WorkflowNodeKind,
       makeCtx("action.plan.create" as WorkflowNodeKind, {
         sessionId: "ses_lifecycle",
         title: "Lifecycle plan",
-        stepsJson: '[{"title":"First","kind":"agent_turn"}]',
+        stepsJson: '[{"title":"First","kind":"agent_turn"},{"title":"Second","kind":"agent_turn"}]',
       })
     )
     const planId = (created.output as { planId: string }).planId
@@ -1301,7 +1303,8 @@ describe("action.plan.*", () => {
         feedback: "Needs a smaller scope",
       })
     )
-    expect((rejected.output as { plan: { status: string } }).plan.status).toBe("cancelled")
+    // Rejection is its own terminal status, not a cancellation.
+    expect((rejected.output as { plan: { status: string } }).plan.status).toBe("rejected")
 
     const deleted = await exec(
       "action.plan.delete" as WorkflowNodeKind,
@@ -2843,6 +2846,9 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
 }))
 
 describe("action.team.task.dispatch", () => {
+  // The teammates here answer with text alone, so each task is dispatched as
+  // `general`. A `code` task (the node's default) must also bring a revision,
+  // a diff and a verification before it may complete; see the evidence test.
   const setupTeamCtx = async (params: {
     runId: string
     workers: { id: string; name: string }[]
@@ -2906,6 +2912,20 @@ describe("action.team.task.dispatch", () => {
       resolvedCapabilities: new Map(),
     }
     registerTeamRunContext(ctx as never)
+    // Dispatch is durable: it admits a task only while the persisted run is
+    // live, so the in-memory context alone is refused ("Run is not accepting
+    // dispatch").
+    const { createAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+    await createAgentTeamRun({
+      id: params.runId,
+      teamId: "team-1",
+      objective: "Dispatch test",
+      status: "running",
+      priority: 1,
+      decisionVersion: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
     return { messages, taskStatuses, ctx }
   }
 
@@ -2922,6 +2942,7 @@ describe("action.team.task.dispatch", () => {
       usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
     })
     const ctx = makeCtx("action.team.task.dispatch", {
+      taskKind: "general",
       teamId: "team-1",
       taskId: "t1",
       title: "Title",
@@ -2934,6 +2955,37 @@ describe("action.team.task.dispatch", () => {
     // ADR-0090 Phase 6: this test host has no sidecar, so the tool-capable
     // claude dispatch degrades to text — the reason rides the node output.
     expect((r.output as { degradedReason?: string }).degradedReason).toBe("sidecar-unavailable")
+  })
+
+  it("reports the access and kind it dispatched the task as", async () => {
+    await setupTeamCtx({ runId: "run_dispatch_kind", workers: [{ id: "w1", name: "W1" }] })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({ text: "notes" })
+    const ctx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t1",
+      title: "Research",
+      access: "read",
+      taskKind: "general",
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = "run_dispatch_kind"
+    const r = await exec("action.team.task.dispatch", ctx)
+    expect(r.output).toMatchObject({ access: "read", taskKind: "general" })
+  })
+
+  it("parks a default (code) task that reports only text at the evidence gate", async () => {
+    await setupTeamCtx({ runId: "run_dispatch_code", workers: [{ id: "w1", name: "W1" }] })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({ text: "I changed the code" })
+    const ctx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t1",
+      title: "Implement",
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = "run_dispatch_code"
+    await expect(exec("action.team.task.dispatch", ctx)).rejects.toThrow(
+      /Evidence gate requires: .*code_diff/
+    )
   })
 
   it("honors params.assignedTo as the preferred teammate (skill-aware claim)", async () => {
@@ -2950,6 +3002,7 @@ describe("action.team.task.dispatch", () => {
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
     })
     const ctx = makeCtx("action.team.task.dispatch", {
+      taskKind: "general",
       teamId: "team-1",
       taskId: "t1",
       title: "Title",
@@ -2965,6 +3018,7 @@ describe("action.team.task.dispatch", () => {
     const { __resetTeamRunContextForTesting } = await import("@/lib/ai/agent/team/team-run-context")
     __resetTeamRunContextForTesting()
     const ctx = makeCtx("action.team.task.dispatch", {
+      taskKind: "general",
       teamId: "team-1",
       taskId: "t1",
       title: "Title",
@@ -2983,6 +3037,7 @@ describe("action.team.task.dispatch", () => {
     teamCtx.pool.recordFailure("w1", new Error("e2"))
     expect(teamCtx.pool.claim("anything")).toBeNull()
     const ctx = makeCtx("action.team.task.dispatch", {
+      taskKind: "general",
       teamId: "team-1",
       taskId: "t1",
       title: "Title",
@@ -3003,6 +3058,7 @@ describe("action.team.task.dispatch", () => {
       usage: { promptTokens: 5, completionTokens: 3, totalTokens: 8 },
     })
     const ctx = makeCtx("action.team.task.dispatch", {
+      taskKind: "general",
       teamId: "team-1",
       taskId: "t1",
       title: "Title",
@@ -3018,6 +3074,7 @@ describe("action.team.task.dispatch", () => {
     const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
     ;(executeAgent as jest.Mock).mockRejectedValue(new Error("LLM down"))
     const ctx = makeCtx("action.team.task.dispatch", {
+      taskKind: "general",
       teamId: "team-1",
       taskId: "t1",
       title: "Title",
@@ -3037,6 +3094,7 @@ describe("action.team.task.dispatch", () => {
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
     })
     const ctx = makeCtx("action.team.task.dispatch", {
+      taskKind: "general",
       teamId: "team-1",
       taskId: "t1",
       title: "Title",
@@ -3065,6 +3123,7 @@ describe("action.team.task.dispatch", () => {
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
     })
     const ctx = makeCtx("action.team.task.dispatch", {
+      taskKind: "general",
       teamId: "team-1",
       taskId: "t2",
       title: "Build",
@@ -3179,13 +3238,34 @@ describe("action.team.task.review", () => {
       resolvedCapabilities: new Map(),
     }
     registerTeamRunContext(ctx as never)
+    // A revision is a durable dispatch, admitted only while the run is live.
+    const { createAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+    await createAgentTeamRun({
+      id: params.runId,
+      teamId: "team-1",
+      objective: "Review test",
+      status: "running",
+      priority: 1,
+      decisionVersion: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
     return { messages, taskStatuses, events, runLeadReview, reviewCalls }
   }
 
   /** `upstream: null` = the dispatch node published nothing. */
   const reviewCtx = (runId: string, upstream?: Record<string, unknown> | null) => {
+    // What `action.team.task.dispatch` outputs for a read-only, text-only task.
     const dispatchOutput =
-      upstream === undefined ? { text: "the work", teammateId: "w1", teammateName: "W1" } : upstream
+      upstream === undefined
+        ? {
+            text: "the work",
+            teammateId: "w1",
+            teammateName: "W1",
+            access: "read",
+            taskKind: "general",
+          }
+        : upstream
     const ctx = makeCtx(
       "action.team.task.review",
       {
@@ -3263,6 +3343,48 @@ describe("action.team.task.review", () => {
     expect(taskStatuses).toContainEqual(
       expect.objectContaining({ id: "t1", status: "completed", result: "revised work" })
     )
+  })
+
+  it("revises with the access and kind the task was dispatched as", async () => {
+    await setupReviewCtx({
+      runId: "rv_kind",
+      verdicts: [
+        { verdict: "changes_requested", feedback: "cite the source" },
+        { verdict: "approved", feedback: "ok" },
+      ],
+    })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({ text: "revised notes" })
+    // The shared coordinator is a plain object, so its method can be spied on
+    // (a module export compiled by SWC cannot).
+    const { getDurableTeamCoordinator } =
+      await import("@/lib/ai/agent/team/durable/durable-runtime")
+    const registerChild = jest.spyOn(getDurableTeamCoordinator(), "registerChild")
+    try {
+      const r = await exec("action.team.task.review", reviewCtx("rv_kind"))
+      // Approved without a code diff: the revision answered to the `general`
+      // gate its task was dispatched under, not the `code` default.
+      expect((r.output as { verdict: string }).verdict).toBe("approved")
+      expect(registerChild).toHaveBeenCalledTimes(1)
+      expect(registerChild.mock.calls[0][0]).toMatchObject({ access: "read" })
+    } finally {
+      registerChild.mockRestore()
+    }
+  })
+
+  it("revises a dispatch output that predates access/kind as the node's default code task", async () => {
+    await setupReviewCtx({
+      runId: "rv_legacy",
+      verdicts: [{ verdict: "changes_requested", feedback: "again" }],
+    })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({ text: "revised" })
+    await expect(
+      exec(
+        "action.team.task.review",
+        reviewCtx("rv_legacy", { text: "the work", teammateId: "w1", teammateName: "W1" })
+      )
+    ).rejects.toThrow(/revision dispatch failed \(Evidence gate requires: .*code_diff/)
   })
 
   it("fails the task when the revision budget is exhausted", async () => {
@@ -3471,6 +3593,17 @@ describe("action.team.task.dispatch output validation", () => {
         resolvedCapabilities: new Map(),
       }
       registerTeamRunContext(ctx as never)
+      const { createAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+      await createAgentTeamRun({
+        id: "run_empty",
+        teamId: "team-1",
+        objective: "Empty output test",
+        status: "running",
+        priority: 1,
+        decisionVersion: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      })
       return { ctx }
     })()
     const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
@@ -3479,6 +3612,7 @@ describe("action.team.task.dispatch output validation", () => {
       usage: { promptTokens: 1, completionTokens: 0, totalTokens: 1 },
     })
     const stepCtx = makeCtx("action.team.task.dispatch", {
+      taskKind: "general",
       teamId: "team-1",
       taskId: "t1",
       title: "T",

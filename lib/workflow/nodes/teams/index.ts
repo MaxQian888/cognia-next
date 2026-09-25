@@ -398,6 +398,9 @@ registerNodeExecutor({
           ].join("\n\n")
         : ""
 
+    const access = params.access === "read" ? "read" : "write"
+    const taskKind =
+      params.taskKind === "ui" || params.taskKind === "general" ? params.taskKind : "code"
     const result = await dispatchTeammate(teamCtx, {
       taskId,
       // Persona-aware prompt built from the teammate the pool actually claims,
@@ -409,9 +412,8 @@ registerNodeExecutor({
       signal: ctx.signal,
       validateOutput: true,
       recordToStore: true,
-      access: params.access === "read" ? "read" : "write",
-      taskKind:
-        params.taskKind === "ui" || params.taskKind === "general" ? params.taskKind : "code",
+      access,
+      taskKind,
       ...(typeof params.repositoryId === "string" ? { repositoryId: params.repositoryId } : {}),
       ...(Array.isArray(params.fileOwnership)
         ? {
@@ -443,6 +445,11 @@ registerNodeExecutor({
         text: result.text,
         teammateId: result.teammateId,
         teammateName: result.teammateName,
+        // What this task was dispatched as. A lead review's revision re-dispatch
+        // reads them back, so a revision runs with the same access and answers
+        // to the same evidence gate as the work it revises.
+        access,
+        taskKind,
         tokenUsage: result.usage,
         attempt: 1,
         // ADR-0090 Phase 6: surface a degraded dispatch (lesser rail than the
@@ -525,12 +532,26 @@ registerNodeExecutor({
     // The dispatch node's output carries both the deliverable and its author —
     // the author is what makes "send it back to whoever wrote it" possible.
     const upstream = ctx.upstream[params.dispatchNodeId] as
-      { text?: string; teammateId?: string; teammateName?: string } | undefined
+      | {
+          text?: string
+          teammateId?: string
+          teammateName?: string
+          access?: unknown
+          taskKind?: unknown
+        }
+      | undefined
     if (!upstream || typeof upstream.text !== "string") {
       throw nonRetryable(
         `action.team.task.review: no output from dispatch node "${params.dispatchNodeId}"`
       )
     }
+    // A revision is the same task: same access, same evidence gate. Without
+    // these a read-only research task was revised with write access and then
+    // refused for lacking a code diff. An output from before the dispatch node
+    // recorded them falls back to the dispatch node's own defaults.
+    const revisionAccess = upstream.access === "read" ? "read" : "write"
+    const revisionTaskKind =
+      upstream.taskKind === "ui" || upstream.taskKind === "general" ? upstream.taskKind : "code"
 
     let workerOutput = upstream.text
     let workerId = upstream.teammateId
@@ -646,6 +667,8 @@ registerNodeExecutor({
           // this teammate wrote, so substituting anyone else is meaningless.
           requireTeammateId: workerId,
           workspaceKey: taskId,
+          access: revisionAccess,
+          taskKind: revisionTaskKind,
         })
         workerOutput = revised.text
         workerId = revised.teammateId
