@@ -6,6 +6,7 @@ import { wireAttentionSource } from "./sources/attention-source"
 import { wireGitSource } from "./sources/git-source"
 import { wireBackgroundTaskSource } from "./sources/background-task-source"
 import { wireCaptureSource } from "./sources/capture-source"
+import { wireRadarSource } from "./sources/radar-source"
 
 describe("wirePetSources", () => {
   it("wires every provided source and disposes them all", () => {
@@ -25,7 +26,11 @@ describe("wirePetSources", () => {
   })
 
   it("ships the full default source set", () => {
-    expect(DEFAULT_PET_SOURCES).toHaveLength(14)
+    expect(DEFAULT_PET_SOURCES).toHaveLength(15)
+  })
+
+  it("includes the Attention Radar source, so a fresh report reaches the pet", () => {
+    expect(DEFAULT_PET_SOURCES).toContain(wireRadarSource)
   })
 
   it("includes the unified attention source", () => {

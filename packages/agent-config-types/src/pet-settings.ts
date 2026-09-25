@@ -47,7 +47,11 @@ export interface PetWanderSettings {
  * the window-state plugin denylists the "pet" window so this field owns it.
  */
 export interface PetDesktopOverlaySettings {
-  /** Whether the desktop-pet overlay window is open. */
+  /**
+   * Whether the desktop-pet overlay window is open. Opening it is a summon, so
+   * every summon path sets {@link PetSettings.enabled} too (ADR-0058 D9): an
+   * overlay has no controller of its own and needs the main window's.
+   */
   enabled: boolean
   /** Whether the overlay ignores cursor events (click-through). */
   clickThrough: boolean
@@ -107,7 +111,12 @@ export interface PetTwinAwarenessSettings {
 }
 
 export interface PetSettings {
-  /** Master switch — when false the widget never mounts. */
+  /**
+   * Master switch — when false the widget never mounts. Summoning the desktop
+   * overlay (hotkey, tray, ⌘K, the overlay switch, the agent's `pet_show`)
+   * turns it back on; hiding the overlay never turns it off (ADR-0058 D9).
+   * Desktop app only: web and mobile never host the pet, whatever this says.
+   */
   enabled: boolean
   /** Dock corner for the floating widget. */
   anchor: PetAnchor

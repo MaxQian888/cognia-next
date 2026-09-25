@@ -84,9 +84,10 @@ lib/radar/
   radar-cron-bridge.ts   # 调度器调用的入口
 lib/db/radar-reports.ts · types/radar/
 components/pet/console/radar-panel.tsx · hooks/pet/use-pet-insight.ts
+lib/pet/events/sources/radar-source.ts
 ```
 
-报告呈现在宠物控制台上，这也是 `use-pet-insight.ts` 位于宠物侧而非 `lib/radar` 的原因。
+报告呈现在宠物控制台上，这也是其投递逻辑位于宠物侧而非 `lib/radar` 的原因。`radar-source.ts` 把每份新保存的报告转为 `radarReport` 宠物事件（只含 id，不含内容），`use-pet-insight.ts` 响应该事件，把经过 PII 门禁的 verdict 放进带「打开 Insights」按钮的气泡（ADR-0058 D10）。
 
 ## 相关文档
 

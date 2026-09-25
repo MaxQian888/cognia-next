@@ -3,9 +3,13 @@
 //! The pet lives in a dedicated webview window labelled `"pet"`: transparent,
 //! frameless, always-on-top, skip-taskbar. It loads the `/pet-overlay` route
 //! and survives the main window's close-to-tray (it is a sibling window, not a
-//! child). The renderer drives it through the commands below; the tray
-//! native-action handler reaches the same open/close behaviour via the
-//! `pub(crate)` helpers so a tray click and a settings toggle share one path.
+//! child). The renderer drives it through the commands below, and so does the
+//! tray: its pet toggle runs the renderer's `pet.toggle-window` command, which
+//! knows the saved geometry and switches the pet on (ADR-0058 D9). The only
+//! native tray path into this module is `set_pet_click_through_inner`, the
+//! recovery for a window stuck ignoring the cursor. The open/close helpers are
+//! private on purpose, so no Rust caller can grow a second opener that skips
+//! the renderer's saved size and position.
 //!
 //! Position is owned by PetSettings (the renderer), NOT by
 //! `tauri-plugin-window-state` — `lib.rs` denylists `"pet"` so the plugin
@@ -54,11 +58,6 @@ pub(crate) use macos_panel::{
 #[cfg(test)]
 pub(crate) use macos_panel::lock_panel_state_for_test as lock_overlay_panel_state_for_test;
 
-/// Default overlay size used when the tray opens the pet with no renderer
-/// supplied options (the renderer always sends its persisted size).
-const DEFAULT_PET_WIDTH: f64 = 280.0;
-const DEFAULT_PET_HEIGHT: f64 = 320.0;
-
 /// Margin (in physical pixels) kept between the overlay and the work-area
 /// edges when falling back to the bottom-right corner.
 const EDGE_MARGIN: f64 = 24.0;
@@ -79,18 +78,6 @@ pub struct PetWindowOpts {
     /// When true the window ignores cursor events (click-through mode).
     #[serde(default)]
     pub click_through: bool,
-}
-
-impl Default for PetWindowOpts {
-    fn default() -> Self {
-        Self {
-            width: DEFAULT_PET_WIDTH,
-            height: DEFAULT_PET_HEIGHT,
-            x: None,
-            y: None,
-            click_through: false,
-        }
-    }
 }
 
 /// Resolve the initial top-left position of the overlay.
@@ -172,8 +159,9 @@ fn work_area_for<R: Runtime>(
 }
 
 /// Payload of the `pet://state-changed` event — lets the renderer's settings
-/// store track native window mutations (tray toggle, click-through recovery,
-/// blur-hide) it did not itself initiate, instead of silently desyncing.
+/// store track native window mutations it did not itself initiate (the tray's
+/// click-through recovery, blur-hide, an open or close started from another
+/// window), instead of silently desyncing.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PetStateChanged {
@@ -212,8 +200,9 @@ fn apply_click_through<R: Runtime>(
     Ok(())
 }
 
-/// Core "open or re-show" logic shared by the `open_pet_window` command and
-/// the tray native action. Idempotent: if the window already exists it is
+/// Core "open or re-show" logic behind the `open_pet_window` command (the tray
+/// reaches it through the renderer's `pet.toggle-window` command, which knows
+/// the saved geometry). Idempotent: if the window already exists it is
 /// ordered in front without activating Cognia, and its click-through state is
 /// re-applied.
 fn open_pet_window_claimed<R: Runtime>(
@@ -407,7 +396,7 @@ fn open_pet_window_claimed<R: Runtime>(
     Ok(())
 }
 
-pub(crate) fn open_pet_window_inner<R: Runtime>(
+fn open_pet_window_inner<R: Runtime>(
     app: &AppHandle<R>,
     opts: PetWindowOpts,
 ) -> Result<(), String> {
@@ -436,10 +425,10 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     Ok(())
 }
 
-/// Core "hide for toggle" logic shared by the command and the tray action.
+/// Core "hide for toggle" logic behind the `close_pet_window` command.
 /// Resets click-through to false first so a hidden window can never strand the
 /// pointer; reopening is cheap so we hide rather than destroy.
-pub(crate) fn close_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+fn close_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // Invalidate any pending force-show safety net from a recent open — a
     // close inside the grace period must win over the net.
     macos_panel::cancel_panel_reveal(macos_panel::PetPanelRole::Sprite);
@@ -457,7 +446,7 @@ pub(crate) fn close_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(
 }
 
 /// True when the pet window exists AND is currently visible.
-pub(crate) fn is_pet_window_open_inner<R: Runtime>(app: &AppHandle<R>) -> bool {
+fn is_pet_window_open_inner<R: Runtime>(app: &AppHandle<R>) -> bool {
     app.get_webview_window("pet")
         .map(|w| w.is_visible().unwrap_or(false))
         .unwrap_or(false)
@@ -867,16 +856,6 @@ mod tests {
     fn opts_deserializes_with_missing_optionals() {
         // x / y / clickThrough all default when absent.
         let opts: PetWindowOpts = serde_json::from_str(r#"{"width":280,"height":320}"#).unwrap();
-        assert_eq!(opts.x, None);
-        assert_eq!(opts.y, None);
-        assert!(!opts.click_through);
-    }
-
-    #[test]
-    fn opts_default_matches_constants() {
-        let opts = PetWindowOpts::default();
-        assert_eq!(opts.width, DEFAULT_PET_WIDTH);
-        assert_eq!(opts.height, DEFAULT_PET_HEIGHT);
         assert_eq!(opts.x, None);
         assert_eq!(opts.y, None);
         assert!(!opts.click_through);

@@ -47,6 +47,11 @@ describe("pickBubbleKey", () => {
     for (const k of kinds) expect(pickBubbleKey(k, 3)).not.toBeNull()
   })
 
+  it("has no template for radarReport: the insight hook owns that bubble", () => {
+    // A template would fire a second bubble next to the verdict one.
+    for (let seed = 0; seed < 6; seed++) expect(pickBubbleKey("radarReport", seed)).toBeNull()
+  })
+
   it("keeps achievementUnlocked within its variant pool", () => {
     for (let seed = 0; seed < 10; seed++) {
       expect(pickBubbleKey("achievementUnlocked", seed)).toMatch(

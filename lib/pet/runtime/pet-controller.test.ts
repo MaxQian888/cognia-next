@@ -189,6 +189,25 @@ describe("handlePetEvent", () => {
     expect(usePetStore.getState().visualState).toBe("happy")
   })
 
+  it("shows happy for a fresh radar report without writing a ledger row", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-3", 0),
+      soul: { name: "Pip", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    // Expressive, so it is not a PASSIVE_KIND and reaches the reducer; 0 XP,
+    // so it never enters the journal's XP ledger.
+    await handlePetEvent({
+      source: "radar",
+      kind: "radarReport",
+      meta: { reportId: "r1" },
+      at: 2000,
+    })
+    await whenPetEventsSettled()
+    expect(usePetStore.getState().visualState).toBe("happy")
+    expect(await listPetActivity(10)).toEqual([])
+  })
+
   it("persists coins and the care streak after a user interaction", async () => {
     await upsertPetProfile({
       ...createDefaultProfile("acct-1", 0),

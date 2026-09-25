@@ -17,9 +17,9 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import { isLinuxPlatform } from "@/lib/tauri/os"
-import { destroyPetWindow, openPetWindow, setPetClickThrough } from "@/lib/tauri/pet-window"
+import { openDesktopPetWindow } from "@/lib/pet/commands"
+import { destroyPetWindow, setPetClickThrough } from "@/lib/tauri/pet-window"
 import {
   DEFAULT_PET_DESKTOP_OVERLAY,
   DEFAULT_PET_WANDER,
@@ -46,15 +46,13 @@ export function PetDesktopControls({ pet, patch }: PetControlsProps) {
     patchDesktop({ wander: { ...wander, ...next } })
 
   const handleDesktopEnabled = (enabled: boolean) => {
-    patchDesktop({ enabled })
     if (enabled) {
-      void openPetWindow({
-        ...overlayWindowSize(desktopPet.size),
-        x: desktopPet.position?.x,
-        y: desktopPet.position?.y,
-        clickThrough: desktopPet.clickThrough,
-      })
+      // The one summon path (ADR-0058 D3/D9): it opens at the saved geometry,
+      // switches the pet itself on (an overlay without a running controller
+      // ignores every click), and persists both flags in a race-safe order.
+      void openDesktopPetWindow()
     } else {
+      patchDesktop({ enabled })
       void destroyPetWindow()
     }
   }

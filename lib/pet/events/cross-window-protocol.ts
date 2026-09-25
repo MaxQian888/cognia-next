@@ -11,12 +11,19 @@
 
 import type { PetLookTarget, PetOneShot, PetSkinSelection, PetVisualState } from "@/types/pet"
 import { isPetConsoleTab, type PetConsoleTab } from "@/lib/pet/console-tabs"
+import { decodePetBubbleAction, type PetBubbleAction } from "@/lib/pet/bubbles/action"
 
 /** Bridge wire text for a speech bubble — already localized by the main side. */
 export interface PetBridgeBubble {
   text: string
   /** Bubble provenance so the overlay can style LLM replies like the widget. */
   origin?: "template" | "llm" | "system"
+  /**
+   * Optional follow-up button. Additive, so the message stays `v: 1`: an older
+   * decoder rebuilt the bubble from known fields and simply drops it, and a
+   * malformed action is dropped here while the text is kept.
+   */
+  action?: PetBubbleAction
 }
 
 /** Interaction kinds the overlay can send back to the main controller. */
@@ -144,10 +151,15 @@ export function decodePetBridgeMessage(raw: unknown): PetBridgeMessage | null {
           typeof raw.bubble.origin === "string" && BUBBLE_ORIGINS.has(raw.bubble.origin)
             ? (raw.bubble.origin as PetBridgeBubble["origin"])
             : undefined
+        const action = decodePetBubbleAction(raw.bubble.action)
         return {
           v: 1,
           t: "bubble",
-          bubble: { text: raw.bubble.text, ...(origin ? { origin } : {}) },
+          bubble: {
+            text: raw.bubble.text,
+            ...(origin ? { origin } : {}),
+            ...(action ? { action } : {}),
+          },
         }
       }
       return null

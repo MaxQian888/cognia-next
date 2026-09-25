@@ -24,7 +24,7 @@ export const COIN_AWARD: Partial<Record<PetEventKind, number>> = {
   scheduledRun: 1,
   // Birthday gift — once a year, so generosity is safe.
   birthday: 30,
-  // inboundMessage / radar / twin / lifecycle kinds mint nothing. Scheduled-task
+  // inboundMessage / radar / twin / radarReport / lifecycle kinds mint nothing. Scheduled-task
   // starting/due cues (scheduledRunStarting / scheduledRunDue) are reminders, not
   // completed work, so they mint nothing either (fall through to 0).
 }

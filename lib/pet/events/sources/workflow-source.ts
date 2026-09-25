@@ -44,13 +44,17 @@ export function wireWorkflowSource(
   let started = false
   return observe((rows) => {
     const row = rows[0]
+    if (!started) {
+      // Baseline on the FIRST callback, even an empty one. Returning before
+      // marking it would make the very first run's `running` row the
+      // baseline, so that run would lose its "working on it" cue.
+      started = true
+      last = row ? { id: row.id, status: row.status } : null
+      return
+    }
     if (!row) return
     if (last && last.id === row.id && last.status === row.status) return
     last = { id: row.id, status: row.status }
-    if (!started) {
-      started = true
-      return
-    }
     const mapped = runStatusToEmit(row.status)
     if (mapped)
       emit({ source: "workflow", kind: mapped.kind, xp: mapped.xp, meta: { runId: row.id } })

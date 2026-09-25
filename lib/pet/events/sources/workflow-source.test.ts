@@ -36,4 +36,20 @@ describe("wireWorkflowSource", () => {
 
     expect(events.map((e) => e.kind)).toEqual(["success", "workflowRun", "error"])
   })
+
+  it("takes an empty first result as the baseline, so the first run's running cue emits", () => {
+    let push: (rows: WorkflowRunRow[]) => void = () => {}
+    const observe: RowObserver<WorkflowRunRow> = (onRows) => {
+      push = onRows
+      return () => {}
+    }
+    const events: PetEvent[] = []
+    wireWorkflowSource((e) => events.push({ ...e, at: 0 }), observe)
+
+    push([]) // no runs yet → baseline
+    push([run("r1", "running")]) // the first run ever → workflowRun
+    push([run("r1", "succeeded")]) // → success
+
+    expect(events.map((e) => e.kind)).toEqual(["workflowRun", "success"])
+  })
 })

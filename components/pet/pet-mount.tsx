@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePetEventBus } from "@/hooks/pet/use-pet-event-bus"
@@ -16,7 +17,8 @@ import { usePetCareAlert } from "@/hooks/pet/use-pet-care-alert"
 import { usePetInteractionRefusal } from "@/hooks/pet/use-pet-interaction-refusal"
 import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
-import { registerPetInteractionCommands, registerPetWindowCommand } from "@/lib/pet/commands"
+import { registerPetCommands } from "@/lib/pet/commands"
+import { notifyPetInteractionUnavailable } from "@/lib/pet/access/notify-unavailable"
 import { getPetWindowRole } from "@/lib/pet/window-role"
 import { isPetAvailable } from "@/lib/pet/access/availability"
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
@@ -33,6 +35,7 @@ import { onPetConsoleRequest } from "@/lib/pet/console-request"
 import { PetWidget } from "./pet-widget"
 
 export function PetMount() {
+  const t = useTranslations("pet")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const pet = settings?.petSettings ?? DEFAULT_PET_SETTINGS
@@ -104,13 +107,38 @@ export function PetMount() {
     return dispose
   }, [widgetEnabled, router])
 
-  // The desktop-pet toggle command backs a global hotkey / tray quick action.
-  // Register it on the main desktop window regardless of `enabled` so a chord
-  // the user bound stays live (and isn't reserved-but-dead) when the pet is off.
+  // Every pet command (the window toggle and feed/play/pet/…) backs a global
+  // hotkey or a tray entry, so all of them are registered on the main desktop
+  // window regardless of `enabled`: an unregistered id behind a bound chord is
+  // reserved at the OS level yet dispatches to nothing. The toggle summons the
+  // pet (switching it on). The nurture handlers go through the access gate,
+  // which refuses while the pet is off; that refusal becomes a notification,
+  // since a chord usually fires with Cognia in the background and a disabled
+  // pet has no widget to hold a bubble. Burst limiting stays silent, and the
+  // controller's cooldown already answers repeat presses with its own bubble.
+  // Titles are localized here (the tray's "All Commands" menu shows them), so a
+  // locale switch re-registers with the new strings.
   useEffect(() => {
     if (!isMainDesktopWindow) return
-    return registerPetWindowCommand()
-  }, [isMainDesktopWindow])
+    return registerPetCommands({
+      windowTitle: t("commands.toggleWindow"),
+      titles: {
+        "pet.feed": t("commands.feed"),
+        "pet.play": t("commands.play"),
+        "pet.pet": t("commands.pet"),
+        "pet.sleep": t("commands.sleep"),
+        "pet.clean": t("commands.clean"),
+        "pet.treat": t("commands.treat"),
+      },
+      onRefused: (_kind, refusal) => {
+        if (refusal.code !== "unavailable" || refusal.reason !== "disabled") return
+        void notifyPetInteractionUnavailable({
+          title: t("commands.unavailable.title"),
+          body: t("commands.unavailable.body"),
+        })
+      },
+    })
+  }, [isMainDesktopWindow, t])
 
   // Reconcile persisted intent after a cold start. The native window is
   // process-local, so `desktopPet.enabled` can survive a restart while no
@@ -189,12 +217,6 @@ export function PetMount() {
       })
     })
   }, [isMainDesktopWindow])
-
-  // Feed/play/pet need the running controller, so gate them on the widget.
-  useEffect(() => {
-    if (!widgetEnabled) return
-    return registerPetInteractionCommands()
-  }, [widgetEnabled])
 
   if (!widgetEnabled) return null
   return <PetWidget settings={pet} activeCharacterId={activeCharacterId} />

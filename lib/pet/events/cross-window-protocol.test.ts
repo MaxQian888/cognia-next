@@ -16,6 +16,11 @@ describe("cross-window-protocol", () => {
     { v: 1, t: "one-shot", shot: "sleepy" },
     { v: 1, t: "bubble", bubble: { text: "hi" } },
     { v: 1, t: "bubble", bubble: { text: "hi", origin: "llm" } },
+    {
+      v: 1,
+      t: "bubble",
+      bubble: { text: "hi", origin: "system", action: { kind: "open-console", tab: "insights" } },
+    },
     { v: 1, t: "bubble", bubble: null },
     { v: 1, t: "interaction", kind: "fed" },
     { v: 1, t: "interaction", kind: "talked", text: "hello pet" },
@@ -52,6 +57,33 @@ describe("cross-window-protocol", () => {
     expect(
       decodePetBridgeMessage({ v: 1, t: "bubble", bubble: { text: "hello", origin: "weird" } })
     ).toEqual({ v: 1, t: "bubble", bubble: { text: "hello" } })
+  })
+
+  it("carries a valid bubble action and rebuilds it without extra keys", () => {
+    expect(
+      decodePetBridgeMessage({
+        v: 1,
+        t: "bubble",
+        bubble: {
+          text: "report!",
+          action: { kind: "open-console", tab: "insights", href: "https://evil.example" },
+        },
+      })
+    ).toEqual({
+      v: 1,
+      t: "bubble",
+      bubble: { text: "report!", action: { kind: "open-console", tab: "insights" } },
+    })
+  })
+
+  it.each([
+    ["an unknown action kind", { kind: "navigate", tab: "insights" }],
+    ["an unknown tab", { kind: "open-console", tab: "not-a-tab" }],
+    ["a non-object action", "open-console"],
+  ])("drops %s but keeps the bubble's text", (_label, action) => {
+    expect(
+      decodePetBridgeMessage({ v: 1, t: "bubble", bubble: { text: "still here", action } })
+    ).toEqual({ v: 1, t: "bubble", bubble: { text: "still here" } })
   })
 
   it("caps interaction text at 500 chars and drops empty/non-string text", () => {

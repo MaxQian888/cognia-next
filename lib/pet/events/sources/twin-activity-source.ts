@@ -98,12 +98,16 @@ export function wireTwinActivitySource(
 
     const offCompleted = observeCompleted((rows) => {
       const newest = newestMilestone(rows)
-      if (!newest || newest.id === lastMilestoneId) return
-      lastMilestoneId = newest.id
       if (!milestoneStarted) {
+        // The baseline is the first callback, even when no milestone exists
+        // yet. Returning before marking it would swallow the twin's first
+        // distill ever, which is the milestone most worth celebrating.
         milestoneStarted = true
+        lastMilestoneId = newest?.id ?? null
         return
       }
+      if (!newest || newest.id === lastMilestoneId) return
+      lastMilestoneId = newest.id
       emit({ source: "twin", kind: "twinMilestone", meta: { twinId, jobKind: newest.kind } })
     })
 

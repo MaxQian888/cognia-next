@@ -24,6 +24,19 @@ describe("schedulerMessageToPetEvent", () => {
     })
   })
 
+  it("leaves the radar's completed run to the radar source, but still maps its start and failure", () => {
+    // The radar source announces the saved report; a generic `scheduledRun`
+    // right after it would reset the pet's `happy` and pay for skipped runs.
+    const taskId = "radar-report::singleton"
+    expect(schedulerMessageToPetEvent({ ...base, taskId, status: "completed" })).toBeNull()
+    expect(schedulerMessageToPetEvent({ ...base, taskId, status: "running" })).toMatchObject({
+      kind: "scheduledRunStarting",
+    })
+    expect(schedulerMessageToPetEvent({ ...base, taskId, status: "failed" })).toMatchObject({
+      kind: "error",
+    })
+  })
+
   it("maps a failed execution to the generic error kind", () => {
     expect(schedulerMessageToPetEvent({ ...base, taskId: "t1", status: "failed" })).toEqual({
       source: "scheduler",

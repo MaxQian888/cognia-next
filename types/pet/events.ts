@@ -17,6 +17,8 @@ export type PetEventSource =
   | "source-control"
   | "background-task"
   | "capture"
+  // A fresh Attention Radar report was saved (`lib/pet/events/sources/radar-source.ts`).
+  | "radar"
   | "user"
   | "system"
   // Plugin-originated interactions/rewards via ctx.pet (rate-limited +
@@ -46,6 +48,10 @@ export type PetEventKind =
   // ambient twin-awareness signals (opt-in; job metadata only, never content)
   | "twinBusy"
   | "twinMilestone"
+  // a new Attention Radar report landed (ambient, 0 XP; meta carries only
+  // { reportId }, never report content — `hooks/pet/use-pet-insight.ts` owns
+  // the bubble and reads the verdict through the PII gate itself)
+  | "radarReport"
   // direct user interactions
   | "fed"
   | "played"

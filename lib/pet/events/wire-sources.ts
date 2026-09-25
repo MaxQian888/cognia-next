@@ -21,6 +21,7 @@ import { wireSchedulerSource } from "./sources/scheduler-source"
 import { wireSchedulerDueSource } from "./sources/scheduler-due-source"
 import { wireHeartbeatSource } from "./sources/heartbeat-source"
 import { wireBirthdaySource } from "./sources/birthday-source"
+import { wireRadarSource } from "./sources/radar-source"
 
 export type PetSourceWire = (emit: PetEmit) => () => void
 
@@ -43,6 +44,9 @@ export const DEFAULT_PET_SOURCES: PetSourceWire[] = [
   wireHeartbeatSource,
   // Hatch-anniversary celebration (once per birthday local-day).
   wireBirthdaySource,
+  // A fresh Attention Radar report (scheduled or "Run now"); the insight
+  // bubble with its "Open Insights" action rides on this event.
+  wireRadarSource,
 ]
 
 export function wirePetSources(

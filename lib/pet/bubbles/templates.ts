@@ -30,6 +30,9 @@ const VARIANTS: Partial<Record<PetEventKind, number>> = {
   achievementUnlocked: 2,
   twinBusy: 2,
   twinMilestone: 2,
+  // `radarReport` is deliberately absent: `hooks/pet/use-pet-insight.ts` owns
+  // that bubble (the report's PII-gated verdict, with its own fallback copy
+  // under `pet.insight.fallback`), and a template here would fire a second one.
   // Interpolates {days} — the bubble hook passes the event's meta.days through.
   streakDay: 2,
   birthday: 2,

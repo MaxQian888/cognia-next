@@ -5,12 +5,24 @@
 // duplicating the toggle/feed/play/pet logic per call site.
 
 import { registerCommand } from "@/lib/plugin/commands/registry"
-import { requestPetInteraction, type PetInteractionKind } from "@/lib/pet/access/gate"
+import {
+  PET_INTERACTION_COMMAND_IDS,
+  PET_WINDOW_COMMAND_ID,
+  type PetInteractionCommandId,
+} from "@/lib/pet/command-ids"
+import {
+  requestPetInteraction,
+  type PetAccessResult,
+  type PetInteractionKind,
+  type PetRefusal,
+} from "@/lib/pet/access/gate"
 import { closePetWindow, isPetWindowOpen, openPetWindow } from "@/lib/tauri/pet-window"
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import { isTauri } from "@/lib/platform/detect"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
+
+export { PET_INTERACTION_COMMAND_IDS, PET_WINDOW_COMMAND_ID, type PetInteractionCommandId }
 
 /**
  * Open/close the desktop-pet overlay window, persisting the flip into
@@ -19,6 +31,10 @@ import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
  * it's safe to invoke from a context with no cached "is it open" flag (a
  * hotkey or the tray). Returns the resulting open state; off Tauri (or on
  * IPC failure) it's a safe no-op that returns `false`.
+ *
+ * Opening is a summon and switches the pet on (see
+ * {@link openDesktopPetWindow}); closing only hides the window and never
+ * switches the pet off, which stays the master switch's job.
  */
 export async function toggleDesktopPetWindow(): Promise<boolean> {
   if (!isTauri()) return false
@@ -35,29 +51,62 @@ export async function toggleDesktopPetWindow(): Promise<boolean> {
 }
 
 /**
- * Open the overlay and persist the intent, idempotently.
+ * Summon the overlay: switch the pet on, open the window, persist the intent.
+ * Idempotent.
  *
- * Split out of {@link toggleDesktopPetWindow} so a caller that wants the pet
- * on screen (the agent's `pet_show`, a deep link) does not have to reimplement
- * the open-and-persist pair and risk the two drifting apart. Already-open is a
- * success, not a toggle: asking for the pet twice should leave it visible.
- * Off Tauri it is a safe no-op that returns `false`.
+ * Split out of {@link toggleDesktopPetWindow} so every caller that wants the
+ * pet on screen (the hotkey, the tray, ⌘K, the settings switch, the agent's
+ * `pet_show`) shares one open-and-persist path instead of drifting apart.
+ * Already-open is a success, not a toggle: asking for the pet twice should
+ * leave it visible. Off Tauri, or when the window fails to open, it is a safe
+ * no-op that returns `false`.
+ *
+ * A summon switches the pet on (ADR-0058 D9). The overlay owns no controller:
+ * with `PetSettings.enabled` off, `PetMount` never starts the event bus, the
+ * main-window bridge or the profile, so the summoned window ignored every
+ * click, and on a never-hatched install it rendered nothing at all, an
+ * invisible always-on-top window. The writes are ordered on purpose:
+ *
+ * 1. Switch the pet on BEFORE the window exists, leaving `desktopPet.enabled`
+ *    alone. Writing both first would let `PetMount`'s cold-start reconcile
+ *    (it opens the overlay when both are set and no window exists) race this
+ *    function into a second open.
+ * 2. Open the window.
+ * 3. Re-read the store and persist both flags. `saveSettings` replaces
+ *    `petSettings` whole, and the native `pet://state-changed` echo that
+ *    step 2 triggers saves from the store too, so spreading the snapshot
+ *    taken at the top could switch the pet straight back off.
  */
 export async function openDesktopPetWindow(): Promise<boolean> {
   if (!isTauri()) return false
-  const store = useSettingsStore.getState()
-  const pet = store.settings?.petSettings ?? DEFAULT_PET_SETTINGS
-  const desktop = pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
+  const initial = useSettingsStore.getState().settings?.petSettings ?? DEFAULT_PET_SETTINGS
+  const desktop = initial.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
+
+  if (!initial.enabled) {
+    await useSettingsStore.getState().save({ petSettings: { ...initial, enabled: true } })
+  }
 
   if (!(await isPetWindowOpen())) {
-    await openPetWindow({
+    const opened = await openPetWindow({
       ...overlayWindowSize(desktop.size),
       x: desktop.position?.x,
       y: desktop.position?.y,
       clickThrough: desktop.clickThrough,
     })
+    // Persisting `desktopPet.enabled` for a window that never appeared would
+    // have the cold-start reconcile retry it on every launch.
+    if (!opened) return false
   }
-  await store.save({ petSettings: { ...pet, desktopPet: { ...desktop, enabled: true } } })
+
+  const store = useSettingsStore.getState()
+  const latest = store.settings?.petSettings ?? DEFAULT_PET_SETTINGS
+  await store.save({
+    petSettings: {
+      ...latest,
+      enabled: true,
+      desktopPet: { ...(latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY), enabled: true },
+    },
+  })
   return true
 }
 
@@ -66,14 +115,17 @@ export async function openDesktopPetWindow(): Promise<boolean> {
  * commands because its handler is self-contained (reads settings, flips the OS
  * window) and does NOT depend on the in-app widget being mounted. It must stay
  * registered whenever the main desktop window is up — even when the pet
- * subsystem is currently disabled — so a global hotkey the user bound to it
- * actually summons the pet instead of being reserved at the OS level yet
- * dispatching to nothing.
+ * subsystem is currently disabled — so a global hotkey or the tray toggle the
+ * user reaches for actually summons the pet (switching it on) instead of being
+ * reserved at the OS level yet dispatching to nothing.
  */
-export function registerPetWindowCommand(): () => void {
+export function registerPetWindowCommand(opts: { title?: string } = {}): () => void {
   return registerCommand({
-    id: "pet.toggle-window",
-    title: "Toggle desktop pet",
+    id: PET_WINDOW_COMMAND_ID,
+    // Localized by the React caller; the English literal is the fallback for a
+    // caller with no translator. The title is user-visible in the tray's "All
+    // Commands" submenu and the keybinding sheet.
+    title: opts.title ?? "Toggle desktop pet",
     category: "Pet",
     pluginId: null,
     handler: () => toggleDesktopPetWindow(),
@@ -81,7 +133,7 @@ export function registerPetWindowCommand(): () => void {
 }
 
 interface InteractionCommand {
-  id: string
+  id: PetInteractionCommandId
   title: string
   kind: PetInteractionKind
 }
@@ -100,18 +152,33 @@ const INTERACTION_COMMANDS: readonly InteractionCommand[] = [
   { id: "pet.sleep", title: "Put the pet to sleep", kind: "slept" },
   { id: "pet.clean", title: "Clean the pet", kind: "cleaned" },
   { id: "pet.treat", title: "Give the pet a treat", kind: "treated" },
-] as const satisfies readonly { id: string; title: string; kind: PetInteractionKind }[]
+] as const satisfies readonly InteractionCommand[]
+
+export interface RegisterPetInteractionCommandsOptions {
+  /** Localized titles by command id; each falls back to its English literal. */
+  titles?: Partial<Record<PetInteractionCommandId, string>>
+  /**
+   * Called when the access gate refuses an interaction. The commands are
+   * registered on the main desktop window even while the pet is off, so a
+   * bound global chord still answers; this is where the caller makes that
+   * answer visible.
+   */
+  onRefused?: (kind: PetInteractionKind, refusal: PetRefusal) => void
+}
 
 /**
  * Registers the nurture commands. These drive the pet through the access gate,
- * so they only do anything while the pet is available (see
- * `lib/pet/access/availability.ts`), unlike {@link registerPetWindowCommand}.
+ * so they only act while the pet is available (see
+ * `lib/pet/access/availability.ts`); otherwise the refusal goes to
+ * `onRefused` instead of vanishing.
  */
-export function registerPetInteractionCommands(): () => void {
+export function registerPetInteractionCommands(
+  opts: RegisterPetInteractionCommandsOptions = {}
+): () => void {
   const disposers = INTERACTION_COMMANDS.map(({ id, title, kind }) =>
     registerCommand({
       id,
-      title,
+      title: opts.titles?.[id] ?? title,
       category: "Pet",
       pluginId: null,
       // Through the access gate rather than straight onto the bus. This is the
@@ -119,7 +186,11 @@ export function registerPetInteractionCommands(): () => void {
       // the one with no checks at all: availability, the kind whitelist and
       // the burst bucket all start here now, and the controller's per-kind
       // cooldown finishes the job downstream.
-      handler: () => requestPetInteraction({ kind: "user" }, kind),
+      handler: async (): Promise<PetAccessResult> => {
+        const result = await requestPetInteraction({ kind: "user" }, kind)
+        if (!result.ok) opts.onRefused?.(kind, result.refusal)
+        return result
+      },
     })
   )
   return () => {
@@ -129,11 +200,16 @@ export function registerPetInteractionCommands(): () => void {
 
 /**
  * Convenience: register all pet commands (window toggle + interactions) at once.
- * Returns a single bulk-unregister handle.
+ * Returns a single bulk-unregister handle. Takes the same localization and
+ * refusal options as the two registrations it combines, so a caller using it
+ * never falls back to the English titles.
  */
-export function registerPetCommands(): () => void {
-  const disposeWindow = registerPetWindowCommand()
-  const disposeInteractions = registerPetInteractionCommands()
+export function registerPetCommands(
+  opts: { windowTitle?: string } & RegisterPetInteractionCommandsOptions = {}
+): () => void {
+  const { windowTitle, ...interactionOpts } = opts
+  const disposeWindow = registerPetWindowCommand({ title: windowTitle })
+  const disposeInteractions = registerPetInteractionCommands(interactionOpts)
   return () => {
     disposeWindow()
     disposeInteractions()

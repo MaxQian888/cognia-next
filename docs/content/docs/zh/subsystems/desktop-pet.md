@@ -107,12 +107,21 @@ context-loss/fallback，并在资源失效或 WebView 销毁时释放。隐藏�
 
 `lib/pet/sprite-v2/import.ts` 校验固定图集契约。最后两行提供顺时针 16 个视线方向，按 22.5°
 量化，并包含中心死区、迟滞和陈旧输入回到 idle。SVG 移动既有面部元素；Live2D 映射标准的
-head/eye/body/mouth 参数。视线会让位于挂起、被抓住、one-shot、移动和语义状态。Web 使用页内
-pointer；Tauri 的最小权限 cursor command 采样不超过 10 Hz，且绝不持久化或传输。
+head/eye/body/mouth 参数。视线会让位于挂起、被抓住、one-shot、移动和语义状态。应用内小部件与预览跟随
+页内 pointer；悬浮窗使用 Tauri 的最小权限 cursor command，采样不超过 10 Hz，且绝不持久化或传输。
 
 角色绑定可以继承全局选择，也可以选择 SVG、某个 Live2D 模型或 Sprite 包。旧的
 `live2dModelId` 会被惰性解释为类型化 Live2D 选择；删除资源时会在事务中清除全局和角色引用，
 随后由 SVG 接管。
+
+## 触达宠物
+
+宠物只运行在桌面应用的主窗口中（ADR-0058 D9）；在 web 与移动端，侧栏、⌘K 与设置都不会提供它，`/pet`
+页面会自行说明，`/pet feed` 会告知宠物所在之处。在桌面端，所有召唤路径（全局快捷键、托盘切换、⌘K
+「切换桌宠」、设置中的悬浮窗开关、agent 的 `pet_show`）都运行 `openDesktopPetWindow()`
+（`lib/pet/commands.ts`），按已保存的几何位置打开，并启用已关闭的宠物。六个照料命令可在设置 → 快捷键中
+绑定，宠物关闭时仍保持注册，以一条「宠物已关闭」通知作答而非毫无反应。新的注意力雷达报告以
+`radarReport` 事件抵达，其气泡提供「打开 Insights」（D10）。
 
 ## 控制台与自定义工作区
 

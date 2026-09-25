@@ -26,6 +26,10 @@ describe("xpForEvent", () => {
     expect(xpForEvent("twinMilestone")).toBe(0)
   })
 
+  it("grants no XP when a radar report lands: news, not work the user did", () => {
+    expect(xpForEvent("radarReport")).toBe(0)
+  })
+
   it("treats scheduled-task cues as low-signal (a due reminder pays nothing)", () => {
     expect(xpForEvent("scheduledRunStarting")).toBe(1)
     expect(xpForEvent("scheduledRunDue")).toBe(0)

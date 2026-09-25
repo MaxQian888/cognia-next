@@ -16,8 +16,8 @@
  * tier puts a HITL approval dialog in front of every mutation, which would
  * mean a modal to feed a pet, and its registry refuses to register a write
  * skill that ships no A2UI confirm card. And `BuiltInSkill.platforms` is an IM
- * platform axis, while the pet's real constraints are the host (desktop and
- * web only, ADR-0059) and the window role.
+ * platform axis, while the pet's real constraints are the host (the desktop
+ * app only, ADR-0058 D9) and the window role.
  *
  * The relay already expresses exactly those: `build-options.ts` drops Canvas
  * on native mobile and gates Sites on `isTauri()`. The pet's state also lives
@@ -31,6 +31,7 @@
  * `await import()` at call time.
  */
 
+import type { PetAvailability } from "@/lib/pet/access/availability"
 import type { PetConsoleTab } from "@/lib/pet/console-tabs"
 import type { PetOneShot } from "@/types/pet"
 
@@ -169,7 +170,7 @@ export function buildPetManifestEntries(): PetManifestEntry[] {
       name: PET_SHOW_TOOL_NAME,
       pluginId: PET_BUILTIN_PLUGIN_ID,
       description:
-        "Bring the pet to the user's attention: raise the desktop overlay, or open the pet console on a tab. Ask the user before using this unprompted, since the overlay floats above whatever they are doing.",
+        "Bring the pet to the user's attention: raise the desktop overlay, or open the pet console on a tab. Raising the overlay also switches the pet on when the user has it turned off. Ask the user before using this unprompted, since the overlay floats above whatever they are doing.",
       jsonSchema: {
         type: "object",
         additionalProperties: false,
@@ -230,8 +231,19 @@ export interface PetToolDeps {
   listAchievements: () => Promise<unknown[]>
   listInventory: () => Promise<unknown[]>
   bubblesMuted: () => boolean
-  /** Whether the pet may act on this host right now. */
-  isAvailable: () => boolean
+  /**
+   * Whether the pet may act on this host right now, and if not, why. The reason
+   * matters to `pet_show`: a pet that is merely switched off can be summoned
+   * (which switches it on), a web or mobile host cannot.
+   */
+  availability: () => PetAvailability
+  /**
+   * Ms until `kind` is off the controller's cooldown for this profile, or 0.
+   * Advisory: the controller still decides, but reading the same durable gate
+   * state lets `pet_care` refuse honestly instead of reporting a success (and
+   * spending the daily ledger) the controller is about to reject.
+   */
+  cooldownMs: (profile: import("@/types/pet").PetProfile, kind: string, now: number) => number
   now: () => number
 }
 
@@ -252,17 +264,27 @@ export function __setPetToolDepsForTesting(factory: (() => PetToolDeps) | null):
  */
 export async function resolvePetToolDeps(): Promise<PetToolDeps> {
   if (testDepsFactory) return testDepsFactory()
-  const [db, summary, gate, say, commands, consoleRequest, settings, availability] =
-    await Promise.all([
-      import("@/lib/db/pet"),
-      import("@/lib/pet/access/summary"),
-      import("@/lib/pet/access/gate"),
-      import("@/lib/pet/bubbles/say"),
-      import("@/lib/pet/commands"),
-      import("@/lib/pet/console-request"),
-      import("@/stores/settings"),
-      import("@/lib/pet/access/availability"),
-    ])
+  const [
+    db,
+    summary,
+    gate,
+    say,
+    commands,
+    consoleRequest,
+    settings,
+    availability,
+    interactionGate,
+  ] = await Promise.all([
+    import("@/lib/db/pet"),
+    import("@/lib/pet/access/summary"),
+    import("@/lib/pet/access/gate"),
+    import("@/lib/pet/bubbles/say"),
+    import("@/lib/pet/commands"),
+    import("@/lib/pet/console-request"),
+    import("@/stores/settings"),
+    import("@/lib/pet/access/availability"),
+    import("@/lib/pet/interaction/gate"),
+  ])
   const subject = { kind: "agent" } as const
   return {
     getProfile: () => db.getPetProfile(),
@@ -278,10 +300,16 @@ export async function resolvePetToolDeps(): Promise<PetToolDeps> {
     listInventory: () => db.listPetInventory(),
     bubblesMuted: () =>
       settings.useSettingsStore.getState().settings?.petSettings?.mutedBubbles === true,
-    isAvailable: () =>
+    availability: () =>
       availability.resolveLivePetAvailability(
         settings.useSettingsStore.getState().settings?.petSettings?.enabled !== false
-      ).available,
+      ),
+    cooldownMs: (profile, kind, now) =>
+      interactionGate.remainingCooldownMs(
+        interactionGate.normalizeInteractionGate(profile.interactionGate),
+        kind,
+        now
+      ),
     now: () => Date.now(),
   }
 }
@@ -294,7 +322,7 @@ function refusalToFailure(refusal: import("@/lib/pet/access/gate").PetRefusal): 
         ? fail("pet_disabled", "The desktop pet is switched off in Settings.")
         : fail(
             "pet_unavailable_here",
-            "The pet does not run on this surface (mobile, or a secondary window)."
+            "The pet only runs in the main window of the Cognia desktop app, not on this surface."
           )
     case "rate-limited":
       return fail("rate_limited", "Too many pet actions in a row. Wait a moment.")
@@ -364,6 +392,20 @@ export async function runPetBuiltinTool(
             "pet_unhatched",
             "The pet is still an egg. It has to hatch in the pet console before it can be nurtured."
           )
+        }
+        // Read the controller's own cooldown state first. Without this the gate
+        // accepted, the ledger was spent, and the controller then refused the
+        // event downstream, so the tool reported a success that never happened
+        // and the manifest's "refuses while it is cooling" was untrue.
+        const waitMs = deps.cooldownMs(profile, CARE_ACTIONS[action], deps.now())
+        if (waitMs > 0) {
+          return {
+            ...fail(
+              "cooldown",
+              `The pet is still recovering from the last "${action}". Try again in ${Math.ceil(waitMs / 1000)}s.`
+            ),
+            retryAfterMs: waitMs,
+          }
         }
         const itemId = str(args, "itemId")
         const result = await deps.interact(CARE_ACTIONS[action], itemId ? { itemId } : {})
@@ -435,25 +477,41 @@ export async function runPetBuiltinTool(
         // The only tool that does not route through the access gate, because it
         // opens a window rather than driving the pet. It still has to ask: with
         // the pet switched off nothing subscribes to the console request, so
-        // this returned `opened: true` while doing nothing, and the overlay
-        // branch would recreate the very window the master switch destroys.
-        if (!deps.isAvailable()) {
-          return fail("pet_disabled", "The desktop pet is switched off in Settings.")
-        }
+        // this returned `opened: true` while doing nothing.
         const target = str(args, "target") ?? "console"
         const tabRaw = str(args, "tab")
         const tab = CONSOLE_TABS.includes(tabRaw as PetConsoleTab)
           ? (tabRaw as PetConsoleTab)
           : undefined
+        const availability = deps.availability()
+        if (!availability.available) {
+          // Raising the overlay is a summon, and a summon switches the pet on
+          // (ADR-0058 D9): it is exactly what the user's own hotkey and tray
+          // toggle do, and the `ask` consent tier sits in front of this call.
+          // The console has no such meaning, and a web or mobile host or a
+          // secondary window cannot host the pet at all.
+          const summons = target === "overlay" && availability.reason === "disabled"
+          if (!summons) {
+            if (availability.reason === "disabled") {
+              return fail(
+                "pet_disabled",
+                'The desktop pet is switched off in Settings. Raising it with target "overlay" switches it back on.'
+              )
+            }
+            return refusalToFailure({ code: "unavailable", reason: availability.reason })
+          }
+        }
         if (target === "overlay") {
           const opened = await deps.openOverlay()
           if (!opened) {
-            return fail(
-              "overlay_unavailable",
-              "The floating desktop pet is only available in the desktop app."
-            )
+            return fail("overlay_unavailable", "The desktop pet window could not be opened.")
           }
-          return { ok: true, target: "overlay", opened: true }
+          return {
+            ok: true,
+            target: "overlay",
+            opened: true,
+            ...(availability.available ? {} : { switchedOn: true }),
+          }
         }
         const opened = deps.openConsole(tab)
         if (!opened) {

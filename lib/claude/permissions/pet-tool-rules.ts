@@ -16,8 +16,10 @@
  * - `pet_reward`: clamped per call and against a daily ledger. A per-call
  *   dialog on a bounded grant is the click-through trap. Allowed.
  * - `pet_show`: asks. It raises an always-on-top window over whatever the user
- *   is doing, and it persists `desktopPet.enabled`, so it changes a setting
- *   and the screen at once. That one is worth a question.
+ *   is doing, and it persists `desktopPet.enabled`, and when the pet is
+ *   switched off it switches `PetSettings.enabled` back on too (a summon
+ *   enables, ADR-0058 D9). It changes settings and the screen at once. That
+ *   one is worth a question.
  *
  * Precedence: merged as the LOWEST layer of `opts.permissionRuleset`, so an
  * explicit rule in Settings, Agent, Permissions overrides any of it in either

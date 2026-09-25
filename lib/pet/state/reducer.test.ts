@@ -92,6 +92,10 @@ describe("reducePetVisualState", () => {
     expect(reducePetVisualState(event("twinMilestone"), needs())).toBe("happy")
   })
 
+  it("greets a fresh radar report as good news", () => {
+    expect(reducePetVisualState(event("radarReport"), needs())).toBe("happy")
+  })
+
   it("maps the controller-emitted unwell edge to the unwell state", () => {
     expect(reducePetVisualState(event("unwell"), needs())).toBe("unwell")
   })

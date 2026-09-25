@@ -86,10 +86,13 @@ lib/radar/
   radar-cron-bridge.ts   # what the scheduler calls
 lib/db/radar-reports.ts · types/radar/
 components/pet/console/radar-panel.tsx · hooks/pet/use-pet-insight.ts
+lib/pet/events/sources/radar-source.ts
 ```
 
-The report surfaces in the pet console, which is why `use-pet-insight.ts` lives on the pet side rather than
-in `lib/radar`.
+The report surfaces in the pet console, which is why its delivery lives on the pet side rather than in
+`lib/radar`. `radar-source.ts` turns each newly saved report into a `radarReport` pet event (id only, no
+content), and `use-pet-insight.ts` answers that event with the report's PII-gated verdict in a bubble that
+offers "Open Insights" (ADR-0058 D10).
 
 ## Related
 

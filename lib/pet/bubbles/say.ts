@@ -8,13 +8,14 @@
 // is already the shared budget across every talk source, so an agent that
 // wants the pet to say something cannot out-talk the person using it.
 //
-// The bubble clears itself. `usePetInsight` used to set one straight into the
+// The bubble clears itself. `usePetInsight` once set one straight into the
 // store that never did, so a radar teaser could sit on screen until something
-// else happened to replace it.
+// else happened to replace it; it speaks through here now.
 
 import { sanitizeReply } from "@/lib/pet/bubbles/speak"
 import { getSpeakLimiter } from "@/lib/pet/bubbles/speak-limiter"
-import { usePetStore } from "@/stores/pet/pet-store"
+import type { PetBubbleAction } from "@/lib/pet/bubbles/action"
+import { usePetStore, type PetBubble } from "@/stores/pet/pet-store"
 import type { PetOneShot } from "@/types/pet"
 import { hasNoLeakingPii } from "@cognia/redact"
 
@@ -31,7 +32,7 @@ export type SayResult =
 export interface SayDeps {
   now?: () => number
   muted?: boolean
-  setBubble?: (bubble: { text: string; origin: "template" | "llm" | "system" } | null) => void
+  setBubble?: (bubble: PetBubble | null) => void
   enqueueOneShot?: (shot: PetOneShot) => void
   schedule?: (fn: () => void, ms: number) => void
   limiter?: { tryAcquire: (now: number) => boolean }
@@ -44,6 +45,8 @@ export interface SayOptions {
   durationMs?: number
   /** Where the line came from, for the bubble's styling. */
   origin?: "template" | "llm" | "system"
+  /** A follow-up the bubble offers as a button (see `PetBubbleView`). */
+  action?: PetBubbleAction
 }
 
 /**
@@ -56,7 +59,11 @@ export function sayAsPet(text: string, opts: SayOptions = {}, deps: SayDeps = {}
 
   const clean = sanitizeReply(text)
   if (!clean) return { ok: false, reason: "empty" }
-  if (!hasNoLeakingPii(clean)) return { ok: false, reason: "pii" }
+  // Gate the raw line as well as the trimmed one. Sanitizing keeps the first
+  // line and cuts it to length, and a cut that lands inside an address or a
+  // key can leave a fragment the detector no longer recognizes, which would
+  // then reach the screen.
+  if (!hasNoLeakingPii(text) || !hasNoLeakingPii(clean)) return { ok: false, reason: "pii" }
 
   const now = deps.now?.() ?? Date.now()
   const limiter = deps.limiter ?? getSpeakLimiter()
@@ -71,7 +78,11 @@ export function sayAsPet(text: string, opts: SayOptions = {}, deps: SayDeps = {}
     deps.enqueueOneShot ?? ((s: PetOneShot) => usePetStore.getState().enqueueOneShot(s))
   const schedule = deps.schedule ?? ((fn: () => void, ms: number) => void setTimeout(fn, ms))
 
-  setBubble({ text: clean, origin: opts.origin ?? "llm" })
+  setBubble({
+    text: clean,
+    origin: opts.origin ?? "llm",
+    ...(opts.action ? { action: opts.action } : {}),
+  })
   if (opts.emotion) enqueue(opts.emotion)
   schedule(() => {
     // Only clear if it is still ours: a newer bubble must not be cut short.

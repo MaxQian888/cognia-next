@@ -119,6 +119,13 @@ describe("wireTwinActivitySource", () => {
     })
   })
 
+  it("takes an empty first result as the baseline, so the first distill ever emits", () => {
+    const { pushCompleted, events } = setup()
+    pushCompleted([]) // no completed jobs yet → baseline
+    pushCompleted([job({ id: "first", completedAt: 100 })]) // → twinMilestone
+    expect(events.map((e) => e.kind)).toEqual(["twinMilestone"])
+  })
+
   it("ignores completed rows with no milestone-qualifying job", () => {
     const { pushCompleted, events } = setup()
     pushCompleted([job({ kind: "ingest" })])

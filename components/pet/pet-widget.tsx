@@ -240,7 +240,16 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
         ANCHOR_ALIGN[settings.anchor]
       )}
     >
-      {bubble && <PetBubbleView bubble={bubble} />}
+      {bubble && (
+        <PetBubbleView
+          bubble={bubble}
+          onAction={(action) => {
+            // The bubble has done its job once acted on; the console takes over.
+            usePetStore.getState().setBubble(null)
+            router.push(`/pet?tab=${action.tab}`)
+          }}
+        />
+      )}
       {open && (
         <div className="max-w-[calc(100vw-2rem)] rounded-xl border bg-popover p-3 shadow-lg">
           <PetInteractionPanel

@@ -30,7 +30,7 @@ Nothing audited the `[[slug]]` links the CrossRefAgent inserts. A pure, no-AI pa
 
 ### Phase 3 — Attention Radar (`lib/radar/`)
 
-A periodic 7-dimension "info-diet" report (verdict / at-a-glance / info-diet / subconscious / graveyard / blind-spots / actions + topic cloud + locally-computed heatmap). **Data source: existing stores** — long-term memories (already redacted + importance-weighted) + Phase-4 captured items — pre-filtered with an OpenWiki-style importance→dedup→top-N pass. Every item passes `hasNoLeakingPii` before the model. LLM via the existing `buildUtilityLlmClient` + `extractJson`. **Delivery: the desktop pet** — a `use-pet-insight` teaser bubble on a fresh report + a full "Insights" tab in the pet console (`radar-panel.tsx`), with config/schedule folded into the panel (no new Settings-nav entry).
+A periodic 7-dimension "info-diet" report (verdict / at-a-glance / info-diet / subconscious / graveyard / blind-spots / actions + topic cloud + locally-computed heatmap). **Data source: existing stores** — long-term memories (already redacted + importance-weighted) + Phase-4 captured items — pre-filtered with an OpenWiki-style importance→dedup→top-N pass. Every item passes `hasNoLeakingPii` before the model. LLM via the existing `buildUtilityLlmClient` + `extractJson`. **Delivery: the desktop pet** — a `use-pet-insight` teaser bubble on a fresh report (driven by the `radarReport` pet event, with an "Open Insights" action since ADR-0058 D10) + a full "Insights" tab in the pet console (`radar-panel.tsx`), with config/schedule folded into the panel (no new Settings-nav entry).
 
 ### Phase 4 — Content Capture (`lib/capture/`, `components/capture/`)
 

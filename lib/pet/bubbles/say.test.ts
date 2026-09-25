@@ -3,7 +3,7 @@ import { usePetStore } from "@/stores/pet/pet-store"
 
 const T0 = 1_700_000_000_000
 
-let bubbles: Array<{ text: string; origin: string } | null>
+let bubbles: Array<{ text: string; origin: string; action?: unknown } | null>
 let shots: string[]
 let scheduled: Array<{ fn: () => void; ms: number }>
 
@@ -39,6 +39,21 @@ describe("sayAsPet", () => {
     expect(scheduled[0].ms).toBe(DEFAULT_SAY_DURATION_MS)
   })
 
+  it("carries a follow-up action onto the bubble when given one", () => {
+    sayAsPet(
+      "Your radar is ready",
+      { origin: "system", action: { kind: "open-console", tab: "insights" } },
+      deps()
+    )
+    expect(bubbles).toEqual([
+      {
+        text: "Your radar is ready",
+        origin: "system",
+        action: { kind: "open-console", tab: "insights" },
+      },
+    ])
+  })
+
   it("plays a flourish alongside the line when asked", () => {
     sayAsPet("yay", { emotion: "love" }, deps())
     expect(shots).toEqual(["love"])
@@ -54,6 +69,14 @@ describe("sayAsPet", () => {
 
   it("refuses text carrying PII before it can reach the screen", () => {
     expect(sayAsPet("your SSN is 123-45-6789", {}, deps())).toEqual({ ok: false, reason: "pii" })
+    expect(bubbles).toEqual([])
+  })
+
+  it("gates the raw text too, so a cut through personal data cannot leak a fragment", () => {
+    // Padding pushes the address across the 200-character cut, so the trimmed
+    // line alone would carry only an unrecognizable piece of it.
+    const text = `${"a".repeat(195)} someone@example.com`
+    expect(sayAsPet(text, {}, deps())).toEqual({ ok: false, reason: "pii" })
     expect(bubbles).toEqual([])
   })
 

@@ -9,6 +9,7 @@
 
 import { useState, useSyncExternalStore, type ComponentType } from "react"
 import { useTranslations } from "next-intl"
+import Link from "next/link"
 import { usePlatform } from "@/hooks/use-platform"
 import { getPetWindowRole } from "@/lib/pet/window-role"
 import { resolvePetAvailability } from "@/lib/pet/access/availability"
@@ -18,6 +19,7 @@ import {
   LibraryIcon,
   MenuIcon,
   MessageCircleIcon,
+  MonitorIcon,
   PaletteIcon,
   PlugIcon,
   ScanLineIcon,
@@ -32,6 +34,7 @@ import {
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
+  EmptyTitle,
 } from "@/components/ui/empty"
 import {
   Sheet,
@@ -177,10 +180,23 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
   // Capacitor shell `PetMount` refuses to initialize the profile at all, so a
   // phone reaching this page waited at a spinner that could never resolve.
   if (!availability.available) {
+    // An empty state, not a bare sentence in the top-left corner: on a phone
+    // it was the only thing on the page, with nothing leading anywhere.
     return (
-      <div data-testid="pet-console-unavailable" className="p-6 text-muted-foreground">
-        {t("console.unavailable.unsupportedHost")}
-      </div>
+      <Empty className="h-full border-none" data-testid="pet-console-unavailable">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <MonitorIcon aria-hidden />
+          </EmptyMedia>
+          <EmptyTitle>{t("console.unavailable.title")}</EmptyTitle>
+          <EmptyDescription>{t("console.unavailable.unsupportedHost")}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/">{t("console.unavailable.backToChat")}</Link>
+          </Button>
+        </EmptyContent>
+      </Empty>
     )
   }
 

@@ -31,16 +31,31 @@ jest.mock("./pet-renderer", () => ({
   },
 }))
 jest.mock("./pet-bubble", () => ({
-  PetBubbleView: ({ bubble }: { bubble: { text: string } | null }) =>
-    bubble ? <div data-testid="pet-bubble">{bubble.text}</div> : null,
+  PetBubbleView: ({
+    bubble,
+    onAction,
+  }: {
+    bubble: { text: string; action?: { kind: string; tab: string } } | null
+    onAction?: (a: { kind: string; tab: string }) => void
+  }) =>
+    bubble ? (
+      <div data-testid="pet-bubble">
+        {bubble.text}
+        {bubble.action && onAction ? (
+          <button data-testid="pet-bubble-action" onClick={() => onAction(bubble.action!)} />
+        ) : null}
+      </div>
+    ) : null,
 }))
 
 // Cross-window bridge.
 const bridgeDispose = jest.fn()
 const bridgeSendInteraction = jest.fn()
+const bridgeSendOpenConsole = jest.fn()
 const startOverlayPetBridge = jest.fn(() => ({
   dispose: bridgeDispose,
   sendInteraction: bridgeSendInteraction,
+  sendOpenConsole: bridgeSendOpenConsole,
 }))
 jest.mock("@/lib/pet/events/cross-window-bridge", () => ({
   startOverlayPetBridge: () => startOverlayPetBridge(),
@@ -65,6 +80,7 @@ jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
 const getPetWindowPosition = jest.fn()
 const setPetWindowPosition = jest.fn()
 const openPetPopup = jest.fn()
+const showMainWindow = jest.fn()
 let workAreaValue: unknown = { x: 0, y: 0, width: 1920, height: 1080, scaleFactor: 1 }
 jest.mock("@/lib/tauri/pet-window", () => ({
   getPetWindowPosition: () => getPetWindowPosition(),
@@ -72,6 +88,7 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   setPetWindowPosition: (x: number, y: number) => setPetWindowPosition(x, y),
   getPetWorkArea: () => Promise.resolve(workAreaValue),
   openPetPopup: (opts: unknown) => openPetPopup(opts),
+  showMainWindow: () => showMainWindow(),
   // Native event subscriptions — inert disposers in jsdom.
   onPetSuspend: () => () => {},
   onPetResume: () => () => {},
@@ -131,12 +148,17 @@ jest.mock("@/hooks/pet/use-pet-locomotion", () => ({
 }))
 
 // Pet store bubble selector.
-let bubbleValue: { text: string; origin: string } | null = null
+let bubbleValue: {
+  text: string
+  origin: string
+  action?: { kind: string; tab: string }
+} | null = null
 const mockEnqueueOneShot = jest.fn()
+const mockSetBubble = jest.fn()
 jest.mock("@/stores/pet/pet-store", () => ({
   usePetStore: Object.assign(
     (selector: (s: { bubble: unknown }) => unknown) => selector({ bubble: bubbleValue }),
-    { getState: () => ({ enqueueOneShot: mockEnqueueOneShot }) }
+    { getState: () => ({ enqueueOneShot: mockEnqueueOneShot, setBubble: mockSetBubble }) }
   ),
 }))
 
@@ -186,6 +208,9 @@ beforeEach(() => {
   rendererProps.mockReset()
   bridgeDispose.mockReset()
   bridgeSendInteraction.mockReset()
+  bridgeSendOpenConsole.mockReset()
+  showMainWindow.mockReset()
+  mockSetBubble.mockReset()
   startOverlayPetBridge.mockClear()
   getPetWindowPosition.mockReset()
   getPetWindowPosition.mockResolvedValue({ x: 100, y: 200 })
@@ -371,6 +396,21 @@ describe("PetOverlayView", () => {
     bubbleValue = { text: "hello", origin: "system" }
     render(<PetOverlayView />)
     expect(screen.getByTestId("pet-bubble")).toHaveTextContent("hello")
+  })
+
+  it("routes a bubble action to the main window, which owns the router", () => {
+    withPet()
+    bubbleValue = {
+      text: "report ready",
+      origin: "system",
+      action: { kind: "open-console", tab: "insights" },
+    }
+    render(<PetOverlayView />)
+    fireEvent.click(screen.getByTestId("pet-bubble-action"))
+    expect(showMainWindow).toHaveBeenCalledTimes(1)
+    expect(bridgeSendOpenConsole).toHaveBeenCalledWith("insights")
+    // Acted on, so it goes away rather than lingering over the desktop.
+    expect(mockSetBubble).toHaveBeenCalledWith(null)
   })
 
   it("renders nothing for the pet until the profile loads (still transparent)", () => {

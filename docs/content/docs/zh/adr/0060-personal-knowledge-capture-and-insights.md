@@ -29,7 +29,7 @@ description: "记录四阶段传递，借用OpenWiki最佳创意到认知中：�
 
 ### 第三阶段 — 注意力雷达（`lib/radar/`）
 
-定期进行7维“信息饮食”报告（结论/一目了然/信息-饮食/潜意识/墓地/盲点/动作+主题云+局部计算热图）。**数据来源：现有存储**——长期记忆（已涂黑+重要性加权）+第四阶段捕获的项目——预先过滤并进行了OpenWiki-style重要性→删减→top-N通过。每个物品都经过模型前`hasNoLeakingPii`。LLM通过现有的 `buildUtilityLlmClient` + `extractJson`。**送货：桌面宠物**——新报告上的`use-pet-insight`预览泡泡 + 宠物控制台（`radar-panel.tsx`）中完整的“洞察”标签页，config/schedule折叠在面板中（无新的设置导航条目）。
+定期进行7维“信息饮食”报告（结论/一目了然/信息-饮食/潜意识/墓地/盲点/动作+主题云+局部计算热图）。**数据来源：现有存储**——长期记忆（已涂黑+重要性加权）+第四阶段捕获的项目——预先过滤并进行了OpenWiki-style重要性→删减→top-N通过。每个物品都经过模型前`hasNoLeakingPii`。LLM通过现有的 `buildUtilityLlmClient` + `extractJson`。**送货：桌面宠物**——新报告上的`use-pet-insight`预览泡泡（自 ADR-0058 D10 起由 `radarReport` 宠物事件驱动，并带「打开 Insights」操作）+ 宠物控制台（`radar-panel.tsx`）中完整的“洞察”标签页，config/schedule折叠在面板中（无新的设置导航条目）。
 
 ### 第四阶段 — 内容捕获（`lib/capture/`，`components/capture/`）
 

@@ -9,6 +9,14 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   setPetClickThrough: (v: boolean) => setPetClickThrough(v),
 }))
 
+// The summon path owns geometry, the master switch and persistence; its own
+// suite (`lib/pet/commands.test.ts`) pins those. Here it only has to be THE
+// path the switch takes.
+const openDesktopPetWindow = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/pet/commands", () => ({
+  openDesktopPetWindow: () => openDesktopPetWindow(),
+}))
+
 let mockIsLinux = false
 jest.mock("@/lib/tauri/os", () => ({ isLinuxPlatform: () => mockIsLinux }))
 
@@ -17,6 +25,7 @@ import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 
 beforeEach(() => {
   openPetWindow.mockClear()
+  openDesktopPetWindow.mockClear()
   destroyPetWindow.mockClear()
   setPetClickThrough.mockClear()
   mockIsLinux = false
@@ -34,32 +43,14 @@ describe("PetDesktopControls", () => {
     expect(link).toHaveAttribute("href", "/settings?section=shortcuts")
   })
 
-  it("enabling opens the overlay window and persists the flag", () => {
+  it("enabling summons through the single summon path, not a second opener", () => {
     const patch = jest.fn()
     render(<PetDesktopControls pet={DEFAULT_PET_SETTINGS} patch={patch} />)
     fireEvent.click(document.getElementById("pet-desktop-enabled") as HTMLButtonElement)
-    expect(openPetWindow).toHaveBeenCalled()
-    expect(patch).toHaveBeenCalledWith({
-      desktopPet: expect.objectContaining({ enabled: true }),
-    })
-  })
-
-  it("opens the overlay at the saved position when one exists", () => {
-    render(
-      <PetDesktopControls
-        pet={withDesktop({
-          enabled: false,
-          clickThrough: true,
-          size: 160,
-          position: { x: 40, y: 60 },
-        })}
-        patch={jest.fn()}
-      />
-    )
-    fireEvent.click(document.getElementById("pet-desktop-enabled") as HTMLButtonElement)
-    expect(openPetWindow).toHaveBeenCalledWith(
-      expect.objectContaining({ x: 40, y: 60, clickThrough: true })
-    )
+    expect(openDesktopPetWindow).toHaveBeenCalledTimes(1)
+    // A second persist here would race the summon's own ordered writes.
+    expect(patch).not.toHaveBeenCalled()
+    expect(openPetWindow).not.toHaveBeenCalled()
   })
 
   it("disabling destroys the overlay window", () => {

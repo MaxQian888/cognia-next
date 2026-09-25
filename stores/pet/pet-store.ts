@@ -9,6 +9,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
+import type { PetBubbleAction } from "@/lib/pet/bubbles/action"
 import type {
   PetLookTarget,
   PetOneShot,
@@ -22,6 +23,13 @@ export interface PetBubble {
   text: string
   /** Source tag for styling/telemetry ("template" | "llm" | "system"). */
   origin: "template" | "llm" | "system"
+  /**
+   * Optional follow-up the bubble offers as a button (e.g. "Open Insights"
+   * when a radar report lands). Rendered by `PetBubbleView` only when its host
+   * passes an `onAction` handler, so a surface that cannot act shows the text
+   * alone.
+   */
+  action?: PetBubbleAction
 }
 
 export interface PetUiPosition {

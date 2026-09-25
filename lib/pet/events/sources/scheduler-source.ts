@@ -11,6 +11,7 @@
 // a plain fake; the default opens the BroadcastChannel.
 
 import type { PetEvent } from "@/types/pet"
+import { RADAR_REPORT_TASK_ID } from "@/types/radar"
 import type { PetEmit } from "../pet-event-bus"
 
 const CHANNEL_NAME = "cognia-scheduler-executions"
@@ -33,6 +34,12 @@ export function schedulerMessageToPetEvent(msg: unknown): PetEventInput | null {
   const meta: Record<string, unknown> =
     typeof m.taskName === "string" && m.taskName ? { taskId, taskName: m.taskName } : { taskId }
   if (m.status === "running") return { source: "scheduler", kind: "scheduledRunStarting", meta }
+  // The radar's background run is announced by `radar-source.ts` when its
+  // report is actually saved. Mapping its `completed` here too reset the pet
+  // from that `happy` straight back to resting (the runner saves before the
+  // scheduler broadcasts), and paid XP and coins even for a run whose own
+  // guards skipped generating anything.
+  if (m.status === "completed" && taskId === RADAR_REPORT_TASK_ID) return null
   if (m.status === "completed") return { source: "scheduler", kind: "scheduledRun", meta }
   if (m.status === "failed") return { source: "scheduler", kind: "error", meta }
   return null

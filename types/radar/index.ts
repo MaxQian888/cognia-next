@@ -112,3 +112,11 @@ export const DEFAULT_RADAR_SETTINGS: RadarSettings = {
 
 /** Minimum items required before a report is worth generating. */
 export const RADAR_MIN_ITEMS = 5
+
+/**
+ * Id of the single scheduler row that generates the radar in the background.
+ * Lives with the types rather than in `lib/radar/radar-cron-bridge.ts` so a
+ * reader that only needs to recognise the task (the pet's scheduler source)
+ * does not import the scheduler database to get a string.
+ */
+export const RADAR_REPORT_TASK_ID = "radar-report::singleton"

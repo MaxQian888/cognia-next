@@ -27,3 +27,15 @@ export const System: Story = {
 export const Hidden: Story = {
   args: { bubble: null },
 }
+
+/** A bubble that offers a follow-up, like the radar report's "Open Insights". */
+export const Actionable: Story = {
+  args: {
+    bubble: {
+      text: "You have been deep in Rust async lately.",
+      origin: "system",
+      action: { kind: "open-console", tab: "insights" },
+    },
+    onAction: () => {},
+  },
+}

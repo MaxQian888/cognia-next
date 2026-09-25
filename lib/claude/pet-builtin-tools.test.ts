@@ -2,11 +2,26 @@ import type { PetProfile } from "@/types/pet"
 import { makePetProfile } from "@/lib/storybook/fixtures/pet-core"
 import {
   PET_TOOL_NAMES,
+  __setPetToolDepsForTesting,
   buildPetManifestEntries,
   isPetBuiltinTool,
+  resolvePetToolDeps,
   runPetBuiltinTool,
   type PetToolDeps,
 } from "./pet-builtin-tools"
+
+// Only the live-wiring suite at the bottom reads these; every other test hands
+// `runPetBuiltinTool` its own fake deps.
+let mockPetSettings: { enabled: boolean } | undefined = { enabled: true }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: { getState: () => ({ settings: { petSettings: mockPetSettings } }) },
+}))
+let mockPlatform: "tauri" | "web" = "tauri"
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  detectPlatform: () => mockPlatform,
+  isTauri: () => mockPlatform === "tauri",
+}))
 
 const NOW = Date.UTC(2026, 5, 29, 9, 0)
 
@@ -38,7 +53,8 @@ function deps(over: Partial<PetToolDeps> = {}): PetToolDeps {
     listAchievements: async () => [{ id: "first-xp" }],
     listInventory: async () => [{ id: "berry", qty: 2 }],
     bubblesMuted: () => false,
-    isAvailable: () => true,
+    availability: () => ({ available: true }),
+    cooldownMs: () => 0,
     now: () => NOW,
     ...over,
   }
@@ -157,6 +173,34 @@ describe("pet_care", () => {
     expect(res).toMatchObject({ ok: false, code: "item_not_owned" })
   })
 
+  it("refuses honestly while the action is cooling, without spending the gate", async () => {
+    // The controller would reject the event downstream; reporting success here
+    // (and spending the agent's daily ledger) was the lie this guards against.
+    const res = await runPetBuiltinTool(
+      "pet_care",
+      { action: "feed" },
+      deps({ cooldownMs: (_p, kind) => (kind === "fed" ? 1200 : 0) })
+    )
+    expect(res).toMatchObject({ ok: false, code: "cooldown", retryAfterMs: 1200 })
+    expect(interactions).toEqual([])
+  })
+
+  it("reads the cooldown for the mapped event kind at the current time", async () => {
+    const seen: Array<{ kind: string; now: number }> = []
+    await runPetBuiltinTool(
+      "pet_care",
+      { action: "sleep" },
+      deps({
+        cooldownMs: (_p, kind, now) => {
+          seen.push({ kind, now })
+          return 0
+        },
+      })
+    )
+    expect(seen).toEqual([{ kind: "slept", now: NOW }])
+    expect(interactions).toHaveLength(1)
+  })
+
   it("says the pet is switched off rather than pretending it worked", async () => {
     const res = await runPetBuiltinTool(
       "pet_care",
@@ -264,20 +308,64 @@ describe("pet_show", () => {
     expect(res).toMatchObject({ ok: true, target: "overlay", opened: true })
   })
 
-  it("refuses when the pet is switched off, instead of reporting a window it never opened", async () => {
-    // Nothing subscribes to the console request with the pet off, and the
-    // overlay branch would recreate the exact window the master switch
-    // destroys. It used to return `opened: true` either way.
+  it("refuses the console when the pet is switched off, instead of reporting a window it never opened", async () => {
+    // Nothing subscribes to the console request with the pet off. It used to
+    // return `opened: true` either way.
     const res = await runPetBuiltinTool(
       "pet_show",
       { target: "console" },
-      deps({ isAvailable: () => false })
+      deps({ availability: () => ({ available: false, reason: "disabled" }) })
     )
     expect(res).toMatchObject({ ok: false, code: "pet_disabled" })
+    expect((res as { error: string }).error).toContain('"overlay"')
     expect(consoleOpened).toEqual([])
   })
 
-  it("explains that the floating pet needs the desktop app", async () => {
+  it("summons a switched-off pet onto the desktop, switching it on (ADR-0058 D9)", async () => {
+    let opens = 0
+    const res = await runPetBuiltinTool(
+      "pet_show",
+      { target: "overlay" },
+      deps({
+        availability: () => ({ available: false, reason: "disabled" }),
+        openOverlay: async () => {
+          opens += 1
+          return true
+        },
+      })
+    )
+    expect(opens).toBe(1)
+    expect(res).toMatchObject({ ok: true, target: "overlay", opened: true, switchedOn: true })
+  })
+
+  it("does not claim to have switched anything on when the pet was already on", async () => {
+    const res = await runPetBuiltinTool("pet_show", { target: "overlay" }, deps())
+    expect(res).not.toHaveProperty("switchedOn")
+  })
+
+  it.each(["unsupported-host", "secondary-window"] as const)(
+    "refuses both targets on a %s surface without opening anything",
+    async (reason) => {
+      let opens = 0
+      const d = deps({
+        availability: () => ({ available: false, reason }),
+        openOverlay: async () => {
+          opens += 1
+          return true
+        },
+      })
+      for (const target of ["overlay", "console"]) {
+        expect(await runPetBuiltinTool("pet_show", { target }, d)).toMatchObject({
+          ok: false,
+          code: "pet_unavailable_here",
+        })
+      }
+      expect(opens).toBe(0)
+      expect(consoleOpened).toEqual([])
+    }
+  )
+
+  it("reports a window that failed to open", async () => {
     overlayOpened = false
     expect(await runPetBuiltinTool("pet_show", { target: "overlay" }, deps())).toMatchObject({
       ok: false,
@@ -305,5 +393,58 @@ describe("the failure envelope", () => {
       ok: false,
       code: "invalid_arguments",
     })
+  })
+})
+
+describe("resolvePetToolDeps (the live wiring the fakes stand in for)", () => {
+  beforeEach(() => {
+    __setPetToolDepsForTesting(null)
+    mockPetSettings = { enabled: true }
+    mockPlatform = "tauri"
+  })
+
+  it("reports availability with its reason, which pet_show needs to tell a summon from a refusal", async () => {
+    mockPetSettings = { enabled: false }
+    expect((await resolvePetToolDeps()).availability()).toEqual({
+      available: false,
+      reason: "disabled",
+    })
+
+    mockPetSettings = { enabled: true }
+    expect((await resolvePetToolDeps()).availability()).toEqual({ available: true })
+
+    mockPlatform = "web"
+    expect((await resolvePetToolDeps()).availability()).toEqual({
+      available: false,
+      reason: "unsupported-host",
+    })
+  })
+
+  it("reads the controller's real cooldown state for the kind asked about", async () => {
+    const deps = await resolvePetToolDeps()
+    const profile = makePetProfile({ interactionGate: { lastAtByKind: { fed: NOW - 500 } } })
+    // `fed` cools for 1.5 s; 0.5 s have passed.
+    expect(deps.cooldownMs(profile, "fed", NOW)).toBe(1000)
+    expect(deps.cooldownMs(profile, "played", NOW)).toBe(0)
+    expect(deps.cooldownMs(makePetProfile({ interactionGate: undefined }), "fed", NOW)).toBe(0)
+  })
+
+  it("summons a switched-off pet end to end through the live availability", async () => {
+    mockPetSettings = { enabled: false }
+    const live = await resolvePetToolDeps()
+    let opened = 0
+    const res = await runPetBuiltinTool(
+      "pet_show",
+      { target: "overlay" },
+      {
+        ...live,
+        openOverlay: async () => {
+          opened += 1
+          return true
+        },
+      }
+    )
+    expect(opened).toBe(1)
+    expect(res).toMatchObject({ ok: true, switchedOn: true })
   })
 })

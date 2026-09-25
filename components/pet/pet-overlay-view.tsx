@@ -45,7 +45,9 @@ import {
   onPetSuspend,
   openPetPopup,
   setPetWindowPosition,
+  showMainWindow,
 } from "@/lib/tauri/pet-window"
+import type { PetConsoleTab } from "@/lib/pet/console-tabs"
 import { MIN_THROW_SPEED, overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import { LIVE2D_ONE_SHOT_HOLD_MS } from "@/lib/pet/live2d/constants"
 import {
@@ -151,6 +153,9 @@ export function PetOverlayView() {
   const sendInteractionRef = useRef<
     (kind: "fed" | "played" | "petted" | "talked", text?: string) => void
   >(() => {})
+  // A bubble action (e.g. "Open Insights") routes to the main window, which
+  // owns the router, exactly the way the popup's "open console" does.
+  const sendOpenConsoleRef = useRef<(tab: PetConsoleTab) => void>(() => {})
   useEffect(() => {
     const bridge = startOverlayPetBridge({
       // Smart-Moving: main-window activity counts as "interaction" for the
@@ -165,8 +170,10 @@ export function PetOverlayView() {
       if (text === undefined) bridge.sendInteraction(kind)
       else bridge.sendInteraction(kind, text)
     }
+    sendOpenConsoleRef.current = (tab) => bridge.sendOpenConsole(tab)
     return () => {
       sendInteractionRef.current = () => {}
+      sendOpenConsoleRef.current = () => {}
       bridge.dispose()
     }
   }, [])
@@ -342,7 +349,20 @@ export function PetOverlayView() {
       // wander ground math rests the window bottom on the work-area bottom.
       className="flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden bg-transparent"
     >
-      {bubble && <PetBubbleView bubble={bubble} className="mb-2" />}
+      {bubble && (
+        <PetBubbleView
+          bubble={bubble}
+          className="mb-2"
+          // Clickable only while the overlay takes the pointer: with
+          // click-through on, the whole window ignores the cursor, and the
+          // widget or the pet console remain the way in.
+          onAction={(action) => {
+            void showMainWindow()
+            sendOpenConsoleRef.current(action.tab)
+            usePetStore.getState().setBubble(null)
+          }}
+        />
+      )}
       {profile && view ? (
         <div
           data-testid="pet-overlay-pet"

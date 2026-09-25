@@ -23,6 +23,7 @@ describe("COIN_AWARD", () => {
       "error",
       "twinBusy",
       "twinMilestone",
+      "radarReport",
       "hatched",
       "levelUp",
       "evolved",

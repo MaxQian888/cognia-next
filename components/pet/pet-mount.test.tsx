@@ -10,10 +10,14 @@ const isTauri = jest.fn<boolean, []>()
 const usePlatform = jest.fn<"tauri" | "mobile" | "web", []>()
 const startMainPetBridge = jest.fn<() => void, [unknown?]>()
 const mainBridgeDispose = jest.fn()
-const registerPetWindowCommand = jest.fn<() => void, []>()
-const registerPetInteractionCommands = jest.fn<() => void, []>()
-const windowCommandDispose = jest.fn()
-const interactionCommandsDispose = jest.fn()
+type PetCommandOpts = {
+  windowTitle?: string
+  titles?: Record<string, string>
+  onRefused?: (kind: string, refusal: { code: string; reason?: string }) => void
+}
+const registerPetCommands = jest.fn<() => void, [PetCommandOpts?]>()
+const notifyPetInteractionUnavailable = jest.fn().mockResolvedValue(true)
+const petCommandsDispose = jest.fn()
 const openPetWindow = jest.fn().mockResolvedValue(true)
 const isPetWindowOpen = jest.fn().mockResolvedValue(false)
 const setPetClickThrough = jest.fn().mockResolvedValue(true)
@@ -22,8 +26,10 @@ jest.mock("@/hooks/pet/use-pet-event-bus", () => ({
   usePetEventBus: (e: boolean, twinAwareness: unknown) => usePetEventBus(e, twinAwareness),
 }))
 jest.mock("@/lib/pet/commands", () => ({
-  registerPetWindowCommand: () => registerPetWindowCommand(),
-  registerPetInteractionCommands: () => registerPetInteractionCommands(),
+  registerPetCommands: (opts?: PetCommandOpts) => registerPetCommands(opts),
+}))
+jest.mock("@/lib/pet/access/notify-unavailable", () => ({
+  notifyPetInteractionUnavailable: (strings: unknown) => notifyPetInteractionUnavailable(strings),
 }))
 jest.mock("@/hooks/pet/use-active-character-id", () => ({
   useActiveCharacterId: () => useActiveCharacterId(),
@@ -82,16 +88,14 @@ beforeEach(() => {
   startMainPetBridge.mockReset()
   mainBridgeDispose.mockReset()
   startMainPetBridge.mockReturnValue(mainBridgeDispose)
-  registerPetWindowCommand.mockReset()
-  registerPetInteractionCommands.mockReset()
-  windowCommandDispose.mockReset()
-  interactionCommandsDispose.mockReset()
+  registerPetCommands.mockReset()
+  notifyPetInteractionUnavailable.mockClear()
+  petCommandsDispose.mockReset()
   openPetWindow.mockClear()
   setPetClickThrough.mockClear()
   isPetWindowOpen.mockReset()
   isPetWindowOpen.mockResolvedValue(false)
-  registerPetWindowCommand.mockReturnValue(windowCommandDispose)
-  registerPetInteractionCommands.mockReturnValue(interactionCommandsDispose)
+  registerPetCommands.mockReturnValue(petCommandsDispose)
 })
 
 const ENABLED_SETTINGS = {
@@ -309,11 +313,9 @@ describe("PetMount", () => {
     getPetWindowRole.mockReturnValue("main")
     isTauri.mockReturnValue(true)
     const { unmount } = render(<PetMount />)
-    expect(registerPetWindowCommand).toHaveBeenCalledTimes(1)
-    expect(registerPetInteractionCommands).toHaveBeenCalledTimes(1)
+    expect(registerPetCommands).toHaveBeenCalledTimes(1)
     unmount()
-    expect(windowCommandDispose).toHaveBeenCalledTimes(1)
-    expect(interactionCommandsDispose).toHaveBeenCalledTimes(1)
+    expect(petCommandsDispose).toHaveBeenCalledTimes(1)
   })
 
   it("keeps the toggle-window command registered while disabled so its hotkey stays live", () => {
@@ -329,10 +331,42 @@ describe("PetMount", () => {
     getPetWindowRole.mockReturnValue("main")
     isTauri.mockReturnValue(true)
     render(<PetMount />)
-    // The window toggle stays reachable (the fix) but the interaction commands,
-    // which need the running controller, do not register while disabled.
-    expect(registerPetWindowCommand).toHaveBeenCalledTimes(1)
-    expect(registerPetInteractionCommands).not.toHaveBeenCalled()
+    // Every pet command stays registered while the pet is off, so a bound
+    // chord is never reserved at the OS level yet dispatching to nothing. The
+    // interaction handlers go through the access gate, which refuses.
+    expect(registerPetCommands).toHaveBeenCalledTimes(1)
+  })
+
+  it("localizes the command titles the tray and keybinding sheet show", () => {
+    settingsValue = ENABLED_SETTINGS
+    getPetWindowRole.mockReturnValue("main")
+    isTauri.mockReturnValue(true)
+    render(<PetMount />)
+    expect(registerPetCommands.mock.calls[0][0]?.windowTitle).toBe("Toggle desktop pet")
+    expect(registerPetCommands.mock.calls[0][0]?.titles).toEqual({
+      "pet.feed": "Feed the pet",
+      "pet.play": "Play with the pet",
+      "pet.pet": "Pet the pet",
+      "pet.sleep": "Put the pet to sleep",
+      "pet.clean": "Clean the pet",
+      "pet.treat": "Give the pet a treat",
+    })
+  })
+
+  it("answers a shortcut pressed while the pet is off with a notification, and only that refusal", () => {
+    settingsValue = ENABLED_SETTINGS
+    getPetWindowRole.mockReturnValue("main")
+    isTauri.mockReturnValue(true)
+    render(<PetMount />)
+    const onRefused = registerPetCommands.mock.calls[0][0]!.onRefused!
+    onRefused("fed", { code: "rate-limited" })
+    onRefused("fed", { code: "unavailable", reason: "unsupported-host" })
+    expect(notifyPetInteractionUnavailable).not.toHaveBeenCalled()
+    onRefused("fed", { code: "unavailable", reason: "disabled" })
+    expect(notifyPetInteractionUnavailable).toHaveBeenCalledWith({
+      title: "Your pet is switched off",
+      body: "Turn it on in Settings → Pet to use pet shortcuts.",
+    })
   })
 
   it("registers no pet commands on a secondary window or mobile", () => {
@@ -340,8 +374,7 @@ describe("PetMount", () => {
     getPetWindowRole.mockReturnValue("overlay")
     isTauri.mockReturnValue(true)
     render(<PetMount />)
-    expect(registerPetWindowCommand).not.toHaveBeenCalled()
-    expect(registerPetInteractionCommands).not.toHaveBeenCalled()
+    expect(registerPetCommands).not.toHaveBeenCalled()
   })
 
   it("renders nothing and disables the controller on the Capacitor mobile shell", () => {
@@ -398,8 +431,7 @@ it("does not mount or initialize any pet runtime on web with saved enabled setti
   expect(usePetEventBus).toHaveBeenCalledWith(false, undefined)
   expect(ensurePetAccountId).not.toHaveBeenCalled()
   expect(ensurePetProfile).not.toHaveBeenCalled()
-  expect(registerPetInteractionCommands).not.toHaveBeenCalled()
-  expect(registerPetWindowCommand).not.toHaveBeenCalled()
+  expect(registerPetCommands).not.toHaveBeenCalled()
   expect(startMainPetBridge).not.toHaveBeenCalled()
   expect(openPetWindow).not.toHaveBeenCalled()
 })

@@ -113,12 +113,24 @@ before persistence. The official Hiyori and Haru corpus is revision- and SHA-256
 `lib/pet/sprite-v2/import.ts` validates the fixed atlas contract. Its final two rows provide 16 clockwise
 gaze directions in 22.5° buckets with a dead zone, hysteresis, and stale-input return to idle. SVG moves
 its existing face artwork; Live2D maps standard head/eye/body/mouth parameters. Gaze yields to suspension,
-held pose, one-shots, locomotion, and semantic state. Page-local pointer input works in web mode; Tauri's
-least-privilege cursor command is sampled at no more than 10 Hz and is never persisted or transmitted.
+held pose, one-shots, locomotion, and semantic state. The in-app widget and previews follow the page-local
+pointer; the overlay uses Tauri's least-privilege cursor command, sampled at no more than 10 Hz and never
+persisted or transmitted.
 
 Character bindings may inherit the global selection or choose SVG, a Live2D model, or a Sprite pack.
 Legacy `live2dModelId` rows are interpreted lazily as typed Live2D selections, and deleting an asset clears
 both global and character references transactionally before SVG takes over.
+
+## Reaching the pet
+
+The pet runs only in the desktop app's main window (ADR-0058 D9); on the web and mobile the rail, ⌘K and
+Settings never offer it, `/pet` explains itself, and `/pet feed` says where the pet lives. On the desktop
+every summon path, the global hotkey, the tray toggle, ⌘K "Toggle desktop pet", the Settings overlay
+switch and the agent's `pet_show`, runs `openDesktopPetWindow()` (`lib/pet/commands.ts`), which opens at
+the saved geometry and switches a disabled pet on. The six nurture commands are bindable in Settings →
+Shortcuts and stay registered while the pet is off, answering with a "pet is off" notification rather than
+nothing. A fresh Attention Radar report arrives as a `radarReport` event whose bubble offers "Open
+Insights" (D10).
 
 ## Console and customization workspace
 

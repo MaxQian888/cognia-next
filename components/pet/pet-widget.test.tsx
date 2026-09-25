@@ -164,6 +164,21 @@ describe("PetWidget", () => {
     expect(screen.getByTestId("pet-interaction-panel")).toBeInTheDocument()
   })
 
+  it("offers a bubble's action and routes it to the pet console, clearing the bubble", () => {
+    withPet()
+    usePetStore.setState({
+      bubble: {
+        text: "Your radar is ready",
+        origin: "system",
+        action: { kind: "open-console", tab: "insights" },
+      },
+    })
+    render(<PetWidget settings={DEFAULT_PET_SETTINGS} />)
+    fireEvent.click(screen.getByRole("button", { name: "Open Insights" }))
+    expect(routerPush).toHaveBeenCalledWith("/pet?tab=insights")
+    expect(usePetStore.getState().bubble).toBeNull()
+  })
+
   it("passes the resolved Live2D skin to the interaction panel when active + ready", () => {
     withPet()
     mockUseActiveLive2dModel.mockReturnValue({ modelId: "m1", row: undefined, coreReady: true })

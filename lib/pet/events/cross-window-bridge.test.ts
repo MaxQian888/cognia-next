@@ -107,6 +107,28 @@ describe("startMainPetBridge", () => {
     expect(channel.msgs()).toContainEqual({ v: 1, t: "bubble", bubble: null })
   })
 
+  it("forwards a bubble's action, so the overlay can offer the same button", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    startMainPetBridge({ channel, store: store as never })
+    store.emit({
+      bubble: {
+        text: "report ready",
+        origin: "system",
+        action: { kind: "open-console", tab: "insights" },
+      },
+    })
+    expect(channel.msgs()).toContainEqual({
+      v: 1,
+      t: "bubble",
+      bubble: {
+        text: "report ready",
+        origin: "system",
+        action: { kind: "open-console", tab: "insights" },
+      },
+    })
+  })
+
   it("broadcasts effective appearance and gaze changes", () => {
     const channel = new FakeChannel()
     const store = makeStore()
@@ -191,7 +213,11 @@ describe("startMainPetBridge", () => {
     const channel = new FakeChannel()
     const store = makeStore()
     store.__state.visualState = "happy"
-    store.__state.bubble = { text: "yo", origin: "llm" }
+    store.__state.bubble = {
+      text: "yo",
+      origin: "llm",
+      action: { kind: "open-console", tab: "insights" },
+    }
     store.__state.appearanceSelection = { skinId: "sprite-v2", packId: "momo" }
     store.__state.lookTarget = {
       x: -0.5,
@@ -202,10 +228,11 @@ describe("startMainPetBridge", () => {
     startMainPetBridge({ channel, store: store as never })
     channel.deliver({ v: 1, t: "request-state" })
     expect(channel.msgs()).toContainEqual({ v: 1, t: "visual-state", state: "happy" })
+    // A late-opening overlay must catch the action too, not just the text.
     expect(channel.msgs()).toContainEqual({
       v: 1,
       t: "bubble",
-      bubble: { text: "yo", origin: "llm" },
+      bubble: { text: "yo", origin: "llm", action: { kind: "open-console", tab: "insights" } },
     })
     expect(channel.msgs()).toContainEqual({
       v: 1,
@@ -440,6 +467,22 @@ describe("startOverlayPetBridge", () => {
     startOverlayPetBridge({ channel, store: store as never })
     channel.deliver({ v: 1, t: "bubble", bubble: { text: "from llm", origin: "llm" } })
     expect(store.__state.setBubble).toHaveBeenCalledWith({ text: "from llm", origin: "llm" })
+  })
+
+  it("applies a broadcast bubble action", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    startOverlayPetBridge({ channel, store: store as never })
+    channel.deliver({
+      v: 1,
+      t: "bubble",
+      bubble: { text: "new report", action: { kind: "open-console", tab: "insights" } },
+    })
+    expect(store.__state.setBubble).toHaveBeenCalledWith({
+      text: "new report",
+      origin: "system",
+      action: { kind: "open-console", tab: "insights" },
+    })
   })
 
   it("dispose closes the channel", () => {

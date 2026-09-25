@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, within, fireEvent, act } from "@testing-library/react"
 
 const mockUsePlatform = jest.fn(() => "tauri")
 jest.mock("@/hooks/use-platform", () => ({
@@ -274,6 +274,14 @@ describe("hosts where the pet cannot run", () => {
     render(<PetConsole />)
     expect(screen.getByTestId("pet-console-unavailable")).toBeInTheDocument()
     expect(screen.queryByTestId("pet-console-loading")).not.toBeInTheDocument()
+  })
+
+  it("gives the unavailable page a way out instead of a bare sentence", () => {
+    mockUsePlatform.mockReturnValue("mobile")
+    mockUsePet.mockReturnValue(petResult(null))
+    render(<PetConsole />)
+    const exit = within(screen.getByTestId("pet-console-unavailable")).getByRole("link")
+    expect(exit).toHaveAttribute("href", "/")
   })
 
   it("renders the console normally on a host that does run the pet", () => {

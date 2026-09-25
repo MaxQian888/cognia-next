@@ -20,6 +20,7 @@ import {
   decodePetBridgeMessage,
   encodePetBridgeMessage,
   PET_BRIDGE_CHANNEL,
+  type PetBridgeBubble,
   type PetBridgeInteractionKind,
   type PetBridgeMessage,
 } from "./cross-window-protocol"
@@ -45,6 +46,16 @@ function post(channel: BroadcastChannelLike, msg: PetBridgeMessage): void {
   channel.postMessage(encodePetBridgeMessage(msg))
 }
 
+/** The store bubble as it crosses the wire: text, provenance and any action. */
+function toBridgeBubble(bubble: PetBubble | null): PetBridgeBubble | null {
+  if (!bubble) return null
+  return {
+    text: bubble.text,
+    origin: bubble.origin,
+    ...(bubble.action ? { action: bubble.action } : {}),
+  }
+}
+
 export interface MainPetBridgeDeps {
   channel?: BroadcastChannelLike
   store?: PetStoreApi
@@ -68,11 +79,7 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
   const broadcastSnapshot = () => {
     const s = store.getState()
     post(channel, { v: 1, t: "visual-state", state: s.visualState })
-    post(channel, {
-      v: 1,
-      t: "bubble",
-      bubble: s.bubble ? { text: s.bubble.text, origin: s.bubble.origin } : null,
-    })
+    post(channel, { v: 1, t: "bubble", bubble: toBridgeBubble(s.bubble) })
     if (s.appearanceSelection) {
       post(channel, { v: 1, t: "appearance", selection: s.appearanceSelection })
     }
@@ -84,11 +91,7 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
       post(channel, { v: 1, t: "visual-state", state: state.visualState })
     }
     if (state.bubble !== prev.bubble) {
-      post(channel, {
-        v: 1,
-        t: "bubble",
-        bubble: state.bubble ? { text: state.bubble.text, origin: state.bubble.origin } : null,
-      })
+      post(channel, { v: 1, t: "bubble", bubble: toBridgeBubble(state.bubble) })
     }
     if (state.appearanceSelection !== prev.appearanceSelection && state.appearanceSelection) {
       post(channel, { v: 1, t: "appearance", selection: state.appearanceSelection })
@@ -173,7 +176,11 @@ export function startOverlayPetBridge(deps: OverlayPetBridgeDeps = {}): OverlayP
         break
       case "bubble": {
         const next: PetBubble | null = msg.bubble
-          ? { text: msg.bubble.text, origin: msg.bubble.origin ?? "system" }
+          ? {
+              text: msg.bubble.text,
+              origin: msg.bubble.origin ?? "system",
+              ...(msg.bubble.action ? { action: msg.bubble.action } : {}),
+            }
           : null
         api.setBubble(next)
         break
