@@ -35,7 +35,7 @@ log.workspace = true
 regex.workspace = true
 
 # Process-group creation (`setsid`) and group kill (`killpg`). Mirrors the
-# idiom in `cognia-automation/src/sandbox/macos.rs`.
+# idiom in `cognia-exec-sandbox/src/macos.rs`.
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 

@@ -3,9 +3,7 @@
   "findings": [
     "direct-only: cognia-subscription depends on keyring",
     "direct-only: cognia-terminal depends on keyring",
-    "layer: cognia-plugin-runtime -> cognia-automation",
     "layer: cognia-plugin-runtime -> cognia-connectors",
-    "layer: cognia-terminal -> cognia-automation",
     "tauri-default: cognia-agents",
     "tauri-default: cognia-automation",
     "tauri-default: cognia-ccswitch",

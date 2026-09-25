@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use crate::sandbox::types::{NetworkPolicy, SandboxError, SandboxPolicy};
+use crate::types::{NetworkPolicy, SandboxError, SandboxPolicy};
 
 /// Input the renderer passes to the dispatcher. Fields are optional because
 /// each tool only uses a subset — Bash uses `writable` + `readable` +

@@ -9,7 +9,7 @@
 #![allow(dead_code)]
 //
 // Lives in its own file so backends (`mock`, `uninstalled`, future
-// `windows` / `macos` / `linux`) can `use crate::sandbox::traits::*` without
+// `windows` / `macos` / `linux`) can `use crate::traits::*` without
 // pulling in the dispatcher / Tauri command surface that lives in `mod.rs`.
 
 use std::collections::BTreeMap;
@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::sandbox::types::{
+use crate::types::{
     NetworkPolicy, ProbeReport, SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy,
     SandboxResult,
 };
@@ -196,5 +196,138 @@ pub trait SandboxedExec: Send + Sync {
             confined: true,
             detail: "ok".into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A backend that runs nothing and answers each probe from a script, so
+    /// every branch of the default `probe_confinement` can be driven without
+    /// an OS sandbox.
+    struct Scripted {
+        available: bool,
+        /// Exit code for the trivial `exit 0` probe; `None` makes `run` fail.
+        trivial: Option<i32>,
+        /// Exit code for the write-outside-the-writable-set probe.
+        denied_write: i32,
+    }
+
+    #[async_trait]
+    impl SandboxedExec for Scripted {
+        async fn run(
+            &self,
+            command: SandboxCommand,
+            _policy: SandboxPolicy,
+        ) -> Result<SandboxResult, SandboxError> {
+            let script = command.argv.last().cloned().unwrap_or_default();
+            let exit_code = if script == "exit 0" {
+                self.trivial.ok_or(SandboxError::BackendFailed {
+                    reason: "runner crashed".into(),
+                })?
+            } else {
+                self.denied_write
+            };
+            Ok(SandboxResult {
+                exit_code,
+                stdout: String::new(),
+                stderr: String::new(),
+                duration: Duration::ZERO,
+                timed_out: false,
+                stdout_truncated: false,
+                stderr_truncated: false,
+            })
+        }
+
+        fn is_available(&self) -> bool {
+            self.available
+        }
+
+        async fn first_time_setup(&self) -> Result<(), SandboxError> {
+            Ok(())
+        }
+
+        fn health(&self) -> SandboxHealth {
+            SandboxHealth {
+                available: self.available,
+                backend: "scripted".into(),
+                version: String::new(),
+                last_error: String::new(),
+            }
+        }
+    }
+
+    fn backend(available: bool, trivial: Option<i32>, denied_write: i32) -> Scripted {
+        Scripted {
+            available,
+            trivial,
+            denied_write,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_backend_is_not_confined_and_runs_nothing() {
+        let report = backend(false, Some(0), 1).probe_confinement().await;
+        assert_eq!(report.backend, "scripted");
+        assert!(!report.confined);
+        assert!(
+            report.detail.contains("backend unavailable"),
+            "{}",
+            report.detail
+        );
+    }
+
+    #[tokio::test]
+    async fn a_backend_that_cannot_run_a_trivial_command_is_not_confined() {
+        let report = backend(true, None, 1).probe_confinement().await;
+        assert!(!report.confined);
+        assert!(
+            report.detail.contains("failed to run a trivial command"),
+            "{}",
+            report.detail
+        );
+
+        let report = backend(true, Some(3), 1).probe_confinement().await;
+        assert!(!report.confined);
+        assert!(
+            report.detail.contains("returned exit 3"),
+            "{}",
+            report.detail
+        );
+    }
+
+    /// A backend that reports success for the forbidden write is not confining
+    /// anything, even though this fake never actually writes the file.
+    #[tokio::test]
+    async fn an_unblocked_write_outside_the_writable_set_fails_the_probe() {
+        let report = backend(true, Some(0), 0).probe_confinement().await;
+        if dirs::home_dir().is_some() {
+            assert!(!report.confined);
+            assert!(report.detail.contains("NOT blocked"), "{}", report.detail);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_blocked_write_passes_the_probe() {
+        let report = backend(true, Some(0), 1).probe_confinement().await;
+        assert!(report.confined, "{}", report.detail);
+    }
+
+    #[test]
+    fn the_probe_runs_through_the_platform_shell_with_a_short_timeout() {
+        let cwd = std::env::temp_dir();
+        let command = probe_command(&cwd, "exit 0");
+        assert_eq!(command.cwd, cwd);
+        assert_eq!(command.timeout, Duration::from_secs(10));
+        assert_eq!(command.argv.last().map(String::as_str), Some("exit 0"));
+        let shell = if cfg!(target_os = "windows") {
+            "cmd"
+        } else {
+            "sh"
+        };
+        assert_eq!(command.argv[0], shell);
+        assert!(command.env.is_empty());
+        assert!(command.stdin.is_none());
     }
 }

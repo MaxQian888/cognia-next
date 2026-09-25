@@ -26,8 +26,8 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::sandbox::traits::SandboxedExec;
-use crate::sandbox::types::{
+use crate::traits::SandboxedExec;
+use crate::types::{
     NetworkPolicy, SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
 };
 
@@ -119,7 +119,7 @@ impl SandboxedExec for WindowsSandboxBackend {
         }
         // Defense-in-depth: scrub code-injection env vars at the exec boundary
         // too, so a direct backend call (not just `run_confined`) is safe.
-        crate::sandbox::env::filter_env(&mut command.env);
+        crate::env::filter_env(&mut command.env);
         let runner = self.runner_path();
         let target_user = self.target_user_for(&policy);
         let payload = build_runner_payload(target_user, &command, &policy);
@@ -192,14 +192,14 @@ impl SandboxedExec for WindowsSandboxBackend {
             serde_json::from_slice(&output.stdout).map_err(|err| SandboxError::BackendFailed {
                 reason: format!("parse runner JSON failed: {err}"),
             })?;
-        let (stdout, stdout_truncated) = crate::sandbox::output::truncate_utf8(
+        let (stdout, stdout_truncated) = crate::output::truncate_utf8(
             parsed.stdout,
-            crate::sandbox::output::MAX_OUTPUT_BYTES,
+            crate::output::MAX_OUTPUT_BYTES,
             parsed.stdout_truncated,
         );
-        let (stderr, stderr_truncated) = crate::sandbox::output::truncate_utf8(
+        let (stderr, stderr_truncated) = crate::output::truncate_utf8(
             parsed.stderr,
-            crate::sandbox::output::MAX_OUTPUT_BYTES,
+            crate::output::MAX_OUTPUT_BYTES,
             parsed.stderr_truncated,
         );
         Ok(SandboxResult {

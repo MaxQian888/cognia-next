@@ -144,7 +144,7 @@ impl JobSupervisor {
         }
 
         // Put the child in its OWN session so a kill reaches grandchildren.
-        // Same idiom as `cognia-automation/src/sandbox/macos.rs`.
+        // Same idiom as `cognia-exec-sandbox/src/macos.rs`.
         // SAFETY: post-fork / pre-exec; no allocation and no locks taken.
         #[cfg(unix)]
         unsafe {

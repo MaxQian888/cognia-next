@@ -19,14 +19,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
 export const NATIVE_HOSTS = [
   {
-    crate: "cognia-automation",
+    crate: "cognia-exec-sandbox",
     bin: "cognia-external-agent-launcher",
-    dir: "crates/cognia-automation",
+    dir: "crates/cognia-exec-sandbox",
   },
   {
-    crate: "cognia-automation",
+    crate: "cognia-exec-sandbox",
     bin: "cognia-sandbox-exec",
-    dir: "crates/cognia-automation",
+    dir: "crates/cognia-exec-sandbox",
   },
   {
     crate: "cognia-task-workspace",

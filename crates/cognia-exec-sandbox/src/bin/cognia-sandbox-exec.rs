@@ -43,8 +43,8 @@
 
 use std::io::Read;
 
-use cognia_automation::sandbox::policy::{policy_for, PolicyRequest};
-use cognia_automation::sandbox::types::{SandboxCommand, SandboxError};
+use cognia_exec_sandbox::policy::{policy_for, PolicyRequest};
+use cognia_exec_sandbox::types::{SandboxCommand, SandboxError};
 use serde::{Deserialize, Serialize};
 
 /// One sandboxed execution request. Field-for-field the `sandbox_exec` Tauri
@@ -77,17 +77,17 @@ enum Envelope {
     Exec {
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
-        result: Option<cognia_automation::sandbox::types::SandboxResult>,
+        result: Option<cognia_exec_sandbox::types::SandboxResult>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<SandboxError>,
     },
     Health {
         ok: bool,
-        health: cognia_automation::sandbox::types::SandboxHealth,
+        health: cognia_exec_sandbox::types::SandboxHealth,
     },
     Probe {
         ok: bool,
-        probe: cognia_automation::sandbox::types::ProbeReport,
+        probe: cognia_exec_sandbox::types::ProbeReport,
     },
 }
 
@@ -155,7 +155,7 @@ async fn run_exec(req: ExecRequest) -> Envelope {
             }
         }
     };
-    match cognia_automation::sandbox::run_confined(req.command, policy).await {
+    match cognia_exec_sandbox::run_confined(req.command, policy).await {
         Ok(result) => Envelope::Exec {
             ok: true,
             result: Some(result),
@@ -177,11 +177,11 @@ async fn run(mode: Mode) -> Result<Envelope, String> {
         }
         Mode::Health => Ok(Envelope::Health {
             ok: true,
-            health: cognia_automation::sandbox::current_backend().health(),
+            health: cognia_exec_sandbox::current_backend().health(),
         }),
         Mode::Probe => Ok(Envelope::Probe {
             ok: true,
-            probe: cognia_automation::sandbox::current_backend()
+            probe: cognia_exec_sandbox::current_backend()
                 .probe_confinement()
                 .await,
         }),

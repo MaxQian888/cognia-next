@@ -20,6 +20,7 @@
     "cognia-media": "platform",
     "cognia-sandboxd": "platform",
     "cognia-provider-diagnostics": "platform",
+    "cognia-exec-sandbox": "platform",
 
     "cognia-git": "domain",
     "cognia-ocr": "domain",

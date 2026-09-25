@@ -49,7 +49,7 @@ export function prepareExternalAgentLauncher({
     resolvedTarget = parseRustHost(rustc.stdout)
   }
 
-  const buildArgs = ["build", "-p", "cognia-automation", "--bin", LAUNCHER_BIN, "--release"]
+  const buildArgs = ["build", "-p", "cognia-exec-sandbox", "--bin", LAUNCHER_BIN, "--release"]
   if (target) buildArgs.push("--target", resolvedTarget)
   const build = run("cargo", buildArgs, {
     cwd: root,

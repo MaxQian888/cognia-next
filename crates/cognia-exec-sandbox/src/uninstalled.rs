@@ -13,10 +13,8 @@
 
 use async_trait::async_trait;
 
-use crate::sandbox::traits::SandboxedExec;
-use crate::sandbox::types::{
-    SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
-};
+use crate::traits::SandboxedExec;
+use crate::types::{SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult};
 
 #[derive(Debug, Clone)]
 pub struct UninstalledSandboxBackend {
@@ -95,7 +93,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::sandbox::types::NetworkPolicy;
+    use crate::types::NetworkPolicy;
 
     fn sample_cmd() -> SandboxCommand {
         SandboxCommand {

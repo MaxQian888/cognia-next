@@ -31,10 +31,10 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::sandbox::sbpl;
-use crate::sandbox::sbpl::push_loopback_proxy_network_rule;
-use crate::sandbox::traits::SandboxedExec;
-use crate::sandbox::types::{
+use crate::sbpl;
+use crate::sbpl::push_loopback_proxy_network_rule;
+use crate::traits::SandboxedExec;
+use crate::types::{
     NetworkPolicy, SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
 };
 
@@ -65,7 +65,7 @@ impl SandboxedExec for MacOsSandboxBackend {
         }
         // Defense-in-depth: scrub code-injection env vars at the exec boundary
         // too, so a direct backend call (not just `run_confined`) is safe.
-        crate::sandbox::env::filter_env(&mut command.env);
+        crate::env::filter_env(&mut command.env);
         if !Path::new(SANDBOX_EXEC).exists() {
             return Err(SandboxError::Unavailable {
                 reason: format!("{SANDBOX_EXEC} not found (macOS sandbox-exec missing)"),
@@ -118,7 +118,7 @@ impl SandboxedExec for MacOsSandboxBackend {
         // Opt-in resource limits (RLIMIT_CPU; RLIMIT_AS is Linux-only).
         // Applied to `sandbox-exec` via pre_exec and inherited by the
         // sandboxed command. No-op unless the policy set a cap.
-        crate::sandbox::limits::apply_rlimits(&mut cmd, rlimits_for(&policy));
+        crate::limits::apply_rlimits(&mut cmd, rlimits_for(&policy));
 
         // Put the sandboxed process in its OWN session / process group so the
         // timeout watchdog can kill the WHOLE tree, not just `sandbox-exec`.
@@ -171,8 +171,8 @@ impl SandboxedExec for MacOsSandboxBackend {
             .ok_or_else(|| SandboxError::BackendFailed {
                 reason: "sandbox-exec stderr pipe was unavailable".into(),
             })?;
-        let stdout_task = tokio::spawn(crate::sandbox::output::read_capped(stdout));
-        let stderr_task = tokio::spawn(crate::sandbox::output::read_capped(stderr));
+        let stdout_task = tokio::spawn(crate::output::read_capped(stdout));
+        let stderr_task = tokio::spawn(crate::output::read_capped(stderr));
         let wait_future = child.wait();
         let timed_out;
         let status = if timeout_secs == 0 {
@@ -287,14 +287,14 @@ impl SandboxedExec for MacOsSandboxBackend {
 /// session, not the sandbox. The Linux backend enforces it inside the
 /// unshared user namespace; the Windows runner maps it onto the Job
 /// Object's `ActiveProcessLimit`.
-fn rlimits_for(policy: &SandboxPolicy) -> crate::sandbox::limits::ResolvedLimits {
+fn rlimits_for(policy: &SandboxPolicy) -> crate::limits::ResolvedLimits {
     match policy {
         SandboxPolicy::Bash {
             max_cpu_seconds,
             max_memory_mb,
             ..
-        } => crate::sandbox::limits::resolve_rlimits(*max_cpu_seconds, *max_memory_mb, 0),
-        _ => crate::sandbox::limits::ResolvedLimits::default(),
+        } => crate::limits::resolve_rlimits(*max_cpu_seconds, *max_memory_mb, 0),
+        _ => crate::limits::ResolvedLimits::default(),
     }
 }
 

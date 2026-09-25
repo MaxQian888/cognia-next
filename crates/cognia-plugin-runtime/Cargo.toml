@@ -24,7 +24,8 @@ cognia-core = { path = "../cognia-core" }
 # Open VSX `.vsix` fetch uses.
 cognia-net = { path = "../cognia-net" }
 cognia-secrets = { path = "../cognia-secrets" }
-cognia-automation = { path = "../cognia-automation" }
+# Sandboxed Python plugin launches (bwrap/sandbox-exec prefixes, env filter).
+cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
 cognia-terminal = { path = "../cognia-terminal" }
 cognia-connectors = { path = "../cognia-connectors" }
 tauri = { workspace = true }

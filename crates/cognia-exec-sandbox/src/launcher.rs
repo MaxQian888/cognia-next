@@ -20,8 +20,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::sandbox::protected::{protected_entries_under, ProtKind};
-use crate::sandbox::sbpl;
+use crate::protected::{protected_entries_under, ProtKind};
+use crate::sbpl;
 
 /// Filesystem + network scope for a sandboxed interactive launch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -508,7 +508,10 @@ mod tests {
         let Some(store) = dirs::data_dir().map(|d| d.join("cognia")) else {
             return; // no per-user data dir on this host — nothing to assert
         };
-        let ws = store.join("task-workspaces").join("executions").join("probe");
+        let ws = store
+            .join("task-workspaces")
+            .join("executions")
+            .join("probe");
         let profile = render_sbpl(&LaunchScope {
             cwd: ws.to_string_lossy().into_owned(),
             writable: vec![ws.to_string_lossy().into_owned()],
@@ -522,13 +525,21 @@ mod tests {
         let canon_store = std::fs::canonicalize(&store).unwrap_or_else(|_| store.clone());
         let emitted_ws = canon_store.join(ws.strip_prefix(&store).expect("ws under store"));
         let allow = format!("(subpath \"{}\")", emitted_ws.display());
-        let deny_at = profile.find(&deny).unwrap_or_else(|| panic!("store deny missing\n{profile}"));
+        let deny_at = profile
+            .find(&deny)
+            .unwrap_or_else(|| panic!("store deny missing\n{profile}"));
         let allow_at = profile
             .find(&allow)
             .unwrap_or_else(|| panic!("workspace carve-out missing\n{profile}"));
-        assert!(allow_at > deny_at, "carve-out must follow the deny\n{profile}");
+        assert!(
+            allow_at > deny_at,
+            "carve-out must follow the deny\n{profile}"
+        );
         // The store itself is re-opened for traversal only, never as a subpath.
-        for spelling in [store.display().to_string(), canon_store.display().to_string()] {
+        for spelling in [
+            store.display().to_string(),
+            canon_store.display().to_string(),
+        ] {
             assert!(
                 !profile.contains(&format!("(allow file-read* (subpath \"{spelling}\"))")),
                 "{profile}"

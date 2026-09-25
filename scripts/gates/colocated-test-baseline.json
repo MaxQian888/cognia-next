@@ -76,7 +76,6 @@
     "crates/cognia-automation/src/automation/platform/uia/element.rs",
     "crates/cognia-automation/src/automation/platform/uia/text_selection.rs",
     "crates/cognia-automation/src/cua_sandbox/remote_client.rs",
-    "crates/cognia-automation/src/sandbox/traits.rs",
     "crates/cognia-cli/src/commands/lint/report.rs",
     "crates/cognia-cli/src/engine/contract.rs",
     "crates/cognia-cli/src/shared/encoding.rs",

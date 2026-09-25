@@ -214,7 +214,7 @@ pub fn tool_host_runtime_dir(temp_root: &Path, uid: Option<u32>) -> PathBuf {
 
 /// Build the launcher argv.
 ///
-/// Shape is fixed by `crates/cognia-automation/src/bin/cognia-external-agent-launcher.rs`:
+/// Shape is fixed by `crates/cognia-exec-sandbox/src/bin/cognia-external-agent-launcher.rs`:
 /// `--cwd <dir> (--writable <root>)* (--readable <root>)* [--network] -- <command> <args…>`.
 pub fn build_sandbox_launcher_args(
     command: &str,

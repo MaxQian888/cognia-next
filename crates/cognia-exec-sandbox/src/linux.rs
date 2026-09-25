@@ -28,8 +28,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::sandbox::traits::SandboxedExec;
-use crate::sandbox::types::{
+use crate::traits::SandboxedExec;
+use crate::types::{
     NetworkPolicy, SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
 };
 
@@ -108,7 +108,7 @@ impl SandboxedExec for LinuxSandboxBackend {
         }
         // Defense-in-depth: scrub code-injection env vars at the exec boundary
         // too, so a direct backend call (not just `run_confined`) is safe.
-        crate::sandbox::env::filter_env(&mut command.env);
+        crate::env::filter_env(&mut command.env);
         // Defense-in-depth on the filesystem side: refuse readable roots that
         // would expose host runtime state (`/var/run`, `/proc`, …) even when
         // the call did not come through `run_confined`.
@@ -127,8 +127,8 @@ impl SandboxedExec for LinuxSandboxBackend {
         // Defence-in-depth syscall filter, parked on a descriptor for bwrap to
         // install on the sandboxed process. `seccomp_program` owns that
         // descriptor and must outlive the spawn below.
-        let seccomp_program = match crate::sandbox::seccomp::build_filter() {
-            Ok(bpf) => match crate::sandbox::seccomp::park_program(&bpf) {
+        let seccomp_program = match crate::seccomp::build_filter() {
+            Ok(bpf) => match crate::seccomp::park_program(&bpf) {
                 Ok(file) => Some(file),
                 Err(e) => {
                     eprintln!(
@@ -146,9 +146,7 @@ impl SandboxedExec for LinuxSandboxBackend {
         let bwrap_args = render_bwrap_args(
             &policy,
             &command,
-            seccomp_program
-                .as_ref()
-                .map(|_| crate::sandbox::seccomp::SECCOMP_FD),
+            seccomp_program.as_ref().map(|_| crate::seccomp::SECCOMP_FD),
         );
 
         let mut cmd = Command::new(bwrap);
@@ -175,9 +173,9 @@ impl SandboxedExec for LinuxSandboxBackend {
         // applied to the `bwrap` process via `pre_exec` and inherited into the
         // sandboxed command. seccomp is best-effort — namespaces remain the
         // boundary if filter construction fails on an exotic arch.
-        crate::sandbox::limits::apply_rlimits(&mut cmd, rlimits_for(&policy));
+        crate::limits::apply_rlimits(&mut cmd, rlimits_for(&policy));
         if let Some(program) = seccomp_program.as_ref() {
-            crate::sandbox::seccomp::attach_program_fd(&mut cmd, program.as_raw_fd());
+            crate::seccomp::attach_program_fd(&mut cmd, program.as_raw_fd());
         }
 
         let started = Instant::now();
@@ -210,8 +208,8 @@ impl SandboxedExec for LinuxSandboxBackend {
             .ok_or_else(|| SandboxError::BackendFailed {
                 reason: "bwrap stderr pipe was unavailable".into(),
             })?;
-        let stdout_task = tokio::spawn(crate::sandbox::output::read_capped(stdout));
-        let stderr_task = tokio::spawn(crate::sandbox::output::read_capped(stderr));
+        let stdout_task = tokio::spawn(crate::output::read_capped(stdout));
+        let stderr_task = tokio::spawn(crate::output::read_capped(stderr));
         let wait_future = child.wait();
         let timed_out;
         let status = if timeout_secs == 0 {
@@ -336,19 +334,15 @@ impl SandboxedExec for LinuxSandboxBackend {
 /// kernels with per-user-namespace process accounting (≥4.11) the counter is
 /// scoped to the sandbox's own namespace — a fork bomb exhausts the sandbox
 /// cap, not the login uid's.
-fn rlimits_for(policy: &SandboxPolicy) -> crate::sandbox::limits::ResolvedLimits {
+fn rlimits_for(policy: &SandboxPolicy) -> crate::limits::ResolvedLimits {
     match policy {
         SandboxPolicy::Bash {
             max_cpu_seconds,
             max_memory_mb,
             max_processes,
             ..
-        } => crate::sandbox::limits::resolve_rlimits(
-            *max_cpu_seconds,
-            *max_memory_mb,
-            *max_processes,
-        ),
-        _ => crate::sandbox::limits::ResolvedLimits::default(),
+        } => crate::limits::resolve_rlimits(*max_cpu_seconds, *max_memory_mb, *max_processes),
+        _ => crate::limits::ResolvedLimits::default(),
     }
 }
 
@@ -364,11 +358,11 @@ fn reject_forbidden_readable_roots(policy: &SandboxPolicy) -> Result<(), Sandbox
         | SandboxPolicy::Write { readable, .. }
         | SandboxPolicy::TextEditor { readable, .. } => readable,
     };
-    let deny = crate::sandbox::protected::forbidden_readable_roots();
+    let deny = crate::protected::forbidden_readable_roots();
     for p in readable {
-        let resolved = crate::sandbox::paths::safe_canonicalize(p).unwrap_or_else(|_| p.clone());
-        if crate::sandbox::protected::is_forbidden_readable(&resolved, &deny)
-            || crate::sandbox::protected::is_forbidden_readable(p, &deny)
+        let resolved = crate::paths::safe_canonicalize(p).unwrap_or_else(|_| p.clone());
+        if crate::protected::is_forbidden_readable(&resolved, &deny)
+            || crate::protected::is_forbidden_readable(p, &deny)
         {
             return Err(SandboxError::InvalidPolicy {
                 reason: format!(
@@ -486,19 +480,15 @@ fn namespace_setup_denial(exit_code: i32, stdout: &str, stderr: &str) -> Option<
 /// mount actually served: their own files, or, through a symlink to the real
 /// home directory, the very secrets the mount exists to hide. A tmpfs needs no
 /// host path at all, so the squat has nothing to aim at.
-fn push_hidden_entry(
-    args: &mut Vec<String>,
-    kind: crate::sandbox::protected::ProtKind,
-    dest: &str,
-) {
+fn push_hidden_entry(args: &mut Vec<String>, kind: crate::protected::ProtKind, dest: &str) {
     match kind {
-        crate::sandbox::protected::ProtKind::Dir => {
+        crate::protected::ProtKind::Dir => {
             args.push("--tmpfs".into());
             args.push(dest.to_string());
             args.push("--remount-ro".into());
             args.push(dest.to_string());
         }
-        crate::sandbox::protected::ProtKind::File => {
+        crate::protected::ProtKind::File => {
             args.push("--ro-bind".into());
             args.push("/dev/null".into());
             args.push(dest.to_string());
@@ -519,7 +509,7 @@ fn push_hidden_entry(
 ///     process cannot create through a read-only mount.
 fn push_protected_binds(args: &mut Vec<String>, writable: &[PathBuf], readable: &[PathBuf]) {
     for root in writable {
-        for (protected, kind, secret) in crate::sandbox::protected::protected_entries_under(root) {
+        for (protected, kind, secret) in crate::protected::protected_entries_under(root) {
             let dest = protected.to_string_lossy().into_owned();
             if secret {
                 push_hidden_entry(args, kind, &dest);
@@ -531,7 +521,7 @@ fn push_protected_binds(args: &mut Vec<String>, writable: &[PathBuf], readable: 
         }
     }
     for root in readable {
-        for (protected, kind, secret) in crate::sandbox::protected::protected_entries_under(root) {
+        for (protected, kind, secret) in crate::protected::protected_entries_under(root) {
             // Only entries that actually exist. A readable root is mounted
             // read-only, and bwrap has to mkdir a mount point before it can
             // cover it, so covering an ABSENT entry fails the whole call with
@@ -967,15 +957,12 @@ mod tests {
         // `unshare` and `pivot_root` calls bwrap needs to build the sandbox,
         // which is how every Linux sandbox call came back as
         // `bwrap: Failed to make / slave: Operation not permitted`.
-        let args = render_bwrap_args(&policy, &cmd(), Some(crate::sandbox::seccomp::SECCOMP_FD));
+        let args = render_bwrap_args(&policy, &cmd(), Some(crate::seccomp::SECCOMP_FD));
         let idx = args
             .iter()
             .position(|s| s == "--seccomp")
             .expect("--seccomp present when a program is parked");
-        assert_eq!(
-            args[idx + 1],
-            crate::sandbox::seccomp::SECCOMP_FD.to_string()
-        );
+        assert_eq!(args[idx + 1], crate::seccomp::SECCOMP_FD.to_string());
 
         // Without one the run proceeds on namespace isolation alone, and bwrap
         // must not be handed a descriptor that holds nothing.

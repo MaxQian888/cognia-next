@@ -1,11 +1,9 @@
-# ADR-0067 Phase 5 — Computer Use automation + execution sandbox
-# (ADR-0020 / ADR-0028). Extracted from app_lib's automation/ + sandbox/ +
-# cua_sandbox/ modules (one cyclic cluster). Isolates the UI-automation stack
-# (uiautomation + windows-rs on Windows, enigo + AX on macOS, atspi/seccomp on
-# Linux) and xcap. Shared deps (windows, core-graphics, core-foundation, libc)
-# stay in src-tauri too; only the cluster-exclusive ones (uiautomation, enigo,
-# xcap, accessibility[-sys], seccompiler) were removed there. Native target
-# blocks are copied verbatim from src-tauri/Cargo.toml.
+# ADR-0067 Phase 5 — Computer Use automation (ADR-0020). Extracted from
+# app_lib's automation/ + sandbox/ + cua_sandbox/ modules (one cyclic cluster).
+# Isolates the UI-automation stack (uiautomation + windows-rs on Windows,
+# enigo + AX on macOS, atspi on Linux) and xcap. The execution sandbox itself
+# (ADR-0028: bwrap/seccomp, sandbox-exec, the Windows runner) moved on to
+# `cognia-exec-sandbox` (ADR-0196 P2); this crate keeps its Tauri commands.
 [package]
 name = "cognia-automation"
 version = "0.1.0"
@@ -25,9 +23,10 @@ cc = "1"
 [dependencies]
 cognia-instrument = { path = "../cognia-instrument" }
 cognia-core = { path = "../cognia-core" }
-# Shared outbound proxy policy — the sandbox filtering proxy chains through the
-# Host's configured proxy rather than dialling the internet directly.
-cognia-net = { path = "../cognia-net" }
+# The execution sandbox (ADR-0028), its own crate since ADR-0196 P2 and
+# re-exported as `crate::sandbox`; the three sandbox Tauri commands and the
+# plugin-grant admission check stay in `src/sandbox.rs`.
+cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
 tauri = { workspace = true, features = ["image-png"] }
 # `desktop_paste` writes to the clipboard via ClipboardExt before pasting.
 tauri-plugin-clipboard-manager.workspace = true
@@ -101,14 +100,11 @@ objc2-app-kit = { version = "0.3.2", features = ["libc", "NSRunningApplication",
 objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSString", "NSURL"] }
 objc2 = "0.6.4"
 
-[target."cfg(unix)".dependencies]
-# setrlimit for the sandbox CPU / address-space caps (sandbox/limits.rs).
-libc.workspace = true
 
 [target."cfg(target_os = \"linux\")".dependencies]
-# Linux input sim (atspi backend) + seccomp-bpf filter for the bwrap backend.
+# Linux input sim (atspi backend). The seccomp filter moved to
+# `cognia-exec-sandbox` with the bwrap backend.
 enigo = "0.6"
-seccompiler = "0.5"
 
 [lints]
 workspace = true

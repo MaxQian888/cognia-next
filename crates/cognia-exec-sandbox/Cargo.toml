@@ -1,0 +1,44 @@
+# ADR-0196 P2 — the per-tool OS execution sandbox (ADR-0028), out of
+# `cognia-automation`. The terminal and the Python plugin host need three
+# launcher helpers from it; as a module of the automation crate they linked the
+# whole UI-automation stack (uiautomation, xcap, enigo) to reach them.
+#
+# Not to be confused with its neighbours: `cognia-sandbox-runner` is the
+# Windows restricted-token executable this crate's Windows backend spawns,
+# `cognia-sandbox-pool` runs Docker-backed runtime environments, and
+# `cognia-sandboxd` is the supervisor inside such an environment.
+[package]
+name = "cognia-exec-sandbox"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Per-tool OS execution sandbox: bwrap + seccomp on Linux, sandbox-exec/SBPL on macOS, the restricted-token runner on Windows, and the launcher binaries agent runtimes spawn through."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_exec_sandbox"
+path = "src/lib.rs"
+
+[dependencies]
+# The egress proxy's allow/deny checks and the upstream proxy dialer.
+cognia-net = { path = "../cognia-net" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "fs", "io-util", "sync", "time", "net"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+dirs.workspace = true
+# Scratch dirs for the SBPL profile and confined runs.
+tempfile.workspace = true
+
+[target."cfg(unix)".dependencies]
+# `setrlimit` for the CPU / address-space caps applied in `pre_exec`.
+libc.workspace = true
+
+[target."cfg(target_os = \"linux\")".dependencies]
+# The seccomp filter the bwrap backend installs.
+seccompiler = "0.5"
+
+[lints]
+workspace = true

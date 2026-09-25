@@ -9,10 +9,10 @@ use std::path::Path;
 use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
-use cognia_automation::sandbox::launcher::bwrap_prefix;
+use cognia_exec_sandbox::launcher::bwrap_prefix;
 #[cfg(target_os = "macos")]
-use cognia_automation::sandbox::launcher::sandbox_exec_prefix;
-use cognia_automation::sandbox::launcher::LaunchScope;
+use cognia_exec_sandbox::launcher::sandbox_exec_prefix;
+use cognia_exec_sandbox::launcher::LaunchScope;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Args {
@@ -112,7 +112,9 @@ fn render_launch(args: &Args) -> Result<Vec<String>, String> {
         launch[2].push_str("(deny network-outbound (remote unix-socket (subpath \"/\")))\n");
         for root in std::iter::once(&args.scope.cwd).chain(args.scope.writable.iter()) {
             let escaped = root.replace('\\', "\\\\").replace('"', "\\\"");
-            launch[2].push_str(&format!("(allow network-outbound (remote unix-socket (subpath \"{escaped}\")))\n"));
+            launch[2].push_str(&format!(
+                "(allow network-outbound (remote unix-socket (subpath \"{escaped}\")))\n"
+            ));
         }
         launch[2].push_str("(allow network-outbound (remote unix-socket (literal \"/private/var/run/mDNSResponder\")))\n");
         // Keychain access is an IPC operation, not a read of its on-disk
@@ -166,14 +168,57 @@ fn run() -> Result<(), String> {
 /// The Bot agent receives its model credential, never ambient GitHub/SSH or
 /// interpreter injection credentials. Git's global helper configuration is
 /// disabled independently of filesystem confinement.
-fn bot_environment(env: impl IntoIterator<Item = (String, String)>) -> std::collections::BTreeMap<String, String> {
-    let mut result: std::collections::BTreeMap<_, _> = env.into_iter().filter(|(key, _)| matches!(key.as_str(),
-        "PATH" | "HOME" | "USER" | "LOGNAME" | "SHELL" | "LANG" | "LC_ALL" | "LC_CTYPE" | "TZ" | "TERM" | "TMPDIR" | "TMP" | "TEMP" |
-        "XDG_CONFIG_HOME" | "XDG_DATA_HOME" | "XDG_CACHE_HOME" | "XDG_STATE_HOME" | "SSL_CERT_FILE" | "SSL_CERT_DIR" | "NODE_EXTRA_CA_CERTS" |
-        "HTTP_PROXY" | "HTTPS_PROXY" | "NO_PROXY" | "http_proxy" | "https_proxy" | "no_proxy" | "DEVIN_API_KEY" | "DEVIN_TOKEN" | "DEVIN_BASE_URL" |
-        "DISABLE_AUTO_UPDATE" | "NO_COLOR" | "FORCE_COLOR" | "NVM_BIN" | "NVM_DIR" | "PNPM_HOME" | "BUN_INSTALL" |
-        "npm_config_cache" | "npm_config_store_dir" | "pnpm_config_store_dir" | "pnpm_config_cache_dir"
-    )).collect();
+fn bot_environment(
+    env: impl IntoIterator<Item = (String, String)>,
+) -> std::collections::BTreeMap<String, String> {
+    let mut result: std::collections::BTreeMap<_, _> = env
+        .into_iter()
+        .filter(|(key, _)| {
+            matches!(
+                key.as_str(),
+                "PATH"
+                    | "HOME"
+                    | "USER"
+                    | "LOGNAME"
+                    | "SHELL"
+                    | "LANG"
+                    | "LC_ALL"
+                    | "LC_CTYPE"
+                    | "TZ"
+                    | "TERM"
+                    | "TMPDIR"
+                    | "TMP"
+                    | "TEMP"
+                    | "XDG_CONFIG_HOME"
+                    | "XDG_DATA_HOME"
+                    | "XDG_CACHE_HOME"
+                    | "XDG_STATE_HOME"
+                    | "SSL_CERT_FILE"
+                    | "SSL_CERT_DIR"
+                    | "NODE_EXTRA_CA_CERTS"
+                    | "HTTP_PROXY"
+                    | "HTTPS_PROXY"
+                    | "NO_PROXY"
+                    | "http_proxy"
+                    | "https_proxy"
+                    | "no_proxy"
+                    | "DEVIN_API_KEY"
+                    | "DEVIN_TOKEN"
+                    | "DEVIN_BASE_URL"
+                    | "DISABLE_AUTO_UPDATE"
+                    | "NO_COLOR"
+                    | "FORCE_COLOR"
+                    | "NVM_BIN"
+                    | "NVM_DIR"
+                    | "PNPM_HOME"
+                    | "BUN_INSTALL"
+                    | "npm_config_cache"
+                    | "npm_config_store_dir"
+                    | "pnpm_config_store_dir"
+                    | "pnpm_config_cache_dir"
+            )
+        })
+        .collect();
     result.insert("GIT_CONFIG_GLOBAL".into(), "/dev/null".into());
     result.insert("GIT_CONFIG_NOSYSTEM".into(), "1".into());
     result.insert("GIT_TERMINAL_PROMPT".into(), "0".into());
@@ -243,12 +288,39 @@ mod tests {
 
     #[test]
     fn bot_scope_scrubs_publication_credentials_and_injection_hooks() {
-        let env = bot_environment([("GH_TOKEN", "secret"), ("GITHUB_TOKEN", "secret"), ("SSH_AUTH_SOCK", "/socket"), ("NODE_OPTIONS", "--require bad"), ("DEVIN_API_KEY", "model-only"), ("PATH", "/bin"), ("XDG_CONFIG_HOME", "/isolated/config")].map(|(key, value)| (key.into(), value.into())));
-        for key in ["GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK", "NODE_OPTIONS"] { assert!(!env.contains_key(key)); }
+        let env = bot_environment(
+            [
+                ("GH_TOKEN", "secret"),
+                ("GITHUB_TOKEN", "secret"),
+                ("SSH_AUTH_SOCK", "/socket"),
+                ("NODE_OPTIONS", "--require bad"),
+                ("DEVIN_API_KEY", "model-only"),
+                ("PATH", "/bin"),
+                ("XDG_CONFIG_HOME", "/isolated/config"),
+            ]
+            .map(|(key, value)| (key.into(), value.into())),
+        );
+        for key in ["GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK", "NODE_OPTIONS"] {
+            assert!(!env.contains_key(key));
+        }
         assert_eq!(env["DEVIN_API_KEY"], "model-only");
         assert_eq!(env["GIT_CONFIG_GLOBAL"], "/dev/null");
         assert_eq!(env["GIT_TERMINAL_PROMPT"], "0");
-        let args = parse_args(["--bot-isolation", "--cwd", "/work", "--deny-readable", "/home/user", "--", "devin", "acp"].into_iter().map(str::to_string)).unwrap();
+        let args = parse_args(
+            [
+                "--bot-isolation",
+                "--cwd",
+                "/work",
+                "--deny-readable",
+                "/home/user",
+                "--",
+                "devin",
+                "acp",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        )
+        .unwrap();
         assert!(args.bot_isolation);
     }
 
@@ -263,11 +335,16 @@ mod tests {
             ("pnpm_config_store_dir", "/work/state/cache/pnpm-store"),
             ("pnpm_config_cache_dir", "/work/state/cache/pnpm"),
         ];
-        let env = bot_environment(entries.into_iter().chain([
-            ("npm_config_userconfig", "/private/credentials"),
-            ("NODE_OPTIONS", "--require injected.js"),
-            ("GITHUB_TOKEN", "private"),
-        ]).map(|(key, value)| (key.into(), value.into())));
+        let env = bot_environment(
+            entries
+                .into_iter()
+                .chain([
+                    ("npm_config_userconfig", "/private/credentials"),
+                    ("NODE_OPTIONS", "--require injected.js"),
+                    ("GITHUB_TOKEN", "private"),
+                ])
+                .map(|(key, value)| (key.into(), value.into())),
+        );
         for (key, value) in entries {
             assert_eq!(env[key], value);
         }
@@ -279,7 +356,12 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn bot_scope_blocks_keychain_ipc() {
-        let args = parse_args(["--bot-isolation", "--cwd", "/tmp", "--", "/usr/bin/true"].into_iter().map(str::to_string)).unwrap();
+        let args = parse_args(
+            ["--bot-isolation", "--cwd", "/tmp", "--", "/usr/bin/true"]
+                .into_iter()
+                .map(str::to_string),
+        )
+        .unwrap();
         let launch = render_launch(&args).unwrap();
         assert!(launch[2].contains("(deny mach-lookup (global-name \"com.apple.securityd\")"));
     }

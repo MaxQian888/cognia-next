@@ -132,10 +132,11 @@ RUN cargo build --release --locked --bin cognia-server \
 # Agent-first loopback operator CLI. It is intentionally shipped in the same
 # image so service-token issuance and the network peer both stay in-container.
 RUN cargo build --release --locked -p cognia-cli --bin cognia
-# The Brain layout shells out to this existing automation host. Build it in the
+# The Brain layout shells out to this external-agent launcher. Build it in the
 # Rust stage and pass the artifact to brain-builder instead of installing a
-# second Rust toolchain in the Node stage.
-RUN cargo build --release --locked -p cognia-automation --bin cognia-external-agent-launcher
+# second Rust toolchain in the Node stage. It lives in the Tauri-free
+# `cognia-exec-sandbox` (ADR-0196), not the UI-automation crate.
+RUN cargo build --release --locked -p cognia-exec-sandbox --bin cognia-external-agent-launcher
 
 # PR CI target: type/borrow-check the whole graph without codegen or linking.
 FROM deps AS check

@@ -49,7 +49,7 @@ test("prepareExternalAgentLauncher builds the launcher bin from the automation c
     args: [
       "build",
       "-p",
-      "cognia-automation",
+      "cognia-exec-sandbox",
       "--bin",
       "cognia-external-agent-launcher",
       "--release",

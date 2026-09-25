@@ -10,7 +10,7 @@
 use std::path::Path;
 
 #[cfg(target_os = "macos")]
-use cognia_automation::sandbox::launcher::sandbox_exec_network_proxy_prefix;
+use cognia_exec_sandbox::launcher::sandbox_exec_network_proxy_prefix;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Args {

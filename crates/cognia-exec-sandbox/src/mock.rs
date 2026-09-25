@@ -17,10 +17,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::sandbox::traits::SandboxedExec;
-use crate::sandbox::types::{
-    SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
-};
+use crate::traits::SandboxedExec;
+use crate::types::{SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult};
 
 /// One recorded call. Cloned out of the ring for test assertions; the
 /// originals live in the `Arc<Mutex<…>>` so multiple test handles share
@@ -132,7 +130,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::sandbox::types::NetworkPolicy;
+    use crate::types::NetworkPolicy;
 
     fn sample_cmd() -> SandboxCommand {
         SandboxCommand {

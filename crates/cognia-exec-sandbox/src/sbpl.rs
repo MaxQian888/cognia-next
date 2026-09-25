@@ -21,7 +21,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::sandbox::protected::protected_entries_under;
+use crate::protected::protected_entries_under;
 
 /// Escape a path for an SBPL string literal.
 pub(crate) fn escape(s: &str) -> String {
@@ -420,7 +420,7 @@ mod tests {
 
         let mut out = String::new();
         push_read_deny(&mut out, &escape(&store.to_string_lossy()));
-        push_store_carveouts_at(&mut out, &store, &[ws.clone()]);
+        push_store_carveouts_at(&mut out, &store, std::slice::from_ref(&ws));
 
         let deny = out.find("file-read* (subpath").unwrap();
         let lit = |p: &Path| format!("(allow file-read-metadata (literal \"{}\"))", p.display());
@@ -432,7 +432,9 @@ mod tests {
             ws.clone(),
         ] {
             let needle = lit(&dir);
-            let at = out.find(&needle).unwrap_or_else(|| panic!("missing {needle}\n{out}"));
+            let at = out
+                .find(&needle)
+                .unwrap_or_else(|| panic!("missing {needle}\n{out}"));
             assert!(at > deny, "{needle} must follow the deny\n{out}");
         }
         assert!(out.contains(&sub(&ws)), "{out}");
@@ -478,9 +480,19 @@ mod tests {
         let child = std::fs::canonicalize(&child).unwrap_or(child);
         let parent = std::fs::canonicalize(&parent).unwrap_or(parent);
         push_store_carveouts_at(&mut out, &store, &[parent.clone(), child.clone()]);
-        assert_eq!(out.matches("(allow file-read* (subpath").count(), 1, "{out}");
-        assert!(out.contains(&format!("(subpath \"{}\")", parent.display())), "{out}");
-        assert!(!out.contains(&format!("(subpath \"{}\")", child.display())), "{out}");
+        assert_eq!(
+            out.matches("(allow file-read* (subpath").count(),
+            1,
+            "{out}"
+        );
+        assert!(
+            out.contains(&format!("(subpath \"{}\")", parent.display())),
+            "{out}"
+        );
+        assert!(
+            !out.contains(&format!("(subpath \"{}\")", child.display())),
+            "{out}"
+        );
     }
 
     #[test]
@@ -498,7 +510,7 @@ mod tests {
             .join("pending");
 
         let mut out = String::new();
-        push_store_carveouts_at(&mut out, &store, &[pending.clone()]);
+        push_store_carveouts_at(&mut out, &store, std::slice::from_ref(&pending));
         // Either spelling nests under the deny — case-insensitive FS resolves
         // `cognia` to `Cognia`, and on a case-sensitive FS the lowercase
         // spelling is the one the deny itself matched.

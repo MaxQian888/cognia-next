@@ -104,7 +104,7 @@ pub struct Confinement {
 
 /// Environment shapes the desktop backend has serialised over time.
 ///
-/// `crates/cognia-automation/src/sandbox/windows.rs` builds the payload's
+/// `crates/cognia-exec-sandbox/src/windows.rs` builds the payload's
 /// `env` as a `Vec<(String, String)>`, which serialises to an array of pairs;
 /// this struct's own history says map. A runner that accepts only one of the
 /// two refuses every call from the other, which is exactly what happened:
@@ -396,7 +396,7 @@ mod tests {
 
     fn legacy_payload() -> RunnerInput {
         // The exact shape `build_runner_payload` in
-        // `crates/cognia-automation/src/sandbox/windows.rs` emitted before
+        // `crates/cognia-exec-sandbox/src/windows.rs` emitted before
         // this contract grew fields: `env` as an array of pairs.
         payload(
             r#"{"target_user":"CogniaSandboxOnline","argv":["cmd.exe","/c","echo hi"],

@@ -1,19 +1,24 @@
-// ADR-0028 — sandbox module entry. Hosts the `SandboxedExec` trait
-// (`traits.rs`), the data types (`types.rs`), the per-tool policy resolver
-// (`policy.rs`), the production backends, the test mock (`mock.rs`), and
-// the dispatcher + Tauri command surface below.
-//
-// `current_backend()` returns the per-platform real backend in `cfg`
-// arms (bwrap on Linux, sandbox-exec/SBPL on macOS); a platform without a
-// real backend routes to `UninstalledSandboxBackend`.
-//
-// BOTH `sandbox_exec` AND `sandbox_health_probe` are registered in
-// `lib.rs::invoke_handler`. `sandbox_exec` is consumed by the
-// `cognia-sandboxed-tools` plugin and by Computer Use's `bash`/`text_editor`
-// routing (which run through `current_backend()` when a sandbox tier is
-// active, fail-closed when no backend is available);
-// `sandbox_health_probe` is the read-only diagnostic backing the
-// Settings → Sandbox status badge.
+//! The per-tool OS execution sandbox (ADR-0028), a platform crate since
+//! ADR-0196 P2.
+//!
+//! [`traits::SandboxedExec`] is the backend contract, [`types`] the data,
+//! [`policy`] the per-tool policy resolver, and [`launcher`] the argv prefixes
+//! the external-agent and proxy launchers spawn through. [`current_backend`]
+//! routes to the per-platform backend — bwrap (+ seccomp) on Linux,
+//! sandbox-exec/SBPL on macOS, the bundled restricted-token runner on Windows —
+//! and a platform without one routes to `UninstalledSandboxBackend`, which
+//! reports SetupRequired instead of running unsandboxed. [`run_confined`]
+//! canonicalizes a policy, rejects protected paths, starts the egress proxy
+//! when the policy asks for one, and dispatches.
+//!
+//! This used to be `cognia_automation::sandbox`, so the terminal and the
+//! Python plugin host linked the whole UI-automation stack to reach three
+//! launcher helpers. The Tauri commands (`sandbox_exec`,
+//! `sandbox_health_probe`, `sandbox_health_check`) and the plugin-grant
+//! admission check stay in `cognia-automation`, which re-exports this crate
+//! at its old path so `crate::…` and `app_lib::sandbox::…` resolve
+//! unchanged. The three launcher binaries live here now; their output names
+//! are unchanged.
 
 pub mod env;
 pub mod launcher;
@@ -39,10 +44,9 @@ pub mod windows;
 
 use std::sync::Arc;
 
-use crate::sandbox::traits::SandboxedExec;
-use crate::sandbox::types::SandboxHealth;
+use crate::traits::SandboxedExec;
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-use crate::sandbox::uninstalled::UninstalledSandboxBackend;
+use crate::uninstalled::UninstalledSandboxBackend;
 
 /// Backend selection. Single source of truth for the per-platform routing
 /// table. macOS routes through sandbox-exec, Linux through bwrap, and Windows
@@ -70,27 +74,6 @@ pub fn current_backend() -> Arc<dyn SandboxedExec> {
     }
 }
 
-/// Tauri-exposed read-only diagnostic. The Settings → Sandbox tab
-/// (Phase 7) polls this to drive the status badge ("Active" / "Setup
-/// required" / "Unavailable") and the "Retry setup" button visibility.
-///
-/// Cheap — no I/O, no keyring, no spawn. Safe to poll on a 5s interval.
-#[tauri::command]
-pub async fn sandbox_health_probe() -> Result<SandboxHealth, String> {
-    Ok(current_backend().health())
-}
-
-/// ACTIVE confinement probe. Distinct from `sandbox_health_probe` (which only
-/// checks the backend binary exists and is cheap enough to poll): this spawns
-/// real confined commands to verify confinement is actually enforced, so it is
-/// invoked on-demand (a "Verify confinement" action), NOT on the status poll.
-/// A present-but-broken backend reports `confined: false` here even though the
-/// cheap probe shows "Active".
-#[tauri::command]
-pub async fn sandbox_health_check() -> Result<crate::sandbox::types::ProbeReport, String> {
-    Ok(current_backend().probe_confinement().await)
-}
-
 /// Canonicalize every path a policy carries (writable / readable /
 /// target_files). Rejects control characters, relative paths, and `..`
 /// traversal, and resolves symlinks on the existing prefix so the
@@ -98,12 +81,12 @@ pub async fn sandbox_health_check() -> Result<crate::sandbox::types::ProbeReport
 /// kernel will actually resolve. Returns `InvalidPolicy` on the first bad
 /// path so the refusal happens before any spawn (ADR-0028 hardening).
 fn canonicalize_policy(
-    policy: crate::sandbox::types::SandboxPolicy,
-) -> Result<crate::sandbox::types::SandboxPolicy, crate::sandbox::types::SandboxError> {
-    use crate::sandbox::paths::safe_canonicalize_all;
-    use crate::sandbox::types::{SandboxError, SandboxPolicy};
+    policy: crate::types::SandboxPolicy,
+) -> Result<crate::types::SandboxPolicy, crate::types::SandboxError> {
+    use crate::paths::safe_canonicalize_all;
+    use crate::types::{SandboxError, SandboxPolicy};
 
-    let map_err = |e: crate::sandbox::paths::PathError| SandboxError::InvalidPolicy {
+    let map_err = |e: crate::paths::PathError| SandboxError::InvalidPolicy {
         reason: e.to_string(),
     };
     Ok(match policy {
@@ -153,11 +136,11 @@ fn canonicalize_policy(
 /// network" rather than run with an unenforced (effectively open) one. macOS
 /// pins egress to the proxy port at the kernel, so it keeps the allowlist.
 fn downgrade_unenforceable_network(
-    policy: crate::sandbox::types::SandboxPolicy,
-) -> crate::sandbox::types::SandboxPolicy {
+    policy: crate::types::SandboxPolicy,
+) -> crate::types::SandboxPolicy {
     #[cfg(target_os = "linux")]
     {
-        use crate::sandbox::types::{NetworkPolicy, SandboxPolicy};
+        use crate::types::{NetworkPolicy, SandboxPolicy};
         if let SandboxPolicy::Bash {
             network: NetworkPolicy::Allowlist { .. },
             writable,
@@ -197,7 +180,7 @@ fn downgrade_unenforceable_network(
 /// and the user's home are deliberately allowed (Python scratch uses temp;
 /// Computer Use's confine defaults to home).
 fn forbidden_deny_roots() -> Vec<std::path::PathBuf> {
-    let mut roots = crate::sandbox::protected::system_forbidden_roots();
+    let mut roots = crate::protected::system_forbidden_roots();
     if let Some(d) = dirs::data_dir() {
         roots.push(d.join("cognia"));
     }
@@ -217,7 +200,7 @@ fn forbidden_deny_roots() -> Vec<std::path::PathBuf> {
 fn with_resolved_twins(roots: Vec<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
     let mut out: Vec<std::path::PathBuf> = Vec::with_capacity(roots.len() * 2);
     for root in roots {
-        if let Ok(resolved) = crate::sandbox::paths::safe_canonicalize(&root) {
+        if let Ok(resolved) = crate::paths::safe_canonicalize(&root) {
             if resolved != root && !out.contains(&resolved) {
                 out.push(resolved);
             }
@@ -238,11 +221,11 @@ fn with_resolved_twins(roots: Vec<std::path::PathBuf>) -> Vec<std::path::PathBuf
 /// see.
 fn reject_forbidden_paths(
     cwd: &std::path::Path,
-    policy: &crate::sandbox::types::SandboxPolicy,
+    policy: &crate::types::SandboxPolicy,
     deny_roots: &[std::path::PathBuf],
-) -> Result<(), crate::sandbox::types::SandboxError> {
-    use crate::sandbox::protected::is_forbidden_writable;
-    use crate::sandbox::types::{SandboxError, SandboxPolicy};
+) -> Result<(), crate::types::SandboxError> {
+    use crate::protected::is_forbidden_writable;
+    use crate::types::{SandboxError, SandboxPolicy};
 
     let check = |p: &std::path::Path| -> Result<(), SandboxError> {
         if is_forbidden_writable(p, deny_roots) {
@@ -272,7 +255,7 @@ fn reject_forbidden_paths(
                 // File tools have no writable root for the backends' per-root
                 // re-deny to key on, so reject a target that aims into any
                 // credential / VCS-control segment (`.ssh`, `.git`, …) here.
-                if crate::sandbox::protected::is_protected_anywhere(f) {
+                if crate::protected::is_protected_anywhere(f) {
                     return Err(SandboxError::InvalidPolicy {
                         reason: format!(
                             "'{}' targets a protected credential / control path",
@@ -296,7 +279,7 @@ fn reject_forbidden_paths(
 /// `/bin`, `/lib`, …) are deliberately absent — a caller declaring them only
 /// duplicates the backend's own read-only mounts.
 fn readable_deny_roots() -> Vec<std::path::PathBuf> {
-    with_resolved_twins(crate::sandbox::protected::forbidden_readable_roots())
+    with_resolved_twins(crate::protected::forbidden_readable_roots())
 }
 
 /// Reject — before any spawn — a readable root that would expose host
@@ -304,9 +287,9 @@ fn readable_deny_roots() -> Vec<std::path::PathBuf> {
 /// `readable` list (Bash plus the file tools), before the backend renders
 /// its bind set / SBPL profile.
 fn reject_forbidden_readable(
-    policy: &crate::sandbox::types::SandboxPolicy,
-) -> Result<(), crate::sandbox::types::SandboxError> {
-    use crate::sandbox::types::{SandboxError, SandboxPolicy};
+    policy: &crate::types::SandboxPolicy,
+) -> Result<(), crate::types::SandboxError> {
+    use crate::types::{SandboxError, SandboxPolicy};
 
     let deny_roots = readable_deny_roots();
     if deny_roots.is_empty() {
@@ -319,7 +302,7 @@ fn reject_forbidden_readable(
         | SandboxPolicy::TextEditor { readable, .. } => readable,
     };
     for p in readable {
-        if crate::sandbox::protected::is_forbidden_readable(p, &deny_roots) {
+        if crate::protected::is_forbidden_readable(p, &deny_roots) {
             return Err(SandboxError::InvalidPolicy {
                 reason: format!(
                     "'{}' reaches host runtime / control state and cannot be a sandbox readable root",
@@ -337,11 +320,10 @@ fn reject_forbidden_readable(
 /// when the policy needs no proxy. Fails closed: an allowlist that can't bind
 /// its proxy is a `BackendFailed` error, never an open-network run.
 async fn maybe_start_proxy(
-    command: &mut crate::sandbox::types::SandboxCommand,
-    policy: &crate::sandbox::types::SandboxPolicy,
-) -> Result<Option<crate::sandbox::net_proxy::FilteringProxy>, crate::sandbox::types::SandboxError>
-{
-    use crate::sandbox::types::{NetworkPolicy, SandboxError, SandboxPolicy};
+    command: &mut crate::types::SandboxCommand,
+    policy: &crate::types::SandboxPolicy,
+) -> Result<Option<crate::net_proxy::FilteringProxy>, crate::types::SandboxError> {
+    use crate::types::{NetworkPolicy, SandboxError, SandboxPolicy};
 
     let SandboxPolicy::Bash {
         network: NetworkPolicy::Allowlist { hosts },
@@ -353,7 +335,7 @@ async fn maybe_start_proxy(
     if hosts.is_empty() {
         return Ok(None);
     }
-    match crate::sandbox::net_proxy::FilteringProxy::start(hosts.clone()).await {
+    match crate::net_proxy::FilteringProxy::start(hosts.clone()).await {
         Ok(proxy) => {
             let url = format!("http://127.0.0.1:{}", proxy.port());
             for key in [
@@ -390,10 +372,10 @@ async fn maybe_start_proxy(
 /// downgrade; (5) the kernel-enforced filtering proxy. Only then does it
 /// hand off to the per-platform backend.
 pub async fn run_confined(
-    mut command: crate::sandbox::types::SandboxCommand,
-    policy: crate::sandbox::types::SandboxPolicy,
-) -> Result<crate::sandbox::types::SandboxResult, crate::sandbox::types::SandboxError> {
-    use crate::sandbox::types::SandboxError;
+    mut command: crate::types::SandboxCommand,
+    policy: crate::types::SandboxPolicy,
+) -> Result<crate::types::SandboxResult, crate::types::SandboxError> {
+    use crate::types::SandboxError;
 
     // 1. Availability gate — the dispatcher-level invariant. Fail closed.
     let backend = current_backend();
@@ -409,11 +391,10 @@ pub async fn run_confined(
     }
 
     // 2. Canonicalize + validate every path the policy and cwd carry.
-    command.cwd = crate::sandbox::paths::safe_canonicalize(&command.cwd).map_err(|e| {
-        SandboxError::InvalidPolicy {
+    command.cwd =
+        crate::paths::safe_canonicalize(&command.cwd).map_err(|e| SandboxError::InvalidPolicy {
             reason: format!("cwd: {e}"),
-        }
-    })?;
+        })?;
     let policy = canonicalize_policy(policy)?;
 
     // 2b. Floor: refuse forbidden writable roots (system dirs + the app's own
@@ -427,7 +408,7 @@ pub async fn run_confined(
     reject_forbidden_readable(&policy)?;
 
     // 3. Drop code-injection environment variables (LD_PRELOAD, NODE_OPTIONS…).
-    crate::sandbox::env::filter_env(&mut command.env);
+    crate::env::filter_env(&mut command.env);
 
     // 4. Fail closed on networks the platform can't actually enforce.
     let policy = downgrade_unenforceable_network(policy);
@@ -436,248 +417,6 @@ pub async fn run_confined(
     let _proxy_guard = maybe_start_proxy(&mut command, &policy).await?;
 
     backend.run(command, policy).await
-}
-
-/// The plugin that owns every sandboxed tool. `sandbox_exec` is reachable only
-/// through `cognia-sandboxed-tools`' `sandbox_bash` / `sandbox_edit` /
-/// `sandbox_write` / `sandbox_text_editor`, so the grant check is pinned to
-/// that id rather than to a caller-supplied one — an id passed over the
-/// transport could simply be forged by the caller it is meant to constrain.
-pub const SANDBOX_PLUGIN_ID: &str = "cognia-sandboxed-tools";
-
-/// The two manifest permissions a sandboxed tool call requires.
-///
-/// `plugins/cognia-sandboxed-tools/src/index.ts` declares exactly these, and
-/// the consent UI describes them to the user as "Read and write files on this
-/// device" and "Run programs on this device". Until this check existed they
-/// were decorative: the user could deny both and every sandbox tool kept
-/// working, because `sandbox_exec` validated only the *policy* (path and
-/// network scope) and never looked at a grant at all.
-pub const SANDBOX_REQUIRED_GRANTS: [&str; 2] = ["native:filesystem", "native:process"];
-
-fn sandbox_audit_reason(
-    termination: &str,
-    provider: &str,
-    requested_timeout_seconds: u64,
-    result: Option<&crate::sandbox::types::SandboxResult>,
-) -> String {
-    format!(
-        "tier=os;provider={provider};termination={termination};requested_timeout_seconds={requested_timeout_seconds};timeout={};stdout_truncated={};stderr_truncated={};exit_code={}",
-        result.is_some_and(|value| value.timed_out),
-        result.is_some_and(|value| value.stdout_truncated),
-        result.is_some_and(|value| value.stderr_truncated),
-        result
-            .map(|value| value.exit_code.to_string())
-            .unwrap_or_else(|| "none".to_string())
-    )
-}
-
-/// Why a sandbox call was refused before it reached the OS sandbox.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SandboxAdmission {
-    Allowed,
-    PluginNotInstalled,
-    PluginDisabled,
-    MissingGrants(Vec<String>),
-}
-
-impl SandboxAdmission {
-    pub fn is_allowed(&self) -> bool {
-        matches!(self, SandboxAdmission::Allowed)
-    }
-
-    /// Short tag for the audit entry's `reason` field.
-    pub fn audit_reason(&self) -> &'static str {
-        match self {
-            SandboxAdmission::Allowed => "allowed",
-            SandboxAdmission::PluginNotInstalled => "plugin_not_installed",
-            SandboxAdmission::PluginDisabled => "plugin_disabled",
-            SandboxAdmission::MissingGrants(_) => "permission_denied",
-        }
-    }
-
-    pub fn message(&self) -> String {
-        match self {
-            SandboxAdmission::Allowed => String::new(),
-            SandboxAdmission::PluginNotInstalled => format!(
-                "sandboxed tools are unavailable: the \"{SANDBOX_PLUGIN_ID}\" plugin is not installed."
-            ),
-            SandboxAdmission::PluginDisabled => format!(
-                "sandboxed tools are unavailable: the \"{SANDBOX_PLUGIN_ID}\" plugin is disabled."
-            ),
-            SandboxAdmission::MissingGrants(missing) => format!(
-                "sandboxed tools are not permitted: \"{SANDBOX_PLUGIN_ID}\" is missing the {} permission(s). Grant them in Settings → Plugins.",
-                missing.join(", ")
-            ),
-        }
-    }
-}
-
-/// Decide whether a sandbox call may proceed, from the owning plugin's live
-/// facts. Fails closed on every axis: not installed, disabled, or any required
-/// grant absent all deny.
-pub fn admit_sandbox_call(
-    facts: &crate::automation::record::plugin_facts::PluginFacts,
-) -> SandboxAdmission {
-    if !facts.installed {
-        return SandboxAdmission::PluginNotInstalled;
-    }
-    if !facts.enabled {
-        return SandboxAdmission::PluginDisabled;
-    }
-    let missing: Vec<String> = SANDBOX_REQUIRED_GRANTS
-        .iter()
-        .filter(|required| !facts.granted.iter().any(|g| g == *required))
-        .map(|s| s.to_string())
-        .collect();
-    if missing.is_empty() {
-        SandboxAdmission::Allowed
-    } else {
-        SandboxAdmission::MissingGrants(missing)
-    }
-}
-
-/// Tauri-exposed execution dispatcher consumed by the
-/// `cognia-sandboxed-tools` plugin (Phase 4.5). The renderer-side plugin
-/// tool's `execute()` forwards every call here.
-///
-/// Flow: check the owning plugin's grants via [`admit_sandbox_call`], derive a
-/// `SandboxPolicy` from `(tool, request)` via `policy::policy_for`, then
-/// dispatch through `run_confined`. Each call is also recorded in the shared
-/// `AuditRing` with `Surface::Sandbox` (ADR-0028 Phase 14) so the Diagnostics
-/// tab can surface allow/deny/error counts alongside the desktop-automation
-/// surfaces.
-///
-/// Errors come back as `String` (Tauri can't serialize the rich
-/// `SandboxError` enum directly without a custom impl); the plugin uses
-/// `error.message` verbatim as the ToolResult error so the model sees the
-/// same stderr-style failure a native shell command would emit.
-#[tauri::command]
-pub async fn sandbox_exec(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, crate::automation::commands::AutomationState>,
-    tool: String,
-    command: crate::sandbox::types::SandboxCommand,
-    request: crate::sandbox::policy::PolicyRequest,
-) -> Result<crate::sandbox::types::SandboxResult, String> {
-    use crate::automation::audit::{AuditEntry, Decision as AuditDecision};
-    use crate::automation::permission::Surface;
-    use std::time::Instant;
-    use tauri::Emitter;
-
-    let started = Instant::now();
-    let stripped = tool.strip_prefix("sandbox_").unwrap_or(&tool).to_string();
-    let cwd_label = command.cwd.to_string_lossy().into_owned();
-    let requested_timeout_seconds = command.timeout.as_secs();
-    let backend_id = current_backend().health().backend;
-
-    // Permission gate. This runs BEFORE the policy check so a revoked grant
-    // denies regardless of how well-formed the request is, and before any
-    // process is spawned.
-    let admission = admit_sandbox_call(&state.plugin_facts().facts(SANDBOX_PLUGIN_ID));
-    if !admission.is_allowed() {
-        let msg = admission.message();
-        let entry = state.audit.record(AuditEntry {
-            id: String::new(),
-            ts: chrono::Utc::now().timestamp_millis(),
-            surface: Surface::Sandbox,
-            plugin_id: Some(SANDBOX_PLUGIN_ID.to_string()),
-            command: tool.clone(),
-            process_name: Some(format!("os:{backend_id}")),
-            window_title: Some(cwd_label.clone()),
-            decision: AuditDecision::Deny,
-            reason: Some(format!(
-                "{};{}",
-                admission.audit_reason(),
-                sandbox_audit_reason("refused", &backend_id, requested_timeout_seconds, None)
-            )),
-            duration_ms: started.elapsed().as_millis() as u64,
-            error: Some(msg.clone()),
-        });
-        let _ = app.emit("automation:event", &entry);
-        return Err(msg);
-    }
-
-    let policy = match crate::sandbox::policy::policy_for(&stripped, request) {
-        Ok(p) => p,
-        Err(err) => {
-            let msg = err.to_string();
-            let entry = state.audit.record(AuditEntry {
-                id: String::new(),
-                ts: chrono::Utc::now().timestamp_millis(),
-                surface: Surface::Sandbox,
-                plugin_id: Some(SANDBOX_PLUGIN_ID.to_string()),
-                command: tool.clone(),
-                process_name: Some(format!("os:{backend_id}")),
-                window_title: Some(cwd_label.clone()),
-                decision: AuditDecision::Deny,
-                reason: Some(format!(
-                    "invalid_policy;{}",
-                    sandbox_audit_reason("refused", &backend_id, requested_timeout_seconds, None)
-                )),
-                duration_ms: started.elapsed().as_millis() as u64,
-                error: Some(msg.clone()),
-            });
-            let _ = app.emit("automation:event", &entry);
-            return Err(msg);
-        }
-    };
-
-    let outcome = run_confined(command, policy).await;
-    let entry = match &outcome {
-        Ok(result) => AuditEntry {
-            id: String::new(),
-            ts: chrono::Utc::now().timestamp_millis(),
-            surface: Surface::Sandbox,
-            plugin_id: Some(SANDBOX_PLUGIN_ID.to_string()),
-            command: tool.clone(),
-            process_name: Some(format!("os:{backend_id}")),
-            window_title: Some(cwd_label),
-            decision: AuditDecision::Allow,
-            reason: Some(sandbox_audit_reason(
-                if result.timed_out {
-                    "timeout"
-                } else if result.exit_code == 0 {
-                    "completed"
-                } else {
-                    "exit_nonzero"
-                },
-                &backend_id,
-                requested_timeout_seconds,
-                Some(result),
-            )),
-            duration_ms: result.duration.as_millis() as u64,
-            error: if result.exit_code == 0 {
-                None
-            } else {
-                Some(format!("exit_code={}", result.exit_code))
-            },
-        },
-        Err(err) => AuditEntry {
-            id: String::new(),
-            ts: chrono::Utc::now().timestamp_millis(),
-            surface: Surface::Sandbox,
-            plugin_id: Some(SANDBOX_PLUGIN_ID.to_string()),
-            command: tool.clone(),
-            process_name: Some(format!("os:{backend_id}")),
-            window_title: Some(cwd_label),
-            decision: AuditDecision::Deny,
-            reason: Some(format!(
-                "backend_error;{}",
-                sandbox_audit_reason(
-                    "backend_error",
-                    &backend_id,
-                    requested_timeout_seconds,
-                    None
-                )
-            )),
-            duration_ms: started.elapsed().as_millis() as u64,
-            error: Some(err.to_string()),
-        },
-    };
-    let recorded = state.audit.record(entry);
-    let _ = app.emit("automation:event", &recorded);
-    outcome.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -709,17 +448,7 @@ mod tests {
         let _ = health;
     }
 
-    #[tokio::test]
-    async fn sandbox_health_probe_reports_a_known_backend_id() {
-        let health = sandbox_health_probe().await.unwrap();
-        let ok = matches!(
-            health.backend.as_str(),
-            "windows-cognia-sandbox" | "macos-sandbox-exec" | "linux-bwrap" | "mock"
-        ) || health.backend.starts_with("uninstalled-");
-        assert!(ok, "unexpected backend id: {}", health.backend);
-    }
-
-    use crate::sandbox::types::{NetworkPolicy, SandboxCommand, SandboxError, SandboxPolicy};
+    use crate::types::{NetworkPolicy, SandboxCommand, SandboxError, SandboxPolicy};
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -813,7 +542,7 @@ mod tests {
             if !path.exists() {
                 continue;
             }
-            let resolved = crate::sandbox::paths::safe_canonicalize(&path).unwrap();
+            let resolved = crate::paths::safe_canonicalize(&path).unwrap();
             assert!(
                 roots.contains(&resolved),
                 "{literal} resolves to {} which is not in the deny roots: {roots:?}",
@@ -835,7 +564,7 @@ mod tests {
             if !path.exists() {
                 continue;
             }
-            let canonical = crate::sandbox::paths::safe_canonicalize(&path).unwrap();
+            let canonical = crate::paths::safe_canonicalize(&path).unwrap();
             let policy = bash_policy(NetworkPolicy::Off, vec![canonical.clone()]);
             let err = reject_forbidden_paths(&std::env::temp_dir(), &policy, &deny)
                 .expect_err(&format!("{literal} must not be a writable root"));
@@ -1003,111 +732,5 @@ mod tests {
             err,
             SandboxError::SetupRequired { .. } | SandboxError::Unavailable { .. }
         ));
-    }
-}
-
-#[cfg(test)]
-mod admission_tests {
-    use super::*;
-    use crate::automation::record::plugin_facts::PluginFacts;
-    use std::time::Duration;
-
-    fn facts(installed: bool, enabled: bool, granted: &[&str]) -> PluginFacts {
-        PluginFacts {
-            installed,
-            enabled,
-            granted: granted.iter().map(|s| s.to_string()).collect(),
-        }
-    }
-
-    #[test]
-    fn both_grants_present_is_allowed() {
-        let a = admit_sandbox_call(&facts(true, true, &SANDBOX_REQUIRED_GRANTS));
-        assert_eq!(a, SandboxAdmission::Allowed);
-        assert!(a.is_allowed());
-    }
-
-    #[test]
-    fn a_denied_grant_denies_the_call() {
-        // The whole point of the gate: the user denies `native:process` and the
-        // sandbox tools stop working, instead of running anyway.
-        let a = admit_sandbox_call(&facts(true, true, &["native:filesystem"]));
-        assert_eq!(
-            a,
-            SandboxAdmission::MissingGrants(vec!["native:process".into()])
-        );
-        assert!(!a.is_allowed());
-        assert_eq!(a.audit_reason(), "permission_denied");
-        assert!(a.message().contains("native:process"));
-    }
-
-    #[test]
-    fn both_grants_denied_names_both() {
-        let a = admit_sandbox_call(&facts(true, true, &[]));
-        assert_eq!(
-            a,
-            SandboxAdmission::MissingGrants(vec![
-                "native:filesystem".into(),
-                "native:process".into()
-            ])
-        );
-    }
-
-    #[test]
-    fn unrelated_grants_do_not_satisfy_the_requirement() {
-        let a = admit_sandbox_call(&facts(true, true, &["native:input", "native:screen"]));
-        assert!(!a.is_allowed());
-    }
-
-    #[test]
-    fn a_disabled_plugin_denies() {
-        let a = admit_sandbox_call(&facts(true, false, &SANDBOX_REQUIRED_GRANTS));
-        assert_eq!(a, SandboxAdmission::PluginDisabled);
-        assert_eq!(a.audit_reason(), "plugin_disabled");
-    }
-
-    #[test]
-    fn an_uninstalled_plugin_denies_before_grants_are_considered() {
-        let a = admit_sandbox_call(&facts(false, true, &SANDBOX_REQUIRED_GRANTS));
-        assert_eq!(a, SandboxAdmission::PluginNotInstalled);
-    }
-
-    #[test]
-    fn the_default_facts_source_fails_closed() {
-        // `NoPluginFacts` is what `AutomationState` holds until `src-tauri`
-        // registers the real source at boot. A wiring mistake must deny.
-        use crate::automation::record::plugin_facts::{NoPluginFacts, PluginFactsSource};
-        let a = admit_sandbox_call(&NoPluginFacts.facts(SANDBOX_PLUGIN_ID));
-        assert_eq!(a, SandboxAdmission::PluginNotInstalled);
-    }
-
-    #[test]
-    fn required_grants_match_the_plugin_manifest() {
-        // `plugins/cognia-sandboxed-tools/src/index.ts` declares exactly these.
-        // Drift here means the gate checks a permission the plugin never asks
-        // for, which denies every call.
-        assert_eq!(
-            SANDBOX_REQUIRED_GRANTS,
-            ["native:filesystem", "native:process"]
-        );
-        assert_eq!(SANDBOX_PLUGIN_ID, "cognia-sandboxed-tools");
-    }
-
-    #[test]
-    fn audit_reason_carries_effective_backend_and_result_limits() {
-        let result = crate::sandbox::types::SandboxResult {
-            exit_code: 137,
-            stdout: String::new(),
-            stderr: String::new(),
-            duration: Duration::from_secs(4),
-            timed_out: true,
-            stdout_truncated: true,
-            stderr_truncated: false,
-        };
-
-        assert_eq!(
-            sandbox_audit_reason("timeout", "macos-sandbox-exec", 30, Some(&result)),
-            "tier=os;provider=macos-sandbox-exec;termination=timeout;requested_timeout_seconds=30;timeout=true;stdout_truncated=true;stderr_truncated=false;exit_code=137"
-        );
     }
 }
