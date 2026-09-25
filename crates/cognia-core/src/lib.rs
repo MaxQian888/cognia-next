@@ -11,5 +11,6 @@
 
 pub mod command_error;
 pub mod fs_atomic;
+pub mod installed;
 pub mod node_runtime;
 pub mod supervision_backoff;
