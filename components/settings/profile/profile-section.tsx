@@ -144,11 +144,20 @@ export function ProfileSection({ showEmail = true }: ProfileSectionProps = {}) {
                     className="size-full object-cover"
                     data-testid="profile-preview-avatar"
                   />
-                ) : (
+                ) : nameValue.trim() || resolvedDisplayName ? (
                   <AvatarFallback
                     style={{ backgroundColor: deterministicColor(previewDisplayName) }}
                   >
                     {initials(previewDisplayName)}
+                  </AvatarFallback>
+                ) : (
+                  // No name yet: a person glyph rather than the initials of
+                  // the localized placeholder ("SI" for "Signed-out").
+                  <AvatarFallback
+                    className="bg-muted text-muted-foreground"
+                    data-testid="profile-preview-avatar-placeholder"
+                  >
+                    <UserRoundIcon className="size-6" aria-hidden />
                   </AvatarFallback>
                 )}
               </Avatar>
@@ -182,6 +191,7 @@ export function ProfileSection({ showEmail = true }: ProfileSectionProps = {}) {
             <ProfileAvatarPicker
               value={resolvedAvatarUrl}
               fallbackName={previewName}
+              placeholder={!resolvedDisplayName}
               onChange={(dataUrl) => save({ avatarDataUrl: dataUrl ?? "" })}
             />
             {showEmail && email ? (

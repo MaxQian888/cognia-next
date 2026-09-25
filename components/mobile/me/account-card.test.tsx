@@ -80,6 +80,21 @@ describe("<AccountCard />", () => {
     expect(screen.queryByTestId("account-card-email")).toBeNull()
   })
 
+  it("shows a person glyph, not the placeholder's initials, when there is no name", () => {
+    render(<AccountCard />)
+    const placeholder = screen.getByTestId("account-card-avatar-placeholder")
+    // Was "SI" (from "Signed-out") — and "未登" in Chinese.
+    expect(placeholder).not.toHaveTextContent("SI")
+    expect(placeholder.querySelector("svg")).not.toBeNull()
+  })
+
+  it("keeps initials once there is a real name", () => {
+    credentialRef.current = PRO_CRED
+    render(<AccountCard />)
+    expect(screen.queryByTestId("account-card-avatar-placeholder")).toBeNull()
+    expect(screen.getByText("AD")).toBeInTheDocument()
+  })
+
   it("renders the name from the email prefix + uppercased plan", () => {
     credentialRef.current = PRO_CRED
     render(<AccountCard />)

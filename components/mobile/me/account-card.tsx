@@ -15,6 +15,7 @@
 
 import Link from "next/link"
 import { useTranslations } from "next-intl"
+import { UserRoundIcon } from "lucide-react"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -106,12 +107,22 @@ export function AccountCard({ className }: { className?: string }) {
                   className="size-full object-cover"
                   data-testid="account-card-avatar-img"
                 />
-              ) : (
+              ) : resolvedDisplayName ? (
                 <AvatarFallback
                   style={{ backgroundColor: deterministicColor(displayName) }}
                   className="text-base"
                 >
                   {initials(displayName)}
+                </AvatarFallback>
+              ) : (
+                // No name yet: a person glyph, not the initials of the
+                // placeholder text ("SI" for "Signed-out", "未登" for 未登录),
+                // whose colour also changed with the UI language.
+                <AvatarFallback
+                  className="bg-muted text-muted-foreground"
+                  data-testid="account-card-avatar-placeholder"
+                >
+                  <UserRoundIcon className="size-6" aria-hidden />
                 </AvatarFallback>
               )}
             </Avatar>

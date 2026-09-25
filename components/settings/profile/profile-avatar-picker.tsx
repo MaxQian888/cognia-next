@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { ImagePlusIcon, Trash2Icon } from "lucide-react"
+import { ImagePlusIcon, Trash2Icon, UserRoundIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
@@ -25,6 +25,11 @@ export interface ProfileAvatarPickerProps {
   value: string | null
   /** Name used for the glyph fallback + deterministic color. */
   fallbackName: string
+  /**
+   * `fallbackName` is a stand-in label, not a person's name: show a person
+   * glyph instead of its initials.
+   */
+  placeholder?: boolean
   onChange: (dataUrl: string | null) => void | Promise<void>
   disabled?: boolean
 }
@@ -32,6 +37,7 @@ export interface ProfileAvatarPickerProps {
 export function ProfileAvatarPicker({
   value,
   fallbackName,
+  placeholder = false,
   onChange,
   disabled,
 }: ProfileAvatarPickerProps) {
@@ -52,11 +58,20 @@ export function ProfileAvatarPicker({
 
   return (
     <div className="flex items-center gap-4" data-testid="profile-avatar-picker">
-      <AvatarBadge
-        subject={{ name: fallbackName, avatarImageUrl: value ?? undefined }}
-        size={64}
-        textClassName="text-xl"
-      />
+      {placeholder && !value ? (
+        <span
+          className="grid size-16 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
+          data-testid="profile-avatar-placeholder"
+        >
+          <UserRoundIcon className="size-8" aria-hidden />
+        </span>
+      ) : (
+        <AvatarBadge
+          subject={{ name: fallbackName, avatarImageUrl: value ?? undefined }}
+          size={64}
+          textClassName="text-xl"
+        />
+      )}
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <Button

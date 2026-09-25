@@ -58,6 +58,23 @@ const pickFile = async (file: File) => {
 }
 
 describe("ProfileAvatarPicker", () => {
+  it("shows a person glyph for a placeholder name until an image is set", () => {
+    const { rerender } = render(
+      <ProfileAvatarPicker value={null} fallbackName="Signed-out" placeholder onChange={() => {}} />
+    )
+    expect(screen.getByTestId("profile-avatar-placeholder")).toBeInTheDocument()
+    expect(screen.queryByText("SI")).toBeNull()
+    rerender(
+      <ProfileAvatarPicker
+        value="data:image/webp;base64,AA"
+        fallbackName="Signed-out"
+        placeholder
+        onChange={() => {}}
+      />
+    )
+    expect(screen.queryByTestId("profile-avatar-placeholder")).toBeNull()
+  })
+
   it("opens the edit dialog for a valid image", async () => {
     render(<ProfileAvatarPicker value={null} fallbackName="Max" onChange={() => {}} />)
     await pickFile(new File([new Uint8Array([1])], "a.png", { type: "image/png" }))

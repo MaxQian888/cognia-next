@@ -224,6 +224,14 @@ describe("ProfileSection", () => {
     expect(screen.queryByTestId("profile-reset")).not.toBeInTheDocument()
   })
 
+  it("previews a person glyph until there is a name to take initials from", () => {
+    mockUseUserProfile.mockReturnValue(baseResult({ resolvedDisplayName: null }))
+    render(<ProfileSection />)
+    expect(screen.getByTestId("profile-preview-avatar-placeholder")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("profile-display-name"), { target: { value: "Ada" } })
+    expect(screen.queryByTestId("profile-preview-avatar-placeholder")).toBeNull()
+  })
+
   it("shows a zone in the picker after a reset stored an empty timezone", () => {
     // Reset writes `timezone: ""`; the picker used to keep that and go blank.
     mockUseUserProfile.mockReturnValue(baseResult({ profile: { timezone: "" } }))
