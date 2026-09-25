@@ -150,13 +150,22 @@ describe("ingestKnowledgeBaseSource", () => {
     generateEmbeddingsMock.mockImplementation(async (texts) => ({
       embeddings: texts.map(() => [0.1, 0.2]),
     }))
+    // Each ingest writes a generation collection of its own, so only a backend
+    // that already holds that collection at another dimension can refuse it.
+    const store = createStore()
+    jest.mocked(store.getCollectionInfo).mockImplementation(async (collection: string) => ({
+      name: collection,
+      documentCount: 0,
+      dimension: 3,
+    }))
 
     await expect(
       ingestKnowledgeBaseSource({
         sourceId: "source-1",
-        deps: { store: createStore(3), embedding, vectorBackend: "qdrant" },
+        deps: { store, embedding, vectorBackend: "qdrant" },
       })
     ).rejects.toMatchObject({ name: "EmbeddingDimensionMismatchError" })
+    expect(store.documents.size).toBe(0)
 
     const [source] = await listKnowledgeBaseSources("kb-1")
     const [job] = await listKnowledgeBaseIngestJobs("kb-1")
@@ -217,8 +226,11 @@ describe("ingestKnowledgeBaseSource", () => {
     expect(await listKnowledgeBaseIngestJobs("kb-1")).toEqual([])
   })
 
-  it("rebuilds an incompatible library collection and re-ingests its sources", async () => {
+  it("ingests under a new embedding dimension without touching the old collection", async () => {
     await seedSource()
+    // The library's collection from before a model switch, at another dimension.
+    // Every ingest writes an immutable generation collection of its own, so the
+    // switch neither collides with it nor needs a rebuild first.
     const store = createStore(3)
     generateEmbeddingsMock.mockImplementation(async (texts) => ({
       embeddings: texts.map(() => [0.1, 0.2]),
@@ -228,8 +240,17 @@ describe("ingestKnowledgeBaseSource", () => {
         sourceId: "source-1",
         deps: { store, embedding, vectorBackend: "qdrant" },
       })
-    ).rejects.toMatchObject({ name: "EmbeddingDimensionMismatchError" })
+    ).resolves.toEqual(expect.objectContaining({ status: "completed", chunkCount: 1 }))
+    expect(store.createCollection).toHaveBeenCalledWith(
+      expect.stringMatching(/^cognia_kb_kb-1__kbgen_/),
+      { dimension: 2 }
+    )
+    expect(store.deleteCollection).not.toHaveBeenCalled()
+    await expect(store.getCollectionInfo("cognia_kb_kb-1")).resolves.toEqual(
+      expect.objectContaining({ dimension: 3 })
+    )
 
+    // A rebuild still re-ingests every source, into a collection family of its own.
     const result = await rebuildKnowledgeBaseIndex("kb-1", {
       store,
       embedding,
@@ -429,7 +450,7 @@ describe("ingestKnowledgeBaseSource", () => {
     ])
   })
 
-  it("deletes a whole reusable library and its remote vector collection", async () => {
+  it("deletes a whole reusable library and every remote collection its chunks were written to", async () => {
     await seedSource()
     const store = createStore()
     generateEmbeddingsMock.mockResolvedValue({ embeddings: [[0.1, 0.2]] })
@@ -437,10 +458,16 @@ describe("ingestKnowledgeBaseSource", () => {
       sourceId: "source-1",
       deps: { store, embedding, vectorBackend: "native" },
     })
+    const collections = [
+      ...new Set((await listKnowledgeBaseChunks("kb-1")).map((chunk) => chunk.vectorCollection)),
+    ]
+    expect(collections).toEqual([expect.stringMatching(/^cognia_kb_kb-1__kbgen_/)])
 
     await removeKnowledgeBase("kb-1", { deps: { store } })
 
-    expect(store.deleteCollection).toHaveBeenCalledWith("cognia_kb_kb-1")
+    expect(jest.mocked(store.deleteCollection).mock.calls.map(([name]) => name)).toEqual(
+      collections
+    )
     expect(await listKnowledgeBases()).toEqual([])
   })
 
