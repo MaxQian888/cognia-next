@@ -531,6 +531,29 @@ describe("editor store — drag history coalescing", () => {
     expect(useStore.temporal.getState().pastStates.length).toBe(before)
   })
 
+  it("records nothing for a press that only selected the node", () => {
+    const useStore = withOneNode()
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().beginDragHistory()
+    const selected = useStore.getState().nodes.map((n) => ({ ...n, selected: true }))
+    useStore.getState().setNodes(selected, { markDirty: false })
+    useStore.getState().commitDragHistory()
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+
+  it("keeps the drag's pause when a selection change lands mid-drag", () => {
+    const useStore = withOneNode()
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().beginDragHistory()
+    moveFirstNode(useStore, 10, 0)
+    const selected = useStore.getState().nodes.map((n) => ({ ...n, selected: true }))
+    useStore.getState().setNodes(selected, { markDirty: false })
+    moveFirstNode(useStore, 20, 0)
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+    useStore.getState().commitDragHistory()
+    expect(useStore.temporal.getState().pastStates.length).toBe(before + 1)
+  })
+
   it("is idempotent across overlapping begin calls (node + selection drag)", () => {
     const useStore = withOneNode()
     const before = useStore.temporal.getState().pastStates.length
@@ -556,6 +579,39 @@ describe("editor store — drag history coalescing", () => {
     // The newest (last) entry is the pre-drag snapshot we just pushed.
     const newest = useStore.temporal.getState().pastStates.at(-1)
     expect(newest?.nodes?.[0]?.position).toEqual({ x: 0, y: 0 })
+  })
+})
+
+describe("editor store — bookkeeping changes", () => {
+  it("applies a measurement or selection without dirtying or recording it", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    useStore.getState().resetDirty()
+    const before = useStore.temporal.getState().pastStates.length
+
+    const measured = useStore
+      .getState()
+      .nodes.map((n) => ({ ...n, measured: { width: 200, height: 60 }, selected: true }))
+    useStore.getState().setNodes(measured, { markDirty: false })
+    const edges = useStore.getState().edges.map((e) => ({ ...e, selected: true }))
+    useStore.getState().setEdges(edges, { markDirty: false })
+
+    expect(useStore.getState().nodes[0].selected).toBe(true)
+    expect(useStore.getState().dirty).toBe(false)
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+    // Recording resumes for the next real edit.
+    expect(useStore.temporal.getState().isTracking).toBe(true)
+  })
+
+  it("still dirties and records an edit", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    useStore.getState().resetDirty()
+    const before = useStore.temporal.getState().pastStates.length
+    const moved = useStore.getState().nodes.map((n) => ({ ...n, position: { x: 40, y: 0 } }))
+    useStore.getState().setNodes(moved)
+    expect(useStore.getState().dirty).toBe(true)
+    expect(useStore.temporal.getState().pastStates.length).toBe(before + 1)
   })
 })
 

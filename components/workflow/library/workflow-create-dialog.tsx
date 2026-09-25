@@ -77,37 +77,52 @@ export function WorkflowCreateDialog({
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="wf-name">{t("name")}</Label>
-            <Input
-              id="wf-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("namePlaceholder")}
-              autoFocus
-              maxLength={120}
-            />
+        {/* A real form, so Enter in the name field creates — the one-field
+            dialog used to ignore it and wait for a click on Create. */}
+        <form
+          className="contents"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void handleCreate()
+          }}
+        >
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="wf-name">{t("name")}</Label>
+              <Input
+                id="wf-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t("namePlaceholder")}
+                autoFocus
+                maxLength={120}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="wf-desc">{t("descriptionLabel")}</Label>
+              <Textarea
+                id="wf-desc"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder={t("descriptionPlaceholder")}
+                rows={3}
+              />
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="wf-desc">{t("descriptionLabel")}</Label>
-            <Textarea
-              id="wf-desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t("descriptionPlaceholder")}
-              rows={3}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            {t("cancel")}
-          </Button>
-          <Button onClick={handleCreate} disabled={busy}>
-            {busy ? tToolbar("saving") : t("create")}
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={busy}
+            >
+              {t("cancel")}
+            </Button>
+            <Button type="submit" disabled={busy}>
+              {busy ? tToolbar("saving") : t("create")}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

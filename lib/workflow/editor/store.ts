@@ -384,8 +384,15 @@ export interface EditorState extends EditorStateSnapshot {
   clearRequestedFieldFocus: (seq: number) => void
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
-  setNodes: (nodes: RFWorkflowNode[]) => void
-  setEdges: (edges: RFWorkflowEdge[]) => void
+  /**
+   * Replace the node array. Marks the workflow dirty — and records undo
+   * history — unless `markDirty` is `false`: React Flow also streams
+   * bookkeeping through here (a node measured on mount, a click selecting
+   * it), and neither is an edit.
+   */
+  setNodes: (nodes: RFWorkflowNode[], options?: { markDirty?: boolean }) => void
+  /** Replace the edge array; `markDirty: false` for selection-only changes. */
+  setEdges: (edges: RFWorkflowEdge[], options?: { markDirty?: boolean }) => void
   setViewport: (viewport: Viewport) => void
   /**
    * Drag-history coalescing. `beginDragHistory` pauses zundo recording and
@@ -705,6 +712,24 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
   // Pre-drag snapshot held across begin/commit. A factory-closure ref (not
   // store state) so it never triggers a re-render and stays per-editor.
   let dragHistorySnapshot: Pick<EditorState, "baseWorkflow" | "nodes" | "edges"> | null = null
+  // Whether an edit (not just the press's own selection change) landed while
+  // the drag was open — the only thing worth an undo entry.
+  let dragHistoryEdited = false
+  /**
+   * Apply React Flow bookkeeping — a node measured on mount, a selection
+   * click — without recording it. The history slice holds whole node arrays,
+   * so each of those used to push an entry: Undo walked back through clicks,
+   * and a workflow nobody had touched opened with Undo already enabled.
+   * Respects a pause the drag coalescer already holds. Only called after
+   * `useStore` below exists.
+   */
+  const setOutsideHistory = (patch: Partial<EditorState>) => {
+    const history = (useStore as EditorStore).temporal.getState()
+    const tracking = history.isTracking
+    if (tracking) history.pause()
+    useStore.setState(patch)
+    if (tracking) history.resume()
+  }
   // Debounce timer for the diagnostics recompute driver — closure-local so it
   // never re-renders and is isolated per editor instance.
   let diagnosticsTimer: ReturnType<typeof setTimeout> | null = null
@@ -842,29 +867,46 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           set({ requestedFieldFocus: null })
         },
 
-        setNodes: (nodes) => set({ nodes, dirty: true }),
-        setEdges: (edges) => set({ edges, dirty: true }),
+        setNodes: (nodes, options) => {
+          if (options?.markDirty === false) {
+            setOutsideHistory({ nodes })
+            return
+          }
+          if (dragHistorySnapshot) dragHistoryEdited = true
+          set({ nodes, dirty: true })
+        },
+        setEdges: (edges, options) => {
+          if (options?.markDirty === false) {
+            setOutsideHistory({ edges })
+            return
+          }
+          if (dragHistorySnapshot) dragHistoryEdited = true
+          set({ edges, dirty: true })
+        },
         setViewport: (viewport) => set({ viewport, dirty: true }),
 
         beginDragHistory: () => {
           // Idempotent: overlapping node-drag + selection-drag events must not
           // re-snapshot or re-pause mid-drag.
           if (dragHistorySnapshot) return
+          dragHistoryEdited = false
           ;(useStore as EditorStore).temporal.getState().pause()
           const { baseWorkflow, nodes, edges } = get()
           dragHistorySnapshot = { baseWorkflow, nodes, edges }
         },
         commitDragHistory: () => {
           const snap = dragHistorySnapshot
+          const edited = dragHistoryEdited
           dragHistorySnapshot = null
+          dragHistoryEdited = false
           const temporalStore = (useStore as EditorStore).temporal
           temporalStore.getState().resume()
           if (!snap) return
           const cur = get()
-          // No-op drag (click without move): the arrays keep their identity
-          // because no `setNodes`/`setEdges` ran, so skip — mirrors the
-          // temporal `equality` guard below.
-          if (snap.nodes === cur.nodes && snap.edges === cur.edges) return
+          // No-op drag (click without move): nothing but the press's own
+          // selection change ran, so skip — mirrors the temporal `equality`
+          // guard below.
+          if (!edited || (snap.nodes === cur.nodes && snap.edges === cur.edges)) return
           const past = temporalStore.getState().pastStates.concat({
             baseWorkflow: snap.baseWorkflow,
             nodes: snap.nodes,

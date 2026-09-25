@@ -71,6 +71,7 @@ import { WorkflowNodeComponent } from "./nodes/workflow-node"
 import { LoopContainerNode } from "./nodes/loop-container-node"
 import { GroupContainerNode } from "./nodes/group-container-node"
 import { pickContainerTarget } from "@/lib/workflow/editor/node-handles"
+import { isEdgeEdit, isNodeEdit } from "@/lib/workflow/editor/content-changes"
 import { SmartEdge } from "./edges/smart-edge"
 
 const nodeTypes: NodeTypes = {
@@ -201,7 +202,9 @@ export function FlowCanvas({
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       const s = useStore.getState()
-      s.setNodes(applyNodeChanges(changes, s.nodes) as typeof s.nodes)
+      s.setNodes(applyNodeChanges(changes, s.nodes) as typeof s.nodes, {
+        markDirty: changes.some(isNodeEdit),
+      })
       const selected = changes
         .filter((c): c is Extract<NodeChange, { type: "select" }> => c.type === "select")
         .filter((c) => c.selected)
@@ -214,7 +217,9 @@ export function FlowCanvas({
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
       const s = useStore.getState()
-      s.setEdges(applyEdgeChanges(changes, s.edges) as typeof s.edges)
+      s.setEdges(applyEdgeChanges(changes, s.edges) as typeof s.edges, {
+        markDirty: changes.some(isEdgeEdit),
+      })
       const selected = changes
         .filter((c): c is Extract<EdgeChange, { type: "select" }> => c.type === "select")
         .filter((c) => c.selected)

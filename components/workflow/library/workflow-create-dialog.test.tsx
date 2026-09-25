@@ -30,6 +30,20 @@ describe("WorkflowCreateDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it("creates on Enter in the name field", async () => {
+    const onOpenChange = jest.fn()
+    render(<WorkflowCreateDialog open onOpenChange={onOpenChange} parentFolderId="wff_y" />)
+    const name = screen.getByLabelText("Name")
+    fireEvent.change(name, { target: { value: "Keyboard flow" } })
+    fireEvent.submit(name.closest("form")!)
+
+    await waitFor(async () => {
+      const inFolder = await listWorkflowsInFolder("wff_y")
+      expect(inFolder.map((w) => w.name)).toContain("Keyboard flow")
+    })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it("closes on cancel without creating anything", async () => {
     const onOpenChange = jest.fn()
     render(<WorkflowCreateDialog open onOpenChange={onOpenChange} />)
