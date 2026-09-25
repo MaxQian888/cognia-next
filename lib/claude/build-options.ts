@@ -1123,6 +1123,29 @@ async function proIdeWriteToolsAvailable(ctx: BuildOptionsContext): Promise<bool
   }
 }
 
+/**
+ * Add a session-stable section to `appendSystemPrompt`, ahead of the per-turn
+ * dynamic tail when that tail is already in place.
+ *
+ * The tail (`dynamicSystemPrompt`) must stay the exact suffix: the sidecar
+ * caches everything before it only when the prompt ends with it
+ * (`sidecar/dispatch/ai-sdk.mjs`), and a stable section after it would sit
+ * behind text that changes every turn, so no provider could cache it either.
+ */
+function appendStableSection(
+  appendSystemPrompt: string | undefined,
+  section: string,
+  dynamicTail: string | undefined
+): string {
+  const existing = appendSystemPrompt ?? ""
+  if (dynamicTail && existing.endsWith(dynamicTail)) {
+    const head = existing.slice(0, existing.length - dynamicTail.length).trim()
+    return head ? `${head}\n\n${section}\n\n${dynamicTail}` : `${section}\n\n${dynamicTail}`
+  }
+  const trimmed = existing.trim()
+  return trimmed ? `${trimmed}\n\n${section}` : section
+}
+
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
   const { session, appSettings, memberOverride } = ctx
   // Which workspace's capability overlay this turn obeys. The session's own
@@ -4841,10 +4864,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     a2ui: a2uiEnabled,
   })
   if (visualOutputSection) {
-    const existing = opts.appendSystemPrompt?.trim() ?? ""
-    opts.appendSystemPrompt = existing
-      ? `${existing}\n\n${visualOutputSection}`
-      : visualOutputSection
+    // Resolved only after the final tool clamp, so it arrives after the
+    // dynamic tail was appended; it is the same every turn, so it goes in front.
+    opts.appendSystemPrompt = appendStableSection(
+      opts.appendSystemPrompt,
+      visualOutputSection,
+      opts.dynamicSystemPrompt
+    )
   }
 
   // Deposit the ceiling this session ACTUALLY resolved to (post-clamp), keyed by

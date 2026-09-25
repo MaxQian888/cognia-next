@@ -26,6 +26,8 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
 
 const MEMORY_SECTION = "## Memory\n\nRECALLED_FACT_FOR_THIS_TURN"
+// The resident routing section `buildVisualOutputSection` appends every turn.
+const VISUAL_OUTPUT_HEADING = "## Choosing how to show something"
 
 const dbFixture = createDbTestFixture()
 
@@ -65,6 +67,16 @@ describe("cacheOptimizationEnabled = OFF (explicit opt-out, legacy assembly)", (
     const opts = await resolveSendOptions({ character, appSettings: offSettings, ...memoryCtx })
     expect(opts.systemPrompt).toContain(MEMORY_SECTION)
     expect(opts.appendSystemPrompt ?? "").not.toContain(MEMORY_SECTION)
+  })
+
+  it("appends the visual-output routing at the end when there is no dynamic tail", async () => {
+    const opts = await resolveSendOptions({ character, appSettings: offSettings, ...memoryCtx })
+    expect(opts.dynamicSystemPrompt).toBeUndefined()
+    const append = opts.appendSystemPrompt ?? ""
+    const visual = append.indexOf(VISUAL_OUTPUT_HEADING)
+    expect(visual).toBeGreaterThan(0)
+    // No section heading follows it.
+    expect(append.lastIndexOf("\n## ")).toBe(visual - 1)
   })
 
   it("keeps the full twin prompt (incl. dynamic segments) as baseSystem", async () => {
@@ -114,6 +126,21 @@ describe("cacheOptimizationEnabled = ON (cache-friendly assembly)", () => {
     expect(append).toContain(MEMORY_SECTION)
     // Dynamic tail lands AFTER session-stable sections (brief-mode snippet).
     expect(append.trimEnd().endsWith("RECALLED_FACT_FOR_THIS_TURN")).toBe(true)
+  })
+
+  // The visual-output routing is resolved after the final tool clamp, i.e.
+  // after the tail is appended. It is the same every turn, so it must land in
+  // front of the tail rather than behind it.
+  it("keeps the stable visual-output routing ahead of the tail, which stays the exact suffix", async () => {
+    const opts = await resolveSendOptions({ character, appSettings, ...memoryCtx })
+    const append = opts.appendSystemPrompt ?? ""
+    const visual = append.indexOf(VISUAL_OUTPUT_HEADING)
+    expect(visual).toBeGreaterThanOrEqual(0)
+    expect(visual).toBeLessThan(append.indexOf(MEMORY_SECTION))
+    // The sidecar caches the head only when the append ends with the declared tail.
+    expect(opts.dynamicSystemPrompt).toBe(MEMORY_SECTION)
+    expect(append.endsWith(MEMORY_SECTION)).toBe(true)
+    expect(append.split(VISUAL_OUTPUT_HEADING)).toHaveLength(2)
   })
 
   it("keeps the stable twin segments in systemPrompt and moves dynamic ones to the tail", async () => {
