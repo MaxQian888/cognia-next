@@ -9,5 +9,27 @@
   "queueAwaitingApprovalNoCode": "等待主机批准。",
   "queueNeedsAttention": "{count} 条操作需要你处理",
   "queuePending": "{count} 条待发送",
+  "queueSheet": {
+    "description": "正在等待主机。尚未开始发送的操作可以撤回。",
+    "discard": "丢弃",
+    "discarded": "已丢弃。",
+    "empty": "没有待发送的操作。",
+    "inOrder": "属于某个对话，会与其他消息按顺序发送。",
+    "retry": "重试",
+    "retrying": "已重新排队发送。",
+    "status": {
+      "conflicted": "与较新的修改冲突",
+      "deadlettered": "多次重试后已放弃",
+      "pending": "等待发送",
+      "rejected": "被主机拒绝",
+      "sending": "正在发送…"
+    },
+    "title": "待发送的操作",
+    "tooLate": "已开始发送，无法撤回。",
+    "unlabeled": "待发送的操作",
+    "withdraw": "撤回",
+    "withdrawn": "已撤回，不会再发送。"
+  },
+  "review": "查看",
   "staleWarning": "{count} 条消息超过 30 分钟未送达。"
 }

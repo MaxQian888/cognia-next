@@ -28,7 +28,7 @@
  * empty snapshot reports `offline` by construction.
  */
 
-import { useEffect, useSyncExternalStore } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { CloudOffIcon, LoaderIcon, TriangleAlertIcon } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
@@ -46,6 +46,7 @@ import {
 } from "@/lib/queue/outbound-approval"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
+import { OutboundQueueSheet } from "./outbound-queue-sheet"
 
 export interface OfflineBannerProps {
   className?: string
@@ -82,6 +83,7 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
     [],
     { inFlight: 0, stuck: 0 }
   )
+  const [reviewOpen, setReviewOpen] = useState(false)
 
   if (!compact) return null
   if (loading) return null
@@ -97,11 +99,17 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
   const stuckCount = queue?.stuck ?? 0
   const visible =
     offline || reconnecting || pendingCount > 0 || stuckCount > 0 || consentCode !== null
+  // A count was all this banner could say about the queue, with nowhere to
+  // see or take back what it counted. Rows exist → offer the list.
+  const hasRows = pendingCount > 0 || stuckCount > 0
 
   return (
+    <>
     <AnimatePresence initial={false}>
       {visible ? (
         <BannerBody
+          onReview={hasRows ? () => setReviewOpen(true) : undefined}
+          reviewLabel={t("review")}
           offline={offline}
           hostOffline={hostOffline}
           reconnecting={reconnecting}
@@ -122,6 +130,8 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
         />
       ) : null}
     </AnimatePresence>
+    <OutboundQueueSheet open={reviewOpen} onOpenChange={setReviewOpen} />
+    </>
   )
 }
 
@@ -135,6 +145,9 @@ interface BannerBodyProps {
   messageOffline: string
   messageReconnecting: string
   messageQueue: string
+  /** Opens the queue list; absent when nothing is queued. */
+  onReview?: () => void
+  reviewLabel?: string
   className?: string
 }
 
@@ -147,6 +160,8 @@ function BannerBody({
   messageOffline,
   messageReconnecting,
   messageQueue,
+  onReview,
+  reviewLabel,
   className,
 }: BannerBodyProps) {
   const reduce = useReducedMotion()
@@ -188,6 +203,16 @@ function BannerBody({
       <span className="flex-1">
         {offline ? messageOffline : reconnecting ? messageReconnecting : messageQueue}
       </span>
+      {onReview ? (
+        <button
+          type="button"
+          onClick={onReview}
+          className="shrink-0 rounded-sm font-medium underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="offline-banner-review"
+        >
+          {reviewLabel}
+        </button>
+      ) : null}
       {/* `pending` is included in the queue message via t("queuePending"); kept
        *  as a separate prop so this component is trivial to render-test. */}
       <span className="sr-only">{pending}</span>

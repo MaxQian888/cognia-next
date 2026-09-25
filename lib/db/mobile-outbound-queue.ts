@@ -675,6 +675,28 @@ export async function deleteRow(id: string): Promise<void> {
 }
 
 /**
+ * Take back an action the user no longer wants sent. Returns whether it was.
+ *
+ * Only a row that has not started is withdrawable: once `sending`, the Host
+ * may already have it. The read and the delete share a transaction, so a
+ * runner that claims the row in between wins and this answers `false`.
+ *
+ * Channel rows (a conversation's sends) are refused too. Their optimistic
+ * copy is already on screen in order, so dropping one would leave a message
+ * the Host never gets, sitting between ones it does. Standalone actions —
+ * a workflow trigger, an approval — have no such shadow.
+ */
+export async function withdrawPending(id: string): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.mobileOutboundQueue, async () => {
+    const row = await db.mobileOutboundQueue.get(id)
+    if (!row || row.status !== "pending" || row.channel) return false
+    await db.mobileOutboundQueue.delete(id)
+    return true
+  })
+}
+
+/**
  * Vacuum sent rows older than `keepMs`. Default: prune sent rows older than
  * 24 h. Deadletters stay for audit until manually cleared.
  */

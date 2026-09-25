@@ -19,6 +19,7 @@ import {
   releaseStaleClaims,
   rebaseCollabConflict,
   retryDeadletter,
+  withdrawPending,
 } from "./mobile-outbound-queue"
 import { __resetDbForTesting, activateAccountDatabase, getDb } from "./schema"
 import {
@@ -97,6 +98,40 @@ describe("mobile outbound queue target isolation", () => {
       rejectionCode: "host_state_revision_conflict",
       currentRevision: 2,
     })
+  })
+
+  it("withdraws a standalone action that has not started sending", async () => {
+    const row = await enqueue({ command: "connector_send", payload: {}, ...scope, nowMs: 1 })
+    await expect(withdrawPending(row.id)).resolves.toBe(true)
+    await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toBeUndefined()
+  })
+
+  it("refuses to withdraw a row the runner already claimed", async () => {
+    const row = await enqueue({ command: "connector_send", payload: {}, ...scope, nowMs: 1 })
+    await claimNext(1, scope)
+    await expect(withdrawPending(row.id)).resolves.toBe(false)
+    await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toMatchObject({
+      status: "sending",
+    })
+  })
+
+  it("refuses to withdraw a conversation send, whose copy is already on screen", async () => {
+    const row = await enqueueHostStateAction({
+      channel: "cognia://target/desktop-studio/sessions/s1",
+      accountId: scope.accountId,
+      runtimeTargetId: scope.targetId,
+      hostId: scope.targetId,
+      hostGeneration: 2,
+      sessionId: "s1",
+      clientId: "client-a",
+      clientSeq: 1,
+      actionId: "action-1",
+      baseRevision: 1,
+      createdAt: 100,
+      action: { kind: "draft.replace", text: "draft", attachments: [] },
+    })
+    await expect(withdrawPending(row.id)).resolves.toBe(false)
+    await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toBeDefined()
   })
 
   it("returns a policy-frozen claim to pending without incrementing attempts", async () => {

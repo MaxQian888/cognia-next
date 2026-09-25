@@ -9,5 +9,27 @@
   "queueAwaitingApprovalNoCode": "Waiting for approval on the host.",
   "queueNeedsAttention": "{count, plural, one {# action needs your attention} other {# actions need your attention}}",
   "queuePending": "{count} queued",
+  "queueSheet": {
+    "description": "Waiting for your host. Anything that has not started sending can be withdrawn.",
+    "discard": "Discard",
+    "discarded": "Discarded.",
+    "empty": "Nothing is queued.",
+    "inOrder": "Part of a conversation, so it sends in order with the rest.",
+    "retry": "Retry",
+    "retrying": "Queued to try again.",
+    "status": {
+      "conflicted": "Conflicts with a newer change",
+      "deadlettered": "Gave up after retries",
+      "pending": "Waiting to send",
+      "rejected": "Refused by the host",
+      "sending": "Sending…"
+    },
+    "title": "Queued actions",
+    "tooLate": "Already sending, so it can no longer be withdrawn.",
+    "unlabeled": "Queued action",
+    "withdraw": "Withdraw",
+    "withdrawn": "Withdrawn — it will not be sent."
+  },
+  "review": "Review",
   "staleWarning": "{count} messages waiting > 30 min."
 }

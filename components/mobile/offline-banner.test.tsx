@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { OfflineBanner } from "./offline-banner"
 
@@ -55,6 +55,11 @@ jest.mock("@/lib/queue/outbound-queue", () => ({
   inFlight: (summary: TestQueueSummary) => summary.pending + summary.failed,
   needsAttention: (summary: TestQueueSummary) =>
     summary.deadlettered + summary.rejected + summary.conflicted,
+}))
+
+jest.mock("./outbound-queue-sheet", () => ({
+  OutboundQueueSheet: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="outbound-queue-sheet-stub" /> : null,
 }))
 
 let consentCode: string | null = null
@@ -111,6 +116,31 @@ beforeEach(() => {
   useRuntimeSnapshotMock
     .mockReset()
     .mockReturnValue({ target: { kind: "companion" }, connectionState: "online" })
+})
+
+describe("<OfflineBanner /> queue review", () => {
+  it("opens the queue list from the banner when something is queued", async () => {
+    getQueueSummaryMock.mockResolvedValue({ ...EMPTY_SUMMARY, pending: 1 })
+    render(<OfflineBanner />)
+    fireEvent.click(await screen.findByTestId("offline-banner-review"))
+    expect(screen.getByTestId("outbound-queue-sheet-stub")).toBeInTheDocument()
+  })
+
+  it("offers the list for stuck rows too", async () => {
+    getQueueSummaryMock.mockResolvedValue({ ...EMPTY_SUMMARY, rejected: 1 })
+    render(<OfflineBanner />)
+    expect(await screen.findByTestId("offline-banner-review")).toBeInTheDocument()
+  })
+
+  it("offers nothing to review when only the network is down", async () => {
+    useNetworkStatusMock.mockReturnValue({
+      loading: false,
+      status: { connected: false, connectionType: "none" },
+    })
+    render(<OfflineBanner />)
+    await screen.findByTestId("offline-banner")
+    expect(screen.queryByTestId("offline-banner-review")).not.toBeInTheDocument()
+  })
 })
 
 describe("<OfflineBanner />", () => {
