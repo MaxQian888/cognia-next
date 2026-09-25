@@ -190,7 +190,7 @@ Where it surfaces: the chat composer renders a quiet suggestion row under the in
 
 ## Executors
 
-`registerBuiltInExecutors()` in `lib/scheduler/executors/index.ts` registers every built-in executor. All chat-like types (chat / agent / skill / goal / plan / agent-team) go through the same `resolveSendOptions` pipeline the interactive composer uses, so a scheduled prompt has exactly the semantics of a manual send.
+`registerBuiltInExecutors()` in `lib/scheduler/executors/index.ts` registers every built-in executor. `initSchedulerSystem` calls it at boot. A scheduler started before that (a plugin's lifecycle write that lands before the initializer mounts) loads it on demand through `lib/scheduler/executor-owners.ts` when a built-in task comes due, so the built-in types are listed there as `BUILT_IN_EXECUTOR_TASK_TYPES`. All chat-like types (chat / agent / skill / goal / plan / agent-team) go through the same `resolveSendOptions` pipeline the interactive composer uses, so a scheduled prompt has exactly the semantics of a manual send.
 
 | Type                                                     | Purpose                                                                                                        | Key dependency                                                                          |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -274,7 +274,7 @@ Route: `app/scheduler/`. Components: `components/scheduler/`. Tabs:
 
 | Goal                           | Files                                                                     |
 | ------------------------------ | ------------------------------------------------------------------------- |
-| Add a new executor             | `lib/scheduler/executors/<name>.ts` + register                            |
+| Add a new executor             | `executors/<name>.ts`, register it, list its type in `executor-owners.ts` |
 | Add a new trigger type         | `lib/scheduler/cron-parser.ts` (or a new parser), `trigger-normalizer.ts` |
 | Add a native platform          | `src-tauri/src/scheduler/<platform>.rs`                                   |
 | Tweak conversational authoring | `conversational-task-authoring.ts`                                        |

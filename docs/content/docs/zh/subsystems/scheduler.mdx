@@ -169,7 +169,7 @@ flowchart TB
 
 ## 内置 executor
 
-`lib/scheduler/executors/index.ts` 中的 `registerBuiltInExecutors()` 注册全部内置 executor。所有 chat 类（chat / agent / skill / goal / plan / agent-team）都通过同一份 `resolveSendOptions` 流水线，复用交互式 Composer 使用的角色 / agent mode / 技能 / 工具 / MCP / 内置工具配置 —— 调度任务跑出的提示词与人工发送的语义完全一致。
+`lib/scheduler/executors/index.ts` 中的 `registerBuiltInExecutors()` 注册全部内置 executor。`initSchedulerSystem` 在启动时调用它。在那之前就被启动的调度器（插件的生命周期写入早于初始化组件挂载）会在内置任务到期时经由 `lib/scheduler/executor-owners.ts` 按需加载它，因此内置类型在那里以 `BUILT_IN_EXECUTOR_TASK_TYPES` 列出。所有 chat 类（chat / agent / skill / goal / plan / agent-team）都通过同一份 `resolveSendOptions` 流水线，复用交互式 Composer 使用的角色 / agent mode / 技能 / 工具 / MCP / 内置工具配置 —— 调度任务跑出的提示词与人工发送的语义完全一致。
 
 | 类型                                                     | 用途                                                                                        | 关键依赖                                                                       |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
@@ -269,7 +269,7 @@ registerTaskExecutor("custom-daily-report", async (task) => {
 
 | 目标                | 文件                                                                            |
 | ------------------- | ------------------------------------------------------------------------------- |
-| 加内置 executor     | 在 `executors/` 写一个，在 `executors/index.ts:registerBuiltInExecutors` 加一行 |
+| 加内置 executor     | 在 `executors/` 写一个并注册，在 `executor-owners.ts` 列出其类型                     |
 | 加新 trigger 类型   | `lib/scheduler/cron-parser.ts`（或新解析器）、`trigger-normalizer.ts`           |
 | 支持新原生平台      | `src-tauri/src/scheduler/<platform>.rs`                                         |
 | 调整对话式创作      | `conversational-task-authoring.ts`                                              |

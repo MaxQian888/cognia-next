@@ -96,6 +96,12 @@ jest.mock("./cron-parser", () => ({
   getNextCronTime: jest.fn().mockReturnValue(new Date(Date.now() + 60000)),
 }))
 
+// A built-in type with no executor loads `./executors` on demand
+// (`executor-owners.ts`, covered by executor-owners.test.ts). Every case here
+// registers the executor it fires. This keeps one that forgets on the boot
+// grace path instead of importing the real executor graph.
+jest.mock("./executors", () => ({ registerBuiltInExecutors: jest.fn() }))
+
 jest.mock("@cognia/logging", () => {
   const stub = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
   return {

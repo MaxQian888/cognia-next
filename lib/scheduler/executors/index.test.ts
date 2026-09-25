@@ -24,6 +24,7 @@ jest.mock("@/lib/platform/detect", () => {
   }
 })
 import * as platformDetect from "@/lib/platform/detect"
+import { BUILT_IN_EXECUTOR_TASK_TYPES } from "../executor-owners"
 
 /**
  * The capability scope these helpers take. A schedule resolves skills and MCP
@@ -353,21 +354,13 @@ function emitTerminalResult(sessionId = "session-created") {
 }
 
 describe("registerBuiltInExecutors", () => {
-  it("registers all eight executor types and is idempotent", () => {
+  it("registers exactly the types the scheduler loads it for on demand, and is idempotent", () => {
     registerBuiltInExecutors()
     const types = registerTaskExecutorMock.mock.calls.map((c) => c[0])
-    expect(types).toEqual(
-      expect.arrayContaining([
-        "chat",
-        "agent",
-        "skill",
-        "script",
-        "plugin",
-        "backup",
-        "custom",
-        "external-agent",
-      ])
-    )
+    // `executor-owners.ts` routes a due task of these types to this function.
+    expect([...types].sort()).toEqual([...BUILT_IN_EXECUTOR_TASK_TYPES].sort())
+    expect(registerTaskExecutorMock).toHaveBeenCalledWith("chat", executeChatTask)
+    expect(registerTaskExecutorMock).toHaveBeenCalledWith("custom", executeCustomTask)
     const firstCount = registerTaskExecutorMock.mock.calls.length
     registerBuiltInExecutors()
     expect(registerTaskExecutorMock.mock.calls.length).toBe(firstCount)

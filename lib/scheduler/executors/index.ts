@@ -30,10 +30,17 @@
  *   - twin / wiki-rebuild / wiki-lint / radar-report / agent-team / goal / plan
  *                     → subsystem executors registered here as well.
  *
+ * `initSchedulerSystem` calls `registerBuiltInExecutors()` at boot. A scheduler
+ * started without it (a lifecycle write that lands before the initializer
+ * mounts) loads this module on demand through `../executor-owners.ts` when a
+ * built-in task comes due, which is why the registered types are declared
+ * there as `BUILT_IN_EXECUTOR_TASK_TYPES`.
+ *
  * Connector task types (`connection:*`) are registered by the `integrations`
  * boot bundle. `provider-diagnostics-refresh` is registered by
- * `lib/provider-diagnostics/refresh.ts`, which the scheduler loads on demand
- * through `../executor-owners.ts` when the boot that installs it never ran.
+ * `lib/provider-diagnostics/refresh.ts`, which the scheduler also loads on
+ * demand through `../executor-owners.ts` when the boot that installs it never
+ * ran.
  */
 
 import type {
@@ -56,7 +63,8 @@ import { provisioningForWorkspaceRoot } from "@/lib/task-workspace/workspace-pro
 import { getProjectEnvironment } from "@/lib/db/project-environments"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
 import { resolveEnvironmentForRun } from "@/lib/project-environment/resolve-environment"
-import { registerTaskExecutor } from "../task-scheduler"
+import { registerTaskExecutor, type TaskExecutor } from "../task-scheduler"
+import { BUILT_IN_EXECUTOR_TASK_TYPES, type BuiltInExecutorTaskType } from "../executor-owners"
 import { executePluginTask } from "./plugin-executor"
 import { executeBackupTask } from "./backup-executor"
 import { executeTwinTask } from "./twin-executor"
@@ -1013,42 +1021,52 @@ async function executeCustomTask(
 // Registration
 // =============================================================================
 
+/**
+ * Typed against `BUILT_IN_EXECUTOR_TASK_TYPES`, the list the scheduler loads
+ * this module for on demand (`../executor-owners.ts`): a type missing here, or
+ * one the list does not name, does not compile.
+ */
+const BUILT_IN_EXECUTORS = {
+  chat: executeChatTask,
+  agent: executeAgentTask,
+  skill: executeSkillTask,
+  script: executeScriptTask,
+  "background-command": executeBackgroundCommandTask,
+  monitor: executeMonitorTask,
+  plugin: executePluginTask,
+  backup: executeBackupTask,
+  custom: executeCustomTask,
+  "external-agent": executeExternalAgentTask,
+  twin: executeTwinTask,
+  "wiki-rebuild": executeWikiRebuildTask,
+  "wiki-lint": executeWikiLintTask,
+  "github-issue-sync": executeGithubIssueSyncTask,
+  "radar-report": executeRadarReportTask,
+  "agent-team": executeAgentTeamTask,
+  goal: executeGoalTask,
+  plan: executePlanTask,
+  bot: executeBotTask,
+  test: executeTestTask,
+  workflow: executeWorkflowTask,
+  "im-push": executeImPushTask,
+} satisfies Record<BuiltInExecutorTaskType, TaskExecutor>
+
 let registered = false
 
 /**
  * Register all built-in executors with the global task scheduler. Idempotent
- * — calling twice (e.g. from HMR) won't double-register.
+ * — calling twice (e.g. from HMR, or `initSchedulerSystem` after the scheduler
+ * already loaded this module for a due task) won't double-register.
  */
 export function registerBuiltInExecutors(): void {
   if (registered) return
   registered = true
 
-  registerTaskExecutor("chat", executeChatTask)
-  registerTaskExecutor("agent", executeAgentTask)
-  registerTaskExecutor("skill", executeSkillTask)
-  registerTaskExecutor("script", executeScriptTask)
-  registerTaskExecutor("background-command", executeBackgroundCommandTask)
-  registerTaskExecutor("monitor", executeMonitorTask)
-  registerTaskExecutor("plugin", executePluginTask)
-  registerTaskExecutor("backup", executeBackupTask)
-  registerTaskExecutor("custom", executeCustomTask)
-  registerTaskExecutor("external-agent", executeExternalAgentTask)
-  registerTaskExecutor("twin", executeTwinTask)
-  registerTaskExecutor("wiki-rebuild", executeWikiRebuildTask)
-  registerTaskExecutor("wiki-lint", executeWikiLintTask)
-  registerTaskExecutor("github-issue-sync", executeGithubIssueSyncTask)
-  registerTaskExecutor("radar-report", executeRadarReportTask)
-  registerTaskExecutor("agent-team", executeAgentTeamTask)
-  registerTaskExecutor("goal", executeGoalTask)
-  registerTaskExecutor("plan", executePlanTask)
-  registerTaskExecutor("bot", executeBotTask)
-  registerTaskExecutor("test", executeTestTask)
-  registerTaskExecutor("workflow", executeWorkflowTask)
-  registerTaskExecutor("im-push", executeImPushTask)
+  for (const type of BUILT_IN_EXECUTOR_TASK_TYPES) {
+    registerTaskExecutor(type, BUILT_IN_EXECUTORS[type])
+  }
 
-  log.info(
-    "Built-in scheduler executors registered: chat, agent, skill, script, background-command, monitor, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, github-issue-sync, radar-report, agent-team, goal, plan, test, workflow, im-push"
-  )
+  log.info(`Built-in scheduler executors registered: ${BUILT_IN_EXECUTOR_TASK_TYPES.join(", ")}`)
 }
 
 export {
