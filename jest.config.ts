@@ -192,7 +192,7 @@ const projectCommon: Config = {
     "^@cognia/latex(.*)$": "<rootDir>/packages/latex/src$1",
     "^@cognia/mermaid(.*)$": "<rootDir>/packages/mermaid/src$1",
     "^@cognia/plugin-sdk$": "<rootDir>/packages/plugin-sdk/src/index.ts",
-    "^@cognia/plugin-sdk/(manifest|context|events|hooks|permissions|extensions|templates)$":
+    "^@cognia/plugin-sdk/(manifest|context|events|hooks|permissions|extensions|templates|testing)$":
       "<rootDir>/packages/plugin-sdk/src/$1/index.ts",
     "^@cognia/plugin-sdk/contracts$": "<rootDir>/packages/plugin-sdk/src/contracts/catalog.ts",
     // Every published capability subpath, not an allowlist of two. Imports of

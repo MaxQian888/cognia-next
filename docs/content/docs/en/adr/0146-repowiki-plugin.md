@@ -152,7 +152,7 @@ pinned all survive the port and only their transports changed:
 
 ## Consequences
 
-**213 tests**, from upstream's 164. The extra coverage is the rewrites plus new
+**326 tests**, from upstream's 164. The extra coverage is the rewrites plus new
 suites for the three swapped layers and the pipeline they meet in — upstream had
 no test at that level, because the same eight steps lived twice.
 

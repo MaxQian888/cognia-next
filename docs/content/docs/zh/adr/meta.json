@@ -187,6 +187,8 @@
     "0190-notifications-leave-the-app-as-durable-work",
     "0191-the-web-shell-lets-each-column-draw-its-own-header",
     "0192-a-bot-turn-borrows-the-runs-stage",
-    "0194-a-judgment-is-a-provider-not-a-prompt"
+    "0193-one-guide-kit",
+    "0194-a-judgment-is-a-provider-not-a-prompt",
+    "0195-a-plugin-writes-to-the-contract-not-around-it"
   ]
 }

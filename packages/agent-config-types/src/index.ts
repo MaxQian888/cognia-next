@@ -2276,7 +2276,15 @@ export type SessionOrigin =
    * integration opened it without a second lookup, and only the key that
    * created it may reach its runs through the API.
    */
-  { kind: "gateway-api"; keyId: string; keyName: string }
+  | { kind: "gateway-api"; keyId: string; keyName: string }
+  /**
+   * A scheduled task's run created this session (chat / agent / skill / goal
+   * executors). Denormalised name so the chat header can say which task it
+   * came from without a lookup, and the ids to open that task and run on the
+   * scheduler page. Stamped only on sessions the executor CREATES; a task
+   * that runs into an existing conversation leaves it alone.
+   */
+  | { kind: "scheduled-task"; taskId: string; taskName: string; runId?: string }
 
 export interface ChatSession {
   /** Durable source/target link for an explicitly exported Codex snapshot. */
@@ -3767,8 +3775,12 @@ export interface AppSettings {
      * `pet_say`, `pet_reward`, `pet_show`). Reads and nurture are allowed
      * outright; the pet's own access gate applies the per-kind cooldown and a
      * daily XP/coin budget, and `pet_show` asks first because it raises an
-     * always-on-top window. Desktop and web only, since the pet subsystem is
-     * excluded from the Capacitor shell. Default false.
+     * always-on-top window (and, summoning, switches a disabled pet on).
+     * Desktop app only (ADR-0058 D9): on the web, mobile, the CLI and a
+     * headless brain the flag is intentionally inert. Neither the tools nor
+     * their consent tier are surfaced there (`lib/claude/build-options.ts`),
+     * and Settings → Tools shows the switch disabled with a desktop-only
+     * note. Default false.
      */
     pet?: boolean
   }
