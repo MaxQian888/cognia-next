@@ -51,6 +51,7 @@ import {
   setWorkspaceLifecyclePolicy,
 } from "@/lib/task-workspace/client"
 import { runWorkspaceUserAction } from "@/lib/task-workspace/user-action"
+import { hasHostRuntime } from "@/lib/platform/capabilities"
 import { useWorkspaceActionController } from "@/hooks/use-workspace-action-controller"
 import type {
   WorkspaceLifecyclePolicy,
@@ -221,6 +222,10 @@ function WorkspaceLifecyclePolicyBlock() {
 
 function WorkspaceMaintenanceBlock() {
   const t = useTranslations("settings.data.workspaceMaintenance")
+  // Managed workspaces live on a host. A standalone browser has none, and
+  // reading the events anyway painted "tauri-only command from web mode" in
+  // red on every visit, beside a Run button that could only fail the same way.
+  const hostAvailable = hasHostRuntime()
   const [events, setEvents] = useState<WorkspaceMaintenanceEvent[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -231,6 +236,7 @@ function WorkspaceMaintenanceBlock() {
   }, [])
 
   useEffect(() => {
+    if (!hostAvailable) return
     let cancelled = false
     void listWorkspaceMaintenanceEvents({ pageSize: 20 }).then(
       (next) => {
@@ -243,7 +249,7 @@ function WorkspaceMaintenanceBlock() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [hostAvailable])
 
   const run = async () => {
     setBusy(true)
@@ -269,6 +275,11 @@ function WorkspaceMaintenanceBlock() {
         <Label className="text-sm">{t("title")}</Label>
       </div>
       <p className="text-xs text-muted-foreground">{t("description")}</p>
+      {hostAvailable ? null : (
+        <p className="text-xs text-muted-foreground" data-testid="workspace-maintenance-needs-host">
+          {t("needsHost")}
+        </p>
+      )}
       {error ? (
         <p className="text-xs text-destructive" role="alert">
           {t("error", { error })}
@@ -283,7 +294,13 @@ function WorkspaceMaintenanceBlock() {
               })
             : t("noEvents")}
         </span>
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => void run()}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !hostAvailable}
+          onClick={() => void run()}
+          data-testid="workspace-maintenance-run"
+        >
           {busy ? t("running") : t("runNow")}
         </Button>
       </div>

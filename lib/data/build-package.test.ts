@@ -942,3 +942,45 @@ describe("the desktop pet", () => {
     expect(backup.payload.petAchievements).toBeUndefined()
   })
 })
+
+// Recorded browser flows are authored scripts nothing can rebuild; the visit
+// history beside them is not portable and stays on the device.
+describe("recorded browser flows", () => {
+  const FLOW = {
+    id: "flow-1",
+    name: "Sign in",
+    baseUrl: "http://localhost:3000",
+    createdAt: 1,
+    updatedAt: 2,
+    steps: [{ act: "navigate" as const, at: 1, url: "http://localhost:3000/login" }],
+  }
+
+  it("carries the saved flows with the core data, and leaves the visit history behind", async () => {
+    const db = getDb()
+    await db.browserRecordings.put(FLOW)
+    await db.browserHistory.put({
+      id: "https://example.com/",
+      url: "https://example.com/",
+      visitedAt: 1,
+      visits: 1,
+    })
+    const backup = await buildBackupPackage({
+      includeSessions: false,
+      includeApiKey: false,
+      includeCoreData: true,
+    })
+    expect(backup.payload.browserRecordings).toEqual([FLOW])
+    expect(backup.payload).not.toHaveProperty("browserHistory")
+  })
+
+  it("omits them from an export without the core data", async () => {
+    await getDb().browserRecordings.put(FLOW)
+    const backup = await buildBackupPackage({
+      includeSessions: false,
+      includeApiKey: false,
+      includeCoreData: false,
+      includeSettings: true,
+    })
+    expect(backup.payload).not.toHaveProperty("browserRecordings")
+  })
+})

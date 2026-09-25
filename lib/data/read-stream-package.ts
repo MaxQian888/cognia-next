@@ -37,6 +37,7 @@ const SHAPES: Record<
   templateDefinitions: "rows",
   templatePackages: "rows",
   templateInstances: "rows",
+  browserRecordings: "rows",
   mcpServers: "rows",
   mcpCredentialManifest: "rows",
   artifacts: "rows",

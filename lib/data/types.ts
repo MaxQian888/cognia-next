@@ -44,6 +44,7 @@ import type { LocalStorageSnapshot } from "./snapshots/types"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
+import type { BrowserRecordingRow } from "@/lib/db/browser-recordings"
 import type { ProfilesExport } from "@cognia/provider-types/profile-migration"
 import type { ContextCommentRow } from "@/types/context-comment"
 import type { PortableProfileDekEnvelopeV1 } from "@/lib/rag/profile-dek-store"
@@ -185,6 +186,13 @@ export interface BackupPayloadV3 {
   templateDefinitions?: TemplateDefinitionRow[]
   templatePackages?: TemplatePackageRow[]
   templateInstances?: TemplateInstanceRecord[]
+  /**
+   * Recorded browser flows (ADR-0072). Authored work: a named, edited script
+   * of clicks and assertions that nothing can rebuild. Credentials are never in
+   * them — the recorder keeps only a `secret: true` flag for a password field,
+   * and replay asks for the value again.
+   */
+  browserRecordings?: BrowserRecordingRow[]
   /**
    * Secret-free Provider Profile Store documents. Catalog revisions and live
    * connection inventory are host caches and are intentionally rehydrated

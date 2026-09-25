@@ -148,6 +148,7 @@ export async function* buildBackupSections(
     yield* tableSections("templateDefinitions", db.templateDefinitions, iterate)
     yield* tableSections("templatePackages", db.templatePackages, iterate)
     yield* tableSections("templateInstances", db.templateInstances, iterate)
+    yield* tableSections("browserRecordings", db.browserRecordings, iterate)
   }
 
   if (includeMemories) {

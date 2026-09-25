@@ -81,6 +81,9 @@ export const BACKUP_PAYLOAD_DOMAIN: Record<keyof BackupPayloadV3, BackupShareDom
   templateDefinitions: "library",
   templatePackages: "library",
   templateInstances: "library",
+  // Recorded browser flows: authored scripts, and the one place a backup keeps
+  // text typed into a web form (never a password), so the scan must see them.
+  browserRecordings: "library",
   mcpServers: "connectors",
   mcpCredentialManifest: "connectors",
   artifacts: "artifacts",

@@ -3,6 +3,7 @@
 
 import Dexie from "dexie"
 
+import { clearBrowserPreviewData } from "@/lib/browser/preview-data"
 import { getDb } from "@/lib/db/schema"
 import { clearTemporarySessionAssets } from "@/lib/db/session-assets"
 import { clearDraft } from "@/lib/db/chat-drafts"
@@ -108,6 +109,12 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
  * re-open and re-run the seed step. The Router + Fusion ledger beside it only
  * describes the sessions just dropped, so it goes too; deleting a database that
  * was never created (Router + Fusion never switched on) is a no-op.
+ *
+ * The built-in browser keeps its preferences and its cookies outside the
+ * database, so those are cleared here as well — otherwise a reset device stays
+ * signed in to every site the preview visited, imported sign-ins included.
+ * That part is best-effort: a cookie store that cannot be reached must not
+ * leave the user's data half-deleted, so it is logged rather than thrown.
  */
 export async function clearAll(): Promise<void> {
   const db = getDb()
@@ -115,4 +122,11 @@ export async function clearAll(): Promise<void> {
   await db.delete()
   clearTemporarySessionAssets()
   await Dexie.delete(fusionName)
+  try {
+    await clearBrowserPreviewData()
+  } catch (error) {
+    loggers.store.warn("clear all: browser preview data was not cleared", {
+      error: String(error),
+    })
+  }
 }

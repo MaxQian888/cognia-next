@@ -5,7 +5,11 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { setDraftDebounced, clearDraft } from "@/lib/db/chat-drafts"
 import { loggers } from "@cognia/logging"
 import { putSessionAsset, listSessionAssets } from "@/lib/db/session-assets"
+import { clearBrowserPreviewData } from "@/lib/browser/preview-data"
 import { clearTables, clearAll } from "./clear"
+
+jest.mock("@/lib/browser/preview-data", () => ({ clearBrowserPreviewData: jest.fn() }))
+const clearPreview = clearBrowserPreviewData as jest.Mock
 
 const fixture = createDbTestFixture({ seeded: false })
 beforeAll(fixture.initialize)
@@ -244,6 +248,28 @@ describe("clearAll", () => {
     await clearAll()
 
     expect(await Dexie.exists(fusionName)).toBe(false)
+  })
+
+  // The preview's cookies and preferences live outside the database; a reset
+  // device must not stay signed in to the sites the preview visited.
+  it("signs the built-in browser out and forgets its preferences", async () => {
+    clearPreview.mockReset().mockResolvedValue({ cookiesRemoved: 2 })
+    await clearAll()
+    expect(clearPreview).toHaveBeenCalledTimes(1)
+  })
+
+  it("still clears the database when the browser's cookie store is unreachable", async () => {
+    clearPreview.mockReset().mockRejectedValue(new Error("no webview"))
+    const warn = jest.spyOn(loggers.store, "warn").mockImplementation(() => undefined)
+    const remove = jest.spyOn(getDb(), "delete")
+    try {
+      await expect(clearAll()).resolves.toBeUndefined()
+      expect(remove).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      remove.mockRestore()
+      warn.mockRestore()
+    }
   })
 })
 

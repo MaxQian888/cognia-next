@@ -25,6 +25,7 @@ import type { PetAchievementRecord, PetCharacterBinding, PetInventoryRow } from 
 import type { PetModelRow } from "@/lib/db/pet-models"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
+import type { BrowserRecordingRow } from "@/lib/db/browser-recordings"
 import type { CogniaDB, SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import { getDb } from "@/lib/db/schema"
 import { contextCommentRowFromCanvas } from "@/lib/db/context-comments"
@@ -239,6 +240,7 @@ export async function applyBackupPackage(
       db.templateDefinitions,
       db.templatePackages,
       db.templateInstances,
+      db.browserRecordings,
       db.providerProfiles,
       db.deploymentProfiles,
       db.transportProfiles,
@@ -442,6 +444,18 @@ export async function applyBackupPackage(
         opts,
         summary,
         keyOf: (row) => row.id,
+      })
+      // Recorded browser flows are the user's authored scripts, like a chat
+      // template: "duplicate" mints a fresh id so an imported flow sits next to
+      // the local one of the same id instead of replacing it.
+      await applyCollection<BrowserRecordingRow>({
+        rows: env.browserRecordings,
+        table: db.browserRecordings,
+        kind: "browserRecordings",
+        opts,
+        summary,
+        idPrefix: "flow",
+        respectBuiltIn: false,
       })
 
       // Provider Profile Store documents are a referential bundle. A

@@ -41,6 +41,7 @@
   "botRunSteps": "encrypted-content",
   "browserAnnotations": "metadata-only",
   "browserDomainGrants": "metadata-only",
+  "browserHistory": "metadata-only",
   "browserProfiles": "metadata-only",
   "browserRecordings": "metadata-only",
   "browserSubmissions": "metadata-only",

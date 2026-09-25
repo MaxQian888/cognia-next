@@ -87,6 +87,7 @@ export const CORE_TABLE_NAMES = [
   "botRunSteps",
   "browserAnnotations",
   "browserDomainGrants",
+  "browserHistory",
   "browserProfiles",
   "browserRecordings",
   "sftpTransfers",
@@ -468,6 +469,10 @@ export const PORTABLE_BACKUP_BINDINGS = {
   templateDefinitions: "templateDefinitions",
   templatePackages: "templatePackages",
   templateInstances: "templateInstances",
+  // Recorded browser flows (ADR-0072): named, edited scripts nothing can
+  // rebuild. Portable like chat templates; the browser's visit history
+  // (`browserHistory`) deliberately is not.
+  browserRecordings: "browserRecordings",
   providerProfiles: "providerProfileStore",
   deploymentProfiles: "providerProfileStore",
   transportProfiles: "providerProfileStore",
@@ -1323,6 +1328,12 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     maxRows: 5_000,
     enforcement: "domain",
     reason: "The terminal history writer trims least-recently-used commands after insert.",
+  },
+  browserHistory: {
+    mode: "cap",
+    maxRows: 500,
+    enforcement: "domain",
+    reason: "The built-in browser's visit writer trims the oldest pages after each visit.",
   },
   remoteControlAudit: {
     mode: "cap",

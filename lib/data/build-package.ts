@@ -117,6 +117,7 @@ export async function buildBackupPackage(
     templateDefinitions,
     templatePackages,
     templateInstances,
+    browserRecordings,
     providerProfileStore,
   ] = await Promise.all([
     getSettings(),
@@ -170,6 +171,7 @@ export async function buildBackupPackage(
     readTable(db.templateDefinitions),
     readTable(db.templatePackages),
     readTable(db.templateInstances),
+    readTable(db.browserRecordings),
     exportStoredProfilesRedacted(),
   ])
 
@@ -283,6 +285,7 @@ export async function buildBackupPackage(
     templateDefinitions,
     templatePackages,
     templateInstances,
+    browserRecordings,
     providerProfileStore,
   }
   if (opts.includeSessions) {
@@ -344,6 +347,7 @@ export async function buildBackupPackage(
       "templateDefinitions",
       "templatePackages",
       "templateInstances",
+      "browserRecordings",
     ] satisfies (keyof BackupPayloadV3)[]) {
       delete payload[key]
     }

@@ -153,3 +153,32 @@ it("reports uninspected originals and previews separately from text PII findings
     )
   ).toEqual({ kind: "clean", scannedDomains: 0, uninspectedAttachments: 1 })
 })
+
+// A recorded flow keeps what was typed into a web form (never a password), so
+// it is exactly the kind of text the owner must see before sharing a backup.
+it("scans recorded browser flows as part of the library", () => {
+  const result = scanBackupForShare(
+    plaintext({
+      browserRecordings: [
+        {
+          id: "flow-1",
+          name: "Sign up",
+          baseUrl: "http://localhost:3000",
+          createdAt: 1,
+          updatedAt: 2,
+          steps: [
+            {
+              act: "fill",
+              at: 1,
+              target: { selector: "#email", role: "textbox", name: "Email", domPath: "input" },
+              value: "carol@example.com",
+            },
+          ],
+        },
+      ],
+    })
+  )
+  expect(result.kind).toBe("hits")
+  if (result.kind !== "hits") return
+  expect(result.domains.map((domain) => domain.domain)).toEqual(["library"])
+})

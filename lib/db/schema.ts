@@ -417,7 +417,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 228
+export const CURRENT_SCHEMA_VERSION = 229
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -611,6 +611,8 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   approvedBinaries: "&[pluginId+binaryPath], pluginId, sha256, approvedAt",
   browserRecordings: "&id, baseUrl, updatedAt, [baseUrl+updatedAt]",
   browserAnnotations: "&id, sessionId, baseUrl, status, createdAt, [baseUrl+status]",
+  // v229 — pages visited in the built-in browser, one row per address.
+  browserHistory: "&id, visitedAt",
   behaviorEvents: "&id, eventName, at, sessionId, [eventName+at]",
   executionRuns:
     "&id, kind, sourceId, status, sessionId, projectId, updatedAt, [kind+sourceId], parentRunId, [parentRunId+status]",
@@ -1794,6 +1796,8 @@ export class CogniaDB extends Dexie {
   // v110 — Recorded browser flows (ADR-0072). See `lib/db/browser-recordings.ts`.
   browserRecordings!: Table<import("./browser-recordings").BrowserRecordingRow, string>
   browserAnnotations!: Table<import("./browser-annotations").BrowserAnnotationRow, string>
+  // v229 — the built-in browser's recent pages. See `lib/db/browser-history.ts`.
+  browserHistory!: Table<import("./browser-history").BrowserHistoryRow, string>
   // v117 — host-local remote browser profile and public-domain grants.
   browserProfiles!: Table<import("./browser-profiles").BrowserProfileRow, string>
   browserDomainGrants!: Table<import("./browser-profiles").BrowserDomainGrantRow, string>

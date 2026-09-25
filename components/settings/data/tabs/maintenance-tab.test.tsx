@@ -46,6 +46,12 @@ jest.mock("@/lib/task-workspace/user-action", () => ({
     (runWorkspaceUserActionMock as unknown as (...a: unknown[]) => unknown)(...args),
 }))
 
+let mockHostRuntime = true
+jest.mock("@/lib/platform/capabilities", () => ({
+  ...jest.requireActual("@/lib/platform/capabilities"),
+  hasHostRuntime: () => mockHostRuntime,
+}))
+
 import { MaintenanceTab } from "./maintenance-tab"
 
 beforeEach(() => {
@@ -63,6 +69,7 @@ beforeEach(() => {
   runWorkspaceUserActionMock.mockImplementation((_command, operation) => operation())
   localStorage.clear()
   storeState = { settings: { storageRetention: { traceRetentionDays: 30 } }, save: saveMock }
+  mockHostRuntime = true
 })
 
 describe("<MaintenanceTab /> managed workspace block", () => {
@@ -90,6 +97,18 @@ describe("<MaintenanceTab /> managed workspace block", () => {
     await waitFor(() => expect(runWorkspaceMaintenanceMock).toHaveBeenCalledTimes(1))
     expect(listWorkspaceMaintenanceEventsMock).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(block).toHaveAttribute("data-last-event-detail", "registry checked"))
+  })
+
+  // A standalone browser has no host: reading anyway painted the transport's
+  // "tauri-only command" error in red beside a Run button that could only fail.
+  it("says maintenance needs a host instead of calling one that is not there", async () => {
+    mockHostRuntime = false
+    render(<MaintenanceTab />)
+    const block = screen.getByTestId("workspace-maintenance")
+    expect(within(block).getByTestId("workspace-maintenance-needs-host")).toBeInTheDocument()
+    expect(within(block).getByTestId("workspace-maintenance-run")).toBeDisabled()
+    expect(within(block).queryByRole("alert")).not.toBeInTheDocument()
+    expect(listWorkspaceMaintenanceEventsMock).not.toHaveBeenCalled()
   })
 })
 

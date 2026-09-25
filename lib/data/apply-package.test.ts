@@ -1666,3 +1666,40 @@ describe("applyBackupPackage — retrieval tombstones", () => {
     ).rejects.toThrow(/tombstone/i)
   })
 })
+
+describe("recorded browser flows", () => {
+  const flow = (name: string) => ({
+    id: "flow-1",
+    name,
+    baseUrl: "http://localhost:3000",
+    createdAt: 1,
+    updatedAt: 2,
+    steps: [{ act: "navigate" as const, at: 1, url: "http://localhost:3000/login" }],
+  })
+  const opts = (mergeStrategy: "skip" | "overwrite" | "duplicate") => ({
+    mergeStrategy,
+    includeSessions: false,
+    includeApiKey: false,
+  })
+
+  it("restores a saved flow", async () => {
+    await applyBackupPackage(pkg({ browserRecordings: [flow("Sign in")] }), opts("skip"))
+    expect(await getDb().browserRecordings.get("flow-1")).toMatchObject({ name: "Sign in" })
+  })
+
+  it("keeps the local flow on skip and replaces it on overwrite", async () => {
+    await getDb().browserRecordings.put(flow("Local"))
+    await applyBackupPackage(pkg({ browserRecordings: [flow("Imported")] }), opts("skip"))
+    expect((await getDb().browserRecordings.get("flow-1"))?.name).toBe("Local")
+
+    await applyBackupPackage(pkg({ browserRecordings: [flow("Imported")] }), opts("overwrite"))
+    expect((await getDb().browserRecordings.get("flow-1"))?.name).toBe("Imported")
+  })
+
+  it("keeps both on duplicate, under a fresh id", async () => {
+    await getDb().browserRecordings.put(flow("Local"))
+    await applyBackupPackage(pkg({ browserRecordings: [flow("Imported")] }), opts("duplicate"))
+    const names = (await getDb().browserRecordings.toArray()).map((row) => row.name).sort()
+    expect(names).toEqual(["Imported", "Local"])
+  })
+})
