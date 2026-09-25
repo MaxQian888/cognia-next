@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { DiscoverStep } from "./discover-step"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
@@ -166,6 +166,27 @@ describe("<DiscoverStep />", () => {
       )
     )
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("leaves its title to the shell's page heading and keeps only the live scan line", async () => {
+    // ADR-0193: the step's title and subtitle are the page heading, drawn by
+    // the guide shell; a second heading in here would be a second title.
+    let settle!: (hits: DiscoveredServer[]) => void
+    const scan = jest.fn(() => new Promise<DiscoveredServer[]>((resolve) => (settle = resolve)))
+    render(<DiscoverStep onSelect={() => {}} onSkip={() => {}} scan={scan as never} />)
+    const step = screen.getByTestId("pair-discover-step")
+    expect(within(step).queryByRole("heading")).toBeNull()
+    expect(within(step).queryByText("Pick a server or use a QR/manual code.")).toBeNull()
+    await waitFor(() =>
+      expect(
+        within(step).getByText("Scanning your network…", { selector: "p" })
+      ).toBeInTheDocument()
+    )
+
+    await act(async () => settle([]))
+    await waitFor(() =>
+      expect(within(step).queryByText("Scanning your network…", { selector: "p" })).toBeNull()
+    )
   })
 
   it("renders an empty state once the scan settles with no results", async () => {

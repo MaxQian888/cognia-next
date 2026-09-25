@@ -16,6 +16,24 @@ import { FirstRunStep } from "./first-run-step"
 const character = { id: "c1", name: "Ada" } as Character
 
 describe("FirstRunStep", () => {
+  it("asks the style-pack question only when the path it is on asks it", () => {
+    // ADR-0148: a custom-path question. The recommended path renders this same
+    // step in its ready phase and keeps the default look.
+    const props = {
+      shell: "tauri" as const,
+      capabilities: ["web"] as const,
+      modelAccess: true,
+      character,
+      onChangeCharacter: jest.fn(),
+      onPick: jest.fn(),
+    }
+    const { unmount } = render(<FirstRunStep {...props} />)
+    expect(screen.queryByTestId("onboarding-style-pack")).toBeNull()
+    unmount()
+    render(<FirstRunStep {...props} showStylePack />)
+    expect(screen.getByTestId("onboarding-style-pack")).toBeInTheDocument()
+  })
+
   it("disables the cards when this device cannot reach a model", () => {
     // Running a card creates a session, queues its prompt and records the flow
     // as completed — so an ungated click reported success and handed the user

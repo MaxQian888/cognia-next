@@ -96,6 +96,32 @@ describe("StepShell", () => {
     expect(secondBody).toHaveTextContent("provider body")
   })
 
+  it("crossfades the scene on its own key while the step stays the same", () => {
+    // The recommended screen swaps its plan picture for the first-task one
+    // when the plan has run, without changing step.
+    const { rerender } = render(
+      <StepShell sequence={expressSeq} current="express" scene={scene} showStepper={false}>
+        <p>body</p>
+      </StepShell>
+    )
+    const firstSlot = screen.getByTestId("onboarding-scene-slot")
+    const firstBody = screen.getByTestId("onboarding-step-body")
+    rerender(
+      <StepShell
+        sequence={expressSeq}
+        current="express"
+        sceneKey="express-ready"
+        scene={scene}
+        showStepper={false}
+      >
+        <p>body</p>
+      </StepShell>
+    )
+    expect(screen.getByTestId("onboarding-scene-slot")).not.toBe(firstSlot)
+    // The body is keyed on the step, which did not change.
+    expect(screen.getByTestId("onboarding-step-body")).toBe(firstBody)
+  })
+
   it("renders one narrative panel at every width, not a rail plus a stand-in", () => {
     render(
       <StepShell sequence={seq} current="scan" scene={scene}>

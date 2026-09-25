@@ -1,5 +1,7 @@
 import type { OnboardingMode, OnboardingShell, OnboardingStepId } from "@cognia/agent-config-types"
 
+import type { OnboardingFocus } from "./route"
+
 /**
  * The canonical onboarding step order, plus which shells each step applies to.
  *
@@ -166,6 +168,30 @@ export function resumeStep(
 ): OnboardingStepId | null {
   if (lastStep && sequence.some((s) => s.id === lastStep)) return lastStep
   return sequence[0]?.id ?? null
+}
+
+/**
+ * The step a focused re-entry lands on (ADR-0193), or `null` to resume as usual.
+ *
+ * `model` wants the sign-in: the provider step on the step-by-step path, the
+ * recommended screen (whose plan carries the sign-in inline) on the other.
+ * `task` wants the first-task cards: the terminal step, or the recommended
+ * screen, which the flow then opens in its ready phase rather than re-running
+ * a plan that has already been applied.
+ *
+ * Only a step this device's sequence actually contains is returned — a focus
+ * can aim, it cannot conjure a step the shell or the path does not have.
+ */
+export function stepForFocus(
+  sequence: readonly OnboardingStepDef[],
+  focus: OnboardingFocus | null
+): OnboardingStepId | null {
+  if (!focus) return null
+  const preferred: OnboardingStepId = focus === "model" ? "provider" : "first-run"
+  for (const id of [preferred, "express"] as const) {
+    if (sequence.some((s) => s.id === id)) return id
+  }
+  return null
 }
 
 /**

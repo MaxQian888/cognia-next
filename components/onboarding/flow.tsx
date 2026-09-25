@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import type {
   Character,
@@ -31,11 +31,18 @@ import { resolveOnboardingMode } from "@cognia/agent-config-types"
 import { useModelAccess } from "@/hooks/onboarding/use-model-access"
 import { listCharacters } from "@/lib/db/characters"
 import { loggers } from "@cognia/logging"
-import { nextStep, previousStep, resolveStepSequence, resumeStep } from "@/lib/onboarding/steps"
+import {
+  nextStep,
+  previousStep,
+  resolveStepSequence,
+  resumeStep,
+  stepForFocus,
+} from "@/lib/onboarding/steps"
 import { queuePendingChatPrompt } from "@/lib/chat/pending-prompt"
 import { createOnboardingRequest } from "@/lib/onboarding/request"
 import { onboardingSkillRowId } from "@/lib/onboarding/skill"
 import { resolveOnboardingShell } from "@/lib/onboarding/shell"
+import { readOnboardingFocus } from "@/lib/onboarding/route"
 import { setMobileRuntimeMode, type MobileRuntimeMode } from "@/lib/runtime/standalone-mode"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useHistoryImport } from "@/hooks/onboarding/use-history-import"
@@ -110,6 +117,15 @@ export function OnboardingFlow() {
   const { paired: companionPaired, loading: companionLoading } = useCompanionConfig()
   const pairingGateClosed = shell === "mobile-paired" && (companionLoading || !companionPaired)
 
+  // A focused re-entry (`/onboarding?focus=…`, from the finish-setup bar or
+  // the Settings status block) goes straight to the one thing still missing
+  // instead of resuming wherever the user last stood. Read once, on mount,
+  // through the router rather than `window.location`: on a client-side push
+  // Next commits the new URL only after this render, so the address bar still
+  // holds the page the user came from.
+  const searchParams = useSearchParams()
+  const [focus] = useState(() => readOnboardingFocus(searchParams?.toString()))
+
   // Whether this device arrived with model access, latched at the first
   // settled probe. See `useModelAccess` for why it is latched rather than
   // live, and `hasModelAccess` for the sources it folds together.
@@ -117,8 +133,13 @@ export function OnboardingFlow() {
 
   // Which path. Persisted, so a resumed setup does not re-ask — and derived
   // from `lastStep` for records written before the fork existed.
-  const [mode, setMode] = useState<OnboardingMode | undefined>(() =>
-    resolveOnboardingMode(settings?.onboardingProgress)
+  //
+  // A focused re-entry with no path on record — a migrated legacy user, or one
+  // who left through "I've done this before" — takes the step-by-step path:
+  // it is the one with a discrete step for each gap, and landing such a user
+  // on the intro would turn "connect a model" into "start setup over".
+  const [mode, setMode] = useState<OnboardingMode | undefined>(
+    () => resolveOnboardingMode(settings?.onboardingProgress) ?? (focus ? "custom" : undefined)
   )
 
   const sequence = useMemo(
@@ -127,7 +148,10 @@ export function OnboardingFlow() {
   )
 
   const [step, setStep] = useState<OnboardingStepId>(
-    () => resumeStep(sequence, settings?.onboardingProgress?.lastStep) ?? "welcome"
+    () =>
+      stepForFocus(sequence, focus) ??
+      resumeStep(sequence, settings?.onboardingProgress?.lastStep) ??
+      "welcome"
   )
   // A paired phone that has not paired yet cannot be on the terminal step: its
   // compute is on the other side of a handshake that has not happened.
@@ -156,7 +180,12 @@ export function OnboardingFlow() {
   // The recommended path's plan
   // ---------------------------------------------------------------------
 
-  const [expressPhase, setExpressPhase] = useState<ExpressPhase>("plan")
+  // A task-focused re-entry lands on the cards: the plan was already applied
+  // on the visit that got this far, and re-running it to reach them is the
+  // detour the focus exists to skip.
+  const [expressPhase, setExpressPhase] = useState<ExpressPhase>(() =>
+    focus === "task" && step === "express" ? "ready" : "plan"
+  )
   const [expressStatus, setExpressStatus] = useState<Record<string, ExpressItemStatus>>({})
   // Lines the user unchecked. Held here rather than in the step because the
   // narrative panel's scene draws the same selection — a copy in each would
@@ -246,17 +275,16 @@ export function OnboardingFlow() {
     [currentStep, mode, router, skipOnboarding, shell]
   )
 
-  /** Skip reasons differ by step, so the finish bar can name what is missing. */
-  const skipPathForStep = (id: OnboardingStepId): OnboardingPath => {
-    if (id === "provider") return "provider_skipped"
-    // The recommended screen carries the sign-in line, so bailing out of it is
-    // the same omission the step-by-step path records as `provider_skipped` —
-    // reporting it as a missing runtime would make the finish bar name the
-    // wrong thing.
-    if (id === "express")
-      return plan.some((item) => item.kind === "sign-in") ? "provider_skipped" : "runtime_skipped"
-    return "runtime_skipped"
-  }
+  /**
+   * Why the user left, read from what is actually true at the moment they
+   * leave rather than from which screen they left on. Leaving the first-task
+   * cards with a working model is not "no runtime", and leaving the sign-in
+   * step after signing in is not "no model". The finish bar re-derives the gap
+   * live anyway (ADR-0193); this keeps the record honest for everything else
+   * that reads it.
+   */
+  const skipPath = (): OnboardingPath =>
+    modelAccess.value === false ? "provider_skipped" : "runtime_skipped"
 
   /**
    * "I've done this before" is not a skip: the user is telling us they are
@@ -393,7 +421,7 @@ export function OnboardingFlow() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => void leave(skipPathForStep(currentStep))}
+            onClick={() => void leave(skipPath())}
             data-testid="onboarding-skip"
           >
             {t("skip")}
@@ -424,6 +452,10 @@ export function OnboardingFlow() {
       onChangeCharacter={changeCharacter}
       onPick={handlePickCard}
       runtimeLabel={runtimeLabel}
+      // ADR-0148: the style pack is a custom-path question. The recommended
+      // path renders this same step in its ready phase and keeps the default,
+      // because its whole promise is fewer questions.
+      showStylePack={mode === "custom"}
     />
   )
 
@@ -439,9 +471,10 @@ export function OnboardingFlow() {
       showStepper={mode !== "express"}
       // The recommended screen has two things to say: one before the button is
       // pressed and one after.
-      narrativeKey={
-        currentStep === "express" && expressPhase !== "plan" ? "express-applying" : undefined
-      }
+      // …and the ready phase a third: "nothing here needs you" is wrong the
+      // moment the cards ask the user to pick one.
+      narrativeKey={currentStep === "express" ? expressNarrativeKey(expressPhase) : undefined}
+      sceneKey={currentStep === "express" && expressPhase === "ready" ? "express-ready" : undefined}
       scene={renderScene({
         step: currentStep,
         scan,
@@ -522,6 +555,13 @@ export function OnboardingFlow() {
   )
 }
 
+/** Which `onboarding.narrative.*` entry each phase of the recommended screen reads. */
+function expressNarrativeKey(phase: ExpressPhase): string | undefined {
+  if (phase === "applying") return "express-applying"
+  if (phase === "ready") return "express-ready"
+  return undefined
+}
+
 /** Maps the express plan's lifecycle onto the tones the scene draws. */
 function sceneItemState(
   item: ExpressPlanItem,
@@ -560,6 +600,9 @@ function renderScene(input: {
     case "provider":
       return <ProviderScene connected={input.providerView === "connected"} />
     case "express":
+      // Once the plan has run, the screen *is* the first-task step, and the
+      // picture follows it rather than holding up a finished checklist.
+      if (input.expressPhase === "ready") return <FirstRunScene />
       return (
         <ExpressScene
           items={input.plan.map((item) => ({

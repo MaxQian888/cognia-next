@@ -82,10 +82,17 @@ export function hasModelAccess(input: {
   providerConfigured: boolean
   /** `settings.apiKey`, the legacy Anthropic-only slot. */
   legacyApiKey?: string
+  /**
+   * A connected external agent that signs in to its own provider — the same
+   * fact as an authenticated scanned runtime, seen from inside the app rather
+   * than from a process probe. Optional: the flow has the scan instead.
+   */
+  externalRuntimeReady?: boolean
 }): boolean {
   if (input.credentialsOk === true) return true
   if (input.providerConfigured) return true
   if (input.legacyApiKey?.trim()) return true
+  if (input.externalRuntimeReady) return true
   return input.scan.runtimes.some((r) => r.authenticated)
 }
 

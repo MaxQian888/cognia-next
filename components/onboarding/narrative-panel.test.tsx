@@ -57,6 +57,19 @@ describe("NarrativePanel", () => {
     expect(screen.getAllByTestId("onboarding-stepper")).toHaveLength(1)
   })
 
+  it("drops the stepper band before the path fork is answered", () => {
+    // The welcome-only sequence counts no progress; an empty stepper band
+    // would still pad the foot of the panel.
+    const bare = resolveStepSequence({ shell: "tauri", mode: undefined, hasModelAccess: false })
+    renderPanel({ sequence: bare, current: "welcome", sceneKey: "welcome" })
+    expect(screen.queryByTestId("onboarding-stepper")).toBeNull()
+  })
+
+  it("renders the supporting line under its own hook", () => {
+    renderPanel()
+    expect(screen.getByTestId("onboarding-narrative-body")).toHaveTextContent("narrative.scan.body")
+  })
+
   it("keeps the brand tint off the text layer", () => {
     // `--brand-action` is 1.69:1 on a light substrate (ADR-0092 V2 §8), so it
     // is a substrate and a stroke here and never a text colour.

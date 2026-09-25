@@ -1,6 +1,8 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 import { isOnboardingSettled } from "@cognia/agent-config-types"
 
+import { isSetupUnfinished } from "./setup-status"
+
 /**
  * Decide whether this device should be routed into the first-run flow
  * (ADR-0122). Consumed by `components/providers/onboarding-gate.tsx`.
@@ -36,21 +38,19 @@ export function shouldEnterOnboarding(settings: AppSettings, sessionsCount: numb
 }
 
 /**
- * Whether the residual "finish setup" bar should render after the user landed
+ * Whether the residual "finish setup" bar may render after the user landed
  * back in the app.
  *
- * Shown only for a *deliberate* early exit — the paths where something the
- * user wanted is still missing. `completed` has nothing left to finish, and
- * `legacy_dismissed` is pre-dismissed by the migration precisely so upgrading
- * users are not nagged about a flow they never opted into.
+ * Only for a *deliberate* early exit that the user has not waved away —
+ * `completed` has nothing left to finish, and `legacy_dismissed` is
+ * pre-dismissed by the migration so upgrading users are not nagged about a
+ * flow they never opted into. This is the precondition only: what the bar
+ * *says*, and whether anything is still missing at all, is re-derived from
+ * live state by `deriveSetupGaps` (ADR-0193), so a gap closed elsewhere takes
+ * the bar with it.
  */
 export function shouldShowFinishBar(settings: AppSettings): boolean {
   const progress = settings.onboardingProgress
-  if (!progress) return false
-  if (progress.finishBarDismissed) return false
-  return (
-    progress.path === "provider_skipped" ||
-    progress.path === "runtime_skipped" ||
-    progress.path === "task_failed"
-  )
+  if (progress?.finishBarDismissed) return false
+  return isSetupUnfinished(progress)
 }

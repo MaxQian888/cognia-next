@@ -10,6 +10,13 @@ import { WelcomeStep } from "./welcome-step"
 const noop = () => {}
 
 describe("WelcomeStep", () => {
+  it("opens with the hero-sized page heading every guide shares", () => {
+    render(<WelcomeStep shell="tauri" onStart={noop} onCustomise={noop} />)
+    const heading = screen.getByRole("heading", { level: 1, name: "welcome.headline" })
+    expect(heading).toHaveClass("text-4xl", "sm:text-5xl")
+    expect(screen.getByText("welcome.lede")).toBeInTheDocument()
+  })
+
   it("puts the recommended path on the primary button", () => {
     const onStart = jest.fn()
     render(<WelcomeStep shell="tauri" onStart={onStart} onCustomise={noop} />)

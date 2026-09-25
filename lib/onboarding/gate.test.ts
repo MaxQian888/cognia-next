@@ -68,10 +68,30 @@ describe("shouldShowFinishBar", () => {
   it.each(["provider_skipped", "runtime_skipped", "task_failed"] as const)(
     "shows for the %s exit path",
     (path) => {
-      const settings = makeSettings({ onboardingProgress: progress({ path }) })
+      const settings = makeSettings({
+        onboardingProgress: progress({ path, skippedAt: "2026-09-01T00:00:00.000Z" }),
+      })
       expect(shouldShowFinishBar(settings)).toBe(true)
     }
   )
+
+  it("hides while the flow is still in progress", () => {
+    // A fresh record carries a placeholder `runtime_skipped` path from the
+    // first step on; only a recorded exit (`skippedAt`) is something to finish.
+    const settings = makeSettings({ onboardingProgress: progress({ lastStep: "scan" }) })
+    expect(shouldShowFinishBar(settings)).toBe(false)
+  })
+
+  it("hides once a later run completed, even if an old skip is still recorded", () => {
+    const settings = makeSettings({
+      onboardingProgress: progress({
+        path: "provider_skipped",
+        skippedAt: "2026-09-01T00:00:00.000Z",
+        completedAt: "2026-09-02T00:00:00.000Z",
+      }),
+    })
+    expect(shouldShowFinishBar(settings)).toBe(false)
+  })
 
   it("hides after a completed run", () => {
     const settings = makeSettings({ onboardingProgress: progress({ path: "completed" }) })
@@ -85,7 +105,11 @@ describe("shouldShowFinishBar", () => {
 
   it("hides once the user closed the bar", () => {
     const settings = makeSettings({
-      onboardingProgress: progress({ path: "runtime_skipped", finishBarDismissed: true }),
+      onboardingProgress: progress({
+        path: "runtime_skipped",
+        skippedAt: "2026-09-01T00:00:00.000Z",
+        finishBarDismissed: true,
+      }),
     })
     expect(shouldShowFinishBar(settings)).toBe(false)
   })

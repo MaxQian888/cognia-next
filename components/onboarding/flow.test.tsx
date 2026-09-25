@@ -4,7 +4,13 @@ import type { AppSettings } from "@cognia/agent-config-types"
 
 const replace = jest.fn()
 const push = jest.fn()
-jest.mock("next/navigation", () => ({ useRouter: () => ({ replace, push }) }))
+// The router's view of the query string. Deliberately not `window.location`:
+// on a client-side push Next commits the new URL only after the page renders.
+let routerSearch = ""
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ replace, push }),
+  useSearchParams: () => new URLSearchParams(routerSearch),
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -147,6 +153,7 @@ beforeEach(() => {
   historyTotal = 0
   modelAccess.value = false
   modelAccess.resolved = false
+  routerSearch = ""
 })
 
 describe("OnboardingFlow", () => {
@@ -447,5 +454,193 @@ describe("OnboardingFlow", () => {
 
     await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("first-run", "custom"))
     expect(screen.getByRole("heading", { name: "firstRun.title" })).toBeInTheDocument()
+  })
+
+  // ---------------------------------------------------------------------
+  // ADR-0193: the ready phase, the style pack, honest exits, focused re-entry
+  // ---------------------------------------------------------------------
+
+  const expressRecord = () =>
+    ({
+      id: "singleton",
+      onboardingProgress: {
+        version: 2,
+        path: "runtime_skipped",
+        lastStep: "express",
+        mode: "express",
+      },
+    }) as AppSettings
+
+  it("tells the ready phase apart from the run, in words and in the picture", async () => {
+    modelAccess.value = true
+    modelAccess.resolved = true
+    settings = expressRecord()
+    render(<OnboardingFlow />)
+    expect(screen.getByTestId("onboarding-scene-express")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("onboarding-express-apply"))
+    await waitFor(() => expect(screen.getByTestId("onboarding-express-ready")).toBeInTheDocument())
+    // "Nothing here needs you" is wrong the moment the cards ask for a pick.
+    expect(screen.getByTestId("onboarding-narrative-headline")).toHaveTextContent(
+      "narrative.express-ready.headline"
+    )
+    // And the picture follows the screen to its first task.
+    expect(screen.getByTestId("onboarding-scene-first-run")).toBeInTheDocument()
+    expect(screen.queryByTestId("onboarding-scene-express")).toBeNull()
+  })
+
+  it("keeps the style pack off the recommended path", async () => {
+    modelAccess.value = true
+    modelAccess.resolved = true
+    settings = expressRecord()
+    render(<OnboardingFlow />)
+    fireEvent.click(screen.getByTestId("onboarding-express-apply"))
+    await waitFor(() => expect(screen.getByTestId("onboarding-express-ready")).toBeInTheDocument())
+    expect(screen.queryByTestId("onboarding-style-pack")).toBeNull()
+  })
+
+  it("offers the style pack on the step-by-step path's first task", () => {
+    modelAccess.value = true
+    settings = {
+      id: "singleton",
+      onboardingProgress: {
+        version: 2,
+        path: "runtime_skipped",
+        lastStep: "first-run",
+        mode: "custom",
+      },
+    } as AppSettings
+    render(<OnboardingFlow />)
+    expect(screen.getByTestId("onboarding-style-pack")).toBeInTheDocument()
+  })
+
+  it("does not blame a missing model when the user leaves the cards with one", async () => {
+    modelAccess.value = true
+    modelAccess.resolved = true
+    settings = {
+      id: "singleton",
+      onboardingProgress: {
+        version: 2,
+        path: "runtime_skipped",
+        lastStep: "first-run",
+        mode: "custom",
+      },
+    } as AppSettings
+    render(<OnboardingFlow />)
+    fireEvent.click(screen.getByTestId("onboarding-skip"))
+    await waitFor(() => expect(skipOnboarding).toHaveBeenCalledWith("runtime_skipped", "first-run"))
+  })
+
+  it("records a missing model wherever the user leaves without one", async () => {
+    modelAccess.value = false
+    settings = {
+      id: "singleton",
+      onboardingProgress: { version: 2, path: "runtime_skipped", lastStep: "scan", mode: "custom" },
+    } as AppSettings
+    render(<OnboardingFlow />)
+    fireEvent.click(screen.getByTestId("onboarding-skip"))
+    await waitFor(() => expect(skipOnboarding).toHaveBeenCalledWith("provider_skipped", "scan"))
+  })
+
+  describe("focused re-entry", () => {
+    const visit = (search: string) => {
+      routerSearch = search
+    }
+
+    it("opens the recommended screen straight on its cards for a task focus", () => {
+      modelAccess.value = true
+      modelAccess.resolved = true
+      settings = expressRecord()
+      visit("?focus=task")
+      render(<OnboardingFlow />)
+      // The plan was applied on the visit that got this far; re-running it to
+      // reach the cards is the detour the focus exists to skip.
+      expect(screen.getByTestId("onboarding-express-ready")).toBeInTheDocument()
+      expect(screen.getByTestId("onboarding-card-summarize-web")).toBeInTheDocument()
+      expect(screen.queryByTestId("onboarding-express-apply")).toBeNull()
+    })
+
+    it("opens the step-by-step path on the sign-in for a model focus", () => {
+      settings = {
+        id: "singleton",
+        onboardingProgress: {
+          version: 2,
+          path: "provider_skipped",
+          lastStep: "scan",
+          mode: "custom",
+        },
+      } as AppSettings
+      visit("?focus=model")
+      render(<OnboardingFlow />)
+      expect(screen.getByTestId("onboarding-provider")).toBeInTheDocument()
+    })
+
+    it("opens the step-by-step path on the first-task cards for a task focus", () => {
+      modelAccess.value = true
+      settings = {
+        id: "singleton",
+        onboardingProgress: {
+          version: 2,
+          path: "runtime_skipped",
+          lastStep: "scan",
+          mode: "custom",
+        },
+      } as AppSettings
+      visit("?focus=task")
+      render(<OnboardingFlow />)
+      expect(screen.getByTestId("onboarding-first-run")).toBeInTheDocument()
+    })
+
+    it("reads the focus from the router, not from an address bar that has not caught up", () => {
+      // On a soft navigation the old URL is still in `window.location` while
+      // the new page renders; only the router already knows the new one.
+      window.history.replaceState({}, "", "/settings?section=discover")
+      settings = {
+        id: "singleton",
+        onboardingProgress: {
+          version: 2,
+          path: "provider_skipped",
+          lastStep: "scan",
+          mode: "custom",
+        },
+      } as AppSettings
+      visit("?focus=model")
+      render(<OnboardingFlow />)
+      expect(screen.getByTestId("onboarding-provider")).toBeInTheDocument()
+      window.history.replaceState({}, "", "/")
+    })
+
+    it("takes the step-by-step path when no path is on record, instead of the intro", () => {
+      // A migrated legacy user, or one who left through "I've done this
+      // before", has no mode — "connect a model" must still land on sign-in.
+      settings = {
+        id: "singleton",
+        onboardingProgress: { version: 2, path: "legacy_dismissed", finishBarDismissed: true },
+      } as AppSettings
+      visit("?focus=model")
+      render(<OnboardingFlow />)
+      expect(screen.getByTestId("onboarding-provider")).toBeInTheDocument()
+      expect(screen.queryByTestId("onboarding-welcome")).toBeNull()
+    })
+
+    it("starts at the intro for a fresh install with no focus", () => {
+      render(<OnboardingFlow />)
+      expect(screen.getByTestId("onboarding-welcome")).toBeInTheDocument()
+    })
+
+    it("ignores a focus it does not recognise", () => {
+      settings = {
+        id: "singleton",
+        onboardingProgress: {
+          version: 2,
+          path: "runtime_skipped",
+          lastStep: "scan",
+          mode: "custom",
+        },
+      } as AppSettings
+      visit("?focus=everything")
+      render(<OnboardingFlow />)
+      expect(screen.getByTestId("onboarding-scan")).toBeInTheDocument()
+    })
   })
 })

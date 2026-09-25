@@ -15,10 +15,19 @@
  * static export build renders a shell.
  */
 
+import { Suspense } from "react"
+
 import { OnboardingFlow } from "@/components/onboarding/flow"
 
 export const dynamicParams = false
 
 export default function OnboardingPage() {
-  return <OnboardingFlow />
+  // Static-export idiom (as in `app/page.tsx`): the flow reads its `?focus=`
+  // re-entry through `useSearchParams`, which throws during prerender unless
+  // it sits inside a Suspense boundary.
+  return (
+    <Suspense fallback={null}>
+      <OnboardingFlow />
+    </Suspense>
+  )
 }

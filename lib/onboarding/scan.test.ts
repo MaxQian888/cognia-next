@@ -76,6 +76,13 @@ describe("hasModelAccess", () => {
     // sign-in step for everyone during the first frames of the flow.
     expect(hasModelAccess({ scan: EMPTY_SCAN, ...base, credentialsOk: null })).toBe(false)
   })
+
+  it("counts a connected external agent the way it counts an authenticated scanned CLI", () => {
+    // Outside the flow there is no process scan; the app sees the same fact
+    // as a connected runtime that signs in to its own provider.
+    expect(hasModelAccess({ scan: EMPTY_SCAN, ...base, externalRuntimeReady: true })).toBe(true)
+    expect(hasModelAccess({ scan: EMPTY_SCAN, ...base, externalRuntimeReady: false })).toBe(false)
+  })
 })
 
 describe("migratableVendors", () => {
@@ -180,7 +187,7 @@ describe("vendorLabel", () => {
   it.each([
     ["claude-code", "Claude Code ACP adapter"],
     ["codex", "Codex ACP adapter"],
-    ["opencode", "OpenCode (auto-spawn)"],
+    ["opencode", "OpenCode V2"],
   ] as const)("resolves %s without a scan result", (vendor, expected) => {
     expect(vendorLabel(EMPTY_SCAN, vendor)).toBe(expected)
   })

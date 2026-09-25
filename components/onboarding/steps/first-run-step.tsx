@@ -49,6 +49,12 @@ interface FirstRunStepProps {
   onPick: (card: StarterCard) => Promise<void>
   /** Label of the runtime that will execute, so it is never a mystery. */
   runtimeLabel?: string
+  /**
+   * Offer the style-pack picker (ADR-0148). Custom path only: the recommended
+   * path hosts this same step in its ready phase and keeps the default look,
+   * because its promise is fewer questions.
+   */
+  showStylePack?: boolean
 }
 
 /**
@@ -78,6 +84,7 @@ export function FirstRunStep({
   onChangeCharacter,
   onPick,
   runtimeLabel,
+  showStylePack = false,
 }: FirstRunStepProps) {
   const t = useTranslations("onboarding")
   const [running, setRunning] = useState<string | null>(null)
@@ -178,15 +185,17 @@ export function FirstRunStep({
         </p>
       )}
 
-      {/* ADR-0148 — the style pack, offered only on the custom path (this step
-          is custom-only). Express keeps the default rather than adding a
-          question to the path whose whole promise is fewer of them. Compact
-          because the choice is legible from the previews alone; the full
-          descriptions live in Settings → Appearance → Style. */}
-      <section className="flex flex-col gap-2" data-testid="onboarding-style-pack">
-        <span className="text-sm font-medium">{tStyle("sectionLabel")}</span>
-        <StylePackPicker compact />
-      </section>
+      {/* ADR-0148 — the style pack, offered only on the custom path. Express
+          renders this step too (in its ready phase) and keeps the default
+          rather than adding a question to the path whose whole promise is
+          fewer of them. Compact because the choice is legible from the
+          previews alone; the full descriptions live in Settings → Appearance. */}
+      {showStylePack && (
+        <section className="flex flex-col gap-2" data-testid="onboarding-style-pack">
+          <span className="text-sm font-medium">{tStyle("sectionLabel")}</span>
+          <StylePackPicker compact />
+        </section>
+      )}
 
       {/* Only when it has something to say — an empty row still painted its
           top border, leaving a hairline under the grid with nothing beneath. */}

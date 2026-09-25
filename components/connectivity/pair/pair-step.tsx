@@ -536,15 +536,6 @@ export function PairStep({
           </InvitationCard>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {webMode ? (
-              // The browser form has no scan button and no discover step to
-              // introduce it, so it says what it is. Both strings existed for
-              // the web shell and were rendered by nothing.
-              <div className="mb-1" data-testid="pair-web-form-heading">
-                <p className="text-sm font-medium">{t("web.formCardTitle")}</p>
-                <p className="text-xs text-muted-foreground">{t("web.formCardDescription")}</p>
-              </div>
-            ) : null}
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="pair-payload">{t("tokenLabel")}</Label>
               <div className="flex items-center gap-1">

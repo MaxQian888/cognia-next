@@ -7,6 +7,10 @@ import { PairShell } from "./pair-shell"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
+jest.mock("@/components/desktop/window-controls", () => ({
+  useWindowChromeMode: () => "none",
+  WindowControls: () => null,
+}))
 jest.mock("./pair-scene", () => ({
   PairScene: ({ state, client }: { state: string; client: string }) => (
     <svg data-testid="pair-scene" data-state={state} data-client={client} />
@@ -32,20 +36,41 @@ it("owns the viewport with an opaque surface", () => {
   expect(shell).toHaveClass("overflow-hidden")
 })
 
-it("gives the panel one title and the body none", () => {
-  renderShell()
-  // One h1 on the page: the title used to be duplicated by a page header and
-  // the step's own heading.
+it("opens the step body with its heading, as every onboarding step does", () => {
+  renderShell({ heading: { title: "Pair this browser", description: "Paste the invitation." } })
+  // One h1 on the page, in the body: the panel beside it narrates the scene,
+  // the same split `/onboarding` uses (ADR-0193).
+  const h1 = screen.getByRole("heading", { level: 1, name: "Pair this browser" })
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
-  expect(screen.getByTestId("pair-narrative-panel")).toContainElement(
-    screen.getByRole("heading", { level: 1 })
-  )
+  expect(screen.getByTestId("pair-step-body")).toContainElement(h1)
+  expect(screen.getByTestId("pair-narrative-panel")).not.toContainElement(h1)
+  expect(screen.getByText("Paste the invitation.")).toBeInTheDocument()
+})
+
+it("narrates the flow in the panel headline", () => {
+  renderShell()
+  expect(screen.getByTestId("pair-narrative-headline")).toHaveTextContent("web.title")
+  renderShell({ client: "mobile" })
+  expect(screen.getAllByTestId("pair-narrative-headline")[1]).toHaveTextContent("title")
+})
+
+it("draws the same window bar as the first-run flow, with the wordmark in it", () => {
+  renderShell()
+  const bar = screen.getByTestId("pair-window-bar")
+  expect(bar).toHaveTextContent("brandMark")
+  expect(screen.getByTestId("pair-narrative-panel")).not.toHaveTextContent("brandMark")
+})
+
+it("enters like the first-run flow and scrolls as one page below md", () => {
+  renderShell()
+  expect(screen.getByTestId("pair-shell")).toHaveClass("animate-in", "fade-in")
+  expect(screen.getByTestId("pair-narrative-panel")).toHaveAttribute("data-overflow", "scroll")
 })
 
 it("narrates the scene state it is drawing", () => {
   renderShell({ sceneState: "blocked" })
   expect(screen.getByTestId("pair-scene")).toHaveAttribute("data-state", "blocked")
-  expect(screen.getByTestId("pair-narration")).toHaveTextContent("narration.blocked")
+  expect(screen.getByTestId("pair-narrative-body")).toHaveTextContent("narration.blocked")
 })
 
 it("renders the aside and the status inside the panel, not the body", () => {

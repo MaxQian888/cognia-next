@@ -1,20 +1,29 @@
 "use client"
 
-// Dismissible "get started" hint shown at the top of the provider settings
-// page. It now also hosts a *quiet* models.dev catalog refresh: the catalog
-// already auto-syncs on app boot (see ModelsDevCatalogInitializer), so this is
-// only an optional manual nudge — failures stay silent (no toast), and the
-// counts / last-synced detail live behind the button's hover title rather than
-// occupying the page. Dismissing the hint is remembered across sessions.
+// The provider page's "get started" guide, drawn as the shared guide callout
+// (ADR-0193) so it reads as the same thing as the finish-setup bar and the
+// Settings → Discover status block. It hides itself once the built-in agent
+// can reach a model — "get started by configuring a provider" is wrong the
+// moment one is configured — and, as before, once dismissed.
+//
+// It also hosts a *quiet* models.dev catalog refresh: the catalog already
+// auto-syncs on app boot (see ModelsDevCatalogInitializer), so this is only an
+// optional manual nudge — failures stay silent (no toast), and the counts /
+// last-synced detail live behind the button's hover title.
 
-import { X, Sparkles, RefreshCw, Loader2 } from "lucide-react"
+import { KeyRoundIcon, Loader2, RefreshCw, SparklesIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { GuideCallout } from "@/components/guide/guide-callout"
 import { useSettingsStore } from "@/stores"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
+import { useBuiltInModelAccess } from "@/hooks/onboarding/use-setup-status"
 
 const QUICK_SETUP_PROVIDERS = ["openai", "anthropic", "google"] as const
+
+/** How long a quick-setup target stays highlighted after the jump. */
+const HIGHLIGHT_MS = 2000
 
 interface ProviderOnboardingBannerProps {
   onScrollToProvider?: (providerId: string) => void
@@ -27,6 +36,21 @@ interface ProviderOnboardingBannerProps {
   externalRuntimeReady?: boolean
 }
 
+/**
+ * Scroll a provider row into view and pulse it once. The pulse is the shared
+ * `[data-guide-highlight]` treatment in `globals.css`, which the reduce-motion
+ * guards collapse to a static outline.
+ */
+function highlightProviderRow(providerId: string) {
+  const el = document.getElementById(`provider-${providerId}`)
+  if (!el) return
+  el.scrollIntoView({ behavior: "smooth", block: "center" })
+  el.dataset.guideHighlight = "true"
+  window.setTimeout(() => {
+    delete el.dataset.guideHighlight
+  }, HIGHLIGHT_MS)
+}
+
 export function ProviderOnboardingBanner({
   onScrollToProvider,
   externalRuntimeReady = false,
@@ -34,9 +58,13 @@ export function ProviderOnboardingBanner({
   const t = useTranslations("providers")
   const dismissed = useSettingsStore((s) => s.providerOnboardingDismissed)
   const dismiss = useSettingsStore((s) => s.dismissProviderOnboarding)
+  const builtInAccess = useBuiltInModelAccess()
   const { row, providerCount, modelCount, isSyncing, sync } = useModelsDevCatalog()
 
   if (dismissed) return null
+  // Nothing left to get started with. `null` (still probing) keeps it up, so
+  // a user who needs it does not see it flash in late.
+  if (builtInAccess === true) return null
 
   const lastSynced = row?.fetchedAt
     ? new Date(row.fetchedAt).toLocaleString()
@@ -50,40 +78,33 @@ export function ProviderOnboardingBanner({
     : t("modelsDev.lastSynced", { time: lastSynced })
 
   return (
-    <div className="relative flex items-center gap-4 rounded-lg border border-dashed bg-muted/30 px-4 py-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-        <Sparkles className="h-4.5 w-4.5 text-primary" />
-      </div>
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-sm font-medium">
-          {externalRuntimeReady ? t("externalRuntimes.bannerTitle") : t("onboardingTitle")}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {externalRuntimeReady
-            ? t("externalRuntimes.bannerDescription")
-            : t("onboardingDescription")}
-        </p>
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+    <GuideCallout
+      icon={externalRuntimeReady ? SparklesIcon : KeyRoundIcon}
+      title={externalRuntimeReady ? t("externalRuntimes.bannerTitle") : t("onboardingTitle")}
+      description={
+        externalRuntimeReady ? t("externalRuntimes.bannerDescription") : t("onboardingDescription")
+      }
+      testId="provider-onboarding-guide"
+      dismiss={{ onDismiss: () => void dismiss(), label: t("dismissOnboarding") }}
+      actions={
+        <>
           <span className="text-xs text-muted-foreground">{t("onboardingQuickSetup")}:</span>
           {QUICK_SETUP_PROVIDERS.map((id) => (
             <Badge
               key={id}
+              asChild
               variant="outline"
-              className="cursor-pointer text-xs hover:bg-primary/10 transition-colors"
-              onClick={() => {
-                const el = document.getElementById(`provider-${id}`)
-                if (el) {
-                  el.scrollIntoView({ behavior: "smooth", block: "center" })
-                  el.classList.add("ring-2", "ring-primary", "ring-offset-2")
-                  setTimeout(
-                    () => el.classList.remove("ring-2", "ring-primary", "ring-offset-2"),
-                    2000
-                  )
-                }
-                onScrollToProvider?.(id)
-              }}
+              className="cursor-pointer bg-background text-xs transition-colors hover:bg-brand-action/10"
             >
-              {t(id)}
+              <button
+                type="button"
+                onClick={() => {
+                  highlightProviderRow(id)
+                  onScrollToProvider?.(id)
+                }}
+              >
+                {t(id)}
+              </button>
             </Badge>
           ))}
           {/* Quiet catalog refresh — silent on failure, detail in the title. */}
@@ -94,7 +115,7 @@ export function ProviderOnboardingBanner({
             onClick={() => void sync()}
             disabled={isSyncing}
             title={catalogSummary}
-            className="ml-1 h-auto gap-1 p-0 text-xs font-normal text-muted-foreground hover:bg-transparent hover:text-primary disabled:opacity-60"
+            className="ml-1 h-auto gap-1 p-0 text-xs font-normal text-muted-foreground hover:bg-transparent hover:text-foreground disabled:opacity-60"
           >
             {isSyncing ? (
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -103,17 +124,8 @@ export function ProviderOnboardingBanner({
             )}
             {isSyncing ? t("modelsDev.syncing") : t("modelsDev.update")}
           </Button>
-        </div>
-      </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="absolute right-2 top-2 h-6 w-6 shrink-0"
-        onClick={() => void dismiss()}
-      >
-        <X className="h-3.5 w-3.5" />
-        <span className="sr-only">{t("dismissOnboarding")}</span>
-      </Button>
-    </div>
+        </>
+      }
+    />
   )
 }

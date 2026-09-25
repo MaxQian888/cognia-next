@@ -21,7 +21,10 @@ describe("StepStepper", () => {
 
   it("marks the current step for assistive tech", () => {
     render(<StepStepper sequence={seq} current="provider" />)
-    expect(screen.getByTestId("onboarding-rail-provider")).toHaveAttribute("aria-current", "step")
+    expect(screen.getByTestId("onboarding-rail-provider").closest("li")).toHaveAttribute(
+      "aria-current",
+      "step"
+    )
   })
 
   it("makes only completed steps clickable", () => {
@@ -55,6 +58,18 @@ describe("StepStepper", () => {
     const bare = resolveStepSequence({ shell: "tauri", mode: undefined, hasModelAccess: false })
     const { container } = render(<StepStepper sequence={bare} current="welcome" />)
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it("draws the shared guide row that the pairing flow draws too", () => {
+    render(<StepStepper sequence={seq} current="scan" />)
+    expect(screen.getByRole("navigation", { name: "rail.label" })).toHaveAttribute(
+      "data-testid",
+      "onboarding-stepper"
+    )
+    expect(screen.getByTestId("onboarding-rail-scan").closest("li")).toHaveAttribute(
+      "data-status",
+      "current"
+    )
   })
 
   it("keeps the step ids the previous rail exposed", () => {

@@ -53,7 +53,14 @@ jest.mock("@/hooks/settings/use-models-dev-catalog", () => ({
   useModelsDevCatalog: () => catalogState,
 }))
 
+// ── live access mock ──────────────────────────────────────────────────────────
+const access = { builtIn: false as boolean | null }
+jest.mock("@/hooks/onboarding/use-setup-status", () => ({
+  useBuiltInModelAccess: () => access.builtIn,
+}))
+
 beforeEach(() => {
+  access.builtIn = false
   storeState.providerOnboardingDismissed = false
   storeState.dismissProviderOnboarding = jest.fn()
   catalogState.row = undefined
@@ -94,9 +101,49 @@ describe("ProviderOnboardingBanner (dismissible hint)", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("steps aside once the built-in agent can reach a model", () => {
+    // "Get started by configuring a provider" is wrong the moment one is.
+    access.builtIn = true
+    const { container } = render(<ProviderOnboardingBanner />)
+    expect(container.firstChild).toBeNull()
+  })
+
+  it("stays up while access is still being probed, so it never flashes in late", () => {
+    access.builtIn = null
+    render(<ProviderOnboardingBanner />)
+    expect(screen.getByText("Get started")).toBeInTheDocument()
+  })
+
+  it("renders as the shared guide callout", () => {
+    render(<ProviderOnboardingBanner />)
+    expect(screen.getByRole("region", { name: "Get started" })).toHaveAttribute(
+      "data-testid",
+      "provider-onboarding-guide"
+    )
+  })
+
+  it("marks the quick-setup target with the shared guide highlight, then clears it", () => {
+    jest.useFakeTimers()
+    try {
+      const row = document.createElement("div")
+      row.id = "provider-google"
+      row.scrollIntoView = jest.fn()
+      document.body.appendChild(row)
+      render(<ProviderOnboardingBanner />)
+      fireEvent.click(screen.getByRole("button", { name: "Google" }))
+      expect(row.scrollIntoView).toHaveBeenCalled()
+      expect(row).toHaveAttribute("data-guide-highlight", "true")
+      jest.advanceTimersByTime(2000)
+      expect(row).not.toHaveAttribute("data-guide-highlight")
+      row.remove()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("persists dismissal when the close button is clicked", () => {
     render(<ProviderOnboardingBanner />)
-    fireEvent.click(screen.getByText("Dismiss"))
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
     expect(storeState.dismissProviderOnboarding).toHaveBeenCalledTimes(1)
   })
 

@@ -35,3 +35,36 @@ export function isOnboardingRoute(pathname: string | null | undefined): boolean 
     pathname.startsWith(`${ONBOARDING_ROUTE}/`)
   )
 }
+
+/**
+ * What a re-entry into the flow is *for* (ADR-0193).
+ *
+ *  - `model` — the device still cannot reach a model; land on the sign-in.
+ *  - `task`  — setup is otherwise done; land on the first-task cards.
+ *
+ * Without it, every way back into the flow — the finish-setup bar, the
+ * setup-status block in Settings — resumed wherever the user last stood, which
+ * for the recommended path meant re-reading (and re-running) the whole plan to
+ * get to the one thing that was actually missing.
+ */
+export type OnboardingFocus = "model" | "task"
+
+const FOCUS_PARAM = "focus"
+const FOCUS_VALUES: readonly OnboardingFocus[] = ["model", "task"]
+
+/** The flow's route, optionally aimed at one thing to finish. */
+export function onboardingHref(focus?: OnboardingFocus): string {
+  return focus ? `${ONBOARDING_ROUTE}?${FOCUS_PARAM}=${focus}` : ONBOARDING_ROUTE
+}
+
+/**
+ * Read the focus from a query string (`useSearchParams().toString()`, with or
+ * without its leading `?`).
+ *
+ * Anything other than the two known values is ignored rather than trusted.
+ */
+export function readOnboardingFocus(search: string | null | undefined): OnboardingFocus | null {
+  if (!search) return null
+  const value = new URLSearchParams(search).get(FOCUS_PARAM)
+  return FOCUS_VALUES.find((focus) => focus === value) ?? null
+}

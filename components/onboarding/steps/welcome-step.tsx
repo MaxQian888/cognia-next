@@ -7,6 +7,7 @@ import type { OnboardingShell } from "@cognia/agent-config-types"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { GuideHeading } from "@/components/guide/guide-heading"
 import { Spinner } from "@/components/ui/spinner"
 import type { MobileRuntimeMode } from "@/lib/runtime/standalone-mode"
 
@@ -77,14 +78,7 @@ export function WelcomeStep({
 
   return (
     <div className="flex flex-col gap-8" data-testid="onboarding-welcome">
-      <div className="flex flex-col gap-4">
-        <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
-          {t("welcome.headline")}
-        </h1>
-        <p className="max-w-[38ch] text-base leading-relaxed text-foreground">
-          {t("welcome.lede")}
-        </p>
-      </div>
+      <GuideHeading size="hero" title={t("welcome.headline")} description={t("welcome.lede")} />
 
       {showModeFork && (
         <div className="flex flex-col gap-3">

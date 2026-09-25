@@ -6,6 +6,7 @@ import {
   progressPosition,
   resolveStepSequence,
   resumeStep,
+  stepForFocus,
 } from "./steps"
 
 const ids = (shell: OnboardingShell, hasModelAccess = false, mode: OnboardingMode = "custom") =>
@@ -164,5 +165,38 @@ describe("progressPosition", () => {
   it("shrinks the total when a step is filtered out", () => {
     const seq = custom("web", true)
     expect(progressPosition(seq, "first-run")).toEqual({ index: 0, total: 1 })
+  })
+})
+
+describe("stepForFocus", () => {
+  const seq = (mode: OnboardingMode, hasModelAccess = false, shell: OnboardingShell = "tauri") =>
+    resolveStepSequence({ shell, mode, hasModelAccess })
+
+  it("resumes as usual when the re-entry names no focus", () => {
+    expect(stepForFocus(seq("custom"), null)).toBeNull()
+  })
+
+  it("aims a model focus at the sign-in step on the step-by-step path", () => {
+    expect(stepForFocus(seq("custom"), "model")).toBe("provider")
+  })
+
+  it("aims a task focus at the first-task cards on the step-by-step path", () => {
+    expect(stepForFocus(seq("custom"), "task")).toBe("first-run")
+  })
+
+  it("lands both focuses on the recommended screen, which carries sign-in and cards itself", () => {
+    expect(stepForFocus(seq("express"), "model")).toBe("express")
+    expect(stepForFocus(seq("express"), "task")).toBe("express")
+  })
+
+  it("never conjures a step the sequence dropped", () => {
+    // With model access the provider step is filtered out; the focus falls
+    // through to whatever this sequence can offer rather than a phantom step.
+    expect(stepForFocus(seq("custom", true), "model")).toBeNull()
+  })
+
+  it("returns nothing before the path fork is answered", () => {
+    const bare = resolveStepSequence({ shell: "tauri", mode: undefined, hasModelAccess: false })
+    expect(stepForFocus(bare, "task")).toBeNull()
   })
 })

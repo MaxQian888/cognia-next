@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * The window `/pair` renders into.
+ * The window `/pair` renders into — the shared guide shell (ADR-0193).
  *
  * # Why this exists
  *
@@ -9,55 +9,45 @@
  * paints behind it. The page used to be a bare `<main>` with no background of
  * its own, which meant `body[data-bg-enabled="true"]::before` — the fixed,
  * full-window wallpaper layer in `globals.css` — showed straight through under
- * the body text. Every string on the screen sat on whatever photo the user had
- * picked, at whatever contrast that happened to give. An opaque
- * `bg-background` here is the whole fix, and it is the reason this is a shell
- * rather than a set of classes on the page: the surface has to be the thing
- * that owns the viewport, or the next route-level change loses it again.
+ * the body text. `GuideShell` owns the viewport with an opaque background, so
+ * the next route-level change cannot lose it again.
  *
- * # Geometry
+ * # One design with `/onboarding`
  *
- * Deliberately the same as `components/onboarding/step-shell.tsx`, because
  * `/pair` and `/onboarding` are the same kind of screen — a full-window
- * first-contact flow — and looked like two different products.
+ * first-contact flow — and this file used to be a hand-made copy of the
+ * onboarding shell that had drifted from it: its own padding, a narrower body,
+ * no entrance, a brand mark inside the panel instead of the window bar, and
+ * the page title in the panel where onboarding narrates. Both now render the
+ * same `components/guide/` parts: the same window bar, the same narrative
+ * panel (a headline that narrates the scene, one line under it, the stepper),
+ * and a step body that opens with the step's own `GuideHeading`.
  *
- * ```
- * md and up                              below md
- * ┌──────────────┬────────────────┐      ┌──────────────────────┐
- * │  mesh        │                │      │ mesh · scene · line  │
- * │  ┌────────┐  │  step body     │      ├──────────────────────┤
- * │  │ scene  │  │  (scrolls)     │      │  step body           │
- * │  └────────┘  │                │      │                      │
- * │  title/line  │                │      └──────────────────────┘
- * │  status      │                │        one document scroll
- * │  stepper     │                │
- * │  aside       │                │
- * └──────────────┴────────────────┘
- *   26rem / 30rem   independent scrolls
- * ```
+ * # It scrolls as a page below `md`
  *
- * The two width regimes scroll differently on purpose. At `md` and up each
- * column owns its own overflow, so a long panel (the web flow's command block)
- * never pushes the field off screen. Below `md` there is one scroll for the
- * whole stack — a narrow browser window genuinely cannot show a picture, a
- * command and a form at once, and two nested scroll regions in that space is
- * worse than one honest page scroll.
+ * The one thing that differs, on purpose, is `overflow="scroll"`. On the web
+ * the panel carries real material (how to mint an invitation), so below `md`
+ * the panel and the body share one page scroll instead of the onboarding
+ * band's capped height — a narrow browser window genuinely cannot show a
+ * picture, a command and a form at once, and two nested scroll regions in that
+ * space is worse than one honest page scroll. At `md` and up each column owns
+ * its own overflow, as on `/onboarding`.
  *
  * # It must own a definite height
  *
- * `h-[100dvh]` here is only correct because `MobileShellWrapper` gives `/pair`
- * the same `flex h-[100dvh] flex-col overflow-hidden` treatment it gives
- * `/onboarding` — otherwise the offline banner takes a row *above* a
- * full-viewport child and the page grows a scrollbar nobody asked for. The
- * `flex-1 min-h-0` beside it is what makes that work: flex-basis governs a
- * column child's main size, so one class list serves the wrapper's column and
- * the bare desktop/web mount where this element is the viewport.
+ * `h-[100dvh]` is only correct because `MobileShellWrapper` gives `/pair` the
+ * same `flex h-[100dvh] flex-col overflow-hidden` treatment it gives
+ * `/onboarding`; `GuideShell`'s `flex-1 min-h-0` is what makes one class list
+ * serve that column and the bare desktop/web mount alike.
  */
 
 import type { ReactNode } from "react"
 import { useTranslations } from "next-intl"
 
-import { cn } from "@/lib/utils"
+import { GuideHeading } from "@/components/guide/guide-heading"
+import { GuideNarrativePanel } from "@/components/guide/guide-narrative-panel"
+import { GuideShell } from "@/components/guide/guide-shell"
+import { GuideWindowBar } from "@/components/guide/guide-window-bar"
 
 import { PairScene, type PairSceneState } from "./pair-scene"
 import { PairStepper, type PairStep } from "./pair-stepper"
@@ -70,6 +60,8 @@ export interface PairShellProps {
   step: PairStep
   /** Steps to show in the row. The web flow has no Discover step. */
   steps?: readonly PairStep[]
+  /** The step's page heading, rendered at the top of the body. */
+  heading?: { title: string; description?: string }
   /**
    * Panel material that is invariant across steps — on web, how to mint an
    * invitation. Rendered under the stepper, inside the panel's own scroll.
@@ -89,6 +81,7 @@ export function PairShell({
   sceneState,
   step,
   steps,
+  heading,
   aside,
   status,
   notice,
@@ -98,95 +91,34 @@ export function PairShell({
   const t = useTranslations("mobile.pair")
 
   return (
-    <div
-      className="flex h-[100dvh] min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground safe-area-pt"
-      data-testid="pair-shell"
-      data-client={client}
-      data-scene-state={sceneState}
+    <GuideShell
+      testIdPrefix="pair"
+      overflow="scroll"
+      bodyKey={bodyKey}
+      dataAttributes={{ "data-client": client, "data-scene-state": sceneState }}
+      windowBar={<GuideWindowBar wordmark={t("brandMark")} testIdPrefix="pair" />}
+      panel={
+        <GuideNarrativePanel
+          testIdPrefix="pair"
+          overflow="scroll"
+          sceneKey={sceneState}
+          scene={<PairScene state={sceneState} client={client} />}
+          headline={client === "web" ? t("web.title") : t("title")}
+          body={t(`narration.${sceneState}`)}
+          copyKey={sceneState}
+          status={status}
+          stepper={<PairStepper current={step} steps={steps} />}
+          aside={aside}
+        />
+      }
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
-        <aside
-          data-testid="pair-narrative-panel"
-          className={cn(
-            "relative flex shrink-0 flex-col border-border/60",
-            "w-full border-b",
-            "md:h-auto md:w-[26rem] md:overflow-y-auto md:border-r md:border-b-0 lg:w-[30rem]"
-          )}
-        >
-          {/* Substrate. Two soft brand stops over the app's own background, so
-              the panel reads as a different surface without becoming a
-              different product. Same recipe and same tokens as the onboarding
-              panel — `--brand-action` is 1.69:1 on a light ground, so it is a
-              mesh at 12–18% alpha and never sits behind text. */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 bg-background"
-            style={{
-              backgroundImage:
-                "radial-gradient(90% 70% at 18% 12%, var(--brand-mesh-from), transparent 70%), radial-gradient(80% 60% at 88% 96%, var(--brand-mesh-to), transparent 72%)",
-            }}
-          />
-
-          <div className="relative flex min-h-0 flex-1 flex-col gap-4 px-6 py-5 md:gap-6 md:px-9 md:py-10">
-            <div className="flex items-center gap-2">
-              <span aria-hidden="true" className="size-2 rounded-full bg-brand-action" />
-              <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                {t("brandMark")}
-              </span>
-            </div>
-
-            <div
-              key={sceneState}
-              data-testid="pair-scene-slot"
-              className="flex w-full justify-center animate-in fade-in zoom-in-95 duration-300"
-            >
-              {/* Much smaller on a narrow viewport: below `md` the panel is a
-                  band above the step body, and a scene sized for the wide
-                  column would take half a phone screen to say something the
-                  line underneath it already says. */}
-              <PairScene
-                state={sceneState}
-                client={client}
-                className="max-w-[8.5rem] md:max-w-[17rem]"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <h1 className="text-balance text-xl font-semibold tracking-tight md:text-2xl">
-                {client === "web" ? t("web.title") : t("title")}
-              </h1>
-              <p
-                className="text-sm leading-relaxed text-muted-foreground"
-                data-testid="pair-narration"
-              >
-                {t(`narration.${sceneState}`)}
-              </p>
-            </div>
-
-            {status}
-
-            <PairStepper current={step} steps={steps} />
-
-            {aside ? <div className="flex flex-col gap-3">{aside}</div> : null}
-          </div>
-        </aside>
-
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 flex-col md:overflow-y-auto">
-            {/* Keyed on the step so only the body replays its entrance; the
-                panel, the scene and the action row stay put. The global
-                reduce-motion guards in globals.css collapse this to ~1ms. */}
-            <div
-              key={bodyKey}
-              data-testid="pair-step-body"
-              className="mx-auto flex w-full max-w-[34rem] flex-1 flex-col justify-center gap-4 px-6 py-8 sm:px-9 lg:py-10 animate-in fade-in slide-in-from-bottom-2 duration-200"
-            >
-              {notice}
-              {children}
-            </div>
-          </div>
-        </div>
+      <div className="flex flex-col gap-4">
+        {heading && (
+          <GuideHeading title={heading.title} description={heading.description} className="mb-2" />
+        )}
+        {notice}
+        {children}
       </div>
-    </div>
+    </GuideShell>
   )
 }

@@ -171,19 +171,21 @@ export function DiscoverStep({
       aria-label={t("title")}
       data-testid="pair-discover-step"
     >
-      <header className="flex flex-col items-center gap-2 text-center">
+      {/* The step's title and subtitle are its page heading, drawn by the
+          shell (ADR-0193); what stays here is the live part — the radar and
+          what it has found so far. */}
+      <div className="flex flex-col items-center gap-2 text-center">
         <ScanRadar active={scanning} />
-        <h2 className="text-base font-semibold">{t("title")}</h2>
-        <p className="max-w-sm text-balance text-sm text-muted-foreground">
-          {scanning ? t("scanning") : t("subtitle")}
-        </p>
+        {scanning ? (
+          <p className="max-w-sm text-balance text-sm text-muted-foreground">{t("scanning")}</p>
+        ) : null}
         <span
           aria-live="polite"
           className="text-[11px] uppercase tracking-wide text-muted-foreground"
         >
           {t("foundCount", { count: foundCount })}
         </span>
-      </header>
+      </div>
 
       {permissionDenied ? (
         <Alert variant="destructive" data-testid="pair-discover-permission">

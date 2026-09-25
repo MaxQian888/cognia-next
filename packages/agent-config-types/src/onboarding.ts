@@ -49,12 +49,16 @@ export type OnboardingMode = "express" | "custom"
 export const ONBOARDING_MODES = ["express", "custom"] as const satisfies readonly OnboardingMode[]
 
 /**
- * How the user left the flow. Recorded so the post-onboarding "finish setup"
- * bar can say something specific, and so re-entry knows what is still missing.
+ * How the user left the flow. Recorded so the setup surfaces know the flow was
+ * left unfinished; *what* is still missing is re-derived from live state
+ * (`lib/onboarding/setup-status.ts`, ADR-0193), because anything recorded here
+ * goes stale the moment the user fixes it elsewhere.
  *
  *  - `completed`        — reached a first real output.
  *  - `provider_skipped` — left without any usable model access.
- *  - `runtime_skipped`  — skipped the scan step; no local runtime selected.
+ *  - `runtime_skipped`  — left before the first task with model access in
+ *                         place (the name predates the recommended path; it is
+ *                         also the placeholder of a record still in progress).
  *  - `task_failed`      — picked a starter card but the run errored out.
  *  - `legacy_dismissed` — migrated from the old `onboardingDismissedAt`
  *                         timestamp, whose true intent is unrecoverable. Never
