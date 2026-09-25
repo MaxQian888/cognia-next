@@ -31,9 +31,15 @@ jest.mock("./pair-step", () => ({
   PairStep: (props: {
     prefilledPairPayload: string
     persistPairing: (config: unknown) => Promise<void>
+    extraFields?: React.ReactNode
   }) => {
     persist = props.persistPairing
-    return <div data-testid="pair-step" data-payload={props.prefilledPairPayload} />
+    return (
+      <form data-testid="pair-step" data-payload={props.prefilledPairPayload}>
+        {props.extraFields}
+        <button type="submit">pair-submit</button>
+      </form>
+    )
   },
 }))
 
@@ -66,6 +72,25 @@ describe("AddHostForm", () => {
       await persist?.({ baseUrl: "https://h:27890" })
     })
     expect(activateHost).not.toHaveBeenCalled()
+  })
+
+  it("puts the label and connect-after above the submit they apply to", () => {
+    render(<AddHostForm />)
+    const form = screen.getByTestId("pair-step")
+    const submit = screen.getByRole("button", { name: "pair-submit" })
+    for (const field of [screen.getByLabelText("add.labelLabel"), screen.getByRole("switch")]) {
+      expect(form).toContainElement(field)
+      expect(field.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+  })
+
+  it("offers discovery before the invitation it fills", () => {
+    render(<AddHostForm discoveryLane="loopback" />)
+    const discovery = screen.getByText("use-address")
+    expect(
+      discovery.compareDocumentPosition(screen.getByTestId("pair-step")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 
   it("feeds a discovered address into the shared pair step", () => {

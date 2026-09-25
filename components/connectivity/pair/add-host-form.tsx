@@ -85,41 +85,48 @@ export function AddHostForm({
         </p>
       ) : null}
 
-      <PairStep
-        key={payload}
-        prefilledPairPayload={payload}
-        webMode
-        persistPairing={persistPairing}
-        onPaired={() => undefined}
-        {...pairStepProps}
-      />
-
+      {/* Discovery fills the invitation, so it sits above it. The label and
+          "connect after" ride inside the pair form: below the submit button
+          they read as a second step after "Complete pairing" had already
+          run with whatever they held. */}
       {lane === "mdns" ? (
         <LanDiscoveryPanel payload={payload} onUseAddress={setPayload} />
       ) : (
         <LoopbackDiscoveryPanel onUseAddress={setPayload} />
       )}
 
-      <div className="space-y-1.5">
-        <Label htmlFor="remote-host-label">{t("add.labelLabel")}</Label>
-        <Input
-          id="remote-host-label"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          placeholder={t("add.labelPlaceholder")}
-        />
-      </div>
+      <PairStep
+        key={payload}
+        prefilledPairPayload={payload}
+        webMode
+        persistPairing={persistPairing}
+        onPaired={() => undefined}
+        extraFields={
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor="remote-host-label">{t("add.labelLabel")}</Label>
+              <Input
+                id="remote-host-label"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder={t("add.labelPlaceholder")}
+              />
+            </div>
 
-      <div className="flex items-center justify-between rounded-md border border-border/60 p-3">
-        <Label htmlFor="remote-host-connect-after" className="cursor-pointer">
-          {t("add.connectAfter")}
-        </Label>
-        <Switch
-          id="remote-host-connect-after"
-          checked={connectAfter}
-          onCheckedChange={setConnectAfter}
-        />
-      </div>
+            <div className="flex items-center justify-between rounded-md border border-border/60 p-3">
+              <Label htmlFor="remote-host-connect-after" className="cursor-pointer">
+                {t("add.connectAfter")}
+              </Label>
+              <Switch
+                id="remote-host-connect-after"
+                checked={connectAfter}
+                onCheckedChange={setConnectAfter}
+              />
+            </div>
+          </>
+        }
+        {...pairStepProps}
+      />
 
       {success ? (
         <p role="status" className="text-sm text-success" data-testid="add-host-success">

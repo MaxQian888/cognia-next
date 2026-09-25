@@ -242,6 +242,21 @@ it("exposes a stable back affordance on native pair flows", () => {
   expect(screen.getByTestId("pair-back-to-discover")).toBeInTheDocument()
 })
 
+it("renders caller fields inside the form, above the submit button", () => {
+  render(
+    <PairStep
+      isCredentialStoreReady={readyStore}
+      webMode
+      onPaired={jest.fn()}
+      extraFields={<input aria-label="host label" />}
+    />
+  )
+  const field = screen.getByLabelText("host label")
+  const submit = screen.getByTestId("pair-submit")
+  expect(field.closest("form")).toBe(submit.closest("form"))
+  expect(field.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})
+
 it("does not expose the camera action in web mode", () => {
   render(<PairStep isCredentialStoreReady={readyStore} webMode onPaired={jest.fn()} />)
   expect(screen.queryByTestId("pair-scan-qr")).not.toBeInTheDocument()

@@ -40,7 +40,7 @@
  * and the blob was never a candidate for the job.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { ArrowLeftIcon, ClipboardPasteIcon, Loader2Icon, ScanLineIcon, XIcon } from "lucide-react"
 
@@ -114,6 +114,13 @@ export interface PairStepProps {
   onBack?: () => void
   /** Lets the shell's scene follow what the form is doing. */
   onActivityChange?: (activity: PairActivity) => void
+  /**
+   * Caller fields rendered inside the form, between the invitation and the
+   * submit button, so options the pairing applies (a registry label, "connect
+   * after") come before the action that applies them, and Enter in them
+   * submits the pairing.
+   */
+  extraFields?: ReactNode
 }
 
 type ErrorAction = { label: string; onAction: () => void | Promise<void> }
@@ -183,6 +190,7 @@ export function PairStep({
   onPaired,
   onBack,
   onActivityChange,
+  extraFields,
 }: PairStepProps) {
   const t = useTranslations("mobile.pair")
   // The unlock button is the account subsystem's own affordance; borrowing its
@@ -573,6 +581,8 @@ export function PairStep({
             </p>
           </div>
         )}
+
+        {extraFields}
 
         <Button
           type="submit"
