@@ -49,6 +49,10 @@ pub(crate) use macos_panel::{
     try_begin_panel_build as try_begin_overlay_panel_build,
     PetPanelRole as OverlayPanelRole,
 };
+// Tests outside this module that drive the per-role panel statics (the fleet
+// island's) must serialize on the same lock as `macos_panel`'s own tests.
+#[cfg(test)]
+pub(crate) use macos_panel::lock_panel_state_for_test as lock_overlay_panel_state_for_test;
 
 /// Default overlay size used when the tray opens the pet with no renderer
 /// supplied options (the renderer always sends its persisted size).

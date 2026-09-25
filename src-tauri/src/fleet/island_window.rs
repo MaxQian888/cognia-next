@@ -1520,8 +1520,12 @@ mod tests {
         assert!(opted_in.hide_on_fullscreen);
     }
 
+    // The Island panel statics are process-wide and shared with
+    // `pet_window::macos_panel`'s tests, so each of these three holds the same
+    // serialization lock for its whole body.
     #[test]
     fn opening_the_island_arms_its_native_panel_reveal() {
+        let _serial = crate::pet_window::lock_overlay_panel_state_for_test();
         let generation = begin_island_panel_open();
         let role = crate::pet_window::OverlayPanelRole::Island;
 
@@ -1534,6 +1538,7 @@ mod tests {
 
     #[test]
     fn island_panel_builds_are_serialized() {
+        let _serial = crate::pet_window::lock_overlay_panel_state_for_test();
         let role = crate::pet_window::OverlayPanelRole::Island;
         let first = crate::pet_window::try_begin_overlay_panel_build(role)
             .expect("first island build should claim the lifecycle");
@@ -1546,6 +1551,7 @@ mod tests {
 
     #[test]
     fn closing_cancels_an_island_open_waiting_for_the_build_guard() {
+        let _serial = crate::pet_window::lock_overlay_panel_state_for_test();
         let role = crate::pet_window::OverlayPanelRole::Island;
         let first = crate::pet_window::try_begin_overlay_panel_build(role)
             .expect("first island build should claim the lifecycle");

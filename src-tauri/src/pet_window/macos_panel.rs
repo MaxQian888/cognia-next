@@ -132,6 +132,25 @@ static USAGE_DOCK_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifec
     in_flight_builds: 0,
 });
 
+/// Test-only serialization for the per-role statics above. They are
+/// process-wide and `cargo test` runs cases on parallel threads, so every test
+/// that opens, cancels, builds or destroys a panel lifecycle — in this module
+/// or any other (`fleet::island_window`) — must hold this for its whole body.
+/// Otherwise one test's `cancel_panel_reveal` lands between another test's
+/// `begin_panel_open` and its assertion on the same role.
+#[cfg(test)]
+static PANEL_STATE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// Take [`PANEL_STATE_TEST_LOCK`]. A test that panics while holding it only
+/// fails itself: the poison is cleared so the remaining tests still run
+/// serialized instead of cascading into lock errors.
+#[cfg(test)]
+pub(crate) fn lock_panel_state_for_test() -> std::sync::MutexGuard<'static, ()> {
+    PANEL_STATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
     match role {
         PetPanelRole::Sprite => &SPRITE_PANEL_GENERATION,
@@ -683,11 +702,13 @@ mod tests {
     /// make each tray dismissal cancel an in-flight reveal of the other role
     /// (and vice versa).
     ///
-    /// Paired with `Island` rather than `Popup`: these statics are process-wide
-    /// and `cargo test` runs cases in parallel threads, so the counterpart has
-    /// to be a role no other test mutates.
+    /// These statics are process-wide and `cargo test` runs cases in parallel
+    /// threads, so this (like every test that mutates them) holds
+    /// `lock_panel_state_for_test` — `fleet::island_window` tests drive the
+    /// `Island` role concurrently.
     #[test]
     fn tray_panel_has_its_own_reveal_generation() {
+        let _serial = lock_panel_state_for_test();
         let tray = begin_panel_open(PetPanelRole::TrayPanel);
         let island = begin_panel_open(PetPanelRole::Island);
 
@@ -727,6 +748,7 @@ mod tests {
     /// leaving a recording running with no visible stop.
     #[test]
     fn recorder_controller_has_its_own_reveal_generation() {
+        let _serial = lock_panel_state_for_test();
         let controller = begin_panel_open(PetPanelRole::RecorderController);
         let toolbar = begin_panel_open(PetPanelRole::SelectionToolbar);
 
@@ -751,6 +773,7 @@ mod tests {
     /// stop appearing whenever the pet was in use.
     #[test]
     fn selection_toolbar_has_its_own_reveal_generation() {
+        let _serial = lock_panel_state_for_test();
         let toolbar = begin_panel_open(PetPanelRole::SelectionToolbar);
         let popup = begin_panel_open(PetPanelRole::Popup);
 
@@ -767,6 +790,7 @@ mod tests {
 
     #[test]
     fn closing_a_panel_invalidates_queued_reveal_work() {
+        let _serial = lock_panel_state_for_test();
         let generation = begin_panel_open(PetPanelRole::Sprite);
         assert!(panel_generation_is_current(
             PetPanelRole::Sprite,
@@ -782,6 +806,7 @@ mod tests {
 
     #[test]
     fn destroying_a_panel_blocks_new_reveal_work_until_removal_finishes() {
+        let _serial = lock_panel_state_for_test();
         let build = try_begin_panel_build(PetPanelRole::Popup).unwrap();
         assert!(try_begin_panel_build(PetPanelRole::Popup).is_none());
         let generation = begin_panel_open(PetPanelRole::Popup);
