@@ -32,6 +32,7 @@ import {
 } from "lucide-react"
 import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -108,6 +109,7 @@ import { resolveSessionWorkspace } from "@/lib/workspace/session-workspace"
 import { SessionWorkspaceMove } from "./session-workspace-move"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import { useSettingsStore } from "@/stores/settings"
+import { providerSettingsHref } from "@/lib/settings/deep-link"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { SessionExecutionWorkspace } from "./session-execution-workspace"
@@ -229,6 +231,12 @@ export interface SessionSettingsSheetProps {
    * (`showHeader={false}`) and relocates the cluster here instead.
    */
   showAmbientStatus?: boolean
+  /**
+   * Section to expand and scroll to when the sheet opens — the mobile
+   * missing-key warning opens it on "Model & account", four sections down on
+   * a phone, instead of on Mode.
+   */
+  focusSection?: SessionSettingsSectionId
 }
 
 /**
@@ -242,6 +250,7 @@ export function SessionSettingsSheet({
   open,
   onOpenChange,
   showAmbientStatus = false,
+  focusSection,
 }: SessionSettingsSheetProps) {
   const t = useTranslations("chat.header")
   const tPower = useTranslations("sessionPower")
@@ -279,7 +288,7 @@ export function SessionSettingsSheet({
     () => new Set(session.disabledSkillIds ?? []),
     [session.disabledSkillIds]
   )
-  const { plan } = useCredentialStatus()
+  const { plan, keyOk } = useCredentialStatus()
   const planLabel = plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : null
 
   // What the session actually falls back to when no per-session dir is set:
@@ -364,7 +373,19 @@ export function SessionSettingsSheet({
     setEnvSecretValues({})
     setExecutionEffortDirty(false)
     setMessageDisplayPreference(session.messageDisplayOverride)
-    setSectionOpen(defaultSectionState(session))
+    setSectionOpen(
+      focusSection
+        ? { ...defaultSectionState(session), [focusSection]: true }
+        : defaultSectionState(session)
+    )
+    if (focusSection) {
+      // After the sheet's content mounts and the section expands.
+      requestAnimationFrame(() => {
+        document
+          .querySelector(`[data-testid="session-settings-section-${focusSection}"]`)
+          ?.scrollIntoView?.({ block: "start" })
+      })
+    }
     let resolvedId: string | null = null
     if (session.activePresetId) {
       const byId = presets.find((p) => p.id === session.activePresetId)
@@ -375,7 +396,7 @@ export function SessionSettingsSheet({
       resolvedId = matched?.id ?? null
     }
     setPresetId(resolvedId ?? "")
-  }, [open, session, presets])
+  }, [open, session, presets, focusSection])
 
   // The session's working directory is typed or picked, never browsed against
   // a paired host: this override sits at the top of the cwd chain and a path
@@ -807,6 +828,29 @@ export function SessionSettingsSheet({
               open={sectionOpen.account}
               onOpenChange={setSection("account")}
             >
+              {/* The missing-key warning sends people here, and the switcher
+                  below renders nothing when there is no account to switch
+                  between — which is exactly that case. So the section was an
+                  empty header at the end of the one path meant to fix it. */}
+              {keyOk === false ? (
+                <div
+                  className="flex flex-col gap-2 rounded-md border border-dashed p-3 text-sm"
+                  data-testid="session-settings-add-key"
+                >
+                  <p className="text-muted-foreground">{t("sheet.missingKey")}</p>
+                  <Button asChild size="sm" variant="outline" className="self-start">
+                    <Link
+                      href={providerSettingsHref({
+                        provider: session.providerOverride ?? character?.providerId ?? undefined,
+                      })}
+                      onClick={() => onOpenChange(false)}
+                    >
+                      <KeyRoundIcon className="size-4" aria-hidden />
+                      {t("sheet.addKey")}
+                    </Link>
+                  </Button>
+                </div>
+              ) : null}
               <HeaderAccountSwitcher
                 session={session}
                 characterProviderId={character?.providerId}

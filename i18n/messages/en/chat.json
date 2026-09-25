@@ -1409,8 +1409,10 @@
     "save": "Save",
     "sessionCommunication": "Session communication",
     "sheet": {
+      "addKey": "Add an API key",
       "collapseAll": "Collapse all",
       "expandAll": "Expand all",
+      "missingKey": "No API key is set up for this chat’s provider yet. Add one to start chatting.",
       "sections": {
         "account": "Model & account",
         "actions": "Session actions",

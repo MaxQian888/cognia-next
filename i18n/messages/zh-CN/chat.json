@@ -1409,8 +1409,10 @@
     "save": "保存",
     "sessionCommunication": "会话通信",
     "sheet": {
+      "addKey": "添加 API 密钥",
       "collapseAll": "全部收起",
       "expandAll": "全部展开",
+      "missingKey": "这个对话的服务商还没有配置 API 密钥，添加后即可开始对话。",
       "sections": {
         "account": "模型与账号",
         "actions": "会话操作",

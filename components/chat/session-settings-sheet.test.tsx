@@ -120,7 +120,7 @@ jest.mock("@/components/settings/appearance/components/message-display-controls"
   ),
 }))
 
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { isTauri } from "@/lib/tauri"
@@ -517,6 +517,54 @@ describe("SessionSettingsSheet", () => {
       </DataAdapterProvider>
     )
     await waitFor(() => expect(document.getElementById("session-preset")).not.toBeNull())
+  })
+
+  it("offers a way to add a key when the provider has none", () => {
+    mockCredentialStatus.mockReturnValue({ keyOk: false, plan: null })
+    const onOpenChange = jest.fn()
+    render(
+      <DataAdapterProvider adapter={makeAdapter()}>
+        <SessionSettingsSheet session={mkSession()} open onOpenChange={onOpenChange} />
+      </DataAdapterProvider>
+    )
+    const cta = within(screen.getByTestId("session-settings-add-key")).getByRole("link")
+    expect(cta.getAttribute("href")).toContain("section=ai-connections")
+    fireEvent.click(cta)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("shows no add-key prompt once a credential exists", () => {
+    mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })
+    render(
+      <DataAdapterProvider adapter={makeAdapter()}>
+        <SessionSettingsSheet session={mkSession()} open onOpenChange={jest.fn()} />
+      </DataAdapterProvider>
+    )
+    expect(screen.queryByTestId("session-settings-add-key")).not.toBeInTheDocument()
+  })
+
+  it("scrolls to the focused section when it opens", async () => {
+    const scrollIntoView = jest.fn()
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = scrollIntoView
+    try {
+      render(
+        <DataAdapterProvider adapter={makeAdapter()}>
+          <SessionSettingsSheet
+            session={mkSession()}
+            open
+            onOpenChange={jest.fn()}
+            focusSection="account"
+          />
+        </DataAdapterProvider>
+      )
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
+      expect(scrollIntoView.mock.contexts[0]).toBe(
+        screen.getByTestId("session-settings-section-account")
+      )
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
   })
 
   it("renders the subscription tier badge when on a subscription plan", () => {

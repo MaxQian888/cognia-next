@@ -205,6 +205,9 @@ export function AppShellMobile() {
   const [navOpen, setNavOpen] = useState(false)
   const [memberSheetOpen, setMemberSheetOpen] = useState(false)
   const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false)
+  // Which section the sheet should land on: the missing-key warning opens it
+  // on "Model & account", the ⋮ menu on the top as usual.
+  const [sessionSettingsFocus, setSessionSettingsFocus] = useState<"account" | undefined>()
   const [searchOpen, setSearchOpen] = useState(false)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
   const [homeLayoutOpen, setHomeLayoutOpen] = useState(false)
@@ -665,7 +668,10 @@ export function AppShellMobile() {
         {keyOk === false && activeSession ? (
           <MobileCredentialWarning
             showLabel={keyLabelInBar}
-            onResolve={() => setSessionSettingsOpen(true)}
+            onResolve={() => {
+              setSessionSettingsFocus("account")
+              setSessionSettingsOpen(true)
+            }}
             className="ml-1"
           />
         ) : null}
@@ -820,7 +826,10 @@ export function AppShellMobile() {
                 <DropdownMenuItem
                   onSelect={() => {
                     // Defer so the menu can close before the sheet grabs focus.
-                    setTimeout(() => setSessionSettingsOpen(true), 0)
+                    setTimeout(() => {
+                      setSessionSettingsFocus(undefined)
+                      setSessionSettingsOpen(true)
+                    }, 0)
                   }}
                   data-testid="mobile-action-session-settings"
                 >
@@ -892,6 +901,7 @@ export function AppShellMobile() {
           session={activeSession}
           open={sessionSettingsOpen}
           onOpenChange={setSessionSettingsOpen}
+          focusSection={sessionSettingsFocus}
           showAmbientStatus
         />
       ) : null}

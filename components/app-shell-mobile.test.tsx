@@ -387,13 +387,19 @@ jest.mock("@/components/chat/session-settings-sheet", () => ({
     open,
     session,
     showAmbientStatus,
+    focusSection,
   }: {
     open?: boolean
     session?: { id: string }
     showAmbientStatus?: boolean
+    focusSection?: string
   }) =>
     open ? (
-      <div data-testid="session-settings-sheet" data-ambient={showAmbientStatus ? "1" : "0"}>
+      <div
+        data-testid="session-settings-sheet"
+        data-ambient={showAmbientStatus ? "1" : "0"}
+        data-focus={focusSection ?? ""}
+      >
         {session?.id}
       </div>
     ) : null,
@@ -1212,6 +1218,8 @@ describe("<AppShellMobile />", () => {
 
     await user.click(warning)
     await waitFor(() => expect(screen.getByTestId("session-settings-sheet")).toBeInTheDocument())
+    // Lands on the section that resolves it, not on Mode at the top.
+    expect(screen.getByTestId("session-settings-sheet")).toHaveAttribute("data-focus", "account")
   })
 
   it("hides the No-API-key warning when credentials are present", () => {
