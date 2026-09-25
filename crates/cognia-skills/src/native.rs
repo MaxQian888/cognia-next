@@ -225,7 +225,7 @@ fn base64_encode(bytes: &[u8]) -> String {
 /// Walk a directory of skill subdirectories — typically `~/.claude/skills/`
 /// or a user-supplied folder via the discovery flow. Returns the parsed
 /// skills with their resources.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn skills_scan_dir(path: String) -> Result<Vec<NativeSkill>, String> {
     let root = PathBuf::from(&path);
     if !root.is_dir() {
@@ -250,7 +250,7 @@ pub fn skills_scan_dir(path: String) -> Result<Vec<NativeSkill>, String> {
 /// Resolve `~/.agents/skills/` (the Codex CLI default) and scan it. Empty
 /// Vec when the directory doesn't exist — Codex CLI may simply not be
 /// installed.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn skills_scan_codex() -> Result<Vec<NativeSkill>, String> {
     let Some(home) = dirs::home_dir() else {
         return Err("could not resolve home directory".into());
@@ -270,6 +270,7 @@ pub fn skills_scan_codex() -> Result<Vec<NativeSkill>, String> {
 /// existing copy: the prior copy goes to trash so the user can manually
 /// recover via the Settings → Skills → Empty Trash button. No background
 /// retention sweep is run; the trash grows until the user clears it.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn skills_move_to_trash(app: tauri::AppHandle, dir_name: String) -> Result<String, String> {
     if dir_name.contains('/') || dir_name.contains('\\') || dir_name.contains("..") {
@@ -300,7 +301,7 @@ pub fn skills_move_to_trash(app: tauri::AppHandle, dir_name: String) -> Result<S
 
 /// Resolve `~/.claude/skills/` and scan it. Empty Vec when the directory
 /// doesn't exist (e.g., user has never used Claude Code).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn skills_scan_native() -> Result<Vec<NativeSkill>, String> {
     let Some(home) = dirs::home_dir() else {
         return Err("could not resolve home directory".into());
@@ -320,7 +321,7 @@ pub struct UninstallResult {
 
 /// Remove `~/.claude/skills/<dir_name>/` recursively. The frontend should
 /// confirm with the user first; this command does no extra prompting.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn skills_uninstall_native(dir_name: String) -> Result<UninstallResult, String> {
     if dir_name.contains('/') || dir_name.contains('\\') || dir_name.contains("..") {
         return Err(format!("invalid dir_name: {}", dir_name));

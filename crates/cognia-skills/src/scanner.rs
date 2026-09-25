@@ -12,7 +12,7 @@ pub struct ScanInput {
     pub content: String,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn skills_scan_security(content: String) -> Result<Vec<ScanIssue>, String> {
     Ok(scan(&[ScanInput {
         label: "SKILL.md".to_string(),
@@ -20,7 +20,7 @@ pub fn skills_scan_security(content: String) -> Result<Vec<ScanIssue>, String> {
     }]))
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn skills_scan_resources(resources: Vec<(String, String)>) -> Result<Vec<ScanIssue>, String> {
     let inputs: Vec<ScanInput> = resources
         .into_iter()

@@ -21,7 +21,7 @@ fn validate_scheme(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn skills_fetch_remote_md(url: String) -> Result<String, String> {
     validate_scheme(&url)?;
     let builder = reqwest::Client::builder()
@@ -72,7 +72,7 @@ pub struct RemoteGetResponse {
     pub retry_after: Option<String>,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn skills_fetch_remote_json(req: RemoteGetRequest) -> Result<RemoteGetResponse, String> {
     validate_scheme(&req.url)?;
     let builder = reqwest::Client::builder()

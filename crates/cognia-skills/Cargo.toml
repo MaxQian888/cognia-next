@@ -14,9 +14,16 @@ publish.workspace = true
 name = "cognia_skills"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the `#[tauri::command]` shells. The four that take an
+# `AppHandle` (uninstall, trash) compile only with it; the rest stay ordinary
+# fns the companion RPC can call. Only `src-tauri` enables it.
+default = []
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 cognia-net = { path = "../cognia-net" }
-tauri = { workspace = true }
+tauri = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 regex.workspace = true

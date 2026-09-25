@@ -16,6 +16,9 @@
 
 pub mod backend;
 pub mod backends;
+/// The Tauri command shells, all over `State`; only `src-tauri` enables them
+/// (ADR-0196).
+#[cfg(feature = "tauri-host")]
 pub mod commands;
 pub mod credential_store;
 pub mod credentials;

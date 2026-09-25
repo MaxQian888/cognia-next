@@ -125,7 +125,7 @@ cognia-connectors = { path = "../crates/cognia-connectors" }
 # registered from run().
 cognia-plugin-runtime = { path = "../crates/cognia-plugin-runtime" }
 # ADR-0067 follow-up — skills subsystem. Re-aliased as `crate::skills`.
-cognia-skills = { path = "../crates/cognia-skills" }
+cognia-skills = { path = "../crates/cognia-skills", features = ["tauri-host"] }
 # ADR-0067 follow-up — TTS subsystem. Re-aliased as `crate::tts`.
 cognia-tts = { path = "../crates/cognia-tts", features = ["tauri-host"] }
 # ADR-0067 follow-up — remote-control LAN API. Re-aliased as
@@ -254,7 +254,7 @@ rusqlite = { workspace = true, features = ["backup", "bundled"] }
 # lives in `crates/cognia-vector`, which owns the `sqlite-vec` + `qdrant-client`
 # deps. Re-aliased as `crate::vector` in lib.rs; the app installs a keyring-backed
 # `CredentialStore` at boot so the crate never touches `secret_store` directly.
-cognia-vector = { path = "../crates/cognia-vector" }
+cognia-vector = { path = "../crates/cognia-vector", features = ["tauri-host"] }
 
 # ADR-0067 Tier C — `gray_matter` moved to `crates/cognia-files` with the
 # slash-command / skill front-matter parsing; no `src-tauri/src` file

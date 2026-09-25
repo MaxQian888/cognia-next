@@ -61,7 +61,7 @@ fn locate_lockfile() -> Option<PathBuf> {
     candidates.into_iter().find(|c| c.is_file())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn skills_load_registry() -> Result<Vec<RegistryEntry>, String> {
     let path = match locate_lockfile() {
         Some(p) => p,

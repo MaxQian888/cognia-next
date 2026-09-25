@@ -71,7 +71,7 @@ fn validate_resource_path(rel: &str) -> Result<(), String> {
 const MAX_SKILL_RESOURCES: usize = 50;
 const MAX_SKILL_RESOURCE_BYTES: usize = 2 * 1024 * 1024;
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn skills_install_native(request: InstallSkillRequest) -> Result<InstallSkillResponse, String> {
     validate_dir_name(&request.dir_name)?;
     let Some(home) = dirs::home_dir() else {
@@ -399,6 +399,7 @@ fn rollback_committed(committed: &[(PathBuf, Option<PathBuf>)]) {
     }
 }
 
+#[cfg(feature = "tauri-host")]
 fn resolve_target_root(
     target: SkillsTarget,
     app: &tauri::AppHandle,
@@ -441,6 +442,7 @@ fn timestamp_iso_ish() -> String {
 /// `.trash/` first. Per-target failures other than "no home directory"
 /// bubble as `Err` so the frontend can show the user what went wrong
 /// rather than silently dropping a mirror.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn skills_install_mirrored(
     app: tauri::AppHandle,
@@ -525,6 +527,7 @@ pub fn skills_install_mirrored(
     })
 }
 
+#[cfg(feature = "tauri-host")]
 /// Mirror the cognia canonical at a sibling root by either symlinking the
 /// whole directory (Unix) or copying the tree (Windows / symlink failure).
 /// Symlinks keep Claude Code / Codex CLI seeing exactly what cognia owns,
@@ -573,6 +576,7 @@ fn link_or_copy_mirror(source: &Path, dest: &Path) -> Result<Vec<String>, String
     Ok(written)
 }
 
+#[cfg(feature = "tauri-host")]
 fn copy_tree(source: &Path, dest: &Path, written: &mut Vec<String>) -> Result<(), String> {
     std::fs::create_dir_all(dest).map_err(|e| format!("mkdir {}: {}", dest.display(), e))?;
     let entries =
@@ -598,6 +602,7 @@ fn copy_tree(source: &Path, dest: &Path, written: &mut Vec<String>) -> Result<()
 /// Remove every skill copy under `<appData>/cognia/skills/.trash/`. Used
 /// by the Settings → Skills → Empty Trash button. Returns the number of
 /// directories removed.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn skills_empty_trash(app: tauri::AppHandle) -> Result<usize, String> {
     use tauri::Manager;
@@ -627,6 +632,7 @@ pub fn skills_empty_trash(app: tauri::AppHandle) -> Result<usize, String> {
 /// List every trashed skill copy under
 /// `<appData>/cognia/skills/.trash/`. Returns the `<name>-<ts>` basenames
 /// so the UI can render a count + offer the empty-trash button.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn skills_list_trash(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     use tauri::Manager;

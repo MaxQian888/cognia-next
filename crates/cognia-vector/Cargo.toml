@@ -16,10 +16,17 @@ publish.workspace = true
 name = "cognia_vector"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the Tauri command shells in `commands` (they all take `State`).
+# Off by default so the crate builds and tests Tauri-free; `src-tauri`
+# turns it on.
+default = []
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 cognia-instrument = { path = "../cognia-instrument" }
 cognia-net = { path = "../cognia-net" }
-tauri = { workspace = true }
+tauri = { workspace = true, optional = true }
 log.workspace = true
 # VectorBackend + the 5 cloud backends are `#[async_trait]` (dyn-dispatched
 # through VectorRegistry), so this must be a direct dep, not transitive.

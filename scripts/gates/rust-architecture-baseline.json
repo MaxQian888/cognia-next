@@ -9,9 +9,7 @@
     "tauri-default: cognia-mcp-server",
     "tauri-default: cognia-plugin-runtime",
     "tauri-default: cognia-scheduling",
-    "tauri-default: cognia-skills",
     "tauri-default: cognia-subscription",
-    "tauri-default: cognia-terminal",
-    "tauri-default: cognia-vector"
+    "tauri-default: cognia-terminal"
   ]
 }
