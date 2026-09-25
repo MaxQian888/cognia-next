@@ -7,11 +7,11 @@
 [package]
 name = "cognia-problem"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "RFC 9457 problem details with the companion extensions (code, requestId, retryable, details, operationId)."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_problem"
@@ -24,15 +24,18 @@ default = []
 axum = ["dep:axum"]
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-schemars = "1"
-uuid = { version = "1", features = ["v4"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+schemars.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 # The page token is opaque base64url (paging.rs).
-base64 = "0.23"
-thiserror = "2"
+base64.workspace = true
+thiserror.workspace = true
 axum = { version = "0.8", default-features = false, optional = true }
 
 [dev-dependencies]
 axum = { version = "0.8", default-features = false }
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

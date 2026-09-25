@@ -3,13 +3,13 @@ name = "cognia-next"
 version = "0.1.0"
 description = "cognia-next — AI-powered desktop application built with Next.js 16 + Tauri 2"
 authors = ["AstroAir <astro_air@126.com>"]
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 repository = "https://github.com/MaxQian888/cognia-next"
-edition = "2021"
+edition.workspace = true
 # Rust 1.95 is required by oar-ocr 0.9.x, which is now part of the standard
 # desktop build through the default `ocr-paddle` feature.
-rust-version = "1.95"
+rust-version.workspace = true
 # PP-OCRv6 ships through oar-ocr 0.9.x, whose supported toolchain floor is
 # Rust 1.95. Keep this crate and rust-toolchain.toml aligned.
 default-run = "cognia-next"
@@ -67,12 +67,12 @@ required-features = ["webrtc-harness"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-serde_json = "1.0"
-serde = { version = "1.0", features = ["derive"] }
+serde_json.workspace = true
+serde = { workspace = true, features = ["derive"] }
 # ADR-0175 B4: wire types derive their own JSON Schema so the published output
 # contract cannot disagree with the struct that fills it, and
 # `companion_api::output_registry` generates a `Derived` row from the type.
-schemars = "1"
+schemars.workspace = true
 # Shared signaling wire protocol (ADR-0021). Single source of truth for the
 # frame/envelope types, also consumed by the standalone signaling-server and
 # its Cloudflare Worker. The desktop peer (companion_api::signaling) keeps its
@@ -180,39 +180,39 @@ cognia-agent-state = { path = "../crates/cognia-agent-state" }
 # `usr_…` / `org_…` before persisting them and resolves membership, but never
 # mints grants, so it does not link the `grants` HMAC machinery.
 cognia-tenant-auth = { path = "../crates/cognia-tenant-auth" }
-log = "0.4"
+log.workspace = true
 # `unstable` unlocks the built-in multi-webview API (`Window::add_child`,
 # `Manager::get_webview`) that powers the embedded in-app browser pane
 # (`src-tauri/src/browser/embedded.rs`). Pinned exactly because unstable APIs
 # may shift across minor versions.
-tauri = { version = "=2.11.5", features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
+tauri = { workspace = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
 
 # Timestamps across the app shell (companion, headless, perf, subscription…)
 # and process-global lazies (claude, codeserver, companion, fleet, perf…).
 # The native logging stack that first brought these in moved to
 # `crates/cognia-observability` (ADR-0067 Tier C).
-chrono = { version = "0.4", features = ["serde"] }
-once_cell = "1"
+chrono = { workspace = true, features = ["serde"] }
+once_cell.workspace = true
 # `tracing` spans in `claude` and `companion_api`. The structured subscriber
 # itself lives in `crates/cognia-observability`.
-tracing = "0.1"
+tracing.workspace = true
 # Process and host metrics for the perf panel and the fleet host rows
 # (`perf/`, `fleet/`). Only the `system` feature is needed; disabling the
 # defaults drops disk/network/component/multithread to keep it lean.
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
-thiserror = "2"
+sysinfo = { workspace = true, features = ["system"] }
+thiserror.workspace = true
 # `anyhow` is already pulled in as a transitive; expose it directly so
 # `cli_bridge` (and similar small modules) can use Result<T> + Context
 # without inventing a per-module error enum.
-anyhow = "1"
+anyhow.workspace = true
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-process = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-clipboard-manager = "2"
-tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager.workspace = true
+tauri-plugin-opener.workspace = true
 tauri-plugin-os = "2"
 # `tauri-plugin-shell` powers the host-managed cloudflared companion tunnel.
 # Scope-locked to the `cloudflared` binary in `tauri.conf.json`.
@@ -230,20 +230,20 @@ tauri-plugin-upload = "2"
 # Window positioner — exposes `moveWindow(Position)` for tray-anchored panels
 # and standard placements (TopRight, Center, etc.). See `lib/tauri/positioner.ts`.
 tauri-plugin-positioner = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "net", "signal"] }
-dirs = "6"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "net", "signal"] }
+dirs.workspace = true
 # ADR-0067 Tier C — `ignore` moved to `crates/cognia-files` with the
 # workspace-search walker; no `src-tauri/src` file references it.
 
 # Object-safe async traits in `companion_api`, `claude`, `recorder_window` and
 # `codex_app_dispatch`. (The system scheduler that first needed it is now
 # `crates/cognia-scheduling`.)
-async-trait = "0.1"
-parking_lot = "0.12"
+async-trait.workspace = true
+parking_lot.workspace = true
 # ADR-0059 R13 — bollard (docker) and kube moved to
 # `crates/cognia-external-agent` (ADR-0067); the `container-exec` / `k8s-exec`
 # features below forward to that crate's own features.
-rusqlite = { version = "0.37", features = ["backup", "bundled"] }
+rusqlite = { workspace = true, features = ["backup", "bundled"] }
 # ADR-0067 Tier B — the Matrix E2EE stack (`matrix-sdk-crypto` /
 # `matrix-sdk-sqlite` / `ruma`) moved to `crates/cognia-connectors`; these
 # declarations outlived the move and kept the stack in app_lib's dep graph.
@@ -256,7 +256,7 @@ cognia-vector = { path = "../crates/cognia-vector" }
 # ADR-0067 Tier C — `gray_matter` moved to `crates/cognia-files` with the
 # slash-command / skill front-matter parsing; no `src-tauri/src` file
 # references it.
-wait-timeout = "0.2"
+wait-timeout.workspace = true
 # ADR-0067 Tier B — `portable-pty` moved to `crates/cognia-terminal` together
 # with `src-tauri/src/terminal/` (the path this comment named no longer exists).
 # System font enumeration for the appearance / terminal font pickers
@@ -265,16 +265,16 @@ wait-timeout = "0.2"
 # fixed-pitch families. The webview can't do this (WKWebView has no Local
 # Font Access API).
 fontdb = "0.24"
-regex = "1"
-toml_edit = { version = "0.25", features = ["serde"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"] }
+regex.workspace = true
+toml_edit = { workspace = true, features = ["serde"] }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"] }
 # `tokio-socks` / `tokio-rustls` were direct declarations no `src-tauri/src`
 # file ever named; reqwest's `socks` / `rustls` features pull them transitively.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-futures-util = { version = "0.3", default-features = false }
+rustls = { workspace = true, features = ["ring", "std"] }
+futures-util = { workspace = true }
 # ADR-0067 Tier C — `rquickjs` moved to `crates/cognia-net` with
 # `provider_diagnostics`, its only user; no `src-tauri/src` file references it.
-bytes = "1"
+bytes.workspace = true
 
 # Vector cloud backends (ADR-0022, qdrant/milvus/pinecone/chroma/weaviate) moved
 # to `crates/cognia-vector` (ADR-0067 Phase 4).
@@ -289,9 +289,9 @@ bytes = "1"
 # target below (windows-native / apple-native / sync-secret-service); the base
 # entry stays default-free so Android/iOS fall back to mock intentionally.
 keyring = { version = "4", default-features = false }
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
-uuid = { version = "1", features = ["v4", "v7"] }
-base64 = "0.23"
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "connect"] }
+uuid = { workspace = true, features = ["v4", "v7"] }
+base64.workspace = true
 # ADR-0067 Tier B — `prost` (the Feishu/Lark `pbbp2.Frame` codec) moved to
 # `crates/cognia-connectors` with `lark_ws.rs`; the path this comment named no
 # longer exists.
@@ -304,31 +304,31 @@ cognia-scheduling = { path = "../crates/cognia-scheduling" }
 # HTTP listeners in the app shell (companion API, codeserver relay, CLI
 # bridge): axum for the routers, subtle for constant-time token comparison in
 # the codeserver relay, tower-http for body-size limits.
-axum = { version = "0.8", features = ["macros", "multipart", "ws"] }
+axum = { workspace = true, features = ["macros", "multipart", "ws"] }
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 # axum-server (M2.9) — TLS termination for the companion API. `tls-rustls`
 # pulls in rustls + ring; matches the project's existing tokio-rustls path.
 axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
-subtle = "2"
-tower = { version = "0.5", features = ["util", "limit", "timeout"] }
-tower-http = { version = "0.7", features = ["limit", "trace", "cors"] }
-hmac = "0.13"
+subtle.workspace = true
+tower = { workspace = true, features = ["util", "limit", "timeout"] }
+tower-http = { workspace = true, features = ["limit", "trace", "cors"] }
+hmac.workspace = true
 sha1 = "0.11"
-sha2 = "0.11"
+sha2.workspace = true
 hkdf = "0.13"
 p256 = { version = "0.14", features = ["ecdsa", "ecdh"] }
 argon2 = "0.5"
-ed25519-dalek = "3"
-hex = "0.4"
-url = "2"
-aes-gcm = { version = "0.11", features = ["aes"] }
+ed25519-dalek.workspace = true
+hex.workspace = true
+url.workspace = true
+aes-gcm = { workspace = true, features = ["aes"] }
 aes = "0.9"
 cbc = { version = "0.2", features = ["alloc"] }
 pbkdf2 = "0.13"
 psl = "2.1"
-rand = "0.10"
-jsonwebtoken = { version = "11", features = ["rust_crypto"] }
+rand.workspace = true
+jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
 serde_urlencoded = "0.7"
 
 # Local IP detection — used by `companion_issue_pair_jwt` to render the
@@ -344,13 +344,13 @@ local-ip-address = "0.6"
 # `vendored-libgit2` ships libgit2's C source inside `libgit2-sys` so
 # developer machines don't need a system install — critical on Windows
 # where libgit2 isn't typically present.
-git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
+git2 = { workspace = true, features = ["vendored-libgit2"] }
 
 # Companion TLS (Wave 1.4 / M2.8) — self-signed certificate generation +
 # SHA-256 SubjectPublicKeyInfo fingerprint computation. The mobile client
 # pins the fingerprint via the QR pair payload, so the cert chain is never
 # validated by hostname; this avoids needing a real CA.
-rcgen = "0.14"
+rcgen.workspace = true
 time = { version = "0.3", features = ["std"] }
 
 # mDNS (Wave 1.5 / M2.9) — service advertisement for `_cognia._tcp.local.`
@@ -366,16 +366,16 @@ mdns-sd = "0.20"
 # (`session_import_watch.rs`); `flate2` + `tar` read and write the gzipped
 # tarballs in `codeserver`, `headless` backups and `cli_bridge`. (The plugin
 # runtime that first brought them in is now `crates/cognia-plugin-runtime`.)
-notify = "8"
-flate2 = "1"
-tar = "0.4"
+notify.workspace = true
+flate2.workspace = true
+tar.workspace = true
 # Auto-cleanup temp dirs at runtime (`companion_api/rpc/media.rs`,
 # `cli_bridge`, `codex_app_dispatch.rs`, `codeserver`, browser cookie import);
 # most other uses are unit tests.
-tempfile = "3"
+tempfile.workspace = true
 # Zip archives in `cli_bridge` (plugin bundles the `cognia plugin build` CLI
 # emits) and `codeserver`. Pure-Rust, no system zlib dep.
-zip = { version = "8", default-features = false, features = ["deflate", "bzip2"] }
+zip = { workspace = true, features = ["deflate", "bzip2"] }
 
 # ADR-0067 Tier B — the WASM plugin runtime (ADR-0013) moved to
 # `crates/cognia-plugin-runtime`, which owns `wasmtime`/`wasmtime-wasi`/
@@ -387,7 +387,7 @@ zip = { version = "8", default-features = false, features = ["deflate", "bzip2"]
 # `derive` gives us the `#[derive(Parser)]` macro; `std` keeps default
 # features (env / wrap_help / etc.). Pulling clap is cheap compared to
 # maintaining a hand-rolled parser as the subcommand surface grows.
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true, features = ["derive"] }
 
 # ADR-0067 Phase 5 — `xcap` (screenshot) + the UIA/a11y crates moved to
 # `crates/cognia-automation`.
@@ -510,7 +510,7 @@ objc2-web-kit = { version = "0.3.2", features = [
 # Direct syscalls for the execution sandbox (ADR-0028): `setrlimit` for the
 # CPU / address-space caps applied via `Command::pre_exec` on the Linux
 # `bwrap` and macOS `sandbox-exec` backends (`sandbox/limits.rs`).
-libc = "0.2"
+libc.workspace = true
 
 [target."cfg(target_os = \"linux\")".dependencies]
 # Real OS credential store (freedesktop Secret Service over D-Bus) — see the
@@ -530,7 +530,7 @@ cognia-secrets = { path = "../crates/cognia-secrets", features = ["test-inmemory
 # HTTP mock server for connectors::http_client and attachments tests.
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)
-wiremock = "0.6"
+wiremock.workspace = true
 
 # ADR-0024 — standard desktop builds include PaddleOCR; other native OCR
 # bindings remain explicit opt-ins. Placeholder registrations keep the
@@ -588,3 +588,6 @@ parse-liteparse = ["dep:liteparse"]
 # RTen is mandatory `--release` per upstream README — without opt-level=3
 # even smoke tests crawl. The override now lives in the workspace root
 # Cargo.toml (cargo ignores `[profile.*]` blocks in workspace members).
+
+[lints]
+workspace = true

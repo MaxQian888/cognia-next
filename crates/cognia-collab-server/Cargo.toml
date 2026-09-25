@@ -1,11 +1,11 @@
 [package]
 name = "cognia-collab-server"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.95"
+edition.workspace = true
+rust-version.workspace = true
 description = "Cognia collaboration plane — server-authoritative Issues over ADR-0149 identity."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_collab_server"
@@ -20,33 +20,36 @@ name = "cognia-collab-bootstrap"
 path = "src/bin/bootstrap.rs"
 
 [dependencies]
-anyhow = "1"
-async-trait = "0.1"
-axum = { version = "0.8", features = ["macros", "ws"] }
+anyhow.workspace = true
+async-trait.workspace = true
+axum = { workspace = true, features = ["macros", "ws"] }
 base64 = "0.22"
-bytes = "1"
-clap = { version = "4", features = ["derive", "env"] }
+bytes.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
 cognia-tenant-auth = { path = "../cognia-tenant-auth", features = ["grants", "oidc"] }
 deadpool-postgres = "0.14"
-futures-util = { version = "0.3", default-features = false }
-parking_lot = "0.12"
+futures-util = { workspace = true }
+parking_lot.workspace = true
 object_store = { version = "0.14", default-features = false, features = ["aws-base", "reqwest", "ring", "fs"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 rand = "0.9"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
-rustls-native-certs = "0.8"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
+rustls-native-certs.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 sha2 = "0.10"
-subtle = "2"
-thiserror = "2"
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+subtle.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-postgres-rustls = "0.14"
-tower-http = { version = "0.7", features = ["cors", "request-id", "trace"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1", features = ["serde", "v4"] }
+tower-http = { workspace = true, features = ["cors", "request-id", "trace"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

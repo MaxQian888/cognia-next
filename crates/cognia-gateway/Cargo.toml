@@ -5,11 +5,11 @@
 [package]
 name = "cognia-gateway"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Local OpenAI-compatible API gateway — api keys, rate limiting, execute/translate pipeline."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_gateway"
@@ -36,27 +36,30 @@ test-support = []
 cognia-secrets = { path = "../cognia-secrets" }
 cognia-net = { path = "../cognia-net" }
 cognia-instrument = { path = "../cognia-instrument" }
-tauri = { version = "=2.11.5", optional = true }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-axum = { version = "0.8", features = ["macros", "ws"] }
-tower-http = { version = "0.7", features = ["limit", "trace", "cors"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-futures-util = { version = "0.3", default-features = false }
-bytes = "1"
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "v7"] }
-parking_lot = "0.12"
-log = "0.4"
-thiserror = "2"
-subtle = "2"
-rand = "0.10"
+tauri = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+axum = { workspace = true, features = ["macros", "ws"] }
+tower-http = { workspace = true, features = ["limit", "trace", "cors"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+futures-util = { workspace = true }
+bytes.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["v4", "v7"] }
+parking_lot.workspace = true
+log.workspace = true
+thiserror.workspace = true
+subtle.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
-tower = { version = "0.5", features = ["util", "limit", "timeout"] }
+tower = { workspace = true, features = ["util", "limit", "timeout"] }
 # `test-util` gives tests a paused clock, so the SSE idle-timeout test can
 # assert the real STREAM_IDLE_TIMEOUT instead of a stand-in short duration.
-tokio = { version = "1", features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

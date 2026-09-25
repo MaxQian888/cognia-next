@@ -13,11 +13,11 @@
 [package]
 name = "cognia-sandbox-pool"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Runtime environment sandboxes: admission and the Docker driver."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_sandbox_pool"
@@ -38,21 +38,24 @@ docker = ["cognia-external-agent/container-exec"]
 cognia-environment = { path = "../cognia-environment", default-features = false, features = ["store"] }
 cognia-external-agent = { path = "../cognia-external-agent", default-features = false }
 cognia-sandboxd = { path = "../cognia-sandboxd", default-features = false }
-async-trait = "0.1"
-log = "0.4"
-parking_lot = "0.12"
-serde_json = "1.0"
-serde = { version = "1", features = ["derive"] }
-schemars = "1"
-hex = "0.4"
-uuid = { version = "1", features = ["v4"] }
-tempfile = "3"
-tar = "0.4"
-url = "2"
+async-trait.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+serde_json.workspace = true
+serde = { workspace = true, features = ["derive"] }
+schemars.workspace = true
+hex.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+tempfile.workspace = true
+tar.workspace = true
+url.workspace = true
 sha2 = "0.10"
-tokio = { version = "1", features = ["sync", "time", "io-util", "process", "fs", "macros", "rt"] }
+tokio = { workspace = true, features = ["sync", "time", "io-util", "process", "fs", "macros", "rt"] }
 
 [dev-dependencies]
 cognia-external-agent = { path = "../cognia-external-agent", default-features = false, features = ["test-support"] }
-tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
+
+[lints]
+workspace = true

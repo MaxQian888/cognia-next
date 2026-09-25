@@ -13,11 +13,11 @@
 [package]
 name = "cognia-secrets"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Encrypted single-keychain secret store + provider env state shared across cognia subsystem crates."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_secrets"
@@ -29,19 +29,19 @@ test-inmemory = []
 
 [dependencies]
 cognia-core = { path = "../cognia-core" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-aes-gcm = { version = "0.11", features = ["aes"] }
-parking_lot = "0.12"
-rand = "0.10"
-hex = "0.4"
-dirs = "6"
-log = "0.4"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+aes-gcm = { workspace = true, features = ["aes"] }
+parking_lot.workspace = true
+rand.workspace = true
+hex.workspace = true
+dirs.workspace = true
+log.workspace = true
 keyring = { version = "4", default-features = false }
 # `rt` + `rt-multi-thread`: readiness waits use `block_in_place` on runtime
 # workers so an async command waiting for initialization never starves the
 # executor (see `secret_store::wait_blocking`).
-tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 
 # Real OS credential store backends — same platform matrix as src-tauri.
 # Without these features keyring silently uses its mock store.
@@ -59,4 +59,7 @@ security-framework-sys = "2.17"
 keyring = { version = "4", features = ["zbus-secret-service-keyring-store"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

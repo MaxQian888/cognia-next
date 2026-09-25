@@ -7,11 +7,11 @@
 [package]
 name = "cognia-git"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Source Control subsystem (ADR-0038) — VSCode-style Git panel backend."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_git"
@@ -26,18 +26,21 @@ cognia-instrument = { path = "../cognia-instrument" }
 # fetched instead of going to the network every time.
 cognia-git-mirror = { path = "../cognia-git-mirror" }
 # The watch commands take `AppHandle`/`State` and `Emitter` the status-changed event.
-tauri = { version = "=2.11.5" }
-tokio = { version = "1", features = ["process", "fs", "io-util", "sync", "time", "rt-multi-thread", "macros"] }
+tauri = { workspace = true }
+tokio = { workspace = true, features = ["process", "fs", "io-util", "sync", "time", "rt-multi-thread", "macros"] }
 # `default-features = false` (no https/ssh) — mutating/network ops shell out to
 # system `git`; git2 is read-only here. Matches the `src-tauri` build exactly.
-git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
-notify = "8"
-ignore = "0.4"
-once_cell = "1"
-parking_lot = "0.12"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2"
+git2 = { workspace = true, features = ["vendored-libgit2"] }
+notify.workspace = true
+ignore.workspace = true
+once_cell.workspace = true
+parking_lot.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
+
+[lints]
+workspace = true

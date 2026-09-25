@@ -1,11 +1,11 @@
 [package]
 name = "cognia-ops-controller"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Provider-neutral Cognia deployment operations controller."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_ops_controller"
@@ -16,40 +16,43 @@ name = "cognia-ops-controller"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1"
+anyhow.workspace = true
 async-stream = "0.3"
-async-trait = "0.1"
-axum = { version = "0.8", features = ["macros", "ws"] }
-base64 = "0.23"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive", "env"] }
+async-trait.workspace = true
+axum = { workspace = true, features = ["macros", "ws"] }
+base64.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+clap = { workspace = true, features = ["derive", "env"] }
 cognia-deployment = { path = "../cognia-deployment" }
 # ADR-0149 §7 — shared OIDC verification. The controller keeps its own
 # scope vocabulary; only the token-verification machinery is shared.
 cognia-tenant-auth = { path = "../cognia-tenant-auth", features = ["oidc"] }
 futures-util = "0.3"
-hex = "0.4"
-ed25519-dalek = "3"
-jsonwebtoken = { version = "11", features = ["rust_crypto"] }
-parking_lot = "0.12"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
-rcgen = { version = "0.14", features = ["pem", "x509-parser"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-native-certs = "0.8"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+hex.workspace = true
+ed25519-dalek.workspace = true
+jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
+parking_lot.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
+rcgen = { workspace = true, features = ["pem", "x509-parser"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+rustls-native-certs.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 deadpool-postgres = "0.14"
-sha2 = "0.11"
-thiserror = "2"
+sha2.workspace = true
+thiserror.workspace = true
 time = "0.3"
-tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-postgres-rustls = "0.14"
-tower-http = { version = "0.7", features = ["request-id", "trace"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-url = { version = "2", features = ["serde"] }
-uuid = { version = "1", features = ["serde", "v4"] }
+tower-http = { workspace = true, features = ["request-id", "trace"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+url = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

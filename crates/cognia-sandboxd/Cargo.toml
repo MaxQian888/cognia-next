@@ -13,11 +13,11 @@
 [package]
 name = "cognia-sandboxd"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "In-sandbox supervisor: bundle staging, image probe and the agent init process."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_sandboxd"
@@ -34,15 +34,18 @@ cli = ["dep:clap"]
 
 [dependencies]
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context"], optional = true }
-hex = "0.4"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.11"
-thiserror = "2"
+hex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc.workspace = true
 signal-hook = "0.3"
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -9,19 +9,22 @@
 [package]
 name = "cognia-canonical-json"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "RFC 8785 JSON canonicalization shared with the TypeScript implementation."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_canonical_json"
 path = "src/lib.rs"
 
 [dependencies]
-serde_json = "1"
-thiserror = "2"
+serde_json.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+
+[lints]
+workspace = true

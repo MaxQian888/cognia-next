@@ -10,31 +10,34 @@
 [package]
 name = "cognia-agent-state"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "SQLite-backed agent session, provider-profile and session-import state for cognia."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_agent_state"
 path = "src/lib.rs"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 # `backup` for the store snapshot path, `bundled` so no system SQLite is
 # required. Must match src-tauri verbatim or cargo builds a second libsqlite3.
-rusqlite = { version = "0.37", features = ["backup", "bundled"] }
-parking_lot = "0.12"
-once_cell = "1"
+rusqlite = { workspace = true, features = ["backup", "bundled"] }
+parking_lot.workspace = true
+once_cell.workspace = true
 # `sync` for the provider-profile version watch channel; `rt` for the session
 # store's `spawn_blocking` retention sweep.
-tokio = { version = "1", features = ["rt", "sync"] }
-log = "0.4"
+tokio = { workspace = true, features = ["rt", "sync"] }
+log.workspace = true
 # Per-OS roots when probing for an OpenCode database.
-dirs = "6"
-chrono = { version = "0.4", features = ["serde"] }
-thiserror = "2"
+dirs.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+thiserror.workspace = true
 # Routing-snapshot + credential types and the static-header policy check.
 cognia-gateway = { path = "../cognia-gateway" }
+
+[lints]
+workspace = true

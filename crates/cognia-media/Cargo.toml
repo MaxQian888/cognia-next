@@ -1,24 +1,27 @@
 [package]
 name = "cognia-media"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Native local-video metadata, frame extraction, trimming, and analysis for Cognia."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_media"
 path = "src/lib.rs"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tauri = { version = "=2.11.5" }
-thiserror = "2"
-tokio = { version = "1", features = ["fs", "process", "time"] }
-uuid = { version = "1", features = ["v4"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tauri = { workspace = true }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "process", "time"] }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

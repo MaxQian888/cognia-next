@@ -9,11 +9,11 @@
 [package]
 name = "cognia-jobs"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Background-job supervisor: process-group-safe spawn/kill, ring+disk output, SQLite journal."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_jobs"
@@ -23,21 +23,24 @@ path = "src/lib.rs"
 # Shared outbound proxy policy — a job spawned with `env_clear()` would
 # otherwise dial past whatever proxy the user configured.
 cognia-net = { path = "../cognia-net" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "fs", "io-util", "sync", "time"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2"
-parking_lot = "0.12"
-uuid = { version = "1", features = ["v4"] }
-bytes = "1"
-log = "0.4"
-regex = "1"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "fs", "io-util", "sync", "time"] }
+rusqlite = { workspace = true, features = ["bundled"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+bytes.workspace = true
+log.workspace = true
+regex.workspace = true
 
 # Process-group creation (`setsid`) and group kill (`killpg`). Mirrors the
 # idiom in `cognia-automation/src/sandbox/macos.rs`.
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
+
+[lints]
+workspace = true

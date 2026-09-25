@@ -8,11 +8,11 @@
 [package]
 name = "cognia-terminal"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Integrated terminal subsystem — portable-pty + xterm.js bridge (ADR-0031/0033)."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_terminal"
@@ -28,18 +28,18 @@ cognia-secrets = { path = "../cognia-secrets" }
 cognia-problem = { path = "../cognia-problem" }
 # perf span guards (terminal.exec).
 cognia-instrument = { path = "../cognia-instrument" }
-tauri = { version = "=2.11.5" }
+tauri = { workspace = true }
 portable-pty = "0.9"
-parking_lot = "0.12"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+parking_lot.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 # ADR-0175 B4: the wire types this crate answers with derive their own JSON
 # Schema, so the published output contract cannot disagree with the struct.
-schemars = "1"
+schemars.workspace = true
 # `net` + `macros` + `rt` are used directly by the SSH forwarding runtime
 # (loopback listeners, `select!`, and the per-tunnel tasks); they were reaching
 # this crate only through feature unification before.
-tokio = { version = "1", features = [
+tokio = { workspace = true, features = [
   "process",
   "sync",
   "io-util",
@@ -48,9 +48,9 @@ tokio = { version = "1", features = [
   "macros",
   "rt",
 ] }
-uuid = { version = "1", features = ["v4", "v7"] }
-dirs = "6"
-log = "0.4"
+uuid = { workspace = true, features = ["v4", "v7"] }
+dirs.workspace = true
+log.workspace = true
 # Do not enable russh's `rsa` feature: it pulls the unpatched RustCrypto RSA
 # implementation affected by RUSTSEC-2023-0071. Ed25519/ECDSA SSH keys remain
 # supported through the ring backend.
@@ -61,17 +61,17 @@ russh = { version = "=0.62.6", default-features = false, features = ["ring"] }
 # second SSH stack of its own. Apache-2.0, and upstream tests against the same
 # russh 0.62 line this crate pins.
 russh-sftp = "2.4"
-thiserror = "2"
+thiserror.workspace = true
 # ADR-0067 Tier C — `terminal_host_service` moved in from `app_lib`;
 # versions copied verbatim from `src-tauri/Cargo.toml` so the move adds
 # no new version to the lock.
-base64 = "0.23"
-chrono = { version = "0.4", features = ["serde"] }
-ed25519-dalek = "3"
-hex = "0.4"
-once_cell = "1"
-rand = "0.10"
-sha2 = "0.11"
+base64.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+ed25519-dalek.workspace = true
+hex.workspace = true
+once_cell.workspace = true
+rand.workspace = true
+sha2.workspace = true
 # `terminal_host_service` mints its own bootstrap secret + descriptor signing
 # key. It talks to `keyring` directly (as it did in `app_lib`); the per-OS
 # backend features below mirror `src-tauri` and `cognia-secrets` — without them
@@ -97,8 +97,11 @@ keyring = { version = "4", features = ["zbus-secret-service-keyring-store"] }
 
 [target.'cfg(unix)'.dependencies]
 # chmod on the host socket / descriptor files.
-libc = "0.2"
+libc.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

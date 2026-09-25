@@ -7,11 +7,11 @@
 [package]
 name = "cognia-ocr"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.95"
+edition.workspace = true
+rust-version.workspace = true
 description = "Native OCR subsystem (ADR-0024) — tesseract/ocrs/paddle backends behind a dispatch table."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_ocr"
@@ -20,20 +20,20 @@ path = "src/lib.rs"
 [dependencies]
 cognia-instrument = { path = "../cognia-instrument" }
 cognia-net = { path = "../cognia-net" }
-tauri = { version = "=2.11.5" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "process", "io-util", "net"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
-futures-util = { version = "0.3", default-features = false }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2"
-chrono = { version = "0.4", features = ["serde"] }
-once_cell = "1"
-log = "0.4"
-sha2 = "0.11"
-hex = "0.4"
-dirs = "6"
-tempfile = "3"
+tauri = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "process", "io-util", "net"] }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
+futures-util = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+once_cell.workspace = true
+log.workspace = true
+sha2.workspace = true
+hex.workspace = true
+dirs.workspace = true
+tempfile.workspace = true
 
 # ADR-0024 — local OCR engines (opt-in). `ocrs` + `rten` = pure-Rust ONNX-style
 # pipeline (no system deps); `oar-ocr` = PaddleOCR PP-OCRv6 via ONNX Runtime
@@ -73,3 +73,6 @@ ocr-windows = []
 ocr-ocrs = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
 # PaddleOCR PP-OCRv6 via `oar-ocr` + ONNX Runtime (ships an onnxruntime DLL).
 ocr-paddle = ["dep:oar-ocr", "dep:image"]
+
+[lints]
+workspace = true

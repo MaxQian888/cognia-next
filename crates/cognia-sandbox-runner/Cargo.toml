@@ -8,10 +8,11 @@
 [package]
 name = "cognia-sandbox-runner"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 description = "Non-elevated Windows sandbox runner — restricted token + low integrity + Job Object."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 # The contract and the launch plan are a library so the security-relevant
 # decisions — limits, the child's environment, what confinement is on offer —
@@ -25,8 +26,8 @@ name = "cognia-sandbox-runner"
 path = "src/main.rs"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 
 # Real Win32 sandbox primitives. Version pinned to the workspace's existing
 # `windows` (0.62.2, from the uiautomation/automation deps) so the lockfile and
@@ -40,3 +41,6 @@ windows = { version = "0.62.2", features = [
     "Win32_System_JobObjects",
     "Win32_Storage_FileSystem",
 ] }
+
+[lints]
+workspace = true

@@ -6,11 +6,11 @@
 [package]
 name = "cognia-subscription"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Unified subscription / OAuth credential vault — Anthropic, Codex, OpenCode providers (ADR-0025)."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_subscription"
@@ -19,25 +19,25 @@ path = "src/lib.rs"
 [dependencies]
 cognia-secrets = { path = "../cognia-secrets" }
 cognia-net = { path = "../cognia-net" }
-tauri = { version = "=2.11.5" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-base64 = "0.23"
-url = "2"
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "v7"] }
-parking_lot = "0.12"
-log = "0.4"
-dirs = "6"
+tauri = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+base64.workspace = true
+url.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["v4", "v7"] }
+parking_lot.workspace = true
+log.workspace = true
+dirs.workspace = true
 # Upstream-CLI credential discovery (~/.claude, ~/.codex keychain entries) —
 # deliberately raw keyring reads of OTHER apps' entries; our own storage goes
 # through cognia-secrets::secret_store.
 keyring = { version = "4", default-features = false }
 # Live re-discovery of upstream CLI credential files.
-notify = "8"
+notify.workspace = true
 # Codex device-auth flow.
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"] }
-tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"] }
+tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "4", features = ["windows-native-keyring-store"] }
@@ -51,5 +51,8 @@ keyring = { version = "4", features = ["zbus-secret-service-keyring-store"] }
 [dev-dependencies]
 # Keep this crate's tests off the real OS keyring / disk store.
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

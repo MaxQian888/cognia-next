@@ -12,25 +12,28 @@
 [package]
 name = "cognia-agents"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Multi-agent MCP configuration discovery and IO for cognia."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_agents"
 path = "src/lib.rs"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 # Format-preserving TOML rewrites for Codex's `config.toml` — the whole reason
 # this dependency exists in the tree; no other subsystem links it.
-toml_edit = { version = "0.25", features = ["serde"] }
+toml_edit = { workspace = true, features = ["serde"] }
 # Per-OS home/config/data roots for the vendor path table.
-dirs = "6"
+dirs.workspace = true
 # `commands.rs` only; the four `#[tauri::command]` shells stay co-located with
 # their fns (the macro requires it) and are referenced from the app's
 # `generate_handler!` as `agents::commands::…` through the crate alias.
-tauri = { version = "=2.11.5", features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
+tauri = { workspace = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
+
+[lints]
+workspace = true

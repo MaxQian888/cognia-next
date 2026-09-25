@@ -4,11 +4,11 @@
 [package]
 name = "cognia-mcp-server"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Embedded MCP server — streamable HTTP transport + automation/orchestration proxies (ADR-0008/0020)."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_mcp_server"
@@ -17,25 +17,28 @@ path = "src/lib.rs"
 [dependencies]
 cognia-core = { path = "../cognia-core" }
 cognia-automation = { path = "../cognia-automation" }
-tauri = { version = "=2.11.5" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-axum = { version = "0.8", features = ["macros", "ws"] }
-tower-http = { version = "0.7", features = ["limit", "trace", "cors"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util", "process"] }
-futures-util = { version = "0.3", default-features = false }
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "v7"] }
-parking_lot = "0.12"
-log = "0.4"
-thiserror = "2"
-subtle = "2"
-rand = "0.10"
-sha2 = "0.11"
-hex = "0.4"
+tauri = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+axum = { workspace = true, features = ["macros", "ws"] }
+tower-http = { workspace = true, features = ["limit", "trace", "cors"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util", "process"] }
+futures-util = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["v4", "v7"] }
+parking_lot.workspace = true
+log.workspace = true
+thiserror.workspace = true
+subtle.workspace = true
+rand.workspace = true
+sha2.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
-tower = { version = "0.5", features = ["util", "limit", "timeout"] }
+tower = { workspace = true, features = ["util", "limit", "timeout"] }
 # http_server integration tests drive the live listener over HTTP.
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+
+[lints]
+workspace = true

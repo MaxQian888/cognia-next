@@ -1,10 +1,10 @@
 [package]
 name = "cognia-observability"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.82"
-license = "AGPL-3.0-or-later"
-publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
 
 [features]
 default = []
@@ -58,36 +58,36 @@ otel-export = [
 ]
 
 [dependencies]
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true, features = ["serde"] }
 # ADR-0067 Tier C — `recovery_runtime` moved in from `app_lib`: `dirs` for the
 # diagnostics data dir, `log` for the non-fatal persistence warnings.
-dirs = "6"
-log = "0.4"
+dirs.workspace = true
+log.workspace = true
 ed25519-dalek = "2"
-hex = "0.4"
-regex = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+hex.workspace = true
+regex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 sha2 = "0.10"
-thiserror = "2"
-uuid = { version = "1", features = ["v4", "serde"] }
-zip = { version = "8", default-features = false, features = ["deflate"] }
+thiserror.workspace = true
+uuid = { workspace = true, features = ["v4", "serde"] }
+zip = { workspace = true, features = ["deflate"] }
 zstd = "0.13"
 
 # --- ADR-0067 Tier C: the `desktop-host` cluster (all optional) ---
-tauri = { version = "=2.11.5", features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"], optional = true }
+tauri = { workspace = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"], optional = true }
 tauri-plugin-log = { version = "2", optional = true }
-tauri-plugin-opener = { version = "2", optional = true }
+tauri-plugin-opener = { workspace = true, optional = true }
 fern = { version = "0.7", optional = true }
-tracing = { version = "0.1", optional = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"], optional = true }
-sysinfo = { version = "0.39", default-features = false, features = ["system"], optional = true }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"], optional = true }
-once_cell = { version = "1", optional = true }
-base64 = { version = "0.23", optional = true }
-url = { version = "2", optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json", "registry"], optional = true }
+sysinfo = { workspace = true, features = ["system"], optional = true }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"], optional = true }
+once_cell = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
 # `crash::submit` stages a package in a TempDir at runtime — not a dev-only dep.
-tempfile = { version = "3", optional = true }
+tempfile = { workspace = true, optional = true }
 # The crash reporter attaches a screenshot; telemetry feeds the metrics registry.
 cognia-automation = { path = "../cognia-automation", optional = true }
 cognia-instrument = { path = "../cognia-instrument", optional = true }
@@ -120,5 +120,8 @@ syslog = { version = "7", optional = true }
 [dev-dependencies]
 # `telemetry`'s OTLP export tests stand up a loopback TCP listener. tokio is
 # test-only here: the production paths use `tauri::async_runtime`.
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "net"] }
-tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "net"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

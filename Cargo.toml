@@ -120,6 +120,85 @@ exclude = [
   "plugins/wasm-example-formatter",
 ]
 
+# ADR-0196 — package metadata every member inherits (`edition.workspace = true`
+# …). `version` is deliberately NOT here: `scripts/sync/version-sync.mjs`
+# rewrites the literal `version = "…"` line of the app-version members, and
+# `check-runtime-versions.mjs` reads the gateway's.
+[workspace.package]
+edition = "2021"
+rust-version = "1.95"
+license = "AGPL-3.0-or-later"
+publish = false
+repository = "https://github.com/MaxQian888/cognia-next"
+
+# ADR-0196 — one version for each third-party dependency that three or more
+# members declare. Members inherit with `x.workspace = true` and add their own
+# `features`. Workspace features are additive and cannot be switched off by a
+# member, so none are declared here; a crate whose default features differ
+# from the entry below keeps a local declaration.
+[workspace.dependencies]
+serde = { version = "1" }
+serde_json = { version = "1" }
+tokio = { version = "1" }
+thiserror = { version = "2" }
+tempfile = { version = "3" }
+parking_lot = { version = "0.12" }
+base64 = { version = "0.23" }
+uuid = { version = "1" }
+log = { version = "0.4" }
+sha2 = { version = "0.11" }
+tauri = { version = "=2.11.5" }
+reqwest = { version = "0.13", default-features = false }
+chrono = { version = "0.4" }
+dirs = { version = "6" }
+hex = { version = "0.4" }
+url = { version = "2" }
+futures-util = { version = "0.3", default-features = false }
+once_cell = { version = "1" }
+async-trait = { version = "0.1" }
+ed25519-dalek = { version = "3" }
+rand = { version = "0.10" }
+axum = { version = "0.8" }
+regex = { version = "1" }
+rusqlite = { version = "0.37" }
+rustls = { version = "0.23", default-features = false }
+libc = { version = "0.2" }
+notify = { version = "8" }
+tower-http = { version = "0.7" }
+anyhow = { version = "1" }
+bytes = { version = "1" }
+clap = { version = "4" }
+schemars = { version = "1" }
+tower = { version = "0.5" }
+tracing = { version = "0.1" }
+subtle = { version = "2" }
+tokio-tungstenite = { version = "0.29", default-features = false }
+flate2 = { version = "1" }
+hmac = { version = "0.13" }
+rcgen = { version = "0.14" }
+zip = { version = "8", default-features = false }
+rustls-native-certs = { version = "0.8" }
+ignore = { version = "0.4" }
+tracing-subscriber = { version = "0.3" }
+aes-gcm = { version = "0.11" }
+git2 = { version = "0.21", default-features = false }
+jsonwebtoken = { version = "11" }
+sysinfo = { version = "0.39", default-features = false }
+tar = { version = "0.4" }
+toml_edit = { version = "0.25" }
+wait-timeout = { version = "0.2" }
+wiremock = { version = "0.6" }
+tauri-plugin-clipboard-manager = { version = "2" }
+tauri-plugin-opener = { version = "2" }
+
+[workspace.lints.rust]
+# `tokio_unstable` is set for every crate by `.cargo/config.toml` (dial9's
+# tokio telemetry). Any other unknown `cfg` is an error — in particular
+# `desktop` / `mobile`, which only `tauri-build` defines and only for
+# `src-tauri`: code carrying them into a library crate would otherwise
+# silently compile out. The workspace had zero hits when this landed.
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(tokio_unstable)'] }
+
 # `rten` and `rten-imageproc` are pulled in transitively when the optional
 # `ocr-ocrs` feature is enabled on the `cognia-next` member. Upstream README
 # requires opt-level = 3 even in dev profile — without it, smoke tests crawl.

@@ -1,11 +1,11 @@
 [package]
 name = "cognia-task-workspace"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Task-scoped isolated workspace, resource ledger, and reversible apply service."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_task_workspace"
@@ -16,7 +16,7 @@ name = "cognia-task-workspace-worker"
 path = "src/bin/cognia-task-workspace-worker.rs"
 
 [dependencies]
-base64 = "0.23"
+base64.workspace = true
 # ADR-0067 Phase 1 span registry. Provisioning is the hot path this crate is
 # judged on, and it had no timing at all: `cognia_instrument::guard` writes
 # into the same process-global registry the `/performance` panel reads, so a
@@ -30,19 +30,19 @@ cognia-git-mirror = { path = "../cognia-git-mirror" }
 # Schema, and `wire_schema::closed_object` states the two things schemars
 # leaves looser than the enforced output contract.
 cognia-problem = { path = "../cognia-problem" }
-flate2 = "1"
-git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
-hex = "0.4"
-ignore = "0.4"
-notify = "8"
-parking_lot = "0.12"
-rusqlite = { version = "0.37", features = ["bundled"] }
-schemars = "1"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-sha2 = "0.11"
-thiserror = "2"
-uuid = { version = "1", features = ["v4", "v7"] }
+flate2.workspace = true
+git2 = { workspace = true, features = ["vendored-libgit2"] }
+hex.workspace = true
+ignore.workspace = true
+notify.workspace = true
+parking_lot.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+schemars.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid = { workspace = true, features = ["v4", "v7"] }
 
 # Copy-on-write clones for `include` provisioning (`copyfile(COPYFILE_CLONE)` on
 # macOS, the `FICLONE` ioctl on Linux). Already in the lock via rusqlite/git2;
@@ -50,7 +50,10 @@ uuid = { version = "1", features = ["v4", "v7"] }
 # equivalent that `fs::copy` does not already reach (ReFS block cloning is not
 # exposed through a stable API).
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
+
+[lints]
+workspace = true

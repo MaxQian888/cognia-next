@@ -5,11 +5,11 @@
 [package]
 name = "cognia-core"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "Foundation utilities shared across cognia subsystem crates."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_core"
@@ -19,12 +19,15 @@ path = "src/lib.rs"
 # ADR-0175. `CommandError` converts into the plane-level `Problem`.
 cognia-problem = { path = "../cognia-problem" }
 # command_error serializes as a 3-key object for the renderer.
-serde = { version = "1.0", features = ["derive"] }
-wait-timeout = "0.2"
+serde = { workspace = true, features = ["derive"] }
+wait-timeout.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc.workspace = true
 
 [dev-dependencies]
-serde_json = "1.0"
-tempfile = "3"
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

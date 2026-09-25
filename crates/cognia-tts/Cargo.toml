@@ -4,11 +4,11 @@
 [package]
 name = "cognia-tts"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.89.0"
+edition.workspace = true
+rust-version.workspace = true
 description = "TTS subsystem — Edge synthesis, provider keyring, proxied fetch, realtime."
-license = "AGPL-3.0-or-later"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "cognia_tts"
@@ -17,18 +17,21 @@ path = "src/lib.rs"
 [dependencies]
 cognia-secrets = { path = "../cognia-secrets" }
 cognia-net = { path = "../cognia-net" }
-tauri = { version = "=2.11.5" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-base64 = "0.23"
-log = "0.4"
-uuid = { version = "1", features = ["v4", "v7"] }
-parking_lot = "0.12"
-futures-util = { version = "0.3", default-features = false }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
-tokio = { version = "1", features = ["sync", "time", "net", "io-util"] }
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
+tauri = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+base64.workspace = true
+log.workspace = true
+uuid = { workspace = true, features = ["v4", "v7"] }
+parking_lot.workspace = true
+futures-util = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
+tokio = { workspace = true, features = ["sync", "time", "net", "io-util"] }
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "connect"] }
 
 [dev-dependencies]
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
