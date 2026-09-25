@@ -195,6 +195,34 @@ function useCreateIssueForm(props: CreateIssuePageProps) {
     setForm((current) => ({ ...current, ...next }))
   }, [])
 
+  // Every open re-seeds the entry-point fields. The sheet stays mounted, so
+  // `initialForm` ran once, at mount: "+" on the Todo column still created a
+  // Backlog issue, and "Add sub-issue" (header and all) created a top-level
+  // one, because `status` / `parentId` never followed the props that asked
+  // for them. The rest of an abandoned form is left alone — that is the
+  // draft. A submitted form is cleared here too, on the next open, rather
+  // than on submit: clearing it then emptied the sheet while it was still
+  // sliding out. Derived during render (the previous-props pattern), not in
+  // an effect, so the first painted frame already shows the right values.
+  const [openSeen, setOpenSeen] = useState(props.open)
+  const [resetOnOpen, setResetOnOpen] = useState(false)
+  if (props.open !== openSeen) {
+    setOpenSeen(props.open)
+    if (props.open && resetOnOpen) {
+      setResetOnOpen(false)
+      setForm(initialForm(props))
+      setIdentity(EMPTY_PROJECT_IDENTITY)
+      setCreatingProject(false)
+    } else if (props.open) {
+      setForm((current) => ({
+        ...current,
+        status: props.status ?? "backlog",
+        parentId: props.parent?.id ?? "",
+        cycleId: props.cycleId ?? "",
+      }))
+    }
+  }
+
   useEffect(() => {
     if (!props.open || !needsProject) return
     void listTakenProjectKeys().then(setTakenKeys)
@@ -275,13 +303,20 @@ function useCreateIssueForm(props: CreateIssuePageProps) {
         props.onCreated?.(issue.id)
       }
 
-      const resetTo = createAnother
-        ? { ...initialForm(props), status: form.status, issueProjectId: form.issueProjectId }
-        : initialForm(props)
-      setForm(resetTo)
-      setIdentity(EMPTY_PROJECT_IDENTITY)
-      setCreatingProject(false)
-      if (!createAnother) props.onOpenChange(false)
+      if (createAnother) {
+        setForm({
+          ...initialForm(props),
+          status: form.status,
+          issueProjectId: form.issueProjectId,
+        })
+        setIdentity(EMPTY_PROJECT_IDENTITY)
+        setCreatingProject(false)
+      } else {
+        // Cleared on the next open (see above), so the closing sheet keeps
+        // showing what was just created instead of an empty form.
+        setResetOnOpen(true)
+        props.onOpenChange(false)
+      }
       return true
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))

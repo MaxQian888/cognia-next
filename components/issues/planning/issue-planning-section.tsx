@@ -420,7 +420,10 @@ function IssueChip({
 }) {
   return (
     <span
-      className="inline-flex h-6 max-w-full items-center gap-1 rounded-md border px-1.5 text-xs"
+      // `min-w-0` + a non-shrinking identifier: in the narrow detail column the
+      // title truncates, instead of "WA-1" breaking onto a second line and
+      // spilling out of the fixed-height chip.
+      className="inline-flex h-6 max-w-full min-w-0 items-center gap-1 rounded-md border px-1.5 text-xs"
       data-testid={testId}
     >
       {onOpen ? (
@@ -429,12 +432,16 @@ function IssueChip({
           onClick={() => onOpen(item.unifiedId)}
           className="inline-flex min-w-0 items-center gap-1 hover:underline"
         >
-          <span className="font-mono text-[11px] text-muted-foreground">{item.identifier}</span>
+          <span className="shrink-0 font-mono text-[11px] whitespace-nowrap text-muted-foreground">
+            {item.identifier}
+          </span>
           <span className="truncate">{item.title}</span>
         </button>
       ) : (
         <a href={issueHref(item.sourceId)} className="inline-flex min-w-0 items-center gap-1">
-          <span className="font-mono text-[11px] text-muted-foreground">{item.identifier}</span>
+          <span className="shrink-0 font-mono text-[11px] whitespace-nowrap text-muted-foreground">
+            {item.identifier}
+          </span>
           <span className="truncate">{item.title}</span>
         </a>
       )}
@@ -443,7 +450,7 @@ function IssueChip({
           type="button"
           onClick={onRemove}
           aria-label={removeLabel}
-          className="rounded-sm opacity-60 hover:opacity-100"
+          className="shrink-0 rounded-sm opacity-60 hover:opacity-100"
           data-testid={`${testId}-remove`}
         >
           <XIcon className="size-3" />

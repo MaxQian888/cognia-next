@@ -458,6 +458,62 @@ describe("CreateIssuePage v2", () => {
     })
   })
 
+  it("files the issue under the column it was reopened from", async () => {
+    // The sheet stays mounted between opens; "+" on Todo must not reuse the
+    // status the form was mounted with.
+    const user = userEvent.setup()
+    const props = baseProps({ issues: ISSUES, open: false })
+    const { rerender } = render(<CreateIssuePage {...props} />)
+    rerender(<CreateIssuePage {...props} open status="todo" />)
+    await user.type(await screen.findByTestId("create-issue-title"), "Column work")
+    await user.click(screen.getByTestId("create-issue-submit"))
+    await waitFor(() =>
+      expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ status: "todo" }))
+    )
+  })
+
+  it("creates a sub-issue when reopened from Add sub-issue", async () => {
+    const user = userEvent.setup()
+    const props = baseProps({ issues: ISSUES, open: false })
+    const { rerender } = render(<CreateIssuePage {...props} />)
+    rerender(
+      <CreateIssuePage
+        {...props}
+        open
+        parent={{ id: "i1", identifier: "DEMO-1", issueProjectId: PROJECT.id }}
+      />
+    )
+    await user.type(await screen.findByTestId("create-issue-title"), "Child work")
+    await user.click(screen.getByTestId("create-issue-submit"))
+    await waitFor(() =>
+      expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ parentId: "i1" }))
+    )
+  })
+
+  it("keeps the submitted form while the sheet closes, and starts clean next time", async () => {
+    const user = userEvent.setup()
+    const props = baseProps({ issues: ISSUES })
+    const { rerender } = render(<CreateIssuePage {...props} />)
+    await user.type(screen.getByTestId("create-issue-title"), "Shipped")
+    await user.click(screen.getByTestId("create-issue-submit"))
+    await waitFor(() => expect(props.onOpenChange).toHaveBeenCalledWith(false))
+    // Still what was created while the exit animation plays — not a blank form.
+    expect(screen.getByTestId("create-issue-title")).toHaveValue("Shipped")
+    rerender(<CreateIssuePage {...props} open={false} />)
+    rerender(<CreateIssuePage {...props} open />)
+    expect(await screen.findByTestId("create-issue-title")).toHaveValue("")
+  })
+
+  it("keeps an abandoned form as the draft across a close", async () => {
+    const user = userEvent.setup()
+    const props = baseProps({ issues: ISSUES })
+    const { rerender } = render(<CreateIssuePage {...props} />)
+    await user.type(screen.getByTestId("create-issue-title"), "Half written")
+    rerender(<CreateIssuePage {...props} open={false} />)
+    rerender(<CreateIssuePage {...props} open />)
+    expect(await screen.findByTestId("create-issue-title")).toHaveValue("Half written")
+  })
+
   it("clears the draft after a successful submit", async () => {
     const user = userEvent.setup()
     renderPage()
