@@ -16,6 +16,20 @@ describe("workspace dialog request", () => {
     expect(seen).toEqual(["newWorkspace", "manage"])
   })
 
+  it("carries the workspace a manage request is about, and only for manage", () => {
+    const seen: unknown[] = []
+    const stop = onWorkspaceDialogRequest((detail) => seen.push(detail))
+    requestWorkspaceDialog("manage", { workspaceId: "p1" })
+    requestWorkspaceDialog("adopt", { workspaceId: "p1" })
+    requestWorkspaceDialog("manage")
+    stop()
+    expect(seen).toEqual([
+      { kind: "manage", workspaceId: "p1" },
+      { kind: "adopt" },
+      { kind: "manage" },
+    ])
+  })
+
   it("stops delivering once unsubscribed", () => {
     const seen: WorkspaceDialogKind[] = []
     const stop = onWorkspaceDialogRequest(({ kind }) => seen.push(kind))

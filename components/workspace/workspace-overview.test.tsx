@@ -2,7 +2,15 @@
  * @jest-environment jsdom
  */
 
-jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+  // Members and activity format dates through the app's locale.
+  useFormatter: () => ({
+    dateTime: (value: Date | number) => new Date(value).toISOString(),
+    relativeTime: (value: Date | number) => new Date(value).toISOString(),
+  }),
+  useNow: () => new Date("2026-09-25T00:00:00Z"),
+}))
 jest.mock("next/link", () => ({
   __esModule: true,
   default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => (
@@ -26,20 +34,83 @@ jest.mock("@/components/feature-shell/feature-page-shell", () => ({
   ),
 }))
 jest.mock("@/components/feature-shell/feature-page-header", () => ({
-  // `controls` is rendered because the workspace switcher lives there now.
-  FeaturePageHeader: ({ title, controls }: { title: string; controls?: React.ReactNode }) => (
+  // `controls` is rendered because the workspace switcher lives there now, and
+  // the secondary actions because Manage does.
+  FeaturePageHeader: ({
+    title,
+    summary,
+    controls,
+    secondaryActions,
+  }: {
+    title: string
+    summary?: React.ReactNode
+    controls?: React.ReactNode
+    secondaryActions?: Array<{ id: string; label: string; onSelect?: () => void; testId?: string }>
+  }) => (
     <>
       <h1>{title}</h1>
+      <p data-testid="header-summary">{summary}</p>
+      {secondaryActions?.map((action) => (
+        <button key={action.id} type="button" onClick={action.onSelect} data-testid={action.testId}>
+          {action.label}
+        </button>
+      ))}
       {controls}
     </>
   ),
 }))
+jest.mock("@/components/shared/responsive-picker", () => ({
+  ResponsivePicker: ({
+    trigger,
+    children,
+    open,
+  }: {
+    trigger: React.ReactNode
+    children: React.ReactNode
+    open: boolean
+  }) => (
+    <>
+      {trigger}
+      {open ? children : null}
+    </>
+  ),
+}))
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => false }))
+const routerPush = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPush }) }))
+const pickerActions = {
+  openFolder: jest.fn(),
+  newWorkspace: jest.fn(),
+  adopt: jest.fn(),
+  manage: jest.fn(),
+  canOpenFolder: true,
+}
+const pickerDialogsHook = jest.fn()
 jest.mock("./workspace-picker-list", () => ({
-  useWorkspacePickerDialogs: () => ({
-    actions: {},
-    element: <div data-testid="workspace-picker-dialogs" />,
-  }),
+  useWorkspacePickerDialogs: () => pickerDialogsHook(),
+  useWorkspacePickerRequests: () => pickerActions,
   WorkspacePickerList: () => <div data-testid="workspace-picker-list" />,
+}))
+jest.mock("./workspace-recent-conversations", () => ({
+  WorkspaceRecentConversations: ({ workspaceId }: { workspaceId: string | null }) => (
+    <section data-testid="recent-conversations-stub">{workspaceId}</section>
+  ),
+}))
+jest.mock("./workspace-schedules", () => ({
+  WorkspaceSchedules: ({ workspaceId }: { workspaceId: string | null }) => (
+    <section data-testid="schedules-stub">{workspaceId}</section>
+  ),
+}))
+jest.mock("./workspace-context-summary", () => ({
+  WorkspaceContextSummary: ({ onEdit }: { onEdit: () => void }) => (
+    <button type="button" data-testid="context-edit-stub" onClick={onEdit}>
+      edit
+    </button>
+  ),
+}))
+let repoVerdict: { kind: string } = { kind: "absent" }
+jest.mock("@/hooks/workspace/use-repo-workspace-config", () => ({
+  useRepoWorkspaceConfig: () => ({ verdict: repoVerdict }),
 }))
 jest.mock("@/components/settings/project-environment-manager", () => ({
   ProjectEnvironmentManager: () => <section data-testid="project-environment-manager-stub" />,
@@ -55,9 +126,9 @@ jest.mock("./workspace-capabilities", () => ({
   WorkspaceCapabilities: () => <section data-testid="workspace-capabilities-stub" />,
 }))
 
-let projectsResult: unknown[] = []
-let issuesResult: unknown[] = []
-let runningResult: unknown[] = []
+let projectsResult: unknown[] | undefined = []
+let issuesResult: unknown[] | undefined = []
+let runningResult: unknown[] | undefined = []
 let trustedResult: Array<{ path: string; trustedAt: number }> = []
 jest.mock("@/hooks/data", () => ({
   useClientLiveQuery: (fn: () => Promise<unknown>) => {
@@ -81,13 +152,6 @@ jest.mock("./workspace-agents-working", () => ({
   ),
 }))
 jest.mock("@/lib/db/trusted-workspaces", () => ({ listTrustedWorkspaces: jest.fn() }))
-let manageDialogProps: { open: boolean; onOpenChange: (open: boolean) => void } | null = null
-jest.mock("@/components/shell/workspace-manage-dialog", () => ({
-  WorkspaceManageDialog: (props: { open: boolean; onOpenChange: (open: boolean) => void }) => {
-    manageDialogProps = props
-    return props.open ? <div data-testid="manage-dialog-stub" /> : null
-  },
-}))
 
 let storeState: { activeProjectId: string | null; projects: unknown[] } = {
   activeProjectId: "w1",
@@ -98,7 +162,7 @@ jest.mock("@/stores/project/project-store", () => ({
 }))
 
 import { useState } from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { WorkspaceOverview, type WorkspaceTab } from "./workspace-overview"
 
@@ -111,7 +175,10 @@ beforeEach(() => {
   issuesResult = []
   runningResult = []
   trustedResult = []
-  manageDialogProps = null
+  repoVerdict = { kind: "absent" }
+  routerPush.mockClear()
+  pickerActions.manage.mockClear()
+  pickerDialogsHook.mockClear()
   storeState = { activeProjectId: "w1", projects: [] }
   listWorkspaceEnvironmentsMock.mockReset()
   listWorkspaceEnvironmentsMock.mockResolvedValue([])
@@ -161,6 +228,8 @@ describe("WorkspaceOverview", () => {
     expect(screen.queryByRole("tab", { name: "workspace.sourceControl" })).not.toBeInTheDocument()
     const link = screen.getByTestId("workspace-source-control-link")
     expect(link).toHaveAttribute("href", "/source-control")
+    // Beside the tab strip, not in it: a tablist admits only tabs.
+    expect(screen.getByRole("tablist")).not.toContainElement(link)
   })
 
   it("counts only unstarted and started issues as open", () => {
@@ -241,19 +310,98 @@ describe("WorkspaceOverview", () => {
     expect(screen.queryByTestId("agents-working-stub")).not.toBeInTheDocument()
   })
 
-  it("keeps the other tiles as plain numbers", () => {
-    render(<WorkspaceOverview />)
-    expect(screen.getByTestId("workspace-stat-open-issues").tagName).toBe("DIV")
+  /**
+   * A count the reader cannot drill into is a dead end. Issues and projects
+   * open the pages scoped to this workspace; Environments opens its own tab.
+   */
+  it("makes every tile open what it counts", () => {
+    const onTabChange = jest.fn()
+    render(<WorkspaceOverview tab="overview" onTabChange={onTabChange} />)
+
+    fireEvent.click(screen.getByTestId("workspace-stat-open-issues"))
+    expect(routerPush).toHaveBeenLastCalledWith("/issues")
+    fireEvent.click(screen.getByTestId("workspace-stat-projects"))
+    expect(routerPush).toHaveBeenLastCalledWith("/projects")
+    fireEvent.click(screen.getByTestId("workspace-stat-environments"))
+    expect(onTabChange).toHaveBeenCalledWith("environments")
   })
 
-  it("opens the ONE root editor (the manage dialog) instead of editing roots here", () => {
+  it("says a count is unknown while its query is in flight, rather than zero", () => {
+    issuesResult = undefined
+    projectsResult = undefined
+    runningResult = undefined
+    render(<WorkspaceOverview />)
+    expect(screen.getByTestId("workspace-stat-open-issues")).toHaveTextContent(
+      "workspace.unknownValue"
+    )
+    expect(screen.getByTestId("workspace-stat-projects")).toHaveTextContent(
+      "workspace.unknownValue"
+    )
+    expect(screen.getByTestId("workspace-stat-agents-working")).toHaveTextContent(
+      "workspace.unknownValue"
+    )
+    // And the sections wait too, instead of claiming there is nothing.
+    expect(screen.queryByTestId("workspace-no-projects")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-projects-loading")).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-issues-loading")).toBeInTheDocument()
+  })
+
+  it("opens the ONE workspace editor, on this workspace, from every door", () => {
+    storeState = { activeProjectId: "w1", projects: [{ id: "w1", name: "Repo", roots: [] }] }
     render(<WorkspaceOverview />)
     // Two editors over one row is the double-entry-point defect this page must
-    // not reintroduce; it mounts the existing manager dialog instead.
-    expect(screen.queryByTestId("manage-dialog-stub")).not.toBeInTheDocument()
+    // not reintroduce; each door asks the shell's host for the same manager.
     fireEvent.click(screen.getByTestId("workspace-manage-link"))
-    expect(screen.getByTestId("manage-dialog-stub")).toBeInTheDocument()
-    act(() => manageDialogProps!.onOpenChange(false))
+    fireEvent.click(screen.getByTestId("workspace-header-manage"))
+    fireEvent.click(screen.getByTestId("context-edit-stub"))
+    expect(pickerActions.manage.mock.calls).toEqual([["w1"], ["w1"], ["w1"]])
+  })
+
+  it("summarises the workspace with its own description when it has one", () => {
+    storeState = {
+      activeProjectId: "w1",
+      projects: [{ id: "w1", name: "Repo", roots: [], description: "Billing API" }],
+    }
+    render(<WorkspaceOverview />)
+    expect(screen.getByTestId("header-summary")).toHaveTextContent("Billing API")
+  })
+
+  it("carries this workspace's conversations, schedules and context", () => {
+    render(<WorkspaceOverview />)
+    expect(screen.getByTestId("recent-conversations-stub")).toHaveTextContent("w1")
+    expect(screen.getByTestId("schedules-stub")).toHaveTextContent("w1")
+    expect(screen.getByTestId("context-edit-stub")).toBeInTheDocument()
+  })
+
+  it("names the primary root in words, not as a bare '1'", () => {
+    storeState = {
+      activeProjectId: "w1",
+      projects: [
+        { id: "w1", name: "Repo", roots: [{ id: "r1", path: "/tmp/repo", isPrimary: true }] },
+      ],
+    }
+    render(<WorkspaceOverview />)
+    expect(screen.getByTestId("workspace-root-primary")).toHaveTextContent("primaryBadge")
+  })
+
+  /**
+   * Every ancestor down to the shell's centre column clips, so a tab body that
+   * does not scroll itself hides whatever falls below the fold.
+   */
+  it("gives each tab body its own scroll container", () => {
+    render(<WorkspaceOverview />)
+    expect(screen.getByTestId("workspace-overview")).toHaveClass("min-h-0", "overflow-y-auto")
+  })
+
+  it("flags the Environments tab when the repository config needs a decision", () => {
+    repoVerdict = { kind: "unapproved" }
+    render(<WorkspaceOverview />)
+    expect(screen.getByTestId("workspace-environments-attention")).toBeInTheDocument()
+  })
+
+  it("keeps the Environments tab quiet when the repository asks for nothing", () => {
+    render(<WorkspaceOverview />)
+    expect(screen.queryByTestId("workspace-environments-attention")).not.toBeInTheDocument()
   })
 
   /**
@@ -267,12 +415,13 @@ describe("WorkspaceOverview", () => {
   })
 
   /**
-   * A Drawer or Popover unmounts its children on close, so the picker's
-   * dialogs have to be mounted by the page, not inside the trigger.
+   * A Drawer or Popover unmounts its children on close, so what the picker
+   * opens cannot live inside it. It belongs to the shell's dialog host, and
+   * this page mounting a copy of its own was the second instance of one editor.
    */
-  it("mounts the picker's dialogs outside the popover", () => {
+  it("mounts no workspace dialogs of its own", () => {
     render(<WorkspaceOverview />)
-    expect(screen.getByTestId("workspace-picker-dialogs")).toBeInTheDocument()
+    expect(pickerDialogsHook).not.toHaveBeenCalled()
   })
 
   it("counts this workspace's environments, ignoring rows another project owns", async () => {

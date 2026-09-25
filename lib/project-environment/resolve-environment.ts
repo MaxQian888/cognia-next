@@ -169,7 +169,10 @@ async function reportWorkspaceConfig(input: {
     level: "warning",
     title: t(`${titleKey}.title`),
     body,
-    href: "/settings",
+    // Where the approval card actually is. `/settings` has no copy of it, so
+    // the one link on this row was a dead end. The row names the workspace it
+    // is about whenever that is not the one on screen.
+    href: "/workspace?tab=environments",
     // One row per workspace and kind. A configuration awaiting approval is a
     // standing fact, not an event — a second copy of it is noise.
     dedupeKey: `workspace-config:${input.projectId ?? "-"}:${titleKey}`,

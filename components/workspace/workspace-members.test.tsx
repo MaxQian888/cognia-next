@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
 
@@ -15,6 +15,8 @@ jest.mock("next-intl", () => ({
     t.has = () => true
     return t
   },
+  // The invitation list, the audit and the invite dialog format dates.
+  useFormatter: () => ({ dateTime: (date: Date) => `date(${date.getTime()})` }),
 }))
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
@@ -45,6 +47,28 @@ describe("WorkspaceMembers", () => {
   it("says a workspace nobody shares is empty, not broken", async () => {
     render(<WorkspaceMembers workspaceId={WORKSPACE} />)
     expect(await screen.findByTestId("workspace-members-empty")).toBeInTheDocument()
+  })
+
+  /**
+   * The live query answers `undefined` before its first read. Treating that as
+   * an empty roster flashed "set up collaboration" at every workspace that has
+   * members, which reads as the plane being broken.
+   */
+  it("shows a skeleton, not the set-up call to action, until the roster is read", async () => {
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [{ userId: "usr_ada", displayName: "Ada", role: "maintainer", orgMember: true }],
+      now: 1,
+    })
+
+    render(<WorkspaceMembers workspaceId={WORKSPACE} />)
+    expect(screen.getByRole("status", { name: "loading" })).toHaveAttribute("aria-busy", "true")
+    expect(screen.queryByTestId("workspace-members-empty")).not.toBeInTheDocument()
+
+    expect(await screen.findByTestId("workspace-member-usr_ada")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-members-loading")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-members-empty")).not.toBeInTheDocument()
   })
 
   /**
@@ -207,6 +231,18 @@ describe("WorkspaceMembers", () => {
       expect(client.offboardOrgMember).toHaveBeenCalledWith(ORG, "usr_cleo", "reason.offboarded")
     )
     expect(toast.success).toHaveBeenCalledWith("toast.offboarded")
+
+    // The row wraps instead of squeezing: the controls travel as one group
+    // that can drop below the name, and the name keeps a floor of its own.
+    const row = screen.getByTestId("workspace-member-usr_cleo")
+    expect(row).toHaveClass("flex-wrap")
+    const controls = screen.getByTestId("workspace-member-role-usr_cleo").parentElement!
+    expect(controls).toHaveClass("ml-auto", "shrink-0")
+    expect(controls).toContainElement(screen.getByTestId("workspace-member-org-role-usr_cleo"))
+    expect(controls).toContainElement(screen.getByTestId("workspace-member-remove-usr_cleo"))
+    expect(controls).toContainElement(screen.getByTestId("workspace-member-offboard-usr_cleo"))
+    expect(within(row).getByText("Cleo")).toHaveClass("min-w-24")
+    expect(controls).not.toContainElement(within(row).getByText("Cleo"))
 
     // The live sections and the dialog are mounted for a manager.
     expect(screen.getByTestId("workspace-invitations")).toBeInTheDocument()

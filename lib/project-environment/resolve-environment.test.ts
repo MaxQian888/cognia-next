@@ -1,6 +1,14 @@
 import type { Project } from "@/types"
 import type { ProjectEnvironment } from "@/types/project-environment"
 
+const notifyMock = jest.fn(async (_input: Record<string, unknown>) => undefined)
+jest.mock("@/lib/notifications/runtime", () => ({
+  notify: (input: Record<string, unknown>) => notifyMock(input),
+}))
+jest.mock("@/lib/i18n/runtime-translator", () => ({
+  getRuntimeTranslator: async () => (key: string) => key,
+}))
+
 import {
   __resetWorkspaceConfigReports,
   resolveEnvironmentForRun,
@@ -140,6 +148,22 @@ describe("resolveEnvironmentForRun", () => {
 })
 
 describe("reporting", () => {
+  /**
+   * The approval card lives in the workspace's Environments tab. The row used
+   * to link to `/settings`, which has no copy of it.
+   */
+  it("points the notification at the Environments tab, where the approval is", async () => {
+    __resetWorkspaceConfigReports()
+    notifyMock.mockClear()
+    const { report: _drop, ...withoutReport } = deps()
+    void _drop
+    await resolveEnvironmentForRun(base, withoutReport)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(notifyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ href: "/workspace?tab=environments", projectId: "p1" })
+    )
+  })
+
   it("reports a pending approval exactly once per content", async () => {
     const report = jest.fn()
     await resolveEnvironmentForRun(base, deps({ report }))

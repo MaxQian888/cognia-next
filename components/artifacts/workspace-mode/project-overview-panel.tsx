@@ -25,6 +25,7 @@ import { useClientLiveQuery } from "@/hooks/data"
 import { useGitActions } from "@/hooks/git/use-git-actions"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
 import { countWorkspaceConversations, type WorkspaceConversationCounts } from "@/lib/db/sessions"
+import { sourceControlHref } from "@/lib/global-search/providers/git"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { cn } from "@/lib/utils"
 import { useGitStore } from "@/stores/git/git-store"
@@ -73,6 +74,11 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
   const rootPaths = roots.map((root) => root.path)
   const primaryRoot = project ? primaryRootOf(project) : undefined
   const boundToProject = Boolean(rootDir && rootPaths.includes(rootDir))
+  // The repository these links open: the project root the store is bound to,
+  // else the primary one. Named in the URL rather than trusted to still be in
+  // the store on arrival, so a multi-root project lands on the root the user
+  // was looking at here, and a picked file survives the route rebinding it.
+  const sourceControlRoot = boundToProject ? rootDir : (primaryRoot?.path ?? null)
 
   // This panel is resource-scoped: a background/split conversation may belong
   // to a different Project than the globally active one. Bind Git to that
@@ -132,7 +138,7 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
                 size="sm"
                 variant="outline"
                 disabled={!available}
-                onClick={() => router.push("/source-control")}
+                onClick={() => router.push(sourceControlHref(sourceControlRoot))}
                 data-testid="project-open-source-control"
               >
                 <GitCompareArrowsIcon className="size-3.5" />
@@ -303,7 +309,7 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
                     selectedPath={selectedPath}
                     onSelectFile={(path, staged) => {
                       selectFile(path, staged)
-                      router.push("/source-control")
+                      router.push(sourceControlHref(sourceControlRoot, { path, staged }))
                     }}
                   />
                 </div>
@@ -321,7 +327,7 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
             variant="ghost"
             className="w-full justify-between"
             disabled={!available}
-            onClick={() => router.push("/source-control")}
+            onClick={() => router.push(sourceControlHref(sourceControlRoot))}
           >
             {t("actions.openFullSourceControl")}
             <ArrowRightIcon className="size-4" />

@@ -8,7 +8,6 @@ const actions = {
   adopt: jest.fn(),
   manage: jest.fn(),
   canOpenFolder: true,
-  adoptableCount: 0,
 }
 jest.mock("@/components/workspace/workspace-picker-list", () => ({
   // Rebuilt every render, exactly as the real hook does. That is what makes
@@ -46,6 +45,11 @@ describe("WorkspaceDialogMount", () => {
     rerender(<WorkspaceDialogMount request={request} />)
     rerender(<WorkspaceDialogMount request={request} />)
     expect(actions.manage).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens the manager on the workspace the request names", () => {
+    render(<WorkspaceDialogMount request={{ kind: "manage", seq: 1, workspaceId: "p-2" }} />)
+    expect(actions.manage).toHaveBeenCalledWith("p-2")
   })
 
   it("re-opens when the same editor is requested again", () => {

@@ -152,7 +152,7 @@ export function NewWorkspaceDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-      <DialogContent data-testid="new-workspace-dialog">
+      <DialogContent className="max-h-[85dvh] overflow-y-auto" data-testid="new-workspace-dialog">
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>

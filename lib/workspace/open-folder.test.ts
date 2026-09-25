@@ -19,6 +19,7 @@ jest.mock("@/lib/db/projects", () => ({
 jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({
     dispatchProjectCreate: jest.fn(async () => undefined),
+    dispatchProjectUpdate: jest.fn(async () => undefined),
     dispatchProjectSwitch: jest.fn(),
   }),
 }))
@@ -81,13 +82,31 @@ describe("openPathAsWorkspace", () => {
     expect(useProjectStore.getState().projects).toHaveLength(1)
   })
 
-  it("skips archived workspaces when deduping", () => {
+  it("restores an archived workspace instead of cloning it", () => {
     const first = openPathAsWorkspace("/Users/me/proj")
     useProjectStore.setState((s) => ({
       projects: s.projects.map((p) => ({ ...p, isArchived: true })),
+      activeProjectId: null,
     }))
     const again = openPathAsWorkspace("/Users/me/proj")
-    expect(again!.id).not.toBe(first!.id)
-    expect(useProjectStore.getState().projects).toHaveLength(2)
+    expect(again!.id).toBe(first!.id)
+    expect(again!.isArchived).toBe(false)
+    expect(useProjectStore.getState().projects).toHaveLength(1)
+    expect(useProjectStore.getState().activeProjectId).toBe(first!.id)
+  })
+
+  it("prefers a live workspace over an archived one for the same folder", () => {
+    const archived = openPathAsWorkspace("/Users/me/proj")!
+    useProjectStore.setState((s) => ({
+      projects: [
+        ...s.projects.map((p) => ({ ...p, isArchived: true })),
+        { ...s.projects[0], id: "live", isArchived: false },
+      ],
+    }))
+    const again = openPathAsWorkspace("/Users/me/proj")
+    expect(again!.id).toBe("live")
+    expect(useProjectStore.getState().projects.find((p) => p.id === archived.id)?.isArchived).toBe(
+      true
+    )
   })
 })

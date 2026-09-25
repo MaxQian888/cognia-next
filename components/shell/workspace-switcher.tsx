@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils"
 import { useProjectStore } from "@/stores/project/project-store"
 import {
-  useWorkspacePickerDialogs,
+  useWorkspacePickerRequests,
   WorkspacePickerList,
 } from "@/components/workspace/workspace-picker-list"
 
@@ -40,9 +40,9 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const [open, setOpen] = useState(false)
-  // Owned here rather than inside the popover content: closing the popover
-  // unmounts its children, and every footer action closes before it opens.
-  const { actions, element: dialogs } = useWorkspacePickerDialogs()
+  // Requests to the shell's one dialog host, not dialogs of its own: there
+  // are up to three switchers on the desktop shell at once.
+  const actions = useWorkspacePickerRequests()
 
   const active = useMemo(
     () => projects.find((p) => p.id === activeProjectId) ?? null,
@@ -111,8 +111,6 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
           <WorkspacePickerList actions={actions} onSwitched={() => setOpen(false)} />
         </PopoverContent>
       </Popover>
-
-      {dialogs}
     </>
   )
 }

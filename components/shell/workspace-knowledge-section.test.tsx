@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${Object.values(values).join(",")}` : key,
 }))
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({ projectChunks: {} }) }))
@@ -112,12 +113,31 @@ describe("WorkspaceKnowledgeSection", () => {
     expect(reindexFile).toHaveBeenCalledWith("ws1", expect.objectContaining({ id: "f1" }))
   })
 
-  it("remove button removes the file from the store", async () => {
+  /**
+   * Removing drops the file's text and every chunk indexed from it, and a
+   * pasted note has no copy anywhere else. One stray click must not be enough.
+   */
+  it("remove asks first, names the file, and removes only on confirm", async () => {
     liveQueryMock.mockReturnValue(new Map())
     const user = userEvent.setup()
     render(<WorkspaceKnowledgeSection project={project()} />)
     await user.click(screen.getByRole("button", { name: "removeFile" }))
+    expect(removeKnowledgeFile).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent("removeFileDescription:guide.md")
+    await user.click(screen.getByRole("button", { name: "confirmRemoveFile" }))
     expect(removeKnowledgeFile).toHaveBeenCalledWith("ws1", "f1")
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+  })
+
+  it("cancelling the remove confirmation keeps the file", async () => {
+    liveQueryMock.mockReturnValue(new Map())
+    const user = userEvent.setup()
+    render(<WorkspaceKnowledgeSection project={project()} />)
+    await user.click(screen.getByRole("button", { name: "removeFile" }))
+    await user.click(await screen.findByRole("button", { name: "cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(removeKnowledgeFile).not.toHaveBeenCalled()
   })
 
   it("reindex-all triggers a project reindex", async () => {
@@ -126,6 +146,29 @@ describe("WorkspaceKnowledgeSection", () => {
     render(<WorkspaceKnowledgeSection project={project()} />)
     await user.click(screen.getByRole("button", { name: "reindexAll" }))
     expect(reindexProject).toHaveBeenCalledTimes(1)
+  })
+
+  it("reindex-all spins and refuses a second click until the first run settles", async () => {
+    liveQueryMock.mockReturnValue(new Map())
+    let finish: () => void = () => {}
+    reindexProject.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const user = userEvent.setup()
+    render(<WorkspaceKnowledgeSection project={project()} />)
+    const button = screen.getByRole("button", { name: "reindexAll" })
+    await user.click(button)
+    expect(button).toBeDisabled()
+    expect(button.querySelector("svg")).toHaveClass("animate-spin")
+    await user.click(button)
+    expect(reindexProject).toHaveBeenCalledTimes(1)
+
+    await act(async () => finish())
+    expect(button).toBeEnabled()
+    expect(button.querySelector("svg")).not.toHaveClass("animate-spin")
   })
 
   it("adds a pasted note through the store", async () => {
@@ -194,7 +237,9 @@ describe("WorkspaceKnowledgeSection", () => {
 
     await user.upload(screen.getByTestId("knowledge-file-input"), file)
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("importFailed"))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("importFailed:guide.pdf,corrupt document")
+    )
     expect(addKnowledgeFile).not.toHaveBeenCalled()
   })
 

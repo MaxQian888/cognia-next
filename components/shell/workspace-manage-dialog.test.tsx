@@ -82,6 +82,20 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   }),
 }))
 
+// The removal guard asks which of the workspace's conversations are running.
+const listWorkspaceSessionsMock = jest.fn(
+  async (_projectId: string) => [] as { id: string; projectId?: string }[]
+)
+jest.mock("@/lib/db/sessions", () => ({
+  listWorkspaceSessions: (projectId: string) => listWorkspaceSessionsMock(projectId),
+}))
+const hasActiveSessionMock = jest.fn((_sessionId: string) => false)
+jest.mock("@/lib/execution/broker", () => ({
+  getExecutionBroker: () => ({
+    hasActiveSession: (sessionId: string) => hasActiveSessionMock(sessionId),
+  }),
+}))
+
 import { WorkspaceManageDialog } from "./workspace-manage-dialog"
 import { useProjectStore } from "@/stores/project/project-store"
 const originalDeleteProject = useProjectStore.getState().deleteProject
@@ -101,6 +115,8 @@ beforeEach(() => {
   openDialogMock.mockReset()
   toastSuccess.mockReset()
   toastError.mockReset()
+  listWorkspaceSessionsMock.mockReset().mockResolvedValue([])
+  hasActiveSessionMock.mockReset().mockReturnValue(false)
   act(() => {
     useProjectStore.setState({
       projects: [],
@@ -111,31 +127,87 @@ beforeEach(() => {
   })
 })
 
-function renderDialog() {
-  return render(<WorkspaceManageDialog open onOpenChange={jest.fn()} />)
+function renderDialog(props: { initialId?: string; onOpenChange?: (open: boolean) => void } = {}) {
+  return render(
+    <WorkspaceManageDialog
+      open
+      onOpenChange={props.onOpenChange ?? jest.fn()}
+      initialId={props.initialId}
+    />
+  )
+}
+
+/** Seed stored workspaces; returns their ids in order. */
+function seed(...names: string[]): string[] {
+  let ids: string[] = []
+  act(() => {
+    ids = names.map((name) => useProjectStore.getState().createProject({ name }).id)
+  })
+  return ids
+}
+
+/** Open the dialog on one stored workspace. */
+function renderEditing(name = "Stored") {
+  const [id] = seed(name)
+  const view = renderDialog({ initialId: id })
+  return { id, ...view }
+}
+
+function addManualRoot(path: string) {
+  const manual = screen.getByPlaceholderText("addRootManual")
+  fireEvent.change(manual, { target: { value: path } })
+  fireEvent.keyDown(manual, { key: "Enter" })
 }
 
 describe("WorkspaceManageDialog", () => {
-  it("creates a workspace via 'New' and opens it in the editor", () => {
+  it("opens a draft on 'New' and writes the row only on Create", () => {
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))
-    expect(useProjectStore.getState().projects).toHaveLength(1)
-    // Editor fields appear once a workspace is selected.
+    // A draft, not a row: abandoning it used to leave a rootless workspace behind.
+    expect(useProjectStore.getState().projects).toHaveLength(0)
     expect(screen.getByLabelText("nameLabel")).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-knowledge-after-create")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-delete")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("workspace-save"))
+
+    const [created] = useProjectStore.getState().projects
+    expect(created.name).toBe("defaultName")
+    expect(toastSuccess).toHaveBeenCalledWith("created")
+    // The editor stays on what it just created, now as a stored row.
+    expect(screen.getByTestId(`workspace-row-${created.id}`)).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-save")).toHaveTextContent("save")
+    expect(screen.queryByTestId("workspace-knowledge-after-create")).not.toBeInTheDocument()
   })
 
-  it("renames + adds roots and persists via updateProject on save", () => {
+  it("opens on the workspace it was asked for, else on the active one", () => {
+    const [a, b] = seed("Alpha", "Beta")
+    act(() => useProjectStore.getState().setActiveProject(a))
+
+    const { unmount } = renderDialog({ initialId: b })
+    expect(screen.getByLabelText("nameLabel")).toHaveValue("Beta")
+    unmount()
+
+    renderDialog()
+    expect(screen.getByLabelText("nameLabel")).toHaveValue("Alpha")
+  })
+
+  it("creates with name, description, tags, instructions and roots in one save", () => {
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))
 
     fireEvent.change(screen.getByLabelText("nameLabel"), { target: { value: "Backend" } })
-
-    // Add two roots via the manual input — the first becomes primary.
-    const manual = screen.getByPlaceholderText("addRootManual")
-    fireEvent.change(manual, { target: { value: "/srv/api" } })
-    fireEvent.keyDown(manual, { key: "Enter" })
-    fireEvent.change(manual, { target: { value: "/srv/shared" } })
-    fireEvent.keyDown(manual, { key: "Enter" })
+    fireEvent.change(screen.getByLabelText("descriptionLabel"), {
+      target: { value: "  Billing API  " },
+    })
+    const tagInput = screen.getByLabelText("tagsLabel")
+    fireEvent.change(tagInput, { target: { value: "api, billing" } })
+    fireEvent.keyDown(tagInput, { key: "Enter" })
+    fireEvent.change(screen.getByLabelText("instructionsLabel"), {
+      target: { value: "Use pnpm." },
+    })
+    addManualRoot("/srv/api")
+    addManualRoot("/srv/shared")
     expect(screen.getByText("/srv/api")).toBeInTheDocument()
     expect(screen.getByText("/srv/shared")).toBeInTheDocument()
 
@@ -143,10 +215,54 @@ describe("WorkspaceManageDialog", () => {
 
     const p = useProjectStore.getState().projects[0]
     expect(p.name).toBe("Backend")
+    expect(p.description).toBe("Billing API")
+    expect(p.tags).toEqual(["api", "billing"])
+    expect(p.customInstructions).toBe("Use pnpm.")
     expect(p.rootDir).toBe("/srv/api")
     expect(p.additionalDirs).toEqual(["/srv/shared"])
     expect(p.roots.map((r) => r.path)).toEqual(["/srv/api", "/srv/shared"])
-    expect(toastSuccess).toHaveBeenCalled()
+  })
+
+  it("edits a stored workspace's fields through updateProject", () => {
+    const { id } = renderEditing("Stored")
+    fireEvent.change(screen.getByLabelText("instructionsLabel"), {
+      target: { value: "Never touch prod." },
+    })
+    const tagInput = screen.getByLabelText("tagsLabel")
+    fireEvent.change(tagInput, { target: { value: "ops" } })
+    fireEvent.keyDown(tagInput, { key: "," })
+    fireEvent.click(screen.getByRole("button", { name: "removeTag" }))
+    fireEvent.change(tagInput, { target: { value: "infra" } })
+    fireEvent.blur(tagInput)
+
+    fireEvent.click(screen.getByTestId("workspace-save"))
+
+    const p = useProjectStore.getState().projects.find((q) => q.id === id)!
+    expect(p.customInstructions).toBe("Never touch prod.")
+    expect(p.tags).toEqual(["infra"])
+    expect(toastSuccess).toHaveBeenCalledWith("saved")
+  })
+
+  /**
+   * The send path refuses a prompt carrying an email or key, and these
+   * instructions ride every turn. Saved, one pasted address would break every
+   * conversation in the workspace far from its cause.
+   */
+  it("will not save instructions the send gate would refuse, and says why", () => {
+    const { id } = renderEditing("Stored")
+    const field = screen.getByLabelText("instructionsLabel")
+
+    fireEvent.change(field, { target: { value: "Mail ops@example.com on failure." } })
+    expect(screen.getByTestId("workspace-instructions-pii")).toHaveTextContent("instructionsPii")
+    expect(field).toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByTestId("workspace-save")).toBeDisabled()
+
+    fireEvent.change(field, { target: { value: "Page the on-call channel on failure." } })
+    expect(screen.queryByTestId("workspace-instructions-pii")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("workspace-save"))
+    expect(useProjectStore.getState().projects.find((p) => p.id === id)?.customInstructions).toBe(
+      "Page the on-call channel on failure."
+    )
   })
 
   it("picks roots via the native multi-select dialog on desktop", async () => {
@@ -155,17 +271,26 @@ describe("WorkspaceManageDialog", () => {
     fireEvent.click(screen.getByTestId("workspace-new"))
 
     await act(async () => {
-      fireEvent.click(screen.getByLabelText("pickDir"))
+      fireEvent.click(screen.getByTestId("workspace-manage-pick"))
     })
     expect(screen.getByText("/picked/a")).toBeInTheDocument()
     expect(screen.getByText("/picked/b")).toBeInTheDocument()
+  })
+
+  it("names the picker button by what it shows", () => {
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    // The accessible name used to be "Choose directory" on a button reading
+    // "Add folder", so a screen reader and the screen disagreed.
+    expect(screen.getByTestId("workspace-manage-pick")).toHaveAccessibleName("addRoot")
+    expect(screen.getByRole("textbox", { name: "addRootManual" })).toBeInTheDocument()
   })
 
   it("hides the native picker on web (manual path entry still works)", () => {
     isTauriMock.mockReturnValue(false)
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))
-    expect(screen.queryByLabelText("pickDir")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-manage-pick")).not.toBeInTheDocument()
     // Manual add still functions.
     const manual = screen.getByPlaceholderText("addRootManual")
     fireEvent.change(manual, { target: { value: "/web/dir" } })
@@ -209,12 +334,11 @@ describe("WorkspaceManageDialog", () => {
     await waitFor(() => expect(listWorkspaceDirMock).toHaveBeenCalledWith("/srv", undefined))
     // The picker asks the host for its roots before it lists anything, so the
     // first entry appears a tick after the listing call resolves. `find*`
-    // rather than `get*`, which raced that render.
-    fireEvent.click(await screen.findByRole("button", { name: "openFolder" }))
-    await waitFor(() =>
-      expect(listWorkspaceDirMock).toHaveBeenCalledWith("/srv/projects", undefined)
-    )
-    await waitFor(() => expect(screen.getByLabelText("pathLabel")).toHaveValue("/srv/projects"))
+    // rather than `get*`, which raced that render. A folder row is named by
+    // its own path segment and expands under the same root, the way the
+    // picker's own suite drives it.
+    fireEvent.click(await screen.findByRole("button", { name: "projects" }))
+    await waitFor(() => expect(listWorkspaceDirMock).toHaveBeenCalledWith("/srv", "projects"))
     fireEvent.click(screen.getByRole("button", { name: "chooseCurrent" }))
 
     await waitFor(() => expect(screen.getByText("/srv/projects")).toBeInTheDocument())
@@ -225,11 +349,8 @@ describe("WorkspaceManageDialog", () => {
   it("switches the primary root", () => {
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))
-    const manual = screen.getByPlaceholderText("addRootManual")
-    fireEvent.change(manual, { target: { value: "/a" } })
-    fireEvent.keyDown(manual, { key: "Enter" })
-    fireEvent.change(manual, { target: { value: "/b" } })
-    fireEvent.keyDown(manual, { key: "Enter" })
+    addManualRoot("/a")
+    addManualRoot("/b")
 
     // Make the second root primary, then save.
     const primaryButtons = screen.getAllByLabelText("setPrimary")
@@ -244,9 +365,7 @@ describe("WorkspaceManageDialog", () => {
   it("removes a root", () => {
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))
-    const manual = screen.getByPlaceholderText("addRootManual")
-    fireEvent.change(manual, { target: { value: "/to/remove" } })
-    fireEvent.keyDown(manual, { key: "Enter" })
+    addManualRoot("/to/remove")
     expect(screen.getByText("/to/remove")).toBeInTheDocument()
     fireEvent.click(screen.getByLabelText("removeRoot"))
     expect(screen.queryByText("/to/remove")).not.toBeInTheDocument()
@@ -255,9 +374,7 @@ describe("WorkspaceManageDialog", () => {
   it("trusts a root via the per-folder button", async () => {
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))
-    const manual = screen.getByPlaceholderText("addRootManual")
-    fireEvent.change(manual, { target: { value: "/trust/me" } })
-    fireEvent.keyDown(manual, { key: "Enter" })
+    addManualRoot("/trust/me")
     await act(async () => {
       fireEvent.click(screen.getByText("trustRoot"))
     })
@@ -273,9 +390,7 @@ describe("WorkspaceManageDialog", () => {
         return original(...args)
       },
     })
-    renderDialog()
-    fireEvent.click(screen.getByTestId("workspace-new"))
-    expect(useProjectStore.getState().projects).toHaveLength(1)
+    renderEditing()
     // First click arms the confirm, second removes.
     fireEvent.click(screen.getByTestId("workspace-delete"))
     await act(async () => fireEvent.click(screen.getByTestId("workspace-delete")))
@@ -294,14 +409,32 @@ describe("WorkspaceManageDialog", () => {
         return original(...args)
       },
     })
-    renderDialog()
-    fireEvent.click(screen.getByTestId("workspace-new"))
+    renderEditing()
     // The destructive option only appears once the confirm is armed.
     expect(screen.queryByTestId("workspace-delete-data")).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId("workspace-delete"))
     await act(async () => fireEvent.click(screen.getByTestId("workspace-delete-data")))
     expect(useProjectStore.getState().projects).toHaveLength(0)
     expect(removals.at(-1)?.[1]).toBe("delete-data")
+  })
+
+  it("refuses removal while one of the workspace's conversations is running", async () => {
+    const remove = jest.fn(async () => undefined)
+    useProjectStore.setState({ deleteProject: remove })
+    const { id } = renderEditing()
+    listWorkspaceSessionsMock.mockResolvedValue([
+      { id: "s-other" },
+      { id: "s-mine", projectId: id },
+    ])
+    hasActiveSessionMock.mockImplementation((sessionId) => sessionId === "s-mine")
+
+    fireEvent.click(screen.getByTestId("workspace-delete"))
+    await act(async () => fireEvent.click(screen.getByTestId("workspace-delete")))
+
+    expect(remove).not.toHaveBeenCalled()
+    expect(toastError).toHaveBeenCalledWith("deleteRunning")
+    // Still armed, so the reader can try again once the turn settles.
+    expect(screen.getByTestId("workspace-delete-confirm")).toBeInTheDocument()
   })
 
   it("waits for cleanup and retains the editor for retry after a failure", async () => {
@@ -313,10 +446,9 @@ describe("WorkspaceManageDialog", () => {
         })
     )
     useProjectStore.setState({ deleteProject: remove })
-    renderDialog()
-    fireEvent.click(screen.getByTestId("workspace-new"))
+    renderEditing()
     fireEvent.click(screen.getByTestId("workspace-delete"))
-    fireEvent.click(screen.getByTestId("workspace-delete-data"))
+    await act(async () => fireEvent.click(screen.getByTestId("workspace-delete-data")))
     expect(screen.getByTestId("workspace-delete")).toBeDisabled()
     expect(screen.getByTestId("workspace-delete-data")).toBeDisabled()
     expect(toastSuccess).not.toHaveBeenCalled()
@@ -328,21 +460,93 @@ describe("WorkspaceManageDialog", () => {
   })
 
   it("sets the active workspace from the editor", () => {
-    renderDialog()
-    fireEvent.click(screen.getByTestId("workspace-new"))
-    const id = useProjectStore.getState().projects[0].id
+    const { id } = renderEditing()
     fireEvent.click(screen.getByText("setActive"))
     expect(useProjectStore.getState().activeProjectId).toBe(id)
+  })
+
+  it("offers neither archive nor removal for Default, and says why", () => {
+    act(() => {
+      useProjectStore.setState({
+        projects: [
+          {
+            id: "project-default",
+            name: "Default",
+            roots: [],
+            knowledgeBase: [],
+            sessionIds: [],
+            sessionCount: 0,
+            messageCount: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            lastAccessedAt: new Date(),
+          },
+        ],
+      })
+    })
+    renderDialog({ initialId: "project-default" })
+
+    expect(screen.queryByTestId("workspace-delete")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-archive")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-default-locked")).toHaveTextContent("defaultLocked")
+  })
+})
+
+describe("WorkspaceManageDialog archive", () => {
+  it("archives into its own group and restores from there", () => {
+    const [keep, shelve] = seed("Keep", "Shelve")
+    act(() => useProjectStore.getState().setActiveProject(keep))
+    renderDialog({ initialId: shelve })
+
+    fireEvent.click(screen.getByTestId("workspace-archive"))
+
+    expect(useProjectStore.getState().projects.find((p) => p.id === shelve)?.isArchived).toBe(true)
+    expect(toastSuccess).toHaveBeenCalledWith("archived")
+    const group = screen.getByTestId("workspace-manage-archived")
+    expect(group).toContainElement(screen.getByTestId(`workspace-row-${shelve}`))
+    expect(screen.getByTestId("workspace-archived-note")).toBeInTheDocument()
+    // An archived workspace cannot be made the working one without restoring it.
+    expect(screen.queryByText("setActive")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("workspace-archive"))
+    expect(useProjectStore.getState().projects.find((p) => p.id === shelve)?.isArchived).toBe(false)
+    expect(screen.queryByTestId("workspace-manage-archived")).not.toBeInTheDocument()
+  })
+
+  it("hands the active pointer to the most recent other workspace first", () => {
+    const [older, newer, active] = seed("Older", "Newer", "Active")
+    act(() => {
+      useProjectStore.setState((state) => ({
+        projects: state.projects.map((p) => ({
+          ...p,
+          lastAccessedAt: new Date(p.id === older ? 1_000 : p.id === newer ? 2_000 : 3_000),
+        })),
+        activeProjectId: active,
+      }))
+    })
+    renderDialog()
+
+    fireEvent.click(screen.getByTestId("workspace-archive"))
+
+    expect(useProjectStore.getState().activeProjectId).toBe(newer)
+    expect(useProjectStore.getState().projects.find((p) => p.id === active)?.isArchived).toBe(true)
+    expect(toastSuccess).toHaveBeenCalledWith("archivedSwitched")
+  })
+
+  it("cannot archive the only workspace while it is active", () => {
+    const [only] = seed("Only")
+    act(() => useProjectStore.getState().setActiveProject(only))
+    renderDialog()
+    expect(screen.getByTestId("workspace-archive")).toBeDisabled()
   })
 })
 
 describe("WorkspaceManageDialog draft state", () => {
   it("keeps Save inert until the draft differs from what is stored", () => {
-    renderDialog()
-    fireEvent.click(screen.getByTestId("workspace-new"))
+    renderEditing()
 
-    // A freshly created workspace is already saved — offering Save here is an
-    // enabled button that does nothing.
+    // Nothing edited yet — offering Save here is an enabled button that does
+    // nothing.
     expect(screen.getByTestId("workspace-save")).toBeDisabled()
     expect(screen.queryByTestId("workspace-unsaved")).not.toBeInTheDocument()
 
@@ -356,15 +560,26 @@ describe("WorkspaceManageDialog draft state", () => {
   })
 
   /**
+   * Knowledge files and trust are written straight to the row from inside this
+   * editor, which replaces the row object. The form used to reload on that and
+   * threw away an edited name.
+   */
+  it("keeps an edit when the stored row changes underneath it", () => {
+    const { id } = renderEditing("Stored")
+    fireEvent.change(screen.getByLabelText("nameLabel"), { target: { value: "Edited" } })
+
+    act(() => useProjectStore.getState().updateProject(id, { pinned: true }))
+
+    expect(screen.getByLabelText("nameLabel")).toHaveValue("Edited")
+  })
+
+  /**
    * The draft used to be thrown away in silence: the selection effect reset the
    * form and nothing said an edited name had just been lost.
    */
   it("asks before a selection change throws an edited draft away", () => {
-    renderDialog()
-    fireEvent.click(screen.getByTestId("workspace-new"))
-    const first = useProjectStore.getState().projects[0].id
-    fireEvent.click(screen.getByTestId("workspace-new"))
-    const second = useProjectStore.getState().projects[1].id
+    const [first, second] = seed("First", "Second")
+    renderDialog({ initialId: second })
 
     fireEvent.change(screen.getByLabelText("nameLabel"), { target: { value: "Edited" } })
     fireEvent.click(screen.getByTestId(`workspace-row-${first}`))
@@ -374,20 +589,72 @@ describe("WorkspaceManageDialog draft state", () => {
     expect(screen.getByLabelText("nameLabel")).toHaveValue("Edited")
 
     fireEvent.click(screen.getByTestId("workspace-discard-confirm"))
-    expect(screen.getByLabelText("nameLabel")).toHaveValue("defaultName")
-    expect(useProjectStore.getState().projects.find((p) => p.id === second)?.name).toBe(
-      "defaultName"
-    )
+    expect(screen.getByLabelText("nameLabel")).toHaveValue("First")
+    expect(useProjectStore.getState().projects.find((p) => p.id === second)?.name).toBe("Second")
+  })
+
+  it("keeps the draft, and the selection, when the reader keeps editing", () => {
+    const [first, second] = seed("First", "Second")
+    renderDialog({ initialId: second })
+    fireEvent.change(screen.getByLabelText("nameLabel"), { target: { value: "Edited" } })
+    // The row being edited says so where the reader is about to click away.
+    expect(screen.getByTestId("workspace-row-dirty")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId(`workspace-row-${first}`))
+    fireEvent.click(screen.getByRole("button", { name: "discardCancel" }))
+
+    expect(screen.queryByTestId("workspace-discard-confirm")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("nameLabel")).toHaveValue("Edited")
+    expect(screen.getByTestId("workspace-row-dirty")).toBeInTheDocument()
+  })
+
+  it("drops the last tag on Backspace in an empty tag field", () => {
+    const [id] = seed("Tagged")
+    act(() => useProjectStore.getState().updateProject(id, { tags: ["api", "ops"] }))
+    renderDialog({ initialId: id })
+
+    fireEvent.keyDown(screen.getByLabelText("tagsLabel"), { key: "Backspace" })
+    fireEvent.click(screen.getByTestId("workspace-save"))
+
+    expect(useProjectStore.getState().projects.find((p) => p.id === id)?.tags).toEqual(["api"])
   })
 
   it("switches straight through when the draft is clean", () => {
-    renderDialog()
-    fireEvent.click(screen.getByTestId("workspace-new"))
-    const first = useProjectStore.getState().projects[0].id
-    fireEvent.click(screen.getByTestId("workspace-new"))
+    const [first, second] = seed("First", "Second")
+    renderDialog({ initialId: second })
 
     fireEvent.click(screen.getByTestId(`workspace-row-${first}`))
     expect(screen.queryByTestId("workspace-discard-confirm")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("nameLabel")).toHaveValue("First")
+  })
+
+  it("asks before closing over an edited draft, and closes on discard", () => {
+    const onOpenChange = jest.fn()
+    const [id] = seed("Stored")
+    const { rerender } = renderDialog({ initialId: id, onOpenChange })
+    fireEvent.change(screen.getByLabelText("nameLabel"), { target: { value: "Edited" } })
+
+    fireEvent.keyDown(screen.getByLabelText("nameLabel"), { key: "Escape" })
+    expect(onOpenChange).not.toHaveBeenCalled()
+    // Worded for closing, not for switching.
+    expect(screen.getByText("discardCloseDescription")).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-discard-confirm")).toHaveTextContent("discardCloseConfirm")
+    fireEvent.click(screen.getByTestId("workspace-discard-confirm"))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+
+    // Closed and reopened, it shows what is stored, not the discarded draft.
+    rerender(<WorkspaceManageDialog open={false} onOpenChange={onOpenChange} initialId={id} />)
+    rerender(<WorkspaceManageDialog open onOpenChange={onOpenChange} initialId={id} />)
+    expect(screen.getByLabelText("nameLabel")).toHaveValue("Stored")
+  })
+
+  it("closes straight through when nothing was edited", () => {
+    const onOpenChange = jest.fn()
+    const [id] = seed("Stored")
+    renderDialog({ initialId: id, onOpenChange })
+
+    fireEvent.keyDown(screen.getByLabelText("nameLabel"), { key: "Escape" })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })
 
@@ -397,8 +664,7 @@ describe("WorkspaceManageDialog delete confirmation", () => {
    * the only exit from a mis-clicked Delete was to pick one of them.
    */
   it("offers a way out of the armed state", () => {
-    renderDialog()
-    fireEvent.click(screen.getByTestId("workspace-new"))
+    renderEditing()
 
     fireEvent.click(screen.getByTestId("workspace-delete"))
     expect(screen.getByTestId("workspace-delete-confirm")).toBeInTheDocument()
@@ -411,29 +677,27 @@ describe("WorkspaceManageDialog delete confirmation", () => {
 })
 
 describe("WorkspaceManageDialog list filtering", () => {
-  function seed(names: string[]) {
-    act(() => {
-      for (const name of names) useProjectStore.getState().createProject({ name })
-    })
-  }
-
   it("withholds the filter field until the roster is worth filtering", () => {
-    seed(["Alpha", "Beta"])
+    seed("Alpha", "Beta")
     renderDialog()
     expect(screen.queryByTestId("workspace-manage-search")).not.toBeInTheDocument()
   })
 
-  it("filters the roster by name and says so when nothing matches", () => {
-    seed(["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"])
-    renderDialog()
-
+  it("filters the roster by name, and by tag, and says so when nothing matches", () => {
+    seed("Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta")
     const ids = Object.fromEntries(
       useProjectStore.getState().projects.map((p) => [p.name, p.id] as const)
     )
+    act(() => useProjectStore.getState().updateProject(ids.Gamma, { tags: ["billing"] }))
+    renderDialog()
+
     fireEvent.change(screen.getByTestId("workspace-manage-search"), { target: { value: "eta" } })
     expect(screen.getByTestId(`workspace-row-${ids.Beta}`)).toBeInTheDocument()
     expect(screen.getByTestId(`workspace-row-${ids.Zeta}`)).toBeInTheDocument()
     expect(screen.queryByTestId(`workspace-row-${ids.Alpha}`)).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId("workspace-manage-search"), { target: { value: "bill" } })
+    expect(screen.getByTestId(`workspace-row-${ids.Gamma}`)).toBeInTheDocument()
 
     fireEvent.change(screen.getByTestId("workspace-manage-search"), {
       target: { value: "nothing-matches" },

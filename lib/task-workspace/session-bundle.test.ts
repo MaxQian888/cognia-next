@@ -111,6 +111,9 @@ describe("a session-scoped managed workspace", () => {
     expect(binding.primaryAlias).toBe("/isolated/managed")
     expect(binding.primaryLogicalRootId).toBe("primary")
     expect(binding.additionalAliases).toEqual([])
+    // The mounted root is the device's managed directory, not a Project root,
+    // so that is the source path its alias is keyed by.
+    expect(binding.aliasesBySource).toEqual(new Map([["/managed/session-1", "/isolated/managed"]]))
     expect(binding.context.execution?.roots).toEqual([
       {
         logicalRootId: "primary",
@@ -172,6 +175,12 @@ describe("ensureSessionExecutionBundle", () => {
     })
     expect(binding.primaryAlias).toBe("/isolated/app")
     expect(binding.additionalAliases).toEqual(["/isolated/docs"])
+    expect(binding.aliasesBySource).toEqual(
+      new Map([
+        ["/repo", "/isolated/app"],
+        ["/docs", "/isolated/docs"],
+      ])
+    )
     expect(binding.context.execution).toMatchObject({
       bundleId: "bundle-1",
       roots: [
@@ -235,6 +244,33 @@ describe("ensureSessionExecutionBundle", () => {
     )
     expect(binding.primaryAlias).toBe("/isolated/docs")
     expect(binding.primaryLogicalRootId).toBe("docs")
+    // Keyed by the root id each lease names, not by the lease's role: the
+    // persisted bundle still calls "app" primary, and "/repo" is still
+    // checked out at "/isolated/app".
+    expect(binding.aliasesBySource).toEqual(
+      new Map([
+        ["/repo", "/isolated/app"],
+        ["/docs", "/isolated/docs"],
+      ])
+    )
+  })
+
+  it("keys each alias by the trimmed source path it checks out", async () => {
+    const binding = await ensureSessionExecutionBundle({
+      sessionId: "session-1",
+      context,
+      project: {
+        ...project,
+        roots: [
+          { id: "app", path: " /repo ", isPrimary: true },
+          { id: "docs", path: "/docs" },
+        ],
+      },
+    })
+
+    // `remapExactRoots` matches on the trimmed value, so the key must be
+    // trimmed too or a padded root's grant would never reach its alias.
+    expect([...binding.aliasesBySource.keys()]).toEqual(["/repo", "/docs"])
   })
 
   it("falls back to the primary root when the context's rootId went stale", async () => {

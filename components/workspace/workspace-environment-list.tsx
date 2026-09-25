@@ -349,9 +349,11 @@ export function WorkspaceEnvironmentList({
   const [removeTarget, setRemoveTarget] = useState<WorkspaceEnvironmentSummary | null>(null)
   const [forceRemove, setForceRemove] = useState(false)
   const [deleteBranch, setDeleteBranch] = useState(false)
+  const [reloading, setReloading] = useState(false)
 
   const load = useCallback(async () => {
     clearError()
+    setReloading(true)
     try {
       const environments = await listWorkspaceEnvironments(rootDir)
       setRows(environments)
@@ -360,8 +362,16 @@ export function WorkspaceEnvironmentList({
       setError(errorDetail(cause))
       setRows([])
       return null
+    } finally {
+      setReloading(false)
     }
   }, [clearError, rootDir, setError])
+  /**
+   * The refresh buttons spin and refuse while any read is out, the first one
+   * included. Clickable during a load, they stacked parallel reads whose
+   * answers landed in whatever order the host returned them.
+   */
+  const refreshBusy = reloading || rows === null
 
   useEffect(() => {
     let cancelled = false
@@ -638,7 +648,14 @@ export function WorkspaceEnvironmentList({
         <div className="flex min-w-0 items-center gap-1.5 pt-0.5 text-[11px] text-muted-foreground">
           <span
             className="shrink-0"
-            title={row.lastUsedAt ? new Date(row.lastUsedAt).toLocaleString() : undefined}
+            title={
+              row.lastUsedAt
+                ? format.dateTime(new Date(row.lastUsedAt), {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })
+                : undefined
+            }
           >
             {row.lastUsedAt ? format.relativeTime(new Date(row.lastUsedAt), now) : t("neverUsed")}
           </span>
@@ -1001,9 +1018,13 @@ export function WorkspaceEnvironmentList({
                   size="icon-sm"
                   variant="ghost"
                   onClick={() => void load()}
+                  disabled={refreshBusy}
                   aria-label={t("refresh")}
                 >
-                  <RefreshCwIcon aria-hidden className="size-4" />
+                  <RefreshCwIcon
+                    aria-hidden
+                    className={cn("size-4", refreshBusy && "animate-spin")}
+                  />
                 </Button>
               ) : null}
             </div>
@@ -1017,7 +1038,9 @@ export function WorkspaceEnvironmentList({
 
   const content =
     searched === null ? (
-      <div className="flex flex-col gap-2" aria-label={t("loading")}>
+      // `role="status"`: an `aria-label` on a plain div names nothing a screen
+      // reader announces, so the wait was silent.
+      <div className="flex flex-col gap-2" role="status" aria-busy="true" aria-label={t("loading")}>
         <Skeleton className="h-14 w-full" />
         <Skeleton className="h-14 w-full" />
         <Skeleton className="h-14 w-full" />
@@ -1358,9 +1381,13 @@ export function WorkspaceEnvironmentList({
                 variant="ghost"
                 className="-my-1 size-6"
                 onClick={() => void load()}
+                disabled={refreshBusy}
                 aria-label={t("refresh")}
               >
-                <RefreshCwIcon aria-hidden className="size-3.5" />
+                <RefreshCwIcon
+                  aria-hidden
+                  className={cn("size-3.5", refreshBusy && "animate-spin")}
+                />
               </Button>
             </span>
           }

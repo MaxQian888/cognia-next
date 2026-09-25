@@ -46,6 +46,12 @@ jest.mock("@/lib/task-workspace/client", () => ({
 jest.mock("@cognia/logging", () => ({
   loggers: { shell: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
 }))
+// The manage dialog asks which of a workspace's conversations are running
+// before it removes one. Neither is this suite's subject.
+jest.mock("@/lib/db/sessions", () => ({ listWorkspaceSessions: jest.fn(async () => []) }))
+jest.mock("@/lib/execution/broker", () => ({
+  getExecutionBroker: () => ({ hasActiveSession: () => false }),
+}))
 jest.mock("@/lib/db/projects", () => ({
   getAllProjects: jest.fn(async () => []),
   loadActiveProjectId: jest.fn(async () => null),
@@ -66,7 +72,17 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   }),
 }))
 
+// The switcher opens editors by REQUEST; the shell's `WorkspaceDialogHost`
+// owns them. The host lazy-loads its half with `next/dynamic`, which resolves
+// synchronously here so a click can be followed to the dialog it opens.
+jest.mock("next/dynamic", () => ({
+  __esModule: true,
+  default: () =>
+    jest.requireActual("@/components/workspace/workspace-dialog-mount").WorkspaceDialogMount,
+}))
+
 import { WorkspaceSwitcher } from "./workspace-switcher"
+import { WorkspaceDialogHost } from "@/components/workspace/workspace-dialog-host"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
@@ -109,6 +125,7 @@ function renderSwitcher() {
   return render(
     <TooltipProvider>
       <WorkspaceSwitcher />
+      <WorkspaceDialogHost />
     </TooltipProvider>
   )
 }
@@ -187,6 +204,25 @@ describe("WorkspaceSwitcher", () => {
     renderSwitcher()
     fireEvent.click(screen.getByTestId("workspace-switcher"))
     expect(screen.getByText("empty")).toBeInTheDocument()
+  })
+
+  it("mounts no dialogs of its own; the shell's host opens them on request", () => {
+    render(
+      <TooltipProvider>
+        <WorkspaceSwitcher />
+      </TooltipProvider>
+    )
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    fireEvent.click(screen.getByTestId("workspace-switcher-manage"))
+    expect(screen.queryByTestId("workspace-new")).not.toBeInTheDocument()
+    // Nor does it ask the host for adoptable folders until the list is open.
+    expect(listWorkspaceEnvironmentsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not ask the host for adoptable folders while the list is closed", async () => {
+    renderSwitcher()
+    await act(async () => {})
+    expect(listWorkspaceEnvironmentsMock).not.toHaveBeenCalled()
   })
 
   it("opens the manage dialog (browse) without creating anything", () => {
@@ -369,8 +405,8 @@ describe("WorkspaceSwitcher", () => {
       { environmentId: "e1", sourceRoot: "/repos/api" },
     ])
     renderSwitcher()
-    await act(async () => {})
     fireEvent.click(screen.getByTestId("workspace-switcher"))
+    await act(async () => {})
     const entry = screen.getByTestId("workspace-switcher-adopt")
     // The count is the affordance — the gap is invisible without a number.
     expect(entry).toHaveTextContent("1")
@@ -390,8 +426,8 @@ describe("WorkspaceSwitcher", () => {
       { environmentId: "e1", sourceRoot: "/repos/api" },
     ])
     renderSwitcher()
-    await act(async () => {})
     fireEvent.click(screen.getByTestId("workspace-switcher"))
+    await act(async () => {})
     expect(screen.queryByTestId("workspace-switcher-adopt")).not.toBeInTheDocument()
   })
 })

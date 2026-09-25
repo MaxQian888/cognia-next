@@ -50,6 +50,11 @@ jest.mock("@/lib/db/project-scope", () => ({
   detachProjectContents: (...args: unknown[]) => detachProjectContents(...args),
 }))
 
+const rebindWorkspaceSchedules = jest.fn()
+jest.mock("@/lib/workspace/rebind-workspace-schedules", () => ({
+  rebindWorkspaceSchedules: (...args: unknown[]) => rebindWorkspaceSchedules(...args),
+}))
+
 import { useProjectStore } from "./project-store"
 import type { Project } from "@/types"
 
@@ -89,6 +94,7 @@ beforeEach(() => {
   ensureDefaultProject.mockReset().mockResolvedValue(projectFixture())
   deleteProjectCascade.mockReset().mockResolvedValue(undefined)
   detachProjectContents.mockReset().mockResolvedValue("project-default")
+  rebindWorkspaceSchedules.mockReset().mockResolvedValue(0)
 })
 
 describe("load", () => {
@@ -314,6 +320,52 @@ describe("archive, knowledge file, and tag mutations", () => {
     expect(useProjectStore.getState().projects[0].tags).toEqual([])
   })
 
+  it("announces an in-place knowledge edit with the new file list", () => {
+    const project = useProjectStore.getState().createProject({ name: "Knowledge" })
+    useProjectStore.getState().addKnowledgeFile(project.id, {
+      name: "note",
+      type: "text",
+      content: "old",
+      size: 3,
+    } as never)
+    const fileId = useProjectStore.getState().projects[0].knowledgeBase[0].id
+    dispatchProjectUpdate.mockClear()
+
+    useProjectStore.getState().updateKnowledgeFile(project.id, fileId, "new")
+
+    expect(dispatchProjectUpdate).toHaveBeenCalledTimes(1)
+    const [row, updates] = dispatchProjectUpdate.mock.calls[0] as [
+      { id: string },
+      { knowledgeBase: Array<{ content: string }> },
+    ]
+    expect(row.id).toBe(project.id)
+    expect(updates.knowledgeBase[0].content).toBe("new")
+  })
+
+  it("announces archive and tag changes to plugins, but not no-ops", () => {
+    const project = useProjectStore.getState().createProject({ name: "Events" })
+    dispatchProjectUpdate.mockClear()
+
+    useProjectStore.getState().archiveProject(project.id)
+    useProjectStore.getState().unarchiveProject(project.id)
+    useProjectStore.getState().addTag(project.id, "alpha")
+    useProjectStore.getState().addTag(project.id, "alpha")
+    useProjectStore.getState().removeTag(project.id, "missing")
+    useProjectStore.getState().removeTag(project.id, "alpha")
+    useProjectStore.getState().archiveProject("unknown")
+
+    expect(dispatchProjectUpdate.mock.calls.map(([, updates]) => updates)).toEqual([
+      { isArchived: true },
+      { isArchived: false },
+      { tags: ["alpha"] },
+      { tags: [] },
+    ])
+    expect(dispatchProjectUpdate.mock.calls[0][0]).toMatchObject({
+      id: project.id,
+      isArchived: true,
+    })
+  })
+
   it("preserves non-target projects across scoped mutations", () => {
     const untouched = useProjectStore.getState().createProject({ name: "Untouched" })
     const target = useProjectStore.getState().createProject({ name: "Target" })
@@ -462,7 +514,10 @@ describe("project-store roots", () => {
       expect(deleteProjectRow).not.toHaveBeenCalled()
       expect(dispatchProjectDelete).not.toHaveBeenCalled()
       await useProjectStore.getState().deleteProject(project.id, "delete-data")
-      expect(useProjectStore.getState().projects).toEqual([])
+      // The retried removal succeeds and the active pointer lands on Default.
+      expect(useProjectStore.getState().projects.map((item) => item.id)).toEqual([
+        "project-default",
+      ])
       expect(deleteProjectRow).toHaveBeenCalledWith(project.id)
     })
 
@@ -488,6 +543,96 @@ describe("project-store roots", () => {
 
       expect(deleteProjectCascade).toHaveBeenCalledWith("p_gone")
       expect(detachProjectContents).not.toHaveBeenCalled()
+    })
+
+    it("refuses to remove Default, in either mode", async () => {
+      const fallback = projectFixture()
+      useProjectStore.setState({ projects: [fallback], activeProjectId: fallback.id, loaded: true })
+
+      await expect(useProjectStore.getState().deleteProject(fallback.id)).rejects.toThrow(
+        "Default workspace"
+      )
+      await expect(
+        useProjectStore.getState().deleteProject(fallback.id, "delete-data")
+      ).rejects.toThrow("Default workspace")
+
+      expect(deleteProjectCascade).not.toHaveBeenCalled()
+      expect(detachProjectContents).not.toHaveBeenCalled()
+      expect(useProjectStore.getState().projects).toEqual([fallback])
+    })
+
+    it("makes Default active when the active workspace is removed", async () => {
+      const project = projectFixture({ id: "p_active" })
+      const fallback = projectFixture()
+      ensureDefaultProject.mockResolvedValueOnce(fallback)
+      useProjectStore.setState({ projects: [project], activeProjectId: project.id, loaded: true })
+
+      await useProjectStore.getState().deleteProject(project.id)
+
+      const state = useProjectStore.getState()
+      expect(state.activeProjectId).toBe(fallback.id)
+      // The row the pointer now names is in the list the switcher renders.
+      expect(state.projects).toEqual([fallback])
+      expect(persistActiveProjectId).toHaveBeenCalledWith(fallback.id)
+      expect(dispatchProjectSwitch).toHaveBeenCalledWith(fallback.id, project.id)
+    })
+
+    it("clears the pointer, and says so, when no persistence has loaded", async () => {
+      // Without a loaded store there is no Default row to hand the pointer to.
+      const project = projectFixture({ id: "p_mem" })
+      useProjectStore.setState({ projects: [project], activeProjectId: project.id, loaded: false })
+
+      await useProjectStore.getState().deleteProject(project.id)
+
+      expect(useProjectStore.getState().activeProjectId).toBeNull()
+      expect(ensureDefaultProject).not.toHaveBeenCalled()
+      expect(rebindWorkspaceSchedules).not.toHaveBeenCalled()
+      expect(dispatchProjectSwitch).toHaveBeenCalledWith(null, project.id)
+    })
+
+    it("leaves the active pointer alone when another workspace is removed", async () => {
+      const fallback = projectFixture()
+      const project = projectFixture({ id: "p_other" })
+      useProjectStore.setState({
+        projects: [fallback, project],
+        activeProjectId: fallback.id,
+        loaded: true,
+      })
+
+      await useProjectStore.getState().deleteProject(project.id)
+
+      expect(useProjectStore.getState().activeProjectId).toBe(fallback.id)
+      expect(persistActiveProjectId).not.toHaveBeenCalled()
+      expect(dispatchProjectSwitch).not.toHaveBeenCalled()
+    })
+
+    it("sends schedules where the conversations went, or unbinds them with the data", async () => {
+      useProjectStore.setState({
+        projects: [projectFixture({ id: "p_a" }), projectFixture({ id: "p_b" })],
+        loaded: true,
+      })
+
+      await useProjectStore.getState().deleteProject("p_a")
+      await useProjectStore.getState().deleteProject("p_b", "delete-data")
+
+      expect(rebindWorkspaceSchedules.mock.calls).toEqual([
+        ["p_a", "project-default"],
+        ["p_b", null],
+      ])
+    })
+
+    it("keeps the workspace when its schedules cannot be rebound", async () => {
+      const project = projectFixture({ id: "p_sched" })
+      useProjectStore.setState({ projects: [project], activeProjectId: project.id, loaded: true })
+      rebindWorkspaceSchedules.mockRejectedValueOnce(new Error("scheduler db closed"))
+
+      await expect(useProjectStore.getState().deleteProject(project.id)).rejects.toThrow(
+        "scheduler db closed"
+      )
+
+      expect(deleteProjectRow).not.toHaveBeenCalled()
+      expect(useProjectStore.getState().projects).toEqual([project])
+      expect(useProjectStore.getState().activeProjectId).toBe(project.id)
     })
   })
 })

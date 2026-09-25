@@ -54,6 +54,21 @@ describe("WorkspaceActivity", () => {
     expect(await screen.findByTestId("workspace-activity-empty")).toBeInTheDocument()
   })
 
+  /**
+   * The live query answers `undefined` before its first read. That is "not
+   * read yet", and showing the empty sentence for it flashed "no shared work"
+   * on every workspace that has some.
+   */
+  it("shows a skeleton, not the empty sentence, until the mirror is read", async () => {
+    render(<WorkspaceActivity workspaceId={WORKSPACE} />)
+    expect(screen.getByTestId("workspace-activity-loading")).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByRole("status", { name: "loading" })).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-activity-empty")).not.toBeInTheDocument()
+
+    expect(await screen.findByTestId("workspace-activity-empty")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-activity-loading")).not.toBeInTheDocument()
+  })
+
   it("shows a plan's progress as counts, because the steps are not mirrored", async () => {
     await replaceCollabPlans(ORG, [
       {

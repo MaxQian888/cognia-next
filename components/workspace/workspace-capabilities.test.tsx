@@ -182,3 +182,37 @@ it("says so when a library is empty instead of rendering a blank section", () =>
 
   expect(screen.getByTestId("workspace-skill-empty")).toHaveTextContent("noSkills")
 })
+
+/**
+ * A live query answers `undefined` before its first read. Rendering that as an
+ * empty library told the reader "no skills are defined yet" on a machine full
+ * of them, and pointed them at Settings to add what they already have.
+ */
+it("shows a skeleton for a library that has not been read yet, not its empty sentence", () => {
+  listSkillsMock.mockReturnValue(undefined)
+  seed()
+  render(<WorkspaceCapabilities workspaceId="w1" />)
+
+  expect(screen.getByTestId("workspace-skill-loading")).toHaveAttribute("aria-busy", "true")
+  expect(screen.queryByTestId("workspace-skill-empty")).toBeNull()
+  // Each card waits on its own source: the servers already answered.
+  expect(screen.queryByTestId("workspace-mcpServer-loading")).toBeNull()
+  expect(screen.getByTestId("workspace-capability-mcpServer-mcp-1")).toBeInTheDocument()
+})
+
+it("draws each library as a console card inside its own pane container", () => {
+  seed()
+  render(<WorkspaceCapabilities workspaceId="w1" />)
+
+  const root = screen.getByTestId("workspace-capabilities")
+  // `ConsoleSection` sizes off `@container/workspace-pane`; with no such
+  // ancestor its container queries never fire.
+  expect(root).toHaveClass("@container/workspace-pane")
+  for (const id of ["skills", "mcp-servers", "templates"]) {
+    expect(root).toContainElement(screen.getByTestId(`workspace-section-capabilities-${id}`))
+  }
+  expect(screen.getByTestId("workspace-section-capabilities-skills")).toContainElement(
+    screen.getByTestId("workspace-capability-skill-sk-on")
+  )
+  expect(screen.getByTestId("workspace-capability-skill-sk-on")).toHaveClass("rounded-control")
+})

@@ -349,13 +349,19 @@ export function WorkspaceFolderPicker({ open, onOpenChange, initialPath, onSelec
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-xl">
-        <DialogHeader className="border-b px-6 py-5 pr-12">
+      {/*
+        Header and footer stay put, the body scrolls. With no height cap the
+        dialog ran past a short window, which put the Choose button, the one
+        control that finishes the task, out of reach.
+      */}
+      <DialogContent className="flex max-h-[90dvh] flex-col overflow-hidden p-0 sm:max-w-xl">
+        <DialogHeader className="shrink-0 border-b px-6 py-5 pr-12">
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 px-6">
+        {/* `py-1` so the path field's focus ring is not clipped by the scroller. */}
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-1">
           <form
             className="flex gap-2"
             onSubmit={(event) => {
@@ -380,7 +386,7 @@ export function WorkspaceFolderPicker({ open, onOpenChange, initialPath, onSelec
               <p className="text-xs font-medium text-muted-foreground">{t("rootsLabel")}</p>
               <ul className="flex flex-wrap gap-1.5">
                 {roots.map((root) => (
-                  <li key={root.path}>
+                  <li key={root.path} className="min-w-0 max-w-full">
                     <Button
                       type="button"
                       size="sm"
@@ -420,14 +426,14 @@ export function WorkspaceFolderPicker({ open, onOpenChange, initialPath, onSelec
             </span>
           </div>
 
-          <ScrollArea className="h-64 rounded-md border">
+          <ScrollArea className="h-64 max-h-[40dvh] rounded-md border">
             {rootLoading ? (
-              <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
+              <div className="flex h-64 max-h-[40dvh] items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Spinner className="size-4" />
                 {t("loading")}
               </div>
             ) : loadFailure ? (
-              <div className="flex h-64 flex-col items-center justify-center gap-1.5 px-6 text-center text-sm">
+              <div className="flex min-h-[min(16rem,40dvh)] flex-col items-center justify-center gap-1.5 px-6 py-3 text-center text-sm">
                 <span className="text-destructive">
                   {loadFailure.kind === "refused" ? t("loadRefused") : t("loadError")}
                 </span>
@@ -482,7 +488,7 @@ export function WorkspaceFolderPicker({ open, onOpenChange, initialPath, onSelec
           </ScrollArea>
         </div>
 
-        <DialogFooter className="border-t bg-muted/20 px-6 py-4">
+        <DialogFooter className="shrink-0 border-t bg-muted/20 px-6 py-4">
           <Button
             type="button"
             disabled={!chosenPath || busy || Boolean(loadFailure)}

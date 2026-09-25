@@ -8,7 +8,7 @@
 // second one-row table) — it reuses the already-hydrated settings store and
 // its companion-sync `updatedAt` bump.
 
-import { locateWorkspaceForPath } from "@/lib/workspace/locate-workspace"
+import { workspaceIdForPath } from "@/lib/workspace/locate-workspace"
 import type { Project } from "@/types"
 import { getDb } from "./schema"
 import { getSettings, saveSettings } from "./settings"
@@ -66,7 +66,7 @@ export async function findWorkspaceIdForPath(
 ): Promise<string | null> {
   if (!path?.trim()) return null
   try {
-    return locateWorkspaceForPath(path, await getAllProjects())?.project.id ?? null
+    return workspaceIdForPath(path, await getAllProjects())
   } catch {
     return null
   }

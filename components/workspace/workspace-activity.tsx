@@ -33,6 +33,7 @@ import { ActivityIcon, ExternalLinkIcon } from "lucide-react"
 import { CollabRefreshStaleBadge } from "@/components/issues/collab-refresh-stale-badge"
 import { ConsoleSection } from "@/components/surface/console-section"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { listCollabPlans } from "@/lib/db/collab-plan-mirror"
 import type { CollabPlanMirrorRow } from "@/lib/db/collab-plan-mirror-types"
 import { listCollabRuns } from "@/lib/db/collab-run-mirror"
@@ -49,26 +50,29 @@ import { PLAN_STATUS_VARIANT, RUN_STATUS_VARIANT } from "./workspace-activity-ca
 export function WorkspaceActivity({ workspaceId }: { workspaceId: string | null }) {
   const t = useTranslations("workspace.activity")
 
-  const plans =
-    useLiveQuery<CollabPlanMirrorRow[]>(
-      () =>
-        typeof window === "undefined" || !workspaceId
-          ? Promise.resolve([])
-          : listCollabPlans({ workspaceId }),
-      [workspaceId]
-    ) ?? []
+  const plansQuery = useLiveQuery<CollabPlanMirrorRow[]>(
+    () =>
+      typeof window === "undefined" || !workspaceId
+        ? Promise.resolve([])
+        : listCollabPlans({ workspaceId }),
+    [workspaceId]
+  )
 
-  const runs =
-    useLiveQuery<CollabRunMirrorRow[]>(
-      () =>
-        typeof window === "undefined" || !workspaceId
-          ? Promise.resolve([])
-          : listCollabRuns({ workspaceId }),
-      [workspaceId]
-    ) ?? []
+  const runsQuery = useLiveQuery<CollabRunMirrorRow[]>(
+    () =>
+      typeof window === "undefined" || !workspaceId
+        ? Promise.resolve([])
+        : listCollabRuns({ workspaceId }),
+    [workspaceId]
+  )
 
   if (!workspaceId) return null
 
+  // `undefined` is "not read yet", not "nothing there". Collapsing the two
+  // showed the empty sentence for a beat on every workspace that has work.
+  const loading = plansQuery === undefined || runsQuery === undefined
+  const plans = plansQuery ?? []
+  const runs = runsQuery ?? []
   const empty = plans.length === 0 && runs.length === 0
 
   return (
@@ -83,12 +87,30 @@ export function WorkspaceActivity({ workspaceId }: { workspaceId: string | null 
         // say when the mirror is behind.
         <span className="flex items-center gap-1.5">
           <CollabRefreshStaleBadge />
-          <span className="tabular-nums">{plans.length + runs.length}</span>
+          {loading ? null : <span className="tabular-nums">{plans.length + runs.length}</span>}
         </span>
       }
     >
       <div className="flex flex-col gap-2" data-testid="workspace-activity">
-        {empty ? (
+        {loading ? (
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label={t("loading")}
+            className="flex flex-col gap-2"
+            data-testid="workspace-activity-loading"
+          >
+            {[0, 1].map((index) => (
+              <div key={index} className="flex items-center justify-between gap-2">
+                <span className="flex min-w-0 flex-1 flex-col gap-1">
+                  <Skeleton className="h-3 w-2/3" />
+                  <Skeleton className="h-2.5 w-1/3" />
+                </span>
+                <Skeleton className="h-5 w-16 shrink-0 rounded-pill" />
+              </div>
+            ))}
+          </div>
+        ) : empty ? (
           // Not an error. A workspace nobody shares work in is the ordinary case,
           // and a failure-shaped message would make a working app look broken.
           <p

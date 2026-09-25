@@ -9,6 +9,10 @@ jest.mock("next-intl", () => ({
     t.has = () => true
     return t
   },
+  useFormatter: () => ({
+    dateTime: (date: Date, options?: Intl.DateTimeFormatOptions) =>
+      `date(${date.getTime()}/${options?.dateStyle})`,
+  }),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
@@ -85,6 +89,18 @@ describe("WorkspaceInvitations", () => {
     // Only a pending invitation can be pulled back.
     expect(screen.getByTestId("workspace-invitation-revoke-inv_1")).toBeInTheDocument()
     expect(screen.queryByTestId("workspace-invitation-revoke-inv_2")).not.toBeInTheDocument()
+  })
+
+  /**
+   * The expiry goes through the locale formatter, not the runtime's default,
+   * and never wraps: a date broken over two lines inside a one-line row reads
+   * as two facts.
+   */
+  it("formats the expiry in the reader's locale and keeps it on one line", async () => {
+    render(<WorkspaceInvitations admin={adminStub()} now={() => NOW} />)
+    fireEvent.click(screen.getByTestId("workspace-invitations-toggle"))
+    const expiry = await screen.findByText(`invitations.expires(date(${NOW + 86_400_000}/medium))`)
+    expect(expiry).toHaveClass("shrink-0", "whitespace-nowrap")
   })
 
   it("revokes with the roster reason and reloads", async () => {

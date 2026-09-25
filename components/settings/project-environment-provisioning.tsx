@@ -34,6 +34,7 @@ import { Surface } from "@/components/surface/surface"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { useProvisioningOffer } from "@/hooks/workspace/use-provisioning-offer"
 import {
+  activeCandidates,
   PNPM_GLOBAL_STORE_COMMAND,
   type ProvisioningCandidate,
 } from "@/lib/workspace/provisioning-inference"
@@ -87,7 +88,7 @@ export function ProjectEnvironmentProvisioning({ projectId, executionRoot, deps 
   const { copied, copy } = useCopy()
 
   const accepted = new Set(consent.accepted)
-  const active = candidates.filter((candidate) => accepted.has(candidate.id))
+  const active = activeCandidates(candidates, consent)
   // A declined proposal is not re-offered, but it must still be findable —
   // otherwise "I clicked no by mistake" has no way back.
   const declined = candidates.filter(

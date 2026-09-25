@@ -52,3 +52,26 @@ const DENIED_SET = new Set<string>(RESTRICTED_MODE_DENIED_TOOLS)
 export function isRestrictedTool(tool: string): boolean {
   return DENIED_SET.has(tool) || tool.startsWith(COMPUTER_USE_PREFIX)
 }
+
+/**
+ * Apply Restricted Mode to a tool allow/deny pair: every restricted tool is
+ * denied, and none stays on the allow list. Idempotent, so a caller that layers
+ * its own overrides on top of an already-restricted send (a scheduled run's
+ * payload, an ad-hoc skill) re-applies it afterwards and cannot widen it.
+ */
+export function withRestrictedModeDenials<
+  T extends { allowedTools?: string[]; disallowedTools?: string[] },
+>(options: T): T {
+  const denied = new Set(options.disallowedTools ?? [])
+  for (const tool of RESTRICTED_MODE_DENIED_TOOLS) denied.add(tool)
+  for (const tool of options.allowedTools ?? []) {
+    if (isRestrictedTool(tool)) denied.add(tool)
+  }
+  return {
+    ...options,
+    disallowedTools: [...denied],
+    ...(options.allowedTools
+      ? { allowedTools: options.allowedTools.filter((tool) => !denied.has(tool)) }
+      : {}),
+  }
+}

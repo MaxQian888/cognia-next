@@ -93,6 +93,9 @@ jest.mock("@/components/source-control/changes-view", () => ({
       <button type="button" onClick={() => onSelectFile("components/panel.tsx", false)}>
         open-change
       </button>
+      <button type="button" onClick={() => onSelectFile("components/staged.tsx", true)}>
+        open-staged-change
+      </button>
     </div>
   ),
 }))
@@ -234,16 +237,35 @@ describe("ProjectOverviewPanel", () => {
     expect(onOpenWorkspace).toHaveBeenCalledTimes(1)
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(sync).toHaveBeenCalledTimes(1)
-    expect(push).toHaveBeenCalledWith("/source-control")
+    // Names the project root it is showing, rather than trusting the store to
+    // still be bound to it when the route mounts.
+    expect(push).toHaveBeenCalledWith("/source-control?root=%2Frepo%2Fb")
   })
 
-  it("opens a selected change in the full diff surface", () => {
+  it("opens a selected change in the full diff surface, carrying the file", () => {
     render(<ProjectOverviewPanel projectId="project-b" onOpenWorkspace={onOpenWorkspace} />)
 
     fireEvent.click(screen.getByRole("button", { name: "open-change" }))
 
     expect(selectFile).toHaveBeenCalledWith("components/panel.tsx", false)
-    expect(push).toHaveBeenCalledWith("/source-control")
+    expect(push).toHaveBeenCalledWith(
+      "/source-control?root=%2Frepo%2Fb&path=components%2Fpanel.tsx"
+    )
+  })
+
+  it("carries the staged side of a staged change", () => {
+    render(<ProjectOverviewPanel projectId="project-b" onOpenWorkspace={onOpenWorkspace} />)
+    fireEvent.click(screen.getByRole("button", { name: "open-staged-change" }))
+    expect(push).toHaveBeenCalledWith(
+      "/source-control?root=%2Frepo%2Fb&path=components%2Fstaged.tsx&staged=1"
+    )
+  })
+
+  it("links to the bound secondary root of a multi-root project, not the primary", () => {
+    gitState.rootDir = "/repo/shared"
+    render(<ProjectOverviewPanel projectId="project-b" onOpenWorkspace={onOpenWorkspace} />)
+    fireEvent.click(screen.getByTestId("project-open-source-control"))
+    expect(push).toHaveBeenCalledWith("/source-control?root=%2Frepo%2Fshared")
   })
 
   it("rebinds Source Control when the current repo belongs to another project", async () => {

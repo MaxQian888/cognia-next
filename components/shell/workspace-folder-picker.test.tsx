@@ -191,3 +191,37 @@ it("disables the parent button at a declared root rather than hiding it", async 
   await waitFor(() => expect(up).toBeDisabled())
   expect(up).toHaveAttribute("title", "upConfined")
 })
+
+it("keeps the Choose button outside the scrolling body so a short window cannot hide it", async () => {
+  // With no height cap the dialog ran past a short window and took the footer,
+  // the one control that finishes the task, with it. jsdom does no layout, so
+  // this pins the structure that makes that impossible: a capped column whose
+  // body scrolls and whose footer is not part of that scroller.
+  listWorkspaceRootsMock.mockResolvedValue([HEADLESS_ROOT])
+  listWorkspaceDirMock.mockResolvedValue([dir("projects", "/srv/workspaces/projects")])
+
+  render(<WorkspaceFolderPicker open onOpenChange={jest.fn()} onSelect={jest.fn()} />)
+  await screen.findByText("projects")
+
+  const dialog = screen.getByRole("dialog")
+  expect(dialog).toHaveClass("flex", "max-h-[90dvh]", "flex-col")
+  const body = screen.getByLabelText("pathLabel").closest(".overflow-y-auto")
+  expect(body).not.toBeNull()
+  expect(body).toHaveClass("min-h-0", "flex-1")
+  expect(body).not.toContainElement(screen.getByRole("button", { name: "chooseCurrent" }))
+})
+
+it("lets a long root path shrink its chip so the path truncates instead of overflowing", async () => {
+  const longRoot = {
+    path: "/srv/a/very/deeply/nested/workspaces/root/that/does/not/fit/on/one/line",
+    source: "headless-workspaces-dir" as const,
+  }
+  listWorkspaceRootsMock.mockResolvedValue([longRoot])
+
+  render(<WorkspaceFolderPicker open onOpenChange={jest.fn()} onSelect={jest.fn()} />)
+
+  const chip = await screen.findByRole("button", { name: `openRootAction:${longRoot.path}` })
+  // A flex item's default `min-width: auto` is its content, which is what let
+  // the path push the chip wider than the dialog.
+  expect(chip.closest("li")).toHaveClass("min-w-0", "max-w-full")
+})

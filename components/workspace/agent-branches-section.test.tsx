@@ -1,9 +1,10 @@
 /** @jest-environment jsdom */
 
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${Object.values(values).join(",")}` : key,
 }))
 
 const gitBranches = jest.fn()
@@ -89,5 +90,85 @@ describe("AgentBranchesSection", () => {
       expect(button).toBeDisabled()
       expect(button).toHaveAttribute("title", "Pair a host first")
     }
+  })
+
+  /**
+   * Before the first read lands the list is unknown, not empty. Saying "no
+   * agent branches" for a beat on a repository that has some is a small lie
+   * the reader has no way to tell from the real answer.
+   */
+  it("shows a skeleton until the first read lands, then the answer", async () => {
+    let answer: (branches: { name: string }[]) => void = () => {}
+    gitBranches.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve
+        })
+    )
+    render(<AgentBranchesSection rootDir="/repo" />)
+    expect(screen.getByTestId("workspace-agent-branches-loading")).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
+    expect(screen.queryByTestId("workspace-agent-branches-empty")).not.toBeInTheDocument()
+
+    await act(async () => answer([{ name: "dev" }]))
+    expect(screen.getByTestId("workspace-agent-branches-empty")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-agent-branches-loading")).not.toBeInTheDocument()
+  })
+
+  it("spins and refuses the refresh button while a read is out", async () => {
+    render(<AgentBranchesSection rootDir="/repo" />)
+    await screen.findByTestId("workspace-agent-branch-agent/run-1/ada/task-9")
+    const refresh = screen.getByTestId("workspace-agent-branches-refresh")
+    expect(refresh).toBeEnabled()
+    expect(refresh.querySelector("svg")).not.toHaveClass("animate-spin")
+
+    let answer: (branches: { name: string }[]) => void = () => {}
+    gitBranches.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve
+        })
+    )
+    fireEvent.click(refresh)
+    expect(refresh).toBeDisabled()
+    expect(refresh.querySelector("svg")).toHaveClass("animate-spin")
+    fireEvent.click(refresh)
+    expect(gitBranches).toHaveBeenCalledTimes(2)
+
+    await act(async () => answer([]))
+    expect(refresh).toBeEnabled()
+    expect(refresh.querySelector("svg")).not.toHaveClass("animate-spin")
+  })
+
+  /**
+   * Delete is a forced `-D`, and after a run has settled the branch is the only
+   * trace of what it did. It asks first, and names the branch it will remove.
+   */
+  it("deletes a branch only after a confirmation that names it", async () => {
+    gitDeleteBranch.mockResolvedValue(undefined)
+    render(<AgentBranchesSection rootDir="/repo" />)
+    const name = "agent/run-1/ada/task-9"
+    fireEvent.click(await screen.findByTestId(`workspace-agent-branch-delete-${name}`))
+    expect(gitDeleteBranch).not.toHaveBeenCalled()
+
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent(`deleteDescription:${name}`)
+    fireEvent.click(screen.getByTestId("workspace-agent-branch-delete-confirm"))
+
+    await waitFor(() => expect(gitDeleteBranch).toHaveBeenCalledWith("/repo", name, true))
+    // The list re-reads after the delete, so the row goes away on the host's word.
+    await waitFor(() => expect(gitBranches).toHaveBeenCalledTimes(2))
+  })
+
+  it("leaves the branch alone when the confirmation is cancelled", async () => {
+    render(<AgentBranchesSection rootDir="/repo" />)
+    fireEvent.click(
+      await screen.findByTestId("workspace-agent-branch-delete-agent/run-2/cleo/task-3")
+    )
+    fireEvent.click(await screen.findByRole("button", { name: "cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(gitDeleteBranch).not.toHaveBeenCalled()
   })
 })

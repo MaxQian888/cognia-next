@@ -19,6 +19,12 @@
  * and every footer action here closes the container before opening a dialog.
  * If the list owned the dialogs, tapping "New workspace" would unmount the
  * thing it had just asked to open, and nothing would appear.
+ *
+ * A switcher does NOT call {@link useWorkspacePickerDialogs} itself: it calls
+ * {@link useWorkspacePickerRequests}, whose actions ask the shell's one
+ * always-mounted `WorkspaceDialogHost` to open the editor. Each switcher used
+ * to mount its own copy of all four dialogs, and three of them sit on the
+ * desktop shell at once.
  */
 
 import { useEffect, useMemo, useState, type ReactElement } from "react"
@@ -52,6 +58,7 @@ import { WorkspaceFolderPicker } from "@/components/shell/workspace-folder-picke
 import { WorkspaceManageDialog } from "@/components/shell/workspace-manage-dialog"
 import { NewWorkspaceDialog } from "@/components/workspace/new-workspace-dialog"
 import { AdoptWorkspacesDialog } from "@/components/workspace/adopt-workspaces-dialog"
+import { requestWorkspaceDialog } from "@/lib/workspace/workspace-dialog-request"
 import type { Project } from "@/types"
 
 // Above this count the flat list stops being scannable, so the search field and
@@ -61,15 +68,47 @@ const LARGE_THRESHOLD = 8
 // How many most-recently-used workspaces to pin above the full list.
 const RECENT_COUNT = 3
 
-/** What the footer can do, wired by {@link useWorkspacePickerDialogs}. */
+/**
+ * What the footer can do. {@link useWorkspacePickerRequests} for a switcher,
+ * {@link useWorkspacePickerDialogs} for the one host that owns the dialogs.
+ */
 export interface WorkspacePickerActions {
   openFolder: () => void
   newWorkspace: () => void
   adopt: () => void
-  manage: () => void
+  /** Opens the manager on `workspaceId`, or on the active workspace. */
+  manage: (workspaceId?: string) => void
   /** False on an unpaired browser: no native dialog and no host to walk. */
   canOpenFolder: boolean
-  adoptableCount: number
+}
+
+/**
+ * The desktop has a native dialog. A paired phone or browser has no local
+ * filesystem worth opening but CAN walk the host's, which is the machine the
+ * agent will actually run on. Only an unpaired browser has neither.
+ */
+function useCanOpenFolder(): boolean {
+  const gate = useWorkspaceCommandGate()
+  return isTauri() || gate("fs_list_workspace_dir").available
+}
+
+/**
+ * Footer actions for a switcher: each one asks `WorkspaceDialogHost` to open
+ * the editor, so no switcher mounts dialogs of its own.
+ */
+export function useWorkspacePickerRequests(): WorkspacePickerActions {
+  const canOpenFolder = useCanOpenFolder()
+  return useMemo(
+    () => ({
+      openFolder: () => requestWorkspaceDialog("openFolder"),
+      newWorkspace: () => requestWorkspaceDialog("newWorkspace"),
+      adopt: () => requestWorkspaceDialog("adopt"),
+      manage: (workspaceId?: string) =>
+        requestWorkspaceDialog("manage", workspaceId ? { workspaceId } : {}),
+      canOpenFolder,
+    }),
+    [canOpenFolder]
+  )
 }
 
 export interface WorkspacePickerSelection {
@@ -97,28 +136,19 @@ type PickerRow = Pick<Project, "id" | "name"> &
   Partial<Pick<Project, "roots" | "pinned" | "lastAccessedAt">>
 
 /**
- * Everything the footer opens, owned above the Popover or Drawer.
- *
- * Also resolves the two facts the footer needs but the list should not compute
- * twice: whether a folder can be opened at all on this host, and how many
- * directories are sitting there unadopted.
+ * Everything the footer opens, owned above the Popover or Drawer. Mounted once
+ * per shell, by `WorkspaceDialogMount`.
  */
 export function useWorkspacePickerDialogs(): {
   actions: WorkspacePickerActions
   element: ReactElement
 } {
   const [manageOpen, setManageOpen] = useState(false)
+  const [manageTarget, setManageTarget] = useState<string | undefined>(undefined)
   const [createOpen, setCreateOpen] = useState(false)
   const [adoptOpen, setAdoptOpen] = useState(false)
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
-  // Collected here rather than inside the dialog so the entry can carry the
-  // count: the gap is invisible until something says how big it is.
-  const { candidates: adoptable } = useAdoptionCandidates()
-  const gate = useWorkspaceCommandGate()
-  // The desktop has a native dialog. A paired phone or browser has no local
-  // filesystem worth opening but CAN walk the host's, which is the machine the
-  // agent will actually run on. Only an unpaired browser has neither.
-  const canOpenFolder = isTauri() || gate("fs_list_workspace_dir").available
+  const canOpenFolder = useCanOpenFolder()
 
   const actions: WorkspacePickerActions = {
     openFolder: () => {
@@ -130,9 +160,11 @@ export function useWorkspacePickerDialogs(): {
     },
     newWorkspace: () => setCreateOpen(true),
     adopt: () => setAdoptOpen(true),
-    manage: () => setManageOpen(true),
+    manage: (workspaceId) => {
+      setManageTarget(workspaceId)
+      setManageOpen(true)
+    },
     canOpenFolder,
-    adoptableCount: adoptable.length,
   }
 
   const element = (
@@ -144,11 +176,31 @@ export function useWorkspacePickerDialogs(): {
       />
       <NewWorkspaceDialog open={createOpen} onOpenChange={setCreateOpen} />
       <AdoptWorkspacesDialog open={adoptOpen} onOpenChange={setAdoptOpen} />
-      <WorkspaceManageDialog open={manageOpen} onOpenChange={setManageOpen} />
+      <WorkspaceManageDialog
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        initialId={manageTarget}
+      />
     </>
   )
 
   return { actions, element }
+}
+
+/**
+ * "Detected folders (N)". Its own component so the host call behind the count
+ * runs while the list is on screen, not for as long as a switcher is mounted.
+ * Only shown when there is something to adopt: a permanent "(0)" row would
+ * train the user to ignore the one time it matters. The count is the whole
+ * affordance.
+ */
+function AdoptEntry({
+  render,
+}: {
+  render: (count: number) => ReactElement | null
+}): ReactElement | null {
+  const { candidates } = useAdoptionCandidates()
+  return candidates.length > 0 ? render(candidates.length) : null
 }
 
 export function WorkspacePickerList({
@@ -420,26 +472,24 @@ export function WorkspacePickerList({
             t("newWorkspace"),
             () => runAction(actions.newWorkspace)
           )}
-          {/*
-        Only when there is something to adopt: a permanent "Detected folders
-        (0)" row would train the user to ignore the one time it matters. The
-        count is the whole affordance.
-      */}
-          {actions.adoptableCount > 0 &&
-            footerButton(
-              "workspace-switcher-adopt",
-              <FolderSearchIcon className="size-4 shrink-0 text-muted-foreground" />,
-              t("adoptEntry"),
-              () => runAction(actions.adopt),
-              <Badge variant="secondary" className="shrink-0 font-normal tabular-nums">
-                {actions.adoptableCount}
-              </Badge>
-            )}
+          <AdoptEntry
+            render={(count) =>
+              footerButton(
+                "workspace-switcher-adopt",
+                <FolderSearchIcon className="size-4 shrink-0 text-muted-foreground" />,
+                t("adoptEntry"),
+                () => runAction(actions.adopt),
+                <Badge variant="secondary" className="shrink-0 font-normal tabular-nums">
+                  {count}
+                </Badge>
+              )
+            }
+          />
           {footerButton(
             "workspace-switcher-manage",
             <SlidersHorizontalIcon className="size-4 shrink-0 text-muted-foreground" />,
             t("manage"),
-            () => runAction(actions.manage)
+            () => runAction(() => actions.manage())
           )}
         </>
       )}

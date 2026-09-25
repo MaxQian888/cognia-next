@@ -9,7 +9,6 @@ const ACTIONS: WorkspacePickerActions = {
   adopt: () => {},
   manage: () => {},
   canOpenFolder: true,
-  adoptableCount: 2,
 }
 
 function seed(count: number) {

@@ -152,18 +152,6 @@ export function applyCapabilityOverlay<T>(
   })
 }
 
-/** The ids live in this workspace — the "enabled set" as a projection. */
-export function resolveEnabledCapabilityIds<T>(
-  rows: readonly T[],
-  kind: WorkspaceCapabilityKind,
-  overlay: WorkspaceCapabilityOverlay | null | undefined,
-  options: { idOf: (row: T) => string; enabledOf: (row: T) => boolean }
-): string[] {
-  return applyCapabilityOverlay(rows, kind, overlay, { ...options, alreadyFiltered: false }).map(
-    options.idOf
-  )
-}
-
 /**
  * A new overlay with one capability set to `state`.
  *

@@ -30,8 +30,8 @@ jest.mock("@/components/shell/workspace-folder-picker", () => ({
     p.open ? <div data-testid="remote-folder-picker" /> : null,
 }))
 jest.mock("@/components/shell/workspace-manage-dialog", () => ({
-  WorkspaceManageDialog: (p: { open: boolean }) =>
-    p.open ? <div data-testid="manage-dialog" /> : null,
+  WorkspaceManageDialog: (p: { open: boolean; initialId?: string }) =>
+    p.open ? <div data-testid="manage-dialog" data-initial-id={p.initialId ?? ""} /> : null,
 }))
 jest.mock("@/components/workspace/new-workspace-dialog", () => ({
   NewWorkspaceDialog: (p: { open: boolean }) => (p.open ? <div data-testid="new-dialog" /> : null),
@@ -54,7 +54,13 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   }),
 }))
 
-import { useWorkspacePickerDialogs, WorkspacePickerList } from "./workspace-picker-list"
+import { renderHook } from "@testing-library/react"
+import { onWorkspaceDialogRequest } from "@/lib/workspace/workspace-dialog-request"
+import {
+  useWorkspacePickerDialogs,
+  useWorkspacePickerRequests,
+  WorkspacePickerList,
+} from "./workspace-picker-list"
 import { useProjectStore } from "@/stores/project/project-store"
 
 /** Mounts the list exactly the way both real callers do. */
@@ -224,5 +230,66 @@ describe("WorkspacePickerList", () => {
     render(<Harness />)
 
     expect(screen.queryByTestId("workspace-switcher-open-folder")).not.toBeInTheDocument()
+  })
+})
+
+describe("useWorkspacePickerRequests", () => {
+  /**
+   * A switcher's actions are requests to the shell's one dialog host. Each
+   * switcher used to mount all four dialogs itself, three of them at once on
+   * the desktop.
+   */
+  it("asks the shell's host to open each editor, naming the workspace to manage", () => {
+    const seen: unknown[] = []
+    const stop = onWorkspaceDialogRequest((detail) => seen.push(detail))
+    const { result } = renderHook(() => useWorkspacePickerRequests())
+
+    result.current.newWorkspace()
+    result.current.adopt()
+    result.current.openFolder()
+    result.current.manage()
+    result.current.manage("p3")
+    stop()
+
+    expect(seen).toEqual([
+      { kind: "newWorkspace" },
+      { kind: "adopt" },
+      { kind: "openFolder" },
+      { kind: "manage" },
+      { kind: "manage", workspaceId: "p3" },
+    ])
+    expect(screen.queryByTestId("manage-dialog")).not.toBeInTheDocument()
+  })
+
+  it("says a folder cannot be opened only when neither route exists", () => {
+    isTauriMock.mockReturnValue(false)
+    gateMock.mockReturnValue({ available: false, reason: "unsupported" })
+    expect(renderHook(() => useWorkspacePickerRequests()).result.current.canOpenFolder).toBe(false)
+  })
+})
+
+describe("useWorkspacePickerDialogs", () => {
+  function ManageHarness({ target }: { target?: string }) {
+    const { actions, element } = useWorkspacePickerDialogs()
+    return (
+      <>
+        <button type="button" onClick={() => actions.manage(target)}>
+          manage
+        </button>
+        {element}
+      </>
+    )
+  }
+
+  it("opens the manager on the workspace it was asked for", () => {
+    render(<ManageHarness target="p1" />)
+    fireEvent.click(screen.getByRole("button", { name: "manage" }))
+    expect(screen.getByTestId("manage-dialog")).toHaveAttribute("data-initial-id", "p1")
+  })
+
+  it("leaves the choice to the manager when no workspace is named", () => {
+    render(<ManageHarness />)
+    fireEvent.click(screen.getByRole("button", { name: "manage" }))
+    expect(screen.getByTestId("manage-dialog")).toHaveAttribute("data-initial-id", "")
   })
 })

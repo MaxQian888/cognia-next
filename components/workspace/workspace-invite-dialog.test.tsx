@@ -4,10 +4,15 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => {
-    const t = (key: string) => key
+    const t = (key: string, values?: Record<string, unknown>) =>
+      values ? `${key}(${Object.values(values).join(",")})` : key
     t.has = () => true
     return t
   },
+  useFormatter: () => ({
+    dateTime: (date: Date, options?: Intl.DateTimeFormatOptions) =>
+      `date(${date.getTime()}/${options?.dateStyle}/${options?.timeStyle})`,
+  }),
 }))
 
 import { WorkspaceInviteDialog, type WorkspaceInviteDialogProps } from "./workspace-invite-dialog"
@@ -60,6 +65,19 @@ describe("WorkspaceInviteDialog", () => {
       reason: "onboarding",
       expiresInDays: 7,
     })
+    // The expiry goes through the locale formatter, not the runtime default.
+    expect(screen.getByTestId("workspace-invite-issued")).toHaveTextContent(
+      `expires(date(${Date.UTC(2030, 0, 1)}/medium/short))`
+    )
+  })
+
+  /** A long form on a short window scrolls inside the dialog instead of off-screen. */
+  it("caps the dialog's height and scrolls its content", () => {
+    render(<WorkspaceInviteDialog open onOpenChange={() => {}} admin={adminStub()} />)
+    expect(screen.getByTestId("workspace-invite-dialog")).toHaveClass(
+      "max-h-[85dvh]",
+      "overflow-y-auto"
+    )
   })
 
   it("offers the org scope only to somebody who may manage the org", () => {

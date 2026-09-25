@@ -6,7 +6,6 @@ import {
   countCapabilityOverrides,
   pruneCapabilityOverlay,
   resolveCapabilityEnabled,
-  resolveEnabledCapabilityIds,
   withCapabilityState,
   type WorkspaceCapabilityOverlay,
 } from "./capability-overlay"
@@ -128,18 +127,15 @@ describe("applyCapabilityOverlay", () => {
   })
 })
 
-describe("resolveEnabledCapabilityIds", () => {
+describe("applyCapabilityOverlay over unfiltered rows", () => {
   it("projects the enabled set from the global flags plus the overlay", () => {
     expect(
-      resolveEnabledCapabilityIds(
+      applyCapabilityOverlay(
         rows,
         "skill",
         { skill: { b: false, c: true } },
-        {
-          idOf: (r) => r.id,
-          enabledOf: (r) => r.enabled,
-        }
-      )
+        { idOf: (r) => r.id, enabledOf: (r) => r.enabled, alreadyFiltered: false }
+      ).map((r) => r.id)
     ).toEqual(["a", "c"])
   })
 })

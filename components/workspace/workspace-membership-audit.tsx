@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 import { HistoryIcon, RefreshCwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -25,6 +25,37 @@ import type { CollabMembershipAuditEvent } from "@/lib/collab/client"
 
 const AUDIT_LIMIT = 50
 
+/**
+ * Every action the collaboration server writes to the audit, as the server
+ * spells it (`crates/cognia-collab-server/src/store.rs`). Listed so the test
+ * can hold both locales to a label for each; the renderer still falls back to
+ * the raw value for one added server-side before the client learns it.
+ */
+export const MEMBERSHIP_AUDIT_ACTIONS = [
+  "account.bootstrapped",
+  "invitation.created",
+  "invitation.redeemed",
+  "invitation.revoked",
+  "org.member.changed",
+  "org.member.offboarded",
+  "workspace.member.changed",
+  "workspace.member.removed",
+] as const
+
+/**
+ * The message key for a server action: `org.member.changed` → `orgMemberChanged`.
+ *
+ * Flattened because next-intl reads dots as nesting, so the raw value would
+ * address a path rather than a message.
+ */
+export function auditActionKey(action: string): string {
+  return action
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((word, index) => (index === 0 ? word : word[0]!.toUpperCase() + word.slice(1)))
+    .join("")
+}
+
 export interface WorkspaceMembershipAuditProps {
   admin: Pick<MembershipAdminState, "status" | "canManageOrg" | "context">
   /** Bump to reload after a write. */
@@ -33,6 +64,7 @@ export interface WorkspaceMembershipAuditProps {
 
 export function WorkspaceMembershipAudit({ admin, reloadKey = 0 }: WorkspaceMembershipAuditProps) {
   const t = useTranslations("workspace.members")
+  const format = useFormatter()
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<CollabMembershipAuditEvent[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -63,6 +95,18 @@ export function WorkspaceMembershipAudit({ admin, reloadKey = 0 }: WorkspaceMemb
   }, [open, reloadKey, load])
 
   if (admin.status !== "ready" || !admin.canManageOrg || !admin.context) return null
+
+  const actionLabel = (action: string): string => {
+    const key = `audit.actions.${auditActionKey(action)}`
+    return t.has(key) ? t(key) : action
+  }
+  // A workspace-scoped event carries workspace seats; everything else, an
+  // org invitation, an org role change, the bootstrap claim, carries org roles.
+  const roleLabel = (role: string | undefined, workspaceScoped: boolean): string => {
+    if (!role) return ""
+    const key = workspaceScoped ? `role.${role}` : `orgRole.${role}`
+    return t.has(key) ? t(key) : role
+  }
 
   return (
     <section className="flex flex-col gap-1.5" data-testid="workspace-membership-audit">
@@ -121,26 +165,32 @@ export function WorkspaceMembershipAudit({ admin, reloadKey = 0 }: WorkspaceMemb
                 data-testid={`workspace-membership-audit-${event.id}`}
               >
                 <span className="flex flex-wrap items-center gap-x-2">
-                  <span className="font-medium">{event.action}</span>
+                  <span className="font-medium">{actionLabel(event.action)}</span>
                   {event.targetUserId ? (
                     <span className="truncate font-mono text-[11px]">{event.targetUserId}</span>
                   ) : null}
                   {event.oldRole || event.newRole ? (
                     <span className="text-muted-foreground">
-                      {t("audit.roleChange", {
-                        from: event.oldRole ?? "",
-                        to: event.newRole ?? "",
-                      })}
+                      {event.oldRole && event.newRole
+                        ? t("audit.roleChange", {
+                            from: roleLabel(event.oldRole, Boolean(event.workspaceId)),
+                            to: roleLabel(event.newRole, Boolean(event.workspaceId)),
+                          })
+                        : roleLabel(event.oldRole || event.newRole, Boolean(event.workspaceId))}
                     </span>
                   ) : null}
-                  <span className="ml-auto text-muted-foreground">
-                    {new Date(event.createdAt).toLocaleString()}
+                  <span className="ml-auto whitespace-nowrap text-muted-foreground">
+                    {format.dateTime(new Date(event.createdAt), {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
                   </span>
                 </span>
                 <span className="truncate text-muted-foreground">
-                  {event.reason}
-                  {"  "}
-                  {t("audit.actor", { who: event.actorUserId })}
+                  {t("audit.detail", {
+                    reason: event.reason,
+                    actor: t("audit.actor", { who: event.actorUserId }),
+                  })}
                 </span>
               </li>
             ))}

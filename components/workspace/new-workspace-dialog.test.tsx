@@ -181,4 +181,16 @@ describe("NewWorkspaceDialog", () => {
     )
     expect(screen.getByRole("button", { name: "submit" })).toBeDisabled()
   })
+
+  /** On a short window the form scrolls inside the dialog instead of off-screen. */
+  it("caps the dialog's height and scrolls its content", async () => {
+    setup()
+    await waitFor(() =>
+      expect(screen.getByLabelText("parentLabel")).toHaveValue("/Users/x/Projects")
+    )
+    expect(screen.getByTestId("new-workspace-dialog")).toHaveClass(
+      "max-h-[85dvh]",
+      "overflow-y-auto"
+    )
+  })
 })

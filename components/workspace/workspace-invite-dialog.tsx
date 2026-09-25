@@ -20,7 +20,7 @@
  */
 
 import { useId, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { loadCollabConnection } from "@/lib/collab/connection"
@@ -105,7 +105,10 @@ export function WorkspaceInviteDialog({
 }: WorkspaceInviteDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="workspace-invite-dialog">
+      <DialogContent
+        className="max-h-[85dvh] overflow-y-auto"
+        data-testid="workspace-invite-dialog"
+      >
         {/*
           The form and its state live in a child that exists only while the
           dialog is open. Closing unmounts it, which is how the token is
@@ -128,6 +131,7 @@ function InviteForm({
 }) {
   const t = useTranslations("workspace.members.inviteDialog")
   const tMembers = useTranslations("workspace.members")
+  const format = useFormatter()
   const reasonId = useId()
   const scopeLabelId = useId()
   const [scope, setScope] = useState<InviteScope>("workspace")
@@ -189,7 +193,12 @@ function InviteForm({
             </code>
           </Surface>
           <p className="text-xs text-muted-foreground">
-            {t("expires", { date: new Date(issued.expiresAt).toLocaleString() })}
+            {t("expires", {
+              date: format.dateTime(new Date(issued.expiresAt), {
+                dateStyle: "medium",
+                timeStyle: "short",
+              }),
+            })}
           </p>
           <DialogFooter>
             <Button

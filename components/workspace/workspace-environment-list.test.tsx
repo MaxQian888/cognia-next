@@ -2,13 +2,17 @@
 
 const mockNow = new Date("2026-09-09T08:00:00Z")
 const mockRelativeTime = jest.fn(() => "relative-time")
+const mockDateTime = jest.fn(
+  (date: Date, options?: Intl.DateTimeFormatOptions) =>
+    `date(${date.getTime()}/${options?.dateStyle}/${options?.timeStyle})`
+)
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: { error?: string }) =>
     values?.error ? `${key}:${values.error}` : key,
   // The row reports when an environment was last used. A relative time needs
   // no locale data to be asserted on, so the mock returns a stable marker.
-  useFormatter: () => ({ relativeTime: mockRelativeTime }),
+  useFormatter: () => ({ relativeTime: mockRelativeTime, dateTime: mockDateTime }),
   useNow: () => mockNow,
 }))
 
@@ -79,7 +83,7 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
   ),
 }))
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { WorkspaceEnvironmentSummary } from "@/lib/task-workspace/types"
@@ -728,4 +732,57 @@ it("formats last use against an explicit shared clock", async () => {
   render(<WorkspaceEnvironmentList presentation="sheet" rootDir="/repo" />)
   await screen.findByText("relative-time")
   expect(mockRelativeTime).toHaveBeenCalledWith(new Date(lastUsedAt), mockNow)
+  // The exact time on hover goes through the locale formatter too, not the
+  // runtime's default `toLocaleString`.
+  expect(screen.getByText("relative-time")).toHaveAttribute(
+    "title",
+    `date(${lastUsedAt}/medium/short)`
+  )
+})
+
+describe("WorkspaceEnvironmentList — loading and refresh", () => {
+  /** An `aria-label` on a plain div names nothing a screen reader announces. */
+  it("announces the first load as a busy status region", async () => {
+    listMock.mockReturnValueOnce(new Promise(() => {}))
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+
+    const status = screen.getByRole("status", { name: "loading" })
+    expect(status).toHaveAttribute("aria-busy", "true")
+  })
+
+  it.each(["page", "sheet"] as const)(
+    "spins and refuses the %s refresh button while a read is out",
+    async (presentation) => {
+      let answer: (rows: WorkspaceEnvironmentSummary[]) => void = () => {}
+      listMock.mockReturnValueOnce(
+        new Promise((resolve) => {
+          answer = resolve
+        })
+      )
+      render(<WorkspaceEnvironmentList presentation={presentation} rootDir="/repo" />)
+      const refresh = screen.getByRole("button", { name: "refresh" })
+      // The first read is a read like any other: clicking during it stacked a
+      // second, parallel one.
+      expect(refresh).toBeDisabled()
+      expect(refresh.querySelector("svg")).toHaveClass("animate-spin")
+
+      await act(async () => answer([managed]))
+      expect(refresh).toBeEnabled()
+      expect(refresh.querySelector("svg")).not.toHaveClass("animate-spin")
+
+      listMock.mockReturnValueOnce(
+        new Promise((resolve) => {
+          answer = resolve
+        })
+      )
+      fireEvent.click(refresh)
+      expect(refresh).toBeDisabled()
+      expect(refresh.querySelector("svg")).toHaveClass("animate-spin")
+      fireEvent.click(refresh)
+      expect(listMock).toHaveBeenCalledTimes(2)
+
+      await act(async () => answer([managed]))
+      expect(refresh).toBeEnabled()
+    }
+  )
 })

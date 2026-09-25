@@ -28,14 +28,25 @@
  * children: that component was reachable only from chat, through session
  * settings, so the repo-config and provisioning offers had no entry from the
  * page about the workspace they configure.
+ *
+ * Every dialog this page opens (the manager, the picker's footer) is a request
+ * to the shell's one `WorkspaceDialogHost`. The page used to mount its own
+ * manager AND the picker's copy of it, two instances of one editor.
+ *
+ * Each tab body is its own scroll container. Every ancestor from the app shell
+ * down to `FeaturePageShell`'s centre column is `overflow-hidden`, so a tab
+ * that did not scroll itself clipped whatever fell below the fold, and on the
+ * desktop the provisioning rules under the environment list were unreachable.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import {
   ArrowUpRightIcon,
   ChevronsUpDownIcon,
   FolderIcon,
+  GitBranchIcon,
   SettingsIcon,
   ShieldCheckIcon,
   ShieldOffIcon,
@@ -44,16 +55,20 @@ import Link from "next/link"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
-import { WorkspaceManageDialog } from "@/components/shell/workspace-manage-dialog"
+import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import { ConsoleSection } from "@/components/surface/console-section"
 import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ProjectEnvironmentManager } from "@/components/settings/project-environment-manager"
 import { listWorkspaceEnvironments } from "@/lib/task-workspace/client"
+import { verdictNeedsAttention } from "@/lib/project-environment/workspace-config-trust"
+import { cn } from "@/lib/utils"
 import { useClientLiveQuery } from "@/hooks/data"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
+import { useRepoWorkspaceConfig } from "@/hooks/workspace/use-repo-workspace-config"
 import { listIssues } from "@/lib/db/issues"
 import { listIssueProjects } from "@/lib/db/issue-projects"
 import { listActiveAgentRuns, type ActiveAgentRun } from "@/lib/workspace/active-agent-runs"
@@ -68,7 +83,21 @@ import { WorkspaceActivity } from "./workspace-activity"
 import { AgentBranchesSection } from "./agent-branches-section"
 import { AGENTS_WORKING_REGION_ID, WorkspaceAgentsWorking } from "./workspace-agents-working"
 import { WorkspaceEnvironmentList } from "./workspace-environment-list"
-import { useWorkspacePickerDialogs, WorkspacePickerList } from "./workspace-picker-list"
+import { WorkspaceContextSummary } from "./workspace-context-summary"
+import { WorkspaceRecentConversations } from "./workspace-recent-conversations"
+import { WorkspaceSchedules } from "./workspace-schedules"
+import { useWorkspacePickerRequests, WorkspacePickerList } from "./workspace-picker-list"
+
+/**
+ * A panel arriving, whether a tab body or the "agents working" list: a short
+ * fade, scaled by the user's motion setting like every other in-app motion.
+ * Reduced motion is honoured globally (`app/globals.css`).
+ */
+const PANEL_ENTER =
+  "animate-in fade-in-0 [animation-duration:calc(160ms*var(--motion-duration-scale,1))]"
+/** Tab bodies stay mounted while hidden, so the fade keys on becoming active. */
+const TAB_ENTER =
+  "data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:[animation-duration:calc(160ms*var(--motion-duration-scale,1))]"
 
 /** Trailing-separator-insensitive, matching `lib/db/trusted-workspaces.ts`. */
 function normalizePath(path: string): string {
@@ -101,18 +130,29 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
   // relationship to the skill/MCP libraries, not about issues.
   const tCapabilities = useTranslations("workspace.capabilities")
   const tSwitcher = useTranslations("workspace.switcher")
+  const tManage = useTranslations("workspace.manage")
+  const router = useRouter()
+  const isMobile = useIsMobile()
   const workspaceId = useProjectStore((s) => s.activeProjectId)
   const workspaces = useProjectStore((s) => s.projects)
   const workspace = workspaces.find((candidate) => candidate.id === workspaceId)
-  const [manageOpen, setManageOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [agentsOpen, setAgentsOpen] = useState(false)
-  // Mounted outside the Popover, because it closes before opening any of them
-  // and a Popover unmounts its children on close. The picker says so itself.
-  const { actions: pickerActions, element: pickerDialogs } = useWorkspacePickerDialogs()
+  // Requests to the shell's dialog host: a Popover or Drawer unmounts its
+  // children on close, so nothing the picker opens can live inside it.
+  const pickerActions = useWorkspacePickerRequests()
+  const openManage = useCallback(
+    () => pickerActions.manage(workspaceId ?? undefined),
+    [pickerActions, workspaceId]
+  )
 
   const primaryRoot =
     workspace?.roots?.find((root) => root.isPrimary)?.path ?? workspace?.roots?.[0]?.path
+
+  // A repository config waiting for approval changes what every turn here
+  // runs, and its card sits at the bottom of a tab nobody opens by habit.
+  const repoConfig = useRepoWorkspaceConfig(workspaceId, primaryRoot)
+  const environmentsNeedAttention = verdictNeedsAttention(repoConfig.verdict)
 
   const projects = useClientLiveQuery(
     () => (workspaceId ? listIssueProjects({ projectId: workspaceId }) : Promise.resolve([])),
@@ -190,13 +230,28 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
     return { byStatus, open }
   }, [issues])
 
+  // `undefined` is a query still in flight. Rendering it as 0 said "no open
+  // issues" for the first frames of every visit, and the Environments tile
+  // beside it already said "unknown" for the same state.
+  const unknown = t("workspace.unknownValue")
   const stats: StatStripItem[] = [
-    { id: "open-issues", label: t("workspace.openIssues"), value: counts.open },
-    { id: "projects", label: t("workspace.projectSummary"), value: (projects ?? []).length },
+    {
+      id: "open-issues",
+      label: t("workspace.openIssues"),
+      value: issues === undefined ? unknown : counts.open,
+      // `/issues` is scoped to the active workspace, which is this one.
+      action: { onSelect: () => router.push("/issues"), label: t("workspace.openIssuesOpen") },
+    },
+    {
+      id: "projects",
+      label: t("workspace.projectSummary"),
+      value: projects === undefined ? unknown : projects.length,
+      action: { onSelect: () => router.push("/projects"), label: t("workspace.projectsOpen") },
+    },
     {
       id: "agents-working",
       label: t("workspace.agentsWorking"),
-      value: agentsWorking.length,
+      value: activeAgentRuns === undefined ? unknown : agentsWorking.length,
       tone: agentsWorking.length > 0 ? "positive" : "neutral",
       action: {
         onSelect: () => setAgentsOpen((open) => !open),
@@ -206,13 +261,26 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
       },
     },
     {
-      // The fourth tile exists so the Environments tab is discoverable at all.
-      // A workspace with worktrees on disk gave no hint of them from here.
+      // The fourth tile exists so the Environments tab is discoverable at all,
+      // so it opens it rather than only counting it.
       id: "environments",
       label: t("workspace.environments"),
-      value: environments ?? "—",
+      value: environments ?? unknown,
+      tone: environmentsNeedAttention ? "attention" : "neutral",
+      action: {
+        onSelect: () => onTabChange?.("environments"),
+        label: t("workspace.environmentsOpen"),
+      },
     },
   ]
+
+  const switcherTrigger = (
+    <Button size="sm" variant="outline" data-testid="workspace-switcher-trigger">
+      <FolderIcon aria-hidden className="size-3.5" />
+      <span className="max-w-40 truncate">{workspace?.name ?? tSwitcher("heading")}</span>
+      <ChevronsUpDownIcon aria-hidden className="size-3.5 opacity-60" />
+    </Button>
+  )
 
   return (
     <FeaturePageShell
@@ -221,32 +289,49 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
         <FeaturePageHeader
           variant="management"
           title={workspace?.name ?? t("workspace.title")}
-          summary={t("workspace.overview")}
+          // The workspace's own description when it has one: the generic
+          // tagline says what the page is, not what this workspace is for.
+          summary={workspace?.description?.trim() || t("workspace.overview")}
+          secondaryActions={[
+            {
+              id: "manage",
+              label: t("workspace.manage"),
+              icon: SettingsIcon,
+              onSelect: openManage,
+              disabled: !workspace,
+              testId: "workspace-header-manage",
+            },
+          ]}
           controls={
             /*
               The switcher belongs on the page about the workspace, not only in
               the desktop rail. On a phone that rail lives inside a nav sheet
               only `/` mounts, so this was the one workspace-shaped surface you
               could reach with no way to change which workspace it described.
-              Same list the rail popover and the mobile drawer render.
+              Same list the rail popover and the mobile drawer render, in the
+              same frame every picker wears: a popover, a bottom sheet on a
+              phone.
             */
-            <Popover open={switcherOpen} onOpenChange={setSwitcherOpen}>
-              <PopoverTrigger asChild>
-                <Button size="sm" variant="outline" data-testid="workspace-switcher-trigger">
-                  <FolderIcon aria-hidden className="size-3.5" />
-                  <span className="max-w-40 truncate">
-                    {workspace?.name ?? tSwitcher("heading")}
-                  </span>
-                  <ChevronsUpDownIcon aria-hidden className="size-3.5 opacity-60" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-80 p-1">
-                <WorkspacePickerList
-                  actions={pickerActions}
-                  onSwitched={() => setSwitcherOpen(false)}
-                />
-              </PopoverContent>
-            </Popover>
+            <ResponsivePicker
+              open={switcherOpen}
+              onOpenChange={setSwitcherOpen}
+              trigger={switcherTrigger}
+              // Not "Workspaces": the list inside already carries that heading,
+              // and the bottom sheet shows its title above it.
+              title={tSwitcher("switchTitle")}
+              variant="panel"
+              align="end"
+              side="bottom"
+              contentClassName="w-72 p-1"
+              commandClassName="px-2"
+              testId="workspace-switcher-picker"
+            >
+              <WorkspacePickerList
+                actions={pickerActions}
+                density={isMobile ? "comfortable" : "compact"}
+                onSwitched={() => setSwitcherOpen(false)}
+              />
+            </ResponsivePicker>
           }
         />
       }
@@ -255,44 +340,65 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
       <Tabs
         value={tab}
         onValueChange={(next) => onTabChange?.(next as WorkspaceTab)}
-        className="flex min-h-0 flex-1 flex-col gap-4 p-4"
+        className="flex min-h-0 flex-1 flex-col gap-0"
       >
-        <TabsList
-          // `w-fit` alone let the four triggers add up to 406px inside a 375px
-          // column, and the ancestor clipped the excess rather than scrolling
-          // it, so "Source Control" could not be reached on a phone. Same
-          // idiom the other narrow tab strips use.
-          //
-          // `shrink-0` because this sits in a `flex-col` with `min-h-0`: the
-          // list's own `h-9` is a base size a flex child is free to shrink
-          // below, and once the tab body had enough content the strip
-          // compressed to its 3px padding and the labels vanished.
-          className="w-fit max-w-full shrink-0 justify-start overflow-x-auto"
-          aria-label={t("workspace.viewsLabel")}
-        >
-          <TabsTrigger value="overview">{t("workspace.overview")}</TabsTrigger>
-          <TabsTrigger value="environments">{t("workspace.environments")}</TabsTrigger>
-          <TabsTrigger value="capabilities">{tCapabilities("tab")}</TabsTrigger>
-          {/* Not a tab: it leaves the page. Rendered in the strip anyway,
-              because removing a surface without leaving its entry point behind
-              is how a feature becomes unreachable. */}
+        {/*
+          The strip stays put while each tab body scrolls under it. `shrink-0`
+          because this sits in a `flex-col` with `min-h-0`: the list's own `h-9`
+          is a base size a flex child is free to shrink below, and once the tab
+          body had enough content the strip compressed to its 3px padding and
+          the labels vanished.
+        */}
+        <div className="@container/workspace-tabs flex shrink-0 items-center gap-2 px-4 pt-4 pb-3">
+          <TabsList
+            // `w-fit` alone let the triggers add up to more than a 375px
+            // column, and the ancestor clipped the excess rather than
+            // scrolling it. Same idiom the other narrow tab strips use.
+            className="w-fit max-w-full min-w-0 justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            aria-label={t("workspace.viewsLabel")}
+          >
+            <TabsTrigger value="overview">{t("workspace.overview")}</TabsTrigger>
+            <TabsTrigger value="environments" className="gap-1.5">
+              {t("workspace.environments")}
+              {environmentsNeedAttention ? (
+                <span
+                  className="size-1.5 shrink-0 rounded-full bg-amber-500"
+                  role="img"
+                  aria-label={t("workspace.environmentsAttention")}
+                  data-testid="workspace-environments-attention"
+                />
+              ) : null}
+            </TabsTrigger>
+            <TabsTrigger value="capabilities">{tCapabilities("tab")}</TabsTrigger>
+          </TabsList>
+          {/* Not a tab: it leaves the page. Beside the strip rather than in
+              it, because a link is not a tab (`role="tablist"` admits only
+              tabs, and arrow keys skipped it), and at phone width it was the
+              part of the scrolling strip that fell off the edge. Removing a
+              surface without leaving its entry point behind is how a feature
+              becomes unreachable. */}
           <Button
             asChild
             variant="ghost"
             size="sm"
-            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+            className="ml-auto h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
             data-testid="workspace-source-control-link"
           >
-            <Link href="/source-control">
-              {t("workspace.sourceControl")}
+            {/* The word gives way before the tabs do: at phone width the label
+                pushed the last tab into a scroll the reader could not see. */}
+            <Link href="/source-control" aria-label={t("workspace.sourceControl")}>
+              <GitBranchIcon aria-hidden className="size-3.5 @[28rem]/workspace-tabs:hidden" />
+              <span className="hidden @[28rem]/workspace-tabs:inline">
+                {t("workspace.sourceControl")}
+              </span>
               <ArrowUpRightIcon aria-hidden className="size-3" />
             </Link>
           </Button>
-        </TabsList>
+        </div>
 
         <TabsContent
           value="overview"
-          className="mt-0 flex flex-col gap-3.5"
+          className={cn("mt-0 min-h-0 flex-1 overflow-y-auto px-4 pb-6", TAB_ENTER)}
           data-testid="workspace-overview"
         >
           {/*
@@ -314,9 +420,16 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
               cellTestIdPrefix="workspace-stat"
             />
 
-            {agentsOpen ? <WorkspaceAgentsWorking runs={agentsWorking} /> : null}
+            {agentsOpen ? (
+              <div className={PANEL_ENTER}>
+                <WorkspaceAgentsWorking runs={agentsWorking} />
+              </div>
+            ) : null}
 
             <div className="grid items-start gap-3.5 @3xl/workspace-pane:grid-cols-2">
+              <WorkspaceRecentConversations workspaceId={workspaceId} />
+              <WorkspaceContextSummary workspace={workspace ?? null} onEdit={openManage} />
+
               <ConsoleSection
                 id="issues"
                 pane="workspace-pane"
@@ -325,37 +438,45 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
                 meta={counts.open}
                 wide
               >
-                <ul className="flex flex-wrap gap-2" data-testid="workspace-status-breakdown">
-                  {ISSUE_STATUSES.map((status) => (
-                    <li
-                      key={status}
-                      className="flex items-center gap-1.5 rounded-control border px-2.5 py-1.5 text-xs"
-                      data-testid={`workspace-status-${status}`}
-                    >
-                      <IssueStatusIcon status={status} />
-                      <span>{t(`status.${status}`)}</span>
-                      <span className="tabular-nums text-muted-foreground">
-                        {counts.byStatus[status]}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                {issues === undefined ? (
+                  <Skeleton className="h-7 w-full" data-testid="workspace-issues-loading" />
+                ) : (
+                  <ul className="flex flex-wrap gap-2" data-testid="workspace-status-breakdown">
+                    {ISSUE_STATUSES.map((status) => (
+                      <li
+                        key={status}
+                        className="flex items-center gap-1.5 rounded-control border px-2.5 py-1.5 text-xs"
+                        data-testid={`workspace-status-${status}`}
+                      >
+                        <IssueStatusIcon status={status} />
+                        <span>{t(`status.${status}`)}</span>
+                        <span className="tabular-nums text-muted-foreground">
+                          {counts.byStatus[status]}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </ConsoleSection>
+
+              <WorkspaceSchedules workspaceId={workspaceId} />
 
               <ConsoleSection
                 id="projects"
                 pane="workspace-pane"
                 idPrefix="workspace-section"
                 title={t("projects.title")}
-                meta={(projects ?? []).length}
+                meta={projects?.length}
               >
-                {(projects ?? []).length === 0 ? (
+                {projects === undefined ? (
+                  <Skeleton className="h-9 w-full" data-testid="workspace-projects-loading" />
+                ) : projects.length === 0 ? (
                   <p className="text-xs text-muted-foreground" data-testid="workspace-no-projects">
                     {t("workspace.noProjects")}
                   </p>
                 ) : (
                   <ul className="flex flex-col gap-1">
-                    {(projects ?? []).map((project) => (
+                    {projects.map((project) => (
                       <li key={project.id}>
                         <Link
                           href={`/projects?id=${encodeURIComponent(project.id)}`}
@@ -364,10 +485,10 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
                         >
                           <span aria-hidden>{project.icon ?? "📁"}</span>
                           <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                          <Badge variant="outline" className="font-mono text-[10px]">
+                          <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
                             {project.key}
                           </Badge>
-                          <Badge variant="secondary" className="font-normal">
+                          <Badge variant="secondary" className="shrink-0 font-normal">
                             {t(`projects.status.${project.status}`)}
                           </Badge>
                         </Link>
@@ -392,11 +513,12 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
                     size="sm"
                     variant="ghost"
                     className="-my-1 h-7"
-                    onClick={() => setManageOpen(true)}
+                    onClick={openManage}
+                    disabled={!workspace}
                     title={t("workspace.manageHint")}
                     data-testid="workspace-manage-link"
                   >
-                    <SettingsIcon className="size-3.5" />
+                    <SettingsIcon aria-hidden className="size-3.5" />
                     {t("workspace.manage")}
                   </Button>
                 }
@@ -408,27 +530,45 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
                       return (
                         <li
                           key={root.id}
-                          className="flex items-center gap-2 rounded-control border px-3 py-2 text-xs"
+                          className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-control border px-3 py-2 text-xs"
                         >
                           <FolderIcon aria-hidden className="size-3.5 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate font-mono">{root.path}</span>
-                          {root.isPrimary ? (
-                            <Badge variant="secondary" className="text-[10px] font-normal">
-                              1
-                            </Badge>
-                          ) : null}
-                          <Badge
-                            variant={isTrusted ? "secondary" : "outline"}
-                            className="gap-1 text-[10px] font-normal"
-                            data-testid={`workspace-root-trust-${isTrusted ? "trusted" : "untrusted"}`}
+                          <span
+                            className="min-w-0 flex-1 basis-40 truncate font-mono"
+                            title={root.path}
                           >
-                            {isTrusted ? (
-                              <ShieldCheckIcon aria-hidden className="size-3" />
+                            {root.label?.trim() && root.label.trim() !== root.path ? (
+                              <>
+                                <span className="font-sans font-medium">{root.label}</span>{" "}
+                                <span className="text-muted-foreground">{root.path}</span>
+                              </>
                             ) : (
-                              <ShieldOffIcon aria-hidden className="size-3" />
+                              root.path
                             )}
-                            {isTrusted ? t("workspace.trusted") : t("workspace.untrusted")}
-                          </Badge>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            {root.isPrimary ? (
+                              <Badge
+                                variant="secondary"
+                                className="text-[10px] font-normal uppercase"
+                                data-testid="workspace-root-primary"
+                              >
+                                {tManage("primaryBadge")}
+                              </Badge>
+                            ) : null}
+                            <Badge
+                              variant={isTrusted ? "secondary" : "outline"}
+                              className="gap-1 text-[10px] font-normal"
+                              data-testid={`workspace-root-trust-${isTrusted ? "trusted" : "untrusted"}`}
+                            >
+                              {isTrusted ? (
+                                <ShieldCheckIcon aria-hidden className="size-3" />
+                              ) : (
+                                <ShieldOffIcon aria-hidden className="size-3" />
+                              )}
+                              {isTrusted ? t("workspace.trusted") : t("workspace.untrusted")}
+                            </Badge>
+                          </span>
                         </li>
                       )
                     })}
@@ -449,7 +589,10 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
 
         <TabsContent
           value="environments"
-          className="mt-0 flex flex-col gap-4"
+          className={cn(
+            "mt-0 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-6",
+            TAB_ENTER
+          )}
           data-testid="workspace-environments"
         >
           {/* Scoped to this Workspace. It used to list every environment on the
@@ -465,13 +608,6 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
           />
 
           {/*
-            How this workspace's environments get provisioned, and what the repo
-            itself declares. Both were reachable only from chat, through the
-            session settings sheet, so the page about the workspace could show
-            you the worktrees and not the rules that produce them. One
-            component, a second door, not a second editor.
-          */}
-          {/*
             What isolated runs left behind. Branches outlive the directories
             above them, so after a run settles this is the only trace of what it
             did. It lived in a tab of the retired `/agent-teams/workspace`,
@@ -480,6 +616,13 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
           */}
           <AgentBranchesSection {...(primaryRoot ? { rootDir: primaryRoot } : {})} />
 
+          {/*
+            How this workspace's environments get provisioned, and what the repo
+            itself declares. Both were reachable only from chat, through the
+            session settings sheet, so the page about the workspace could show
+            you the worktrees and not the rules that produce them. One
+            component, a second door, not a second editor.
+          */}
           {workspaceId && primaryRoot ? (
             <ProjectEnvironmentManager
               projectId={workspaceId}
@@ -489,13 +632,14 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
           ) : null}
         </TabsContent>
 
-        <TabsContent value="capabilities" className="mt-0">
+        <TabsContent
+          value="capabilities"
+          className={cn("mt-0 min-h-0 flex-1 overflow-y-auto px-4 pb-6", TAB_ENTER)}
+        >
           {/* Deltas only. The definitions stay in Settings. See the component. */}
           <WorkspaceCapabilities workspaceId={workspaceId} />
         </TabsContent>
       </Tabs>
-      <WorkspaceManageDialog open={manageOpen} onOpenChange={setManageOpen} />
-      {pickerDialogs}
     </FeaturePageShell>
   )
 }

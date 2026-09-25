@@ -15,9 +15,16 @@ import { useEffect } from "react"
 import { useWorkspacePickerDialogs } from "@/components/workspace/workspace-picker-list"
 import type { WorkspaceDialogKind } from "@/lib/workspace/workspace-dialog-request"
 
+export interface WorkspaceDialogMountRequest {
+  kind: WorkspaceDialogKind
+  seq: number
+  /** `manage` only: the workspace the editor opens on. */
+  workspaceId?: string
+}
+
 export interface WorkspaceDialogMountProps {
   /** The request to act on. Changes identity per request, never per render. */
-  request: { kind: WorkspaceDialogKind; seq: number } | null
+  request: WorkspaceDialogMountRequest | null
 }
 
 export function WorkspaceDialogMount({ request }: WorkspaceDialogMountProps) {
@@ -39,7 +46,7 @@ export function WorkspaceDialogMount({ request }: WorkspaceDialogMountProps) {
         actions.adopt()
         return
       case "manage":
-        actions.manage()
+        actions.manage(request.workspaceId)
         return
     }
     // `actions` is rebuilt every render by the hook, so keying the effect on it

@@ -69,4 +69,64 @@ describe("TerminalProjectOverride", () => {
     void fireEvent
     void act
   })
+
+  async function pick(name: string) {
+    fireEvent.click(screen.getByRole("combobox"))
+    fireEvent.click(await screen.findByRole("option", { name }))
+  }
+
+  /**
+   * `terminalConfig.env` had three readers and no writer. It is edited here as
+   * the same KEY=VALUE text the terminal profiles use.
+   */
+  it("writes the workspace's terminal environment, keeping shell and cwd", async () => {
+    const proj = useProjectStore.getState().createProject({ name: "proj-a" })
+    useProjectStore.getState().updateProject(proj.id, { terminalConfig: { shell: "/bin/zsh" } })
+    render(<TerminalProjectOverride />)
+    await pick("proj-a")
+
+    fireEvent.change(screen.getByTestId("terminal-project-override-env"), {
+      target: { value: "NODE_ENV=development\nHALF\nURL=a=b" },
+    })
+
+    const cfg = useProjectStore.getState().projects.find((p) => p.id === proj.id)?.terminalConfig
+    // A half-typed line is skipped rather than stored as garbage.
+    expect(cfg).toEqual({ shell: "/bin/zsh", env: { NODE_ENV: "development", URL: "a=b" } })
+    // What was typed stays on screen while typing, half line included.
+    expect(screen.getByTestId("terminal-project-override-env")).toHaveValue(
+      "NODE_ENV=development\nHALF\nURL=a=b"
+    )
+  })
+
+  it("drops the half-typed text when another workspace is picked", async () => {
+    useProjectStore.getState().createProject({ name: "proj-a" })
+    const b = useProjectStore.getState().createProject({ name: "proj-b" })
+    useProjectStore.getState().updateProject(b.id, { terminalConfig: { env: { B: "2" } } })
+    render(<TerminalProjectOverride />)
+    await pick("proj-a")
+    fireEvent.change(screen.getByTestId("terminal-project-override-env"), {
+      target: { value: "HALF" },
+    })
+
+    await pick("proj-b")
+
+    expect(screen.getByTestId("terminal-project-override-env")).toHaveValue("B=2")
+  })
+
+  it("shows the stored environment and clears it when emptied", async () => {
+    const proj = useProjectStore.getState().createProject({ name: "proj-a" })
+    useProjectStore.getState().updateProject(proj.id, { terminalConfig: { env: { A: "1" } } })
+    render(<TerminalProjectOverride />)
+    await pick("proj-a")
+
+    const field = screen.getByTestId("terminal-project-override-env")
+    expect(field).toHaveValue("A=1")
+    fireEvent.change(field, { target: { value: "" } })
+    fireEvent.blur(field)
+
+    expect(
+      useProjectStore.getState().projects.find((p) => p.id === proj.id)?.terminalConfig?.env
+    ).toBeUndefined()
+    expect(field).toHaveValue("")
+  })
 })

@@ -8,9 +8,15 @@ jest.mock("next/dynamic", () => ({
   // split. For the test the mount is stubbed so this file can assert the
   // listener half without dragging in the picker's module graph.
   default: () => {
-    const Stub = ({ request }: { request: { kind: string; seq: number } | null }) => (
+    const Stub = ({
+      request,
+    }: {
+      request: { kind: string; seq: number; workspaceId?: string } | null
+    }) => (
       <div data-testid="workspace-dialog-mount">
-        {request ? `${request.kind}:${request.seq}` : "none"}
+        {request
+          ? `${request.kind}:${request.seq}${request.workspaceId ? `:${request.workspaceId}` : ""}`
+          : "none"}
       </div>
     )
     return Stub
@@ -46,5 +52,11 @@ describe("WorkspaceDialogHost", () => {
     act(() => requestWorkspaceDialog("manage"))
     act(() => requestWorkspaceDialog("manage"))
     expect(screen.getByTestId("workspace-dialog-mount")).toHaveTextContent("manage:2")
+  })
+
+  it("passes the workspace a manage request names through to the editors", () => {
+    render(<WorkspaceDialogHost />)
+    act(() => requestWorkspaceDialog("manage", { workspaceId: "p-9" }))
+    expect(screen.getByTestId("workspace-dialog-mount")).toHaveTextContent("manage:1:p-9")
   })
 })

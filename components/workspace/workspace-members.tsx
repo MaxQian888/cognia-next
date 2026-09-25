@@ -51,6 +51,7 @@ import { CollabRefreshStaleBadge } from "@/components/issues/collab-refresh-stal
 import { ConsoleSection } from "@/components/surface/console-section"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
   SelectContent,
@@ -149,6 +150,10 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
 
   if (!workspaceId) return null
 
+  // `useLiveQuery` answers `undefined` until the first read lands. Treating
+  // that as an empty roster flashed the "set up collaboration" call to action
+  // at every workspace that does have members.
+  const loading = rosterQuery === undefined
   const showFilter = roster.length > FILTER_THRESHOLD
   const inviteDisabledReason =
     admin.status === "loading"
@@ -213,7 +218,7 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
       meta={
         <span className="flex items-center gap-1.5">
           <CollabRefreshStaleBadge />
-          <span className="tabular-nums">{roster.length}</span>
+          {loading ? null : <span className="tabular-nums">{roster.length}</span>}
         </span>
       }
     >
@@ -239,7 +244,22 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
           </Select>
         ) : null}
 
-        {roster.length === 0 ? (
+        {loading ? (
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label={t("loading")}
+            className="flex flex-col gap-1.5"
+            data-testid="workspace-members-loading"
+          >
+            {[0, 1, 2].map((index) => (
+              <div key={index} className="flex items-center gap-2">
+                <Skeleton className="size-6 shrink-0 rounded-full" />
+                <Skeleton className="h-3 max-w-40 flex-1" />
+              </div>
+            ))}
+          </div>
+        ) : roster.length === 0 ? (
           /*
             Deliberately not an error. A workspace nobody shares is the ordinary
             case, and "no members" alone reads as a failure to load. Saying that
@@ -262,9 +282,16 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
               const isSelf = selfUserIds.includes(entry.membership.userId)
               const manageable = admin.canManageWorkspace && !isSelf
               return (
+                /*
+                  Wraps rather than squeezes. An admin's row carries two
+                  selects and two buttons, which left the name, the only
+                  part that says who is being changed, a few pixels wide. The
+                  name keeps a floor and the controls drop to their own line
+                  when the card cannot seat both.
+                */
                 <li
                   key={entry.membership.id}
-                  className="flex items-center gap-2 text-xs"
+                  className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
                   data-testid={`workspace-member-${entry.membership.userId}`}
                 >
                   <span
@@ -282,7 +309,7 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
                     the same call the device console and the Feishu principals
                     card make.
                   */}
-                  <span className="min-w-0 flex-1 truncate" title={entry.membership.userId}>
+                  <span className="min-w-24 flex-1 truncate" title={entry.membership.userId}>
                     {entry.user?.displayName ?? entry.membership.userId}
                   </span>
                   {isSelf ? (
@@ -302,88 +329,90 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
                       {t("guest")}
                     </Badge>
                   ) : null}
-                  {manageable ? (
-                    <Select
-                      value={entry.membership.role}
-                      onValueChange={(value) =>
-                        void changeRole(entry.membership.userId, value as WorkspaceRole)
-                      }
-                      disabled={admin.busy}
-                    >
-                      <SelectTrigger
-                        size="sm"
-                        className="h-6 w-28 text-[11px]"
-                        aria-label={t("roleAria")}
-                        data-testid={`workspace-member-role-${entry.membership.userId}`}
+                  <span className="ml-auto flex shrink-0 items-center gap-1">
+                    {manageable ? (
+                      <Select
+                        value={entry.membership.role}
+                        onValueChange={(value) =>
+                          void changeRole(entry.membership.userId, value as WorkspaceRole)
+                        }
+                        disabled={admin.busy}
                       >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {WORKSPACE_ROLES.map((role) => (
-                          <SelectItem key={role} value={role}>
-                            {t(`role.${role}`)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Badge variant="outline" aria-label={t("roleAria")}>
-                      {t(`role.${entry.membership.role}`)}
-                    </Badge>
-                  )}
-                  {manageable && admin.canManageOrg && !entry.guest ? (
-                    <Select
-                      value={orgRoles[entry.membership.userId] ?? "member"}
-                      onValueChange={(value) =>
-                        void changeOrgRole(entry.membership.userId, value as OrgRole)
-                      }
-                      disabled={admin.busy}
-                    >
-                      <SelectTrigger
-                        size="sm"
-                        className="h-6 w-28 text-[11px]"
-                        aria-label={t("orgRoleAria")}
-                        data-testid={`workspace-member-org-role-${entry.membership.userId}`}
+                        <SelectTrigger
+                          size="sm"
+                          className="h-6 w-28 text-[11px]"
+                          aria-label={t("roleAria")}
+                          data-testid={`workspace-member-role-${entry.membership.userId}`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {WORKSPACE_ROLES.map((role) => (
+                            <SelectItem key={role} value={role}>
+                              {t(`role.${role}`)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Badge variant="outline" aria-label={t("roleAria")}>
+                        {t(`role.${entry.membership.role}`)}
+                      </Badge>
+                    )}
+                    {manageable && admin.canManageOrg && !entry.guest ? (
+                      <Select
+                        value={orgRoles[entry.membership.userId] ?? "member"}
+                        onValueChange={(value) =>
+                          void changeOrgRole(entry.membership.userId, value as OrgRole)
+                        }
+                        disabled={admin.busy}
                       >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ORG_ROLES.map((role) => (
-                          <SelectItem key={role} value={role}>
-                            {t(`orgRole.${role}`)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : null}
-                  {manageable ? (
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      className="size-6"
-                      disabled={admin.busy}
-                      title={t("remove")}
-                      aria-label={t("remove")}
-                      onClick={() => void remove(entry.membership.userId)}
-                      data-testid={`workspace-member-remove-${entry.membership.userId}`}
-                    >
-                      <UserMinusIcon aria-hidden className="size-3.5" />
-                    </Button>
-                  ) : null}
-                  {manageable && admin.canManageOrg && !entry.guest ? (
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      className="size-6 text-destructive"
-                      disabled={admin.busy}
-                      title={t("offboard")}
-                      aria-label={t("offboard")}
-                      onClick={() => void offboard(entry.membership.userId)}
-                      data-testid={`workspace-member-offboard-${entry.membership.userId}`}
-                    >
-                      <UserXIcon aria-hidden className="size-3.5" />
-                    </Button>
-                  ) : null}
+                        <SelectTrigger
+                          size="sm"
+                          className="h-6 w-28 text-[11px]"
+                          aria-label={t("orgRoleAria")}
+                          data-testid={`workspace-member-org-role-${entry.membership.userId}`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ORG_ROLES.map((role) => (
+                            <SelectItem key={role} value={role}>
+                              {t(`orgRole.${role}`)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : null}
+                    {manageable ? (
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        className="size-6"
+                        disabled={admin.busy}
+                        title={t("remove")}
+                        aria-label={t("remove")}
+                        onClick={() => void remove(entry.membership.userId)}
+                        data-testid={`workspace-member-remove-${entry.membership.userId}`}
+                      >
+                        <UserMinusIcon aria-hidden className="size-3.5" />
+                      </Button>
+                    ) : null}
+                    {manageable && admin.canManageOrg && !entry.guest ? (
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        className="size-6 text-destructive"
+                        disabled={admin.busy}
+                        title={t("offboard")}
+                        aria-label={t("offboard")}
+                        onClick={() => void offboard(entry.membership.userId)}
+                        data-testid={`workspace-member-offboard-${entry.membership.userId}`}
+                      >
+                        <UserXIcon aria-hidden className="size-3.5" />
+                      </Button>
+                    ) : null}
+                  </span>
                 </li>
               )
             })}

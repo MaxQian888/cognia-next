@@ -30,13 +30,25 @@ export type WorkspaceDialogKind = "openFolder" | "newWorkspace" | "adopt" | "man
 
 export interface WorkspaceDialogRequestDetail {
   kind: WorkspaceDialogKind
+  /**
+   * `manage` only: the workspace the editor opens on. Absent, it opens on the
+   * active one. A page about one workspace asking to manage it must not land
+   * the reader on an empty "pick a workspace" pane.
+   */
+  workspaceId?: string
 }
 
-export function requestWorkspaceDialog(kind: WorkspaceDialogKind): void {
+export function requestWorkspaceDialog(
+  kind: WorkspaceDialogKind,
+  options: { workspaceId?: string } = {}
+): void {
   if (typeof window === "undefined") return
   window.dispatchEvent(
     new CustomEvent<WorkspaceDialogRequestDetail>(WORKSPACE_DIALOG_REQUEST_EVENT, {
-      detail: { kind },
+      detail: {
+        kind,
+        ...(kind === "manage" && options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      },
     })
   )
 }

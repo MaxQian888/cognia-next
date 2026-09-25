@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 import { MailIcon, RefreshCwIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -56,6 +56,7 @@ export interface WorkspaceInvitationsProps {
 
 export function WorkspaceInvitations({ admin, reloadKey = 0, now }: WorkspaceInvitationsProps) {
   const t = useTranslations("workspace.members")
+  const format = useFormatter()
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<CollabInvitation[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -175,9 +176,13 @@ export function WorkspaceInvitations({ admin, reloadKey = 0, now }: WorkspaceInv
                       {t("invitations.createdBy", { who: invitation.createdBy })}
                     </span>
                   </span>
-                  <span className="text-muted-foreground">
+                  {/* Never wraps: a date broken over two lines inside a one-line row
+                      reads as two facts. The scope beside it truncates instead. */}
+                  <span className="shrink-0 whitespace-nowrap text-muted-foreground">
                     {t("invitations.expires", {
-                      date: new Date(invitation.expiresAt).toLocaleDateString(),
+                      date: format.dateTime(new Date(invitation.expiresAt), {
+                        dateStyle: "medium",
+                      }),
                     })}
                   </span>
                   <Badge variant={status === "pending" ? "secondary" : "outline"}>

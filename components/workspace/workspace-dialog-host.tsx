@@ -18,10 +18,8 @@
 import { useEffect, useState } from "react"
 import dynamic from "next/dynamic"
 
-import {
-  onWorkspaceDialogRequest,
-  type WorkspaceDialogKind,
-} from "@/lib/workspace/workspace-dialog-request"
+import { onWorkspaceDialogRequest } from "@/lib/workspace/workspace-dialog-request"
+import type { WorkspaceDialogMountRequest } from "./workspace-dialog-mount"
 
 const WorkspaceDialogMount = dynamic(
   () => import("./workspace-dialog-mount").then((m) => m.WorkspaceDialogMount),
@@ -29,15 +27,19 @@ const WorkspaceDialogMount = dynamic(
 )
 
 export function WorkspaceDialogHost() {
-  const [request, setRequest] = useState<{ kind: WorkspaceDialogKind; seq: number } | null>(null)
+  const [request, setRequest] = useState<WorkspaceDialogMountRequest | null>(null)
 
   useEffect(
     () =>
-      onWorkspaceDialogRequest(({ kind }) => {
+      onWorkspaceDialogRequest(({ kind, workspaceId }) => {
         // A monotonic sequence rather than the kind alone: asking for the same
         // editor twice in a row has to re-open it, and two identical objects
         // would not change the mount's prop identity.
-        setRequest((previous) => ({ kind, seq: (previous?.seq ?? 0) + 1 }))
+        setRequest((previous) => ({
+          kind,
+          seq: (previous?.seq ?? 0) + 1,
+          ...(workspaceId ? { workspaceId } : {}),
+        }))
       }),
     []
   )

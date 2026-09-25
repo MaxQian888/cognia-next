@@ -22,9 +22,16 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   }),
 }))
 
+// Schedules live in the scheduler's store; the store's call into it is
+// covered by `project-store.test.ts` and `rebind-workspace-schedules.test.ts`.
+jest.mock("@/lib/workspace/rebind-workspace-schedules", () => ({
+  rebindWorkspaceSchedules: jest.fn(async () => 0),
+}))
+
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { getAllProjects, loadActiveProjectId } from "@/lib/db/projects"
 import { saveSettings } from "@/lib/db/settings"
+import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 import { useProjectStore } from "./project-store"
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
@@ -149,17 +156,17 @@ describe("mutations persist (only after load)", () => {
     expect(row?.additionalDirs).toEqual(["/z"])
   })
 
-  it("deleteProject removes the persisted row and clears the active pointer", async () => {
+  it("deleteProject removes the persisted row and points the active pointer at Default", async () => {
     await useProjectStore.getState().load()
     const p = useProjectStore.getState().createProject({ name: "Delta" })
     useProjectStore.getState().setActiveProject(p.id)
     await flush()
-    useProjectStore.getState().deleteProject(p.id)
+    await useProjectStore.getState().deleteProject(p.id)
     await waitForCondition(async () => {
       expect((await getAllProjects()).find((x) => x.id === p.id)).toBeUndefined()
     })
     await settleActivePointerWrites()
-    expect(await loadActiveProjectId()).toBeNull()
+    expect(await loadActiveProjectId()).toBe(DEFAULT_PROJECT_ID)
   })
 
   it("setActiveProject persists the pointer", async () => {

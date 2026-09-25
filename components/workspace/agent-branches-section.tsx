@@ -33,7 +33,18 @@ import { useTranslations } from "next-intl"
 import { GitBranchIcon, RefreshCwIcon } from "lucide-react"
 
 import { ConsoleSection } from "@/components/surface/console-section"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { CompareRefsSheet } from "@/components/source-control/compare-refs-sheet"
 import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
 import { AGENT_BRANCH_PREFIX as AGENT_PREFIX } from "@/lib/git/branch-placement"
@@ -43,6 +54,7 @@ import {
   gitDeleteBranch,
   runGitUserAction,
 } from "@/lib/git/commands"
+import { cn } from "@/lib/utils"
 import type { GitBranch } from "@/types/git"
 import { createLogger } from "@cognia/logging"
 
@@ -67,7 +79,15 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
   const gate = useWorkspaceCommandGate()
   const [branches, setBranches] = useState<GitBranch[]>([])
   const [loading, setLoading] = useState(false)
+  /**
+   * The root the last completed read answered for. Derived against `rootDir`
+   * rather than reset in an effect, so a first load, or a switch to another
+   * root, reads as loading instead of as "no agent branches".
+   */
+  const [loadedRoot, setLoadedRoot] = useState<string | null>(null)
   const [compareOpen, setCompareOpen] = useState(false)
+  /** The branch awaiting a delete confirmation. */
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     if (!rootDir) return
@@ -82,6 +102,7 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
       setBranches([])
     } finally {
       setLoading(false)
+      setLoadedRoot(rootDir)
     }
   }, [rootDir])
 
@@ -121,6 +142,7 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
 
   const checkoutGate = gate("git_checkout_branch")
   const deleteGate = gate("git_delete_branch")
+  const loaded = loadedRoot === rootDir
 
   return (
     <ConsoleSection
@@ -132,7 +154,7 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
       description={t("description")}
       meta={
         <span className="flex items-center gap-1">
-          <span className="tabular-nums">{branches.length}</span>
+          {loaded ? <span className="tabular-nums">{branches.length}</span> : null}
           <Button
             size="icon-sm"
             variant="ghost"
@@ -140,13 +162,26 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
             onClick={() => void refresh()}
             disabled={loading}
             aria-label={t("refresh")}
+            data-testid="workspace-agent-branches-refresh"
           >
-            <RefreshCwIcon aria-hidden className="size-3.5" />
+            <RefreshCwIcon aria-hidden className={cn("size-3.5", loading && "animate-spin")} />
           </Button>
         </span>
       }
     >
-      {branches.length === 0 ? (
+      {!loaded ? (
+        <div
+          role="status"
+          aria-busy="true"
+          aria-label={t("loading")}
+          className="flex flex-col gap-1"
+          data-testid="workspace-agent-branches-loading"
+        >
+          {[0, 1].map((index) => (
+            <Skeleton key={index} className="h-11 w-full rounded-control" />
+          ))}
+        </div>
+      ) : branches.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="workspace-agent-branches-empty">
           {t("empty")}
         </p>
@@ -193,7 +228,11 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
                   disabled={!deleteGate.available}
                   title={deleteGate.reason ?? undefined}
                   data-unavailable={deleteGate.available ? undefined : "true"}
-                  onClick={() => void doDelete(branch.name)}
+                  // A forced delete (`-D`), and after a run has settled the
+                  // branch is the only trace of what it did. One stray click
+                  // must not be enough.
+                  onClick={() => setDeleteTarget(branch.name)}
+                  data-testid={`workspace-agent-branch-delete-${branch.name}`}
                 >
                   {t("actions.delete")}
                 </Button>
@@ -217,6 +256,35 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
         </Button>
       </div>
       <CompareRefsSheet open={compareOpen} onOpenChange={setCompareOpen} rootDir={rootDir} />
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("deleteDescription", { name: deleteTarget ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                const name = deleteTarget
+                setDeleteTarget(null)
+                if (name) void doDelete(name)
+              }}
+              data-testid="workspace-agent-branch-delete-confirm"
+            >
+              {t("confirmDelete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ConsoleSection>
   )
 }

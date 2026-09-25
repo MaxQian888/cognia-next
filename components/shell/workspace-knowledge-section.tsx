@@ -7,6 +7,16 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { FileTextIcon, RefreshCwIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -58,6 +68,9 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
   const [pasteName, setPasteName] = useState("")
   const [pasteText, setPasteText] = useState("")
   const [uploading, setUploading] = useState(false)
+  const [reindexingAll, setReindexingAll] = useState(false)
+  /** The file awaiting a remove confirmation. */
+  const [removeTarget, setRemoveTarget] = useState<KnowledgeFile | null>(null)
 
   const settings = resolveProjectKnowledgeSettings(project.knowledgeSettings)
   const files = project.knowledgeBase ?? []
@@ -124,6 +137,17 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
     }
   }
 
+  // Disabled while it runs: a second click queued a second full re-ingest of
+  // every file behind the first.
+  const reindexAll = async () => {
+    setReindexingAll(true)
+    try {
+      await controller.reindexProject(project)
+    } finally {
+      setReindexingAll(false)
+    }
+  }
+
   const handlePaste = () => {
     const text = pasteText.trim()
     if (!text) return
@@ -162,9 +186,13 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
             variant="ghost"
             size="sm"
             className="h-7 gap-1"
-            onClick={() => void controller.reindexProject(project)}
+            disabled={reindexingAll}
+            onClick={() => void reindexAll()}
           >
-            <RefreshCwIcon className="size-3.5" />
+            <RefreshCwIcon
+              aria-hidden
+              className={cn("size-3.5", reindexingAll && "animate-spin")}
+            />
             {t("reindexAll")}
           </Button>
         )}
@@ -194,21 +222,25 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
                   labelNamespace="workspace.manage.knowledge.status"
                   className="shrink-0"
                 />
+                {/* Padded, with a focus ring: the same idiom as the manage
+                    dialog's remove-root button, rather than a bare 14px glyph. */}
                 <button
                   type="button"
                   aria-label={t("reindex")}
+                  title={t("reindex")}
                   onClick={() => void controller.reindexFile(project.id, file)}
-                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  className="shrink-0 rounded-control p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <RefreshCwIcon className="size-3.5" />
+                  <RefreshCwIcon aria-hidden className="size-3.5" />
                 </button>
                 <button
                   type="button"
                   aria-label={t("removeFile")}
-                  onClick={() => removeKnowledgeFile(project.id, file.id)}
-                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  title={t("removeFile")}
+                  onClick={() => setRemoveTarget(file)}
+                  className="shrink-0 rounded-control p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <Trash2Icon className="size-3.5" />
+                  <Trash2Icon aria-hidden className="size-3.5" />
                 </button>
               </li>
             )
@@ -296,6 +328,38 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
         />
       </div>
       <p className="text-[11px] text-muted-foreground">{t("backendHint")}</p>
+
+      {/*
+        Removing a file drops its text and every chunk indexed from it, and a
+        pasted note has no copy anywhere else, so it asks first.
+      */}
+      <AlertDialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("removeFileTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("removeFileDescription", { name: removeTarget?.name ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (removeTarget) removeKnowledgeFile(project.id, removeTarget.id)
+                setRemoveTarget(null)
+              }}
+            >
+              {t("confirmRemoveFile")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

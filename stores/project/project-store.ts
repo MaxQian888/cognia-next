@@ -38,6 +38,8 @@ import {
   ensureDefaultProject,
 } from "@/lib/db/project-scope"
 import type { ProjectRemovalMode } from "@/lib/db/project-scope"
+import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
+import { rebindWorkspaceSchedules } from "@/lib/workspace/rebind-workspace-schedules"
 
 export interface CreateProjectOptions {
   name?: string
@@ -83,7 +85,8 @@ interface ProjectState {
    * Remove a workspace. `"detach"` (the default) hands its contents to Default;
    * `"delete-data"` destroys them. Removing a workspace is not the same
    * decision as destroying the conversations that were in it, so the caller
-   * has to say which one it means.
+   * has to say which one it means. Default itself is refused, and removing the
+   * active workspace makes Default active.
    */
   deleteProject: (id: string, mode?: ProjectRemovalMode) => Promise<void>
   setActiveProject: (id: string | null) => void
@@ -122,6 +125,15 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   const persistActive = (id: string | null): void => {
     if (!get().loaded) return
     void persistActiveProjectId(id).catch(() => {})
+  }
+  // Archive, tags and knowledge edits are row updates like any other, so a
+  // plugin watching `onProjectUpdate` has to hear about them too. Silent on an
+  // unknown id, matching `updateProject`.
+  const announceUpdate = (id: string, updates: Partial<Project>): void => {
+    const row = get().projects.find((p) => p.id === id)
+    if (!row) return
+    persist(id)
+    void getPluginEventHooks().dispatchProjectUpdate(row, updates)
   }
 
   return {
@@ -237,24 +249,50 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     deleteProject: async (id, mode = "detach") => {
+      // Default is where every other workspace's contents land when it is
+      // removed. `detachProjectContents` already refuses it; refusing here too
+      // keeps "delete-data" from emptying the one workspace that must exist.
+      if (id === DEFAULT_PROJECT_ID) {
+        throw new Error("the Default workspace cannot be removed")
+      }
       const project = get().projects.find((item) => item.id === id)
       if (!project) return
+      let fallback: Project | null = null
       if (get().loaded) {
         // Native histories must be removed before their durable references.
         // Preserve the project row and UI state when either operation fails.
+        fallback = await ensureDefaultProject()
         if (mode === "delete-data") await deleteProjectCascade(id)
         else await detachProjectContents(id)
+        // Schedules live outside the scoped tables; without this they keep a
+        // dangling id and vanish from every workspace's list.
+        await rebindWorkspaceSchedules(id, mode === "detach" ? fallback.id : null)
         if (get().projects.find((item) => item.id === id) !== project) {
           throw new Error("Workspace changed during deletion; retry deletion")
         }
         await deleteProjectRow(id)
       }
       const previouslyActive = get().activeProjectId === id
-      set((state) => ({
-        projects: state.projects.filter((item) => item.id !== id),
-        activeProjectId: state.activeProjectId === id ? null : state.activeProjectId,
-      }))
-      if (previouslyActive) persistActive(get().activeProjectId)
+      const nextActiveId = previouslyActive ? (fallback?.id ?? null) : get().activeProjectId
+      set((state) => {
+        const remaining = state.projects.filter((item) => item.id !== id)
+        return {
+          // `ensureDefaultProject` may have just created the row; the switcher
+          // must be able to show the workspace that is now active.
+          projects:
+            fallback && !remaining.some((item) => item.id === fallback.id)
+              ? [...remaining, fallback]
+              : remaining,
+          activeProjectId: nextActiveId,
+        }
+      })
+      if (previouslyActive) {
+        // Removing the active workspace used to leave NOTHING active: the
+        // conversation list scoped to null showed nothing and the mobile chip
+        // disappeared until a restart. It lands where the contents went.
+        persistActive(nextActiveId)
+        getPluginEventHooks().dispatchProjectSwitch(nextActiveId, id)
+      }
       void getPluginEventHooks().dispatchProjectDelete(id)
     },
 
@@ -293,7 +331,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           p.id === id ? { ...p, isArchived: true, updatedAt: nowDate() } : p
         ),
       }))
-      persist(id)
+      announceUpdate(id, { isArchived: true })
     },
 
     unarchiveProject: (id) => {
@@ -302,7 +340,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           p.id === id ? { ...p, isArchived: false, updatedAt: nowDate() } : p
         ),
       }))
-      persist(id)
+      announceUpdate(id, { isArchived: false })
     },
 
     addKnowledgeFile: (projectId, file) => {
@@ -363,7 +401,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           }
         }),
       }))
-      persist(projectId)
+      const knowledgeBase = get().projects.find((p) => p.id === projectId)?.knowledgeBase
+      announceUpdate(projectId, knowledgeBase ? { knowledgeBase } : {})
     },
 
     addSessionToProject: (projectId, sessionId) => {
@@ -412,26 +451,35 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     addTag: (projectId, tag) => {
+      let added = false
       set((state) => ({
         projects: state.projects.map((p) => {
           if (p.id !== projectId) return p
           const tags = p.tags ?? []
           if (tags.includes(tag)) return p
+          added = true
           return { ...p, tags: [...tags, tag], updatedAt: nowDate() }
         }),
       }))
-      persist(projectId)
+      if (added)
+        announceUpdate(projectId, { tags: get().projects.find((p) => p.id === projectId)?.tags })
     },
 
     removeTag: (projectId, tag) => {
+      let removed = false
       set((state) => ({
         projects: state.projects.map((p) => {
           if (p.id !== projectId) return p
           const tags = (p.tags ?? []).filter((t) => t !== tag)
+          removed = tags.length !== (p.tags ?? []).length
           return { ...p, tags, updatedAt: nowDate() }
         }),
       }))
-      persist(projectId)
+      if (removed) {
+        announceUpdate(projectId, { tags: get().projects.find((p) => p.id === projectId)?.tags })
+      } else {
+        persist(projectId)
+      }
     },
   }
 })

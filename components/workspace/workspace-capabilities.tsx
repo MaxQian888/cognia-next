@@ -18,9 +18,11 @@
 
 import { useCallback, useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { FileStackIcon, PlugIcon, SparklesIcon } from "lucide-react"
+import { FileStackIcon, PlugIcon, SparklesIcon, type LucideIcon } from "lucide-react"
 
+import { ConsoleSection } from "@/components/surface/console-section"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listMcpServers } from "@/lib/db/mcp-servers"
@@ -144,12 +146,19 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
   const overrideCount = countCapabilityOverrides(overlay)
 
   return (
-    <div className="flex flex-col gap-6" data-testid="workspace-capabilities">
+    /*
+      The pane container is declared here rather than by the tab: the cards
+      below size off `@container/workspace-pane`, and a container query with no
+      matching ancestor never fires. The sections are the console cards the
+      sibling tabs use, not a hand-built uppercase heading over bare sections.
+    */
+    <div
+      className="@container/workspace-pane flex flex-col gap-3.5"
+      data-testid="workspace-capabilities"
+    >
       <header className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {t("title")}
-          </h2>
+          <h2 className="text-[13px] font-semibold leading-tight">{t("title")}</h2>
           {overrideCount > 0 ? (
             <Badge
               variant="secondary"
@@ -163,11 +172,17 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </header>
 
+      {/*
+        `undefined` from a live query is "not read yet". Each card waits on its
+        own source, so a slow template read does not hold back the skills.
+      */}
       <CapabilitySection
+        id="capabilities-skills"
         kind="skill"
-        icon={<SparklesIcon aria-hidden className="size-3.5" />}
+        icon={SparklesIcon}
         title={t("skills")}
         empty={t("noSkills")}
+        loading={skills === undefined}
         rows={skillRows}
         overlay={overlay}
         disabled={!workspaceId}
@@ -175,10 +190,12 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
       />
 
       <CapabilitySection
+        id="capabilities-mcp-servers"
         kind="mcpServer"
-        icon={<PlugIcon aria-hidden className="size-3.5" />}
+        icon={PlugIcon}
         title={t("mcpServers")}
         empty={t("noMcpServers")}
+        loading={servers === undefined}
         rows={serverRows}
         overlay={overlay}
         disabled={!workspaceId}
@@ -186,10 +203,14 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
       />
 
       <CapabilitySection
+        id="capabilities-templates"
         kind="template"
-        icon={<FileStackIcon aria-hidden className="size-3.5" />}
+        icon={FileStackIcon}
         title={t("templates")}
         empty={t("noTemplates")}
+        // Until the owners are read every template looks shared, including
+        // the ones confined to another workspace.
+        loading={templateOwners === undefined}
         rows={templateRows}
         overlay={overlay}
         disabled={!workspaceId}
@@ -213,19 +234,23 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
 }
 
 function CapabilitySection({
+  id,
   kind,
   icon,
   title,
   empty,
+  loading,
   rows,
   overlay,
   disabled,
   onSet,
 }: {
+  id: string
   kind: WorkspaceCapabilityKind
-  icon: React.ReactNode
+  icon: LucideIcon
   title: string
   empty: string
+  loading: boolean
   rows: CapabilityRow[]
   overlay: WorkspaceCapabilityOverlay | undefined
   disabled: boolean
@@ -234,12 +259,27 @@ function CapabilitySection({
   const t = useTranslations("workspace.capabilities")
 
   return (
-    <section className="flex flex-col gap-2">
-      <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {icon}
-        {title}
-      </h3>
-      {rows.length === 0 ? (
+    <ConsoleSection
+      id={id}
+      pane="workspace-pane"
+      idPrefix="workspace-section"
+      icon={icon}
+      title={title}
+      meta={loading ? null : rows.length}
+    >
+      {loading ? (
+        <div
+          role="status"
+          aria-busy="true"
+          aria-label={t("loading")}
+          className="flex flex-col gap-1"
+          data-testid={`workspace-${kind}-loading`}
+        >
+          {[0, 1].map((index) => (
+            <Skeleton key={index} className="h-12 w-full rounded-control" />
+          ))}
+        </div>
+      ) : rows.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid={`workspace-${kind}-empty`}>
           {empty}
         </p>
@@ -253,7 +293,7 @@ function CapabilitySection({
             return (
               <li
                 key={row.id}
-                className="flex items-center gap-3 rounded-lg border px-3 py-2"
+                className="flex items-center gap-3 rounded-control border px-3 py-2"
                 data-testid={`workspace-capability-${kind}-${row.id}`}
               >
                 <div className="flex min-w-0 flex-1 flex-col">
@@ -296,6 +336,6 @@ function CapabilitySection({
           })}
         </ul>
       )}
-    </section>
+    </ConsoleSection>
   )
 }

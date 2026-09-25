@@ -14,6 +14,13 @@ export interface SessionBundleBinding {
   primaryAlias: string
   additionalAliases: string[]
   primaryLogicalRootId: string
+  /**
+   * The alias each mounted source root is checked out at, keyed by the trimmed
+   * source path. The bundle's leases name roots by id, never by path, so this
+   * is where a caller holding source-path policy (the Workspace Trust proof)
+   * learns which alias inherits it. Input for `remapExactRoots`.
+   */
+  aliasesBySource: ReadonlyMap<string, string>
 }
 
 /** The single logical root of a session-scoped managed workspace, if it has one. */
@@ -176,5 +183,8 @@ export async function ensureSessionExecutionBundle(input: {
       .filter((lease) => lease.role === "additional")
       .map((lease) => lease.aliasPath),
     primaryLogicalRootId: primaryRoot.id,
+    aliasesBySource: new Map(
+      roots.map((root) => [root.path.trim(), leasesByRoot.get(root.id)!.aliasPath] as const)
+    ),
   }
 }

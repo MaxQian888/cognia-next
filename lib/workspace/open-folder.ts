@@ -14,22 +14,26 @@ function basename(path: string): string {
 /**
  * Create-or-activate a single-root workspace for `path`, then activate it.
  *
- * Dedupes: if a non-archived workspace already has `path` as its primary root,
- * that workspace is re-activated instead of creating a duplicate. This is the
+ * Dedupes: if a workspace already has `path` as its primary root, that
+ * workspace is re-activated instead of creating a duplicate. This is the
  * shared sink for every "open" entry point (menu / Cmd+O / title-bar / deep
  * link / Source Control / New workspace), so re-opening a folder never piles up
- * workspaces.
+ * workspaces. A live match wins; an ARCHIVED one is restored rather than
+ * cloned, because the clone would start with none of the conversations,
+ * knowledge or instructions the archived row still holds.
  *
  * `name` overrides the folder-derived default; only creation passes it.
  */
 export function openPathAsWorkspace(path: string, name?: string): Project | null {
   const trimmed = path.trim()
   if (!trimmed) return null
-  const { projects, createProject, setActiveProject } = useProjectStore.getState()
-  const existing = projects.find((p) => !p.isArchived && primaryRootOf(p)?.path === trimmed)
+  const { projects, createProject, setActiveProject, unarchiveProject } = useProjectStore.getState()
+  const matching = projects.filter((p) => primaryRootOf(p)?.path === trimmed)
+  const existing = matching.find((p) => !p.isArchived) ?? matching[0]
   if (existing) {
+    if (existing.isArchived) unarchiveProject(existing.id)
     setActiveProject(existing.id)
-    return existing
+    return useProjectStore.getState().projects.find((p) => p.id === existing.id) ?? existing
   }
   const created = createProject({
     // "New workspace" passes the name the user typed, which the folder name is
