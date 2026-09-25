@@ -9,6 +9,8 @@
   "exports": {
     ".": {
       "cognia-source": "./src/index.ts",
+      "types": "./src/index.ts",
+      "node": "./dist/index.js",
       "default": "./src/index.ts"
     },
     "./*": {
@@ -17,6 +19,7 @@
     }
   },
   "scripts": {
+    "build": "tsup",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

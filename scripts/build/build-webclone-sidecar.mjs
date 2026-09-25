@@ -31,6 +31,7 @@ import { Command, CommanderError } from "commander"
 import { execaSync } from "execa"
 import { z } from "zod"
 
+import { buildLinkedPackages } from "./lib/build-linked-packages.mjs"
 import { newestMtimeMs } from "./lib/newest-mtime.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -56,32 +57,12 @@ function run(cmd, args, opts = {}) {
 }
 
 /**
- * Rebuild a `file:` workspace package only when its own sources moved.
- *
- * The freshness check has to happen BEFORE tsup runs: tsup is configured with
- * `clean: true`, so an unconditional build rewrites every file in `dist/` with
- * a new mtime, which then reads as "the linked package changed" and cascades
- * into a reinstall and a full `tsc` on every single prebuild — defeating the
- * ADR-0068 C4 cache skip this script exists to honour.
+ * Rebuild a `file:` workspace package only when its own sources moved. An
+ * unconditional build would restamp `dist/` and cascade into a reinstall and a
+ * full `tsc` on every prebuild (see ./lib/build-linked-packages.mjs).
  */
-function buildLinkedPackages() {
-  for (const pkg of linkedPackages) {
-    const name = basename(pkg)
-    const dist = join(pkg, "dist")
-    // Sources = src/**/* plus the root build inputs (package.json, tsconfig,
-    // tsup.config) that change the output.
-    const newestSrc = Math.max(
-      newestMtimeMs(join(pkg, "src")),
-      newestMtimeMs(pkg, { exts: [".json", ".ts"] })
-    )
-    const builtAt = existsSync(dist) ? newestMtimeMs(dist) : 0
-    if (builtAt > 0 && newestSrc > 0 && builtAt > newestSrc) {
-      process.stdout.write(`[build-webclone-sidecar] @cognia/${name} up to date; skipping build\n`)
-      continue
-    }
-    process.stdout.write(`[build-webclone-sidecar] building @cognia/${name}\n`)
-    run("pnpm", ["--filter", `@cognia/${name}`, "run", "build"], { cwd: repoRoot })
-  }
+function buildWebcloneLinkedPackages() {
+  buildLinkedPackages(linkedPackages, { label: "build-webclone-sidecar", repoRoot, run })
 }
 
 /** Path of a linked package as installed into the engine's node_modules. */
@@ -205,7 +186,7 @@ function main({ installOnly = false } = {}) {
   // The engine's SSRF guard is an adapter over @cognia/network-guard, and npm
   // packs a `file:` dependency from its `files` list — `dist/` has to be there
   // before the install, and current before the copy is trusted.
-  buildLinkedPackages()
+  buildWebcloneLinkedPackages()
   const evicted = evictStaleLinkedPackages()
 
   if (evicted || shouldInstall()) {

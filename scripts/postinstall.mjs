@@ -1,4 +1,5 @@
-// Root postinstall — sidecar deps + the VSCode ext-host sidecar bundle.
+// Root postinstall — sidecar deps, the compiled output of the workspace
+// packages the sidecar links, and the VSCode ext-host sidecar bundle.
 //
 // Container/partial checkouts (the cognia-server brain-builder stage installs
 // workspace deps BEFORE copying sidecar/ so the store-heavy layer caches)
@@ -14,4 +15,5 @@ if (!fs.existsSync("sidecar/package.json")) {
 }
 
 execSync("pnpm run sidecar:install", { stdio: "inherit" })
+execSync("node scripts/build/build-sidecar-linked-packages.mjs", { stdio: "inherit" })
 execSync("pnpm run sidecar:vscode:build", { stdio: "inherit" })

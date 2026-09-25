@@ -11,12 +11,19 @@
       "cognia-source": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./claude-agent-sdk-options": {
+      "cognia-source": "./src/claude-agent-sdk-options.ts",
+      "types": "./src/claude-agent-sdk-options.ts",
+      "node": "./dist/claude-agent-sdk-options.js",
+      "default": "./src/claude-agent-sdk-options.ts"
+    },
     "./*": {
       "cognia-source": "./src/*.ts",
       "default": "./src/*.ts"
     }
   },
   "scripts": {
+    "build": "tsup",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
