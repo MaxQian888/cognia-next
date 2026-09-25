@@ -17,9 +17,23 @@ const onOpenWorkspace = jest.fn()
 let projects: Project[] = []
 let available = true
 let gitState: Record<string, unknown>
+let liveMessageCount: number | undefined
+const liveQueries: Array<{ query: () => unknown; deps: unknown[] }> = []
+const countWorkspaceMessages = jest.fn(async (_projectId: string) => 0)
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
+}))
+
+jest.mock("@/hooks/data", () => ({
+  useClientLiveQuery: (query: () => unknown, deps: unknown[]) => {
+    liveQueries.push({ query, deps })
+    return liveMessageCount
+  },
+}))
+
+jest.mock("@/lib/db/sessions", () => ({
+  countWorkspaceMessages: (projectId: string) => countWorkspaceMessages(projectId),
 }))
 
 jest.mock("next-intl", () => ({
@@ -137,6 +151,8 @@ function status(): GitStatus {
 beforeEach(() => {
   jest.clearAllMocks()
   available = true
+  liveMessageCount = 23
+  liveQueries.length = 0
   projects = [
     project("project-a", "Alpha", "/repo/a"),
     project("project-b", "Beta", "/repo/b", "/repo/shared"),
@@ -167,6 +183,32 @@ describe("ProjectOverviewPanel", () => {
     expect(screen.getByTestId("project-branch-header")).toHaveTextContent("feature/project-panel")
     expect(screen.getByTestId("project-changes-view")).toHaveTextContent("1")
     expect(screen.getByText("projectOverview.analysis.title")).toBeInTheDocument()
+  })
+
+  it("shows the workspace's live message count, not the never-written project field", () => {
+    render(<ProjectOverviewPanel projectId="project-b" onOpenWorkspace={onOpenWorkspace} />)
+
+    // The fixture's stale `messageCount: 14` must not leak through.
+    const metric = screen.getByTestId("project-overview-message-count")
+    expect(metric).toHaveTextContent("projectOverview.summary.messages")
+    expect(metric).toHaveTextContent("23")
+    expect(metric).not.toHaveTextContent("14")
+
+    // The live query is keyed to this panel's workspace and counts its messages.
+    expect(liveQueries.at(-1)?.deps).toEqual(["project-b"])
+    void liveQueries.at(-1)?.query()
+    expect(countWorkspaceMessages).toHaveBeenCalledWith("project-b")
+  })
+
+  it("holds a placeholder for the message count until the first read lands", () => {
+    liveMessageCount = undefined
+
+    render(<ProjectOverviewPanel projectId="project-b" onOpenWorkspace={onOpenWorkspace} />)
+
+    const metric = screen.getByTestId("project-overview-message-count")
+    expect(metric).toHaveTextContent("projectOverview.summary.messages")
+    expect(metric.querySelector('[data-slot="skeleton"]')).not.toBeNull()
+    expect(metric).not.toHaveTextContent(/\d/)
   })
 
   it("offers workspace, refresh, sync, and full Source Control shortcuts", () => {

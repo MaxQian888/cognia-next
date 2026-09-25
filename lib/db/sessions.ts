@@ -18,6 +18,7 @@ import { revokeClaimsForDeletedSession } from "@/lib/memory/lifecycle/claim-dele
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import { assertSessionWritable, type SessionWriteOperation } from "@/lib/chat/session-write-guard"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -126,6 +127,27 @@ export async function listWorkspaceSessions(projectId: string): Promise<ChatSess
   ])
   if (unscoped.length === 0) return scoped
   return [...scoped, ...unscoped].sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/**
+ * How many messages a workspace's conversations hold, counted over the same
+ * conversations its chat list shows: {@link listWorkspaceSessions} less the
+ * embedded ones no list shows (subagent transcripts, resource workbenches,
+ * workflow editors — `lib/chat/session-exposure.ts`).
+ *
+ * Counted from `messages` because `Project.messageCount` is written as 0 at
+ * creation and never again. One `sessionId` index count per conversation: each
+ * is a native IndexedDB `count(range)` that reads no rows, where a single
+ * `anyOf` count walks every matching key with a cursor, and a live query
+ * re-runs this on every message write, a streaming reply's included.
+ */
+export async function countWorkspaceMessages(projectId: string): Promise<number> {
+  const db = getDb()
+  const sessions = filterExposedSessions(await listWorkspaceSessions(projectId), "main-list")
+  const counts = await Promise.all(
+    sessions.map((session) => db.messages.where("sessionId").equals(session.id).count())
+  )
+  return counts.reduce((sum, count) => sum + count, 0)
 }
 
 /**

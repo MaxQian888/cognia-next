@@ -17,6 +17,7 @@ import {
   listAgentThreadSessions,
   listScopedSessions,
   listWorkspaceSessions,
+  countWorkspaceMessages,
   deleteSession,
   listSessionBranches,
   countBranchesAtMessage,
@@ -1312,6 +1313,74 @@ describe("workspace (project) scoping", () => {
     await waitUntil(() => emissions.at(-1)?.[0] === "renamed")
     sub.unsubscribe()
     expect(emissions.at(-1)).toEqual(["renamed"])
+  })
+})
+
+describe("countWorkspaceMessages", () => {
+  async function putMessages(sessionId: string, count: number) {
+    await getDb().messages.bulkPut(
+      Array.from({ length: count }, (_, index) => ({
+        id: `${sessionId}-m${index}`,
+        sessionId,
+        role: "user",
+        parts: [],
+        createdAt: index + 1,
+      })) as never
+    )
+  }
+
+  it("counts the messages of the conversations the workspace's chat list shows", async () => {
+    await saveSettings({ activeProjectId: "proj-A" })
+    const own = await createSession({ title: "own" })
+    const legacy = await createSession({ title: "legacy" })
+    await getDb().sessions.update(legacy.id, { projectId: undefined })
+    const other = await createSession({ title: "other", projectId: "proj-B" })
+    const subagent = await createSession({ title: "subagent" })
+    await getDb().sessions.update(subagent.id, { kind: "subagent" })
+    const empty = await createSession({ title: "empty" })
+    await putMessages(own.id, 3)
+    await putMessages(legacy.id, 2)
+    await putMessages(other.id, 5)
+    await putMessages(subagent.id, 7)
+
+    // Own + workspace-less; not another workspace's, not an embedded
+    // transcript, and a conversation with no messages adds nothing.
+    expect(await countWorkspaceMessages("proj-A")).toBe(5)
+    expect(await countWorkspaceMessages("proj-B")).toBe(7)
+    expect(empty.projectId).toBe("proj-A")
+  })
+
+  it("is zero for a workspace with no conversations", async () => {
+    expect(await countWorkspaceMessages("proj-empty")).toBe(0)
+  })
+
+  it("re-emits in a liveQuery when a message lands or a conversation joins", async () => {
+    await saveSettings({ activeProjectId: "proj-A" })
+    const own = await createSession({ title: "own" })
+    await putMessages(own.id, 1)
+    const emissions: number[] = []
+    const sub = Dexie.liveQuery(() => countWorkspaceMessages("proj-A")).subscribe({
+      next: (count) => emissions.push(count),
+    })
+    await waitUntil(() => emissions.at(-1) === 1)
+
+    await getDb().messages.put({
+      id: "late",
+      sessionId: own.id,
+      role: "assistant",
+      parts: [],
+      createdAt: 9,
+    } as never)
+    await waitUntil(() => emissions.at(-1) === 2)
+
+    // A conversation moved in from another workspace brings its messages.
+    const moved = await createSession({ title: "moved", projectId: "proj-B" })
+    await putMessages(moved.id, 4)
+    await getDb().sessions.update(moved.id, { projectId: "proj-A" })
+    await waitUntil(() => emissions.at(-1) === 6)
+
+    sub.unsubscribe()
+    expect(emissions.at(-1)).toBe(6)
   })
 })
 

@@ -17,11 +17,14 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
 import { BranchHeader } from "@/components/source-control/branch-header"
 import { ChangesView } from "@/components/source-control/changes-view"
 import { RootSwitcher } from "@/components/source-control/root-switcher"
+import { useClientLiveQuery } from "@/hooks/data"
 import { useGitActions } from "@/hooks/git/use-git-actions"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
+import { countWorkspaceMessages } from "@/lib/db/sessions"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { cn } from "@/lib/utils"
 import { useGitStore } from "@/stores/git/git-store"
@@ -54,6 +57,9 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
   const committing = useGitStore((state) => state.ops.commit)
   const syncing = useGitStore((state) => state.ops.sync)
   const setRootDir = useGitStore((state) => state.setRootDir)
+  // Counted live from the workspace's conversations: `Project.messageCount` is
+  // written as 0 at creation and never again. `undefined` until the first read.
+  const messageCount = useClientLiveQuery(() => countWorkspaceMessages(projectId), [projectId], 0)
 
   const roots = project?.roots ?? []
   const rootPaths = roots.map((root) => root.path)
@@ -155,7 +161,8 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
             <Metric
               icon={<SparklesIcon className="size-3.5" />}
               label={t("summary.messages")}
-              value={project.messageCount}
+              value={messageCount}
+              testId="project-overview-message-count"
             />
           </div>
         </section>
@@ -317,14 +324,29 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
   )
 }
 
-function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+function Metric({
+  icon,
+  label,
+  value,
+  testId,
+}: {
+  icon: React.ReactNode
+  label: string
+  /** `undefined` while a counted value is still loading. */
+  value: number | undefined
+  testId?: string
+}) {
   return (
-    <div className="rounded-lg border bg-card p-3">
+    <div className="rounded-lg border bg-card p-3" data-testid={testId}>
       <div className="mb-2 flex items-center gap-1.5 text-muted-foreground">
         {icon}
         <span className="text-xs">{label}</span>
       </div>
-      <p className="text-xl font-semibold tabular-nums">{value}</p>
+      {value === undefined ? (
+        <Skeleton className="h-7 w-10" />
+      ) : (
+        <p className="text-xl font-semibold tabular-nums">{value}</p>
+      )}
     </div>
   )
 }
