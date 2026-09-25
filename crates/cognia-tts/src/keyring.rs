@@ -44,12 +44,12 @@ pub fn get_provider_key(provider: &str) -> Result<Option<String>, String> {
     secret_store::get(SERVICE, provider)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn tts_keyring_get(provider: String) -> Result<Option<String>, String> {
     get_provider_key(&provider)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn tts_keyring_set(provider: String, key: String) -> Result<(), String> {
     validate_provider(&provider)?;
     if key.trim().is_empty() {
@@ -59,7 +59,7 @@ pub async fn tts_keyring_set(provider: String, key: String) -> Result<(), String
     secret_store::set(SERVICE, &provider, &key)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn tts_keyring_delete(provider: String) -> Result<(), String> {
     validate_provider(&provider)?;
     secret_store::delete(SERVICE, &provider)
@@ -68,7 +68,7 @@ pub async fn tts_keyring_delete(provider: String) -> Result<(), String> {
 /// Returns the list of providers that currently have a key stored. Useful
 /// for the Speech settings UI to render "configured" badges without a
 /// per-provider round-trip.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn tts_keyring_list_providers() -> Result<Vec<String>, String> {
     list_configured_providers(KNOWN_PROVIDERS, |provider| {
         secret_store::get(SERVICE, provider)

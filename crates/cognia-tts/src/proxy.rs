@@ -346,7 +346,7 @@ fn cancellations() -> &'static cognia_net::request_cancellation::RequestCancella
     CANCELLATIONS.get_or_init(Default::default)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn tts_proxy_cancel(request_id: String) -> bool {
     cancellations().cancel(&request_id)
 }
@@ -465,7 +465,7 @@ fn enforce_cloud_pii_boundary(request: &ProxyRequest) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn tts_proxy_fetch(request: ProxyRequest) -> Result<ProxyResponse, String> {
     let Some(request_id) = request
         .request_id

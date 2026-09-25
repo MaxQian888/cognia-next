@@ -24,7 +24,7 @@ pub struct AgentReadResult {
     pub parse_error: Option<String>,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn read_agent_config(agent: String) -> Result<AgentReadResult, String> {
     let spec = spec_for(&agent).ok_or_else(|| format!("unknown agent: {}", agent))?;
     let format_str = match spec.format {
@@ -62,7 +62,7 @@ pub struct AgentWriteResult {
     pub backup_path: Option<String>,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn write_agent_config(
     agent: String,
     value: serde_json::Value,
@@ -97,7 +97,7 @@ pub fn write_agent_config(
 /// trees on this host, honouring `$CLAUDE_CONFIG_DIR` / `$CODEX_HOME` /
 /// `$XDG_CONFIG_HOME` / `$XDG_DATA_HOME`. Every importer takes its scan roots
 /// from this one answer — see `lib/agent-roots/`.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn agent_vendor_roots() -> VendorRoots {
     vendor_roots()
 }
@@ -109,7 +109,7 @@ pub fn agent_vendor_roots() -> VendorRoots {
 /// Read-only on purpose: `.mcp.json` is usually version-controlled and shared
 /// with the user's teammates, so Cognia imports from it but never projects
 /// back into it (unlike the user-scope agent files in [`write_agent_config`]).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn read_project_mcp_config(cwd: String) -> Result<AgentReadResult, String> {
     let trimmed = cwd.trim();
     if trimmed.is_empty() {

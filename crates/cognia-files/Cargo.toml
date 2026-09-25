@@ -21,6 +21,13 @@ publish.workspace = true
 name = "cognia_files"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the `#[tauri::command]` attribute on this crate's command fns.
+# Off by default: the fns stay plain Rust functions, callable without Tauri;
+# `src-tauri` turns it on to register them in `generate_handler!`.
+default = []
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -41,8 +48,9 @@ log.workspace = true
 # The async command shells hand blocking IO to `spawn_blocking`; `macros` is
 # for the `#[tokio::test]` in this file.
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "sync", "time"] }
-# The command shells only; the fns stay in the `files` submodule (E0255).
-tauri = { workspace = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
+# The command attribute only, behind `tauri-host`; the fns stay in the `files`
+# submodule (E0255).
+tauri = { workspace = true, optional = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
 
 [lints]
 workspace = true

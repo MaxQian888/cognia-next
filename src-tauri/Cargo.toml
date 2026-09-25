@@ -127,7 +127,7 @@ cognia-plugin-runtime = { path = "../crates/cognia-plugin-runtime" }
 # ADR-0067 follow-up — skills subsystem. Re-aliased as `crate::skills`.
 cognia-skills = { path = "../crates/cognia-skills" }
 # ADR-0067 follow-up — TTS subsystem. Re-aliased as `crate::tts`.
-cognia-tts = { path = "../crates/cognia-tts" }
+cognia-tts = { path = "../crates/cognia-tts", features = ["tauri-host"] }
 # ADR-0067 follow-up — remote-control LAN API. Re-aliased as
 # `crate::remote_control`.
 # ADR-0067 follow-up — local OpenAI-compatible gateway. Re-aliased as
@@ -173,9 +173,9 @@ cognia-git = { path = "../crates/cognia-git" }
 cognia-git-mirror = { path = "../crates/cognia-git-mirror" }
 cognia-task-workspace = { path = "../crates/cognia-task-workspace" }
 # ADR-0067 Tier C — multi-agent MCP config IO (owns `toml_edit`).
-cognia-agents = { path = "../crates/cognia-agents" }
+cognia-agents = { path = "../crates/cognia-agents", features = ["tauri-host"] }
 # ADR-0067 Tier C — confined filesystem surface (owns `gray_matter`, `ignore`).
-cognia-files = { path = "../crates/cognia-files" }
+cognia-files = { path = "../crates/cognia-files", features = ["tauri-host"] }
 # ADR-0067 Tier C — SQLite mirrors of renderer-side agent state. Tauri-free
 # on purpose: the headless `cognia-server` bin links it directly.
 cognia-agent-state = { path = "../crates/cognia-agent-state" }

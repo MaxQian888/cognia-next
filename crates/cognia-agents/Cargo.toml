@@ -22,6 +22,13 @@ publish.workspace = true
 name = "cognia_agents"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the `#[tauri::command]` attribute on this crate's command fns.
+# Off by default: the fns stay plain Rust functions, callable without Tauri;
+# `src-tauri` turns it on to register them in `generate_handler!`.
+default = []
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -30,10 +37,11 @@ serde_json.workspace = true
 toml_edit = { workspace = true, features = ["serde"] }
 # Per-OS home/config/data roots for the vendor path table.
 dirs.workspace = true
-# `commands.rs` only; the four `#[tauri::command]` shells stay co-located with
-# their fns (the macro requires it) and are referenced from the app's
-# `generate_handler!` as `agents::commands::…` through the crate alias.
-tauri = { workspace = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
+# `commands.rs` only, behind `tauri-host`: the command attribute stays
+# co-located with its fns (the macro requires it), and the app's
+# `generate_handler!` references them as `agents::commands::…` through the
+# crate alias.
+tauri = { workspace = true, optional = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
 
 [lints]
 workspace = true

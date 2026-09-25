@@ -321,7 +321,7 @@ pub fn remote_workspace_roots() -> Vec<String> {
 /// starting points a picker should offer, not a fence. The fence for a *remote*
 /// caller is applied in the companion RPC layer, which builds this same report
 /// from whichever Host is answering.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_workspace_roots() -> WorkspaceRootsReport {
     WorkspaceRootsReport {
         roots: remote_workspace_roots()
@@ -394,7 +394,7 @@ fn enforce_check_path(path: &str, op: &str, origin: FsOrigin) -> Result<(), Stri
 /// Register a dialog-chosen path so a subsequent confined/raw write to it is
 /// inside an allowed root. For a directory the dir itself is registered; for a
 /// file (or a not-yet-created save target) its containing directory is.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_allow_dialog_path(path: String) {
     let p = PathBuf::from(&path);
     if p.is_dir() {
@@ -408,7 +408,7 @@ pub fn fs_allow_dialog_path(path: String) {
 
 /// Replace/extend the registered workspace roots from the renderer's active
 /// project. Called whenever `Project.roots` change.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_set_allowed_roots(
     paths: Vec<String>,
     account_id: Option<String>,
@@ -427,7 +427,7 @@ pub fn fs_set_allowed_roots(
 /// (UI) thread, so a large or slow-FS read would freeze the webview. The
 /// blocking work runs on the blocking pool; `read_text_file_impl` holds the
 /// actual sync logic so tests and the companion RPC path can call it directly.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn read_text_file(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || read_text_file_impl(path, FsOrigin::Local))
         .await
@@ -442,7 +442,7 @@ pub fn read_text_file_impl(path: String, origin: FsOrigin) -> Result<String, Str
 /// Write a text file at the given absolute path, creating parent
 /// directories as needed. Shadow-mode containment logs out-of-root writes.
 /// Runs off the UI thread (see [`read_text_file`]).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || write_text_file_impl(path, content, FsOrigin::Local))
         .await
@@ -464,7 +464,7 @@ pub fn write_text_file_impl(path: String, content: String, origin: FsOrigin) -> 
 /// Ensure a directory exists, creating it (and parents) if needed.
 /// Shadow-mode containment logs out-of-root directory creation. Runs off the
 /// UI thread (see [`read_text_file`]).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn ensure_dir(path: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || ensure_dir_impl(path, FsOrigin::Local))
         .await
@@ -490,7 +490,7 @@ pub struct DiscoveredSkill {
 /// files. Returns an empty list when the directory doesn't exist. Runs off the
 /// UI thread — the directory walk + per-skill reads can be slow (see
 /// [`read_text_file`]); `scan_claude_skills_impl` holds the sync logic.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn scan_claude_skills() -> Result<Vec<DiscoveredSkill>, String> {
     tokio::task::spawn_blocking(scan_claude_skills_impl)
         .await
@@ -539,7 +539,7 @@ pub(crate) fn scan_claude_skills_impl() -> Result<Vec<DiscoveredSkill>, String> 
 /// Read the user-level Claude Code config at `~/.claude.json`. Used to
 /// import its `mcpServers` block. Returns an empty object when the file
 /// doesn't exist so the UI can show "no servers found" cleanly.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn read_claude_user_config() -> Result<serde_json::Value, String> {
     tokio::task::spawn_blocking(read_claude_user_config_impl)
         .await
@@ -561,7 +561,7 @@ pub(crate) fn read_claude_user_config_impl() -> Result<serde_json::Value, String
 
 /// Convenience used by Sync export/import — resolve a sensible default
 /// directory for save dialogs (the user's documents folder).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn default_export_dir() -> Result<String, String> {
     let dir = dirs::document_dir()
         .or_else(dirs::home_dir)
@@ -674,7 +674,7 @@ const SEARCH_MAX_DEPTH: usize = 12;
 /// up to `limit` entries whose path contains `query`. Empty `query` returns the
 /// first `limit` entries found in walk order. Sorting puts directories before
 /// files and prefix matches before substring matches.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_search_workspace(
     root: String,
     query: String,
@@ -813,7 +813,7 @@ const CONTENT_PREVIEW_MAX: usize = 400;
 /// The `root` is validated as a directory; individual files are range-safe by
 /// construction (we only read paths yielded by the walker under `root`). Binary
 /// / non-UTF-8 / oversized files are skipped silently.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_search_content_workspace(
     root: String,
     query: String,
@@ -905,7 +905,7 @@ pub fn fs_search_content_workspace(
 
 /// Read a text file inside a workspace, with a sandboxed path-traversal check.
 /// `rel_path` is joined to `root` and must canonicalize back inside `root`.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_read_workspace_file(
     root: String,
     rel_path: String,
@@ -950,7 +950,7 @@ const BASE64_READ_HARD_CAP: usize = 32 * 1024 * 1024;
 /// (the built-in editor's image previews). Same root-relative sandbox check.
 /// Refuses files over `max_bytes` (or the hard cap when none is given) before
 /// touching the disk so the cap bounds the allocation, not just the output.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_read_workspace_file_base64(
     root: String,
     rel_path: String,
@@ -978,7 +978,7 @@ pub fn fs_read_workspace_file_base64(
 /// check as [`fs_read_workspace_file`]. `rel_path` is joined to `root`; parent
 /// directories are created as needed, and the resolved parent must canonicalize
 /// back inside `root` so a `../` escape cannot write outside the workspace.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_write_workspace_file(
     root: String,
     rel_path: String,
@@ -1039,7 +1039,7 @@ pub fn fs_write_workspace_file(
 /// Some(true)` to show everything. Directories are listed before files, each
 /// sorted case-insensitively by name. `rel_path` is sandbox-checked against
 /// `root` like the read/write variants.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_list_workspace_dir(
     root: String,
     rel_path: Option<String>,
@@ -1164,7 +1164,7 @@ const WALK_DEFAULT_MAX_DEPTH: usize = 24;
 /// tree browser is one level deep and `fs_search_workspace` stops at 200 hits.
 ///
 /// Caps are reported, never silent — see [`WorkspaceWalk`].
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_walk_workspace(
     root: String,
     rel_path: Option<String>,
@@ -1266,7 +1266,7 @@ pub fn fs_walk_workspace(
 /// `exists: false` (never an error) when the path is absent, so a client can
 /// probe before a create/rename. Sandbox-checked against `root`; a `rel_path`
 /// that escapes the workspace is rejected even when it doesn't exist.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_stat_workspace_file(root: String, rel_path: String) -> Result<WorkspaceStat, String> {
     let root_path = PathBuf::from(&root)
         .canonicalize()
@@ -1316,7 +1316,7 @@ pub fn fs_stat_workspace_file(root: String, rel_path: String) -> Result<Workspac
 /// to the workspace. The `root` + `rel_path` counterpart to `ensure_dir_confined`
 /// (which takes an absolute path + allowed roots). Re-verifies the created path
 /// stays inside `root` to guard a symlinked ancestor.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_create_workspace_dir(root: String, rel_path: String) -> Result<(), String> {
     if rel_path.trim().is_empty() {
         return Err("rel_path is empty".into());
@@ -1341,7 +1341,7 @@ pub fn fs_create_workspace_dir(root: String, rel_path: String) -> Result<(), Str
 /// be empty). A symlinked final component is unlinked (never followed), so a
 /// symlinked directory can't let removal traverse outside the workspace.
 /// Deleting the root itself (empty `rel_path`) is refused.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_delete_workspace_entry(
     root: String,
     rel_path: String,
@@ -1372,7 +1372,7 @@ pub fn fs_delete_workspace_entry(
 /// endpoints are sandbox-checked against `root`; the destination parent is
 /// created as needed. Refuses to clobber an existing destination or to write
 /// through a symlinked destination.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_rename_workspace_entry(
     root: String,
     from_rel_path: String,
@@ -1397,7 +1397,7 @@ pub fn fs_rename_workspace_entry(
 /// the destination parent is created as needed; refuses to clobber an existing
 /// destination or to write through a symlinked destination. Symlinks inside a
 /// recursively-copied tree are skipped (never followed out of the workspace).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_copy_workspace_entry(
     root: String,
     from_rel_path: String,
@@ -1609,7 +1609,7 @@ fn resolve_confined_target(path: &str, allowed_roots: &[String]) -> Result<PathB
 /// [`write_text_file`]; the secure-fs write path calls this so a write that
 /// escapes the workspace — including via a symlink the lexical TS check can't
 /// see — is rejected on-disk.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn write_text_file_confined(
     path: String,
     content: String,
@@ -1623,7 +1623,7 @@ pub fn write_text_file_confined(
 /// deepest existing ancestor canonicalizes inside a root *before* creating any
 /// new directories, so a denied call never creates a directory outside the
 /// workspace.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn ensure_dir_confined(path: String, allowed_roots: Vec<String>) -> Result<(), String> {
     let roots = canonicalize_roots(&allowed_roots);
     if roots.is_empty() {
@@ -1696,7 +1696,7 @@ pub struct SlashCommandFile {
 /// `.cognia` beats `.claude` inside the project because it is this app's own
 /// directory: a repository that has both is deliberately overriding the
 /// Claude Code file it also ships.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn slash_commands_scan(cwd: Option<String>) -> Result<Vec<SlashCommandFile>, String> {
     let mut out: Vec<SlashCommandFile> = Vec::new();
     if let Some(cwd) = cwd.as_ref() {
@@ -1818,7 +1818,7 @@ fn collect_command_files(root: &Path, scope: &str, out: &mut Vec<SlashCommandFil
 /// "project") or the user-global ~/.claude/CLAUDE.md (scope == "user"). The
 /// content is prefixed with `\n- ` to match Claude Code's bullet style; the
 /// caller passes the bare text. Creates the file if missing.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn memory_append(
     scope: String,
     content: String,

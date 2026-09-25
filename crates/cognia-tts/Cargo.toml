@@ -14,10 +14,18 @@ publish.workspace = true
 name = "cognia_tts"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the `#[tauri::command]` attribute on this crate's command fns.
+# Off by default: the fns stay plain Rust functions, callable without Tauri;
+# `src-tauri` turns it on to register them in `generate_handler!`.
+default = []
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 cognia-secrets = { path = "../cognia-secrets" }
 cognia-net = { path = "../cognia-net" }
-tauri = { workspace = true }
+# The command attribute only, behind `tauri-host`.
+tauri = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 base64.workspace = true
