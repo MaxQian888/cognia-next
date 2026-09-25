@@ -32,15 +32,24 @@ import { useEvalDatasets } from "@/hooks/eval/use-eval-data"
 import { useRunConfigOptions } from "@/hooks/eval/use-run-config-options"
 import { DatasetDetail } from "./dataset-detail"
 
-export function EvalDashboard() {
+export interface EvalDashboardProps {
+  /**
+   * Dataset to open on (`/eval?dataset=<id>`) — e.g. the benchmark the twin
+   * persona tab just generated. Without it the dashboard opens on the first
+   * row, which is how that link used to drop the dataset it had just made.
+   */
+  initialDatasetId?: string
+}
+
+export function EvalDashboard({ initialDatasetId }: EvalDashboardProps = {}) {
   const t = useTranslations("eval")
   const datasets = useEvalDatasets()
   const settings = useSettingsStore((s) => s.settings)
   const runOptions = useRunConfigOptions()
   const isMobile = useIsMobile()
 
-  const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
-  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | undefined>(initialDatasetId)
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(Boolean(initialDatasetId))
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState("")

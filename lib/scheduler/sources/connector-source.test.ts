@@ -110,8 +110,9 @@ describe("toUnifiedOutboundQueue", () => {
   })
 
   it("deep-links to the connections settings outbound tab", () => {
-    expect(toUnifiedOutboundQueue(0).origin.deepLinkHref).toContain("connections")
-    expect(toUnifiedOutboundQueue(0).origin.deepLinkHref).toContain("outbound")
+    expect(toUnifiedOutboundQueue(0).origin.deepLinkHref).toBe(
+      "/settings?section=connections&connectionsTab=outbound"
+    )
   })
 })
 

@@ -101,7 +101,7 @@ describe("<TodayStatsCard />", () => {
     expect(screen.getByTestId("stat-tile-sessions")).toHaveAttribute("href", "/")
     expect(screen.getByTestId("stat-tile-drafts")).toHaveAttribute(
       "href",
-      "/discover?tab=twinDrafts"
+      "/discover?category=twinDrafts"
     )
     // Regression: the backup tile used to dead-link to the desktop-only
     // `/settings?section=data` route, which mobile redirects away.

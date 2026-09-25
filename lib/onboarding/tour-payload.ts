@@ -46,7 +46,9 @@ export const TOUR_SLIDE_HREFS: Record<TourSlideId, string> = {
   computerUse: "/settings?section=automation",
   connectors: "/settings?section=connections",
   mobile: "/settings?section=companion",
-  twin: "/settings?section=twin",
+  // The twin has its own page, not a settings section — `section=twin` fell
+  // back to AI connections.
+  twin: "/twin",
 }
 
 /** Lucide icon name per slide, resolved by the host. */

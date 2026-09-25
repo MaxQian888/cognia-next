@@ -19,7 +19,7 @@ describe("TOUR_SLIDE_IDS", () => {
 
   it("gives every slide a destination and an icon", () => {
     for (const id of TOUR_SLIDE_IDS) {
-      expect(TOUR_SLIDE_HREFS[id]).toMatch(/^\/settings\?section=/)
+      expect(TOUR_SLIDE_HREFS[id]).toMatch(id === "twin" ? /^\/twin$/ : /^\/settings\?section=/)
       expect(TOUR_SLIDE_ICONS[id]).toBeTruthy()
     }
   })

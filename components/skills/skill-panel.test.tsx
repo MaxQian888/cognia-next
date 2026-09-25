@@ -90,6 +90,8 @@ const storeState: {
   openDetail: jest.Mock
   closeDetail: jest.Mock
   openCreate: jest.Mock
+  setActiveTab: jest.Mock
+  resetFilters: jest.Mock
 } = {
   activeTab: "my-skills",
   editorTarget: null,
@@ -103,10 +105,28 @@ const storeState: {
   openDetail: jest.fn(),
   closeDetail: jest.fn(),
   openCreate: jest.fn(),
+  setActiveTab: jest.fn(),
+  resetFilters: jest.fn(),
 }
 
 jest.mock("@/stores/skills", () => ({
-  useSkillsStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
+  useSkillsStore: Object.assign(
+    (selector: (s: typeof storeState) => unknown) => selector(storeState),
+    { getState: () => storeState }
+  ),
+}))
+
+let mockSearch = new URLSearchParams()
+const mockRouterReplace = jest.fn()
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => mockSearch,
+  useRouter: () => ({ replace: mockRouterReplace, push: jest.fn() }),
+  usePathname: () => "/skills",
+}))
+
+const settingsRef = { loaded: true }
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (selector: (s: typeof settingsRef) => unknown) => selector(settingsRef),
 }))
 
 const tauriRef = { current: false }
@@ -256,6 +276,32 @@ beforeEach(() => {
   storeState.openDetail = jest.fn()
   storeState.closeDetail = jest.fn()
   storeState.openCreate = jest.fn()
+  storeState.setActiveTab = jest.fn()
+  storeState.resetFilters = jest.fn()
+  mockSearch = new URLSearchParams()
+  settingsRef.loaded = true
+})
+
+describe("SkillPanel — ?skill= deep link", () => {
+  it("opens the named skill on My skills with filters cleared, then strips the param", async () => {
+    // Where a global-search skill result lands; nothing used to read it.
+    mockSearch = new URLSearchParams("skill=s9")
+    render(<SkillPanel />)
+    await waitFor(() => expect(storeState.openDetail).toHaveBeenCalledWith("s9"))
+    expect(storeState.setActiveTab).toHaveBeenCalledWith("my-skills")
+    expect(storeState.resetFilters).toHaveBeenCalled()
+    expect(mockRouterReplace).toHaveBeenCalledWith("/skills", { scroll: false })
+  })
+
+  it("waits for settings, so prefs hydration cannot switch the tab back", async () => {
+    mockSearch = new URLSearchParams("skill=s9")
+    settingsRef.loaded = false
+    const { rerender } = render(<SkillPanel />)
+    expect(storeState.openDetail).not.toHaveBeenCalledWith("s9")
+    settingsRef.loaded = true
+    rerender(<SkillPanel />)
+    await waitFor(() => expect(storeState.openDetail).toHaveBeenCalledWith("s9"))
+  })
 })
 
 describe("SkillPanel", () => {

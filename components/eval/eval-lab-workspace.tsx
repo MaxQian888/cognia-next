@@ -288,7 +288,7 @@ function EvidenceContent({
   )
 }
 
-export function EvalLabWorkspace() {
+export function EvalLabWorkspace({ initialDatasetId }: { initialDatasetId?: string } = {}) {
   const t = useTranslations("eval")
   const format = useFormatter()
   const router = useRouter()
@@ -317,7 +317,8 @@ export function EvalLabWorkspace() {
     initialVariant("variant-a", "A"),
     initialVariant("variant-b", "B"),
   ])
-  const [legacyTool, setLegacyTool] = useState<LegacyTool>(null)
+  // A `?dataset=` link lands on the datasets tool, open on that dataset.
+  const [legacyTool, setLegacyTool] = useState<LegacyTool>(initialDatasetId ? "datasets" : null)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [queueState, setQueueState] = useState<QueueState>("draft")
   const [experimentId, setExperimentId] = useState<string | null>(null)
@@ -1124,7 +1125,7 @@ export function EvalLabWorkspace() {
           </Button>
         </div>
         <div className="min-h-0 flex-1">
-          {legacyTool === "datasets" ? <EvalDashboard /> : null}
+          {legacyTool === "datasets" ? <EvalDashboard initialDatasetId={initialDatasetId} /> : null}
           {legacyTool === "compare" ? <RunsComparePanel /> : null}
           {legacyTool === "annotate" ? <TraceAnnotationPanel /> : null}
           {legacyTool === "calibrate" ? <CalibrationPanel /> : null}

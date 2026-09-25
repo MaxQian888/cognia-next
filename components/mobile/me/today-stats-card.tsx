@@ -162,7 +162,8 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
     {
       label: t("drafts"),
       value: String(stats.drafts),
-      href: "/discover?tab=twinDrafts",
+      // Discover reads `?category=` — `?tab=` landed on the default view.
+      href: "/discover?category=twinDrafts",
       testId: "stat-tile-drafts",
     },
     {

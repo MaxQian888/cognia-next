@@ -37,7 +37,7 @@ import { CalibrationPanel } from "./calibration-panel"
 
 type EvalView = "datasets" | "compare" | "annotate" | "calibrate" | "routing"
 
-export function EvalWorkspace() {
+export function EvalWorkspace({ initialDatasetId }: { initialDatasetId?: string } = {}) {
   const t = useTranslations("eval")
   const tRouting = useTranslations("routerFusionEval")
   const router = useRouter()
@@ -134,7 +134,7 @@ export function EvalWorkspace() {
         className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 min-h-0 flex-1"
       >
         {view === "datasets" ? (
-          <EvalDashboard />
+          <EvalDashboard initialDatasetId={initialDatasetId} />
         ) : view === "compare" ? (
           <RunsComparePanel />
         ) : view === "annotate" ? (

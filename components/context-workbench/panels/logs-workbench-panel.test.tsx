@@ -99,7 +99,7 @@ describe("LogsWorkbenchPanel", () => {
     render(<LogsWorkbenchPanel />)
     expect(screen.getByText("Open full log viewer")).toBeInTheDocument()
     const link = screen.getByText("Open full log viewer").closest("a")
-    expect(link).toHaveAttribute("href", "/logging")
+    expect(link).toHaveAttribute("href", "/logs")
   })
 
   it("shows error badge when errors are present", () => {

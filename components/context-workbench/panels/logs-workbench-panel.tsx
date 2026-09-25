@@ -136,7 +136,7 @@ export function LogsWorkbenchPanel() {
       {/* Footer link to full logging page */}
       <div className="shrink-0 border-t p-2">
         <Button variant="ghost" size="sm" className="w-full text-xs" asChild>
-          <Link href="/logging">
+          <Link href="/logs">
             <ExternalLinkIcon className="mr-1.5 size-3" />
             {t("openFullPage")}
           </Link>

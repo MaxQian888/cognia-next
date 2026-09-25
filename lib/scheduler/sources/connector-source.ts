@@ -32,6 +32,7 @@ import Dexie from "dexie"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
 import { getDb } from "@/lib/db/schema"
+import { connectionsHref } from "@/lib/settings/deep-link"
 import type {
   ScheduledTask,
   ScheduledTaskStatus,
@@ -332,7 +333,9 @@ export function toUnifiedOutboundQueue(queueLength: number): UnifiedScheduledIte
     triggerSummary: { type: "event", eventType: "outbound.queue" },
     origin: {
       tableName: "outboundQueue",
-      deepLinkHref: "/settings?section=connections&connTab=outbound",
+      // `connectionsHref` owns the param spelling: the hand-written
+      // `connTab` was read by nothing, so this landed on Overview.
+      deepLinkHref: connectionsHref({ tab: "outbound" }),
     },
     capabilities: { runNow: false, pause: false, edit: false, delete: false },
   }

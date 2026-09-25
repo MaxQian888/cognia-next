@@ -85,6 +85,20 @@ describe("EvalDashboard", () => {
     expect(screen.getByTestId("dataset-detail")).toHaveTextContent("Second")
   })
 
+  it("opens on the dataset a link named, not the first row", () => {
+    // `/eval?dataset=<id>` after the twin persona tab generates a benchmark.
+    datasets = [dataset("d1", "First"), dataset("d2", "Twin benchmark")]
+    render(<EvalDashboard initialDatasetId="d2" />)
+    expect(screen.getByTestId("dataset-detail")).toHaveTextContent("Twin benchmark")
+  })
+
+  it("goes straight to the linked dataset's detail on mobile", () => {
+    ;(useIsMobile as jest.Mock).mockReturnValue(true)
+    datasets = [dataset("d1", "First"), dataset("d2", "Twin benchmark")]
+    render(<EvalDashboard initialDatasetId="d2" />)
+    expect(screen.getByTestId("dataset-detail")).toHaveTextContent("Twin benchmark")
+  })
+
   it("filters the dataset list by search (name or capability)", () => {
     datasets = [dataset("d1", "alpha-ds"), dataset("d2", "beta-ds")]
     render(<EvalDashboard />)

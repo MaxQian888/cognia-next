@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
@@ -12,6 +13,7 @@ import { deleteRecording, listRecordingsForSkill } from "@/lib/db/skill-recordin
 import { useSkills, useSkillShortcuts, useSkillPrefsHydration } from "@/hooks/skills"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { useSkillsStore } from "@/stores/skills"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useChatStore } from "@/stores/chat"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { SkillPanelHeader } from "./skill-panel-header"
@@ -63,6 +65,22 @@ export function SkillPanel({ className, embedded }: Props) {
   // Seed the ephemeral panel state (tab / sort / status) from persisted
   // preferences on mount, and persist the last view when that toggle is on.
   useSkillPrefsHydration()
+
+  // `?skill=<id>` — where a global-search skill result lands. Applied here,
+  // after the hydration above (same commit, declared later), because
+  // hydration sets the tab and filters and would otherwise undo it; the
+  // Suspense-wrapped reader below only hands the id over. Resets filters so
+  // the skill is actually in the list the detail pane is kept in step with.
+  const [linkedSkill, setLinkedSkill] = useState<LinkedSkillRequest | null>(null)
+  const settingsLoaded = useSettingsStore((s) => s.loaded)
+  useEffect(() => {
+    if (!linkedSkill || !settingsLoaded) return
+    const store = useSkillsStore.getState()
+    store.setActiveTab("my-skills")
+    store.resetFilters()
+    store.openDetail(linkedSkill.id)
+  }, [linkedSkill, settingsLoaded])
+
   const fadeTransition = reduce
     ? { duration: 0 }
     : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
@@ -87,6 +105,9 @@ export function SkillPanel({ className, embedded }: Props) {
 
   return (
     <SkillPanelProvider className={className}>
+      <Suspense fallback={null}>
+        <SkillDeepLinkReader onRequest={setLinkedSkill} />
+      </Suspense>
       <div className={cn("relative flex h-full min-h-0 flex-col overflow-hidden", className)}>
         <SkillPanelHeader
           totalCount={view.all.length}
@@ -320,4 +341,37 @@ function SkillDeleteHost() {
       }}
     />
   )
+}
+
+/** The query param global search's skill results carry (`/skills?skill=<id>`). */
+export const SKILL_DEEP_LINK_PARAM = "skill"
+
+/** One `?skill=` visit; `seq` makes a repeat of the same id a new request. */
+interface LinkedSkillRequest {
+  id: string
+  seq: number
+}
+
+/**
+ * Reads `?skill=` and strips it, so a reload returns to the user's own view.
+ * Its own component so `useSearchParams` gets a Suspense boundary here rather
+ * than requiring one from every page that hosts the panel.
+ */
+function SkillDeepLinkReader({ onRequest }: { onRequest: (request: LinkedSkillRequest) => void }) {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const seqRef = useRef(0)
+  const requested = searchParams.get(SKILL_DEEP_LINK_PARAM)
+  useEffect(() => {
+    if (!requested) return
+    seqRef.current += 1
+    onRequest({ id: requested, seq: seqRef.current })
+    const next = new URLSearchParams(searchParams.toString())
+    next.delete(SKILL_DEEP_LINK_PARAM)
+    const query = next.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one pass per requested id
+  }, [requested])
+  return null
 }
