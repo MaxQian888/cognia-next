@@ -1,4 +1,5 @@
 import type { RunGoalLoopInput } from "./goal-headless-runner"
+import type { Project } from "@/types"
 
 const getGoalMock = jest.fn()
 const getSessionMock = jest.fn()
@@ -6,6 +7,7 @@ const resolveSendOptionsMock = jest.fn()
 const runCaptureMock = jest.fn()
 const buildJudgeMock = jest.fn()
 const handleTurnCompleteMock = jest.fn()
+const getAllProjectsMock = jest.fn()
 
 jest.mock("@/lib/db/goals", () => ({ getGoal: (...a: unknown[]) => getGoalMock(...a) }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: (...a: unknown[]) => getSessionMock(...a) }))
@@ -32,6 +34,10 @@ jest.mock("@/lib/goal/judge-client", () => ({
 }))
 jest.mock("@/lib/goal/turn-driver", () => ({
   handleTurnComplete: (...a: unknown[]) => handleTurnCompleteMock(...a),
+}))
+// The owning workspace is read from Dexie (no project store headlessly).
+jest.mock("@/lib/db/projects", () => ({
+  getAllProjects: () => getAllProjectsMock(),
 }))
 
 import { runGoalLoopHeadless } from "./goal-headless-runner"
@@ -62,6 +68,7 @@ beforeEach(() => {
   runCaptureMock.mockReset()
   buildJudgeMock.mockReset()
   handleTurnCompleteMock.mockReset()
+  getAllProjectsMock.mockReset().mockResolvedValue([])
   getSessionMock.mockResolvedValue({ id: "s1" })
   buildJudgeMock.mockReturnValue({ id: "judge" })
   resolveSendOptionsMock.mockResolvedValue({ model: "m" })
@@ -212,5 +219,137 @@ describe("runGoalLoopHeadless", () => {
     const r = await runGoalLoopHeadless(input({ pacing: { enabled: true } }))
     expect(r.status).toBe("completed")
     expect(r.turns).toBe(2)
+  })
+})
+
+describe("runGoalLoopHeadless — owning workspace (ADR-0144)", () => {
+  function makeProject(id: string): Project {
+    return { id, name: id, rootPath: `/repos/${id}` } as unknown as Project
+  }
+
+  /** The `activeProject` each resolveSendOptions call received, in order. */
+  function resolvedWorkspaces(): Array<Project | null | undefined> {
+    return resolveSendOptionsMock.mock.calls.map(
+      (call) => (call[0] as { activeProject?: Project | null }).activeProject
+    )
+  }
+
+  /** One turn that ends the goal, so each case drives exactly one resolution. */
+  function oneTurn() {
+    getGoalMock.mockResolvedValue(activeGoal)
+    runCaptureMock.mockResolvedValue({ text: "r1" })
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      resultingStatus: "completed",
+      exit: "judge_done",
+      reason: "done",
+    })
+  }
+
+  it("resolves every turn against the session's workspace, read once", async () => {
+    const owning = makeProject("proj-owning")
+    getSessionMock.mockResolvedValue({ id: "s1", projectId: "proj-owning" })
+    getAllProjectsMock.mockResolvedValue([makeProject("proj-ui"), owning])
+    getGoalMock.mockResolvedValue(activeGoal)
+    runCaptureMock.mockResolvedValueOnce({ text: "r1" }).mockResolvedValueOnce({ text: "r2" })
+    handleTurnCompleteMock
+      .mockResolvedValueOnce({ kind: "continue", userMessage: "keep going" })
+      .mockResolvedValueOnce({
+        kind: "exit",
+        resultingStatus: "completed",
+        exit: "judge_done",
+        reason: "done",
+      })
+
+    const r = await runGoalLoopHeadless(input())
+    expect(r.status).toBe("completed")
+    expect(resolvedWorkspaces()).toEqual([owning, owning])
+    // The goal section still rides along with the workspace.
+    expect(resolveSendOptionsMock.mock.calls[0][0]).toMatchObject({ activeGoal })
+    expect(getAllProjectsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("resolves a bound session through its binding's workspace", async () => {
+    const bound = makeProject("proj-bound")
+    getSessionMock.mockResolvedValue({
+      id: "s1",
+      executionContext: { projectId: "proj-bound", location: "local", projectRoot: "/repos/b" },
+    })
+    getAllProjectsMock.mockResolvedValue([makeProject("proj-ui"), bound])
+    oneTurn()
+
+    await runGoalLoopHeadless(input())
+    expect(resolvedWorkspaces()).toEqual([bound])
+  })
+
+  it("prefers the session's own projectId over its binding's, like resolveSessionWorkspace", async () => {
+    const own = makeProject("proj-session")
+    getSessionMock.mockResolvedValue({
+      id: "s1",
+      projectId: "proj-session",
+      executionContext: { projectId: "proj-bound", location: "local", projectRoot: "/repos/b" },
+    })
+    getAllProjectsMock.mockResolvedValue([makeProject("proj-bound"), own])
+    oneTurn()
+
+    await runGoalLoopHeadless(input())
+    expect(resolvedWorkspaces()).toEqual([own])
+  })
+
+  it("runs with no workspace when the session's workspace was deleted", async () => {
+    getSessionMock.mockResolvedValue({ id: "s1", projectId: "proj-gone" })
+    getAllProjectsMock.mockResolvedValue([makeProject("proj-ui")])
+    oneTurn()
+
+    await runGoalLoopHeadless(input())
+    expect(resolvedWorkspaces()).toEqual([null])
+  })
+
+  it("does not read the workspaces for a session that names none", async () => {
+    oneTurn()
+
+    await runGoalLoopHeadless(input())
+    expect(resolvedWorkspaces()).toEqual([null])
+    expect(getAllProjectsMock).not.toHaveBeenCalled()
+  })
+
+  it("still drives the goal, with no workspace, when the workspace read fails", async () => {
+    getSessionMock.mockResolvedValue({ id: "s1", projectId: "proj-owning" })
+    getAllProjectsMock.mockRejectedValue(new Error("db closed"))
+    oneTurn()
+
+    const r = await runGoalLoopHeadless(input())
+    expect(r.status).toBe("completed")
+    expect(resolvedWorkspaces()).toEqual([null])
+    expect(runCaptureMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('resolves with no workspace when the caller passes workspace: "none"', async () => {
+    getSessionMock.mockResolvedValue({ id: "s1", projectId: "proj-owning" })
+    getAllProjectsMock.mockResolvedValue([makeProject("proj-owning")])
+    oneTurn()
+
+    await runGoalLoopHeadless(input({ workspace: "none" }))
+    expect(resolvedWorkspaces()).toEqual([null])
+    expect(getAllProjectsMock).not.toHaveBeenCalled()
+  })
+
+  it("sends the resolved options untouched, so confinement roots match the cwd", async () => {
+    // Unlike a scheduled chat run, nothing on the goal path moves the cwd or
+    // additional directories after resolution (no task lease, no payload
+    // union). The roots build-options derived from them must reach the turn.
+    const resolved = {
+      model: "m",
+      cwd: "/repos/proj-owning",
+      additionalDirectories: ["/extra"],
+      confinement: { enabled: true, roots: ["/repos/proj-owning", "/extra"] },
+    }
+    getSessionMock.mockResolvedValue({ id: "s1", projectId: "proj-owning" })
+    getAllProjectsMock.mockResolvedValue([makeProject("proj-owning")])
+    resolveSendOptionsMock.mockResolvedValue(resolved)
+    oneTurn()
+
+    await runGoalLoopHeadless(input())
+    expect(runCaptureMock.mock.calls[0][2]).toBe(resolved)
   })
 })

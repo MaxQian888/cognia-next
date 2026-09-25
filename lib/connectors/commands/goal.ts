@@ -186,6 +186,9 @@ export function startConnectorGoalDriver(
           if (text.trim()) await post(text)
         },
         pacing: { enabled: true },
+        // Connector turns resolve with no workspace (`runtime.ts` passes no
+        // `activeProject`); an IM goal's turns match the rest of its conversation.
+        workspace: "none",
       })
       if (isTerminalGoalStatus(result.status)) {
         await post(

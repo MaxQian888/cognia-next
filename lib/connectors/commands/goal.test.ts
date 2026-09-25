@@ -266,6 +266,19 @@ describe("startConnectorGoalDriver", () => {
     )
   })
 
+  it("drives the loop with no workspace and pacing on, like the conversation's other turns", () => {
+    const run = jest.fn(() => new Promise(() => {})) // never resolves
+    startConnectorGoalDriver(driverArgs(), { run: run as never, enqueue: jest.fn() })
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "s1",
+        goalId: "g1",
+        workspace: "none",
+        pacing: { enabled: true },
+      })
+    )
+  })
+
   it("fails closed and audits when generated output contains PII", async () => {
     jest.mocked(hasNoLeakingPii).mockReturnValue(false)
     const enqueue = jest.fn()

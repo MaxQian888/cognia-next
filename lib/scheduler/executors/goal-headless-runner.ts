@@ -8,7 +8,9 @@
  * reproduces that loop using the same primitives:
  *
  *   1. Resolve SendOptions for the session WITH `activeGoal` so build-options
- *      injects the goal system section.
+ *      injects the goal system section, and with the session's owning
+ *      workspace as `activeProject` so the turn gets that workspace's
+ *      instructions, roots, knowledge and confinement.
  *   2. Run one turn headlessly via `runAndCaptureAssistantReply` (captures the
  *      assistant text + per-turn usage).
  *   3. Feed the result to `handleTurnComplete` (the pure turn-driver), which
@@ -40,6 +42,7 @@ import {
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
 import { gateContinuation } from "@/lib/goal/pacing"
+import { loadOwningWorkspace } from "./owning-workspace"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
@@ -83,6 +86,17 @@ export interface RunGoalLoopInput {
     /** Max single sleep before re-checking status + re-evaluating the gate. */
     maxSleepMs?: number
   }
+  /**
+   * Which workspace each turn resolves against. `"owning"` (the default) is
+   * the session's own workspace (ADR-0144), never the one open in the UI: its
+   * custom instructions, CLAUDE.md/AGENTS.md from every root, project
+   * knowledge, additional directories and workspace confinement, the same as
+   * a scheduled chat turn. `"none"` resolves with no workspace, as connector
+   * turns do (see `activeProject` in `lib/claude/build-options.ts`); the
+   * connector driver passes it so an IM goal matches the rest of its
+   * conversation.
+   */
+  workspace?: "owning" | "none"
 }
 
 export interface RunGoalLoopResult {
@@ -129,6 +143,20 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
   if (!initial) return { status: "stopped", turns: 0, error: `Goal not found: ${goalId}` }
   const hardCap = (initial.config.maxTurns ?? 20) + 5
 
+  // The session's own workspace: a scheduled goal's session carries its task's
+  // `projectId` (`scheduledSessionAttribution`), a bound session its binding's.
+  // Same precedence as `resolveSessionWorkspace`. Resolved once, like the
+  // session itself. Nothing below rewrites the cwd or additional directories
+  // `resolveSendOptions` returns, so the confinement roots it derives from
+  // them already name the directories the turn works in.
+  const activeProject =
+    input.workspace === "none"
+      ? null
+      : await loadOwningWorkspace(session.projectId || session.executionContext?.projectId, {
+          goalId,
+          sessionId,
+        })
+
   while (turns < hardCap) {
     if (signal.aborted) {
       return { status: "paused", turns, lastResponse, error: "aborted" }
@@ -167,7 +195,12 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
 
     let resolved
     try {
-      resolved = await resolveSendOptions({ session, appSettings, activeGoal: goal })
+      resolved = await resolveSendOptions({
+        session,
+        appSettings,
+        activeGoal: goal,
+        activeProject,
+      })
     } catch (err) {
       return {
         status: goal.status,
