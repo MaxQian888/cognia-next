@@ -637,6 +637,7 @@ export function buildLocalHostFeatureManifest({
         "browser_session_ensure",
         "browser_session_get",
         "browser_session_close",
+        "browser_profile_delete",
         "browser_navigate",
         "browser_snapshot",
         "browser_act",

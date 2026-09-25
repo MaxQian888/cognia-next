@@ -19,6 +19,9 @@ const startNewSessionMock = jest.fn(async (..._args: unknown[]) => ({ id: "s-new
 const setSelectedGuildMock = jest.fn()
 const saveSettingsMock = jest.fn(async () => undefined)
 const chatClearMock = jest.fn()
+const setActiveSessionMock = jest.fn()
+const requestOpenSettingsMock = jest.fn()
+const openPathAsWorkspaceMock = jest.fn()
 const ensureNotificationPermissionMock = jest.fn(async () => "granted")
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
@@ -28,6 +31,9 @@ jest.mock("@/lib/tauri/deep-link", () => ({ getLaunchDeepLink: () => getLaunchDe
 const publishLogtoDeepLinkCallbackMock = jest.fn()
 jest.mock("@/lib/logto/deep-link-callback", () => ({
   publishLogtoDeepLinkCallback: (route: unknown) => publishLogtoDeepLinkCallbackMock(route),
+}))
+jest.mock("@/lib/workspace/open-folder", () => ({
+  openPathAsWorkspace: (path: string) => openPathAsWorkspaceMock(path),
 }))
 jest.mock("@/lib/chat/start-session", () => ({
   startNewSession: (...args: unknown[]) => startNewSessionMock(...args),
@@ -73,7 +79,7 @@ jest.mock("sonner", () => ({ toast: { success: jest.fn(), message: jest.fn() } }
 
 jest.mock("@/stores/chat", () => ({
   useChatStore: Object.assign(<T,>(selector: (s: unknown) => T): T => selector({}), {
-    getState: () => ({ clear: chatClearMock, setActiveSession: jest.fn() }),
+    getState: () => ({ clear: chatClearMock, setActiveSession: setActiveSessionMock }),
   }),
 }))
 jest.mock("@/stores/settings", () => ({
@@ -83,7 +89,10 @@ jest.mock("@/stores/settings", () => ({
 }))
 jest.mock("@/stores/ui", () => ({
   useUIStore: Object.assign(<T,>(selector: (s: unknown) => T): T => selector({}), {
-    getState: () => ({ setSelectedGuild: setSelectedGuildMock }),
+    getState: () => ({
+      setSelectedGuild: setSelectedGuildMock,
+      requestOpenSettings: requestOpenSettingsMock,
+    }),
   }),
 }))
 
@@ -195,6 +204,59 @@ describe("<TauriProvider /> launch CLI args", () => {
     expect(publishLogtoDeepLinkCallbackMock).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "logto_callback", code: "c-2", state: "st-2" })
     )
+  })
+
+  it("opens the conversation a cold-start session link names", async () => {
+    // `cognia://session/<id>` is the link every Browser Companion submission
+    // carries. The cold-start path knew only `chat`, so a click that launched
+    // Cognia opened it on nothing.
+    getLaunchDeepLinkMock.mockResolvedValue(["cognia://session/s-7"])
+    render(
+      <TauriProvider>
+        <div />
+      </TauriProvider>
+    )
+    await waitFor(() => expect(setActiveSessionMock).toHaveBeenCalledWith("s-7"))
+    expect(setSelectedGuildMock).toHaveBeenCalledWith({ kind: "dm" })
+  })
+
+  it("keeps the older chat alias working at cold start", async () => {
+    getLaunchDeepLinkMock.mockResolvedValue(["cognia://chat/c-1"])
+    render(
+      <TauriProvider>
+        <div />
+      </TauriProvider>
+    )
+    await waitFor(() => expect(setActiveSessionMock).toHaveBeenCalledWith("c-1"))
+  })
+
+  it("routes the rest of the vocabulary at cold start too", async () => {
+    getLaunchDeepLinkMock.mockResolvedValue([
+      "cognia://issues/issue-3",
+      "cognia://settings?tab=advanced",
+      "cognia://workspace?path=%2Fwork",
+    ])
+    render(
+      <TauriProvider>
+        <div />
+      </TauriProvider>
+    )
+    await waitFor(() => expect(routerPushMock).toHaveBeenCalledWith("/issues?id=issue-3"))
+    await waitFor(() => expect(requestOpenSettingsMock).toHaveBeenCalledWith("advanced"))
+    await waitFor(() => expect(openPathAsWorkspaceMock).toHaveBeenCalledWith("/work"))
+  })
+
+  it("logs an unknown launch link and carries on with the next one", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    getLaunchDeepLinkMock.mockResolvedValue(["cognia://nope", "cognia://session/s-8"])
+    render(
+      <TauriProvider>
+        <div />
+      </TauriProvider>
+    )
+    await waitFor(() => expect(setActiveSessionMock).toHaveBeenCalledWith("s-8"))
+    expect(warn).toHaveBeenCalledWith("unhandled launch deep link", "cognia://nope")
+    warn.mockRestore()
   })
 
   it("renders its children", () => {

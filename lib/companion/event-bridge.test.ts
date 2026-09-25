@@ -310,6 +310,30 @@ describe("installCompanionEventBridge", () => {
     expect(rows[0]?.platform).toBe("unknown")
   })
 
+  it("mirrors a paired browser extension as a browser, with no signaling room", async () => {
+    // The Rust browser-registration handler emits the same event a phone does,
+    // with `platform: "browser"` and the signaling keys omitted.
+    const { handlers } = captureHandlers()
+    installCompanionEventBridge()
+    const handler = handlers.get("companion://device-paired")!
+
+    handler({
+      device_id: "browser-1",
+      label: "Chrome",
+      platform: "browser",
+      pubkey: "k",
+      paired_at_ms: 1_700_000_000_000,
+      app_version: "unknown",
+      account_id: "local_acct_a",
+    })
+    await flushMicrotasks()
+
+    const rows = await listPairedDevices()
+    expect(rows[0]).toMatchObject({ deviceId: "browser-1", platform: "browser", label: "Chrome" })
+    expect(rows[0]?.rendezvousId).toBeUndefined()
+    expect(rows[0]?.signalingRoomDescriptor).toBeUndefined()
+  })
+
   it("device-seen handler updates lastSeenAt for an existing row", async () => {
     const { handlers } = captureHandlers()
     installCompanionEventBridge()

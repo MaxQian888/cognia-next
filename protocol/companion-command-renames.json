@@ -233,6 +233,12 @@
     "browser_context_submit": {
       "to": "browser.context.submit"
     },
+    "browser_cookie_clear": {
+      "to": "browser.cookie.clear"
+    },
+    "browser_cookie_clear_all": {
+      "to": "browser.cookie.clear_all"
+    },
     "browser_cookie_import": {
       "to": "browser.cookie.import"
     },
@@ -385,6 +391,9 @@
     },
     "browser_scroll": {
       "to": "browser.scroll"
+    },
+    "browser_profile_delete": {
+      "to": "browser.profile.delete"
     },
     "browser_session_close": {
       "to": "browser.session.close"

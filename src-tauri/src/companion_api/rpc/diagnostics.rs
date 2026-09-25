@@ -52,6 +52,45 @@ fn require_owner(
     }
 }
 
+/// The body of `fleet_worker_set`: add or remove `agent.worker` on the target's
+/// live snapshot and write the whole set back.
+///
+/// A browser companion is refused by the store (its class admits no
+/// `agent.worker`), and that refusal answers 403 `capability_outside_device_class`
+/// rather than falling into the 500 every other store error takes here.
+fn set_worker_grant(
+    security: &super::super::security_store::SecurityStore,
+    tenant_id: &str,
+    actor_device_id: &str,
+    target_device_id: &str,
+    allowed: bool,
+    now: i64,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    let mut capabilities = security
+        .capability_snapshot(tenant_id, target_device_id)
+        .map_err(|error| RpcError::internal(error.to_string()))?
+        .ok_or_else(|| RpcError::malformed("worker device is unavailable".to_string()))?;
+    capabilities.retain(|capability| capability != "agent.worker");
+    if allowed {
+        capabilities.push("agent.worker".to_string());
+    }
+    security
+        .replace_device_capabilities(
+            tenant_id,
+            actor_device_id,
+            target_device_id,
+            &capabilities,
+            now,
+        )
+        .map_err(|error| match error {
+            super::super::security_store::SecurityStoreError::CapabilityOutsideDeviceClass => {
+                RpcError::capability_outside_device_class(error.to_string())
+            }
+            other => RpcError::internal(other.to_string()),
+        })?;
+    Ok(())
+}
+
 fn is_active_owner(
     devices: &[super::super::security_store::DeviceSummary],
     device_id: &str,
@@ -170,23 +209,14 @@ pub(super) async fn dispatch(
             require_owner(&security, tenant_id, device_id)?;
             let target_device_id: String = required(&args, "deviceId")?;
             let allowed: bool = required(&args, "allowed")?;
-            let mut capabilities = security
-                .capability_snapshot(tenant_id, &target_device_id)
-                .map_err(|error| RpcError::internal(error.to_string()))?
-                .ok_or_else(|| RpcError::malformed("worker device is unavailable".to_string()))?;
-            capabilities.retain(|capability| capability != "agent.worker");
-            if allowed {
-                capabilities.push("agent.worker".to_string());
-            }
-            security
-                .replace_device_capabilities(
-                    tenant_id,
-                    device_id,
-                    &target_device_id,
-                    &capabilities,
-                    super::super::security_store::unix_time_secs(),
-                )
-                .map_err(|error| RpcError::internal(error.to_string()))?;
+            set_worker_grant(
+                &security,
+                tenant_id,
+                device_id,
+                &target_device_id,
+                allowed,
+                super::super::security_store::unix_time_secs(),
+            )?;
             Ok(Value::Null)
         }
         "fleet_project_managed_session" => {
@@ -318,5 +348,79 @@ mod tests {
         }];
         assert!(is_active_owner(&devices, "owner-a"));
         assert!(!is_active_owner(&devices, "worker-a"));
+    }
+
+    /// `fleet_worker_set` is the RPC path to a grant: an owner device can aim it
+    /// at any device id in the tenant, a browser companion included.
+    #[test]
+    fn fleet_worker_set_refuses_a_browser_device_and_still_serves_an_ordinary_one() {
+        use super::super::super::security_store::SecurityStore;
+        let store = SecurityStore::in_memory().unwrap();
+        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
+        let invitation = store
+            .create_owner_invitation("tenant-a", "local-trust-root", 100, 60)
+            .unwrap();
+        store
+            .register_owner_device(
+                "tenant-a",
+                &invitation,
+                &challenge.id,
+                &challenge.nonce,
+                "owner-a",
+                "Owner phone",
+                "-----BEGIN PUBLIC KEY-----\nowner\n-----END PUBLIC KEY-----",
+                "thumb-owner-a",
+                100,
+            )
+            .unwrap();
+        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
+        let enrollment = store
+            .create_browser_enrollment("tenant-a", "local-trust-root", 100, 60)
+            .unwrap();
+        store
+            .register_browser_device(
+                "tenant-a",
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-a",
+                "Chrome",
+                "pem",
+                "thumb-browser-a",
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                100,
+            )
+            .unwrap();
+        let browser_snapshot = || {
+            store
+                .capability_snapshot("tenant-a", "browser-a")
+                .unwrap()
+                .unwrap()
+        };
+
+        let (status, Json(error)) =
+            set_worker_grant(&store, "tenant-a", "owner-a", "browser-a", true, 101)
+                .expect_err("a browser device must not become an execution worker");
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(error.code, "capability_outside_device_class");
+        assert!(!error.retryable);
+        assert_eq!(
+            browser_snapshot(),
+            vec!["browser.read-own", "browser.submit"]
+        );
+
+        // Clearing the switch writes the browser's own class back, which the
+        // store must still accept.
+        set_worker_grant(&store, "tenant-a", "owner-a", "browser-a", false, 102).unwrap();
+        assert_eq!(
+            browser_snapshot(),
+            vec!["browser.read-own", "browser.submit"]
+        );
+
+        // An ordinary device is unaffected.
+        set_worker_grant(&store, "tenant-a", "owner-a", "owner-a", true, 103).unwrap();
+        assert!(store
+            .has_capability("tenant-a", "owner-a", "agent.worker")
+            .unwrap());
     }
 }

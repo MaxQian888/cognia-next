@@ -838,6 +838,7 @@ mod tests {
         ("browser_session_ensure", OutputShape::Opaque(RootType::Object)),
         ("browser_session_get", OutputShape::Opaque(RootType::Object)),
         ("browser_session_close", OutputShape::Opaque(RootType::Any)),
+        ("browser_profile_delete", OutputShape::Declared(RootType::Object)),
         ("browser_navigate", OutputShape::Opaque(RootType::Any)),
         ("browser_snapshot", OutputShape::Declared(RootType::Object)),
         ("browser_act", OutputShape::Opaque(RootType::Any)),

@@ -719,6 +719,18 @@
       },
       "additionalProperties": false
     },
+    "BrowserProfileDeleteResult": {
+      "type": "object",
+      "x-cognia-wire-source": "src-tauri/src/companion_api/browser_gateway.rs dispatch_browser_rpc browser_profile_delete",
+      "description": "The persistent profile's user-data directory is gone from the workspace runtime. A refusal (the profile is open in a session, or no runtime is reachable) arrives as an error, never as `deleted: false`.",
+      "required": ["deleted"],
+      "properties": {
+        "deleted": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
     "BrowserRuntimeStatus": {
       "type": "object",
       "x-cognia-wire-source": "src-tauri/src/companion_api/browser_gateway.rs BrowserRuntimeStatus",
@@ -9777,6 +9789,9 @@
     },
     "browser_scroll": {
       "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_profile_delete": {
+      "$ref": "#/$defs/BrowserProfileDeleteResult"
     },
     "browser_session_close": {
       "$ref": "#/$defs/LegacyResult"

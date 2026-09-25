@@ -69,6 +69,8 @@ commands.allow = [
   "browser_cdp_execute",
   "browser_cdp_grant",
   "browser_cdp_revoke",
+  "browser_cookie_clear",
+  "browser_cookie_clear_all",
   "browser_cookie_import",
   "browser_cookie_import_available",
   "browser_embed_act",

@@ -396,6 +396,12 @@ const schemas = {
   }),
   browser_session_get: browserSession,
   browser_session_close: browserSession,
+  // Erase a persistent cloud-browser profile's data on the runtime. Refused
+  // while a live session holds the profile.
+  browser_profile_delete: z.object({
+    workspaceId: z.string().min(1),
+    profileId: z.string().regex(/^[a-zA-Z0-9._-]{1,128}$/),
+  }),
   browser_navigate: browserSession.extend({ url: z.string().min(1) }),
   browser_snapshot: browserSession.extend({
     options: z.object({ includeText: z.boolean().optional() }).optional(),

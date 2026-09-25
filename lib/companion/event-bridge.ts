@@ -62,7 +62,16 @@ interface DeviceLifecyclePayload {
 /** Lifecycle actions that end a device's authority to drive a session. */
 const AUTHORITY_ENDING_ACTIONS: ReadonlySet<string> = new Set(["suspend", "revoke"])
 
-const KNOWN_PLATFORMS: ReadonlySet<DevicePlatform> = new Set(["ios", "android", "web", "unknown"])
+// `browser` is the extension (ADR-0154). Left out, a registered browser was
+// mirrored as `unknown`, which the device console cannot tell from a phone that
+// would not say what it was.
+const KNOWN_PLATFORMS: ReadonlySet<DevicePlatform> = new Set([
+  "ios",
+  "android",
+  "web",
+  "browser",
+  "unknown",
+])
 
 function normalizePlatform(value: string): DevicePlatform {
   return KNOWN_PLATFORMS.has(value as DevicePlatform) ? (value as DevicePlatform) : "unknown"

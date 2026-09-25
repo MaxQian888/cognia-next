@@ -10,11 +10,9 @@ import { emitSchedulerEvent } from "@/lib/scheduler/event-integration"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { isTauri } from "@/lib/tauri"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
-import { useChatStore } from "@/stores/chat"
 import { startNewSession } from "@/lib/chat/start-session"
 import { isMainAppWindow } from "@/lib/pet/window-role"
 import { useUIStore } from "@/stores/ui"
-import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { dispatchTrayClick, dispatchShortcut } from "@/lib/tray/dispatcher"
 import {
   checkUpdates,
@@ -26,7 +24,7 @@ import {
 } from "@/lib/tray/tray-actions"
 import type { TrayActionPayload } from "@/lib/tray/types"
 import { parseCogniaDeeplink } from "@/lib/navigation/cognia-deeplink"
-import { publishLogtoDeepLinkCallback } from "@/lib/logto/deep-link-callback"
+import { dispatchDesktopDeeplink } from "@/lib/navigation/desktop-deeplink-dispatch"
 
 function relaySchedulerEvent(
   eventType: "job:exited" | "monitor:fired",
@@ -69,82 +67,20 @@ export function useTauriEvents(): void {
       router.push("/logs")
     }
 
+    // One dispatcher for running-app links and cold-start links, so the two
+    // cannot drift: they used to be separate switches, and the cold-start one
+    // silently dropped `cognia://session/<id>`.
     const handleDeepLinks = (urls: string[]) => {
       for (const raw of urls) {
-        const action = parseCogniaDeeplink(raw)
-        switch (action.kind) {
-          case "open_session": {
-            if (action.sessionId) {
-              useChatStore.getState().setActiveSession(action.sessionId)
-              useUIStore.getState().setSelectedGuild({ kind: "dm" })
-            }
-            break
-          }
-          case "open_im": {
-            if (action.conversationKey) {
-              void import("@/lib/connectors/session-bindings")
-                .then(({ findActiveSessionForConversation }) =>
-                  findActiveSessionForConversation(action.conversationKey!)
-                )
-                .then((session) => {
-                  if (!session) return
-                  useChatStore.getState().setActiveSession(session.id)
-                  useUIStore.getState().setSelectedGuild({ kind: "dm" })
-                })
-                .catch(() => undefined)
-            }
-            break
-          }
-          case "open_scheduler_task": {
-            if (action.taskId) {
-              // OS-promoted wake-up: only a link carrying the task's own
-              // promotion token may execute; a bare link just navigates.
-              // Shared with the cold-start launch-URL path (tauri-provider).
-              void import("@/lib/scheduler/promoted-wake").then(({ handlePromotedTaskWake }) =>
-                handlePromotedTaskWake(
-                  { taskId: action.taskId as string, runToken: action.runToken },
-                  { navigate: (path) => router.push(path) }
-                )
-              )
-            }
-            break
-          }
-          case "open_settings": {
-            useUIStore.getState().requestOpenSettings(action.settingsTab)
-            break
-          }
-          case "open_workspace": {
-            // Unified flow: create/activate a real workspace Project for the
-            // deep-linked path (consistent with the File menu / switcher).
-            if (action.workspacePath) openPathAsWorkspace(action.workspacePath)
-            break
-          }
-          case "open_workflow_run": {
-            if (action.workflowId && action.runId) {
-              router.push(
-                `/workflows/run?id=${encodeURIComponent(action.workflowId)}&runId=${encodeURIComponent(action.runId)}`
-              )
-            }
-            break
-          }
-          case "logto_callback": {
-            // The cloud sign-in gate's desktop driver is waiting on this seam;
-            // when nobody is, the callback is dropped by design.
-            publishLogtoDeepLinkCallback(action)
-            break
-          }
-          case "oauth_callback":
-          case "pair_qr":
-          case "share_target": {
-            // Mobile-owned routes are parsed here for parity but handled by
-            // the Capacitor router when this hook runs in the Tauri shell.
-            break
-          }
-          default: {
-            console.warn("unhandled deep link", raw)
-            toast.message("Deep link", { description: raw })
-          }
-        }
+        void dispatchDesktopDeeplink(parseCogniaDeeplink(raw), {
+          navigate: (path) => router.push(path),
+          onUnknown: (link) => {
+            console.warn("unhandled deep link", link)
+            toast.message(tRef.current("deepLinkUnknown"), { description: link })
+          },
+        }).catch((error) => {
+          console.warn("deep link failed", raw, error)
+        })
       }
     }
 

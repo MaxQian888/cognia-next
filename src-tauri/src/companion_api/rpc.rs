@@ -191,6 +191,18 @@ impl RpcError {
         )
     }
 
+    /// A grant the target device's class does not admit (ADR-0154): a browser
+    /// companion holds only `browser.submit` and `browser.read-own`. The same
+    /// code and status the Owner route answers with for the same store error.
+    ///
+    /// Not retryable: the class is fixed by the enrollment the device spent.
+    fn capability_outside_device_class(detail: String) -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::FORBIDDEN,
+            Json(Self::new("capability_outside_device_class", detail)),
+        )
+    }
+
     fn service_unavailable(detail: String) -> (StatusCode, Json<Self>) {
         (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1316,6 +1328,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_context_result",
     "browser_context_cancel",
     "browser_session_close",
+    "browser_profile_delete",
     "browser_navigate",
     "browser_snapshot",
     "browser_act",
@@ -1740,6 +1753,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "host_consent_respond",
     "browser_session_ensure",
     "browser_session_close",
+    "browser_profile_delete",
     "browser_navigate",
     "browser_act",
     "browser_drag",

@@ -2458,6 +2458,102 @@ mod tests {
         security_store::install_security_store(None);
     }
 
+    /// Enrol a browser companion into the installed store, under the tenant
+    /// these commands resolve.
+    fn enroll_browser(store: &security_store::SecurityStore, device_id: &str) {
+        let tenant = paired_tenant_id();
+        let now = unix_time_secs();
+        let challenge = store.issue_challenge(&tenant, now, 600).expect("challenge");
+        let enrollment = store
+            .create_browser_enrollment(&tenant, "local-trust-root", now, 600)
+            .expect("browser enrollment");
+        store
+            .register_browser_device(
+                &tenant,
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                device_id,
+                "Chrome",
+                "pem",
+                &format!("thumb-{device_id}"),
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                now,
+            )
+            .expect("register browser");
+    }
+
+    /// The desktop grant commands take a bare device id from the renderer. The
+    /// console hides their switches on a browser row, but these are invokable
+    /// directly, so each one must be refused by the store for a browser device.
+    #[tokio::test]
+    async fn no_desktop_grant_command_can_widen_a_browser_device() {
+        let _scope = store_scope();
+        let owner = "grant-owner-device";
+        let browser = "grant-browser-device";
+        let store = install_store_with_device(owner);
+        enroll_browser(&store, browser);
+        let class = || {
+            store
+                .capability_snapshot(&paired_tenant_id(), browser)
+                .unwrap()
+                .unwrap()
+        };
+
+        let refusals = [
+            (
+                "remote control",
+                companion_set_remote_control(browser.into(), true).await,
+            ),
+            (
+                "agent control",
+                companion_set_agent_control(browser.into(), true).await,
+            ),
+            (
+                "terminal",
+                companion_set_remote_terminal(browser.into(), true).await,
+            ),
+            (
+                "ssh files",
+                companion_set_ssh_files(browser.into(), true).await,
+            ),
+            ("worker", companion_set_worker(browser.into(), true).await),
+        ];
+        for (grant, result) in refusals {
+            let error = result.expect_err(grant);
+            assert_eq!(
+                error,
+                security_store::SecurityStoreError::CapabilityOutsideDeviceClass.to_string(),
+                "{grant}"
+            );
+        }
+        assert!(!holds(&store, browser, "terminal.open"));
+        assert_eq!(class(), vec!["browser.read-own", "browser.submit"]);
+
+        // Switching one off is a write of the browser's own class, and stays
+        // allowed — the device must remain editable.
+        companion_set_remote_terminal(browser.into(), false)
+            .await
+            .expect("revoking on a browser device writes back its own class");
+        companion_set_worker(browser.into(), false)
+            .await
+            .expect("clearing the worker switch on a browser device");
+        assert_eq!(class(), vec!["browser.read-own", "browser.submit"]);
+
+        // The owner phone next to it is unaffected.
+        companion_set_remote_terminal(owner.into(), false)
+            .await
+            .unwrap();
+        companion_set_remote_terminal(owner.into(), true)
+            .await
+            .unwrap();
+        assert!(holds(&store, owner, "terminal.open"));
+        companion_set_worker(owner.into(), true).await.unwrap();
+        assert!(holds(&store, owner, "agent.worker"));
+
+        security_store::install_security_store(None);
+    }
+
     #[tokio::test]
     async fn grants_refuse_an_empty_device_id_rather_than_widening_to_every_caller() {
         let _scope = store_scope();

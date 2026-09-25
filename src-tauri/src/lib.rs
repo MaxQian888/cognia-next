@@ -1677,6 +1677,8 @@ pub fn run() {
             browser::embedded::browser_embed_destroy,
             browser::cookie_import::browser_cookie_import_available,
             browser::cookie_import::browser_cookie_import,
+            browser::cookie_import::browser_cookie_clear,
+            browser::cookie_import::browser_cookie_clear_all,
             // Optional desktop "Pro IDE" mode — on-demand embedded code-server.
             codeserver::commands::codeserver_supported,
             codeserver::commands::codeserver_remote_relay_ensure,

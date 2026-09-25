@@ -13,7 +13,6 @@ import { getCloseBehavior, pushCloseBehaviorToRust } from "@/lib/tauri/close-beh
 import { setWindowBackgroundColor } from "@/lib/tauri/shell-window"
 import { getShellColors } from "@/lib/appearance/shell-sync"
 import { isTauri } from "@/lib/tauri"
-import { useChatStore } from "@/stores/chat"
 import { startNewSession } from "@/lib/chat/start-session"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
@@ -151,51 +150,31 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Cold-start deep link — `cognia://...` URLs the OS launched us with.
+      // Through the same parser and dispatcher as a link arriving while the app
+      // runs. This used to parse the host by hand and knew only `chat`,
+      // `settings`, `logto` and `scheduler`, so `cognia://session/<id>` — the
+      // link every Browser Companion submission carries — and every issue,
+      // agent-task, workflow-run and workspace link did nothing when it was
+      // the link that launched Cognia.
       try {
         const urls = await getLaunchDeepLink()
         if (urls && urls.length > 0) {
+          const [{ parseCogniaDeeplink }, { dispatchDesktopDeeplink }] = await Promise.all([
+            import("@/lib/navigation/cognia-deeplink"),
+            import("@/lib/navigation/desktop-deeplink-dispatch"),
+          ])
           for (const raw of urls) {
             try {
-              const url = new URL(raw)
-              if (url.protocol !== "cognia:") continue
-              const head = url.host || url.pathname.replace(/^\/+/, "").split("/")[0]
-              if (head === "chat") {
-                const id =
-                  url.pathname.replace(/^\/+/, "").split("/").filter(Boolean)[0] ||
-                  url.searchParams.get("id") ||
-                  ""
-                if (id) {
-                  useChatStore.getState().setActiveSession(id)
-                  useUIStore.getState().setSelectedGuild({ kind: "dm" })
-                }
-              } else if (head === "settings") {
-                useUIStore.getState().requestOpenSettings(url.searchParams.get("tab") ?? undefined)
-              } else if (head === "logto") {
-                // A sign-in that started before the app was closed cannot be
-                // resumed (the PKCE verifier lived in the old process), but a
-                // running flow in a window that reloaded can still be waiting.
-                const { parseCogniaDeeplink } = await import("@/lib/navigation/cognia-deeplink")
-                const action = parseCogniaDeeplink(raw)
-                if (action.kind === "logto_callback") {
-                  const { publishLogtoDeepLinkCallback } =
-                    await import("@/lib/logto/deep-link-callback")
-                  publishLogtoDeepLinkCallback(action)
-                }
-              } else if (head === "scheduler") {
-                // OS-promoted task wake-up when the timer had to launch the
-                // app (ADR-0128 §5): same handler as the running-app path.
-                const { parseCogniaDeeplink } = await import("@/lib/navigation/cognia-deeplink")
-                const action = parseCogniaDeeplink(raw)
-                if (action.kind === "open_scheduler_task" && action.taskId) {
-                  const { handlePromotedTaskWake } = await import("@/lib/scheduler/promoted-wake")
-                  await handlePromotedTaskWake(
-                    { taskId: action.taskId, runToken: action.runToken },
-                    { navigate: (path) => routerRef.current.push(path) }
-                  )
-                }
-              }
-            } catch {
-              // Ignore individual malformed URLs; log once at top level below.
+              await dispatchDesktopDeeplink(parseCogniaDeeplink(raw), {
+                navigate: (path) => routerRef.current.push(path),
+                // Not a toast at cold start: whatever launched the app with a
+                // link this build does not know gets a log line, not a popup
+                // over the first frame.
+                onUnknown: (link) => console.warn("unhandled launch deep link", link),
+              })
+            } catch (err) {
+              // One bad link must not stop the rest from being handled.
+              console.warn("launch deep link failed", raw, err)
             }
           }
         }

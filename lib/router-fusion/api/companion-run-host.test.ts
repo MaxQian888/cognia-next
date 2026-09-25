@@ -94,6 +94,15 @@ function harness() {
       { id: "desktop-session", title: "t", transcriptRevision: 6 } as ChatSession,
     ],
     [
+      "scheduled-session",
+      {
+        id: "scheduled-session",
+        title: "Morning digest (scheduled)",
+        transcriptRevision: 2,
+        origin: { kind: "scheduled-task", taskId: "task-1", taskName: "Morning digest" },
+      } as ChatSession,
+    ],
+    [
       "key-session",
       {
         id: "key-session",
@@ -293,6 +302,25 @@ describe("createCompanionRun", () => {
       keyId: "device:phone-1",
       keyName: "Max's phone",
     })
+  })
+
+  it("treats a scheduled run's conversation as the user's own, not a gateway key's", async () => {
+    // Only a gateway origin fences a conversation to its key; the scheduled
+    // origin names which task opened it and fences nothing.
+    const { apiDeps, created } = harness()
+    const outcome = await createCompanionRun(
+      SETTINGS,
+      {
+        actor: await actorFor("phone-1"),
+        mode: "cascade",
+        text: "why did this fail?",
+        sessionId: "scheduled-session",
+        idempotencyKey: "companion-run:scheduled",
+      },
+      { apiDeps }
+    )
+    expect(outcome.ok).toBe(true)
+    expect(created[0]).toMatchObject({ session: { id: "scheduled-session" } })
   })
 
   it("[ACC:AUTH-03] never writes into a gateway key's conversation", async () => {

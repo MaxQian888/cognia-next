@@ -232,7 +232,9 @@ async function targetSession(
 ): Promise<ChatSession | null> {
   const session = await apiDeps.session.get(sessionId)
   if (!session) return null
-  if (session.origin && session.origin.keyId !== actor.keyId) return null
+  // Only a session a gateway key opened is fenced to that key; a session with
+  // any other origin (a scheduled run) is not an API session at all.
+  if (session.origin?.kind === "gateway-api" && session.origin.keyId !== actor.keyId) return null
   return session
 }
 

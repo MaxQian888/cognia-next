@@ -291,7 +291,11 @@ pub fn status_for_code(code: &str) -> Option<u16> {
         | "policy_constraints_mismatch"
         | "service_scope_required"
         | "operator_identity_required"
-        | "browser_submissions_disabled" => 403,
+        | "browser_submissions_disabled"
+        // A grant the target device's class refuses (ADR-0154). Raised by the
+        // Owner route and the RPC plane for the same store error, so it is
+        // listed here rather than left to each arm.
+        | "capability_outside_device_class" => 403,
         "unknown_command" | "not_found" | "operation_not_found" | "media_not_found" => 404,
         "command_renamed" => 410,
         "idempotency_conflict" | "idempotency_indeterminate" | "conflict" => 409,
@@ -413,6 +417,10 @@ mod tests {
         assert_eq!(Problem::for_code("unknown_command", "").status, 404);
         assert_eq!(Problem::for_code("command_renamed", "").status, 410);
         assert_eq!(Problem::for_code("rate_limited", "").status, 429);
+        assert_eq!(
+            Problem::for_code("capability_outside_device_class", "").status,
+            403
+        );
         assert_eq!(Problem::for_code("no_such_code", "").status, 500);
     }
 

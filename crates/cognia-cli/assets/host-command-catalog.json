@@ -5770,6 +5770,54 @@
       "outputTyped": true
     },
     {
+      "name": "browser_profile_delete",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "browser_profile_delete (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "profileId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9._-]{1,128}$"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "profileId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "src-tauri/src/companion_api/browser_gateway.rs dispatch_browser_rpc browser_profile_delete",
+        "description": "The persistent profile's user-data directory is gone from the workspace runtime. A refusal (the profile is open in a session, or no runtime is reachable) arrives as an error, never as `deleted: false`.",
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "const": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "browser_read_console",
       "category": "development",
       "resource": "browser",
@@ -64383,5 +64431,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "c02138d44db327151c9c0c8aea460c242cf135dd20760844597f94e2acf86198"
+  "catalogHash": "1704430a8e657bda79bc49eae6b1f94fb70babe9d366ff4a4db8cca48955bc72"
 }

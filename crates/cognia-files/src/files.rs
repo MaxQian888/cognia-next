@@ -1202,10 +1202,20 @@ pub fn fs_walk_workspace(
             continue; // the starting directory itself
         }
         let is_dir = dent.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let is_link = dent.file_type().map(|t| t.is_symlink()).unwrap_or(false);
         let path = dent.path();
         if !is_dir {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-            if name.as_deref().is_some_and(is_sensitive_workspace_file) {
+            // A read follows a symlink to its target, so the credential floor
+            // must see the target's name too: `notes.md -> .env` would
+            // otherwise hand `.env` to whatever reads what the walk lists.
+            let target_name = is_link
+                .then(|| std::fs::canonicalize(path).ok())
+                .flatten()
+                .and_then(|t| t.file_name().map(|n| n.to_string_lossy().into_owned()));
+            if name.as_deref().is_some_and(is_sensitive_workspace_file)
+                || target_name.as_deref().is_some_and(is_sensitive_workspace_file)
+            {
                 skipped_sensitive += 1;
                 continue;
             }
@@ -1221,7 +1231,13 @@ pub fn fs_walk_workspace(
             Ok(r) => r.to_string_lossy().replace('\\', "/"),
             Err(_) => continue,
         };
-        let meta = dent.metadata().ok();
+        // A symlink's own metadata is the link's; report the target's size, so
+        // a caller's size cap sees what a read would actually return.
+        let meta = if is_link {
+            std::fs::metadata(path).ok()
+        } else {
+            dent.metadata().ok()
+        };
         entries.push(WorkspaceEntry {
             rel_path: rel_to_root,
             absolute_path: path.to_string_lossy().to_string(),
@@ -2650,6 +2666,39 @@ mod tests {
                 "caller must learn files were withheld"
             );
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walk_workspace_judges_a_symlink_by_its_target() {
+        let root = make_sandbox("walk-secret-link");
+        std::fs::write(root.join(".env"), "TOKEN=1").unwrap();
+        std::fs::write(root.join("big.txt"), "x".repeat(4096)).unwrap();
+        std::os::unix::fs::symlink(root.join(".env"), root.join("notes.md")).unwrap();
+        std::os::unix::fs::symlink(root.join("big.txt"), root.join("alias.txt")).unwrap();
+
+        let walk = fs_walk_workspace(
+            root.to_string_lossy().to_string(),
+            None,
+            Some(true),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let names: Vec<_> = walk.entries.iter().map(|e| e.rel_path.clone()).collect();
+        assert!(
+            !names.iter().any(|n| n == "notes.md"),
+            "a harmless name must not launder .env: {names:?}"
+        );
+        assert_eq!(walk.skipped_sensitive, 2);
+        let alias = walk
+            .entries
+            .iter()
+            .find(|e| e.rel_path == "alias.txt")
+            .expect("a link to an ordinary file is listed");
+        assert_eq!(alias.size, 4096, "sized by its target, not the link text");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -1474,8 +1474,44 @@ pub(crate) struct DevicePairedEvent {
     pub pubkey: String,
     pub paired_at_ms: i64,
     pub app_version: String,
-    pub rendezvous_id: String,
-    pub room_descriptor: Value,
+    /// ADR-0021 signaling room. `None` for a device class that has no WAN
+    /// plane — a paired browser talks only to the loopback listener — and then
+    /// omitted from the payload, which the renderer already treats as optional
+    /// (it predates WebRTC). An empty string here would read as a room id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rendezvous_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub room_descriptor: Option<Value>,
+}
+
+/// The pairing event for a newly registered browser extension.
+///
+/// A separate constructor rather than inline fields because the browser class
+/// differs from a phone in exactly the ways that matter to the renderer: it
+/// names itself `browser` (so the device console can say what it is and offer
+/// no grant a browser may not hold) and it has no signaling room.
+pub(crate) fn browser_device_paired_event(
+    tenant_id: &str,
+    device_id: &str,
+    display_name: &str,
+    public_key_pem: &str,
+    paired_at_ms: i64,
+) -> DevicePairedEvent {
+    DevicePairedEvent {
+        device_id: device_id.to_owned(),
+        account_id: host_identity::event_namespace_for_tenant(tenant_id),
+        tenant_id: tenant_id.to_owned(),
+        label: display_name.to_owned(),
+        platform: "browser".to_owned(),
+        pubkey: public_key_pem.to_owned(),
+        paired_at_ms,
+        // The extension does not report its version at registration, and a
+        // made-up one would be worse than the word the phone path uses for
+        // the same absence.
+        app_version: "unknown".to_owned(),
+        rendezvous_id: None,
+        room_descriptor: None,
+    }
 }
 
 /// Emit `companion://device-paired` on the same rail as `device-seen`.
@@ -1598,9 +1634,10 @@ async fn register_handler(
                 .app_version
                 .clone()
                 .unwrap_or_else(|| "unknown".to_owned()),
-            rendezvous_id: signaling.rendezvous_id.clone(),
-            room_descriptor: serde_json::to_value(&signaling.room_descriptor)
-                .unwrap_or(Value::Null),
+            rendezvous_id: Some(signaling.rendezvous_id.clone()),
+            room_descriptor: Some(
+                serde_json::to_value(&signaling.room_descriptor).unwrap_or(Value::Null),
+            ),
         },
     );
     Ok(Json(RegisterResponse {
@@ -1656,6 +1693,7 @@ async fn worker_register_handler(
 }
 
 async fn browser_register_handler(
+    State(state): State<SharedState>,
     body: Result<Json<BrowserRegisterRequest>, JsonRejection>,
 ) -> ApiResult<BrowserRegisterResponse> {
     let request = parse_public_json(body)?;
@@ -1704,6 +1742,21 @@ async fn browser_register_handler(
             unix_time_secs(),
         )
         .map_err(store_error)?;
+    // The same pairing event a phone gets. Without it a paired browser never
+    // reached the renderer's `pairedDevices` mirror, so the device console —
+    // the one place a device is revoked — never listed it, and the only way
+    // to cut a browser off was to switch Browser Access off for everyone.
+    // Best-effort, like the phone path: registration has already succeeded.
+    publish_device_paired(
+        &state,
+        browser_device_paired_event(
+            &tenant_id,
+            &request.device_id,
+            &request.display_name,
+            &request.public_key_pem,
+            chrono::Utc::now().timestamp_millis(),
+        ),
+    );
     Ok(Json(BrowserRegisterResponse {
         device_id: request.device_id,
         tenant_id,
@@ -2373,6 +2426,14 @@ fn store_error(error: SecurityStoreError) -> Problem {
             "invalid_device_capabilities",
             "the requested capability snapshot contains an invalid grant or removes required Owner authority",
         ),
+        // 403, not the 400 above: the request is well-formed and names real
+        // capabilities; the target device's class refuses them, and no edit
+        // of the payload short of dropping them can succeed.
+        SecurityStoreError::CapabilityOutsideDeviceClass => api_error(
+            StatusCode::FORBIDDEN,
+            "capability_outside_device_class",
+            "a browser companion device can hold only browser.submit and browser.read-own",
+        ),
         SecurityStoreError::HostBindingMismatch => api_error(
             StatusCode::FORBIDDEN,
             "host_binding_mismatch",
@@ -2502,8 +2563,8 @@ mod tests {
                 pubkey: "-----BEGIN PUBLIC KEY-----".into(),
                 paired_at_ms: 1_700_000_000_000,
                 app_version: "1.2.3".into(),
-                rendezvous_id: "rv-1".into(),
-                room_descriptor: json!({ "roomId": "r1" }),
+                rendezvous_id: Some("rv-1".into()),
+                room_descriptor: Some(json!({ "roomId": "r1" })),
             },
         );
         let frame = receiver.try_recv().expect("one frame published");
@@ -2518,6 +2579,43 @@ mod tests {
         assert_eq!(frame.payload["app_version"], "1.2.3");
         assert_eq!(frame.payload["rendezvous_id"], "rv-1");
         assert_eq!(frame.payload["room_descriptor"]["roomId"], "r1");
+    }
+
+    /// A registered browser reaches the renderer the way a phone does, named as
+    /// the browser class and with no signaling room — the keys are omitted, not
+    /// empty, because `event-bridge.ts` reads an empty string as a room id.
+    #[test]
+    fn browser_pairing_publishes_a_browser_device_with_no_signaling_room() {
+        let state = test_state();
+        let mut receiver = match state.event_bus.subscribe(None, 0) {
+            super::super::event_bus::SubscribeResult::Ok { receiver, .. } => receiver,
+            _ => panic!("subscribe"),
+        };
+        publish_device_paired(
+            &state,
+            browser_device_paired_event(
+                "tenant-a",
+                "browser-1",
+                "Chrome",
+                "-----BEGIN PUBLIC KEY-----",
+                1_700_000_000_000,
+            ),
+        );
+        let frame = receiver.try_recv().expect("one frame published");
+        assert_eq!(frame.event_type, "companion://device-paired");
+        assert_eq!(frame.payload["device_id"], "browser-1");
+        assert_eq!(frame.payload["platform"], "browser");
+        assert_eq!(frame.payload["label"], "Chrome");
+        assert_eq!(frame.payload["tenantId"], "tenant-a");
+        assert_eq!(
+            frame.payload["account_id"],
+            host_identity::event_namespace_for_tenant("tenant-a")
+        );
+        assert_eq!(frame.payload["paired_at_ms"], 1_700_000_000_000_i64);
+        assert_eq!(frame.payload["app_version"], "unknown");
+        let object = frame.payload.as_object().expect("an object payload");
+        assert!(!object.contains_key("rendezvous_id"));
+        assert!(!object.contains_key("room_descriptor"));
     }
 
     /// Older clients omit the self-reported labels; the request still parses.
@@ -3217,6 +3315,105 @@ mod tests {
             body["catalogHash"],
             super::super::command_manifest::CATALOG_HASH
         );
+    }
+
+    /// The Owner route `PUT /api/devices/{id}/capabilities` is a raw snapshot
+    /// replace, so it is the easiest surface to hand a browser device anything.
+    /// The store refuses it and the route answers a typed 403.
+    #[tokio::test]
+    async fn the_owner_capability_route_refuses_a_browser_device_anything_outside_its_class() {
+        let _guard = super::super::security_store::test_guard();
+        let store = SecurityStore::in_memory().expect("in-memory store");
+        super::super::security_store::install_security_store(Some(store.clone()));
+        let now = unix_time_secs();
+        let challenge = store.issue_challenge("tenant-a", now, 60).unwrap();
+        let invitation = store
+            .create_owner_invitation("tenant-a", "local-trust-root", now, 60)
+            .unwrap();
+        store
+            .register_owner_device(
+                "tenant-a",
+                &invitation,
+                &challenge.id,
+                &challenge.nonce,
+                "owner-a",
+                "Owner phone",
+                "-----BEGIN PUBLIC KEY-----\nowner\n-----END PUBLIC KEY-----",
+                "thumb-owner-a",
+                now,
+            )
+            .unwrap();
+        let challenge = store.issue_challenge("tenant-a", now, 60).unwrap();
+        let enrollment = store
+            .create_browser_enrollment("tenant-a", "local-trust-root", now, 60)
+            .unwrap();
+        store
+            .register_browser_device(
+                "tenant-a",
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-a",
+                "Chrome",
+                "pem",
+                "thumb-browser-a",
+                BOUND,
+                now,
+            )
+            .unwrap();
+        let owner = || DeviceContext {
+            device_id: "owner-a".to_string(),
+            account_id: "tenant-a".to_string(),
+            scope: "owner".to_string(),
+            granted_scopes: Vec::new(),
+            authorization_capabilities: None,
+        };
+        let put = |device: &str, capabilities: &[&str]| {
+            replace_device_capabilities_handler(
+                Path(device.to_string()),
+                Extension(owner()),
+                Ok(Json(ReplaceCapabilitiesRequest {
+                    capabilities: capabilities.iter().map(|c| c.to_string()).collect(),
+                })),
+            )
+        };
+
+        for requested in [
+            &["browser.read-own", "browser.submit", "terminal.open"][..],
+            &["terminal.open"][..],
+            &["browser.submit", "host.observe"][..],
+            &["browser.read-own", "browser.submit", "agent.worker"][..],
+        ] {
+            let problem = put("browser-a", requested)
+                .await
+                .expect_err("a browser device must be refused");
+            assert_eq!(problem.status, 403, "{requested:?}");
+            assert_eq!(problem.code, "capability_outside_device_class");
+            assert!(!problem.retryable);
+        }
+        assert!(!store
+            .has_capability("tenant-a", "browser-a", "terminal.open")
+            .unwrap());
+
+        // Its own two still round-trip through the same route.
+        let Json(kept) = put("browser-a", &["browser.submit", "browser.read-own"])
+            .await
+            .expect("a browser device's own class must stay editable");
+        assert_eq!(
+            kept.capabilities,
+            vec!["browser.read-own", "browser.submit"]
+        );
+
+        // An ordinary device is unaffected.
+        let Json(owner_grants) = put("owner-a", &["host.admin", "terminal.open"])
+            .await
+            .expect("an owner device keeps its ordinary grants");
+        assert_eq!(
+            owner_grants.capabilities,
+            vec!["host.admin", "terminal.open"]
+        );
+
+        super::super::security_store::install_security_store(None);
     }
 
     /// The device handshake reads the contract identity from here (ADR-0175):

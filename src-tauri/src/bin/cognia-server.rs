@@ -1986,7 +1986,7 @@ mod tests {
     use super::{
         Cli, CliCommand, DevicesCommand, agent_session_store_path, browser_plane_base_url,
         color_enabled, encode_pair_invitation_payload, encode_running_pair_invitation,
-        format_log_line, lark_entry, plugin_storage_dir, report_lark_env,
+        format_log_line, lark_entry, plugin_storage_dir, report_lark_env, run_devices_admin,
     };
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use clap::Parser;
@@ -2399,5 +2399,125 @@ mod tests {
                 "tenantId": "tenant-a",
             })
         );
+    }
+
+    /// Parse a `cognia-server devices …` line the way `main` does and run it.
+    async fn devices(args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+        let cli = Cli::try_parse_from(
+            ["cognia-server", "devices"]
+                .iter()
+                .chain(args.iter())
+                .copied()
+                .collect::<Vec<_>>(),
+        )
+        .expect("devices arguments");
+        let CliCommand::Devices { command } = cli.command else {
+            panic!("expected a devices command");
+        };
+        run_devices_admin(command).await
+    }
+
+    /// `cognia-server devices grant|revoke` writes the store directly, with no
+    /// device console in between to hide the switches on a browser row. The
+    /// store has to refuse every grant kind for a browser companion, and the
+    /// operator has to be told why.
+    ///
+    /// The only test in this binary that installs the process-global store, so
+    /// it needs no lock of its own; the library's `test_guard` is not visible
+    /// from a bin crate.
+    #[tokio::test]
+    async fn the_devices_cli_cannot_grant_a_browser_device_anything_outside_its_class() {
+        use app_lib::companion_api::security_store::{
+            SecurityStore, SecurityStoreError, install_security_store,
+        };
+        let store = SecurityStore::in_memory().expect("in-memory store");
+        install_security_store(Some(store.clone()));
+        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
+        let invitation = store
+            .create_owner_invitation("tenant-a", "local-cli-trust-root", 100, 60)
+            .unwrap();
+        store
+            .register_owner_device(
+                "tenant-a",
+                &invitation,
+                &challenge.id,
+                &challenge.nonce,
+                "owner-a",
+                "Owner phone",
+                "-----BEGIN PUBLIC KEY-----\nowner\n-----END PUBLIC KEY-----",
+                "thumb-owner-a",
+                100,
+            )
+            .unwrap();
+        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
+        let enrollment = store
+            .create_browser_enrollment("tenant-a", "local-cli-trust-root", 100, 60)
+            .unwrap();
+        store
+            .register_browser_device(
+                "tenant-a",
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-a",
+                "Chrome",
+                "pem",
+                "thumb-browser-a",
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                100,
+            )
+            .unwrap();
+        let class = || {
+            store
+                .capability_snapshot("tenant-a", "browser-a")
+                .unwrap()
+                .unwrap()
+        };
+
+        for flag in ["--control", "--agent-control", "--terminal", "--ssh-files"] {
+            let error = devices(&["grant", "browser-a", flag, "--tenant-id", "tenant-a"])
+                .await
+                .expect_err(flag);
+            assert!(
+                matches!(
+                    error.downcast_ref::<SecurityStoreError>(),
+                    Some(SecurityStoreError::CapabilityOutsideDeviceClass)
+                ),
+                "{flag}: {error}"
+            );
+        }
+        assert!(
+            !store
+                .has_capability("tenant-a", "browser-a", "terminal.open")
+                .unwrap()
+        );
+        assert_eq!(class(), vec!["browser.read-own", "browser.submit"]);
+
+        // Revoking writes the browser's own class back, which must still work.
+        devices(&[
+            "revoke",
+            "browser-a",
+            "--terminal",
+            "--tenant-id",
+            "tenant-a",
+        ])
+        .await
+        .expect("revoke on a browser device");
+        assert_eq!(class(), vec!["browser.read-own", "browser.submit"]);
+
+        // The owner phone is unaffected.
+        devices(&["revoke", "owner-a", "--terminal", "--tenant-id", "tenant-a"])
+            .await
+            .expect("revoke on an owner device");
+        devices(&["grant", "owner-a", "--terminal", "--tenant-id", "tenant-a"])
+            .await
+            .expect("grant on an owner device");
+        assert!(
+            store
+                .has_capability("tenant-a", "owner-a", "terminal.open")
+                .unwrap()
+        );
+
+        install_security_store(None);
     }
 }

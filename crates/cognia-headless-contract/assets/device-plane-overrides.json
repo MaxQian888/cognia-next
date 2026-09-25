@@ -704,6 +704,32 @@
         "additionalProperties": false
       }
     },
+    "browser_profile_delete": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "profileId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9._-]{1,128}$"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "workspaceId",
+          "profileId",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
     "browser_reload": {
       "inputSchemaSource": "zod-contract",
       "inputSchema": {

@@ -124,6 +124,12 @@ const uiStoreState = {
 jest.mock("@/stores/ui", () => ({
   useUIStore: { getState: () => uiStoreState },
 }))
+const getAgentTaskMock = jest.fn(async (_id: string): Promise<unknown> => undefined)
+const listAgentTaskAttemptsMock = jest.fn(async (_id: string): Promise<unknown[]> => [])
+jest.mock("@/lib/db/agent-tasks", () => ({
+  getAgentTask: (id: string) => getAgentTaskMock(id),
+  listAgentTaskAttempts: (id: string) => listAgentTaskAttemptsMock(id),
+}))
 const findActiveSessionForConversation = jest.fn()
 jest.mock("@/lib/connectors/session-bindings", () => ({
   findActiveSessionForConversation: (...args: unknown[]) =>
@@ -437,9 +443,49 @@ describe("useTauriEvents", () => {
       expect(openPathAsWorkspaceMock).toHaveBeenCalledWith("/work")
     })
 
-    it("unknown deep link surfaces a toast warning", async () => {
+    it("unknown deep link surfaces a localized toast", async () => {
       await fireDeepLinks(["cognia://nope"])
-      expect(toastMessage).toHaveBeenCalled()
+      expect(toastMessage).toHaveBeenCalledWith("deepLinkUnknown", {
+        description: "cognia://nope",
+      })
+    })
+
+    it("session deep link activates the session", async () => {
+      // The link every Browser Companion submission carries.
+      await fireDeepLinks(["cognia://session/s-9"])
+      expect(setActiveSession).toHaveBeenCalledWith("s-9")
+      expect(toastMessage).not.toHaveBeenCalled()
+    })
+
+    it("issue deep link opens the board on that issue", async () => {
+      // Minted for a page the Browser Companion filed as an issue; it used to
+      // land on the unknown-link toast.
+      await fireDeepLinks(["cognia://issues/issue-7"])
+      expect(routerPush).toHaveBeenCalledWith("/issues?id=issue-7")
+      expect(toastMessage).not.toHaveBeenCalled()
+    })
+
+    it("agent-task deep link opens the conversation the task ran in", async () => {
+      getAgentTaskMock.mockResolvedValueOnce({ id: "task-7" })
+      listAgentTaskAttemptsMock.mockResolvedValueOnce([
+        { attemptNo: 1, sessionId: "session-old" },
+        { attemptNo: 2, sessionId: "session-latest" },
+      ])
+      await fireDeepLinks(["cognia://agent-tasks/task-7"])
+      await flushPromises()
+      await flushPromises()
+      expect(setActiveSession).toHaveBeenCalledWith("session-latest")
+      expect(toastMessage).not.toHaveBeenCalled()
+    })
+
+    it("agent-task deep link for a task that has not run opens its board", async () => {
+      getAgentTaskMock.mockResolvedValueOnce({ id: "task-8" })
+      listAgentTaskAttemptsMock.mockResolvedValueOnce([])
+      await fireDeepLinks(["cognia://agent-tasks/task-8"])
+      await flushPromises()
+      await flushPromises()
+      expect(requestOpenSettings).toHaveBeenCalledWith("characters")
+      expect(setActiveSession).not.toHaveBeenCalled()
     })
 
     it("malformed URL falls into the unknown branch", async () => {
