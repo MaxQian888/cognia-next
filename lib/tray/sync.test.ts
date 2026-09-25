@@ -34,6 +34,8 @@ jest.mock("./icon-builder", () => ({
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }
 
+import { loggers } from "@cognia/logging"
+
 import {
   useSyncTrayToRust,
   defaultSnapshot,
@@ -239,6 +241,118 @@ describe("useSyncTrayToRust", () => {
     expect(rasterizeMock).toHaveBeenCalledWith({
       color: "#ff0000",
       badge: { text: "42%", color: "#10b981" },
+    })
+  })
+
+  describe("tray_set_menu outcome", () => {
+    const SKIPPED = [
+      { id: "tray.stale", reason: "tray menu references unknown native action 'self-destruct'" },
+    ]
+    let menuResult: () => Promise<unknown>
+
+    beforeEach(() => {
+      menuResult = () => Promise.resolve({ skipped: [] })
+      invoke.mockImplementation((cmd: string) =>
+        cmd === "tray_set_menu" ? menuResult() : Promise.resolve(undefined)
+      )
+    })
+
+    /** Force a fresh debounced push and let its IPC promise settle. */
+    async function pushMenu(n: number) {
+      act(() => {
+        registerTrayItem({ id: `p:${n}`, pluginId: "p", label: `Item ${n}` })
+      })
+      await act(async () => {
+        jest.advanceTimersByTime(200)
+      })
+    }
+
+    function menuPushCount() {
+      return invoke.mock.calls.filter((c) => c[0] === "tray_set_menu").length
+    }
+
+    it("logs skipped items once per distinct set, and again after a clean push", async () => {
+      const warnSpy = jest.spyOn(loggers.tray, "warn").mockImplementation(() => {})
+      const skipWarnings = () =>
+        warnSpy.mock.calls.filter((c) => String(c[0]).startsWith("tray_set_menu skipped"))
+      try {
+        menuResult = () => Promise.resolve({ skipped: SKIPPED })
+        useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
+        renderHook(() => useSyncTrayToRust())
+        await act(async () => {
+          jest.advanceTimersByTime(200)
+        })
+        expect(skipWarnings()).toHaveLength(1)
+        expect(skipWarnings()[0][1]).toEqual({ skipped: SKIPPED })
+
+        // Same stale item on the next push: already reported, stay quiet.
+        const pushesBefore = menuPushCount()
+        await pushMenu(1)
+        expect(menuPushCount()).toBeGreaterThan(pushesBefore)
+        expect(skipWarnings()).toHaveLength(1)
+
+        // A clean push clears the issue, so the same set recurring logs again.
+        menuResult = () => Promise.resolve({ skipped: [] })
+        await pushMenu(2)
+        expect(skipWarnings()).toHaveLength(1)
+        menuResult = () => Promise.resolve({ skipped: SKIPPED })
+        await pushMenu(3)
+        expect(skipWarnings()).toHaveLength(2)
+      } finally {
+        warnSpy.mockRestore()
+      }
+    })
+
+    it("does not log on a clean push, including a report-less resolve", async () => {
+      const warnSpy = jest.spyOn(loggers.tray, "warn").mockImplementation(() => {})
+      const errorSpy = jest.spyOn(loggers.tray, "error").mockImplementation(() => {})
+      try {
+        menuResult = () => Promise.resolve(undefined)
+        useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
+        renderHook(() => useSyncTrayToRust())
+        await act(async () => {
+          jest.advanceTimersByTime(200)
+        })
+        expect(menuPushCount()).toBeGreaterThan(0)
+        const menuLogs = [...warnSpy.mock.calls, ...errorSpy.mock.calls].filter((c) =>
+          String(c[0]).startsWith("tray_set_menu")
+        )
+        expect(menuLogs).toHaveLength(0)
+      } finally {
+        warnSpy.mockRestore()
+        errorSpy.mockRestore()
+      }
+    })
+
+    it("logs a rejected push as an error once, naming that the old menu stays", async () => {
+      const errorSpy = jest.spyOn(loggers.tray, "error").mockImplementation(() => {})
+      const failures = () =>
+        errorSpy.mock.calls.filter((c) => String(c[0]).startsWith("tray_set_menu failed"))
+      try {
+        menuResult = () => Promise.reject("tray: main-tray not registered")
+        useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
+        renderHook(() => useSyncTrayToRust())
+        await act(async () => {
+          jest.advanceTimersByTime(200)
+        })
+        expect(failures()).toEqual([
+          [
+            "tray_set_menu failed; the previous tray menu is still shown",
+            "tray: main-tray not registered",
+          ],
+        ])
+
+        await pushMenu(1)
+        expect(failures()).toHaveLength(1)
+
+        // A different failure is a new issue.
+        menuResult = () => Promise.reject("tray: set_menu failed: boom")
+        await pushMenu(2)
+        expect(failures()).toHaveLength(2)
+        expect(failures()[1][1]).toBe("tray: set_menu failed: boom")
+      } finally {
+        errorSpy.mockRestore()
+      }
     })
   })
 

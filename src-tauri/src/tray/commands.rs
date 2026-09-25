@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use serde::Serialize;
 use tauri::{AppHandle, Runtime, State};
 
 use super::dto::{TrayIconState, TrayMenuItem};
@@ -17,56 +18,115 @@ use super::TrayMenuStateStore;
 #[cfg(desktop)]
 use super::icon_state::{self, TrayIconStateStore};
 #[cfg(desktop)]
-use super::menu_builder::build_menu;
+use super::menu_builder::{build_menu_skipping_invalid, BuiltMenu, SanitizedBuild, SkippedItem};
 #[cfg(desktop)]
 use super::TRAY_ICON_ID;
 #[cfg(desktop)]
 use tauri::Manager;
 
+/// What `tray_set_menu` applied. Returned only once the new menu is on the
+/// tray; anything that leaves the previous menu up is an `Err` instead.
+/// Mirrored by `TraySetMenuReport` in `lib/tray/sync.ts`.
+#[derive(Serialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TraySetMenuReport {
+    /// Items dropped for breaking a builder invariant (unknown native
+    /// action, duplicate id, nesting past the cap). Empty on a clean push.
+    pub skipped: Vec<TraySkippedMenuItem>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TraySkippedMenuItem {
+    pub id: String,
+    /// The builder's reason, e.g. "tray menu references unknown native
+    /// action 'x'".
+    pub reason: String,
+}
+
+#[cfg(desktop)]
+impl From<SkippedItem> for TraySkippedMenuItem {
+    fn from(skipped: SkippedItem) -> Self {
+        Self {
+            id: skipped.id,
+            reason: skipped.error.to_string(),
+        }
+    }
+}
+
 /// Replace the tray menu in one shot. Empty input wipes the menu down to
 /// just whatever predefined items the OS forces (typically nothing).
+///
+/// Items that break a builder invariant are dropped and listed in the
+/// report; the rest of the menu still applies. The command fails only when
+/// the new menu never reached the tray, and then the previous menu (on cold
+/// start, the English bootstrap one) is what the user still sees.
 #[tauri::command]
 pub async fn tray_set_menu<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, Arc<TrayMenuStateStore>>,
     items: Vec<TrayMenuItem>,
-) -> Result<(), String> {
+) -> Result<TraySetMenuReport, String> {
     #[cfg(desktop)]
     {
-        let _ = &state;
         // Main-thread dispatch: building an NSMenu and swapping it on the
         // NSStatusItem (which also drops the OLD menu) are AppKit ops that
-        // trap off-main — and async commands run on tokio workers. The layout
-        // store write moves inside the closure too, so the persisted layout
-        // and the applied menu can't diverge when a build fails.
+        // trap off-main — and async commands run on tokio workers. The
+        // outcome comes back over a oneshot so a failed build or swap
+        // reaches the renderer instead of the command reporting success.
+        let (tx, rx) = tokio::sync::oneshot::channel();
         let handle = app.clone();
+        let store = Arc::clone(state.inner());
         app.run_on_main_thread(move || {
-            let built = match build_menu(&handle, &items) {
-                Ok(b) => b,
-                Err(e) => {
-                    log::warn!("tray: build_menu failed: {e}");
-                    return;
-                }
-            };
-            if let Some(store) = handle.try_state::<Arc<TrayMenuStateStore>>() {
-                store.set_layout(items, built.index);
-            }
-            match handle.tray_by_id(TRAY_ICON_ID) {
-                Some(tray) => {
-                    if let Err(e) = tray.set_menu(Some(built.menu)) {
-                        log::warn!("tray: set_menu failed: {e}");
-                    }
-                }
-                None => log::warn!("tray: {TRAY_ICON_ID} not registered"),
-            }
+            // A closed receiver means the IPC call was abandoned; there is
+            // no one left to tell.
+            let _ = tx.send(apply_menu(&handle, &store, &items));
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+        rx.await
+            .map_err(|_| "tray: the menu update was dropped before it ran".to_string())?
     }
     #[cfg(not(desktop))]
     {
         let _ = (app, state, items);
         Err("tray not available on this platform".into())
     }
+}
+
+/// Build `items` and swap the result onto the tray. Must run on the main
+/// thread. The layout store is written only after the swap succeeds, and
+/// with the items actually applied, so the persisted layout, the click
+/// index, and the menu on screen can't diverge.
+#[cfg(desktop)]
+fn apply_menu<R: Runtime>(
+    handle: &AppHandle<R>,
+    store: &TrayMenuStateStore,
+    items: &[TrayMenuItem],
+) -> Result<TraySetMenuReport, String> {
+    // Looked up first: with no tray (e.g. `install` failed on a Linux host
+    // without an appindicator) every debounced push would otherwise build a
+    // whole menu only to throw it away.
+    let tray = handle
+        .tray_by_id(TRAY_ICON_ID)
+        .ok_or_else(|| format!("tray: {TRAY_ICON_ID} not registered"))?;
+    let SanitizedBuild {
+        built: BuiltMenu { menu, index },
+        applied,
+        skipped,
+    } = build_menu_skipping_invalid(handle, items)
+        .map_err(|e| format!("tray: build_menu failed: {e}"))?;
+    tray.set_menu(Some(menu))
+        .map_err(|e| format!("tray: set_menu failed: {e}"))?;
+    store.set_layout(applied, index);
+    // Debug, not warn: the renderer gets the list in the report and logs it
+    // once per distinct set, where a warning here would repeat on every
+    // debounced push for as long as the stale item stays persisted.
+    for item in &skipped {
+        log::debug!("tray: skipped menu item '{}': {}", item.id, item.error);
+    }
+    Ok(TraySetMenuReport {
+        skipped: skipped.into_iter().map(Into::into).collect(),
+    })
 }
 
 #[tauri::command]
@@ -302,6 +362,75 @@ mod tests {
         assert_eq!(store.title().as_deref(), Some("42%"));
         store.set_title(None);
         assert!(store.title().is_none());
+    }
+
+    /// Pins the wire shape `lib/tray/sync.ts` reads (`TraySetMenuReport`).
+    #[test]
+    fn set_menu_report_serializes_to_the_renderer_shape() {
+        let clean = serde_json::to_value(TraySetMenuReport::default()).unwrap();
+        assert_eq!(clean, serde_json::json!({ "skipped": [] }));
+
+        let report = TraySetMenuReport {
+            skipped: vec![TraySkippedMenuItem {
+                id: "tray.stale".into(),
+                reason: "tray menu references unknown native action 'x'".into(),
+            }],
+        };
+        assert_eq!(
+            serde_json::to_value(report).unwrap(),
+            serde_json::json!({
+                "skipped": [{
+                    "id": "tray.stale",
+                    "reason": "tray menu references unknown native action 'x'",
+                }],
+            })
+        );
+    }
+
+    /// `apply_menu` needs a live tray (the project doesn't enable Tauri's
+    /// `test` feature), so this covers its pure half: the sanitizer's skips
+    /// become the report entries the renderer logs.
+    #[cfg(desktop)]
+    #[test]
+    fn skipped_items_convert_into_report_entries() {
+        use crate::tray::menu_builder::sanitize_items;
+
+        let items = vec![
+            TrayMenuItem::Action {
+                id: "tray.stale".into(),
+                label: "Stale".into(),
+                accelerator: None,
+                payload: TrayActionPayload::Native {
+                    action: "self-destruct".into(),
+                },
+                disabled: None,
+                checked: None,
+            },
+            TrayMenuItem::Separator {
+                id: "tray.sep".into(),
+            },
+            TrayMenuItem::Separator {
+                id: "tray.sep".into(),
+            },
+        ];
+        let entries: Vec<TraySkippedMenuItem> = sanitize_items(&items)
+            .skipped
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        assert_eq!(
+            entries,
+            vec![
+                TraySkippedMenuItem {
+                    id: "tray.stale".into(),
+                    reason: "tray menu references unknown native action 'self-destruct'".into(),
+                },
+                TraySkippedMenuItem {
+                    id: "tray.sep".into(),
+                    reason: "tray menu duplicate id 'tray.sep'".into(),
+                },
+            ]
+        );
     }
 
     #[test]

@@ -42,6 +42,24 @@ export const BADGE_STATUS_COLORS: Record<TrayUsageMeterSummary["status"], string
 }
 
 /**
+ * What `tray_set_menu` applied. Mirrors `TraySetMenuReport` in
+ * `src-tauri/src/tray/commands.rs`. The command resolves only once the new
+ * menu is on the tray; a rejection means the previous menu is still shown.
+ */
+export interface TraySetMenuReport {
+  /**
+   * Items Rust dropped for breaking a menu-builder invariant (unknown native
+   * action, duplicate id, nesting past the cap). The rest of the menu applied.
+   */
+  skipped: TraySkippedMenuItem[]
+}
+
+export interface TraySkippedMenuItem {
+  id: string
+  reason: string
+}
+
+/**
  * Shape of the translator returned by next-intl's `useTranslations()`. We only
  * need the call signature and `.has(key)` predicate; the rest of the surface
  * (`rich`, `markup`, `raw`, formatter helpers, …) is intentionally omitted so
@@ -136,6 +154,11 @@ export function useSyncTrayToRust(): void {
   // user's prefs actually differ from those defaults.
   const lastRasterKey = useRef<string | null>("#000000||")
   const debounceHandle = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The menu re-pushes on every debounced state change, so a persistent
+  // problem (a stale persisted item, a tray that never installed) would log
+  // on every flush. Log each distinct issue once; a clean push clears it so
+  // a recurrence logs again.
+  const lastMenuIssue = useRef<string | null>(null)
 
   // Menu pushes — debounced, re-runs on store or plugin registry change
   // or any when-relevant snapshot transition.
@@ -150,9 +173,25 @@ export function useSyncTrayToRust(): void {
         snapshot,
         display,
       })
-      void invoke("tray_set_menu", { items: dto }).catch((err) => {
-        loggers.tray.warn("tray_set_menu failed", { error: String(err) })
-      })
+      void invoke<TraySetMenuReport | null>("tray_set_menu", { items: dto }).then(
+        (report) => {
+          const skipped = report && Array.isArray(report.skipped) ? report.skipped : []
+          const issue = skipped.length > 0 ? `skipped:${JSON.stringify(skipped)}` : null
+          if (lastMenuIssue.current === issue) return
+          lastMenuIssue.current = issue
+          if (issue === null) return
+          loggers.tray.warn("tray_set_menu skipped invalid items; the rest of the menu applied", {
+            skipped,
+          })
+        },
+        (err: unknown) => {
+          const error = String(err)
+          const issue = `failed:${error}`
+          if (lastMenuIssue.current === issue) return
+          lastMenuIssue.current = issue
+          loggers.tray.error("tray_set_menu failed; the previous tray menu is still shown", error)
+        }
+      )
     }
 
     function schedule() {
