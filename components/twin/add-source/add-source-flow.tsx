@@ -19,6 +19,7 @@ import {
   ClipboardPasteIcon,
   GitBranchIcon,
   BookOpenTextIcon,
+  ArrowLeftIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { commitStagedSources, type IngestError, type StagedSource } from "@/lib/twin/ingest/stage"
@@ -175,7 +176,11 @@ export function AddSourceFlow({ twinId, onAdded }: AddSourceFlowProps) {
               disabled={busy}
               data-testid="twin-add-source-back-to-pick"
             >
-              {t("back")}
+              {/* Not "Back": inside the creation wizard this sat right above
+                  the wizard's own Back (to the previous step), two identical
+                  buttons going to different places. */}
+              <ArrowLeftIcon aria-hidden="true" />
+              {t("otherTypes")}
             </Button>
           </div>
         </div>

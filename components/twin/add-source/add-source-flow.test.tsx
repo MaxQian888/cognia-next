@@ -78,10 +78,25 @@ describe("AddSourceFlow", () => {
     render(<AddSourceFlow twinId="twin_a" />)
 
     fireEvent.click(screen.getByTestId("twin-add-source-type-paste"))
+    fireEvent.change(screen.getByLabelText(/content/i), { target: { value: "body" } })
     fireEvent.click(screen.getByTestId("twin-add-source-paste-stage"))
 
     expect(await screen.findByTestId("twin-add-source-error")).toBeInTheDocument()
     expect(screen.getByTestId("twin-add-source-paste")).toBeInTheDocument()
+  })
+
+  it("holds an empty paste instead of staging it", () => {
+    render(<AddSourceFlow twinId="twin_a" />)
+    fireEvent.click(screen.getByTestId("twin-add-source-type-paste"))
+    expect(screen.getByTestId("twin-add-source-paste-stage")).toBeDisabled()
+    fireEvent.change(screen.getByLabelText(/content/i), { target: { value: "  " } })
+    expect(screen.getByTestId("twin-add-source-paste-stage")).toBeDisabled()
+  })
+
+  it("does not label the way back to the type picker plain Back", () => {
+    render(<AddSourceFlow twinId="twin_a" />)
+    fireEvent.click(screen.getByTestId("twin-add-source-type-paste"))
+    expect(screen.getByTestId("twin-add-source-back-to-pick")).not.toHaveTextContent(/^Back$/)
   })
 
   it("navigates back from input to the type picker", () => {

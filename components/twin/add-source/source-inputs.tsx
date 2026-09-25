@@ -363,8 +363,14 @@ export function PasteSourceInput({ busy, onStaged, onError }: SourceInputProps) 
         />
       </div>
       <div className="flex justify-end">
-        <Button onClick={handleSubmit} disabled={busy} data-testid="twin-add-source-paste-stage">
-          {tAdd("extract")}
+        {/* "Preview", not the URL/Feishu inputs' "Fetch & preview": there is
+            nothing to fetch, and an empty paste has nothing to preview. */}
+        <Button
+          onClick={handleSubmit}
+          disabled={busy || !content.trim()}
+          data-testid="twin-add-source-paste-stage"
+        >
+          {tAdd("preview")}
         </Button>
       </div>
     </div>
