@@ -53,8 +53,9 @@ export function PlanPanel({ sessionId }: { sessionId: string }) {
   const onEdit = editable ? (patch: PlanEditPatch) => applyPlanEditPatch(plan, patch) : undefined
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-1 p-2" data-testid="plan-panel">
-      <div className="flex items-center gap-2">
+    // `bg-background` is what the document's sticky outline strip inherits.
+    <div className="flex h-full min-h-0 flex-col bg-background" data-testid="plan-panel">
+      <div className="flex items-center gap-2 px-3 pt-2 pb-1">
         {plans.length > 1 ? (
           <NativeSelect
             value={plan.id}
@@ -72,7 +73,8 @@ export function PlanPanel({ sessionId }: { sessionId: string }) {
             ))}
           </NativeSelect>
         ) : (
-          <span className="min-w-0 flex-1 truncate text-xs font-medium">{plan.title}</span>
+          // One plan: its title is the document's own (editable) heading below.
+          <span className="flex-1" />
         )}
         <Badge variant="secondary" className="shrink-0 text-[10px]">
           {t(`status.${plan.status}`)}

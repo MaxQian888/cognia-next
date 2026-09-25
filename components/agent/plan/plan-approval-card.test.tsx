@@ -9,7 +9,8 @@ import type { AgentPlan, PlanStep } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${JSON.stringify(values)}` : key,
 }))
 
 // The card delegates markdown-body rendering to the shared MarkdownRenderer;
@@ -85,9 +86,24 @@ describe("PlanApprovalCard", () => {
   it("renders the title, status, source and steps", () => {
     render(<PlanApprovalCard plan={plan()} {...noop} />)
     expect(screen.getByTestId("plan-approval-card")).toBeInTheDocument()
-    expect(screen.getByText("Ship the widget")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-approval-title")).toHaveTextContent("Ship the widget")
     expect(screen.getByText("First step")).toBeInTheDocument()
     expect(screen.getByText("status.awaiting_approval")).toBeInTheDocument()
+    // Provenance is a sentence, never the raw enum value.
+    expect(screen.getByTestId("plan-approval-source")).toHaveTextContent(
+      "approval.source.exit_plan_mode"
+    )
+  })
+
+  it("counts the steps a reader sees — the document's steps section, not every bullet", () => {
+    const planText = "# Ship\n\n## Steps\n\n1. one\n2. two\n\n## Files\n\n- a.ts\n- b.ts"
+    const steps = ["one", "two", "a.ts", "b.ts"].map((title, i) =>
+      step(`s${i}`, { title, order: i })
+    )
+    render(<PlanApprovalCard plan={plan({ steps, metadata: { planText } })} {...noop} />)
+    expect(screen.getByTestId("plan-approval-step-count")).toHaveTextContent(
+      'composer.stepCount:{"count":2}'
+    )
   })
 
   it("renders the full markdown body with the step list embedded when metadata.planText is present", () => {
@@ -141,14 +157,49 @@ describe("PlanApprovalCard", () => {
     expect(screen.queryByTestId("plan-approval-editor")).not.toBeInTheDocument()
   })
 
-  it("caps the card height and scrolls the step list natively (selection-safe)", () => {
+  it("caps the document body, not the card, and scrolls it natively (selection-safe)", () => {
     const { container } = render(<PlanApprovalCard plan={plan()} {...noop} />)
-    // Card max-h (not h): compact when short, capped when long.
-    expect(screen.getByTestId("plan-approval-card").className).toContain("max-h-[45vh]")
+    // The cap sits on the body so the header and decisions can never squeeze
+    // the document to nothing; the card itself grows with its content.
+    expect(screen.getByTestId("plan-approval-card").className).not.toMatch(/max-h-/)
+    expect(screen.getByTestId("plan-document").className).toContain("max-h-[34dvh]")
     // Native overflow scroller inside the document body (no hover-only Radix thumb).
-    const steps = screen.getByTestId("plan-doc-steps")
     expect(screen.getByTestId("plan-doc-scroll").className).toContain("overflow-y-auto")
     expect(container.querySelector("[data-radix-scroll-area-viewport]")).toBeNull()
+  })
+
+  it("collapses the body and takes it out of the tab order", async () => {
+    render(<PlanApprovalCard plan={plan()} {...noop} onEdit={jest.fn()} />)
+    const toggle = screen.getByTestId("plan-approval-collapse")
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    const body = screen.getByTestId("plan-approval-body")
+    expect(body).toHaveAttribute("data-collapsed", "true")
+    expect(body).toHaveAttribute("inert")
+    expect(toggle).toHaveAttribute("aria-controls", body.id)
+    // Decisions stay available while collapsed.
+    expect(screen.getByTestId("plan-approval-approve-auto")).toBeEnabled()
+    await userEvent.click(toggle)
+    expect(body).not.toHaveAttribute("inert")
+  })
+
+  it("offers the side panel only when the host can open it", async () => {
+    const onOpenPanel = jest.fn()
+    const { unmount } = render(<PlanApprovalCard plan={plan()} {...noop} />)
+    expect(screen.queryByTestId("plan-approval-open-panel")).not.toBeInTheDocument()
+    unmount()
+    render(<PlanApprovalCard plan={plan()} {...noop} onOpenPanel={onOpenPanel} />)
+    await userEvent.click(screen.getByTestId("plan-approval-open-panel"))
+    expect(onOpenPanel).toHaveBeenCalledTimes(1)
+    // One reading surface: the card folds its copy of the document.
+    expect(screen.getByTestId("plan-approval-body")).toHaveAttribute("data-collapsed", "true")
+  })
+
+  it("says a refinement is running and dims the body", () => {
+    render(<PlanApprovalCard plan={plan()} {...noop} refining disabled />)
+    expect(screen.getByTestId("plan-approval-refining")).toHaveTextContent("approval.refining")
+    expect(screen.getByTestId("plan-approval-card")).toHaveAttribute("aria-busy", "true")
   })
 
   it("maps the two primary approve buttons onto acceptEdits / default", async () => {
@@ -213,13 +264,15 @@ describe("PlanApprovalCard", () => {
     expect(screen.queryByTestId("plan-approval-discard")).not.toBeInTheDocument()
   })
 
-  it("shows Edit only when the host can open the plan editor", async () => {
+  it("offers the plan editor in the overflow menu only when the host can open it", async () => {
     const onOpenEditor = jest.fn()
     const { unmount } = render(<PlanApprovalCard plan={plan()} {...noop} />)
+    await userEvent.click(screen.getByTestId("plan-approval-more"))
     expect(screen.queryByTestId("plan-approval-open-editor")).not.toBeInTheDocument()
     unmount()
     render(<PlanApprovalCard plan={plan()} {...noop} onOpenEditor={onOpenEditor} />)
-    await userEvent.click(screen.getByTestId("plan-approval-open-editor"))
+    await userEvent.click(screen.getByTestId("plan-approval-more"))
+    await userEvent.click(await screen.findByTestId("plan-approval-open-editor"))
     expect(onOpenEditor).toHaveBeenCalledTimes(1)
   })
 
@@ -232,8 +285,19 @@ describe("PlanApprovalCard", () => {
 
     render(<PlanApprovalCard plan={plan()} {...noop} onRefine={onRefine} />)
     await userEvent.click(screen.getByTestId("plan-approval-more"))
+    expect(await screen.findByText("approval.refineHeading")).toBeInTheDocument()
     await userEvent.click(await screen.findByTestId("plan-refine-expand"))
     expect(onRefine).toHaveBeenCalledWith("expand", undefined)
+  })
+
+  it("refines with the typed note and says so in the menu", async () => {
+    const onRefine = jest.fn()
+    render(<PlanApprovalCard plan={plan()} {...noop} onRefine={onRefine} />)
+    await userEvent.type(screen.getByTestId("plan-approval-feedback"), " fewer steps ")
+    await userEvent.click(screen.getByTestId("plan-approval-more"))
+    expect(await screen.findByText("approval.refineWithNote")).toBeInTheDocument()
+    await userEvent.click(await screen.findByTestId("plan-refine-simplify"))
+    expect(onRefine).toHaveBeenCalledWith("simplify", "fewer steps")
   })
 
   it("disables all actions when disabled", () => {
@@ -244,37 +308,78 @@ describe("PlanApprovalCard", () => {
     expect(screen.getByTestId("plan-approval-more")).toBeDisabled()
   })
 
-  it("opens the inline editor only when onEdit is provided and the plan awaits approval", async () => {
-    const { unmount } = render(<PlanApprovalCard plan={plan()} {...noop} />)
+  it("offers the markdown source only for an editable markdown plan", async () => {
+    const md = { planText: "- one" }
+    const { unmount, rerender } = render(
+      <PlanApprovalCard plan={plan({ metadata: md })} {...noop} />
+    )
+    // No onEdit channel.
+    expect(screen.queryByTestId("plan-approval-edit")).not.toBeInTheDocument()
+    rerender(
+      <PlanApprovalCard
+        plan={plan({ status: "draft", metadata: md })}
+        {...noop}
+        onEdit={jest.fn()}
+      />
+    )
+    // Not awaiting approval.
     expect(screen.queryByTestId("plan-approval-edit")).not.toBeInTheDocument()
     unmount()
 
-    render(<PlanApprovalCard plan={plan({ status: "draft" })} {...noop} onEdit={jest.fn()} />)
+    // A plan without a markdown body has no source to edit — its rows edit
+    // inline in the document instead.
+    render(<PlanApprovalCard plan={plan()} {...noop} onEdit={jest.fn()} />)
     expect(screen.queryByTestId("plan-approval-edit")).not.toBeInTheDocument()
+    expect(screen.getByTestId("plan-doc-step-0")).toHaveValue("First step")
   })
 
-  it("edits title + steps inline and saves via onEdit (one step per line)", async () => {
+  it("edits the title alongside the source and swaps the decisions for save / cancel", async () => {
     const onEdit = jest.fn()
-    const steps = [step("a", { title: "one", order: 0 }), step("b", { title: "two", order: 1 })]
-    render(<PlanApprovalCard plan={plan({ steps })} {...noop} onEdit={onEdit} />)
+    render(
+      <PlanApprovalCard
+        plan={plan({ metadata: { planText: "- one" } })}
+        {...noop}
+        onEdit={onEdit}
+      />
+    )
     await userEvent.click(screen.getByTestId("plan-approval-edit"))
-    // Prefilled from the current plan.
+    expect(screen.getByTestId("plan-approval-edit")).toHaveAttribute("aria-pressed", "true")
+    // Decisions are out of reach while the source is open.
+    expect(screen.queryByTestId("plan-approval-approve-auto")).not.toBeInTheDocument()
     expect(screen.getByTestId("plan-edit-title")).toHaveValue("Ship the widget")
-    expect(screen.getByTestId("plan-edit-steps")).toHaveValue("one\ntwo")
-
     await userEvent.clear(screen.getByTestId("plan-edit-title"))
     await userEvent.type(screen.getByTestId("plan-edit-title"), "Better title")
-    await userEvent.clear(screen.getByTestId("plan-edit-steps"))
-    await userEvent.type(screen.getByTestId("plan-edit-steps"), "alpha{enter}{enter}  beta  ")
     await userEvent.click(screen.getByTestId("plan-edit-save"))
-    // Blank lines dropped, titles trimmed; editor closes back to the actions.
-    expect(onEdit).toHaveBeenCalledWith({ title: "Better title", stepTitles: ["alpha", "beta"] })
+    expect(onEdit).toHaveBeenCalledWith({ title: "Better title", planText: "- one" })
     expect(screen.queryByTestId("plan-approval-editor")).not.toBeInTheDocument()
+    expect(screen.getByTestId("plan-approval-approve-auto")).toBeInTheDocument()
   })
 
-  it("cancels the inline editor without calling onEdit", async () => {
+  it("keeps the source editor open with the text when the save is rejected", async () => {
+    const onEdit = jest.fn(() => Promise.reject(new Error("no longer awaiting approval")))
+    render(
+      <PlanApprovalCard
+        plan={plan({ metadata: { planText: "- one" } })}
+        {...noop}
+        onEdit={onEdit}
+      />
+    )
+    await userEvent.click(screen.getByTestId("plan-approval-edit"))
+    await userEvent.type(screen.getByTestId("plan-edit-plan"), "{enter}- two")
+    await userEvent.click(screen.getByTestId("plan-edit-save"))
+    expect(await screen.findByTestId("plan-edit-failed")).toHaveTextContent("composer.saveFailed")
+    expect(screen.getByTestId("plan-edit-plan")).toHaveValue("- one\n- two")
+  })
+
+  it("cancels the source editor without calling onEdit", async () => {
     const onEdit = jest.fn()
-    render(<PlanApprovalCard plan={plan()} {...noop} onEdit={onEdit} />)
+    render(
+      <PlanApprovalCard
+        plan={plan({ metadata: { planText: "- one" } })}
+        {...noop}
+        onEdit={onEdit}
+      />
+    )
     await userEvent.click(screen.getByTestId("plan-approval-edit"))
     await userEvent.click(screen.getByTestId("plan-edit-cancel"))
     expect(onEdit).not.toHaveBeenCalled()
@@ -284,8 +389,8 @@ describe("PlanApprovalCard", () => {
   it("renders the empty state when there are no steps", () => {
     render(<PlanApprovalCard plan={plan({ steps: [] })} {...noop} />)
     expect(screen.getByText("document.empty")).toBeInTheDocument()
-    // No steps → no progress bar.
-    expect(screen.queryByTestId("plan-approval-progress")).not.toBeInTheDocument()
+    // No steps → no count in the header.
+    expect(screen.queryByTestId("plan-approval-step-count")).not.toBeInTheDocument()
   })
 
   it("renders the interactive HTML body when interactiveView is on and the plan is editable", () => {
@@ -320,13 +425,20 @@ describe("PlanApprovalCard", () => {
   })
 
   it("toggles between the interactive and classic bodies via the header button", async () => {
-    render(<PlanApprovalCard plan={plan()} {...noop} onEdit={jest.fn()} interactiveView />)
+    render(
+      <PlanApprovalCard
+        plan={plan({ metadata: { planText: "- First step" } })}
+        {...noop}
+        onEdit={jest.fn()}
+        interactiveView
+      />
+    )
     expect(screen.getByTestId("plan-html-view-stub")).toBeInTheDocument()
 
     await userEvent.click(screen.getByTestId("plan-approval-view-toggle"))
     expect(screen.queryByTestId("plan-html-view-stub")).not.toBeInTheDocument()
     expect(screen.getByTestId("plan-doc-steps")).toBeInTheDocument()
-    // Classic mode restores the pencil editor.
+    // The document view restores the markdown source toggle.
     expect(screen.getByTestId("plan-approval-edit")).toBeInTheDocument()
 
     await userEvent.click(screen.getByTestId("plan-approval-view-toggle"))
@@ -359,16 +471,9 @@ describe("PlanApprovalCard", () => {
     expect(screen.getByTestId("plan-html-view-stub")).toHaveAttribute("data-style", "cards")
   })
 
-  it("shows step progress as a count and a progressbar", () => {
-    const steps = [
-      step("a", { title: "one", order: 0, status: "completed" }),
-      step("b", { title: "two", order: 1, status: "completed" }),
-      step("c", { title: "three", order: 2, status: "in_progress" }),
-      step("d", { title: "four", order: 3, status: "pending" }),
-    ]
+  it("never shows a progress bar before approval (nothing has run yet)", () => {
+    const steps = [step("a", { title: "one", order: 0 }), step("b", { title: "two", order: 1 })]
     render(<PlanApprovalCard plan={plan({ steps })} {...noop} />)
-    expect(screen.getByTestId("plan-approval-progress")).toHaveTextContent("2/4")
-    // 2 of 4 completed → 50%.
-    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50")
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
   })
 })

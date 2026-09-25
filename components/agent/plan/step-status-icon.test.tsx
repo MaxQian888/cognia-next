@@ -14,7 +14,8 @@ function iconClass(status: PlanStepStatus): string {
 describe("stepStatusIcon", () => {
   it("draws each status with its own tone", () => {
     expect(iconClass("completed")).toContain("text-green-600")
-    expect(iconClass("in_progress")).toContain("animate-pulse")
+    // Motion only when the OS allows it.
+    expect(iconClass("in_progress")).toContain("motion-safe:animate-pulse")
     expect(iconClass("failed")).toContain("text-rose-600")
     expect(iconClass("blocked")).toContain("text-rose-600")
     expect(iconClass("skipped")).toContain("text-muted-foreground")

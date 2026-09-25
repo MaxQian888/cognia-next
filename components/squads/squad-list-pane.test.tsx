@@ -70,6 +70,18 @@ function fleet(over: Partial<SquadFleetSnapshot> = {}): SquadFleetSnapshot {
 
 beforeEach(() => jest.clearAllMocks())
 
+describe("layout", () => {
+  // Radix sizes the viewport's child as a table that grows to its widest
+  // `truncate` line; on a phone that pushed the empty state off-centre and
+  // the built-in cards past the right edge.
+  it("keeps the scroll content to the pane width", () => {
+    render(<SquadListPane fleet={fleet()} route={route()} />)
+    expect(screen.getByTestId("squad-fleet-scroll").className).toContain(
+      "[&_[data-slot=scroll-area-viewport]>div]:!block"
+    )
+  })
+})
+
 describe("rows", () => {
   it("names the Squad and its roster size", () => {
     render(<SquadListPane fleet={fleet()} route={route()} />)

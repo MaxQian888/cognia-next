@@ -378,28 +378,17 @@ const handleApprove = (): void => {
 
 ### 绑回总线
 
-对话框的处理器来自 `useApprovalGate(scope, id)`（`use-approval-gate.ts:13`），一个闭合于总线生产者的薄钩子：
+对话框的处理器调用 `decidePendingGate(gate, decision)`（`lib/ai/agent/team/gates/decide-pending-gate.ts`），这是与灵动岛浮层共用的唯一结算路径：它唤醒总线等待者、移除 store 条目并记录答复，因此任何界面都无法只做其中一步：
 
 ```ts
-// components/agent/team/use-approval-gate.ts:13-31
-export function useApprovalGate(
-  scope: string,
-  id: string
-): {
-  approve: (plan?: unknown) => void
-  reject: (feedback?: string) => void
-} {
-  return useMemo(
-    () => ({
-      approve: (plan?: unknown) => {
-        approve({ scope, id }, plan)
-      },
-      reject: (feedback?: string) => {
-        reject({ scope, id }, feedback)
-      },
-    }),
-    [scope, id]
-  )
+// lib/ai/agent/team/gates/decide-pending-gate.ts
+export function decidePendingGate(gate: PendingGate, decision: PendingGateDecision): boolean {
+  let delivered = 0
+  if (decision.outcome === "approve") delivered = approve(gate.key, decision.payload)
+  if (decision.outcome === "reject") delivered = reject(gate.key, decision.feedback)
+  usePendingGatesStore.getState().close(gate.key)
+  // …plus a best-effort record of the answer in the run's conversation
+  return delivered > 0
 }
 ```
 

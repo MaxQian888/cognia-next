@@ -76,6 +76,13 @@ import {
 } from "./steps"
 import { findPlanPiiLeak } from "./pii-gate"
 import {
+  listItemTitle,
+  projectStepTitles,
+  rebuildPlanText,
+  splitPlanDocument,
+  stepsSectionWindow,
+} from "./plan-doc"
+import {
   emitPlanCompletedSchedulerEvent,
   emitPlanStatus,
   notifyPlanAwaitingApproval,
@@ -887,6 +894,15 @@ class PlanRuntime {
    * replace the plan and it returns to `awaiting_approval` so a human (or the
    * caller) re-confirms before the next run — auto-replan never silently
    * re-executes. Fail-OPEN: any planner failure leaves the plan unchanged.
+   *
+   * A plan captured as markdown (`metadata.planText`) IS its document: the
+   * planner sees the steps section a reader sees (not the Files / checklist
+   * bullets the projection also carries), the result is written back into
+   * that section, and `steps[]` is re-projected from the rewritten body — the
+   * same single-source rule as a manual edit. Either way the plan is stamped
+   * `userEdited`: it no longer matches the proposal in the transcript, so the
+   * approval prompt must embed this version instead of pointing at "the plan
+   * above".
    */
   async refinePlan(
     request: PlanRefinementRequest,
@@ -914,15 +930,35 @@ class PlanRuntime {
       return current
     }
 
+    const planText = typeof current.metadata?.planText === "string" ? current.metadata.planText : ""
+    let subject = current
+    if (planText) {
+      const ordered = [...current.steps].sort((a, b) => a.order - b.order)
+      const section = splitPlanDocument(planText).steps?.map(listItemTitle) ?? null
+      const window = stepsSectionWindow(
+        section,
+        ordered.map((s) => s.title)
+      )
+      subject = { ...current, steps: ordered.slice(window.start, window.end) }
+    }
+
     const { refinePlanSteps } = await import("./planner")
-    const result = await refinePlanSteps(current, request, client, opts.signal)
+    const result = await refinePlanSteps(subject, request, client, opts.signal)
     if (!result) return current // fail-OPEN — keep the existing plan
     disarmPlanStepWatch(request.planId)
 
-    const steps = materializeSteps(linearAgentTurnSteps(result.titles))
+    const nextText = planText ? rebuildPlanText(planText, result.titles) : null
+    const steps = materializeSteps(
+      linearAgentTurnSteps(nextText ? projectStepTitles(nextText) : result.titles)
+    )
     const counts = computePlanCounts(steps)
     await updatePlan(request.planId, {
       steps,
+      metadata: {
+        ...current.metadata,
+        userEdited: true,
+        ...(nextText ? { planText: nextText } : {}),
+      },
       totalSteps: counts.totalSteps,
       completedSteps: counts.completedSteps,
       currentStepId: undefined,

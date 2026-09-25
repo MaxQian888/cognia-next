@@ -18,9 +18,15 @@
  *    source into `before` / `steps` / `after` segments the component renders
  *    around an interactive list. Fenced code blocks are tracked so a `## Steps`
  *    inside ``` fences can never match.
- *  - `planDocHeadings` collects the heading outline (h1–h3) for the TOC chips.
+ *    The split also carries the heading outline (h1–h3) for the TOC chips.
  *  - `rebuildPlanText` rewrites the steps list lines in place, preserving the
  *    rest of the document byte-for-byte.
+ *  - `stepsSectionWindow` locates the steps section inside the executable
+ *    projection (the slice the embedded editor and a refinement own).
+ *  - `planDocTitle` / `withoutRestatedTitle` / `retitlePlanText` treat the
+ *    document's leading `# H1` as the plan's name: capture derives the title
+ *    from it, surfaces that already print the title skip it, and a title edit
+ *    rewrites it so the two never disagree.
  */
 
 export interface PlanDocHeading {
@@ -151,7 +157,10 @@ export function splitPlanDocument(planText: string): PlanDocSplit {
 }
 
 /** Rebuild the document with the steps list rewritten in place. When the
- *  source had no steps section the list is appended under a new heading. */
+ *  source had no steps section the list is appended under a new heading, and
+ *  replaces the document's list items: with no section, every one of them was
+ *  a step (see `stepsSectionWindow`), so keeping them would project each old
+ *  step alongside the new list. */
 export function rebuildPlanText(
   planText: string,
   stepTitles: string[],
@@ -161,8 +170,13 @@ export function rebuildPlanText(
   const ordered = split.steps ? split.ordered : true
   const listLines = stepTitles.map((t, i) => (ordered ? `${i + 1}. ${t}` : `- ${t}`))
   if (split.steps === null) {
-    const head = planText.replace(/\s+$/, "")
-    return `${head}\n\n${stepsHeadingText}\n\n${listLines.join("\n")}\n`
+    const scanned = scanLines(planText)
+    const head = planText
+      .split(/\r?\n/)
+      .filter((_, i) => !scanned[i].isListItem)
+      .join("\n")
+      .replace(/\s+$/, "")
+    return `${head ? `${head}\n\n` : ""}${stepsHeadingText}\n\n${listLines.join("\n")}\n`
   }
   const before = split.before.replace(/\s+$/, "")
   const after = split.after.replace(/^\s+/, "")
@@ -200,4 +214,79 @@ export function projectStepTitles(planText: string): string[] {
 /** Heading ids for TOC anchors, stable across renders for the same text. */
 export function planDocHeadingId(index: number): string {
   return `pd-h-${index}`
+}
+
+/**
+ * Where the document's steps section sits inside the executable projection.
+ *
+ * The projection collects every list item in document order, so the section
+ * (`section`, its item titles) is one contiguous run of `titles`. No section
+ * means the whole projection is the steps. When the two drifted apart (a
+ * refinement or an older write touched one side) the window anchors at the top
+ * with the section's row count, so a surface never shows more rows than the
+ * section owns.
+ */
+export function stepsSectionWindow(
+  section: string[] | null,
+  titles: string[]
+): { start: number; end: number } {
+  if (!section?.length) return { start: 0, end: titles.length }
+  for (let i = 0; i + section.length <= titles.length; i++) {
+    if (section.every((s, k) => s === titles[i + k])) {
+      return { start: i, end: i + section.length }
+    }
+  }
+  return { start: 0, end: Math.min(section.length, titles.length) }
+}
+
+/** A "Plan:" label is chrome, not part of the name: every surface already says "plan". */
+const PLAN_LABEL_RE = /^(?:plan|计划|方案)\s*[:：]\s*/i
+const TITLE_HEADING_RE = /^#\s+(.*\S)\s*$/
+
+/** Index of the document's opening line when it is a `# H1`, else -1. */
+function leadingTitleLine(lines: string[]): number {
+  const at = lines.findIndex((l) => l.trim().length > 0)
+  return at >= 0 && TITLE_HEADING_RE.test(lines[at]) ? at : -1
+}
+
+/**
+ * The document's own name: its leading `# H1` (the first non-blank line), with
+ * bold emphasis unwrapped and a "Plan:" label dropped. `null` when the body
+ * does not open with an H1 — a `## Context` section is not a name for a plan.
+ */
+export function planDocTitle(planText: string): string | null {
+  const lines = planText.split(/\r?\n/)
+  const at = leadingTitleLine(lines)
+  if (at < 0) return null
+  const text = (lines[at].match(TITLE_HEADING_RE)?.[1] ?? "")
+    .replace(/^\*\*(.*)\*\*$/, "$1")
+    .replace(PLAN_LABEL_RE, "")
+    .trim()
+  return text || null
+}
+
+/**
+ * The body to print under a surface that already shows `title`: the leading
+ * H1 is dropped when it restates that title, so the name is not printed twice
+ * and does not head the outline. Display only — edits keep rewriting the full
+ * source.
+ */
+export function withoutRestatedTitle(planText: string, title: string): string {
+  if (planDocTitle(planText) !== title.trim()) return planText
+  const lines = planText.split(/\r?\n/)
+  const rest = lines.slice(leadingTitleLine(lines) + 1).join("\n")
+  return rest.replace(/^(?:[ \t]*\r?\n)+/, "")
+}
+
+/**
+ * Rewrite the leading H1 to `title`, preserving the rest byte-for-byte. A body
+ * with no leading H1 is returned unchanged — renaming a plan never invents a
+ * heading the author did not write.
+ */
+export function retitlePlanText(planText: string, title: string): string {
+  const lines = planText.split(/\r?\n/)
+  const at = leadingTitleLine(lines)
+  if (at < 0) return planText
+  lines[at] = `# ${title}`
+  return lines.join("\n")
 }

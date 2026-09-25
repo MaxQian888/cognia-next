@@ -6,7 +6,7 @@
  * One component per `gateType`: budget / deadlock / plan / teammate_fix /
  * replan / capability_audit, plus the ADR-0045 `plan_step` variant (a plan's
  * own `approval_gate` step). The component does NOT call approval-bus
- * directly; callers thread approve / reject handlers (see `useApprovalGate`)
+ * directly; callers thread approve / reject handlers (see `decidePendingGate`)
  * so the dialog stays presentation-only.
  *
  * `plan_step` is the only variant that collects reject feedback inline: the

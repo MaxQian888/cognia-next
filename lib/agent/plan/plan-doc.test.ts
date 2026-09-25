@@ -1,9 +1,13 @@
 import {
   listItemTitle,
   planDocHeadingId,
+  planDocTitle,
   projectStepTitles,
   rebuildPlanText,
+  retitlePlanText,
   splitPlanDocument,
+  stepsSectionWindow,
+  withoutRestatedTitle,
 } from "./plan-doc"
 
 const DOC = [
@@ -123,6 +127,21 @@ describe("rebuildPlanText", () => {
     expect(out).toContain("Some text.")
   })
 
+  it("replaces, not duplicates, the steps of a doc with no Steps section", () => {
+    const doc = "# Add dark mode\n## Approach\n1. Add theme tokens\n2. Wire toggle\n"
+    const out = rebuildPlanText(doc, ["Add theme tokens", "Wire toggle", "Persist choice"])
+    expect(projectStepTitles(out)).toEqual(["Add theme tokens", "Wire toggle", "Persist choice"])
+    expect(out).toContain("## Approach")
+    expect(out.startsWith("# Add dark mode")).toBe(true)
+  })
+
+  it("keeps list-looking lines inside code fences", () => {
+    const doc = "## Notes\n\n```\n- not a step\n```\n\n- old step\n"
+    const out = rebuildPlanText(doc, ["new step"])
+    expect(out).toContain("- not a step")
+    expect(out).not.toContain("old step")
+  })
+
   it("keeps bullet style when the source list was unordered", () => {
     const out = rebuildPlanText("## Steps\n\n- a\n- b\n", ["x", "y"])
     expect(out).toContain("- x")
@@ -158,5 +177,61 @@ describe("planDocHeadingId", () => {
   it("produces stable anchor ids", () => {
     expect(planDocHeadingId(0)).toBe("pd-h-0")
     expect(planDocHeadingId(3)).toBe("pd-h-3")
+  })
+})
+
+describe("stepsSectionWindow", () => {
+  it("finds the section as a contiguous run of the projection", () => {
+    expect(stepsSectionWindow(["b", "c"], ["a", "b", "c", "d"])).toEqual({ start: 1, end: 3 })
+  })
+
+  it("owns the whole projection when the document has no steps section", () => {
+    expect(stepsSectionWindow(null, ["a", "b"])).toEqual({ start: 0, end: 2 })
+    expect(stepsSectionWindow([], ["a", "b"])).toEqual({ start: 0, end: 2 })
+  })
+
+  it("anchors at the top with the section's row count when the two drifted", () => {
+    expect(stepsSectionWindow(["x", "y"], ["a", "b", "c"])).toEqual({ start: 0, end: 2 })
+    expect(stepsSectionWindow(["x", "y", "z"], ["a"])).toEqual({ start: 0, end: 1 })
+  })
+})
+
+describe("planDocTitle", () => {
+  it("reads the leading H1, unwrapping bold and dropping a Plan: label", () => {
+    expect(planDocTitle("# Migrate auth\n\n## Steps")).toBe("Migrate auth")
+    expect(planDocTitle("\n\n# **Plan: Migrate auth**\n")).toBe("Migrate auth")
+    expect(planDocTitle("# 计划：迁移认证")).toBe("迁移认证")
+  })
+
+  it("is null when the body does not open with an H1", () => {
+    expect(planDocTitle("## Context\n\n# Late title")).toBeNull()
+    expect(planDocTitle("Intro prose\n\n# Title")).toBeNull()
+    expect(planDocTitle("# Plan:")).toBeNull()
+    expect(planDocTitle("")).toBeNull()
+  })
+})
+
+describe("withoutRestatedTitle", () => {
+  it("drops the leading H1 (and the blank lines after it) when it restates the title", () => {
+    expect(withoutRestatedTitle("# Migrate auth\n\n## Context\n\nx", "Migrate auth")).toBe(
+      "## Context\n\nx"
+    )
+    expect(withoutRestatedTitle("# Plan: Migrate auth\n\nbody", " Migrate auth ")).toBe("body")
+  })
+
+  it("keeps a heading that names something else", () => {
+    const doc = "# Migrate auth\n\nbody"
+    expect(withoutRestatedTitle(doc, "Audit call sites")).toBe(doc)
+    expect(withoutRestatedTitle("## Context\n\nbody", "Context")).toBe("## Context\n\nbody")
+  })
+})
+
+describe("retitlePlanText", () => {
+  it("rewrites only the leading H1", () => {
+    expect(retitlePlanText("# Old\n\n## Steps\n\n1. a", "New")).toBe("# New\n\n## Steps\n\n1. a")
+  })
+
+  it("never invents a heading for a body without one", () => {
+    expect(retitlePlanText("## Steps\n\n1. a", "New")).toBe("## Steps\n\n1. a")
   })
 })

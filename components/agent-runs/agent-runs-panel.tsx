@@ -304,8 +304,18 @@ export function AgentRunsPanel({
             {selected ? (
               <RunDetailPane row={selected} actions={actions} />
             ) : (
-              <p className="pt-8 text-center text-sm text-muted-foreground">
-                {t("detail.selectPrompt")}
+              <p
+                className="mx-auto max-w-sm pt-8 text-center text-sm text-muted-foreground"
+                data-testid="agent-runs-detail-prompt"
+              >
+                {/* "Select a run" beside an empty list asks for something the
+                    reader cannot do. Say what fills the list, or which knob
+                    hides it, instead. */}
+                {!isLoading && rows.length === 0
+                  ? canWiden
+                    ? t("detail.filteredPrompt")
+                    : t("detail.emptyPrompt")
+                  : t("detail.selectPrompt")}
               </p>
             )}
           </div>

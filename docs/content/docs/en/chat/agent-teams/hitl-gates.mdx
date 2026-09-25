@@ -380,28 +380,17 @@ The **budget** variant renders a numeric `extraTokens` input; the **deadlock** v
 
 ### Binding back to the bus
 
-The dialog's handlers come from `useApprovalGate(scope, id)` (`use-approval-gate.ts:13`), a thin hook that closes over the bus producers:
+The dialog's handlers call `decidePendingGate(gate, decision)` (`lib/ai/agent/team/gates/decide-pending-gate.ts`), the one settle path shared with the island overlay: it resolves the bus waiter, removes the store entry and records the answer, so no surface can do one without the others:
 
 ```ts
-// components/agent/team/use-approval-gate.ts:13-31
-export function useApprovalGate(
-  scope: string,
-  id: string
-): {
-  approve: (plan?: unknown) => void
-  reject: (feedback?: string) => void
-} {
-  return useMemo(
-    () => ({
-      approve: (plan?: unknown) => {
-        approve({ scope, id }, plan)
-      },
-      reject: (feedback?: string) => {
-        reject({ scope, id }, feedback)
-      },
-    }),
-    [scope, id]
-  )
+// lib/ai/agent/team/gates/decide-pending-gate.ts
+export function decidePendingGate(gate: PendingGate, decision: PendingGateDecision): boolean {
+  let delivered = 0
+  if (decision.outcome === "approve") delivered = approve(gate.key, decision.payload)
+  if (decision.outcome === "reject") delivered = reject(gate.key, decision.feedback)
+  usePendingGatesStore.getState().close(gate.key)
+  // …plus a best-effort record of the answer in the run's conversation
+  return delivered > 0
 }
 ```
 

@@ -420,6 +420,174 @@ describe("PlanDocument", () => {
     expect(toc.scrollLeft).toBe(192)
   })
 
+  it("does not print a leading H1 that restates the title, nor list it in the outline", () => {
+    render(<PlanDocument plan={makePlan({ title: "Ship OAuth2" })} />)
+    const md = screen.getAllByTestId("md")
+    expect(md[0].querySelector("h1")).toBeNull()
+    expect(md[0].textContent).toContain("Context")
+    const toc = screen.getByTestId("plan-doc-toc")
+    expect(toc.textContent).not.toContain("Ship OAuth2")
+    expect(toc.firstElementChild?.textContent).toBe("Context")
+  })
+
+  it("renaming the plan rewrites the document's own H1", async () => {
+    const onEdit = jest.fn()
+    render(
+      <PlanDocument plan={makePlan({ title: "Ship OAuth2" })} editable onEdit={onEdit} showTitle />
+    )
+    await userEvent.type(screen.getByTestId("plan-doc-title"), " now")
+    await waitFor(() => expect(onEdit).toHaveBeenCalled(), { timeout: 2000 })
+    const patch = onEdit.mock.calls.at(-1)?.[0] as PlanEditPatch
+    expect(patch.title).toBe("Ship OAuth2 now")
+    expect("planText" in patch && patch.planText.startsWith("# Ship OAuth2 now\n")).toBe(true)
+  })
+
+  it("Enter adds a step below and focuses it; Backspace on an empty row removes it", async () => {
+    const onEdit = jest.fn()
+    render(<PlanDocument plan={makePlan()} editable onEdit={onEdit} />)
+    await userEvent.click(screen.getByTestId("plan-doc-step-0"))
+    await userEvent.keyboard("{End}{Enter}")
+    const inserted = screen.getByTestId("plan-doc-step-1")
+    expect(inserted).toHaveValue("")
+    expect(inserted).toHaveFocus()
+    expect(screen.getByTestId("plan-doc-step-2")).toHaveValue("Add PKCE flow")
+    await userEvent.keyboard("New step")
+    await waitFor(() => expect(onEdit).toHaveBeenCalled(), { timeout: 2000 })
+    const added = onEdit.mock.calls.at(-1)?.[0] as PlanEditPatch
+    expect("planText" in added && added.planText).toContain(
+      "1. Audit call sites\n2. New step\n3. Add PKCE flow"
+    )
+
+    await userEvent.clear(screen.getByTestId("plan-doc-step-1"))
+    await userEvent.keyboard("{Backspace}")
+    expect(screen.getByTestId("plan-doc-step-1")).toHaveValue("Add PKCE flow")
+    expect(screen.getByTestId("plan-doc-step-0")).toHaveFocus()
+  })
+
+  it("Alt+Arrow moves the focused step and keeps focus on it", async () => {
+    render(<PlanDocument plan={makePlan()} editable onEdit={jest.fn()} />)
+    await userEvent.click(screen.getByTestId("plan-doc-step-1"))
+    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}")
+    expect(screen.getByTestId("plan-doc-step-0")).toHaveValue("Add PKCE flow")
+    expect(screen.getByTestId("plan-doc-step-0")).toHaveFocus()
+    // The top row cannot move further up.
+    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}")
+    expect(screen.getByTestId("plan-doc-step-0")).toHaveValue("Add PKCE flow")
+  })
+
+  it("writes a pending edit as soon as focus leaves the document", async () => {
+    const onEdit = jest.fn()
+    render(
+      <>
+        <PlanDocument plan={makePlan()} editable onEdit={onEdit} />
+        <button type="button">approve</button>
+      </>
+    )
+    await userEvent.type(screen.getByTestId("plan-doc-step-0"), "!")
+    // Moving between rows keeps the debounce…
+    await userEvent.click(screen.getByTestId("plan-doc-step-1"))
+    expect(onEdit).not.toHaveBeenCalled()
+    // …leaving the document flushes it without waiting for the timer.
+    await userEvent.click(screen.getByText("approve"))
+    expect(onEdit).toHaveBeenCalledTimes(1)
+    const patch = onEdit.mock.calls[0][0] as PlanEditPatch
+    expect("planText" in patch && patch.planText).toContain("1. Audit call sites!")
+  })
+
+  it("writes a pending edit on unmount instead of dropping it", async () => {
+    const onEdit = jest.fn()
+    const { unmount } = render(<PlanDocument plan={makePlan()} editable onEdit={onEdit} />)
+    await userEvent.type(screen.getByTestId("plan-doc-step-2"), "?")
+    expect(onEdit).not.toHaveBeenCalled()
+    unmount()
+    expect(onEdit).toHaveBeenCalledTimes(1)
+  })
+
+  it("writes a pending edit to the plan being left when the host switches plans", async () => {
+    const onEditA = jest.fn()
+    const onEditB = jest.fn()
+    const { rerender } = render(<PlanDocument plan={makePlan()} editable onEdit={onEditA} />)
+    await userEvent.type(screen.getByTestId("plan-doc-step-0"), "!")
+    const other = makePlan({ id: "plan-2", title: "Other plan", updatedAt: 5 })
+    rerender(<PlanDocument plan={other} editable onEdit={onEditB} />)
+    // The edit belongs to the first plan and lands there — never on the next.
+    expect(onEditA).toHaveBeenCalledTimes(1)
+    const patch = onEditA.mock.calls[0][0] as PlanEditPatch
+    expect("planText" in patch && patch.planText).toContain("1. Audit call sites!")
+    await new Promise((r) => setTimeout(r, 900))
+    expect(onEditB).not.toHaveBeenCalled()
+    expect(screen.getByTestId("plan-doc-step-0")).toHaveValue("Audit call sites")
+  })
+
+  it("deletes a row without pulling another list's item into the steps section", async () => {
+    const doc = "## Steps\n\n1. First\n2. Second\n\n## Files\n\n- lib/a.ts"
+    const steps = ["First", "Second", "lib/a.ts"].map((title, i) => ({
+      id: `w${i}`,
+      planId: "plan-1",
+      order: i,
+      title,
+      kind: "agent_turn" as const,
+      status: "pending" as const,
+      dependencies: [],
+      attempts: 0,
+    }))
+    const onEdit = jest.fn()
+    render(
+      <PlanDocument
+        plan={makePlan({ metadata: { planText: doc }, steps })}
+        editable
+        onEdit={onEdit}
+      />
+    )
+    fireEvent.click(screen.getByTestId("plan-doc-del-0"))
+    await waitFor(() => expect(onEdit).toHaveBeenCalled(), { timeout: 2000 })
+    const patch = onEdit.mock.calls.at(-1)?.[0] as PlanEditPatch
+    expect("planText" in patch && patch.planText).toContain("## Steps\n\n1. Second\n\n## Files")
+    expect("planText" in patch && patch.planText).not.toContain("2. lib/a.ts")
+  })
+
+  it("numbers the rows of a plan that has not started, and shows status once it has", () => {
+    const { rerender, container } = render(<PlanDocument plan={makePlan()} />)
+    const steps = screen.getByTestId("plan-doc-steps")
+    expect(steps.textContent).toContain("1.")
+    expect(container.querySelector('[data-status="pending"] svg')).toBeNull()
+
+    const running = makePlan()
+    running.steps = running.steps.map((s, i) => ({
+      ...s,
+      status: i === 0 ? "in_progress" : "pending",
+    })) as AgentPlan["steps"]
+    rerender(<PlanDocument plan={running} />)
+    expect(container.querySelector('[data-status="in_progress"] svg')).not.toBeNull()
+  })
+
+  it("keeps the save state inside the outline strip so it never covers content", async () => {
+    render(<PlanDocument plan={makePlan()} editable onEdit={jest.fn()} />)
+    const state = screen.getByTestId("plan-doc-save-state")
+    expect(state.parentElement).toContainElement(screen.getByTestId("plan-doc-toc"))
+    expect(state).not.toHaveClass("absolute")
+    await userEvent.type(screen.getByTestId("plan-doc-step-0"), "x")
+    expect(state.textContent).toContain("document.save.edited")
+  })
+
+  it("keeps the activity trail's heading out of the scroll-spy outline", () => {
+    render(
+      <PlanDocument
+        plan={makePlan({ status: "completed" })}
+        events={[
+          { id: "e2", planId: "plan-1", kind: "approved", ts: 2, payload: { kind: "approved" } },
+        ]}
+      />
+    )
+    act(() => {
+      screen.getByTestId("plan-doc-scroll").dispatchEvent(new Event("scroll"))
+    })
+    // All rects are zero in jsdom, so the spy lands on the LAST outline heading
+    // — which must be a chip, not the trail's "Activity" heading.
+    const last = screen.getByTestId("plan-doc-toc").lastElementChild as HTMLElement
+    expect(last).toHaveAttribute("aria-current", "location")
+  })
+
   it("resyncs title and steps when a clean plan prop updates", async () => {
     const onEdit = jest.fn()
     const { rerender } = render(

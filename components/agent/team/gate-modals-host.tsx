@@ -21,9 +21,9 @@
  */
 
 import { useTranslations } from "next-intl"
+import { decidePendingGate } from "@/lib/ai/agent/team/gates/decide-pending-gate"
 import { usePendingGatesStore, type PendingGate } from "@/stores/agent/pending-gates-store"
 import { ApprovalGateDialog } from "./approval-gate-dialog"
-import { useApprovalGate } from "./use-approval-gate"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -47,44 +47,23 @@ export function GateModalsHost(): React.ReactElement | null {
 }
 
 /**
- * One mounted dialog bound to a single gate. Kept as its own component so
- * `useApprovalGate` (a hook) is called once per gate without violating the
- * rules-of-hooks inside the parent's `.map`.
+ * One mounted dialog bound to a single gate.
+ *
+ * This dialog is mounted at the app root so a gate is answerable from
+ * whatever surface the user is on (ADR-0045); the island overlay answers the
+ * same gates. Both settle through `decidePendingGate`, which resolves the
+ * waiter, removes the entry and writes the decision back into the
+ * conversation the run belongs to, so no surface can answer one without the
+ * other two happening.
  */
 function GateModalItem({ gate }: { gate: PendingGate }): React.ReactElement {
-  const { approve, reject } = useApprovalGate(gate.key.scope, gate.key.id)
-  const close = usePendingGatesStore((s) => s.close)
   const t = useTranslations("agentTeam.approvalGate")
 
-  // This dialog is mounted at the app root so a gate is answerable from
-  // whatever surface the user is on (ADR-0045). The cost is that answering it
-  // leaves nothing behind — the modal is gone and no surface can say what was
-  // approved, or when. Write the decision back into the conversation the run
-  // belongs to. Fire-and-forget and best-effort: the run is waiting on the
-  // answer, and losing the answer would be far worse than losing the note.
-  const recordAnswer = (decision: "approved" | "rejected" | "dismissed"): void => {
-    if (!gate.runId) return
-    void import("@/lib/ai/agent/team/gates/record-gate-answer")
-      .then(({ recordSquadGateAnswer }) =>
-        recordSquadGateAnswer({
-          runId: gate.runId,
-          gateType: gate.gateType,
-          decision,
-          title: gate.title,
-        })
-      )
-      .catch(() => undefined)
-  }
-
   const approveAndClose = (payload?: unknown): void => {
-    approve(payload)
-    close(gate.key)
-    recordAnswer("approved")
+    decidePendingGate(gate, { outcome: "approve", payload })
   }
   const rejectAndClose = (feedback?: string): void => {
-    reject(feedback)
-    close(gate.key)
-    recordAnswer("rejected")
+    decidePendingGate(gate, { outcome: "reject", feedback })
   }
 
   // Restored-from-persistence gate: the approval-bus waiter died with the
@@ -105,11 +84,10 @@ function GateModalItem({ gate }: { gate: PendingGate }): React.ReactElement {
             <Button
               variant="secondary"
               onClick={() => {
-                close(gate.key)
                 // A stale gate is dismissed, not answered — the waiter died
                 // with the previous page. Worth recording precisely because
                 // it means the run got no decision from this dialog.
-                recordAnswer("dismissed")
+                decidePendingGate(gate, { outcome: "dismiss" })
               }}
             >
               {t("dismissStale")}

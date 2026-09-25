@@ -144,7 +144,15 @@ export function SquadListPane({
         </div>
       ) : null}
 
-      <ScrollArea className="min-h-0 flex-1">
+      {/* `!block` on the viewport's child: Radix wraps it in a `display:table`
+          div that grows to its widest `truncate` line, so on a phone the empty
+          state centred itself in a column wider than the screen and the
+          built-in team cards ran off the right edge. Same override as
+          `provider-sidebar.tsx` and `channel-list.tsx`. */}
+      <ScrollArea
+        className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block"
+        data-testid="squad-fleet-scroll"
+      >
         <div className="space-y-1.5 p-2 pt-0">
           {loading ? (
             <ListSkeleton rows={4} testId="squad-fleet-loading" />

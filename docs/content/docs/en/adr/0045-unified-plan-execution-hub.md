@@ -319,3 +319,54 @@ uses `IntersectionObserver`-free scroll-spy over the rendered heading DOM —
 deliberately not the `srcdoc` + inline-script path, which ADR-0158 records as
 nonfunctional inside packaged Tauri. The interactive iframe editor remains an
 opt-in enhancement behind `planSettings.interactiveHtmlView`.
+
+## Approval-card amendment (2026-09-25)
+
+The document surface above shipped inside a card that capped *itself* at
+`45vh` while also carrying a label row, a source line, a pre-approval progress
+bar (always `0/N` — nothing has run before approval), a feedback box and six
+buttons. The chrome consumed the cap and the document's `flex-1` region
+collapsed to a strip a few pixels tall; on a phone it disappeared. The dock had
+also drifted to the top of the pane. What the card is now:
+
+**It lives in the plan slot above the composer**, the slot it shares with
+`PlanTrackerDock` and `PlanComposerDock` (mutually exclusive by plan status),
+beside the composer its decisions resume — not under the pane header.
+
+**The cap is on the body, not the card.** The document is capped at a share of
+the *viewport* (`34dvh` on phones, `min(42dvh, 30rem)` from `md`), because what
+must stay visible — the decisions and the composer — sits outside it. The card
+has three bands: a header (status · provenance · step count, the title, view
+controls), the body, and a footer whose decisions stack full-width in a narrow
+card. The footer switch is a container query, since a split pane is narrow on a
+wide screen. The body collapses (grid-rows `0fr↔1fr`, `inert` while hidden),
+and *Open in side panel* reveals the dock's `PlanPanel` through
+`revealSessionPanel` (`lib/artifacts/reveal.ts`, shared with the session
+summary). Opening the panel folds the card's copy of the document, so the two
+never show it side by side.
+
+**The document's `# H1` is the plan's name.** Capture derives the title from
+the leading H1 (`planDocTitle`, a `Plan:` label dropped) rather than the first
+list item, a surface that already prints the title skips a restated H1, and a
+rename rewrites it (`retitlePlanText`).
+
+**Editing paths were consolidated.** Step rows edit inline in the document
+(Enter inserts below, Backspace on an empty row removes it, Alt+↑/↓ moves it).
+Only a markdown plan gets a second path, its raw source, for prose edits. The
+one-title-per-line textarea duplicated the inline rows, so it is gone. The
+"Write a plan" editor (step types) moved into the overflow menu.
+
+**Edits cannot be lost or outrun.** The dock serializes autosaves on one chain
+and applies each to the row as it is now. It previously dropped an edit that
+landed while another write was in flight, while the document still showed
+"Saved". A pending autosave flushes when focus leaves the document (and on
+unmount), and every decision waits for the chain and re-reads the plan. An
+edit typed just before *Approve* is therefore what gets approved, and what the
+resume prompt embeds.
+
+**Refinement edits the document.** `refinePlan` used to replace `steps[]` and
+leave `metadata.planText` untouched. The card kept showing the old list, and
+with no `userEdited` stamp the resume prompt told the model to implement its
+original proposal. For a markdown plan the planner now sees the steps section
+a reader sees. Its result is written back into that section and `steps[]` is
+re-projected. Every applied refinement stamps `userEdited`.

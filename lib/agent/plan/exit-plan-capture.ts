@@ -18,6 +18,7 @@
 
 import type { SDKAssistantMessage, SDKMessage, BetaToolUseBlock } from "@cognia/agent-config-types"
 import { linearAgentTurnSteps } from "./steps"
+import { planDocTitle } from "./plan-doc"
 import type {
   AgentPlan,
   CreatePlanInput,
@@ -103,7 +104,9 @@ export function planInputFromExitPlanMode(
   return {
     sessionId: ctx.sessionId,
     ...(ctx.characterId ? { characterId: ctx.characterId } : {}),
-    title: ctx.title ?? (titles[0] ?? "Captured plan").slice(0, 120),
+    // The document's own `# H1` names the plan; the first step is only the
+    // fallback for a body without one (it reads as a task, not a name).
+    title: (ctx.title ?? (planText ? planDocTitle(planText) : null) ?? titles[0]).slice(0, 120),
     source: "exit_plan_mode",
     executionMode: "auto",
     steps,

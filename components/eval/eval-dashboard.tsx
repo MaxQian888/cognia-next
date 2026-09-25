@@ -187,7 +187,11 @@ export function EvalDashboard() {
                 runOptions={runOptions}
               />
             ) : (
-              <p className="text-muted-foreground text-sm">{t("datasets.select")}</p>
+              <p className="text-muted-foreground text-sm" data-testid="eval-detail-prompt">
+                {/* "Select a dataset" beside an empty list asks for something
+                    that is not there yet. */}
+                {datasets.length === 0 ? t("datasets.selectEmpty") : t("datasets.select")}
+              </p>
             )}
           </div>
         )}

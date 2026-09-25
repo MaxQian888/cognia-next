@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { applyPlanEditPatch, linearSteps } from "./draft-edit"
+import { applyPlanEditPatch, linearSteps, planEditsSettled } from "./draft-edit"
 import type { AgentPlan } from "@/types/agent/plan"
 
 const updatePlanDraft = jest.fn().mockResolvedValue(null)
@@ -73,6 +73,26 @@ describe("applyPlanEditPatch", () => {
       planText: "# Ship it\n\nAll prose, no lists.\n",
     })
     expect(updatePlanDraft).not.toHaveBeenCalled()
+  })
+
+  it("lands edits in call order and lets a decision wait for all of them", async () => {
+    let release!: () => void
+    updatePlanDraft.mockImplementationOnce(
+      () => new Promise<null>((resolve) => (release = () => resolve(null)))
+    )
+    const first = applyPlanEditPatch(plan(), { title: "T", stepTitles: ["a"] })
+    const second = applyPlanEditPatch(plan(), { title: "T", stepTitles: ["b"] })
+    let settled = false
+    const decision = planEditsSettled("p1").then(() => (settled = true))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // The first write is in flight; the second waits behind it, and so does the decision.
+    expect(updatePlanDraft).toHaveBeenCalledTimes(1)
+    expect(settled).toBe(false)
+    release()
+    await Promise.all([first, second, decision])
+    expect(settled).toBe(true)
+    expect(updatePlanDraft.mock.calls.map((c) => c[1].steps?.[0]?.title)).toEqual(["a", "b"])
+    await expect(planEditsSettled("p1")).resolves.toBeUndefined()
   })
 
   it("falls back to the existing title and caps it at 120 chars", async () => {

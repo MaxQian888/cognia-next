@@ -244,6 +244,24 @@ describe("AgentRunsPanel", () => {
     expect(screen.getByText("empty")).toBeInTheDocument()
   })
 
+  /** "Select a run" beside an empty list asks for something nobody can do. */
+  it("explains an empty journal in the detail pane instead of asking for a selection", () => {
+    cockpit = state({ rows: [], allRows: [] })
+    const { rerender } = render(<AgentRunsPanel onSelect={jest.fn()} />)
+    expect(screen.getByTestId("agent-runs-detail-prompt")).toHaveTextContent("detail.emptyPrompt")
+
+    cockpit = state({ rows: [], allRows: [row()] })
+    rerender(<AgentRunsPanel onSelect={jest.fn()} statusGroup="failed" onStatusGroup={jest.fn()} />)
+    expect(screen.getByTestId("agent-runs-detail-prompt")).toHaveTextContent(
+      "detail.filteredPrompt"
+    )
+
+    // Still loading: the list is not known to be empty yet.
+    cockpit = state({ rows: [], allRows: [], isLoading: true })
+    rerender(<AgentRunsPanel onSelect={jest.fn()} />)
+    expect(screen.getByTestId("agent-runs-detail-prompt")).toHaveTextContent("detail.selectPrompt")
+  })
+
   /** A dropdown that shows a value it will not let you change is a lie. */
   it("renders the kind control only where it is one", () => {
     render(<AgentRunsPanel onSelect={jest.fn()} filterKind="team" />)

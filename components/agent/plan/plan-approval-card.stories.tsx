@@ -13,39 +13,43 @@ const meta = {
     onKeepPlanning: fn(),
     onReject: fn(),
     onOpenEditor: fn(),
+    onOpenPanel: fn(),
   },
 } satisfies Meta<typeof PlanApprovalCard>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Approve / keep-planning / reject / edit-in-editor (no refine or inline edit).
+// Approve / keep-planning / reject, the plan editor in the overflow menu.
 export const Default: Story = {}
 
-// With onRefine, the refinement actions appear in the overflow menu.
+// With onRefine, the refinement presets appear in the overflow menu.
 export const WithRefine: Story = {
   args: { onRefine: fn() },
 }
 
-// With onEdit and an awaiting-approval plan, the pencil toggle opens the
-// inline title/steps editor.
+// With onEdit, the document's step rows edit inline and autosave.
 export const WithInlineEdit: Story = {
   args: { onEdit: fn() },
 }
 
 // An `exit_plan_mode` plan renders its full markdown body (headings, lists,
-// code, blockquote) instead of the lossy step-title list.
+// code, blockquote) with the executable step list embedded in place.
 export const MarkdownBody: Story = {
   args: { plan: buildMarkdownPlan() },
 }
 
-// With onEdit, the pencil toggle opens the raw-markdown editor for a plan that
-// carries a markdown body (rather than the one-step-per-line editor).
+// With onEdit, a markdown plan also offers its raw source (header toggle).
 export const MarkdownWithEdit: Story = {
   args: { plan: buildMarkdownPlan(), onEdit: fn() },
 }
 
-// A partially-executed plan shows progress + struck-through completed steps.
+// A refinement in flight: the header says so, the body dims, actions wait.
+export const Refining: Story = {
+  args: { plan: buildMarkdownPlan(), onRefine: fn(), refining: true, disabled: true },
+}
+
+// A plan that has started shows each step's status instead of its number.
 export const InProgress: Story = {
   args: { plan: buildPlan() },
 }

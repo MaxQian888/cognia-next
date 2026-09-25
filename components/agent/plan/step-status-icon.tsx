@@ -15,7 +15,7 @@ export function stepStatusIcon(status: PlanStepStatus) {
     case "completed":
       return <CheckCircle2Icon className="size-3.5 shrink-0 text-green-600" />
     case "in_progress":
-      return <ClockIcon className="size-3.5 shrink-0 animate-pulse text-yellow-600" />
+      return <ClockIcon className="size-3.5 shrink-0 text-yellow-600 motion-safe:animate-pulse" />
     case "failed":
     case "blocked":
       return <XCircleIcon className="size-3.5 shrink-0 text-rose-600" />

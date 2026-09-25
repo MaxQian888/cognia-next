@@ -4,7 +4,7 @@
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { PlanPanel } from "./plan-panel"
-import type { AgentPlan } from "@/types/agent/plan"
+import { DEFAULT_PLAN_CONFIG, type AgentPlan } from "@/types/agent/plan"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
@@ -35,7 +35,7 @@ function makePlan(id: string, status: AgentPlan["status"], title = id): AgentPla
     status,
     executionMode: "in_session",
     refinementCount: 0,
-    config: { errorPolicy: "stop", maxConcurrency: 1 },
+    config: { ...DEFAULT_PLAN_CONFIG, errorPolicy: "stop", maxConcurrency: 1 },
     steps: [
       {
         id: `${id}-s1`,

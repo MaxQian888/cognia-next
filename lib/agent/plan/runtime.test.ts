@@ -551,6 +551,65 @@ describe("refinePlan", () => {
     expect(kinds).toEqual(expect.arrayContaining(["refined", "replanned"]))
   })
 
+  it("stamps userEdited so the approval prompt embeds the refined plan", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput())
+    const refined = await rt.refinePlan(
+      { planId: plan.id, refinementType: "simplify", trigger: "manual" },
+      fakeClient('{"steps":["only"],"reasoning":"leaner"}') as never
+    )
+    expect(refined?.metadata?.userEdited).toBe(true)
+  })
+
+  it("refines a markdown plan's steps section and writes it back into the document", async () => {
+    const rt = getPlanRuntime()
+    const planText = [
+      "# Migrate auth",
+      "",
+      "## Steps",
+      "",
+      "1. Audit call sites",
+      "2. Swap the adapter",
+      "",
+      "## Files",
+      "",
+      "- lib/auth.ts",
+    ].join("\n")
+    const plan = await rt.createPlan(
+      createInput({
+        source: "exit_plan_mode",
+        steps: ["Audit call sites", "Swap the adapter", "lib/auth.ts"].map((title) => ({
+          title,
+          kind: "agent_turn" as const,
+        })),
+        metadata: { planText },
+      })
+    )
+    const client = fakeClient('{"steps":["Audit","Add adapter","Swap"],"reasoning":"split"}')
+    const refined = await rt.refinePlan(
+      { planId: plan.id, refinementType: "expand", trigger: "manual" },
+      client as never
+    )
+    // The planner saw the steps section only — not the Files bullet.
+    const prompt = String(client.complete.mock.calls[0][0])
+    expect(prompt).toContain("Swap the adapter")
+    expect(prompt).not.toContain("lib/auth.ts")
+    // The document carries the refined list in place; the rest is untouched.
+    const text = String(refined?.metadata?.planText)
+    expect(text).toContain("1. Audit\n2. Add adapter\n3. Swap")
+    expect(text).toContain("# Migrate auth")
+    expect(text).toContain("- lib/auth.ts")
+    expect(text).not.toContain("Audit call sites")
+    // steps[] is re-projected from the rewritten body (doc = single source).
+    expect(refined?.steps.map((s) => s.title)).toEqual([
+      "Audit",
+      "Add adapter",
+      "Swap",
+      "lib/auth.ts",
+    ])
+    expect(refined?.metadata?.userEdited).toBe(true)
+  })
+
   it("auto triggers respect maxAutoRefinements (no LLM call past the cap)", async () => {
     const rt = getPlanRuntime()
     const plan = await rt.createPlan(createInput({ config: { maxAutoRefinements: 0 } }))

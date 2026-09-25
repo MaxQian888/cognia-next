@@ -12,6 +12,7 @@ import {
   projectCanonicalHeader,
   pruneCanonicalEnvelopeDetails,
   readCanonicalEnvelopes,
+  subscribeCanonicalAppends,
 } from "./canonical-log"
 import { appendEvent, listRunEvents } from "@/lib/workflow/runtime/event-log"
 import { mapWorkflowRunEvent } from "@/lib/execution/sources/workflow"
@@ -154,5 +155,32 @@ describe("canonical envelope log", () => {
     const remaining = await listRunEvents("run-old")
     expect(remaining).toHaveLength(1)
     expect(remaining[0].type).toBe("run_started")
+  })
+})
+
+describe("append observers", () => {
+  it("sees exactly the envelopes that became durable, once each", async () => {
+    const seen: string[][] = []
+    const off = subscribeCanonicalAppends((envelopes) => seen.push(envelopes.map((e) => e.eventId)))
+    await appendCanonicalEnvelopes("run-o", [envelope(0), envelope(1)])
+    // A redelivery is deduplicated before it is written, so it is not re-announced.
+    await appendCanonicalEnvelopes("run-o", [envelope(1), envelope(2)])
+    expect(seen).toEqual([["s1:a1:0", "s1:a1:1"], ["s1:a1:2"]])
+    off()
+    await appendCanonicalEnvelopes("run-o", [envelope(3)])
+    expect(seen).toHaveLength(2)
+  })
+
+  it("never lets a failing observer fail the write", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const later = jest.fn()
+    subscribeCanonicalAppends(() => {
+      throw new Error("observer bug")
+    })
+    subscribeCanonicalAppends(later)
+    await expect(appendCanonicalEnvelopes("run-f", [envelope(0)])).resolves.toBe(1)
+    expect(later).toHaveBeenCalledTimes(1)
+    expect(await readCanonicalEnvelopes("run-f")).toHaveLength(1)
+    warn.mockRestore()
   })
 })

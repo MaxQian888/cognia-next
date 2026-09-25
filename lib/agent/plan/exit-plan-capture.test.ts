@@ -85,8 +85,20 @@ describe("planInputFromExitPlanMode", () => {
     expect(input!.config).toEqual({ requireApproval: false })
   })
 
+  it("names the plan after the document's leading H1, stripping a Plan: label", () => {
+    const plan = "# Plan: Migrate auth\n\n## Steps\n\n1. Audit call sites\n2. Swap the adapter"
+    expect(planInputFromExitPlanMode({ plan }, ctx)!.title).toBe("Migrate auth")
+    // A body that opens with a section heading has no name of its own.
+    expect(planInputFromExitPlanMode({ plan: "## Context\n\n- first step" }, ctx)!.title).toBe(
+      "first step"
+    )
+  })
+
   it("derives a title from the first step, override wins", () => {
     expect(planInputFromExitPlanMode({ plan: "- only" }, ctx)!.title).toBe("only")
+    expect(
+      planInputFromExitPlanMode({ plan: "# Named\n\n- only" }, { ...ctx, title: "Custom" })!.title
+    ).toBe("Custom")
     expect(planInputFromExitPlanMode({ plan: "- only" }, { ...ctx, title: "Custom" })!.title).toBe(
       "Custom"
     )

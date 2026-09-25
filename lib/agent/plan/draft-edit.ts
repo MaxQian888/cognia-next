@@ -25,7 +25,30 @@ export function linearSteps(titles: string[]): AgentPlan["steps"] {
   return materializeSteps(linearAgentTurnSteps(titles))
 }
 
-export async function applyPlanEditPatch(plan: AgentPlan, patch: PlanEditPatch): Promise<void> {
+/**
+ * Per-plan queue of in-flight edits. The approval dock and the side panel both
+ * edit the same draft, so every edit lands in call order, and a decision
+ * (approve, refine) waits for all of them via {@link planEditsSettled}, not
+ * just the ones its own surface made.
+ */
+const editQueues = new Map<string, Promise<void>>()
+
+/** Resolves once every edit already queued for `planId` has landed or failed. */
+export function planEditsSettled(planId: string): Promise<void> {
+  return (editQueues.get(planId) ?? Promise.resolve()).catch(() => undefined)
+}
+
+export function applyPlanEditPatch(plan: AgentPlan, patch: PlanEditPatch): Promise<void> {
+  const run = planEditsSettled(plan.id).then(() => writePlanEditPatch(plan, patch))
+  editQueues.set(plan.id, run)
+  const forget = () => {
+    if (editQueues.get(plan.id) === run) editQueues.delete(plan.id)
+  }
+  run.then(forget, forget)
+  return run
+}
+
+async function writePlanEditPatch(plan: AgentPlan, patch: PlanEditPatch): Promise<void> {
   const title = patch.title.trim().slice(0, 120) || plan.title
   // planText patches re-derive steps via `projectStepTitles` — list items
   // only, no prose fallback — so a doc edited down to zero lists projects

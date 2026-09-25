@@ -48,7 +48,8 @@ describe("EvalDashboard", () => {
   it("shows the empty state when there are no datasets", () => {
     render(<EvalDashboard />)
     expect(screen.getByText("datasets.empty")).toBeInTheDocument()
-    expect(screen.getByText("datasets.select")).toBeInTheDocument()
+    // Not "select a dataset" beside an empty list.
+    expect(screen.getByTestId("eval-detail-prompt")).toHaveTextContent("datasets.selectEmpty")
   })
 
   it("does not restate the page title its host header already renders", () => {

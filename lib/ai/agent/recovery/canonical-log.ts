@@ -52,10 +52,42 @@ function outsideCurrentDexieTransaction<T>(operation: () => Promise<T>): Promise
   })
 }
 
+/**
+ * Observers of envelopes as they become durable, from every writer (the chat
+ * sink, the connector runtime, the external manager, the live-stream mirror).
+ *
+ * Exists for the facts the renderer produces itself and the sidecar's live
+ * stream never carries — above all `permission-resolved` for an ALLOW, which
+ * only `approveTool` and the approval modal know about. A live projection that
+ * folds the stream alone keeps every answered ask open until the turn ends.
+ */
+export type CanonicalAppendListener = (envelopes: readonly AgentEventEnvelope[]) => void
+
+const appendListeners = new Set<CanonicalAppendListener>()
+
+export function subscribeCanonicalAppends(listener: CanonicalAppendListener): () => void {
+  appendListeners.add(listener)
+  return () => {
+    appendListeners.delete(listener)
+  }
+}
+
+function notifyAppended(envelopes: readonly AgentEventEnvelope[]): void {
+  for (const listener of appendListeners) {
+    try {
+      listener(envelopes)
+    } catch (error) {
+      // An observer can never fail the durable write it is observing.
+      console.warn("canonical append listener failed", error)
+    }
+  }
+}
+
 /** Test-only: drop the idempotency cache so suites start cold. */
 export function __resetCanonicalLogForTesting(): void {
   seenByRun.clear()
   appendTailByRun.clear()
+  appendListeners.clear()
 }
 
 function envelopeIdentityKey(envelope: AgentEventEnvelope): string {
@@ -113,6 +145,7 @@ export async function appendCanonicalEnvelopes(
           }))
         )
         for (const envelope of fresh) seen.add(envelopeIdentityKey(envelope))
+        notifyAppended(fresh)
         return fresh.length
       })
     )

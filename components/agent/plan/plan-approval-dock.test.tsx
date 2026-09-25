@@ -30,9 +30,13 @@ const updatePlanDraft = jest.fn().mockResolvedValue(null)
 const startPlan = jest.fn().mockResolvedValue(null)
 const setChatResumeFailure = jest.fn().mockResolvedValue(null)
 const failInSessionStep = jest.fn().mockResolvedValue(null)
+// Decisions and edits re-read the row; by default it is whatever the live
+// query currently returns (see beforeEach).
+const getPlan = jest.fn()
 jest.mock("@/lib/agent/plan/runtime", () => ({
   readPlanChatResumeFailure: (plan: AgentPlan) => plan.metadata?.chatResumeFailure ?? null,
   getPlanRuntime: () => ({
+    getPlan,
     approvePlan,
     rejectPlan,
     refinePlan,
@@ -103,6 +107,11 @@ jest.mock("./plan-html-view", () => ({
 const toastError = jest.fn()
 jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => toastError(...a) } }))
 
+const revealSessionPanel = jest.fn()
+jest.mock("@/lib/artifacts/reveal", () => ({
+  revealSessionPanel: (...a: unknown[]) => revealSessionPanel(...a),
+}))
+
 function step(id: string, title: string, order: number): PlanStep {
   return { id, title, kind: "agent_turn", status: "pending", order, dependencies: [] }
 }
@@ -132,6 +141,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   buildClient.mockReturnValue({})
   __setMockSettings({ foo: 1 })
+  getPlan.mockImplementation(async () => mockPlan())
 })
 
 describe("PlanApprovalDock", () => {
@@ -351,7 +361,8 @@ describe("PlanApprovalDock", () => {
     mockPlan.mockReturnValue(plan())
     render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
     expect(screen.queryByTestId("plan-editor-stub")).not.toBeInTheDocument()
-    await userEvent.click(screen.getByTestId("plan-approval-open-editor"))
+    await userEvent.click(screen.getByTestId("plan-approval-more"))
+    await userEvent.click(await screen.findByTestId("plan-approval-open-editor"))
     expect(screen.getByTestId("plan-editor-stub")).toHaveAttribute("data-edit", "p1")
     await userEvent.click(screen.getByText("close-editor"))
     expect(screen.queryByTestId("plan-editor-stub")).not.toBeInTheDocument()
@@ -360,11 +371,11 @@ describe("PlanApprovalDock", () => {
   it("saves an inline edit via updatePlanDraft with materialized linear steps", async () => {
     mockPlan.mockReturnValue(plan({ steps: [step("a", "one", 0)] }))
     render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
-    await userEvent.click(screen.getByTestId("plan-approval-edit"))
-    await userEvent.clear(screen.getByTestId("plan-edit-steps"))
-    await userEvent.type(screen.getByTestId("plan-edit-steps"), "alpha{enter}beta")
-    await userEvent.click(screen.getByTestId("plan-edit-save"))
-    await waitFor(() => expect(updatePlanDraft).toHaveBeenCalled())
+    // The document's rows edit in place: rename the row, Enter adds one below.
+    const row = screen.getByTestId("plan-doc-step-0")
+    await userEvent.clear(row)
+    await userEvent.type(row, "alpha{enter}beta")
+    await waitFor(() => expect(updatePlanDraft).toHaveBeenCalled(), { timeout: 3000 })
     const [planId, patch] = updatePlanDraft.mock.calls[0] as [
       string,
       { title: string; steps: PlanStep[] },
@@ -379,11 +390,95 @@ describe("PlanApprovalDock", () => {
   it("skips the edit (no updatePlanDraft) when every step title is cleared", async () => {
     mockPlan.mockReturnValue(plan({ steps: [step("a", "one", 0)] }))
     render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
-    await userEvent.click(screen.getByTestId("plan-approval-edit"))
-    await userEvent.clear(screen.getByTestId("plan-edit-steps"))
-    await userEvent.click(screen.getByTestId("plan-edit-save"))
-    // Empty titles → guard returns early; the plan is not wiped.
+    await userEvent.clear(screen.getByTestId("plan-doc-step-0"))
+    // The autosave reached the dock (it re-reads the row before applying)…
+    await waitFor(() => expect(getPlan).toHaveBeenCalled(), { timeout: 3000 })
+    // …but empty titles → the guard returns early; the plan is not wiped.
     expect(updatePlanDraft).not.toHaveBeenCalled()
+  })
+
+  it("does not apply an edit once the plan stopped awaiting approval", async () => {
+    mockPlan.mockReturnValue(plan({ steps: [step("a", "one", 0)] }))
+    getPlan.mockResolvedValue(plan({ status: "approved", steps: [step("a", "one", 0)] }))
+    render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    await userEvent.type(screen.getByTestId("plan-doc-step-0"), "!")
+    // The rejected write surfaces as a failed save, never a false "Saved".
+    await waitFor(
+      () =>
+        expect(screen.getByTestId("plan-doc-save-state")).toHaveTextContent("document.save.error"),
+      { timeout: 3000 }
+    )
+    expect(updatePlanDraft).not.toHaveBeenCalled()
+  })
+
+  it("approves the edited plan when Approve is clicked before the autosave fired", async () => {
+    const edited = plan({
+      steps: [step("a", "one!", 0)],
+      metadata: { userEdited: true },
+    })
+    mockPlan.mockReturnValue(plan({ steps: [step("a", "one", 0)] }))
+    // The row as it is once the flushed edit landed.
+    updatePlanDraft.mockImplementation(async () => {
+      getPlan.mockResolvedValue(edited)
+      return edited
+    })
+    const onResume = jest.fn()
+    render(<PlanApprovalDock sessionId="ses" onResume={onResume} />)
+    await userEvent.type(screen.getByTestId("plan-doc-step-0"), "!")
+    // Clicking away from the document flushes the pending edit immediately;
+    // approval waits for it and embeds the edited plan.
+    await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
+    await waitFor(() => expect(onResume).toHaveBeenCalled())
+    expect(updatePlanDraft.mock.invocationCallOrder[0]).toBeLessThan(
+      approvePlan.mock.invocationCallOrder[0]
+    )
+    const [prompt] = onResume.mock.calls[0] as [string]
+    expect(prompt).toContain("ADJUSTED")
+    expect(prompt).toContain("1. one!")
+  })
+
+  it("serializes autosaves instead of dropping one that lands mid-write", async () => {
+    mockPlan.mockReturnValue(plan({ steps: [step("a", "one", 0)] }))
+    let release: (() => void) | undefined
+    updatePlanDraft.mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve(null)))
+    )
+    render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    const row = screen.getByTestId("plan-doc-step-0")
+    await userEvent.type(row, "1")
+    await waitFor(() => expect(updatePlanDraft).toHaveBeenCalledTimes(1), { timeout: 3000 })
+    // A second edit while the first write is still in flight…
+    await userEvent.type(row, "2")
+    release?.()
+    // …is written after it, not discarded.
+    await waitFor(() => expect(updatePlanDraft).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    const [, patch] = updatePlanDraft.mock.calls[1] as [string, { steps: PlanStep[] }]
+    expect(patch.steps.map((s) => s.title)).toEqual(["one12"])
+  })
+
+  it("opens the plan in the dock's Plan panel", async () => {
+    mockPlan.mockReturnValue(plan())
+    render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    await userEvent.click(screen.getByTestId("plan-approval-open-panel"))
+    expect(revealSessionPanel).toHaveBeenCalledWith("ses", "plan")
+  })
+
+  it("marks the card as refining while a refinement is generated", async () => {
+    mockPlan.mockReturnValue(plan())
+    let finish: (() => void) | undefined
+    refinePlan.mockImplementationOnce(
+      () => new Promise((resolve) => (finish = () => resolve(null)))
+    )
+    render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    await userEvent.click(screen.getByTestId("plan-approval-more"))
+    await userEvent.click(await screen.findByTestId("plan-refine-simplify"))
+    expect(await screen.findByTestId("plan-approval-refining")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-approval-approve-auto")).toBeDisabled()
+    finish?.()
+    await waitFor(() =>
+      expect(screen.queryByTestId("plan-approval-refining")).not.toBeInTheDocument()
+    )
+    expect(screen.getByTestId("plan-approval-approve-auto")).not.toBeDisabled()
   })
 
   it("saves a markdown edit → persists planText metadata + re-derived linear steps", async () => {
@@ -472,11 +567,9 @@ describe("PlanApprovalDock", () => {
   it("saving an edit stamps metadata.userEdited for the approval prompt", async () => {
     mockPlan.mockReturnValue(plan({ steps: [step("a", "one", 0)] }))
     render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
-    await userEvent.click(screen.getByTestId("plan-approval-edit"))
-    await userEvent.clear(screen.getByTestId("plan-edit-steps"))
-    await userEvent.type(screen.getByTestId("plan-edit-steps"), "alpha")
-    await userEvent.click(screen.getByTestId("plan-edit-save"))
-    await waitFor(() => expect(updatePlanDraft).toHaveBeenCalled())
+    await userEvent.clear(screen.getByTestId("plan-doc-step-0"))
+    await userEvent.type(screen.getByTestId("plan-doc-step-0"), "alpha")
+    await waitFor(() => expect(updatePlanDraft).toHaveBeenCalled(), { timeout: 3000 })
     const [, patch] = updatePlanDraft.mock.calls[0] as [
       string,
       { metadata: { userEdited?: boolean } },
