@@ -69,6 +69,7 @@
     "workflow": "工作流编辑器",
     "zoom": "缩放"
   },
+  "chatCopilotCapture": "聊天副驾：读取最前方的聊天",
   "clear": "清除",
   "conflictBlocked": "该组合键已被占用",
   "conflictWith": "与之冲突：",

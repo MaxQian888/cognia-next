@@ -23,6 +23,7 @@ export type PetWindowRole =
   | "selection-toolbar"
   | "tray-panel"
   | "usage-dock"
+  | "chat-copilot"
   | "web"
 
 /** Label given to the desktop-pet overlay window by the Rust `open_pet_window`. */
@@ -55,6 +56,13 @@ export const TRAY_PANEL_WINDOW_LABEL = "tray-panel"
  * Kept in lockstep with `usage_dock/mod.rs:USAGE_DOCK_LABEL`.
  */
 export const USAGE_DOCK_WINDOW_LABEL = "usage-dock"
+
+/**
+ * Label given to the desktop chat copilot overlay by the Rust
+ * `chat_copilot_open`. Kept in lockstep with
+ * `chat_copilot/mod.rs:CHAT_COPILOT_LABEL`.
+ */
+export const CHAT_COPILOT_WINDOW_LABEL = "chat-copilot"
 
 interface TauriInternalsShape {
   metadata?: {
@@ -101,6 +109,7 @@ export function getPetWindowRole(
   if (label === SELECTION_TOOLBAR_WINDOW_LABEL) return "selection-toolbar"
   if (label === TRAY_PANEL_WINDOW_LABEL) return "tray-panel"
   if (label === USAGE_DOCK_WINDOW_LABEL) return "usage-dock"
+  if (label === CHAT_COPILOT_WINDOW_LABEL) return "chat-copilot"
   return "main"
 }
 
@@ -119,7 +128,8 @@ export function isSecondaryOverlayRole(role: PetWindowRole): boolean {
     role === "island" ||
     role === "selection-toolbar" ||
     role === "tray-panel" ||
-    role === "usage-dock"
+    role === "usage-dock" ||
+    role === "chat-copilot"
   )
 }
 

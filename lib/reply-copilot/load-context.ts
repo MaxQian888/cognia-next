@@ -36,7 +36,8 @@ export interface LoadContextDeps {
   recall: (settings: AppSettings | null | undefined, query: string) => Promise<string[]>
 }
 
-async function defaultRecall(
+/** Memory recall for the copilot; shared with the desktop screen path. */
+export async function recallCopilotMemory(
   settings: AppSettings | null | undefined,
   query: string
 ): Promise<string[]> {
@@ -64,7 +65,7 @@ const defaultDeps: LoadContextDeps = {
   listRows: (sessionId, limit) => listRecentMessages(sessionId, limit) as Promise<TranscriptRow[]>,
   selfPlatformIds: selfPlatformIdsForAdapter,
   resolveContact: resolveCopilotContact,
-  recall: defaultRecall,
+  recall: recallCopilotMemory,
 }
 
 /**

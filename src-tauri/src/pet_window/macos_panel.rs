@@ -80,6 +80,15 @@ pub(crate) enum PetPanelRole {
     /// open-intent / lifecycle statics are keyed BY ROLE, so borrowing the
     /// island's would make closing one cancel an in-flight reveal of the other.
     UsageDock,
+    /// The desktop chat copilot's panel beside another app's chat window
+    /// (ADR-0194). Key-capable only when needed: its buttons never take key,
+    /// but the optional "what you want to say" box must accept typing. It
+    /// floats at the sprite's level; the chat window it sits beside is an
+    /// ordinary window, so there is no menu bar to cover.
+    ///
+    /// Its own role for the same reason as the others: the lifecycle statics
+    /// are keyed BY ROLE.
+    ChatCopilot,
 }
 
 static SPRITE_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -89,6 +98,7 @@ static SELECTION_TOOLBAR_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static RECORDER_CONTROLLER_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static TRAY_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static USAGE_DOCK_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+static CHAT_COPILOT_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static SPRITE_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static POPUP_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static ISLAND_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
@@ -96,6 +106,7 @@ static SELECTION_TOOLBAR_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static RECORDER_CONTROLLER_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static TRAY_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static USAGE_DOCK_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
+static CHAT_COPILOT_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug)]
 struct PanelLifecycle {
@@ -131,6 +142,10 @@ static USAGE_DOCK_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifec
     destroying: false,
     in_flight_builds: 0,
 });
+static CHAT_COPILOT_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifecycle {
+    destroying: false,
+    in_flight_builds: 0,
+});
 
 /// Test-only serialization for the per-role statics above. They are
 /// process-wide and `cargo test` runs cases on parallel threads, so every test
@@ -160,6 +175,7 @@ fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
         PetPanelRole::RecorderController => &RECORDER_CONTROLLER_PANEL_GENERATION,
         PetPanelRole::TrayPanel => &TRAY_PANEL_GENERATION,
         PetPanelRole::UsageDock => &USAGE_DOCK_PANEL_GENERATION,
+        PetPanelRole::ChatCopilot => &CHAT_COPILOT_PANEL_GENERATION,
     }
 }
 
@@ -172,6 +188,7 @@ fn panel_open_intent(role: PetPanelRole) -> &'static AtomicBool {
         PetPanelRole::RecorderController => &RECORDER_CONTROLLER_PANEL_OPEN,
         PetPanelRole::TrayPanel => &TRAY_PANEL_OPEN,
         PetPanelRole::UsageDock => &USAGE_DOCK_PANEL_OPEN,
+        PetPanelRole::ChatCopilot => &CHAT_COPILOT_PANEL_OPEN,
     }
 }
 
@@ -184,6 +201,7 @@ fn panel_lifecycle(role: PetPanelRole) -> &'static Mutex<PanelLifecycle> {
         PetPanelRole::RecorderController => &RECORDER_CONTROLLER_PANEL_LIFECYCLE,
         PetPanelRole::TrayPanel => &TRAY_PANEL_LIFECYCLE,
         PetPanelRole::UsageDock => &USAGE_DOCK_PANEL_LIFECYCLE,
+        PetPanelRole::ChatCopilot => &CHAT_COPILOT_PANEL_LIFECYCLE,
     }
 }
 
@@ -286,6 +304,7 @@ impl PetPanelRole {
                 | PetPanelRole::SelectionToolbar
                 | PetPanelRole::RecorderController
                 | PetPanelRole::TrayPanel
+                | PetPanelRole::ChatCopilot
         )
     }
 
@@ -302,7 +321,8 @@ impl PetPanelRole {
             PetPanelRole::Sprite
             | PetPanelRole::Popup
             | PetPanelRole::SelectionToolbar
-            | PetPanelRole::UsageDock => 3,
+            | PetPanelRole::UsageDock
+            | PetPanelRole::ChatCopilot => 3,
             // `NSStatusWindowLevel` (25) — one above `NSMainMenuWindowLevel`
             // (24) so the top-hugging island draws over the menu bar instead
             // of hiding behind it. The recorder controller needs the same, so
@@ -450,7 +470,8 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
         | PetPanelRole::Island
         | PetPanelRole::SelectionToolbar
         | PetPanelRole::RecorderController
-        | PetPanelRole::TrayPanel => {
+        | PetPanelRole::TrayPanel
+        | PetPanelRole::ChatCopilot => {
             debug_assert!(role.can_become_key());
             let panel = window
                 .to_panel::<PetPopupPanel<R>>()
@@ -682,10 +703,33 @@ mod tests {
             PetPanelRole::SelectionToolbar,
             PetPanelRole::RecorderController,
             PetPanelRole::TrayPanel,
+            PetPanelRole::ChatCopilot,
         ] {
             assert!(!role.hides_on_deactivate());
             assert!(role.works_when_modal());
         }
+    }
+
+    #[test]
+    fn chat_copilot_panel_takes_typing_and_floats_beside_the_chat() {
+        // The steering box must accept keystrokes; buttons still never pull key
+        // (`set_becomes_key_only_if_needed`), so the chat app stays frontmost.
+        assert!(PetPanelRole::ChatCopilot.can_become_key());
+        assert_eq!(PetPanelRole::ChatCopilot.window_level(), 3);
+    }
+
+    #[test]
+    fn chat_copilot_has_its_own_reveal_generation() {
+        let _guard = lock_panel_state_for_test();
+        let copilot = begin_panel_open(PetPanelRole::ChatCopilot);
+        let dock = begin_panel_open(PetPanelRole::UsageDock);
+        cancel_panel_reveal(PetPanelRole::UsageDock);
+        assert!(panel_generation_is_current(
+            PetPanelRole::ChatCopilot,
+            copilot
+        ));
+        assert!(!panel_generation_is_current(PetPanelRole::UsageDock, dock));
+        cancel_panel_reveal(PetPanelRole::ChatCopilot);
     }
 
     #[test]

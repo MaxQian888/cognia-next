@@ -355,6 +355,59 @@ macro_rules! command_body {
     }};
 }
 
+/// ADR-0194 — capture the frontmost application window for the desktop chat
+/// copilot. Runs on the dedicated `chatCopilot` surface: asks every time by
+/// default, is not silenced by the automation engine switch, and accepts only
+/// this command (`permission::evaluate_chat_copilot`). The frontmost app is
+/// probed first so the whitelist tier and the consent prompt can name it.
+#[tauri::command]
+pub async fn desktop_capture_frontmost_window(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+) -> std::result::Result<FrontmostWindowCapture, String> {
+    // Without the macOS Screen Recording grant a window capture comes back
+    // blank; say so instead of OCR-ing an empty frame. Never request the
+    // grant implicitly (ADR-0095): the renderer links to System Settings.
+    if !super::platform::shared::screen_capture::screen_capture_permitted() {
+        return Err(err_to_string(&AutomationError::PermissionDenied {
+            reason: super::worker::CHAT_COPILOT_SCREEN_RECORDING_REQUIRED.into(),
+        }));
+    }
+    let focus = state
+        .handle
+        .get_focus()
+        .await
+        .map_err(|e| err_to_string(&e))?;
+    // Pin the target (and its credential state) now: answering the consent
+    // prompt can move focus to Cognia before the capture runs.
+    let credential_focused = state.gate.settings().redact_screenshots
+        && super::platform::shared::credential_window::is_credential_window_focused();
+    let target =
+        super::worker::resolve_chat_copilot_target(&focus, std::process::id(), credential_focused)
+            .map_err(|e| err_to_string(&e))?;
+    let gctx = super::dispatcher::GateContext {
+        surface: Surface::ChatCopilot,
+        plugin_id: None,
+        process_name: target.process_name.clone(),
+        window_title: target.window_title.clone(),
+        target_url: None,
+        click_x: None,
+        click_y: None,
+        force_tier: None,
+        command_detail: None,
+        session_key: None,
+    };
+    super::dispatcher::run_gated(
+        Some(&app),
+        state.inner(),
+        gctx,
+        super::permission::CHAT_COPILOT_CAPTURE_COMMAND,
+        || async { state.handle.capture_chat_copilot_window(target).await },
+    )
+    .await
+    .map_err(|e| err_to_string(&e))
+}
+
 #[tauri::command]
 pub async fn desktop_capabilities(
     state: State<'_, AutomationState>,

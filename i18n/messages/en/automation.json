@@ -83,6 +83,7 @@
       "decisionAllow": "allow",
       "decisionConsent": "consent",
       "decisionDeny": "deny",
+      "surfaceChatCopilot": "Chat copilot",
       "surfaceComputerUse": "Computer Use",
       "surfaceMcp": "MCP",
       "surfacePlugin": "Plugin",
@@ -129,6 +130,7 @@
     "commands": {
       "auditSnapshot": "Read audit snapshot",
       "capabilities": "Read capabilities",
+      "capture_frontmost_window": "Capture the frontmost chat window",
       "click": "Click on screen",
       "cursorPosition": "Read cursor position",
       "drag": "Drag",
@@ -159,6 +161,7 @@
       "window": "Window:"
     },
     "surfaces": {
+      "chatCopilot": "Chat copilot",
       "computerUse": "Computer Use",
       "mcp": "MCP",
       "plugin": "Plugin",
@@ -293,6 +296,22 @@
     "yes": "Yes"
   },
   "permissions": {
+    "chatCopilot": {
+      "add": "Add",
+      "description": "When you press the chat copilot shortcut, Cognia captures the frontmost window once, reads it with local OCR and never types into it. This permission is separate from Computer Use and from the automation switch above.",
+      "empty": "No apps listed. Every capture asks.",
+      "modeAllowListed": "Allow listed chat apps",
+      "modeAllowListedHint": "Apps on the list below are captured without a prompt. Every other app still asks.",
+      "modeAsk": "Ask every time",
+      "modeAskHint": "Each capture shows a consent prompt naming the app and window.",
+      "modeLabel": "When the shortcut is pressed",
+      "permissionNote": "macOS also requires Screen Recording permission. Cognia checks it before each capture and never requests it on its own.",
+      "processNames": "Chat apps captured without asking",
+      "processNamesHint": "Exact process names, for example WeChat or QQ. Only this list counts; the Computer Use whitelist does not apply here.",
+      "processPlaceholder": "WeChat",
+      "removeEntryAria": "Remove {entry}",
+      "title": "Chat copilot capture"
+    },
     "defaultTier": "Default Tier",
     "defaultTierDescription": "The tier applied when no per-surface override is set.",
     "perPlugin": {

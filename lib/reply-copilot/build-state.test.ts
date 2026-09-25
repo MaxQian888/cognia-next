@@ -2,6 +2,7 @@ import {
   COPILOT_STATE_TRIM,
   COPILOT_WINDOW,
   buildCopilotTranscript,
+  isSidedTranscript,
   sideOf,
   toCopilotState,
   type TranscriptRow,
@@ -100,5 +101,13 @@ describe("toCopilotState", () => {
     })
     expect(toCopilotState(t, "friends", "  likes tea ")).toHaveProperty("background", "likes tea")
     expect(COPILOT_STATE_TRIM).toEqual(["chat", "messages"])
+  })
+
+  it("refuses a transcript with an unknown sender", () => {
+    const t = buildCopilotTranscript([inbound("在吗")])
+    const unsided = { ...t, turns: [...t.turns, { from: "unknown" as const, text: "?" }] }
+    expect(isSidedTranscript(t)).toBe(true)
+    expect(isSidedTranscript(unsided)).toBe(false)
+    expect(() => toCopilotState(unsided, "friends")).toThrow(/unknown/)
   })
 })

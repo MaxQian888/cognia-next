@@ -216,6 +216,8 @@ mod turn_provision;
 mod twin;
 // ADR-0165 Phase 2 — the Capacity Dock edge rail.
 mod usage_dock;
+// ADR-0194 §8 — the desktop chat copilot's overlay panel.
+mod chat_copilot;
 // ADR-0067 Phase 4 — extracted to `crates/cognia-vector`; re-aliased so
 // `crate::vector::{VectorState, VectorRegistry, commands::…}` resolve.
 pub use cognia_vector as vector;
@@ -934,6 +936,12 @@ pub fn run() {
             fleet::island_window::island_set_hide_on_fullscreen,
             fleet::island_window::island_debug_geometry,
             fleet::island_window::island_restore,
+            chat_copilot::chat_copilot_open,
+            chat_copilot::chat_copilot_place,
+            chat_copilot::chat_copilot_close,
+            chat_copilot::chat_copilot_reveal,
+            chat_copilot::chat_copilot_resize,
+            chat_copilot::chat_copilot_copy,
             usage_dock::usage_dock_open,
             usage_dock::usage_dock_close,
             usage_dock::usage_dock_is_open,
@@ -1582,6 +1590,7 @@ pub fn run() {
             automation::commands::desktop_read_tree,
             automation::commands::desktop_find,
             automation::commands::desktop_screenshot,
+            automation::commands::desktop_capture_frontmost_window,
             automation::commands::desktop_click,
             automation::commands::desktop_type,
             automation::commands::desktop_paste,

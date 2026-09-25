@@ -39,6 +39,33 @@ describe("buildDraftPrompt", () => {
   })
 })
 
+describe("buildDraftPrompt with unattributed turns", () => {
+  it("labels unknown senders and tells the model not to guess", () => {
+    const prompt = buildDraftPrompt({
+      transcript: {
+        ...transcript,
+        turns: [...transcript.turns, { from: "unknown", text: "几点？" }],
+        latestFrom: "unknown",
+      },
+      relationship: "",
+      background: "",
+      instructions: "",
+    })
+    expect(prompt).toContain("Unknown: 几点？")
+    expect(prompt).toContain("do not assume who wrote them")
+  })
+
+  it("adds no attribution note when every sender is known", () => {
+    const prompt = buildDraftPrompt({
+      transcript,
+      relationship: "",
+      background: "",
+      instructions: "",
+    })
+    expect(prompt).not.toContain("could not be attributed")
+  })
+})
+
 describe("parseCandidates", () => {
   it("reads a JSON array, trims quotes, de-duplicates and caps at three", () => {
     expect(parseCandidates('ok:\n["“好的”", "好的", "明早发你", "稍等", "extra"]')).toEqual([

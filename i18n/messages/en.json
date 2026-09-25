@@ -4366,6 +4366,7 @@
         "decisionAllow": "allow",
         "decisionConsent": "consent",
         "decisionDeny": "deny",
+        "surfaceChatCopilot": "Chat copilot",
         "surfaceComputerUse": "Computer Use",
         "surfaceMcp": "MCP",
         "surfacePlugin": "Plugin",
@@ -4412,6 +4413,7 @@
       "commands": {
         "auditSnapshot": "Read audit snapshot",
         "capabilities": "Read capabilities",
+        "capture_frontmost_window": "Capture the frontmost chat window",
         "click": "Click on screen",
         "cursorPosition": "Read cursor position",
         "drag": "Drag",
@@ -4442,6 +4444,7 @@
         "window": "Window:"
       },
       "surfaces": {
+        "chatCopilot": "Chat copilot",
         "computerUse": "Computer Use",
         "mcp": "MCP",
         "plugin": "Plugin",
@@ -4576,6 +4579,22 @@
       "yes": "Yes"
     },
     "permissions": {
+      "chatCopilot": {
+        "add": "Add",
+        "description": "When you press the chat copilot shortcut, Cognia captures the frontmost window once, reads it with local OCR and never types into it. This permission is separate from Computer Use and from the automation switch above.",
+        "empty": "No apps listed. Every capture asks.",
+        "modeAllowListed": "Allow listed chat apps",
+        "modeAllowListedHint": "Apps on the list below are captured without a prompt. Every other app still asks.",
+        "modeAsk": "Ask every time",
+        "modeAskHint": "Each capture shows a consent prompt naming the app and window.",
+        "modeLabel": "When the shortcut is pressed",
+        "permissionNote": "macOS also requires Screen Recording permission. Cognia checks it before each capture and never requests it on its own.",
+        "processNames": "Chat apps captured without asking",
+        "processNamesHint": "Exact process names, for example WeChat or QQ. Only this list counts; the Computer Use whitelist does not apply here.",
+        "processPlaceholder": "WeChat",
+        "removeEntryAria": "Remove {entry}",
+        "title": "Chat copilot capture"
+      },
       "defaultTier": "Default Tier",
       "defaultTierDescription": "The tier applied when no per-surface override is set.",
       "perPlugin": {
@@ -8810,6 +8829,61 @@
     "updateFailed": "The membership changed elsewhere or could not be updated.",
     "userId": "User ID",
     "userIdPlaceholder": "usr_…"
+  },
+  "chatCopilot": {
+    "actions": {
+      "close": "Close",
+      "instructions": "What you want to say (optional)",
+      "openScreenRecording": "Open Screen Recording settings",
+      "recapture": "Read the chat again",
+      "redraft": "Draft again"
+    },
+    "command": {
+      "title": "Chat copilot: read the chat in front"
+    },
+    "consent": {
+      "allowForLabel": "Stop asking for {app} for:",
+      "allowForMinutes": "{minutes} min",
+      "allowOnce": "Allow once",
+      "autoReject": "Declines automatically in {seconds}s",
+      "question": "Let the chat copilot read the window of {app} in front, once?",
+      "reject": "Don't allow",
+      "unknownApp": "this app",
+      "window": "Window: {title}"
+    },
+    "errors": {
+      "blocked_target": "This app is on the protected list (password managers, system security), so it is never captured.",
+      "capture_failed": "The window could not be captured.",
+      "credential_window": "A password field was focused, so the capture was blanked and nothing was read.",
+      "declined": "Capture not allowed. Nothing was read.",
+      "draft_failed": "The copilot could not finish. Try again.",
+      "kill_switch": "Automation is stopped by the kill switch. Release it in Settings → Automation to capture again.",
+      "no_frontmost_app": "No app window is in front. Switch to the chat and press the shortcut again.",
+      "no_local_ocr": "No on-device OCR engine is ready. Set one up in Settings → OCR; chat screenshots are never sent to cloud OCR.",
+      "no_messages": "No messages were found in the window. Open a conversation and try again.",
+      "ocr_failed": "On-device OCR could not read the window.",
+      "screen_recording_required": "Cognia needs the Screen Recording permission to read the chat window. Grant it in System Settings, then try again.",
+      "self_window": "Cognia was in front when the shortcut was pressed. Switch to the chat app and press it again.",
+      "unsupported_platform": "Reading another app's window is not supported on this system."
+    },
+    "footer": "Read once with on-device OCR. Nothing is typed into the chat app; copy a reply to use it.",
+    "overlayUnavailable": "The chat copilot window could not open. Its permission prompt appears in the main window instead.",
+    "phase": {
+      "capturing": "Capturing the chat window…",
+      "reading": "Reading the messages…",
+      "thinking": "Judging the conversation and drafting replies…"
+    },
+    "read": {
+      "contactAmbiguous": "More than one contact is named {name}, so no notes were used.",
+      "contactMatched": "Using what you noted about {name}.",
+      "messages": "Read {count, plural, one {# message} other {# messages}} from {app}.",
+      "unsided": {
+        "ambiguous": "Some messages could not be placed on either side.",
+        "one_sided": "Only one side of the conversation is visible, so the copilot can't tell which messages are yours.",
+        "single_column": "This app shows everyone's messages in one column, so senders can't be told apart."
+      }
+    },
+    "title": "Chat copilot"
   },
   "chatPlatformComposer": {
     "attachmentsUnsupported": "{platform} cannot upload these attachments through this connection. Remove them to send text; your draft has been kept.",
@@ -29510,7 +29584,8 @@
       "unrankedReason": {
         "no_provider": "Not ranked — no decision provider is selected.",
         "not_validated": "Not ranked — the selected provider is not validated for ranking replies.",
-        "single_candidate": "Only one reply was drafted, so there was nothing to rank."
+        "single_candidate": "Only one reply was drafted, so there was nothing to rank.",
+        "unsided": "Not ranked — some senders could not be identified."
       }
     },
     "errors": {
@@ -29554,7 +29629,8 @@
         "no_provider": "No decision provider is selected, so the conversation is not judged and drafts are not ranked. Pick one in Settings → Conversation.",
         "not_configured": "The decision endpoint is missing a URL, model or key.",
         "not_validated": "The selected decision provider has not passed calibration for conversation judgment (the local laya checkpoint scores near chance on it), so this chat is not judged and drafts are not ranked. Use a remote Jev endpoint in Settings → Conversation for this.",
-        "provider_unavailable": "The decision provider is not ready yet (the model may still be loading)."
+        "provider_unavailable": "The decision provider is not ready yet (the model may still be loading).",
+        "unsided": "Couldn't tell who sent some of these messages, so the conversation is not judged and replies are not ranked. This works best in chat apps that show your own messages on one side."
       }
     },
     "knowledge": {
@@ -41886,6 +41962,7 @@
         "workflow": "Workflow editor",
         "zoom": "Zoom"
       },
+      "chatCopilotCapture": "Chat copilot: read the chat in front",
       "clear": "Clear",
       "conflictBlocked": "Chord already bound",
       "conflictWith": "Conflicts with",

@@ -7,7 +7,7 @@
  * text where the user can review it; nothing here sends.
  */
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CheckIcon, CopyIcon, CornerDownLeftIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -105,14 +105,32 @@ function Candidate({
   probability,
   best,
   onFill,
+  writeText,
 }: {
   text: string
   probability: number | null
   best: boolean
   onFill?: (text: string) => void
+  writeText?: (text: string) => Promise<void>
 }) {
   const t = useTranslations("replyCopilot")
-  const { copy, copied } = useCopy()
+  const fallback = useCopy()
+  const [hostCopied, setHostCopied] = useState(false)
+  useEffect(() => {
+    if (!hostCopied) return
+    const id = window.setTimeout(() => setHostCopied(false), 1500)
+    return () => window.clearTimeout(id)
+  }, [hostCopied])
+  const copied = writeText ? hostCopied : fallback.copied
+  const copy = async (value: string) => {
+    if (!writeText) return void (await fallback.copy(value))
+    try {
+      await writeText(value)
+      setHostCopied(true)
+    } catch {
+      setHostCopied(false)
+    }
+  }
   return (
     <li
       className={cn("rounded-md border p-2", best && "border-primary/50 bg-primary/5")}
@@ -155,9 +173,19 @@ export interface CopilotResultCardProps {
   knowledge: CopilotKnowledge | null
   /** Put a candidate into the composer. Absent where there is no composer (overlay). */
   onFill?: (text: string) => void
+  /**
+   * Copy through the host instead of `navigator.clipboard`, which refuses in
+   * a window that never takes focus (the desktop overlay panel).
+   */
+  writeText?: (text: string) => Promise<void>
 }
 
-export function CopilotResultCard({ result, knowledge, onFill }: CopilotResultCardProps) {
+export function CopilotResultCard({
+  result,
+  knowledge,
+  onFill,
+  writeText,
+}: CopilotResultCardProps) {
   const t = useTranslations("replyCopilot")
   const [expandedKnowledge, setExpandedKnowledge] = useState(false)
   const { drafts } = result
@@ -180,6 +208,7 @@ export function CopilotResultCard({ result, knowledge, onFill }: CopilotResultCa
                   probability={candidate.probability}
                   best={drafts.ranked && index === 0}
                   onFill={onFill}
+                  writeText={writeText}
                 />
               ))}
             </ul>

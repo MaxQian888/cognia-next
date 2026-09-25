@@ -110,8 +110,25 @@ describe("ShortcutsSection", () => {
     it("renders 'Not set' with no Clear button until the user records one", () => {
       render(<ShortcutsSection />)
       expect(screen.getByText("Toggle desktop pet")).toBeInTheDocument()
-      expect(screen.getByText("Not set")).toBeInTheDocument()
+      // The pet toggle and the chat copilot.
+      expect(screen.getAllByText("Not set")).toHaveLength(2)
       expect(screen.queryByLabelText("Clear")).toBeNull()
+    })
+
+    it("offers the desktop chat copilot's capture as a bindable row", async () => {
+      invoke.mockResolvedValue(undefined)
+      useShortcutStore.setState({
+        bindings: { "chat-copilot.capture": "ctrl+alt+j" },
+        hydrated: true,
+      })
+      render(<ShortcutsSection />)
+      // This suite's next-intl mock echoes the key when no fallback is given.
+      expect(screen.getByText("chatCopilotCapture")).toBeInTheDocument()
+      fireEvent.click(screen.getByLabelText("Clear"))
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(invoke).toHaveBeenCalledWith("shortcut_unbind", { id: "chat-copilot.capture" })
     })
 
     it("shows the bound chord and a Clear button once bound, which unbinds on click", async () => {
@@ -121,7 +138,8 @@ describe("ShortcutsSection", () => {
         hydrated: true,
       })
       render(<ShortcutsSection />)
-      expect(screen.queryByText("Not set")).toBeNull()
+      // Only the unbound chat copilot row still says so.
+      expect(screen.getAllByText("Not set")).toHaveLength(1)
       const clearButton = screen.getByLabelText("Clear")
       fireEvent.click(clearButton)
       await act(async () => {

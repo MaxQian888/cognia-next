@@ -69,6 +69,7 @@
     "workflow": "Workflow editor",
     "zoom": "Zoom"
   },
+  "chatCopilotCapture": "Chat copilot: read the chat in front",
   "clear": "Clear",
   "conflictBlocked": "Chord already bound",
   "conflictWith": "Conflicts with",

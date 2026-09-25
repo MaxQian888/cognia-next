@@ -30,7 +30,8 @@
       "provider_unavailable": "The decision provider is not ready yet (the model may still be loading).",
       "not_configured": "The decision endpoint is missing a URL, model or key.",
       "cors_unreachable": "The browser version cannot reach the decision endpoint. Use the desktop or mobile app.",
-      "not_validated": "The selected decision provider has not passed calibration for conversation judgment (the local laya checkpoint scores near chance on it), so this chat is not judged and drafts are not ranked. Use a remote Jev endpoint in Settings → Conversation for this."
+      "not_validated": "The selected decision provider has not passed calibration for conversation judgment (the local laya checkpoint scores near chance on it), so this chat is not judged and drafts are not ranked. Use a remote Jev endpoint in Settings → Conversation for this.",
+      "unsided": "Couldn't tell who sent some of these messages, so the conversation is not judged and replies are not ranked. This works best in chat apps that show your own messages on one side."
     }
   },
   "tone": {
@@ -81,7 +82,8 @@
     "unrankedReason": {
       "no_provider": "Not ranked — no decision provider is selected.",
       "not_validated": "Not ranked — the selected provider is not validated for ranking replies.",
-      "single_candidate": "Only one reply was drafted, so there was nothing to rank."
+      "single_candidate": "Only one reply was drafted, so there was nothing to rank.",
+      "unsided": "Not ranked — some senders could not be identified."
     }
   },
   "errors": {

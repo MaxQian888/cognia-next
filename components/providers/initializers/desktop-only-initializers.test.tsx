@@ -26,7 +26,14 @@ jest.mock("@/lib/boot/capabilities", () => ({
 }))
 
 let mockPetRole:
-  "main" | "web" | "overlay" | "popup" | "island" | "selection-toolbar" | "tray-panel" = "main"
+  | "main"
+  | "web"
+  | "overlay"
+  | "popup"
+  | "island"
+  | "selection-toolbar"
+  | "tray-panel"
+  | "chat-copilot" = "main"
 jest.mock("@/lib/pet/window-role", () => ({
   getPetWindowRole: () => mockPetRole,
   isSecondaryOverlayRole: (role: string) =>
@@ -34,7 +41,8 @@ jest.mock("@/lib/pet/window-role", () => ({
     role === "popup" ||
     role === "island" ||
     role === "selection-toolbar" ||
-    role === "tray-panel",
+    role === "tray-panel" ||
+    role === "chat-copilot",
 }))
 
 describe("DesktopOnlyInitializers", () => {
@@ -64,7 +72,7 @@ describe("DesktopOnlyInitializers", () => {
     // WebviewHeartbeatInitializer and ExitConfirmationDialog moved up to
     // WindowLivenessInitializers. UpdateCheckInitializer moved out entirely:
     // the Update Center sweep covers every host, not just the desktop.)
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(23)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(24)
     expect(mockMarkDesktopReady).toHaveBeenCalledWith("desktop-tools")
   })
 
@@ -78,18 +86,22 @@ describe("DesktopOnlyInitializers", () => {
     expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(0)
   })
 
-  it.each(["overlay", "popup", "island", "selection-toolbar", "tray-panel"] as const)(
-    "renders nothing in the %s pet window even on Tauri",
-    async (role) => {
-      isTauriMock.mockReturnValue(true)
-      mockPetRole = role
-      let container!: HTMLElement
-      await act(async () => {
-        container = render(<DesktopOnlyInitializers />).container
-      })
-      // The bundled initializers are all main-window concerns; the pet windows
-      // must not run them (e.g. the character-pack fs scan the caps deny).
-      expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(0)
-    }
-  )
+  it.each([
+    "overlay",
+    "popup",
+    "island",
+    "selection-toolbar",
+    "tray-panel",
+    "chat-copilot",
+  ] as const)("renders nothing in the %s pet window even on Tauri", async (role) => {
+    isTauriMock.mockReturnValue(true)
+    mockPetRole = role
+    let container!: HTMLElement
+    await act(async () => {
+      container = render(<DesktopOnlyInitializers />).container
+    })
+    // The bundled initializers are all main-window concerns; the pet windows
+    // must not run them (e.g. the character-pack fs scan the caps deny).
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(0)
+  })
 })

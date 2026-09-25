@@ -83,6 +83,7 @@
       "decisionAllow": "allow",
       "decisionConsent": "consent",
       "decisionDeny": "deny",
+      "surfaceChatCopilot": "聊天副驾",
       "surfaceComputerUse": "桌面自动化",
       "surfaceMcp": "MCP",
       "surfacePlugin": "插件",
@@ -129,6 +130,7 @@
     "commands": {
       "auditSnapshot": "读取审计快照",
       "capabilities": "读取能力清单",
+      "capture_frontmost_window": "截取最前方的聊天窗口",
       "click": "点击屏幕",
       "cursorPosition": "读取光标位置",
       "drag": "拖拽",
@@ -159,6 +161,7 @@
       "window": "窗口："
     },
     "surfaces": {
+      "chatCopilot": "聊天副驾",
       "computerUse": "桌面自动化",
       "mcp": "MCP",
       "plugin": "插件",
@@ -293,6 +296,22 @@
     "yes": "是"
   },
   "permissions": {
+    "chatCopilot": {
+      "add": "添加",
+      "description": "按下聊天副驾快捷键时，Cognia 只截取一次最前方的窗口，用本地 OCR 读取，绝不会向其中输入。此权限独立于电脑操控，也不受上方自动化总开关影响。",
+      "empty": "列表为空，每次截取都会询问。",
+      "modeAllowListed": "允许列表中的聊天应用",
+      "modeAllowListedHint": "下方列表中的应用截取时不再询问，其他应用仍然每次询问。",
+      "modeAsk": "每次询问",
+      "modeAskHint": "每次截取都会弹出同意提示，并写明应用和窗口。",
+      "modeLabel": "按下快捷键时",
+      "permissionNote": "macOS 还需要屏幕录制权限。Cognia 每次截取前都会检查，但绝不会自行申请。",
+      "processNames": "无需询问即可截取的聊天应用",
+      "processNamesHint": "填写准确的进程名，例如 WeChat 或 QQ。只认这份列表，电脑操控的白名单在这里不生效。",
+      "processPlaceholder": "WeChat",
+      "removeEntryAria": "移除 {entry}",
+      "title": "聊天副驾截屏"
+    },
     "defaultTier": "默认等级",
     "defaultTierDescription": "未设置界面级覆盖时使用的权限等级。",
     "perPlugin": {

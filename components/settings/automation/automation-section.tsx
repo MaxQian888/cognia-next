@@ -66,6 +66,7 @@ import { SandboxConnectionsTab } from "./sandbox-connections-tab"
 import { ScreenOffCard } from "./screen-off-card"
 import { BehaviorCard } from "./behavior-card"
 import { PlatformCapabilitiesCard } from "./platform-capabilities-card"
+import { ChatCopilotCaptureCard } from "./chat-copilot-capture-card"
 import { AutomationUnavailableNotice } from "./automation-unavailable-notice"
 
 interface BackendInitFailure {
@@ -367,8 +368,10 @@ function PermissionsTab() {
 
   // Sandbox is an audit-only tag (calls go through `sandbox_exec`, never
   // through `command_body!`); exclude it from the per-surface picker so
-  // the index into `PerSurfacePolicies` stays exhaustive.
-  type AutomationConfigurableSurface = Exclude<Surface, "sandbox">
+  // the index into `PerSurfacePolicies` stays exhaustive. The chat copilot
+  // has its own card: its tiers mean something else (see
+  // `ChatCopilotCaptureCard`).
+  type AutomationConfigurableSurface = Exclude<Surface, "sandbox" | "chatCopilot">
   const surfaces: Array<{
     id: AutomationConfigurableSurface
     label: string
@@ -451,6 +454,8 @@ function PermissionsTab() {
           })}
         </CardContent>
       </Card>
+
+      <ChatCopilotCaptureCard settings={settings} onChange={update} saving={saving} />
 
       <PerPluginOverridesCard settings={settings} onChange={update} saving={saving} />
     </div>

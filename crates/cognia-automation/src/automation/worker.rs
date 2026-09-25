@@ -77,6 +77,10 @@ enum Request {
         opts: ScreenshotOpts,
         reply: oneshot::Sender<Result<Screenshot>>,
     },
+    CaptureChatCopilotWindow {
+        target: ChatCopilotTarget,
+        reply: oneshot::Sender<Result<FrontmostWindowCapture>>,
+    },
     Click {
         target: ClickTarget,
         opts: ClickOpts,
@@ -346,6 +350,13 @@ fn dispatch(
         Request::Screenshot { opts, reply } => {
             let _ = reply.send(backend.screenshot(opts));
         }
+        Request::CaptureChatCopilotWindow { target, reply } => {
+            let _ = reply.send(capture_chat_copilot_window(
+                backend,
+                std::process::id(),
+                target,
+            ));
+        }
         Request::Click {
             target,
             opts,
@@ -491,6 +502,105 @@ fn dispatch(
         Request::Shutdown => return DispatchControl::Stop,
     }
     DispatchControl::Continue
+}
+
+/// Stable `PermissionDenied` reasons the renderer maps to copy (ADR-0194).
+pub const CHAT_COPILOT_SELF_WINDOW: &str = "chat_copilot_self_window";
+pub const CHAT_COPILOT_SCREEN_RECORDING_REQUIRED: &str = "chat_copilot_screen_recording_required";
+pub const CHAT_COPILOT_NO_FRONTMOST_APP: &str = "chat_copilot_no_frontmost_app";
+
+/// The window the chat copilot captures, pinned when the shortcut fired.
+///
+/// Resolved BEFORE the consent prompt: answering the prompt can move focus to
+/// Cognia, and re-reading focus afterwards would then capture (or refuse) the
+/// wrong window. The credential check is pinned for the same reason.
+#[derive(Debug, Clone)]
+pub struct ChatCopilotTarget {
+    pub process_id: u32,
+    pub process_name: Option<String>,
+    pub window_title: Option<String>,
+    pub focus_bounds: Option<Rect>,
+    pub focus_role: Option<String>,
+    pub credential_focused: bool,
+}
+
+/// Pin the frontmost window as the chat copilot's target. Refuses Cognia's
+/// own windows here so the user is never asked to approve capturing Cognia.
+pub fn resolve_chat_copilot_target(
+    focus: &ElementInfo,
+    self_pid: u32,
+    credential_focused: bool,
+) -> Result<ChatCopilotTarget> {
+    let process_id = focus
+        .process_id
+        .ok_or_else(|| AutomationError::PermissionDenied {
+            reason: CHAT_COPILOT_NO_FRONTMOST_APP.into(),
+        })?;
+    if process_id == self_pid {
+        return Err(AutomationError::PermissionDenied {
+            reason: CHAT_COPILOT_SELF_WINDOW.into(),
+        });
+    }
+    Ok(ChatCopilotTarget {
+        process_id,
+        process_name: focus.process_name.clone(),
+        window_title: focus.window_title.clone(),
+        focus_bounds: focus.bounding_rect,
+        focus_role: focus.control_type.clone(),
+        credential_focused,
+    })
+}
+
+/// ADR-0194 — capture the pinned target's window for the desktop chat
+/// copilot. Refuses Cognia itself (by pid, and through the hard target list,
+/// which also covers password managers and system auth), then takes the
+/// per-window capture (`screenshot_application`: ScreenCaptureKit on macOS)
+/// and blanks it when a credential window was focused.
+pub(crate) fn capture_chat_copilot_window(
+    backend: &dyn AutomationBackend,
+    self_pid: u32,
+    target: ChatCopilotTarget,
+) -> Result<FrontmostWindowCapture> {
+    let pid = target.process_id;
+    if pid == self_pid {
+        return Err(AutomationError::PermissionDenied {
+            reason: CHAT_COPILOT_SELF_WINDOW.into(),
+        });
+    }
+    let app = backend
+        .list_applications()?
+        .into_iter()
+        .find(|candidate| candidate.process_id == pid)
+        .unwrap_or_else(|| super::session::ResolvedApplication {
+            bundle_id: None,
+            path: None,
+            display_name: target
+                .process_name
+                .clone()
+                .unwrap_or_else(|| "Unknown".into()),
+            process_id: pid,
+        });
+    if let Decision::Deny { reason } = policy::evaluate_hard_target(HardTargetFacts {
+        bundle_id: app.bundle_id.as_deref(),
+        process_name: Some(app.display_name.as_str()),
+        window_title: target.window_title.as_deref(),
+        target_url: None,
+    }) {
+        return Err(AutomationError::PermissionDenied { reason });
+    }
+    let capture = backend.screenshot_application(&app, None, ScreenshotOpts::default())?;
+    Ok(FrontmostWindowCapture {
+        screenshot: redact_captured_frame(capture.screenshot, target.credential_focused)?,
+        app_name: app.display_name,
+        bundle_id: app.bundle_id,
+        window_title: target.window_title,
+        process_id: pid,
+        logical_bounds: capture.logical_bounds,
+        scale_factor: capture.scale_factor,
+        redacted: target.credential_focused,
+        focus_bounds: target.focus_bounds,
+        focus_role: target.focus_role,
+    })
 }
 
 /// Apply ADR-0020 W1 credential-window redaction to a freshly captured frame.
@@ -1181,6 +1291,18 @@ impl AutomationHandle {
         round_trip(&self.tx, |reply| Request::Screenshot { opts, reply }).await
     }
 
+    /// ADR-0194 — capture the pinned target's window for the chat copilot.
+    pub async fn capture_chat_copilot_window(
+        &self,
+        target: ChatCopilotTarget,
+    ) -> Result<FrontmostWindowCapture> {
+        round_trip(&self.tx, |reply| Request::CaptureChatCopilotWindow {
+            target,
+            reply,
+        })
+        .await
+    }
+
     pub async fn click(&self, target: ClickTarget, opts: ClickOpts) -> Result<()> {
         round_trip(&self.tx, |reply| Request::Click {
             target,
@@ -1425,6 +1547,236 @@ mod tests {
             assert_eq!(caps.platform, Platform::Unsupported);
         }
         h.shutdown().await;
+    }
+
+    struct ChatAppBackend {
+        pid: u32,
+        name: String,
+        bundle: String,
+    }
+
+    impl AutomationBackend for ChatAppBackend {
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                platform: Platform::Unsupported,
+                has_uia: false,
+                has_input_sim: false,
+                has_screenshot: false,
+                has_events: false,
+                has_a11y_tree: false,
+                monitors: vec![],
+            }
+        }
+        fn get_focus(&self) -> Result<ElementInfo> {
+            Ok(ElementInfo {
+                element_ref: ElementRef("focused".into()),
+                name: None,
+                automation_id: None,
+                control_type: Some("AXTextArea".into()),
+                class_name: None,
+                bounding_rect: Some(Rect {
+                    x: 160,
+                    y: 500,
+                    width: 640,
+                    height: 90,
+                }),
+                is_enabled: true,
+                is_focused: true,
+                process_id: Some(self.pid),
+                process_name: Some(self.name.clone()),
+                window_title: Some("Chat with Ann".into()),
+                children: None,
+            })
+        }
+        fn list_applications(
+            &self,
+        ) -> Result<Vec<crate::automation::session::ResolvedApplication>> {
+            Ok(vec![crate::automation::session::ResolvedApplication {
+                bundle_id: Some(self.bundle.clone()),
+                path: None,
+                display_name: self.name.clone(),
+                process_id: self.pid,
+            }])
+        }
+        fn screenshot_application(
+            &self,
+            app: &crate::automation::session::ResolvedApplication,
+            _hint: Option<&ElementInfo>,
+            _opts: ScreenshotOpts,
+        ) -> Result<crate::automation::backend::ApplicationScreenshot> {
+            // The capture targets the pinned app, which need not be the one
+            // this fake reports as focused.
+            let _ = app;
+            Ok(crate::automation::backend::ApplicationScreenshot {
+                screenshot: tiny_png_screenshot(),
+                window_id: Some(7),
+                display_id: None,
+                logical_bounds: Rect {
+                    x: 10,
+                    y: 20,
+                    width: 800,
+                    height: 600,
+                },
+                scale_factor: 2.0,
+            })
+        }
+        fn read_tree(&self, _r: Option<ElementRef>, _o: TreeOpts) -> Result<Vec<ElementInfo>> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn find(&self, _l: &Locator) -> Result<Option<ElementRef>> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn screenshot(&self, _o: ScreenshotOpts) -> Result<Screenshot> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn click(&self, _t: ClickTarget, _o: ClickOpts) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn type_text(&self, _text: &str, _o: TypeOpts) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn send_keys(&self, _c: &KeyChord) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn invoke_pattern(
+            &self,
+            _t: ElementRef,
+            _p: PatternKind,
+            _a: serde_json::Value,
+        ) -> Result<serde_json::Value> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn window_op(&self, _t: ElementRef, _o: WindowOp) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn subscribe_events(&self, _f: EventFilter) -> Result<SubscriptionId> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn unsubscribe(&self, _s: SubscriptionId) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn mouse_move(&self, _p: Point) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn drag(&self, _f: Point, _t: Point, _o: DragOpts) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn scroll(&self, _t: ScrollTarget, _o: ScrollOpts) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn hold_key(&self, _c: &KeyChord, _d: u32) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn mouse_button(&self, _b: MouseButton, _t: ButtonTransition) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn cursor_position(&self) -> Result<Point> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn pick_at_point(&self, _p: Point) -> Result<ElementInfo> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+    }
+
+    fn tiny_png_screenshot() -> Screenshot {
+        // Redaction re-encodes a blank frame of the same size without decoding
+        // the original, so placeholder bytes are enough here.
+        Screenshot {
+            bytes: "chat-window-pixels".into(),
+            width: 4,
+            height: 4,
+            captured_at: 0,
+            format: ImageFormat::Png,
+            source_width: None,
+            source_height: None,
+        }
+    }
+
+    fn chat_app(pid: u32, name: &str, bundle: &str) -> ChatAppBackend {
+        ChatAppBackend {
+            pid,
+            name: name.into(),
+            bundle: bundle.into(),
+        }
+    }
+
+    fn pinned(
+        backend: &ChatAppBackend,
+        self_pid: u32,
+        credential: bool,
+    ) -> Result<ChatCopilotTarget> {
+        resolve_chat_copilot_target(&backend.get_focus().unwrap(), self_pid, credential)
+    }
+
+    #[test]
+    fn chat_copilot_captures_the_pinned_chat_window() {
+        let backend = chat_app(4242, "WeChat", "com.tencent.xinWeChat");
+        let target = pinned(&backend, 1, false).unwrap();
+        let capture = capture_chat_copilot_window(&backend, 1, target).unwrap();
+        assert_eq!(capture.app_name, "WeChat");
+        assert_eq!(capture.bundle_id.as_deref(), Some("com.tencent.xinWeChat"));
+        assert_eq!(capture.window_title.as_deref(), Some("Chat with Ann"));
+        assert_eq!(capture.process_id, 4242);
+        assert_eq!(capture.logical_bounds.width, 800);
+        assert!(!capture.redacted);
+        // The composer that was focused when the shortcut fired.
+        assert_eq!(capture.focus_bounds.map(|r| r.width), Some(640));
+        assert_eq!(capture.focus_role.as_deref(), Some("AXTextArea"));
+    }
+
+    #[test]
+    fn chat_copilot_captures_the_pinned_window_even_after_focus_moves() {
+        // Pinned while WeChat was frontmost; by capture time the consent
+        // click has moved focus to Cognia (pid 7).
+        let wechat = chat_app(4242, "WeChat", "com.tencent.xinWeChat");
+        let target = pinned(&wechat, 7, false).unwrap();
+        let now_focused_on_cognia = ChatAppBackend {
+            pid: 7,
+            name: "Cognia".into(),
+            bundle: "com.cognia.desktop".into(),
+        };
+        // The fake only lists its own pid, so the pinned app resolves from its
+        // pinned name, never from the focused Cognia window.
+        let capture = capture_chat_copilot_window(&now_focused_on_cognia, 7, target).unwrap();
+        assert_eq!(capture.process_id, 4242);
+        assert_eq!(capture.app_name, "WeChat");
+        assert_eq!(capture.window_title.as_deref(), Some("Chat with Ann"));
+    }
+
+    #[test]
+    fn chat_copilot_refuses_cognia_itself_before_asking() {
+        let backend = chat_app(4242, "Cognia", "com.example.other");
+        let err = pinned(&backend, 4242, false).unwrap_err();
+        assert!(matches!(
+            err,
+            AutomationError::PermissionDenied { ref reason } if reason == CHAT_COPILOT_SELF_WINDOW
+        ));
+        let by_bundle = chat_app(99, "Cognia", "com.cognia.desktop");
+        let target = pinned(&by_bundle, 1, false).unwrap();
+        assert!(matches!(
+            capture_chat_copilot_window(&by_bundle, 1, target).unwrap_err(),
+            AutomationError::PermissionDenied { .. }
+        ));
+    }
+
+    #[test]
+    fn chat_copilot_reports_a_missing_frontmost_app() {
+        let backend = chat_app(4242, "WeChat", "com.tencent.xinWeChat");
+        let mut focus = backend.get_focus().unwrap();
+        focus.process_id = None;
+        assert!(matches!(
+            resolve_chat_copilot_target(&focus, 1, false).unwrap_err(),
+            AutomationError::PermissionDenied { ref reason } if reason == CHAT_COPILOT_NO_FRONTMOST_APP
+        ));
+    }
+
+    #[test]
+    fn chat_copilot_blanks_a_pinned_credential_window() {
+        let backend = chat_app(4242, "WeChat", "com.tencent.xinWeChat");
+        let target = pinned(&backend, 1, true).unwrap();
+        let capture = capture_chat_copilot_window(&backend, 1, target).unwrap();
+        assert!(capture.redacted);
+        assert_ne!(capture.screenshot.bytes, tiny_png_screenshot().bytes);
     }
 
     /// Backend whose `get_focus` always panics. `capabilities` returns

@@ -338,6 +338,36 @@ export function contactProfileOf(primary: PlatformIdentityRow): {
   return { ...(relationship ? { relationship } : {}), ...(note ? { note } : {}) }
 }
 
+export type DisplayNameMatch =
+  | { kind: "match"; primary: PlatformIdentityRow }
+  | { kind: "none" }
+  | { kind: "ambiguous"; count: number }
+
+function normalizeDisplayName(value: string): string {
+  return value.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase()
+}
+
+/**
+ * The one contact whose name (on any merged alias) reads exactly `name`.
+ *
+ * For the desktop chat copilot (ADR-0194 §8), which only has the title a chat
+ * window shows. Two people named "Alex" must not borrow each other's notes, so
+ * more than one match is `ambiguous`, never a guess.
+ */
+export async function findByDisplayName(name: string): Promise<DisplayNameMatch> {
+  const needle = normalizeDisplayName(name)
+  if (!needle) return { kind: "none" }
+  const rows = await getDb().platformIdentities.toArray()
+  const hits = rows.filter((row) =>
+    findInIdentityTree(
+      row,
+      (identity) => normalizeDisplayName(identity.displayName ?? "") === needle
+    )
+  )
+  if (hits.length === 1) return { kind: "match", primary: hits[0] }
+  return hits.length === 0 ? { kind: "none" } : { kind: "ambiguous", count: hits.length }
+}
+
 /** Resolve a top-level or absorbed platform address to its surviving primary. */
 export async function getByPlatformUser(
   platform: PlatformKind,

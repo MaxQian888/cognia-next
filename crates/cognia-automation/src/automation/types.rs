@@ -106,6 +106,28 @@ pub struct Rect {
     pub height: i32,
 }
 
+/// ADR-0194 — one capture of the frontmost application's window, taken for
+/// the desktop chat copilot. `redacted` is true when a credential window was
+/// focused and the frame was blanked before leaving the worker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontmostWindowCapture {
+    pub screenshot: Screenshot,
+    pub app_name: String,
+    pub bundle_id: Option<String>,
+    pub window_title: Option<String>,
+    pub process_id: u32,
+    pub logical_bounds: Rect,
+    pub scale_factor: f64,
+    pub redacted: bool,
+    /// The element focused when the shortcut fired, in global logical points.
+    /// Usually the app's message composer, whose extent tells the renderer
+    /// where the conversation pane is.
+    pub focus_bounds: Option<Rect>,
+    /// That element's role / control type (`AXTextArea`, `Edit`, …).
+    pub focus_role: Option<String>,
+}
+
 /// Element-locator query — the cross-platform analog of UIA's `UIMatcher`.
 /// `None` fields are wildcards; multiple non-None fields are ANDed.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

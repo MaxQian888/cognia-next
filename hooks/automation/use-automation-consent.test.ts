@@ -6,6 +6,11 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 
 import { useAutomationConsent } from "./use-automation-consent"
 import type { ConsentRequestEvent } from "@/lib/automation/client"
+import {
+  __resetConsentRouting,
+  claimConsentSurface,
+  markConsentSettled,
+} from "@/lib/automation/consent-routing"
 
 let handler: ((payload: ConsentRequestEvent) => void) | null = null
 const unsubMock = jest.fn()
@@ -37,6 +42,7 @@ function evt(overrides: Partial<ConsentRequestEvent> = {}): ConsentRequestEvent 
 }
 
 beforeEach(() => {
+  __resetConsentRouting()
   handler = null
   unsubMock.mockClear()
   consentRespondMock.mockClear().mockResolvedValue(undefined)
@@ -120,6 +126,39 @@ describe("useAutomationConsent", () => {
         prompt: expect.objectContaining({ sessionKey: null }),
       })
     )
+  })
+
+  it("hides prompts another window claimed or answered, only when asked to", async () => {
+    const routed = renderHook(() => useAutomationConsent({ enabled: true, honorRouting: true }))
+    await waitFor(() => expect(handler).toBeTruthy())
+    act(() => {
+      handler!(evt({ id: "copilot", surface: "chatCopilot" }))
+      handler!(evt({ id: "agent" }))
+    })
+    expect(routed.result.current.queue.map((p) => p.id)).toEqual(["copilot", "agent"])
+
+    let release = () => {}
+    act(() => {
+      release = claimConsentSurface("chatCopilot")
+    })
+    expect(routed.result.current.queue.map((p) => p.id)).toEqual(["agent"])
+
+    act(() => markConsentSettled("agent"))
+    expect(routed.result.current.queue).toEqual([])
+
+    // Released unanswered: the copilot prompt comes back rather than vanishing.
+    act(() => release())
+    expect(routed.result.current.queue.map((p) => p.id)).toEqual(["copilot"])
+  })
+
+  it("shows every prompt when routing is not honored", async () => {
+    const { result } = renderHook(() => useAutomationConsent({ enabled: true }))
+    await waitFor(() => expect(handler).toBeTruthy())
+    act(() => {
+      claimConsentSurface("chatCopilot")
+      handler!(evt({ id: "copilot", surface: "chatCopilot" }))
+    })
+    expect(result.current.queue.map((p) => p.id)).toEqual(["copilot"])
   })
 
   it("unsubscribes on unmount", async () => {

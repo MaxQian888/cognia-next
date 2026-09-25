@@ -18,14 +18,21 @@ export const COPILOT_WINDOW = 10
 
 export type CopilotSide = "me" | "other"
 
+/**
+ * A turn's sender as far as the source can tell. Session rows always know;
+ * a turn read off another app's window (ADR-0194 §8) is `"unknown"` when its
+ * bubble could not be placed on either side.
+ */
+export type CopilotTurnSide = CopilotSide | "unknown"
+
 export interface CopilotTurn {
-  from: CopilotSide
+  from: CopilotTurnSide
   text: string
 }
 
 export interface CopilotTranscript {
   turns: CopilotTurn[]
-  latestFrom: CopilotSide
+  latestFrom: CopilotTurnSide
   /** Sender of the latest "other" turn — the contact the copilot reads for. */
   latestOtherSender: PlatformIdentity | null
   /** More than one distinct "other" speaker in the window. */
@@ -111,12 +118,27 @@ export function buildCopilotTranscript(
   }
 }
 
-/** The calibrated wire state: `{ chat: { relationship, messages, latest_from }, background? }`. */
+/**
+ * Every sender is known. The judge questions were calibrated on `me` / `other`
+ * turns; a transcript with an unknown sender is drafted for but never judged.
+ */
+export function isSidedTranscript(transcript: CopilotTranscript): boolean {
+  return transcript.turns.every((turn) => turn.from !== "unknown")
+}
+
+/**
+ * The calibrated wire state: `{ chat: { relationship, messages, latest_from }, background? }`.
+ * Throws for an unsided transcript: sending `"unknown"` would ask the judge a
+ * question it was never calibrated on.
+ */
 export function toCopilotState(
   transcript: CopilotTranscript,
   relationship: string,
   background?: string
 ): Record<string, unknown> {
+  if (!isSidedTranscript(transcript)) {
+    throw new Error("toCopilotState needs every turn's sender; this transcript has unknown ones")
+  }
   return {
     chat: {
       relationship,

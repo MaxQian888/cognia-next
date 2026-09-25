@@ -27,6 +27,7 @@ import { BUILTIN_HTTP_PROVIDER_ID } from "@/lib/decisions/providers/decisions-ht
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import {
   COPILOT_STATE_TRIM,
+  isSidedTranscript,
   toCopilotState,
   type CopilotTranscript,
 } from "@/lib/reply-copilot/build-state"
@@ -64,8 +65,12 @@ const UNAVAILABLE_KINDS: ReadonlySet<DecisionErrorKind> = new Set([
   "cors_unreachable",
 ])
 
-/** Why the copilot did not judge: a decision error, or a provider not validated for this set. */
-export type CopilotUnavailableReason = DecisionErrorKind | "not_validated"
+/**
+ * Why the copilot did not judge: a decision error, a provider not validated for
+ * this set, or a transcript whose senders could not all be told apart (a
+ * screen read, ADR-0194 §8).
+ */
+export type CopilotUnavailableReason = DecisionErrorKind | "not_validated" | "unsided"
 
 export type JudgeOutcome =
   | {
@@ -88,7 +93,7 @@ export type DraftOutcome =
       /** False when ranking was not possible; `rankError` / `rankSkipped` say why. */
       ranked: boolean
       rankError?: DecisionErrorKind
-      rankSkipped?: "no_provider" | "not_validated" | "single_candidate"
+      rankSkipped?: "no_provider" | "not_validated" | "single_candidate" | "unsided"
     }
   | { kind: "skipped"; reason: "pii" | "empty" | "no-output" | "no-model" }
   | { kind: "failed" }
@@ -194,24 +199,27 @@ export async function runCopilot(
     return { result: first, backgroundDropped: false }
   }
 
-  const judgeReady = provider?.validated === true
-  const judgePromise: Promise<JudgeOutcome> = !provider
-    ? Promise.resolve({ kind: "unavailable", reason: "no_provider" })
-    : !judgeReady
-      ? Promise.resolve({ kind: "unavailable", reason: "not_validated" })
-      : decideWithBackground(judgeQuestions(variant)).then(({ result, backgroundDropped }) => {
-          if (!result.ok) return outcomeOfFailure(result.error.kind)
-          const judgment = toJudgment(result.answers)
-          if (isEmptyJudgment(judgment)) return { kind: "failed", reason: "provider_error" }
-          return {
-            kind: "ok",
-            judgment,
-            providerId: result.providerId,
-            latencyMs: result.latencyMs,
-            truncated: Boolean(result.truncation || result.stateTruncated),
-            backgroundDropped,
-          }
-        })
+  const sided = isSidedTranscript(input.transcript)
+  const judgeReady = sided && provider?.validated === true
+  const judgePromise: Promise<JudgeOutcome> = !sided
+    ? Promise.resolve({ kind: "unavailable", reason: "unsided" })
+    : !provider
+      ? Promise.resolve({ kind: "unavailable", reason: "no_provider" })
+      : !judgeReady
+        ? Promise.resolve({ kind: "unavailable", reason: "not_validated" })
+        : decideWithBackground(judgeQuestions(variant)).then(({ result, backgroundDropped }) => {
+            if (!result.ok) return outcomeOfFailure(result.error.kind)
+            const judgment = toJudgment(result.answers)
+            if (isEmptyJudgment(judgment)) return { kind: "failed", reason: "provider_error" }
+            return {
+              kind: "ok",
+              judgment,
+              providerId: result.providerId,
+              latencyMs: result.latencyMs,
+              truncated: Boolean(result.truncation || result.stateTruncated),
+              backgroundDropped,
+            }
+          })
 
   type DraftAttempt =
     DraftCandidatesResult | { kind: "failed" } | { kind: "skipped"; reason: "no-model" }
@@ -243,7 +251,13 @@ export async function runCopilot(
       kind: "ok",
       candidates: rankCandidates(drafted.candidates, null),
       ranked: false,
-      rankSkipped: !provider ? "no_provider" : !judgeReady ? "not_validated" : "single_candidate",
+      rankSkipped: !sided
+        ? "unsided"
+        : !provider
+          ? "no_provider"
+          : !judgeReady
+            ? "not_validated"
+            : "single_candidate",
     }
   } else {
     const { result } = await decideWithBackground(rankQuestion(drafted.candidates, variant))

@@ -1,0 +1,8 @@
+[[permission]]
+identifier = "allow-chat-copilot-app-commands"
+description = "Enables the application commands invoked by the trusted local desktop chat copilot overlay window."
+commands.allow = [
+  "chat_copilot_copy",
+  "chat_copilot_resize",
+  "chat_copilot_reveal",
+]

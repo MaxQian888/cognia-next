@@ -144,6 +144,7 @@ export function AutomationAuditTable() {
               <SelectItem value="computerUse">{tFilters("surfaceComputerUse")}</SelectItem>
               <SelectItem value="mcp">{tFilters("surfaceMcp")}</SelectItem>
               <SelectItem value="plugin">{tFilters("surfacePlugin")}</SelectItem>
+              <SelectItem value="chatCopilot">{tFilters("surfaceChatCopilot")}</SelectItem>
             </SelectContent>
           </Select>
           <Select

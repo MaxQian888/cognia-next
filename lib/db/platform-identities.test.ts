@@ -12,6 +12,7 @@ import {
   listMergeCandidates,
   updateIdentityProfile,
   contactProfileOf,
+  findByDisplayName,
   MAX_RELATIONSHIP_CHARS,
 } from "./platform-identities"
 import { getDb } from "./schema"
@@ -402,6 +403,37 @@ describe("platform-identities", () => {
 
     it("reports nothing for a contact without a profile", async () => {
       expect(contactProfileOf(await upsertIdentity(baseInput()))).toEqual({})
+    })
+  })
+
+  describe("findByDisplayName (desktop chat copilot)", () => {
+    it("matches one contact by any alias name, ignoring case and spacing", async () => {
+      const primary = await upsertIdentity(baseInput())
+      const alias = await upsertIdentity({
+        ...baseInput(),
+        platform: "discord",
+        adapterId: "adp_2",
+        remoteUserId: "snow_1",
+        displayName: "Ａlice  Wong",
+      })
+      await mergeIdentities(primary.id, alias.id)
+      await expect(findByDisplayName("  alice wong ")).resolves.toMatchObject({
+        kind: "match",
+        primary: { id: primary.id },
+      })
+      await expect(findByDisplayName("ALICE")).resolves.toMatchObject({ kind: "match" })
+    })
+
+    it("refuses to guess between two people with the same name", async () => {
+      await upsertIdentity(baseInput())
+      await upsertIdentity({ ...baseInput(), adapterId: "adp_9", remoteUserId: "other" })
+      await expect(findByDisplayName("Alice")).resolves.toEqual({ kind: "ambiguous", count: 2 })
+    })
+
+    it("finds nothing for an empty or unknown name", async () => {
+      await upsertIdentity(baseInput())
+      await expect(findByDisplayName("   ")).resolves.toEqual({ kind: "none" })
+      await expect(findByDisplayName("Bob")).resolves.toEqual({ kind: "none" })
     })
   })
 })

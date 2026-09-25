@@ -81,7 +81,7 @@ export async function listenUiaEvents(
   return () => safeUnlisten(off)
 }
 
-export type Surface = "workflow" | "computerUse" | "mcp" | "plugin" | "sandbox"
+export type Surface = "workflow" | "computerUse" | "mcp" | "plugin" | "sandbox" | "chatCopilot"
 
 export interface CallContext {
   surface?: Surface
@@ -172,6 +172,34 @@ export interface VirtualDisplayProbeResult {
   nonBlack: boolean
   monitor: string
 }
+
+/** Mirror of `types.rs::FrontmostWindowCapture` (ADR-0194 §8). */
+export interface FrontmostWindowCapture {
+  screenshot: Screenshot
+  appName: string
+  bundleId: string | null
+  windowTitle: string | null
+  processId: number
+  /** The captured window, in global logical points. */
+  logicalBounds: Rect
+  /** Pixels per logical point in `screenshot`. */
+  scaleFactor: number
+  /** A credential window was focused and the frame was blanked. */
+  redacted: boolean
+  /** The element focused when the shortcut fired (usually the composer). */
+  focusBounds: Rect | null
+  focusRole: string | null
+}
+
+/**
+ * Stable `PermissionDenied` reasons the capture returns
+ * (`worker.rs::CHAT_COPILOT_*`); anything else is a policy or backend refusal.
+ */
+export const CHAT_COPILOT_CAPTURE_REASONS = {
+  selfWindow: "chat_copilot_self_window",
+  screenRecordingRequired: "chat_copilot_screen_recording_required",
+  noFrontmostApp: "chat_copilot_no_frontmost_app",
+} as const
 
 /** Outcome of arming the virtual display before a screen-off action. */
 export interface VirtualDisplayArmResult {
@@ -274,6 +302,18 @@ export const desktop = {
     return transport.call<Screenshot>("desktop_screenshot", {
       args: { opts, ctx },
     })
+  },
+
+  /**
+   * ADR-0194 §8 — one read-only capture of the frontmost app window for the
+   * desktop chat copilot. Gated on the dedicated `chatCopilot` surface (asks
+   * every time unless that app is on the surface's own allow-list), refuses
+   * Cognia's windows and password managers, and pins the target before the
+   * prompt so answering it cannot change what is captured. Takes no context:
+   * the surface is fixed host-side, so a caller cannot re-label the call.
+   */
+  captureFrontmostWindow(): Promise<FrontmostWindowCapture> {
+    return transport.call<FrontmostWindowCapture>("desktop_capture_frontmost_window", {})
   },
 
   click(target: ClickTarget, opts: ClickOpts = {}, ctx: CallContext = {}): Promise<void> {
@@ -628,6 +668,13 @@ export interface PerSurfacePolicies {
   computerUse: SurfacePolicy
   mcp: SurfacePolicy
   plugin: PluginSurfacePolicy
+  /**
+   * ADR-0194 §8 — the desktop screen-chat copilot's single read-only capture.
+   * Independent of the automation master switch and of Computer Use: `off` and
+   * `perCall` both ask on every capture, `whitelist` skips the prompt only for
+   * matching chat apps. It never escalates to input.
+   */
+  chatCopilot: SurfacePolicy
 }
 
 export interface AuditSettings {
@@ -694,6 +741,7 @@ export function defaultAutomationSettings(): AutomationSettings {
       computerUse: { tier: "off" },
       mcp: { tier: "off" },
       plugin: { tier: "off", perPluginOverrides: {} },
+      chatCopilot: { tier: "off" },
     },
     audit: { retentionDays: 30, exportEnabled: true },
     redactScreenshots: false,

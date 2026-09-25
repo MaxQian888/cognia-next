@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import {
+  CHAT_COPILOT_WINDOW_LABEL,
   getPetWindowRole,
   ISLAND_WINDOW_LABEL,
   isMainAppWindow,
@@ -153,5 +154,17 @@ describe("the Capacity Dock window (ADR-0165)", () => {
     // Its capability file grants a handful of commands. Anything gated on
     // `isMainAppWindow` would otherwise log denied-capability warnings there.
     expect(isMainAppWindow(() => USAGE_DOCK_WINDOW_LABEL)).toBe(false)
+  })
+})
+
+describe("the desktop chat copilot overlay (ADR-0194)", () => {
+  beforeEach(() => setTauri(true))
+  afterEach(() => setTauri(false))
+
+  it("is a secondary overlay with its own role, never the main window", () => {
+    expect(getPetWindowRole(() => CHAT_COPILOT_WINDOW_LABEL)).toBe("chat-copilot")
+    expect(isSecondaryOverlayRole("chat-copilot")).toBe(true)
+    // The copilot controller and its capture command must mount only in main.
+    expect(isMainAppWindow(() => CHAT_COPILOT_WINDOW_LABEL)).toBe(false)
   })
 })

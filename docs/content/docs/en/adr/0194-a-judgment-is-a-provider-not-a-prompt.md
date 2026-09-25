@@ -130,6 +130,45 @@ clears them, and the transcript renders them as chips. Outbound ignores
 annotate. Laya's observe mode uses it: a would-be block now shows its scores on
 the message instead of only bumping a counter.
 
+### 8. The desktop copilot reads pixels once, asks first, and never types
+
+On the desktop the same copilot runs over another app's chat window, from a
+shortcut (`chat-copilot.capture`, unbound by default).
+
+- **Its own permission surface.** `Surface::ChatCopilot` accepts exactly one
+  command, `capture_frontmost_window`, and nothing else. It is not silenced by
+  the automation switch and does not inherit the default tier, which govern
+  agents driving the desktop. `off` and `perCall` both ask every time;
+  `whitelist` captures the apps on the surface's own list without asking and
+  never falls back to the Computer Use whitelist. Its consent prompt carries no
+  screen thumbnail, because that thumbnail would travel to paired phones.
+- **The target is pinned before the prompt.** The command reads focus, refuses
+  Cognia's own windows and the hard-target list (password managers, system
+  auth), preflights Screen Recording without ever requesting it, and only then
+  asks. Answering can move focus to Cognia, so the capture uses the pinned
+  process, not whatever is frontmost afterwards. A focused credential window
+  blanks the frame, and the renderer says so instead of reading nothing.
+- **Local OCR only, never cached.** The frame is read by the first ready local
+  engine (Apple Vision, PaddleOCR, Tesseract) with cloud fallback forced off,
+  and the result skips the OCR cache.
+- **Sides are inferred, and admitted when unknown.** `bubble-grouper.ts`
+  rebuilds messages from line geometry: the focused composer, when there is
+  one, bounds the conversation pane; timestamps and centered system lines drop;
+  a line hugging the left edge is theirs, the right edge mine. A single-column
+  app (Slack, Discord, Teams), an unlisted app that never shows the user's side,
+  or a bubble too close to call makes the transcript unsided (`unsided`
+  reason): drafts are still written, but the judge and the ranking are skipped
+  and the overlay says why. Group sender names become "Person A/B"; contact
+  knowledge is used only when the chat header or window title names exactly
+  one contact.
+- **An overlay beside the chat, copy only.** The pipeline runs in the main
+  window, where plugin providers live; a non-activating panel beside the chat
+  window shows the prompt, the read and the candidates. The main window's
+  consent overlay stands back for this surface while the copilot holds a
+  claim (`lib/automation/consent-routing.ts`) and takes the prompt back if the
+  panel cannot open. The panel is kept out of screen capture, copies through
+  the host clipboard, and has no path to type into the chat app.
+
 ## Alternatives rejected
 
 - **Emulate the judge with the chat LLM.** Cheap to build, but it yields model
@@ -141,6 +180,13 @@ the message instead of only bumping a counter.
   without a way in.
 - **Trust `locality` to skip redaction for local providers.** A plugin can
   declare anything; the gate has to hold without believing it.
+- **Reuse the Computer Use permission for the screen copilot.** One grant would
+  have covered both "an agent may drive this app" and "read my chat when I
+  press a key"; revoking either would have revoked both.
+- **Read the chat through accessibility APIs, as Jarvis does on Android.**
+  Desktop chat apps (WeChat, QQ, most Electron clients) expose little or no
+  message text to accessibility, and walking another app's tree is the
+  driving-grade access this feature is designed not to need.
 
 ## Consequences
 

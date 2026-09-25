@@ -4,7 +4,7 @@
  * These are deep-link / overlay screens: the mobile pairing flow, OAuth
  * callbacks, the share target, a canvas join link, and the small frameless
  * Tauri windows (pet overlay/popup, island, selection toolbar, tray panel,
- * skill-recorder controller strip, Capacity Dock). They own the whole viewport and keep the
+ * skill-recorder controller strip, Capacity Dock, chat copilot). They own the whole viewport and keep the
  * document scroll, so anything the shells normally paint around a route — rail,
  * title bar, tab bar, persistent notices — must not appear on them.
  *
@@ -25,6 +25,7 @@ const BYPASS_PREFIXES = [
   "/tray-panel",
   "/recorder-controller",
   "/usage-dock",
+  "/chat-copilot",
 ]
 
 export function isShellBypassRoute(pathname: string | null | undefined): boolean {

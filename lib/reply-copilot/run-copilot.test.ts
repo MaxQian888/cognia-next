@@ -130,6 +130,19 @@ describe("runCopilot", () => {
     expect(decide).not.toHaveBeenCalled()
   })
 
+  it("never judges or ranks a transcript with an unknown sender, even on a validated provider", async () => {
+    const { d, decide } = deps()
+    const unsided: CopilotTranscript = {
+      ...transcript,
+      turns: [...transcript.turns, { from: "unknown", text: "在吗" }],
+      latestFrom: "unknown",
+    }
+    const result = await runCopilot({ transcript: unsided, knowledge, instructions: "", client }, d)
+    expect(result.judge).toEqual({ kind: "unavailable", reason: "unsided" })
+    expect(result.drafts).toMatchObject({ kind: "ok", ranked: false, rankSkipped: "unsided" })
+    expect(decide).not.toHaveBeenCalled()
+  })
+
   it("retries once without background when a strict endpoint rejects it", async () => {
     const decide = jest
       .fn<Promise<DecisionResult>, [DecisionRequest]>()

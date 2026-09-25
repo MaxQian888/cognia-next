@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "chat-copilot-window",
+  "description": "Least-privilege capabilities for the desktop chat copilot overlay (ADR-0194). It renders views pushed by the main window and sends intents back; it cannot capture, read settings, or reach automation commands.",
+  "windows": ["chat-copilot"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit-to",
+    "core:webview:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "allow-chat-copilot-app-commands"
+  ]
+}

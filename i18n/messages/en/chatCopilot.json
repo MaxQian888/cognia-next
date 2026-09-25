@@ -1,0 +1,55 @@
+{
+  "actions": {
+    "close": "Close",
+    "instructions": "What you want to say (optional)",
+    "openScreenRecording": "Open Screen Recording settings",
+    "recapture": "Read the chat again",
+    "redraft": "Draft again"
+  },
+  "command": {
+    "title": "Chat copilot: read the chat in front"
+  },
+  "consent": {
+    "allowForLabel": "Stop asking for {app} for:",
+    "allowForMinutes": "{minutes} min",
+    "allowOnce": "Allow once",
+    "autoReject": "Declines automatically in {seconds}s",
+    "question": "Let the chat copilot read the window of {app} in front, once?",
+    "reject": "Don't allow",
+    "unknownApp": "this app",
+    "window": "Window: {title}"
+  },
+  "errors": {
+    "blocked_target": "This app is on the protected list (password managers, system security), so it is never captured.",
+    "capture_failed": "The window could not be captured.",
+    "credential_window": "A password field was focused, so the capture was blanked and nothing was read.",
+    "declined": "Capture not allowed. Nothing was read.",
+    "draft_failed": "The copilot could not finish. Try again.",
+    "kill_switch": "Automation is stopped by the kill switch. Release it in Settings → Automation to capture again.",
+    "no_frontmost_app": "No app window is in front. Switch to the chat and press the shortcut again.",
+    "no_local_ocr": "No on-device OCR engine is ready. Set one up in Settings → OCR; chat screenshots are never sent to cloud OCR.",
+    "no_messages": "No messages were found in the window. Open a conversation and try again.",
+    "ocr_failed": "On-device OCR could not read the window.",
+    "screen_recording_required": "Cognia needs the Screen Recording permission to read the chat window. Grant it in System Settings, then try again.",
+    "self_window": "Cognia was in front when the shortcut was pressed. Switch to the chat app and press it again.",
+    "unsupported_platform": "Reading another app's window is not supported on this system."
+  },
+  "footer": "Read once with on-device OCR. Nothing is typed into the chat app; copy a reply to use it.",
+  "overlayUnavailable": "The chat copilot window could not open. Its permission prompt appears in the main window instead.",
+  "phase": {
+    "capturing": "Capturing the chat window…",
+    "reading": "Reading the messages…",
+    "thinking": "Judging the conversation and drafting replies…"
+  },
+  "read": {
+    "contactAmbiguous": "More than one contact is named {name}, so no notes were used.",
+    "contactMatched": "Using what you noted about {name}.",
+    "messages": "Read {count, plural, one {# message} other {# messages}} from {app}.",
+    "unsided": {
+      "ambiguous": "Some messages could not be placed on either side.",
+      "one_sided": "Only one side of the conversation is visible, so the copilot can't tell which messages are yours.",
+      "single_column": "This app shows everyone's messages in one column, so senders can't be told apart."
+    }
+  },
+  "title": "Chat copilot"
+}

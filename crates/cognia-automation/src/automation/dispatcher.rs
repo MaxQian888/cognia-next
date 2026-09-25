@@ -132,6 +132,15 @@ const THUMBNAIL_BOXES: [(u32, u32); 3] = [(640, 400), (400, 250), (256, 160)];
 /// own capture needs a consent prompt) and there is nothing to gate: the image
 /// is shown only to the operator being asked to authorize, never returned to
 /// the model, never written to the audit ring, and never persisted.
+/// Whether a consent prompt on `surface` carries a screen thumbnail.
+///
+/// Not for the chat copilot (ADR-0194): the operator is at the desk pressing
+/// the shortcut, and the thumbnail would put a picture of their private chat
+/// on the companion bus, which the capture's own consent exists to prevent.
+fn wants_consent_thumbnail(surface: Surface) -> bool {
+    surface != Surface::ChatCopilot
+}
+
 async fn capture_consent_thumbnail(handle: &AutomationHandle) -> Option<ConsentThumbnail> {
     let shot = handle.screenshot(ScreenshotOpts::default()).await.ok()?;
     let redacted = credential_window::is_credential_window_focused();
@@ -333,8 +342,10 @@ where
                     // oversized capture just means a text-only prompt, never a
                     // blocked action.
                     let thumbnail = match handle {
-                        Some(h) => capture_consent_thumbnail(h).await,
-                        None => None,
+                        Some(h) if wants_consent_thumbnail(surface) => {
+                            capture_consent_thumbnail(h).await
+                        }
+                        _ => None,
                     };
                     consent
                         .request_with_thumbnail(
@@ -602,6 +613,13 @@ mod tests {
         MAX_THUMBNAIL_B64_BYTES + 16 * 1024 <= WS_FRAME_CAP_BYTES,
         "thumbnail budget leaves under 16 KiB for the rest of the consent frame"
     );
+
+    #[test]
+    fn chat_copilot_consent_never_carries_a_screen_thumbnail() {
+        assert!(!wants_consent_thumbnail(Surface::ChatCopilot));
+        assert!(wants_consent_thumbnail(Surface::ComputerUse));
+        assert!(wants_consent_thumbnail(Surface::Plugin));
+    }
 
     #[test]
     fn thumbnail_boxes_step_down_monotonically() {

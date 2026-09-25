@@ -149,4 +149,40 @@ describe("CopilotResultCard", () => {
       "drafts.unrankedReason.not_validated"
     )
   })
+
+  it("says a screen read could not attribute senders, and offers copy only without onFill", () => {
+    render(
+      <CopilotResultCard
+        result={{
+          variant: "full",
+          judge: { kind: "unavailable", reason: "unsided" },
+          drafts: {
+            kind: "ok",
+            ranked: false,
+            rankSkipped: "unsided",
+            candidates: [{ text: "好", probability: null, slot: 0 }],
+          },
+        }}
+        knowledge={null}
+      />
+    )
+    expect(screen.getByTestId("copilot-judge-unavailable")).toHaveTextContent(
+      "judge.unavailable.unsided"
+    )
+    expect(screen.getByTestId("copilot-unranked")).toHaveTextContent(
+      "drafts.unrankedReason.unsided"
+    )
+    expect(screen.queryByRole("button", { name: "drafts.fill" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /drafts.copy/ })).toBeInTheDocument()
+  })
+
+  it("copies through the host when given a writer, instead of the web clipboard", async () => {
+    const writeText = jest.fn(async (_text: string) => undefined)
+    copy.mockClear()
+    render(<CopilotResultCard result={judged} knowledge={null} writeText={writeText} />)
+    fireEvent.click(screen.getAllByRole("button", { name: /drafts.copy/ })[0])
+    await screen.findByText("drafts.copied")
+    expect(writeText).toHaveBeenCalledWith("我查一下再回你")
+    expect(copy).not.toHaveBeenCalled()
+  })
 })

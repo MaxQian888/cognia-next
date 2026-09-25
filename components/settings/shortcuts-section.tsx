@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { KeyboardIcon, RotateCcwIcon } from "lucide-react"
 import { isTauri } from "@/lib/tauri"
+import { CHAT_COPILOT_COMMAND_ID } from "@/lib/reply-copilot/screen/overlay-client"
 import { Button } from "@/components/ui/button"
 import { useShortcutStore } from "@/lib/shortcuts/registry"
 import { parseKeyEvent, formatKeybinding } from "@/lib/shortcuts/utils"
@@ -93,7 +94,11 @@ const SELECTION_SHORTCUT_DEFAULTS = [
  * `lib/plugin/commands/registry.ts` so the bound chord actually dispatches
  * somewhere (see `lib/pet/commands.ts:registerPetCommands`).
  */
-const OPTIONAL_SHORTCUT_IDS = ["pet.toggle-window"] as const
+const OPTIONAL_SHORTCUT_IDS = [
+  "pet.toggle-window",
+  // Registered by `ChatCopilotInitializer` in the main desktop window.
+  CHAT_COPILOT_COMMAND_ID,
+] as const
 
 interface RecorderState {
   id: string
@@ -201,6 +206,7 @@ export function ShortcutsSection() {
 
   const optionalLabels: Record<(typeof OPTIONAL_SHORTCUT_IDS)[number], string> = {
     "pet.toggle-window": t("petToggleWindow", { fallback: "Toggle desktop pet" }),
+    "chat-copilot.capture": t("chatCopilotCapture"),
   }
   const optionalShortcutRows: Array<{ id: string; label: string; chord: Chord | null }> =
     OPTIONAL_SHORTCUT_IDS.map((id) => ({

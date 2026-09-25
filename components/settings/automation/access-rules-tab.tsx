@@ -344,7 +344,7 @@ export function AccessRulesTab() {
   )
 }
 
-interface BadgeListEditorProps {
+export interface BadgeListEditorProps {
   label: string
   description: string
   placeholder: string
@@ -360,11 +360,12 @@ interface BadgeListEditorProps {
 }
 
 /**
- * The admit-stage list. Entries are whole values rather than editable rows,
- * because a half-typed process name in this stage silently stops admitting the
- * app it was meant to name.
+ * The admit-stage list, also used by the chat-copilot capture allow-list.
+ * Entries are whole values rather than editable rows, because a half-typed
+ * process name in this stage silently stops admitting the app it was meant to
+ * name.
  */
-function BadgeListEditor({
+export function BadgeListEditor({
   label,
   description,
   placeholder,

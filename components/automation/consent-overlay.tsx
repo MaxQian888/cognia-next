@@ -55,7 +55,9 @@ export function ConsentOverlay() {
   // The queue, the countdown tick, the dedupe and the respond call all live in
   // `useAutomationConsent`, shared with the mobile sheet. This file held a
   // second copy of all four until they drifted.
-  const { queue, now, respond } = useAutomationConsent({ enabled: isTauri() })
+  // Prompts a feature answers in its own window (the chat copilot's overlay)
+  // are hidden here while it holds the claim, and come back if it lets go.
+  const { queue, now, respond } = useAutomationConsent({ enabled: isTauri(), honorRouting: true })
 
   if (!isTauri() || queue.length === 0) return null
 

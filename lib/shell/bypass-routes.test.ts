@@ -24,6 +24,9 @@ describe("isShellBypassRoute", () => {
     // frameless window: rail, title bar and the finish-setup bar must not paint
     // inside a 420x56 overlay.
     expect(isShellBypassRoute("/recorder-controller")).toBe(true)
+    // The desktop chat copilot's non-activating overlay panel (ADR-0194).
+    expect(isShellBypassRoute("/chat-copilot")).toBe(true)
+    expect(isShellBypassRoute("/chat-copilot.html")).toBe(true)
   })
 
   test("matches nested bypass route", () => {

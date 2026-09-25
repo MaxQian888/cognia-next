@@ -4366,6 +4366,7 @@
         "decisionAllow": "allow",
         "decisionConsent": "consent",
         "decisionDeny": "deny",
+        "surfaceChatCopilot": "聊天副驾",
         "surfaceComputerUse": "桌面自动化",
         "surfaceMcp": "MCP",
         "surfacePlugin": "插件",
@@ -4412,6 +4413,7 @@
       "commands": {
         "auditSnapshot": "读取审计快照",
         "capabilities": "读取能力清单",
+        "capture_frontmost_window": "截取最前方的聊天窗口",
         "click": "点击屏幕",
         "cursorPosition": "读取光标位置",
         "drag": "拖拽",
@@ -4442,6 +4444,7 @@
         "window": "窗口："
       },
       "surfaces": {
+        "chatCopilot": "聊天副驾",
         "computerUse": "桌面自动化",
         "mcp": "MCP",
         "plugin": "插件",
@@ -4576,6 +4579,22 @@
       "yes": "是"
     },
     "permissions": {
+      "chatCopilot": {
+        "add": "添加",
+        "description": "按下聊天副驾快捷键时，Cognia 只截取一次最前方的窗口，用本地 OCR 读取，绝不会向其中输入。此权限独立于电脑操控，也不受上方自动化总开关影响。",
+        "empty": "列表为空，每次截取都会询问。",
+        "modeAllowListed": "允许列表中的聊天应用",
+        "modeAllowListedHint": "下方列表中的应用截取时不再询问，其他应用仍然每次询问。",
+        "modeAsk": "每次询问",
+        "modeAskHint": "每次截取都会弹出同意提示，并写明应用和窗口。",
+        "modeLabel": "按下快捷键时",
+        "permissionNote": "macOS 还需要屏幕录制权限。Cognia 每次截取前都会检查，但绝不会自行申请。",
+        "processNames": "无需询问即可截取的聊天应用",
+        "processNamesHint": "填写准确的进程名，例如 WeChat 或 QQ。只认这份列表，电脑操控的白名单在这里不生效。",
+        "processPlaceholder": "WeChat",
+        "removeEntryAria": "移除 {entry}",
+        "title": "聊天副驾截屏"
+      },
       "defaultTier": "默认等级",
       "defaultTierDescription": "未设置界面级覆盖时使用的权限等级。",
       "perPlugin": {
@@ -8810,6 +8829,61 @@
     "updateFailed": "成员状态已在其他位置变化或无法更新。",
     "userId": "用户 ID",
     "userIdPlaceholder": "usr_…"
+  },
+  "chatCopilot": {
+    "actions": {
+      "close": "关闭",
+      "instructions": "你想说什么（可选）",
+      "openScreenRecording": "打开屏幕录制设置",
+      "recapture": "重新读取聊天",
+      "redraft": "重新起草"
+    },
+    "command": {
+      "title": "聊天副驾：读取最前方的聊天"
+    },
+    "consent": {
+      "allowForLabel": "对 {app} 暂停询问：",
+      "allowForMinutes": "{minutes} 分钟",
+      "allowOnce": "允许一次",
+      "autoReject": "{seconds} 秒后自动拒绝",
+      "question": "允许聊天副驾读取最前方的 {app} 窗口一次吗？",
+      "reject": "不允许",
+      "unknownApp": "该应用",
+      "window": "窗口：{title}"
+    },
+    "errors": {
+      "blocked_target": "该应用在受保护名单中（密码管理器、系统安全组件），永远不会被截取。",
+      "capture_failed": "无法截取该窗口。",
+      "credential_window": "当前聚焦的是密码输入框，截图已被遮蔽，未读取任何内容。",
+      "declined": "未获允许，没有读取任何内容。",
+      "draft_failed": "副驾没能完成，请重试。",
+      "kill_switch": "自动化已被紧急停止。请在 设置 → 自动化 中解除后再截取。",
+      "no_frontmost_app": "最前方没有应用窗口。请切换到聊天窗口后再按快捷键。",
+      "no_local_ocr": "没有可用的本地 OCR 引擎。请在 设置 → OCR 中配置；聊天截图绝不会发送给云端 OCR。",
+      "no_messages": "窗口中没有找到消息。请打开一个会话后重试。",
+      "ocr_failed": "本地 OCR 无法读取该窗口。",
+      "screen_recording_required": "Cognia 需要“屏幕录制”权限才能读取聊天窗口。请在系统设置中授权后重试。",
+      "self_window": "按下快捷键时最前方是 Cognia。请切换到聊天应用后再按一次。",
+      "unsupported_platform": "当前系统不支持读取其他应用的窗口。"
+    },
+    "footer": "只用本地 OCR 读取一次。不会向聊天应用输入任何内容；复制回复即可使用。",
+    "overlayUnavailable": "聊天副驾窗口无法打开，权限提示会改为显示在主窗口中。",
+    "phase": {
+      "capturing": "正在截取聊天窗口…",
+      "reading": "正在读取消息…",
+      "thinking": "正在判断对话并起草回复…"
+    },
+    "read": {
+      "contactAmbiguous": "有多个联系人名为 {name}，因此没有使用备注。",
+      "contactMatched": "已使用你对 {name} 的备注。",
+      "messages": "从 {app} 读取了 {count} 条消息。",
+      "unsided": {
+        "ambiguous": "部分消息无法判断在哪一侧。",
+        "one_sided": "只能看到对话的一侧，副驾无法分辨哪些消息是你发的。",
+        "single_column": "该应用把所有人的消息显示在同一列，无法分辨发送者。"
+      }
+    },
+    "title": "聊天副驾"
   },
   "chatPlatformComposer": {
     "attachmentsUnsupported": "当前连接无法向 {platform} 上传这些附件。可移除附件后发送文字，草稿已保留。",
@@ -29510,7 +29584,8 @@
       "unrankedReason": {
         "no_provider": "未排序：未选择决策模型。",
         "not_validated": "未排序：所选决策模型未通过回复排序校准。",
-        "single_candidate": "只起草了一条回复，无需排序。"
+        "single_candidate": "只起草了一条回复，无需排序。",
+        "unsided": "未排序——部分消息无法确定发送者。"
       }
     },
     "errors": {
@@ -29554,7 +29629,8 @@
         "no_provider": "未选择决策模型，因此不会判断对话，也不会给回复排序。请在 设置 → 对话 中选择。",
         "not_configured": "决策接口缺少地址、模型或密钥。",
         "not_validated": "所选决策模型未通过对话判断校准（本地 laya 检查点在该题集上接近随机），因此不判断这段对话，也不给回复排序。请在 设置 → 对话 中改用远程 Jev 接口。",
-        "provider_unavailable": "决策模型尚未就绪（模型可能仍在加载）。"
+        "provider_unavailable": "决策模型尚未就绪（模型可能仍在加载）。",
+        "unsided": "无法分辨部分消息是谁发的，因此不评估这段对话，也不给回复排序。在把自己的消息显示在一侧的聊天应用中效果最好。"
       }
     },
     "knowledge": {
@@ -41886,6 +41962,7 @@
         "workflow": "工作流编辑器",
         "zoom": "缩放"
       },
+      "chatCopilotCapture": "聊天副驾：读取最前方的聊天",
       "clear": "清除",
       "conflictBlocked": "该组合键已被占用",
       "conflictWith": "与之冲突：",

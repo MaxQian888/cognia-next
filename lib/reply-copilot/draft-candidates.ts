@@ -14,7 +14,7 @@
 
 import { hasNoLeakingPii, redactText, unredactText } from "@cognia/redact"
 import type { LlmClient } from "@/lib/twin/distill/llm"
-import type { CopilotTranscript } from "@/lib/reply-copilot/build-state"
+import type { CopilotTranscript, CopilotTurnSide } from "@/lib/reply-copilot/build-state"
 
 export const DRAFT_SYSTEM_PROMPT =
   "You draft replies for a person in an instant-messaging conversation. " +
@@ -43,13 +43,24 @@ export interface DraftCandidatesInput {
   signal?: AbortSignal
 }
 
+const SPEAKER_LABEL: Record<CopilotTurnSide, string> = {
+  me: "Me",
+  other: "Them",
+  unknown: "Unknown",
+}
+
 export function buildDraftPrompt(input: Omit<DraftCandidatesInput, "client" | "signal">): string {
   const lines: string[] = []
   if (input.background.trim()) lines.push("Background:", input.background.trim(), "")
   if (input.relationship.trim()) lines.push(`Relationship: ${input.relationship.trim()}`, "")
   lines.push("Conversation (oldest first):")
   for (const turn of input.transcript.turns) {
-    lines.push(`${turn.from === "me" ? "Me" : "Them"}: ${turn.text.replace(/\s*\n\s*/g, " ")}`)
+    lines.push(`${SPEAKER_LABEL[turn.from]}: ${turn.text.replace(/\s*\n\s*/g, " ")}`)
+  }
+  if (input.transcript.turns.some((turn) => turn.from === "unknown")) {
+    // A screen read (ADR-0194 §8) could not place these bubbles; guessing a
+    // side here would put words in the wrong person's mouth.
+    lines.push("(Messages marked Unknown could not be attributed; do not assume who wrote them.)")
   }
   if (input.instructions.trim()) lines.push("", `What I want to say: ${input.instructions.trim()}`)
   lines.push("", "Write my next message: 3 candidates as a JSON array.")

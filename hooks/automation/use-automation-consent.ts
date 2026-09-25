@@ -22,16 +22,17 @@
  * device that may not resolve consent).
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 
 import { transport } from "@/lib/tauri"
+import { desktop, type ConsentRequestEvent } from "@/lib/automation/client"
 import {
-  desktop,
-  type ConsentPromptPayload,
-  type ConsentRequestEvent,
-} from "@/lib/automation/client"
-
-const CONSENT_EVENT = "automation:consent-request"
+  CONSENT_REQUEST_EVENT,
+  consentPromptOf,
+  getConsentRoutingVersion,
+  isConsentRoutedElsewhere,
+  subscribeConsentRouting,
+} from "@/lib/automation/consent-routing"
 
 export interface PendingConsent extends ConsentRequestEvent {
   /** Wall-clock deadline for the renderer-side countdown. */
@@ -56,28 +57,29 @@ export interface AutomationConsentStream {
   ) => Promise<void>
 }
 
-function promptOnly(event: ConsentRequestEvent): ConsentPromptPayload {
-  return {
-    command: event.command,
-    surface: event.surface,
-    pluginId: event.pluginId,
-    processName: event.processName,
-    windowTitle: event.windowTitle,
-    commandDetail: event.commandDetail ?? null,
-    // Part of the host's grant key — omitting it would register the grant
-    // under an empty session tag, so it would never match the prompts it was
-    // meant to cover and the user would be re-asked every call.
-    sessionKey: event.sessionKey ?? null,
-  }
-}
-
-export function useAutomationConsent({ enabled }: { enabled: boolean }): AutomationConsentStream {
+export function useAutomationConsent({
+  enabled,
+  honorRouting = false,
+}: {
+  enabled: boolean
+  /**
+   * Hide prompts another window has claimed or already answered
+   * (`lib/automation/consent-routing.ts`). The main desktop overlay sets it;
+   * the claim is only ever taken in the main window's runtime.
+   */
+  honorRouting?: boolean
+}): AutomationConsentStream {
   const [queue, setQueue] = useState<PendingConsent[]>([])
+  const routingVersion = useSyncExternalStore(
+    subscribeConsentRouting,
+    getConsentRoutingVersion,
+    getConsentRoutingVersion
+  )
   const [now, setNow] = useState<number>(() => Date.now())
 
   useEffect(() => {
     if (!enabled) return
-    const unsub = transport.subscribe<ConsentRequestEvent>(CONSENT_EVENT, (payload) => {
+    const unsub = transport.subscribe<ConsentRequestEvent>(CONSENT_REQUEST_EVENT, (payload) => {
       setQueue((prev) => {
         // Dedupe by id — a WS reconnect replays frames since the last cursor.
         if (prev.some((p) => p.id === payload.id)) return prev
@@ -109,7 +111,7 @@ export function useAutomationConsent({ enabled }: { enabled: boolean }): Automat
           id: event.id,
           allow,
           persist,
-          prompt: persist ? promptOnly(event) : undefined,
+          prompt: persist ? consentPromptOf(event) : undefined,
           grantDurationMs: persist ? grantDurationMs : undefined,
         })
       } catch (err) {
@@ -120,5 +122,13 @@ export function useAutomationConsent({ enabled }: { enabled: boolean }): Automat
     []
   )
 
-  return { queue, now, respond }
+  const visible = useMemo(
+    () => (honorRouting ? queue.filter((prompt) => !isConsentRoutedElsewhere(prompt)) : queue),
+    // `routingVersion` is the external store's snapshot: a claim or a settle
+    // elsewhere must re-filter even though `queue` did not change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [honorRouting, queue, routingVersion]
+  )
+
+  return { queue: visible, now, respond }
 }

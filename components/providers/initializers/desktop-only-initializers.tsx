@@ -165,6 +165,13 @@ const RouterFusionInitializer = dynamic(
   () => import("./router-fusion-initializer").then((m) => m.RouterFusionInitializer),
   { ssr: false }
 )
+// The desktop chat copilot's main-window half (ADR-0194 §8): the capture
+// command and the controller behind the `chat-copilot` overlay. Desktop-only
+// because reading another app's window needs the native automation engine.
+const ChatCopilotInitializer = dynamic(
+  () => import("./chat-copilot-initializer").then((m) => m.ChatCopilotInitializer),
+  { ssr: false }
+)
 const SessionImportWatchInitializer = dynamic(
   () => import("./session-import-watch-initializer").then((m) => m.SessionImportWatchInitializer),
   { ssr: false }
@@ -219,6 +226,7 @@ export function DesktopOnlyInitializers() {
       <TrayPanelInitializer />
       <UsageDockInitializer />
       <IslandInitializer />
+      <ChatCopilotInitializer />
       <SessionImportWatchInitializer />
       <SitesInitializer />
       <RouterFusionInitializer />

@@ -48,6 +48,14 @@ pub enum Surface {
     /// those rows serialize as `"sandbox"` and filter cleanly in the
     /// Diagnostics tab.
     Sandbox,
+    /// ADR-0194 — the desktop screen-chat copilot. The user presses its hotkey
+    /// while a chat app is frontmost; the host captures that one window to read
+    /// the conversation. Deliberately separate from `ComputerUse`: allowing the
+    /// copilot to read a window must not also allow an agent to drive the
+    /// desktop, and a disabled automation engine must not silence a feature the
+    /// user invokes by hand. Only the `capture_frontmost_window` command is
+    /// accepted on this surface (see `evaluate_chat_copilot`).
+    ChatCopilot,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -149,6 +157,12 @@ pub struct PerSurfacePolicies {
     pub computer_use: SurfacePolicy,
     pub mcp: SurfacePolicy,
     pub plugin: PluginSurfacePolicy,
+    /// ADR-0194. Tier semantics differ from the other surfaces: `Off` (the
+    /// default) and `PerCall` both mean "ask every time" — it does NOT inherit
+    /// the global default tier, which governs agents driving the desktop.
+    /// `Whitelist` captures apps on this policy's own list without asking and
+    /// asks for the rest; it never falls back to the global whitelist.
+    pub chat_copilot: SurfacePolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -600,6 +614,11 @@ impl PermissionGate {
         if call.surface == Surface::Workflow && call.is_passive_inspection() {
             return Decision::Allow;
         }
+        // The chat copilot is a user-invoked, read-only capture with its own
+        // policy; it is not gated by the automation engine's master switch.
+        if call.surface == Surface::ChatCopilot {
+            return evaluate_chat_copilot(&s, call);
+        }
         if !s.enabled {
             return Decision::Deny(AutomationError::PermissionDenied {
                 reason: "automation engine disabled".into(),
@@ -640,6 +659,7 @@ impl PermissionGate {
             // `command_body!` (e.g., future test scaffolding) will pass
             // the gate and rely on the sandbox subsystem's own checks.
             Surface::Sandbox => return Decision::Allow,
+            Surface::ChatCopilot => unreachable!("handled before the engine gate"),
         };
 
         if tier == Tier::Off {
@@ -676,6 +696,43 @@ impl PermissionGate {
             },
             (Tier::Off, _) => unreachable!("guarded above"),
         }
+    }
+}
+
+/// The one command the chat copilot surface may run.
+pub const CHAT_COPILOT_CAPTURE_COMMAND: &str = "capture_frontmost_window";
+
+/// ADR-0194 — gate for the desktop chat copilot's window capture.
+///
+/// Anything but the capture command is denied outright: without that check a
+/// renderer claiming `chatCopilot` would reach driving commands with the engine
+/// switched off. The capture itself asks every time unless the user chose the
+/// `Whitelist` tier and the frontmost app matches; a whitelist miss asks rather
+/// than denies, because the user pressed the hotkey on purpose.
+///
+/// Only the surface's own list counts. Falling back to the global whitelist
+/// would let "agents may drive this app" silently grant "the copilot may
+/// capture it", which is exactly the coupling a separate surface exists to
+/// avoid.
+fn evaluate_chat_copilot(s: &AutomationSettings, call: &Call<'_>) -> Decision {
+    if call.command != CHAT_COPILOT_CAPTURE_COMMAND {
+        return Decision::Deny(AutomationError::PermissionDenied {
+            reason: format!(
+                "the chat copilot surface only runs {CHAT_COPILOT_CAPTURE_COMMAND}, not {}",
+                call.command
+            ),
+        });
+    }
+    let policy = &s.per_surface.chat_copilot;
+    if policy.tier == Tier::Whitelist {
+        if let Some(own) = policy.whitelist.as_ref() {
+            if !own.is_empty() && own.matches(&call.target) {
+                return Decision::Allow;
+            }
+        }
+    }
+    Decision::RequireConsent {
+        prompt: consent_prompt(call),
     }
 }
 
@@ -984,6 +1041,105 @@ mod tests {
             gate.evaluate(&record_start_call()),
             Decision::RequireConsent { .. }
         ));
+    }
+
+    fn copilot_call(command: &'static str, process: Option<&str>) -> Call<'static> {
+        Call {
+            command,
+            surface: Surface::ChatCopilot,
+            plugin_id: None,
+            target: TargetMeta {
+                process_name: process.map(str::to_string),
+                window_title: None,
+            },
+        }
+    }
+
+    #[test]
+    fn chat_copilot_asks_by_default_even_with_the_engine_off() {
+        let g = PermissionGate::new(AutomationSettings {
+            enabled: false,
+            ..Default::default()
+        });
+        let d = g.evaluate(&copilot_call(CHAT_COPILOT_CAPTURE_COMMAND, Some("WeChat")));
+        assert!(matches!(d, Decision::RequireConsent { .. }));
+    }
+
+    #[test]
+    fn chat_copilot_refuses_every_other_command() {
+        let g = PermissionGate::new(AutomationSettings {
+            enabled: true,
+            ..Default::default()
+        });
+        for command in ["click", "screenshot", "type", "bash", "read_tree"] {
+            let d = g.evaluate(&copilot_call(command, Some("WeChat")));
+            assert!(matches!(d, Decision::Deny(_)), "{command} must be denied");
+        }
+    }
+
+    #[test]
+    fn chat_copilot_whitelist_allows_matching_apps_and_asks_for_the_rest() {
+        let mut settings = AutomationSettings::default();
+        settings.per_surface.chat_copilot = SurfacePolicy {
+            tier: Tier::Whitelist,
+            whitelist: Some(Whitelist {
+                process_names: vec!["WeChat".into()],
+                window_title_patterns: vec![],
+            }),
+        };
+        let g = PermissionGate::new(settings);
+        assert!(matches!(
+            g.evaluate(&copilot_call(CHAT_COPILOT_CAPTURE_COMMAND, Some("WeChat"))),
+            Decision::Allow
+        ));
+        assert!(matches!(
+            g.evaluate(&copilot_call(
+                CHAT_COPILOT_CAPTURE_COMMAND,
+                Some("Terminal")
+            )),
+            Decision::RequireConsent { .. }
+        ));
+    }
+
+    #[test]
+    fn chat_copilot_whitelist_ignores_the_global_agent_whitelist() {
+        let settings = AutomationSettings {
+            whitelist: Whitelist {
+                process_names: vec!["WeChat".into()],
+                window_title_patterns: vec![],
+            },
+            per_surface: PerSurfacePolicies {
+                chat_copilot: SurfacePolicy {
+                    tier: Tier::Whitelist,
+                    whitelist: None,
+                },
+                ..Default::default()
+            },
+            ..AutomationSettings::default()
+        };
+        let g = PermissionGate::new(settings);
+        assert!(matches!(
+            g.evaluate(&copilot_call(CHAT_COPILOT_CAPTURE_COMMAND, Some("WeChat"))),
+            Decision::RequireConsent { .. }
+        ));
+    }
+
+    #[test]
+    fn chat_copilot_honors_the_kill_switch() {
+        let g = PermissionGate::new(AutomationSettings::default());
+        g.engage_kill_switch();
+        assert!(matches!(
+            g.evaluate(&copilot_call(CHAT_COPILOT_CAPTURE_COMMAND, Some("WeChat"))),
+            Decision::Deny(AutomationError::KillSwitchActive)
+        ));
+    }
+
+    #[test]
+    fn chat_copilot_surface_serializes_camel_case() {
+        assert_eq!(
+            serde_json::to_string(&Surface::ChatCopilot).unwrap(),
+            "\"chatCopilot\""
+        );
     }
 
     #[test]

@@ -209,6 +209,12 @@ describe("desktop client", () => {
     })
   })
 
+  it("desktop.captureFrontmostWindow sends no caller context", async () => {
+    mockCall.mockResolvedValueOnce({ appName: "WeChat" })
+    await expect(desktop.captureFrontmostWindow()).resolves.toEqual({ appName: "WeChat" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_capture_frontmost_window", {})
+  })
+
   it("desktop.type marshals text + opts + ctx", async () => {
     mockCall.mockResolvedValueOnce(undefined)
     await desktop.type("hello", { delayMs: 5 }, { surface: "plugin", pluginId: "p1" })
@@ -403,6 +409,12 @@ describe("defaultAutomationSettings", () => {
     expect(s.defaultTier).toBe("off")
     expect(s.perSurface.workflow.tier).toBe("off")
     expect(s.perSurface.plugin.perPluginOverrides).toEqual({})
+  })
+
+  it("ships the chat-copilot surface at off, which the host reads as ask-every-time", () => {
+    // `permission.rs::evaluate_chat_copilot` — off never means silent allow
+    // and never inherits `defaultTier`.
+    expect(defaultAutomationSettings().perSurface.chatCopilot).toEqual({ tier: "off" })
   })
 
   it("includes behavior defaults (scaling on, dedup on, paste 200)", () => {
