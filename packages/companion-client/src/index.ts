@@ -14,6 +14,7 @@ export {
   textToBase64Url,
   utf8ByteLength,
 } from "./base64url"
+export { clipToBytes, type ClippedText } from "./clip-to-bytes"
 export { CompanionApiError, companionErrorCode, expectCompanionJson } from "./errors"
 export {
   isProblem,
@@ -35,6 +36,7 @@ export {
   decodeBrowserEnrollmentPayload,
   encodeBrowserEnrollmentPayload,
   type BrowserEnrollmentDecodeOutcome,
+  type BrowserEnrollmentInvalidReason,
   type BrowserEnrollmentPayload,
 } from "./browser-enrollment-payload"
 export * from "./browser-companion"

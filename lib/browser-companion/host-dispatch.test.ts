@@ -191,6 +191,46 @@ describe("createBrowserCompanionDeps", () => {
     expect(await deps.capabilityRevision("browser-a")).toBe(fresh)
   })
 
+  it("offers only the conversations this Host still has", async () => {
+    // The side-note ledger outlives the sessions it names; a deleted one must
+    // not come back as "add to this task".
+    __resetCapabilityRevisionCacheForTests()
+    const base = {
+      deviceId: "browser-a",
+      title: "A guide",
+      sourceHost: "example.com",
+      workspaceId: "ws-default",
+      captureMode: "selection" as const,
+      contentBytes: 1,
+      truncated: false,
+      status: "queued" as const,
+      workKind: "session" as const,
+    }
+    await getDb().browserSubmissions.bulkPut([
+      { ...base, submissionId: "kept", sessionId: "session-kept", submittedAt: 2, updatedAt: 2 },
+      {
+        ...base,
+        submissionId: "deleted",
+        sessionId: "session-deleted",
+        submittedAt: 3,
+        updatedAt: 3,
+      },
+    ])
+    await getDb().sessions.put({
+      id: "session-kept",
+      title: "A guide",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    const deps = createBrowserCompanionDeps({}, async () => {
+      throw new Error("unused")
+    })
+
+    const ids = (await deps.listDeliveryTargets("browser-a")).map((target) => target.id)
+    expect(ids).toContain("session:session-kept")
+    expect(ids).not.toContain("session:session-deleted")
+  })
+
   it("finds the latest assistant answer beyond one page of newer rows", async () => {
     const sessionId = "answer-paging-session"
     const messages: StoredMessage[] = [

@@ -95,6 +95,15 @@ export interface DeliveryTargetDeps {
    * which is a worse answer than not offering it.
    */
   listTaskAgents: () => Promise<{ id: string; name: string }[]>
+  /**
+   * Which of these conversations still exist on this Host.
+   *
+   * The ledger outlives the conversations it points at: a session the user
+   * deleted in Cognia keeps its side-note row until the row ages out. Offering
+   * it as "add to this task" would promise an append that the Host then has to
+   * refuse, or worse, silently recreate.
+   */
+  existingSessionIds: (sessionIds: readonly string[]) => Promise<ReadonlySet<string>>
 }
 
 /** `template:<id>` — the id form, in one place so the reader and writer agree. */
@@ -162,9 +171,12 @@ export async function listDeliveryTargets(
   ]
   if (!deviceId) return targets
   const rows = await deps.listSubmissions(deviceId, SESSION_TARGET_SCAN)
-  let offeredSessions = 0
+  // One candidate per conversation, newest row first. Every append to a task
+  // writes another row naming the same session, so a task somebody kept
+  // adding pages to used to fill the dropdown with copies of itself — under
+  // one target id, which is also not a list a select can key.
+  const candidates = new Map<string, BrowserSubmissionRow>()
   for (const row of rows) {
-    if (offeredSessions >= MAX_SESSION_TARGETS) break
     // A submission that never started has no conversation to append to. Its
     // own retry is the way to finish it, and offering it here would look like
     // a second, different way to do the same thing.
@@ -173,8 +185,19 @@ export async function listDeliveryTargets(
     // are work on their own planes, and "add this page to that" would mean
     // something different for each.
     if (!row.sessionId || (row.workKind && row.workKind !== "session")) continue
+    if (!candidates.has(row.sessionId)) candidates.set(row.sessionId, row)
+  }
+  // Asked once for the whole scan rather than per row, and before the cap is
+  // applied: a deleted conversation must not use up a slot that a live one
+  // just behind it could have had.
+  const existing =
+    candidates.size > 0 ? await deps.existingSessionIds([...candidates.keys()]) : new Set()
+  let offeredSessions = 0
+  for (const [sessionId, row] of candidates) {
+    if (offeredSessions >= MAX_SESSION_TARGETS) break
+    if (!existing.has(sessionId)) continue
     targets.push({
-      id: sessionTargetId(row.sessionId),
+      id: sessionTargetId(sessionId),
       kind: "session",
       label: row.title,
       isDefault: false,

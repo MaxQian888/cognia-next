@@ -1,14 +1,29 @@
 "use client"
 
 import { useCallback, useEffect, useReducer, useState } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { CopyIcon, HistoryIcon, MonitorSmartphoneIcon, PuzzleIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { encodeBrowserEnrollmentPayload } from "@cognia/companion-client"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { SettingsBlock } from "@/components/settings/common/settings-block"
-import { clearBrowserSubmissions, summarizeBrowserSubmissions } from "@/lib/db/browser-submissions"
+import {
+  clearBrowserSubmissions,
+  pruneBrowserSubmissions,
+  summarizeBrowserSubmissions,
+} from "@/lib/db/browser-submissions"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import { localTransport as transport } from "@/lib/tauri"
 
@@ -22,6 +37,13 @@ export interface BrowserEnrollmentIssue {
 
 /** The subset of `BrowserAccessSummary` this card needs. */
 interface BrowserAccessListenerState {
+  /** Whether the user has switched Browser Access on. */
+  enabled: boolean
+  /**
+   * The port actually bound. It outlives the switch: turning Browser Access
+   * off leaves the listener bound until the server restarts, so a port on its
+   * own does not mean this Host is accepting browsers.
+   */
   boundPort: number | null
 }
 
@@ -38,6 +60,8 @@ export interface BrowserCompanionCardProps {
   loadHistory?: () => Promise<{ deviceIds: string[]; total: number }>
   /** Test seam — defaults to the real device-scoped delete. */
   clearHistory?: (deviceId: string) => Promise<number>
+  /** Test seam — defaults to the real retention sweep. */
+  pruneHistory?: () => Promise<number>
 }
 
 const defaultLoadListener = () =>
@@ -71,20 +95,30 @@ export function BrowserCompanionCard({
   now = Date.now,
   loadHistory = summarizeBrowserSubmissions,
   clearHistory = clearBrowserSubmissions,
+  pruneHistory = pruneBrowserSubmissions,
 }: BrowserCompanionCardProps = {}) {
   const t = useTranslations("mobile.companion.browserCompanion")
   // The listener and the enrolment code both live in the desktop process. A
   // browser tab or a phone is told so below; it is not shown a blank.
   const shellReach = useSurfaceReach({ capability: "webview", requirement: "desktop-shell" })
   const desktopShell = shellReach.available
-  const [listening, setListening] = useState<"loading" | "stopped" | "ready" | "failed">("loading")
+  // `disabled`: the switch is off. `stopped`: it is on, and nothing is bound
+  // yet — the server has to restart for the listener to come up. Different
+  // remedies, so different sentences.
+  const [listening, setListening] = useState<
+    "loading" | "disabled" | "stopped" | "ready" | "failed"
+  >("loading")
   const [issue, setIssue] = useState<BrowserEnrollmentIssue | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [history, setHistory] = useState<{ deviceIds: string[]; total: number } | null>(null)
   const [clearing, setClearing] = useState(false)
   const [cleared, setCleared] = useState(false)
+  const [confirmingClear, setConfirmingClear] = useState(false)
+  // Bumped after a clear, so a history reader that is not a Dexie query (a
+  // test seam, or anything injected) is re-asked as well. A real Dexie reader
+  // is re-run by the live query on its own.
+  const [historyRevision, bumpHistoryRevision] = useReducer((tick: number) => tick + 1, 0)
   const [, refreshExpiry] = useReducer((tick: number) => tick + 1, 0)
 
   useEffect(() => {
@@ -101,7 +135,14 @@ export function BrowserCompanionCard({
     let cancelled = false
     void loadListener()
       .then((summary) => {
-        if (!cancelled) setListening(summary.boundPort !== null ? "ready" : "stopped")
+        if (cancelled) return
+        // Both, never the port alone. A switched-off Host keeps its port until
+        // the server restarts, and the Rust command refuses to mint a code for
+        // it — so a card that read only the port offered a button that could
+        // only fail.
+        setListening(
+          !summary.enabled ? "disabled" : summary.boundPort !== null ? "ready" : "stopped"
+        )
       })
       .catch(() => {
         if (!cancelled) setListening("failed")
@@ -111,38 +152,44 @@ export function BrowserCompanionCard({
     }
   }, [desktopShell, loadListener])
 
+  // Apply retention once when the card opens, so the count below never
+  // includes rows the Host already considers expired. Separate from the live
+  // query because a live query is a read: Dexie refuses writes inside one.
   useEffect(() => {
     if (!desktopShell) return
-    let cancelled = false
-    void loadHistory()
-      .then((summary) => {
-        if (!cancelled) setHistory(summary)
-      })
-      .catch(() => {
-        // A history the card cannot read is one it must not claim is empty.
-        if (!cancelled) setHistory(null)
-      })
-    return () => {
-      cancelled = true
+    void pruneHistory().catch(() => undefined)
+  }, [desktopShell, pruneHistory])
+
+  // Live, so a submission arriving from a browser while this pane is open is
+  // counted without reopening it. `null` is "could not be read", which the
+  // card must not render as "empty"; `undefined` is "not answered yet".
+  const history = useLiveQuery(async (): Promise<{ deviceIds: string[]; total: number } | null> => {
+    if (!desktopShell) return null
+    try {
+      return await loadHistory()
+    } catch {
+      return null
     }
-  }, [desktopShell, loadHistory])
+  }, [desktopShell, loadHistory, historyRevision])
 
   /**
    * Forget every recorded submission, one device at a time.
    *
    * Looped rather than a single unscoped delete because device scoping is the
    * table's security property, not an optimisation: `clearBrowserSubmissions`
-   * is the only writer that deletes from it, and a bulk path beside it would be
-   * a second one that no longer has to name whose rows it is removing.
+   * is the only delete a person asks for, and a bulk path beside it would be a
+   * second one that no longer has to name whose rows it is removing.
+   * (Retention also deletes, by age and count only — never by choice.)
    */
   const clearAll = useCallback(async () => {
+    setConfirmingClear(false)
     if (!history || history.total === 0) return
     setClearing(true)
     setCleared(false)
     try {
       setError(null)
       for (const deviceId of history.deviceIds) await clearHistory(deviceId)
-      setHistory(await loadHistory())
+      bumpHistoryRevision()
       setCleared(true)
     } catch {
       // A Dexie failure message is not a sentence anybody can act on, and
@@ -153,7 +200,7 @@ export function BrowserCompanionCard({
     } finally {
       setClearing(false)
     }
-  }, [clearHistory, history, loadHistory, t])
+  }, [clearHistory, history, t])
 
   const generate = useCallback(async () => {
     if (!desktopShell || listening !== "ready") return
@@ -163,15 +210,16 @@ export function BrowserCompanionCard({
     try {
       setError(null)
       setIssue(await createEnrollment())
-    } catch (caught) {
-      // The Rust side refuses when the listener is not bound and says why.
-      // Surfacing its message beats a generic failure, because the remedy is
-      // a different control on this same page.
-      setError(caught instanceof Error ? caught.message : String(caught))
+    } catch {
+      // The two refusals whose remedy is another control — not listening,
+      // switched off — are ruled out before this button is enabled, and said
+      // above it in the user's language. What is left is a store failure, and
+      // the Rust message for that is English diagnostics, not a sentence.
+      setError(t("generateFailed"))
     } finally {
       setBusy(false)
     }
-  }, [createEnrollment, desktopShell, listening])
+  }, [createEnrollment, desktopShell, listening, t])
 
   if (!desktopShell) {
     // Rendered with the reason, never hidden: a missing card reads as "this
@@ -228,9 +276,14 @@ export function BrowserCompanionCard({
       {/* Rendered as a disabled control with the reason beside it, never
             hidden: a missing button reads as "this build does not have the
             feature", which is a different answer from "one switch away". */}
-      {listening === "stopped" ? (
+      {listening === "disabled" ? (
         <Alert data-testid="browser-companion-needs-listener">
           <AlertDescription>{t("requiresListener")}</AlertDescription>
+        </Alert>
+      ) : null}
+      {listening === "stopped" ? (
+        <Alert data-testid="browser-companion-needs-restart">
+          <AlertDescription>{t("requiresRestart")}</AlertDescription>
         </Alert>
       ) : null}
       {listening === "failed" ? (
@@ -316,23 +369,46 @@ export function BrowserCompanionCard({
             variant="ghost"
             className="h-7 px-2 text-xs"
             disabled={clearing || history.total === 0}
-            onClick={() => void clearAll()}
+            onClick={() => setConfirmingClear(true)}
             data-testid="browser-companion-clear-history"
           >
             {clearing ? t("historyClearing") : cleared ? t("historyCleared") : t("historyClear")}
           </Button>
+          {/* Asked first: the rows are the only record of which browser sent
+              what, and there is no undo. The conversations they point at are
+              not touched, and the question says so. */}
+          <AlertDialog open={confirmingClear} onOpenChange={setConfirmingClear}>
+            <AlertDialogContent data-testid="browser-companion-clear-dialog">
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("historyClearConfirmTitle")}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t("historyClearConfirmDescription", { count: history.total })}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t("historyClearCancel")}</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  onClick={() => void clearAll()}
+                  data-testid="browser-companion-clear-confirm"
+                >
+                  {t("historyClearConfirm")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       ) : null}
 
+      {/* A sentence, not a second link: the pairing panel renders the device
+          console link directly below this card, and two links to one place
+          side by side read as two different places. */}
       <div className="space-y-1 border-t pt-3">
         <p className="flex items-center gap-1.5 text-xs font-medium">
           <MonitorSmartphoneIcon className="size-3.5" aria-hidden="true" />
           {t("pairedTitle")}
         </p>
         <p className="text-xs text-muted-foreground">{t("pairedHint")}</p>
-        <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs">
-          <a href="/devices">{t("openDevices")}</a>
-        </Button>
       </div>
     </SettingsBlock>
   )

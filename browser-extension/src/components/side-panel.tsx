@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type {
   BrowserCaptureMode,
+  BrowserContextLimits,
   BrowserContextSubmissionSummaryV1,
 } from "@cognia/companion-client"
-import { BROWSER_CONTEXT_LIMITS, utf8ByteLength } from "@cognia/companion-client"
+import { BROWSER_CONTEXT_LIMITS, clipToBytes } from "@cognia/companion-client"
 import {
   Alert,
   AlertDescription,
@@ -15,6 +16,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Skeleton,
   Textarea,
 } from "@cognia/plugin-ui"
 
@@ -36,6 +38,7 @@ import {
 } from "@ext/src/lib/client"
 import {
   APPEARANCE_OVERRIDES,
+  STALE_CATALOGUE_CODES,
   STATUSES_WITH_A_REASON,
   appearanceOverrideMessage,
   captureModeFor,
@@ -47,6 +50,7 @@ import {
   preferredModeFor,
   selectedTargetId,
   stopFailureMessage,
+  submitFailureMessage,
   targetLabel,
   targetParamsSatisfied,
   targetsForWorkspace,
@@ -66,6 +70,31 @@ export interface SidePanelProps {
 }
 
 /**
+ * The default clock, defined once.
+ *
+ * An inline `() => Date.now()` default is a new function on every render, and
+ * `now` is a dependency of the capture callbacks — so every render rebuilt
+ * them, and every rebuild re-ran the effect that picks up a recorded capture.
+ */
+const systemNow = () => Date.now()
+
+/**
+ * A submission the Host accepted but could not start, because its runtime was
+ * not there to run it (`host_unavailable`).
+ *
+ * The contract calls that "a real state, not an error": the Host recorded the
+ * capture and keeps the row redrivable, so a retry under the SAME submission id
+ * finishes the job in the conversation the first attempt created, rather than
+ * opening a second one beside it.
+ */
+interface StalledSubmission {
+  submissionId: string
+}
+
+/** Which destructive setting is waiting for a second click, if any. */
+type PendingConfirmation = "disconnect" | "clear-local" | null
+
+/**
  * The whole side panel.
  *
  * State lives here rather than in the service worker because MV3 reclaims the
@@ -77,11 +106,7 @@ export interface SidePanelProps {
  * instruction live in React state and die with the panel; what persists is the
  * public pairing record, the Host's appearance, and the last workspace choice.
  */
-export function SidePanel({
-  api,
-  makeClient = createHostClient,
-  now = () => Date.now(),
-}: SidePanelProps) {
+export function SidePanel({ api, makeClient = createHostClient, now = systemNow }: SidePanelProps) {
   const [state, setState] = useState<PanelState>({ kind: "loading" })
   const [instruction, setInstruction] = useState("")
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
@@ -96,6 +121,15 @@ export function SidePanel({
   // about.
   const [hasPermission, setHasPermission] = useState(false)
   const [override, setOverride] = useState<AppearanceOverride>("follow-host")
+  // Read by the connect path through a ref rather than a dependency. As a
+  // dependency, choosing an appearance re-ran the whole connect effect, which
+  // replaced the ready state — and with it the page the user had captured and
+  // was halfway through describing.
+  const overrideRef = useRef<AppearanceOverride>("follow-host")
+  const [stalled, setStalled] = useState<StalledSubmission | null>(null)
+  const [confirming, setConfirming] = useState<PendingConfirmation>(null)
+  const [localCleared, setLocalCleared] = useState(false)
+  const [disconnected, setDisconnected] = useState(false)
   const [failureCodes, setFailureCodes] = useState<Record<string, string>>({})
   const [answers, setAnswers] = useState<Record<string, { text?: string; truncated?: boolean }>>({})
   const [expanded, setExpanded] = useState<string[]>([])
@@ -106,6 +140,13 @@ export function SidePanel({
   // held in a ref rather than derived from `failureCodes` so this effect does
   // not depend on the state it writes.
   const askedForReasonRef = useRef<Set<string>>(new Set())
+  // The capture request last acted on, so the mount read and a storage change
+  // arriving together cannot capture the same gesture twice.
+  const consumedCaptureRef = useRef<string | null>(null)
+  // The Host's own ceilings once it has said them. A build-time constant would
+  // be wrong on exactly the machines where the extension and the Host have
+  // drifted, which is why the limits travel with the capability.
+  const limitsRef = useRef<BrowserContextLimits>(BROWSER_CONTEXT_LIMITS)
 
   // Paint before anything else. The stored appearance is the Host's last
   // answer, so a panel reopened offline still looks like the app rather than
@@ -121,15 +162,6 @@ export function SidePanel({
 
   useEffect(() => {
     void api.hasLoopbackPermission().then(setHasPermission)
-  }, [api])
-
-  useEffect(() => {
-    void api
-      .read<unknown>(STORAGE_KEYS.appearanceOverride)
-      .then((stored) => {
-        if (isAppearanceOverride(stored)) setOverride(stored)
-      })
-      .catch(() => undefined)
   }, [api])
 
   // Recover a submission whose response never arrived.
@@ -160,21 +192,31 @@ export function SidePanel({
   const resolveConnection = useCallback(async (): Promise<{
     state: PanelState
     workspaceId?: string | null
+    override?: AppearanceOverride
   }> => {
+    // The stored appearance override first, because the very first capability
+    // call already asks for a mode. Read here rather than in an effect of its
+    // own: as separate effects the two raced, and the loser either asked for
+    // the wrong mode or re-ran the connection when the override arrived.
+    const storedOverride = await api
+      .read<unknown>(STORAGE_KEYS.appearanceOverride)
+      .catch(() => null)
+    if (isAppearanceOverride(storedOverride)) overrideRef.current = storedOverride
+    const override = overrideRef.current
     let connection: {
       pairing: PairingRecord
       signer: NonNullable<Awaited<ReturnType<typeof restoreSigner>>>
     }
     try {
       const pairing = await api.read<PairingRecord>(STORAGE_KEYS.pairing)
-      if (!pairing) return { state: { kind: "unpaired" } }
+      if (!pairing) return { state: { kind: "unpaired" }, override }
       const signer = await restoreSigner(pairing)
       if (!signer) {
         // The public record survived but the key did not — a profile copied
         // between machines, or IndexedDB cleared. Treat it as unpaired rather
         // than as an error: the remedy is the same and the state is honest.
         await api.remove([STORAGE_KEYS.pairing])
-        return { state: { kind: "unpaired" } }
+        return { state: { kind: "unpaired" }, override }
       }
       connection = { pairing, signer }
     } catch {
@@ -188,6 +230,7 @@ export function SidePanel({
       if (!isCompatible(capability)) {
         return {
           state: { kind: "incompatible", hostSchemaVersion: capability.schemaVersion },
+          override,
         }
       }
       // Only now is `followsSystem` known, and it is the one input the Host
@@ -217,6 +260,7 @@ export function SidePanel({
           captured: null,
         },
         workspaceId: chosen?.id ?? null,
+        override,
       }
     } catch (error) {
       const state = panelStateForError(error, pairing)
@@ -226,14 +270,15 @@ export function SidePanel({
       // before finding out — one wasted round trip that reports as an
       // authentication failure rather than as "reconnect".
       if (state.kind === "revoked") client.invalidate()
-      return { state }
+      return { state, override }
     }
-  }, [api, makeClient, override])
+  }, [api, makeClient])
 
   const connect = useCallback(async () => {
     const next = await resolveConnection()
     setState(next.state)
     if (next.workspaceId !== undefined) setWorkspaceId(next.workspaceId)
+    if (next.override) setOverride(next.override)
   }, [resolveConnection])
 
   useEffect(() => {
@@ -242,11 +287,20 @@ export function SidePanel({
       if (cancelled) return
       setState(next.state)
       if (next.workspaceId !== undefined) setWorkspaceId(next.workspaceId)
+      if (next.override) setOverride(next.override)
     })
     return () => {
       cancelled = true
     }
   }, [resolveConnection])
+
+  // Follow the Host's ceilings once they are known. Written from an effect so
+  // the capture callbacks can read the current value without being rebuilt
+  // every time the capability object is replaced by a poll.
+  const hostLimits = state.kind === "ready" ? state.capability.limits : undefined
+  useEffect(() => {
+    limitsRef.current = hostLimits ?? BROWSER_CONTEXT_LIMITS
+  }, [hostLimits])
 
   /**
    * Read a page and put it in the preview.
@@ -284,9 +338,13 @@ export function SidePanel({
         setSubmitError(api.message("captureNoGrant"))
         return
       }
-      const selection = clip(extracted.selection, BROWSER_CONTEXT_LIMITS.selectionBytes)
-      const readable = clip(extracted.readableText, BROWSER_CONTEXT_LIMITS.readableTextBytes)
+      const limits = limitsRef.current
+      const selection = clip(extracted.selection, limits.selectionBytes)
+      const readable = clip(extracted.readableText, limits.readableTextBytes)
       setSubmitError(null)
+      // A new capture is a new submission: whatever the previous one left
+      // stalled belongs to the page that was on screen then.
+      setStalled(null)
       setWholePage(whole)
       setState((current) =>
         current.kind === "ready"
@@ -311,27 +369,54 @@ export function SidePanel({
     [api, includeFullUrl, now]
   )
 
-  // Pick up a capture the background worker recorded, once the panel is
-  // connected. Consumed immediately: leaving it in storage would re-capture on
-  // every panel open, which is precisely the "reads the page without being
-  // asked" behaviour the design forbids.
+  /**
+   * Act on a capture the background worker recorded, if there is one.
+   *
+   * Consumed immediately: leaving it in storage would re-capture on every
+   * panel open, which is precisely the "reads the page without being asked"
+   * behaviour the design forbids. `isCancelled` is checked after the read and
+   * before the request is consumed, so a torn-down effect leaves the request
+   * for the next one rather than eating it.
+   */
+  const consumeCaptureRequest = useCallback(
+    async (isCancelled: () => boolean) => {
+      const request = await api.read<CaptureRequest>(CAPTURE_REQUEST_KEY)
+      if (!request || isCancelled()) return
+      const identity = `${request.tabId}:${request.mode}:${request.requestedAt}`
+      if (consumedCaptureRef.current === identity) return
+      consumedCaptureRef.current = identity
+      await api.remove([CAPTURE_REQUEST_KEY])
+      if (!isFreshCaptureRequest(request, now())) return
+      await runCapture(request.mode === "page", request.tabId)
+    },
+    [api, now, runCapture]
+  )
+
+  // Pick up a recorded capture once the panel is connected — and keep picking
+  // them up while it stays open. Reading only on mount meant a context-menu
+  // click made while the panel was already showing did nothing until the
+  // panel was closed and opened again.
   const ready = state.kind === "ready"
   useEffect(() => {
     if (!ready) return
     let cancelled = false
-    void api.read<CaptureRequest>(CAPTURE_REQUEST_KEY).then(async (request) => {
-      if (!request || cancelled) return
-      await api.remove([CAPTURE_REQUEST_KEY])
-      if (!isFreshCaptureRequest(request, now())) return
-      await runCapture(request.mode === "page", request.tabId)
+    const isCancelled = () => cancelled
+    const pickUp = () => {
+      void consumeCaptureRequest(isCancelled).catch(() => undefined)
+    }
+    pickUp()
+    const stop = api.onStorageChange(CAPTURE_REQUEST_KEY, (value) => {
+      // The panel's own removal arrives here too, as `null`.
+      if (value !== null) pickUp()
     })
     return () => {
       cancelled = true
+      stop()
     }
-  }, [ready, api, now, runCapture])
+  }, [ready, api, consumeCaptureRequest])
 
   const recent = state.kind === "ready" ? state.recent : EMPTY
-  const pollMs = useMemo(() => pollIntervalFor(recent), [recent])
+  const pollMs = useMemo(() => pollIntervalFor(recent, now()), [recent, now])
 
   // Ask why, once per failed submission.
   //
@@ -510,6 +595,8 @@ export function SidePanel({
 
   const onPair = useCallback(
     async (code: string) => {
+      setDisconnected(false)
+      setLocalCleared(false)
       setState({ kind: "pairing" })
       const granted = (await api.hasLoopbackPermission()) || (await api.requestLoopbackPermission())
       const outcome = await pairWithHost({
@@ -606,17 +693,38 @@ export function SidePanel({
       captured.selection?.text.length ?? -1,
       captured.readableText?.text.length ?? -1,
     ])
-    const submissionId =
-      pendingSubmissionRef.current?.fingerprint === fingerprint
-        ? pendingSubmissionRef.current.submissionId
-        : crypto.randomUUID()
+    const reuse = pendingSubmissionRef.current?.fingerprint === fingerprint
+    const submissionId = reuse
+      ? (pendingSubmissionRef.current?.submissionId ?? crypto.randomUUID())
+      : crypto.randomUUID()
+    // Re-driving a stalled submission. Same submission id, so the Host finds
+    // its own row and finishes it in the conversation it already created — but
+    // a FRESH idempotency key, because the Host's operation ledger holds a
+    // final receipt for the old one and would only replay "the runtime is not
+    // there" back at us. The lost-response retry above is the opposite case:
+    // no answer ever arrived, so the old key is exactly what should replay.
+    const redrive = reuse && stalled?.submissionId === submissionId
     pendingSubmissionRef.current = { fingerprint, submissionId }
     await api.write(STORAGE_KEYS.pendingSubmission, { fingerprint, submissionId })
     try {
-      await clientRef.current?.submit({
-        submissionId,
-        ...draft,
-      })
+      const response = await clientRef.current?.submit(
+        { submissionId, ...draft },
+        redrive ? { idempotencyKey: crypto.randomUUID() } : undefined
+      )
+      if (response?.status === "host_unavailable") {
+        // Accepted, recorded, and not started. Everything the user reviewed
+        // stays on screen and the id stays pending, so "try again" is the same
+        // submission rather than a second task beside an empty one.
+        setStalled({ submissionId })
+        const page = await clientRef.current?.list().catch(() => undefined)
+        if (page) {
+          setState((current) =>
+            current.kind === "ready" ? { ...current, recent: page.items } : current
+          )
+        }
+        return
+      }
+      setStalled(null)
       pendingSubmissionRef.current = null
       await api.remove([STORAGE_KEYS.pendingSubmission])
       void api.write(STORAGE_KEYS.lastWorkspaceId, workspaceId)
@@ -628,7 +736,7 @@ export function SidePanel({
       // changes when the user does something, not on its own.
       const [page, capability] = await Promise.all([
         clientRef.current?.list(),
-        clientRef.current?.capability().catch(() => undefined),
+        clientRef.current?.capability(preferredModeRef.current).catch(() => undefined),
       ])
       setState((current) =>
         current.kind === "ready"
@@ -640,9 +748,33 @@ export function SidePanel({
           : current
       )
     } catch (error) {
+      const code = (error as { code?: unknown })?.code
       setSubmitError(
-        api.message("submitFailed", [error instanceof Error ? error.message : String(error)])
+        submitFailureMessage(
+          typeof code === "string" && code.length > 0 ? code : undefined,
+          error instanceof Error ? error.message : String(error),
+          api.message
+        )
       )
+      // The panel offered something the Host no longer has. Re-reading the
+      // catalogue lets the workspace and target controls re-derive from what
+      // is actually there, instead of inviting the same refusal again.
+      if (typeof code === "string" && STALE_CATALOGUE_CODES.includes(code)) {
+        const capability = await clientRef.current
+          ?.capability(preferredModeRef.current)
+          .catch(() => undefined)
+        if (capability && isCompatible(capability)) {
+          setState((current) => (current.kind === "ready" ? { ...current, capability } : current))
+          if (!capability.workspaces.some((workspace) => workspace.id === workspaceId)) {
+            setWorkspaceId(
+              (
+                capability.workspaces.find((workspace) => workspace.isDefault) ??
+                capability.workspaces[0]
+              )?.id ?? null
+            )
+          }
+        }
+      }
     } finally {
       setSubmitting(false)
     }
@@ -651,6 +783,7 @@ export function SidePanel({
     includeFullUrl,
     instruction,
     preferredTargetId,
+    stalled,
     state,
     targetParams,
     wholePage,
@@ -666,9 +799,17 @@ export function SidePanel({
    * an orphaned key that nothing can ever use or delete.
    */
   const disconnect = useCallback(async () => {
+    setConfirming(null)
     await clearDeviceKey()
     await api.remove(Object.values(STORAGE_KEYS))
     clientRef.current = null
+    pendingSubmissionRef.current = null
+    setStalled(null)
+    // Said on the pairing screen, which is what replaces this one: the key is
+    // gone from this browser, and the Host still lists the device until it is
+    // revoked there. No call reaches the Host from here — a revoked or
+    // unreachable Host must not be able to stop a user forgetting it locally.
+    setDisconnected(true)
     setState({ kind: "unpaired" })
   }, [api])
 
@@ -680,10 +821,46 @@ export function SidePanel({
    * which is what somebody handing over a laptop would want gone.
    */
   const clearLocal = useCallback(async () => {
+    setConfirming(null)
     await api.remove([STORAGE_KEYS.appearance, STORAGE_KEYS.lastWorkspaceId])
+    setLocalCleared(true)
   }, [api])
 
-  if (state.kind === "loading") return <div className="p-4" data-testid="panel-loading" />
+  /**
+   * Apply a new appearance choice, refreshing only what depends on it.
+   *
+   * The palette is the Host's to build, so the choice is a request for a
+   * re-resolved one — and nothing else about the panel changes. The connect
+   * path used to depend on the override directly, so this same click re-ran
+   * it and threw away the capture on screen.
+   */
+  const chooseAppearance = useCallback(
+    async (next: AppearanceOverride, followsSystem: boolean | undefined) => {
+      overrideRef.current = next
+      setOverride(next)
+      void api.write(STORAGE_KEYS.appearanceOverride, next)
+      const client = clientRef.current
+      if (!client) return
+      try {
+        const refreshed = await client.capability(
+          preferredModeFor(next, followsSystem, prefersDark())
+        )
+        // A second choice made while this one was in flight wins.
+        if (!isCompatible(refreshed) || overrideRef.current !== next) return
+        applyAppearance(document.documentElement, refreshed.appearance)
+        void api.write(STORAGE_KEYS.appearance, refreshed.appearance)
+        setState((current) =>
+          current.kind === "ready" ? { ...current, capability: refreshed } : current
+        )
+      } catch {
+        // The choice is saved and the next connect applies it; an unreachable
+        // Host is the poll's to report, not this control's.
+      }
+    },
+    [api]
+  )
+
+  if (state.kind === "loading") return <PanelSkeleton label={api.message("loading")} />
 
   if (state.kind === "storage-error") {
     return (
@@ -704,6 +881,7 @@ export function SidePanel({
         busy={state.kind === "pairing"}
         needsPermission={!hasPermission}
         failure={state.kind === "unpaired" ? state.failure : undefined}
+        disconnected={disconnected}
         onSubmit={(code) => void onPair(code)}
       />
     )
@@ -909,15 +1087,35 @@ export function SidePanel({
               </Button>
               <Button
                 variant="ghost"
-                onClick={() =>
+                onClick={() => {
+                  setStalled(null)
                   setState((current) =>
                     current.kind === "ready" ? { ...current, captured: null } : current
                   )
-                }
+                }}
               >
                 {api.message("clearCapture")}
               </Button>
             </div>
+            {stalled ? (
+              // Not the error alert: nothing failed. The Host has the capture
+              // and is waiting for its runtime, and the remedy is this button.
+              <Alert data-testid="submit-stalled">
+                <AlertTitle>{api.message("statusHostUnavailable")}</AlertTitle>
+                <AlertDescription className="space-y-2">
+                  <p>{api.message("reasonNoRuntime")}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void onSubmit()}
+                    disabled={submitting}
+                    data-testid="submit-retry"
+                  >
+                    {submitting ? api.message("submitting") : api.message("retry")}
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
           </>
         ) : (
           <p className="text-xs text-muted-foreground" data-testid="capture-empty">
@@ -984,8 +1182,7 @@ export function SidePanel({
             value={override}
             onValueChange={(next) => {
               if (!isAppearanceOverride(next)) return
-              setOverride(next)
-              void api.write(STORAGE_KEYS.appearanceOverride, next)
+              void chooseAppearance(next, state.capability.followsSystem)
             }}
           >
             <SelectTrigger
@@ -1008,7 +1205,11 @@ export function SidePanel({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => void disconnect()}
+            onClick={() => {
+              setLocalCleared(false)
+              setConfirming("disconnect")
+            }}
+            aria-expanded={confirming === "disconnect"}
             data-testid="disconnect"
           >
             {api.message("disconnect")}
@@ -1016,12 +1217,52 @@ export function SidePanel({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => void clearLocal()}
+            onClick={() => {
+              setLocalCleared(false)
+              setConfirming("clear-local")
+            }}
+            aria-expanded={confirming === "clear-local"}
             data-testid="clear-local"
           >
             {api.message("clearLocal")}
           </Button>
         </div>
+        {/* Inline rather than a modal: the panel is 320px wide, and a dialog
+            over it would cover the very settings the question is about. Both
+            actions are one click from irreversible — disconnecting destroys the
+            only copy of this browser's key — so each asks once, in words that
+            say what will and will not go. */}
+        {confirming === "disconnect" ? (
+          <ConfirmAction
+            testId="confirm-disconnect"
+            title={api.message("disconnectConfirmTitle")}
+            detail={api.message("disconnectConfirmDetail")}
+            confirmLabel={api.message("disconnect")}
+            cancelLabel={api.message("cancel")}
+            onConfirm={() => void disconnect()}
+            onCancel={() => setConfirming(null)}
+          />
+        ) : null}
+        {confirming === "clear-local" ? (
+          <ConfirmAction
+            testId="confirm-clear-local"
+            title={api.message("clearLocalConfirmTitle")}
+            detail={api.message("clearLocalConfirmDetail")}
+            confirmLabel={api.message("clearLocal")}
+            cancelLabel={api.message("cancel")}
+            onConfirm={() => void clearLocal()}
+            onCancel={() => setConfirming(null)}
+          />
+        ) : null}
+        {localCleared ? (
+          <p
+            role="status"
+            className="text-[11px] text-muted-foreground"
+            data-testid="clear-local-done"
+          >
+            {api.message("clearLocalDone")}
+          </p>
+        ) : null}
       </section>
     </div>
   )
@@ -1086,22 +1327,114 @@ function Notice({
 }
 
 /**
- * Cut text to a byte ceiling on a character boundary, and say whether it was
- * cut.
+ * An inline "are you sure", for a setting that cannot be taken back.
  *
- * Bytes, not characters, because that is the unit the contract is denominated
- * in — and the loop steps back a character at a time so a multi-byte
- * codepoint is never split into a replacement character.
+ * `role="alertdialog"` so assistive technology announces it as a question
+ * that needs an answer, and focus moves to the safe choice: an accidental
+ * Enter keeps things as they were.
+ */
+function ConfirmAction({
+  testId,
+  title,
+  detail,
+  confirmLabel,
+  cancelLabel,
+  onConfirm,
+  onCancel,
+}: {
+  testId: string
+  title: string
+  detail: string
+  confirmLabel: string
+  cancelLabel: string
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const cancelRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    cancelRef.current?.focus()
+  }, [])
+  return (
+    <div
+      role="alertdialog"
+      aria-labelledby={`${testId}-title`}
+      aria-describedby={`${testId}-detail`}
+      className="space-y-2 rounded-control border border-destructive/40 bg-destructive/5 p-2.5"
+      data-testid={testId}
+    >
+      <p id={`${testId}-title`} className="text-xs font-medium">
+        {title}
+      </p>
+      <p id={`${testId}-detail`} className="text-[11px] text-muted-foreground">
+        {detail}
+      </p>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button ref={cancelRef} variant="ghost" size="sm" onClick={onCancel}>
+          {cancelLabel}
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={onConfirm}
+          data-testid={`${testId}-confirm`}
+        >
+          {confirmLabel}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The shape of the ready panel, while storage and the Host are being asked.
+ *
+ * An empty box read as "the extension is broken" for however long the Host
+ * took to answer. The blocks mirror what replaces them — a heading, the
+ * capture prompt, its two buttons, the recent list — so nothing jumps when the
+ * real content lands. The pulse is `motion-safe` only: a reduced-motion
+ * preference gets still placeholders.
+ */
+function PanelSkeleton({ label }: { label: string }) {
+  const block = "animate-none motion-safe:animate-pulse"
+  return (
+    <div
+      className="flex flex-col gap-4 p-3"
+      role="status"
+      aria-busy="true"
+      aria-label={label}
+      data-testid="panel-loading"
+    >
+      <div className="space-y-2">
+        <Skeleton className={`${block} h-4 w-28`} />
+        <Skeleton className={`${block} h-3 w-full`} />
+        <Skeleton className={`${block} h-3 w-4/5`} />
+        <div className="flex gap-2 pt-1">
+          <Skeleton className={`${block} h-8 w-28`} />
+          <Skeleton className={`${block} h-8 w-32`} />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Skeleton className={`${block} h-3 w-16`} />
+        <Skeleton className={`${block} h-14 w-full`} />
+        <Skeleton className={`${block} h-14 w-full`} />
+      </div>
+      <span className="sr-only">{label}</span>
+    </div>
+  )
+}
+
+/**
+ * Cut captured text to a byte ceiling, or `null` when there is none.
+ *
+ * The cut itself is the shared `clipToBytes`, the same one the Host uses on
+ * answers. This used to be a local loop that stepped back by UTF-16 code units
+ * and could split an emoji into a lone surrogate — a U+FFFD in text the user
+ * had just approved as what would be sent.
  */
 function clip(
   value: string | null,
   limitBytes: number
 ): { text: string; truncated: boolean } | null {
   if (!value) return null
-  if (utf8ByteLength(value) <= limitBytes) return { text: value, truncated: false }
-  let cut = value.length
-  while (cut > 0 && utf8ByteLength(value.slice(0, cut)) > limitBytes) {
-    cut = Math.max(0, cut - Math.ceil((utf8ByteLength(value.slice(0, cut)) - limitBytes) / 4) - 1)
-  }
-  return { text: value.slice(0, cut), truncated: true }
+  return clipToBytes(value, limitBytes)
 }

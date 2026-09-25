@@ -61,6 +61,10 @@ export function baselinePlatformFor(platform: DevicePlatform | undefined): Platf
       return "mobile"
     case "web":
       return "web"
+    // The browser extension is not a platform in this vocabulary: it runs no
+    // Cognia shell, reports nothing, and holds SecurityStore ids instead.
+    case "browser":
+      return undefined
     default:
       return undefined
   }

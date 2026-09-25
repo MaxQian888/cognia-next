@@ -44,6 +44,14 @@ Browser Use 的调研给出了更重要的否定结论：Browser Use **不需要
 因此浏览器设备没有 `agent.run`、没有 `workspace.*`、没有 `terminal.open`、没有 `process.spawn`、
 没有 `host.observe`，也没有 Owner 权威。测试断言的是"没有"，因为"没有"才是重点。
 
+SecurityStore 在每一条授权路径上强制执行这一点，而不只是在注册时。
+桌面端授权命令、`fleet_worker_set`、`PUT /api/devices/{id}/capabilities` 与
+`cognia-server devices grant|revoke` 最终都会调用 `replace_device_capabilities`。
+对 `browser_devices` 中的设备，它会以 `capability_outside_device_class`（403）拒绝任何类外能力；
+撤销该类自身两项能力中的一项仍然允许。旧版授权导入会跳过浏览器设备，
+`ensure_service_principal` 会拒绝浏览器设备的 id；每次打开存储时，
+都会撤销并审计早期版本放入的类外授权。
+
 **3. 扩展 origin 在注册时绑定，并在此后每个请求上重放。**
 
 `WebOriginPolicy` 把不带 `Origin` 头的请求判为 `Native` 并放行——这对原生客户端是对的默认值，

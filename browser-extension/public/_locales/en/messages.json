@@ -21,10 +21,10 @@
     "message": "Connect to Cognia"
   },
   "pairIntro": {
-    "message": "Open Cognia on this computer, go to Settings → Companion → Browser Companion, and generate a pairing code."
+    "message": "Open Cognia on this computer, go to Settings → Connectivity → Pairing → Browser Companion, and generate a pairing code."
   },
   "pairOriginLabel": {
-    "message": "Add this extension origin to Browser Access before connecting"
+    "message": "Before connecting, add this extension origin to Settings → Connectivity → Local host → Browser access"
   },
   "pairPlaceholder": {
     "message": "Paste the pairing code"
@@ -57,6 +57,15 @@
         "content": "$1"
       }
     }
+  },
+  "pairExpired": {
+    "message": "This pairing code has expired. Generate a new one in Cognia."
+  },
+  "pairNotLoopback": {
+    "message": "This code is for a different computer. Generate one in Cognia on this computer."
+  },
+  "pairMalformed": {
+    "message": "This code is incomplete or damaged. Copy it from Cognia again."
   },
   "captureTitle": {
     "message": "Send to Cognia"
@@ -122,6 +131,24 @@
       }
     }
   },
+  "submitDisabled": {
+    "message": "Cognia has switched off browser submissions. Turn Browser access back on in Settings → Connectivity → Local host."
+  },
+  "submitUnknownTarget": {
+    "message": "That destination is no longer available in Cognia. The list has been refreshed — pick one again."
+  },
+  "submitUnknownWorkspace": {
+    "message": "That workspace is no longer available in Cognia. The list has been refreshed — pick one again."
+  },
+  "submitParamsMissing": {
+    "message": "This template needs every required value filled in."
+  },
+  "submitTooLarge": {
+    "message": "This capture is larger than Cognia accepts. Send your selection instead of the whole page."
+  },
+  "submitPayloadMismatch": {
+    "message": "This capture changed since the first attempt. Capture the page again and resend."
+  },
   "reasonNoRuntime": {
     "message": "Waiting for Cognia's runtime — try again once it is running."
   },
@@ -138,6 +165,9 @@
   },
   "retry": {
     "message": "Try again"
+  },
+  "cancel": {
+    "message": "Cancel"
   },
   "clearCapture": {
     "message": "Discard"
@@ -206,7 +236,7 @@
     "message": "Cognia is not responding on this computer."
   },
   "hostOfflineHint": {
-    "message": "Open the app and check Settings → Companion → Browser access."
+    "message": "Open the app and check Settings → Connectivity → Local host → Browser access."
   },
   "storageError": {
     "message": "The extension could not read its local data."
@@ -244,8 +274,32 @@
   "clearLocal": {
     "message": "Clear local data"
   },
+  "disconnectConfirmTitle": {
+    "message": "Disconnect this browser?"
+  },
+  "disconnectConfirmDetail": {
+    "message": "This browser's key is deleted and it will need a new pairing code. Cognia keeps listing it until you revoke it in the device console."
+  },
+  "disconnectDone": {
+    "message": "This browser is disconnected"
+  },
+  "disconnectDoneHint": {
+    "message": "Its key is gone from this browser. To remove it from Cognia as well, revoke it in the device console."
+  },
+  "clearLocalConfirmTitle": {
+    "message": "Clear local data?"
+  },
+  "clearLocalConfirmDetail": {
+    "message": "Forgets the cached appearance and the workspace you last chose. You stay paired, and your tasks stay in Cognia."
+  },
+  "clearLocalDone": {
+    "message": "Local data cleared."
+  },
   "diagnostics": {
     "message": "Connection details"
+  },
+  "loading": {
+    "message": "Connecting to Cognia…"
   },
   "captureNow": {
     "message": "Capture this page"

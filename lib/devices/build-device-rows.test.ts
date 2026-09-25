@@ -282,6 +282,109 @@ describe("admin state precedence", () => {
   })
 })
 
+describe("paired browsers (ADR-0154)", () => {
+  const browserHostDevice = (
+    overrides: Partial<HostDeviceSummaryInput> = {}
+  ): HostDeviceSummaryInput => ({
+    deviceId: "b1",
+    displayName: "Chrome",
+    role: "member",
+    status: "active",
+    createdAt: 1_700_000_000,
+    updatedAt: 1_700_000_000,
+    capabilities: ["browser.read-own", "browser.submit"],
+    ...overrides,
+  })
+
+  it("lists a browser the renderer never mirrored, so it can be revoked", () => {
+    // Browsers paired before the host emitted a pairing event for them exist
+    // only in the SecurityStore. The console is the one place a device is
+    // revoked, so leaving them out left no way to cut one off.
+    const rows = buildDeviceRows(input({ hostDevices: new Map([["b1", browserHostDevice()]]) }))
+    expect(find(rows, "device:b1")).toMatchObject({
+      kind: "paired-device",
+      deviceId: "b1",
+      label: "Chrome",
+      reportedPlatform: "browser",
+      adminState: "active",
+      // Store seconds, console milliseconds.
+      pairedAt: 1_700_000_000_000,
+      // Nobody has seen it yet as far as this renderer knows; not "offline".
+      reachability: "unknown",
+    })
+  })
+
+  it("shows the host's lifecycle for an unmirrored browser, revoked included", () => {
+    const rows = buildDeviceRows(
+      input({ hostDevices: new Map([["b1", browserHostDevice({ status: "revoked" })]]) })
+    )
+    expect(find(rows, "device:b1").adminState).toBe("revoked")
+  })
+
+  it("does not list a browser twice once the mirror has it", () => {
+    const rows = buildDeviceRows(
+      input({
+        pairedDevices: [phone({ deviceId: "b1", label: "Chrome", platform: "browser" })],
+        hostDevices: new Map([["b1", browserHostDevice()]]),
+      })
+    )
+    expect(rows.filter((row) => row.deviceId === "b1")).toHaveLength(1)
+  })
+
+  it("does not invent rows for host devices that are not browsers", () => {
+    // A phone missing from the mirror has signaling state only the mirror
+    // owns; the worker list covers workers.
+    const rows = buildDeviceRows(
+      input({
+        hostDevices: new Map([
+          ["p9", browserHostDevice({ deviceId: "p9", capabilities: ["host.observe"] })],
+        ]),
+      })
+    )
+    expect(rows.some((row) => row.deviceId === "p9")).toBe(false)
+  })
+
+  it("offers no grant switch on a browser, only its lifecycle", () => {
+    // The store would accept an assignable grant for a browser device, so the
+    // console must not be the thing that offers one.
+    const mirrored = buildDeviceRows(
+      input({ pairedDevices: [phone({ deviceId: "b1", platform: "browser" })] })
+    )
+    expect(find(mirrored, "device:b1").grants).toEqual([])
+    const unmirrored = buildDeviceRows(
+      input({ hostDevices: new Map([["b1", browserHostDevice()]]) })
+    )
+    expect(find(unmirrored, "device:b1").grants).toEqual([])
+  })
+
+  it("recognises a browser by its host capabilities even under another label", () => {
+    // A row mirrored before `browser` was a known platform reads `unknown`.
+    const rows = buildDeviceRows(
+      input({
+        pairedDevices: [phone({ deviceId: "b1", platform: "unknown" })],
+        hostDevices: new Map([["b1", browserHostDevice()]]),
+      })
+    )
+    expect(find(rows, "device:b1")).toMatchObject({ reportedPlatform: "browser", grants: [] })
+  })
+
+  it("gives a browser no platform matrix and no missing-report warning", () => {
+    const rows = buildDeviceRows(
+      input({ pairedDevices: [phone({ deviceId: "b1", platform: "browser" })] })
+    )
+    expect(find(rows, "device:b1")).toMatchObject({
+      capabilities: [],
+      capabilityReportMissing: false,
+    })
+  })
+
+  it("still gives a phone its grants and its report warning", () => {
+    const rows = buildDeviceRows(input({ pairedDevices: [phone()] }))
+    expect(find(rows, "device:d1").grants.length).toBeGreaterThan(0)
+    expect(find(rows, "device:d1").capabilityReportMissing).toBe(true)
+  })
+})
+
 describe("remote host liveness", () => {
   /**
    * The store only reports `ready` after authentication and both capability

@@ -45,6 +45,17 @@ export interface BrowserApi {
   write(key: string, value: unknown): Promise<void>
   /** Remove keys from `chrome.storage.local`. */
   remove(keys: string[]): Promise<void>
+  /**
+   * Be told when one `chrome.storage.local` key changes, for as long as the
+   * returned function has not been called.
+   *
+   * The listener receives the new value, or `null` when the key was removed.
+   * It exists for the capture request: the background worker writes one when
+   * the user picks a context-menu entry, and a panel that is ALREADY open has
+   * no mount to read it on — reading only on mount left those gestures
+   * waiting until the panel happened to be reopened.
+   */
+  onStorageChange(key: string, listener: (value: unknown) => void): () => void
   /** Whether the loopback host permission has been granted. */
   hasLoopbackPermission(): Promise<boolean>
   /** Ask for the loopback host permission. Must run in a user gesture. */

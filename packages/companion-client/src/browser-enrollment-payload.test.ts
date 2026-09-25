@@ -38,7 +38,7 @@ describe("browser enrollment payload", () => {
       got: 9,
     })
     const broken = decodeBrowserEnrollmentPayload("cgnb1|not-base64-json", NOW)
-    expect(broken.kind).toBe("invalid")
+    expect(broken).toMatchObject({ kind: "invalid", reason: "malformed" })
   })
 
   it("refuses an expired code and says so", () => {
@@ -46,7 +46,13 @@ describe("browser enrollment payload", () => {
       encodeBrowserEnrollmentPayload(payload({ expiresAt: NOW - 1 })),
       NOW
     )
-    expect(outcome).toEqual({ kind: "invalid", message: "the pairing code has expired" })
+    // A reason code for the panel to translate, and the English sentence only
+    // for diagnostics: the package cannot know the browser's UI language.
+    expect(outcome).toEqual({
+      kind: "invalid",
+      reason: "expired",
+      message: "the pairing code has expired",
+    })
   })
 
   it("accepts every loopback form the Host can bind", () => {
@@ -82,7 +88,7 @@ describe("browser enrollment payload", () => {
         encodeBrowserEnrollmentPayload(payload({ baseUrl })),
         NOW
       )
-      expect(outcome.kind).toBe("invalid")
+      expect(outcome).toMatchObject({ kind: "invalid", reason: "not_loopback" })
     }
   })
 
@@ -131,7 +137,10 @@ describe("browser enrollment payload", () => {
           .replace(/\+/g, "-")
           .replace(/\//g, "_")
           .replace(/=+$/g, "")
-      expect(decodeBrowserEnrollmentPayload(encoded, NOW).kind).toBe("invalid")
+      expect(decodeBrowserEnrollmentPayload(encoded, NOW)).toMatchObject({
+        kind: "invalid",
+        reason: "malformed",
+      })
     }
   })
 })

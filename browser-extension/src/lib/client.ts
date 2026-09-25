@@ -21,6 +21,7 @@ import {
   type BrowserContextSubmissionSummaryPageV1,
   type BrowserContextSubmitRequestV1,
   type BrowserContextSubmitResponseV1,
+  type BrowserEnrollmentInvalidReason,
   type CompanionFetch,
   type CompanionSession,
   type DeviceSigner,
@@ -40,7 +41,11 @@ export interface PairingRecord {
 export type PairFailure =
   | { code: "wrong_format" }
   | { code: "version_mismatch"; got: number }
-  | { code: "invalid"; message: string }
+  /**
+   * A code that is ours but unusable. `reason` is what the panel translates;
+   * `message` is the decoder's English diagnostic and is never shown.
+   */
+  | { code: "invalid"; reason: BrowserEnrollmentInvalidReason; message: string }
   | { code: "permission_denied" }
   | { code: "rejected"; message: string }
 
@@ -78,7 +83,10 @@ export async function pairWithHost({
     return { ok: false, failure: { code: "version_mismatch", got: decoded.got } }
   }
   if (decoded.kind === "invalid") {
-    return { ok: false, failure: { code: "invalid", message: decoded.message } }
+    return {
+      ok: false,
+      failure: { code: "invalid", reason: decoded.reason, message: decoded.message },
+    }
   }
   if (!hasPermission) return { ok: false, failure: { code: "permission_denied" } }
 
@@ -151,7 +159,21 @@ export interface HostClient {
    * flipping locally would paint a light layout in dark colours.
    */
   capability(preferredMode?: "light" | "dark"): Promise<BrowserCompanionCapabilityV1>
-  submit(request: BrowserContextSubmitRequestV1): Promise<BrowserContextSubmitResponseV1>
+  /**
+   * Submit a capture.
+   *
+   * The submission id doubles as the `Idempotency-Key`, so a retry after a
+   * lost response replays the Host's receipt instead of starting a second task.
+   * `idempotencyKey` overrides that for the one case where replaying is wrong:
+   * re-driving a submission whose answer DID arrive and said the runtime was
+   * not there. The Host's ledger holds that answer as final, so the same key
+   * would only ever repeat it; a fresh key under the same submission id lets
+   * the Host find its own row and finish it in the conversation it created.
+   */
+  submit(
+    request: BrowserContextSubmitRequestV1,
+    options?: { idempotencyKey?: string }
+  ): Promise<BrowserContextSubmitResponseV1>
   list(limit?: number): Promise<BrowserContextSubmissionSummaryPageV1>
   /**
    * One submission, by id.
@@ -193,7 +215,11 @@ export function createHostClient({
     fetchImpl,
   })
 
-  async function call<T>(command: string, args: Record<string, unknown>): Promise<T> {
+  async function call<T>(
+    command: string,
+    args: Record<string, unknown>,
+    idempotencyKey?: string
+  ): Promise<T> {
     const path = `/api/_rpc/${command}`
     const headers: Record<string, string> = {
       ...(await session.authorizationHeaders("POST", path)),
@@ -203,7 +229,7 @@ export function createHostClient({
     // is refused with `idempotency_key_forbidden`, so this is not "always send
     // one to be safe" — the header is as much a declaration as a value.
     if (command === "browser_context_submit" && typeof args.submissionId === "string") {
-      headers["Idempotency-Key"] = args.submissionId
+      headers["Idempotency-Key"] = idempotencyKey ?? args.submissionId
     }
     // `cancel` declares `idempotency: required` too, and the Host parses the
     // header as a UUID. A fresh one per press rather than the submission id: a
@@ -228,10 +254,11 @@ export function createHostClient({
         "browser_companion_capability",
         preferredMode ? { preferredMode } : {}
       ),
-    submit: (request) =>
+    submit: (request, options) =>
       call<BrowserContextSubmitResponseV1>(
         "browser_context_submit",
-        request as unknown as Record<string, unknown>
+        request as unknown as Record<string, unknown>,
+        options?.idempotencyKey
       ),
     list: (limit) =>
       call<BrowserContextSubmissionSummaryPageV1>(

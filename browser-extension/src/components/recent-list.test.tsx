@@ -138,6 +138,28 @@ describe("RecentList", () => {
     expect(screen.getByTestId("recent-stop-sub-1")).toBeInTheDocument()
   })
 
+  it("lets the action row wrap instead of overflowing a narrow panel", () => {
+    // A 320px side panel cannot seat a hostname and three localized buttons on
+    // one line; a non-wrapping, non-shrinking group pushed past the card edge.
+    render(
+      <RecentList
+        api={makeApi()}
+        items={[item({ submissionId: "s-wrap", status: "running" })]}
+        onStop={jest.fn()}
+        onToggleAnswer={jest.fn()}
+      />
+    )
+    const row = screen.getByTestId("recent-actions-s-wrap")
+    expect(row.className).toContain("flex-wrap")
+    const host = row.firstElementChild as HTMLElement
+    expect(host.className).toContain("min-w-0")
+    expect(host.className).toContain("truncate")
+    const buttons = row.lastElementChild as HTMLElement
+    expect(buttons.className).toContain("flex-wrap")
+    expect(buttons.className).toContain("justify-end")
+    expect(buttons.className).not.toContain("shrink-0")
+  })
+
   it("keeps one row per submission", () => {
     render(
       <RecentList

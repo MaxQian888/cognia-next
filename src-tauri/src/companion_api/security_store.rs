@@ -32,6 +32,14 @@ pub enum SecurityStoreError {
     LastOwner,
     #[error("the requested device capability set is invalid")]
     InvalidCapabilities,
+    /// A grant the target device's class does not admit. A browser companion
+    /// (ADR-0154) holds `browser.submit` and `browser.read-own` and nothing
+    /// else, whichever surface — the desktop toggles, `fleet_worker_set`, the
+    /// Owner route or `cognia-server devices` — asks for more.
+    #[error(
+        "the device's class does not admit this capability: a browser companion holds only browser.submit and browser.read-own"
+    )]
+    CapabilityOutsideDeviceClass,
     #[error("security schema migration failed: {0}")]
     Migration(String),
     #[error("device lifecycle transition is invalid")]
@@ -387,6 +395,7 @@ impl SecurityStore {
         conn.execute_batch(SCHEMA_SQL)?;
         let now = unix_time_secs();
         apply_schema_migrations(&mut conn, now, Some(path))?;
+        confine_browser_device_grants(&mut conn, now)?;
         reconcile_interrupted_operations(&mut conn, now)?;
         Ok(Arc::new(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -401,7 +410,9 @@ impl SecurityStore {
         // only ever records markers. Running the runner here anyway is what
         // keeps it exercised by the test suite rather than only by real user
         // data on someone's disk.
-        apply_schema_migrations(&mut conn, unix_time_secs(), None)?;
+        let now = unix_time_secs();
+        apply_schema_migrations(&mut conn, now, None)?;
+        confine_browser_device_grants(&mut conn, now)?;
         Ok(Arc::new(Self {
             conn: Arc::new(Mutex::new(conn)),
         }))
@@ -1154,29 +1165,37 @@ impl SecurityStore {
             )
             .optional()?;
         let role = role.ok_or(SecurityStoreError::DeviceUnavailable)?;
-        // The browser class's two capabilities are not *assignable* — no
-        // ordinary device may be handed them — but the browser device itself
-        // holds them, and every caller of this method reads that device's live
-        // snapshot and hands it straight back (`apply_device_grant`,
-        // `companion_set_worker`, the `fleet_worker_set` arm, the Owner route,
-        // `cognia-server devices grant|revoke`). Rejecting them by name would
-        // therefore not make the class unforgeable, it would make a browser
-        // device's grants uneditable. So the check is on the device's class,
-        // which `browser_devices` decides and no request can claim.
-        let is_browser_device: bool = tx.query_row(
-            "SELECT EXISTS (
-                 SELECT 1 FROM browser_devices WHERE tenant_id = ?1 AND device_id = ?2
-             )",
-            params![tenant_id, device_id],
-            |row| row.get(0),
-        )?;
+        // A name that is neither assignable nor a browser-class capability is
+        // not a capability at all, whichever device it is aimed at.
         if normalized.iter().any(|capability| {
-            !is_assignable_device_capability(capability)
-                && (!is_browser_device
-                    || !BROWSER_ENROLLMENT
-                        .capabilities
-                        .contains(&capability.as_str()))
+            !is_assignable_device_capability(capability) && !is_browser_class_capability(capability)
         }) {
+            return Err(SecurityStoreError::InvalidCapabilities);
+        }
+        // The rest is decided by the device's class, which `browser_devices`
+        // records at enrollment and no request can claim. Every caller of this
+        // method (`apply_device_grant`, `companion_set_worker`, the
+        // `fleet_worker_set` arm, the Owner route, `cognia-server devices
+        // grant|revoke`) reads the device's live snapshot, edits it, and hands
+        // the whole set back, so the check has to hold for the full set:
+        //
+        // - A browser device may hold its two class capabilities and nothing
+        //   else. The desktop console hides the switches for a browser row,
+        //   but the UI is not the boundary; this is. Its own two still
+        //   round-trip, so a revoke on a browser device keeps working.
+        // - An ordinary device may never be handed the browser pair: the
+        //   class is decided by which enrollment was spent, not by a grant.
+        if is_browser_device(&tx, tenant_id, device_id)? {
+            if normalized
+                .iter()
+                .any(|capability| !is_browser_class_capability(capability))
+            {
+                return Err(SecurityStoreError::CapabilityOutsideDeviceClass);
+            }
+        } else if normalized
+            .iter()
+            .any(|capability| is_browser_class_capability(capability))
+        {
             return Err(SecurityStoreError::InvalidCapabilities);
         }
         if role == "owner"
@@ -1235,10 +1254,21 @@ impl SecurityStore {
         .map(|(devices, kind)| (devices, kind.capabilities()))
         {
             for device_id in devices {
+                // A browser companion is skipped rather than failing the
+                // import. The legacy flags predate the browser class, so a
+                // browser id in them is a stale mirror row or a forged
+                // argument (the desktop command takes the lists from the
+                // renderer), and aborting would leave the marker unset and
+                // withhold every legitimate grant on every later boot.
                 let tenant: Option<String> = tx
                     .query_row(
-                        "SELECT tenant_id FROM devices
-                         WHERE id = ?1 AND status IN ('active', 'suspended') LIMIT 1",
+                        "SELECT d.tenant_id FROM devices d
+                         WHERE d.id = ?1 AND d.status IN ('active', 'suspended')
+                           AND NOT EXISTS (
+                             SELECT 1 FROM browser_devices b
+                             WHERE b.tenant_id = d.tenant_id AND b.device_id = d.id
+                           )
+                         LIMIT 1",
                         [device_id],
                         |row| row.get(0),
                     )
@@ -1271,6 +1301,13 @@ impl SecurityStore {
     ) -> Result<(), SecurityStoreError> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // The upsert below re-roles, reactivates and re-grants whatever row
+        // already has this id. A browser device's id is client-chosen at
+        // registration, so without this a collision would turn the extension's
+        // key into a service principal holding the service's capabilities.
+        if is_browser_device(&tx, tenant_id, device_id)? {
+            return Err(SecurityStoreError::CapabilityOutsideDeviceClass);
+        }
         tx.execute(
             "INSERT INTO devices
              (id, tenant_id, display_name, role, status, created_at, updated_at)
@@ -2588,6 +2625,100 @@ pub(crate) fn is_assignable_device_capability(capability: &str) -> bool {
             // profile's user, and the name has to say so.
             | "ssh.files"
     )
+}
+
+/// Whether `capability` is one of the browser companion class's own two.
+///
+/// Never assignable to an ordinary device, and the only thing a browser device
+/// may hold. [`BROWSER_ENROLLMENT`] is the one list, so the enrollment, the
+/// grant check and [`confine_browser_device_grants`] cannot disagree.
+fn is_browser_class_capability(capability: &str) -> bool {
+    BROWSER_ENROLLMENT.capabilities.contains(&capability)
+}
+
+/// Whether `(tenant_id, device_id)` was registered through a browser
+/// enrollment. The row is written by [`SecurityStore::register_browser_device`]
+/// and nothing else, so it is the device's class, not a claim.
+fn is_browser_device(
+    conn: &Connection,
+    tenant_id: &str,
+    device_id: &str,
+) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM browser_devices WHERE tenant_id = ?1 AND device_id = ?2
+         )",
+        params![tenant_id, device_id],
+        |row| row.get(0),
+    )
+}
+
+/// Revoke every live grant a browser device holds outside its class.
+///
+/// Until this build `replace_device_capabilities` admitted any assignable
+/// capability for a browser device, so a host may already carry, say,
+/// `terminal.open` on one. The write-side check stops new ones; this clears the
+/// old ones. Left in place they would stay live, and would also make every
+/// later edit of that device fail, since each caller writes the whole snapshot
+/// back and the snapshot would fail the class check.
+///
+/// Runs on every open rather than behind a migration marker: it is a
+/// re-assertion of an invariant, cheap (it walks `browser_devices`, a handful
+/// of rows), and a marker would let a grant written by an older build after a
+/// downgrade survive the next upgrade. Audited per device, and only when it
+/// actually revoked something.
+fn confine_browser_device_grants(
+    conn: &mut Connection,
+    now: i64,
+) -> Result<(), SecurityStoreError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let held: Vec<(String, String, String)> = {
+        let mut statement = tx.prepare(
+            "SELECT g.tenant_id, g.device_id, g.capability
+             FROM capability_grants g
+             JOIN browser_devices b
+               ON b.tenant_id = g.tenant_id AND b.device_id = g.device_id
+             WHERE g.revoked_at IS NULL
+             ORDER BY g.tenant_id, g.device_id, g.capability",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let mut confined: Vec<(String, String)> = Vec::new();
+    for (tenant_id, device_id, capability) in held {
+        if is_browser_class_capability(&capability) {
+            continue;
+        }
+        tx.execute(
+            "UPDATE capability_grants SET revoked_at = ?1
+             WHERE tenant_id = ?2 AND device_id = ?3 AND capability = ?4
+               AND revoked_at IS NULL",
+            params![now, tenant_id, device_id, capability],
+        )?;
+        if confined.last() != Some(&(tenant_id.clone(), device_id.clone())) {
+            confined.push((tenant_id, device_id));
+        }
+    }
+    for (tenant_id, device_id) in &confined {
+        // The store itself is the actor: nobody asked for this revocation, the
+        // device's class demanded it.
+        insert_audit(
+            &tx,
+            tenant_id,
+            "security-store",
+            "device.capabilities_confined",
+            device_id,
+            now,
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 fn upsert_capability_grant(
@@ -4870,6 +5001,54 @@ CREATE TABLE devices (
         }
     }
 
+    /// Register a browser companion the way `browser_register_handler` does:
+    /// by spending a browser enrollment.
+    fn register_browser(store: &SecurityStore, tenant: &str, device: &str, now: i64) {
+        let challenge = store.issue_challenge(tenant, now, 60).unwrap();
+        let enrollment = store
+            .create_browser_enrollment(tenant, "owner-a", now, 300)
+            .unwrap();
+        store
+            .register_browser_device(
+                tenant,
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                device,
+                "Chrome on this Mac",
+                "pem",
+                &format!("thumb-{device}"),
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                now,
+            )
+            .unwrap();
+    }
+
+    /// Every capability the store will accept as an ordinary grant. The owner
+    /// defaults carry all of them except `agent.worker`, which only
+    /// `companion_set_worker` / `fleet_worker_set` hand out; the assert keeps
+    /// the list from silently drifting away from `is_assignable_device_capability`.
+    fn every_assignable_capability() -> Vec<&'static str> {
+        let mut capabilities: Vec<&'static str> = default_capabilities_for_role("owner").to_vec();
+        capabilities.push("agent.worker");
+        for kind in super::super::device_grants::GrantKind::all() {
+            capabilities.extend_from_slice(kind.capabilities());
+        }
+        capabilities.sort_unstable();
+        capabilities.dedup();
+        for capability in &capabilities {
+            assert!(is_assignable_device_capability(capability), "{capability}");
+        }
+        capabilities
+    }
+
+    fn browser_snapshot(store: &SecurityStore, device: &str) -> Vec<String> {
+        store
+            .capability_snapshot("tenant-a", device)
+            .unwrap()
+            .unwrap()
+    }
+
     #[test]
     fn a_browser_device_keeps_its_own_capabilities_through_a_grant_edit() {
         // Every caller of `replace_device_capabilities` reads the device's live
@@ -4880,46 +5059,53 @@ CREATE TABLE devices (
         // and `cognia-server devices grant|revoke` would all answer
         // InvalidCapabilities on a device that legitimately holds them.
         let store = SecurityStore::in_memory().unwrap();
-        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
-        let enrollment = store
-            .create_browser_enrollment("tenant-a", "owner-a", 100, 300)
-            .unwrap();
-        store
-            .register_browser_device(
-                "tenant-a",
-                &enrollment,
-                &challenge.id,
-                &challenge.nonce,
-                "browser-a",
-                "Chrome on this Mac",
-                "pem",
-                "thumb-browser-a",
-                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
-                101,
-            )
-            .unwrap();
+        register_browser(&store, "tenant-a", "browser-a", 101);
 
-        // The snapshot round-trips, plus one ordinary grant the owner toggled on.
+        // The snapshot round-trips unchanged.
         let replaced = store
             .replace_device_capabilities(
                 "tenant-a",
                 "owner-a",
                 "browser-a",
-                &[
-                    "browser.read-own".into(),
-                    "browser.submit".into(),
-                    "host.observe".into(),
-                ],
+                &["browser.read-own".into(), "browser.submit".into()],
                 102,
             )
             .unwrap();
-        assert_eq!(
-            replaced,
-            vec!["browser.read-own", "browser.submit", "host.observe"]
-        );
+        assert_eq!(replaced, vec!["browser.read-own", "browser.submit"]);
         assert!(store
             .has_capability("tenant-a", "browser-a", "browser.submit")
             .unwrap());
+
+        // Narrowing is always allowed: taking one of its own two away, and
+        // giving it back.
+        assert_eq!(
+            store
+                .replace_device_capabilities(
+                    "tenant-a",
+                    "owner-a",
+                    "browser-a",
+                    &["browser.read-own".into()],
+                    103,
+                )
+                .unwrap(),
+            vec!["browser.read-own"]
+        );
+        assert!(!store
+            .has_capability("tenant-a", "browser-a", "browser.submit")
+            .unwrap());
+        store
+            .replace_device_capabilities(
+                "tenant-a",
+                "owner-a",
+                "browser-a",
+                &["browser.read-own".into(), "browser.submit".into()],
+                104,
+            )
+            .unwrap();
+        assert_eq!(
+            browser_snapshot(&store, "browser-a"),
+            vec!["browser.read-own", "browser.submit"]
+        );
 
         // The class is what admits them, not the name: an ordinary device in
         // the same tenant is still refused.
@@ -4934,6 +5120,262 @@ CREATE TABLE devices (
             ),
             Err(SecurityStoreError::InvalidCapabilities)
         ));
+    }
+
+    /// ADR-0154 §2: a browser device holds its two capabilities and no others,
+    /// however the request reaches the store. Every grant surface funnels into
+    /// `replace_device_capabilities`, so this is the one check they all hit.
+    #[test]
+    fn a_browser_device_cannot_be_granted_any_capability_outside_its_class() {
+        let store = SecurityStore::in_memory().unwrap();
+        register_browser(&store, "tenant-a", "browser-a", 101);
+
+        for capability in every_assignable_capability() {
+            // The shape every caller sends: the live snapshot plus one grant.
+            for requested in [
+                vec![
+                    "browser.read-own".to_string(),
+                    "browser.submit".to_string(),
+                    capability.to_string(),
+                ],
+                // And a wholesale replacement that drops the class entirely.
+                vec![capability.to_string()],
+            ] {
+                assert!(
+                    matches!(
+                        store.replace_device_capabilities(
+                            "tenant-a",
+                            "owner-a",
+                            "browser-a",
+                            &requested,
+                            102,
+                        ),
+                        Err(SecurityStoreError::CapabilityOutsideDeviceClass)
+                    ),
+                    "a browser device must not be granted {capability} via {requested:?}"
+                );
+            }
+            assert!(
+                !store
+                    .has_capability("tenant-a", "browser-a", capability)
+                    .unwrap(),
+                "a refused grant must not have been written: {capability}"
+            );
+        }
+        // Refusal is all-or-nothing: the class survives every attempt intact.
+        assert_eq!(
+            browser_snapshot(&store, "browser-a"),
+            vec!["browser.read-own", "browser.submit"]
+        );
+
+        // A name that is no capability at all stays `InvalidCapabilities` on a
+        // browser device too — the class error is for real, refused grants.
+        assert!(matches!(
+            store.replace_device_capabilities(
+                "tenant-a",
+                "owner-a",
+                "browser-a",
+                &["browser.submit".into(), "service.internal".into()],
+                103,
+            ),
+            Err(SecurityStoreError::InvalidCapabilities)
+        ));
+    }
+
+    /// The other half of the class check: phone and desktop devices keep every
+    /// assignable grant, owner and member alike.
+    #[test]
+    fn phone_and_desktop_devices_are_unaffected_by_the_browser_class_check() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "owner-a", 100);
+        register_browser(&store, "tenant-a", "browser-a", 101);
+        let challenge = store.issue_challenge("tenant-a", 102, 60).unwrap();
+        store
+            .register_oidc_device(
+                "tenant-a",
+                "owner-a",
+                &challenge.id,
+                &challenge.nonce,
+                "member-a",
+                "Shared laptop",
+                "-----BEGIN PUBLIC KEY-----\nmember\n-----END PUBLIC KEY-----",
+                "thumb-member-a",
+                "member",
+                102,
+            )
+            .unwrap();
+
+        let all: Vec<String> = every_assignable_capability()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        for device in ["owner-a", "member-a"] {
+            let replaced = store
+                .replace_device_capabilities("tenant-a", "owner-a", device, &all, 103)
+                .unwrap_or_else(|error| panic!("{device} must accept every grant: {error}"));
+            assert_eq!(replaced, all);
+            assert!(store
+                .has_capability("tenant-a", device, "terminal.open")
+                .unwrap());
+        }
+        // A browser device in the same tenant changed nothing about them, and
+        // they changed nothing about it.
+        assert_eq!(
+            browser_snapshot(&store, "browser-a"),
+            vec!["browser.read-own", "browser.submit"]
+        );
+    }
+
+    /// The legacy `device-grants.json` / Dexie import is the one grant writer
+    /// that does not go through `replace_device_capabilities`, and its desktop
+    /// command takes the device lists from the renderer.
+    #[test]
+    fn the_legacy_grant_import_skips_a_browser_device_and_still_imports_the_rest() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "owner-a", 100);
+        register_browser(&store, "tenant-a", "browser-a", 101);
+        store
+            .replace_device_capabilities(
+                "tenant-a",
+                "owner-a",
+                "owner-a",
+                &["host.admin".into()],
+                102,
+            )
+            .unwrap();
+
+        let browser_and_owner = vec!["browser-a".to_string(), "owner-a".to_string()];
+        assert!(store
+            .migrate_legacy_device_grants(
+                &browser_and_owner,
+                &browser_and_owner,
+                &browser_and_owner,
+                103,
+            )
+            .unwrap());
+
+        assert_eq!(
+            browser_snapshot(&store, "browser-a"),
+            vec!["browser.read-own", "browser.submit"]
+        );
+        for capability in ["terminal.open", "process.spawn", "agent.run"] {
+            assert!(
+                store
+                    .has_capability("tenant-a", "owner-a", capability)
+                    .unwrap(),
+                "the import must still reach an ordinary device: {capability}"
+            );
+        }
+    }
+
+    /// `ensure_service_principal` upserts whatever row has its id. Pointed at a
+    /// browser device it would re-role, reactivate and re-grant the extension.
+    #[test]
+    fn a_browser_device_cannot_be_taken_over_as_a_service_principal() {
+        let store = SecurityStore::in_memory().unwrap();
+        register_browser(&store, "tenant-a", "browser-a", 101);
+
+        assert!(matches!(
+            store.ensure_service_principal(
+                "tenant-a",
+                "browser-a",
+                "Cognia ACP CLI",
+                &["agent.run"],
+                102,
+            ),
+            Err(SecurityStoreError::CapabilityOutsideDeviceClass)
+        ));
+        assert_eq!(
+            browser_snapshot(&store, "browser-a"),
+            vec!["browser.read-own", "browser.submit"]
+        );
+        let role: String = store
+            .conn
+            .lock()
+            .query_row(
+                "SELECT role FROM devices WHERE tenant_id = 'tenant-a' AND id = 'browser-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(role, "member");
+
+        // An ordinary service principal id is unaffected.
+        store
+            .ensure_service_principal("tenant-a", "acp-cli", "Cognia ACP CLI", &["agent.run"], 103)
+            .unwrap();
+        assert!(store
+            .has_capability("tenant-a", "acp-cli", "agent.run")
+            .unwrap());
+    }
+
+    /// A host upgraded from a build that let a browser device be granted, say,
+    /// `terminal.open` must not keep that grant live — and the device must
+    /// stay editable afterwards, which it would not be if the tainted grant
+    /// were still in the snapshot every caller writes back.
+    #[test]
+    fn opening_the_store_revokes_grants_a_browser_device_holds_outside_its_class() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security.sqlite");
+        {
+            let store = SecurityStore::open(&path).unwrap();
+            register(&store, "tenant-a", "owner-a", 100);
+            register_browser(&store, "tenant-a", "browser-a", 101);
+            // What the previous build's `replace_device_capabilities` wrote.
+            let conn = store.conn.lock();
+            for capability in ["terminal.open", "host.observe"] {
+                conn.execute(
+                    "INSERT INTO capability_grants
+                     (id, tenant_id, device_id, capability, created_at)
+                     VALUES (?1, 'tenant-a', 'browser-a', ?2, 102)",
+                    params![format!("tainted-{capability}"), capability],
+                )
+                .unwrap();
+            }
+        }
+
+        let store = SecurityStore::open(&path).unwrap();
+        assert!(!store
+            .has_capability("tenant-a", "browser-a", "terminal.open")
+            .unwrap());
+        assert_eq!(
+            browser_snapshot(&store, "browser-a"),
+            vec!["browser.read-own", "browser.submit"]
+        );
+        // The owner's own grants are none of this pass's business.
+        assert!(store
+            .has_capability("tenant-a", "owner-a", "terminal.open")
+            .unwrap());
+        let audited = scalar_i64(
+            &store,
+            "SELECT COUNT(*) FROM audit_events
+             WHERE action = 'device.capabilities_confined' AND target_id = 'browser-a'
+               AND actor_id = 'security-store'",
+        );
+        assert_eq!(audited, 1, "one audit row per confined device");
+
+        // A clean host is left alone: reopening again revokes and audits
+        // nothing further.
+        drop(store);
+        let store = SecurityStore::open(&path).unwrap();
+        assert_eq!(
+            scalar_i64(
+                &store,
+                "SELECT COUNT(*) FROM audit_events
+                 WHERE action = 'device.capabilities_confined'",
+            ),
+            1
+        );
+        // And the device's grants can be edited again.
+        store
+            .replace_device_capabilities(
+                "tenant-a",
+                "owner-a",
+                "browser-a",
+                &["browser.read-own".into()],
+                200,
+            )
+            .unwrap();
     }
 
     #[test]

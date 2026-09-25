@@ -41,6 +41,10 @@ describe("baselinePlatformFor", () => {
     expect(baselinePlatformFor("unknown")).toBeUndefined()
     expect(baselinePlatformFor(undefined)).toBeUndefined()
   })
+
+  it("gives the browser extension no baseline: it runs no Cognia shell", () => {
+    expect(baselinePlatformFor("browser")).toBeUndefined()
+  })
 })
 
 describe("buildPlatformCapabilityCells — device has reported", () => {

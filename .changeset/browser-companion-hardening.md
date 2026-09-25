@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Browser Companion fixes: paired browsers now appear in the device console (and can be paused or revoked there, with no grant switches a browser may not hold); `cognia://session`, `cognia://issues` and `cognia://agent-tasks` links open correctly both while Cognia runs and when they launch it; the extension keeps a capture the Host could not start yet and retries it into the same task, picks up context-menu captures while already open, keeps the capture when the appearance changes, explains submit refusals in the browser's language, clips text without splitting emoji and to the Host's own limits, asks before disconnecting or clearing local data, shows a loading skeleton, wraps its task actions on narrow panels, and translates pairing-code errors; the Settings card waits for Browser Access to be switched on, updates its history live, asks before clearing it, and no longer shows raw errors; recorded submissions are pruned by age and a table-wide cap; stale Settings paths in both apps are corrected.

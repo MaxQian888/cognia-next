@@ -4,7 +4,10 @@ import { createChromeBrowserApi } from "./chrome-browser-api"
 interface ChromeStub {
   tabs: { query: jest.Mock; create: jest.Mock; get: jest.Mock }
   scripting: { executeScript: jest.Mock }
-  storage: { local: { get: jest.Mock; set: jest.Mock; remove: jest.Mock } }
+  storage: {
+    local: { get: jest.Mock; set: jest.Mock; remove: jest.Mock }
+    onChanged: { addListener: jest.Mock; removeListener: jest.Mock }
+  }
   permissions: { contains: jest.Mock; request: jest.Mock }
   runtime: { getURL: jest.Mock }
   i18n: { getMessage: jest.Mock }
@@ -24,6 +27,7 @@ function stub(): ChromeStub {
         set: jest.fn(async () => undefined),
         remove: jest.fn(async () => undefined),
       },
+      onChanged: { addListener: jest.fn(), removeListener: jest.fn() },
     },
     permissions: { contains: jest.fn(async () => true), request: jest.fn(async () => true) },
     runtime: { getURL: jest.fn(() => "chrome-extension://abcdefghijklmnopabcdefghijklmnop/") },
@@ -103,6 +107,27 @@ describe("createChromeBrowserApi", () => {
     expect(createChromeBrowserApi().extensionOrigin()).toBe(
       "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
     )
+  })
+
+  it("reports changes to one local key, and stops when asked", () => {
+    const chromeStub = stub()
+    const seen: unknown[] = []
+    const stop = createChromeBrowserApi().onStorageChange("a.key", (value) => seen.push(value))
+    const handler = chromeStub.storage.onChanged.addListener.mock.calls[0][0] as (
+      changes: Record<string, { newValue?: unknown; oldValue?: unknown }>,
+      area: string
+    ) => void
+
+    handler({ "a.key": { newValue: 7 } }, "local")
+    // Another key, and the same key in another area, are somebody else's.
+    handler({ "b.key": { newValue: 8 } }, "local")
+    handler({ "a.key": { newValue: 9 } }, "sync")
+    // A removal carries no `newValue`; the contract reports it as null.
+    handler({ "a.key": { oldValue: 7 } }, "local")
+    expect(seen).toEqual([7, null])
+
+    stop()
+    expect(chromeStub.storage.onChanged.removeListener).toHaveBeenCalledWith(handler)
   })
 
   it("passes substitutions through to the locale lookup", async () => {

@@ -55,11 +55,19 @@ function deps(
   extra: {
     boards?: { id: string; name: string; workspaceId: string }[]
     agents?: { id: string; name: string }[]
+    /** Sessions deleted from the Host. Every other one exists. */
+    deletedSessions?: string[]
+    /** Every batch `existingSessionIds` was asked about. */
+    existenceQueries?: string[][]
   } = {}
 ) {
   return {
     listIssueProjects: async () => extra.boards ?? [],
     listTaskAgents: async () => extra.agents ?? [],
+    existingSessionIds: async (sessionIds: readonly string[]) => {
+      extra.existenceQueries?.push([...sessionIds])
+      return new Set(sessionIds.filter((id) => !(extra.deletedSessions ?? []).includes(id)))
+    },
     listSubmissions: async (deviceId: string, limit: number) =>
       rows
         .filter((entry) => entry.deviceId === deviceId)
@@ -171,6 +179,80 @@ describe("listDeliveryTargets", () => {
     )
     const targets = await listDeliveryTargets(deps([...filed, ...conversations]), "browser-a")
     expect(targets.filter((target) => target.kind === "session")).toHaveLength(2)
+  })
+
+  it("offers a conversation once however many pages were added to it", async () => {
+    // Every append writes another row naming the same session. Offering each
+    // one filled the dropdown with copies of one task under a single id.
+    const targets = await listDeliveryTargets(
+      deps([
+        row({ submissionId: "third", sessionId: "session-1", title: "Latest", submittedAt: 3 }),
+        row({ submissionId: "second", sessionId: "session-1", title: "Older", submittedAt: 2 }),
+        row({ submissionId: "other", sessionId: "session-2", submittedAt: 1 }),
+      ]),
+      "browser-a"
+    )
+    const ids = targets.map((target) => target.id)
+    expect(ids).toEqual([
+      NEW_CHAT_TARGET_ID,
+      sessionTargetId("session-1"),
+      sessionTargetId("session-2"),
+    ])
+    expect(new Set(ids).size).toBe(ids.length)
+    // The newest row speaks for the conversation.
+    expect(targets[1].label).toBe("Latest")
+  })
+
+  it("does not offer a conversation that has since been deleted", async () => {
+    const targets = await listDeliveryTargets(
+      deps(
+        [
+          row({ submissionId: "gone", sessionId: "session-gone", submittedAt: 2 }),
+          row({ submissionId: "here", sessionId: "session-here", submittedAt: 1 }),
+        ],
+        [],
+        { deletedSessions: ["session-gone"] }
+      ),
+      "browser-a"
+    )
+    expect(targets.map((target) => target.id)).toEqual([
+      NEW_CHAT_TARGET_ID,
+      sessionTargetId("session-here"),
+    ])
+  })
+
+  it("does not let deleted conversations use up the slots", async () => {
+    const deleted = Array.from({ length: MAX_SESSION_TARGETS }, (_unused, index) =>
+      row({ submissionId: `gone-${index}`, sessionId: `gone-${index}`, submittedAt: 100 + index })
+    )
+    const live = row({ submissionId: "live", sessionId: "session-live", submittedAt: 1 })
+    const targets = await listDeliveryTargets(
+      deps([...deleted, live], [], { deletedSessions: deleted.map((entry) => entry.sessionId!) }),
+      "browser-a"
+    )
+    expect(
+      targets.filter((target) => target.kind === "session").map((target) => target.id)
+    ).toEqual([sessionTargetId("session-live")])
+  })
+
+  it("asks about existence once per catalogue, and not at all with nothing to ask", async () => {
+    const queries: string[][] = []
+    await listDeliveryTargets(
+      deps(
+        [
+          row({ submissionId: "a", sessionId: "session-a", submittedAt: 2 }),
+          row({ submissionId: "b", sessionId: "session-a", submittedAt: 1 }),
+        ],
+        [],
+        { existenceQueries: queries }
+      ),
+      "browser-a"
+    )
+    expect(queries).toEqual([["session-a"]])
+
+    const none: string[][] = []
+    await listDeliveryTargets(deps([], [], { existenceQueries: none }), "browser-a")
+    expect(none).toEqual([])
   })
 })
 

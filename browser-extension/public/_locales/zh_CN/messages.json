@@ -21,10 +21,10 @@
     "message": "连接到 Cognia"
   },
   "pairIntro": {
-    "message": "在这台电脑上打开 Cognia，进入 设置 → Companion → 浏览器伴侣，生成一个配对码。"
+    "message": "在这台电脑上打开 Cognia，进入 设置 → 连接 → 配对 → 浏览器伴侣，生成一个配对码。"
   },
   "pairOriginLabel": {
-    "message": "连接前，请先把这个扩展来源加入浏览器访问白名单"
+    "message": "连接前，请先把这个扩展来源加入 设置 → 连接 → 本机主机 → 浏览器访问 的允许列表"
   },
   "pairPlaceholder": {
     "message": "粘贴配对码"
@@ -57,6 +57,15 @@
         "content": "$1"
       }
     }
+  },
+  "pairExpired": {
+    "message": "配对码已过期，请在 Cognia 中重新生成。"
+  },
+  "pairNotLoopback": {
+    "message": "这个配对码属于另一台电脑，请在本机的 Cognia 中生成。"
+  },
+  "pairMalformed": {
+    "message": "配对码不完整或已损坏，请从 Cognia 重新复制。"
   },
   "captureTitle": {
     "message": "发送到 Cognia"
@@ -122,6 +131,24 @@
       }
     }
   },
+  "submitDisabled": {
+    "message": "Cognia 已关闭来自浏览器的提交。请在 设置 → 连接 → 本机主机 中重新开启浏览器访问。"
+  },
+  "submitUnknownTarget": {
+    "message": "这个目标在 Cognia 中已不可用。列表已刷新，请重新选择。"
+  },
+  "submitUnknownWorkspace": {
+    "message": "这个工作区在 Cognia 中已不可用。列表已刷新，请重新选择。"
+  },
+  "submitParamsMissing": {
+    "message": "请填写这个模板的全部必填项。"
+  },
+  "submitTooLarge": {
+    "message": "这次捕获的内容超出了 Cognia 的上限。请只发送选中的内容，而不是整个页面。"
+  },
+  "submitPayloadMismatch": {
+    "message": "与第一次尝试相比，捕获的内容已经变化。请重新捕获页面后再发送。"
+  },
   "reasonNoRuntime": {
     "message": "正在等待 Cognia 的运行时 —— 等它起来后再试一次。"
   },
@@ -138,6 +165,9 @@
   },
   "retry": {
     "message": "重试"
+  },
+  "cancel": {
+    "message": "取消"
   },
   "clearCapture": {
     "message": "丢弃"
@@ -206,7 +236,7 @@
     "message": "这台电脑上的 Cognia 没有响应。"
   },
   "hostOfflineHint": {
-    "message": "请打开应用，检查 设置 → Companion → 浏览器访问。"
+    "message": "请打开应用，检查 设置 → 连接 → 本机主机 → 浏览器访问。"
   },
   "storageError": {
     "message": "扩展无法读取本地数据。"
@@ -244,8 +274,32 @@
   "clearLocal": {
     "message": "清除本地数据"
   },
+  "disconnectConfirmTitle": {
+    "message": "断开这个浏览器？"
+  },
+  "disconnectConfirmDetail": {
+    "message": "这个浏览器的密钥会被删除，之后需要新的配对码才能再次连接。在设备控制台中撤销之前，Cognia 仍会列出它。"
+  },
+  "disconnectDone": {
+    "message": "这个浏览器已断开"
+  },
+  "disconnectDoneHint": {
+    "message": "它的密钥已从这个浏览器中删除。如需同时从 Cognia 移除，请在设备控制台中撤销它。"
+  },
+  "clearLocalConfirmTitle": {
+    "message": "清除本地数据？"
+  },
+  "clearLocalConfirmDetail": {
+    "message": "会忘记缓存的外观和你上次选择的工作区。配对保持不变，任务仍保留在 Cognia 中。"
+  },
+  "clearLocalDone": {
+    "message": "本地数据已清除。"
+  },
   "diagnostics": {
     "message": "连接详情"
+  },
+  "loading": {
+    "message": "正在连接 Cognia…"
   },
   "captureNow": {
     "message": "捕获此页面"

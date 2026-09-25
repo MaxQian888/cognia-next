@@ -1,7 +1,11 @@
+import { BROWSER_TERMINAL_STATUSES, type BrowserSubmissionStatus } from "@cognia/companion-client"
+
 import {
   APPEARANCE_OVERRIDES,
+  POLL_ACTIVE_MAX_AGE_MS,
   POLL_ACTIVE_MS,
   POLL_IDLE_MS,
+  STALE_CATALOGUE_CODES,
   STATUSES_WITH_A_REASON,
   STOPPABLE_STATUSES,
   SUPPORTED_SCHEMA_VERSION,
@@ -15,6 +19,7 @@ import {
   preferredModeFor,
   selectedTargetId,
   stopFailureMessage,
+  submitFailureMessage,
   targetLabel,
   targetsForWorkspace,
   type CapturedPage,
@@ -93,21 +98,90 @@ describe("captureModeFor", () => {
 })
 
 describe("pollIntervalFor", () => {
+  const NOW = 10_000_000
+  const row = (status: BrowserSubmissionStatus, age = 0) => ({
+    status,
+    submittedAt: NOW - age,
+    updatedAt: NOW - age,
+  })
+
   it("polls fast while anything is in flight", () => {
-    for (const status of ["submitting", "queued", "running", "needs_input"]) {
-      expect(pollIntervalFor([{ status }])).toBe(POLL_ACTIVE_MS)
+    for (const status of [
+      "submitting",
+      "queued",
+      "running",
+      "needs_input",
+      "host_unavailable",
+    ] as const) {
+      expect(pollIntervalFor([row(status)], NOW)).toBe(POLL_ACTIVE_MS)
+    }
+  })
+
+  it("uses the contract's own terminal set rather than a second list", () => {
+    // A hand-rolled list is how `host_unavailable` came to be missed: the
+    // contract calls it non-terminal, the panel polled it as if it were done.
+    for (const status of BROWSER_TERMINAL_STATUSES) {
+      expect(pollIntervalFor([row(status)], NOW)).toBe(POLL_IDLE_MS)
     }
   })
 
   it("backs off once everything is finished", () => {
     // A settled list is history, and history does not change; polling it every
     // three seconds is a request per user per three seconds for nothing.
-    expect(pollIntervalFor([{ status: "completed" }, { status: "failed" }])).toBe(POLL_IDLE_MS)
-    expect(pollIntervalFor([])).toBe(POLL_IDLE_MS)
+    expect(pollIntervalFor([row("completed"), row("failed")], NOW)).toBe(POLL_IDLE_MS)
+    expect(pollIntervalFor([], NOW)).toBe(POLL_IDLE_MS)
   })
 
   it("polls fast when even one entry is still moving", () => {
-    expect(pollIntervalFor([{ status: "completed" }, { status: "running" }])).toBe(POLL_ACTIVE_MS)
+    expect(pollIntervalFor([row("completed"), row("running")], NOW)).toBe(POLL_ACTIVE_MS)
+  })
+
+  it("stops treating a row as a progress bar once it has sat still too long", () => {
+    // One forgotten `needs_input` row used to pin every open panel to a
+    // request every three seconds for as long as it stayed in the list.
+    expect(pollIntervalFor([row("needs_input", POLL_ACTIVE_MAX_AGE_MS)], NOW)).toBe(POLL_IDLE_MS)
+    expect(pollIntervalFor([row("host_unavailable", POLL_ACTIVE_MAX_AGE_MS * 4)], NOW)).toBe(
+      POLL_IDLE_MS
+    )
+    expect(pollIntervalFor([row("running", POLL_ACTIVE_MAX_AGE_MS - 1)], NOW)).toBe(POLL_ACTIVE_MS)
+  })
+
+  it("measures age from the most recent change, not from submission", () => {
+    expect(
+      pollIntervalFor(
+        [{ status: "running", submittedAt: NOW - POLL_ACTIVE_MAX_AGE_MS * 2, updatedAt: NOW - 1 }],
+        NOW
+      )
+    ).toBe(POLL_ACTIVE_MS)
+  })
+})
+
+describe("submitFailureMessage", () => {
+  const message = (key: string, subs?: string[]) => (subs ? `${key}:${subs.join(",")}` : key)
+
+  it("names the remedy for each refusal the Host can give", () => {
+    const cases: [string, string][] = [
+      ["browser_submissions_disabled", "submitDisabled"],
+      ["unknown_target", "submitUnknownTarget"],
+      ["unknown_workspace", "submitUnknownWorkspace"],
+      ["target_params_missing", "submitParamsMissing"],
+      ["payload_too_large", "submitTooLarge"],
+      ["submission_payload_mismatch", "submitPayloadMismatch"],
+    ]
+    for (const [code, key] of cases) {
+      expect(submitFailureMessage(code, "English detail", message)).toBe(key)
+    }
+  })
+
+  it("falls back to the generic sentence, with the detail, for anything else", () => {
+    expect(submitFailureMessage("enqueue_refused", "no", message)).toBe("submitFailed:no")
+    expect(submitFailureMessage(undefined, "network down", message)).toBe(
+      "submitFailed:network down"
+    )
+  })
+
+  it("flags exactly the refusals whose remedy is a fresh catalogue", () => {
+    expect([...STALE_CATALOGUE_CODES].sort()).toEqual(["unknown_target", "unknown_workspace"])
   })
 })
 

@@ -51,10 +51,14 @@ describe("PairScreen", () => {
       [{ code: "wrong_format" }, "pairWrongFormat"],
       [{ code: "version_mismatch", got: 9 }, "pairVersionMismatch"],
       [{ code: "permission_denied" }, "pairPermissionDenied"],
+      // Translated by reason: the decoder's message is an English diagnostic
+      // and never reaches the screen.
       [
-        { code: "invalid", message: "the pairing code has expired" },
-        "the pairing code has expired",
+        { code: "invalid", reason: "expired", message: "the pairing code has expired" },
+        "pairExpired",
       ],
+      [{ code: "invalid", reason: "not_loopback", message: "elsewhere" }, "pairNotLoopback"],
+      [{ code: "invalid", reason: "malformed", message: "missing base" }, "pairMalformed"],
       [{ code: "rejected", message: "bad origin" }, "pairFailed:bad origin"],
     ]
     for (const [failure, expected] of cases) {
@@ -78,6 +82,32 @@ describe("PairScreen", () => {
     // Chrome's own dialog names neither who is asking nor what for.
     render(<PairScreen api={api} busy={false} needsPermission onSubmit={jest.fn()} />)
     expect(screen.getByTestId("pair-permission-notice")).toHaveTextContent("pairPermissionNeeded")
+  })
+
+  it("never shows the decoder's English diagnostic", () => {
+    render(
+      <PairScreen
+        api={api}
+        busy={false}
+        needsPermission
+        failure={{ code: "invalid", reason: "expired", message: "the pairing code has expired" }}
+        onSubmit={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("pair-failure")).not.toHaveTextContent("the pairing code has expired")
+  })
+
+  it("says what disconnecting did, and what it did not", () => {
+    // The key is gone from this browser; the Host still lists the device until
+    // it is revoked there. Saying only "disconnected" would imply the second.
+    render(<PairScreen api={api} busy={false} needsPermission disconnected onSubmit={jest.fn()} />)
+    expect(screen.getByTestId("pair-disconnected")).toHaveTextContent("disconnectDone")
+    expect(screen.getByTestId("pair-disconnected")).toHaveTextContent("disconnectDoneHint")
+  })
+
+  it("shows no disconnect notice on an ordinary first pairing", () => {
+    render(<PairScreen api={api} busy={false} needsPermission onSubmit={jest.fn()} />)
+    expect(screen.queryByTestId("pair-disconnected")).toBeNull()
   })
 
   it("shows no failure until there is one", () => {

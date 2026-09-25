@@ -2,15 +2,27 @@
 
 import { type FormEvent, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CloudIcon, FlaskConicalIcon, XIcon } from "lucide-react"
+import { CloudIcon, FlaskConicalIcon, Trash2Icon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { RemoteProfileDeleteError, deleteRemoteBrowserProfile } from "@/lib/browser/remote-profiles"
 import {
   createBrowserProfile,
   grantBrowserDomain,
@@ -18,6 +30,7 @@ import {
   listBrowserProfiles,
   revokeBrowserDomain,
   selectBrowserProfile,
+  type BrowserProfileRow,
 } from "@/lib/db/browser-profiles"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isTauri } from "@/lib/tauri"
@@ -45,6 +58,10 @@ export function RemoteBrowserCard() {
   const [profileName, setProfileName] = useState("")
   const [domain, setDomain] = useState("")
   const [error, setError] = useState<string | null>(null)
+  /** The profile awaiting delete confirmation. */
+  const [pendingDelete, setPendingDelete] = useState<BrowserProfileRow | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const ephemeralSelected = !profiles.some((profile) => profile.selected)
 
   const createProfile = async (event: FormEvent) => {
     event.preventDefault()
@@ -56,6 +73,31 @@ export function RemoteBrowserCard() {
       setProfileName("")
     } catch {
       setError(t("operationFailed"))
+    }
+  }
+
+  // Erase the runtime's copy first; a refusal leaves the profile listed, so the
+  // user can close the session holding it (or reconnect) and try again.
+  const confirmDelete = async () => {
+    if (!workspaceId || !pendingDelete) return
+    setDeleting(true)
+    try {
+      setError(null)
+      await deleteRemoteBrowserProfile(workspaceId, pendingDelete.id)
+      toast.success(t("profiles.deleted", { name: pendingDelete.name }))
+      setPendingDelete(null)
+    } catch (cause) {
+      const reason = cause instanceof RemoteProfileDeleteError ? cause.reason : "failed"
+      setError(
+        reason === "in-use"
+          ? t("profiles.deleteInUse")
+          : reason === "unreachable"
+            ? t("profiles.deleteUnreachable")
+            : t("operationFailed")
+      )
+      setPendingDelete(null)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -117,25 +159,48 @@ export function RemoteBrowserCard() {
               </h4>
               <p className="text-xs text-muted-foreground">{t("profiles.description")}</p>
             </div>
-            <Button
-              size="sm"
-              variant={!profiles.some((profile) => profile.selected) ? "secondary" : "outline"}
-              onClick={() => workspaceId && void selectBrowserProfile(workspaceId, null)}
-              disabled={!workspaceId}
-            >
-              {t("profiles.ephemeral")}
-            </Button>
-            {profiles.map((profile) => (
+            {/* One row per choice, stacked: the old inline buttons had a
+                margin on every one but the first and wrapped raggedly. */}
+            <div className="flex flex-col gap-1.5" data-testid="remote-browser-profiles">
               <Button
-                key={profile.id}
                 size="sm"
-                variant={profile.selected ? "secondary" : "outline"}
-                className="mr-2"
-                onClick={() => workspaceId && void selectBrowserProfile(workspaceId, profile.id)}
+                variant={ephemeralSelected ? "secondary" : "outline"}
+                className="justify-start"
+                aria-pressed={ephemeralSelected}
+                onClick={() => workspaceId && void selectBrowserProfile(workspaceId, null)}
+                disabled={!workspaceId}
               >
-                {profile.name}
+                {t("profiles.ephemeral")}
               </Button>
-            ))}
+              {profiles.map((profile) => (
+                <div key={profile.id} className="flex min-w-0 items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant={profile.selected ? "secondary" : "outline"}
+                    className="min-w-0 flex-1 justify-start"
+                    aria-pressed={profile.selected === true}
+                    onClick={() =>
+                      workspaceId && void selectBrowserProfile(workspaceId, profile.id)
+                    }
+                  >
+                    <span className="truncate">{profile.name}</span>
+                  </Button>
+                  {/* Its data lives on the server, so there is nothing to erase
+                      until one is connected. */}
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    aria-label={t("profiles.delete", { name: profile.name })}
+                    title={reachable ? undefined : t("profiles.deleteUnreachable")}
+                    disabled={!workspaceId || !reachable}
+                    onClick={() => setPendingDelete(profile)}
+                  >
+                    <Trash2Icon aria-hidden />
+                  </Button>
+                </div>
+              ))}
+            </div>
             <form className="flex gap-2" onSubmit={(event) => void createProfile(event)}>
               <Input
                 value={profileName}
@@ -159,9 +224,9 @@ export function RemoteBrowserCard() {
             {grants.map((grant) => (
               <div
                 key={grant.id}
-                className="flex items-center justify-between rounded border px-2 py-1"
+                className="flex min-w-0 items-center justify-between gap-2 rounded border px-2 py-1"
               >
-                <span className="truncate font-mono text-xs">{grant.domain}</span>
+                <span className="min-w-0 truncate font-mono text-xs">{grant.domain}</span>
                 <Button
                   size="icon-sm"
                   variant="ghost"
@@ -192,6 +257,34 @@ export function RemoteBrowserCard() {
           )}
         </div>
       )}
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("profiles.deleteTitle", { name: pendingDelete?.name ?? "" })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t("profiles.deleteDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>{t("profiles.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              onClick={(event) => {
+                // Keep the dialog up until the runtime has answered.
+                event.preventDefault()
+                void confirmDelete()
+              }}
+            >
+              {t("profiles.deleteConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsBlock>
   )
 }

@@ -9,12 +9,13 @@
  * Kept pure and free of React so the transitions can be tested directly. The
  * component reduces over this; it does not decide.
  */
-import type {
-  BrowserCompanionCapabilityV1,
-  BrowserContextSubmissionSummaryV1,
-  BrowserDeliveryTargetV1,
-  BrowserSubmissionStatus,
-  BrowserTargetParamV1,
+import {
+  isTerminalBrowserSubmissionStatus,
+  type BrowserCompanionCapabilityV1,
+  type BrowserContextSubmissionSummaryV1,
+  type BrowserDeliveryTargetV1,
+  type BrowserSubmissionStatus,
+  type BrowserTargetParamV1,
 } from "@cognia/companion-client"
 
 import type { PairFailure, PairingRecord } from "./client"
@@ -119,13 +120,27 @@ export function captureModeFor(
 export const POLL_ACTIVE_MS = 3_000
 export const POLL_IDLE_MS = 15_000
 
-export function pollIntervalFor(recent: { status: string }[]): number {
+/**
+ * How long a non-terminal row keeps the panel on the fast rate.
+ *
+ * "Not terminal" is the contract's own definition of active
+ * ({@link isTerminalBrowserSubmissionStatus}), and it includes states that can
+ * sit still for hours: `host_unavailable` waits for a retry that may never
+ * come, and `needs_input` waits for a person who may have gone home. Without a
+ * ceiling one forgotten row pinned every open panel to a request every three
+ * seconds for as long as it stayed in the list. Past this age a row is still
+ * polled, at the idle rate, so it still updates — just not as a progress bar.
+ */
+export const POLL_ACTIVE_MAX_AGE_MS = 15 * 60_000
+
+export function pollIntervalFor(
+  recent: { status: BrowserSubmissionStatus; submittedAt: number; updatedAt: number }[],
+  now: number
+): number {
   const active = recent.some(
     (row) =>
-      row.status === "submitting" ||
-      row.status === "queued" ||
-      row.status === "running" ||
-      row.status === "needs_input"
+      !isTerminalBrowserSubmissionStatus(row.status) &&
+      now - Math.max(row.submittedAt, row.updatedAt) < POLL_ACTIVE_MAX_AGE_MS
   )
   return active ? POLL_ACTIVE_MS : POLL_IDLE_MS
 }
@@ -213,6 +228,48 @@ export function targetLabel(
   message: (key: string) => string
 ): string {
   return target.kind === "chat" ? message("targetNewTask") : target.label
+}
+
+/**
+ * Submit refusals whose remedy is a fresh catalogue.
+ *
+ * Both mean the panel offered something the Host no longer has — a workspace
+ * that was removed, a conversation that was deleted, a template that went —
+ * so the answer is to re-read the capability and let the controls re-derive,
+ * not to retry the same choice.
+ */
+export const STALE_CATALOGUE_CODES: readonly string[] = ["unknown_target", "unknown_workspace"]
+
+/**
+ * The sentence for a refused submission, keyed by what the Host said.
+ *
+ * Known codes get a localized explanation that names the remedy; anything else
+ * — including a transport failure with no code at all — falls back to the
+ * generic message with the detail attached, clearly framed as Cognia's words
+ * rather than the extension's. A `switch` with literal keys for the same reason
+ * {@link failureReasonMessage} is one: the coverage test reads keys from source.
+ */
+export function submitFailureMessage(
+  code: string | undefined,
+  detail: string,
+  message: (key: string, substitutions?: string[]) => string
+): string {
+  switch (code) {
+    case "browser_submissions_disabled":
+      return message("submitDisabled")
+    case "unknown_target":
+      return message("submitUnknownTarget")
+    case "unknown_workspace":
+      return message("submitUnknownWorkspace")
+    case "target_params_missing":
+      return message("submitParamsMissing")
+    case "payload_too_large":
+      return message("submitTooLarge")
+    case "submission_payload_mismatch":
+      return message("submitPayloadMismatch")
+    default:
+      return message("submitFailed", [detail])
+  }
 }
 
 /** How the panel is themed, relative to the Host. */

@@ -4,6 +4,23 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 jest.mock("next-intl", () => ({
   useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
 }))
+jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
+let mockReachable = true
+jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+jest.mock("@/lib/tauri/transport-routing", () => ({ isRemoteHostActive: () => mockReachable }))
+jest.mock("@/lib/platform/web-companion", () => ({ hasWebCompanionTarget: () => mockReachable }))
+const deleteRemoteBrowserProfile = jest.fn()
+jest.mock("@/lib/browser/remote-profiles", () => {
+  class RemoteProfileDeleteError extends Error {
+    constructor(readonly reason: string) {
+      super(reason)
+    }
+  }
+  return {
+    RemoteProfileDeleteError,
+    deleteRemoteBrowserProfile: (...args: unknown[]) => deleteRemoteBrowserProfile(...args),
+  }
+})
 
 const save = jest.fn().mockResolvedValue(undefined)
 let enabled = false
@@ -31,10 +48,15 @@ jest.mock("@/stores/settings/settings-store", () => ({
     selector({ settings: { remoteBrowserEnabled: enabled }, save }),
 }))
 
+import { toast } from "sonner"
+import { RemoteProfileDeleteError } from "@/lib/browser/remote-profiles"
 import { RemoteBrowserCard } from "./remote-browser-card"
 
 beforeEach(() => {
   enabled = false
+  mockReachable = true
+  deleteRemoteBrowserProfile.mockReset().mockResolvedValue(undefined)
+  ;(toast.success as jest.Mock).mockClear()
   save.mockClear()
   createBrowserProfile.mockClear()
   selectBrowserProfile.mockClear()
@@ -90,4 +112,57 @@ it("grants and revokes exact public domains", async () => {
     })
   )
   expect(revokeBrowserDomain).toHaveBeenCalledWith("workspace-1", "example.com")
+})
+
+describe("profiles", () => {
+  const deleteButton = () =>
+    screen.getByRole("button", { name: "mobile.companion.remoteBrowser.profiles.delete" })
+  const confirm = () =>
+    screen.getByRole("button", { name: "mobile.companion.remoteBrowser.profiles.deleteConfirm" })
+
+  it("marks which profile new sessions use", () => {
+    enabled = true
+    render(<RemoteBrowserCard />)
+    expect(screen.getByRole("button", { name: "QA" })).toHaveAttribute("aria-pressed", "true")
+    expect(
+      screen.getByRole("button", { name: "mobile.companion.remoteBrowser.profiles.ephemeral" })
+    ).toHaveAttribute("aria-pressed", "false")
+  })
+
+  // The profile's data is a directory on the runtime. The row alone used to be
+  // the only thing "deleting" could touch, leaving that directory orphaned.
+  it("erases a profile's cloud data after confirmation", async () => {
+    enabled = true
+    render(<RemoteBrowserCard />)
+    fireEvent.click(deleteButton())
+    expect(deleteRemoteBrowserProfile).not.toHaveBeenCalled()
+    fireEvent.click(confirm())
+    await waitFor(() =>
+      expect(deleteRemoteBrowserProfile).toHaveBeenCalledWith("workspace-1", "profile-1")
+    )
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+  })
+
+  it("explains a refusal while the profile is open", async () => {
+    enabled = true
+    deleteRemoteBrowserProfile.mockRejectedValue(new RemoteProfileDeleteError("in-use", null))
+    render(<RemoteBrowserCard />)
+    fireEvent.click(deleteButton())
+    fireEvent.click(confirm())
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "mobile.companion.remoteBrowser.error"
+    )
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it("cannot erase anything with no server connected", () => {
+    enabled = true
+    mockReachable = false
+    render(<RemoteBrowserCard />)
+    expect(deleteButton()).toBeDisabled()
+    expect(deleteButton()).toHaveAttribute(
+      "title",
+      "mobile.companion.remoteBrowser.profiles.deleteUnreachable"
+    )
+  })
 })

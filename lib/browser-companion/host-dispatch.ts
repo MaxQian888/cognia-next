@@ -464,7 +464,21 @@ function targetDeps() {
     listTemplates: listChatTemplates,
     listIssueProjects: hostIssueBoards,
     listTaskAgents: hostTaskAgents,
+    existingSessionIds: hostExistingSessionIds,
   }
+}
+
+/**
+ * The conversations, out of these, that this Host still has.
+ *
+ * One indexed `bulkGet`: the capability digest re-runs the catalogue on the
+ * panel's poll, so a lookup per candidate would be a lookup per candidate per
+ * poll per open panel.
+ */
+async function hostExistingSessionIds(sessionIds: readonly string[]): Promise<Set<string>> {
+  const { getSessionsByIds } = await import("@/lib/db/sessions")
+  const sessions = await getSessionsByIds(sessionIds)
+  return new Set(sessions.map((session) => session.id))
 }
 
 /**

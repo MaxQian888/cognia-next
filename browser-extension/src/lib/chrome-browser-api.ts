@@ -63,6 +63,18 @@ export function createChromeBrowserApi(): BrowserApi {
       await chrome.storage.local.remove(keys)
     },
 
+    onStorageChange(key, listener) {
+      // `chrome.storage.onChanged` fires for every area; only `local` is ours.
+      // `newValue` is absent on a removal, which the contract reports as null
+      // rather than `undefined` so a listener has one "gone" to check for.
+      const handler = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+        if (areaName !== "local" || !Object.hasOwn(changes, key)) return
+        listener(changes[key]?.newValue ?? null)
+      }
+      chrome.storage.onChanged.addListener(handler)
+      return () => chrome.storage.onChanged.removeListener(handler)
+    },
+
     async hasLoopbackPermission() {
       return chrome.permissions.contains({ origins: [LOOPBACK_ORIGIN] })
     },

@@ -1,5 +1,6 @@
 import { useState } from "react"
-import { Alert, AlertDescription, Button, Input, Label } from "@cognia/plugin-ui"
+import type { BrowserEnrollmentInvalidReason } from "@cognia/companion-client"
+import { Alert, AlertDescription, AlertTitle, Button, Input, Label } from "@cognia/plugin-ui"
 
 import type { BrowserApi } from "@ext/src/lib/browser-api"
 import type { PairFailure } from "@ext/src/lib/client"
@@ -18,6 +19,14 @@ export interface PairScreenProps {
    */
   needsPermission: boolean
   failure?: PairFailure
+  /**
+   * Set when this screen is showing because the user just disconnected.
+   *
+   * Disconnecting forgets the key on this browser only. The Host still lists
+   * the device until it is revoked there, and saying so here is the one place
+   * the user is looking at the moment it matters.
+   */
+  disconnected?: boolean
   onSubmit: (code: string) => void
 }
 
@@ -38,15 +47,41 @@ function failureMessage(api: BrowserApi, failure: PairFailure): string {
     case "permission_denied":
       return api.message("pairPermissionDenied")
     case "invalid":
-      // The decoder's own message: "expired" and "does not name this machine's
-      // browser listener" want different actions from the user.
-      return failure.message
+      // By reason, never the decoder's own message: that is an English
+      // diagnostic, and "expired", "names another machine" and "damaged in
+      // copying" want different actions from the user.
+      return invalidMessage(api, failure.reason)
     case "rejected":
       return api.message("pairFailed", [failure.message])
   }
 }
 
-export function PairScreen({ api, busy, needsPermission, failure, onSubmit }: PairScreenProps) {
+/**
+ * The sentence for each reason a recognisably-Cognia code was refused.
+ *
+ * A `switch` with literal keys rather than a lookup table: the locale coverage
+ * test finds message keys by reading the source, and a key reached only
+ * through a table variable reads as unused.
+ */
+function invalidMessage(api: BrowserApi, reason: BrowserEnrollmentInvalidReason): string {
+  switch (reason) {
+    case "expired":
+      return api.message("pairExpired")
+    case "not_loopback":
+      return api.message("pairNotLoopback")
+    case "malformed":
+      return api.message("pairMalformed")
+  }
+}
+
+export function PairScreen({
+  api,
+  busy,
+  needsPermission,
+  failure,
+  disconnected = false,
+  onSubmit,
+}: PairScreenProps) {
   const [code, setCode] = useState("")
   return (
     <form
@@ -56,6 +91,12 @@ export function PairScreen({ api, busy, needsPermission, failure, onSubmit }: Pa
         if (code.trim()) onSubmit(code.trim())
       }}
     >
+      {disconnected ? (
+        <Alert data-testid="pair-disconnected">
+          <AlertTitle>{api.message("disconnectDone")}</AlertTitle>
+          <AlertDescription>{api.message("disconnectDoneHint")}</AlertDescription>
+        </Alert>
+      ) : null}
       <div className="space-y-1">
         <h1 className="text-sm font-semibold">{api.message("pairTitle")}</h1>
         <p className="text-xs text-muted-foreground">{api.message("pairIntro")}</p>

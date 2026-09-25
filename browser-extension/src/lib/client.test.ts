@@ -54,7 +54,7 @@ describe("pairWithHost", () => {
       fetchImpl: async () => jsonResponse({}),
       now: () => NOW,
     })
-    expect(outcome).toMatchObject({ ok: false, failure: { code: "invalid" } })
+    expect(outcome).toMatchObject({ ok: false, failure: { code: "invalid", reason: "expired" } })
   })
 
   it("refuses without the loopback permission, rather than failing at fetch", async () => {
@@ -264,5 +264,32 @@ describe("createHostClient", () => {
       ["/api/_rpc/browser_context_list", null],
       ["/api/_rpc/browser_context_submit", submissionId],
     ])
+  })
+
+  it("presents a fresh key, under the same submission id, only when asked to re-drive", async () => {
+    // A `host_unavailable` answer is a completed receipt in the Host's ledger.
+    // Re-sending the same key could only replay it; a fresh key lets the Host
+    // find its own row by submission id and finish it.
+    const submissionId = "11111111-2222-3333-4444-555555555555"
+    const redriveKey = "99999999-8888-7777-6666-555555555555"
+    const host = hostAnswering({ requestId: "r1", result: {} })
+    const client = createHostClient({ pairing, signer, fetchImpl: host.fetchImpl })
+    const request = {
+      submissionId,
+      workspaceId: "w1",
+      instruction: "summarize",
+      context: {
+        schemaVersion: 1 as const,
+        captureMode: "metadata" as const,
+        url: "https://example.com/",
+        title: "Example",
+        capturedAt: NOW,
+      },
+    }
+
+    await client.submit(request, { idempotencyKey: redriveKey })
+
+    const submit = host.calls.find((call) => call.path === "/api/_rpc/browser_context_submit")
+    expect(submit?.headers.get("Idempotency-Key")).toBe(redriveKey)
   })
 })

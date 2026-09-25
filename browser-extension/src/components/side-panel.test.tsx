@@ -84,6 +84,12 @@ interface Harness {
   invalidations: string[]
   capabilityError?: unknown
   submitError?: unknown
+  /** What `submit()` answers with, when it answers. */
+  submitStatus?: "queued" | "host_unavailable"
+  /** The options each `submit()` call carried, in order. */
+  submitOptions: ({ idempotencyKey?: string } | undefined)[]
+  /** `onStorageChange` listeners, by key. */
+  storageListeners: Map<string, Set<(value: unknown) => void>>
 }
 
 function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: never } {
@@ -99,6 +105,8 @@ function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: neve
     resultReads: [],
     cancelled: [],
     invalidations: [],
+    submitOptions: [],
+    storageListeners: new Map(),
     ...overrides,
     // After the spread, not before: `overrides` carries its own `store`, and
     // letting it win here would leave the harness reading one Map while the
@@ -115,11 +123,24 @@ function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: neve
         readableCharacterCount: 0,
       }),
       read: async (key) => (store.get(key) ?? null) as never,
+      // Writes and removals notify `onStorageChange` listeners the way
+      // `chrome.storage.onChanged` does, so a test can play the background
+      // worker recording a capture while the panel is already open.
       write: async (key, value) => {
         store.set(key, value)
+        for (const listener of state.storageListeners.get(key) ?? []) listener(value)
       },
       remove: async (keys) => {
-        for (const key of keys) store.delete(key)
+        for (const key of keys) {
+          store.delete(key)
+          for (const listener of state.storageListeners.get(key) ?? []) listener(null)
+        }
+      },
+      onStorageChange: (key, listener) => {
+        const listeners = state.storageListeners.get(key) ?? new Set()
+        listeners.add(listener)
+        state.storageListeners.set(key, listeners)
+        return () => listeners.delete(listener)
       },
       hasLoopbackPermission: async () => true,
       requestLoopbackPermission: async () => true,
@@ -144,15 +165,16 @@ function clientFactory(state: Harness, capability: BrowserCompanionCapabilityV1 
         ? { ...capability, appearance: { ...capability.appearance, mode: preferredMode } }
         : capability
     },
-    submit: async (request: unknown) => {
+    submit: async (request: unknown, options?: { idempotencyKey?: string }) => {
       state.submitAttempts.push(request)
+      state.submitOptions.push(options)
       if (state.submitError) throw state.submitError
       state.submitted.push(request)
       return {
         submissionId: "sub-1",
         sessionId: "session-1",
         acceptedAt: 1,
-        status: "queued" as const,
+        status: state.submitStatus ?? ("queued" as const),
         deepLink: "cognia://session/session-1",
       }
     },
@@ -841,12 +863,32 @@ describe("SidePanel capture and settings", () => {
     expect(await screen.findByTestId("diagnostics")).toHaveTextContent("http://127.0.0.1:27891")
   })
 
-  it("forgets everything on disconnect", async () => {
+  it("forgets everything on disconnect, once confirmed", async () => {
     const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
     renderPanel(state)
     fireEvent.click(await screen.findByTestId("disconnect"))
+    fireEvent.click(await screen.findByTestId("confirm-disconnect-confirm"))
     await screen.findByText("pairTitle")
     expect(state.store.get(STORAGE_KEYS.pairing)).toBeUndefined()
+    // And says what it did — and that the Host still lists this browser until
+    // it is revoked there, which no call from here can do.
+    expect(screen.getByTestId("pair-disconnected")).toHaveTextContent("disconnectDoneHint")
+  })
+
+  it("asks before disconnecting, and a cancel keeps the pairing", async () => {
+    // Disconnecting destroys the only copy of this browser's key. One stray
+    // click used to do it with no question and no trace.
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("disconnect"))
+    const confirm = await screen.findByTestId("confirm-disconnect")
+    expect(confirm).toHaveAttribute("role", "alertdialog")
+    expect(state.store.get(STORAGE_KEYS.pairing)).toBeDefined()
+
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }))
+    expect(screen.queryByTestId("confirm-disconnect")).toBeNull()
+    expect(state.store.get(STORAGE_KEYS.pairing)).toBeDefined()
+    expect(screen.getByTestId("diagnostics")).toBeInTheDocument()
   })
 
   it("clears the local conveniences without unpairing", async () => {
@@ -857,8 +899,14 @@ describe("SidePanel capture and settings", () => {
     await screen.findByTestId("clear-local")
     await waitFor(() => expect(state.store.get(STORAGE_KEYS.appearance)).toBeDefined())
     fireEvent.click(screen.getByTestId("clear-local"))
+    // Nothing goes until the question is answered.
+    await screen.findByTestId("confirm-clear-local")
+    expect(state.store.get(STORAGE_KEYS.appearance)).toBeDefined()
+    fireEvent.click(screen.getByTestId("confirm-clear-local-confirm"))
     await waitFor(() => expect(state.store.get(STORAGE_KEYS.appearance)).toBeUndefined())
     expect(state.store.get(STORAGE_KEYS.pairing)).toBeDefined()
+    // And it says it happened; a silent click reads as a button that did nothing.
+    expect(await screen.findByTestId("clear-local-done")).toHaveTextContent("clearLocalDone")
   })
 
   it("captures the tab the gesture named, not whichever is active now", async () => {
@@ -895,5 +943,217 @@ describe("SidePanel capture and settings", () => {
     })
     renderPanel(state)
     expect(await screen.findByTestId("submit-error")).toBeInTheDocument()
+  })
+})
+
+describe("SidePanel resilience", () => {
+  function capturedAndDescribed(state: Harness) {
+    return (async () => {
+      renderPanel(state)
+      fireEvent.click(await screen.findByTestId("capture-now"))
+      await screen.findByTestId("capture-preview")
+      fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+    })()
+  }
+
+  it("shows the shape of the panel while it connects, not an empty box", async () => {
+    let release: (value: unknown) => void = () => undefined
+    const gate = new Promise((resolve) => {
+      release = resolve
+    })
+    const state = harness({
+      api: {
+        read: async () => {
+          await gate
+          return null
+        },
+      } as never,
+    })
+    renderPanel(state)
+    const loading = screen.getByTestId("panel-loading")
+    expect(loading).toHaveAttribute("role", "status")
+    expect(loading).toHaveAttribute("aria-busy", "true")
+    expect(loading).toHaveAttribute("aria-label", "loading")
+    // Motion only for those who have not asked for less of it.
+    expect(loading.querySelector("[data-slot=skeleton]")?.className).toContain(
+      "motion-safe:animate-pulse"
+    )
+    release(null)
+    await screen.findByText("pairTitle")
+  })
+
+  it("keeps the capture and the submission id when the Host has no runtime yet", async () => {
+    // `host_unavailable` is an answer, not a success: the Host recorded the
+    // capture and could not start it. Clearing the preview told the user it
+    // had started and threw away what they would need to try again.
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      submitStatus: "host_unavailable",
+    })
+    await capturedAndDescribed(state)
+    fireEvent.click(screen.getByTestId("submit"))
+
+    expect(await screen.findByTestId("submit-stalled")).toHaveTextContent("reasonNoRuntime")
+    expect(screen.getByTestId("capture-preview")).toBeInTheDocument()
+    expect(screen.getByTestId("instruction")).toHaveValue("Go")
+    const first = (state.submitAttempts[0] as { submissionId: string }).submissionId
+    expect(state.store.get(STORAGE_KEYS.pendingSubmission)).toMatchObject({ submissionId: first })
+    expect(screen.queryByTestId("submit-error")).toBeNull()
+  })
+
+  it("retries a stalled submission under the same id, with a fresh idempotency key", async () => {
+    // Same id, so the Host finds its own row and finishes it in the
+    // conversation it already created. A fresh key, because the Host's ledger
+    // holds the first answer as final and would only replay it.
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      submitStatus: "host_unavailable",
+    })
+    await capturedAndDescribed(state)
+    fireEvent.click(screen.getByTestId("submit"))
+    await screen.findByTestId("submit-stalled")
+
+    state.submitStatus = "queued"
+    fireEvent.click(screen.getByTestId("submit-retry"))
+    await waitFor(() => expect(state.submitAttempts).toHaveLength(2))
+
+    const ids = state.submitAttempts.map(
+      (attempt) => (attempt as { submissionId: string }).submissionId
+    )
+    expect(ids[1]).toBe(ids[0])
+    expect(state.submitOptions[0]).toBeUndefined()
+    expect(state.submitOptions[1]?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
+    expect(state.submitOptions[1]?.idempotencyKey).not.toBe(ids[0])
+    // Once it lands, the capture and the pending id go, as for any submission.
+    await waitFor(() => expect(screen.queryByTestId("capture-preview")).toBeNull())
+    expect(screen.queryByTestId("submit-stalled")).toBeNull()
+    await waitFor(() => expect(state.store.has(STORAGE_KEYS.pendingSubmission)).toBe(false))
+  })
+
+  it("does not present a fresh key for an ordinary lost-response retry", async () => {
+    // No answer arrived, so replaying the first receipt is exactly right.
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      submitError: new Error("response lost"),
+    })
+    await capturedAndDescribed(state)
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitAttempts).toHaveLength(1))
+    state.submitError = undefined
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitAttempts).toHaveLength(2))
+    expect(state.submitOptions).toEqual([undefined, undefined])
+  })
+
+  it("explains a refusal in words rather than the Host's code", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      submitError: Object.assign(new Error("these values are required: tone"), {
+        code: "target_params_missing",
+      }),
+    })
+    await capturedAndDescribed(state)
+    fireEvent.click(screen.getByTestId("submit"))
+    expect(await screen.findByTestId("submit-error")).toHaveTextContent("submitParamsMissing")
+    // The capture survives a refusal; the user fixes the value and sends again.
+    expect(screen.getByTestId("capture-preview")).toBeInTheDocument()
+  })
+
+  it("re-reads the catalogue when the Host no longer has what was offered", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      submitError: Object.assign(new Error("gone"), { code: "unknown_target" }),
+    })
+    await capturedAndDescribed(state)
+    const before = state.capabilityCalls.length
+    fireEvent.click(screen.getByTestId("submit"))
+    expect(await screen.findByTestId("submit-error")).toHaveTextContent("submitUnknownTarget")
+    await waitFor(() => expect(state.capabilityCalls.length).toBe(before + 1))
+  })
+
+  it("does not re-read the catalogue for a refusal a fresh one cannot fix", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      submitError: Object.assign(new Error("too big"), { code: "payload_too_large" }),
+    })
+    await capturedAndDescribed(state)
+    const before = state.capabilityCalls.length
+    fireEvent.click(screen.getByTestId("submit"))
+    expect(await screen.findByTestId("submit-error")).toHaveTextContent("submitTooLarge")
+    expect(state.capabilityCalls.length).toBe(before)
+  })
+
+  it("picks up a capture recorded while the panel is already open", async () => {
+    // The context menu writes a request; a panel that is already showing has
+    // no mount left to read it on.
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    await screen.findByTestId("capture-empty")
+
+    await state.api.write(CAPTURE_REQUEST_KEY, { tabId: 7, mode: "selection", requestedAt: 1_000 })
+
+    expect(await screen.findByTestId("capture-url")).toHaveTextContent("https://example.com/tab-7")
+    await waitFor(() => expect(state.store.get(CAPTURE_REQUEST_KEY)).toBeUndefined())
+  })
+
+  it("stops listening for capture requests once it is gone", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    const view = renderPanel(state)
+    await screen.findByTestId("capture-empty")
+    expect(state.storageListeners.get(CAPTURE_REQUEST_KEY)?.size).toBe(1)
+    view.unmount()
+    expect(state.storageListeners.get(CAPTURE_REQUEST_KEY)?.size ?? 0).toBe(0)
+  })
+
+  it("keeps the capture when the appearance changes", async () => {
+    // The connect path used to depend on the appearance choice, so picking one
+    // reconnected the panel and replaced the page being described.
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    await capturedAndDescribed(state)
+
+    fireEvent.click(screen.getByTestId("appearance-select"))
+    fireEvent.click(await screen.findByRole("option", { name: "appearanceDark" }))
+    await waitFor(() => expect(state.capabilityCalls).toContain("dark"))
+
+    expect(screen.getByTestId("capture-preview")).toBeInTheDocument()
+    expect(screen.getByTestId("instruction")).toHaveValue("Go")
+    expect(document.documentElement.classList.contains("dark")).toBe(true)
+  })
+
+  it("asks for the stored appearance on its very first capability call", async () => {
+    const state = harness({
+      store: new Map<string, unknown>([
+        [STORAGE_KEYS.pairing, PAIRING],
+        [STORAGE_KEYS.appearanceOverride, "light"],
+      ]) as never,
+    })
+    renderPanel(state)
+    await screen.findByTestId("capture-empty")
+    expect(state.capabilityCalls).toEqual(["light"])
+  })
+
+  it("clips a capture to the Host's own ceiling without splitting a character", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      api: {
+        extract: async () => ({
+          title: "A page",
+          url: "https://example.com/a",
+          // Three bytes of ASCII, then an emoji: a five-byte ceiling lands
+          // inside the surrogate pair.
+          selection: "abc😀def",
+          readableText: null,
+          readableCharacterCount: 0,
+        }),
+      } as never,
+    })
+    renderPanel(state, { ...CAPABILITY, limits: { ...CAPABILITY.limits, selectionBytes: 5 } })
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    const selection = (state.submitted[0] as { context: { selection: unknown } }).context.selection
+    expect(selection).toEqual({ text: "abc", truncated: true })
   })
 })

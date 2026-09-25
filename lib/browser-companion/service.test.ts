@@ -43,6 +43,8 @@ interface Harness {
   templates: ChatTemplateRow[]
   /** Every `renderTemplate` call — the harness's stand-in for `recordChatTemplateUse`. */
   renderedTemplates: string[]
+  /** Conversations deleted on the Host since they were created. */
+  deletedSessions: Set<string>
 }
 
 function harness(
@@ -65,6 +67,7 @@ function harness(
   const answers = new Map<string, { text: string; at: number }>()
   const aborted: string[] = []
   const renderedTemplates: string[] = []
+  const deletedSessions = new Set<string>()
   const state = {
     sessionStatusThrows: false,
     followsSystem: false,
@@ -113,6 +116,8 @@ function harness(
           listTemplates: async () => templates,
           listIssueProjects: async () => boards,
           listTaskAgents: async () => agents,
+          existingSessionIds: async (sessionIds) =>
+            new Set(sessionIds.filter((sessionId) => !deletedSessions.has(sessionId))),
         },
         deviceId
       ),
@@ -170,6 +175,7 @@ function harness(
     workStatuses,
     templates,
     renderedTemplates,
+    deletedSessions,
     get sessionStatusThrows() {
       return state.sessionStatusThrows
     },
@@ -310,6 +316,22 @@ describe("submitBrowserContext", () => {
     // The conversation keeps its own title. Overwriting it with whatever page
     // was captured second would rename a task from under whoever is reading it.
     expect(h.rows.get("sub-2")?.title).toBe(h.rows.get("sub-1")?.title)
+  })
+
+  it("refuses to append to a conversation deleted since it was offered", async () => {
+    // The ledger row outlives the session. Honouring the stale target would
+    // enqueue into a conversation nobody can open any more.
+    const h = harness()
+    const first = await submitBrowserContext(h.deps, "browser-a", payload())
+    h.deletedSessions.add(first.sessionId!)
+    await expect(
+      submitBrowserContext(
+        h.deps,
+        "browser-a",
+        payload({ submissionId: "sub-2", targetId: `session:${first.sessionId}` })
+      )
+    ).rejects.toMatchObject({ code: "unknown_target" })
+    expect(h.enqueued).toHaveLength(1)
   })
 
   it("refuses a session the Host never offered this device", async () => {

@@ -48,18 +48,36 @@ export function encodeBrowserEnrollmentPayload(payload: BrowserEnrollmentPayload
 }
 
 /**
+ * Why a code that is recognisably ours was still refused.
+ *
+ * A code rather than a sentence, because the side panel renders it in the
+ * browser's UI language and this package has no way to know that language.
+ * The three want different remedies, which is why they are not one:
+ *
+ * - `not_loopback` — the code names somewhere other than this machine's
+ *   browser listener: a code from another computer, or a tampered one.
+ * - `expired` — generate a fresh code in Cognia.
+ * - `malformed` — the code was damaged in copying; copy it again.
+ */
+export type BrowserEnrollmentInvalidReason = "not_loopback" | "expired" | "malformed"
+
+/**
  * The result of reading a pasted code.
  *
  * Same four-way vocabulary as `decodePairPayload`, and for the same reason:
  * "this is not one of our codes", "this is one of ours but from a newer
  * Cognia", and "this is ours and it is broken or stale" are three different
  * things to tell somebody, and a thrown error collapses them into one.
+ *
+ * `invalid` carries a {@link BrowserEnrollmentInvalidReason} for the UI and a
+ * `message` for logs and diagnostics. The message is English and technical by
+ * design; nothing should put it in front of a user.
  */
 export type BrowserEnrollmentDecodeOutcome =
   | { kind: "ok"; payload: BrowserEnrollmentPayload }
   | { kind: "wrong_format" }
   | { kind: "version_mismatch"; got: number }
-  | { kind: "invalid"; message: string }
+  | { kind: "invalid"; reason: BrowserEnrollmentInvalidReason; message: string }
 
 export function decodeBrowserEnrollmentPayload(
   raw: string,
@@ -83,14 +101,22 @@ export function decodeBrowserEnrollmentPayload(
     // permission anyway — accepting it would produce a permission prompt the
     // user cannot satisfy instead of a legible refusal.
     if (!isLoopbackHttpOrigin(payload.baseUrl)) {
-      return { kind: "invalid", message: "the code does not name this machine's browser listener" }
+      return {
+        kind: "invalid",
+        reason: "not_loopback",
+        message: "the code does not name this machine's browser listener",
+      }
     }
     if (payload.expiresAt <= now) {
-      return { kind: "invalid", message: "the pairing code has expired" }
+      return { kind: "invalid", reason: "expired", message: "the pairing code has expired" }
     }
     return { kind: "ok", payload }
   } catch (error) {
-    return { kind: "invalid", message: error instanceof Error ? error.message : String(error) }
+    return {
+      kind: "invalid",
+      reason: "malformed",
+      message: error instanceof Error ? error.message : String(error),
+    }
   }
 }
 

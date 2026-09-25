@@ -52,7 +52,7 @@ import {
   BROWSER_CONTEXT_LIMITS,
   BROWSER_RESULT_TEXT_BYTES,
 } from "@/types/browser-companion"
-import { utf8ByteLength } from "@cognia/companion-client"
+import { clipToBytes, utf8ByteLength } from "@cognia/companion-client"
 import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
 
 import { sha256Hex } from "@/lib/share/hash"
@@ -295,9 +295,11 @@ export async function submitBrowserContext(
 
   // Replay before anything is resolved or created. The RPC layer already
   // replays the receipt for a repeated Idempotency-Key, so reaching here twice
-  // means the ledger was cleared or the key was reused across restarts —
-  // either way, a second session for one user action is the failure this
-  // exists to prevent.
+  // means the ledger was cleared, the key was reused across restarts, or the
+  // side panel is re-driving a `host_unavailable` submission — which it does
+  // under the SAME submission id and a FRESH key, because the ledger holds the
+  // first answer as final and would only replay it. In every case, a second
+  // session for one user action is the failure this exists to prevent.
   //
   // Resolving the target FIRST is what this used to do, and it turned the
   // ordinary retry into a refusal: a submission that succeeded but whose
@@ -720,6 +722,9 @@ export async function getBrowserContextResult(
   if (!status.sessionId) return status
   const answer = await deps.latestAnswer(status.sessionId)
   if (!answer) return status
+  // The shared cut, the same one the side panel applies to a capture: a
+  // binary search on a codepoint boundary, so an answer that ends mid-emoji is
+  // shortened by the whole emoji rather than turned into U+FFFD.
   const clipped = clipToBytes(answer.text, BROWSER_RESULT_TEXT_BYTES)
   return {
     ...status,
@@ -779,41 +784,6 @@ export async function cancelBrowserContext(
   // request to the runtime, and what the run does with it is the runtime's
   // answer, not this function's.
   return getBrowserContextSubmission(deps, deviceId, payload)
-}
-
-/**
- * Cut text to a byte ceiling on a CODEPOINT boundary, and say whether it was
- * cut.
- *
- * A binary search over code-unit offsets, then one step back off a lone
- * surrogate. The previous loop claimed "a multi-byte codepoint is never split
- * into a replacement character" but stepped by UTF-16 code units, so a cut
- * landing inside an emoji left an unpaired high surrogate that every UTF-8
- * encoder turns into U+FFFD — the exact outcome the comment promised to avoid.
- * It also re-measured the whole prefix on each of many iterations, which on a
- * 32 KiB CJK answer walked the string dozens of times; the search is
- * logarithmic instead.
- */
-function clipToBytes(value: string, limitBytes: number): { text: string; truncated: boolean } {
-  if (utf8ByteLength(value) <= limitBytes) return { text: value, truncated: false }
-  // Largest code-unit count whose UTF-8 encoding still fits.
-  let low = 0
-  let high = value.length
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2)
-    if (utf8ByteLength(value.slice(0, mid)) <= limitBytes) low = mid
-    else high = mid - 1
-  }
-  // `low` may sit between a surrogate pair. Backing off one unit is always
-  // enough: a pair is exactly two units, and dropping the high surrogate can
-  // only shrink the encoding.
-  const cut = low > 0 && isHighSurrogate(value.charCodeAt(low - 1)) ? low - 1 : low
-  return { text: value.slice(0, cut), truncated: true }
-}
-
-/** A UTF-16 leading surrogate — the first half of an astral codepoint. */
-function isHighSurrogate(code: number): boolean {
-  return code >= 0xd800 && code <= 0xdbff
 }
 
 /**

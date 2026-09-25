@@ -95,11 +95,23 @@ export function RecentList({
                   ) : null}
                 </div>
               ) : null}
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate font-mono text-[11px] text-muted-foreground">
+              {/* Wraps rather than squeezes. A side panel can be 320px wide,
+                  and three localized buttons beside a hostname do not fit on
+                  one line there — a `shrink-0` group pushed the row past the
+                  card edge. The host takes what is left and truncates; the
+                  buttons wrap onto a second line, right-aligned, when they
+                  must. */}
+              <div
+                className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
+                data-testid={`recent-actions-${item.submissionId}`}
+              >
+                <span
+                  className="min-w-0 flex-1 basis-24 truncate font-mono text-[11px] text-muted-foreground"
+                  title={item.sourceHost}
+                >
                   {item.sourceHost}
                 </span>
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1">
                   {/* Only a conversation has a turn to stop or a transcript to
                       read. A filed issue and a queued agent task have neither,
                       and offering controls that would refuse is worse than

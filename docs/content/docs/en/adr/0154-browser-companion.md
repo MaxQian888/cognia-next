@@ -59,6 +59,16 @@ A browser device therefore has no `agent.run`, no `workspace.*`, no
 `terminal.open`, no `process.spawn`, no `host.observe`, and no Owner authority.
 The tests assert the absence, because the absence is the point.
 
+The SecurityStore enforces this on every grant path, not just at enrollment.
+`replace_device_capabilities` is where the desktop grant commands,
+`fleet_worker_set`, `PUT /api/devices/{id}/capabilities` and
+`cognia-server devices grant|revoke` all end up. It refuses any capability
+outside the class for a device listed in `browser_devices`, with
+`capability_outside_device_class` (403). Revoking one of the class's own two
+capabilities is still allowed. The legacy grant import skips browser devices,
+and `ensure_service_principal` refuses a browser device's id. Every store open
+revokes, and audits, any out-of-class grant that an earlier build let through.
+
 **3. The extension origin is bound at registration and replayed on every
 request.**
 

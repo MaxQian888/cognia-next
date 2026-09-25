@@ -309,6 +309,15 @@ impl BrowserGateway {
         Ok(summary)
     }
 
+    /// Whether a live session of this account holds `profile_id` in
+    /// `workspace_id`. A profile's saved data must not be erased from under a
+    /// browser that has it open.
+    pub fn profile_in_use(&self, account_id: &str, workspace_id: &str, profile_id: &str) -> bool {
+        self.profile_owners
+            .lock()
+            .contains_key(&format!("{account_id}\0{workspace_id}\0{profile_id}"))
+    }
+
     pub fn set_ready(
         &self,
         session_id: &str,
@@ -705,6 +714,7 @@ pub const BROWSER_RPC_COMMANDS: &[&str] = &[
     "browser_session_ensure",
     "browser_session_get",
     "browser_session_close",
+    "browser_profile_delete",
     "browser_navigate",
     "browser_snapshot",
     "browser_act",
@@ -1228,6 +1238,28 @@ pub async fn dispatch_browser_rpc(
             .map_err(|error| BrowserGatewayError::new("browser_runtime_error", error.to_string()));
     }
 
+    if name == "browser_profile_delete" {
+        // A persistent profile is a user-data directory on the runtime: the
+        // sign-ins and site storage the cloud browser kept for it. Forgetting
+        // the profile on the client without this left all of it on the server.
+        let workspace_id = required_string(&args, "workspaceId")?;
+        let profile_id = required_string(&args, "profileId")?;
+        if gateway().profile_in_use(account_id, &workspace_id, &profile_id) {
+            return Err(BrowserGatewayError::new(
+                "browser_profile_in_use",
+                "browser profile is in use",
+            ));
+        }
+        control
+            .call(
+                &workspace_id,
+                "browser.profile.delete",
+                json!({ "profileId": profile_id }),
+            )
+            .await?;
+        return Ok(json!({ "deleted": true }));
+    }
+
     let session_id = required_string(&args, "browserSessionId")?;
     let summary = gateway().session_for_principal(account_id, device_id, &session_id)?;
     gateway().touch_session(&session_id);
@@ -1674,6 +1706,40 @@ mod tests {
             .filter_map(|result| result.as_ref().err())
             .all(|error| error.code == "browser_session_quota_exceeded"));
         assert_eq!(gateway.sessions.lock().len(), 3);
+    }
+
+    // A persistent profile's data is erased on the runtime; the gateway must
+    // refuse while one of the account's live sessions has that profile open,
+    // and only for that account and workspace.
+    #[test]
+    fn profile_in_use_tracks_the_owning_session_only() {
+        let (gateway, _) = fixture();
+        assert!(!gateway.profile_in_use("acct-1", "workspace-1", "profile-1"));
+        let summary = gateway
+            .ensure_session(EnsureBrowserSession {
+                account_id: "acct-1".into(),
+                device_id: "device-1".into(),
+                chat_session_id: "chat-1".into(),
+                parent_chat_session_id: None,
+                workspace_id: "workspace-1".into(),
+                backend: BrowserBackend::RemoteChromium,
+                profile_id: Some("profile-1".into()),
+            })
+            .expect("session");
+        assert!(gateway.profile_in_use("acct-1", "workspace-1", "profile-1"));
+        assert!(!gateway.profile_in_use("acct-2", "workspace-1", "profile-1"));
+        assert!(!gateway.profile_in_use("acct-1", "workspace-2", "profile-1"));
+        assert!(!gateway.profile_in_use("acct-1", "workspace-1", "profile-2"));
+
+        gateway
+            .close_session("acct-1", "device-1", &summary.id)
+            .expect("close");
+        assert!(!gateway.profile_in_use("acct-1", "workspace-1", "profile-1"));
+    }
+
+    #[test]
+    fn profile_delete_is_a_browser_rpc() {
+        assert!(is_browser_rpc("browser_profile_delete"));
     }
 
     #[test]

@@ -34,10 +34,63 @@ import type {
   DeviceReachability,
   DeviceRow,
   DeviceWanSummary,
+  HostDeviceSummaryInput,
   RemoteHostInput,
   SshHostInput,
   WorkerInput,
 } from "./types"
+
+/**
+ * The SecurityStore capabilities only a browser extension holds (ADR-0154).
+ *
+ * Not assignable to any other device class — the store refuses them for a
+ * device not enrolled through the browser class — so holding either one is
+ * what makes a host device a browser, whatever its label says.
+ */
+const BROWSER_CLASS_CAPABILITIES: ReadonlySet<string> = new Set([
+  "browser.submit",
+  "browser.read-own",
+])
+
+/** Whether the host enrolled this device as a browser extension. */
+export function isBrowserHostDevice(device: HostDeviceSummaryInput): boolean {
+  return device.capabilities.some((capability) => BROWSER_CLASS_CAPABILITIES.has(capability))
+}
+
+/**
+ * Epoch milliseconds from a SecurityStore timestamp.
+ *
+ * The store writes Unix seconds; the console, and every other clock it is
+ * compared against, is in milliseconds. A value already in milliseconds is
+ * left alone, so the conversion cannot run twice.
+ */
+function storeTimeToMs(value: number): number {
+  return value > 0 && value < 1e12 ? value * 1_000 : value
+}
+
+/**
+ * A mirror-shaped row for a browser the host enrolled but this renderer never
+ * recorded.
+ *
+ * Browsers paired before the host emitted a pairing event for them — or while
+ * no account was unlocked to receive it — exist only in the SecurityStore. The
+ * console is the one place a device is revoked, so a browser missing from it
+ * could not be cut off at all. Presence is unknown rather than guessed: the
+ * store's `updatedAt` is when its lifecycle last changed, not when it was last
+ * seen.
+ */
+function browserRowFromHost(device: HostDeviceSummaryInput): PairedDeviceRow {
+  return {
+    deviceId: device.deviceId,
+    label: device.displayName,
+    platform: "browser",
+    pubkey: "",
+    appVersion: "unknown",
+    pairedAt: storeTimeToMs(device.createdAt),
+    lastSeenAt: 0,
+    allowRemoteTerminal: false,
+  }
+}
 
 /** Namespaced so a paired device and a Host can never collide on `ref`. */
 export function pairedDeviceRef(deviceId: string): string {
@@ -178,6 +231,12 @@ export function buildDeviceWan(
 
 function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput): DeviceRow {
   const hostDevice = input.hostDevices?.get(row.deviceId)
+  // A browser extension holds exactly its own two capabilities and nothing a
+  // grant switch could add; the store would accept an assignable grant for it,
+  // so the console must not offer one. Its lifecycle — pause, resume, revoke —
+  // is the whole of what can be managed here.
+  const isBrowser =
+    row.platform === "browser" || (hostDevice !== undefined && isBrowserHostDevice(hostDevice))
   const mirror = mirrorAdminState(row)
   const hostState = hostDevice ? adminStateFromHostStatus(hostDevice.status) : undefined
   const adminState = hostState && hostState !== "unknown" ? hostState : mirror
@@ -204,11 +263,17 @@ function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput)
     ownerSuspended: !ownerPermits(input.hostPersonUserId, hostDevice?.userId),
   }
 
-  const capabilities = buildPlatformCapabilityCells({
-    reported: row.capabilities,
-    reportedAt: row.capabilitiesReportedAt,
-    platform: baselinePlatformFor(row.platform),
-  })
+  // No platform matrix for a browser, for the reason a worker has none: what it
+  // holds is SecurityStore capability ids, not the platform vocabulary, and it
+  // never sends a capability report — so "has not reported" would be a
+  // permanent warning about something that is not going to happen.
+  const capabilities = isBrowser
+    ? []
+    : buildPlatformCapabilityCells({
+        reported: row.capabilities,
+        reportedAt: row.capabilitiesReportedAt,
+        platform: baselinePlatformFor(row.platform),
+      })
 
   return {
     ref: pairedDeviceRef(row.deviceId),
@@ -218,7 +283,7 @@ function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput)
     deviceId: row.deviceId,
     pubkey: row.pubkey,
     platform: baselinePlatformFor(row.platform),
-    reportedPlatform: row.platform,
+    reportedPlatform: isBrowser ? "browser" : row.platform,
     appVersion: row.appVersion,
     fingerprint: row.serverFingerprint,
     role: hostDevice?.role,
@@ -239,8 +304,8 @@ function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput)
     pairedAt: row.pairedAt,
     capabilities,
     capabilitiesReportedAt: row.capabilitiesReportedAt,
-    capabilityReportMissing: row.capabilitiesReportedAt === undefined,
-    grants: buildGrantRows(evidence),
+    capabilityReportMissing: !isBrowser && row.capabilitiesReportedAt === undefined,
+    grants: isBrowser ? [] : buildGrantRows(evidence),
     wan: buildDeviceWan(row, input, adminState),
     presence,
     placement: buildDevicePlacement({
@@ -483,9 +548,18 @@ const REACHABILITY_ORDER: Record<DeviceReachability, number> = {
  * shuffles between renders of identical data.
  */
 export function buildDeviceRows(input: BuildDeviceRowsInput): DeviceRow[] {
+  // Browsers the host enrolled that the mirror never heard of. Only browsers:
+  // a phone missing from the mirror is a different story (it has signaling
+  // state the mirror owns), and the worker list already covers workers.
+  const mirrored = new Set(input.pairedDevices.map((row) => row.deviceId))
+  const unmirroredBrowsers = [...(input.hostDevices?.values() ?? [])]
+    .filter((device) => isBrowserHostDevice(device) && !mirrored.has(device.deviceId))
+    .map(browserRowFromHost)
   const rows: DeviceRow[] = [
     buildLocalRow(input),
-    ...input.pairedDevices.map((row) => buildPairedDeviceRow(row, input)),
+    ...[...input.pairedDevices, ...unmirroredBrowsers].map((row) =>
+      buildPairedDeviceRow(row, input)
+    ),
     ...input.remoteHosts.map((host) => buildRemoteHostRow(host, input)),
     ...input.workers.map((worker) => buildWorkerRow(worker, input)),
     ...input.sshHosts.map((profile) => buildSshHostRow(profile, input)),
