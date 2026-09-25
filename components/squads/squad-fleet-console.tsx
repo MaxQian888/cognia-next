@@ -114,7 +114,11 @@ export function SquadFleetConsole({ route }: SquadFleetConsoleProps) {
           icon={<UsersIcon className="size-4" />}
           title={t("title")}
           description={t("description")}
-          summary={t("summary", { total: fleet.total, live: fleet.live })}
+          // Nothing to count yet: the rail already says "No Squads yet", and
+          // a header reading "none working of 0 Squads" only repeated it badly.
+          summary={
+            fleet.total > 0 ? t("summary", { total: fleet.total, live: fleet.live }) : undefined
+          }
           primaryAction={{
             id: "manage",
             label: t("manageAction"),

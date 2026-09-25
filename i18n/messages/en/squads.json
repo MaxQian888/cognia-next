@@ -51,7 +51,7 @@
       "waiting": "Needs you",
       "working": "Working"
     },
-    "summary": "{live, plural, =0 {none working} other {# working}} of {total, plural, =1 {1 Squad} other {# Squads}}",
+    "summary": "{total, plural, =1 {1 Squad} other {# Squads}} · {live, plural, =0 {idle} other {# working}}",
     "tabs": {
       "board": "Board",
       "runs": "Runs",

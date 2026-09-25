@@ -161,6 +161,18 @@ beforeEach(() => {
 })
 
 describe("SquadFleetConsole", () => {
+  it("counts the fleet in the header", () => {
+    renderConsole(route())
+    expect(screen.getByText("2 Squads · idle")).toBeInTheDocument()
+  })
+
+  it("leaves the header uncounted when there is no Squad to count", () => {
+    // It read "none working of 0 Squads" beside the rail's own empty state.
+    seed([])
+    renderConsole(route())
+    expect(screen.queryByText(/0 Squads/)).not.toBeInTheDocument()
+  })
+
   it("renders the rail as a real pane, never behind a Sheet glyph", () => {
     renderConsole(route())
     expect(screen.getAllByTestId("squad-fleet-row")).toHaveLength(2)
