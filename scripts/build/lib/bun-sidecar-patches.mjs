@@ -1,0 +1,111 @@
+// Source patches the compiled Bun CLI applies to sidecar modules at load time.
+//
+// A `bun build --compile` executable cannot read files that sit next to a
+// sidecar module (schema.sql, package.json version metadata) or dynamically
+// import the vscode-ext-host dist by computed path, so build-cli-bun.mjs
+// rewrites those few lines while bundling. Each rewrite anchors on exact source
+// text; the table lives here, as data, so a node --test suite can prove every
+// anchor still matches exactly once (scripts/build/lib/bun-sidecar-patches.test.mjs)
+// instead of the drift surfacing only when someone builds the CLI binary.
+//
+// Runs under both Node (the test) and Bun (the build), so it uses node:fs only.
+
+import fs from "node:fs"
+import path from "node:path"
+
+/**
+ * Replace the single occurrence of `search` in `source`.
+ * Throws when `search` matches zero or several times, naming `label`.
+ */
+export function replaceExactly(source, search, replacement, label) {
+  const matches =
+    typeof search === "string"
+      ? source.split(search).length - 1
+      : [...source.matchAll(new RegExp(search.source, search.flags.includes("g") ? search.flags : `${search.flags}g`))]
+          .length
+  if (matches !== 1) {
+    throw new Error(`build-cli-bun: ${label} expected exactly one source match; found ${matches}`)
+  }
+  return source.replace(search, () => replacement)
+}
+
+const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"))
+
+/**
+ * @typedef {object} PatchContext
+ * @property {string} root repo root
+ * @property {string} filePath absolute path of the module being loaded
+ *
+ * @typedef {object} SidecarPatch
+ * @property {string} file repo-relative path of the patched module
+ * @property {"js" | "ts"} loader Bun loader for the patched contents
+ * @property {Array<{ label: string, search: string | RegExp, replace: (ctx: PatchContext) => string }>} edits
+ */
+
+/** @type {SidecarPatch[]} */
+export const BUN_SIDECAR_PATCHES = [
+  {
+    file: "sidecar/builtin-tools/code/store-sqlite.mjs",
+    loader: "js",
+    edits: [
+      {
+        label: "codegraph schema inline",
+        search: 'const SCHEMA_SQL = fs.readFileSync(path.join(HERE, "schema.sql"), "utf-8")',
+        replace: ({ filePath }) =>
+          `const SCHEMA_SQL = ${JSON.stringify(fs.readFileSync(path.join(path.dirname(filePath), "schema.sql"), "utf8"))}`,
+      },
+    ],
+  },
+  {
+    file: "sidecar/agent-host.mjs",
+    loader: "js",
+    edits: [
+      {
+        label: "agent host createRequire import",
+        search: 'import { createRequire } from "node:module"\n',
+        replace: () => "",
+      },
+      {
+        label: "agent host version metadata",
+        search: /const _require = createRequire\(import\.meta\.url\)\nfunction readVersionInfo\(\) \{[\s\S]*?\n\}/,
+        replace: ({ root }) => {
+          const sdkVersion = readJson(
+            path.join(root, "sidecar/node_modules/@anthropic-ai/claude-agent-sdk/package.json")
+          ).version
+          const sidecarVersion = readJson(path.join(root, "sidecar/package.json")).version
+          return `function readVersionInfo() { return ${JSON.stringify({ sdkVersion, sidecarVersion })} }`
+        },
+      },
+    ],
+  },
+  {
+    file: "sidecar/lsp/service-loader.mjs",
+    loader: "js",
+    edits: [
+      {
+        label: "LSP service static import",
+        search: "import(pathToImportUrl(LSP_SERVICE_PATH))",
+        replace: () => 'import("../vscode-ext-host/dist/lsp-service.js")',
+      },
+      {
+        label: "LSP installer static import",
+        search: "import(pathToImportUrl(LSP_INSTALLER_PATH))",
+        replace: () => 'import("../vscode-ext-host/dist/lsp-installer.js")',
+      },
+    ],
+  },
+]
+
+/** Bun `onLoad` filter matching the patch's module on any platform. */
+export function patchFilter(patch) {
+  const escaped = patch.file
+    .split("/")
+    .map((segment) => segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("[\\\\/]")
+  return new RegExp(`[\\\\/]${escaped}$`)
+}
+
+/** Apply every edit of `patch` to `source`. */
+export function applySidecarPatch(patch, source, ctx) {
+  return patch.edits.reduce((text, edit) => replaceExactly(text, edit.search, edit.replace(ctx), edit.label), source)
+}

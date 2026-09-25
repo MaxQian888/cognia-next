@@ -25,6 +25,7 @@ import { signCliArtifacts } from "./sign-cli-bun.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
 import { resolveClaudeRuntime } from "./lib/stage-claude-runtime.mjs"
 import { stageBuiltinPluginAssets } from "./lib/stage-builtin-plugin-assets.mjs"
+import { BUN_SIDECAR_PATCHES, applySidecarPatch, patchFilter } from "./lib/bun-sidecar-patches.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const entry = path.join(root, "cli/src/cli/entry.ts")
@@ -48,18 +49,6 @@ const coreExecutable = path.join(coreDir, target.executable)
 const [bunMajor, bunMinor] = Bun.version.split(".").map(Number)
 if (bunMajor < 1 || (bunMajor === 1 && bunMinor < 4)) {
   throw new Error(`build-cli-bun: Bun 1.4+ is required; found ${Bun.version}`)
-}
-
-function replaceExactly(source, search, replacement, label) {
-  const matches =
-    typeof search === "string"
-      ? source.split(search).length - 1
-      : [...source.matchAll(new RegExp(search.source, search.flags.includes("g") ? search.flags : `${search.flags}g`))]
-          .length
-  if (matches !== 1) {
-    throw new Error(`build-cli-bun: ${label} expected exactly one source match; found ${matches}`)
-  }
-  return source.replace(search, () => replacement)
 }
 
 const claudeBinary = variants.includes("full")
@@ -218,60 +207,18 @@ const embeddedMulticallRolesPlugin = {
   },
 }
 
+// Sidecar modules that read sibling files or import by computed path are
+// rewritten while bundling; the anchors and replacements are a tested table
+// (./lib/bun-sidecar-patches.mjs).
 const dynamicRequireCompatPlugin = {
   name: "dynamic-require-compat",
   setup(build) {
-    build.onLoad(
-      { filter: /[\\/]sidecar[\\/]builtin-tools[\\/]code[\\/]store-sqlite\.mjs$/ },
-      async (args) => {
-        const schema = await Bun.file(path.join(path.dirname(args.path), "schema.sql")).text()
-        return {
-          contents: replaceExactly(
-            await Bun.file(args.path).text(),
-            'const SCHEMA_SQL = fs.readFileSync(path.join(HERE, "schema.sql"), "utf-8")',
-            `const SCHEMA_SQL = ${JSON.stringify(schema)}`,
-            "codegraph schema inline"
-          ),
-          loader: "js",
-        }
-      }
-    )
-    build.onLoad({ filter: /[\\/]sidecar[\\/]agent-host\.mjs$/ }, async (args) => {
-      const sdkPackage = JSON.parse(
-        await Bun.file(path.join(root, "sidecar/node_modules/@anthropic-ai/claude-agent-sdk/package.json")).text()
-      )
-      const sidecarPackage = JSON.parse(await Bun.file(path.join(root, "sidecar/package.json")).text())
-      let source = await Bun.file(args.path).text()
-      source = replaceExactly(
-        source,
-        'import { createRequire } from "node:module"\n',
-        "",
-        "agent host createRequire import"
-      )
-      source = replaceExactly(
-        source,
-        /const _require = createRequire\(import\.meta\.url\)\nfunction readVersionInfo\(\) \{[\s\S]*?\n\}/,
-        `function readVersionInfo() { return ${JSON.stringify({ sdkVersion: sdkPackage.version, sidecarVersion: sidecarPackage.version })} }`,
-        "agent host version metadata"
-      )
-      return { contents: source, loader: "js" }
-    })
-    build.onLoad({ filter: /[\\/]sidecar[\\/]lsp[\\/]service-loader\.mjs$/ }, async (args) => {
-      let source = await Bun.file(args.path).text()
-      source = replaceExactly(
-        source,
-        "import(pathToImportUrl(LSP_SERVICE_PATH))",
-        'import("../vscode-ext-host/dist/lsp-service.js")',
-        "LSP service static import"
-      )
-      source = replaceExactly(
-        source,
-        "import(pathToImportUrl(LSP_INSTALLER_PATH))",
-        'import("../vscode-ext-host/dist/lsp-installer.js")',
-        "LSP installer static import"
-      )
-      return { contents: source, loader: "js" }
-    })
+    for (const patch of BUN_SIDECAR_PATCHES) {
+      build.onLoad({ filter: patchFilter(patch) }, async (args) => ({
+        contents: applySidecarPatch(patch, await Bun.file(args.path).text(), { root, filePath: args.path }),
+        loader: patch.loader,
+      }))
+    }
   },
 }
 
