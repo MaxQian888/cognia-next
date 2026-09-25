@@ -295,8 +295,9 @@ function validateShape(value: unknown, shape: Shape, path: string, errors: strin
   else
     for (const [key, item] of Object.entries(value)) {
       if (item === undefined) continue
-      if (!Object.hasOwn(shape, key)) errors.push(`${path}.${key} is unsupported`)
-      else validateShape(item, (shape as Record<string, Shape>)[key], `${path}.${key}`, errors)
+      const child = Object.hasOwn(shape, key) ? (shape as Record<string, Shape>)[key] : undefined
+      if (child === undefined) errors.push(`${path}.${key} is unsupported`)
+      else validateShape(item, child, `${path}.${key}`, errors)
     }
 }
 

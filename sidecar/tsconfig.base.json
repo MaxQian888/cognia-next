@@ -1,0 +1,50 @@
+{
+  // Shared compiler contract for every TypeScript file the sidecar runs UNBUILT
+  // (ADR-0197): Node 26 strips the types and executes the source as-is, so the
+  // checker must accept exactly what the runtime accepts, and nothing is emitted.
+  // Standalone on purpose: the root tsconfig brings DOM libs, `paths` aliases the
+  // runtime cannot see, and bundler resolution that allows extensionless imports.
+  "compilerOptions": {
+    "target": "es2025",
+    "lib": ["es2025"],
+    // `bundler` rather than `nodenext`: linked workspace packages (agent-config-types)
+    // use extensionless relative imports that `nodenext` rejects inside THEIR
+    // sources. The sidecar's own relative imports must still spell `.ts`/`.mjs`/
+    // `.json`; Node enforces that at runtime and audit:sidecar-architecture at
+    // commit time.
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    // `typescript` and `@types/node` come from the repo root: sidecar/node_modules
+    // ships inside the app bundle, so it carries no dev dependencies.
+    "types": ["node"],
+    // Bundlers (the CLI's esbuild/Bun builds, the Pi extension staging) follow
+    // these to the linked packages' SOURCE, exactly as the root tsconfig does for
+    // the app. Node ignores `paths` and takes each package's `node` export
+    // condition (compiled dist, see scripts/build/build-sidecar-linked-packages.mjs).
+    // Only `link:` dependencies of sidecar/package.json belong here; the
+    // linked-packages test keeps the two lists equal.
+    "paths": {
+      "@cognia/redact": ["../packages/redact/src/index.ts"],
+      "@cognia/redact/*": ["../packages/redact/src/*"],
+      "@cognia/agent-config-types": ["../packages/agent-config-types/src/index.ts"],
+      "@cognia/agent-config-types/*": ["../packages/agent-config-types/src/*"]
+    },
+    "typeRoots": ["../node_modules/@types"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    // Mixed period: `.mjs` modules not yet converted are resolved and inferred,
+    // never checked.
+    "allowJs": true,
+    "checkJs": false,
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  }
+}

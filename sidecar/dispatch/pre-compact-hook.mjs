@@ -42,8 +42,20 @@
 export const PRE_COMPACT_TIMEOUT_MS = 5_000
 
 /**
- * @typedef {import("../../types/plugin/plugin-hooks").PreCompactContext} PreCompactContext
- * @typedef {import("../../types/plugin/plugin-hooks").PreCompactResult} PreCompactResult
+ * Wire shapes of the renderer's `PreCompactContext` / `PreCompactResult`
+ * (types/plugin/plugin-hooks.ts). Declared here because the sidecar type-checks
+ * standalone and cannot reach the app's `@/` aliases.
+ *
+ * @typedef {object} PreCompactContext
+ * @property {string} sessionId
+ * @property {number} messageCount
+ * @property {number} tokenCount
+ * @property {number} compressionRatio
+ *
+ * @typedef {object} PreCompactResult
+ * @property {string} [contextToInject] - context to inject into the compressed summary
+ * @property {boolean} [skipCompaction] - skip compaction entirely
+ * @property {"aggressive" | "moderate" | "minimal"} [customStrategy] - compression strategy override
  */
 
 /**

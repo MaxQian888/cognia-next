@@ -1,0 +1,8 @@
+{
+  // The Pi extension is SHA-pinned (ADR-0119) and loaded raw by Pi, so it is
+  // checked under the base contract without `noUncheckedIndexedAccess`: turning
+  // that on would force edits to the pinned file. Drop this exception the next
+  // time the extension is re-pinned for another reason.
+  "extends": "./tsconfig.base.json",
+  "include": ["pi-extension/**/*.ts"]
+}

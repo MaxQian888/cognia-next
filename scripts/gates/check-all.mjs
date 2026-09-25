@@ -95,6 +95,10 @@ const REGISTRY = [
   // its own JSX transform), exactly like `web`, so it needs its own entry or
   // it would be typechecked by nothing.
   { script: "browser-ext:typecheck", group: "types" },
+  // The sidecar runs its TypeScript unbuilt under Node's type stripping and is
+  // excluded from the root tsc (its own lib/resolution contract, ADR-0197), so
+  // this is the only thing that type-checks it.
+  { script: "sidecar:typecheck", group: "types" },
 
   // ADR-0148 — panel surfaces go through <Surface>, corners and depth go
   // through the token scale. Ratcheted against a baseline: the list may shrink,

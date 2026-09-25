@@ -186,6 +186,7 @@ function luhn(digits: string): boolean {
 
 function isValidUsSsn(value: string): boolean {
   const [area, group, serial] = value.split("-").map((part) => Number.parseInt(part, 10))
+  if (area === undefined || group === undefined || serial === undefined) return false
   return area > 0 && area !== 666 && area < 900 && group > 0 && serial > 0
 }
 
@@ -216,7 +217,7 @@ function freshState(): RedactState {
 function isLikelyPublicIPv4(addr: string): boolean {
   const parts = addr.split(".").map((p) => Number.parseInt(p, 10))
   if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false
-  const [a, b] = parts
+  const [a, b] = parts as [number, number, number, number]
   if (a === 0 || a === 127 || a === 255) return false // loopback / broadcast
   if (a === 10) return false // private 10.0.0.0/8
   if (a === 192 && b === 168) return false // private 192.168.0.0/16

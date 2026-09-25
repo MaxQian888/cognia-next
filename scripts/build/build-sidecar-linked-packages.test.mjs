@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { test } from "node:test"
+import ts from "typescript"
 
 import {
   collectSidecarCogniaSpecifiers,
@@ -80,4 +81,19 @@ test("every linked package can build, and the sidecar's runtime imports resolve 
     [],
     "run `node scripts/build/build-sidecar-linked-packages.mjs`; if it still fails, the package lacks a `node` export condition for that subpath"
   )
+})
+
+test("the sidecar tsconfig maps exactly the linked packages to their source, for bundlers", () => {
+  const manifest = JSON.parse(readFileSync(join(sidecarRoot, "package.json"), "utf8"))
+  const linked = linkedPackageDirs(manifest)
+  const { config, error } = ts.readConfigFile(join(sidecarRoot, "tsconfig.base.json"), ts.sys.readFile)
+  assert.equal(error, undefined)
+  const paths = config.compilerOptions.paths
+  const mapped = new Set(Object.keys(paths).map((key) => key.replace(/\/\*$/, "")))
+  assert.deepEqual([...mapped].sort(), linked.map(({ name }) => name).sort())
+  for (const { name, dir } of linked) {
+    const srcRel = `../packages/${dir.split("/").at(-1)}/src/`
+    assert.ok(paths[name]?.[0]?.startsWith(srcRel), `${name} maps into ${srcRel}`)
+    assert.ok(paths[`${name}/*`]?.[0] === `${srcRel}*`, `${name}/* maps to ${srcRel}*`)
+  }
 })

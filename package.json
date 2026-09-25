@@ -92,6 +92,7 @@
     "sidecar:install": "pnpm --dir sidecar install",
     "sidecar:smoke": "node sidecar/claude-host.mjs --smoke",
     "sidecar:start": "node sidecar/claude-host.mjs",
+    "sidecar:typecheck": "tsc -p sidecar/tsconfig.json && tsc -p sidecar/tsconfig.pi-extension.json",
     "sidecar:test": "node scripts/build/build-sidecar-linked-packages.mjs && pnpm run sidecar:test:root && pnpm run sidecar:test:builtin && pnpm run sidecar:test:dispatch && pnpm run sidecar:test:lsp && pnpm run sidecar:test:pi",
     "update:worker:test": "pnpm --dir services/update-server/worker --ignore-workspace test",
     "update:worker:typecheck": "pnpm --dir services/update-server/worker --ignore-workspace typecheck",
