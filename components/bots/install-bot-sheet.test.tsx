@@ -166,6 +166,16 @@ describe("InstallBotSheet", () => {
       "This browser cannot run Bots"
     )
   })
+
+  it("leads with the blocked reason, ahead of the controls it greys out", () => {
+    readiness = {
+      availability: { state: "unsupported", reason: "requires-companion" },
+      can: false,
+    }
+    render(<InstallBotSheet open onOpenChange={jest.fn()} />)
+    const body = screen.getByTestId("install-bot-sheet")
+    expect(body.firstElementChild).toBe(screen.getByTestId("bot-install-blocked"))
+  })
 })
 
 it("shows a host catalog failure instead of an empty catalog", () => {

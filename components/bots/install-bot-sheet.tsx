@@ -23,9 +23,10 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { PackagePlusIcon } from "lucide-react"
+import { MonitorOffIcon, PackagePlusIcon } from "lucide-react"
 
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
@@ -184,6 +185,18 @@ export function InstallBotSheet({ open, onOpenChange, onInstalled }: InstallBotS
       description={t("install.description")}
     >
       <div className="flex min-h-0 flex-col gap-3 px-4 pb-6" data-testid="install-bot-sheet">
+        {/* First, not between the search box and the list: it is why every
+            Install below is greyed out, and an 11px line mid-form read as a
+            hint about search rather than the reason nothing can be installed. */}
+        {!readiness.can ? (
+          <Alert role="status" data-testid="bot-install-blocked">
+            <MonitorOffIcon className="size-4" aria-hidden="true" />
+            <AlertDescription className="text-xs">
+              {t(`write.reason.${readiness.availability.reason}`)}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="bot-install-scope" className="text-xs">
             {t("install.scopeLabel")}
@@ -219,15 +232,6 @@ export function InstallBotSheet({ open, onOpenChange, onInstalled }: InstallBotS
           className="h-8"
           data-testid="bot-catalog-search"
         />
-
-        {!readiness.can ? (
-          <p
-            className="text-[11px] leading-snug text-muted-foreground"
-            data-testid="bot-install-blocked"
-          >
-            {t(`write.reason.${readiness.availability.reason}`)}
-          </p>
-        ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {failed ? (
