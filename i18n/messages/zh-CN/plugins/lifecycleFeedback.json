@@ -1,0 +1,20 @@
+{
+  "disableFailed": "无法停用 {name}",
+  "disableQueued": "{name} 将在你的桌面端停用",
+  "disabled": "已停用 {name}",
+  "enableBlocked": "此插件无法在当前设备上运行。",
+  "enableFailed": "无法启用 {name}",
+  "enableQueued": "{name} 将在你的桌面端启用",
+  "enabled": "已启用 {name}",
+  "queuedHint": "更改已发送到桌面端，将在下次与本设备同步时生效。",
+  "runsOnDesktop": "在桌面端运行",
+  "runsOnDesktopHint": "本设备是桌面端的镜像。开启或关闭此插件的操作会发送到桌面端，插件在那里运行。",
+  "uninstallBlocked": {
+    "builtin": "内置插件随 Cognia 一起提供，无法卸载。你可以将其停用。",
+    "mirrored": "请在桌面应用中卸载此插件。本设备只是它的镜像。"
+  },
+  "uninstallFailed": "无法卸载 {name}",
+  "uninstalled": "已卸载 {name}",
+  "viewContributions": "查看贡献内容",
+  "viewDetails": "查看详情"
+}

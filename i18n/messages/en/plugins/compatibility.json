@@ -10,5 +10,6 @@
     "tauri": "desktop"
   },
   "installBlocked": "Installing plugins runs in the desktop backend, so it needs the Cognia desktop app.",
+  "installBlockedLabel": "Why install isn't available here",
   "runtimeUnavailable": "Its runtime is not available on this device."
 }

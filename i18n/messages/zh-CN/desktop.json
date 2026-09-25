@@ -592,6 +592,7 @@
     "handoffReadonly": "设备接力后只读",
     "handoffStatus": "设备接力状态",
     "moveToFolder": "移动到文件夹",
+    "moveToWorkspace": "移动到工作区",
     "openInCodexApp": "在 Codex App 中打开",
     "codexHandoffPiiBlocked": "交接内容中检测到敏感信息。请先移除或脱敏，再导出。",
     "codexHandoffUnsupported": "部分内容无法传递。请先将浏览器临时附件保存为文件，再重试。",

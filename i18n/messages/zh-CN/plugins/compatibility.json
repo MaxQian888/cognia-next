@@ -10,5 +10,6 @@
     "tauri": "桌面端"
   },
   "installBlocked": "插件安装在桌面端后台执行，需要 Cognia 桌面应用。",
+  "installBlockedLabel": "为什么这里无法安装",
   "runtimeUnavailable": "该插件的运行时在本设备上不可用。"
 }

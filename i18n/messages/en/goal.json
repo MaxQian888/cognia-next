@@ -219,7 +219,7 @@
     "useChatModel": "Use chat model"
   },
   "launcher": {
-    "description": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
+    "description": "Persistent chat goals. Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
     "open": "Open Goals console",
     "title": "Goals"
   },

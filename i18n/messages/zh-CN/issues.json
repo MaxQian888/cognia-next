@@ -365,13 +365,15 @@
     "resources": "资源",
     "noProjects": "当前工作区还没有项目",
     "openIssues": "未完成议题",
-    "recentActivity": "最近活动",
-    "trust": "工作区信任",
     "manage": "管理工作区",
     "trusted": "已信任",
     "untrusted": "未信任",
-    "trustUnknown": "未决定",
-    "manageHint": "目录只有一个编辑入口 —— 工作区管理器。"
+    "manageHint": "目录只有一个编辑入口 —— 工作区管理器。",
+    "unknownValue": "—",
+    "openIssuesOpen": "打开议题看板",
+    "projectsOpen": "打开项目",
+    "environmentsOpen": "打开环境标签页",
+    "environmentsAttention": "仓库的工作区配置需要你确认"
   },
   "labels": {
     "title": "标签",
@@ -741,6 +743,9 @@
     "queuedHint": "更改会发送到你的主机，下次同步后在此显示。",
     "queued": "已排队：{identifier}",
     "sendComment": "发送",
-    "createQueued": "已排队：{title}"
+    "createQueued": "已排队：{title}",
+    "projectsEmptyHint": "项目需要在大屏设备上创建，创建后会自动显示在这里。",
+    "cyclesEmpty": "还没有迭代",
+    "cyclesEmptyHint": "迭代需要在大屏设备上规划，规划后会自动显示在这里。"
   }
 }

@@ -24,6 +24,20 @@
   "allowConcurrent": "Allow Concurrent",
   "appArgs": "Application Arguments",
   "appPath": "Application Path",
+  "approval": {
+    "deniedTools": "Refused tools",
+    "fallback": "Stopped for your approval",
+    "hintTools": "Add them to the task's allowed tools, or raise its permission mode.",
+    "hintTrust": "Trust the workspace so scheduled runs get their disk and host tools.",
+    "pill": "Needs approval",
+    "sheetBody": "Nobody was watching this run, so it stopped where it needed you instead of going ahead. It was not retried, because a retry would stop in the same place. Allow what it needs, then run the task again.",
+    "sheetTitle": "Waiting for your approval",
+    "tools": "Needs approval for {tools}",
+    "trust": "Workspace not trusted: {roots}",
+    "trustUnverified": "Could not check trust for {roots}",
+    "untrustedRoots": "Untrusted workspace roots",
+    "unverifiedRoots": "Roots whose trust could not be checked"
+  },
   "authority": {
     "graceLabel": "Grace",
     "graceMinutes": "{minutes} min",
@@ -93,7 +107,9 @@
       "full": "Full Backup",
       "sessions": "Sessions Only",
       "settings": "Settings Only"
-    }
+    },
+    "defaultTaskName": "Scheduled backup",
+    "scheduleFailed": "Could not schedule the backup"
   },
   "basicInfo": "Basic Information",
   "breadcrumb": "Breadcrumb",
@@ -697,8 +713,12 @@
   },
   "permissions": {
     "agentAutoCreate": "Agent Auto-Create",
-    "agentAutoCreateDesc": "Allow AI agents to create scheduled tasks without user confirmation dialog",
+    "agentAutoCreateDesc": "Also let agents add tasks without asking, in channels where write confirmations are turned off. A change you approve in the confirmation dialog never needs this.",
+    "agentAutoCreateInert": "Has no effect while agents cannot manage scheduled tasks.",
+    "agentTools": "Agent access",
+    "agentToolsDesc": "Let the assistant list, create, change, run and remove scheduled tasks from a conversation. Every change it makes asks you first.",
     "allowAgentAutoCreate": "Allow agents to auto-create tasks",
+    "allowAgentTools": "Allow agents to manage scheduled tasks",
     "autoRefreshInterval": "Auto-refresh (seconds)",
     "autoRefreshIntervalDesc": "How often the scheduler page re-reads tasks and runs. 0 turns it off.",
     "confirmationRequired": "Confirmation Required",
@@ -1127,6 +1147,10 @@
       "hostSuspended": "This device's schedule is suspended while a paired host runs it",
       "lastRunFailed": "{name} failed its last run",
       "lastRunFailedWith": "{name} failed its last run: {error}",
+      "needsApproval": "{name} is waiting for your approval",
+      "needsApprovalTools": "{name} is waiting for your approval to use {tools}",
+      "needsApprovalToolsAndTrust": "{name} is waiting for your approval to use {tools}, and for you to trust {roots}",
+      "needsApprovalTrust": "{name} is waiting for you to trust {roots}",
       "quotaNearLimit": "Tasks created by {source} are at {count} of the {limit} allowed",
       "running": "{name} is running now",
       "runningWithProcesses": "{name} is running now with {count} live processes",
@@ -1141,6 +1165,10 @@
       "consecutiveFailures": "{count} failures in a row",
       "lastRunFailed": "Last run failed",
       "lastRunFailedWith": "Last run failed: {error}",
+      "needsApproval": "Waiting for your approval",
+      "needsApprovalTools": "Waiting for approval to use {tools}",
+      "needsApprovalToolsAndTrust": "Waiting for approval to use {tools} and trust {roots}",
+      "needsApprovalTrust": "Waiting for you to trust {roots}",
       "running": "Running now",
       "runningWithProcesses": "Running now, {count} live processes",
       "unsupportedType": "Cannot run on this host"
@@ -1204,14 +1232,19 @@
     "storage": "Stored in",
     "tagsTitle": "Tags",
     "updatedAt": "Updated",
-    "workspaceTitle": "Workspace"
+    "workspaceTitle": "Workspace",
+    "backToOverview": "Overview",
+    "starting": "Starting…",
+    "openAuthoringConversation": "Open the conversation that created it"
   },
   "runSheet": {
     "next": "Next run",
     "position": "{index} of {total}",
     "previous": "Previous run",
     "progress": "{percent}% done",
-    "stillRunning": "still running"
+    "stillRunning": "still running",
+    "runningNow": "This run is still going.",
+    "stop": "Stop run"
   },
   "unifiedNames": {
     "backup": "Automatic backup",
@@ -1222,5 +1255,44 @@
   "systemDefault": "System default",
   "tags": "Tags",
   "timeout": "Timeout",
-  "noTags": "No tags"
+  "noTags": "No tags",
+  "itemActions": {
+    "starting": "Starting {name}…",
+    "started": "{name} is running",
+    "finished": "{name} finished",
+    "runFailed": "{name} failed",
+    "queued": "{name} will run when the current run finishes",
+    "skipped": "{name} did not run",
+    "cancelled": "{name} was cancelled",
+    "viewRun": "View run",
+    "paused": "Paused {name}",
+    "resumed": "Resumed {name}",
+    "deleted": "Deleted {name}",
+    "created": "Added {name} to the schedule",
+    "saved": "Saved {name}"
+  },
+  "updateTaskFailed": "Could not save the task",
+  "triggerPreview": {
+    "title": "{count, plural, =1 {Next run} other {Next # runs}}",
+    "titleNone": "Next runs",
+    "event": "Runs whenever the event fires, so there is no fixed time.",
+    "invalid": "Fix the expression to see when it runs.",
+    "past": "This time has already passed.",
+    "none": "No run falls within the next year."
+  },
+  "cleanupRuns": {
+    "title": "Clean up old runs?",
+    "description": "Removes the history of every run that finished more than {days} days ago. Tasks and their schedules are not affected. This cannot be undone.",
+    "confirm": "Clean up",
+    "cancel": "Cancel",
+    "working": "Cleaning up…",
+    "done": "{count, plural, =1 {Removed 1 old run} other {Removed # old runs}}",
+    "nothing": "No runs older than {days} days",
+    "failed": "Could not clean up old runs"
+  },
+  "bulkDone": {
+    "pause": "{count, plural, =1 {Paused 1 item} other {Paused # items}}",
+    "resume": "{count, plural, =1 {Resumed 1 item} other {Resumed # items}}",
+    "delete": "{count, plural, =1 {Deleted 1 item} other {Deleted # items}}"
+  }
 }

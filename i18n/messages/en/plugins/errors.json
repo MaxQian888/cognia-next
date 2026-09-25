@@ -1,6 +1,20 @@
 {
   "activation": "Couldn't activate {pluginName}",
   "adapter": "Plugin adapter failed for {pluginName}",
+  "codes": {
+    "dependencyInUse": "Other plugins depend on it: {dependents}. Disable or uninstall them first.",
+    "dependencyMissing": "It needs plugins that aren't enabled: {dependencies}.",
+    "dirtyRuntime": "Its last run didn't shut down cleanly. Retry the cleanup from the plugin's details first.",
+    "frontendTrust": "It runs unsandboxed code in the app. Trust it in the plugin's Permissions section to load it.",
+    "incompatible": "It can't run on this device.",
+    "intentDisabled": "It's turned off. Enable it first.",
+    "invalidManifest": "Its manifest is invalid.",
+    "managerNotReady": "Plugins are still starting. Try again in a moment.",
+    "notFound": "It's no longer installed.",
+    "pythonDisabled": "The Python runtime is turned off on this device.",
+    "signature": "Its signature couldn't be verified.",
+    "uninstallMirrored": "Uninstall it in the desktop app. This device only mirrors it."
+  },
   "config": "Couldn't apply settings for {pluginName}",
   "disable": "Couldn't disable {pluginName}",
   "enable": "Couldn't enable {pluginName}",

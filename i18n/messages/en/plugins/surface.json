@@ -5,6 +5,7 @@
     "message": "Plugin surface \"{surfaceId}\" crashed while rendering: {error}",
     "retryHint": "Retry the surface. If it fails again, inspect the plugin component and diagnostics."
   },
+  "fallbackStrip": "{pluginName}'s card failed to render, so the plain result is shown.",
   "retry": "Retry",
   "title": "{pluginName} could not render"
 }

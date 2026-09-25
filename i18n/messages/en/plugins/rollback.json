@@ -1,14 +1,24 @@
 {
   "canNotRollback": "No prior version of this plugin can be rolled back to.",
+  "cancel": "Cancel",
   "close": "Close",
+  "confirmAction": "Roll back",
+  "confirmBody": "{name} goes from v{from} back to v{to}. The installed version is replaced and the plugin restarts on the older one.",
+  "confirmTitle": "Roll back to v{version}?",
   "currentVersion": "Currently on v{version}",
   "description": "Restore a previous version captured before an update.",
   "desktopOnlyHint": "Rollbacks run through the native bridge and are only available in the desktop build.",
   "empty": "No snapshots have been recorded yet.",
   "hasBackups": "{count} versions available",
+  "loading": "Loading available versions…",
   "rollback": "Rollback",
   "rollbackAria": "Rollback to v{version}",
   "rollbackFailed": "Rollback failed.",
   "rollingBack": "Rolling back…",
+  "source": {
+    "backup": "Backup",
+    "local": "Local",
+    "marketplace": "Marketplace"
+  },
   "title": "Rollback history"
 }

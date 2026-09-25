@@ -1,0 +1,20 @@
+{
+  "disableFailed": "Couldn't disable {name}",
+  "disableQueued": "{name} will be disabled on your desktop",
+  "disabled": "{name} disabled",
+  "enableBlocked": "This plugin can't run on this device.",
+  "enableFailed": "Couldn't enable {name}",
+  "enableQueued": "{name} will be enabled on your desktop",
+  "enabled": "{name} enabled",
+  "queuedHint": "The change is sent to your desktop and applied the next time it syncs with this device.",
+  "runsOnDesktop": "Runs on your desktop",
+  "runsOnDesktopHint": "This device mirrors your desktop. Turning this plugin on or off is sent to the desktop, which is where it runs.",
+  "uninstallBlocked": {
+    "builtin": "Built-in plugins ship with Cognia and can't be uninstalled. Disable it instead.",
+    "mirrored": "Uninstall this plugin in the desktop app. This device only mirrors it."
+  },
+  "uninstallFailed": "Couldn't uninstall {name}",
+  "uninstalled": "{name} uninstalled",
+  "viewContributions": "View contributions",
+  "viewDetails": "View details"
+}

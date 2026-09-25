@@ -41,7 +41,7 @@
   "dispatchDecisionLabel": "调度决策",
   "enableMessaging": "智能体间消息",
   "execution": {
-    "description": "团队级执行默认值（ADR-0090）：继承模式成员解析到的绑定，以及团队间委派深度上限。",
+    "description": "团队级执行默认值：继承模式成员解析到的绑定，以及团队间委派深度上限。",
     "maxDelegationDepth": "团队委派最大深度",
     "maxDelegationDepthHint": "仅计团队间委派（默认 2）。达到上限的团队再委派会被拒绝。与原生 subagent 嵌套深度相互独立。",
     "title": "执行"

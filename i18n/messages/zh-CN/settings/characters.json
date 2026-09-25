@@ -277,7 +277,9 @@
       "volume": "音量"
     },
     "workingDir": "工作目录",
-    "workingDirPlaceholder": "/path/to/project（可选）"
+    "workingDirPlaceholder": "/path/to/project（可选）",
+    "pluginSkills": "插件技能",
+    "pluginSkillsHint": "由已启用插件提供的技能，会与该角色的对话技能一起加入它的每次回复。"
   },
   "emptyHint": "暂无角色。内置角色应该会自动出现在这里。",
   "exportPackAria": "导出 {name} 的源角色包",

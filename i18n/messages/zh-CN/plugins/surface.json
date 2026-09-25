@@ -5,6 +5,7 @@
     "message": "插件表面“{surfaceId}”在渲染时崩溃：{error}",
     "retryHint": "请重试该表面。若再次失败，请检查插件组件和诊断信息。"
   },
+  "fallbackStrip": "{pluginName} 的卡片渲染失败，已改为显示原始结果。",
   "retry": "重试",
   "title": "{pluginName} 无法渲染"
 }

@@ -412,7 +412,8 @@
     "errorLoading": "Error loading surface",
     "loading": "Loading...",
     "noContent": "No content to display",
-    "rendering": "Rendering..."
+    "rendering": "Rendering...",
+    "preparing": "Preparing…"
   },
   "surfaceRoot": "Surface root (wrap existing root)",
   "systemShare": "System Share",

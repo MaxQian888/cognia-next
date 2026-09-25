@@ -11,6 +11,7 @@
     "description": "Creator 读写的每个文件都限制在该目录内，且没有隐式默认值。",
     "empty": "尚未选择创作根目录。",
     "choose": "选择目录",
+    "desktopOnly": "选择目录需要 Cognia 桌面应用，浏览器标签页无法授予 Creator 访问本地文件的权限。",
     "change": "更换",
     "revoke": "撤销",
     "pathLabel": "路径",

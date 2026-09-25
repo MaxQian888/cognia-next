@@ -264,7 +264,7 @@
   },
   "mobile": {
     "empty": "No Sites on this device.",
-    "emptyExplain": "Sites are created and published on the desktop. This phone reads its own local database and does not yet mirror the desktop's — see ADR-0084.",
+    "emptyExplain": "Sites are created and published on the desktop. This phone shows only what is in its own local database; it does not mirror the desktop's Sites yet.",
     "explain": "Building, previewing, and publishing need the desktop app's sandbox, terminal, and keyring. What this phone can show is what its own database holds.",
     "readOnly": "Read-only on this device.",
     "title": "Sites"

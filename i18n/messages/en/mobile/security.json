@@ -1,7 +1,7 @@
 {
   "deletePairing": {
-    "help": "Ask for biometric before clearing the pairing on this phone.",
-    "label": "Sign out / un-pair"
+    "help": "Ask for biometric before revoking a device's pairing.",
+    "label": "Revoke a paired device"
   },
   "description": "Require Face ID / fingerprint before sensitive actions.",
   "exportBackup": {

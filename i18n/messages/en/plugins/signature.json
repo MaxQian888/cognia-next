@@ -1,4 +1,5 @@
 {
+  "ariaLabel": "Publisher signature: {state}",
   "failed": "Signature failed",
   "failedTooltip": "Signature verification failed — review before enabling.",
   "unknown": "Unknown",

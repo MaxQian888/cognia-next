@@ -5,6 +5,7 @@
     "close": "Close",
     "reject": "Reject"
   },
+  "announce": "{plugin} is asking for permission: {permission}",
   "ariaLabel": "Plugin consent dialog",
   "binary": {
     "rememberHint": "Skips this prompt for these exact bytes only. The approval is pinned to the file's SHA-256, so any change to the binary — an update, a rebuild, or tampering — asks you again. It does not trust the plugin's publisher, and it covers no other binary. Revoke it any time under the plugin's Permissions tab.",
@@ -19,5 +20,6 @@
     "plugin": "Plugin:",
     "reason": "Reason:"
   },
-  "title": "Plugin requesting permission"
+  "title": "Plugin requesting permission",
+  "titleNamed": "{plugin} is asking to use a permission"
 }

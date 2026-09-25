@@ -117,6 +117,12 @@
   "fingerprintPinned": "Desktop identity pinned",
   "formCardDescription": "One-tap scan or manual paste — both routes use the same 5-minute pair token.",
   "formCardTitle": "Pair this phone",
+  "heading": {
+    "paired": {
+      "title": "You're connected",
+      "description": "This client holds its own key and reconnects on its own from here."
+    }
+  },
   "health": {
     "checking": "Checking",
     "continueToChat": "Continue to chat",

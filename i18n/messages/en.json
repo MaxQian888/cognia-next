@@ -413,6 +413,7 @@
       "errorLoading": "Error loading surface",
       "loading": "Loading...",
       "noContent": "No content to display",
+      "preparing": "Preparing…",
       "rendering": "Rendering..."
     },
     "surfaceRoot": "Surface root (wrap existing root)",
@@ -2310,7 +2311,9 @@
     "detail": {
       "activityOmitted": "{count, plural, one {# earlier step is not shown} other {# earlier steps are not shown}}",
       "changesIncomplete": "This change list is incomplete — some file events were not captured.",
+      "emptyPrompt": "Nothing to inspect yet. Chat turns, workflows, goals, Squads and background jobs show up here the moment they start.",
       "error": "Error",
+      "filteredPrompt": "No run matches these filters. Switch back to All to see every run.",
       "finished": "Finished",
       "imOrigin": "From chat",
       "journalUnavailable": "The run journal is not on this device.",
@@ -3385,7 +3388,7 @@
       "dispatchDecisionLabel": "Dispatch decision",
       "enableMessaging": "Inter-agent messaging",
       "execution": {
-        "description": "Team-level execution defaults (ADR-0090): the binding every inheriting teammate resolves to, and the team-to-team delegation depth cap.",
+        "description": "Team-level execution defaults: the binding every inheriting teammate resolves to, and the team-to-team delegation depth cap.",
         "maxDelegationDepth": "Max team delegation depth",
         "maxDelegationDepthHint": "Team-to-team delegations only (default 2). A team at the cap has its further delegations refused. Distinct from native subagent nesting depth.",
         "title": "Execution"
@@ -4863,6 +4866,8 @@
     "detail": {
       "noSelectionBody": "Pick a Bot from the list to see its triggers, credentials and policy.",
       "noSelectionTitle": "No Bot selected",
+      "noneInstalledBody": "A Bot wires an event source to an agent. Install one from a plugin and its triggers, credentials and policy show up here.",
+      "noneInstalledTitle": "No Bots installed yet",
       "notFoundBody": "The link names an installation this device does not have. It may have been uninstalled, or it lives on another host.",
       "notFoundTitle": "That Bot is not here"
     },
@@ -5171,7 +5176,7 @@
       "title": "Comment on this element"
     },
     "cookieImport": {
-      "action": "Reuse Chromium sign-in",
+      "action": "Site sign-in",
       "browser": {
         "brave": "Brave",
         "chrome": "Google Chrome",
@@ -5179,7 +5184,16 @@
         "edge": "Microsoft Edge"
       },
       "browserLabel": "Browser",
-      "cancel": "Cancel",
+      "clear": {
+        "action": "Clear cookies",
+        "clearing": "Clearing…",
+        "description": "Remove {domain}'s cookies from the built-in preview. Your Chromium profile is not touched.",
+        "done": "{count, plural, one {Removed # cookie for {domain}} other {Removed # cookies for {domain}}} and reloaded the preview.",
+        "failed": "Could not clear this site's cookies.",
+        "none": "The preview holds no cookies for {domain}.",
+        "title": "Sign out in the preview"
+      },
+      "close": "Close",
       "consent": {
         "continue": "I understand, continue",
         "description": "Cognia will read saved sign-in cookies for the current site from the selected Chromium profile and inject them into this preview.",
@@ -5187,9 +5201,12 @@
         "title": "Allow local cookie access?"
       },
       "description": "Choose the local browser profile whose sign-in should be reused for this site.",
+      "dialogDescription": "Reuse a sign-in from a local Chromium profile, or remove this site's cookies from the built-in preview.",
+      "dialogTitle": "Sign-in for {host}",
       "import": "Import and reload",
       "importing": "Importing…",
       "keychainHint": "macOS may ask for Keychain access. Denying the prompt leaves the preview unchanged.",
+      "openSettings": "Open Desktop settings",
       "profileLabel": "Profile",
       "reason": {
         "checkFailed": "Could not check local Chromium profiles. Restart the desktop app and try again.",
@@ -5231,6 +5248,7 @@
     "empty": {
       "hint": "Enter any web address or a localhost URL to render it here, then select an element to comment on it.",
       "quickOpen": "Quick open:",
+      "recent": "Recent:",
       "title": "Preview a web page"
     },
     "errors": {
@@ -5247,6 +5265,7 @@
     },
     "history": {
       "clear": "Clear history",
+      "clearFailed": "Could not clear the browsing history",
       "empty": "No recent pages",
       "label": "History"
     },
@@ -5269,14 +5288,12 @@
     "record": {
       "addAssertion": "Expect text…",
       "assertionPlaceholder": "Text that should appear",
-      "collapse": "Collapse recorder",
       "delete": "Delete flow",
       "deleted": "Flow deleted",
       "downloadJson": "Save flow JSON…",
       "downloadPlaywright": "Save Playwright test…",
       "downloaded": "Flow saved to disk",
       "empty": "Interact with the page — your clicks, typing and key presses are captured here.",
-      "expand": "Expand recorder",
       "export": "Export",
       "exportAgent": "Send to chat",
       "exportJson": "Flow JSON",
@@ -5328,6 +5345,13 @@
     "remote": {
       "canvas": "Remote browser canvas",
       "closePage": "Close page",
+      "connection": {
+        "connected": "Connected",
+        "connecting": "Connecting…",
+        "failed": "Disconnected",
+        "offline": "Offline",
+        "reconnecting": "Reconnecting…"
+      },
       "error": "Remote browser unavailable ({code})",
       "find": "Find in page",
       "humanControl": "You're controlling",
@@ -8259,6 +8283,84 @@
       "waitingApproval": "Waiting for approval",
       "working": "Working"
     },
+    "scheduleTools": {
+      "consequences": {
+        "cancelRun": "Stops this run. The task keeps its schedule and will run again.",
+        "create": "It will run on its own at these times until you pause or delete it.",
+        "delete": "Deletes the task and its run history. This cannot be undone.",
+        "runNow": "Runs once now. Its normal schedule is unchanged.",
+        "setStatus": "The task stays in your list; its schedule follows the new status.",
+        "stopProcess": "Kills the process the task started. The task keeps its schedule.",
+        "update": "Only the fields shown change. A new payload replaces the old one entirely."
+      },
+      "deleted": "Deleted {name}",
+      "gone": "Deleted",
+      "listEmpty": "No scheduled tasks match.",
+      "listMore": "{count, plural, =1 {and 1 more} other {and # more}}",
+      "newName": "New name",
+      "newSchedule": "New schedule",
+      "newStatus": "New status",
+      "nextRun": "next {when}",
+      "openInScheduler": "Open in Scheduler",
+      "openSettings": "Scheduler settings",
+      "outcomes": {
+        "alreadyFinished": "Already finished",
+        "cancelRun": "Stop requested",
+        "cancelled": "Stopped",
+        "notApplicable": "This task has no process to stop",
+        "notFound": "No such run",
+        "requested": "Stop requested from the window running it",
+        "runNow": "Started",
+        "stopProcess": "Process stopped",
+        "stopped": "Process stopped",
+        "unavailable": "This host cannot report its processes",
+        "unreachable": "Nothing here holds this run",
+        "unsupported": "Runs on a paired host cannot be stopped from here"
+      },
+      "payloadKeys": {
+        "agentId": "Agent",
+        "command": "Command",
+        "objective": "Objective",
+        "planId": "Plan",
+        "prompt": "Prompt",
+        "skillId": "Skill",
+        "teamId": "Squad",
+        "text": "Message",
+        "workflowId": "Workflow"
+      },
+      "rawArguments": "Raw arguments",
+      "refusalDetail": "Details",
+      "refusals": {
+        "declined": "You declined this change.",
+        "denied": "The request was refused.",
+        "failed": "This did not go through.",
+        "invalidArgs": "The assistant's request was malformed, so nothing changed.",
+        "notAllowedHere": "Not allowed in this conversation.",
+        "piiBlocked": "Blocked: the request contained personal information."
+      },
+      "run": "Run",
+      "runs": "Runs",
+      "schedule": "Schedule",
+      "starts": "Starts",
+      "startsPaused": "Paused, until you turn it on",
+      "taskMissing": "No scheduled task with id {id} on this device.",
+      "untitled": "Untitled task",
+      "verbs": {
+        "cancelRun": "Stop a running task",
+        "create": "Add to your schedule",
+        "delete": "Delete a scheduled task",
+        "runNow": "Run a scheduled task now",
+        "setStatus": "Change a task's status",
+        "stopProcess": "Stop a task's process",
+        "update": "Change a scheduled task"
+      },
+      "viewRun": "View run"
+    },
+    "scheduledOrigin": {
+      "goneHint": "Opened by the scheduled task {name}, which has since been deleted.",
+      "hint": "Opened by the scheduled task {name}. Open it in the scheduler.",
+      "label": "Scheduled · {name}"
+    },
     "search": {
       "close": "Close search",
       "label": "Find in conversation",
@@ -10575,6 +10677,14 @@
     "planPanel": {
       "title": "Plan"
     },
+    "pluginPanel": {
+      "buildFailed": "This panel couldn't be built.",
+      "buildFailedDetail": "The plugin reported: {message}",
+      "contextFailed": "The plugin couldn't provide this resource's context, so your last message was sent without it.",
+      "dismiss": "Dismiss",
+      "retry": "Retry",
+      "selectionToolbar": "Selection actions"
+    },
     "projectProposal": {
       "apply": "Apply accepted",
       "discard": "Discard",
@@ -11039,6 +11149,7 @@
       "change": "Change",
       "choose": "Choose a directory",
       "description": "Every file Creator reads or writes stays inside this directory. There is no implicit default.",
+      "desktopOnly": "Choosing a directory needs the Cognia desktop app. A browser tab cannot grant Creator access to your files.",
       "empty": "No authoring root chosen yet.",
       "origin": {
         "created": "Created",
@@ -11844,6 +11955,7 @@
       "handoffReadonly": "Read-only after device handoff",
       "handoffStatus": "Device handoff status",
       "moveToFolder": "Move to folder",
+      "moveToWorkspace": "Move to workspace",
       "openInCodexApp": "Open in Codex app",
       "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
       "openInTerminal": "Open in terminal",
@@ -13652,6 +13764,7 @@
       "new": "New dataset",
       "searchPlaceholder": "Search datasets…",
       "select": "Select a dataset to see its runs.",
+      "selectEmpty": "A dataset's runs show up here. Create one on the left to start.",
       "version": "v{version}"
     },
     "detail": {
@@ -15249,22 +15362,27 @@
       "actionError": {
         "callFailed": "That did not go through. Try again.",
         "emptyInput": "Type something first.",
+        "hostConsent": "Approve this device on the execution host first.",
         "interrupt_identity_mismatch": "That process is no longer the agent, so nothing was sent.",
         "interrupt_not_running": "That session is no longer reachable.",
         "interrupt_unsupported": "Interrupting isn't supported on this platform.",
+        "noLongerWaiting": "Nothing is waiting on that any more.",
         "noRoute": "There is no page to open for this task.",
         "notPermitted": "That is not available for this task.",
         "requestChanged": "The request changed. Try again.",
         "staleRevision": "This task changed before the action ran. Try again.",
         "timeout": "No response from the app. Try again.",
+        "turnFinished": "That turn already finished.",
         "unknown": "Could not complete that.",
         "unknownRow": "This task is no longer listed."
       },
       "announceActive": "{count, plural, =0 {No active tasks} one {# active task} other {# active tasks}}",
+      "announceFinished": "Finished: {title}",
       "announceWaiting": "{count, plural, one {# task} other {# tasks}}, {waiting} waiting for you",
       "collapse": "Collapse task list",
       "decideInMain": "Decide in the main window",
       "detail": {
+        "asking": "Asking:",
         "hide": "Hide details",
         "loading": "Loading details…",
         "show": "Show details"
@@ -15315,6 +15433,7 @@
         "stale": "No longer waiting",
         "working": "Working…"
       },
+      "stopTurn": "Stop this turn",
       "summary": "{count, plural, one {# task} other {# tasks}}",
       "summaryWaiting": "{count, plural, one {# task} other {# tasks}} · {waiting} waiting",
       "toggle": "Toggle task list",
@@ -15322,11 +15441,25 @@
     },
     "permission": {
       "allow": "Allow",
-      "allowed": "Allowed",
-      "countdown": "{seconds}s",
-      "denied": "Denied",
+      "allowAlways": "Always allow",
+      "allowedAlways": "Always allowed",
+      "answered": {
+        "allow": "Allowed",
+        "approve": "Approved",
+        "deny": "Denied",
+        "reject": "Rejected"
+      },
+      "approve": "Approve",
+      "ask": {
+        "budget": "Allow spending past the budget?",
+        "plan": "Approve this plan step?",
+        "review": "Needs your approval"
+      },
       "deny": "Deny",
       "expired": "Answered in terminal",
+      "lapsed": "Expired",
+      "reject": "Reject",
+      "remaining": "{duration} left",
       "request": "Permission: {tool}",
       "requestGeneric": "Permission requested"
     },
@@ -15437,9 +15570,12 @@
       "openBrowserHint": "Preview a page and comment on it",
       "openFolder": "Open folder as workspace…",
       "openFolderNeedsHost": "Pair with a host to browse folders. This device has no filesystem to open.",
+      "openPetConsole": "Open pet panel",
+      "openPetConsoleHint": "Feed, dress up, and check on your pet",
       "openSettings": "Open settings",
       "switchToDark": "Switch to dark theme",
       "switchToLight": "Switch to light theme",
+      "toggleDesktopPet": "Toggle desktop pet",
       "toggleSidebar": "Toggle sidebar"
     },
     "badges": {
@@ -15587,6 +15723,7 @@
       "conversationCleared": "Conversation cleared.",
       "nothingToExport": "Nothing to export — start a conversation first.",
       "openFolderDesktopOnly": "Opening folders as workspaces is only available in the desktop build.",
+      "petToggleFailed": "Couldn't toggle the desktop pet: {message}",
       "recentsCleared": "Recent searches cleared.",
       "upToDate": "You're on the latest version.",
       "updateAvailable": "Update available: {version}",
@@ -15816,7 +15953,7 @@
       "useChatModel": "Use chat model"
     },
     "launcher": {
-      "description": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
+      "description": "Persistent chat goals. Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
       "open": "Open Goals console",
       "title": "Goals"
     },
@@ -17344,6 +17481,9 @@
     },
     "mobile": {
       "createQueued": "Queued: {title}",
+      "cyclesEmpty": "No cycles yet",
+      "cyclesEmptyHint": "Cycles are planned on a larger screen. They show up here once they exist.",
+      "projectsEmptyHint": "Projects are created on a larger screen. They show up here once they exist.",
       "queued": "Queued for {identifier}",
       "queuedHint": "Changes are sent to your host and appear here after the next sync.",
       "sendComment": "Send"
@@ -17738,20 +17878,22 @@
       },
       "agentsWorkingShow": "Show which agents are working",
       "environments": "Environments",
+      "environmentsAttention": "The repository's workspace config needs your decision",
+      "environmentsOpen": "Open the Environments tab",
       "issueSummary": "Issues",
       "manage": "Manage workspace",
       "manageHint": "Roots have exactly one editor — the workspace manager.",
       "noProjects": "No projects in this workspace yet",
       "openIssues": "Open issues",
+      "openIssuesOpen": "Open the issue board",
       "overview": "Overview",
       "projectSummary": "Projects",
-      "recentActivity": "Recent activity",
+      "projectsOpen": "Open projects",
       "resources": "Resources",
       "sourceControl": "Source Control",
       "title": "Workspace",
-      "trust": "Workspace trust",
-      "trustUnknown": "Trust undecided",
       "trusted": "Trusted",
+      "unknownValue": "—",
       "untrusted": "Not trusted",
       "viewsLabel": "Workspace views"
     },
@@ -20077,6 +20219,10 @@
         "generateFailed": "The pairing code could not be created.",
         "generating": "Generating…",
         "historyClear": "Clear recorded submissions",
+        "historyClearCancel": "Cancel",
+        "historyClearConfirm": "Clear",
+        "historyClearConfirmDescription": "{count, plural, one {# recorded submission} other {# recorded submissions}} will be deleted from this computer. The conversations, issues and tasks they started stay where they are. This cannot be undone.",
+        "historyClearConfirmTitle": "Clear recorded submissions?",
         "historyClearFailed": "The recorded submissions could not be cleared.",
         "historyCleared": "Cleared",
         "historyClearing": "Clearing…",
@@ -20084,12 +20230,12 @@
         "historyHint": "A short note per submission — the page title, the site it came from and whether it is still running. Never the page text or your instruction: those live in the conversation it started, where you can read and delete them.",
         "historyTitle": "Recorded submissions",
         "listenerFailed": "Could not read browser access status. Reopen this page to try again.",
-        "openDevices": "Open device console",
-        "originHint": "After installing the extension, add its chrome-extension:// origin to the list above. The extension shows it on its connection screen.",
+        "originHint": "After installing the extension, add its chrome-extension:// origin to the allowed origins under Connectivity → Local host → Browser access. The extension shows it on its connection screen.",
         "pairedHint": "Paired browsers appear in the device console, where you can revoke one.",
         "pairedTitle": "Paired browsers",
         "regenerate": "Generate a new code",
-        "requiresListener": "Browser access is off, so a pairing code would have nothing to connect to. Turn it on above and restart the Companion server first.",
+        "requiresListener": "Browser access is switched off, so a pairing code would have nothing to connect to. Turn it on under Connectivity → Local host → Browser access, then restart the Companion server.",
+        "requiresRestart": "Browser access is on, but its listener is not running yet. Restart the Companion server from Connectivity → Local host, then generate a code.",
         "singleUse": "One use only. It is spent the moment an extension redeems it, and it carries no credential on its own.",
         "title": "Browser Companion"
       },
@@ -20265,7 +20411,15 @@
         "gateHint": "Both this setting and the server rollout gate must be enabled.",
         "operationFailed": "The remote browser setting could not be saved.",
         "profiles": {
+          "cancel": "Cancel",
           "create": "Create profile",
+          "delete": "Delete {name}",
+          "deleteConfirm": "Delete profile",
+          "deleteDescription": "This erases the sign-ins and site data the cloud browser saved for it on the server. It cannot be undone.",
+          "deleteInUse": "A cloud browser is using this profile. Close it, then try again.",
+          "deleteTitle": "Delete the {name} profile?",
+          "deleteUnreachable": "Connect to your Cognia server to erase this profile's cloud data.",
+          "deleted": "Deleted {name}",
           "description": "Persistent profiles retain browser state inside the selected workspace.",
           "ephemeral": "Ephemeral session",
           "name": "Profile name",
@@ -21039,7 +21193,7 @@
       },
       "deviceInfoRow": "Device info",
       "devicesRow": "Paired devices",
-      "dexieMaintenance": "Dexie maintenance",
+      "dexieMaintenance": "Storage maintenance",
       "diagnosticsRow": "Diagnostics",
       "evalRow": "Agent evaluation",
       "externalAgentsRow": "External agents",
@@ -21132,7 +21286,7 @@
       "settingsLink": "App settings",
       "signOut": {
         "biometricDescription": "Re-prompts before clearing the pairing JWT.",
-        "biometricHelp": "Require Face ID / fingerprint before clearing pairing.",
+        "biometricHelp": "Require Face ID / fingerprint before signing this phone out.",
         "biometricLabel": "Confirm before sign-out",
         "biometricReason": "Confirm to sign out of cognia",
         "biometricTitle": "Sign out",
@@ -21581,6 +21735,12 @@
       "fingerprintPinned": "Desktop identity pinned",
       "formCardDescription": "One-tap scan or manual paste — both routes use the same 5-minute pair token.",
       "formCardTitle": "Pair this phone",
+      "heading": {
+        "paired": {
+          "description": "This client holds its own key and reconnects on its own from here.",
+          "title": "You're connected"
+        }
+      },
       "health": {
         "checking": "Checking",
         "continueToChat": "Continue to chat",
@@ -21604,9 +21764,9 @@
       "httpError": {
         "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
         "403": "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
+        "404": "Server doesn't expose the pairing endpoint — confirm the desktop is running cognia v0.2+ with companion enabled.",
         "403Identity": "The Host refused this account — its recorded binding or tenant doesn't match this device. A fresh invitation from the same account will be refused the same way.",
         "403Spent": "The Host refused the invitation itself — it has expired or was already redeemed. Issue a new one; re-sending this string cannot work.",
-        "404": "Server doesn't expose the pairing endpoint — confirm the desktop is running cognia v0.2+ with companion enabled.",
         "5xx": "Server error (HTTP {status}). Check the desktop's logs and try again.",
         "generic": "Pairing failed (HTTP {status})."
       },
@@ -21886,8 +22046,8 @@
     },
     "security": {
       "deletePairing": {
-        "help": "Ask for biometric before clearing the pairing on this phone.",
-        "label": "Sign out / un-pair"
+        "help": "Ask for biometric before revoking a device's pairing.",
+        "label": "Revoke a paired device"
       },
       "description": "Require Face ID / fingerprint before sensitive actions.",
       "exportBackup": {
@@ -21952,6 +22112,7 @@
     },
     "shell": {
       "artifacts": "Artifacts",
+      "back": "Back",
       "clearSearch": "Clear search",
       "closeNav": "Close navigation",
       "deleteSession": "Delete this session",
@@ -22377,7 +22538,7 @@
         "snapOn": "Snap to grid: on",
         "undo": "Undo"
       },
-      "empty": "No workflows yet. Create one on the desktop and it appears here.",
+      "empty": "No workflows yet",
       "graphViewerEmpty": "No nodes in this workflow.",
       "humanInput": {
         "goneToast": "This form is no longer waiting for a response.",
@@ -23412,11 +23573,24 @@
       "title": "Here is what we will set up"
     },
     "finishBar": {
-      "cta": "Finish setup",
       "dismiss": "Dismiss",
-      "provider_skipped": "Cognia can't reach a model yet — finish signing in.",
-      "runtime_skipped": "No agent runtime is set up on this machine yet.",
-      "task_failed": "Your first run didn't finish. Want to try again?"
+      "gap": {
+        "firstTask": {
+          "cta": "Run a first task",
+          "description": "Run one real task and see what Cognia does.",
+          "title": "Setup is almost done"
+        },
+        "model": {
+          "cta": "Connect a model",
+          "description": "Sign in or add a key to start working.",
+          "title": "Cognia can't reach a model yet"
+        },
+        "taskFailed": {
+          "cta": "Try again",
+          "description": "Try it once more — the rest is already set up.",
+          "title": "Your first run didn't finish"
+        }
+      }
     },
     "firstRun": {
       "changeCharacter": "Change",
@@ -23437,6 +23611,10 @@
       "express-applying": {
         "body": "Each line lights up as it lands. Nothing here needs you.",
         "headline": "Doing it now."
+      },
+      "express-ready": {
+        "body": "Everything is in place. Pick a task and judge the result yourself.",
+        "headline": "Your turn."
       },
       "first-run": {
         "body": "Pick a task and judge the result yourself.",
@@ -23526,7 +23704,6 @@
       }
     },
     "restart": {
-      "description": "Walk through the first-run flow from the beginning.",
       "label": "Run setup again"
     },
     "saving": "Saving…",
@@ -23563,6 +23740,14 @@
       "provider": "A single credential completing the link to Cognia",
       "scan": "What the scan found on this machine",
       "welcome": "An agent inside your machine, reaching your files, your screen and the web"
+    },
+    "setupStatus": {
+      "complete": {
+        "description": "Nothing is missing. You can walk through first-run setup again at any time.",
+        "title": "Setup is complete"
+      },
+      "description": "What first-run setup still needs, and a way back into it.",
+      "title": "Setup status"
     },
     "skip": "Skip for now",
     "toastNeedKey": "Paste your API key to continue.",
@@ -24099,6 +24284,9 @@
       "useGlobal": "Use global pet",
       "useSvg": "Built-in vector mascot"
     },
+    "bubbleAction": {
+      "openConsole": "Open {tab}"
+    },
     "bubbles": {
       "achievementUnlocked": [
         "We earned a badge!",
@@ -24297,6 +24485,19 @@
       "sending": "{name} is thinking…",
       "you": "You"
     },
+    "commands": {
+      "clean": "Clean the pet",
+      "feed": "Feed the pet",
+      "pet": "Pet the pet",
+      "play": "Play with the pet",
+      "sleep": "Put the pet to sleep",
+      "toggleWindow": "Toggle desktop pet",
+      "treat": "Give the pet a treat",
+      "unavailable": {
+        "body": "Turn it on in Settings → Pet to use pet shortcuts.",
+        "title": "Your pet is switched off"
+      }
+    },
     "condition": {
       "unwell": "Needs care"
     },
@@ -24329,6 +24530,8 @@
       },
       "title": "Your Pet",
       "unavailable": {
+        "backToChat": "Back to chat",
+        "title": "Desktop only",
         "unsupportedHost": "The pet is only available in the Cognia desktop app. Open the desktop app to look after it."
       }
     },
@@ -24422,6 +24625,12 @@
       "live2dTitle": "My Live2D models",
       "speciesTitle": "Built-in species",
       "useMascot": "Use built-in mascot"
+    },
+    "insight": {
+      "fallback": [
+        "Your new Attention Radar report is ready!",
+        "Fresh insights just landed — take a look?"
+      ]
     },
     "inventory": {
       "title": "Items"
@@ -24663,20 +24872,19 @@
   },
   "plan": {
     "approval": {
-      "approve": "Approve & run",
       "approveAcceptEdits": "Yes, auto-accept edits",
       "approveFullAuto": "Approve & run fully automated",
       "approveReviewEach": "Yes, review each edit",
-      "edit": "Edit plan",
+      "collapse": "Collapse plan",
       "editCancel": "Cancel",
-      "editInEditor": "Edit",
       "editPlanHint": "Edit the plan as markdown…",
       "editPlanLabel": "Plan (markdown)",
       "editSave": "Save changes",
-      "editStepsHint": "One step per line…",
-      "editStepsLabel": "Steps (one per line)",
+      "editSource": "Edit Markdown source",
       "editTitleLabel": "Title",
-      "feedbackPlaceholder": "Optional feedback for keep-planning or refinement…",
+      "expand": "Expand plan",
+      "feedbackLabel": "Feedback for the plan",
+      "feedbackPlaceholder": "Optional note — sent with “Keep planning”, or used to refine…",
       "interactive": {
         "addStep": "Add step",
         "deleteStep": "Delete step",
@@ -24696,14 +24904,18 @@
       },
       "keepPlanning": "No, keep planning",
       "moreActions": "More plan actions",
-      "noSteps": "This plan has no steps.",
-      "progressLabel": "Progress",
+      "openInEditor": "Open in plan editor",
+      "openInPanel": "Open in side panel",
       "refineExpand": "Expand",
+      "refineFailed": "Could not refine the plan.",
+      "refineHeading": "Refine with AI",
       "refineOptimize": "Optimize",
       "refineReorder": "Reorder",
       "refineRepair": "Repair",
       "refineSimplify": "Simplify",
       "refineUnavailable": "Can't refine — no model is configured for background tasks.",
+      "refineWithNote": "Refine with AI, using your note",
+      "refining": "Refining…",
       "reject": "Reject",
       "rejectBack": "Back",
       "rejectConfirm": "Reject plan",
@@ -24713,7 +24925,14 @@
       "rejectReasonLabel": "Reason for rejecting (optional)",
       "rejectReasonPlaceholder": "Why doesn't this plan work? (optional)",
       "resumeFailed": "The approved plan could not start. Resume to retry the same step.",
-      "sourceLabel": "Source: {source}",
+      "source": {
+        "agent_tool": "Created by the agent",
+        "exit_plan_mode": "Proposed in plan mode",
+        "goal_projection": "From goal subgoals",
+        "manual": "Written by you",
+        "planner_llm": "Generated from an objective",
+        "team_projection": "From the team task graph"
+      },
       "title": "Review plan"
     },
     "composer": {
@@ -24762,6 +24981,7 @@
     "document": {
       "activity": "Activity",
       "addStep": "Add step",
+      "addStepHint": "Press Enter in a step to add one below",
       "currentPlan": "current",
       "deleteStep": "Delete step",
       "empty": "No steps yet.",
@@ -25220,17 +25440,37 @@
     "auth": {
       "callback": {
         "done": "Authorization complete — you can close this window.",
+        "failed": "Sign-in didn't complete",
+        "failedCode": "The provider returned an error: {error}",
+        "failedDetail": "The provider returned an error: {error} ({description})",
+        "failedHint": "You can close this window and try again from the plugin.",
+        "missing": "No authorization response arrived. Close this window and start sign-in again from the plugin.",
         "working": "Completing sign-in…"
       }
     },
     "backup": {
+      "cancel": "Cancel",
       "create": "Create backup",
       "createFailed": "Backup failed.",
       "creating": "Creating…",
       "delete": "Delete",
+      "deleteAria": "Delete the v{version} backup from {date}",
+      "deleteConfirmBody": "The v{version} backup from {date} is deleted for good. You can't roll back to it afterwards.",
+      "deleteConfirmTitle": "Delete this backup?",
       "desktopOnlyHint": "Backups run through the native bridge and are only writable in the desktop build.",
       "empty": "No backups yet.",
+      "reason": {
+        "auto": "Automatic",
+        "manual": "Manual",
+        "migration": "Migration",
+        "pre-uninstall": "Before uninstall",
+        "pre-update": "Before update",
+        "scheduled": "Scheduled"
+      },
       "restore": "Restore",
+      "restoreAria": "Restore the v{version} backup from {date}",
+      "restoreConfirmBody": "The plugin's current files, settings and data are replaced with the v{version} backup from {date}. Anything changed since then is lost.",
+      "restoreConfirmTitle": "Restore this backup?",
       "title": "Backups"
     },
     "batchActions": {
@@ -25240,7 +25480,11 @@
       "enableAll": "Enable all",
       "refresh": "Refresh",
       "selected": "{count} selected",
+      "toggleFailedNames": "Failed: {names}",
+      "toggleResult": "{applied} applied, {queued} queued, {failed} failed, {skipped} skipped",
+      "toggling": "Working… {done}/{total}",
       "uninstall": "Uninstall",
+      "uninstallSkipped": "{count, plural, =1 {1 plugin can't be uninstalled here and was skipped.} other {# plugins can't be uninstalled here and were skipped.}}",
       "updateAll": "Update {count}",
       "updateResult": "{ok} updated, {failed} failed",
       "updating": "Updating…"
@@ -25249,6 +25493,7 @@
       "actionsMenuAria": "Plugin actions for {name}",
       "capabilityChipAria": "{capability} capability — {count} contributions",
       "configure": "Configure",
+      "dangerousPermissionsAria": "{count, plural, =1 {1 sensitive permission} other {# sensitive permissions}}",
       "disable": "Disable",
       "enable": "Enable",
       "erroredAria": "Plugin reported an error",
@@ -25394,6 +25639,7 @@
         "tauri": "desktop"
       },
       "installBlocked": "Installing plugins runs in the desktop backend, so it needs the Cognia desktop app.",
+      "installBlockedLabel": "Why install isn't available here",
       "runtimeUnavailable": "Its runtime is not available on this device."
     },
     "configForm": {
@@ -25410,6 +25656,8 @@
       "noSchema": "This plugin doesn't declare a configuration schema. Its raw config is shown below for reference.",
       "oneOfVariant": "Variant",
       "save": "Save",
+      "saveFailed": "Couldn't save settings for {name}",
+      "saved": "Settings saved for {name}",
       "saving": "Saving…",
       "secretHide": "Hide value",
       "secretShow": "Show value",
@@ -25444,6 +25692,7 @@
         "close": "Close",
         "reject": "Reject"
       },
+      "announce": "{plugin} is asking for permission: {permission}",
       "ariaLabel": "Plugin consent dialog",
       "binary": {
         "rememberHint": "Skips this prompt for these exact bytes only. The approval is pinned to the file's SHA-256, so any change to the binary — an update, a rebuild, or tampering — asks you again. It does not trust the plugin's publisher, and it covers no other binary. Revoke it any time under the plugin's Permissions tab.",
@@ -25458,7 +25707,8 @@
         "plugin": "Plugin:",
         "reason": "Reason:"
       },
-      "title": "Plugin requesting permission"
+      "title": "Plugin requesting permission",
+      "titleNamed": "{plugin} is asking to use a permission"
     },
     "conversionDialog": {
       "acknowledge": "I have reviewed the warnings and accept the described behavior differences.",
@@ -25554,11 +25804,12 @@
       "routing": "Opening…"
     },
     "delete": {
-      "body": "\"{name}\" will be removed from your installed plugins. This action can be reversed by re-installing the plugin.",
+      "body": "\"{name}\" will be stopped and removed from this device, including its files, tools and scheduled jobs. You can install it again later.",
       "cancel": "Cancel",
-      "cascadeHint": "Remove this plugin's saved configuration, analytics counters, and scheduled jobs as well.",
+      "cascadeHint": "Also delete the plugin's stored data, permission grants and analytics counters. Without this, its data is kept so a reinstall can pick up where it left off.",
       "cascadeLabel": "Also wipe stored data",
       "confirm": "Uninstall",
+      "confirming": "Uninstalling…",
       "title": "Uninstall plugin?"
     },
     "dependencies": {
@@ -25601,8 +25852,15 @@
       "contributed": {
         "a2uiComponents": "A2UI components",
         "a2uiTemplates": "A2UI templates",
+        "actionAria": {
+          "palette": "Find {name} in the command palette",
+          "route": "Open {name}",
+          "viewContainer": "Open the {name} view"
+        },
+        "bots": "Bots",
         "commands": "Commands",
         "connectors": "Connector adapters",
+        "contextPanels": "Context panels",
         "countBadge": "{count}",
         "empty": "This plugin has not registered any runtime contributions.",
         "externalAgentAdapters": "External agent adapters",
@@ -25611,12 +25869,19 @@
         "mcpServerPresets": "MCP server presets",
         "modes": "Agent modes",
         "nativeAnthropicTools": "Native Anthropic tools",
+        "quickActions": "Quick actions",
         "skills": "Skills",
+        "slashCommands": "Slash commands",
+        "subagents": "Subagents",
         "themes": "Themes",
         "toolLabels": {
           "eval_project_v2": "Run evaluation project"
         },
+        "toolRenderers": "Tool result cards",
         "tools": "Agent tools",
+        "viewContainers": "View containers",
+        "views": "Views",
+        "webviews": "Webviews",
         "workflowNodes": "Workflow nodes",
         "workflowTriggers": "Workflow triggers"
       },
@@ -25745,6 +26010,20 @@
       "rollback": "Rollback…",
       "rollbackAria": "Rollback {name}",
       "runtimeContributions": "Runtime contributions",
+      "runtimeStatus": {
+        "disabled": "Off",
+        "disabling": "Disabling",
+        "discovered": "Found, not loaded",
+        "enabled": "Running",
+        "enabling": "Enabling",
+        "error": "Error",
+        "installed": "Installed",
+        "loaded": "Loaded",
+        "loading": "Loading",
+        "suspended": "Suspended while idle",
+        "unloading": "Unloading",
+        "updating": "Updating"
+      },
       "screenshotAlt": "Screenshot {index}",
       "screenshots": "Screenshots",
       "sectionAnalytics": "Analytics",
@@ -25992,6 +26271,20 @@
     "errors": {
       "activation": "Couldn't activate {pluginName}",
       "adapter": "Plugin adapter failed for {pluginName}",
+      "codes": {
+        "dependencyInUse": "Other plugins depend on it: {dependents}. Disable or uninstall them first.",
+        "dependencyMissing": "It needs plugins that aren't enabled: {dependencies}.",
+        "dirtyRuntime": "Its last run didn't shut down cleanly. Retry the cleanup from the plugin's details first.",
+        "frontendTrust": "It runs unsandboxed code in the app. Trust it in the plugin's Permissions section to load it.",
+        "incompatible": "It can't run on this device.",
+        "intentDisabled": "It's turned off. Enable it first.",
+        "invalidManifest": "Its manifest is invalid.",
+        "managerNotReady": "Plugins are still starting. Try again in a moment.",
+        "notFound": "It's no longer installed.",
+        "pythonDisabled": "The Python runtime is turned off on this device.",
+        "signature": "Its signature couldn't be verified.",
+        "uninstallMirrored": "Uninstall it in the desktop app. This device only mirrors it."
+      },
       "config": "Couldn't apply settings for {pluginName}",
       "disable": "Couldn't disable {pluginName}",
       "enable": "Couldn't enable {pluginName}",
@@ -26082,6 +26375,26 @@
       "hide": "Hide license",
       "label": "License",
       "view": "View full license"
+    },
+    "lifecycleFeedback": {
+      "disableFailed": "Couldn't disable {name}",
+      "disableQueued": "{name} will be disabled on your desktop",
+      "disabled": "{name} disabled",
+      "enableBlocked": "This plugin can't run on this device.",
+      "enableFailed": "Couldn't enable {name}",
+      "enableQueued": "{name} will be enabled on your desktop",
+      "enabled": "{name} enabled",
+      "queuedHint": "The change is sent to your desktop and applied the next time it syncs with this device.",
+      "runsOnDesktop": "Runs on your desktop",
+      "runsOnDesktopHint": "This device mirrors your desktop. Turning this plugin on or off is sent to the desktop, which is where it runs.",
+      "uninstallBlocked": {
+        "builtin": "Built-in plugins ship with Cognia and can't be uninstalled. Disable it instead.",
+        "mirrored": "Uninstall this plugin in the desktop app. This device only mirrors it."
+      },
+      "uninstallFailed": "Couldn't uninstall {name}",
+      "uninstalled": "{name} uninstalled",
+      "viewContributions": "View contributions",
+      "viewDetails": "View details"
     },
     "loadUnpacked": {
       "cancel": "Cancel",
@@ -26240,6 +26553,7 @@
     "permissionReview": {
       "auditEmpty": "No audit events for this plugin yet.",
       "auditLogTitle": "Recent audit events",
+      "cancel": "Cancel",
       "close": "Close",
       "colActions": "",
       "colDeclared": "Manifest",
@@ -26254,6 +26568,8 @@
       "nodeSubprocessUnavailable": "Unavailable in the Node runtime: scoped in-process subprocess brokering is not implemented.",
       "revoke": "Revoke",
       "revokeAll": "Revoke all",
+      "revokeAllConfirmBody": "{name} loses {count, plural, =1 {its 1 granted permission} other {all # granted permissions}}, including the ones its manifest declares. It may stop working until you grant them again.",
+      "revokeAllConfirmTitle": "Revoke every permission?",
       "tierHint": {
         "confirm": "Show an overlay each time and wait for the user to allow or reject.",
         "forbid": "Always deny — even if the manifest declares it.",
@@ -26272,7 +26588,131 @@
         "permission": "Permission",
         "plugins": "Plugins"
       },
+      "dangerousAria": "Sensitive permission",
       "dangerousSection": "Sensitive permissions",
+      "descriptions": {
+        "agent:control": "Control agent execution",
+        "agent:dispatch": "Dispatch built-in subagents and agent teams",
+        "agent:dispatch-external": "Dispatch external coding agents (Claude Code / Codex / …)",
+        "agent:shared-memory:read": "Read team shared-memory entries",
+        "ai:chat": "Send prompts to a language model on your account (consumes your quota)",
+        "ai:embed": "Generate embeddings on your account (consumes your quota)",
+        "artifact:read": "Read artifact metadata",
+        "artifact:write": "Create and modify artifacts",
+        "auth:consume": "Consume sessions from a registered auth provider",
+        "auth:provide": "Register a native auth/OAuth provider other plugins can use",
+        "automation:click": "Click and press mouse buttons on your desktop",
+        "automation:pointer": "Move, drag, and scroll the mouse on your desktop",
+        "automation:read": "Read the on-screen UI tree, cursor position, and focused element",
+        "automation:screenshot": "Capture screenshots of your desktop",
+        "automation:type": "Type text and send keyboard input to your desktop",
+        "automation:window": "Focus, close, minimize, maximize, or resize desktop windows",
+        "backup:read": "Build and read encrypted backups and the backup history",
+        "backup:write": "Restore a backup, overwriting your local data",
+        "builtin-skills:invoke": "Invoke manifest-allowlisted built-in skills through the host policy gate",
+        "canvas:collaborate": "Join and act in Canvas collaboration sessions",
+        "canvas:read": "Read Canvas document metadata and selection",
+        "canvas:run": "Run code blocks and actions inside Canvas documents",
+        "canvas:write": "Create, modify, and delete Canvas documents",
+        "cli:execute": "Run an external command-line tool this plugin declares (e.g. ripgrep, ffmpeg)",
+        "clipboard:read": "Read from the clipboard",
+        "clipboard:write": "Write to the clipboard",
+        "commands:read": "List the slash commands this app offers and read your custom command files",
+        "commands:write": "Register slash commands, and create, overwrite or delete the markdown command files in .claude/commands and .cognia/commands",
+        "companion:control": "Grant or revoke a paired device's remote-control capability",
+        "companion:goal-control": "Pause, resume, or stop your running goal loops",
+        "companion:read": "List paired devices and their remote-control grants",
+        "connectors:manage": "Create, reconfigure, enable, or delete your connected platform accounts; manage dispatch rules, chats, and contact lookups",
+        "connectors:read": "List connector adapters, bots, and conversation bindings; observe inbound platform events",
+        "connectors:send": "Send outbound messages through a connected platform (direct or queued)",
+        "database:read": "Read from the database",
+        "database:write": "Write to the database",
+        "debug:control": "Start, inspect, and control debug sessions",
+        "decisions:provide": "Offer a decision provider you can pick in Settings",
+        "decisions:run": "Ask your selected decision provider typed questions (the request is redacted, then sent to that provider)",
+        "editor:read": "See what you are looking at in the project editor — the focused file, your selection, and its diagnostics",
+        "editor:write": "Open files and reveal edits in the project editor",
+        "events:publish": "Emit events other plugins can listen for",
+        "events:subscribe": "Listen for events other plugins emit",
+        "export:project": "Export whole projects out of the app",
+        "export:session": "Export chat sessions out of the app",
+        "extension:ui": "Contribute trusted UI to host extension surfaces",
+        "extension:workflow": "Contribute workflow nodes, triggers, tasks, and templates",
+        "filesystem:read": "Read files from the file system",
+        "filesystem:write": "Write files to the file system",
+        "git:read": "Read the active source-control repository (status, log, diff, branches)",
+        "git:write": "Stage, commit, branch, push, stash, or discard changes in the active repository",
+        "goal:read": "Read your goals and their progress",
+        "goal:write": "Create, update, complete, and decompose your goals",
+        "hooks:chat-intercept": "Intercept every chat prompt, tool call, and tool result — can rewrite or block them",
+        "integrations:events": "Publish normalized Integration events to workflows and Inbox",
+        "integrations:execute": "Run Integration actions and authenticated platform requests",
+        "integrations:manage": "Manage Integration accounts, subscriptions, ingress, and migrations",
+        "integrations:read": "Read Integration definitions, accounts, subscriptions, and job status",
+        "ipc:call": "Call or send messages to another plugin over inter-plugin IPC (incl. RPC)",
+        "ipc:expose": "Expose RPC methods that other plugins can invoke over IPC",
+        "issue:read": "Read your issue tracker: issues, their activity trail, cycles and projects",
+        "issue:write": "Create, edit, move, assign, label and comment on issues, and register an external sync source",
+        "logs:read": "Read this app's local logs, their statistics, and transport health",
+        "media:image:read": "Read image media assets",
+        "media:image:write": "Write image media assets",
+        "media:video:export": "Export rendered video outputs",
+        "media:video:read": "Read video media assets",
+        "media:video:write": "Write video media assets",
+        "memory:read": "Search and list what the assistant remembers about you",
+        "memory:write": "Store, update, and forget long-term memories (PII-screened; can never change working instructions)",
+        "native:filesystem": "Read and write files on this device through the sandboxed tools backend",
+        "native:input": "Send native keyboard and mouse input through a native Anthropic tool",
+        "native:process": "Run programs on this device through the sandboxed tools backend",
+        "native:screen": "Capture your screen through a native Anthropic tool",
+        "network:fetch": "Make HTTP/HTTPS requests",
+        "network:upload": "Upload local file contents over HTTP/HTTPS",
+        "network:websocket": "Establish WebSocket connections",
+        "notebook:execute": "Execute notebook cells and notebook kernels",
+        "notification": "Show system notifications",
+        "perf:read": "Read performance dashboard snapshots and the live sample stream",
+        "pet:interact": "Care for the desktop pet and grant budget-capped rewards",
+        "pet:read": "Read the desktop pet's public state and subscribe to its events",
+        "plan:read": "Read your agent plans, their steps, and their progress",
+        "plan:write": "Create, edit, approve, run, pause, and replan agent plans (a plan can dispatch teammates, tools, and sub-workflows)",
+        "process:spawn": "Spawn child processes",
+        "project:delete": "Delete projects",
+        "project:read": "Read project metadata and files through scoped APIs",
+        "project:write": "Create and modify projects, their knowledge files, tags, and linked sessions",
+        "python:execute": "Execute Python code",
+        "sandbox:web-execute": "Execute code inside the browser sandbox",
+        "secrets:read": "Read secrets from the OS keyring",
+        "secrets:write": "Store secrets in the OS keyring",
+        "selection:read": "Read text you selected in another desktop application",
+        "session:delete": "Delete chat sessions",
+        "session:read": "Read chat sessions",
+        "session:write": "Modify chat sessions",
+        "settings:read": "Read application settings",
+        "settings:write": "Modify application settings",
+        "share:create": "Create and revoke public share links (publishes data online)",
+        "share:read": "Read your created public share links and their view stats",
+        "shell:execute": "Execute shell commands",
+        "subscription:read": "Read subscription plan and usage metrics",
+        "team:read": "Read your agent teams, task boards, run events, and execution reports",
+        "team:write": "Create/edit/assign tasks, comment, move cards, and manage non-lead teammates and team config on your agent-team boards",
+        "templates:contribute": "Register lifecycle-scoped template packages",
+        "templates:instantiate": "Preflight and instantiate templates after confirmation",
+        "templates:library:write": "Create user-owned template drafts after confirmation",
+        "templates:read": "Read the unified template catalog and validation results",
+        "terminal:completion": "Suggest terminal commands and read the line you are typing",
+        "terminal:kill": "Terminate an existing terminal session",
+        "terminal:safety": "Add command-safety rules and check whether a command is safe to run",
+        "terminal:spawn": "Open a new terminal session in the integrated dock",
+        "terminal:write": "Pipe input into an existing terminal session",
+        "tests:run": "Discover and run tests through the IDE",
+        "theme:read": "Read the active theme",
+        "theme:write": "Change the active theme",
+        "trace:read": "Read agent-trace spans — models, tokens, cost, timing, and (when you have content capture on) redacted prompt and response previews",
+        "twin:read": "Query the employee twin's memory",
+        "vector:read": "Search the vector store",
+        "vector:write": "Add to and delete from the vector store",
+        "workflow:read": "Read workflow metadata and selection"
+      },
       "emptyAll": "No plugins are installed yet.",
       "groups": {
         "clipboard": "Clipboard",
@@ -26326,16 +26766,26 @@
     },
     "rollback": {
       "canNotRollback": "No prior version of this plugin can be rolled back to.",
+      "cancel": "Cancel",
       "close": "Close",
+      "confirmAction": "Roll back",
+      "confirmBody": "{name} goes from v{from} back to v{to}. The installed version is replaced and the plugin restarts on the older one.",
+      "confirmTitle": "Roll back to v{version}?",
       "currentVersion": "Currently on v{version}",
       "description": "Restore a previous version captured before an update.",
       "desktopOnlyHint": "Rollbacks run through the native bridge and are only available in the desktop build.",
       "empty": "No snapshots have been recorded yet.",
       "hasBackups": "{count} versions available",
+      "loading": "Loading available versions…",
       "rollback": "Rollback",
       "rollbackAria": "Rollback to v{version}",
       "rollbackFailed": "Rollback failed.",
       "rollingBack": "Rolling back…",
+      "source": {
+        "backup": "Backup",
+        "local": "Local",
+        "marketplace": "Marketplace"
+      },
       "title": "Rollback history"
     },
     "scheduled": {
@@ -26396,12 +26846,14 @@
       "install": "Install",
       "installed": "Installed",
       "installedDesktopOnly": "Desktop only — install requires the native app",
+      "installedDesktopOnlyHint": "Plugins are installed and run by the Cognia desktop app. Open it on your desktop to install or update this one.",
       "installing": "Installing…",
       "retry": "Retry",
       "uninstall": "Uninstall",
       "uninstalling": "Uninstalling…"
     },
     "signature": {
+      "ariaLabel": "Publisher signature: {state}",
       "failed": "Signature failed",
       "failedTooltip": "Signature verification failed — review before enabling.",
       "unknown": "Unknown",
@@ -26426,12 +26878,14 @@
         "message": "Plugin surface \"{surfaceId}\" crashed while rendering: {error}",
         "retryHint": "Retry the surface. If it fails again, inspect the plugin component and diagnostics."
       },
+      "fallbackStrip": "{pluginName}'s card failed to render, so the plain result is shown.",
       "retry": "Retry",
       "title": "{pluginName} could not render"
     },
     "title": "Plugins",
     "toolbar": {
       "checkUpdates": "Check for updates",
+      "clearSearch": "Clear search",
       "convertPlugin": "Convert plugin…",
       "desktopOnlyGroupHint": "These install from disk or a git checkout, which runs in the desktop backend.",
       "desktopOnlyHint": "Needs the Cognia desktop app",
@@ -30453,6 +30907,7 @@
   },
   "runtime": {
     "surfaceBoundary": {
+      "back": "Back",
       "backToChat": "Back to chat",
       "diagnose": "Open diagnostics",
       "pairHost": "Pair or switch host",
@@ -30571,6 +31026,20 @@
     "allowConcurrent": "Allow Concurrent",
     "appArgs": "Application Arguments",
     "appPath": "Application Path",
+    "approval": {
+      "deniedTools": "Refused tools",
+      "fallback": "Stopped for your approval",
+      "hintTools": "Add them to the task's allowed tools, or raise its permission mode.",
+      "hintTrust": "Trust the workspace so scheduled runs get their disk and host tools.",
+      "pill": "Needs approval",
+      "sheetBody": "Nobody was watching this run, so it stopped where it needed you instead of going ahead. It was not retried, because a retry would stop in the same place. Allow what it needs, then run the task again.",
+      "sheetTitle": "Waiting for your approval",
+      "tools": "Needs approval for {tools}",
+      "trust": "Workspace not trusted: {roots}",
+      "trustUnverified": "Could not check trust for {roots}",
+      "untrustedRoots": "Untrusted workspace roots",
+      "unverifiedRoots": "Roots whose trust could not be checked"
+    },
     "attention": {
       "actions": {
         "managePaired": "Manage the paired host",
@@ -30585,6 +31054,10 @@
         "hostSuspended": "This device's schedule is suspended while a paired host runs it",
         "lastRunFailed": "{name} failed its last run",
         "lastRunFailedWith": "{name} failed its last run: {error}",
+        "needsApproval": "{name} is waiting for your approval",
+        "needsApprovalTools": "{name} is waiting for your approval to use {tools}",
+        "needsApprovalToolsAndTrust": "{name} is waiting for your approval to use {tools}, and for you to trust {roots}",
+        "needsApprovalTrust": "{name} is waiting for you to trust {roots}",
         "quotaNearLimit": "Tasks created by {source} are at {count} of the {limit} allowed",
         "running": "{name} is running now",
         "runningWithProcesses": "{name} is running now with {count} live processes",
@@ -30599,6 +31072,10 @@
         "consecutiveFailures": "{count} failures in a row",
         "lastRunFailed": "Last run failed",
         "lastRunFailedWith": "Last run failed: {error}",
+        "needsApproval": "Waiting for your approval",
+        "needsApprovalTools": "Waiting for approval to use {tools}",
+        "needsApprovalToolsAndTrust": "Waiting for approval to use {tools} and trust {roots}",
+        "needsApprovalTrust": "Waiting for you to trust {roots}",
         "running": "Running now",
         "runningWithProcesses": "Running now, {count} live processes",
         "unsupportedType": "Cannot run on this host"
@@ -30639,6 +31116,7 @@
       "unsupportedTrigger": "Backfill is only available for cron and interval tasks"
     },
     "backup": {
+      "defaultTaskName": "Scheduled backup",
       "destination": "Backup Destination",
       "destinationAllHint": "Local file plus every configured remote destination.",
       "destinationGithubHint": "Committed to the configured private GitHub repository (encrypted with the sync passphrase).",
@@ -30671,6 +31149,7 @@
       },
       "schedule": "Schedule Backup",
       "scheduleDescription": "Set up regular automatic backups of your data",
+      "scheduleFailed": "Could not schedule the backup",
       "scheduleFrequency": "Backup Frequency",
       "scheduleTitle": "Schedule Automatic Backup",
       "type": "Backup Type",
@@ -30707,6 +31186,11 @@
     "bulkDelete": "Delete",
     "bulkDeleteDescription": "This will delete {n} selected tasks across all kinds. This action cannot be undone.",
     "bulkDeleteTitle": "Delete selected tasks?",
+    "bulkDone": {
+      "delete": "{count, plural, =1 {Deleted 1 item} other {Deleted # items}}",
+      "pause": "{count, plural, =1 {Paused 1 item} other {Paused # items}}",
+      "resume": "{count, plural, =1 {Resumed 1 item} other {Resumed # items}}"
+    },
     "bulkPartialFailure": "{count, plural, =1 {1 item could not be updated} other {# items could not be updated}}",
     "bulkPartialFailureMore": "{hidden, plural, =1 {and 1 more} other {and # more}}",
     "calendar": {
@@ -30731,6 +31215,16 @@
     },
     "character": "Character",
     "cleanupOldExecutions": "Cleanup old executions (30d)",
+    "cleanupRuns": {
+      "cancel": "Cancel",
+      "confirm": "Clean up",
+      "description": "Removes the history of every run that finished more than {days} days ago. Tasks and their schedules are not affected. This cannot be undone.",
+      "done": "{count, plural, =1 {Removed 1 old run} other {Removed # old runs}}",
+      "failed": "Could not clean up old runs",
+      "nothing": "No runs older than {days} days",
+      "title": "Clean up old runs?",
+      "working": "Cleaning up…"
+    },
     "clearSearch": "Clear search",
     "clearSelection": "Clear selection",
     "cloneFailed": "Could not duplicate this task",
@@ -30826,6 +31320,7 @@
     "descriptionPlaceholder": "Describe what this task does",
     "destination": "Destination",
     "detail": {
+      "backToOverview": "Overview",
       "cannot": {
         "delete": "This kind is managed elsewhere and cannot be deleted here",
         "edit": "This kind cannot be edited",
@@ -30841,8 +31336,10 @@
       "noOsRunHistory": "The operating system keeps no run history for this task.",
       "noSelectionBody": "Pick something from the list to see what it does, when it runs and what it has done.",
       "noSelectionTitle": "Select a scheduled item",
+      "openAuthoringConversation": "Open the conversation that created it",
       "originTitle": "Origin",
       "outcomesTitle": "Outcomes, 14 days",
+      "starting": "Starting…",
       "storage": "Stored in",
       "tagsTitle": "Tags",
       "updatedAt": "Updated",
@@ -30997,6 +31494,21 @@
     "intervalSeconds": "Interval (seconds)",
     "intervalTooShort": "Interval must be at least 1 minute",
     "invalidJson": "Invalid JSON",
+    "itemActions": {
+      "cancelled": "{name} was cancelled",
+      "created": "Added {name} to the schedule",
+      "deleted": "Deleted {name}",
+      "finished": "{name} finished",
+      "paused": "Paused {name}",
+      "queued": "{name} will run when the current run finishes",
+      "resumed": "Resumed {name}",
+      "runFailed": "{name} failed",
+      "saved": "Saved {name}",
+      "skipped": "{name} did not run",
+      "started": "{name} is running",
+      "starting": "Starting {name}…",
+      "viewRun": "View run"
+    },
     "jitter": {
       "help": "Random delay (0–N s) added to each fire to avoid load spikes. 0 disables.",
       "label": "Jitter (seconds)"
@@ -31342,8 +31854,12 @@
     },
     "permissions": {
       "agentAutoCreate": "Agent Auto-Create",
-      "agentAutoCreateDesc": "Allow AI agents to create scheduled tasks without user confirmation dialog",
+      "agentAutoCreateDesc": "Also let agents add tasks without asking, in channels where write confirmations are turned off. A change you approve in the confirmation dialog never needs this.",
+      "agentAutoCreateInert": "Has no effect while agents cannot manage scheduled tasks.",
+      "agentTools": "Agent access",
+      "agentToolsDesc": "Let the assistant list, create, change, run and remove scheduled tasks from a conversation. Every change it makes asks you first.",
       "allowAgentAutoCreate": "Allow agents to auto-create tasks",
+      "allowAgentTools": "Allow agents to manage scheduled tasks",
       "autoRefreshInterval": "Auto-refresh (seconds)",
       "autoRefreshIntervalDesc": "How often the scheduler page re-reads tasks and runs. 0 turns it off.",
       "confirmationRequired": "Confirmation Required",
@@ -31449,7 +31965,9 @@
       "position": "{index} of {total}",
       "previous": "Previous run",
       "progress": "{percent}% done",
-      "stillRunning": "still running"
+      "runningNow": "This run is still going.",
+      "stillRunning": "still running",
+      "stop": "Stop run"
     },
     "save": "Save Task",
     "saving": "Saving...",
@@ -31695,6 +32213,14 @@
     "triggerOnEvent": "On Event",
     "triggerOnLogon": "On Logon",
     "triggerPayload": "Trigger payload",
+    "triggerPreview": {
+      "event": "Runs whenever the event fires, so there is no fixed time.",
+      "invalid": "Fix the expression to see when it runs.",
+      "none": "No run falls within the next year.",
+      "past": "This time has already passed.",
+      "title": "{count, plural, =1 {Next run} other {Next # runs}}",
+      "titleNone": "Next runs"
+    },
     "triggerSources": {
       "backfill": "Backfill",
       "catch-up": "Catch-up",
@@ -31734,6 +32260,7 @@
     "unknownKind": "No detail view for this kind.",
     "upcoming": "Upcoming",
     "upcomingTasks": "Upcoming Tasks",
+    "updateTaskFailed": "Could not save the task",
     "useCustomCron": "Use custom cron expression",
     "warnings": "Warnings",
     "webhookPath": "Webhook path",
@@ -32791,6 +33318,7 @@
         "retentionValue": "{days}d / {reports} reports, keep {logs} logs",
         "title": "Crash & logs"
       },
+      "deepLinkUnknown": "Cognia does not recognise this link",
       "description": "App version, build details, diagnostics, updates, and credits.",
       "iconAlt": "{name} app icon",
       "install": {
@@ -32872,12 +33400,12 @@
         "installedRestartRequired": "Update installed. Restart Cognia to finish.",
         "installing": "Installing…",
         "intervals": {
-          "10080": "Weekly",
-          "1440": "Daily",
           "15": "Every 15 minutes",
-          "360": "Every 6 hours",
           "60": "Every hour",
-          "720": "Every 12 hours"
+          "360": "Every 6 hours",
+          "720": "Every 12 hours",
+          "1440": "Daily",
+          "10080": "Weekly"
         },
         "lastChecked": "Last checked",
         "relaunchAfterInstallDescription": "Restart immediately after installation. On Windows, the installer may close the app regardless.",
@@ -34032,8 +34560,8 @@
             "label": "Copy button on inline math"
           },
           "mathFontScale": {
-            "0_8": "Small",
             "1": "Normal",
+            "0_8": "Small",
             "1_2": "Large",
             "label": "Math size"
           },
@@ -35076,6 +35604,8 @@
           "tauri": "Desktop",
           "title": "Available on"
         },
+        "pluginSkills": "Plugin skills",
+        "pluginSkillsHint": "Skills contributed by enabled plugins. They join this character's turns alongside its chat skills.",
         "routing": {
           "description": "Choose separate targets for planning, execution, and lightweight utility work. Model aliases and Auto are supported by the existing router.",
           "execute": "Execute model",
@@ -36090,7 +36620,7 @@
         "characterPrefix": "char:{id}",
         "computerUseBadge": "CU",
         "computerUseLabel": "Computer Use",
-        "computerUseTooltip": "Computer-use tools are allowed on this conversation (ADR-0025 per-channel opt-in). Disable by editing the override.",
+        "computerUseTooltip": "Computer-use tools are allowed on this conversation (a per-channel opt-in). Disable by editing the override.",
         "deleteOverride": "Delete override",
         "editAria": "Edit override",
         "empty": "No conversation overrides yet. Platform conversations appear here once you interact with them.",
@@ -38718,6 +39248,7 @@
           "snapshotExpired": "Snapshot expired"
         },
         "lastEvent": "{kind}: {detail}",
+        "needsHost": "Managed workspaces live on the desktop app or a paired host. This browser has neither, so there is nothing to maintain here.",
         "noEvents": "No maintenance events recorded yet.",
         "runNow": "Run workspace maintenance",
         "running": "Running…",
@@ -38829,7 +39360,7 @@
       "fleet": "Monitor and control coding agents launched anywhere on this machine (Claude Code, Codex, OpenCode), the Dynamic-Island overlay, and recent-session history.",
       "gateway": "Local OpenAI- and Anthropic-compatible endpoint that lets external tools (Claude Code, any OpenAI client) borrow your providers, routing, and credentials.",
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
-      "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
+      "goals": "Persistent chat goals. Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
       "hooks": "Lifecycle hooks for ~/.claude/settings.json (User / Project / Local). 21 events × matcher × command-or-webhook handlers.",
       "imageCatalog": "Container images projects may run their agents in",
       "logs": "Log levels, transports (console / IndexedDB / native / remote / Langfuse / OpenTelemetry), retention, redaction and per-module sampling.",
@@ -39674,9 +40205,14 @@
       }
     },
     "gateway": {
+      "accessHeading": "Access control",
+      "accessHelp": "Which addresses may connect, and how many requests per minute all keys may make together.",
+      "accountLocked": "Your local account is locked. Gateway keys belong to an account, so none can be used or created until you unlock it.",
       "add": "Add",
       "allowlist": "IP allowlist",
+      "allowlistEmpty": "The allowlist is empty, so every connection is refused — including from this machine.",
       "allowlistHelp": "Only these IPv4 addresses (CIDR) may connect. Defaults to loopback-only; widen it for LAN peers.",
+      "allowlistInvalid": "Enter an IPv4 address or CIDR range, such as 192.168.1.0/24.",
       "allowlistPlaceholder": "192.168.1.0/24",
       "anthropicSnippet": "Anthropic clients (Claude Code)",
       "authNote": "Use an API key as the credential — Authorization: Bearer '<key>' or x-api-key: '<key>'.",
@@ -39687,9 +40223,18 @@
       "bindInterface": "Bind interface",
       "bindLan": "Local network (0.0.0.0)",
       "bindLoopback": "Loopback (127.0.0.1)",
-      "bindTimeBadge": "Needs restart",
+      "bindTimeBadge": "Applies on restart",
+      "bindTimeFieldNames": {
+        "allowlist": "IP allowlist",
+        "bindInterface": "bind interface",
+        "connectTimeoutSecs": "connect timeout",
+        "port": "port",
+        "rateLimitPerMin": "global rate limit"
+      },
       "cancel": "Cancel",
       "clearLog": "Clear log",
+      "clearLogConfirm": "Delete every logged request? This cannot be undone.",
+      "clearLogConfirmAction": "Clear log",
       "colCost": "Cost",
       "colError": "Error",
       "colKey": "Key",
@@ -39708,8 +40253,10 @@
       "concurrencyWaitHelp": "How long a request waits for a free concurrency slot before it is rejected with 429. 0 = reject immediately.",
       "connectHeading": "Connect external tools",
       "connectHelp": "Point any OpenAI- or Anthropic-compatible client at the gateway by setting one of these environment variables.",
+      "connectLanNote": "From other devices on your network, replace 127.0.0.1 with this machine's LAN address.",
       "connectTimeout": "Connect timeout (s)",
       "connectTimeoutHelp": "Bounds a hung upstream connection on every request, streaming included.",
+      "connectUsesPublicOrigin": "These use your public origin (Listener panel).",
       "cooldownFallback": "Rate-limit cooldown (s)",
       "cooldownFallbackHelp": "Park an account this long after a 429 with no Retry-After header, so failover stops re-picking it. 0 = honour upstream headers only.",
       "cooldownHeading": "Cooldowns",
@@ -39720,18 +40267,22 @@
       "cooldownsPermanent": "Disabled",
       "cooldownsRecovered": "recovered",
       "cooldownsRecoversIn": "recovers in {seconds}s",
+      "cooldownsRecoversInMinutes": "recovers in {minutes}m {seconds}s",
       "cooldownsRefresh": "Refresh",
       "cooldownsRefreshFailed": "Unable to refresh parked accounts. Try refreshing again.",
       "cooldownsReset": "Restore all accounts",
       "cooldownsResetFailed": "Unable to restore accounts. Try again.",
       "cooldownsResetSuccess": "Restored {count, plural, one {# account} other {# accounts}} for retry.",
       "cooldownsResetting": "Restoring…",
+      "cooldownsRestoreProvider": "Restore",
+      "cooldownsRestoreProviderAria": "Restore parked accounts for {provider}",
       "copied": "Copied",
       "copy": "Copy",
       "copyFailed": "Could not copy to the clipboard",
       "copyKey": "Copy key",
       "costUnknown": "—",
       "createKey": "Create key",
+      "createKeyHelp": "The secret is shown once, right after creation. Run API scopes can be granted afterwards from the key's edit form.",
       "customApplied": "Custom gateway settings applied",
       "customHeading": "Custom configuration",
       "customHelp": "Edit and validate the complete gateway configuration as JSON or YAML.",
@@ -39755,16 +40306,20 @@
       "exposureHelp": "Control which models this gateway advertises and serves.",
       "fieldStripAllow": "Field-strip exceptions",
       "fieldStripAllowHelp": "Re-permit a stripped field for one provider, written provider:field.",
+      "fieldStripAllowInvalid": "Write it as providerId:field, such as openai:service_tier.",
       "fieldStripAllowPlaceholder": "openai:service_tier",
       "fieldStripHeading": "Outbound field stripping",
       "fieldStripHelp": "Request fields removed before the body reaches an upstream.",
       "gatewayLocalRoutingV2": "Use gateway-local routing",
       "gatewayLocalRoutingV2Help": "Resolve routes inside the gateway from the current policy instead of a legacy published snapshot.",
+      "headerRunningOn": "Running on :{port}",
       "hide": "Hide",
       "hideRawModels": "List aliases only",
       "hideRawModelsHelp": "Hide raw provider model ids from /v1/models — advertise routing aliases only. Direct provider:model calls still work.",
+      "justNow": "just now",
       "keyCopied": "Key copied",
       "keyCreated": "Created",
+      "keyDisabled": "Disabled",
       "keyExpired": "Expired",
       "keyExpiry": "Expires",
       "keyExpiryHelp": "Leave blank for a key that never expires.",
@@ -39775,6 +40330,7 @@
       "keyModelsPlaceholder": "fast, gpt-4o (blank = all)",
       "keyName": "Name",
       "keyNamePlaceholder": "e.g. Claude Code laptop",
+      "keyNameRequired": "Give the key a name so you can tell it apart later.",
       "keyNeverExpires": "Never",
       "keyNeverUsed": "Never used",
       "keyQuota": "Token quota",
@@ -39784,23 +40340,36 @@
       "keyRateLimit": "Rate limit / min",
       "keyRateLimitHelp": "Per-key request budget. Blank = only the global limit applies.",
       "keyRateLimitNone": "—",
+      "keyRecentUsage": "Recent",
+      "keyRecentUsageValue": "{requests, plural, one {# request} other {# requests}} · {errors, plural, one {# error} other {# errors}}",
       "keyScopes": "Run API scopes",
       "keyScopesHelp": "What this key may do on the Router + Fusion Run API. A key with no scopes keeps working on the chat endpoints exactly as before, and /v1/runs refuses it.",
       "keyScopesNone": "none (passthrough only)",
       "keysEmpty": "No keys yet. Create one to authenticate external tools.",
       "keysHeading": "API keys",
       "keysHelp": "Issue one scoped key per external tool. Each can be limited to specific models, given an expiry and its own rate limit, and disabled or deleted independently.",
+      "keysLockedEmpty": "Unlock your local account to see and manage its keys.",
+      "lanAllowlistLoopbackOnly": "The listener binds to your network, but the allowlist only admits this machine. Add a range such as 192.168.1.0/24 for other devices to connect.",
       "lanWarning": "LAN binding exposes the gateway to your local network. Keep the IP allowlist tight and every key scoped — only allow-listed IPs with a valid key get through.",
       "latencyMs": "{ms}ms",
       "legacyKeysHeading": "Replace keys from an earlier version",
       "legacyKeysHelp": "{count, plural, one {One older key is} other {# older keys are}} not bound to a local account and can no longer access this gateway. Create a new key below for the current account, then update the external tools that use it. Your provider credentials are unchanged.",
       "listenerHeading": "Listener",
-      "listenerHelp": "Where the gateway binds and who may reach it.",
+      "listenerHelp": "Where the gateway binds and the address callers reach it at.",
       "liveBadge": "Applies immediately",
       "localRoutingActive": "Gateway-local routing is active · policy {revision}",
       "localRoutingLegacy": "Legacy snapshot routing is active.",
+      "logAttempts": "{count, plural, one {# attempt} other {# attempts}}",
+      "logClearFailed": "Could not clear the log",
       "logCleared": "Log cleared",
+      "logDecisionId": "Decision",
+      "logDistribution": "Distribution",
       "logEmpty": "No requests yet.",
+      "logExport": "Export",
+      "logExportCsv": "Export as CSV",
+      "logExportFailed": "Could not export the log",
+      "logExportJson": "Export as JSON",
+      "logFallbackReason": "Fallback reason",
       "logFilterAll": "All",
       "logFilterAllKeys": "All keys",
       "logFilterErrors": "Errors",
@@ -39808,7 +40377,16 @@
       "logFilterOk": "Success",
       "logHeading": "Request log",
       "logHelp": "Every inbound request, kept across restarts.",
+      "logLoadMore": "Load more",
+      "logPolicyRevision": "Policy",
+      "logRoutingLatency": "Routing time",
       "logRowDetailAria": "Toggle details for request {id}",
+      "logSelectedDeployment": "Deployment",
+      "logShowing": "Showing the latest {count, plural, one {# request} other {# requests}} that match",
+      "logStrategy": "Strategy",
+      "logSynthesized": "Answered by",
+      "logSynthesizedValue": "The gateway itself (no upstream call)",
+      "logUpstreamKey": "Upstream account",
       "maxConcurrentPerKey": "Max concurrent / gateway key",
       "maxConcurrentPerKeyHelp": "Simultaneous in-flight requests allowed per API key, shared across chat, embeddings and responses. 0 = unlimited. A streaming chat holds its slot until the stream ends.",
       "maxConcurrentPerUpstreamKey": "Max concurrent / upstream account",
@@ -39840,7 +40418,7 @@
             "label": "API keys"
           },
           "listener": {
-            "description": "Port, interface and allowlist",
+            "description": "Port, interface, allowlist and rate limit",
             "label": "Listener"
           },
           "logs": {
@@ -39852,7 +40430,7 @@
             "label": "Overview"
           },
           "reliability": {
-            "description": "Timeouts, retries and rate limit",
+            "description": "Timeouts, retries and routing engine",
             "label": "Reliability"
           },
           "tickets": {
@@ -39881,9 +40459,9 @@
       "quotaExceeded": "Quota spent",
       "quotaReset": "Quota usage reset",
       "rateLimit": "Global requests / minute",
-      "rateLimitHelp": "Requests per minute across all keys.",
-      "reliabilityHeading": "Reliability & access",
-      "reliabilityHelp": "Timeouts, failover retries, and who may connect.",
+      "rateLimitHelp": "Requests per minute across all keys. Each key can add its own tighter limit.",
+      "reliabilityHeading": "Retries & failover",
+      "reliabilityHelp": "How a failing request walks the fallback chain to the next candidate.",
       "remove": "Remove",
       "requestTimeout": "Request timeout (s)",
       "requestTimeoutHelp": "Total cap for non-streaming requests. 0 disables it; streaming responses are never capped.",
@@ -39891,9 +40469,10 @@
       "resetQuota": "Reset usage",
       "respectRetryAfter": "Respect Retry-After",
       "respectRetryAfterHelp": "Honor an upstream Retry-After delay when it fits within the configured retry wait cap.",
+      "restartBannerFields": "The running listener still uses the previous {fields}. Restart it to apply.",
+      "restartBannerTitle": "{count, plural, one {# saved change is} other {# saved changes are}} waiting for a restart",
       "restartListener": "Restart listener",
-      "restartRequired": "The running listener still uses the previous values. Restart it to apply these changes.",
-      "restartRequiredBadge": "Restart required",
+      "restartPendingBadge": "Restart pending",
       "restarted": "Listener restarted",
       "retryBackoffBase": "Retry backoff base (ms)",
       "retryBackoffBaseHelp": "Initial exponential backoff delay before trying another upstream candidate.",
@@ -39901,8 +40480,11 @@
       "retryBackoffMaxHelp": "Maximum exponential backoff delay between upstream attempts.",
       "retryStatusCodes": "Retry on statuses",
       "retryStatusCodesHelp": "Upstream HTTP statuses that fail over to the next provider instead of surfacing.",
+      "retryStatusCodesInvalid": "Enter a three-digit HTTP status between 100 and 599.",
       "retryStatusCodesPlaceholder": "429, 503",
-      "reveal": "Reveal",
+      "routingEngineHeading": "Routing engine",
+      "routingEngineHelp": "Which planner chooses the candidate chain for each request.",
+      "routingLabel": "Routing",
       "routingRevisionUnavailable": "—",
       "save": "Save",
       "saved": "Saved",
@@ -39914,8 +40496,10 @@
       "selfCheckNeedsRunning": "Start the gateway to run a self-check.",
       "selfCheckNoStatus": "no response",
       "selfCheckRun": "Run check",
+      "selfCheckSummary": "{ok} of {total, plural, one {# candidate} other {# candidates}} answered",
       "serverHeading": "Server",
-      "snapshotGeneratedAt": "Routing snapshot published {time}",
+      "snapshotGeneratedAt": "published {time}",
+      "snapshotLabel": "Routing snapshot",
       "snapshotNone": "No routing snapshot has been published yet.",
       "statAliases": "Aliases",
       "statCalls": "Requests served",
@@ -39931,29 +40515,54 @@
       "strippedFieldsHelp": "Client fields removed from every upstream request (billing / privacy / behaviour toggles). Dotted paths reach nested leaves.",
       "strippedFieldsPlaceholder": "service_tier, store",
       "summaryAvgLatency": "Avg latency",
-      "summaryErrors": "Errors",
+      "summaryCost": "Est. cost",
+      "summaryErrorsHint": "{errors, plural, one {# error} other {# errors}} · {rate}",
       "summaryRequests": "Requests",
       "summaryTokens": "Tokens (in/out)",
       "tickets": {
         "activeHeading": "Active tickets",
         "activeHelp": "Metadata only — ticket secrets are never stored or shown.",
+        "budgetRate": "at most {max, plural, one {# request} other {# requests}} / min",
+        "budgetRequests": "{spent} / {max} requests",
+        "budgetTokens": "{spent} / {max} tokens",
+        "budgetUnmetered": "Unmetered",
+        "cancel": "Cancel",
         "description": "Session-scoped frozen routes issued to agent subprocesses (ADR-0090).",
+        "detailAuthFailover": "Auth failover",
+        "detailBindings": "Model bindings",
+        "detailBudget": "Budget",
+        "detailCandidates": "Candidates",
+        "detailFingerprint": "Execution fingerprint",
+        "detailIssued": "Issued",
+        "detailOperations": "Operations",
+        "detailParentSession": "Parent session",
+        "detailPolicy": "Route policy",
+        "detailProfileVersion": "Profile version",
+        "details": "Details",
         "disabledDescription": "Nothing mints tickets while this capability is off, so the list would stay empty. Turn it on above to start issuing them.",
         "disabledTitle": "Route tickets are not enabled",
         "enableHelp": "Stored locally for this install; off by default.",
         "enableLabel": "Enable route tickets",
         "experimentalBadge": "Experimental",
+        "no": "Not allowed",
         "noneActive": "No tickets have been issued yet.",
         "refresh": "Refresh",
         "revoke": "Revoke",
         "revokeAria": "Revoke ticket {id}",
+        "revokeConfirm": "Revoke this ticket? The agent session using it loses access immediately.",
+        "revokeConfirmAction": "Revoke ticket",
         "revoked": "Ticket revoked",
         "routingWarning": "This switch changes how agent runs are routed, not just what this page shows. Leave it off unless you are testing ADR-0090.",
         "statusRevoked": "Revoked",
-        "ticketMeta": "Session {session} · {candidates} candidates · expires {expires}",
-        "title": "Route tickets"
+        "ticketMeta": "Session {session} · {candidates, plural, one {# candidate} other {# candidates}} · expires {expires}",
+        "ticketMetaExpired": "Session {session} · {candidates, plural, one {# candidate} other {# candidates}} · expired",
+        "title": "Route tickets",
+        "yes": "Allowed"
       },
-      "title": "Inbound Gateway"
+      "timeoutsHeading": "Timeouts",
+      "timeoutsHelp": "How long the gateway waits for an upstream to connect and to answer.",
+      "title": "Inbound Gateway",
+      "verifySnippet": "Check the connection"
     },
     "general": {
       "alwaysAllowedTools": "Always-allowed tools",
@@ -40978,7 +41587,7 @@
         "clickThroughHint": "While click-through is on, the desktop pet ignores the mouse. Turn it back off here or from the tray menu's \"Disable click-through\".",
         "description": "Float the pet on your desktop in a transparent always-on-top window (desktop app only).",
         "enabled": {
-          "description": "Show the pet floating on your desktop, outside the app window.",
+          "description": "Show the pet floating on your desktop, outside the app window. Turning this on also switches the pet on.",
           "label": "Desktop pet"
         },
         "hotkeyLink": "Configure a global hotkey to show/hide the desktop pet",
@@ -41974,7 +42583,13 @@
       "description": "Rebind the global hot-keys. Recording captures the next key combo you press.",
       "desktopOnly": "Global shortcuts are only available in the desktop build.",
       "notSet": "Not set",
+      "petClean": "Pet: clean",
+      "petFeed": "Pet: feed",
+      "petPet": "Pet: pet",
+      "petPlay": "Pet: play",
+      "petSleep": "Pet: sleep",
       "petToggleWindow": "Toggle desktop pet",
+      "petTreat": "Pet: treat",
       "pressKey": "Press any key…",
       "record": "Record",
       "reservedWarning": "May conflict with the system {feature} shortcut",
@@ -43030,12 +43645,14 @@
       "projectOverride": {
         "cwdLabel": "Working directory",
         "cwdPlaceholder": "/path/to/cwd",
-        "emptyProjects": "No projects yet — overrides become available once you create one.",
-        "helper": "Pick a project to override its shell or cwd. Empty fields fall back to the global default.",
-        "selectProject": "Select a project…",
+        "emptyProjects": "No workspaces yet. Overrides become available once you create one.",
+        "envLabel": "Environment (KEY=VALUE per line)",
+        "envPlaceholder": "NODE_ENV=development",
+        "helper": "Pick a workspace to override its shell, working directory or environment. Empty fields fall back to the global default.",
+        "selectProject": "Select a workspace…",
         "shellLabel": "Shell",
         "shellPlaceholder": "/usr/local/bin/fish",
-        "title": "Per-project override"
+        "title": "Per-workspace override"
       },
       "quickFixes": {
         "helper": "Show a lightbulb on a failed command offering a fix — git push --set-upstream, “did you mean”, create-PR link, freeing a busy port, pwsh command-not-found, and more.",
@@ -43075,7 +43692,7 @@
         "cmd": "Command Prompt (cmd.exe)",
         "custom": "Custom path…",
         "customLabel": "Custom shell path",
-        "helper": "Auto-detect picks pwsh on Windows, zsh on macOS, bash on Linux. Per-project overrides win when set. cmd.exe spawns without OSC 633 integration.",
+        "helper": "Auto-detect picks pwsh on Windows, zsh on macOS, bash on Linux. Per-workspace overrides win when set. cmd.exe spawns without OSC 633 integration.",
         "label": "Default shell",
         "powershell": "Windows PowerShell (powershell.exe)",
         "pwsh": "PowerShell 7 (pwsh.exe)",
@@ -43224,7 +43841,7 @@
         "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output.",
         "label": "Sticky scroll"
       },
-      "subheading": "Default shell, font and scrollback for the bottom dock. Per-project overrides take precedence over these defaults.",
+      "subheading": "Default shell, font and scrollback for the bottom dock. Per-workspace overrides take precedence over these defaults.",
       "unattended": {
         "askPolicy": {
           "consent": "Ask in the terminal dock",
@@ -44022,7 +44639,7 @@
     },
     "mobile": {
       "empty": "No Sites on this device.",
-      "emptyExplain": "Sites are created and published on the desktop. This phone reads its own local database and does not yet mirror the desktop's — see ADR-0084.",
+      "emptyExplain": "Sites are created and published on the desktop. This phone shows only what is in its own local database; it does not mirror the desktop's Sites yet.",
       "explain": "Building, previewing, and publishing need the desktop app's sandbox, terminal, and keyring. What this phone can show is what its own database holds.",
       "readOnly": "Read-only on this device.",
       "title": "Sites"
@@ -44428,6 +45045,7 @@
         "empty": "No skills found.",
         "groupHeading": "Available skills",
         "inertChip": "{name} is disabled for this session and won't be sent.",
+        "pluginGroupHeading": "From plugins",
         "removeChip": "Remove {name}",
         "searchPlaceholder": "Search skills…",
         "trigger": "Attach skill"
@@ -45302,6 +45920,7 @@
       "signoff": "Sign Off"
     },
     "commitDetail": {
+      "backToChanges": "Back to changes",
       "branchNamePlaceholder": "New branch name",
       "checkoutAction": "Checkout",
       "checkoutCommit": "Checkout this commit…",
@@ -45309,7 +45928,8 @@
       "checkoutCommitTitle": "Checkout commit?",
       "createBranchAction": "Create & switch",
       "createBranchHere": "Create branch from here…",
-      "createBranchTitle": "Create branch from this commit"
+      "createBranchTitle": "Create branch from this commit",
+      "noFiles": "No file changes in this commit"
     },
     "compare": {
       "empty": "No changes between the selected refs",
@@ -45338,7 +45958,7 @@
     },
     "discard": {
       "confirmAction": "Discard",
-      "confirmAll": "Discard all changes in the working tree? This permanently throws away every uncommitted edit and cannot be undone.",
+      "confirmAll": "Discard all changes in the working tree? This permanently throws away every uncommitted edit and deletes untracked files. It cannot be undone.",
       "confirmFile": "Discard changes to {file}? This permanently throws away the uncommitted edits and cannot be undone.",
       "confirmTitle": "Discard changes?"
     },
@@ -45411,6 +46031,11 @@
       "moveUp": "Move up",
       "rewordPlaceholder": "New commit message",
       "title": "Interactive rebase"
+    },
+    "read": {
+      "failed": "Could not load: {message}",
+      "failedTitle": "Could not load",
+      "loading": "Loading…"
     },
     "remote": {
       "noWorkspace": "No authorized Git workspace",
@@ -45617,6 +46242,7 @@
       "empty": "No history",
       "filterPlaceholder": "Filter loaded commits (message, author, hash)",
       "loadMore": "Load more",
+      "loading": "Loading history…",
       "repository": "Repository",
       "thisFile": "This File",
       "title": "Timeline",
@@ -46956,7 +47582,8 @@
     },
     "empty": {
       "noDescription": "No description",
-      "noResults": "No templates match these filters."
+      "noResults": "No templates match these filters.",
+      "noTemplates": "No templates yet"
     },
     "exportDialog": {
       "cancel": "Cancel",
@@ -47856,7 +48483,8 @@
     "lspIntelligenceDesc": "Language-server-backed code navigation — go-to-definition, find references, hover types, document symbols, and live diagnostics. Desktop only; language servers spawn lazily on first use.",
     "permissionsDesc": "Tools that require approval pop up a per-call dialog. Add a tool to the always-allow list (below) to skip the prompt. Disable a category to remove its tools from the agent entirely.",
     "permissionsTitle": "Permission flow",
-    "petToolsDesc": "Let the agent read your desktop pet, nurture it, make it speak, and reward it for milestones. Bringing the pet on screen always asks first.",
+    "petToolsDesc": "Let the agent read your desktop pet, nurture it, make it speak, and reward it for milestones. Bringing the pet on screen always asks first, and switches the pet on if it is off.",
+    "petToolsDesktopOnly": "Requires the desktop app — the pet only runs in Cognia for desktop.",
     "petToolsTitle": "Desktop pet",
     "processManagement": "Processes",
     "processManagementDesc": "List, search, start and terminate local processes. Off by default — start/terminate are high-risk.",
@@ -55310,6 +55938,7 @@
     "activity": {
       "artifactsAria": "Links this run produced",
       "empty": "No shared plans or runs in this workspace yet.",
+      "loading": "Loading team activity",
       "noSteps": "No steps",
       "planStatus": {
         "approved": "Approved",
@@ -55364,8 +55993,13 @@
         "compare": "Compare refs",
         "delete": "Delete"
       },
+      "cancel": "Cancel",
+      "confirmDelete": "Delete branch",
+      "deleteDescription": "{name} will be force-deleted, even if its commits were never merged. After a run has settled, this branch is the only record of what it did.",
+      "deleteTitle": "Delete this agent branch?",
       "description": "Branches an isolated run left behind, once its worktree was reclaimed.",
       "empty": "No agent branches in this repository.",
+      "loading": "Loading agent branches",
       "refresh": "Refresh agent branches",
       "title": "Agent branches"
     },
@@ -55375,6 +56009,7 @@
       "effectiveOn": "Loaded here",
       "globallyOff": "off for every workspace",
       "globallyOn": "on for every workspace",
+      "loading": "Loading capabilities",
       "mcpServers": "MCP servers",
       "noMcpServers": "No MCP servers are configured yet. Add them in Settings → MCP.",
       "noSkills": "No skills are defined yet. Add them in Settings → Skills.",
@@ -55392,6 +56027,27 @@
       "templates": "Templates",
       "title": "Capabilities in this workspace",
       "unavailable": "not available — trust it in Settings → MCP first"
+    },
+    "context": {
+      "description": "Description",
+      "edit": "Edit",
+      "empty": "No description, instructions or knowledge yet. Add them to steer every conversation here.",
+      "instructions": "Instructions",
+      "knowledge": "Knowledge",
+      "knowledgeCount": "{count, plural, =0 {No knowledge files} one {# knowledge file} other {# knowledge files}}",
+      "knowledgeOff": "(not injected into chat)",
+      "noInstructions": "None. Conversations here get only the repository's own instructions.",
+      "tags": "Tags",
+      "title": "Workspace context"
+    },
+    "conversations": {
+      "empty": "No conversations in this workspace yet.",
+      "loading": "Loading conversations",
+      "new": "New",
+      "startFailed": "Could not start a conversation: {error}",
+      "title": "Conversations",
+      "untitled": "Untitled conversation",
+      "viewAll": "{count, plural, one {Open the conversation list (#)} other {Open all # conversations}}"
     },
     "create": {
       "browse": "Browse…",
@@ -55519,33 +56175,49 @@
     },
     "manage": {
       "activeBadge": "Active",
-      "addDir": "Add",
-      "addDirManual": "Type an absolute path…",
       "addRoot": "Add folder",
       "addRootManual": "Type an absolute path…",
-      "additionalDirsHint": "Extra folders mounted into this workspace so the agent can read and edit them.",
-      "additionalDirsLabel": "Additional directories",
+      "archive": "Archive",
+      "archived": "Workspace archived",
+      "archivedHeading": "Archived",
+      "archivedNote": "Archived: hidden from every workspace picker. Its conversations are kept; restore it to work here again.",
+      "archivedSwitched": "Workspace archived. Switched to {name}.",
       "browseServer": "Browse server",
       "cancelDelete": "Keep it",
       "clearSearch": "Clear the search",
       "confirmDelete": "Remove and delete everything",
       "confirmDetach": "Remove, keep conversations",
+      "create": "Create workspace",
+      "created": "Workspace created",
+      "defaultLocked": "Default can't be archived or removed. Removed workspaces hand their conversations to it.",
       "defaultName": "New Workspace",
       "delete": "Delete",
       "deleteFailed": "The workspace could not be removed. It is still available; retry after its data and external agent sessions can be processed.",
       "deleteQuestion": "Remove this workspace?",
+      "deleteRunning": "A conversation in this workspace is still running. Stop it, then remove the workspace.",
       "deleted": "Workspace deleted",
       "description": "A workspace bundles a primary directory and extra mounted folders. The active workspace drives the working directory, the Source Control panel, and the terminal scope.",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "What is this workspace for?",
       "detached": "Workspace removed — its conversations moved to Default",
       "discardCancel": "Keep editing",
+      "discardCloseConfirm": "Discard and close",
+      "discardCloseDescription": "Your edits to this workspace have not been saved. Closing now throws them away.",
       "discardConfirm": "Discard and switch",
-      "discardDescription": "The name and folders you edited have not been saved. Switching workspace now throws those edits away.",
+      "discardDescription": "Your edits to this workspace have not been saved. Switching now throws them away.",
       "discardTitle": "Discard unsaved changes?",
       "empty": "No workspaces yet",
+      "instructionsCount": "{count}/{max}",
+      "instructionsHint": "Sent with every conversation in this workspace, after the repository's own CLAUDE.md or AGENTS.md.",
+      "instructionsLabel": "Workspace instructions",
+      "instructionsPii": "This looks like personal or secret data (an email address, key or token). It is sent to the model with every turn, so remove it before saving.",
+      "instructionsPlaceholder": "For example: use pnpm, and run the tests before proposing a commit.",
       "knowledge": {
         "addFile": "Upload files",
         "backendHint": "Retrieval needs a configured vector backend and embedding model (Twin settings). Without one, ingestion and retrieval are skipped.",
+        "cancel": "Cancel",
         "chunkCount": "{count, plural, one {# chunk} other {# chunks}}",
+        "confirmRemoveFile": "Remove file",
         "emptyFile": "No readable text was found in the file.",
         "enableRag": "Inject knowledge into chat",
         "importFailed": "Could not import {name}. {message}",
@@ -55558,6 +56230,8 @@
         "reindex": "Reindex file",
         "reindexAll": "Reindex all",
         "removeFile": "Remove file",
+        "removeFileDescription": "“{name}” and every chunk indexed from it will be removed from this workspace's knowledge base. A pasted note has no other copy.",
+        "removeFileTitle": "Remove this file?",
         "status": {
           "indexed": "Indexed",
           "outdated": "Outdated",
@@ -55567,6 +56241,7 @@
         "title": "Knowledge base",
         "topK": "Chunks per message"
       },
+      "knowledgeAfterCreate": "Create the workspace to add knowledge files.",
       "listLabel": "Workspaces",
       "nameLabel": "Name",
       "namePlaceholder": "Workspace name",
@@ -55596,11 +56271,9 @@
         "up": "Go to parent folder",
         "upConfined": "This Host only browses inside the folders listed above."
       },
-      "removeDir": "Remove directory",
       "removeRoot": "Remove folder",
+      "removeTag": "Remove tag {tag}",
       "revokeRoot": "Revoke trust",
-      "rootDirLabel": "Primary directory",
-      "rootDirPlaceholder": "/path/to/project",
       "rootLabelPlaceholder": "Folder name (optional)",
       "rootsEmpty": "No folders added yet. Browse for a folder or enter an absolute path below.",
       "rootsHint": "Mount one or more folders. The primary folder is the working directory; the rest are readable and editable alongside it.",
@@ -55611,16 +56284,30 @@
       "selectHint": "Select a workspace to edit, or create a new one.",
       "setActive": "Set active",
       "setPrimary": "Set as primary",
+      "tagsLabel": "Tags",
+      "tagsPlaceholder": "Add a tag and press Enter",
       "title": "Workspaces",
       "trustRoot": "Trust",
       "trustedBadge": "Trusted",
-      "unsaved": "Unsaved changes",
-      "untrustedBadge": "Untrusted"
+      "unarchive": "Restore",
+      "unarchived": "Workspace restored",
+      "unsaved": "Unsaved changes"
     },
     "members": {
       "allRoles": "All roles",
       "audit": {
+        "actions": {
+          "accountBootstrapped": "Organization set up",
+          "invitationCreated": "Invitation created",
+          "invitationRedeemed": "Invitation accepted",
+          "invitationRevoked": "Invitation revoked",
+          "orgMemberChanged": "Organization role set",
+          "orgMemberOffboarded": "Removed from organization",
+          "workspaceMemberChanged": "Workspace role set",
+          "workspaceMemberRemoved": "Removed from workspace"
+        },
         "actor": "by {who}",
+        "detail": "{reason} · {actor}",
         "empty": "No membership changes recorded yet.",
         "failed": "Could not load the audit log.",
         "hide": "Hide recent changes",
@@ -55694,6 +56381,7 @@
           "viewer": "Viewer"
         }
       },
+      "loading": "Loading members",
       "noMatches": "No member has that role.",
       "offboard": "Remove from organization",
       "orgRole": {
@@ -55744,6 +56432,16 @@
       "workspace": "workspace root",
       "worktree": "worktree"
     },
+    "schedules": {
+      "activeCount": "{active}/{total} active",
+      "empty": "Nothing is scheduled in this workspace.",
+      "loading": "Loading schedules",
+      "next": "next {time}",
+      "openScheduler": "Open scheduler",
+      "remoteHost": "Schedules run on the paired host, which lists them itself.",
+      "shared": "All workspaces",
+      "title": "Schedules"
+    },
     "switcher": {
       "active": "Active workspace: {name}",
       "adoptEntry": "Folders in use",
@@ -55762,6 +56460,7 @@
       "pinnedHeading": "Pinned",
       "recentHeading": "Recent",
       "searchPlaceholder": "Search workspaces…",
+      "switchTitle": "Switch workspace",
       "undoFollow": "Undo",
       "unpin": "Unpin {name}",
       "untrustedHint": "Untrusted workspace"

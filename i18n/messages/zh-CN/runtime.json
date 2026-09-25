@@ -1,5 +1,6 @@
 {
   "surfaceBoundary": {
+    "back": "返回",
     "backToChat": "返回聊天",
     "diagnose": "打开诊断",
     "pairHost": "配对或切换主机",

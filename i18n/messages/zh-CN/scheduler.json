@@ -24,6 +24,20 @@
   "allowConcurrent": "允许并发",
   "appArgs": "应用参数",
   "appPath": "应用路径",
+  "approval": {
+    "deniedTools": "被拒绝的工具",
+    "fallback": "已停止，等待你的批准",
+    "hintTools": "把它们加入任务的允许工具列表，或提高任务的权限模式。",
+    "hintTrust": "信任该工作区后，定时运行才能使用磁盘和主机工具。",
+    "pill": "需要批准",
+    "sheetBody": "这次运行无人值守，因此在需要你确认的地方停了下来，而没有自行继续。它没有被重试，因为重试会停在同一个地方。放行它需要的内容后，再重新运行任务。",
+    "sheetTitle": "等待你的批准",
+    "tools": "需要批准使用 {tools}",
+    "trust": "工作区未受信任：{roots}",
+    "trustUnverified": "无法检查 {roots} 的信任状态",
+    "untrustedRoots": "未受信任的工作区根目录",
+    "unverifiedRoots": "无法检查信任状态的根目录"
+  },
   "authority": {
     "graceLabel": "宽限期",
     "graceMinutes": "{minutes} 分钟",
@@ -93,7 +107,9 @@
       "full": "完整备份",
       "sessions": "仅会话",
       "settings": "仅设置"
-    }
+    },
+    "defaultTaskName": "定时备份",
+    "scheduleFailed": "无法创建定时备份"
   },
   "basicInfo": "基础信息",
   "breadcrumb": "面包屑导航",
@@ -696,14 +712,18 @@
     "plan": "规划模式（只读）"
   },
   "permissions": {
-    "agentAutoCreate": "代理自动创建",
-    "agentAutoCreateDesc": "允许 AI 代理在不弹出确认对话框的情况下创建定时任务",
-    "allowAgentAutoCreate": "允许代理自动创建任务",
+    "agentAutoCreate": "Agent 自动创建",
+    "agentAutoCreateDesc": "在关闭了写入确认的渠道里，也允许 Agent 不经询问直接添加任务。你在确认对话框中批准的改动不受此项影响。",
+    "agentAutoCreateInert": "Agent 无法管理定时任务时，此项不起作用。",
+    "agentTools": "Agent 访问",
+    "agentToolsDesc": "允许助手在对话中查看、新建、修改、运行和删除定时任务。它做的每一次改动都会先征求你的确认。",
+    "allowAgentAutoCreate": "允许 Agent 自动创建任务",
+    "allowAgentTools": "允许 Agent 管理定时任务",
     "autoRefreshInterval": "自动刷新间隔（秒）",
     "autoRefreshIntervalDesc": "定时任务页面重新读取任务和执行记录的间隔，0 表示关闭。",
     "confirmationRequired": "需要确认",
-    "confirmationRequiredDesc": "代理创建以下类型的任务时，始终需要用户明确确认",
-    "description": "控制代理和插件对定时任务的操作权限",
+    "confirmationRequiredDesc": "Agent 创建以下类型的任务时，始终需要用户明确确认",
+    "description": "控制 Agent 和插件对定时任务的操作权限",
     "enableScriptTasks": "允许脚本任务执行",
     "limits": "资源限制",
     "limitsDesc": "设置任务数量和并发执行限制",
@@ -1127,6 +1147,10 @@
       "hostSuspended": "配对主机接管期间，本设备的计划表已挂起",
       "lastRunFailed": "{name} 上次运行失败",
       "lastRunFailedWith": "{name} 上次运行失败：{error}",
+      "needsApproval": "{name} 正在等待你的批准",
+      "needsApprovalTools": "{name} 正在等待你批准使用 {tools}",
+      "needsApprovalToolsAndTrust": "{name} 正在等待你批准使用 {tools}，并信任 {roots}",
+      "needsApprovalTrust": "{name} 正在等待你信任 {roots}",
       "quotaNearLimit": "由 {source} 创建的任务已达 {count}/{limit}",
       "running": "{name} 正在运行",
       "runningWithProcesses": "{name} 正在运行，有 {count} 个活动进程",
@@ -1141,6 +1165,10 @@
       "consecutiveFailures": "已连续失败 {count} 次",
       "lastRunFailed": "上次运行失败",
       "lastRunFailedWith": "上次运行失败：{error}",
+      "needsApproval": "等待你的批准",
+      "needsApprovalTools": "等待批准使用 {tools}",
+      "needsApprovalToolsAndTrust": "等待批准使用 {tools} 并信任 {roots}",
+      "needsApprovalTrust": "等待你信任 {roots}",
       "running": "正在运行",
       "runningWithProcesses": "正在运行，{count} 个活动进程",
       "unsupportedType": "此主机无法运行"
@@ -1204,14 +1232,19 @@
     "storage": "存储位置",
     "tagsTitle": "标签",
     "updatedAt": "更新时间",
-    "workspaceTitle": "工作区"
+    "workspaceTitle": "工作区",
+    "backToOverview": "概览",
+    "starting": "正在启动…",
+    "openAuthoringConversation": "打开创建它的对话"
   },
   "runSheet": {
     "next": "下一次运行",
     "position": "第 {index} / {total} 条",
     "previous": "上一次运行",
     "progress": "已完成 {percent}%",
-    "stillRunning": "仍在运行"
+    "stillRunning": "仍在运行",
+    "runningNow": "这次运行仍在进行中。",
+    "stop": "停止运行"
   },
   "unifiedNames": {
     "backup": "自动备份",
@@ -1222,5 +1255,44 @@
   "systemDefault": "系统默认",
   "tags": "标签",
   "timeout": "超时",
-  "noTags": "没有标签"
+  "noTags": "没有标签",
+  "itemActions": {
+    "starting": "正在启动「{name}」…",
+    "started": "「{name}」正在运行",
+    "finished": "「{name}」已运行完成",
+    "runFailed": "「{name}」运行失败",
+    "queued": "「{name}」将在当前运行结束后开始",
+    "skipped": "「{name}」未运行",
+    "cancelled": "「{name}」已取消",
+    "viewRun": "查看运行",
+    "paused": "已暂停「{name}」",
+    "resumed": "已恢复「{name}」",
+    "deleted": "已删除「{name}」",
+    "created": "已将「{name}」加入定时任务",
+    "saved": "已保存「{name}」"
+  },
+  "updateTaskFailed": "任务保存失败",
+  "triggerPreview": {
+    "title": "{count, plural, =1 {下次运行} other {接下来 # 次运行}}",
+    "titleNone": "下次运行",
+    "event": "在事件触发时运行，没有固定时间。",
+    "invalid": "修正表达式后即可预览运行时间。",
+    "past": "这个时间已经过去了。",
+    "none": "未来一年内没有运行。"
+  },
+  "cleanupRuns": {
+    "title": "清理旧的运行记录？",
+    "description": "将删除所有 {days} 天前结束的运行记录，任务本身和它们的计划不受影响。此操作不可撤销。",
+    "confirm": "清理",
+    "cancel": "取消",
+    "working": "正在清理…",
+    "done": "{count, plural, other {已清理 # 条旧运行记录}}",
+    "nothing": "没有超过 {days} 天的运行记录",
+    "failed": "清理旧运行记录失败"
+  },
+  "bulkDone": {
+    "pause": "{count, plural, other {已暂停 # 项}}",
+    "resume": "{count, plural, other {已恢复 # 项}}",
+    "delete": "{count, plural, other {已删除 # 项}}"
+  }
 }

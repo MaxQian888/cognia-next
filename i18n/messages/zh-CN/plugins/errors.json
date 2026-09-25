@@ -1,6 +1,20 @@
 {
   "activation": "{pluginName} 激活失败",
   "adapter": "{pluginName} 的插件适配器运行失败",
+  "codes": {
+    "dependencyInUse": "其他插件依赖它：{dependents}。请先停用或卸载这些插件。",
+    "dependencyMissing": "它依赖尚未启用的插件：{dependencies}。",
+    "dirtyRuntime": "它上次运行没有正常退出。请先在插件详情中重试清理。",
+    "frontendTrust": "它会在应用中运行未经沙箱隔离的代码。请在插件的“权限”部分信任它后再加载。",
+    "incompatible": "它无法在当前设备上运行。",
+    "intentDisabled": "它已被关闭，请先启用。",
+    "invalidManifest": "它的清单文件无效。",
+    "managerNotReady": "插件仍在启动中，请稍后再试。",
+    "notFound": "它已不再安装。",
+    "pythonDisabled": "当前设备已关闭 Python 运行时。",
+    "signature": "无法验证它的签名。",
+    "uninstallMirrored": "请在桌面应用中卸载它。本设备只是它的镜像。"
+  },
   "config": "{pluginName} 设置应用失败",
   "disable": "{pluginName} 禁用失败",
   "enable": "{pluginName} 启用失败",

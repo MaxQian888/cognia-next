@@ -117,6 +117,12 @@
   "fingerprintPinned": "桌面身份已锁定",
   "formCardDescription": "扫码或手动粘贴均可——两条路径共用同一份 5 分钟令牌。",
   "formCardTitle": "配对手机",
+  "heading": {
+    "paired": {
+      "title": "已连接",
+      "description": "此客户端持有自己的密钥，之后会自动重新连接。"
+    }
+  },
   "health": {
     "checking": "检查中",
     "continueToChat": "进入聊天",

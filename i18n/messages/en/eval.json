@@ -145,6 +145,7 @@
     "new": "New dataset",
     "searchPlaceholder": "Search datasets…",
     "select": "Select a dataset to see its runs.",
+    "selectEmpty": "A dataset's runs show up here. Create one on the left to start.",
     "version": "v{version}"
   },
   "detail": {

@@ -67,7 +67,9 @@
     "noSelectionBody": "从左侧选一个 Bot，查看它的触发器、凭据与策略。",
     "noSelectionTitle": "未选择 Bot",
     "notFoundTitle": "找不到这个 Bot",
-    "notFoundBody": "链接指向的安装在这台设备上不存在。它可能已被卸载，或位于另一台主机上。"
+    "notFoundBody": "链接指向的安装在这台设备上不存在。它可能已被卸载，或位于另一台主机上。",
+    "noneInstalledTitle": "尚未安装 Bot",
+    "noneInstalledBody": "Bot 把事件源连接到智能体。从插件安装一个后，它的触发器、凭据与策略会显示在这里。"
   },
   "executor": {
     "agent-turn": "单次 Agent 回合",

@@ -92,7 +92,7 @@
   },
   "deviceInfoRow": "设备信息",
   "devicesRow": "已配对设备",
-  "dexieMaintenance": "Dexie 维护",
+  "dexieMaintenance": "存储维护",
   "diagnosticsRow": "诊断",
   "evalRow": "Agent 评估",
   "externalAgentsRow": "外部 Agent",
@@ -185,7 +185,7 @@
   "settingsLink": "应用设置",
   "signOut": {
     "biometricDescription": "清除配对前重新验证身份。",
-    "biometricHelp": "清除配对前要求 Face ID / 指纹。",
+    "biometricHelp": "退出本机登录前要求 Face ID / 指纹。",
     "biometricLabel": "退出前要求生物识别",
     "biometricReason": "请验证以退出 cognia",
     "biometricTitle": "退出登录",

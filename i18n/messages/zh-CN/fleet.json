@@ -20,7 +20,10 @@
       "staleRevision": "操作前任务已发生变化，请重试。",
       "timeout": "应用未响应，请重试。",
       "unknown": "无法完成该操作。",
-      "unknownRow": "该任务已不在列表中。"
+      "unknownRow": "该任务已不在列表中。",
+      "noLongerWaiting": "该请求已不再等待处理。",
+      "turnFinished": "该回合已经结束。",
+      "hostConsent": "请先在执行主机上批准此设备。"
     },
     "announceActive": "{count, plural, =0 {暂无进行中的任务} other {# 个进行中的任务}}",
     "announceWaiting": "{count} 个任务，{waiting} 个等待你处理",
@@ -28,7 +31,8 @@
     "detail": {
       "hide": "隐藏详情",
       "loading": "正在加载详情…",
-      "show": "显示详情"
+      "show": "显示详情",
+      "asking": "请求内容："
     },
     "detailError": {
       "notPermitted": "灵动岛的详情展示已关闭。",
@@ -80,17 +84,33 @@
     "summaryWaiting": "{count} 个任务 · {waiting} 个待处理",
     "toggle": "展开或收起任务列表",
     "waitingFor": "已等待 {duration}",
-    "collapse": "收起任务列表"
+    "collapse": "收起任务列表",
+    "announceFinished": "已完成：{title}",
+    "stopTurn": "停止当前回合"
   },
   "permission": {
     "allow": "允许",
-    "allowed": "已允许",
-    "countdown": "{seconds} 秒",
-    "denied": "已拒绝",
     "deny": "拒绝",
     "expired": "已在终端中处理",
     "request": "权限请求：{tool}",
-    "requestGeneric": "收到权限请求"
+    "requestGeneric": "收到权限请求",
+    "allowAlways": "始终允许",
+    "allowedAlways": "已始终允许",
+    "approve": "批准",
+    "reject": "驳回",
+    "answered": {
+      "allow": "已允许",
+      "deny": "已拒绝",
+      "approve": "已批准",
+      "reject": "已驳回"
+    },
+    "lapsed": "已过期",
+    "remaining": "剩余 {duration}",
+    "ask": {
+      "plan": "批准此计划步骤？",
+      "budget": "允许超出预算继续？",
+      "review": "需要你的批准"
+    }
   },
   "question": {
     "expired": "已在终端中处理",

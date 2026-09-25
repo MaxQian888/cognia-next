@@ -133,6 +133,9 @@
     "useGlobal": "使用全局宠物",
     "useSvg": "内置矢量吉祥物"
   },
+  "bubbleAction": {
+    "openConsole": "打开{tab}"
+  },
   "bubbles": {
     "achievementUnlocked": ["我们拿到徽章啦！", "成就达成！"],
     "birthday": {
@@ -223,6 +226,19 @@
     "sending": "{name} 正在思考…",
     "you": "你"
   },
+  "commands": {
+    "clean": "给宠物清洁",
+    "feed": "喂宠物",
+    "pet": "抚摸宠物",
+    "play": "和宠物玩耍",
+    "sleep": "哄宠物睡觉",
+    "toggleWindow": "切换桌宠",
+    "treat": "给宠物吃零食",
+    "unavailable": {
+      "body": "在「设置 → 宠物」中开启宠物后即可使用宠物快捷键。",
+      "title": "宠物已关闭"
+    }
+  },
   "condition": {
     "unwell": "需要照顾"
   },
@@ -255,7 +271,9 @@
     },
     "title": "你的宠物",
     "unavailable": {
-      "unsupportedHost": "桌宠仅在 Cognia 桌面客户端可用。请打开桌面客户端来照顾它。"
+      "unsupportedHost": "桌宠仅在 Cognia 桌面客户端可用。请打开桌面客户端来照顾它。",
+      "title": "仅限桌面端",
+      "backToChat": "返回聊天"
     }
   },
   "customize": {
@@ -348,6 +366,9 @@
     "live2dTitle": "我的 Live2D 模型",
     "speciesTitle": "内置物种",
     "useMascot": "使用内置形象"
+  },
+  "insight": {
+    "fallback": ["新的注意力雷达报告出炉啦！", "有新洞察了，来看看？"]
   },
   "inventory": {
     "title": "道具"

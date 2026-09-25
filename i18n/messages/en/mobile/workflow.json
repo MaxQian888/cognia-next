@@ -78,7 +78,7 @@
     "snapOn": "Snap to grid: on",
     "undo": "Undo"
   },
-  "empty": "No workflows yet. Create one on the desktop and it appears here.",
+  "empty": "No workflows yet",
   "graphViewerEmpty": "No nodes in this workflow.",
   "humanInput": {
     "goneToast": "This form is no longer waiting for a response.",

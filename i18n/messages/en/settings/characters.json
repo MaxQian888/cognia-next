@@ -277,7 +277,9 @@
       "volume": "Volume"
     },
     "workingDir": "Working directory",
-    "workingDirPlaceholder": "/path/to/project (optional)"
+    "workingDirPlaceholder": "/path/to/project (optional)",
+    "pluginSkills": "Plugin skills",
+    "pluginSkillsHint": "Skills contributed by enabled plugins. They join this character's turns alongside its chat skills."
   },
   "emptyHint": "No characters yet. The built-ins should appear here automatically.",
   "exportPackAria": "Export source pack for {name}",

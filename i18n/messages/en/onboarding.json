@@ -72,10 +72,23 @@
     "freshDescription": "Nothing to bring over from this machine, so setup is short: connect a model, and Cognia is ready to do something with it."
   },
   "finishBar": {
-    "provider_skipped": "Cognia can't reach a model yet — finish signing in.",
-    "runtime_skipped": "No agent runtime is set up on this machine yet.",
-    "task_failed": "Your first run didn't finish. Want to try again?",
-    "cta": "Finish setup",
+    "gap": {
+      "model": {
+        "title": "Cognia can't reach a model yet",
+        "description": "Sign in or add a key to start working.",
+        "cta": "Connect a model"
+      },
+      "taskFailed": {
+        "title": "Your first run didn't finish",
+        "description": "Try it once more — the rest is already set up.",
+        "cta": "Try again"
+      },
+      "firstTask": {
+        "title": "Setup is almost done",
+        "description": "Run one real task and see what Cognia does.",
+        "cta": "Run a first task"
+      }
+    },
     "dismiss": "Dismiss"
   },
   "firstRun": {
@@ -113,6 +126,10 @@
     "express-applying": {
       "headline": "Doing it now.",
       "body": "Each line lights up as it lands. Nothing here needs you."
+    },
+    "express-ready": {
+      "headline": "Your turn.",
+      "body": "Everything is in place. Pick a task and judge the result yourself."
     }
   },
   "provider": {
@@ -186,8 +203,7 @@
     }
   },
   "restart": {
-    "label": "Run setup again",
-    "description": "Walk through the first-run flow from the beginning."
+    "label": "Run setup again"
   },
   "saving": "Saving…",
   "scan": {
@@ -223,6 +239,14 @@
     "express": "The setup plan, and how far it has got",
     "provider": "A single credential completing the link to Cognia",
     "firstRun": "Cognia writing its first output back out"
+  },
+  "setupStatus": {
+    "title": "Setup status",
+    "description": "What first-run setup still needs, and a way back into it.",
+    "complete": {
+      "title": "Setup is complete",
+      "description": "Nothing is missing. You can walk through first-run setup again at any time."
+    }
   },
   "skip": "Skip for now",
   "toastNeedKey": "Paste your API key to continue.",

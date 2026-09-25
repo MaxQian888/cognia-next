@@ -7,6 +7,7 @@
   "install": "Install",
   "installed": "Installed",
   "installedDesktopOnly": "Desktop only — install requires the native app",
+  "installedDesktopOnlyHint": "Plugins are installed and run by the Cognia desktop app. Open it on your desktop to install or update this one.",
   "installing": "Installing…",
   "retry": "Retry",
   "uninstall": "Uninstall",

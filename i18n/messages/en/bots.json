@@ -67,7 +67,9 @@
     "noSelectionBody": "Pick a Bot from the list to see its triggers, credentials and policy.",
     "noSelectionTitle": "No Bot selected",
     "notFoundTitle": "That Bot is not here",
-    "notFoundBody": "The link names an installation this device does not have. It may have been uninstalled, or it lives on another host."
+    "notFoundBody": "The link names an installation this device does not have. It may have been uninstalled, or it lives on another host.",
+    "noneInstalledTitle": "No Bots installed yet",
+    "noneInstalledBody": "A Bot wires an event source to an agent. Install one from a plugin and its triggers, credentials and policy show up here."
   },
   "executor": {
     "agent-turn": "Agent turn",

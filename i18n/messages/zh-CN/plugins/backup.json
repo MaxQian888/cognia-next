@@ -1,10 +1,25 @@
 {
+  "cancel": "取消",
   "create": "创建备份",
   "createFailed": "备份失败。",
   "creating": "创建中…",
   "delete": "删除",
+  "deleteAria": "删除 {date} 的 v{version} 备份",
+  "deleteConfirmBody": "{date} 的 v{version} 备份将被永久删除，之后无法再回滚到它。",
+  "deleteConfirmTitle": "删除此备份？",
   "desktopOnlyHint": "备份通过原生桥接写入，仅在桌面端可写。",
   "empty": "暂无备份。",
+  "reason": {
+    "auto": "自动",
+    "manual": "手动",
+    "migration": "迁移",
+    "pre-uninstall": "卸载前",
+    "pre-update": "更新前",
+    "scheduled": "定时"
+  },
   "restore": "恢复",
+  "restoreAria": "恢复 {date} 的 v{version} 备份",
+  "restoreConfirmBody": "插件当前的文件、设置和数据将被 {date} 的 v{version} 备份替换，此后的所有更改都会丢失。",
+  "restoreConfirmTitle": "恢复此备份？",
   "title": "备份"
 }

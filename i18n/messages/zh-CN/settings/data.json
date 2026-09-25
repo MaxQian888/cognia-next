@@ -40,6 +40,7 @@
       "snapshotExpired": "快照已过期"
     },
     "lastEvent": "{kind}：{detail}",
+    "needsHost": "受管工作区位于桌面应用或已配对的宿主上。此浏览器两者皆无，因此这里无需维护。",
     "noEvents": "尚无维护事件记录。",
     "runNow": "运行工作区维护",
     "running": "运行中…",

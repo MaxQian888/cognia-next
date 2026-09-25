@@ -17,6 +17,7 @@
     "retentionValue": "{days} 天 / {reports} 份，保留 {logs} 个日志",
     "title": "崩溃与日志"
   },
+  "deepLinkUnknown": "Cognia 无法识别这个链接",
   "description": "应用版本、构建详情、诊断信息、更新与致谢。",
   "iconAlt": "{name} 应用图标",
   "install": {

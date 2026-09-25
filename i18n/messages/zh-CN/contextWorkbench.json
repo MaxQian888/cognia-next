@@ -426,5 +426,13 @@
   },
   "planPanel": {
     "title": "计划"
+  },
+  "pluginPanel": {
+    "buildFailed": "无法生成此面板。",
+    "buildFailedDetail": "插件返回：{message}",
+    "retry": "重试",
+    "contextFailed": "插件未能提供此资源的上下文，你的上一条消息已在没有上下文的情况下发送。",
+    "dismiss": "关闭",
+    "selectionToolbar": "选中文本操作"
   }
 }

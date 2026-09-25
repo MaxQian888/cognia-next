@@ -426,5 +426,13 @@
   },
   "planPanel": {
     "title": "Plan"
+  },
+  "pluginPanel": {
+    "buildFailed": "This panel couldn't be built.",
+    "buildFailedDetail": "The plugin reported: {message}",
+    "retry": "Retry",
+    "contextFailed": "The plugin couldn't provide this resource's context, so your last message was sent without it.",
+    "dismiss": "Dismiss",
+    "selectionToolbar": "Selection actions"
   }
 }

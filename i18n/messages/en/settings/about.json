@@ -17,6 +17,7 @@
     "retentionValue": "{days}d / {reports} reports, keep {logs} logs",
     "title": "Crash & logs"
   },
+  "deepLinkUnknown": "Cognia does not recognise this link",
   "description": "App version, build details, diagnostics, updates, and credits.",
   "iconAlt": "{name} app icon",
   "install": {

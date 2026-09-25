@@ -73,6 +73,8 @@
     "notJournalled": "该运行早于执行日志，无法在这里控制。",
     "progress": "进度",
     "selectPrompt": "选择一个运行查看详情。",
+    "emptyPrompt": "暂无可查看的运行。对话轮次、工作流、目标、小队和后台任务一旦开始，就会出现在这里。",
+    "filteredPrompt": "没有符合当前筛选条件的运行。切回「全部」即可查看所有运行。",
     "sensitive": "敏感",
     "started": "开始于",
     "status": "状态",

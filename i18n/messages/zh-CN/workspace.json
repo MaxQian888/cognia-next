@@ -125,20 +125,16 @@
   },
   "manage": {
     "activeBadge": "活动",
-    "addDir": "添加",
-    "addDirManual": "输入绝对路径…",
     "addRoot": "添加文件夹",
     "addRootManual": "输入绝对路径…",
-    "additionalDirsHint": "挂载到该工作区的额外文件夹，便于智能体读取和编辑。",
-    "additionalDirsLabel": "附加目录",
     "browseServer": "浏览服务器",
     "confirmDelete": "移除并删除全部内容",
-    "confirmDetach": "移除，保留会话",
+    "confirmDetach": "移除，保留对话",
     "defaultName": "新工作区",
     "delete": "删除",
     "deleted": "工作区已删除",
     "description": "工作区包含一个主目录和额外挂载的文件夹。活动工作区决定工作目录、源代码管理面板和终端范围。",
-    "detached": "工作区已移除——其会话已迁到 Default",
+    "detached": "工作区已移除——其对话已迁到 Default",
     "deleteFailed": "无法移除工作区，工作区仍然保留。请在能够处理其数据及外部 Agent 会话后重试。",
     "empty": "暂无工作区",
     "knowledge": {
@@ -157,6 +153,10 @@
       "reindex": "重新索引文件",
       "reindexAll": "全部重新索引",
       "removeFile": "移除文件",
+      "removeFileTitle": "移除此文件？",
+      "removeFileDescription": "“{name}”及其所有已索引的片段将从该工作区的知识库中移除。粘贴的笔记没有其他副本。",
+      "confirmRemoveFile": "移除文件",
+      "cancel": "取消",
       "status": {
         "indexed": "已索引",
         "outdated": "已过期",
@@ -193,11 +193,8 @@
       "up": "前往上一级文件夹",
       "upConfined": "该主机只允许浏览上面列出的目录。"
     },
-    "removeDir": "移除目录",
     "removeRoot": "移除文件夹",
     "revokeRoot": "撤销信任",
-    "rootDirLabel": "主目录",
-    "rootDirPlaceholder": "/项目/路径",
     "rootLabelPlaceholder": "文件夹名称（可选）",
     "rootsEmpty": "尚未添加文件夹。可浏览文件夹，或在下方输入绝对路径。",
     "rootsHint": "挂载一个或多个文件夹。主文件夹即工作目录；其余文件夹可一并读取与编辑。",
@@ -210,7 +207,6 @@
     "title": "工作区",
     "trustRoot": "信任",
     "trustedBadge": "已信任",
-    "untrustedBadge": "未信任",
     "searchPlaceholder": "搜索工作区…",
     "clearSearch": "清除搜索",
     "noMatches": "未找到匹配的工作区",
@@ -218,10 +214,34 @@
     "deleteQuestion": "要移除这个工作区吗？",
     "cancelDelete": "取消",
     "discardTitle": "放弃未保存的修改？",
-    "discardDescription": "你改动的名称和文件夹还没有保存。现在切换工作区会丢弃这些改动。",
+    "discardDescription": "你对此工作区的修改还没有保存。现在切换会丢弃这些修改。",
     "discardCancel": "继续编辑",
     "discardConfirm": "放弃并切换",
-    "noSelectionTitle": "尚未选择工作区"
+    "noSelectionTitle": "尚未选择工作区",
+    "descriptionLabel": "描述",
+    "descriptionPlaceholder": "这个工作区用来做什么？",
+    "tagsLabel": "标签",
+    "tagsPlaceholder": "输入标签后按回车添加",
+    "removeTag": "移除标签 {tag}",
+    "instructionsLabel": "工作区指令",
+    "instructionsPlaceholder": "例如：使用 pnpm，提交前先运行测试。",
+    "instructionsHint": "随本工作区的每个对话一起发送，位于仓库自身的 CLAUDE.md 或 AGENTS.md 之后。",
+    "create": "创建工作区",
+    "created": "工作区已创建",
+    "archive": "归档",
+    "unarchive": "恢复",
+    "archived": "工作区已归档",
+    "archivedSwitched": "工作区已归档，已切换到 {name}。",
+    "unarchived": "工作区已恢复",
+    "archivedHeading": "已归档",
+    "archivedNote": "已归档：不会出现在任何工作区选择器中。对话会保留，恢复后即可继续在此工作。",
+    "defaultLocked": "默认工作区不能归档或移除。被移除的工作区会把对话移交给它。",
+    "deleteRunning": "此工作区中仍有对话在运行。请先停止，再移除工作区。",
+    "knowledgeAfterCreate": "创建工作区后即可添加知识文件。",
+    "discardCloseDescription": "你对此工作区的修改还没有保存。现在关闭会丢弃这些修改。",
+    "discardCloseConfirm": "放弃并关闭",
+    "instructionsPii": "这里似乎包含个人或机密信息（如邮箱、密钥或令牌）。它会随每次对话发送给模型，请先删除再保存。",
+    "instructionsCount": "{count}/{max}"
   },
   "switcher": {
     "active": "当前工作区：{name}",
@@ -243,9 +263,11 @@
     "undoFollow": "撤销",
     "unpin": "取消置顶 {name}",
     "untrustedHint": "未受信任的工作区",
-    "adoptEntry": "正在使用的目录"
+    "adoptEntry": "正在使用的目录",
+    "switchTitle": "切换工作区"
   },
   "capabilities": {
+    "loading": "正在加载能力",
     "description": "技能与 MCP 服务器在本机统一定义，这里只记录本工作区的取舍：保持「继承」的条目会跟随全局设置，包括之后的改动。",
     "effectiveOff": "在此不加载",
     "effectiveOn": "在此加载",
@@ -310,6 +332,7 @@
     "configureCollaboration": "设置协作",
     "invite": "邀请",
     "cachedNote": "服务端名册的本地缓存。",
+    "loading": "正在加载成员",
     "remove": "移出工作区",
     "offboard": "移出组织",
     "unavailable": {
@@ -407,11 +430,23 @@
       "empty": "尚未记录任何成员变更。",
       "actor": "操作者 {who}",
       "roleChange": "{from} → {to}",
-      "failed": "无法加载审计日志。"
+      "detail": "{reason} · {actor}",
+      "failed": "无法加载审计日志。",
+      "actions": {
+        "accountBootstrapped": "组织已初始化",
+        "invitationCreated": "已创建邀请",
+        "invitationRedeemed": "邀请已接受",
+        "invitationRevoked": "邀请已撤销",
+        "orgMemberChanged": "已设置组织角色",
+        "orgMemberOffboarded": "已移出组织",
+        "workspaceMemberChanged": "已设置工作区角色",
+        "workspaceMemberRemoved": "已移出工作区"
+      }
     }
   },
   "activity": {
     "title": "团队动态",
+    "loading": "正在加载团队动态",
     "empty": "这个工作区还没有共享的计划或运行。",
     "plans": "计划",
     "runs": "运行",
@@ -466,11 +501,47 @@
     "title": "Agent 分支",
     "description": "隔离运行回收工作树后留下的分支。",
     "empty": "该仓库里没有 agent 分支。",
+    "loading": "正在加载 agent 分支",
     "refresh": "刷新 agent 分支",
+    "deleteTitle": "删除此 agent 分支？",
+    "deleteDescription": "将强制删除 {name}，即使其提交从未被合并。运行结束后，这个分支是它所做工作的唯一记录。",
+    "confirmDelete": "删除分支",
+    "cancel": "取消",
     "actions": {
       "checkout": "检出",
       "delete": "删除",
       "compare": "比较引用"
     }
+  },
+  "conversations": {
+    "title": "对话",
+    "new": "新建",
+    "loading": "正在加载对话",
+    "empty": "此工作区还没有对话。",
+    "untitled": "未命名对话",
+    "viewAll": "{count, plural, other {打开全部 # 个对话}}",
+    "startFailed": "无法开始对话：{error}"
+  },
+  "schedules": {
+    "title": "定时任务",
+    "activeCount": "{active}/{total} 个运行中",
+    "loading": "正在加载定时任务",
+    "empty": "此工作区没有定时任务。",
+    "openScheduler": "打开定时任务",
+    "remoteHost": "定时任务运行在已配对的主机上，请在那里查看。",
+    "shared": "所有工作区",
+    "next": "下次 {time}"
+  },
+  "context": {
+    "title": "工作区上下文",
+    "edit": "编辑",
+    "empty": "尚无描述、指令或知识。添加后可以引导这里的每个对话。",
+    "description": "描述",
+    "instructions": "指令",
+    "noInstructions": "无。此处的对话只使用仓库自身的指令。",
+    "knowledge": "知识",
+    "knowledgeCount": "{count, plural, =0 {没有知识文件} other {# 个知识文件}}",
+    "knowledgeOff": "（未注入对话）",
+    "tags": "标签"
   }
 }

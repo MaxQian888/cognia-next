@@ -5,7 +5,11 @@
   "enableAll": "全部启用",
   "refresh": "刷新",
   "selected": "已选择 {count}",
+  "toggleFailedNames": "失败：{names}",
+  "toggleResult": "已应用 {applied} 个，已排队 {queued} 个，失败 {failed} 个，跳过 {skipped} 个",
+  "toggling": "处理中… {done}/{total}",
   "uninstall": "卸载",
+  "uninstallSkipped": "{count} 个插件无法在此卸载，已跳过。",
   "updateAll": "更新 {count} 个",
   "updateResult": "成功 {ok} 个，失败 {failed} 个",
   "updating": "更新中…"

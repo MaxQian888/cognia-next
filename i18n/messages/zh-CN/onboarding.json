@@ -72,10 +72,23 @@
     "freshDescription": "这台机器上没有可以带过来的东西，所以设置很短：接上一个模型，Cognia 就可以开始干活了。"
   },
   "finishBar": {
-    "provider_skipped": "Cognia 还无法访问模型 —— 请完成登录。",
-    "runtime_skipped": "这台机器上还没有配置 agent 运行时。",
-    "task_failed": "首次运行没有完成，要再试一次吗？",
-    "cta": "完成设置",
+    "gap": {
+      "model": {
+        "title": "Cognia 还无法访问模型",
+        "description": "登录或添加一个密钥即可开始工作。",
+        "cta": "连接模型"
+      },
+      "taskFailed": {
+        "title": "首次运行没有完成",
+        "description": "再试一次即可，其余都已设置好。",
+        "cta": "再试一次"
+      },
+      "firstTask": {
+        "title": "设置只差最后一步",
+        "description": "运行一个真实任务，看看 Cognia 能做什么。",
+        "cta": "运行首个任务"
+      }
+    },
     "dismiss": "关闭"
   },
   "firstRun": {
@@ -113,6 +126,10 @@
     "express-applying": {
       "headline": "正在执行。",
       "body": "每一条完成就会亮起来。这一段不需要你操作。"
+    },
+    "express-ready": {
+      "headline": "轮到你了。",
+      "body": "一切就绪。挑一个任务，结果由你自己判断。"
     }
   },
   "provider": {
@@ -186,8 +203,7 @@
     }
   },
   "restart": {
-    "label": "重新运行引导",
-    "description": "从头走一遍首次运行流程。"
+    "label": "重新运行引导"
   },
   "saving": "保存中…",
   "scan": {
@@ -223,6 +239,14 @@
     "express": "设置计划，以及它进行到哪一步",
     "provider": "一个凭据接通了到 Cognia 的链路",
     "firstRun": "Cognia 正在写出第一份结果"
+  },
+  "setupStatus": {
+    "title": "设置状态",
+    "description": "首次运行设置还缺什么，以及重新进入的入口。",
+    "complete": {
+      "title": "设置已完成",
+      "description": "没有缺失项。你可以随时重新走一遍首次运行设置。"
+    }
   },
   "skip": "暂时跳过",
   "toastNeedKey": "粘贴 API 密钥后才能继续。",

@@ -1,14 +1,24 @@
 {
   "canNotRollback": "此插件没有可回滚到的历史版本。",
+  "cancel": "取消",
   "close": "关闭",
+  "confirmAction": "回滚",
+  "confirmBody": "{name} 将从 v{from} 回退到 v{to}。当前安装的版本会被替换，插件会以旧版本重新启动。",
+  "confirmTitle": "回滚到 v{version}？",
   "currentVersion": "当前版本 v{version}",
   "description": "恢复更新前的某个快照版本。",
   "desktopOnlyHint": "回滚通过原生桥接执行，仅在桌面端可用。",
   "empty": "尚未记录任何快照。",
   "hasBackups": "可用版本 {count} 个",
+  "loading": "正在加载可用版本…",
   "rollback": "回滚",
   "rollbackAria": "回滚到 v{version}",
   "rollbackFailed": "回滚失败。",
   "rollingBack": "回滚中…",
+  "source": {
+    "backup": "备份",
+    "local": "本地",
+    "marketplace": "插件市场"
+  },
   "title": "回滚历史"
 }

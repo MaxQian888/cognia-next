@@ -12,6 +12,8 @@
   "noSchema": "This plugin doesn't declare a configuration schema. Its raw config is shown below for reference.",
   "oneOfVariant": "Variant",
   "save": "Save",
+  "saveFailed": "Couldn't save settings for {name}",
+  "saved": "Settings saved for {name}",
   "saving": "Saving…",
   "secretHide": "Hide value",
   "secretShow": "Show value",

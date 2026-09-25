@@ -12,6 +12,8 @@
   "noSchema": "此插件未声明 configSchema。下方为原始配置预览。",
   "oneOfVariant": "变体",
   "save": "保存",
+  "saveFailed": "无法保存 {name} 的设置",
+  "saved": "已保存 {name} 的设置",
   "saving": "保存中…",
   "secretHide": "隐藏内容",
   "secretShow": "显示内容",

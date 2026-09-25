@@ -11,6 +11,7 @@
     "description": "Every file Creator reads or writes stays inside this directory. There is no implicit default.",
     "empty": "No authoring root chosen yet.",
     "choose": "Choose a directory",
+    "desktopOnly": "Choosing a directory needs the Cognia desktop app. A browser tab cannot grant Creator access to your files.",
     "change": "Change",
     "revoke": "Revoke",
     "pathLabel": "Path",

@@ -125,12 +125,8 @@
   },
   "manage": {
     "activeBadge": "Active",
-    "addDir": "Add",
-    "addDirManual": "Type an absolute path…",
     "addRoot": "Add folder",
     "addRootManual": "Type an absolute path…",
-    "additionalDirsHint": "Extra folders mounted into this workspace so the agent can read and edit them.",
-    "additionalDirsLabel": "Additional directories",
     "browseServer": "Browse server",
     "confirmDelete": "Remove and delete everything",
     "confirmDetach": "Remove, keep conversations",
@@ -157,6 +153,10 @@
       "reindex": "Reindex file",
       "reindexAll": "Reindex all",
       "removeFile": "Remove file",
+      "removeFileTitle": "Remove this file?",
+      "removeFileDescription": "“{name}” and every chunk indexed from it will be removed from this workspace's knowledge base. A pasted note has no other copy.",
+      "confirmRemoveFile": "Remove file",
+      "cancel": "Cancel",
       "status": {
         "indexed": "Indexed",
         "outdated": "Outdated",
@@ -193,11 +193,8 @@
       "up": "Go to parent folder",
       "upConfined": "This Host only browses inside the folders listed above."
     },
-    "removeDir": "Remove directory",
     "removeRoot": "Remove folder",
     "revokeRoot": "Revoke trust",
-    "rootDirLabel": "Primary directory",
-    "rootDirPlaceholder": "/path/to/project",
     "rootLabelPlaceholder": "Folder name (optional)",
     "rootsEmpty": "No folders added yet. Browse for a folder or enter an absolute path below.",
     "rootsHint": "Mount one or more folders. The primary folder is the working directory; the rest are readable and editable alongside it.",
@@ -210,7 +207,6 @@
     "title": "Workspaces",
     "trustRoot": "Trust",
     "trustedBadge": "Trusted",
-    "untrustedBadge": "Untrusted",
     "searchPlaceholder": "Search workspaces…",
     "clearSearch": "Clear the search",
     "noMatches": "No workspace matches that search",
@@ -218,10 +214,34 @@
     "deleteQuestion": "Remove this workspace?",
     "cancelDelete": "Keep it",
     "discardTitle": "Discard unsaved changes?",
-    "discardDescription": "The name and folders you edited have not been saved. Switching workspace now throws those edits away.",
+    "discardDescription": "Your edits to this workspace have not been saved. Switching now throws them away.",
     "discardCancel": "Keep editing",
     "discardConfirm": "Discard and switch",
-    "noSelectionTitle": "No workspace selected"
+    "noSelectionTitle": "No workspace selected",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "What is this workspace for?",
+    "tagsLabel": "Tags",
+    "tagsPlaceholder": "Add a tag and press Enter",
+    "removeTag": "Remove tag {tag}",
+    "instructionsLabel": "Workspace instructions",
+    "instructionsPlaceholder": "For example: use pnpm, and run the tests before proposing a commit.",
+    "instructionsHint": "Sent with every conversation in this workspace, after the repository's own CLAUDE.md or AGENTS.md.",
+    "create": "Create workspace",
+    "created": "Workspace created",
+    "archive": "Archive",
+    "unarchive": "Restore",
+    "archived": "Workspace archived",
+    "archivedSwitched": "Workspace archived. Switched to {name}.",
+    "unarchived": "Workspace restored",
+    "archivedHeading": "Archived",
+    "archivedNote": "Archived: hidden from every workspace picker. Its conversations are kept; restore it to work here again.",
+    "defaultLocked": "Default can't be archived or removed. Removed workspaces hand their conversations to it.",
+    "deleteRunning": "A conversation in this workspace is still running. Stop it, then remove the workspace.",
+    "knowledgeAfterCreate": "Create the workspace to add knowledge files.",
+    "discardCloseDescription": "Your edits to this workspace have not been saved. Closing now throws them away.",
+    "discardCloseConfirm": "Discard and close",
+    "instructionsPii": "This looks like personal or secret data (an email address, key or token). It is sent to the model with every turn, so remove it before saving.",
+    "instructionsCount": "{count}/{max}"
   },
   "switcher": {
     "active": "Active workspace: {name}",
@@ -243,9 +263,11 @@
     "undoFollow": "Undo",
     "unpin": "Unpin {name}",
     "untrustedHint": "Untrusted workspace",
-    "adoptEntry": "Folders in use"
+    "adoptEntry": "Folders in use",
+    "switchTitle": "Switch workspace"
   },
   "capabilities": {
+    "loading": "Loading capabilities",
     "description": "Skills and MCP servers are defined once for the machine. This is where a workspace says which of them it actually uses — anything left on Inherit follows the library, including later changes to it.",
     "effectiveOff": "Not loaded here",
     "effectiveOn": "Loaded here",
@@ -310,6 +332,7 @@
     "configureCollaboration": "Set up collaboration",
     "invite": "Invite",
     "cachedNote": "Cached copy of the server roster.",
+    "loading": "Loading members",
     "remove": "Remove from workspace",
     "offboard": "Remove from organization",
     "unavailable": {
@@ -407,11 +430,23 @@
       "empty": "No membership changes recorded yet.",
       "actor": "by {who}",
       "roleChange": "{from} → {to}",
-      "failed": "Could not load the audit log."
+      "detail": "{reason} · {actor}",
+      "failed": "Could not load the audit log.",
+      "actions": {
+        "accountBootstrapped": "Organization set up",
+        "invitationCreated": "Invitation created",
+        "invitationRedeemed": "Invitation accepted",
+        "invitationRevoked": "Invitation revoked",
+        "orgMemberChanged": "Organization role set",
+        "orgMemberOffboarded": "Removed from organization",
+        "workspaceMemberChanged": "Workspace role set",
+        "workspaceMemberRemoved": "Removed from workspace"
+      }
     }
   },
   "activity": {
     "title": "Team activity",
+    "loading": "Loading team activity",
     "empty": "No shared plans or runs in this workspace yet.",
     "plans": "Plans",
     "runs": "Runs",
@@ -466,11 +501,47 @@
     "title": "Agent branches",
     "description": "Branches an isolated run left behind, once its worktree was reclaimed.",
     "empty": "No agent branches in this repository.",
+    "loading": "Loading agent branches",
     "refresh": "Refresh agent branches",
+    "deleteTitle": "Delete this agent branch?",
+    "deleteDescription": "{name} will be force-deleted, even if its commits were never merged. After a run has settled, this branch is the only record of what it did.",
+    "confirmDelete": "Delete branch",
+    "cancel": "Cancel",
     "actions": {
       "checkout": "Check out",
       "delete": "Delete",
       "compare": "Compare refs"
     }
+  },
+  "conversations": {
+    "title": "Conversations",
+    "new": "New",
+    "loading": "Loading conversations",
+    "empty": "No conversations in this workspace yet.",
+    "untitled": "Untitled conversation",
+    "viewAll": "{count, plural, one {Open the conversation list (#)} other {Open all # conversations}}",
+    "startFailed": "Could not start a conversation: {error}"
+  },
+  "schedules": {
+    "title": "Schedules",
+    "activeCount": "{active}/{total} active",
+    "loading": "Loading schedules",
+    "empty": "Nothing is scheduled in this workspace.",
+    "openScheduler": "Open scheduler",
+    "remoteHost": "Schedules run on the paired host, which lists them itself.",
+    "shared": "All workspaces",
+    "next": "next {time}"
+  },
+  "context": {
+    "title": "Workspace context",
+    "edit": "Edit",
+    "empty": "No description, instructions or knowledge yet. Add them to steer every conversation here.",
+    "description": "Description",
+    "instructions": "Instructions",
+    "noInstructions": "None. Conversations here get only the repository's own instructions.",
+    "knowledge": "Knowledge",
+    "knowledgeCount": "{count, plural, =0 {No knowledge files} one {# knowledge file} other {# knowledge files}}",
+    "knowledgeOff": "(not injected into chat)",
+    "tags": "Tags"
   }
 }

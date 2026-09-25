@@ -44,7 +44,7 @@
     "title": "对该元素评论"
   },
   "cookieImport": {
-    "action": "复用 Chromium 登录态",
+    "action": "站点登录态",
     "browser": {
       "brave": "Brave",
       "chrome": "Google Chrome",
@@ -52,7 +52,16 @@
       "edge": "Microsoft Edge"
     },
     "browserLabel": "浏览器",
-    "cancel": "取消",
+    "clear": {
+      "action": "清除 Cookie",
+      "clearing": "正在清除…",
+      "description": "从内置预览中移除 {domain} 的 Cookie，不会改动你的 Chromium 配置。",
+      "done": "已移除 {domain} 的 {count} 条 Cookie 并刷新预览。",
+      "failed": "无法清除此站点的 Cookie。",
+      "none": "预览中没有 {domain} 的 Cookie。",
+      "title": "在预览中退出登录"
+    },
+    "close": "关闭",
     "consent": {
       "continue": "我已了解，继续",
       "description": "Cognia 将从所选 Chromium 配置中读取当前站点保存的登录 Cookie，并注入此预览。",
@@ -60,9 +69,12 @@
       "title": "允许读取本机 Cookie？"
     },
     "description": "选择要为当前站点复用登录态的本机浏览器配置。",
+    "dialogDescription": "从本机 Chromium 配置复用登录态，或从内置预览中移除此站点的 Cookie。",
+    "dialogTitle": "{host} 的登录态",
     "import": "导入并刷新",
     "importing": "正在导入…",
     "keychainHint": "macOS 可能请求访问钥匙串；拒绝后预览不会发生变化。",
+    "openSettings": "打开桌面设置",
     "profileLabel": "配置",
     "reason": {
       "checkFailed": "无法检查本机 Chromium 配置，请重启桌面 App 后重试。",
@@ -104,6 +116,7 @@
   "empty": {
     "hint": "输入任意网址或 localhost 地址即可在此渲染，然后选择元素进行评论。",
     "quickOpen": "快速打开：",
+    "recent": "最近访问：",
     "title": "预览网页"
   },
   "errors": {
@@ -120,6 +133,7 @@
   },
   "history": {
     "clear": "清空历史",
+    "clearFailed": "无法清除浏览记录",
     "empty": "暂无最近页面",
     "label": "历史"
   },
@@ -142,14 +156,12 @@
   "record": {
     "addAssertion": "断言文本…",
     "assertionPlaceholder": "预期出现的文本",
-    "collapse": "折叠录制面板",
     "delete": "删除流程",
     "deleted": "流程已删除",
     "downloadJson": "保存流程 JSON…",
     "downloadPlaywright": "保存 Playwright 测试…",
     "downloaded": "流程已保存到磁盘",
     "empty": "在页面上操作 —— 你的点击、输入和按键都会记录到这里。",
-    "expand": "展开录制面板",
     "export": "导出",
     "exportAgent": "发送到对话",
     "exportJson": "流程 JSON",
@@ -201,6 +213,13 @@
   "remote": {
     "canvas": "远程浏览器画布",
     "closePage": "关闭页面",
+    "connection": {
+      "connected": "已连接",
+      "connecting": "正在连接…",
+      "failed": "已断开",
+      "offline": "离线",
+      "reconnecting": "正在重连…"
+    },
     "error": "远程浏览器不可用（{code}）",
     "find": "在页面中查找",
     "humanControl": "由你控制",

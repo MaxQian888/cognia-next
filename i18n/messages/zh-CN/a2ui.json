@@ -412,7 +412,8 @@
     "errorLoading": "加载表层失败",
     "loading": "加载中...",
     "noContent": "暂无内容可显示",
-    "rendering": "渲染中..."
+    "rendering": "渲染中...",
+    "preparing": "准备中…"
   },
   "surfaceRoot": "Surface 根（包装现有根）",
   "systemShare": "系统分享",

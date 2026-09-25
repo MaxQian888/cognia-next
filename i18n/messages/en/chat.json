@@ -2765,5 +2765,83 @@
     "title": "Trust this workspace?",
     "trust": "Trust workspace",
     "workspaceLabel": "Workspace"
+  },
+  "scheduleTools": {
+    "verbs": {
+      "create": "Add to your schedule",
+      "update": "Change a scheduled task",
+      "setStatus": "Change a task's status",
+      "runNow": "Run a scheduled task now",
+      "cancelRun": "Stop a running task",
+      "stopProcess": "Stop a task's process",
+      "delete": "Delete a scheduled task"
+    },
+    "consequences": {
+      "create": "It will run on its own at these times until you pause or delete it.",
+      "update": "Only the fields shown change. A new payload replaces the old one entirely.",
+      "setStatus": "The task stays in your list; its schedule follows the new status.",
+      "runNow": "Runs once now. Its normal schedule is unchanged.",
+      "cancelRun": "Stops this run. The task keeps its schedule and will run again.",
+      "stopProcess": "Kills the process the task started. The task keeps its schedule.",
+      "delete": "Deletes the task and its run history. This cannot be undone."
+    },
+    "payloadKeys": {
+      "prompt": "Prompt",
+      "objective": "Objective",
+      "text": "Message",
+      "command": "Command",
+      "workflowId": "Workflow",
+      "planId": "Plan",
+      "teamId": "Squad",
+      "agentId": "Agent",
+      "skillId": "Skill"
+    },
+    "untitled": "Untitled task",
+    "runs": "Runs",
+    "newName": "New name",
+    "schedule": "Schedule",
+    "newSchedule": "New schedule",
+    "newStatus": "New status",
+    "run": "Run",
+    "starts": "Starts",
+    "startsPaused": "Paused, until you turn it on",
+    "taskMissing": "No scheduled task with id {id} on this device.",
+    "rawArguments": "Raw arguments",
+    "nextRun": "next {when}",
+    "gone": "Deleted",
+    "openSettings": "Scheduler settings",
+    "listEmpty": "No scheduled tasks match.",
+    "listMore": "{count, plural, =1 {and 1 more} other {and # more}}",
+    "openInScheduler": "Open in Scheduler",
+    "viewRun": "View run",
+    "outcomes": {
+      "runNow": "Started",
+      "cancelRun": "Stop requested",
+      "stopProcess": "Process stopped",
+      "cancelled": "Stopped",
+      "notFound": "No such run",
+      "alreadyFinished": "Already finished",
+      "requested": "Stop requested from the window running it",
+      "unsupported": "Runs on a paired host cannot be stopped from here",
+      "unreachable": "Nothing here holds this run",
+      "stopped": "Process stopped",
+      "notApplicable": "This task has no process to stop",
+      "unavailable": "This host cannot report its processes"
+    },
+    "deleted": "Deleted {name}",
+    "refusals": {
+      "declined": "You declined this change.",
+      "invalidArgs": "The assistant's request was malformed, so nothing changed.",
+      "piiBlocked": "Blocked: the request contained personal information.",
+      "notAllowedHere": "Not allowed in this conversation.",
+      "denied": "The request was refused.",
+      "failed": "This did not go through."
+    },
+    "refusalDetail": "Details"
+  },
+  "scheduledOrigin": {
+    "label": "Scheduled · {name}",
+    "hint": "Opened by the scheduled task {name}. Open it in the scheduler.",
+    "goneHint": "Opened by the scheduled task {name}, which has since been deleted."
   }
 }

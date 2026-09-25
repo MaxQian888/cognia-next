@@ -2765,5 +2765,83 @@
     "title": "信任此工作区？",
     "trust": "信任工作区",
     "workspaceLabel": "工作区"
+  },
+  "scheduleTools": {
+    "verbs": {
+      "create": "新建定时任务",
+      "update": "修改定时任务",
+      "setStatus": "更改任务状态",
+      "runNow": "立即运行定时任务",
+      "cancelRun": "停止正在运行的任务",
+      "stopProcess": "停止任务的进程",
+      "delete": "删除定时任务"
+    },
+    "consequences": {
+      "create": "之后它会按这些时间自动运行，直到你暂停或删除它。",
+      "update": "只修改列出的字段；新的载荷会整体替换原有载荷。",
+      "setStatus": "任务仍保留在列表中，按新状态决定是否运行。",
+      "runNow": "立即运行一次，原有计划不变。",
+      "cancelRun": "停止这次运行，任务保留计划，之后仍会运行。",
+      "stopProcess": "结束任务启动的进程，任务保留计划。",
+      "delete": "删除该任务及其全部运行记录，此操作不可撤销。"
+    },
+    "payloadKeys": {
+      "prompt": "提示词",
+      "objective": "目标",
+      "text": "消息",
+      "command": "命令",
+      "workflowId": "工作流",
+      "planId": "计划",
+      "teamId": "小队",
+      "agentId": "Agent",
+      "skillId": "技能"
+    },
+    "untitled": "未命名任务",
+    "runs": "运行内容",
+    "newName": "新名称",
+    "schedule": "计划",
+    "newSchedule": "新计划",
+    "newStatus": "新状态",
+    "run": "运行",
+    "starts": "开始",
+    "startsPaused": "先暂停，等你开启后运行",
+    "taskMissing": "本设备上没有 id 为 {id} 的定时任务。",
+    "rawArguments": "原始参数",
+    "nextRun": "下次 {when}",
+    "gone": "已删除",
+    "openSettings": "定时任务设置",
+    "listEmpty": "没有匹配的定时任务。",
+    "listMore": "{count, plural, other {还有 # 项}}",
+    "openInScheduler": "在定时任务中打开",
+    "viewRun": "查看运行",
+    "outcomes": {
+      "runNow": "已开始",
+      "cancelRun": "已请求停止",
+      "stopProcess": "进程已停止",
+      "cancelled": "已停止",
+      "notFound": "没有这次运行",
+      "alreadyFinished": "已经结束",
+      "requested": "已向正在运行它的窗口发出停止请求",
+      "unsupported": "无法在这里停止配对主机上的运行",
+      "unreachable": "这里没有持有这次运行",
+      "stopped": "进程已停止",
+      "notApplicable": "这个任务没有可停止的进程",
+      "unavailable": "这台主机无法报告它的进程"
+    },
+    "deleted": "已删除「{name}」",
+    "refusals": {
+      "declined": "你拒绝了这次改动。",
+      "invalidArgs": "助手的请求格式有误，没有做任何改动。",
+      "piiBlocked": "已拦截：请求中包含个人信息。",
+      "notAllowedHere": "当前对话不允许此操作。",
+      "denied": "请求被拒绝。",
+      "failed": "这次操作没有完成。"
+    },
+    "refusalDetail": "详情"
+  },
+  "scheduledOrigin": {
+    "label": "定时任务 · {name}",
+    "hint": "由定时任务「{name}」打开。点击在定时任务中查看。",
+    "goneHint": "由定时任务「{name}」打开，该任务已被删除。"
   }
 }

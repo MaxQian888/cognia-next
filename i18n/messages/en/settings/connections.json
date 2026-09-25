@@ -584,7 +584,7 @@
     "characterPrefix": "char:{id}",
     "computerUseBadge": "CU",
     "computerUseLabel": "Computer Use",
-    "computerUseTooltip": "Computer-use tools are allowed on this conversation (ADR-0025 per-channel opt-in). Disable by editing the override.",
+    "computerUseTooltip": "Computer-use tools are allowed on this conversation (a per-channel opt-in). Disable by editing the override.",
     "deleteOverride": "Delete override",
     "editAria": "Edit override",
     "empty": "No conversation overrides yet. Platform conversations appear here once you interact with them.",

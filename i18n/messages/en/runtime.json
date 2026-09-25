@@ -1,5 +1,6 @@
 {
   "surfaceBoundary": {
+    "back": "Back",
     "backToChat": "Back to chat",
     "diagnose": "Open diagnostics",
     "pairHost": "Pair or switch host",

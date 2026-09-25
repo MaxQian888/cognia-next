@@ -54,7 +54,8 @@
   },
   "empty": {
     "noDescription": "No description",
-    "noResults": "No templates match these filters."
+    "noResults": "No templates match these filters.",
+    "noTemplates": "No templates yet"
   },
   "exportDialog": {
     "cancel": "Cancel",

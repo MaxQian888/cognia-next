@@ -44,7 +44,7 @@
     "title": "Comment on this element"
   },
   "cookieImport": {
-    "action": "Reuse Chromium sign-in",
+    "action": "Site sign-in",
     "browser": {
       "brave": "Brave",
       "chrome": "Google Chrome",
@@ -52,7 +52,16 @@
       "edge": "Microsoft Edge"
     },
     "browserLabel": "Browser",
-    "cancel": "Cancel",
+    "clear": {
+      "action": "Clear cookies",
+      "clearing": "Clearing…",
+      "description": "Remove {domain}'s cookies from the built-in preview. Your Chromium profile is not touched.",
+      "done": "{count, plural, one {Removed # cookie for {domain}} other {Removed # cookies for {domain}}} and reloaded the preview.",
+      "failed": "Could not clear this site's cookies.",
+      "none": "The preview holds no cookies for {domain}.",
+      "title": "Sign out in the preview"
+    },
+    "close": "Close",
     "consent": {
       "continue": "I understand, continue",
       "description": "Cognia will read saved sign-in cookies for the current site from the selected Chromium profile and inject them into this preview.",
@@ -60,9 +69,12 @@
       "title": "Allow local cookie access?"
     },
     "description": "Choose the local browser profile whose sign-in should be reused for this site.",
+    "dialogDescription": "Reuse a sign-in from a local Chromium profile, or remove this site's cookies from the built-in preview.",
+    "dialogTitle": "Sign-in for {host}",
     "import": "Import and reload",
     "importing": "Importing…",
     "keychainHint": "macOS may ask for Keychain access. Denying the prompt leaves the preview unchanged.",
+    "openSettings": "Open Desktop settings",
     "profileLabel": "Profile",
     "reason": {
       "checkFailed": "Could not check local Chromium profiles. Restart the desktop app and try again.",
@@ -104,6 +116,7 @@
   "empty": {
     "hint": "Enter any web address or a localhost URL to render it here, then select an element to comment on it.",
     "quickOpen": "Quick open:",
+    "recent": "Recent:",
     "title": "Preview a web page"
   },
   "errors": {
@@ -120,6 +133,7 @@
   },
   "history": {
     "clear": "Clear history",
+    "clearFailed": "Could not clear the browsing history",
     "empty": "No recent pages",
     "label": "History"
   },
@@ -142,14 +156,12 @@
   "record": {
     "addAssertion": "Expect text…",
     "assertionPlaceholder": "Text that should appear",
-    "collapse": "Collapse recorder",
     "delete": "Delete flow",
     "deleted": "Flow deleted",
     "downloadJson": "Save flow JSON…",
     "downloadPlaywright": "Save Playwright test…",
     "downloaded": "Flow saved to disk",
     "empty": "Interact with the page — your clicks, typing and key presses are captured here.",
-    "expand": "Expand recorder",
     "export": "Export",
     "exportAgent": "Send to chat",
     "exportJson": "Flow JSON",
@@ -201,6 +213,13 @@
   "remote": {
     "canvas": "Remote browser canvas",
     "closePage": "Close page",
+    "connection": {
+      "connected": "Connected",
+      "connecting": "Connecting…",
+      "failed": "Disconnected",
+      "offline": "Offline",
+      "reconnecting": "Reconnecting…"
+    },
     "error": "Remote browser unavailable ({code})",
     "find": "Find in page",
     "humanControl": "You're controlling",

@@ -92,6 +92,7 @@
     "signoff": "添加签署"
   },
   "commitDetail": {
+    "backToChanges": "返回改动列表",
     "branchNamePlaceholder": "新分支名称",
     "checkoutAction": "检出",
     "checkoutCommit": "检出此提交…",
@@ -99,7 +100,8 @@
     "checkoutCommitTitle": "检出提交？",
     "createBranchAction": "创建并切换",
     "createBranchHere": "从此提交创建分支…",
-    "createBranchTitle": "从此提交创建分支"
+    "createBranchTitle": "从此提交创建分支",
+    "noFiles": "此提交没有文件更改"
   },
   "compare": {
     "empty": "所选引用之间没有更改",
@@ -128,7 +130,7 @@
   },
   "discard": {
     "confirmAction": "放弃",
-    "confirmAll": "放弃工作区的所有更改？这将永久丢弃每一处未提交的编辑，且无法撤销。",
+    "confirmAll": "放弃工作区的所有更改？这将永久丢弃每一处未提交的编辑并删除未跟踪的文件，且无法撤销。",
     "confirmFile": "放弃对 {file} 的更改？这将永久丢弃其未提交的编辑，且无法撤销。",
     "confirmTitle": "放弃更改？"
   },
@@ -201,6 +203,11 @@
     "moveUp": "上移",
     "rewordPlaceholder": "新的提交信息",
     "title": "交互式变基"
+  },
+  "read": {
+    "failed": "加载失败：{message}",
+    "failedTitle": "无法加载",
+    "loading": "正在加载…"
   },
   "remote": {
     "noWorkspace": "没有已授权的 Git 工作区",
@@ -407,6 +414,7 @@
     "empty": "没有历史记录",
     "filterPlaceholder": "过滤已加载的提交（信息、作者、哈希）",
     "loadMore": "加载更多",
+    "loading": "正在加载历史记录…",
     "repository": "仓库",
     "thisFile": "当前文件",
     "title": "时间线",

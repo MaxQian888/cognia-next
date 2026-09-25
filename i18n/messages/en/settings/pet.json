@@ -28,7 +28,7 @@
     "clickThroughHint": "While click-through is on, the desktop pet ignores the mouse. Turn it back off here or from the tray menu's \"Disable click-through\".",
     "description": "Float the pet on your desktop in a transparent always-on-top window (desktop app only).",
     "enabled": {
-      "description": "Show the pet floating on your desktop, outside the app window.",
+      "description": "Show the pet floating on your desktop, outside the app window. Turning this on also switches the pet on.",
       "label": "Desktop pet"
     },
     "hotkeyLink": "Configure a global hotkey to show/hide the desktop pet",

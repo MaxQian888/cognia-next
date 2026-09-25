@@ -2,6 +2,7 @@
   "actionsMenuAria": "{name} 的操作菜单",
   "capabilityChipAria": "{capability} 能力——共 {count} 项贡献",
   "configure": "配置",
+  "dangerousPermissionsAria": "{count} 项敏感权限",
   "disable": "停用",
   "enable": "启用",
   "erroredAria": "插件报告了错误",

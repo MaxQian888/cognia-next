@@ -1,4 +1,5 @@
 {
+  "ariaLabel": "发布者签名：{state}",
   "failed": "签名失败",
   "failedTooltip": "签名验证失败——启用前请仔细核查。",
   "unknown": "未知",

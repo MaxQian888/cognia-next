@@ -2,6 +2,7 @@
   "actionsMenuAria": "Plugin actions for {name}",
   "capabilityChipAria": "{capability} capability — {count} contributions",
   "configure": "Configure",
+  "dangerousPermissionsAria": "{count, plural, =1 {1 sensitive permission} other {# sensitive permissions}}",
   "disable": "Disable",
   "enable": "Enable",
   "erroredAria": "Plugin reported an error",

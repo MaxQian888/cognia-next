@@ -20,7 +20,10 @@
       "staleRevision": "This task changed before the action ran. Try again.",
       "timeout": "No response from the app. Try again.",
       "unknown": "Could not complete that.",
-      "unknownRow": "This task is no longer listed."
+      "unknownRow": "This task is no longer listed.",
+      "noLongerWaiting": "Nothing is waiting on that any more.",
+      "turnFinished": "That turn already finished.",
+      "hostConsent": "Approve this device on the execution host first."
     },
     "announceActive": "{count, plural, =0 {No active tasks} one {# active task} other {# active tasks}}",
     "announceWaiting": "{count, plural, one {# task} other {# tasks}}, {waiting} waiting for you",
@@ -28,7 +31,8 @@
     "detail": {
       "hide": "Hide details",
       "loading": "Loading details…",
-      "show": "Show details"
+      "show": "Show details",
+      "asking": "Asking:"
     },
     "detailError": {
       "notPermitted": "Details are turned off for the island.",
@@ -80,17 +84,33 @@
     "summaryWaiting": "{count, plural, one {# task} other {# tasks}} · {waiting} waiting",
     "toggle": "Toggle task list",
     "waitingFor": "waiting {duration}",
-    "collapse": "Collapse task list"
+    "collapse": "Collapse task list",
+    "announceFinished": "Finished: {title}",
+    "stopTurn": "Stop this turn"
   },
   "permission": {
     "allow": "Allow",
-    "allowed": "Allowed",
-    "countdown": "{seconds}s",
-    "denied": "Denied",
     "deny": "Deny",
     "expired": "Answered in terminal",
     "request": "Permission: {tool}",
-    "requestGeneric": "Permission requested"
+    "requestGeneric": "Permission requested",
+    "allowAlways": "Always allow",
+    "allowedAlways": "Always allowed",
+    "approve": "Approve",
+    "reject": "Reject",
+    "answered": {
+      "allow": "Allowed",
+      "deny": "Denied",
+      "approve": "Approved",
+      "reject": "Rejected"
+    },
+    "lapsed": "Expired",
+    "remaining": "{duration} left",
+    "ask": {
+      "plan": "Approve this plan step?",
+      "budget": "Allow spending past the budget?",
+      "review": "Needs your approval"
+    }
   },
   "question": {
     "expired": "Answered in terminal",

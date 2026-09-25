@@ -78,7 +78,7 @@
     "snapOn": "网格吸附：开",
     "undo": "撤销"
   },
-  "empty": "还没有工作流。在桌面端创建后这里就会出现。",
+  "empty": "还没有工作流",
   "graphViewerEmpty": "工作流中没有节点。",
   "humanInput": {
     "goneToast": "该表单已不再等待答复。",

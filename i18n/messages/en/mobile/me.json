@@ -92,7 +92,7 @@
   },
   "deviceInfoRow": "Device info",
   "devicesRow": "Paired devices",
-  "dexieMaintenance": "Dexie maintenance",
+  "dexieMaintenance": "Storage maintenance",
   "diagnosticsRow": "Diagnostics",
   "evalRow": "Agent evaluation",
   "externalAgentsRow": "External agents",
@@ -185,7 +185,7 @@
   "settingsLink": "App settings",
   "signOut": {
     "biometricDescription": "Re-prompts before clearing the pairing JWT.",
-    "biometricHelp": "Require Face ID / fingerprint before clearing pairing.",
+    "biometricHelp": "Require Face ID / fingerprint before signing this phone out.",
     "biometricLabel": "Confirm before sign-out",
     "biometricReason": "Confirm to sign out of cognia",
     "biometricTitle": "Sign out",

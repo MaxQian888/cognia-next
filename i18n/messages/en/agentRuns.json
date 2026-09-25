@@ -73,6 +73,8 @@
     "notJournalled": "This run predates the execution journal, so it cannot be controlled from here.",
     "progress": "Progress",
     "selectPrompt": "Select a run to see its details.",
+    "emptyPrompt": "Nothing to inspect yet. Chat turns, workflows, goals, Squads and background jobs show up here the moment they start.",
+    "filteredPrompt": "No run matches these filters. Switch back to All to see every run.",
     "sensitive": "Sensitive",
     "started": "Started",
     "status": "Status",

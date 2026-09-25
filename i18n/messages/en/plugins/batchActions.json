@@ -5,7 +5,11 @@
   "enableAll": "Enable all",
   "refresh": "Refresh",
   "selected": "{count} selected",
+  "toggleFailedNames": "Failed: {names}",
+  "toggleResult": "{applied} applied, {queued} queued, {failed} failed, {skipped} skipped",
+  "toggling": "Working… {done}/{total}",
   "uninstall": "Uninstall",
+  "uninstallSkipped": "{count, plural, =1 {1 plugin can't be uninstalled here and was skipped.} other {# plugins can't be uninstalled here and were skipped.}}",
   "updateAll": "Update {count}",
   "updateResult": "{ok} updated, {failed} failed",
   "updating": "Updating…"

@@ -1,7 +1,7 @@
 {
   "deletePairing": {
-    "help": "清除本机配对前先验证生物识别。",
-    "label": "退出登录 / 解除配对"
+    "help": "撤销某台设备的配对前先验证生物识别。",
+    "label": "撤销已配对设备"
   },
   "description": "在敏感操作前要求 Face ID 或指纹。",
   "exportBackup": {

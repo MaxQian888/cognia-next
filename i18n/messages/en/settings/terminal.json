@@ -197,12 +197,14 @@
   "projectOverride": {
     "cwdLabel": "Working directory",
     "cwdPlaceholder": "/path/to/cwd",
-    "emptyProjects": "No projects yet — overrides become available once you create one.",
-    "helper": "Pick a project to override its shell or cwd. Empty fields fall back to the global default.",
-    "selectProject": "Select a project…",
+    "emptyProjects": "No workspaces yet. Overrides become available once you create one.",
+    "helper": "Pick a workspace to override its shell, working directory or environment. Empty fields fall back to the global default.",
+    "selectProject": "Select a workspace…",
     "shellLabel": "Shell",
     "shellPlaceholder": "/usr/local/bin/fish",
-    "title": "Per-project override"
+    "title": "Per-workspace override",
+    "envLabel": "Environment (KEY=VALUE per line)",
+    "envPlaceholder": "NODE_ENV=development"
   },
   "quickFixes": {
     "helper": "Show a lightbulb on a failed command offering a fix — git push --set-upstream, “did you mean”, create-PR link, freeing a busy port, pwsh command-not-found, and more.",
@@ -242,7 +244,7 @@
     "cmd": "Command Prompt (cmd.exe)",
     "custom": "Custom path…",
     "customLabel": "Custom shell path",
-    "helper": "Auto-detect picks pwsh on Windows, zsh on macOS, bash on Linux. Per-project overrides win when set. cmd.exe spawns without OSC 633 integration.",
+    "helper": "Auto-detect picks pwsh on Windows, zsh on macOS, bash on Linux. Per-workspace overrides win when set. cmd.exe spawns without OSC 633 integration.",
     "label": "Default shell",
     "powershell": "Windows PowerShell (powershell.exe)",
     "pwsh": "PowerShell 7 (pwsh.exe)",
@@ -391,7 +393,7 @@
     "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output.",
     "label": "Sticky scroll"
   },
-  "subheading": "Default shell, font and scrollback for the bottom dock. Per-project overrides take precedence over these defaults.",
+  "subheading": "Default shell, font and scrollback for the bottom dock. Per-workspace overrides take precedence over these defaults.",
   "unattended": {
     "askPolicy": {
       "consent": "Ask in the terminal dock",

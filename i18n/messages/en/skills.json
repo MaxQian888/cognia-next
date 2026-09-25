@@ -78,7 +78,8 @@
       "inertChip": "{name} is disabled for this session and won't be sent.",
       "removeChip": "Remove {name}",
       "searchPlaceholder": "Search skills…",
-      "trigger": "Attach skill"
+      "trigger": "Attach skill",
+      "pluginGroupHeading": "From plugins"
     }
   },
   "delete": {

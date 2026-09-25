@@ -592,6 +592,7 @@
     "handoffReadonly": "Read-only after device handoff",
     "handoffStatus": "Device handoff status",
     "moveToFolder": "Move to folder",
+    "moveToWorkspace": "Move to workspace",
     "openInCodexApp": "Open in Codex app",
     "codexHandoffPiiBlocked": "Sensitive information was detected in the handoff. Remove or redact it before exporting.",
     "codexHandoffUnsupported": "Some content cannot be transferred. Save browser-only attachments as files and retry.",

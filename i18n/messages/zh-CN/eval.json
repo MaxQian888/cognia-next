@@ -145,6 +145,7 @@
     "new": "新建评测集",
     "searchPlaceholder": "搜索评测集…",
     "select": "选择一个评测集查看其运行记录。",
+    "selectEmpty": "数据集的运行记录会显示在这里。先在左侧创建一个数据集。",
     "version": "v{version}"
   },
   "detail": {

@@ -197,12 +197,14 @@
   "projectOverride": {
     "cwdLabel": "工作目录",
     "cwdPlaceholder": "/path/to/cwd",
-    "emptyProjects": "暂无项目 — 创建项目后即可在此覆盖。",
-    "helper": "选择项目以覆盖其 shell 或工作目录。留空则回退到全局默认。",
-    "selectProject": "选择一个项目…",
+    "emptyProjects": "暂无工作区。创建工作区后即可在此覆盖。",
+    "helper": "选择工作区以覆盖其 shell、工作目录或环境变量。留空则回退到全局默认。",
+    "selectProject": "选择一个工作区…",
     "shellLabel": "Shell",
     "shellPlaceholder": "/usr/local/bin/fish",
-    "title": "按项目覆盖"
+    "title": "按工作区覆盖",
+    "envLabel": "环境变量（每行 KEY=VALUE）",
+    "envPlaceholder": "NODE_ENV=development"
   },
   "quickFixes": {
     "helper": "命令失败时在该命令处显示灯泡，提供修复建议：git push --set-upstream、“是否想输入”、创建 PR 链接、释放被占端口、pwsh 未找到命令等。",
@@ -242,7 +244,7 @@
     "cmd": "命令提示符 (cmd.exe)",
     "custom": "自定义路径…",
     "customLabel": "自定义 shell 路径",
-    "helper": "自动检测在 Windows 上选用 pwsh，macOS 上选用 zsh，Linux 上选用 bash。按项目覆盖若已设置，优先采用。cmd.exe 启动时不附带 OSC 633 集成。",
+    "helper": "自动检测在 Windows 上选用 pwsh，macOS 上选用 zsh，Linux 上选用 bash。按工作区覆盖若已设置，优先采用。cmd.exe 启动时不附带 OSC 633 集成。",
     "label": "默认 shell",
     "powershell": "Windows PowerShell (powershell.exe)",
     "pwsh": "PowerShell 7 (pwsh.exe)",
@@ -391,7 +393,7 @@
     "helper": "查看长输出时，将当前命令的提示符行固定在视口顶部。",
     "label": "粘性滚动"
   },
-  "subheading": "底部终端面板的默认 shell、字体和回滚行数。按项目覆盖优先于全局默认。",
+  "subheading": "底部终端面板的默认 shell、字体和回滚行数。按工作区覆盖优先于全局默认。",
   "unattended": {
     "askPolicy": {
       "consent": "在终端面板中询问",

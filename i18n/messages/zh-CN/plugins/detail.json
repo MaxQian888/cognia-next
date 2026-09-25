@@ -12,8 +12,15 @@
   "contributed": {
     "a2uiComponents": "A2UI 组件",
     "a2uiTemplates": "A2UI 模板",
+    "actionAria": {
+      "palette": "在命令面板中查找 {name}",
+      "route": "打开 {name}",
+      "viewContainer": "打开 {name} 视图"
+    },
+    "bots": "Bot",
     "commands": "命令",
     "connectors": "连接器适配器",
+    "contextPanels": "上下文面板",
     "countBadge": "{count}",
     "empty": "此插件尚未注册任何运行时贡献。",
     "externalAgentAdapters": "外部 Agent 适配器",
@@ -22,12 +29,19 @@
     "mcpServerPresets": "MCP 服务预设",
     "modes": "Agent 模式",
     "nativeAnthropicTools": "原生 Anthropic 工具",
+    "quickActions": "快捷操作",
     "skills": "技能",
+    "slashCommands": "斜杠命令",
+    "subagents": "子智能体",
     "themes": "主题",
     "toolLabels": {
       "eval_project_v2": "运行评测项目"
     },
+    "toolRenderers": "工具结果卡片",
     "tools": "Agent 工具",
+    "viewContainers": "视图容器",
+    "views": "视图",
+    "webviews": "Webview 视图",
     "workflowNodes": "工作流节点",
     "workflowTriggers": "工作流触发器"
   },
@@ -156,6 +170,20 @@
   "rollback": "回滚…",
   "rollbackAria": "回滚 {name}",
   "runtimeContributions": "运行时贡献",
+  "runtimeStatus": {
+    "disabled": "已关闭",
+    "disabling": "停用中",
+    "discovered": "已发现，未加载",
+    "enabled": "运行中",
+    "enabling": "启用中",
+    "error": "出错",
+    "installed": "已安装",
+    "loaded": "已加载",
+    "loading": "加载中",
+    "suspended": "空闲休眠",
+    "unloading": "卸载中",
+    "updating": "更新中"
+  },
   "screenshotAlt": "截图 {index}",
   "screenshots": "截图",
   "sectionAnalytics": "使用统计",

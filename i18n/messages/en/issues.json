@@ -365,13 +365,15 @@
     "resources": "Resources",
     "noProjects": "No projects in this workspace yet",
     "openIssues": "Open issues",
-    "recentActivity": "Recent activity",
-    "trust": "Workspace trust",
     "manage": "Manage workspace",
     "trusted": "Trusted",
     "untrusted": "Not trusted",
-    "trustUnknown": "Trust undecided",
-    "manageHint": "Roots have exactly one editor — the workspace manager."
+    "manageHint": "Roots have exactly one editor — the workspace manager.",
+    "unknownValue": "—",
+    "openIssuesOpen": "Open the issue board",
+    "projectsOpen": "Open projects",
+    "environmentsOpen": "Open the Environments tab",
+    "environmentsAttention": "The repository's workspace config needs your decision"
   },
   "labels": {
     "title": "Labels",
@@ -741,6 +743,9 @@
     "queuedHint": "Changes are sent to your host and appear here after the next sync.",
     "queued": "Queued for {identifier}",
     "sendComment": "Send",
-    "createQueued": "Queued: {title}"
+    "createQueued": "Queued: {title}",
+    "projectsEmptyHint": "Projects are created on a larger screen. They show up here once they exist.",
+    "cyclesEmpty": "No cycles yet",
+    "cyclesEmptyHint": "Cycles are planned on a larger screen. They show up here once they exist."
   }
 }

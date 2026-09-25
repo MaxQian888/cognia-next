@@ -92,6 +92,7 @@
     "signoff": "Sign Off"
   },
   "commitDetail": {
+    "backToChanges": "Back to changes",
     "branchNamePlaceholder": "New branch name",
     "checkoutAction": "Checkout",
     "checkoutCommit": "Checkout this commit…",
@@ -99,7 +100,8 @@
     "checkoutCommitTitle": "Checkout commit?",
     "createBranchAction": "Create & switch",
     "createBranchHere": "Create branch from here…",
-    "createBranchTitle": "Create branch from this commit"
+    "createBranchTitle": "Create branch from this commit",
+    "noFiles": "No file changes in this commit"
   },
   "compare": {
     "empty": "No changes between the selected refs",
@@ -128,7 +130,7 @@
   },
   "discard": {
     "confirmAction": "Discard",
-    "confirmAll": "Discard all changes in the working tree? This permanently throws away every uncommitted edit and cannot be undone.",
+    "confirmAll": "Discard all changes in the working tree? This permanently throws away every uncommitted edit and deletes untracked files. It cannot be undone.",
     "confirmFile": "Discard changes to {file}? This permanently throws away the uncommitted edits and cannot be undone.",
     "confirmTitle": "Discard changes?"
   },
@@ -201,6 +203,11 @@
     "moveUp": "Move up",
     "rewordPlaceholder": "New commit message",
     "title": "Interactive rebase"
+  },
+  "read": {
+    "failed": "Could not load: {message}",
+    "failedTitle": "Could not load",
+    "loading": "Loading…"
   },
   "remote": {
     "noWorkspace": "No authorized Git workspace",
@@ -407,6 +414,7 @@
     "empty": "No history",
     "filterPlaceholder": "Filter loaded commits (message, author, hash)",
     "loadMore": "Load more",
+    "loading": "Loading history…",
     "repository": "Repository",
     "thisFile": "This File",
     "title": "Timeline",

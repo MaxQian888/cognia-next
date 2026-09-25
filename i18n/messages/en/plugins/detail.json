@@ -12,8 +12,15 @@
   "contributed": {
     "a2uiComponents": "A2UI components",
     "a2uiTemplates": "A2UI templates",
+    "actionAria": {
+      "palette": "Find {name} in the command palette",
+      "route": "Open {name}",
+      "viewContainer": "Open the {name} view"
+    },
+    "bots": "Bots",
     "commands": "Commands",
     "connectors": "Connector adapters",
+    "contextPanels": "Context panels",
     "countBadge": "{count}",
     "empty": "This plugin has not registered any runtime contributions.",
     "externalAgentAdapters": "External agent adapters",
@@ -22,12 +29,19 @@
     "mcpServerPresets": "MCP server presets",
     "modes": "Agent modes",
     "nativeAnthropicTools": "Native Anthropic tools",
+    "quickActions": "Quick actions",
     "skills": "Skills",
+    "slashCommands": "Slash commands",
+    "subagents": "Subagents",
     "themes": "Themes",
     "toolLabels": {
       "eval_project_v2": "Run evaluation project"
     },
+    "toolRenderers": "Tool result cards",
     "tools": "Agent tools",
+    "viewContainers": "View containers",
+    "views": "Views",
+    "webviews": "Webviews",
     "workflowNodes": "Workflow nodes",
     "workflowTriggers": "Workflow triggers"
   },
@@ -156,6 +170,20 @@
   "rollback": "Rollback…",
   "rollbackAria": "Rollback {name}",
   "runtimeContributions": "Runtime contributions",
+  "runtimeStatus": {
+    "disabled": "Off",
+    "disabling": "Disabling",
+    "discovered": "Found, not loaded",
+    "enabled": "Running",
+    "enabling": "Enabling",
+    "error": "Error",
+    "installed": "Installed",
+    "loaded": "Loaded",
+    "loading": "Loading",
+    "suspended": "Suspended while idle",
+    "unloading": "Unloading",
+    "updating": "Updating"
+  },
   "screenshotAlt": "Screenshot {index}",
   "screenshots": "Screenshots",
   "sectionAnalytics": "Analytics",

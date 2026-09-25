@@ -40,6 +40,7 @@
       "snapshotExpired": "Snapshot expired"
     },
     "lastEvent": "{kind}: {detail}",
+    "needsHost": "Managed workspaces live on the desktop app or a paired host. This browser has neither, so there is nothing to maintain here.",
     "noEvents": "No maintenance events recorded yet.",
     "runNow": "Run workspace maintenance",
     "running": "Running…",

@@ -133,6 +133,9 @@
     "useGlobal": "Use global pet",
     "useSvg": "Built-in vector mascot"
   },
+  "bubbleAction": {
+    "openConsole": "Open {tab}"
+  },
   "bubbles": {
     "achievementUnlocked": ["We earned a badge!", "Achievement get!"],
     "birthday": {
@@ -230,6 +233,19 @@
     "sending": "{name} is thinking…",
     "you": "You"
   },
+  "commands": {
+    "clean": "Clean the pet",
+    "feed": "Feed the pet",
+    "pet": "Pet the pet",
+    "play": "Play with the pet",
+    "sleep": "Put the pet to sleep",
+    "toggleWindow": "Toggle desktop pet",
+    "treat": "Give the pet a treat",
+    "unavailable": {
+      "body": "Turn it on in Settings → Pet to use pet shortcuts.",
+      "title": "Your pet is switched off"
+    }
+  },
   "condition": {
     "unwell": "Needs care"
   },
@@ -262,7 +278,9 @@
     },
     "title": "Your Pet",
     "unavailable": {
-      "unsupportedHost": "The pet is only available in the Cognia desktop app. Open the desktop app to look after it."
+      "unsupportedHost": "The pet is only available in the Cognia desktop app. Open the desktop app to look after it.",
+      "title": "Desktop only",
+      "backToChat": "Back to chat"
     }
   },
   "customize": {
@@ -355,6 +373,12 @@
     "live2dTitle": "My Live2D models",
     "speciesTitle": "Built-in species",
     "useMascot": "Use built-in mascot"
+  },
+  "insight": {
+    "fallback": [
+      "Your new Attention Radar report is ready!",
+      "Fresh insights just landed — take a look?"
+    ]
   },
   "inventory": {
     "title": "Items"

@@ -54,7 +54,8 @@
   },
   "empty": {
     "noDescription": "暂无描述",
-    "noResults": "没有符合当前筛选条件的模板。"
+    "noResults": "没有符合当前筛选条件的模板。",
+    "noTemplates": "还没有模板"
   },
   "exportDialog": {
     "cancel": "取消",
