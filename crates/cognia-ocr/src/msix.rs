@@ -20,7 +20,7 @@ pub struct MsixStatus {
 /// link the `windows` crate's `GetCurrentPackageFullName` API when the
 /// `ocr-windows` feature is enabled — without that crate we conservatively
 /// report `false`.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn ocr_msix_status() -> Result<MsixStatus, String> {
     #[cfg(target_os = "windows")]
     {

@@ -20,7 +20,7 @@ path = "src/lib.rs"
 [dependencies]
 cognia-instrument = { path = "../cognia-instrument" }
 cognia-net = { path = "../cognia-net" }
-tauri = { workspace = true }
+tauri = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "process", "io-util", "net"] }
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
 futures-util = { workspace = true }
@@ -65,6 +65,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 
 [features]
 default = []
+# ADR-0196 — the Tauri command shells. Commands that take `State`/`AppHandle`
+# compile only with it; the plain-argument ones stay ordinary fns. Only
+# `src-tauri` enables it.
+tauri-host = ["dep:tauri"]
 # Cross-platform Tesseract via the local `tesseract` CLI (no crate binding).
 ocr-tesseract = []
 # Windows.Media.Ocr — requires MSIX package identity at runtime.

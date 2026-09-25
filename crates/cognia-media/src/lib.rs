@@ -1233,6 +1233,9 @@ pub mod service {
     }
 }
 
+/// The Tauri command shells over [`service`]; only `src-tauri` enables them
+/// (ADR-0196).
+#[cfg(feature = "tauri-host")]
 pub mod commands {
     use super::{
         AuthorizedVideoClipInput, MediaSourceRegistry, NativeVideoInfo, VideoAnalysisManifest,

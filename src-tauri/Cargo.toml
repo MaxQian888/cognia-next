@@ -92,7 +92,7 @@ cognia-net = { path = "../crates/cognia-net" }
 # three command shells and re-exports the crate.
 cognia-provider-diagnostics = { path = "../crates/cognia-provider-diagnostics" }
 # Native local-video metadata, frame extraction, trimming, and analysis.
-cognia-media = { path = "../crates/cognia-media" }
+cognia-media = { path = "../crates/cognia-media", features = ["tauri-host"] }
 # ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased
 # as `crate::terminal`; commands referenced from generate_handler!.
 cognia-terminal = { path = "../crates/cognia-terminal" }
@@ -166,7 +166,7 @@ cognia-instrument = { path = "../crates/cognia-instrument" }
 # ADR-0067 Phase 2 — Source Control subsystem (ADR-0038), extracted so the
 # git2/vendored-libgit2 C compile isolates. Re-aliased as `crate::git` in
 # lib.rs; its `commands::git_*` are referenced from `generate_handler!`.
-cognia-git = { path = "../crates/cognia-git" }
+cognia-git = { path = "../crates/cognia-git", features = ["tauri-host"] }
 # ADR-0176. The shared bare-mirror object cache. This crate owns the
 # credential policy and the git runner that `github/workspace.rs` used to
 # carry itself; the app now only points the cache root at the data dir.
@@ -409,7 +409,7 @@ webrtc = "0.20.2"
 # `crate::ocr` in lib.rs; `ort`'s copy-dylibs still stages the onnxruntime DLL
 # into the shared target dir, so bundling is unchanged. The dev-profile
 # `[profile.dev.package.rten]` opt-level=3 override lives at the workspace root.
-cognia-ocr = { path = "../crates/cognia-ocr" }
+cognia-ocr = { path = "../crates/cognia-ocr", features = ["tauri-host"] }
 
 # Native PDF parsing with per-item bounding boxes (PDFium via pdfium-sys,
 # which downloads a prebuilt PDFium at build time and loads it through

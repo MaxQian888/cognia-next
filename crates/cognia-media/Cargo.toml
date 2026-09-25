@@ -11,10 +11,18 @@ publish.workspace = true
 name = "cognia_media"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the `commands` module: the Tauri shells over `service`. Off by
+# default so the crate builds and tests Tauri-free; `src-tauri` turns it on to
+# register the commands in `generate_handler!`.
+default = []
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-tauri = { workspace = true }
+# The command shells only (`commands`, behind `tauri-host`).
+tauri = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "process", "time"] }
 uuid = { workspace = true, features = ["v4"] }

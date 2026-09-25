@@ -17,6 +17,13 @@ publish.workspace = true
 name = "cognia_git"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the `commands` module (the Tauri shells) and the watcher's
+# event-emitting `start`. Off by default so the crate builds and tests
+# Tauri-free; `src-tauri` turns it on.
+default = []
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 # Span instrumentation (ADR-0067 Phase 1) — replaces the old `crate::perf::guard`.
 cognia-instrument = { path = "../cognia-instrument" }
@@ -26,7 +33,7 @@ cognia-instrument = { path = "../cognia-instrument" }
 # fetched instead of going to the network every time.
 cognia-git-mirror = { path = "../cognia-git-mirror" }
 # The watch commands take `AppHandle`/`State` and `Emitter` the status-changed event.
-tauri = { workspace = true }
+tauri = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["process", "fs", "io-util", "sync", "time", "rt-multi-thread", "macros"] }
 # `default-features = false` (no https/ssh) — mutating/network ops shell out to
 # system `git`; git2 is read-only here. Matches the `src-tauri` build exactly.

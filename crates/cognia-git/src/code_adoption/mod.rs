@@ -10,6 +10,8 @@
 //! See `docs/superpowers/specs/2026-07-13-code-adoption-tracking-design.md`.
 
 pub mod attribution;
+/// Tauri command shells; only `src-tauri` enables them (ADR-0196).
+#[cfg(feature = "tauri-host")]
 pub mod commands;
 pub mod engine;
 pub mod fingerprint;

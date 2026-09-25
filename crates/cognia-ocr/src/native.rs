@@ -172,6 +172,7 @@ impl NativeOcrRegistry {
     }
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn ocr_extract_native(
     state: tauri::State<'_, NativeOcrRegistry>,
@@ -181,6 +182,7 @@ pub async fn ocr_extract_native(
     state.dispatch(&payload).await.map_err(|e| e.to_string())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn ocr_list_native_backends(
     state: tauri::State<'_, NativeOcrRegistry>,
@@ -195,6 +197,7 @@ pub async fn ocr_list_native_backends(
 
 /// Return only real, callable backends. Placeholder registrations are
 /// intentionally excluded so the renderer never advertises them as ready.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn ocr_list_available_backends(
     state: tauri::State<'_, NativeOcrRegistry>,
@@ -324,7 +327,7 @@ fn ocr_http_cancellations() -> &'static cognia_net::request_cancellation::Reques
     CANCELLATIONS.get_or_init(Default::default)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn ocr_http_cancel(request_id: String) -> bool {
     ocr_http_cancellations().cancel(&request_id)
 }
@@ -421,7 +424,7 @@ async fn execute_ocr_http_request(request: OcrHttpRequest) -> Result<OcrHttpResp
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn ocr_http_fetch(request: OcrHttpRequest) -> Result<OcrHttpResponse, String> {
     let request_id = request.request_id.trim().to_string();
     if request_id.is_empty() {
@@ -709,7 +712,7 @@ fn sha256_path(path: &std::path::Path) -> Result<String, std::io::Error> {
 /// `reason`-only status when the backend doesn't manage models (so the UI
 /// can hide the model row gracefully) or when the data directory can't be
 /// resolved.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn ocr_model_status(
     backend: String,
     variant: Option<String>,
@@ -938,7 +941,7 @@ fn model_download_lock(backend: &str, variant: Option<&str>) -> Arc<Mutex<()>> {
         .clone()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn ocr_cancel_model_download(request_id: String) -> bool {
     model_download_cancellations().cancel(&request_id)
 }
@@ -946,6 +949,7 @@ pub fn ocr_cancel_model_download(request_id: String) -> bool {
 /// Download a model variant with request cancellation and per-variant
 /// serialization. Concurrent callers share the verified files: only the
 /// first performs network I/O; waiters reuse the pinned-hash result.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn ocr_download_model(
     app: tauri::AppHandle,

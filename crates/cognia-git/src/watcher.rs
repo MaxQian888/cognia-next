@@ -9,26 +9,13 @@
 //! command is stateless per call.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+#[cfg(any(test, feature = "tauri-host"))]
+use std::path::Path;
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::RecommendedWatcher;
 use parking_lot::Mutex;
-use serde::Serialize;
-use tauri::{AppHandle, Emitter};
-
-use super::error::{GitError, Result};
 
 pub const STATUS_CHANGED_EVENT: &str = "git://status-changed";
-
-/// Trailing debounce window — coalesces bursts into a single refresh.
-const DEBOUNCE_MS: u64 = 250;
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StatusChangedPayload {
-    root_dir: String,
-}
 
 /// Managed Tauri state: one watcher per active repo path. Dropping a watcher
 /// stops it and closes its event channel, which ends the debounce task.
@@ -44,6 +31,7 @@ impl GitWatcherState {
 }
 
 /// `.git/` internals that *do* affect panel state and must not be filtered out.
+#[cfg(any(test, feature = "tauri-host"))]
 fn is_relevant_git_internal(rest: &str) -> bool {
     let rest = rest.replace('\\', "/");
     rest == "index"
@@ -64,6 +52,7 @@ fn is_relevant_git_internal(rest: &str) -> bool {
 }
 
 /// Decide whether a changed path should trigger a refresh.
+#[cfg(any(test, feature = "tauri-host"))]
 fn path_is_relevant(
     repo_root: &Path,
     gi: Option<&ignore::gitignore::Gitignore>,
@@ -103,81 +92,6 @@ fn watcher_key(repo_path: &str) -> String {
         .unwrap_or_else(|_| repo_path.to_string())
 }
 
-/// Start (or replace) the watcher for `repo_path`, emitting debounced
-/// `git://status-changed` events on `app`.
-pub fn start(state: &GitWatcherState, app: &AppHandle, repo_path: &str) -> Result<()> {
-    let repo_root = PathBuf::from(repo_path);
-    if !repo_root.exists() {
-        return Err(GitError::NotARepo(repo_path.to_string().into()));
-    }
-
-    // Build a gitignore matcher once from the repo-root .gitignore.
-    let gi = {
-        let mut builder = ignore::gitignore::GitignoreBuilder::new(&repo_root);
-        let _ = builder.add(repo_root.join(".gitignore"));
-        builder.build().ok()
-    };
-
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-    let root_for_filter = repo_root.clone();
-    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res {
-            let relevant = event
-                .paths
-                .iter()
-                .any(|p| path_is_relevant(&root_for_filter, gi.as_ref(), p));
-            if relevant {
-                let _ = tx.send(());
-            }
-        }
-    })
-    .map_err(|e| GitError::CommandFailed(format!("notify init: {e}").into()))?;
-
-    // Known limitation (ADR-0038): this registers the whole tree recursively.
-    // On macOS (FSEvents) and Windows (ReadDirectoryChangesW) that is a single
-    // kernel stream, so a huge gitignored tree (node_modules/target) costs
-    // nothing extra. On Linux (inotify) it is one watch per directory, which a
-    // very large gitignored tree can inflate toward `max_user_watches`.
-    // notify 6.x has no native exclude, so selective subtree watching is
-    // deferred; spurious events are still dropped downstream by
-    // `path_is_relevant` (gitignore-aware), so correctness — not Linux
-    // registration cost — is unaffected.
-    watcher
-        .watch(&repo_root, RecursiveMode::Recursive)
-        .map_err(|e| GitError::CommandFailed(format!("watch start: {e}").into()))?;
-
-    // Debounce emitter: after the first event, wait for DEBOUNCE_MS of quiet
-    // before emitting a single refresh signal.
-    let app_for_task = app.clone();
-    let root_str = repo_path.to_string();
-    tauri::async_runtime::spawn(async move {
-        while rx.recv().await.is_some() {
-            loop {
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_millis(DEBOUNCE_MS)) => break,
-                    msg = rx.recv() => {
-                        if msg.is_none() { return; } // channel closed
-                    }
-                }
-            }
-            let _ = app_for_task.emit(
-                STATUS_CHANGED_EVENT,
-                StatusChangedPayload {
-                    root_dir: root_str.clone(),
-                },
-            );
-        }
-    });
-
-    // Inserting under the canonical key replaces (and drops) any prior watcher
-    // for this repo, regardless of the string form it was started with.
-    state
-        .watchers
-        .lock()
-        .insert(watcher_key(repo_path), watcher);
-    Ok(())
-}
-
 /// Stop watching `repo_path`. Dropping the watcher ends its debounce task.
 /// Keyed by the canonical path so any string form of the repo stops the same
 /// watcher `start` created.
@@ -185,9 +99,115 @@ pub fn stop(state: &GitWatcherState, repo_path: &str) {
     state.watchers.lock().remove(&watcher_key(repo_path));
 }
 
+/// The event-emitting half of the watcher: the only part that needs Tauri, to
+/// emit `git://status-changed` on an `AppHandle`. Behind `tauri-host`
+/// (ADR-0196); the filtering and the watcher map above are Tauri-free and
+/// tested without it.
+#[cfg(feature = "tauri-host")]
+mod host {
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    use notify::{RecursiveMode, Watcher};
+    use serde::Serialize;
+    use tauri::{AppHandle, Emitter};
+
+    use super::{path_is_relevant, watcher_key, GitWatcherState, STATUS_CHANGED_EVENT};
+    use crate::error::{GitError, Result};
+
+    /// Trailing debounce window — coalesces bursts into a single refresh.
+    const DEBOUNCE_MS: u64 = 250;
+
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct StatusChangedPayload {
+        root_dir: String,
+    }
+
+    /// Start (or replace) the watcher for `repo_path`, emitting debounced
+    /// `git://status-changed` events on `app`.
+    ///
+    pub fn start(state: &GitWatcherState, app: &AppHandle, repo_path: &str) -> Result<()> {
+        let repo_root = PathBuf::from(repo_path);
+        if !repo_root.exists() {
+            return Err(GitError::NotARepo(repo_path.to_string().into()));
+        }
+
+        // Build a gitignore matcher once from the repo-root .gitignore.
+        let gi = {
+            let mut builder = ignore::gitignore::GitignoreBuilder::new(&repo_root);
+            let _ = builder.add(repo_root.join(".gitignore"));
+            builder.build().ok()
+        };
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let root_for_filter = repo_root.clone();
+        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                let relevant = event
+                    .paths
+                    .iter()
+                    .any(|p| path_is_relevant(&root_for_filter, gi.as_ref(), p));
+                if relevant {
+                    let _ = tx.send(());
+                }
+            }
+        })
+        .map_err(|e| GitError::CommandFailed(format!("notify init: {e}").into()))?;
+
+        // Known limitation (ADR-0038): this registers the whole tree recursively.
+        // On macOS (FSEvents) and Windows (ReadDirectoryChangesW) that is a single
+        // kernel stream, so a huge gitignored tree (node_modules/target) costs
+        // nothing extra. On Linux (inotify) it is one watch per directory, which a
+        // very large gitignored tree can inflate toward `max_user_watches`.
+        // notify 6.x has no native exclude, so selective subtree watching is
+        // deferred; spurious events are still dropped downstream by
+        // `path_is_relevant` (gitignore-aware), so correctness — not Linux
+        // registration cost — is unaffected.
+        watcher
+            .watch(&repo_root, RecursiveMode::Recursive)
+            .map_err(|e| GitError::CommandFailed(format!("watch start: {e}").into()))?;
+
+        // Debounce emitter: after the first event, wait for DEBOUNCE_MS of quiet
+        // before emitting a single refresh signal.
+        let app_for_task = app.clone();
+        let root_str = repo_path.to_string();
+        tauri::async_runtime::spawn(async move {
+            while rx.recv().await.is_some() {
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(DEBOUNCE_MS)) => break,
+                        msg = rx.recv() => {
+                            if msg.is_none() { return; } // channel closed
+                        }
+                    }
+                }
+                let _ = app_for_task.emit(
+                    STATUS_CHANGED_EVENT,
+                    StatusChangedPayload {
+                        root_dir: root_str.clone(),
+                    },
+                );
+            }
+        });
+
+        // Inserting under the canonical key replaces (and drops) any prior watcher
+        // for this repo, regardless of the string form it was started with.
+        state
+            .watchers
+            .lock()
+            .insert(watcher_key(repo_path), watcher);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "tauri-host")]
+pub use host::start;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn git_internal_relevance() {
