@@ -356,11 +356,22 @@ export function DiagnosticsWorkspace() {
                     key={view}
                     value={view}
                     aria-label={t(`views.${view}`)}
+                    // The icon-only width below still needs a way to read
+                    // the tab; the label shows once the header can fit it.
+                    title={t(`views.${view}`)}
                     data-testid={`logs-channel-${view}`}
                     className="gap-1.5"
                   >
                     <Icon className="size-4" aria-hidden />
-                    <span className="hidden @xl/feature-header:inline">{t(`views.${view}`)}</span>
+                    {/* Labels from @5xl, not @xl: with them the tab strip is
+                        ~470px, and at @xl..@5xl it crushed the page title
+                        beside it to a clipped "Logs ar / diagno.". */}
+                    <span
+                      className="hidden @5xl/feature-header:inline"
+                      data-testid={`logs-channel-${view}-label`}
+                    >
+                      {t(`views.${view}`)}
+                    </span>
                     {count > 0 ? (
                       <Badge
                         variant="secondary"

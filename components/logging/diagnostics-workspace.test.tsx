@@ -162,6 +162,15 @@ describe("DiagnosticsWorkspace", () => {
     expect(screen.queryByText("logging.workspace.views.advanced")).not.toBeInTheDocument()
   })
 
+  it("keeps channel labels for headers wide enough to hold them beside the title", () => {
+    render(<DiagnosticsWorkspace />)
+    const tab = screen.getByTestId("logs-channel-logs")
+    // Icon-only below the breakpoint, so the name must not depend on the label.
+    expect(tab).toHaveAttribute("title", tab.getAttribute("aria-label"))
+    const label = screen.getByTestId("logs-channel-logs-label")
+    expect(label).toHaveClass("hidden", "@5xl/feature-header:inline")
+  })
+
   it("aggregates live transport health into a single header chip", () => {
     render(<DiagnosticsWorkspace />)
     const chip = screen.getByTestId("logs-status-strip")
