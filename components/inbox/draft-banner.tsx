@@ -67,7 +67,7 @@ export function DraftNotice({ draft, conversationKey }: DraftNoticeProps) {
           <SheetHeader>
             <SheetTitle>{t("reviewAria")}</SheetTitle>
           </SheetHeader>
-          <div className="mt-4">
+          <div className="px-4 pb-6" data-testid="draft-sheet-body">
             <DraftEditor draft={draft} onClose={() => setOpen(false)} />
           </div>
         </SheetContent>

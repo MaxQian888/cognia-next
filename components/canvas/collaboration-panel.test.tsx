@@ -87,6 +87,12 @@ describe("CollaborationPanel", () => {
     expect(screen.getByText("Collaboration")).toBeInTheDocument()
   })
 
+  it("insets the panel body from the sheet edge", async () => {
+    render(<CollaborationPanel {...defaultProps} />)
+    await userEvent.click(screen.getByText("Collaborate"))
+    expect(screen.getByTestId("canvas-collaboration-body")).toHaveClass("px-4")
+  })
+
   it("should show start session button when not connected", async () => {
     render(<CollaborationPanel {...defaultProps} />)
 

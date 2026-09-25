@@ -175,6 +175,7 @@
       "copy": "Copy all",
       "copyPage": "Copy page",
       "empty": "No text was recognized.",
+      "pageTitle": "Page {number}",
       "title": "Extracted text"
     }
   },

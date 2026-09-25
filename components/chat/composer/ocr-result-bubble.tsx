@@ -59,7 +59,7 @@ export function OcrResultBubble(props: OcrResultBubbleProps): React.ReactElement
           ) : null}
         </SheetHeader>
 
-        <ScrollArea className="my-4 max-h-[70vh] pr-2">
+        <ScrollArea className="max-h-[70vh] px-4 pb-4" data-testid="ocr-result-body">
           {props.imageSrc && overlayPage ? (
             <div className="mb-6">
               <OcrTextOverlay imageSrc={props.imageSrc} page={overlayPage} />
@@ -69,7 +69,9 @@ export function OcrResultBubble(props: OcrResultBubbleProps): React.ReactElement
             result.pages.map((page) => (
               <article key={page.pageNumber} className="mb-6">
                 <header className="flex items-center justify-between">
-                  <h3 className="text-sm font-medium">Page {page.pageNumber}</h3>
+                  <h3 className="text-sm font-medium">
+                    {t("ocr.composer.resultSheet.pageTitle", { number: page.pageNumber })}
+                  </h3>
                   <Button
                     type="button"
                     size="sm"

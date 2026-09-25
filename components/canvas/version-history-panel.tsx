@@ -177,7 +177,10 @@ export function VersionHistoryPanel({ documentId, trigger }: VersionHistoryPanel
             </SheetTitle>
           </SheetHeader>
 
-          <div className="mt-4 flex flex-1 min-h-0 flex-col space-y-4">
+          <div
+            className="flex min-h-0 flex-1 flex-col space-y-4 px-4 pb-4"
+            data-testid="canvas-version-history-body"
+          >
             {/* Action buttons */}
             <div className="flex gap-2">
               <Button

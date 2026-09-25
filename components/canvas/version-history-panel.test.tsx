@@ -154,6 +154,11 @@ describe("VersionHistoryPanel", () => {
     expect(screen.getByText("Save Current Version")).toBeInTheDocument()
   })
 
+  it("insets the panel body from the sheet edge", () => {
+    render(<VersionHistoryPanel documentId="doc-1" />)
+    expect(screen.getByTestId("canvas-version-history-body")).toHaveClass("px-4")
+  })
+
   it("displays version history title", () => {
     render(<VersionHistoryPanel documentId="doc-1" />)
     expect(screen.getByText("Version History")).toBeInTheDocument()

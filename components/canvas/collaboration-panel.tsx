@@ -207,7 +207,7 @@ export function CollaborationPanel({
           </SheetDescription>
         </SheetHeader>
 
-        <div className="mt-4 space-y-4">
+        <div className="space-y-4 px-4 pb-4" data-testid="canvas-collaboration-body">
           {/* Connection Status */}
           <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
             <div className="flex items-center gap-2">

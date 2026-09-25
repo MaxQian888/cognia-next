@@ -28,6 +28,13 @@ describe("OcrResultBubble", () => {
     expect(screen.getByTestId("ocr-page-2")).toHaveTextContent("Page 2")
   })
 
+  it("insets the pages from the sheet edge", () => {
+    render(<OcrResultBubble open={true} onOpenChange={() => {}} result={sample} />)
+    const body = screen.getByTestId("ocr-result-body")
+    expect(body).toHaveClass("px-4")
+    expect(body).toContainElement(screen.getByTestId("ocr-page-1"))
+  })
+
   it("shows the empty-state message when result has no pages", () => {
     render(
       <OcrResultBubble

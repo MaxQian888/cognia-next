@@ -104,6 +104,14 @@ describe("DraftNotice", () => {
     expect(screen.getByTestId("draft-editor")).toBeInTheDocument()
   })
 
+  it("insets the editor from the sheet edge", () => {
+    render(<DraftNotice draft={makeDraft()} conversationKey="ck1" />)
+    fireEvent.click(screen.getByTestId("draft-review-btn"))
+    const body = screen.getByTestId("draft-sheet-body")
+    expect(body).toHaveClass("px-4")
+    expect(body).toContainElement(screen.getByTestId("draft-editor"))
+  })
+
   it("Approve & Send enqueues outbound + marks draft approved", async () => {
     render(<DraftNotice draft={makeDraft()} conversationKey="ck1" />)
     fireEvent.click(screen.getByTestId("draft-review-btn"))

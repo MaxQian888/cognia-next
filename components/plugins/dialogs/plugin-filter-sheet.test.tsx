@@ -26,6 +26,11 @@ describe("PluginFilterSheet", () => {
     expect(container.querySelector("[role='dialog']")).toBeNull()
   })
 
+  it("insets the filter fields from the sheet edge", () => {
+    render(<PluginFilterSheet />)
+    expect(screen.getByTestId("plugin-filter-sheet-body")).toHaveClass("px-4")
+  })
+
   it("renders fields for query / capability / permission / source / status", () => {
     render(<PluginFilterSheet />)
     expect(screen.getByText("query")).toBeInTheDocument()

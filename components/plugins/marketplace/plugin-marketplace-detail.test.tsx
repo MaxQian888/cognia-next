@@ -105,6 +105,21 @@ describe("PluginMarketplaceDetail", () => {
     expect(container.textContent ?? "").toBe("")
   })
 
+  it("insets the detail body from the sheet edge", () => {
+    render(
+      <PluginMarketplaceDetail
+        open
+        entry={detail}
+        installed={false}
+        installing={false}
+        onClose={() => {}}
+        onInstall={() => {}}
+        onUninstall={() => {}}
+      />
+    )
+    expect(screen.getByTestId("plugin-marketplace-detail-body")).toHaveClass("px-4")
+  })
+
   it("renders entry metadata + install CTA", () => {
     render(
       <PluginMarketplaceDetail

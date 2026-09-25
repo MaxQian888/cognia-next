@@ -65,7 +65,7 @@ export function PluginFilterSheet() {
           <SheetDescription>{t("description")}</SheetDescription>
         </SheetHeader>
 
-        <div className="space-y-4 mt-4">
+        <div className="space-y-4 px-4 pb-6" data-testid="plugin-filter-sheet-body">
           <FilterField label={t("query")}>
             <Input
               value={filters.query}

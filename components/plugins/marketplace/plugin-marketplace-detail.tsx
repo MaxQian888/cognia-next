@@ -119,7 +119,10 @@ export function PluginMarketplaceDetail({
               {entry.description && <SheetDescription>{entry.description}</SheetDescription>}
             </SheetHeader>
 
-            <div className="mt-4 flex flex-col gap-4">
+            <div
+              className="flex flex-col gap-4 px-4 pb-6"
+              data-testid="plugin-marketplace-detail-body"
+            >
               <RawManifestSection entry={entry} />
               <MetaCard entry={entry} />
 

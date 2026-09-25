@@ -175,6 +175,7 @@
       "copy": "复制全部",
       "copyPage": "复制本页",
       "empty": "没有识别到文字。",
+      "pageTitle": "第 {number} 页",
       "title": "提取出的文字"
     }
   },
