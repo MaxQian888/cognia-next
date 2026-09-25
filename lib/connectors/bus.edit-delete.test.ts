@@ -31,6 +31,9 @@ beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   await dbFixture.restore()
   __resetBusForTesting()
+  // Every fabricated row lives in "s-test". Edit and delete refuse a row whose
+  // conversation is gone (SESSION_NOT_FOUND), so the conversation must exist.
+  await getDb().sessions.add({ id: "s-test", title: "t", createdAt: 1, updatedAt: 1 } as never)
 })
 afterAll(dbFixture.dispose)
 
@@ -135,8 +138,6 @@ describe("ConnectorBus.applyMessageEdit (v49 indexed lookup)", () => {
 
   it("drops inbound labels that judged the pre-edit text", async () => {
     const db = getDb()
-    // The edit path refuses rows whose session is gone (SESSION_NOT_FOUND).
-    await db.sessions.add({ id: "s-test", title: "t", createdAt: 1, updatedAt: 1 } as never)
     const row = makeStoredMessage({
       id: "msg-labels",
       platformMessageId: "tg:77",
@@ -188,6 +189,37 @@ describe("ConnectorBus.applyMessageEdit (v49 indexed lookup)", () => {
 
     expect(toArraySpy).not.toHaveBeenCalled()
     toArraySpy.mockRestore()
+  })
+
+  it("leaves a row alone and audits the failure when its conversation is gone", async () => {
+    const db = getDb()
+    await db.messages.put(
+      makeStoredMessage({
+        id: "orphan",
+        sessionId: "s-gone",
+        platformMessageId: "tg:13",
+        platform: "telegram",
+      })
+    )
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      await getBus().dispatchInboundFull(makeEditEvent("telegram", "tg:13", "edited"))
+      await getBus().dispatchInboundFull(makeDeleteEvent("telegram", "tg:13"))
+    } finally {
+      consoleError.mockRestore()
+    }
+
+    const row = await db.messages.get("orphan")
+    expect(row?.parts).toEqual([{ type: "text", text: "original" }])
+    expect(row?.metadata?.editedAt).toBeUndefined()
+    expect(row?.metadata?.deletedAt).toBeUndefined()
+    const failures = (await db.connectorAudit.toArray()).filter(
+      (entry) => entry.kind === "adapter.error" && entry.reason === "inbound_pipeline_failed"
+    )
+    expect(failures.map((entry) => entry.message)).toEqual([
+      "SESSION_NOT_FOUND",
+      "SESSION_NOT_FOUND",
+    ])
   })
 
   it("is a no-op (audit-only) when no row matches the replacesMessageId", async () => {
