@@ -100,7 +100,9 @@ export async function executeGoalTask(
     goalId,
   })
 
-  // 3. Drive the loop to terminal.
+  // 3. Drive the loop to terminal. Its turns run unattended: a tool that needs
+  // approval is denied, and the goal pauses `needs_approval` with the tools
+  // named in the error and listed below.
   const result = await runGoalLoopHeadless({ sessionId, goalId, appSettings, signal })
 
   const success = result.status === "completed"
@@ -112,6 +114,8 @@ export async function executeGoalTask(
       status: result.status,
       turns: result.turns,
       lastResponse: result.lastResponse,
+      ...(result.exit ? { exit: result.exit } : {}),
+      ...(result.needsApproval ? { needsApproval: result.needsApproval } : {}),
     },
     ...(success ? {} : { error: result.error ?? `Goal ended with status: ${result.status}` }),
   }

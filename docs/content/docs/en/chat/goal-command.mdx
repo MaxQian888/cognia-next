@@ -59,6 +59,12 @@ All subcommands refuse while a turn is still streaming — they wait for the SDK
 
 Notice that condition #6 lands at `paused`, not a terminal state — flaky judges shouldn't wedge your goal. Resume with `/goal resume` once the model recovers.
 
+### Goals that run unattended
+
+A scheduled goal, or one started from an IM conversation, runs with nobody there to approve a tool. When a turn asks for one, the tool is denied at once and the model is told why. Unless that turn's judge finds the goal done or a limit ends it, the goal lands at `paused` with exit `needs_approval` instead of continuing into the same wall. The scheduled run fails with `needs approval: <tools>`, and an IM conversation gets a line naming the tools.
+
+To finish a scheduled goal, open its conversation in the app and run `/goal resume`. The loop then runs in the chat, where you can approve the tool when it asks. An IM goal resumed with `/goal resume` from the conversation runs unattended again, so it stops at the same tool unless that tool no longer needs approval.
+
 ## Writing a good objective
 
 Three patterns work well:

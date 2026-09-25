@@ -800,3 +800,133 @@ describe("handleTurnComplete — completion-promise gate", () => {
     expect(events.some((e) => e.kind === "promise_requested")).toBe(false)
   })
 })
+
+describe("handleTurnComplete — approval gate (unattended denials)", () => {
+  it("pauses with needs_approval instead of continuing after a denied tool", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "Edit needs approval; stopped there.",
+      tokensDelta: 10,
+      judgeClient: mockClient(() => '{"done": false, "reason": "edit not applied"}'),
+      capturedGenerationId: "gen-1",
+      needsApproval: ["Edit", "Bash", "Edit"],
+    })
+    expect(out).toEqual({
+      kind: "exit",
+      exit: "needs_approval",
+      resultingStatus: "paused",
+      reason: "no approver attached for: Edit, Bash",
+    })
+    const goal = await getGoal("g1")
+    expect(goal?.status).toBe("paused")
+    // The turn still counts, and the judge still ran on it.
+    expect(goal?.turnsUsed).toBe(1)
+    expect(goal?.tokensUsed).toBe(10)
+    const events = await listGoalEvents("g1")
+    expect(events.some((e) => e.kind === "judge_evaluated")).toBe(true)
+    const exitEvent = events.find((e) => e.kind === "exit_triggered")
+    expect(exitEvent?.payload).toEqual({
+      kind: "exit_triggered",
+      exit: "needs_approval",
+      reason: "no approver attached for: Edit, Bash",
+    })
+    // Paused is resumable, so completion linkage stays quiet.
+    expect(onGoalTerminalMock).not.toHaveBeenCalled()
+  })
+
+  it("also stops a judge parse-failure continue", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "x",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => "not json"),
+      capturedGenerationId: "gen-1",
+      needsApproval: ["Write"],
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.exit).toBe("needs_approval")
+    expect((await getGoal("g1"))?.judgeFailureCount).toBe(1)
+  })
+
+  it("lets a judge that finds the goal done complete it", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "Worked around it; all done.",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "objective met"}'),
+      capturedGenerationId: "gen-1",
+      needsApproval: ["Edit"],
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.exit).toBe("judge_done")
+    expect((await getGoal("g1"))?.status).toBe("completed")
+  })
+
+  it("lets a limit end the goal as it would anyway", async () => {
+    await createGoal(
+      buildGoal({ id: "g1", turnsUsed: 19, config: { ...SAMPLE_CONFIG, maxTurns: 20 } })
+    )
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "x",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": false, "reason": "x"}'),
+      capturedGenerationId: "gen-1",
+      needsApproval: ["Edit"],
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.exit).toBe("turn_limited")
+    expect((await getGoal("g1"))?.status).toBe("turn_limited")
+  })
+
+  it("lets the completion-promise check run, since echoing the token needs no tool", async () => {
+    await createGoal(
+      buildGoal({ id: "g1", config: { ...SAMPLE_CONFIG, completionPromise: "SHIPPED" } })
+    )
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "Finished; Edit was denied but not needed.",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "complete"}'),
+      capturedGenerationId: "gen-1",
+      needsApproval: ["Edit"],
+    })
+    expect(out.kind).toBe("continue")
+    const goal = await getGoal("g1")
+    expect(goal?.status).toBe("active")
+    expect(goal?.awaitingPromise).toBe(true)
+  })
+
+  it("does not pause when the goal was paused or rotated mid-turn", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "x",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": false, "reason": "x"}'),
+      capturedGenerationId: "outdated",
+      needsApproval: ["Edit"],
+    })
+    expect(out.kind).toBe("stale")
+    expect((await getGoal("g1"))?.status).toBe("active")
+  })
+
+  it("continues as before when nothing was denied", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "x",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": false, "reason": "x"}'),
+      capturedGenerationId: "gen-1",
+      needsApproval: [],
+    })
+    expect(out.kind).toBe("continue")
+  })
+})

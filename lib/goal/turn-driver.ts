@@ -28,13 +28,21 @@
  * reads it back and confirms the generation hasn't rotated. If it has —
  * meaning the user paused / stopped / updated mid-turn — we abort
  * silently and return `{ kind: "stale" }`.
+ *
+ * **Approval gate:** a headless caller reports the tools its unattended
+ * responder denied this turn (`needsApproval`). Such a turn never continues
+ * on its own: wherever the driver would return `continue`, it pauses the goal
+ * with exit `needs_approval` instead. The one exception is the turn that arms
+ * the completion-promise check: the judge already found the goal done, and
+ * echoing the token needs no tool. Every other outcome stands, so a judge that
+ * finds the goal done still completes it, and a limit still ends it.
  */
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { AgentHookContext, LifecycleHookFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { ExitReason, Goal, GoalStatus } from "@/types/goal"
-import { isTerminalGoalStatus } from "@/types/goal"
+import { isTerminalGoalStatus, statusForExit } from "@/types/goal"
 import { appendGoalEvent, getGoal, updateGoal } from "@/lib/db/goals"
 import { recordGoalUsage } from "@/lib/db/session-usage"
 import { evaluateExitConditions } from "./exit-conditions"
@@ -94,6 +102,13 @@ export interface TurnCompleteInput {
   hookContext?: AgentHookContext
   /** Test/host override for the published Workflow verification ingress. */
   verificationDependencies?: GoalVerificationDependencies
+  /**
+   * Tools denied this turn because nobody was there to approve them (the
+   * headless drivers' unattended responder). Non-empty turns the `continue`
+   * outcome into a `needs_approval` pause; see the module docstring. The
+   * interactive chat hook has an approver and leaves it unset.
+   */
+  needsApproval?: readonly string[]
 }
 
 export type TurnCompleteOutcome =
@@ -113,6 +128,26 @@ export type TurnCompleteOutcome =
  * machine.
  */
 export async function handleTurnComplete(input: TurnCompleteInput): Promise<TurnCompleteOutcome> {
+  const outcome = await driveTurnComplete(input)
+  const needsApproval = input.needsApproval ?? []
+  if (outcome.kind !== "continue" || needsApproval.length === 0) return outcome
+  // The judge already found the goal done and armed the completion-promise
+  // check: the next turn only has to echo the token, which needs no tool.
+  if ((await getGoal(input.goalId))?.awaitingPromise) return outcome
+  // Any other next turn would hit the same wall: park the goal where a person
+  // can grant the permission and `/goal resume` it.
+  return commitExit(
+    input.goalId,
+    {
+      exit: "needs_approval",
+      resultingStatus: statusForExit("needs_approval"),
+      reason: `no approver attached for: ${[...new Set(needsApproval)].join(", ")}`,
+    },
+    input.capturedGenerationId
+  )
+}
+
+async function driveTurnComplete(input: TurnCompleteInput): Promise<TurnCompleteOutcome> {
   const { goalId, lastResponse, tokensDelta, modelMessageId, judgeClient, signal } = input
 
   // Step 0 — load the row + sanity check.

@@ -313,6 +313,42 @@ describe("startConnectorGoalDriver", () => {
     expect(texts).toEqual(["t1"])
   })
 
+  it("says so when the goal paused for approval, naming each tool once", async () => {
+    const enqueue = jest.fn().mockResolvedValue({})
+    const run = jest.fn(async () => ({
+      status: "paused",
+      turns: 1,
+      exit: "needs_approval",
+      error: "needs approval: Edit, Bash",
+      needsApproval: [
+        { requestId: "r1", toolName: "Edit", at: 1, reason: "x" },
+        { requestId: "r2", toolName: "Bash", at: 2, reason: "x" },
+        { requestId: "r3", toolName: "Edit", at: 3, reason: "x" },
+      ],
+    }))
+    startConnectorGoalDriver(driverArgs(), { run: run as never, enqueue })
+    await tick()
+    await tick()
+
+    const texts = enqueue.mock.calls.map((c) => c[0].request.segments[0].text)
+    expect(texts).toEqual([
+      "⏸️ 目标已暂停:工具需要授权 (Edit, Bash) / Goal paused — tools need approval: Edit, Bash.",
+    ])
+  })
+
+  it("posts nothing for a pause that is not about approval", async () => {
+    const enqueue = jest.fn().mockResolvedValue({})
+    const run = jest.fn(async () => ({
+      status: "paused",
+      turns: 3,
+      exit: "judge_failed_too_many",
+    }))
+    startConnectorGoalDriver(driverArgs(), { run: run as never, enqueue })
+    await tick()
+    await tick()
+    expect(enqueue).not.toHaveBeenCalled()
+  })
+
   it("swallows a driver failure and clears the running registry", async () => {
     const run = jest.fn().mockRejectedValue(new Error("boom"))
     startConnectorGoalDriver(driverArgs(), { run: run as never, enqueue: jest.fn() })

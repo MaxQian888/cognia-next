@@ -131,7 +131,9 @@ const runningDrivers = new Set<string>()
  * Start (idempotently) a headless driver for `goalId`. Each completed turn's
  * assistant text is posted back to the conversation; the loop honors the
  * pacing gate (quiet-hours / interval / manual-hold) and exits on any terminal
- * or externally-paused status.
+ * or externally-paused status. Turns run unattended: a tool that needs
+ * approval is denied, the goal pauses `needs_approval`, and the conversation
+ * is told which tools.
  */
 export function startConnectorGoalDriver(
   args: ConnectorGoalDriverArgs,
@@ -193,6 +195,13 @@ export function startConnectorGoalDriver(
       if (isTerminalGoalStatus(result.status)) {
         await post(
           `🎯 目标已${result.status} / Goal ${result.status} — ${result.turns} 回合 / turn(s).`
+        ).catch(() => undefined)
+      } else if (result.exit === "needs_approval") {
+        // The driver runs unattended, so a tool that needs approval was denied
+        // and the goal paused. Say so: the pause is otherwise silent here.
+        const tools = [...new Set((result.needsApproval ?? []).map((d) => d.toolName))].join(", ")
+        await post(
+          `⏸️ 目标已暂停:工具需要授权 (${tools}) / Goal paused — tools need approval: ${tools}.`
         ).catch(() => undefined)
       }
     } catch (err) {

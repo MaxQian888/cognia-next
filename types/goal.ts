@@ -457,9 +457,17 @@ export interface GoalEvent {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Exit reasons — discriminated union returned by `evaluateExitConditions`.
+// Exit reasons — discriminated union returned by `evaluateExitConditions`,
+// plus `needs_approval`, which the turn driver commits itself.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * `needs_approval` is not one of the row conditions `evaluateExitConditions`
+ * checks. A headless driver (scheduler, connector) answers permission requests
+ * with the unattended responder, which denies them because nobody is there to
+ * approve. `handleTurnComplete` then pauses the goal with this exit instead of
+ * continuing, since the next turn would hit the same wall.
+ */
 export type ExitReason =
   | "user_stopped"
   | "preempted"
@@ -468,11 +476,13 @@ export type ExitReason =
   | "cost_limited"
   | "timed_out"
   | "judge_failed_too_many"
+  | "needs_approval"
   | "judge_done"
 
 /**
  * Maps an exit reason to the terminal/paused status the goal should land in.
- * Two non-terminal exits use `paused` so the user can manually resume.
+ * Two non-terminal exits use `paused` so the user can manually resume:
+ * `judge_failed_too_many` and `needs_approval`.
  */
 export function statusForExit(exit: ExitReason): GoalStatus {
   switch (exit) {
@@ -491,6 +501,8 @@ export function statusForExit(exit: ExitReason): GoalStatus {
     case "timed_out":
       return "timed_out"
     case "judge_failed_too_many":
+      return "paused"
+    case "needs_approval":
       return "paused"
     case "judge_done":
       return "completed"

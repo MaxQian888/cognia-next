@@ -137,6 +137,29 @@ describe("executeGoalTask", () => {
     expect(r.error).toMatch(/over budget/)
   })
 
+  it("fails a goal paused for approval, naming the denied tools", async () => {
+    const denial = { requestId: "req-1", toolName: "Edit", at: 1, reason: "needs approval" }
+    runGoalLoopMock.mockResolvedValue({
+      status: "paused",
+      turns: 1,
+      exit: "needs_approval",
+      error: "needs approval: Edit",
+      needsApproval: [denial],
+    })
+    const r = await executeGoalTask(
+      makeTask({ objective: "x" }),
+      execution,
+      new AbortController().signal
+    )
+    expect(r.success).toBe(false)
+    expect(r.error).toBe("needs approval: Edit")
+    expect(r.output).toMatchObject({
+      status: "paused",
+      exit: "needs_approval",
+      needsApproval: [denial],
+    })
+  })
+
   it("surfaces a createGoal error", async () => {
     createGoalMock.mockRejectedValue(new Error("im blocked"))
     const r = await executeGoalTask(

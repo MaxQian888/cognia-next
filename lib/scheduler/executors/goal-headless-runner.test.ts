@@ -353,3 +353,141 @@ describe("runGoalLoopHeadless — owning workspace (ADR-0144)", () => {
     expect(runCaptureMock.mock.calls[0][2]).toBe(resolved)
   })
 })
+
+describe("runGoalLoopHeadless — unattended permissions", () => {
+  /** A capture that asks for each tool in turn, then replies `text`. */
+  function captureAsking(tools: string[], text: string) {
+    return async (
+      _sessionId: string,
+      _prompt: unknown,
+      _options: unknown,
+      cap: { onPermissionRequest?: (req: unknown) => unknown }
+    ) => {
+      for (const [i, toolName] of tools.entries()) {
+        const decision = await cap.onPermissionRequest?.({
+          type: "permission_request",
+          sessionId: "s1",
+          requestId: `req-${toolName}-${i}`,
+          toolUseID: `tu-${i}`,
+          toolName,
+          input: {},
+        })
+        decisions.push(decision)
+      }
+      return { text }
+    }
+  }
+  let decisions: unknown[] = []
+
+  beforeEach(() => {
+    decisions = []
+    getGoalMock.mockResolvedValue(activeGoal)
+  })
+
+  it("denies a permission request at once and tells the model why", async () => {
+    runCaptureMock.mockImplementation(captureAsking(["Edit"], "Edit needs approval."))
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "needs_approval",
+      resultingStatus: "paused",
+      reason: "no approver attached for: Edit",
+    })
+
+    await runGoalLoopHeadless(input())
+    expect(decisions).toEqual([
+      { decision: "deny", message: expect.stringContaining('Tool "Edit" needs a human approval') },
+    ])
+    expect((decisions[0] as { message: string }).message).toContain("this goal turn")
+  })
+
+  it("hands the turn's denied tools to the turn driver and reports the pause", async () => {
+    runCaptureMock.mockImplementation(captureAsking(["Edit", "Bash"], "Blocked on approval."))
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "needs_approval",
+      resultingStatus: "paused",
+      reason: "no approver attached for: Edit, Bash",
+    })
+
+    const r = await runGoalLoopHeadless(input())
+    expect(handleTurnCompleteMock.mock.calls[0][0].needsApproval).toEqual(["Edit", "Bash"])
+    expect(r).toMatchObject({
+      status: "paused",
+      turns: 1,
+      exit: "needs_approval",
+      error: "needs approval: Edit, Bash",
+      lastResponse: "Blocked on approval.",
+    })
+    expect(r.needsApproval).toEqual([
+      expect.objectContaining({ requestId: "req-Edit-0", toolName: "Edit" }),
+      expect.objectContaining({ requestId: "req-Bash-1", toolName: "Bash" }),
+    ])
+  })
+
+  it("passes only the current turn's denials, and reports every denial of the run", async () => {
+    // Turn 1 is denied Edit but arms the promise check (the driver continues);
+    // turn 2 asks for nothing and completes.
+    runCaptureMock
+      .mockImplementationOnce(captureAsking(["Edit"], "done, Edit not needed"))
+      .mockImplementationOnce(captureAsking([], "<promise>SHIPPED</promise>"))
+    handleTurnCompleteMock
+      .mockResolvedValueOnce({ kind: "continue", userMessage: "emit the promise" })
+      .mockResolvedValueOnce({
+        kind: "exit",
+        exit: "judge_done",
+        resultingStatus: "completed",
+        reason: "completion promise confirmed",
+      })
+
+    const r = await runGoalLoopHeadless(input())
+    expect(handleTurnCompleteMock.mock.calls[0][0].needsApproval).toEqual(["Edit"])
+    expect(handleTurnCompleteMock.mock.calls[1][0].needsApproval).toEqual([])
+    expect(r.status).toBe("completed")
+    expect(r.exit).toBe("judge_done")
+    // A completed goal is not an approval failure, but the record stays.
+    expect(r.error).toBeUndefined()
+    expect(r.needsApproval).toEqual([expect.objectContaining({ toolName: "Edit" })])
+  })
+
+  it("keeps the denials when the turn fails after one", async () => {
+    runCaptureMock.mockImplementation(async (...args: unknown[]) => {
+      await captureAsking(["Write"], "")(...(args as Parameters<ReturnType<typeof captureAsking>>))
+      throw new Error("sidecar crashed")
+    })
+
+    const r = await runGoalLoopHeadless(input())
+    expect(r.error).toBe("sidecar crashed")
+    expect(r.needsApproval).toEqual([expect.objectContaining({ toolName: "Write" })])
+    expect(handleTurnCompleteMock).not.toHaveBeenCalled()
+  })
+
+  it("wires the responder into an injected sender too (the connector path)", async () => {
+    const sendTurn = jest.fn(captureAsking(["Bash"], "r1"))
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "needs_approval",
+      resultingStatus: "paused",
+      reason: "no approver attached for: Bash",
+    })
+
+    const r = await runGoalLoopHeadless(input({ sendTurn: sendTurn as never }))
+    expect(sendTurn.mock.calls[0][3]).toEqual(
+      expect.objectContaining({ onPermissionRequest: expect.any(Function) })
+    )
+    expect(r.needsApproval).toEqual([expect.objectContaining({ toolName: "Bash" })])
+  })
+
+  it("adds nothing to the result when no tool asked", async () => {
+    runCaptureMock.mockResolvedValue({ text: "r1" })
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "judge_done",
+      resultingStatus: "completed",
+      reason: "done",
+    })
+
+    const r = await runGoalLoopHeadless(input())
+    expect(handleTurnCompleteMock.mock.calls[0][0].needsApproval).toEqual([])
+    expect(r).toEqual({ status: "completed", turns: 1, lastResponse: "r1", exit: "judge_done" })
+  })
+})

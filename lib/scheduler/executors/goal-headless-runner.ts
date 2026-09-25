@@ -26,10 +26,15 @@
  * The first user message is the goal's `safeObjective` — the redacted text, so
  * no raw PII leaves the device in the headless (un-reviewed) path. Subsequent
  * turns use the turn-driver's generated continuation messages.
+ *
+ * Nobody is watching these turns. A tool's permission request is answered at
+ * once by the unattended responder: denied, with the model told why. The turn
+ * driver then pauses the goal with exit `needs_approval` rather than continue
+ * into the same wall, and the result names the denied tools.
  */
 
 import type { AppSettings, SendContent, SendOptions } from "@cognia/agent-config-types"
-import { isTerminalGoalStatus, type Goal, type GoalStatus } from "@/types/goal"
+import { isTerminalGoalStatus, type ExitReason, type Goal, type GoalStatus } from "@/types/goal"
 import { getGoal } from "@/lib/db/goals"
 import { getSession } from "@/lib/db/sessions"
 import { resolveSendOptions } from "@/lib/claude/build-options"
@@ -42,6 +47,12 @@ import {
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
 import { gateContinuation } from "@/lib/goal/pacing"
+import {
+  createUnattendedPermissionResponder,
+  needsApprovalSummary,
+  type UnattendedPermissionDenial,
+  type UnattendedPermissionResponder,
+} from "@/lib/claude/unattended-permission-responder"
 import { loadOwningWorkspace } from "./owning-workspace"
 import { loggers } from "@cognia/logging"
 
@@ -104,9 +115,33 @@ export interface RunGoalLoopResult {
   turns: number
   lastResponse?: string
   error?: string
+  /** The goal's exit, when the loop ended on one (not on a stop, abort or error). */
+  exit?: ExitReason
+  /**
+   * Every tool request the run denied for want of an approver, in arrival
+   * order. Present only when there was one. The goal is then `paused` with
+   * exit `needs_approval`, unless the turn ended it another way (the judge
+   * found it done, a limit fired).
+   */
+  needsApproval?: UnattendedPermissionDenial[]
 }
 
 export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunGoalLoopResult> {
+  // Nobody is watching a headless goal. Answer each permission request now with
+  // a recorded denial, rather than leave it to whichever listener the shell
+  // has: the desktop's silent "session not open" deny, or the headless brain's
+  // hang until the capture timeout.
+  const permissions = createUnattendedPermissionResponder("goal")
+  const result = await driveGoalLoop(input, permissions)
+  return permissions.needsApproval()
+    ? { ...result, needsApproval: [...permissions.denials] }
+    : result
+}
+
+async function driveGoalLoop(
+  input: RunGoalLoopInput,
+  permissions: UnattendedPermissionResponder
+): Promise<RunGoalLoopResult> {
   const { sessionId, goalId, appSettings, signal } = input
   const sendTurn = input.sendTurn ?? runAndCaptureAssistantReply
 
@@ -210,6 +245,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
       }
     }
 
+    const deniedBefore = permissions.denials.length
     let captureText = ""
     let tokensDelta = 0
     let budgetExceeded = false
@@ -221,6 +257,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
           ? { timeoutMs: input.perTurnTimeoutMs }
           : {}),
         execution: { kind: "goal", label: `Goal ${goalId.slice(0, 8)}`, taskId: goalId },
+        onPermissionRequest: permissions.onPermissionRequest,
       })
       captureText = capture.text
       lastResponse = capture.text
@@ -256,6 +293,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
       judgeClient,
       signal,
       capturedGenerationId,
+      needsApproval: permissions.denials.slice(deniedBefore).map((denial) => denial.toolName),
     })
 
     log.debug("Scheduler goal turn complete", {
@@ -271,7 +309,15 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
         lastContinuationAt = nowFn()
         break
       case "exit":
-        return { status: outcome.resultingStatus, turns, lastResponse }
+        return {
+          status: outcome.resultingStatus,
+          turns,
+          lastResponse,
+          exit: outcome.exit,
+          ...(outcome.exit === "needs_approval"
+            ? { error: needsApprovalSummary(permissions) }
+            : {}),
+        }
       case "aborted":
         return { status: "paused", turns, lastResponse, error: "aborted" }
       case "stale":
