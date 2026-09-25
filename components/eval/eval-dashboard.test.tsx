@@ -77,6 +77,42 @@ describe("EvalDashboard", () => {
     )
   })
 
+  it("opens the form focused, and holds Create until both fields are filled", () => {
+    render(<EvalDashboard />)
+    fireEvent.click(screen.getByText("datasets.new"))
+    const name = screen.getByLabelText("datasets.namePlaceholder")
+    expect(name).toHaveFocus()
+    const create = screen.getByRole("button", { name: "datasets.create" })
+    expect(create).toBeDisabled()
+    fireEvent.change(name, { target: { value: "Set A" } })
+    expect(create).toBeDisabled()
+    fireEvent.change(screen.getByLabelText("datasets.capabilityPlaceholder"), {
+      target: { value: "chat" },
+    })
+    expect(create).toBeEnabled()
+  })
+
+  it("creates on Enter", async () => {
+    render(<EvalDashboard />)
+    fireEvent.click(screen.getByText("datasets.new"))
+    fireEvent.change(screen.getByLabelText("datasets.namePlaceholder"), {
+      target: { value: "Set B" },
+    })
+    const capability = screen.getByLabelText("datasets.capabilityPlaceholder")
+    fireEvent.change(capability, { target: { value: "chat" } })
+    fireEvent.submit(capability.closest("form")!)
+    await waitFor(() =>
+      expect(createDataset).toHaveBeenCalledWith({ name: "Set B", capability: "chat" })
+    )
+  })
+
+  it("cancels on Escape", () => {
+    render(<EvalDashboard />)
+    fireEvent.click(screen.getByText("datasets.new"))
+    fireEvent.keyDown(screen.getByLabelText("datasets.namePlaceholder"), { key: "Escape" })
+    expect(screen.queryByTestId("new-dataset-form")).not.toBeInTheDocument()
+  })
+
   it("renders the selected dataset's detail (defaults to the first)", () => {
     datasets = [dataset("d1", "First"), dataset("d2", "Second")]
     render(<EvalDashboard />)

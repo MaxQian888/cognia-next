@@ -444,9 +444,16 @@ export function RunConfigDialog({
           confirmation (where clicking only acknowledged) and reverted to plain
           "run" for the click that actually spent the money. The confirming
           click is the one that says "anyway". */}
+      {/* An empty dataset used to run anyway and file a "pass@1 0%" run:
+          a failure verdict on nothing. */}
+      {cases.length === 0 && !running ? (
+        <p className="text-muted-foreground text-xs" data-testid="run-config-no-cases">
+          {t("runConfig.noCases")}
+        </p>
+      ) : null}
       <Button
         onClick={() => void handleRun()}
-        disabled={running}
+        disabled={running || cases.length === 0}
         variant={overBudget && costAck ? "destructive" : "default"}
       >
         {running ? (

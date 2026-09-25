@@ -44,6 +44,8 @@ jest.mock("@/lib/ai/eval/service", () => ({
 
 import { RunConfigDialog } from "./run-config-dialog"
 import { useEvalRunStore } from "@/stores/eval/eval-run-store"
+import enEval from "@/i18n/messages/en/eval.json"
+import zhEval from "@/i18n/messages/zh-CN/eval.json"
 
 afterEach(() => useEvalRunStore.setState({ active: null, controller: null }))
 
@@ -51,10 +53,17 @@ beforeEach(() => {
   buildConfiguredRunDeps.mockClear()
   runEvalService.mockClear()
   evalRuns.mockReturnValue([])
-  evalCases.mockReturnValue([])
+  evalCases.mockReturnValue([{ id: "c1" }])
 })
 
 describe("RunConfigDialog", () => {
+  it("holds the run, and says why, while the dataset has no cases", () => {
+    evalCases.mockReturnValue([])
+    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    expect(screen.getByTestId("run-config-no-cases")).toHaveTextContent("runConfig.noCases")
+    expect(screen.getByRole("button", { name: /runConfig\.run$/ })).toBeDisabled()
+  })
+
   it("runs the default single chat target and reports completion", async () => {
     const onComplete = jest.fn()
     const onClose = jest.fn()
@@ -417,4 +426,32 @@ describe("RunConfigDialog", () => {
     fireEvent.click(screen.getByText("judge.configure"))
     expect(push).toHaveBeenCalledWith("/settings?section=eval")
   })
+})
+
+// The mock translator above echoes keys, so a key missing from the catalogs
+// passes every test here — the judge row and the cost guard shipped reading
+// `eval.judge.deterministic` / `eval.cost.estimate` in the real app. Pin the
+// keys this dialog renders that its sibling surfaces do not already cover.
+const PINNED_KEYS = [
+  "runConfig.noCases",
+  "judge.auto",
+  "judge.configure",
+  "judge.deterministic",
+  "judge.using",
+  "cost.estimate",
+  "cost.overBudget",
+  "runConfig.runAnyway",
+]
+it.each([
+  ["en", enEval],
+  ["zh-CN", zhEval],
+])("has the dialog's judge and cost-guard copy in %s", (_locale, messages) => {
+  const lookup = (key: string) =>
+    key
+      .split(".")
+      .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], messages)
+  for (const key of PINNED_KEYS) expect([key, lookup(key)]).toEqual([key, expect.any(String)])
+  expect(lookup("judge.using")).toContain("{model}")
+  expect(lookup("cost.estimate")).toContain("{cost}")
+  expect(lookup("cost.overBudget")).toContain("{budget}")
 })

@@ -134,16 +134,27 @@ export function EvalDashboard({ initialDatasetId }: EvalDashboardProps = {}) {
               </Button>
             </div>
 
+            {/* A real form: it opens focused, Enter creates, Escape cancels,
+                and Create waits for both fields. It used to open unfocused
+                and swallow a click on Create while either field was empty. */}
             {creating && (
-              <div
+              <form
                 className="flex shrink-0 flex-col gap-2 border-b bg-muted/30 px-3 py-3"
                 data-testid="new-dataset-form"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void handleCreate()
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setCreating(false)
+                }}
               >
                 <Input
                   aria-label={t("datasets.namePlaceholder")}
                   placeholder={t("datasets.namePlaceholder")}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  autoFocus
                 />
                 <Input
                   aria-label={t("datasets.capabilityPlaceholder")}
@@ -152,14 +163,19 @@ export function EvalDashboard({ initialDatasetId }: EvalDashboardProps = {}) {
                   onChange={(e) => setCapability(e.target.value)}
                 />
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={() => void handleCreate()}>
+                  <Button size="sm" type="submit" disabled={!name.trim() || !capability.trim()}>
                     {t("datasets.create")}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setCreating(false)}>
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setCreating(false)}
+                  >
                     {t("datasets.cancel")}
                   </Button>
                 </div>
-              </div>
+              </form>
             )}
 
             {filtered.length === 0 && !creating ? (

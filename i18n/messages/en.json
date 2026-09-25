@@ -13749,7 +13749,9 @@
       "title": "Runs & comparison"
     },
     "cost": {
-      "confirm": "This run is over your cost guard. Press again to run it anyway."
+      "confirm": "This run is over your cost guard. Press again to run it anyway.",
+      "estimate": "Estimated cost: ${cost}",
+      "overBudget": "over your ${budget} cost guard"
     },
     "datasets": {
       "back": "Back to datasets",
@@ -13878,6 +13880,12 @@
         "history": "From history",
         "huggingface": "HuggingFace"
       }
+    },
+    "judge": {
+      "auto": "Auto",
+      "configure": "Configure",
+      "deterministic": "Deterministic scorers only, no judge model",
+      "using": "Judge model: {model}"
     },
     "lab": {
       "actions": {
@@ -14230,11 +14238,13 @@
         "twin": "Digital Twin",
         "workflow": "Workflow"
       },
+      "noCases": "This dataset has no cases yet. Add or import some before running it.",
       "noTargets": "Add at least one target with a model / team / workflow id.",
       "progress": "{done} / {total} · {passing} passing · {ungraded} ungraded",
       "progressLabel": "Run progress",
       "removeTarget": "Remove target",
       "run": "Run evaluation",
+      "runAnyway": "Run anyway",
       "running": "Running…",
       "scorers": "Scorers ({count})",
       "split": "Split filter",

@@ -13749,7 +13749,9 @@
       "title": "运行与对比"
     },
     "cost": {
-      "confirm": "这次运行超出你设置的成本护栏。再点一次以确认运行。"
+      "confirm": "这次运行超出你设置的成本护栏。再点一次以确认运行。",
+      "estimate": "预计成本：${cost}",
+      "overBudget": "超出 ${budget} 的成本护栏"
     },
     "datasets": {
       "back": "返回评测集列表",
@@ -13878,6 +13880,12 @@
         "history": "从历史",
         "huggingface": "HuggingFace"
       }
+    },
+    "judge": {
+      "auto": "自动",
+      "configure": "配置",
+      "deterministic": "仅使用确定性评分器，不调用评委模型",
+      "using": "评委模型：{model}"
     },
     "lab": {
       "actions": {
@@ -14230,11 +14238,13 @@
         "twin": "数字孪生",
         "workflow": "工作流"
       },
+      "noCases": "这个数据集还没有用例。先添加或导入用例再运行。",
       "noTargets": "至少添加一个带模型 / 团队 / 工作流 ID 的目标。",
       "progress": "{done} / {total} · 通过 {passing} · 无判定 {ungraded}",
       "progressLabel": "运行进度",
       "removeTarget": "移除目标",
       "run": "运行评估",
+      "runAnyway": "仍然运行",
       "running": "运行中…",
       "scorers": "评分器（{count}）",
       "split": "子集筛选",
