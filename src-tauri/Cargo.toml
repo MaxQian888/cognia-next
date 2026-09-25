@@ -132,7 +132,7 @@ cognia-tts = { path = "../crates/cognia-tts" }
 # `crate::remote_control`.
 # ADR-0067 follow-up — local OpenAI-compatible gateway. Re-aliased as
 # `crate::gateway`.
-cognia-gateway = { path = "../crates/cognia-gateway" }
+cognia-gateway = { path = "../crates/cognia-gateway", features = ["tauri-host"] }
 # ADR-0067 follow-up — CCSwitch provider-relay switcher. Re-aliased as
 # `crate::ccswitch`.
 cognia-ccswitch = { path = "../crates/cognia-ccswitch" }
@@ -141,7 +141,7 @@ cognia-mcp-server = { path = "../crates/cognia-mcp-server" }
 # ADR-0067 follow-up — external agent exec backends (bollard/kube isolated
 # behind the crate's own features; see [features] forwarding below).
 # Re-aliased as `crate::external_agent`.
-cognia-external-agent = { path = "../crates/cognia-external-agent" }
+cognia-external-agent = { path = "../crates/cognia-external-agent", features = ["tauri-host"] }
 # ADR-0182/0183 — runtime environment sandboxes. Linked unconditionally so the
 # boot seam decides in every build: a deployment that enabled the pool must
 # never boot into a binary that silently ignores the switch. The Docker driver

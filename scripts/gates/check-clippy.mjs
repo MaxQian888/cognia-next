@@ -128,9 +128,25 @@ export function writeBaseline(counts, file = BASELINE_FILE) {
   return payload
 }
 
+/**
+ * Clippy's full argument list: `CARGO_ARGS` plus the library crates'
+ * `tauri-host` features (ADR-0196). Those features default to off, and
+ * `cognia-next` — the only crate that enables them — is excluded above, so
+ * without this the command shells would never be linted.
+ *
+ * @param {string[]} hostFeatures `crate/feature` entries
+ */
+export function clippyArgs(hostFeatures) {
+  return hostFeatures.length > 0
+    ? [...CARGO_ARGS, "--features", hostFeatures.join(",")]
+    : [...CARGO_ARGS]
+}
+
 /** Run cargo clippy and return its NDJSON stdout. */
-function runClippy() {
-  const res = spawnSync("cargo", CARGO_ARGS, {
+async function runClippy() {
+  const { ciHostFeatureList, loadWorkspace } = await import("./check-rust-architecture.mjs")
+  const { ws, config } = loadWorkspace()
+  const res = spawnSync("cargo", clippyArgs(ciHostFeatureList(ws, config)), {
     cwd: REPO_ROOT,
     encoding: "utf8",
     maxBuffer: 256e6,
@@ -146,9 +162,10 @@ function runClippy() {
   return res.stdout
 }
 
-export function main(argv = []) {
+export async function main(argv = []) {
   const fromFileIndex = argv.indexOf("--from-file")
-  const ndjson = fromFileIndex === -1 ? runClippy() : readFileSync(argv[fromFileIndex + 1], "utf8")
+  const ndjson =
+    fromFileIndex === -1 ? await runClippy() : readFileSync(argv[fromFileIndex + 1], "utf8")
 
   const counts = tally(parseClippyWarnings(ndjson))
 
@@ -196,5 +213,5 @@ if (
   import.meta.url === `file://${process.argv[1]}` ||
   process.argv[1]?.endsWith("check-clippy.mjs")
 ) {
-  process.exit(main(process.argv.slice(2)))
+  process.exit(await main(process.argv.slice(2)))
 }

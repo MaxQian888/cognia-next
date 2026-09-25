@@ -46,6 +46,7 @@
  *   pnpm audit:rust-architecture:baseline          # after fixing a violation
  *   pnpm audit:rust-architecture:deep              # + cargo tree cross-check
  *   node scripts/gates/check-rust-architecture.mjs --print-tauri-host-features
+ *   node scripts/gates/check-rust-architecture.mjs --print-ci-features
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
@@ -371,6 +372,22 @@ export function diffAgainstBaseline(current, baseline) {
   }
 }
 
+/**
+ * The `tauri-host` features CI turns on for its workspace test and clippy
+ * runs, as `crate/feature`. Pure.
+ *
+ * Only crates using the standard feature name: those are the ones whose
+ * default used to include the Tauri surface, so this restores exactly the
+ * coverage the old defaults gave once a crate flips to `default = []`. A crate
+ * with an overridden name (observability's `desktop-host`) was never on in
+ * those runs and is left out rather than silently widening them.
+ */
+export function ciHostFeatureList(ws, config) {
+  return tauriHostFeatureList(ws, config).filter((entry) =>
+    entry.endsWith(`/${config.tauri.hostFeature}`)
+  )
+}
+
 /** Every member's Tauri host feature, as `crate/feature` for `cargo --features`. Pure. */
 export function tauriHostFeatureList(ws, config) {
   const list = []
@@ -380,6 +397,14 @@ export function tauriHostFeatureList(ws, config) {
     if (pkg.features && Object.hasOwn(pkg.features, feature)) list.push(`${name}/${feature}`)
   }
   return list.sort()
+}
+
+/** The workspace index plus its layer config, read from disk and cargo. */
+export function loadWorkspace() {
+  return {
+    config: JSON.parse(readFileSync(CONFIG_FILE, "utf8")),
+    ws: indexWorkspace(loadMetadata()),
+  }
 }
 
 function loadMetadata() {
@@ -449,6 +474,10 @@ function main(argv) {
 
   if (argv.includes("--print-tauri-host-features")) {
     process.stdout.write(`${tauriHostFeatureList(ws, config).join(",")}\n`)
+    return 0
+  }
+  if (argv.includes("--print-ci-features")) {
+    process.stdout.write(`${ciHostFeatureList(ws, config).join(",")}\n`)
     return 0
   }
 

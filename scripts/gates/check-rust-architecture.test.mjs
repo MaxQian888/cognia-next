@@ -17,6 +17,7 @@ import {
   CONFIG_FILE,
   activeDependencies,
   appShellEntries,
+  ciHostFeatureList,
   appShellFindings,
   collectFindings,
   diffAgainstBaseline,
@@ -265,6 +266,19 @@ test("a crate may name its host feature differently", () => {
     "host-enabler: cli enables obs/desktop-host",
   ])
   assert.deepEqual(tauriHostFeatureList(ws, config), ["obs/desktop-host"])
+  assert.deepEqual(ciHostFeatureList(ws, config), [])
+})
+
+test("CI turns on every standard tauri-host feature and nothing else", () => {
+  const ws = workspace(
+    pkg("app", []),
+    pkg("gateway", [], { default: [], "tauri-host": [] }),
+    pkg("obs", [], { "desktop-host": [] }),
+    pkg("plain", [], {})
+  )
+  const config = baseConfig({ app: "app", gateway: "domain", obs: "domain", plain: "domain" })
+  config.tauri.hostFeatureOverrides = { obs: "desktop-host" }
+  assert.deepEqual(ciHostFeatureList(ws, config), ["gateway/tauri-host"])
 })
 
 test("app shell entries are the first path segment under the source dir", () => {

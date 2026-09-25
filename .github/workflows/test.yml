@@ -1033,8 +1033,16 @@ jobs:
       # meant ~1800 tests across the other 22 crates — cognia-automation, -subscription,
       # -connectors, -git, -scheduling, -gateway, -vector and the rest — had
       # never been part of the CI design at all, on top of never having run.
+      #
+      # ADR-0196: a library crate's `#[tauri::command]` shells sit behind its
+      # `tauri-host` feature, which is off by default and enabled only by
+      # src-tauri — excluded here. So the tests run with every standard
+      # `tauri-host` turned on (what those crates' old defaults compiled), and
+      # a separate check proves each crate still builds Tauri-free.
       - name: Run Rust tests (all crates except src-tauri)
-        run: cargo test --locked --workspace --exclude cognia-next
+        run: cargo test --locked --workspace --exclude cognia-next --features "$(node scripts/gates/check-rust-architecture.mjs --print-ci-features)"
+      - name: Check the default (Tauri-free) feature set compiles
+        run: cargo check --locked --workspace --exclude cognia-next --all-targets
 
   postgres-rls:
     name: PostgreSQL RLS & tenant integrity

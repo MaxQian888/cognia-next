@@ -20,11 +20,10 @@ name = "gateway_e2e"
 harness = false
 
 [features]
-# The Tauri host adapter + #[tauri::command] surface. On by default so the
-# desktop build is unchanged; `cognia-server` paths and the crate's own
-# integration tests also build with `--no-default-features` (host-neutral,
-# ADR-0090 Phase 2).
-default = ["tauri-host"]
+# The Tauri host adapter + #[tauri::command] surface. Off by default
+# (ADR-0196): only `src-tauri` enables it. `cognia-server` paths and the
+# crate's own tests are host-neutral (ADR-0090 Phase 2).
+default = []
 tauri-host = ["dep:tauri"]
 # ADR-0188 (Router + Fusion): compiles the Run API's scripted test brain
 # (`brain_bridge::RecordingBrainBridge`) for OTHER crates' tests. Enable it only

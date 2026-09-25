@@ -17,11 +17,11 @@ name = "cognia_external_agent"
 path = "src/lib.rs"
 
 [features]
-# The #[tauri::command] surface and the AppHandle-bound DSH path helpers. On by
-# default so the desktop/headless app is unchanged; `--no-default-features`
-# builds the exec backends Tauri-free for the in-sandbox supervisor
-# (`cognia-sandboxd`, ADR-0183). Precedent: cognia-gateway `tauri-host`.
-default = ["tauri-host"]
+# The #[tauri::command] surface and the AppHandle-bound DSH path helpers. Off
+# by default (ADR-0196): a library crate links Tauri only when asked, and only
+# `src-tauri` asks. The exec backends build Tauri-free for the in-sandbox
+# supervisor (`cognia-sandboxd`, ADR-0183) and the headless server.
+default = []
 tauri-host = ["dep:tauri"]
 # Docker flavor of the exec backend (headless server image).
 container-exec = ["dep:bollard"]

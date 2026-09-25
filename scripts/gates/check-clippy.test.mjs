@@ -12,7 +12,14 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { CARGO_ARGS, diffTally, parseClippyWarnings, readBaseline, tally } from "./check-clippy.mjs"
+import {
+  CARGO_ARGS,
+  clippyArgs,
+  diffTally,
+  parseClippyWarnings,
+  readBaseline,
+  tally,
+} from "./check-clippy.mjs"
 
 /** One real-shaped cargo message per line. */
 const warning = (target, lint) =>
@@ -43,6 +50,16 @@ const NDJSON = [
   "not json at all",
   "",
 ].join("\n")
+
+test("clippy lints the tauri-host command shells the defaults leave out", () => {
+  assert.deepEqual(clippyArgs([]), CARGO_ARGS)
+  const args = clippyArgs(["cognia-gateway/tauri-host", "cognia-git/tauri-host"])
+  assert.deepEqual(args.slice(0, CARGO_ARGS.length), CARGO_ARGS)
+  assert.deepEqual(args.slice(CARGO_ARGS.length), [
+    "--features",
+    "cognia-gateway/tauri-host,cognia-git/tauri-host",
+  ])
+})
 
 test("CARGO_ARGS excludes src-tauri, which cannot be linted without the static export", () => {
   assert.ok(CARGO_ARGS.includes("--workspace"))
