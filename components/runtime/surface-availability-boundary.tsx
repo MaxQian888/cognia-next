@@ -22,11 +22,13 @@ import {
   isInternalRouteExempt,
   resolveSurfaceAvailability,
 } from "@/lib/runtime/surface-contract"
+import { SIDEBAR_NAV_META } from "@/types/shell/sidebar"
 
 export function SurfaceAvailabilityBoundary({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const snapshot = useRuntimeSnapshot()
   const t = useTranslations("runtime.surfaceBoundary")
+  const tNav = useTranslations("desktop.guildRail")
   const contract = getSurfaceContractForRoute(pathname)
   const compact = useCompactLayout()
 
@@ -80,6 +82,20 @@ export function SurfaceAvailabilityBoundary({ children }: { children: React.Reac
           <EmptyMedia variant="icon">
             <Icon aria-hidden />
           </EmptyMedia>
+          {/* The states are generic ("Capability unavailable on this
+              target"), so name the page they are standing in for — picked
+              from the nav or a link, that is the one thing the reader knows. */}
+          {(() => {
+            const nav = SIDEBAR_NAV_META.find((meta) => meta.id === contract.id)
+            return nav ? (
+              <p
+                className="text-xs font-medium text-muted-foreground"
+                data-testid="surface-unavailable-name"
+              >
+                {tNav(nav.i18nKey)}
+              </p>
+            ) : null
+          })()}
           <h1 id="surface-unavailable-title" className="text-lg font-semibold tracking-tight">
             {t(`states.${availability.state}`)}
           </h1>

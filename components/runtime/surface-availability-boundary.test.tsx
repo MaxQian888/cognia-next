@@ -45,6 +45,17 @@ it("returns an explanatory recovery page for a host-only standalone deep link", 
   expect(screen.getByRole("link", { name: "pairHost" })).toHaveAttribute("href", "/pair")
 })
 
+it("names the page it is standing in for", () => {
+  // The state line is generic; the page name is what the reader clicked.
+  pathname = "/source-control"
+  render(
+    <SurfaceAvailabilityBoundary>
+      <div>scm implementation</div>
+    </SurfaceAvailabilityBoundary>
+  )
+  expect(screen.getByTestId("surface-unavailable-name")).toHaveTextContent("sourceControl")
+})
+
 it("lets the recovery page claim the whole content slot", () => {
   // The shell hands routes a flex-row slot. A `<main>` that neither grows nor
   // spans it shrinks to its own max-width and hugs the left edge, which is how
