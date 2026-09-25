@@ -1,10 +1,18 @@
+// Without `tauri-host` the commands that take `State`/`AppHandle` compile out
+// (ADR-0196), leaving imports and helpers only they use; the feature build
+// still lints all of them.
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, State};
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::axum_app::{AppHandleEmitter, EventEmitter};
+#[cfg(feature = "tauri-host")]
+use super::axum_app::AppHandleEmitter;
+use super::axum_app::EventEmitter;
 use super::server_lifecycle::{start_server, ServerHandle};
 use super::state::ConnectorsState;
 use super::types::{AdapterRegistration, ConnectorsHealth, TauriHttpRequest, TauriHttpResponse};
@@ -26,6 +34,7 @@ use super::types::{AdapterRegistration, ConnectorsHealth, TauriHttpRequest, Taur
 /// nothing rather than one that accepts anything, and reverse-WebSocket
 /// adapters register through this same command while never passing through
 /// webhook verification at all.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_register_adapter(
     state: State<'_, ConnectorsState>,
@@ -46,6 +55,7 @@ pub async fn connectors_register_adapter(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_unregister_adapter(
     state: State<'_, ConnectorsState>,
@@ -56,6 +66,7 @@ pub async fn connectors_unregister_adapter(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_health(
     state: State<'_, ConnectorsState>,
@@ -83,6 +94,7 @@ pub async fn connectors_health(
 // always-on brain reserves an acknowledged handoff from a desktop holder. See
 // `state::runtime_owner_class`.
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_runtime_lease_acquire(
     state: State<'_, ConnectorsState>,
@@ -102,6 +114,7 @@ pub async fn connectors_runtime_lease_acquire(
     }
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_runtime_lease_renew(
     state: State<'_, ConnectorsState>,
@@ -111,6 +124,7 @@ pub async fn connectors_runtime_lease_renew(
     state.renew_runtime_lease(&owner_id, ttl_ms)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_runtime_lease_release(
     state: State<'_, ConnectorsState>,
@@ -127,6 +141,7 @@ pub async fn connectors_runtime_lease_release(
 /// the handle is held across async commands).
 pub struct ConnectorsServer(pub Arc<AsyncMutex<Option<ServerHandle>>>);
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_start_server(
     app: AppHandle,
@@ -164,6 +179,7 @@ pub async fn connectors_start_server(
 ///
 /// Always binds loopback-only: an OAuth redirect target has no business being
 /// reachable off-box.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_ensure_server(
     app: AppHandle,
@@ -187,6 +203,7 @@ pub async fn connectors_ensure_server(
     Ok(bound)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_stop_server(
     state: State<'_, ConnectorsState>,
@@ -214,7 +231,7 @@ pub async fn connectors_stop_server(
 /// self-reconnect loop — leak and keep delivering duplicate inbound events.
 /// The connector bootstrap calls this ONCE before opening any adapter so the
 /// previous load's leaked sockets are reaped first.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_reset_all_ws() -> Result<u32, String> {
     // Piggyback the one-time attachment-cache migration on this once-per-boot
     // reset: any plaintext copy an older build left behind is reaped, and any
@@ -247,7 +264,7 @@ pub async fn connectors_reset_all_ws() -> Result<u32, String> {
 // Task 21 — keyring commands
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_keyring_set(
     adapter_id: String,
     credential: String,
@@ -256,7 +273,7 @@ pub async fn connectors_keyring_set(
     super::keyring::set(&adapter_id, &credential, &value)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_keyring_get(
     adapter_id: String,
     credential: String,
@@ -264,7 +281,7 @@ pub async fn connectors_keyring_get(
     super::keyring::get(&adapter_id, &credential)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_keyring_delete(
     adapter_id: String,
     credential: String,
@@ -272,7 +289,7 @@ pub async fn connectors_keyring_delete(
     super::keyring::delete(&adapter_id, &credential)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_keyring_list(
     adapter_id: String,
     accounts: Vec<String>,
@@ -284,7 +301,7 @@ pub async fn connectors_keyring_list(
 // Task 22 — outbound HTTP client command
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, String> {
     super::http_client::http_request(req).await
 }
@@ -293,6 +310,7 @@ pub async fn connectors_http_request(req: TauriHttpRequest) -> Result<TauriHttpR
 // Task 23 — WebSocket client commands
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_ws_open(
     app: tauri::AppHandle,
@@ -309,7 +327,7 @@ pub async fn connectors_ws_open(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_ws_send(
     handle_id: String,
     data: Option<String>,
@@ -323,12 +341,12 @@ pub async fn connectors_ws_send(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_ws_close(handle_id: String) -> Result<(), String> {
     super::ws_client::ws_close(&handle_id).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_onebot_send(adapter_id: String, call_json: String) -> Result<(), String> {
     super::ws_server::send(&adapter_id, call_json).await
 }
@@ -340,6 +358,7 @@ pub async fn connectors_onebot_send(adapter_id: String, call_json: String) -> Re
 // so App Secret never crosses the IPC boundary.
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn connectors_lark_ws_open(
     app: tauri::AppHandle,
@@ -349,7 +368,7 @@ pub async fn connectors_lark_ws_open(
     super::lark_ws::open(emitter, adapter_id).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_lark_ws_close(handle_id: String) -> Result<(), String> {
     super::lark_ws::close(&handle_id).await
 }
@@ -363,7 +382,7 @@ pub async fn connectors_lark_ws_close(handle_id: String) -> Result<(), String> {
 // client dialed in (and since when).
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_onebot_probe() -> Result<Vec<super::types::OneBotLiveClient>, String> {
     Ok(super::ws_server::live_clients())
 }
@@ -372,7 +391,7 @@ pub async fn connectors_onebot_probe() -> Result<Vec<super::types::OneBotLiveCli
 // Task 24 — attachment cache command
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_attachment_fetch(
     adapter_id: String,
     remote_ref: String,
@@ -386,7 +405,7 @@ pub async fn connectors_attachment_fetch(
 /// List every readable cache envelope. The renderer diffs this against its
 /// `connectorAttachments` rows to find orphaned blobs (files whose row was
 /// dropped) without trusting a client-side size or age.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_attachment_list() -> Result<Vec<super::attachments::AttachmentEntry>, String>
 {
     tokio::task::spawn_blocking(super::attachments::list_attachments)
@@ -397,7 +416,7 @@ pub async fn connectors_attachment_list() -> Result<Vec<super::attachments::Atta
 /// Batch-delete cache entries by key. Callers only drop their Dexie row once
 /// the key comes back in `deleted`; anything in `failed` goes to the cleanup
 /// ledger for retry.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_attachment_delete(
     cache_keys: Vec<String>,
 ) -> Result<super::attachments::AttachmentCleanupReport, String> {
@@ -408,7 +427,7 @@ pub async fn connectors_attachment_delete(
 
 /// Drop every cached attachment belonging to one adapter instance — used when
 /// an instance is removed so its media does not outlive it.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_attachment_evict_adapter(
     adapter_id: String,
 ) -> Result<super::attachments::AttachmentCleanupReport, String> {
@@ -420,7 +439,7 @@ pub async fn connectors_attachment_evict_adapter(
 /// Reap expired entries and enforce the total-bytes ceiling, evicting the
 /// least recently used entries first. Sizes come from the envelopes, so the
 /// budget holds regardless of what the caller believed a file weighed.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_attachment_enforce_budget(
     max_total_bytes: u64,
 ) -> Result<super::attachments::AttachmentCleanupReport, String> {
@@ -433,7 +452,7 @@ pub async fn connectors_attachment_enforce_budget(
 /// larger than `max_bytes`). Renderer-side inlining (e.g. Matrix small-image
 /// vision path) uses this instead of raw filesystem access — the webview's fs
 /// scope does not cover the connector cache dir.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_attachment_read(
     adapter_id: String,
     remote_ref: String,
@@ -442,21 +461,21 @@ pub async fn connectors_attachment_read(
     super::attachments::read_attachment_base64(&adapter_id, &remote_ref, max_bytes)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_media_upload(
     req: super::types::ConnectorMediaUploadRequest,
 ) -> Result<String, String> {
     super::media_upload::upload_media(req).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_encrypted_media_upload(
     req: super::types::MatrixEncryptedMediaUploadRequest,
 ) -> Result<super::types::MatrixEncryptedMediaUploadResponse, String> {
     super::media_upload::upload_matrix_encrypted_media(req).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_encrypted_media_fetch(
     req: super::types::MatrixEncryptedMediaFetchRequest,
 ) -> Result<super::attachments::AttachmentRef, String> {
@@ -466,75 +485,75 @@ pub async fn connectors_matrix_encrypted_media_fetch(
 /// Discord multipart media upload — fetch each source URL and POST the bytes as
 /// `multipart/form-data` to `/channels/{id}/messages`, returning the created
 /// message id. Handles voice messages via the IS_VOICE_MESSAGE flag.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_discord_upload(
     req: super::discord_upload::ConnectorDiscordUploadRequest,
 ) -> Result<String, String> {
     super::discord_upload::upload(req).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_crypto_init(
     req: super::matrix_crypto::MatrixCryptoInitRequest,
 ) -> Result<(), String> {
     super::matrix_crypto::matrix_crypto_init(req).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_crypto_close(adapter_id: String) -> Result<(), String> {
     super::matrix_crypto::matrix_crypto_close(&adapter_id).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_crypto_outgoing_requests(
     adapter_id: String,
 ) -> Result<Vec<super::matrix_crypto::MatrixCryptoOutgoingRequest>, String> {
     super::matrix_crypto::matrix_crypto_outgoing_requests(adapter_id).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_crypto_mark_request_sent(
     req: super::matrix_crypto::MatrixCryptoMarkSentRequest,
 ) -> Result<(), String> {
     super::matrix_crypto::matrix_crypto_mark_request_sent(req).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_crypto_receive_sync_changes(
     req: super::matrix_crypto::MatrixCryptoReceiveSyncRequest,
 ) -> Result<(), String> {
     super::matrix_crypto::matrix_crypto_receive_sync_changes(req).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_crypto_decrypt_event(
     req: super::matrix_crypto::MatrixCryptoDecryptRequest,
 ) -> Result<super::matrix_crypto::MatrixCryptoDecryptResponse, String> {
     super::matrix_crypto::matrix_crypto_decrypt_event(req).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_crypto_encrypt_event(
     req: super::matrix_crypto::MatrixCryptoEncryptRequest,
 ) -> Result<super::matrix_crypto::MatrixCryptoEncryptResponse, String> {
     super::matrix_crypto::matrix_crypto_encrypt_event(req).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_crypto_share_room_key(
     req: super::matrix_crypto::MatrixCryptoShareRoomKeyRequest,
 ) -> Result<Vec<super::matrix_crypto::MatrixCryptoOutgoingRequest>, String> {
     super::matrix_crypto::matrix_crypto_share_room_key(req).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_crypto_update_tracked_users(
     req: super::matrix_crypto::MatrixCryptoTrackUsersRequest,
 ) -> Result<(), String> {
     super::matrix_crypto::matrix_crypto_update_tracked_users(req).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_matrix_crypto_get_missing_sessions(
     req: super::matrix_crypto::MatrixCryptoMissingSessionsRequest,
 ) -> Result<Vec<super::matrix_crypto::MatrixCryptoOutgoingRequest>, String> {
@@ -549,7 +568,7 @@ pub async fn connectors_matrix_crypto_get_missing_sessions(
 // round-trip and returns the opaque `file_key` / `image_key`.
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_lark_upload_file(
     access_token: String,
     source_url: String,
@@ -567,7 +586,7 @@ pub async fn connectors_lark_upload_file(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_lark_upload_image(
     access_token: String,
     source_url: String,

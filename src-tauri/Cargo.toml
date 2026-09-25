@@ -119,7 +119,7 @@ cognia-problem = { path = "../crates/cognia-problem", features = ["axum"] }
 cognia-subscription = { path = "../crates/cognia-subscription", features = ["tauri-host"] }
 # ADR-0067 Tier B — Platform Connectors (matrix E2EE stack). Re-aliased as
 # `crate::connectors`; the BusEventEmitter impl stays in companion_api.
-cognia-connectors = { path = "../crates/cognia-connectors" }
+cognia-connectors = { path = "../crates/cognia-connectors", features = ["tauri-host"] }
 # ADR-0067 Tier B — plugin runtime (wasmtime/cranelift). Re-aliased as
 # `crate::plugin_api`; the vscode LSP host's sidecar-dir resolver is
 # registered from run().

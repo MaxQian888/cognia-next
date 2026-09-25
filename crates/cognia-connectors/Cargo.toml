@@ -17,11 +17,19 @@ publish.workspace = true
 name = "cognia_connectors"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the Tauri command shells that take `State`/`AppHandle` and the
+# `AppHandleEmitter` that forwards server events to the renderer. Off by
+# default so the connectors build and test Tauri-free; only `src-tauri`
+# enables it.
+default = []
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 cognia-secrets = { path = "../cognia-secrets" }
 cognia-net = { path = "../cognia-net" }
 cognia-instrument = { path = "../cognia-instrument" }
-tauri = { workspace = true }
+tauri = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 axum = { workspace = true, features = ["macros", "ws"] }

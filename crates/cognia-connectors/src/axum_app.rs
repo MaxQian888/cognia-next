@@ -57,9 +57,12 @@ pub trait EventEmitter: Send + Sync + 'static {
     }
 }
 
-/// Production emitter — forwards to the renderer via Tauri events.
+/// Production emitter — forwards to the renderer via Tauri events. Behind
+/// `tauri-host` (ADR-0196); the server only knows [`EventEmitter`].
+#[cfg(feature = "tauri-host")]
 pub struct AppHandleEmitter(pub tauri::AppHandle);
 
+#[cfg(feature = "tauri-host")]
 impl EventEmitter for AppHandleEmitter {
     fn emit(&self, topic: &str, payload: serde_json::Value) {
         use tauri::Emitter;
