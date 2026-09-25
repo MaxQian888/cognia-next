@@ -53,7 +53,15 @@ describe("buildVisualOutputSection", () => {
 
   it("names A2UI only when A2UI is enabled for the send", () => {
     expect(buildVisualOutputSection(inApp)).toContain("A2UI")
-    expect(buildVisualOutputSection({ artifacts: "tools", a2ui: false })).not.toContain("A2UI")
+    expect(buildVisualOutputSection(imThread)).toContain("A2UI Chart")
+    // Every artifact route, including the no-dock one an IM bot that opted out
+    // of interactive cards lands on.
+    for (const artifacts of ["tools", "fenced", "disabled"] as const) {
+      expect(buildVisualOutputSection({ artifacts, a2ui: false })).not.toContain("A2UI")
+    }
+    expect(buildVisualOutputSection({ artifacts: "disabled", a2ui: false })).toContain(
+      "markdown table"
+    )
   })
 
   it("tells the model when NOT to draw anything at all", () => {

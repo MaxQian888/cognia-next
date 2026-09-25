@@ -86,10 +86,19 @@ export function buildVisualOutputSection(channels: VisualOutputChannels): string
       "- **Editable documents**: answer inline; direct canvas authoring is unavailable."
     )
   } else {
+    // An A2UI Chart is offered only when A2UI is on for this send: a bot that
+    // opted out of interactive cards has no A2UI tools to draw one with.
     lines.push(
-      "- **Quantitative**: prefer an A2UI Chart when this channel supports it; otherwise",
-      "  use a compact markdown table. There is no artifact dock or permitted authoring",
-      "  route here, so never emit raw chart JSON or HTML.",
+      ...(channels.a2ui
+        ? [
+            "- **Quantitative**: prefer an A2UI Chart when this channel supports it; otherwise",
+            "  use a compact markdown table. There is no artifact dock or permitted authoring",
+            "  route here, so never emit raw chart JSON or HTML.",
+          ]
+        : [
+            "- **Quantitative**: use a compact markdown table. There is no artifact dock or",
+            "  permitted authoring route here, so never emit raw chart JSON or HTML.",
+          ]),
       "- **Editable documents**: answer inline; do not emit a canvas payload."
     )
   }
