@@ -206,13 +206,20 @@ pub fn resolve_git_workspace_relative_path(
 
 /// Seed the structurally-trusted directories at startup: appdata, the home
 /// config trees Claude Code / Codex / Gemini / Pi read & write, and the
-/// documents dir (the default export target). Called once from `lib.rs`
-/// `.setup`.
+/// documents dir (the default export target). Called once from the desktop
+/// boot (`src-tauri/src/startup/host_services.rs`).
+///
+/// `extra_roots` are further directories that are just as trusted but that
+/// only the caller can resolve: the app passes Pi's resolved config dir,
+/// because `$PI_CODING_AGENT_DIR` relocates it out of `~/.pi` entirely and
+/// resolving it is `cognia-agents`' job, not this crate's. (The other vendors'
+/// overrides — `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME` — are not seeded; that
+/// predates this and is deliberately left alone.) Empty entries are skipped.
 ///
 /// Anything missing here still *works* on desktop — `enforce_check_path` only
 /// hard-fails remote writes — but every access logs an `fs_shadow_denial`, and
 /// a paired companion device is blocked outright.
-pub fn seed_default_allowed_roots() {
+pub fn seed_default_allowed_roots(extra_roots: &[String]) {
     if let Some(data) = dirs::data_dir() {
         add_allowed_root(data.join("cognia").to_string_lossy().to_string());
     }
@@ -221,13 +228,10 @@ pub fn seed_default_allowed_roots() {
             add_allowed_root(home.join(sub).to_string_lossy().to_string());
         }
     }
-    // `$PI_CODING_AGENT_DIR` relocates Pi's config tree out of `~/.pi`
-    // entirely, so seed the resolved dir too. (The other vendors' overrides —
-    // `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME` — are likewise unseeded above; that
-    // predates this and is deliberately left alone here.)
-    let pi_agent_dir = cognia_agents::paths::vendor_roots().pi_agent_dir;
-    if !pi_agent_dir.is_empty() {
-        add_allowed_root(pi_agent_dir);
+    for root in extra_roots {
+        if !root.is_empty() {
+            add_allowed_root(root.clone());
+        }
     }
     if let Some(docs) = dirs::document_dir() {
         add_allowed_root(docs.to_string_lossy().to_string());
@@ -2456,9 +2460,22 @@ mod tests {
             &folder.join("inside.txt").to_string_lossy()
         ));
 
+        // Boot seeding: a caller-resolved extra root (Pi's relocated config dir
+        // in the app) is trusted like the built-in ones; an empty entry, which
+        // is what an unset vendor dir resolves to, is skipped rather than
+        // registered as a root.
+        let relocated = make_sandbox("registry-extra-root");
+        std::fs::write(relocated.join("settings.json"), "{}").unwrap();
+        seed_default_allowed_roots(&[relocated.to_string_lossy().to_string(), String::new()]);
+        assert!(is_path_allowed(
+            &relocated.join("settings.json").to_string_lossy()
+        ));
+        assert!(!allowed_roots_snapshot().iter().any(String::is_empty));
+
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&folder);
+        let _ = std::fs::remove_dir_all(&relocated);
     }
 
     #[test]

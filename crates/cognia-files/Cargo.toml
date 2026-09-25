@@ -41,8 +41,6 @@ log.workspace = true
 # The async command shells hand blocking IO to `spawn_blocking`; `macros` is
 # for the `#[tokio::test]` in this file.
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "sync", "time"] }
-# The pi-agent vendor root feeds skill scanning.
-cognia-agents = { path = "../cognia-agents" }
 # The command shells only; the fns stay in the `files` submodule (E0255).
 tauri = { workspace = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
 

@@ -13,8 +13,9 @@
 //!
 //! The allowed-roots and remote-git-workspace registries are process-global
 //! `OnceLock`s, deliberately not Tauri managed state: the headless server and
-//! the desktop shell seed the same process. `app_lib`'s setup still calls
-//! `files::seed_default_allowed_roots()`, now through this crate.
+//! the desktop shell seed the same process. The desktop boot calls
+//! `files::seed_default_allowed_roots(..)` through this crate, passing the
+//! vendor roots only `cognia-agents` can resolve.
 
 //! Ten items that were `pub(crate)` inside `app_lib` are `pub` here — the
 //! `companion_api` RPC layer and `codeserver` call them and stayed app-side.

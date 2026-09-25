@@ -3,7 +3,6 @@
   "findings": [
     "direct-only: cognia-subscription depends on keyring",
     "direct-only: cognia-terminal depends on keyring",
-    "layer: cognia-files -> cognia-agents",
     "layer: cognia-observability -> cognia-automation",
     "layer: cognia-plugin-runtime -> cognia-automation",
     "layer: cognia-plugin-runtime -> cognia-connectors",

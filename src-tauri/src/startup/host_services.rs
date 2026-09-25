@@ -51,9 +51,12 @@ pub(crate) fn install(app: &tauri::App) {
     });
 
     // Seed the fs allowed-roots registry: app data, the agent config trees and
-    // Documents. Pure in-memory inserts; the renderer adds the active
-    // workspace roots once it loads.
-    crate::files::seed_default_allowed_roots();
+    // Documents, plus Pi's config dir wherever `$PI_CODING_AGENT_DIR` puts it.
+    // Pure in-memory inserts; the renderer adds the active workspace roots
+    // once it loads.
+    crate::files::seed_default_allowed_roots(&[
+        crate::agents::paths::vendor_roots().pi_agent_dir,
+    ]);
 
     // Mirror the narrow static backup scope in the dynamic scope used by the
     // atomic stream helper; existing deny patterns still win.
