@@ -24,6 +24,7 @@ jest.mock("@xyflow/react", () => ({
         data-pannable={String(props.pannable)}
         data-zoomable={String(props.zoomable)}
         data-color={nodeColor}
+        data-margin-bottom={String((props.style as { marginBottom?: number })?.marginBottom)}
         className={String(props.className ?? "")}
       />
     )
@@ -31,7 +32,7 @@ jest.mock("@xyflow/react", () => ({
 }))
 
 // Re-import after the mock is installed.
-import { PerfMiniMap, PERF_MINIMAP_FLAT_COLOR } from "./minimap-perf"
+import { MINIMAP_BOTTOM_OFFSET_PX, PerfMiniMap, PERF_MINIMAP_FLAT_COLOR } from "./minimap-perf"
 
 beforeEach(() => {
   _lastMinimapProps = null
@@ -89,6 +90,18 @@ describe("PerfMiniMap", () => {
     expect(queryByTestId("minimap")).not.toBeInTheDocument()
     expect(_lastMinimapProps).toBeNull()
     expect(renderCount).toBe(0)
+  })
+
+  it("sits above the canvas toolbar's bottom band, live and frozen alike", () => {
+    // In React Flow's corner it slid under the toolbar's right end on any
+    // canvas narrower than the two side by side.
+    const { getByTestId, rerender } = render(<PerfMiniMap degraded={false} nodeColor={liveColor} />)
+    expect(getByTestId("minimap")).toHaveAttribute(
+      "data-margin-bottom",
+      String(MINIMAP_BOTTOM_OFFSET_PX)
+    )
+    rerender(<PerfMiniMap degraded frozen nodeColor={liveColor} />)
+    expect(getByTestId("minimap-frozen").style.bottom).toBe(`${MINIMAP_BOTTOM_OFFSET_PX}px`)
   })
 
   it("mounts the live MiniMap again once frozen clears", () => {

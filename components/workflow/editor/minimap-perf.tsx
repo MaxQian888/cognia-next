@@ -45,15 +45,25 @@ function flatColor(): string {
   return PERF_MINIMAP_FLAT_COLOR
 }
 
+/**
+ * Bottom offset that lifts the minimap clear of the canvas toolbar, which
+ * owns the bottom band (`bottom-4` + a 42px capsule). Left in React Flow's
+ * corner, the minimap sat under the toolbar's right end whenever the canvas
+ * was narrower than the two side by side — most editor layouts.
+ */
+export const MINIMAP_BOTTOM_OFFSET_PX = 68
+
 // React Flow's default minimap footprint + panel offset, mirrored so the
 // frozen placeholder sits exactly where the live minimap does.
 const FROZEN_PLACEHOLDER_STYLE: React.CSSProperties = {
   position: "absolute",
-  bottom: 15,
+  bottom: MINIMAP_BOTTOM_OFFSET_PX,
   right: 15,
   width: 200,
   height: 150,
 }
+
+const LIVE_MINIMAP_STYLE: React.CSSProperties = { marginBottom: MINIMAP_BOTTOM_OFFSET_PX }
 
 function PerfMiniMapInner({ degraded, frozen, nodeColor, className }: PerfMiniMapProps) {
   const props = useMemo(() => {
@@ -84,7 +94,13 @@ function PerfMiniMapInner({ degraded, frozen, nodeColor, className }: PerfMiniMa
     )
   }
 
-  return <MiniMap position="bottom-right" {...(props as React.ComponentProps<typeof MiniMap>)} />
+  return (
+    <MiniMap
+      position="bottom-right"
+      style={LIVE_MINIMAP_STYLE}
+      {...(props as React.ComponentProps<typeof MiniMap>)}
+    />
+  )
 }
 
 export const PerfMiniMap = memo(PerfMiniMapInner)

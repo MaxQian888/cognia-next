@@ -5,6 +5,9 @@ import { render, screen, renderHook } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ReactNode } from "react"
 import enMessages from "@/i18n/messages/en.json"
+import enCapabilities from "@/i18n/messages/en/workflows/capabilities.json"
+import zhCapabilities from "@/i18n/messages/zh-CN/workflows/capabilities.json"
+import { CORE_CAPABILITY_IDS } from "@/lib/platform/capabilities"
 
 // Deterministic paired-device rows: mock the liveQuery layer itself so the
 // hook sees a synchronous snapshot (dexie-react-hooks needs a real Dexie
@@ -96,6 +99,19 @@ describe("useMissingNodeCapabilities", () => {
       }
     )
     expect(revoked.current?.satisfiedRemotely).toBe(false)
+  })
+})
+
+describe("capability display names", () => {
+  // A node that needs `browser` or `pro-ide` put a raw MISSING_MESSAGE into
+  // its tooltip, and flooded the console, because the table had drifted
+  // behind the append-only id list.
+  it.each([
+    ["en", enCapabilities.names],
+    ["zh-CN", zhCapabilities.names],
+  ])("names every core capability in %s", (_locale, names) => {
+    const missing = CORE_CAPABILITY_IDS.filter((id) => !(id in names))
+    expect(missing).toEqual([])
   })
 })
 

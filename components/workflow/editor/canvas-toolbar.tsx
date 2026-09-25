@@ -290,13 +290,23 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarPro
       radius="pill"
       elevation={2}
       data-testid="wf-canvas-toolbar"
-      className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 border backdrop-blur"
+      // Capped to the canvas: a narrow pane (the phone, or a squeezed
+      // editor column) scrolls the row sideways instead of spilling past
+      // the canvas edges.
+      className="absolute bottom-4 left-1/2 z-10 flex max-w-[calc(100%-2rem)] -translate-x-1/2 border backdrop-blur"
     >
       <Controls
         showZoom={false}
         showFitView={false}
         showInteractive={false}
-        className="relative! inset-auto! flex items-center gap-0.5 border-none! bg-transparent! px-1.5 py-1"
+        // React Flow lays `.react-flow__controls` out as a column unless it
+        // carries `horizontal`; without this the "capsule" stacked fourteen
+        // buttons into a pillar that grew up into the middle of the canvas.
+        orientation="horizontal"
+        // `m-0!`: `.react-flow__panel` adds a 15px margin that made the
+        // capsule 72px tall. The row scrolls (no scrollbar) when capped, and
+        // its children keep their 32px hit area instead of flex-shrinking.
+        className="relative! inset-auto! m-0! flex max-w-full min-w-0 items-center gap-0.5 overflow-x-auto! border-none! bg-transparent! px-1.5 py-1 [scrollbar-width:none] [&>*]:shrink-0"
       >
         <ToolbarButton
           icon={Plus}

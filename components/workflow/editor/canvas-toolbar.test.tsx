@@ -19,8 +19,14 @@ const mockRf = {
 
 jest.mock("@xyflow/react", () => ({
   __esModule: true,
-  Controls: ({ children, ...props }: React.ComponentProps<"div">) => (
-    <div {...props}>{children}</div>
+  Controls: ({
+    children,
+    orientation,
+    ...props
+  }: React.ComponentProps<"div"> & { orientation?: string }) => (
+    <div data-testid="rf-controls" data-orientation={orientation ?? "vertical"} {...props}>
+      {children}
+    </div>
   ),
   useReactFlow: () => mockRf,
   useOnViewportChange: () => undefined,
@@ -79,6 +85,18 @@ describe("CanvasToolbar", () => {
   it("renders the capsule with every core control", () => {
     renderToolbar()
     expect(screen.getByTestId("wf-canvas-toolbar")).toBeInTheDocument()
+  })
+
+  it("lays the capsule out as one row along the bottom, not a pillar up the canvas", () => {
+    // React Flow's Controls default to a column; without `horizontal` and with
+    // the panel's 15px margin the capsule stood 450px tall mid-canvas.
+    renderToolbar()
+    const row = screen.getByTestId("rf-controls")
+    expect(row).toHaveAttribute("data-orientation", "horizontal")
+    expect(row.className).toContain("m-0!")
+    // Capped to the canvas; a narrow pane scrolls the row instead of clipping.
+    expect(screen.getByTestId("wf-canvas-toolbar").className).toContain("max-w-[calc(100%-2rem)]")
+    expect(row.className).toContain("overflow-x-auto!")
   })
 
   it("declares a surface tier instead of hardcoding popover tint and shadow", () => {
