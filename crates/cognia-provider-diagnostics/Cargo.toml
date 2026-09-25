@@ -1,0 +1,40 @@
+# ADR-0196 P2 — the provider balance-script sandbox (QuickJS) and its
+# balance-token storage, moved out of `cognia-net`. `cognia-net` is a
+# foundation crate every networked crate links, so it must not carry a C
+# JavaScript engine or the credential store; this platform crate owns both.
+# The three `provider_diagnostics_*` command shells stay in
+# `src-tauri/src/provider_diagnostics.rs`, which keeps this crate tauri-free.
+[package]
+name = "cognia-provider-diagnostics"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Provider balance-script diagnostics: user scripts run in a host-less QuickJS sandbox and only describe bounded HTTP requests, which Rust validates and sends."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_provider_diagnostics"
+path = "src/lib.rs"
+
+[dependencies]
+# Proxy policy + the crypto-provider guard for the outbound client.
+cognia-net = { path = "../cognia-net" }
+# Balance tokens live in the OS credential store.
+cognia-secrets = { path = "../cognia-secrets" }
+# The sandbox. Nothing else in the workspace links it.
+rquickjs = "0.12.2"
+# `stream` for the bounded body read; the TLS and proxy features come from
+# `cognia-net`'s declaration of the same reqwest.
+reqwest = { workspace = true, features = ["stream"] }
+futures-util = { workspace = true }
+tokio = { workspace = true, features = ["net", "time"] }
+url.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

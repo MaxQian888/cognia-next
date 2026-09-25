@@ -88,6 +88,9 @@ cognia-secrets = { path = "../crates/cognia-secrets" }
 # ADR-0067 Tier B prep — proxy_config foundation (state + detection + WSS
 # dialer); `proxy_config/` stays as an app-side facade for the command shells.
 cognia-net = { path = "../crates/cognia-net" }
+# ADR-0196 P2 — the balance-script sandbox; `provider_diagnostics.rs` keeps the
+# three command shells and re-exports the crate.
+cognia-provider-diagnostics = { path = "../crates/cognia-provider-diagnostics" }
 # Native local-video metadata, frame extraction, trimming, and analysis.
 cognia-media = { path = "../crates/cognia-media" }
 # ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased

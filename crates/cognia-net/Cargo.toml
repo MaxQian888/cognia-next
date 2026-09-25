@@ -45,11 +45,6 @@ futures-util = { workspace = true }
 sysinfo = { workspace = true, features = ["system"] }
 dirs.workspace = true
 regex.workspace = true
-# ADR-0067 Tier C — `provider_diagnostics` sandboxes user-authored balance
-# scripts in QuickJS. Nothing else in the tree links it.
-rquickjs = "0.12.2"
-# Balance-token storage for the diagnostics scripts.
-cognia-secrets = { path = "../cognia-secrets" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

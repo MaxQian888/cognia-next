@@ -2328,14 +2328,12 @@ name = "cognia-net"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
- "cognia-secrets",
  "dirs 6.0.0",
  "futures-util",
  "hex",
  "rcgen",
  "regex",
  "reqwest 0.13.4",
- "rquickjs",
  "rustls",
  "rustls-native-certs",
  "serde",
@@ -2390,6 +2388,7 @@ dependencies = [
  "cognia-ocr",
  "cognia-plugin-runtime",
  "cognia-problem",
+ "cognia-provider-diagnostics",
  "cognia-sandbox-pool",
  "cognia-scheduling",
  "cognia-secrets",
@@ -2666,6 +2665,21 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "cognia-provider-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "cognia-net",
+ "cognia-secrets",
+ "futures-util",
+ "reqwest 0.13.4",
+ "rquickjs",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
 ]
 
 [[package]]

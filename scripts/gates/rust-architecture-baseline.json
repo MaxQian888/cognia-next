@@ -3,9 +3,7 @@
   "findings": [
     "direct-only: cognia-subscription depends on keyring",
     "direct-only: cognia-terminal depends on keyring",
-    "forbidden: cognia-net reaches rquickjs",
     "layer: cognia-files -> cognia-agents",
-    "layer: cognia-net -> cognia-secrets",
     "layer: cognia-observability -> cognia-automation",
     "layer: cognia-plugin-runtime -> cognia-automation",
     "layer: cognia-plugin-runtime -> cognia-connectors",

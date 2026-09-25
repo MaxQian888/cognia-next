@@ -51,6 +51,9 @@ members = [
   # cognia-cli signs Character Packs with it and cognia-environment digests
   # EnvironmentSpecs with it (ADR-0182).
   "crates/cognia-canonical-json",
+  # ADR-0196 P2 — the provider balance-script sandbox (QuickJS) and its token
+  # storage, out of the foundation crate `cognia-net`.
+  "crates/cognia-provider-diagnostics",
   # ADR-0182 — runtime environments: EnvironmentSpec, the two-level image
   # catalog, admission policy and the tenant environment store.
   "crates/cognia-environment",

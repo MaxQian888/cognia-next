@@ -1,32 +1,30 @@
-//! ADR-0067 Tier C facade — the provider balance-script sandbox moved to
-//! [`cognia_net::provider_diagnostics`]; only the three `#[tauri::command]`
-//! shells stay here, mirroring the `proxy_config` facade next door.
-//!
-//! Keeping the shells app-side is what stops `cognia-net` — a foundation crate
-//! linked by eight others — from gaining a `tauri` dependency. The move also
-//! takes `rquickjs` (a C-compiled JS engine, used by nothing else in `app_lib`)
-//! out of the app crate's dependency graph.
+//! Facade over [`cognia_provider_diagnostics`] — the provider balance-script
+//! sandbox. Only the three `#[tauri::command]` shells live here, which keeps
+//! the crate tauri-free (ADR-0196). The sandbox first moved into `cognia-net`
+//! (ADR-0067 Tier C), which put a C-compiled JS engine and the credential
+//! store in a foundation crate every networked crate links; it has its own
+//! platform crate now.
 
-pub use cognia_net::provider_diagnostics::*;
+pub use cognia_provider_diagnostics::*;
 
 #[tauri::command]
 pub fn provider_diagnostics_migrate_balance_token(
     source_id: String,
     token: String,
 ) -> Result<String, String> {
-    cognia_net::provider_diagnostics::migrate_balance_token(source_id, token)
+    cognia_provider_diagnostics::migrate_balance_token(source_id, token)
 }
 
 #[tauri::command]
 pub fn provider_diagnostics_clear_balance_token(source_id: String) -> Result<(), String> {
-    cognia_net::provider_diagnostics::clear_balance_token(source_id)
+    cognia_provider_diagnostics::clear_balance_token(source_id)
 }
 
 #[tauri::command]
 pub async fn provider_diagnostics_run_balance_script(
     request: BalanceScriptRunRequest,
 ) -> Result<BalanceScriptRunResult, String> {
-    cognia_net::provider_diagnostics::run_balance_script_timed(request).await
+    cognia_provider_diagnostics::run_balance_script_timed(request).await
 }
 
 #[cfg(test)]
@@ -66,6 +64,6 @@ mod tests {
     #[test]
     fn the_crate_types_are_re_exported_under_the_old_path() {
         let _: fn(BalanceScriptRunRequest) -> _ =
-            cognia_net::provider_diagnostics::run_balance_script_timed;
+            cognia_provider_diagnostics::run_balance_script_timed;
     }
 }
