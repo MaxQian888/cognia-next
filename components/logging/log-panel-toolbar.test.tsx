@@ -162,6 +162,16 @@ describe("LogPanelToolbar — primary bar", () => {
     expect(screen.getByPlaceholderText("Regex pattern...")).toBeInTheDocument()
   })
 
+  it("sizes the level filters to their content so a wide stats block wraps instead", () => {
+    // jsdom has no layout, so pin the flex contract itself: with a 0% basis
+    // (`flex-1`) the row never wrapped and the filters collapsed to "All".
+    renderToolbar()
+    const filters = screen.getByTestId("log-panel-level-filters")
+    expect(filters).toHaveClass("flex-auto", "min-w-0", "overflow-x-auto")
+    expect(filters).not.toHaveClass("flex-1")
+    expect(filters.parentElement).toHaveClass("flex-wrap")
+  })
+
   it("flips advanced-filters aria-label between Show and Hide", () => {
     const { rerender } = renderToolbar({ showAdvancedFilters: false })
     expect(screen.getByLabelText("More filters")).toBeInTheDocument()

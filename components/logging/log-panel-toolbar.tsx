@@ -725,13 +725,18 @@ function LogPanelToolbarImpl({
       )}
 
       {/* ── Layer 2: Level filters + stats/pagination ──
-          One row, two halves. The level filters scroll horizontally when they
-          run out of room rather than pushing the stats off-screen; below `md`
-          the whole thing wraps and the stats take the second line. */}
+          One row, two halves. The filters size to their content (`flex-auto`),
+          so when both halves do not fit the row wraps and the stats take the
+          second line; the filters only scroll once they are alone on a line
+          narrower than they are (a phone). With a `0%` basis the row never
+          wrapped: a wide stats block crushed the filters to a 27px sliver
+          showing "All" and nothing else, so Error/Warning/Info could not be
+          reached until the stats text happened to get longer again. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 pb-2">
         <div
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex min-w-0 flex-auto items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           role="group"
+          data-testid="log-panel-level-filters"
           aria-label={t("panel.levelFilterGroup")}
         >
           {/* All tab */}
@@ -811,8 +816,8 @@ function LogPanelToolbarImpl({
         </div>
 
         {/* `shrink` (not `shrink-0`): the stats block wraps internally, and it
-            can only do that if it is allowed to narrow. The level filters have
-            a `0%` basis, so they yield space first and scroll instead. */}
+            can only do that if it is allowed to narrow once it has a line of
+            its own. */}
         {statsSlot ? (
           <div className="ml-auto flex min-w-0 shrink items-center">{statsSlot}</div>
         ) : null}
