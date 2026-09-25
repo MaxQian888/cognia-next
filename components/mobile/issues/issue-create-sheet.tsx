@@ -79,17 +79,23 @@ export function IssueCreateSheet({ open, onOpenChange, projectId, projects }: Is
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto">
-        <SheetHeader className="px-0 pt-0">
-          <SheetTitle>{t("create.title")}</SheetTitle>
+      {/* Same frame as the detail sheet beside it: a bordered header and a
+          `px-4` body. The header's own padding was stripped (`px-0 pt-0`) and
+          nothing replaced it, so every field ran into the screen edge. */}
+      <SheetContent side="bottom" className="max-h-[85vh] gap-0 overflow-y-auto p-0">
+        <SheetHeader className="border-b px-4 py-3">
+          <SheetTitle className="text-left">{t("create.title")}</SheetTitle>
         </SheetHeader>
         {projects.length === 0 ? (
-          <p className="text-sm text-muted-foreground" data-testid="issues-mobile-create-no-project">
+          <p
+            className="px-4 py-4 text-sm text-muted-foreground"
+            data-testid="issues-mobile-create-no-project"
+          >
             {t("create.noProject")}
           </p>
         ) : (
           <form
-            className="flex flex-col gap-3"
+            className="flex flex-col gap-3 px-4 py-4"
             data-testid="issues-mobile-create"
             onSubmit={(event) => {
               event.preventDefault()
@@ -111,6 +117,7 @@ export function IssueCreateSheet({ open, onOpenChange, projectId, projects }: Is
             <div className="flex flex-col gap-1">
               <Label htmlFor="issue-mobile-create-project">{t("create.projectLabel")}</Label>
               <NativeSelect
+                wrapperClassName="w-full"
                 id="issue-mobile-create-project"
                 value={effectiveProjectId}
                 onChange={(event) => setIssueProjectId(event.target.value)}
@@ -127,6 +134,7 @@ export function IssueCreateSheet({ open, onOpenChange, projectId, projects }: Is
               <div className="flex flex-col gap-1">
                 <Label htmlFor="issue-mobile-create-status">{t("detail.status")}</Label>
                 <NativeSelect
+                wrapperClassName="w-full"
                   id="issue-mobile-create-status"
                   value={status}
                   onChange={(event) => setStatus(event.target.value as IssueStatus)}
@@ -142,6 +150,7 @@ export function IssueCreateSheet({ open, onOpenChange, projectId, projects }: Is
               <div className="flex flex-col gap-1">
                 <Label htmlFor="issue-mobile-create-priority">{t("detail.priority")}</Label>
                 <NativeSelect
+                wrapperClassName="w-full"
                   id="issue-mobile-create-priority"
                   value={priority}
                   onChange={(event) => setPriority(event.target.value as IssuePriority)}

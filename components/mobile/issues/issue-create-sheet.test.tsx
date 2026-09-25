@@ -56,6 +56,18 @@ describe("IssueCreateSheet", () => {
     expect(screen.getByTestId("issues-mobile-create-title")).toHaveValue("")
   })
 
+  it("insets the form from the screen edge, like the detail sheet", () => {
+    // The header's padding was stripped and nothing replaced it: every field
+    // ran edge to edge on a phone.
+    renderSheet()
+    expect(screen.getByTestId("issues-mobile-create")).toHaveClass("px-4")
+  })
+
+  it("insets the no-container note too", () => {
+    renderSheet({ projects: [] })
+    expect(screen.getByTestId("issues-mobile-create-no-project")).toHaveClass("px-4")
+  })
+
   it("lets the user pick another container", async () => {
     renderSheet()
     fireEvent.change(screen.getByTestId("issues-mobile-create-project"), { target: { value: "p2" } })
