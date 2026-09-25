@@ -118,6 +118,42 @@ describe("TemplateStudio", () => {
     expect(screen.getByText("tabs.library")).toBeInTheDocument()
   })
 
+  it("lays cards out by pane width, with the domain above the name", async () => {
+    catalogDefinitions = [
+      {
+        apiVersion: "cognia.dev/templates/v1",
+        id: "team.review",
+        domain: "agentTeam",
+        version: "1.0.0",
+        status: "published",
+        revision: 1,
+        metadata: { name: "Review Team", description: "Review changes" },
+        payload: {},
+        inputs: [],
+        dependencies: [],
+        capabilities: [],
+        compatibility: { platforms: ["mobile"] },
+        provenance: { source: "user", trust: "unsigned" },
+        contentHash: "sha256:review",
+        baselineHash: "sha256:review",
+        createdAt: "2026-07-30T00:00:00.000Z",
+        updatedAt: "2026-07-30T00:00:00.000Z",
+      },
+    ]
+    await act(async () => {
+      render(<TemplateStudio />)
+    })
+    // Viewport breakpoints cut the pane beside the inspector into 170px cards.
+    expect(screen.getByTestId("template-studio-grid").className).toContain(
+      "grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]"
+    )
+    const title = screen.getByText("Review Team")
+    const domain = screen.getByText("domains.agentTeam")
+    // Same column, domain first: the name keeps the card's full width.
+    expect(title.parentElement).toBe(domain.parentElement)
+    expect(domain.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it("selects a catalog definition from a deep link", async () => {
     catalogDefinitions = [
       {

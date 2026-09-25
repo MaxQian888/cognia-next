@@ -983,7 +983,13 @@ export function TemplateStudio() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="grid content-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {/* Columns follow the pane, not the viewport: beside the
+                      inspector, `xl:grid-cols-3` cut a 530px column into three
+                      170px cards and wrapped names over three lines. */}
+                  <div
+                    className="grid content-start gap-3 grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]"
+                    data-testid="template-studio-grid"
+                  >
                     {rows.map((definition) => (
                       <Card
                         key={`${definition.id}@${definition.version ?? definition.revision}`}
@@ -1004,9 +1010,14 @@ export function TemplateStudio() {
                         }}
                       >
                         <CardHeader className="pb-2">
-                          <div className="flex items-start justify-between gap-2">
-                            <CardTitle className="text-base">{definition.metadata.name}</CardTitle>
+                          {/* Domain above the name, not beside it: a "Subscription
+                              preset" badge took half the card and wrapped
+                              names like "Baichuan AI (百川智能)" over three lines. */}
+                          <div className="flex min-w-0 flex-col items-start gap-1.5">
                             <Badge variant="outline">{t(`domains.${definition.domain}`)}</Badge>
+                            <CardTitle className="min-w-0 text-base break-words">
+                              {definition.metadata.name}
+                            </CardTitle>
                           </div>
                         </CardHeader>
                         <CardContent className="space-y-2 text-sm">
