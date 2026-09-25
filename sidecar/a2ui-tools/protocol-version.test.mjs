@@ -1,5 +1,4 @@
-// Tests for the a2ui MCP protocol-version negotiation helper. Located under
-// `dispatch/` so it runs under the `sidecar:test:dispatch` glob (the standalone
+// Tests for the a2ui MCP protocol-version negotiation helper (the standalone
 // `sidecar/a2ui-mcp.mjs` is a boot script and can't be imported without
 // starting the server, so the negotiation logic lives in an importable module).
 
@@ -10,7 +9,7 @@ import {
   negotiateProtocolVersion,
   A2UI_MCP_PROTOCOL_VERSIONS,
   A2UI_MCP_PREFERRED_PROTOCOL_VERSION,
-} from "../a2ui-tools/protocol-version.mjs"
+} from "./protocol-version.mjs"
 
 test("echoes a supported client protocol version", () => {
   for (const v of A2UI_MCP_PROTOCOL_VERSIONS) {

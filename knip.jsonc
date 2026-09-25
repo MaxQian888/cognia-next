@@ -126,8 +126,15 @@
     },
     "services/workspace-runtime": {},
     "sidecar": {
-      // Packaged by Tauri and launched from the Rust bridge / spawned helpers.
-      "entry": ["a2ui-mcp.mjs", "codex-app-control/*.mjs"],
+      // Packaged by Tauri and launched from the Rust bridge / spawned helpers,
+      // plus the Pi extension (loaded by Pi) and every node --test suite (run by
+      // scripts/test/run-sidecar-tests.mjs, which knip cannot see through).
+      "entry": [
+        "*.mjs",
+        "codex-app-control/*.mjs",
+        "pi-extension/cognia-pi-extension.ts",
+        "**/*.test.{mjs,ts}",
+      ],
       "ignoreDependencies": [
         "@vscode/ripgrep",
         // Pulled in transitively by @langfuse/vercel-ai-sdk; pinned directly so

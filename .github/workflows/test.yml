@@ -468,6 +468,9 @@ jobs:
       - name: Run sidecar tests (Claude + VS Code ext host)
         run: pnpm sidecars:test
 
+      - name: Run live sidecar tests (real host + SDK subprocess, mock server)
+        run: pnpm sidecar:test:live
+
   build:
     name: Build Verification
     runs-on: ubuntu-latest

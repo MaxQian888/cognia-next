@@ -105,8 +105,6 @@ export const EXEMPTIONS = {
   "test:watch": "interactive jest — never runs unattended",
   "test:coverage": "jest coverage — owned by test.yml",
   "test:coverage:changed": "incremental coverage — owned by test.yml",
-  "sidecar:test:root":
-    "subsumed by the sidecars:test aggregate in test.yml after sidecars:build prepares every runtime",
   "tauri:frontend:check":
     "requires the Next.js static export and runs immediately after pnpm build in test.yml",
   "pet:corpus:test": "subset of pet:compat:test, which runs scripts/pet/*.test.mjs",
@@ -134,9 +132,8 @@ export const EXEMPTIONS = {
   "test:e2e:web-headless":
     "real-service playwright lane — owned by compose-e2e.yml, which brings the server/tls/web-headless-e2e compose profiles up before running it. Needs a live stack, so it can never run inside the fast gate matrix",
   "sidecar:test": "sidecar node --test suites — owned by test.yml via sidecars:test",
-  "sidecar:test:builtin": "sidecar node --test subset — owned by test.yml",
-  "sidecar:test:dispatch": "sidecar node --test subset — owned by test.yml",
-  "sidecar:test:lsp": "sidecar node --test subset — owned by test.yml",
+  "sidecar:test:live":
+    "sidecar suites that spawn the real host + Agent SDK subprocess against a mock server — owned by test.yml's sidecar job, after sidecars:test",
   "sidecar:vscode:test": "vscode ext host suite — owned by test.yml via sidecars:test",
   "sidecar:webclone:test": "webclone suite — owned by test.yml via sidecars:test",
   "sidecars:test": "aggregate sidecar suite — owned by test.yml",

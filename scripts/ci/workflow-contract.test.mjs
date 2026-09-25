@@ -22,6 +22,7 @@ test("CI workflows provision their clean-checkout prerequisites", async () => {
   assert.match(testWorkflow, /NODE_OPTIONS: "--max-old-space-size=3072"/)
   assert.match(testWorkflow, /--maxWorkers=4/)
   assert.match(testWorkflow, /sidecars:build[\s\S]*sidecars:test/)
+  assert.match(testWorkflow, /sidecars:test[\s\S]*sidecar:test:live/)
   assert.match(testWorkflow, /libpipewire-0\.3-dev/)
 })
 
