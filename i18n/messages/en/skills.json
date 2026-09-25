@@ -214,6 +214,8 @@
   "fallbackName": "Skill",
   "filter": {
     "all": "All",
+    "allCategories": "All categories ({count})",
+    "allSources": "All sources ({count})",
     "byCategory": "Category",
     "bySource": "Source",
     "byStatus": "Status",

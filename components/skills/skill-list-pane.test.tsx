@@ -99,6 +99,16 @@ describe("SkillListPane", () => {
     expect(items[1]).toHaveAttribute("data-active", "true")
   })
 
+  it("names each filter at rest instead of two identical 'All' labels", () => {
+    render(<SkillListPane {...baseProps} />)
+    expect(screen.getByLabelText("panel.selectSourceAria")).toHaveTextContent(
+      'filter.allSources:{"count":2}'
+    )
+    expect(screen.getByLabelText("panel.selectCategoryAria")).toHaveTextContent(
+      'filter.allCategories:{"count":2}'
+    )
+  })
+
   it("selecting a source resets category to all", async () => {
     const user = userEvent.setup()
     render(<SkillListPane {...baseProps} />)

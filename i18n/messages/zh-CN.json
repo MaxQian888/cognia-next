@@ -45262,6 +45262,8 @@
     "fallbackName": "技能",
     "filter": {
       "all": "全部",
+      "allCategories": "全部分类（{count}）",
+      "allSources": "全部来源（{count}）",
       "byCategory": "类别",
       "bySource": "来源",
       "byStatus": "状态",

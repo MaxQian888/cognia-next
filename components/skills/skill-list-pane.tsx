@@ -110,13 +110,18 @@ export function SkillListPane({
           value={filters.source}
           onValueChange={(v) => setFilters({ source: v as SkillSource | "all", category: "all" })}
         >
-          <SelectTrigger className="h-8 min-w-0 text-xs" aria-label={t("panel.selectSourceAria")}>
+          <SelectTrigger
+            className="h-8 w-full min-w-0 text-xs"
+            aria-label={t("panel.selectSourceAria")}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
+              {/* Two side-by-side selects both read "All (19)" at rest, so
+                  the resting label has to say which filter it is. */}
               <SelectItem value="all" className="text-xs">
-                {t("filter.all")} ({total})
+                {t("filter.allSources", { count: total })}
               </SelectItem>
               {SKILL_SOURCES.map((src) => (
                 <SelectItem key={src.id} value={src.id} className="text-xs">
@@ -130,13 +135,16 @@ export function SkillListPane({
           value={filters.category}
           onValueChange={(v) => setFilters({ category: v as SkillCategory | "all", source: "all" })}
         >
-          <SelectTrigger className="h-8 min-w-0 text-xs" aria-label={t("panel.selectCategoryAria")}>
+          <SelectTrigger
+            className="h-8 w-full min-w-0 text-xs"
+            aria-label={t("panel.selectCategoryAria")}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
               <SelectItem value="all" className="text-xs">
-                {t("filter.all")} ({total})
+                {t("filter.allCategories", { count: total })}
               </SelectItem>
               {SKILL_CATEGORIES.map((cat) => (
                 <SelectItem key={cat.id} value={cat.id} className="text-xs">
