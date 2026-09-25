@@ -51,7 +51,6 @@ export function StorageCleanupDialog({
   onCleanupComplete,
 }: StorageCleanupDialogProps) {
   const t = useTranslations("settings.data.cleanup")
-  const tCommon = useTranslations("common")
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState<StorageCategory[]>([])
   const [previewResult, setPreviewResult] = useState<CleanupResult | null>(null)
@@ -321,7 +320,7 @@ export function StorageCleanupDialog({
               </div>
             )}
             <DialogFooter>
-              <Button onClick={onClose}>{t("done") ?? tCommon("done")}</Button>
+              <Button onClick={onClose}>{t("done")}</Button>
             </DialogFooter>
           </div>
         )}

@@ -43,7 +43,6 @@
     "components/scheduler/payload-editors/mcp-picker.tsx",
     "components/scheduler/payload-editors/plan-payload-editor.tsx",
     "components/scheduler/payload-editors/team-payload-editor.tsx",
-    "components/scheduler/payload-editors/tool-picker.tsx",
     "components/settings/a2ui-section.tsx",
     "components/settings/a2ui/mcp-bridge-tab.tsx",
     "components/settings/appearance/vscode-import-dialog.tsx",

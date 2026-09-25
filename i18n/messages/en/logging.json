@@ -297,6 +297,7 @@
     "logRatePulse": "Live log stream activity",
     "logs": "logs",
     "logsPerMin": "logs/min",
+    "modulePlaceholder": "Module",
     "moreActions": "More actions",
     "moreFilters": {
       "hide": "Hide more filters",
@@ -372,6 +373,7 @@
       "tauri": "Tauri"
     },
     "stackTrace": "Stack Trace",
+    "timePlaceholder": "Time range",
     "timeRange15m": "Last 15m",
     "timeRange1h": "Last 1h",
     "timeRange24h": "Last 24h",

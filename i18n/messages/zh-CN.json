@@ -5855,9 +5855,11 @@
       "bodyFor": "切换至 {name}。请在确认前查看本次变更。",
       "cancel": "取消",
       "close": "关闭",
+      "codexBaseUrlNotPropagated": "不会应用 Base URL",
       "cogniaApplied": "已更新 Cognia。",
       "cogniaSection": "Cognia-next",
       "confirm": "执行切换",
+      "driftAbort": "切换期间该文件在磁盘上被修改，因此未写入任何内容。请重新打开此对话框再应用一次。",
       "noChange": "Cognia 的 API 密钥与 base URL 已与该服务商一致 — 无需重启 sidecar。",
       "notYetSupported": "尚未支持",
       "subscriptionActivated": "已从已登录账号激活 Anthropic 订阅。",
@@ -18376,6 +18378,7 @@
       "logRatePulse": "实时日志流活动",
       "logs": "条日志",
       "logsPerMin": "条/分钟",
+      "modulePlaceholder": "模块",
       "moreActions": "更多操作",
       "moreFilters": {
         "hide": "隐藏更多筛选",
@@ -18451,6 +18454,7 @@
         "tauri": "Tauri"
       },
       "stackTrace": "堆栈跟踪",
+      "timePlaceholder": "时间范围",
       "timeRange15m": "最近 15 分钟",
       "timeRange1h": "最近 1 小时",
       "timeRange24h": "最近 24 小时",
@@ -28956,6 +28960,7 @@
     "importing": "正在导入…",
     "includeApiKeys": "包含 API 密钥（不建议分享）",
     "inputPricing": "输入价格",
+    "installProvider": "安装 {provider}",
     "installed": "已安装",
     "installedModels": "已安装模型",
     "invalidBaseURL": "请输入有效的 HTTP 或 HTTPS Base URL。",
@@ -29273,6 +29278,7 @@
     "providerModels": "{provider} 模型",
     "providerName": "服务商名称",
     "providerNamePlaceholder": "我的服务商",
+    "providerNotRunning": "{provider} 未运行",
     "providerOff": "已关闭",
     "providerOn": "已开启",
     "providerSetup": "{provider} 设置",
@@ -29283,6 +29289,7 @@
     "pullFailed": "无法拉取「{model}」。",
     "pullModelHint": "拉取一个模型开始使用",
     "pullModelPlaceholder": "拉取模型（如 llama3.2）",
+    "pullModelToStart": "在上方拉取一个模型即可开始使用。",
     "pullStarting": "正在开始…",
     "quickActions": "快捷操作",
     "quickAdd": {
@@ -31991,6 +31998,21 @@
     "schedulerRunning": "运行中",
     "schedulerStopped": "调度器已停止",
     "scheduling": "正在安排...",
+    "scriptEditor": {
+      "args": "参数",
+      "argsDescription": "多个参数用空格分隔。",
+      "argsPlaceholder": "--verbose input.csv",
+      "code": "脚本",
+      "language": "语言",
+      "memoryLimitMb": "内存上限（MB）",
+      "sandbox": "在沙箱中运行",
+      "sandboxDescription": "将脚本与本机其他部分隔离，更安全；只有信任的脚本才建议关闭。",
+      "selectLanguage": "选择语言",
+      "test": "试运行",
+      "timeoutSeconds": "超时（秒）",
+      "workingDirectory": "工作目录",
+      "workingDirectoryPlaceholder": "可选。脚本运行所在的目录。"
+    },
     "scriptPreview": "脚本预览",
     "scriptTask": "脚本任务",
     "searchTasks": "搜索任务...",
@@ -32209,14 +32231,19 @@
     "timing": "时间",
     "title": "定时任务",
     "tools": {
+      "add": "添加",
+      "addCustomLabel": "按名称添加工具",
+      "addCustomPlaceholder": "mcp__server__tool",
       "createFailed": "定时任务创建失败",
       "createSuccess": "定时任务创建成功",
+      "customLabel": "自定义工具",
       "listEmpty": "未找到定时任务",
       "manageFailed": "任务操作失败",
       "manageSuccess": "任务操作完成",
       "promoteFailed": "提升任务失败",
       "promoteSuccess": "任务已提升为系统服务",
-      "reminderCreated": "提醒创建成功"
+      "reminderCreated": "提醒创建成功",
+      "remove": "移除 {name}"
     },
     "totalExecutions": "执行次数",
     "totalRuns": "总运行次数",
@@ -37868,6 +37895,7 @@
       "wechatOa": {
         "adapterCreated": "已添加微信公众号",
         "adapterUpdated": "已更新微信公众号",
+        "appCredentialsRequired": "请先填写 App ID 和 App Secret，再测试连接。",
         "appIdHelp": "公众号 → 设置 → 基本配置 → AppID。",
         "appIdLabel": "App ID",
         "appIdPlaceholder": "wx…",
@@ -41733,6 +41761,16 @@
           "zipFailed": "无法读取 .zip 压缩包。"
         },
         "import": "导入模型",
+        "importDialog": {
+          "cancel": "取消",
+          "description": "在此文件夹中找到 {count} 个模型，请选择要导入的模型。",
+          "importButton": "{count, plural, =0 {导入} other {导入 # 个模型}}",
+          "importing": "正在导入…",
+          "selectAll": "全选",
+          "selectedCount": "已选 {count} 个",
+          "summary": "已导入 {ok} 个模型{fail, plural, =0 {} other {，# 个失败}}",
+          "title": "导入 Live2D 模型"
+        },
         "importFolder": "导入文件夹",
         "importHint": "选择模型文件夹，或包含 .model3.json 的 .zip 压缩包。",
         "noModelHint": "在下方选择一个模型即可开始使用；在此之前宠物会保持矢量形象。",
@@ -42454,6 +42492,8 @@
         "title": "工作区约束"
       }
     },
+    "save": "保存",
+    "saved": "已保存",
     "searchPlaceholder": "搜索设置…",
     "sectionReset": {
       "button": "重置此分区",
@@ -45115,6 +45155,8 @@
       "import": "导入所选",
       "noFilesParsed": "未选中任何文件，或所选文件全部解析失败。",
       "pathLabel": "路径",
+      "pathLabelFull": "要扫描的文件夹",
+      "pathPlaceholder": "~/path/to/skills",
       "resourcesCount": "{count} 个资源",
       "scan": "运行扫描",
       "scanCodex": "扫描 ~/.agents/skills/",
@@ -45188,6 +45230,7 @@
       "tabPreview": "预览",
       "tags": "标签（用逗号分隔）",
       "tagsPlaceholder": "风格, 准确性",
+      "unnamedPreview": "未命名技能",
       "unsaved": "● 未保存",
       "validation": "校验",
       "version": "版本"
@@ -45827,7 +45870,8 @@
     "validation": {
       "cardBadge": "{count} 个问题",
       "empty": "没有验证问题。",
-      "tab": "验证"
+      "tab": "验证",
+      "unfielded": "通用"
     }
   },
   "slashCommands": {

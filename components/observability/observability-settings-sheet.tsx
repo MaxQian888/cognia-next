@@ -89,12 +89,12 @@ export function ObservabilitySettingsSheet({
 
   const handlePrune = async () => {
     const removed = await pruneOlderThan(Date.now() - pruneDays * DAY_MS)
-    toast.success(t("pruneDone", { count: removed }))
+    toast.success(t("data.pruneDone", { count: removed }))
   }
 
   const handleClear = async () => {
     const removed = await clearAllSpans()
-    toast.success(t("cleared", { count: removed }))
+    toast.success(t("data.cleared", { count: removed }))
   }
 
   return (

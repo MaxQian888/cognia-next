@@ -183,8 +183,11 @@ export function SkillDiscovery() {
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <div className="flex-1 space-y-1">
-          <Label className="text-xs">{t("pathLabelFull")}</Label>
+          <Label htmlFor="skill-discovery-path" className="text-xs">
+            {t("pathLabelFull")}
+          </Label>
           <Input
+            id="skill-discovery-path"
             value={customPath}
             onChange={(e) => setCustomPath(e.target.value)}
             placeholder={t("pathPlaceholder")}

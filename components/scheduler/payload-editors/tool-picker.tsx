@@ -6,7 +6,7 @@
  * user type names directly so there's no UI lock-in to a specific server set.
  */
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useId, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Plus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -44,6 +44,7 @@ export function ToolPicker({ value, onChange, disabled, testId }: ToolPickerProp
   const t = useTranslations("scheduler")
   const selected = useMemo(() => new Set(value ?? []), [value])
   const [extra, setExtra] = useState("")
+  const addInputId = useId()
 
   const toggle = useCallback(
     (name: string) => {
@@ -122,7 +123,7 @@ export function ToolPicker({ value, onChange, disabled, testId }: ToolPickerProp
                   size="icon-xs"
                   onClick={() => removeExtra(name)}
                   disabled={disabled}
-                  aria-label={t("tools.remove")}
+                  aria-label={t("tools.remove", { name })}
                   className="text-muted-foreground"
                 >
                   <X />
@@ -135,8 +136,11 @@ export function ToolPicker({ value, onChange, disabled, testId }: ToolPickerProp
 
       <div className="flex items-end gap-2">
         <div className="flex-1 space-y-1">
-          <Label className="text-xs text-muted-foreground">{t("tools.addCustomLabel")}</Label>
+          <Label htmlFor={addInputId} className="text-xs text-muted-foreground">
+            {t("tools.addCustomLabel")}
+          </Label>
           <Input
+            id={addInputId}
             value={extra}
             onChange={(e) => setExtra(e.target.value)}
             onKeyDown={(e) => {

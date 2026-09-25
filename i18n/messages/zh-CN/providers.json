@@ -672,6 +672,7 @@
   "importing": "正在导入…",
   "includeApiKeys": "包含 API 密钥（不建议分享）",
   "inputPricing": "输入价格",
+  "installProvider": "安装 {provider}",
   "installed": "已安装",
   "installedModels": "已安装模型",
   "invalidBaseURL": "请输入有效的 HTTP 或 HTTPS Base URL。",
@@ -989,6 +990,7 @@
   "providerModels": "{provider} 模型",
   "providerName": "服务商名称",
   "providerNamePlaceholder": "我的服务商",
+  "providerNotRunning": "{provider} 未运行",
   "providerOff": "已关闭",
   "providerOn": "已开启",
   "providerSetup": "{provider} 设置",
@@ -999,6 +1001,7 @@
   "pullFailed": "无法拉取「{model}」。",
   "pullModelHint": "拉取一个模型开始使用",
   "pullModelPlaceholder": "拉取模型（如 llama3.2）",
+  "pullModelToStart": "在上方拉取一个模型即可开始使用。",
   "pullStarting": "正在开始…",
   "quickActions": "快捷操作",
   "quickAdd": {

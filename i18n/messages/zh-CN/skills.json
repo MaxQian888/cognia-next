@@ -131,6 +131,8 @@
     "import": "导入所选",
     "noFilesParsed": "未选中任何文件，或所选文件全部解析失败。",
     "pathLabel": "路径",
+    "pathLabelFull": "要扫描的文件夹",
+    "pathPlaceholder": "~/path/to/skills",
     "resourcesCount": "{count} 个资源",
     "scan": "运行扫描",
     "scanCodex": "扫描 ~/.agents/skills/",
@@ -204,6 +206,7 @@
     "tabPreview": "预览",
     "tags": "标签（用逗号分隔）",
     "tagsPlaceholder": "风格, 准确性",
+    "unnamedPreview": "未命名技能",
     "unsaved": "● 未保存",
     "validation": "校验",
     "version": "版本"
@@ -843,6 +846,7 @@
   "validation": {
     "cardBadge": "{count} 个问题",
     "empty": "没有验证问题。",
-    "tab": "验证"
+    "tab": "验证",
+    "unfielded": "通用"
   }
 }

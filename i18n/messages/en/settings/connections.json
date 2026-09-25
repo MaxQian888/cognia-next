@@ -1805,6 +1805,7 @@
   "wechatOa": {
     "adapterCreated": "WeChat Official Account added",
     "adapterUpdated": "WeChat Official Account updated",
+    "appCredentialsRequired": "Enter the App ID and App Secret to test the connection.",
     "appIdHelp": "Official Account → Settings → Basic config → AppID.",
     "appIdLabel": "App ID",
     "appIdPlaceholder": "wx…",

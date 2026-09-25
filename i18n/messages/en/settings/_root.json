@@ -23,6 +23,8 @@
   "loadingSection": "Loading section",
   "loadingSettings": "Loading settings…",
   "noSettingsFound": "No settings match your search.",
+  "save": "Save",
+  "saved": "Saved",
   "searchPlaceholder": "Search settings…",
   "serverOnlySectionBody": "This section administers something only a Cognia server deployment runs. Pair a server that provides it, then open this section again.",
   "title": "Settings"

@@ -131,6 +131,8 @@
     "import": "Import selected",
     "noFilesParsed": "Nothing selected, or all selected files failed to parse.",
     "pathLabel": "Path",
+    "pathLabelFull": "Folder to scan",
+    "pathPlaceholder": "~/path/to/skills",
     "resourcesCount": "{count, plural, =0 {0 resources} =1 {1 resource} other {# resources}}",
     "scan": "Run scan",
     "scanCodex": "Scan ~/.agents/skills/",
@@ -204,6 +206,7 @@
     "tabPreview": "Preview",
     "tags": "Tags (comma-sep)",
     "tagsPlaceholder": "style, accuracy",
+    "unnamedPreview": "Untitled skill",
     "unsaved": "● unsaved",
     "validation": "Validation",
     "version": "Version"
@@ -843,6 +846,7 @@
   "validation": {
     "cardBadge": "{count, plural, =1 {1 issue} other {# issues}}",
     "empty": "No validation issues.",
-    "tab": "Validation"
+    "tab": "Validation",
+    "unfielded": "General"
   }
 }

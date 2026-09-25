@@ -159,6 +159,16 @@
       "zipFailed": "The .zip couldn't be read."
     },
     "import": "Import model",
+    "importDialog": {
+      "cancel": "Cancel",
+      "description": "{count, plural, =1 {Found 1 model in this folder.} other {Found # models in this folder.}} Choose which to import.",
+      "importButton": "{count, plural, =0 {Import} =1 {Import 1 model} other {Import # models}}",
+      "importing": "Importing…",
+      "selectAll": "Select all",
+      "selectedCount": "{count} selected",
+      "summary": "{ok, plural, =1 {Imported 1 model} other {Imported # models}}{fail, plural, =0 {} other {, # failed}}",
+      "title": "Import Live2D models"
+    },
     "importFolder": "Import folder",
     "importHint": "Choose a model folder or a .zip containing a .model3.json.",
     "noModelHint": "Pick a model below to start using it — until then the pet stays on the vector mascot.",

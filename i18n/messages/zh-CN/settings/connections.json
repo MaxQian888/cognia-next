@@ -1805,6 +1805,7 @@
   "wechatOa": {
     "adapterCreated": "已添加微信公众号",
     "adapterUpdated": "已更新微信公众号",
+    "appCredentialsRequired": "请先填写 App ID 和 App Secret，再测试连接。",
     "appIdHelp": "公众号 → 设置 → 基本配置 → AppID。",
     "appIdLabel": "App ID",
     "appIdPlaceholder": "wx…",

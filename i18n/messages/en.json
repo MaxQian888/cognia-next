@@ -5855,9 +5855,11 @@
       "bodyFor": "Switch to {name}. Review what changes before confirming.",
       "cancel": "Cancel",
       "close": "Close",
+      "codexBaseUrlNotPropagated": "base URL not applied",
       "cogniaApplied": "Cognia-next updated.",
       "cogniaSection": "Cognia-next",
       "confirm": "Apply switch",
+      "driftAbort": "The file changed on disk while switching, so nothing was written. Reopen this dialog and apply again.",
       "noChange": "Cognia-next's API key and base URL already match this provider — no sidecar restart needed.",
       "notYetSupported": "not yet supported",
       "subscriptionActivated": "Anthropic subscription activated from your signed-in account.",
@@ -18376,6 +18378,7 @@
       "logRatePulse": "Live log stream activity",
       "logs": "logs",
       "logsPerMin": "logs/min",
+      "modulePlaceholder": "Module",
       "moreActions": "More actions",
       "moreFilters": {
         "hide": "Hide more filters",
@@ -18451,6 +18454,7 @@
         "tauri": "Tauri"
       },
       "stackTrace": "Stack Trace",
+      "timePlaceholder": "Time range",
       "timeRange15m": "Last 15m",
       "timeRange1h": "Last 1h",
       "timeRange24h": "Last 24h",
@@ -28956,6 +28960,7 @@
     "importing": "Importing…",
     "includeApiKeys": "Include API keys (not recommended for sharing)",
     "inputPricing": "Input Pricing",
+    "installProvider": "Install {provider}",
     "installed": "Installed",
     "installedModels": "Installed Models",
     "invalidBaseURL": "Enter a valid HTTP or HTTPS base URL.",
@@ -29273,6 +29278,7 @@
     "providerModels": "{provider} Models",
     "providerName": "Provider Name",
     "providerNamePlaceholder": "My Provider",
+    "providerNotRunning": "{provider} is not running",
     "providerOff": "OFF",
     "providerOn": "ON",
     "providerSetup": "{provider} Setup",
@@ -29283,6 +29289,7 @@
     "pullFailed": "Could not pull \"{model}\".",
     "pullModelHint": "Pull a model to get started",
     "pullModelPlaceholder": "Pull a model (e.g., llama3.2)",
+    "pullModelToStart": "Pull a model above to get started.",
     "pullStarting": "Starting…",
     "quickActions": "Quick Actions",
     "quickAdd": {
@@ -31991,6 +31998,21 @@
     "schedulerRunning": "Running",
     "schedulerStopped": "Scheduler stopped",
     "scheduling": "Scheduling...",
+    "scriptEditor": {
+      "args": "Arguments",
+      "argsDescription": "Separate arguments with spaces.",
+      "argsPlaceholder": "--verbose input.csv",
+      "code": "Script",
+      "language": "Language",
+      "memoryLimitMb": "Memory limit (MB)",
+      "sandbox": "Run in a sandbox",
+      "sandboxDescription": "Isolates the script from the rest of the machine. Safer; turn it off only for scripts you trust.",
+      "selectLanguage": "Choose a language",
+      "test": "Test run",
+      "timeoutSeconds": "Timeout (seconds)",
+      "workingDirectory": "Working directory",
+      "workingDirectoryPlaceholder": "Optional. Where the script runs."
+    },
     "scriptPreview": "Script Preview",
     "scriptTask": "Script Task",
     "searchTasks": "Search tasks...",
@@ -32209,14 +32231,19 @@
     "timing": "Timing",
     "title": "Task Scheduler",
     "tools": {
+      "add": "Add",
+      "addCustomLabel": "Add a tool by name",
+      "addCustomPlaceholder": "mcp__server__tool",
       "createFailed": "Failed to create scheduled task",
       "createSuccess": "Scheduled task created successfully",
+      "customLabel": "Custom tools",
       "listEmpty": "No scheduled tasks found",
       "manageFailed": "Task operation failed",
       "manageSuccess": "Task operation completed",
       "promoteFailed": "Failed to promote task",
       "promoteSuccess": "Task promoted to system service",
-      "reminderCreated": "Reminder created successfully"
+      "reminderCreated": "Reminder created successfully",
+      "remove": "Remove {name}"
     },
     "totalExecutions": "Executions",
     "totalRuns": "Total Runs",
@@ -37868,6 +37895,7 @@
       "wechatOa": {
         "adapterCreated": "WeChat Official Account added",
         "adapterUpdated": "WeChat Official Account updated",
+        "appCredentialsRequired": "Enter the App ID and App Secret to test the connection.",
         "appIdHelp": "Official Account → Settings → Basic config → AppID.",
         "appIdLabel": "App ID",
         "appIdPlaceholder": "wx…",
@@ -41733,6 +41761,16 @@
           "zipFailed": "The .zip couldn't be read."
         },
         "import": "Import model",
+        "importDialog": {
+          "cancel": "Cancel",
+          "description": "{count, plural, =1 {Found 1 model in this folder.} other {Found # models in this folder.}} Choose which to import.",
+          "importButton": "{count, plural, =0 {Import} =1 {Import 1 model} other {Import # models}}",
+          "importing": "Importing…",
+          "selectAll": "Select all",
+          "selectedCount": "{count} selected",
+          "summary": "{ok, plural, =1 {Imported 1 model} other {Imported # models}}{fail, plural, =0 {} other {, # failed}}",
+          "title": "Import Live2D models"
+        },
         "importFolder": "Import folder",
         "importHint": "Choose a model folder or a .zip containing a .model3.json.",
         "noModelHint": "Pick a model below to start using it — until then the pet stays on the vector mascot.",
@@ -42454,6 +42492,8 @@
         "title": "Workspace confinement"
       }
     },
+    "save": "Save",
+    "saved": "Saved",
     "searchPlaceholder": "Search settings…",
     "sectionReset": {
       "button": "Reset section",
@@ -45115,6 +45155,8 @@
       "import": "Import selected",
       "noFilesParsed": "Nothing selected, or all selected files failed to parse.",
       "pathLabel": "Path",
+      "pathLabelFull": "Folder to scan",
+      "pathPlaceholder": "~/path/to/skills",
       "resourcesCount": "{count, plural, =0 {0 resources} =1 {1 resource} other {# resources}}",
       "scan": "Run scan",
       "scanCodex": "Scan ~/.agents/skills/",
@@ -45188,6 +45230,7 @@
       "tabPreview": "Preview",
       "tags": "Tags (comma-sep)",
       "tagsPlaceholder": "style, accuracy",
+      "unnamedPreview": "Untitled skill",
       "unsaved": "● unsaved",
       "validation": "Validation",
       "version": "Version"
@@ -45827,7 +45870,8 @@
     "validation": {
       "cardBadge": "{count, plural, =1 {1 issue} other {# issues}}",
       "empty": "No validation issues.",
-      "tab": "Validation"
+      "tab": "Validation",
+      "unfielded": "General"
     }
   },
   "slashCommands": {

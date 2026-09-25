@@ -297,6 +297,7 @@
     "logRatePulse": "实时日志流活动",
     "logs": "条日志",
     "logsPerMin": "条/分钟",
+    "modulePlaceholder": "模块",
     "moreActions": "更多操作",
     "moreFilters": {
       "hide": "隐藏更多筛选",
@@ -372,6 +373,7 @@
       "tauri": "Tauri"
     },
     "stackTrace": "堆栈跟踪",
+    "timePlaceholder": "时间范围",
     "timeRange15m": "最近 15 分钟",
     "timeRange1h": "最近 1 小时",
     "timeRange24h": "最近 24 小时",

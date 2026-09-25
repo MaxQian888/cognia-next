@@ -4,8 +4,16 @@
 
 import { render, screen, fireEvent } from "@testing-library/react"
 
+// Records every key the editor asks for, so the catalog check below sees
+// exactly what renders. The echo translator alone hid twelve missing keys:
+// the component's `t(key) || "English"` fallbacks never fired either,
+// because next-intl answers a miss with the key path, which is truthy.
+const requestedKeys = new Set<string>()
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: (namespace: string) => (key: string) => {
+    requestedKeys.add(`${namespace}.${key}`)
+    return key
+  },
 }))
 
 const validateScript: jest.Mock = jest.fn(() => ({ valid: true, errors: [], warnings: [] }))
@@ -71,6 +79,8 @@ jest.mock("@/components/ui/collapsible", () => ({
 
 import { ScriptTaskEditor } from "./script-task-editor"
 import type { ExecuteScriptAction } from "@/types/scheduler"
+import enMessages from "@/i18n/messages/en.json"
+import zhMessages from "@/i18n/messages/zh-CN.json"
 
 const baseValue: ExecuteScriptAction = {
   type: "execute_script",
@@ -132,9 +142,36 @@ describe("ScriptTaskEditor", () => {
   it("renders the Test button when onTest is supplied", () => {
     const onTest = jest.fn()
     render(<ScriptTaskEditor value={baseValue} onChange={jest.fn()} onTest={onTest} />)
-    const testBtn = screen.getAllByRole("button").find((b) => b.textContent?.includes("testScript"))
-    if (!testBtn) return // Component may not include Test button — branch covered by coverage.
-    fireEvent.click(testBtn)
+    fireEvent.click(screen.getByRole("button", { name: /scriptEditor\.test/ }))
     expect(onTest).toHaveBeenCalled()
+  })
+
+  it("ties each text field to its label", () => {
+    render(<ScriptTaskEditor value={baseValue} onChange={jest.fn()} />)
+    fireEvent.click(screen.getByTestId("collapsible-toggle"))
+    for (const label of [
+      "scriptEditor.code",
+      "scriptEditor.timeoutSeconds",
+      "scriptEditor.memoryLimitMb",
+      "scriptEditor.workingDirectory",
+      "scriptEditor.args",
+    ]) {
+      expect(screen.getByLabelText(label)).toBeInTheDocument()
+    }
+  })
+
+  it("asks only for keys both catalogs have", () => {
+    requestedKeys.clear()
+    render(<ScriptTaskEditor value={baseValue} onChange={jest.fn()} onTest={jest.fn()} />)
+    fireEvent.click(screen.getByTestId("collapsible-toggle"))
+    const lookup = (messages: unknown, key: string) =>
+      key
+        .split(".")
+        .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], messages)
+    expect(requestedKeys.size).toBeGreaterThan(10)
+    for (const key of requestedKeys) {
+      expect([key, typeof lookup(enMessages, key)]).toEqual([key, "string"])
+      expect([key, typeof lookup(zhMessages, key)]).toEqual([key, "string"])
+    }
   })
 })

@@ -10,7 +10,7 @@
  */
 
 import { AlertTriangle, Play, Settings2 } from "lucide-react"
-import { useCallback, useState } from "react"
+import { useCallback, useId, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -47,6 +47,7 @@ export function ScriptTaskEditor({
   disabled = false,
 }: ScriptTaskEditorProps) {
   const t = useTranslations("scheduler")
+  const id = useId()
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [validation, setValidation] = useState<{
     valid: boolean
@@ -80,10 +81,10 @@ export function ScriptTaskEditor({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label>{t("scriptLanguage") || "Script Language"}</Label>
+        <Label htmlFor={`${id}-language`}>{t("scriptEditor.language")}</Label>
         <Select value={value.language} onValueChange={handleLanguageChange} disabled={disabled}>
-          <SelectTrigger>
-            <SelectValue placeholder={t("selectLanguage") || "Select language"} />
+          <SelectTrigger id={`${id}-language`}>
+            <SelectValue placeholder={t("scriptEditor.selectLanguage")} />
           </SelectTrigger>
           <SelectContent>
             {SCRIPT_LANGUAGES.map((lang) => (
@@ -100,7 +101,7 @@ export function ScriptTaskEditor({
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label>{t("scriptCode") || "Script Code"}</Label>
+          <Label htmlFor={`${id}-code`}>{t("scriptEditor.code")}</Label>
           {onTest && (
             <Button
               type="button"
@@ -110,11 +111,12 @@ export function ScriptTaskEditor({
               disabled={disabled || !value.code.trim()}
             >
               <Play className="mr-1 h-3 w-3" />
-              {t("test") || "Test"}
+              {t("scriptEditor.test")}
             </Button>
           )}
         </div>
         <Textarea
+          id={`${id}-code`}
           value={value.code}
           onChange={(e) => handleCodeChange(e.target.value)}
           disabled={disabled}
@@ -151,11 +153,9 @@ export function ScriptTaskEditor({
         <CardHeader className="p-3 pb-0">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <CardTitle className="text-sm font-medium">
-                {t("sandboxExecution") || "Sandbox Execution"}
-              </CardTitle>
+              <CardTitle className="text-sm font-medium">{t("scriptEditor.sandbox")}</CardTitle>
               <CardDescription className="text-xs">
-                {t("sandboxDescription") || "Run script in isolated environment (safer)"}
+                {t("scriptEditor.sandboxDescription")}
               </CardDescription>
             </div>
             <Switch
@@ -171,14 +171,15 @@ export function ScriptTaskEditor({
         <CollapsibleTrigger asChild>
           <Button variant="ghost" size="sm" className="w-full justify-start">
             <Settings2 className="mr-2 h-4 w-4" />
-            {t("advancedSettings") || "Advanced Settings"}
+            {t("advancedSettings")}
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-4 pt-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>{t("timeoutSeconds") || "Timeout (seconds)"}</Label>
+              <Label htmlFor={`${id}-timeout`}>{t("scriptEditor.timeoutSeconds")}</Label>
               <Input
+                id={`${id}-timeout`}
                 type="number"
                 value={value.timeout_secs ?? DEFAULT_SCRIPT_SETTINGS.timeout_secs}
                 onChange={(e) =>
@@ -191,8 +192,9 @@ export function ScriptTaskEditor({
             </div>
 
             <div className="space-y-2">
-              <Label>{t("memoryLimitMB") || "Memory Limit (MB)"}</Label>
+              <Label htmlFor={`${id}-memory`}>{t("scriptEditor.memoryLimitMb")}</Label>
               <Input
+                id={`${id}-memory`}
                 type="number"
                 value={value.memory_mb ?? DEFAULT_SCRIPT_SETTINGS.memory_mb}
                 onChange={(e) => handleSettingChange("memory_mb", parseInt(e.target.value) || 512)}
@@ -204,18 +206,20 @@ export function ScriptTaskEditor({
           </div>
 
           <div className="space-y-2">
-            <Label>{t("workingDirectory") || "Working Directory"}</Label>
+            <Label htmlFor={`${id}-cwd`}>{t("scriptEditor.workingDirectory")}</Label>
             <Input
+              id={`${id}-cwd`}
               value={value.working_dir || ""}
               onChange={(e) => handleSettingChange("working_dir", e.target.value || undefined)}
-              placeholder={t("workingDirPlaceholder") || "(Optional) Script execution directory"}
+              placeholder={t("scriptEditor.workingDirectoryPlaceholder")}
               disabled={disabled}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>{t("commandLineArgs") || "Command Line Arguments"}</Label>
+            <Label htmlFor={`${id}-args`}>{t("scriptEditor.args")}</Label>
             <Input
+              id={`${id}-args`}
               value={(value.args || []).join(" ")}
               onChange={(e) =>
                 handleSettingChange(
@@ -223,12 +227,10 @@ export function ScriptTaskEditor({
                   e.target.value ? e.target.value.split(" ").filter(Boolean) : []
                 )
               }
-              placeholder="arg1 arg2 arg3"
+              placeholder={t("scriptEditor.argsPlaceholder")}
               disabled={disabled}
             />
-            <p className="text-muted-foreground text-xs">
-              {t("argsDescription") || "Space-separated list of arguments"}
-            </p>
+            <p className="text-muted-foreground text-xs">{t("scriptEditor.argsDescription")}</p>
           </div>
         </CollapsibleContent>
       </Collapsible>

@@ -672,6 +672,7 @@
   "importing": "Importing…",
   "includeApiKeys": "Include API keys (not recommended for sharing)",
   "inputPricing": "Input Pricing",
+  "installProvider": "Install {provider}",
   "installed": "Installed",
   "installedModels": "Installed Models",
   "invalidBaseURL": "Enter a valid HTTP or HTTPS base URL.",
@@ -989,6 +990,7 @@
   "providerModels": "{provider} Models",
   "providerName": "Provider Name",
   "providerNamePlaceholder": "My Provider",
+  "providerNotRunning": "{provider} is not running",
   "providerOff": "OFF",
   "providerOn": "ON",
   "providerSetup": "{provider} Setup",
@@ -999,6 +1001,7 @@
   "pullFailed": "Could not pull \"{model}\".",
   "pullModelHint": "Pull a model to get started",
   "pullModelPlaceholder": "Pull a model (e.g., llama3.2)",
+  "pullModelToStart": "Pull a model above to get started.",
   "pullStarting": "Starting…",
   "quickActions": "Quick Actions",
   "quickAdd": {
