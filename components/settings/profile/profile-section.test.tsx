@@ -224,6 +224,13 @@ describe("ProfileSection", () => {
     expect(screen.queryByTestId("profile-reset")).not.toBeInTheDocument()
   })
 
+  it("shows a zone in the picker after a reset stored an empty timezone", () => {
+    // Reset writes `timezone: ""`; the picker used to keep that and go blank.
+    mockUseUserProfile.mockReturnValue(baseResult({ profile: { timezone: "" } }))
+    render(<ProfileSection />)
+    expect(screen.getByTestId("profile-timezone").getAttribute("data-value")).not.toBe("")
+  })
+
   it("shows the reset button when only a timezone is set", () => {
     mockUseUserProfile.mockReturnValue(baseResult({ profile: { timezone: "Asia/Tokyo" } }))
     render(<ProfileSection />)

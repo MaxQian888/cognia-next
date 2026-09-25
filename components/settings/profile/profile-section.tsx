@@ -72,10 +72,13 @@ export function ProfileSection({ showEmail = true }: ProfileSectionProps = {}) {
   const previewDisplayName = nameValue.trim() || previewName
 
   // The picker value falls back to the device zone (only when it's one of the
-  // offered options, else UTC) so the control never renders blank.
+  // offered options, else UTC) so the control never renders blank. `||`, not
+  // `??`: "Reset to default" stores `timezone: ""`, which the resolver in
+  // lib/profile/timezone.ts already reads as unset, but `??` kept it here and
+  // left the picker empty for good.
   const deviceTz = deviceTimeZone()
   const timezoneValue =
-    profile.timezone ??
+    profile.timezone?.trim() ||
     (TIMEZONE_OPTIONS.some((option) => option.value === deviceTz) ? deviceTz : "UTC")
 
   const commitName = () => {
