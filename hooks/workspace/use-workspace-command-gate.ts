@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { resolveUserActionAvailability } from "@/lib/runtime/operation-availability"
 import { AVAILABILITY_MESSAGE_KEY } from "@/lib/workspace/availability-messages"
+import { useCapabilityGrantLabel } from "@/hooks/devices/use-capability-grant-label"
 
 /** Whether one command can run right now, and the sentence to show when it cannot. */
 export interface WorkspaceCommandGate {
@@ -40,6 +41,7 @@ export interface WorkspaceCommandGate {
 export function useWorkspaceCommandGate(): (command: string) => WorkspaceCommandGate {
   const t = useTranslations("workspace.actionErrors")
   const snapshot = useRuntimeSnapshot()
+  const grantLabel = useCapabilityGrantLabel()
   return useCallback(
     (command: string) => {
       const availability = resolveUserActionAvailability(snapshot, command)
@@ -47,10 +49,10 @@ export function useWorkspaceCommandGate(): (command: string) => WorkspaceCommand
       return {
         available: false,
         reason: t(AVAILABILITY_MESSAGE_KEY[availability.state], {
-          grant: availability.requiredGrant ?? "",
+          grant: grantLabel(availability.requiredGrant),
         }),
       }
     },
-    [snapshot, t]
+    [snapshot, t, grantLabel]
   )
 }

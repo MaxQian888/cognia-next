@@ -60,6 +60,21 @@ export const GRANT_CAPABILITIES: Readonly<Record<DeviceGrantId, readonly string[
 )
 
 /**
+ * The grant a device needs to hold for one capability, or undefined for a
+ * capability no grant carries (the admin capabilities above, or an id this
+ * mirror does not know).
+ *
+ * The reverse of {@link GRANT_CAPABILITIES}. Refusal copy used to print the
+ * capability itself ("missing the git.write permission"), a word the device
+ * console never shows; the console's switches are the grants, so this is how
+ * a refusal names the switch to flip. Grants are disjoint (pinned by the
+ * test), so the answer is unique.
+ */
+export function grantForCapability(capability: string): DeviceGrantId | undefined {
+  return DEVICE_GRANT_IDS.find((id) => GRANT_CAPABILITIES[id].includes(capability))
+}
+
+/**
  * The capability a paired device needs to start, read, resume or stop a Router
  * + Fusion run, or to answer a call reservation, over the companion RPC
  * (ADR-0188 D25: `execution_run_*`, `claude_call_reserve_respond`).

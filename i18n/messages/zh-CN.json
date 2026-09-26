@@ -20319,6 +20319,7 @@
         "pairing": "设备配对",
         "push": "推送通知"
       },
+      "hostAdminCapability": "主机管理",
       "lockedComputerUse": {
         "blocked": "Locked Use 未启用（{reason}）。",
         "col": "Locked Use",

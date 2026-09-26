@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl"
 import { HostConsentRequiredError } from "@/lib/tauri/admin-lease"
 import { WorkspaceOperationUnavailableError } from "@/lib/task-workspace/user-action"
 import { AVAILABILITY_MESSAGE_KEY } from "@/lib/workspace/availability-messages"
+import { useCapabilityGrantLabel } from "@/hooks/devices/use-capability-grant-label"
 
 function rawDetail(cause: unknown): string {
   if (cause instanceof Error) return cause.message
@@ -19,6 +20,9 @@ function rawDetail(cause: unknown): string {
 /** Shared pending/error lifecycle for workspace inventory and session actions. */
 export function useWorkspaceActionController() {
   const t = useTranslations("workspace.actionErrors")
+  // The switch to flip ("Remote control"), not the capability id the host
+  // reports ("git.write"), which the device console never shows.
+  const grantLabel = useCapabilityGrantLabel()
   const [pendingKey, setPendingKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const clearError = useCallback(() => setError(null), [])
@@ -40,11 +44,11 @@ export function useWorkspaceActionController() {
       }
       if (cause instanceof WorkspaceOperationUnavailableError) {
         const { state, requiredGrant } = cause.availability
-        return t(AVAILABILITY_MESSAGE_KEY[state], { grant: requiredGrant ?? "" })
+        return t(AVAILABILITY_MESSAGE_KEY[state], { grant: grantLabel(requiredGrant) })
       }
       return rawDetail(cause)
     },
-    [t]
+    [t, grantLabel]
   )
 
   const run = useCallback(

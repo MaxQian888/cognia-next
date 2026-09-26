@@ -77,7 +77,10 @@ describe("useWorkspaceCommandGate", () => {
     const gate = gateFor(companion({ grants: ["workspace.write", "host.admin"] }))
 
     expect(gate("git_worktree_prune").available).toBe(false)
-    expect(gate("git_worktree_prune").reason).toContain("git.write")
+    // Named by the device-console switch that carries `git.write`, not by
+    // the capability id, which nothing on screen shows.
+    expect(gate("git_worktree_prune").reason).toContain("Remote control")
+    expect(gate("git_worktree_prune").reason).not.toContain("git.write")
     expect(gate("task_workspace_managed_delete").available).toBe(true)
   })
 
@@ -87,7 +90,7 @@ describe("useWorkspaceCommandGate", () => {
     )
 
     expect(verdict.available).toBe(false)
-    expect(verdict.reason).toContain("host.admin")
+    expect(verdict.reason).toContain("Host administration")
   })
 
   it("separates offline from unsupported", () => {

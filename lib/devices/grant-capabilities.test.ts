@@ -7,6 +7,7 @@ import {
   LOCKED_USE_AVAILABLE,
   ROUTER_FUSION_COMPANION_CAPABILITY,
   buildGrantRows,
+  grantForCapability,
   isGrantEnabled,
   ownerPermits,
   type GrantEvidence,
@@ -85,6 +86,21 @@ describe("GRANT_CAPABILITIES mirror", () => {
     expect(GRANT_CAPABILITIES.sshFiles).toEqual(["ssh.files"])
     expect(GRANT_CAPABILITIES.terminal).not.toContain("ssh.files")
     expect(GRANT_CAPABILITIES.sshFiles).not.toContain("terminal.open")
+  })
+})
+
+describe("grantForCapability", () => {
+  it("names the grant that carries a capability", () => {
+    expect(grantForCapability("git.write")).toBe("control")
+    expect(grantForCapability("workspace.read")).toBe("control")
+    expect(grantForCapability("terminal.open")).toBe("terminal")
+    expect(grantForCapability("ssh.files")).toBe("sshFiles")
+    expect(grantForCapability("process.spawn")).toBe("agentControl")
+  })
+
+  it("answers undefined for a capability no grant carries", () => {
+    expect(grantForCapability("host.admin")).toBeUndefined()
+    expect(grantForCapability("")).toBeUndefined()
   })
 })
 

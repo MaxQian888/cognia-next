@@ -20319,6 +20319,7 @@
         "pairing": "Device pairing",
         "push": "Push notifications"
       },
+      "hostAdminCapability": "Host administration",
       "lockedComputerUse": {
         "blocked": "Locked Use not enabled ({reason}).",
         "col": "Locked Use",
