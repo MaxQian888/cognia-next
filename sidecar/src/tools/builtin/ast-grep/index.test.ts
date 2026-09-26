@@ -10,7 +10,7 @@ import {
 } from "./index.ts"
 import { firstText } from "../../../../test-support/tool-result.ts"
 import type { ToolResult } from "../../kernel/result.ts"
-import type { SgResult, SgRunOptions } from "./run.ts"
+import type { SgExecOptions, SgResult, SgRunOptions } from "./run.ts"
 
 const { execAstGrepSearch, execAstGrepReplace } = __testExports
 
@@ -149,4 +149,27 @@ test("exec handlers fall back to the real runner when given the SDK tool context
   // in this hermetic env, or returns a real result if installed).
   const r = await execAstGrepSearch({ pattern: "a", lang: "go" }, { sessionID: "s1" })
   assert.ok(typeof textOf(r) === "string")
+})
+
+test("the session cwd, abort signal and write flag reach the runner's exec options", async () => {
+  // runSg reads cwd / signal / updateAll from its SECOND argument; passing them
+  // in the first left the child in the sidecar's cwd with no abort signal.
+  const calls: { options: SgRunOptions; opts: SgExecOptions | undefined }[] = []
+  const run = async (options: SgRunOptions, opts?: SgExecOptions): Promise<SgResult> => {
+    calls.push({ options, opts })
+    return { matches: [], totalMatches: 0 }
+  }
+  const signal = new AbortController().signal
+  await execAstGrepSearch({ pattern: "a", lang: "go" }, { run, cwd: "/workspace", signal })
+  await execAstGrepReplace(
+    { pattern: "a", rewrite: "b", lang: "go", dry_run: false },
+    { run, cwd: "/workspace", signal }
+  )
+  for (const { opts } of calls) {
+    assert.equal(opts?.cwd, "/workspace")
+    assert.equal(opts?.signal, signal)
+  }
+  assert.equal(calls[0]?.opts?.updateAll, undefined)
+  assert.equal(calls[1]?.opts?.updateAll, true)
+  assert.equal(calls[1]?.options.updateAll, true)
 })

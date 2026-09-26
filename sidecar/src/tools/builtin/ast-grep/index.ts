@@ -56,19 +56,22 @@ export async function execAstGrepSearch(
   const deps = (extra ?? {}) as AstGrepDeps
   const run = deps && typeof deps === "object" && typeof deps.run === "function" ? deps.run : runSg
   try {
-    const result = await run({
-      pattern: args.pattern,
-      lang: args.lang,
-      paths: args.paths,
-      globs: args.globs,
-      context: args.context,
-      // Without this the child inherits the SIDECAR process cwd, so the
-      // documented `paths: ['.']` default resolved against wherever Tauri/the
-      // CLI was launched rather than the agent's workspace.
-      cwd: deps?.cwd,
-      // `runSg` has always accepted a signal; nothing ever passed one.
-      signal: deps?.signal,
-    })
+    const result = await run(
+      {
+        pattern: args.pattern,
+        lang: args.lang,
+        paths: args.paths,
+        globs: args.globs,
+        context: args.context,
+      },
+      {
+        // Without this the child inherits the SIDECAR process cwd, so the
+        // documented `paths: ['.']` default resolved against wherever Tauri/the
+        // CLI was launched rather than the agent's workspace.
+        cwd: deps?.cwd,
+        signal: deps?.signal,
+      }
+    )
     let output = formatSearchResult(result)
     if (result.matches.length === 0 && !result.error) {
       const hint = getEmptyResultHint(args.pattern, args.lang)
@@ -117,19 +120,25 @@ export async function execAstGrepReplace(
   const run = deps && typeof deps === "object" && typeof deps.run === "function" ? deps.run : runSg
   try {
     const dryRun = args.dry_run !== false
-    const result = await run({
-      pattern: args.pattern,
-      lang: args.lang,
-      rewrite: args.rewrite,
-      paths: args.paths,
-      globs: args.globs,
-      // Only write to disk when explicitly not a dry run.
-      updateAll: !dryRun,
-      // Critical for the write path: without the session cwd a non-dry-run
-      // rewrite applied to an unrelated directory tree.
-      cwd: deps?.cwd,
-      signal: deps?.signal,
-    })
+    const result = await run(
+      {
+        pattern: args.pattern,
+        lang: args.lang,
+        rewrite: args.rewrite,
+        paths: args.paths,
+        globs: args.globs,
+        // Only write to disk when explicitly not a dry run.
+        updateAll: !dryRun,
+      },
+      {
+        // Critical for the write path: without the session cwd a non-dry-run
+        // rewrite applied to an unrelated directory tree.
+        cwd: deps?.cwd,
+        signal: deps?.signal,
+        // Lets an output-capped rewrite warn that files may be half-written.
+        updateAll: !dryRun,
+      }
+    )
     const output = formatReplaceResult(result, dryRun)
     return result.error ? toolError(output) : toolText(output)
   } catch (err) {

@@ -199,3 +199,23 @@ test("runSg catches a synchronous spawn throw", async () => {
   )
   assert.match(r.error ?? "", /spawn EACCES/)
 })
+
+test("runSg spawns in the given cwd with the given abort signal", async () => {
+  let seen: { cwd?: unknown; signal?: unknown } | undefined
+  const base = fakeSpawnFactory({ stdout: "[]" })
+  const spawnImpl = ((
+    bin: string,
+    args: string[],
+    options: { cwd?: unknown; signal?: unknown }
+  ) => {
+    seen = options
+    return base(bin, args, options as never)
+  }) as unknown as typeof spawnInProcessSandbox
+  const signal = new AbortController().signal
+  await runSg(
+    { pattern: "a", lang: "go" },
+    { sgPath: "/fake/sg", spawnImpl, cwd: "/workspace", signal }
+  )
+  assert.equal(seen?.cwd, "/workspace")
+  assert.equal(seen?.signal, signal)
+})

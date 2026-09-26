@@ -40,13 +40,6 @@ export interface SgRunOptions {
   rewrite?: string | undefined
   context?: number | undefined
   updateAll?: boolean | undefined
-  /**
-   * Accepted here but NOT read: `runSg` takes `cwd` and `signal` from its
-   * second argument only. The tool handlers pass them here, so today the
-   * child runs in the sidecar's cwd without the abort signal.
-   */
-  cwd?: string | undefined
-  signal?: AbortSignal | undefined
 }
 
 /** How to run it; the `*Impl` hooks are for tests. */
