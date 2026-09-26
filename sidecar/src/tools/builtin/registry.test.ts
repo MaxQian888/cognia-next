@@ -1,8 +1,10 @@
-// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { collectCogniaToolDefs, buildCogniaToolsServer } from "./registry.ts"
+import { collectCogniaToolDefs } from "./registry.ts"
+import { findTool, firstJson, firstText } from "../../../test-support/tool-result.ts"
+import type { ReadTracker } from "../state/read-tracker.ts"
+import type { SessionBgShellRegistry } from "../state/host-background-shells.ts"
 
 test("collectCogniaToolDefs returns [] for missing / empty enabled", () => {
   assert.deepEqual(collectCogniaToolDefs(), [])
@@ -19,12 +21,12 @@ test("collectCogniaToolDefs returns well-shaped defs for an enabled category", (
   }
 })
 
-test("buildCogniaToolsServer returns null when nothing enabled, a server otherwise", () => {
-  assert.equal(buildCogniaToolsServer({ enabled: {} }), null)
-  assert.ok(buildCogniaToolsServer({ enabled: { git: true } }))
-})
-
-const fakeTracker = { record() {}, hasRead: () => false, assertReadBefore() {}, clear() {} }
+const fakeTracker: ReadTracker = {
+  record() {},
+  hasRead: () => false,
+  assertReadBefore() {},
+  clear() {},
+}
 
 test("coreFiles suite is included on the ai-sdk path when enabled + tracked", () => {
   const defs = collectCogniaToolDefs({
@@ -106,7 +108,7 @@ test("plan tools are opt-in and available on both dispatch paths", () => {
     collectCogniaToolDefs({ enabled: {}, planTools: true }).map((d) => d.name),
     ["create_plan", "update_plan"]
   )
-  for (const dispatchPath of ["anthropic", "ai-sdk"]) {
+  for (const dispatchPath of ["anthropic", "ai-sdk"] as const) {
     const names = collectCogniaToolDefs({ enabled: {}, planTools: true, dispatchPath }).map(
       (d) => d.name
     )
@@ -116,8 +118,10 @@ test("plan tools are opt-in and available on both dispatch paths", () => {
 })
 
 test("plan tools acknowledge without side effects (the renderer owns the write)", async () => {
-  const [create, update] = collectCogniaToolDefs({ enabled: {}, planTools: true })
-  const body = (r) => JSON.parse(r.content[0].text)
+  const defs = collectCogniaToolDefs({ enabled: {}, planTools: true })
+  const create = findTool(defs, "create_plan")
+  const update = findTool(defs, "update_plan")
+  const body = (r: { content: unknown[] }) => firstJson<Record<string, unknown>>(r)
   const created = body(
     await create.handler({ title: "Ship", steps: [{ title: "a" }, { title: "b" }] })
   )
@@ -130,7 +134,8 @@ test("collected native process tools all fail closed when the launcher is missin
   const definitions = collectCogniaToolDefs({
     enabled: { coreFiles: true, process: true, shellAdvanced: true },
     dispatchPath: "ai-sdk",
-    readTracker: {},
+    // Any tracker: the calls must be refused before a file is touched.
+    readTracker: fakeTracker,
     cwd: process.cwd(),
     builtinProcessSandbox: {
       launcher: "",
@@ -139,7 +144,7 @@ test("collected native process tools all fail closed when the launcher is missin
       network: false,
     },
   })
-  for (const [name, input] of [
+  const calls: [string, Record<string, unknown>][] = [
     ["bash", { command: "echo hello" }],
     [
       "start_process",
@@ -149,30 +154,20 @@ test("collected native process tools all fail closed when the launcher is missin
       "shell_execute_advanced",
       { command: "git", args: ["status"], cwd: process.cwd(), timeoutMs: 1000 },
     ],
-  ]) {
-    const result = await definitions.find((tool) => tool.name === name).handler(input)
+  ]
+  for (const [name, input] of calls) {
+    const result = await findTool(definitions, name).handler(input)
     assert.equal(result.isError, true, name)
-    assert.match(result.content[0].text, /launcher is unavailable/, name)
+    assert.match(firstText(result), /launcher is unavailable/, name)
   }
-})
-
-test("native MCP tool output uses the provider PII gate", async () => {
-  const { wrapNativeToolResults } = await import("./registry.ts")
-  const [tool] = wrapNativeToolResults([
-    {
-      name: "read",
-      handler: async () => ({ content: [{ type: "text", text: "Email: alice@example.com" }] }),
-    },
-  ])
-  const result = await tool.handler({})
-  assert.equal(JSON.stringify(result).includes("alice@example.com"), false)
 })
 
 test("native process jobs expose their existing output and stop controls without core files", () => {
   const tools = collectCogniaToolDefs({
     enabled: { process: true },
     dispatchPath: "anthropic",
-    bgShells: {},
+    // Presence is all this path checks; no shell is spawned.
+    bgShells: {} as SessionBgShellRegistry,
   })
   const names = tools.map((tool) => tool.name)
   for (const name of ["start_process", "bash_output", "kill_shell", "list_shells"])

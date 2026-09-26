@@ -13,11 +13,11 @@ import { disposeTerminalRepls } from "../src/tools/builtin/terminal-repl/index.t
 import { query } from "@anthropic-ai/claude-agent-sdk"
 import { traceAsyncIterable } from "../src/platform/telemetry/index.ts"
 import { randomUUID } from "node:crypto"
+import { buildCogniaToolsServer } from "../src/tools/adapters/sdk-mcp.ts"
 import {
-  buildCogniaToolsServer,
+  BUILTIN_SERVER_NAME,
   namesForDisabledCategories,
-} from "../src/tools/builtin/registry.ts"
-import { BUILTIN_SERVER_NAME } from "../src/policy/tool-catalog/catalog.ts"
+} from "../src/policy/tool-catalog/catalog.ts"
 import { PLUGIN_TOOLS_SERVER_NAME } from "../src/policy/tool-catalog/names.ts"
 import { buildA2UIBridgeServer, SERVER_NAME as A2UI_SERVER_NAME } from "../a2ui-tools/index.mjs"
 import { buildPluginToolsServer } from "../src/tools/plugin/server.ts"

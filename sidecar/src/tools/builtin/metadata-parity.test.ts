@@ -1,4 +1,3 @@
-// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // Guard: the shared metadata (lib/settings/builtin-tools-data.json) and the
 // actual sidecar tool implementations must never drift. This single test locks
 // down the whole class of parity bugs the two explore passes flagged:
@@ -13,6 +12,8 @@ import assert from "node:assert/strict"
 
 import data from "../../../../lib/settings/builtin-tools-data.json" with { type: "json" }
 import { collectCogniaToolDefs } from "./registry.ts"
+import type { LazyLspResolver } from "../../services/lsp/lazy-resolver.ts"
+import type { CodeGraphIndex } from "../../services/code-graph/index-service.ts"
 import { READ_ONLY_TOOL_NAMES, TOOL_NAMES_BY_CATEGORY } from "../../policy/tool-catalog/catalog.ts"
 import { CORE_TOOL_NAMES } from "./core-files/index.ts"
 import { CODE_GRAPH_TOOL_NAMES } from "./code-graph/names.ts"
@@ -29,10 +30,13 @@ const fakeReadTracker = {
   assertReadBefore() {},
   clear() {},
 }
-const fakeLspResolver = { getDiagnostics: async () => [] }
+const fakeLspResolver = { getDiagnostics: async () => [] } as unknown as LazyLspResolver
 // The code-graph tools are only built (not invoked) at collection time, so any
 // object satisfies the resolver-bound branch.
-const fakeCodeGraphResolver = { syncStale: async () => {}, status: () => ({}) }
+const fakeCodeGraphResolver = {
+  syncStale: async () => {},
+  status: () => ({}),
+} as unknown as CodeGraphIndex
 
 function collectAll() {
   return collectCogniaToolDefs({
@@ -131,7 +135,7 @@ test("NotebookEdit is registered as an approval-gated coreFiles tool", () => {
   // Locks the Item-2 addition: present, in coreFiles, mutating (needs approval).
   assert.ok(metadataNames.has("NotebookEdit"))
   const coreMeta = data.categories.find((c) => c.id === "coreFiles")
-  const entry = coreMeta.tools.find((t) => t.name === "NotebookEdit")
-  assert.equal(entry.requiresApproval, true)
+  const entry = coreMeta!.tools.find((t) => t.name === "NotebookEdit")
+  assert.equal(entry!.requiresApproval, true)
   assert.ok(!READ_ONLY_TOOL_NAMES.has("NotebookEdit"))
 })

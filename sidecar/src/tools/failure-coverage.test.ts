@@ -1,4 +1,3 @@
-// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // Sweep: no built-in tool may report a failure without saying what kind it is.
 //
 // The whole value of the taxonomy is that it is exhaustive. One tool that
@@ -34,7 +33,7 @@ const WAIVERS = new Map([
 ])
 
 /** Every tool source file (.mjs / .ts), excluding tests and node_modules. */
-function sourceFiles(dir, out = []) {
+function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === "node_modules" || entry.name === "__tests__") continue
     const full = path.join(dir, entry.name)
@@ -54,16 +53,17 @@ test("every isError site is classified or explicitly waived", () => {
   // Guard the guard: an empty walk would pass this test while proving nothing.
   assert.ok(files.length > 40, `expected to scan the tool tree, saw ${files.length} files`)
 
-  const offenders = []
+  const offenders: string[] = []
   let sitesSeen = 0
   for (const file of files) {
     const relative = path.relative(SIDECAR, file).split(path.sep).join("/")
     const text = fs.readFileSync(file, "utf8")
     const lines = text.split("\n")
     for (let i = 0; i < lines.length; i++) {
-      if (!/isError:\s*true/.test(lines[i])) continue
+      const line = lines[i]!
+      if (!/isError:\s*true/.test(line)) continue
       // Prose about `isError` is not a site — only code is.
-      if (/^\s*(\/\/|\*|\/\*)/.test(lines[i])) continue
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue
       sitesSeen++
       if (WAIVERS.has(relative)) continue
       // Classified when `failure:` rides along in the same call — look at a

@@ -175,6 +175,10 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/presentation.test.mjs`                                    | `src/tools/middleware/presentation.test.ts`                        | 8m          |
 | `builtin-tools/__tests__/metadata-parity.test.mjs`                       | `src/tools/builtin/metadata-parity.test.ts`                        | 8m          |
 | `builtin-tools/failure-coverage.test.mjs`                                | `src/tools/failure-coverage.test.ts`                               | 8m          |
+| `buildCogniaToolsServer`, `wrapNativeToolResults` (in the registry)      | `src/tools/adapters/sdk-mcp.ts`                                    | 8m          |
+| `applyToolPresentation` (in the registry)                                | `src/tools/middleware/presentation.ts`                             | 8m          |
+| the confinement wrapper (in `collectCogniaToolDefs`)                     | `src/tools/middleware/confinement.ts`                              | 8m          |
+| `namesForDisabledCategories`, `namespacedName` (in the registry)         | `src/policy/tool-catalog/catalog.ts`                               | 8m          |
 
 ## Scripts (run from repo root)
 

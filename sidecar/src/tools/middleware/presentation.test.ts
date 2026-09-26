@@ -1,4 +1,3 @@
-// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // Wiring test for the Code presentation: the sidecar decides which tool defs
 // exist from `execution.composition.toolPresentation`, and the code broker
 // dispatches back into exactly the defs this session assembled.
@@ -10,14 +9,17 @@ import { z } from "zod"
 // without requiring bwrap/sandbox-exec on the test machine.
 const LAUNCHER = JSON.stringify(["/usr/bin/env"])
 
-import { applyToolPresentation } from "../builtin/registry.ts"
+import { applyToolPresentation } from "./presentation.ts"
+import { firstJson } from "../../../test-support/tool-result.ts"
+import type { CallableTool } from "../../../test-support/tool-result.ts"
+import type { ToolDefinition } from "../kernel/define.ts"
 
-const CALLS = []
+const CALLS: { name: string; input: unknown }[] = []
 
-function def(name, result = { ok: name }) {
+function def(name: string, result: unknown = { ok: name }): ToolDefinition {
   return {
     name,
-    handler: async (input) => {
+    handler: async (input: unknown) => {
       CALLS.push({ name, input })
       return result
     },
@@ -31,6 +33,18 @@ function nativeDefs() {
 
 function reset() {
   CALLS.length = 0
+}
+
+/** A presented surface, as a test calls it. */
+type PresentedTool = CallableTool & { description: string }
+
+function present(defs: ToolDefinition[], presentation: string): PresentedTool[] {
+  return applyToolPresentation(defs, presentation) as unknown as PresentedTool[]
+}
+
+/** The `result` field of a `run_code` answer. */
+function resultOf(result: { content: unknown[] }): unknown {
+  return firstJson<{ result: unknown }>(result).result
 }
 
 test("native presentation returns the surface untouched", () => {
@@ -93,11 +107,11 @@ test("the broker dispatches an eligible call into this session's own def", async
   reset()
   process.env.COGNIA_CODE_SANDBOX_LAUNCHER = LAUNCHER
   try {
-    const [runCode] = applyToolPresentation(nativeDefs(), "code")
-    const result = await runCode.handler({
+    const [runCode] = present(nativeDefs(), "code")
+    const result = await runCode!.handler({
       source: 'return await cognia.read({ path: "a.ts" })',
     })
-    assert.deepEqual(JSON.parse(result.content[0].text).result, { ok: "read" })
+    assert.deepEqual(resultOf(result), { ok: "read" })
     assert.deepEqual(CALLS, [{ name: "read", input: { path: "a.ts" } }])
   } finally {
     delete process.env.COGNIA_CODE_SANDBOX_LAUNCHER
@@ -109,11 +123,11 @@ test("a tool whose category is disabled reports that, rather than failing generi
   process.env.COGNIA_CODE_SANDBOX_LAUNCHER = LAUNCHER
   try {
     // `read` is eligible but absent from this session's surface.
-    const [runCode] = applyToolPresentation([def("grep")], "code")
-    const result = await runCode.handler({
+    const [runCode] = present([def("grep")], "code")
+    const result = await runCode!.handler({
       source: "try { await cognia.read({}) } catch (e) { return e.message }",
     })
-    assert.match(JSON.parse(result.content[0].text).result, /not enabled in this session/)
+    assert.match(resultOf(result) as string, /not enabled in this session/)
     assert.deepEqual(CALLS, [])
   } finally {
     delete process.env.COGNIA_CODE_SANDBOX_LAUNCHER
@@ -124,11 +138,11 @@ test("an ineligible tool stays unreachable even though it is on the native surfa
   reset()
   process.env.COGNIA_CODE_SANDBOX_LAUNCHER = LAUNCHER
   try {
-    const [runCode] = applyToolPresentation(nativeDefs(), "code")
-    const result = await runCode.handler({
+    const [runCode] = present(nativeDefs(), "code")
+    const result = await runCode!.handler({
       source: 'return typeof cognia.write + "," + typeof cognia.TodoWrite',
     })
-    assert.equal(JSON.parse(result.content[0].text).result, "undefined,undefined")
+    assert.equal(resultOf(result), "undefined,undefined")
     assert.deepEqual(CALLS, [])
   } finally {
     delete process.env.COGNIA_CODE_SANDBOX_LAUNCHER
@@ -139,9 +153,9 @@ test("matches namespaced defs by their bare name", async () => {
   reset()
   process.env.COGNIA_CODE_SANDBOX_LAUNCHER = LAUNCHER
   try {
-    const [runCode] = applyToolPresentation([def("mcp__cognia-tools__read")], "code")
-    const result = await runCode.handler({ source: "return await cognia.read({})" })
-    assert.deepEqual(JSON.parse(result.content[0].text).result, {
+    const [runCode] = present([def("mcp__cognia-tools__read")], "code")
+    const result = await runCode!.handler({ source: "return await cognia.read({})" })
+    assert.deepEqual(resultOf(result), {
       ok: "mcp__cognia-tools__read",
     })
   } finally {
@@ -152,7 +166,7 @@ test("matches namespaced defs by their bare name", async () => {
 test("the SDK declaration advertises only the tools this session enabled", () => {
   process.env.COGNIA_CODE_SANDBOX_LAUNCHER = LAUNCHER
   try {
-    const [runCode] = applyToolPresentation(
+    const [runCode] = present(
       [
         // A zod raw shape, which is what `collectCogniaToolDefs` actually
         // produces. Handing the renderer a hand-written JSON Schema here is
@@ -165,10 +179,10 @@ test("the SDK declaration advertises only the tools this session enabled", () =>
     )
     // `read` is eligible and present; `write`/`TodoWrite` are not eligible, and
     // `grep` is eligible but absent from this session.
-    assert.match(runCode.description, /read\(input: \{/)
-    assert.ok(!runCode.description.includes("write("))
-    assert.ok(!runCode.description.includes("TodoWrite("))
-    assert.ok(!runCode.description.includes("grep("))
+    assert.match(runCode!.description, /read\(input: \{/)
+    assert.ok(!runCode!.description.includes("write("))
+    assert.ok(!runCode!.description.includes("TodoWrite("))
+    assert.ok(!runCode!.description.includes("grep("))
   } finally {
     delete process.env.COGNIA_CODE_SANDBOX_LAUNCHER
   }
@@ -177,7 +191,7 @@ test("the SDK declaration advertises only the tools this session enabled", () =>
 test("the SDK declaration renders real field names from the def's zod shape", () => {
   process.env.COGNIA_CODE_SANDBOX_LAUNCHER = LAUNCHER
   try {
-    const [runCode] = applyToolPresentation(
+    const [runCode] = present(
       [
         {
           ...def("read"),
@@ -188,9 +202,9 @@ test("the SDK declaration renders real field names from the def's zod shape", ()
     )
     // The whole point of the declaration: a signature the model can write
     // against. `input: unknown` means it has to guess the shape instead.
-    assert.ok(!runCode.description.includes("read(input: unknown)"))
-    assert.match(runCode.description, /path\??: string/)
-    assert.match(runCode.description, /limit\?: number/)
+    assert.ok(!runCode!.description.includes("read(input: unknown)"))
+    assert.match(runCode!.description, /path\??: string/)
+    assert.match(runCode!.description, /limit\?: number/)
   } finally {
     delete process.env.COGNIA_CODE_SANDBOX_LAUNCHER
   }
@@ -200,7 +214,7 @@ test("the broker applies the def's zod defaults before calling the handler", asy
   reset()
   process.env.COGNIA_CODE_SANDBOX_LAUNCHER = LAUNCHER
   try {
-    const [runCode] = applyToolPresentation(
+    const [runCode] = present(
       [
         {
           ...def("read"),
@@ -209,7 +223,7 @@ test("the broker applies the def's zod defaults before calling the handler", asy
       ],
       "code"
     )
-    await runCode.handler({ source: 'return await cognia.read({ path: "a.ts" })' })
+    await runCode!.handler({ source: 'return await cognia.read({ path: "a.ts" })' })
     // Unparsed, `maxResults` would arrive undefined and every `length >=
     // maxResults` cap in the handler would be permanently false.
     assert.deepEqual(CALLS, [{ name: "read", input: { path: "a.ts", maxResults: 100 } }])
@@ -222,16 +236,13 @@ test("the broker rejects arguments the def's schema does not accept", async () =
   reset()
   process.env.COGNIA_CODE_SANDBOX_LAUNCHER = LAUNCHER
   try {
-    const [runCode] = applyToolPresentation(
-      [{ ...def("read"), inputSchema: { path: z.string() } }],
-      "code"
-    )
-    const result = await runCode.handler({
+    const [runCode] = present([{ ...def("read"), inputSchema: { path: z.string() } }], "code")
+    const result = await runCode!.handler({
       source: "try { await cognia.read({ path: 42 }) } catch (e) { return e.message }",
     })
     // A validation message the model can act on, rather than a TypeError from
     // deep inside a handler that assumed a string.
-    assert.match(JSON.parse(result.content[0].text).result, /invalid arguments for "read"/)
+    assert.match(resultOf(result) as string, /invalid arguments for "read"/)
     assert.deepEqual(CALLS, [])
   } finally {
     delete process.env.COGNIA_CODE_SANDBOX_LAUNCHER
@@ -241,7 +252,7 @@ test("the broker rejects arguments the def's schema does not accept", async () =
 test("the declaration carries the real schema, not an invented one", () => {
   process.env.COGNIA_CODE_SANDBOX_LAUNCHER = LAUNCHER
   try {
-    const [runCode] = applyToolPresentation(
+    const [runCode] = present(
       [
         {
           ...def("read"),
@@ -251,8 +262,8 @@ test("the declaration carries the real schema, not an invented one", () => {
       ],
       "code"
     )
-    assert.match(runCode.description, /path: string/)
-    assert.match(runCode.description, /Absolute path/)
+    assert.match(runCode!.description, /path: string/)
+    assert.match(runCode!.description, /Absolute path/)
   } finally {
     delete process.env.COGNIA_CODE_SANDBOX_LAUNCHER
   }

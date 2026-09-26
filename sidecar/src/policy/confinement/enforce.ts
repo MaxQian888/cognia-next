@@ -17,7 +17,7 @@ import { isSecretPath } from "./secret-paths.ts"
 
 /** The host-owned sandbox scope a native tool body must stay inside. */
 export interface SandboxScopePolicy {
-  writableRoots?: string[]
+  writableRoots?: readonly string[]
 }
 
 /** Enforce the host-owned scope immediately before a native tool body runs. */

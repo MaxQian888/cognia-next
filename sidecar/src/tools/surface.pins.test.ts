@@ -35,11 +35,9 @@ import type { ToolSet } from "ai"
 import data from "../../../lib/settings/builtin-tools-data.json" with { type: "json" }
 import { stableStringify } from "../shared/stable-stringify.ts"
 import { READ_ONLY_TOOL_NAMES } from "../policy/tool-catalog/catalog.ts"
-import {
-  applyToolPresentation,
-  buildCogniaToolsServer,
-  collectCogniaToolDefs,
-} from "./builtin/registry.ts"
+import { collectCogniaToolDefs } from "./builtin/registry.ts"
+import { applyToolPresentation } from "./middleware/presentation.ts"
+import { buildCogniaToolsServer } from "./adapters/sdk-mcp.ts"
 import { wrapDefsWithReadOnlyTimeout } from "./middleware/read-only-timeout.ts"
 import { createReadTracker } from "./state/read-tracker.ts"
 import { createBgShellRegistry } from "./state/background-shells.ts"

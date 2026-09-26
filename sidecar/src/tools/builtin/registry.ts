@@ -1,16 +1,10 @@
-// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
-// Compose the cognia-tools SDK MCP server.
+// The built-in tool registry: which definitions a session gets, in which
+// order. Category-tool associations come from src/policy/tool-catalog, which
+// reads the metadata JSON the React settings UI shares; each rail's adapter
+// turns the collected definitions into its own tool format.
 //
-// Server name, version, and category-tool associations come from
-// src/policy/tool-catalog/catalog.ts, which reads the metadata JSON the React
-// settings UI shares.
-//
-// `buildCogniaToolsServer({ enabled })` returns either:
-//   - `null` when no categories are enabled (caller should skip registration)
-//   - an `McpSdkServerConfigWithInstance` ready to be merged into the
-//     `mcpServers` field of the SDK's `query()` options.
-
-import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk"
+// Registration order is part of the provider prompt-cache prefix, so the
+// categories below are walked in a fixed order and never reordered.
 
 import { fileExtrasTools } from "./file-extras/index.ts"
 import { gitTools } from "./git/index.ts"
@@ -32,25 +26,8 @@ import { createCoreTools } from "./core-files/index.ts"
 import { createMonitorTools } from "./core-files/monitor.ts"
 import { createExitPlanTool } from "./plan/exit-plan.ts"
 import { createPlanTools } from "./plan/plan-tools.ts"
-import { codeModeToolDefs } from "./run-code/index.ts"
-import { isProgrammaticReadOnly } from "./run-code/eligibility.ts"
-import { bareToolName } from "../../policy/confinement/classify.ts"
-import {
-  BUILTIN_SERVER_NAME,
-  BUILTIN_SERVER_VERSION,
-  READ_ONLY_TOOL_NAMES,
-  TOOL_NAMES_BY_CATEGORY,
-} from "../../policy/tool-catalog/catalog.ts"
-import { assertToolCallWithinRoots } from "../../policy/confinement/enforce.ts"
-import { assertModelSafeToolOutput } from "../../policy/pii/tool-output.ts"
-import { toolError } from "../kernel/result.ts"
-import { withProcessSandbox } from "../../platform/process/exec.ts"
-import { parseToolArgs, toolInputJsonSchema } from "../kernel/args.ts"
-import {
-  DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
-  wrapDefsWithReadOnlyTimeout,
-} from "../middleware/read-only-timeout.ts"
-import { wrapDefsWithResultCap } from "../middleware/result-cap.ts"
+import { wrapDefsWithConfinement } from "../middleware/confinement.ts"
+import { applyToolPresentation } from "../middleware/presentation.ts"
 import type { ToolDefinition } from "../kernel/define.ts"
 import type { ReadTracker } from "../state/read-tracker.ts"
 import type { SessionTaskStore } from "../state/tasks.ts"
@@ -75,14 +52,19 @@ export interface CollectToolDefsOptions {
   sessionId?: string | undefined
   model?: string | undefined
   provider?: string | undefined
-  /** `execution.composition.toolPresentation` from the send spec (ADR-0117). */
+  /**
+   * `execution.composition.toolPresentation` from the send spec (ADR-0117).
+   * Absent ⇒ `native`, the pre-composition behaviour.
+   */
   toolPresentation?: string | undefined
-  /** Register the ADR-0045 plan-authoring tools. */
+  /**
+   * Register the ADR-0045 plan-authoring tools (`create_plan` / `update_plan`).
+   * Off unless the caller asks — the dispatch layer opts in per send.
+   */
   planTools?: boolean | undefined
 }
 
-/** @type {Record<string, ReadonlyArray<unknown>>} */
-const TOOLS_BY_CATEGORY = {
+const TOOLS_BY_CATEGORY: Readonly<Record<string, readonly ToolDefinition[]>> = {
   fileExtras: fileExtrasTools,
   git: gitTools,
   /**
@@ -133,35 +115,12 @@ const TOOLS_BY_CATEGORY = {
 }
 
 /**
- * Build the in-process SDK MCP server.
- *
- * @param {object} options
- * @param {{ fileExtras?: boolean, git?: boolean, process?: boolean, environment?: boolean, shellAdvanced?: boolean }} options.enabled
- * @param {boolean} [options.alwaysLoad]
- *        When true, every tool from this server is kept resident in the
- *        prompt and never deferred behind tool search (claude-agent-sdk
- *        `createSdkMcpServer({ alwaysLoad })`, equivalent to the API's
- *        `defer_loading: false`). When false/omitted and the CLI's tool
- *        search is active, this server's tools defer until discovered.
- * @returns {ReturnType<typeof createSdkMcpServer> | null}
- */
-/**
- * Collect the raw `SdkMcpToolDefinition`s for the enabled categories (+ the
- * resolver-bound LSP tools). These are the same defs `buildCogniaToolsServer`
- * wraps into an in-process MCP server for the Anthropic path; exported so the
- * non-Anthropic AI-SDK bridge (`dispatch/ai-sdk-tools.mjs`) can convert them
- * into native AI SDK `tool()` objects (ADR-0043). Each def is
- * `{ name, description, inputSchema: <zod raw shape>, handler }`.
- *
- * @param {{
- *   enabled?: Record<string, boolean>,
- *   lspResolver?: unknown,
- *   readTracker?: unknown,
- *   taskStore?: unknown,
- *   cwd?: string,
- *   dispatchPath?: "anthropic" | "ai-sdk",
- * }} [options]
- * @returns {Array<{ name: string, description?: string, inputSchema?: unknown, handler: Function }>}
+ * Collect the raw tool definitions for the enabled categories (+ the
+ * resolver-bound LSP and code-graph tools). The Claude Agent SDK rail wraps
+ * them into an in-process MCP server (`adapters/sdk-mcp.ts`); the AI SDK rail
+ * (`dispatch/ai-sdk-tools.mjs`) converts them into native AI SDK `tool()`
+ * objects (ADR-0043). Each def is `{ name, description, inputSchema: <zod raw
+ * shape>, handler }`.
  */
 export function collectCogniaToolDefs({
   enabled,
@@ -177,19 +136,11 @@ export function collectCogniaToolDefs({
   sessionId,
   model,
   provider,
-  /**
-   * `execution.composition.toolPresentation` from the send spec (ADR-0117).
-   * Absent ⇒ `native`, the pre-composition behaviour.
-   */
   toolPresentation,
-  /**
-   * Register the ADR-0045 plan-authoring tools (`create_plan` / `update_plan`).
-   * Off unless the caller asks — the dispatch layer opts in per send.
-   */
   planTools = false,
 }: CollectToolDefsOptions = {}): ToolDefinition[] {
   if (!enabled || typeof enabled !== "object") return []
-  const tools = []
+  const tools: ToolDefinition[] = []
   for (const [category, toolList] of Object.entries(TOOLS_BY_CATEGORY)) {
     if (!enabled[category]) continue
     // `process` and `astGrep` are the static categories with session-bound
@@ -197,7 +148,9 @@ export function collectCogniaToolDefs({
     // (see the map entries). `astGrep` needs the session cwd — without it the
     // ast-grep child inherited the sidecar's cwd and rewrote the wrong tree.
     if (category === "process")
-      tools.push(...createProcessTools({ bgShells, builtinProcessSandbox, cwd }))
+      tools.push(
+        ...createProcessTools({ bgShells: bgShells ?? undefined, builtinProcessSandbox, cwd })
+      )
     else if (category === "terminalRepl")
       tools.push(...createTerminalReplTools({ builtinProcessSandbox, sessionId }))
     else if (category === "shellAdvanced")
@@ -239,7 +192,7 @@ export function collectCogniaToolDefs({
         cwd,
         readTracker,
         lspResolver,
-        bgShells,
+        bgShells: bgShells ?? undefined,
         builtinProcessSandbox,
         taskStore,
         hostRpc,
@@ -278,193 +231,6 @@ export function collectCogniaToolDefs({
   // assembled native surface, because the code broker dispatches back into
   // exactly these defs — a tool the user disabled is not in `tools`, so it is
   // not reachable from generated code either.
-  const confined = builtinProcessSandbox
-    ? tools.map((definition) => ({
-        ...definition,
-        handler: async (input, ...rest) => {
-          try {
-            assertToolCallWithinRoots(builtinProcessSandbox, definition.name, input, cwd)
-          } catch (error) {
-            return toolError(error, definition.name)
-          }
-          return withProcessSandbox(builtinProcessSandbox, cwd, () =>
-            definition.handler(input, ...rest)
-          )
-        },
-      }))
-    : tools
-  return applyToolPresentation(confined, toolPresentation)
+  const confined = wrapDefsWithConfinement(tools, builtinProcessSandbox, cwd)
+  return [...applyToolPresentation(confined, toolPresentation)]
 }
-
-/**
- * Fold the Code presentation over an assembled native tool list.
- *
- * `native` (and anything unrecognised) returns the list untouched, so a turn
- * that never resolved a composition behaves exactly as it did before ADR-0117.
- * `code` replaces the surface with `run_code` alone; `both` appends it.
- *
- * When the host cannot sandbox, `codeModeToolDefs` returns an empty list, and
- * `code` presentation then yields NO tools at all rather than the native ones.
- * That is deliberate: silently handing back the native surface would be the
- * degraded fallback the ADR forbids, and it would do it invisibly.
- *
- * @param {Array<object>} nativeDefs
- * @param {string | undefined} presentation
- */
-export function applyToolPresentation(nativeDefs, presentation) {
-  if (presentation !== "code" && presentation !== "both") return nativeDefs
-
-  const byName = new Map(nativeDefs.map((def) => [bareToolName(def.name), def]))
-  const callTool = async (name, input) => {
-    const def = byName.get(name)
-    if (!def) {
-      // Reached when the tool is eligible in principle but its category is
-      // switched off for this session. Saying so beats a generic failure.
-      throw new Error(`tool "${name}" is not enabled in this session`)
-    }
-    // Parse before dispatch, exactly as the Anthropic, ai-sdk and MCP-bridge
-    // rails do. Generated code is model-authored, so without this every
-    // `.default()`/`.min()`/`.max()` on the def is inert here and nowhere else
-    // — `content_search`'s `maxResults` cap would vanish (`length >= undefined`
-    // is always false) — and a wrong-typed field would surface as a TypeError
-    // deep inside a handler instead of a validation message the model can act
-    // on. It also makes the declaration's "the same argument validation still
-    // applies" claim true rather than aspirational.
-    const parsed = parseToolArgs(def.inputSchema, input)
-    if (!parsed.ok) throw new Error(`invalid arguments for "${name}": ${parsed.message}`)
-    return await def.handler(parsed.value)
-  }
-
-  // The SDK declaration is rendered from the defs this session actually
-  // assembled, so it advertises exactly what the broker can reach — a tool the
-  // user disabled never appears in the API the model is shown. The defs carry
-  // zod raw shapes; the renderer reads JSON Schema, so convert here or every
-  // signature silently degrades to `input: unknown`.
-  const sdkTools = nativeDefs
-    .filter((def) => isProgrammaticReadOnly(bareToolName(def.name)))
-    .map((def) => ({
-      name: bareToolName(def.name),
-      description: def.description,
-      inputSchema: toolInputJsonSchema(def.inputSchema),
-    }))
-
-  const codeDefs = codeModeToolDefs({ callTool, sdkTools })
-  return presentation === "code" ? codeDefs : [...nativeDefs, ...codeDefs]
-}
-
-export function buildCogniaToolsServer({
-  enabled,
-  alwaysLoad,
-  lspResolver,
-  codeGraphResolver,
-  readTracker,
-  taskStore,
-  cwd,
-  dispatchPath,
-  bgShells,
-  builtinProcessSandbox,
-  hostRpc,
-  sessionId,
-  model,
-  provider,
-  toolExecutionTimeoutMs,
-  maxToolResultTokens,
-  toolPresentation,
-  planTools = false,
-}) {
-  if (!enabled || typeof enabled !== "object") return null
-  const tools = collectCogniaToolDefs({
-    enabled,
-    lspResolver,
-    codeGraphResolver,
-    readTracker,
-    taskStore,
-    cwd,
-    dispatchPath,
-    bgShells,
-    builtinProcessSandbox,
-    hostRpc,
-    sessionId,
-    model,
-    provider,
-    toolPresentation,
-    planTools,
-  })
-  if (tools.length === 0) return null
-  // Per-tool execution deadline for READ-ONLY built-ins (see
-  // `src/tools/middleware/read-only-timeout.ts`). The Anthropic SDK calls each tool's handler
-  // itself, so we wrap the handler at registration time — mirroring the
-  // execute-time net the ai-sdk bridge applies (`dispatch/ai-sdk-tools.mjs`).
-  // Honour an explicit override (incl. `0` to disable); default the safety net
-  // otherwise so a hung read-only tool can't wedge the whole turn.
-  const net =
-    typeof toolExecutionTimeoutMs === "number"
-      ? toolExecutionTimeoutMs
-      : DEFAULT_BUILTIN_TOOL_TIMEOUT_MS
-  const guarded = wrapDefsWithReadOnlyTimeout(tools, net, READ_ONLY_TOOL_NAMES)
-  // Cap oversized tool-result TEXT bodies so a huge bash/grep/read output can't
-  // bloat the Anthropic context window (parity with the ai-sdk compaction cap).
-  // No-op unless the renderer resolved a `maxToolResultTokens` budget.
-  const capped = wrapDefsWithResultCap(guarded, maxToolResultTokens)
-  return createSdkMcpServer({
-    name: BUILTIN_SERVER_NAME,
-    version: BUILTIN_SERVER_VERSION,
-    tools: wrapNativeToolResults(capped),
-    ...(alwaysLoad ? { alwaysLoad: true } : {}),
-  })
-}
-
-/** Native MCP results cross the same PII gate as AI SDK results. */
-export function wrapNativeToolResults(definitions) {
-  return definitions.map((definition) => ({
-    ...definition,
-    handler: async (...args) => assertModelSafeToolOutput(await definition.handler(...args)),
-  }))
-}
-
-/**
- * Return the namespaced tool names for any UNAVAILABLE category. The sidecar
- * pushes these onto `disallowedTools` as defence-in-depth so a stray reference
- * to an absent tool is rejected at the SDK boundary.
- *
- * A category is unavailable when its flag is off OR — for the resolver-bound
- * `lsp` / `codeGraph` categories — when the flag is on but the dispatch layer
- * supplied no resolver. Registration guards on `flag && resolver` while this
- * used to guard on `!flag` alone, so that combination left the tools NEITHER
- * registered NOR denied: a stale `Character.allowedTools` entry or a
- * hallucinated `mcp__cognia-tools__lsp_hover` fell through the SDK boundary
- * unhandled. `lsp` is easy to land in — `opts.lsp` is only populated when
- * `settings.lsp.enabled && cwd && !supportAgent`, while the category flag is
- * `builtinTools.lsp`.
- *
- * @param {{ fileExtras?: boolean, git?: boolean, process?: boolean, environment?: boolean, shellAdvanced?: boolean, lsp?: boolean, codeGraph?: boolean }} enabled
- * @param {{ lspResolver?: unknown, codeGraphResolver?: unknown }} [resolvers]
- *        Omit to assume both are present (back-compat for callers that do not
- *        build resolvers).
- * @returns {string[]}
- */
-export function namesForDisabledCategories(enabled, resolvers) {
-  if (!enabled || typeof enabled !== "object") {
-    // No flags — return everything as disallowed.
-    return Object.values(TOOL_NAMES_BY_CATEGORY).flat().map(namespacedName)
-  }
-  const resolverMissing = (category) => {
-    if (!resolvers || typeof resolvers !== "object") return false
-    if (category === "lsp") return !resolvers.lspResolver
-    if (category === "codeGraph") return !resolvers.codeGraphResolver
-    return false
-  }
-  const out = []
-  for (const [category, names] of Object.entries(TOOL_NAMES_BY_CATEGORY)) {
-    if (!enabled[category] || resolverMissing(category)) {
-      for (const n of names) out.push(namespacedName(n))
-    }
-  }
-  return out
-}
-
-function namespacedName(toolName) {
-  return `mcp__${BUILTIN_SERVER_NAME}__${toolName}`
-}
-
-export { namespacedName }
