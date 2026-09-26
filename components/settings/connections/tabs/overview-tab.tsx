@@ -25,10 +25,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { auditKindLabel } from "./audit-kind-label"
 import { DocsProvidersCard } from "../docs-providers/docs-providers-card"
-import {
-  ConnectorHostNotice,
-  useConnectorControlReach,
-} from "@/components/connectors/connector-host-notice"
+import { useConnectorControlReach } from "@/components/connectors/connector-host-notice"
 
 const POLL_INTERVAL_MS = 10_000
 
@@ -186,7 +183,10 @@ export function OverviewTab() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <ConnectorHostNotice reach={reach} />
+          {/* No host notice here: this tab only renders inside
+              `ConnectionsSection`, whose banner already says why nothing can
+              be configured, and repeating it in this card printed the same
+              two sentences twice on one screen. */}
           <div className="flex items-center gap-2">
             <StatusDot state={serverStatus} />
             <span>

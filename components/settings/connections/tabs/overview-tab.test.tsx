@@ -121,22 +121,20 @@ describe("OverviewTab", () => {
     expect(mockRouterPush).toHaveBeenCalledWith("/inbox")
   })
 
-  it("says there is no runtime at all in a standalone browser", () => {
-    hostProfile = "web-standalone"
-    render(<OverviewTab />)
-    expect(screen.getByTestId("connector-host-notice")).toHaveAttribute("data-cause", "no-runtime")
-  })
-
   // The server card said "Platform connectors require the desktop (Tauri)
   // runtime" to a companion whose connectors were running on the paired host.
-  it("tells a companion its runtime is on the paired host", () => {
-    hostProfile = "cloud-companion"
-    render(<OverviewTab />)
-    expect(screen.getByTestId("connector-host-notice")).toHaveAttribute(
-      "data-cause",
-      "runs-on-host"
-    )
-  })
+  // Then it repeated the section banner's reason word for word. The reason is
+  // the banner's to give (`connections-section.test.tsx`); the card makes no
+  // claim of its own either way.
+  it.each(["web-standalone", "cloud-companion"] as const)(
+    "leaves the no-runtime reason to the section banner (%s)",
+    (profile) => {
+      hostProfile = profile
+      render(<OverviewTab />)
+      expect(screen.queryByTestId("connector-host-notice")).toBeNull()
+      expect(screen.queryByText(/require the desktop/i)).toBeNull()
+    }
+  )
 
   it("renders Adapters card heading", () => {
     render(<OverviewTab />)
