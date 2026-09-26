@@ -57,9 +57,11 @@
     "source": {
       "agent-team": "Agent teams",
       "connector": "Connectors",
+      "issue": "Issues",
       "plugin": "Plugins",
       "scheduler": "Scheduler",
       "session": "Sessions",
+      "site": "Sites",
       "system": "System",
       "workflow": "Workflows"
     },

@@ -21598,9 +21598,11 @@
         "source": {
           "agent-team": "智能体团队",
           "connector": "连接器",
+          "issue": "议题",
           "plugin": "插件",
           "scheduler": "计划任务",
           "session": "会话",
+          "site": "站点",
           "system": "系统",
           "workflow": "工作流"
         },

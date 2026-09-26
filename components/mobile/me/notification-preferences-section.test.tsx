@@ -3,6 +3,10 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react"
 
+import enMessages from "@/i18n/messages/en.json"
+import zhMessages from "@/i18n/messages/zh-CN.json"
+import { NOTIFICATION_SOURCES } from "@/types/notifications"
+
 const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
 const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)
 
@@ -190,5 +194,19 @@ describe("NotificationPreferencesSection", () => {
     expect(lastPrefs()).toEqual(
       expect.objectContaining({ globalDefaultChannels: ["center", "toast"], sound: true })
     )
+  })
+})
+
+describe("notification source labels", () => {
+  // The source list grew "issue" and "site" while this map did not, and the
+  // phone printed `mobile.notifications.preferences.source.issue` as a label.
+  it.each([
+    ["en", enMessages],
+    ["zh-CN", zhMessages],
+  ])("labels every source in %s", (_locale, messages) => {
+    const labels = messages.mobile.notifications.preferences.source as Record<string, string>
+    for (const source of NOTIFICATION_SOURCES) {
+      expect(labels[source]).toEqual(expect.any(String))
+    }
   })
 })
