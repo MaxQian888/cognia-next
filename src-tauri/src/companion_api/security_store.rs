@@ -2466,7 +2466,7 @@ fn reconcile_interrupted_operations(
     }
     tx.commit()?;
     for _ in 0..interrupted.len() {
-        super::metrics::record_operation(super::metrics::OperationOutcome::Interrupted);
+        super::operations::record_operation(super::operations::OperationOutcome::Interrupted);
     }
     Ok(interrupted.len())
 }

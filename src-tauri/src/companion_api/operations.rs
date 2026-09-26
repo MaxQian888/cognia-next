@@ -8,6 +8,8 @@
 //! been. The `status` word is the ledger's own and is kept for operators, but
 //! a client branches on `done`, `error` and `result`.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use cognia_problem::Problem;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -128,6 +130,56 @@ fn unix_seconds() -> i64 {
         .unwrap_or(0)
 }
 
+// ---------------------------------------------------------------------------
+// Lifecycle counters
+// ---------------------------------------------------------------------------
+
+/// A durable operation's lifecycle step, counted for `/metrics` as
+/// `cognia_rpc_operations_total{outcome=…}`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationOutcome {
+    Accepted,
+    Completed,
+    Replayed,
+    Interrupted,
+}
+
+static OPERATIONS_ACCEPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static OPERATIONS_COMPLETED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static OPERATIONS_REPLAYED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static OPERATIONS_INTERRUPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+pub fn record_operation(outcome: OperationOutcome) {
+    let counter = match outcome {
+        OperationOutcome::Accepted => &OPERATIONS_ACCEPTED_TOTAL,
+        OperationOutcome::Completed => &OPERATIONS_COMPLETED_TOTAL,
+        OperationOutcome::Replayed => &OPERATIONS_REPLAYED_TOTAL,
+        OperationOutcome::Interrupted => &OPERATIONS_INTERRUPTED_TOTAL,
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Every lifecycle counter with its `outcome` label, in exposition order.
+pub fn operation_counts() -> [(&'static str, u64); 4] {
+    [
+        (
+            "accepted",
+            OPERATIONS_ACCEPTED_TOTAL.load(Ordering::Relaxed),
+        ),
+        (
+            "completed",
+            OPERATIONS_COMPLETED_TOTAL.load(Ordering::Relaxed),
+        ),
+        (
+            "replayed",
+            OPERATIONS_REPLAYED_TOTAL.load(Ordering::Relaxed),
+        ),
+        (
+            "interrupted",
+            OPERATIONS_INTERRUPTED_TOTAL.load(Ordering::Relaxed),
+        ),
+    ]
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +275,17 @@ mod tests {
         assert_eq!(odd.result, Some(json!({ "something": 1 })));
         let body = Operation::from(summary("succeeded", Some(json!({ "body": [1, 2] }))));
         assert_eq!(body.result, Some(json!([1, 2])));
+    }
+
+    #[test]
+    fn each_outcome_counts_under_its_own_label() {
+        let labels: Vec<&str> = operation_counts().iter().map(|(label, _)| *label).collect();
+        assert_eq!(labels, ["accepted", "completed", "replayed", "interrupted"]);
+
+        // Other suites record operations concurrently, so this compares with
+        // a floor rather than an exact before/after.
+        let before = operation_counts()[3].1;
+        record_operation(OperationOutcome::Interrupted);
+        assert!(operation_counts()[3].1 > before);
     }
 }

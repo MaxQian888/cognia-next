@@ -58,10 +58,6 @@ impl Default for RpcPlaneMetrics {
 
 static PUBLIC_RPC_METRICS: Lazy<RpcPlaneMetrics> = Lazy::new(RpcPlaneMetrics::default);
 static INTERNAL_RPC_METRICS: Lazy<RpcPlaneMetrics> = Lazy::new(RpcPlaneMetrics::default);
-static OPERATIONS_ACCEPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
-static OPERATIONS_COMPLETED_TOTAL: AtomicU64 = AtomicU64::new(0);
-static OPERATIONS_REPLAYED_TOTAL: AtomicU64 = AtomicU64::new(0);
-static OPERATIONS_INTERRUPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static CONTRACT_INPUT_VIOLATIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static CONTRACT_OUTPUT_VIOLATIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static CONTRACT_MISMATCHES_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -159,23 +155,10 @@ impl Drop for RpcObservation {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum OperationOutcome {
-    Accepted,
-    Completed,
-    Replayed,
-    Interrupted,
-}
-
-pub fn record_operation(outcome: OperationOutcome) {
-    let counter = match outcome {
-        OperationOutcome::Accepted => &OPERATIONS_ACCEPTED_TOTAL,
-        OperationOutcome::Completed => &OPERATIONS_COMPLETED_TOTAL,
-        OperationOutcome::Replayed => &OPERATIONS_REPLAYED_TOTAL,
-        OperationOutcome::Interrupted => &OPERATIONS_INTERRUPTED_TOTAL,
-    };
-    counter.fetch_add(1, Ordering::Relaxed);
-}
+// The durable-operation counters live beside the operation document, so the
+// security store that owns the ledger can count an interrupted operation
+// without depending on the metrics renderer.
+pub use super::operations::{record_operation, OperationOutcome};
 
 pub fn record_contract_violation(direction: cognia_headless_contract::ContractDirection) {
     let counter = match direction {
@@ -459,15 +442,9 @@ pub fn render_prometheus() -> String {
     }
     out.push_str("# HELP cognia_rpc_operations_total Durable operation lifecycle outcomes.\n");
     out.push_str("# TYPE cognia_rpc_operations_total counter\n");
-    for (outcome, counter) in [
-        ("accepted", &OPERATIONS_ACCEPTED_TOTAL),
-        ("completed", &OPERATIONS_COMPLETED_TOTAL),
-        ("replayed", &OPERATIONS_REPLAYED_TOTAL),
-        ("interrupted", &OPERATIONS_INTERRUPTED_TOTAL),
-    ] {
+    for (outcome, count) in super::operations::operation_counts() {
         out.push_str(&format!(
-            "cognia_rpc_operations_total{{outcome=\"{outcome}\"}} {}\n",
-            counter.load(Ordering::Relaxed)
+            "cognia_rpc_operations_total{{outcome=\"{outcome}\"}} {count}\n"
         ));
     }
     out.push_str(
