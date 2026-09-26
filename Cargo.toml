@@ -73,6 +73,9 @@ members = [
   # ADR-0196 P6f — the task-workspace host surface (service slot, maintenance,
   # hook and event sinks, command bodies), out of `app_lib`.
   "crates/cognia-task-workspace-host",
+  # ADR-0196 P6d — Agent Fleet (registry, ingress routes, installers, terminal
+  # control, recovery), out of `app_lib`.
+  "crates/cognia-fleet",
   # ADR-0196 P6g — Chromium cookie import (profile discovery, Safe Storage
   # decryption), out of `app_lib`.
   "crates/cognia-browser-cookies",

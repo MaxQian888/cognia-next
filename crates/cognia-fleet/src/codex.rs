@@ -30,7 +30,7 @@ fn codex_notify_script_path_at(base: &Path) -> PathBuf {
 }
 
 pub fn codex_notify_script_path() -> Option<PathBuf> {
-    crate::agents::paths::cognia_home().map(|home| codex_notify_script_path_at(&home))
+    cognia_agents::paths::cognia_home().map(|home| codex_notify_script_path_at(&home))
 }
 
 /// The Codex notify forwarder. Codex appends the event JSON as the final argv
@@ -238,9 +238,9 @@ fn current_status() -> Result<CodexIntegrationStatus, String> {
 /// Install the Codex notify integration: generate the script, then point
 /// `~/.codex/config.toml`'s `notify` at it (refusing to overwrite a foreign
 /// notify program).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_codex_install() -> Result<CodexIntegrationStatus, String> {
-    let home = crate::agents::paths::cognia_home().ok_or("no home directory")?;
+    let home = cognia_agents::paths::cognia_home().ok_or("no home directory")?;
     let script_path = write_codex_notify_script_at(&home)?;
     let script_str = script_path.to_string_lossy().into_owned();
 
@@ -267,7 +267,7 @@ pub async fn fleet_codex_install() -> Result<CodexIntegrationStatus, String> {
 }
 
 /// Remove the Codex notify integration (only our entry) and delete the script.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_codex_uninstall() -> Result<CodexIntegrationStatus, String> {
     let script_path = codex_notify_script_path().ok_or("no home directory")?;
     let script_str = script_path.to_string_lossy().into_owned();
@@ -285,7 +285,7 @@ pub async fn fleet_codex_uninstall() -> Result<CodexIntegrationStatus, String> {
     current_status()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_codex_status() -> Result<CodexIntegrationStatus, String> {
     current_status()
 }

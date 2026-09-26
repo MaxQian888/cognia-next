@@ -1,5 +1,5 @@
 /**
- * TS mirrors of the Rust fleet DTOs (`src-tauri/src/fleet/registry.rs`,
+ * TS mirrors of the Rust fleet DTOs (`crates/cognia-fleet/src/registry.rs`,
  * `terminal.rs`, `mod.rs`). Field names are camelCase and enum values
  * kebab-case — pinned by the Rust serde tests.
  */
@@ -251,7 +251,7 @@ export interface FleetMonitorStatus {
 
 export type PermissionBehavior = "allow" | "deny"
 
-/** Event topic (must match `src-tauri/src/fleet/mod.rs`). */
+/** Event topic (must match `crates/cognia-fleet/src/lib.rs`). */
 export const FLEET_UPDATE_EVENT = "fleet://update"
 
 /**

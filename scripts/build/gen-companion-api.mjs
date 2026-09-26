@@ -69,7 +69,7 @@ const RPC_DISPATCH_SOURCE_PATHS = [
 const RUNTIME_ROUTE_SOURCES = [
   { path: COMPANION_SOURCES.server },
   { path: COMPANION_SOURCES.api },
-  { path: "src-tauri/src/fleet/routes.rs" },
+  { path: "crates/cognia-fleet/src/routes.rs" },
   { path: COMPANION_SOURCES.larkEntry, mount: "/integrations/lark" },
   { path: "crates/cognia-connectors/src/axum_app.rs", mount: "/connectors" },
   { path: "crates/cognia-connectors/src/ws_server.rs", mount: "/connectors" },

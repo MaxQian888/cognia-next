@@ -3213,7 +3213,7 @@ mod tests {
     /// island two buttons OpenCode cannot serve.
     #[test]
     fn manifest_false_capability_cannot_be_switched_on_by_a_payload() {
-        use super::super::terminal::{TerminalApp, TerminalSource};
+        use crate::terminal::{TerminalApp, TerminalSource};
 
         let mut payload = base_payload();
         payload["session_id"] = serde_json::json!("oc-cap");
@@ -3287,7 +3287,7 @@ mod tests {
 
     #[test]
     fn terminal_fallback_helpers() {
-        use super::super::terminal::{TerminalApp, TerminalSource};
+        use crate::terminal::{TerminalApp, TerminalSource};
         let mut reg = FleetRegistry::new();
         reg.apply(&claude_ev("SessionStart", base_payload()), 0);
 
@@ -3320,7 +3320,7 @@ mod tests {
         // OS can raise this terminal (Ghostty: macOS/Linux yes, Windows no).
         assert_eq!(
             s.capabilities.focus_terminal,
-            super::super::control::can_focus(TerminalApp::Ghostty)
+            crate::control::can_focus(TerminalApp::Ghostty)
         );
 
         // Unknown session → None everywhere.

@@ -132,7 +132,7 @@ export function vendorRootsFromEnv(
   const xdgConfig = envDir(env.XDG_CONFIG_HOME)
   const xdgData = envDir(env.XDG_DATA_HOME)
   // Windows has no XDG default; both OpenCode and this repo
-  // (src-tauri/src/fleet/opencode.rs) fall back to %APPDATA%.
+  // (crates/cognia-fleet/src/opencode.rs) fall back to %APPDATA%.
   const appData =
     platform === "windows"
       ? (envDir(env.APPDATA) ?? (base ? joinPath(base, "AppData/Roaming") : null))

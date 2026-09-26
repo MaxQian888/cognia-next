@@ -1,0 +1,64 @@
+# ADR-0196 P6d — Agent Fleet, out of `app_lib`: the in-memory registry of
+# externally launched coding agents, the `/api/fleet/*` ingress routes, the
+# hook-script and plugin installers (Claude Code, Codex, OpenCode), terminal
+# focus and interrupt, crash recovery and the durable OpenCode outbox.
+#
+# The island overlay windows and the monitor commands that start the companion
+# listener stay in `src-tauri/src/fleet`, which re-exports this crate and
+# installs its two seams: the snapshot sink (`FleetUpdateSink`) and the
+# companion view (`companion::FleetCompanion`).
+[package]
+name = "cognia-fleet"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Agent Fleet: external agent registry, ingress routes, hook installers, terminal control and recovery."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_fleet"
+path = "src/lib.rs"
+
+[features]
+# ADR-0196 — `#[tauri::command]` on the Fleet commands. Off by default so the
+# crate builds and tests Tauri-free; `src-tauri` turns it on.
+default = []
+tauri-host = ["dep:tauri"]
+# The desktop's own tests run against this crate in its test mode: no
+# recovery file is read or written, `git` capture starts off, and the runtime
+# lock and wait overrides are reachable (`cfg(test)` does not cross a crate
+# boundary). `src-tauri` turns it on from its dev-dependencies only.
+test-support = []
+
+[dependencies]
+# `fs_atomic` for installers and recovery; `rt` for the reaper and blocking
+# work; `installed::Replaceable` for the companion view.
+cognia-core = { path = "../cognia-core", features = ["rt"] }
+# `paths::cognia_home`, where the monitor config and hook scripts live.
+cognia-agents = { path = "../cognia-agents" }
+# Tenant resolution and the deployment mode a snapshot is projected for.
+cognia-companion-security = { path = "../cognia-companion-security" }
+tauri = { workspace = true, optional = true }
+axum.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+sysinfo = { workspace = true, features = ["system"] }
+toml_edit.workspace = true
+once_cell.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
+dirs.workspace = true
+log.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { workspace = true, features = ["util"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

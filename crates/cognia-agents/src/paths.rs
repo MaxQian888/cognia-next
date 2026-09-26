@@ -146,7 +146,7 @@ fn to_string(path: Option<PathBuf>) -> String {
 /// Pure core of [`vendor_roots`]. `config_dir` / `data_dir` are the
 /// `dirs::` values (only consulted on Windows, where there is no XDG default
 /// and `%APPDATA%` is the convention both OpenCode and this repo already use
-/// — see `src-tauri/src/fleet/opencode.rs`).
+/// — see `crates/cognia-fleet/src/opencode.rs`).
 pub fn vendor_roots_from(
     env: RootEnv,
     home_dir: Option<PathBuf>,

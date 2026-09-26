@@ -422,8 +422,10 @@ static SERVICES: RwLock<Option<Arc<HeadlessServices>>> = RwLock::new(None);
 pub fn install_headless_services(services: Option<Arc<HeadlessServices>>) {
     // The hooks runtime merges this process's plugin `commandHooks` through
     // its host. Unit-test states never had that layer, so tests install none.
+    // Fleet snapshots project tenants through the companion core the same way.
     #[cfg(not(test))]
     if let Some(services) = &services {
+        crate::fleet::install_companion_view();
         cognia_hooks::host::HOST.set(Arc::new(
             crate::plugin_api::command_hooks::HeadlessHooksHost(Arc::clone(
                 &services.plugin_runtime,

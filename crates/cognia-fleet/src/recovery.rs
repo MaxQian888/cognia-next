@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::fs_atomic::{atomic_write_with_mtime_check, AtomicWritePlan};
+use cognia_core::fs_atomic::{atomic_write_with_mtime_check, AtomicWritePlan};
 
 use super::registry::{FleetAgent, FleetStatus};
 

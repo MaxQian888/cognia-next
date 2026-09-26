@@ -12,7 +12,7 @@
  * Every installed handler is recognizable by the managed command prefix (the
  * generated `claude-hook.sh` path), so uninstall removes exactly ours and a
  * status check can detect foreign edits. The hook script itself is generated
- * by Rust (`src-tauri/src/fleet/install.rs`) and fails open: with the fleet
+ * by Rust (`crates/cognia-fleet/src/install.rs`) and fails open: with the fleet
  * monitor off (or Cognia closed) each hook exits 0 in ~10 ms.
  */
 
@@ -48,7 +48,7 @@ export interface FleetHookDef {
  * event in the user's own session, so only low-frequency state transitions the
  * island can act on are installed.
  *
- * The registry (`src-tauri/src/fleet/registry.rs`) folds each of these into a
+ * The registry (`crates/cognia-fleet/src/registry.rs`) folds each of these into a
  * session-row state change; the generated hook script forwards the event name
  * verbatim, so this list and the registry's `match` are the only two places
  * coverage is declared.

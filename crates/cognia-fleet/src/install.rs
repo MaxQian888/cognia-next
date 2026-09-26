@@ -16,7 +16,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use crate::fs_atomic::{atomic_write_with_mtime_check, AtomicWritePlan};
+use cognia_core::fs_atomic::{atomic_write_with_mtime_check, AtomicWritePlan};
 
 /// Marker header stamped on every generated artifact so status checks can
 /// distinguish "ours" from user-modified files. Bump the version when the
@@ -24,20 +24,20 @@ use crate::fs_atomic::{atomic_write_with_mtime_check, AtomicWritePlan};
 pub const MANAGED_MARKER: &str = "cognia-fleet v1 — managed by Cognia, do not edit";
 
 fn cognia_home() -> Result<PathBuf, String> {
-    crate::agents::paths::cognia_home().ok_or_else(|| "no home directory".to_string())
+    cognia_agents::paths::cognia_home().ok_or_else(|| "no home directory".to_string())
 }
 
 /// `<cognia-home>/agent-monitor.json` — port + token the hook scripts read.
 pub fn monitor_config_path() -> Option<PathBuf> {
-    crate::agents::paths::cognia_home().map(|home| home.join("agent-monitor.json"))
+    cognia_agents::paths::cognia_home().map(|home| home.join("agent-monitor.json"))
 }
 
 pub fn opencode_outbox_path() -> Option<PathBuf> {
-    crate::agents::paths::cognia_home().map(|home| home.join("fleet-opencode-outbox.json"))
+    cognia_agents::paths::cognia_home().map(|home| home.join("fleet-opencode-outbox.json"))
 }
 
 pub fn fleet_recovery_path() -> Option<PathBuf> {
-    crate::agents::paths::cognia_home().map(|home| home.join("fleet-sessions-recovery.json"))
+    cognia_agents::paths::cognia_home().map(|home| home.join("fleet-sessions-recovery.json"))
 }
 
 fn monitor_config_path_at(base: &Path) -> PathBuf {
@@ -55,7 +55,7 @@ pub fn hook_script_path_at(base: &Path, slug: &str) -> PathBuf {
 }
 
 pub fn claude_hook_script_path() -> Option<PathBuf> {
-    crate::agents::paths::cognia_home().map(|home| claude_hook_script_path_at(&home))
+    cognia_agents::paths::cognia_home().map(|home| claude_hook_script_path_at(&home))
 }
 
 /// Write `agent-monitor.json` atomically with owner-only permissions.
@@ -292,7 +292,7 @@ fn scripts_status() -> FleetScriptsStatus {
 
 /// Ensure the generated hook scripts exist and are current. Returns the
 /// script path the TS catalog references from settings.json.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_scripts_install() -> Result<FleetScriptsStatus, String> {
     write_claude_hook_script()?;
     Ok(scripts_status())
@@ -300,13 +300,13 @@ pub async fn fleet_scripts_install() -> Result<FleetScriptsStatus, String> {
 
 /// Remove generated scripts (after the TS side has removed the settings.json
 /// entries pointing at them).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_scripts_uninstall() -> Result<FleetScriptsStatus, String> {
     remove_scripts()?;
     Ok(scripts_status())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_scripts_status() -> Result<FleetScriptsStatus, String> {
     Ok(scripts_status())
 }
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn script_echoes_output_only_in_wait_mode() {
-        let script = claude_hook_script(super::super::terminal::CAPTURED_ENV_VARS);
+        let script = claude_hook_script(crate::terminal::CAPTURED_ENV_VARS);
         assert!(script.contains(r#"if [ "$MODE" = "wait" ] && [ -n "$OUT" ]; then"#));
     }
 

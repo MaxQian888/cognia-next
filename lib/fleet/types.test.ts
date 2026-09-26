@@ -1,7 +1,7 @@
 /**
  * The fleet DTOs are compile-time types; the only runtime surface is the two
  * constants below, which must stay in lockstep with the Rust side
- * (`src-tauri/src/fleet/mod.rs`) — assert their literal values so a drift is a
+ * (`crates/cognia-fleet/src/lib.rs`) — assert their literal values so a drift is a
  * failing test, not a silent no-op event subscription.
  */
 

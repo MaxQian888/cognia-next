@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::fs_atomic::{atomic_write_with_mtime_check, AtomicWritePlan};
+use cognia_core::fs_atomic::{atomic_write_with_mtime_check, AtomicWritePlan};
 
 pub const COMMAND_TTL_MS: u64 = 24 * 60 * 60 * 1_000;
 pub const COMMAND_LEASE_MS: u64 = 30_000;

@@ -2339,6 +2339,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-fleet"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "cognia-agents",
+ "cognia-companion-security",
+ "cognia-core",
+ "dirs 6.0.0",
+ "libc",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "rand 0.10.2",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tauri",
+ "tempfile",
+ "tokio",
+ "toml_edit 0.25.13+spec-1.1.0",
+ "tower",
+]
+
+[[package]]
 name = "cognia-gateway"
 version = "0.1.0"
 dependencies = [
@@ -2551,6 +2575,7 @@ dependencies = [
  "cognia-environment",
  "cognia-external-agent",
  "cognia-files",
+ "cognia-fleet",
  "cognia-gateway",
  "cognia-git",
  "cognia-git-mirror",

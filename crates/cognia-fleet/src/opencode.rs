@@ -414,7 +414,7 @@ fn status_dto() -> OpencodeIntegrationStatus {
 }
 
 /// Write the OpenCode plugin. Requires `~/.config/opencode/` to exist.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_opencode_install() -> Result<OpencodeIntegrationStatus, String> {
     let dir = opencode_plugin_dir().ok_or("no config directory")?;
     let opencode_root = dir.parent().ok_or("bad plugin path")?;
@@ -426,7 +426,7 @@ pub async fn fleet_opencode_install() -> Result<OpencodeIntegrationStatus, Strin
 }
 
 /// Remove the OpenCode plugin.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_opencode_uninstall() -> Result<OpencodeIntegrationStatus, String> {
     if let Some(path) = opencode_plugin_path() {
         match std::fs::remove_file(&path) {
@@ -436,7 +436,7 @@ pub async fn fleet_opencode_uninstall() -> Result<OpencodeIntegrationStatus, Str
     Ok(status_dto())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_opencode_status() -> Result<OpencodeIntegrationStatus, String> {
     Ok(status_dto())
 }

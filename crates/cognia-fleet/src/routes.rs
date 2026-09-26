@@ -251,7 +251,7 @@ fn permission_decision(agent: FleetAgent, behavior: PermissionBehavior) -> serde
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fleet::runtime;
+    use crate::runtime;
     use tower::ServiceExt as _;
 
     fn loopback_peer() -> ConnectInfo<SocketAddr> {
@@ -302,7 +302,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_non_loopback_peer() {
-        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
         let token = arm("routes-test-token-lan");
         let resp = router()
             .oneshot(hook_request(
@@ -317,7 +317,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_or_wrong_token() {
-        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
         arm("routes-test-token-auth");
         let resp = router()
             .oneshot(hook_request(
@@ -342,7 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn accepts_fire_event_and_folds_into_registry() {
-        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
         let token = arm("routes-test-token-fire");
         let resp = router()
             .oneshot(hook_request(
@@ -367,7 +367,7 @@ mod tests {
 
     #[tokio::test]
     async fn unusable_payload_is_422() {
-        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
         let token = arm("routes-test-token-422");
         let body = serde_json::json!({
             "agent": "claude-code", "event": "SessionStart", "payload": {}
@@ -381,7 +381,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn permission_long_poll_returns_decision_json() {
-        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
         let token = arm("routes-test-token-perm");
         let rt = runtime();
 
@@ -436,7 +436,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ask_user_question_long_poll_returns_answer_decision() {
-        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
         let token = arm("routes-test-token-question");
         let rt = runtime();
 
@@ -504,9 +504,9 @@ mod tests {
 
     #[tokio::test]
     async fn permission_timeout_answers_empty_204() {
-        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
         let token = arm("routes-test-token-timeout");
-        crate::fleet::set_permission_wait_override_ms(Some(80));
+        crate::set_permission_wait_override_ms(Some(80));
 
         let resp = router()
             .oneshot(hook_request(
@@ -516,7 +516,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        crate::fleet::set_permission_wait_override_ms(None);
+        crate::set_permission_wait_override_ms(None);
 
         // Fail-open: empty body so the hook script prints nothing and the
         // agent's own terminal prompt takes over.
@@ -533,7 +533,7 @@ mod tests {
 
     #[tokio::test]
     async fn opencode_commands_poll_requires_loopback_and_token() {
-        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
         let token = arm("routes-cmd-token");
 
         let req = |peer: ConnectInfo<SocketAddr>, tok: Option<&str>| {
@@ -565,7 +565,7 @@ mod tests {
 
     #[tokio::test]
     async fn opencode_commands_poll_returns_queued_command() {
-        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
         let tmp = tempfile::tempdir().unwrap();
         let token = arm("routes-cmd-drain-token");
         let rt = runtime();
@@ -623,7 +623,7 @@ mod tests {
 
     #[tokio::test]
     async fn opencode_command_settlement_requires_auth_and_nack_redelivers() {
-        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
         let tmp = tempfile::tempdir().unwrap();
         let token = arm("routes-cmd-settle-token");
         let rt = runtime();
@@ -698,7 +698,7 @@ mod tests {
     /// agree with the manifest today, because a new manifest entry would not.
     #[test]
     fn permission_decision_is_delegated_to_the_manifest() {
-        for manifest in crate::fleet::integrations::MANIFESTS {
+        for manifest in crate::integrations::MANIFESTS {
             for (behavior, s) in [
                 (PermissionBehavior::Allow, "allow"),
                 (PermissionBehavior::Deny, "deny"),

@@ -331,14 +331,15 @@ pub async fn focus_session_terminal(agent: &str, session_id: &str) -> Result<(),
         .ok_or("session has no known terminal")?;
     // Blocking process spawn — hop off the async runtime like other commands
     // that shell out.
-    tauri::async_runtime::spawn_blocking(move || focus_terminal_app(terminal.app))
+    cognia_core::rt::handle()
+        .spawn_blocking(move || focus_terminal_app(terminal.app))
         .await
         .map_err(|e| e.to_string())?
 }
 
 /// Tauri command: focus the terminal behind a session (looked up by agent +
 /// session id so the frontend never passes raw app identifiers).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_focus_terminal(agent: String, session_id: String) -> Result<(), String> {
     focus_session_terminal(&agent, &session_id).await
 }
@@ -510,22 +511,23 @@ pub async fn interrupt_session(agent: &str, session_id: &str) -> Result<(), Stri
     let expected = expected_process_names(agent);
     // `sysinfo` refresh + `kill` are blocking; hop off the async runtime like
     // the other commands in this module that touch the OS.
-    tauri::async_runtime::spawn_blocking(move || {
-        let observed = observe_process(pid);
-        let observed_ref = observed
-            .as_ref()
-            .map(|(name, argv0)| (name.as_str(), argv0.as_deref()));
-        check_interrupt(can_interrupt(), observed_ref, expected)
-            .map_err(|r| r.code().to_string())?;
-        send_interrupt(pid)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    cognia_core::rt::handle()
+        .spawn_blocking(move || {
+            let observed = observe_process(pid);
+            let observed_ref = observed
+                .as_ref()
+                .map(|(name, argv0)| (name.as_str(), argv0.as_deref()));
+            check_interrupt(can_interrupt(), observed_ref, expected)
+                .map_err(|r| r.code().to_string())?;
+            send_interrupt(pid)
+        })
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Tauri command: interrupt a session's current turn (agent + session id, so
 /// the frontend never passes a raw pid).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_interrupt_session(agent: String, session_id: String) -> Result<(), String> {
     interrupt_session(&agent, &session_id).await
 }
@@ -764,7 +766,7 @@ mod tests {
 
     #[test]
     fn expected_names_cover_every_agent() {
-        use crate::fleet::registry::FleetAgent;
+        use crate::registry::FleetAgent;
         assert_eq!(expected_process_names(FleetAgent::ClaudeCode), &["claude"]);
         assert_eq!(expected_process_names(FleetAgent::Codex), &["codex"]);
         assert_eq!(expected_process_names(FleetAgent::Opencode), &["opencode"]);

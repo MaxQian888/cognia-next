@@ -45,6 +45,7 @@
     "cognia-external-agent": "domain",
     "cognia-task-workspace": "domain",
     "cognia-task-workspace-host": "domain",
+    "cognia-fleet": "domain",
     "cognia-observability": "domain",
     "cognia-agent-state": "domain",
     "cognia-sandbox-pool": "domain",
@@ -110,7 +111,7 @@
   "appShell": {
     "package": "cognia-next",
     "srcDir": "src-tauri/src",
-    "maxLoc": 155522,
+    "maxLoc": 145317,
     "locSlack": 4000,
     "locBlocking": false,
     "modules": [

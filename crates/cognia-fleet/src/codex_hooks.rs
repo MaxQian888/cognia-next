@@ -253,7 +253,7 @@ pub fn codex_hook_script_path_at(base: &Path) -> PathBuf {
 }
 
 pub fn codex_hook_script_path() -> Option<PathBuf> {
-    crate::agents::paths::cognia_home().map(|home| codex_hook_script_path_at(&home))
+    cognia_agents::paths::cognia_home().map(|home| codex_hook_script_path_at(&home))
 }
 
 /// Install state of the Codex hooks integration.
@@ -663,7 +663,7 @@ fn paths() -> Result<(PathBuf, PathBuf, PathBuf), String> {
 /// actually run it: hooks stay inert until the user grants trust in the Codex
 /// TUI, and that trust is not readable from disk. Callers must surface
 /// "waiting for the first event" from observed ingress traffic.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_codex_hooks_install() -> Result<CodexHooksStatus, String> {
     tokio::task::spawn_blocking(|| {
         let _guard = HOOKS_FILE_LOCK
@@ -689,7 +689,7 @@ pub async fn fleet_codex_hooks_install() -> Result<CodexHooksStatus, String> {
 }
 
 /// Remove our handlers (leaving every foreign one) and delete the script.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_codex_hooks_uninstall() -> Result<CodexHooksStatus, String> {
     tokio::task::spawn_blocking(|| {
         let _guard = HOOKS_FILE_LOCK
@@ -708,7 +708,7 @@ pub async fn fleet_codex_hooks_uninstall() -> Result<CodexHooksStatus, String> {
     .map_err(|e| format!("codex hooks uninstall task: {e}"))?
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_codex_hooks_status() -> Result<CodexHooksStatus, String> {
     tokio::task::spawn_blocking(|| {
         let _guard = HOOKS_FILE_LOCK
@@ -729,7 +729,7 @@ pub async fn fleet_codex_hooks_status() -> Result<CodexHooksStatus, String> {
 
 /// Runtime-proven Codex hook event set. This is separate from install status:
 /// a file may be present while the local executable's schema probe is degraded.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_codex_hooks_capabilities() -> Result<CodexHookCapabilityReport, String> {
     tokio::task::spawn_blocking(|| probe_codex_hook_events(Path::new("codex")))
         .await
@@ -870,7 +870,7 @@ mod tests {
         // island 20s < curl 25s < hook timeout — the ladder that guarantees a
         // permission prompt can never wedge the user's terminal.
         let hook_timeout = perm["timeout"].as_u64().unwrap();
-        assert!(hook_timeout * 1000 > super::super::PERMISSION_WAIT_MS);
+        assert!(hook_timeout * 1000 > crate::PERMISSION_WAIT_MS);
         assert!(hook_timeout > 25);
     }
 
