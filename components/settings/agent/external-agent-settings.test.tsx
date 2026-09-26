@@ -95,6 +95,7 @@ const removeAgentMock = jest.fn()
 const createConfigMock = jest.fn(async (_input: CreateExternalAgentInput) => "agent-new")
 const updateConfigMock = jest.fn(async () => {})
 const removeConfigMock = jest.fn(async () => {})
+const duplicateConfigMock = jest.fn(async (_id: string, _name: string) => "agent-copy")
 const toastSuccess = jest.fn()
 const toastError = jest.fn()
 jest.mock("sonner", () => ({
@@ -125,6 +126,7 @@ jest.mock("@/lib/ai/agent/external/lifecycle/service", () => ({
     createConfig: createConfigMock,
     updateConfig: updateConfigMock,
     removeConfig: removeConfigMock,
+    duplicateConfig: duplicateConfigMock,
   }),
 }))
 // An agent reconciliation blocked at startup. Before the verdict was rendered
@@ -1021,6 +1023,26 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
     // The AlertDialog confirmation surfaces (delete title from the messages).
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
+  })
+
+  it("duplicates the selected agent through the lifecycle service", async () => {
+    duplicateConfigMock.mockClear()
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-1"))
+    })
+    const detail = await screen.findByTestId("agent-detail-agent-1")
+    await act(async () => {
+      await user.click(within(detail).getByRole("button", { name: /^duplicate$/i }))
+    })
+    await waitFor(() =>
+      expect(duplicateConfigMock).toHaveBeenCalledWith(
+        "agent-1",
+        expect.stringMatching(/\(copy\)$/)
+      )
+    )
+    expect(toastSuccess).toHaveBeenCalled()
   })
 
   it("confirms the deletion and lands back on the overview", async () => {

@@ -262,6 +262,50 @@ describe("createConfig", () => {
   })
 })
 
+describe("duplicateConfig", () => {
+  it("creates and registers a copy with its own keyring slots", async () => {
+    const { service, store, manager, keyring } = build({}, [
+      // Seeded under its own id: the fake store mints `agent-<n>` for new rows.
+      stdioConfig({ id: "source", codexOptions: { sandboxMode: "readOnly" }, tags: ["review"] }),
+    ])
+    await service.setCredentials("source", { apiKey: "sk-secret" })
+
+    const copyId = await service.duplicateConfig("source", "Codex copy")
+
+    expect(copyId).not.toBe("source")
+    expect(store.getAgent(copyId)).toMatchObject({
+      name: "Codex copy",
+      process: { command: "codex", args: ["app-server"] },
+      codexOptions: { sandboxMode: "readOnly" },
+      tags: ["review"],
+      credentialRefs: { apiKey: `${copyId}:apiKey` },
+    })
+    expect(JSON.stringify(store.getAgent(copyId))).not.toContain("sk-secret")
+    expect(keyring.entries.get(`${copyId}:apiKey`)).toBe("sk-secret")
+    expect(manager.getAgent(copyId)).toBeDefined()
+
+    // Removing the source leaves the copy's secrets alone.
+    await service.removeConfig("source")
+    expect(keyring.entries.get(`${copyId}:apiKey`)).toBe("sk-secret")
+  })
+
+  it("does not carry unsandboxed-launch consent over", async () => {
+    const consent = { grantedAt: 1 } as unknown as LifecycleAgentConfig["unsandboxedConsent"]
+    const { service, store } = build({}, [
+      stdioConfig({ id: "source", unsandboxedConsent: consent }),
+    ])
+
+    const copyId = await service.duplicateConfig("source", "Codex copy")
+
+    expect(store.getAgent(copyId)?.unsandboxedConsent).toBeUndefined()
+  })
+
+  it("refuses an unknown source", async () => {
+    const { service } = build()
+    await expect(service.duplicateConfig("missing", "x")).rejects.toThrow()
+  })
+})
+
 describe("updateConfig", () => {
   it("rebuilds the runtime for a launch-shaping edit, tearing down before persisting", async () => {
     const { service, manager, store } = build({}, [stdioConfig()])

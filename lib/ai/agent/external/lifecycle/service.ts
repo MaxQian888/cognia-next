@@ -58,6 +58,7 @@ import {
 // pay for a listing most users never open.
 import type { RegistryDiscoveryResult } from "./registry-discovery"
 import { externalAgentSandboxSupportsPlatform } from "../policy/security-policy"
+import { externalAgentDuplicateInput } from "../config/duplicate-config"
 import {
   EXTERNAL_AGENT_KEYRING_NAMESPACE,
   applyResolvedCredentials,
@@ -202,7 +203,18 @@ export class ExternalAgentLifecycleService {
   async createConfig(
     input: CreateExternalAgentInput & Partial<ExternalAgentLifecycleFields>
   ): Promise<string> {
-    const secrets = extractInlineCredentials(input as ExternalAgentConfig)
+    return this.createWithSecrets(input, {})
+  }
+
+  /**
+   * {@link createConfig} with secrets that arrive beside the input rather than
+   * inline in it. Inline values win for the same slot.
+   */
+  private async createWithSecrets(
+    input: CreateExternalAgentInput & Partial<ExternalAgentLifecycleFields>,
+    carried: ExternalAgentSecrets
+  ): Promise<string> {
+    const secrets = { ...carried, ...extractInlineCredentials(input as ExternalAgentConfig) }
     const sanitized = scrubInlineCredentials(input as ExternalAgentConfig)
     const id = this.deps.store.addAgent(sanitized as CreateExternalAgentInput)
 
@@ -231,6 +243,21 @@ export class ExternalAgentLifecycleService {
     }
 
     return id
+  }
+
+  /**
+   * Create a copy of an existing configuration named `name`.
+   *
+   * The copy's credentials are the source's secrets written into the copy's
+   * own keyring slots before it registers, so
+   * removing either agent never breaks the other. Unsandboxed-launch consent
+   * is not copied: it covers one agent. See `externalAgentDuplicateInput` for
+   * what else is left behind.
+   */
+  async duplicateConfig(id: string, name: string): Promise<string> {
+    const source = this.requireConfig(id)
+    const secrets = await this.readSecrets(source)
+    return this.createWithSecrets(externalAgentDuplicateInput(source, name), secrets)
   }
 
   /**

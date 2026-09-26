@@ -22,7 +22,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Edit, Loader2, Power, PowerOff, Trash2 } from "lucide-react"
+import { Copy, Edit, Loader2, Power, PowerOff, Trash2 } from "lucide-react"
 
 import { toast } from "@/components/ui/sonner"
 import { Badge } from "@/components/ui/badge"
@@ -176,6 +176,7 @@ export function AgentInspector({
   onConnect,
   onDisconnect,
   onEdit,
+  onDuplicate,
   onDelete,
   onAddRule,
 }: {
@@ -185,6 +186,8 @@ export function AgentInspector({
   onConnect: () => void
   onDisconnect: () => void
   onEdit: () => void
+  /** Create a copy of this configuration, credentials included. */
+  onDuplicate: () => void
   onDelete: () => void
   onAddRule: () => void
 }) {
@@ -401,6 +404,15 @@ export function AgentInspector({
           )}
           <Button variant="outline" size="icon" aria-label={tCommon("edit")} onClick={onEdit}>
             <Edit className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={tCommon("duplicate")}
+            title={t("duplicateHint")}
+            onClick={onDuplicate}
+          >
+            <Copy className="h-4 w-4" />
           </Button>
           <Button
             variant="outline"

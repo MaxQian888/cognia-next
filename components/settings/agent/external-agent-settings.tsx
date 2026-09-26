@@ -201,6 +201,25 @@ export function ExternalAgentSettings() {
     [editingAgentId, t, tErrors]
   )
 
+  const handleDuplicateAgent = useCallback(
+    async (agentId: string) => {
+      const source = getAgent(agentId)
+      if (!source) return
+      try {
+        const lifecycle = await getExternalAgentLifecycleService()
+        const copyId = await lifecycle.duplicateConfig(
+          agentId,
+          t("duplicateName", { name: source.name })
+        )
+        toast.success(t("agentDuplicated"))
+        setView({ kind: "agent", id: copyId })
+      } catch (error) {
+        toast.error(lifecycleErrorMessage(error, tErrors))
+      }
+    },
+    [getAgent, t, tErrors]
+  )
+
   const handleDeleteAgent = useCallback(async () => {
     const agentId = deleteConfirmId
     setDeleteConfirmId(null)
@@ -381,6 +400,7 @@ export function ExternalAgentSettings() {
                     onConnect={() => handleConnect(selectedAgent.id)}
                     onDisconnect={() => handleDisconnect(selectedAgent.id)}
                     onEdit={() => handleEditAgent(selectedAgent.id)}
+                    onDuplicate={() => void handleDuplicateAgent(selectedAgent.id)}
                     onDelete={() => setDeleteConfirmId(selectedAgent.id)}
                     onAddRule={() => {
                       setDelegationSeed({ agentId: selectedAgent.id })

@@ -83,6 +83,7 @@ function renderInspector(over: Partial<Parameters<typeof AgentInspector>[0]> = {
     onConnect: jest.fn(),
     onDisconnect: jest.fn(),
     onEdit: jest.fn(),
+    onDuplicate: jest.fn(),
     onDelete: jest.fn(),
     onAddRule: jest.fn(),
     ...over,
@@ -93,6 +94,15 @@ function renderInspector(over: Partial<Parameters<typeof AgentInspector>[0]> = {
 
 describe("AgentInspector", () => {
   beforeEach(() => updateConfigMock.mockClear())
+
+  it("duplicates the agent from the header", async () => {
+    const user = userEvent.setup()
+    const { onDuplicate } = renderInspector()
+    await user.click(
+      within(screen.getByTestId("agent-detail-a1")).getByRole("button", { name: /^duplicate$/i })
+    )
+    expect(onDuplicate).toHaveBeenCalledTimes(1)
+  })
 
   it("renders the header, readiness strip, and tabs", () => {
     renderInspector()
