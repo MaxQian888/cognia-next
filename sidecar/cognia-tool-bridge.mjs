@@ -29,7 +29,7 @@ import { collectCogniaToolDefs } from "./builtin-tools/index.mjs"
 import { READ_ONLY_TOOL_NAMES } from "./src/policy/tool-catalog/catalog.ts"
 import { createReadTracker } from "./src/tools/state/read-tracker.ts"
 import { createBgShellRegistry } from "./src/tools/state/background-shells.ts"
-import { createSessionTaskStore } from "./builtin-tools/core/tasks.mjs"
+import { createSessionTaskStore } from "./src/tools/state/tasks.ts"
 import { MONITOR_TOOL_NAMES } from "./builtin-tools/core/monitor.mjs"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,

@@ -44,7 +44,7 @@ import { makeLazyCodeGraphResolver } from "../src/services/code-graph/lazy-resol
 import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { createReadTracker } from "../src/tools/state/read-tracker.ts"
 import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
-import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
+import { createSessionTaskStore } from "../src/tools/state/tasks.ts"
 import { createStderrLogSink, buildMcpLogEvent } from "./mcp-log.mjs"
 import { createMcpAutoReconnector } from "./mcp-auto-reconnect.mjs"
 import { guardAnthropicRemoteMcpServers } from "./anthropic-mcp-relay.mjs"

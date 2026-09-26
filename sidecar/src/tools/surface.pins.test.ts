@@ -43,7 +43,7 @@ import {
 import { wrapDefsWithReadOnlyTimeout } from "./middleware/read-only-timeout.ts"
 import { createReadTracker } from "./state/read-tracker.ts"
 import { createBgShellRegistry } from "./state/background-shells.ts"
-import { createSessionTaskStore } from "../../builtin-tools/core/tasks.mjs"
+import { createSessionTaskStore } from "./state/tasks.ts"
 import { probeSandbox } from "../../builtin-tools/run-code/supervisor.mjs"
 import { buildAiSdkTools, __testing__ as aiSdkTools } from "../../dispatch/ai-sdk-tools.mjs"
 import { createAiSdkToolSearchController } from "./adapters/ai-sdk-tool-search.ts"

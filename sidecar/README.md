@@ -147,6 +147,7 @@ Each migration batch appends its moves here (old → new).
 | `dispatch/ai-sdk-tools.mjs` (`allowedTools` whitelist)                   | `src/tools/adapters/allow-list.ts`                                 | 7d          |
 | `builtin-tools/core/read-tracker.mjs`                                    | `src/tools/state/read-tracker.ts`                                  | 7e          |
 | `builtin-tools/core/bash-sessions.mjs`                                   | `src/tools/state/background-shells.ts`                             | 7e          |
+| `createSessionTaskStore` (in `builtin-tools/core/tasks.mjs`)             | `src/tools/state/tasks.ts`                                         | 7f          |
 
 ## Scripts (run from repo root)
 

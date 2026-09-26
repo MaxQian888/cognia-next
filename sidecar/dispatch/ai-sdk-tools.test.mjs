@@ -4,7 +4,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { buildAiSdkTools, __testing__ } from "./ai-sdk-tools.mjs"
-import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
+import { createSessionTaskStore } from "../src/tools/state/tasks.ts"
 
 test("buildAiSdkTools registers built-in tools for enabled categories only", () => {
   const tools = buildAiSdkTools({

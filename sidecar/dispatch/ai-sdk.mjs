@@ -35,7 +35,7 @@ import { makeLazyLspResolver } from "../src/services/lsp/lazy-resolver.ts"
 import { makeLazyCodeGraphResolver } from "../src/services/code-graph/lazy-resolver.ts"
 import { createReadTracker } from "../src/tools/state/read-tracker.ts"
 import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
-import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
+import { createSessionTaskStore } from "../src/tools/state/tasks.ts"
 import { resolveAdapter } from "../src/providers/protocol-adapters/registry.ts"
 import { buildModel } from "../src/providers/protocol-adapters/ai-sdk-adapter.ts"
 import {
