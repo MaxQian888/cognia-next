@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 import enMessages from "@/i18n/messages/en.json"
 import zhMessages from "@/i18n/messages/zh-CN.json"
@@ -83,11 +83,20 @@ jest.mock("@/components/ui/select", () => {
   return { Select, SelectTrigger, SelectValue, SelectContent, SelectItem }
 })
 
-// Native range stand-in for the Slider.
+// Native range stand-in for the Slider: `change` is one drag frame
+// (`onValueChange`), `pointerUp` the release (`onValueCommit`).
 jest.mock("@/components/ui/slider", () => {
   const React = jest.requireActual("react")
   return {
-    Slider: ({ value, onValueChange, min, max, step, ...rest }: Record<string, unknown>) =>
+    Slider: ({
+      value,
+      onValueChange,
+      onValueCommit,
+      min,
+      max,
+      step,
+      ...rest
+    }: Record<string, unknown>) =>
       React.createElement("input", {
         type: "range",
         role: "slider",
@@ -99,6 +108,8 @@ jest.mock("@/components/ui/slider", () => {
         step,
         onChange: (e: { target: { value: string } }) =>
           (onValueChange as (v: number[]) => void)([Number(e.target.value)]),
+        onPointerUp: (e: { currentTarget: { value: string } }) =>
+          (onValueCommit as (v: number[]) => void)([Number(e.currentTarget.value)]),
       }),
   }
 })
@@ -177,14 +188,66 @@ describe("NotificationPreferencesSection", () => {
     )
   })
 
-  it("moving the retention sliders persists numeric limits", async () => {
+  it("saves a quiet-hours time once, on blur, not per change", async () => {
+    settingsRef.current = {
+      notificationPreferences: { quietHours: { enabled: true, start: "22:00", end: "07:00" } },
+    }
+    render(<NotificationPreferencesSection />)
+    const start = screen.getByTestId("notification-quiet-hours-start")
+    // A time field reports every segment edit; each was a queued desktop update.
+    fireEvent.change(start, { target: { value: "21:00" } })
+    fireEvent.change(start, { target: { value: "23:30" } })
+    expect(saveMock).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.blur(start)
+    })
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(lastPrefs()).toEqual(
+      expect.objectContaining({
+        quietHours: expect.objectContaining({ start: "23:30", end: "07:00" }),
+      })
+    )
+  })
+
+  it("reverts a cleared quiet-hours time instead of saving it", async () => {
+    settingsRef.current = {
+      notificationPreferences: { quietHours: { enabled: true, start: "22:00", end: "07:00" } },
+    }
+    render(<NotificationPreferencesSection />)
+    const end = screen.getByTestId("notification-quiet-hours-end")
+    fireEvent.change(end, { target: { value: "" } })
+    await act(async () => {
+      fireEvent.keyDown(end, { key: "Enter" })
+    })
+    expect(saveMock).not.toHaveBeenCalled()
+    expect(end).toHaveValue("07:00")
+  })
+
+  it("saves each retention drag once, on release, not per frame", async () => {
     settingsRef.current = { notificationPreferences: { quietHours: { enabled: false } } }
     render(<NotificationPreferencesSection />)
-    fireEvent.change(screen.getByTestId("notification-retention-items"), {
-      target: { value: "1000" },
+    const items = screen.getByTestId("notification-retention-items")
+    fireEvent.change(items, { target: { value: "550" } })
+    fireEvent.change(items, { target: { value: "1000" } })
+    expect(saveMock).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.pointerUp(items)
     })
-    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledTimes(1)
     expect(lastPrefs()).toEqual(expect.objectContaining({ retentionMaxItems: 1000 }))
+
+    saveMock.mockClear()
+    const days = screen.getByTestId("notification-retention-days")
+    fireEvent.change(days, { target: { value: "10" } })
+    fireEvent.change(days, { target: { value: "14" } })
+    expect(saveMock).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.pointerUp(days)
+    })
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(lastPrefs()).toEqual(
+      expect.objectContaining({ retentionMaxAgeMs: 14 * 24 * 60 * 60 * 1000 })
+    )
   })
 
   it("reset restores the default preferences", async () => {

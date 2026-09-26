@@ -37,6 +37,8 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
+import { DeferredTextInput } from "@/components/settings/common/deferred-text-input"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import type { AppSettings } from "@cognia/agent-config-types"
 import { useSettingsStore } from "@/stores/settings"
@@ -133,6 +135,13 @@ export default function MobileSpeechPage() {
   const ttsAutoPlay = settings?.ttsAutoPlay ?? false
   const sttLanguage = settings?.sttLanguage ?? "auto"
 
+  // Sliders hold the drag locally and save on release (`onValueCommit`): all
+  // three keys are host-writable, and saving per drag frame queued a desktop
+  // update for every intermediate value.
+  const rate = useSettingDraft(ttsRate, (v) => update({ ttsRate: v }))
+  const pitch = useSettingDraft(ttsPitch, (v) => update({ ttsPitch: v }))
+  const volume = useSettingDraft(ttsVolume, (v) => update({ ttsVolume: v }))
+
   const voiceCfg = TTS_PROVIDER_SETTINGS[ttsProvider]
   const currentVoice =
     (settings?.[voiceCfg.voiceSettingKey as keyof AppSettings] as string | undefined) ??
@@ -212,15 +221,23 @@ export default function MobileSpeechPage() {
               <ItemContent>
                 <ItemTitle className="text-xs">{t("voice")}</ItemTitle>
                 <ItemDescription className="text-[11px]">{t("voiceHelp")}</ItemDescription>
-                <Input
+                {/* Free-text id (Mistral, a local OpenAI-compatible server),
+                    committed on blur or Enter: `mistralVoiceId` is
+                    host-writable, and saving per keystroke queued a desktop
+                    update for every prefix of the id. Keyed by provider so a
+                    draft never lands on the next provider's key. */}
+                <DeferredTextInput
+                  key={ttsProvider}
                   aria-label={t("voice")}
                   disabled={!ttsEnabled}
-                  onChange={(event) =>
-                    void update({
-                      [voiceCfg.voiceSettingKey]: event.target.value,
-                    } as Partial<AppSettings>)
-                  }
                   value={currentVoice}
+                  onCommit={(voice) =>
+                    void update({ [voiceCfg.voiceSettingKey]: voice } as Partial<AppSettings>)
+                  }
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-testid="speech-tts-voice-id"
                 />
               </ItemContent>
             </Item>
@@ -259,15 +276,16 @@ export default function MobileSpeechPage() {
               <Item size="sm" className="px-0">
                 <ItemContent>
                   <ItemTitle className="text-xs">
-                    {t("rate")} · {ttsRate.toFixed(1)}×
+                    {t("rate")} · {rate.value.toFixed(1)}×
                   </ItemTitle>
                   <Slider
-                    value={[ttsRate]}
+                    value={[rate.value]}
                     min={0.5}
                     max={2}
                     step={0.1}
                     disabled={!ttsEnabled}
-                    onValueChange={([v]) => void update({ ttsRate: v })}
+                    onValueChange={([v]) => rate.set(v)}
+                    onValueCommit={([v]) => rate.commitValue(v)}
                     data-testid="speech-tts-rate"
                     aria-label={t("rate")}
                     className="mt-2"
@@ -278,15 +296,16 @@ export default function MobileSpeechPage() {
               <Item size="sm" className="px-0">
                 <ItemContent>
                   <ItemTitle className="text-xs">
-                    {t("pitch")} · {ttsPitch.toFixed(1)}
+                    {t("pitch")} · {pitch.value.toFixed(1)}
                   </ItemTitle>
                   <Slider
-                    value={[ttsPitch]}
+                    value={[pitch.value]}
                     min={0}
                     max={2}
                     step={0.1}
                     disabled={!ttsEnabled}
-                    onValueChange={([v]) => void update({ ttsPitch: v })}
+                    onValueChange={([v]) => pitch.set(v)}
+                    onValueCommit={([v]) => pitch.commitValue(v)}
                     data-testid="speech-tts-pitch"
                     aria-label={t("pitch")}
                     className="mt-2"
@@ -299,15 +318,16 @@ export default function MobileSpeechPage() {
           <Item size="sm" className="px-0">
             <ItemContent>
               <ItemTitle className="text-xs">
-                {t("volume")} · {Math.round(ttsVolume * 100)}%
+                {t("volume")} · {Math.round(volume.value * 100)}%
               </ItemTitle>
               <Slider
-                value={[ttsVolume]}
+                value={[volume.value]}
                 min={0}
                 max={1}
                 step={0.05}
                 disabled={!ttsEnabled}
-                onValueChange={([v]) => void update({ ttsVolume: v })}
+                onValueChange={([v]) => volume.set(v)}
+                onValueCommit={([v]) => volume.commitValue(v)}
                 data-testid="speech-tts-volume"
                 aria-label={t("volume")}
                 className="mt-2"

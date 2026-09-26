@@ -14,7 +14,8 @@ import { listCompactionStrategyEntries } from "@/lib/plugin/registries/compactio
 import { SettingsCard } from "../common/settings-section"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Input } from "@/components/ui/input"
+import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
@@ -96,19 +97,19 @@ function NumberRow({
         <p className="text-sm text-muted-foreground">{t(`${keyPath}.description`)}</p>
       </div>
       <div className="flex items-center gap-2">
-        <Input
+        {/* Commits on blur / Enter (clamped), not per keystroke: `compaction`
+            is host-writable, so each save on a paired phone is its own queued
+            host update, and typing "70" wrote 7 first whenever 7 was in range. */}
+        <ClampedNumberInput
           id={id}
-          type="number"
           min={min}
           max={max}
+          commitWhileTyping={false}
           className="w-24"
           aria-label={t(`${keyPath}.label`)}
           value={value}
           disabled={disabled}
-          onChange={(e) => {
-            const n = Number(e.target.value)
-            if (Number.isFinite(n) && n >= min && n <= max) onCommit(n)
-          }}
+          onCommit={onCommit}
         />
         {suffix && <span className="text-sm text-muted-foreground">{t(`${keyPath}.suffix`)}</span>}
       </div>
@@ -157,8 +158,11 @@ export function CompactionSettings() {
     getBuiltInProviderProtocol(defaultProvider ?? "") === "anthropic"
 
   const pluginStrategies = listCompactionStrategyEntries()
-  const saveComp = (patch: Partial<CompressionSettings>) =>
-    void save({ compaction: { ...comp, ...patch } })
+  const writeComp = (patch: Partial<CompressionSettings>) =>
+    save({ compaction: { ...comp, ...patch } })
+  const saveComp = (patch: Partial<CompressionSettings>) => void writeComp(patch)
+  // The focus text is saved on blur, not per keystroke (see NumberRow).
+  const focusDraft = useSettingDraft(focus, (next) => writeComp({ focus: next }))
 
   return (
     <SettingsCard
@@ -398,8 +402,9 @@ export function CompactionSettings() {
                 rows={3}
                 aria-label={t("focus.label")}
                 placeholder={t("focus.placeholder")}
-                value={focus}
-                onChange={(e) => saveComp({ focus: e.target.value })}
+                value={focusDraft.value}
+                onChange={(e) => focusDraft.set(e.target.value)}
+                onBlur={focusDraft.commit}
               />
             </div>
           </>

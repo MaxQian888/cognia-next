@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import type { AppSettings } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
@@ -39,7 +39,7 @@ describe("TypographyTab", () => {
     expect(screen.queryByText("density.sectionLabel")).not.toBeInTheDocument()
   })
 
-  it("restores the default line-height via the slider-row reset", () => {
+  it("restores the default line-height via the slider-row reset", async () => {
     storeState.settings = {
       fontScale: "md",
       language: "en",
@@ -47,7 +47,9 @@ describe("TypographyTab", () => {
     }
     render(<TypographyTab />)
     // Only line-height drifted from default → exactly one reset control shows.
-    fireEvent.click(screen.getByLabelText("resetToDefault"))
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("resetToDefault"))
+    })
     expect(save).toHaveBeenCalled()
     const patch = save.mock.calls[0][0] as { typographyExt: { lineHeightScale: number } }
     expect(patch.typographyExt.lineHeightScale).toBe(1)

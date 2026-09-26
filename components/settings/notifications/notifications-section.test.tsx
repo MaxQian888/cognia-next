@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { NotificationPreferences } from "@/types/notifications"
 
@@ -22,6 +22,36 @@ jest.mock("@/hooks/notifications/use-notification-permission", () => ({
 jest.mock("./notification-delivery-panel", () => ({
   NotificationDeliveryPanel: () => <div data-testid="delivery-panel-stub" />,
 }))
+
+// Range input standing in for the Radix slider: `change` is one drag frame
+// (`onValueChange`), `pointerUp` the release (`onValueCommit`).
+jest.mock("@/components/ui/slider", () => {
+  const React = jest.requireActual("react")
+  return {
+    Slider: ({
+      value,
+      onValueChange,
+      onValueCommit,
+      min,
+      max,
+      step,
+      ...rest
+    }: Record<string, unknown>) =>
+      React.createElement("input", {
+        type: "range",
+        role: "slider",
+        "aria-label": rest["aria-label"],
+        value: (value as number[])[0],
+        min,
+        max,
+        step,
+        onChange: (e: { target: { value: string } }) =>
+          (onValueChange as (v: number[]) => void)([Number(e.target.value)]),
+        onPointerUp: (e: { currentTarget: { value: string } }) =>
+          (onValueCommit as (v: number[]) => void)([Number(e.currentTarget.value)]),
+      }),
+  }
+})
 
 import { NotificationsSection } from "./notifications-section"
 
@@ -67,6 +97,59 @@ it("enabling quiet hours reveals the time inputs", async () => {
   render(<NotificationsSection />)
   expect(screen.getByLabelText("settings.notifications.dndStart")).toHaveValue("22:00")
   await userEvent.clear(screen.getByLabelText("settings.notifications.dndEnd"))
+})
+
+it("saves a quiet-hours time once, on blur, and reverts a cleared one", async () => {
+  settings = {
+    notificationPreferences: { quietHours: { enabled: true, start: "22:00", end: "08:00" } },
+  }
+  render(<NotificationsSection />)
+  const start = screen.getByLabelText("settings.notifications.dndStart")
+  // Each segment edit used to be a save, and on a paired phone a queued update.
+  fireEvent.change(start, { target: { value: "21:00" } })
+  fireEvent.change(start, { target: { value: "23:15" } })
+  expect(save).not.toHaveBeenCalled()
+  await act(async () => {
+    fireEvent.blur(start)
+  })
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(save.mock.calls[0][0].notificationPreferences.quietHours).toEqual(
+    expect.objectContaining({ start: "23:15", end: "08:00" })
+  )
+
+  save.mockClear()
+  const end = screen.getByLabelText("settings.notifications.dndEnd")
+  fireEvent.change(end, { target: { value: "" } })
+  await act(async () => {
+    fireEvent.blur(end)
+  })
+  expect(save).not.toHaveBeenCalled()
+  expect(end).toHaveValue("08:00")
+})
+
+it("saves each retention drag once, on release, not per frame", async () => {
+  render(<NotificationsSection />)
+  const days = screen.getByRole("slider", { name: "settings.notifications.retentionDaysLabel" })
+  fireEvent.change(days, { target: { value: "10" } })
+  fireEvent.change(days, { target: { value: "45" } })
+  expect(save).not.toHaveBeenCalled()
+  await act(async () => {
+    fireEvent.pointerUp(days)
+  })
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(save.mock.calls[0][0].notificationPreferences.retentionMaxAgeMs).toBe(
+    45 * 24 * 60 * 60 * 1000
+  )
+
+  save.mockClear()
+  const items = screen.getByRole("slider", { name: "settings.notifications.retentionItemsLabel" })
+  fireEvent.change(items, { target: { value: "300" } })
+  expect(save).not.toHaveBeenCalled()
+  await act(async () => {
+    fireEvent.pointerUp(items)
+  })
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(save.mock.calls[0][0].notificationPreferences.retentionMaxItems).toBe(300)
 })
 
 it("a behaviour switch (focus-aware) persists", async () => {

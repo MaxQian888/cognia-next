@@ -53,7 +53,7 @@ export function CursorTab() {
 
   const cursor: CursorSettings = { ...DEFAULT_CURSOR, ...(stored ?? {}) }
   const pack = getCursorPack(cursor.packId)
-  const patch = (next: Partial<CursorSettings>) => void save({ cursor: { ...cursor, ...next } })
+  const patch = (next: Partial<CursorSettings>) => save({ cursor: { ...cursor, ...next } })
 
   return (
     <div className="space-y-6">

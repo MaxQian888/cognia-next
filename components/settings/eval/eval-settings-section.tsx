@@ -41,7 +41,6 @@ import {
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Command,
   CommandEmpty,
@@ -55,6 +54,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Switch } from "@/components/ui/switch"
 import { collectOptions, groupByProvider } from "@cognia/provider-routing/model-option-source"
 import { SettingsAlert } from "@/components/settings/common/settings-section"
+import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
+import { OptionalNumberInput } from "@/components/settings/common/optional-number-input"
 import {
   SettingsBlock,
   SettingsField,
@@ -79,6 +80,9 @@ function parseOptionalNumber(raw: string, min: number, max: number): number | un
   if (!Number.isFinite(n)) return undefined
   return Math.min(max, Math.max(min, n))
 }
+
+const parseRatio = (raw: string) => parseOptionalNumber(raw, 0, 1)
+const parseUsd = (raw: string) => parseOptionalNumber(raw, 0, 1_000_000)
 
 function JudgeModelPicker({
   value,
@@ -203,9 +207,11 @@ export function EvalSettingsSection() {
     }
   }
 
-  const patch = (next: Partial<EvalSettings>) => {
-    void runSave({ evalSettings: { ...resolved, ...next } })
-  }
+  // Returns the save so a number field can hold its draft until it lands. The
+  // number fields write on blur / Enter, never per keystroke: `evalSettings`
+  // is host-writable and `/me/eval` embeds this section on a paired phone, where
+  // every save is its own queued host update.
+  const patch = (next: Partial<EvalSettings>) => runSave({ evalSettings: { ...resolved, ...next } })
 
   const patchGate = (next: Partial<GateThresholds>) => {
     const merged: GateThresholds = { ...(resolved.defaultGate ?? {}), ...next }
@@ -213,7 +219,7 @@ export function EvalSettingsSection() {
     const cleaned = Object.fromEntries(
       Object.entries(merged).filter(([, v]) => v !== undefined)
     ) as GateThresholds
-    patch({ defaultGate: Object.keys(cleaned).length > 0 ? cleaned : undefined })
+    return patch({ defaultGate: Object.keys(cleaned).length > 0 ? cleaned : undefined })
   }
 
   const deterministicOnly = resolved.deterministicOnly ?? false
@@ -311,19 +317,13 @@ export function EvalSettingsSection() {
           contentClassName="space-y-0 [&>*+*]:pt-4"
         >
           <SettingsField label={t("defaultKLabel")} description={t("defaultKDescription")}>
-            <Input
-              type="number"
+            <ClampedNumberInput
               min={EVAL_K_RANGE.min}
               max={EVAL_K_RANGE.max}
+              commitWhileTyping={false}
               aria-label={t("defaultKLabel")}
               value={resolved.defaultK}
-              onChange={(e) =>
-                patch({
-                  defaultK:
-                    parseOptionalNumber(e.target.value, EVAL_K_RANGE.min, EVAL_K_RANGE.max) ??
-                    EVAL_K_RANGE.min,
-                })
-              }
+              onCommit={(defaultK) => void patch({ defaultK })}
               className="h-8 w-20"
             />
           </SettingsField>
@@ -356,19 +356,14 @@ export function EvalSettingsSection() {
                 : t("storedOutputDescription")
             }
           >
-            <Input
-              type="number"
+            <ClampedNumberInput
               min={0}
               max={MAX_STORED_OUTPUT_CHARS}
               step={500}
+              commitWhileTyping={false}
               aria-label={t("storedOutputLabel")}
               value={resolved.maxStoredOutputChars}
-              onChange={(e) =>
-                patch({
-                  maxStoredOutputChars:
-                    parseOptionalNumber(e.target.value, 0, MAX_STORED_OUTPUT_CHARS) ?? 0,
-                })
-              }
+              onCommit={(maxStoredOutputChars) => void patch({ maxStoredOutputChars })}
               className="h-8 w-28"
               data-testid="eval-stored-output"
             />
@@ -393,16 +388,14 @@ export function EvalSettingsSection() {
               <span className="text-xs font-medium text-muted-foreground">
                 {t("gateMinPassAt1")}
               </span>
-              <Input
-                type="number"
+              <OptionalNumberInput
                 min={0}
                 max={1}
                 step={0.05}
                 aria-label={t("gateMinPassAt1")}
-                value={gate.minPassAt1 ?? ""}
-                onChange={(e) =>
-                  patchGate({ minPassAt1: parseOptionalNumber(e.target.value, 0, 1) })
-                }
+                value={gate.minPassAt1}
+                parse={parseRatio}
+                onCommit={(minPassAt1) => patchGate({ minPassAt1 })}
                 className="h-8"
               />
             </label>
@@ -410,16 +403,14 @@ export function EvalSettingsSection() {
               <span className="text-xs font-medium text-muted-foreground">
                 {t("gateMinPassHatK")}
               </span>
-              <Input
-                type="number"
+              <OptionalNumberInput
                 min={0}
                 max={1}
                 step={0.05}
                 aria-label={t("gateMinPassHatK")}
-                value={gate.minPassHatK ?? ""}
-                onChange={(e) =>
-                  patchGate({ minPassHatK: parseOptionalNumber(e.target.value, 0, 1) })
-                }
+                value={gate.minPassHatK}
+                parse={parseRatio}
+                onCommit={(minPassHatK) => patchGate({ minPassHatK })}
                 className="h-8"
               />
             </label>
@@ -427,30 +418,26 @@ export function EvalSettingsSection() {
               <span className="text-xs font-medium text-muted-foreground">
                 {t("gateMinScorerPassRate")}
               </span>
-              <Input
-                type="number"
+              <OptionalNumberInput
                 min={0}
                 max={1}
                 step={0.05}
                 aria-label={t("gateMinScorerPassRate")}
-                value={minScorerPassRate ?? ""}
-                onChange={(e) =>
-                  patchGate({ minScorerPassRate: parseOptionalNumber(e.target.value, 0, 1) })
-                }
+                value={minScorerPassRate}
+                parse={parseRatio}
+                onCommit={(next) => patchGate({ minScorerPassRate: next })}
                 className="h-8"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-xs font-medium text-muted-foreground">{t("gateMaxCost")}</span>
-              <Input
-                type="number"
+              <OptionalNumberInput
                 min={0}
                 step={0.5}
                 aria-label={t("gateMaxCost")}
-                value={gate.maxTotalCostUsd ?? ""}
-                onChange={(e) =>
-                  patchGate({ maxTotalCostUsd: parseOptionalNumber(e.target.value, 0, 1_000_000) })
-                }
+                value={gate.maxTotalCostUsd}
+                parse={parseUsd}
+                onCommit={(maxTotalCostUsd) => patchGate({ maxTotalCostUsd })}
                 className="h-8"
               />
             </label>
@@ -470,15 +457,13 @@ export function EvalSettingsSection() {
           testid="eval-block-cost"
         >
           <SettingsField label={t("costWarnLabel")} description={t("costWarnDescription")}>
-            <Input
-              type="number"
+            <OptionalNumberInput
               min={0}
               step={0.5}
               aria-label={t("costWarnLabel")}
-              value={resolved.costWarnUsd ?? ""}
-              onChange={(e) =>
-                patch({ costWarnUsd: parseOptionalNumber(e.target.value, 0, 1_000_000) })
-              }
+              value={resolved.costWarnUsd}
+              parse={parseUsd}
+              onCommit={(costWarnUsd) => patch({ costWarnUsd })}
               className="h-8 w-24"
             />
           </SettingsField>

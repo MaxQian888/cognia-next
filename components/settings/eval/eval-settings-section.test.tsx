@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 import "@testing-library/jest-dom"
 
 jest.mock("next-intl", () => ({
@@ -82,9 +82,15 @@ describe("EvalSettingsSection", () => {
     await screen.findByText("saved") // flush the async save inside act()
   })
 
-  it("persists a changed default k", async () => {
+  it("persists a changed default k once, on blur, not per keystroke", async () => {
     render(<EvalSettingsSection />)
-    fireEvent.change(screen.getByLabelText("defaultKLabel"), { target: { value: "3" } })
+    const field = screen.getByLabelText("defaultKLabel")
+    // Each keystroke used to be a save — and on a paired phone a queued update.
+    fireEvent.change(field, { target: { value: "1" } })
+    fireEvent.change(field, { target: { value: "3" } })
+    expect(mockSave).not.toHaveBeenCalled()
+    fireEvent.blur(field)
+    expect(mockSave).toHaveBeenCalledTimes(1)
     const last = mockSave.mock.calls.at(-1)![0]
     expect(last.evalSettings.defaultK).toBe(3)
     await screen.findByText("saved")
@@ -93,7 +99,13 @@ describe("EvalSettingsSection", () => {
   it("writes a gate threshold and clears it back to no-gate", async () => {
     render(<EvalSettingsSection />)
     const field = screen.getByLabelText("gateMinPassAt1")
+    fireEvent.change(field, { target: { value: "0." } })
     fireEvent.change(field, { target: { value: "0.8" } })
+    expect(mockSave).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "Enter" })
+    })
+    expect(mockSave).toHaveBeenCalledTimes(1)
     expect(mockSave.mock.calls.at(-1)![0].evalSettings.defaultGate).toEqual({ minPassAt1: 0.8 })
     await screen.findByText("saved") // flush the first save before unmounting
     // Re-render with the persisted value, then clear it → gate becomes undefined.
@@ -103,6 +115,9 @@ describe("EvalSettingsSection", () => {
     cleanup()
     render(<EvalSettingsSection />)
     fireEvent.change(screen.getByLabelText("gateMinPassAt1"), { target: { value: "" } })
+    await act(async () => {
+      fireEvent.blur(screen.getByLabelText("gateMinPassAt1"))
+    })
     expect(mockSave.mock.calls.at(-1)![0].evalSettings.defaultGate).toBeUndefined()
     await screen.findByText("saved")
   })
@@ -173,16 +188,24 @@ describe("EvalSettingsSection", () => {
     await waitFor(() => expect(screen.queryByTestId("eval-save-status")).not.toBeInTheDocument())
   })
 
-  it("persists every gate and cost threshold", async () => {
+  it("persists every gate and cost threshold, each once on blur", async () => {
     render(<EvalSettingsSection />)
-    fireEvent.change(screen.getByLabelText("gateMinPassHatK"), { target: { value: "0.6" } })
+    const commit = async (label: string, value: string) => {
+      const field = screen.getByLabelText(label)
+      fireEvent.change(field, { target: { value } })
+      await act(async () => {
+        fireEvent.blur(field)
+      })
+    }
+    await commit("gateMinPassHatK", "0.6")
     expect(mockSave.mock.calls.at(-1)![0].evalSettings.defaultGate).toEqual({ minPassHatK: 0.6 })
-    fireEvent.change(screen.getByLabelText("gateMinScorerPassRate"), { target: { value: "0.7" } })
+    await commit("gateMinScorerPassRate", "0.7")
     expect(mockSave.mock.calls.at(-1)![0].evalSettings.defaultGate.minScorerPassRate).toBe(0.7)
-    fireEvent.change(screen.getByLabelText("gateMaxCost"), { target: { value: "5" } })
+    await commit("gateMaxCost", "5")
     expect(mockSave.mock.calls.at(-1)![0].evalSettings.defaultGate.maxTotalCostUsd).toBe(5)
-    fireEvent.change(screen.getByLabelText("costWarnLabel"), { target: { value: "2" } })
+    await commit("costWarnLabel", "2")
     expect(mockSave.mock.calls.at(-1)![0].evalSettings.costWarnUsd).toBe(2)
+    expect(mockSave).toHaveBeenCalledTimes(4)
     await screen.findByText("saved")
   })
 
@@ -226,8 +249,15 @@ describe("EvalSettingsSection", () => {
     // Open the picker so the selected-vs-auto opacity branches render.
     fireEvent.click(trigger)
     expect(await screen.findByText("Anthropic")).toBeInTheDocument()
-    // A non-numeric k parses to undefined and falls back to the min.
-    fireEvent.change(screen.getByLabelText("defaultKLabel"), { target: { value: "abc" } })
+    // A non-numeric or emptied k reverts to the stored value instead of
+    // saving the minimum; an out-of-range one is clamped on commit.
+    const k = screen.getByLabelText("defaultKLabel")
+    fireEvent.change(k, { target: { value: "abc" } })
+    fireEvent.blur(k)
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(k).toHaveValue(2)
+    fireEvent.change(k, { target: { value: "0" } })
+    fireEvent.blur(k)
     expect(mockSave.mock.calls.at(-1)![0].evalSettings.defaultK).toBe(1)
     await screen.findByText("saved")
   })
@@ -250,9 +280,13 @@ describe("EvalSettingsSection — stored answer length", () => {
     expect(screen.getByTestId("eval-stored-output")).toHaveValue(4000)
   })
 
-  it("persists a new value", async () => {
+  it("persists a new value on blur, not per keystroke", async () => {
     render(<EvalSettingsSection />)
-    fireEvent.change(screen.getByTestId("eval-stored-output"), { target: { value: "1500" } })
+    const field = screen.getByTestId("eval-stored-output")
+    fireEvent.change(field, { target: { value: "15" } })
+    fireEvent.change(field, { target: { value: "1500" } })
+    expect(mockSave).not.toHaveBeenCalled()
+    fireEvent.blur(field)
     await waitFor(() =>
       expect(mockSave).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -265,6 +299,7 @@ describe("EvalSettingsSection — stored answer length", () => {
   it("clamps a value above the storage ceiling", async () => {
     render(<EvalSettingsSection />)
     fireEvent.change(screen.getByTestId("eval-stored-output"), { target: { value: "999999" } })
+    fireEvent.blur(screen.getByTestId("eval-stored-output"))
     await waitFor(() =>
       expect(mockSave).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -279,6 +314,7 @@ describe("EvalSettingsSection — stored answer length", () => {
   it("accepts 0 (store nothing) rather than snapping back to the default", async () => {
     render(<EvalSettingsSection />)
     fireEvent.change(screen.getByTestId("eval-stored-output"), { target: { value: "0" } })
+    fireEvent.blur(screen.getByTestId("eval-stored-output"))
     await waitFor(() =>
       expect(mockSave).toHaveBeenCalledWith(
         expect.objectContaining({

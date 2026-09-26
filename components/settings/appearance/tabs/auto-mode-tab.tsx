@@ -7,6 +7,12 @@
 //   - sunset   → switch at sunrise / sunset for a captured location.
 // Persists through the generic `save({ autoMode })` setter; the runner reads
 // the same store slice live, so edits take effect within a minute.
+//
+// The time and coordinate fields save once, on blur or Enter. `autoMode` is
+// host-writable and `/me/appearance` embeds this tab on a paired phone, so a
+// save per change queued a host update for every half-typed time and
+// coordinate — and a lone "-" on the way to "-33.9" saved latitude 0. A field
+// left empty, half-entered or out of range reverts instead of saving.
 
 import { useTranslations } from "next-intl"
 import { MapPinIcon } from "lucide-react"
@@ -22,20 +28,72 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { responsiveSelectClass } from "@/lib/utils"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
+import { parseHmToMinutes } from "@/lib/appearance/auto-mode"
 import { useSettingsStore } from "@/stores/settings"
 import type { AutoModeSettings, AutoModeTrigger } from "@/types/appearance"
 
 const TRIGGERS: AutoModeTrigger[] = ["system", "schedule", "sunset"]
+
+/** A complete "HH:MM", else `null`: a cleared or half-entered time field. */
+const validTimeOfDay = (value: string): string | null =>
+  parseHmToMinutes(value) === null ? null : value
+
+/** A finite coordinate within ±`limit` degrees, canonicalised; else `null`. */
+const validCoordinate = (limit: number) => (raw: string) => {
+  const trimmed = raw.trim()
+  if (trimmed === "") return null
+  const n = Number(trimmed)
+  return Number.isFinite(n) && Math.abs(n) <= limit ? String(n) : null
+}
+const validLatitude = validCoordinate(90)
+const validLongitude = validCoordinate(180)
 
 export function AutoModeTab() {
   const t = useTranslations("settings.appearance.auto")
   const autoMode = useSettingsStore((s) => s.autoMode)
   const save = useSettingsStore((s) => s.save)
 
-  const patch = (p: Partial<AutoModeSettings>) => void save({ autoMode: { ...autoMode, ...p } })
+  const write = (p: Partial<AutoModeSettings>) => save({ autoMode: { ...autoMode, ...p } })
+  const patch = (p: Partial<AutoModeSettings>) => void write(p)
 
   const schedule = autoMode.schedule ?? { lightAt: "07:00", darkAt: "19:00" }
   const location = autoMode.location
+
+  const lightAt = useSettingDraft(
+    schedule.lightAt,
+    (next) => write({ schedule: { ...schedule, lightAt: next } }),
+    { normalize: validTimeOfDay }
+  )
+  const darkAt = useSettingDraft(
+    schedule.darkAt,
+    (next) => write({ schedule: { ...schedule, darkAt: next } }),
+    { normalize: validTimeOfDay }
+  )
+  const latitude = useSettingDraft(
+    location ? String(location.latitude) : "",
+    (next) =>
+      write({
+        location: {
+          latitude: Number(next),
+          longitude: location?.longitude ?? 0,
+          source: "manual",
+        },
+      }),
+    { normalize: validLatitude }
+  )
+  const longitude = useSettingDraft(
+    location ? String(location.longitude) : "",
+    (next) =>
+      write({
+        location: {
+          latitude: location?.latitude ?? 0,
+          longitude: Number(next),
+          source: "manual",
+        },
+      }),
+    { normalize: validLongitude }
+  )
   const geoAvailable = typeof navigator !== "undefined" && !!navigator.geolocation
 
   const captureLocation = () => {
@@ -100,8 +158,10 @@ export function AutoModeTab() {
             <Input
               id="auto-light-at"
               type="time"
-              value={schedule.lightAt}
-              onChange={(e) => patch({ schedule: { ...schedule, lightAt: e.target.value } })}
+              value={lightAt.value}
+              onChange={(e) => lightAt.set(e.target.value)}
+              onBlur={lightAt.commit}
+              onKeyDown={lightAt.commitOnEnter}
             />
           </div>
           <div className="space-y-1.5">
@@ -111,8 +171,10 @@ export function AutoModeTab() {
             <Input
               id="auto-dark-at"
               type="time"
-              value={schedule.darkAt}
-              onChange={(e) => patch({ schedule: { ...schedule, darkAt: e.target.value } })}
+              value={darkAt.value}
+              onChange={(e) => darkAt.set(e.target.value)}
+              onBlur={darkAt.commit}
+              onKeyDown={darkAt.commitOnEnter}
             />
           </div>
         </div>
@@ -143,16 +205,10 @@ export function AutoModeTab() {
                 id="auto-lat"
                 type="number"
                 inputMode="decimal"
-                value={location?.latitude ?? ""}
-                onChange={(e) =>
-                  patch({
-                    location: {
-                      latitude: Number(e.target.value),
-                      longitude: location?.longitude ?? 0,
-                      source: "manual",
-                    },
-                  })
-                }
+                value={latitude.value}
+                onChange={(e) => latitude.set(e.target.value)}
+                onBlur={latitude.commit}
+                onKeyDown={latitude.commitOnEnter}
               />
             </div>
             <div className="space-y-1.5">
@@ -163,16 +219,10 @@ export function AutoModeTab() {
                 id="auto-lng"
                 type="number"
                 inputMode="decimal"
-                value={location?.longitude ?? ""}
-                onChange={(e) =>
-                  patch({
-                    location: {
-                      latitude: location?.latitude ?? 0,
-                      longitude: Number(e.target.value),
-                      source: "manual",
-                    },
-                  })
-                }
+                value={longitude.value}
+                onChange={(e) => longitude.set(e.target.value)}
+                onBlur={longitude.commit}
+                onKeyDown={longitude.commitOnEnter}
               />
             </div>
           </div>

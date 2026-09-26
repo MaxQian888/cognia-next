@@ -67,7 +67,7 @@ export function StylePanel() {
           max={1.5}
           step={0.025}
           format={(v) => `${v.toFixed(3)}rem`}
-          onChange={(next) => void save({ radius: { base: next } })}
+          onChange={(next) => save({ radius: { base: next } })}
         />
         <p className="text-[11px] text-muted-foreground">
           {radiusFollowsPack ? t("radiusFollowsPack") : t("radiusOverridesPack")}

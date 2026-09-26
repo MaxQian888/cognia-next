@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (k: string) => k,
@@ -67,13 +67,17 @@ describe("CursorEffectCard", () => {
     })
   })
 
-  it("writes the intensity and particle-size sliders", () => {
+  it("writes the intensity and particle-size sliders", async () => {
     const { onChange } = renderCard({ kind: "sparkle", intensity: 0.5, scale: 1 })
     const [intensity, scale] = screen.getAllByRole("slider")
-    fireEvent.keyDown(intensity, { key: "ArrowRight" })
+    await act(async () => {
+      fireEvent.keyDown(intensity, { key: "ArrowRight" })
+    })
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ intensity: 0.55 }))
     onChange.mockClear()
-    fireEvent.keyDown(scale, { key: "ArrowRight" })
+    await act(async () => {
+      fireEvent.keyDown(scale, { key: "ArrowRight" })
+    })
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ scale: 1.1 }))
   })
 

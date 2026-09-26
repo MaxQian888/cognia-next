@@ -179,7 +179,7 @@ describe("ThemeTab", () => {
     expect(seed?.sourceBuiltinName).toBe("Nord")
   })
 
-  it("accent picker writes the chosen color and can be reset", () => {
+  it("accent picker saves the pick once, when the picker closes, and can be reset", async () => {
     storeState.settings = {
       theme: "system",
       colorTheme: "default",
@@ -188,14 +188,47 @@ describe("ThemeTab", () => {
     }
     render(<ThemeTab />)
     const swatch = screen.getByLabelText("accent.label") as HTMLInputElement
-    act(() => {
-      fireEvent.change(swatch, { target: { value: "#00ff00" } })
+    // An open native picker fires `input` for every colour the pointer
+    // crosses; each used to be a save and a queued desktop update.
+    fireEvent.input(swatch, { target: { value: "#00ff00" } })
+    fireEvent.input(swatch, { target: { value: "#00cc00" } })
+    expect(setAccentColor).not.toHaveBeenCalled()
+    expect(screen.getByText("#00cc00")).toBeInTheDocument()
+
+    // The picker closing fires the element's native `change`.
+    await act(async () => {
+      fireEvent.change(swatch)
     })
-    expect(setAccentColor).toHaveBeenCalledWith("#00ff00")
-    act(() => {
+    expect(setAccentColor).toHaveBeenCalledTimes(1)
+    expect(setAccentColor).toHaveBeenCalledWith("#00cc00")
+
+    await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "accent.reset" }))
     })
-    expect(setAccentColor).toHaveBeenCalledWith(null)
+    expect(setAccentColor).toHaveBeenLastCalledWith(null)
+  })
+
+  it("accent picker also saves a pending pick on blur, and skips an unchanged one", async () => {
+    storeState.settings = {
+      theme: "system",
+      colorTheme: "default",
+      activeCustomThemeId: null,
+      accentColor: "#ff0000",
+    }
+    render(<ThemeTab />)
+    const swatch = screen.getByLabelText("accent.label") as HTMLInputElement
+    fireEvent.input(swatch, { target: { value: "#ff0000" } })
+    await act(async () => {
+      fireEvent.blur(swatch)
+    })
+    expect(setAccentColor).not.toHaveBeenCalled()
+
+    fireEvent.input(swatch, { target: { value: "#123456" } })
+    await act(async () => {
+      fireEvent.blur(swatch)
+    })
+    expect(setAccentColor).toHaveBeenCalledTimes(1)
+    expect(setAccentColor).toHaveBeenCalledWith("#123456")
   })
 
   it("clicking a built-in preset clones it as a persistent CustomTheme and activates it", () => {

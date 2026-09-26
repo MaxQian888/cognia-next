@@ -2,8 +2,9 @@
 
 // Settings → Conversation: which composer skin to render, and the per-knob
 // adjustments layered on it. Reads/writes `AppSettings.composerBehavior.skin`
-// and `.skinOverrides` through the settings store `save`, live (same pattern as
-// `appearance/components/density-card.tsx`).
+// and `.skinOverrides` through the settings store `save`: pickers and switches
+// save live (same pattern as `appearance/components/density-card.tsx`), the
+// two sliders once per drag, on release.
 //
 // Which skin is the DEFAULT is the active style pack's call, not this card's
 // (ADR-0148): Soft and Studio default to `classic`, Sharp defaults to `sharp`.
@@ -30,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
@@ -65,13 +67,29 @@ export function ComposerSkinCard() {
   // belongs to the pack, and switching packs will move it.
   const followsPack = cb.skin !== resolved.id
 
+  function write(patch: Partial<ComposerBehavior>): Promise<void> {
+    return save({ composerBehavior: { ...cb, ...patch } })
+  }
+
   function update(patch: Partial<ComposerBehavior>): void {
-    void save({ composerBehavior: { ...cb, ...patch } })
+    void write(patch)
+  }
+
+  function writeOverride(patch: Partial<ComposerSkinOverrides>): Promise<void> {
+    return write({ skinOverrides: { ...overrides, ...patch } })
   }
 
   function setOverride(patch: Partial<ComposerSkinOverrides>): void {
-    update({ skinOverrides: { ...overrides, ...patch } })
+    void writeOverride(patch)
   }
+
+  // The two sliders hold a drag locally and save on release. `composerBehavior`
+  // is host-writable and this card opens on a paired phone at /settings, so a
+  // save per drag frame queued a host update for every pixel crossed.
+  const radius = useSettingDraft(resolved.radiusPx, (radiusPx) => writeOverride({ radiusPx }))
+  const padding = useSettingDraft(resolved.padXPx, (pad) =>
+    writeOverride({ padXPx: pad, padYPx: pad })
+  )
 
   return (
     <div className="space-y-4">
@@ -124,9 +142,7 @@ export function ComposerSkinCard() {
             <Label htmlFor="composer-skin-radius" className="text-xs">
               {t("radiusLabel")}
             </Label>
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {resolved.radiusPx}px
-            </span>
+            <span className="text-xs tabular-nums text-muted-foreground">{radius.value}px</span>
           </div>
           <Slider
             id="composer-skin-radius"
@@ -136,8 +152,9 @@ export function ComposerSkinCard() {
             min={0}
             max={32}
             step={1}
-            value={[resolved.radiusPx]}
-            onValueChange={([next]) => setOverride({ radiusPx: next })}
+            value={[radius.value]}
+            onValueChange={([next]) => radius.set(next)}
+            onValueCommit={([next]) => radius.commitValue(next)}
           />
         </div>
 
@@ -146,7 +163,7 @@ export function ComposerSkinCard() {
             <Label htmlFor="composer-skin-pad" className="text-xs">
               {t("paddingLabel")}
             </Label>
-            <span className="text-xs tabular-nums text-muted-foreground">{resolved.padXPx}px</span>
+            <span className="text-xs tabular-nums text-muted-foreground">{padding.value}px</span>
           </div>
           <Slider
             id="composer-skin-pad"
@@ -156,8 +173,9 @@ export function ComposerSkinCard() {
             min={2}
             max={24}
             step={1}
-            value={[resolved.padXPx]}
-            onValueChange={([next]) => setOverride({ padXPx: next, padYPx: next })}
+            value={[padding.value]}
+            onValueChange={([next]) => padding.set(next)}
+            onValueCommit={([next]) => padding.commitValue(next)}
           />
         </div>
 

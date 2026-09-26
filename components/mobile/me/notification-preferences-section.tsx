@@ -31,7 +31,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
+import { parseHmToMinutes } from "@/lib/appearance/auto-mode"
 import { resolvePreferences } from "@/lib/notifications/preferences"
 import { useSettingsStore } from "@/stores/settings"
 import {
@@ -45,6 +47,10 @@ import {
 } from "@/types/notifications"
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/** A complete "HH:MM", else `null`: a cleared or half-entered time field. */
+const validTimeOfDay = (value: string): string | null =>
+  parseHmToMinutes(value) === null ? null : value
 /** Fan-out channels the phone can toggle (`center` is always implied). */
 const TOGGLE_CHANNELS: NotificationChannel[] = ["toast", "os", "push"]
 
@@ -55,8 +61,33 @@ export function NotificationPreferencesSection() {
 
   const prefs = resolvePreferences(settings?.notificationPreferences)
 
-  const patch = (next: Partial<NotificationPreferences>) =>
-    void update({ notificationPreferences: { ...prefs, ...next } })
+  const write = (next: Partial<NotificationPreferences>) =>
+    update({ notificationPreferences: { ...prefs, ...next } })
+  const patch = (next: Partial<NotificationPreferences>) => void write(next)
+
+  // The quiet-hours times and the retention sliders are held locally and saved
+  // once — a time on blur / Enter, a slider on release. Each save is its own
+  // queued desktop update, and writing per change queued every intermediate
+  // time and every step a drag crossed. A time field that is emptied or only
+  // half-entered reverts rather than saving "" (which quiet-hours routing reads
+  // as midnight).
+  const retentionDays = Math.round(prefs.retentionMaxAgeMs / DAY_MS)
+  const quietStart = useSettingDraft(
+    prefs.quietHours.start,
+    (start) => write({ quietHours: { ...prefs.quietHours, start } }),
+    { normalize: validTimeOfDay }
+  )
+  const quietEnd = useSettingDraft(
+    prefs.quietHours.end,
+    (end) => write({ quietHours: { ...prefs.quietHours, end } }),
+    { normalize: validTimeOfDay }
+  )
+  const retentionDaysDraft = useSettingDraft(retentionDays, (days) =>
+    write({ retentionMaxAgeMs: days * DAY_MS })
+  )
+  const retentionItems = useSettingDraft(prefs.retentionMaxItems, (items) =>
+    write({ retentionMaxItems: items })
+  )
 
   const hasChannel = (c: NotificationChannel) => prefs.globalDefaultChannels.includes(c)
   const toggleChannel = (c: NotificationChannel, on: boolean) => {
@@ -71,7 +102,6 @@ export function NotificationPreferencesSection() {
   const toggleSource = (s: NotificationSource, on: boolean) =>
     patch({ perSource: { ...prefs.perSource, [s]: { ...prefs.perSource[s], enabled: on } } })
 
-  const retentionDays = Math.round(prefs.retentionMaxAgeMs / DAY_MS)
 
   return (
     <div className="flex flex-col gap-4" data-testid="mobile-notification-preferences">
@@ -166,10 +196,10 @@ export function NotificationPreferencesSection() {
                   type="time"
                   aria-label={t("quietHoursStart")}
                   data-testid="notification-quiet-hours-start"
-                  value={prefs.quietHours.start}
-                  onChange={(e) =>
-                    patch({ quietHours: { ...prefs.quietHours, start: e.target.value } })
-                  }
+                  value={quietStart.value}
+                  onChange={(e) => quietStart.set(e.target.value)}
+                  onBlur={quietStart.commit}
+                  onKeyDown={quietStart.commitOnEnter}
                   className="rounded-md border bg-background px-2 py-1"
                 />
                 <span className="text-muted-foreground">→</span>
@@ -177,10 +207,10 @@ export function NotificationPreferencesSection() {
                   type="time"
                   aria-label={t("quietHoursEnd")}
                   data-testid="notification-quiet-hours-end"
-                  value={prefs.quietHours.end}
-                  onChange={(e) =>
-                    patch({ quietHours: { ...prefs.quietHours, end: e.target.value } })
-                  }
+                  value={quietEnd.value}
+                  onChange={(e) => quietEnd.set(e.target.value)}
+                  onBlur={quietEnd.commit}
+                  onKeyDown={quietEnd.commitOnEnter}
                   className="rounded-md border bg-background px-2 py-1"
                 />
               </div>
@@ -241,14 +271,15 @@ export function NotificationPreferencesSection() {
         <Item size="sm" className="px-0">
           <ItemContent>
             <ItemTitle className="text-xs">
-              {t("retentionDays")} · {t("days", { count: retentionDays })}
+              {t("retentionDays")} · {t("days", { count: retentionDaysDraft.value })}
             </ItemTitle>
             <Slider
-              value={[retentionDays]}
+              value={[retentionDaysDraft.value]}
               min={1}
               max={90}
               step={1}
-              onValueChange={([v]) => patch({ retentionMaxAgeMs: (v ?? 30) * DAY_MS })}
+              onValueChange={([v]) => retentionDaysDraft.set(v ?? 30)}
+              onValueCommit={([v]) => retentionDaysDraft.commitValue(v ?? 30)}
               data-testid="notification-retention-days"
               aria-label={t("retentionDays")}
               className="mt-2"
@@ -258,14 +289,15 @@ export function NotificationPreferencesSection() {
         <Item size="sm" className="px-0">
           <ItemContent>
             <ItemTitle className="text-xs">
-              {t("retentionItems")} · {prefs.retentionMaxItems}
+              {t("retentionItems")} · {retentionItems.value}
             </ItemTitle>
             <Slider
-              value={[prefs.retentionMaxItems]}
+              value={[retentionItems.value]}
               min={50}
               max={2000}
               step={50}
-              onValueChange={([v]) => patch({ retentionMaxItems: v ?? 500 })}
+              onValueChange={([v]) => retentionItems.set(v ?? 500)}
+              onValueCommit={([v]) => retentionItems.commitValue(v ?? 500)}
               data-testid="notification-retention-items"
               aria-label={t("retentionItems")}
               className="mt-2"

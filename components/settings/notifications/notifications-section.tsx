@@ -20,6 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
+import { parseHmToMinutes } from "@/lib/appearance/auto-mode"
 import { useSettingsStore } from "@/stores/settings"
 import { NotificationDeliveryPanel } from "./notification-delivery-panel"
 import { useNotificationPermission } from "@/hooks/notifications/use-notification-permission"
@@ -34,6 +36,10 @@ import {
 } from "@/types/notifications"
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/** A complete "HH:MM", else `null`: a cleared or half-entered time field. */
+const validTimeOfDay = (value: string): string | null =>
+  parseHmToMinutes(value) === null ? null : value
 const GATED_LEVELS: NotificationLevel[] = ["info", "success", "warning", "error", "critical"]
 
 function LevelSelect({
@@ -73,9 +79,34 @@ export function NotificationsSection() {
 
   const prefs = resolvePreferences(settings?.notificationPreferences)
 
+  const write = (patch: Partial<NotificationPreferences>) =>
+    save({ notificationPreferences: { ...prefs, ...patch } })
   const update = (patch: Partial<NotificationPreferences>) => {
-    void save({ notificationPreferences: { ...prefs, ...patch } })
+    void write(patch)
   }
+
+  // Quiet-hours times and the retention sliders are held locally and saved
+  // once — a time on blur / Enter, a slider on release. `notificationPreferences`
+  // is host-writable and this section opens on a paired phone at /settings, so
+  // a save per change queued a host update for every intermediate time and
+  // every step a drag crossed. An emptied or half-entered time reverts rather
+  // than saving "" (which quiet-hours routing reads as midnight).
+  const quietStart = useSettingDraft(
+    prefs.quietHours.start,
+    (start) => write({ quietHours: { ...prefs.quietHours, start } }),
+    { normalize: validTimeOfDay }
+  )
+  const quietEnd = useSettingDraft(
+    prefs.quietHours.end,
+    (end) => write({ quietHours: { ...prefs.quietHours, end } }),
+    { normalize: validTimeOfDay }
+  )
+  const retentionDays = useSettingDraft(Math.round(prefs.retentionMaxAgeMs / DAY_MS), (days) =>
+    write({ retentionMaxAgeMs: days * DAY_MS })
+  )
+  const retentionItems = useSettingDraft(prefs.retentionMaxItems, (items) =>
+    write({ retentionMaxItems: items })
+  )
 
   const hasChannel = (c: NotificationChannel) => prefs.globalDefaultChannels.includes(c)
   const toggleChannel = (c: NotificationChannel, on: boolean) => {
@@ -180,18 +211,20 @@ export function NotificationsSection() {
             <Input
               type="time"
               aria-label={t("dndStart")}
-              value={prefs.quietHours.start}
-              onChange={(e) =>
-                update({ quietHours: { ...prefs.quietHours, start: e.target.value } })
-              }
+              value={quietStart.value}
+              onChange={(e) => quietStart.set(e.target.value)}
+              onBlur={quietStart.commit}
+              onKeyDown={quietStart.commitOnEnter}
               className="w-auto"
             />
             <span className="text-muted-foreground">→</span>
             <Input
               type="time"
               aria-label={t("dndEnd")}
-              value={prefs.quietHours.end}
-              onChange={(e) => update({ quietHours: { ...prefs.quietHours, end: e.target.value } })}
+              value={quietEnd.value}
+              onChange={(e) => quietEnd.set(e.target.value)}
+              onBlur={quietEnd.commit}
+              onKeyDown={quietEnd.commitOnEnter}
               className="w-auto"
             />
           </div>
@@ -250,29 +283,29 @@ export function NotificationsSection() {
       <div className="space-y-3 border-t pt-4">
         <div className="flex items-center justify-between">
           <Label className="text-sm">{t("retentionDaysLabel")}</Label>
-          <span className="text-sm tabular-nums text-muted-foreground">
-            {Math.round(prefs.retentionMaxAgeMs / DAY_MS)}
-          </span>
+          <span className="text-sm tabular-nums text-muted-foreground">{retentionDays.value}</span>
         </div>
         <Slider
           min={1}
           max={90}
           step={1}
-          value={[Math.round(prefs.retentionMaxAgeMs / DAY_MS)]}
-          onValueChange={(v) => update({ retentionMaxAgeMs: (v[0] ?? 30) * DAY_MS })}
+          aria-label={t("retentionDaysLabel")}
+          value={[retentionDays.value]}
+          onValueChange={([v]) => retentionDays.set(v ?? 30)}
+          onValueCommit={([v]) => retentionDays.commitValue(v ?? 30)}
         />
         <div className="flex items-center justify-between pt-1">
           <Label className="text-sm">{t("retentionItemsLabel")}</Label>
-          <span className="text-sm tabular-nums text-muted-foreground">
-            {prefs.retentionMaxItems}
-          </span>
+          <span className="text-sm tabular-nums text-muted-foreground">{retentionItems.value}</span>
         </div>
         <Slider
           min={50}
           max={2000}
           step={50}
-          value={[prefs.retentionMaxItems]}
-          onValueChange={(v) => update({ retentionMaxItems: v[0] ?? 500 })}
+          aria-label={t("retentionItemsLabel")}
+          value={[retentionItems.value]}
+          onValueChange={([v]) => retentionItems.set(v ?? 500)}
+          onValueCommit={([v]) => retentionItems.commitValue(v ?? 500)}
         />
       </div>
 

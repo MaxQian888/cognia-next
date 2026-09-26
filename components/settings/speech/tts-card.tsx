@@ -20,6 +20,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { useSettingsStore } from "@/stores/settings"
 import {
   ORDERED_TTS_PROVIDERS,
@@ -194,6 +195,13 @@ export function TtsCard() {
   const ttsRate = settings?.ttsRate ?? 1.0
   const ttsPitch = settings?.ttsPitch ?? 1.0
   const ttsVolume = settings?.ttsVolume ?? 1.0
+  // A drag is held locally and saved on release (`onValueCommit`). All three
+  // keys are host-writable, and this section opens on a paired phone at
+  // /settings, so saving per drag frame queued a host update for every
+  // intermediate value.
+  const rate = useSettingDraft(ttsRate, setTtsRate)
+  const pitch = useSettingDraft(ttsPitch, setTtsPitch)
+  const volume = useSettingDraft(ttsVolume, setTtsVolume)
   const ttsCacheEnabled = settings?.ttsCacheEnabled ?? true
   const ttsStreamingEnabled = settings?.ttsStreamingEnabled ?? true
   const ttsFallbackEnabled = settings?.ttsFallbackEnabled ?? true
@@ -288,30 +296,34 @@ export function TtsCard() {
                     <div className="flex items-center justify-between">
                       <Label className="text-xs">{t("rate")}</Label>
                       <span className="text-xs text-muted-foreground tabular-nums">
-                        {ttsRate.toFixed(2)}x
+                        {rate.value.toFixed(2)}x
                       </span>
                     </div>
                     <Slider
-                      value={[ttsRate]}
+                      value={[rate.value]}
                       min={0.5}
                       max={2.0}
                       step={0.05}
-                      onValueChange={(v) => void setTtsRate(v[0])}
+                      aria-label={t("rate")}
+                      onValueChange={([v]) => rate.set(v)}
+                      onValueCommit={([v]) => rate.commitValue(v)}
                     />
                   </div>
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <Label className="text-xs">{t("pitch")}</Label>
                       <span className="text-xs text-muted-foreground tabular-nums">
-                        {ttsPitch.toFixed(2)}
+                        {pitch.value.toFixed(2)}
                       </span>
                     </div>
                     <Slider
-                      value={[ttsPitch]}
+                      value={[pitch.value]}
                       min={0}
                       max={2}
                       step={0.05}
-                      onValueChange={(v) => void setTtsPitch(v[0])}
+                      aria-label={t("pitch")}
+                      onValueChange={([v]) => pitch.set(v)}
+                      onValueCommit={([v]) => pitch.commitValue(v)}
                     />
                   </div>
                 </>
@@ -320,15 +332,17 @@ export function TtsCard() {
                 <div className="flex items-center justify-between">
                   <Label className="text-xs">{t("volume")}</Label>
                   <span className="text-xs text-muted-foreground tabular-nums">
-                    {Math.round(ttsVolume * 100)}%
+                    {Math.round(volume.value * 100)}%
                   </span>
                 </div>
                 <Slider
-                  value={[ttsVolume]}
+                  value={[volume.value]}
                   min={0}
                   max={1}
                   step={0.05}
-                  onValueChange={(v) => void setTtsVolume(v[0])}
+                  aria-label={t("volume")}
+                  onValueChange={([v]) => volume.set(v)}
+                  onValueCommit={([v]) => volume.commitValue(v)}
                 />
               </div>
             </div>

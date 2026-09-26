@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 
 const mocks = {
   setSearchEnabled: jest.fn(),
@@ -58,10 +58,9 @@ jest.mock("@/components/ui/slider", () => ({
       aria-valuenow={value?.[0] ?? 0}
       disabled={disabled}
       value={value?.[0] ?? 0}
-      onChange={(e) => {
-        onValueChange([Number(e.target.value)])
-        onValueCommit?.([Number(e.target.value)])
-      }}
+      // `change` is one drag frame, `pointerUp` the release.
+      onChange={(e) => onValueChange([Number(e.target.value)])}
+      onPointerUp={(e) => onValueCommit?.([Number(e.currentTarget.value)])}
     />
   ),
 }))
@@ -204,7 +203,7 @@ describe("SearchGlobalSettings", () => {
     expect(mocks.setDefaultSearchProvider).toHaveBeenCalledWith("perplexity")
   })
 
-  it("changes maxResults via slider", () => {
+  it("changes maxResults once, on slider release, not per drag frame", async () => {
     settings = {
       searchEnabled: true,
       searchProviders: {
@@ -213,7 +212,16 @@ describe("SearchGlobalSettings", () => {
     }
     render(<SearchGlobalSettings />)
     // slider[0] = maxResults, slider[1] = maxRetries
-    fireEvent.change(screen.getAllByRole("slider")[0], { target: { value: 8 } })
+    const slider = screen.getAllByRole("slider")[0]
+    fireEvent.change(slider, { target: { value: 6 } })
+    fireEvent.change(slider, { target: { value: 8 } })
+    // Each frame used to be a save, and on a paired phone a queued update.
+    expect(mocks.setSearchMaxResults).not.toHaveBeenCalled()
+    expect(screen.getByText("maxResults: 8")).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.pointerUp(slider)
+    })
+    expect(mocks.setSearchMaxResults).toHaveBeenCalledTimes(1)
     expect(mocks.setSearchMaxResults).toHaveBeenCalledWith(8)
   })
 

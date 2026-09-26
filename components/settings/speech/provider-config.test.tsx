@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 const saveMock = jest.fn()
 jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
@@ -30,6 +30,7 @@ jest.mock("./api-key-input", () => ({
 }))
 
 import {
+  ElevenLabsConfig,
   LocalOpenAiCompatibleConfig,
   MistralConfig,
   PROVIDER_CONFIG_COMPONENTS,
@@ -44,12 +45,32 @@ describe("MistralConfig", () => {
     expect(PROVIDER_CONFIG_COMPONENTS.mistral).toBe(MistralConfig)
   })
 
-  it("persists the reusable voice id", () => {
+  it("persists the reusable voice id once, on blur, not per keystroke", async () => {
     render(<MistralConfig />)
-    fireEvent.change(screen.getByPlaceholderText("mistralVoiceIdPlaceholder"), {
-      target: { value: "voice-123" },
+    const input = screen.getByPlaceholderText("mistralVoiceIdPlaceholder")
+    fireEvent.change(input, { target: { value: "voice" } })
+    fireEvent.change(input, { target: { value: "voice-123" } })
+    expect(saveMock).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.blur(input)
     })
+    expect(saveMock).toHaveBeenCalledTimes(1)
     expect(saveMock).toHaveBeenCalledWith({ mistralVoiceId: "voice-123" })
+  })
+})
+
+describe("ElevenLabsConfig", () => {
+  it("persists a typed voice id once, on Enter, not per keystroke", async () => {
+    render(<ElevenLabsConfig />)
+    const input = screen.getByPlaceholderText("elevenVoiceIdPlaceholder")
+    fireEvent.change(input, { target: { value: "a" } })
+    fireEvent.change(input, { target: { value: "adam" } })
+    expect(saveMock).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" })
+    })
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(saveMock).toHaveBeenCalledWith({ elevenlabsVoice: "adam" })
   })
 })
 

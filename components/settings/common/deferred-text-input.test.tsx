@@ -68,6 +68,20 @@ describe("DeferredTextInput", () => {
     expect(onCommit).toHaveBeenCalledWith("Menlo")
   })
 
+  it("does not commit on the Enter that confirms an IME candidate", async () => {
+    const onCommit = jest.fn()
+    render(<Harness initial="" onCommit={onCommit} />)
+
+    await act(async () => {
+      fireEvent.change(field(), { target: { value: "zhong" } })
+      fireEvent.keyDown(field(), { key: "Enter", isComposing: true })
+      // WebKit reports the confirming Enter after compositionend, as keyCode 229.
+      fireEvent.keyDown(field(), { key: "Enter", keyCode: 229 })
+    })
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(field().value).toBe("zhong")
+  })
+
   it("trims surrounding whitespace on commit", async () => {
     const onCommit = jest.fn()
     render(<Harness initial="" onCommit={onCommit} />)

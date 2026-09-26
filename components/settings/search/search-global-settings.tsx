@@ -32,6 +32,7 @@ import {
   SettingsToggle,
   SettingsAlert,
 } from "@/components/settings/common/settings-section"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { useSettingsStore } from "@/stores/settings"
 import {
   type SearchProviderType,
@@ -77,6 +78,10 @@ export function SearchGlobalSettings({ onConfigureProviders }: SearchGlobalSetti
 
   const searchEnabled = settings?.searchEnabled ?? false
   const searchMaxResults = settings?.searchMaxResults ?? 5
+  // Held while dragging, saved on release: `searchMaxResults` is host-writable,
+  // and a paired phone reaches this section at /settings, where each save is a
+  // queued host update — one per step the thumb crossed.
+  const maxResults = useSettingDraft(searchMaxResults, setSearchMaxResults)
   const searchFallbackEnabled = settings?.searchFallbackEnabled ?? true
   const searchMaxRetries = settings?.searchMaxRetries ?? 2
   const defaultSearchProvider: SearchProviderType = settings?.defaultSearchProvider ?? "tavily"
@@ -217,12 +222,15 @@ export function SearchGlobalSettings({ onConfigureProviders }: SearchGlobalSetti
 
         <div className="space-y-2">
           <Label className="text-sm">
-            {t("maxResults")}: {searchMaxResults}
+            {t("maxResults")}: {maxResults.value}
           </Label>
           <Slider
-            value={[searchMaxResults]}
-            onValueChange={([v]) => void setSearchMaxResults(v)}
-            onValueCommit={([value]) => log.info("max_results_changed", { value })}
+            value={[maxResults.value]}
+            onValueChange={([v]) => maxResults.set(v)}
+            onValueCommit={([value]) => {
+              log.info("max_results_changed", { value })
+              maxResults.commitValue(value)
+            }}
             min={1}
             max={10}
             step={1}

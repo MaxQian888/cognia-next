@@ -38,7 +38,7 @@ const COLOR_MODES: readonly CursorEffectColorMode[] = ["accent", "pack", "custom
 
 export interface CursorEffectCardProps {
   effect: CursorEffectSettings
-  onChange: (next: CursorEffectSettings) => void
+  onChange: (next: CursorEffectSettings) => unknown
 }
 
 export function CursorEffectCard({ effect, onChange }: CursorEffectCardProps) {

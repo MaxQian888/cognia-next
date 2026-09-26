@@ -12,7 +12,8 @@
  * per character.
  *
  * Draft-locally, commit deliberately:
- *   * Enter commits and keeps focus,
+ *   * Enter commits and keeps focus — but not the Enter an input method uses
+ *     to confirm a candidate, which would commit a half-composed word,
  *   * blur commits,
  *   * Escape abandons the draft and restores the committed value.
  *
@@ -23,6 +24,7 @@
 import { useState, type ComponentProps } from "react"
 
 import { Input } from "@/components/ui/input"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export interface DeferredTextInputProps extends Omit<
   ComponentProps<typeof Input>,
@@ -66,7 +68,7 @@ export function DeferredTextInput({
       }}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
-          commitDraft()
+          if (!isImeComposing(e)) commitDraft()
         } else if (e.key === "Escape") {
           setDraft(value)
         }

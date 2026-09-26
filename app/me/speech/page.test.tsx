@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
 const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)
@@ -77,13 +77,16 @@ jest.mock("@/components/ui/select", () => {
   return { Select, SelectTrigger, SelectValue, SelectContent, SelectItem }
 })
 
-// Render the Slider as a native range input so `onValueChange` fires on change.
+// Render the Slider as a native range input: `change` is one drag frame
+// (`onValueChange`), `pointerUp` the release (`onValueCommit`) with the thumb's
+// current value.
 jest.mock("@/components/ui/slider", () => {
   const React = jest.requireActual("react")
   return {
     Slider: ({
       value,
       onValueChange,
+      onValueCommit,
       disabled,
       min,
       max,
@@ -102,6 +105,8 @@ jest.mock("@/components/ui/slider", () => {
         disabled,
         onChange: (e: { target: { value: string } }) =>
           (onValueChange as (v: number[]) => void)([Number(e.target.value)]),
+        onPointerUp: (e: { currentTarget: { value: string } }) =>
+          (onValueCommit as (v: number[]) => void)([Number(e.currentTarget.value)]),
       }),
   }
 })
@@ -166,16 +171,73 @@ describe("MobileSpeechPage", () => {
     expect(saveMock).toHaveBeenCalledWith({ ttsProvider: "openai" })
   })
 
-  it("moving the rate / pitch / volume sliders persists each value", async () => {
+  it("persists each rate / pitch / volume drag once, on release, not per frame", async () => {
     settingsRef.current = { ttsEnabled: true }
     render(<Page />)
-    fireEvent.change(screen.getByTestId("speech-tts-rate"), { target: { value: "1.5" } })
-    fireEvent.change(screen.getByTestId("speech-tts-pitch"), { target: { value: "0.8" } })
-    fireEvent.change(screen.getByTestId("speech-tts-volume"), { target: { value: "0.5" } })
-    await Promise.resolve()
-    expect(saveMock).toHaveBeenCalledWith({ ttsRate: 1.5 })
-    expect(saveMock).toHaveBeenCalledWith({ ttsPitch: 0.8 })
-    expect(saveMock).toHaveBeenCalledWith({ ttsVolume: 0.5 })
+    const drag = async (testid: string, frames: string[]) => {
+      const slider = screen.getByTestId(testid)
+      for (const value of frames) fireEvent.change(slider, { target: { value } })
+      // Each frame used to be its own save — and its own queued desktop update.
+      expect(saveMock).not.toHaveBeenCalled()
+      await act(async () => {
+        fireEvent.pointerUp(slider)
+      })
+    }
+
+    await drag("speech-tts-rate", ["1.1", "1.3", "1.5"])
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(saveMock).toHaveBeenLastCalledWith({ ttsRate: 1.5 })
+    saveMock.mockClear()
+
+    await drag("speech-tts-pitch", ["0.9", "0.8"])
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(saveMock).toHaveBeenLastCalledWith({ ttsPitch: 0.8 })
+    saveMock.mockClear()
+
+    await drag("speech-tts-volume", ["0.9", "0.7", "0.5"])
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(saveMock).toHaveBeenLastCalledWith({ ttsVolume: 0.5 })
+  })
+
+  it("shows the dragged value in the read-out before it is saved", () => {
+    settingsRef.current = { ttsEnabled: true, ttsVolume: 1 }
+    render(<Page />)
+    fireEvent.change(screen.getByTestId("speech-tts-volume"), { target: { value: "0.4" } })
+    expect(screen.getByText("Volume · 40%")).toBeInTheDocument()
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it("commits a typed voice id once, on blur, to the provider's key", async () => {
+    settingsRef.current = { ttsEnabled: true, ttsProvider: "mistral" }
+    render(<Page />)
+    const input = screen.getByTestId("speech-tts-voice-id")
+    fireEvent.change(input, { target: { value: "v" } })
+    fireEvent.change(input, { target: { value: "voice-7 " } })
+    expect(saveMock).not.toHaveBeenCalled()
+    expect(input).toHaveValue("voice-7 ")
+
+    await act(async () => {
+      fireEvent.blur(input)
+    })
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(saveMock).toHaveBeenCalledWith({ mistralVoiceId: "voice-7" })
+  })
+
+  it("commits a typed voice id on Enter and skips an unchanged one", async () => {
+    settingsRef.current = { ttsEnabled: true, ttsProvider: "mistral", mistralVoiceId: "abc" }
+    render(<Page />)
+    const input = screen.getByTestId("speech-tts-voice-id")
+    fireEvent.change(input, { target: { value: " abc " } })
+    await act(async () => {
+      fireEvent.blur(input)
+    })
+    expect(saveMock).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: "xyz" } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" })
+    })
+    expect(saveMock).toHaveBeenCalledWith({ mistralVoiceId: "xyz" })
   })
 
   it("toggling auto-play persists the flag", async () => {

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { act, render, screen, fireEvent, cleanup } from "@testing-library/react"
 import "@testing-library/jest-dom"
 import { CompactionSettings } from "./compaction-settings"
 
@@ -102,29 +102,46 @@ describe("CompactionSettings", () => {
     expect(screen.queryByLabelText("focus.label")).not.toBeInTheDocument()
   })
 
-  it("persists a changed trigger threshold", () => {
+  it("persists a changed trigger threshold once, on blur, not per keystroke", () => {
     render(<CompactionSettings />)
-    fireEvent.change(screen.getByLabelText("threshold.label"), { target: { value: "70" } })
+    const field = screen.getByLabelText("threshold.label")
+    // "7" is in range too — typing "70" used to save 7 and then 70, each a
+    // queued host update on a paired phone.
+    fireEvent.change(field, { target: { value: "7" } })
+    fireEvent.change(field, { target: { value: "70" } })
+    expect(mockSave).not.toHaveBeenCalled()
+    fireEvent.blur(field)
+    expect(mockSave).toHaveBeenCalledTimes(1)
     expect(mockSave).toHaveBeenCalledWith({ compaction: { tokenThreshold: 70 } })
   })
 
-  it("ignores an out-of-range threshold", () => {
+  it("clamps an out-of-range threshold on commit", () => {
     render(<CompactionSettings />)
-    fireEvent.change(screen.getByLabelText("threshold.label"), { target: { value: "5" } })
+    const field = screen.getByLabelText("threshold.label")
+    fireEvent.change(field, { target: { value: "5" } })
     expect(mockSave).not.toHaveBeenCalled()
+    fireEvent.keyDown(field, { key: "Enter" })
+    expect(mockSave).toHaveBeenCalledWith({ compaction: { tokenThreshold: 10 } })
   })
 
   it("persists a changed keep-recent count", () => {
     render(<CompactionSettings />)
-    fireEvent.change(screen.getByLabelText("keepRecent.label"), { target: { value: "12" } })
+    const field = screen.getByLabelText("keepRecent.label")
+    fireEvent.change(field, { target: { value: "12" } })
+    fireEvent.blur(field)
     expect(mockSave).toHaveBeenCalledWith({ compaction: { preserveRecentMessages: 12 } })
   })
 
-  it("persists the compact-instructions focus", () => {
+  it("persists the compact-instructions focus once, on blur, not per keystroke", async () => {
     render(<CompactionSettings />)
-    fireEvent.change(screen.getByLabelText("focus.label"), {
-      target: { value: "the API changes" },
+    const field = screen.getByLabelText("focus.label")
+    fireEvent.change(field, { target: { value: "the API" } })
+    fireEvent.change(field, { target: { value: "the API changes" } })
+    expect(mockSave).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.blur(field)
     })
+    expect(mockSave).toHaveBeenCalledTimes(1)
     expect(mockSave).toHaveBeenCalledWith({ compaction: { focus: "the API changes" } })
   })
 
@@ -159,14 +176,17 @@ describe("CompactionSettings", () => {
     mockSettings = { defaultProvider: "openai", compaction: { trigger: "message-count" } }
     render(<CompactionSettings />)
     fireEvent.change(screen.getByLabelText("retained.label"), { target: { value: "30" } })
+    fireEvent.blur(screen.getByLabelText("retained.label"))
     expect(mockSave).toHaveBeenCalledWith(
       expect.objectContaining({ compaction: expect.objectContaining({ retainedThreshold: 30 }) })
     )
     fireEvent.change(screen.getByLabelText("toolResultCap.label"), { target: { value: "800" } })
+    fireEvent.blur(screen.getByLabelText("toolResultCap.label"))
     expect(mockSave).toHaveBeenCalledWith(
       expect.objectContaining({ compaction: expect.objectContaining({ maxToolResultTokens: 800 }) })
     )
     fireEvent.change(screen.getByLabelText("messageCount.label"), { target: { value: "40" } })
+    fireEvent.blur(screen.getByLabelText("messageCount.label"))
     expect(mockSave).toHaveBeenCalledWith(
       expect.objectContaining({
         compaction: expect.objectContaining({ messageCountThreshold: 40 }),
@@ -178,6 +198,7 @@ describe("CompactionSettings", () => {
     mockSettings = { defaultProvider: "openai", compaction: { strategy: "selective" } }
     render(<CompactionSettings />)
     fireEvent.change(screen.getByLabelText("importance.label"), { target: { value: "60" } })
+    fireEvent.blur(screen.getByLabelText("importance.label"))
     expect(mockSave).toHaveBeenCalledWith(
       expect.objectContaining({ compaction: expect.objectContaining({ importanceThreshold: 0.6 }) })
     )
@@ -187,6 +208,7 @@ describe("CompactionSettings", () => {
     mockSettings = { defaultProvider: "openai", compaction: { strategy: "recursive" } }
     render(<CompactionSettings />)
     fireEvent.change(screen.getByLabelText("recursiveChunkSize.label"), { target: { value: "30" } })
+    fireEvent.blur(screen.getByLabelText("recursiveChunkSize.label"))
     expect(mockSave).toHaveBeenCalledWith(
       expect.objectContaining({ compaction: expect.objectContaining({ recursiveChunkSize: 30 }) })
     )

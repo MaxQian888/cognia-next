@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 
 import { ComposerSkinCard } from "./composer-skin-card"
 import type { AppSettings } from "@cognia/agent-config-types"
@@ -127,7 +127,62 @@ describe("ComposerSkinCard — classic takes no adjustments", () => {
   })
 })
 
+/**
+ * Lets a real Radix slider be dragged in jsdom: pointer capture does not exist
+ * there, and the track has no layout, so give it a width in pixels equal to
+ * its range and each `clientX` lands on that value.
+ */
+function makeDraggable(root: HTMLElement, width: number): () => void {
+  const proto = Element.prototype as unknown as Record<string, unknown>
+  const saved = ["setPointerCapture", "releasePointerCapture", "hasPointerCapture"].map(
+    (k) => [k, proto[k]] as const
+  )
+  proto.setPointerCapture = () => {}
+  proto.releasePointerCapture = () => {}
+  proto.hasPointerCapture = () => true
+  root.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, width, height: 8, right: width, bottom: 8, x: 0, y: 0 }) as DOMRect
+  return () => saved.forEach(([k, v]) => (proto[k] = v))
+}
+
 describe("ComposerSkinCard — overrides", () => {
+  it("saves a radius drag once, on release, not per frame", async () => {
+    mockSettings = { composerBehavior: { skin: "airy", sendOnEnter: false } }
+    render(<ComposerSkinCard />)
+    const root = screen.getByTestId("skin-radius")
+    const restore = makeDraggable(root, 32)
+    try {
+      fireEvent.pointerDown(root, { clientX: 4, pointerId: 1 })
+      fireEvent.pointerMove(root, { clientX: 12, pointerId: 1 })
+      fireEvent.pointerMove(root, { clientX: 20, pointerId: 1 })
+      // Each frame used to be a save, and on a paired phone a queued update.
+      expect(save).not.toHaveBeenCalled()
+      await act(async () => {
+        fireEvent.pointerUp(root, { clientX: 20, pointerId: 1 })
+      })
+    } finally {
+      restore()
+    }
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(save).toHaveBeenCalledWith({
+      composerBehavior: { skin: "airy", sendOnEnter: false, skinOverrides: { radiusPx: 20 } },
+    })
+  })
+
+  it("saves a padding keyboard step at once, to both axes", async () => {
+    mockSettings = { composerBehavior: { skin: "airy", skinOverrides: { padXPx: 10, padYPx: 10 } } }
+    render(<ComposerSkinCard />)
+    const thumb = screen.getAllByRole("slider", { name: "paddingLabel" })[0]
+    await act(async () => {
+      fireEvent.keyDown(thumb, { key: "ArrowRight" })
+    })
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(save.mock.calls[0][0].composerBehavior.skinOverrides).toEqual({
+      padXPx: 11,
+      padYPx: 11,
+    })
+  })
+
   it("shows the resolved value, not the raw override", () => {
     // 9999 is clamped by the resolver; the card must not promise it.
     mockSettings = { composerBehavior: { skin: "airy", skinOverrides: { radiusPx: 9999 } } }

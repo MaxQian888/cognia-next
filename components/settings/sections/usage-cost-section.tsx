@@ -28,7 +28,7 @@ import { WalletIcon, BugIcon, GaugeIcon, PlusIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+import { OptionalNumberInput } from "@/components/settings/common/optional-number-input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -104,10 +104,13 @@ export function UsageCostSection() {
 
   const budget = useMemo<BudgetPolicy>(() => settings?.costBudget ?? {}, [settings?.costBudget])
 
+  // Every budget field is a number the user types, so each one writes on blur
+  // or Enter rather than per keystroke. `costBudget` is host-writable and this
+  // section opens on a paired phone at /settings, where each save is its own
+  // queued host update: typing "25" capped spending at $2 on the way there.
+  // Returning the save lets a field hold its draft until the write lands.
   const patchBudget = useCallback(
-    (patch: Partial<BudgetPolicy>) => {
-      void save({ costBudget: { ...budget, ...patch } })
-    },
+    (patch: Partial<BudgetPolicy>) => save({ costBudget: { ...budget, ...patch } }),
     [budget, save]
   )
 
@@ -135,32 +138,32 @@ export function UsageCostSection() {
               <Label htmlFor="cost-budget-daily" className="text-xs">
                 {t("budget.dailyLabel")}
               </Label>
-              <Input
+              <OptionalNumberInput
                 id="cost-budget-daily"
-                type="number"
                 min={0}
                 step="0.01"
                 inputMode="decimal"
                 placeholder={t("budget.noLimit")}
                 aria-label={t("budget.dailyLabel")}
-                value={budget.dailyUsd ?? ""}
-                onChange={(e) => patchBudget({ dailyUsd: positiveOrUndefined(e.target.value) })}
+                value={budget.dailyUsd}
+                parse={positiveOrUndefined}
+                onCommit={(dailyUsd) => patchBudget({ dailyUsd })}
               />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="cost-budget-monthly" className="text-xs">
                 {t("budget.monthlyLabel")}
               </Label>
-              <Input
+              <OptionalNumberInput
                 id="cost-budget-monthly"
-                type="number"
                 min={0}
                 step="0.01"
                 inputMode="decimal"
                 placeholder={t("budget.noLimit")}
                 aria-label={t("budget.monthlyLabel")}
-                value={budget.monthlyUsd ?? ""}
-                onChange={(e) => patchBudget({ monthlyUsd: positiveOrUndefined(e.target.value) })}
+                value={budget.monthlyUsd}
+                parse={positiveOrUndefined}
+                onCommit={(monthlyUsd) => patchBudget({ monthlyUsd })}
               />
             </div>
           </div>
@@ -262,7 +265,7 @@ function PerProviderBudgets({
   onPatch,
 }: {
   budget: BudgetPolicy
-  onPatch: (patch: Partial<BudgetPolicy>) => void
+  onPatch: (patch: Partial<BudgetPolicy>) => unknown
 }) {
   const t = useTranslations("settings.usageCost")
   const { spend } = useCostBudgetStatus()
@@ -294,13 +297,15 @@ function PerProviderBudgets({
     field: "perProviderDailyUsd" | "perProviderMonthlyUsd",
     provider: string,
     value: number | undefined
-  ): void => {
+  ): unknown => {
     const next = { ...(budget[field] ?? {}) }
     // An absent key and a key holding `undefined` mean the same thing to the
     // policy, but only the deletion round-trips cleanly through settings sync.
     if (value === undefined) delete next[provider]
     else next[provider] = value
-    onPatch({ [field]: Object.keys(next).length > 0 ? next : undefined } as Partial<BudgetPolicy>)
+    return onPatch({
+      [field]: Object.keys(next).length > 0 ? next : undefined,
+    } as Partial<BudgetPolicy>)
   }
 
   const removeProvider = (provider: string): void => {
@@ -365,46 +370,34 @@ function PerProviderBudgets({
                 <Label htmlFor={`budget-${provider}-daily`} className="text-[10px]">
                   {t("budget.dailyShort")}
                 </Label>
-                <Input
+                <OptionalNumberInput
                   id={`budget-${provider}-daily`}
-                  type="number"
                   min={0}
                   step="0.01"
                   inputMode="decimal"
                   className="h-8"
                   placeholder={t("budget.noLimit")}
                   aria-label={t("budget.perProviderDailyLabel", { provider })}
-                  value={budget.perProviderDailyUsd?.[provider] ?? ""}
-                  onChange={(e) =>
-                    patchProvider(
-                      "perProviderDailyUsd",
-                      provider,
-                      positiveOrUndefined(e.target.value)
-                    )
-                  }
+                  value={budget.perProviderDailyUsd?.[provider]}
+                  parse={positiveOrUndefined}
+                  onCommit={(next) => patchProvider("perProviderDailyUsd", provider, next)}
                 />
               </div>
               <div className="flex min-w-0 flex-col gap-1">
                 <Label htmlFor={`budget-${provider}-monthly`} className="text-[10px]">
                   {t("budget.monthlyShort")}
                 </Label>
-                <Input
+                <OptionalNumberInput
                   id={`budget-${provider}-monthly`}
-                  type="number"
                   min={0}
                   step="0.01"
                   inputMode="decimal"
                   className="h-8"
                   placeholder={t("budget.noLimit")}
                   aria-label={t("budget.perProviderMonthlyLabel", { provider })}
-                  value={budget.perProviderMonthlyUsd?.[provider] ?? ""}
-                  onChange={(e) =>
-                    patchProvider(
-                      "perProviderMonthlyUsd",
-                      provider,
-                      positiveOrUndefined(e.target.value)
-                    )
-                  }
+                  value={budget.perProviderMonthlyUsd?.[provider]}
+                  parse={positiveOrUndefined}
+                  onCommit={(next) => patchProvider("perProviderMonthlyUsd", provider, next)}
                 />
               </div>
               <Button
@@ -437,7 +430,7 @@ function ThresholdFields({
   onPatch,
 }: {
   budget: BudgetPolicy
-  onPatch: (patch: Partial<BudgetPolicy>) => void
+  onPatch: (patch: Partial<BudgetPolicy>) => unknown
 }) {
   const t = useTranslations("settings.usageCost")
   return (
@@ -451,34 +444,36 @@ function ThresholdFields({
           <Label htmlFor="cost-budget-warn-at" className="text-xs">
             {t("budget.warnAtLabel")}
           </Label>
-          <Input
+          <OptionalNumberInput
             id="cost-budget-warn-at"
-            type="number"
             min={1}
             max={99}
             step="1"
             inputMode="numeric"
             placeholder={String(Math.round(DEFAULT_WARN_AT * 100))}
             aria-label={t("budget.warnAtLabel")}
-            value={ratioAsPercentField(budget.warnAt)}
-            onChange={(e) => onPatch({ warnAt: ratioOrUndefined(e.target.value) })}
+            value={budget.warnAt}
+            parse={ratioOrUndefined}
+            format={ratioAsPercentField}
+            onCommit={(warnAt) => onPatch({ warnAt })}
           />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="cost-budget-critical-at" className="text-xs">
             {t("budget.criticalAtLabel")}
           </Label>
-          <Input
+          <OptionalNumberInput
             id="cost-budget-critical-at"
-            type="number"
             min={1}
             max={99}
             step="1"
             inputMode="numeric"
             placeholder={String(Math.round(DEFAULT_CRITICAL_AT * 100))}
             aria-label={t("budget.criticalAtLabel")}
-            value={ratioAsPercentField(budget.criticalAt)}
-            onChange={(e) => onPatch({ criticalAt: ratioOrUndefined(e.target.value) })}
+            value={budget.criticalAt}
+            parse={ratioOrUndefined}
+            format={ratioAsPercentField}
+            onCommit={(criticalAt) => onPatch({ criticalAt })}
           />
         </div>
       </div>

@@ -126,9 +126,7 @@ export function TypographyTab() {
           max={1.25}
           step={0.005}
           format={(v) => v.toFixed(3)}
-          onChange={(next) =>
-            void save({ typographyExt: { ...typographyExt, lineHeightScale: next } })
-          }
+          onChange={(next) => save({ typographyExt: { ...typographyExt, lineHeightScale: next } })}
         />
         <SettingSliderRow
           label={tLayout("fine.letterSpacing")}
@@ -139,9 +137,7 @@ export function TypographyTab() {
           max={0.02}
           step={0.001}
           format={(v) => `${v.toFixed(3)}em`}
-          onChange={(next) =>
-            void save({ typographyExt: { ...typographyExt, letterSpacingEm: next } })
-          }
+          onChange={(next) => save({ typographyExt: { ...typographyExt, letterSpacingEm: next } })}
         />
       </div>
     </div>

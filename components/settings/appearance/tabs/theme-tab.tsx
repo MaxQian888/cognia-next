@@ -8,7 +8,7 @@
 //      `useSyncExternalStore`); activating any non-imported card seeds a
 //      persistent CustomTheme so the choice survives plugin disable.
 
-import { useDeferredValue, useMemo, useState, useSyncExternalStore } from "react"
+import { useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { useSettingsStore } from "@/stores/settings"
 import type { AppTheme } from "@cognia/agent-config-types"
 import type { ColorThemePreset, CustomTheme, ThemeColors } from "@/types/plugin/plugin"
@@ -62,6 +63,70 @@ function getServerPluginThemes(): PluginTheme[] {
 }
 
 type VariantFilter = "all" | "light" | "dark"
+
+/**
+ * The accent swatch. A native colour picker fires `input` continuously while it
+ * is open, so the pick is held locally (the swatch and hex follow it) and saved
+ * once: on the element's native `change`, which fires when the picker closes,
+ * or on blur. `accentColor` is host-writable, and saving on every `input`
+ * queued a desktop update for each colour the pointer crossed. React's
+ * `onChange` cannot tell the two events apart, hence the native listener.
+ */
+function AccentColorPicker({
+  accentColor,
+  setAccentColor,
+}: {
+  accentColor: string | null
+  setAccentColor: (color: string | null) => Promise<void>
+}) {
+  const t = useTranslations("settings.appearance")
+  const draft = useSettingDraft(accentColor ?? "", (color) => setAccentColor(color))
+  const shown = draft.value || null
+  const inputRef = useRef<HTMLInputElement>(null)
+  const commitRef = useRef(draft.commit)
+  useEffect(() => {
+    commitRef.current = draft.commit
+  })
+  useEffect(() => {
+    const input = inputRef.current
+    if (!input) return
+    const onPickerClosed = () => commitRef.current()
+    input.addEventListener("change", onPickerClosed)
+    return () => input.removeEventListener("change", onPickerClosed)
+  }, [])
+
+  return (
+    <div className="flex items-center gap-3">
+      <label
+        className="relative inline-flex size-8 cursor-pointer items-center justify-center overflow-hidden rounded-md border"
+        style={shown ? { background: shown } : undefined}
+      >
+        <Input
+          ref={inputRef}
+          type="color"
+          value={shown ?? "#3b82f6"}
+          onChange={(e) => draft.set(e.target.value)}
+          onBlur={draft.commit}
+          className="absolute inset-0 cursor-pointer opacity-0"
+          aria-label={t("accent.label")}
+        />
+        {!shown && <span className="text-[10px] text-muted-foreground">A</span>}
+      </label>
+      <span className="text-xs text-muted-foreground">{shown ?? t("accent.usingTheme")}</span>
+      {shown && (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="ml-auto h-7 text-xs"
+          onClick={() => void setAccentColor(null)}
+        >
+          {t("accent.reset")}
+        </Button>
+      )}
+    </div>
+  )
+}
 
 export function ThemeTab() {
   const t = useTranslations("settings.appearance")
@@ -448,35 +513,7 @@ export function ThemeTab() {
           <h3 className="text-sm font-medium">{t("accent.label")}</h3>
           <p className="text-[11px] text-muted-foreground">{t("accent.description")}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <label
-            className="relative inline-flex size-8 cursor-pointer items-center justify-center overflow-hidden rounded-md border"
-            style={accentColor ? { background: accentColor } : undefined}
-          >
-            <Input
-              type="color"
-              value={accentColor ?? "#3b82f6"}
-              onChange={(e) => void setAccentColor(e.target.value)}
-              className="absolute inset-0 cursor-pointer opacity-0"
-              aria-label={t("accent.label")}
-            />
-            {!accentColor && <span className="text-[10px] text-muted-foreground">A</span>}
-          </label>
-          <span className="text-xs text-muted-foreground">
-            {accentColor ? accentColor : t("accent.usingTheme")}
-          </span>
-          {accentColor && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="ml-auto h-7 text-xs"
-              onClick={() => void setAccentColor(null)}
-            >
-              {t("accent.reset")}
-            </Button>
-          )}
-        </div>
+        <AccentColorPicker accentColor={accentColor} setAccentColor={setAccentColor} />
       </section>
 
       <section className="space-y-2">

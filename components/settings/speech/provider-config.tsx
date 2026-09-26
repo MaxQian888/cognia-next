@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
+import { DeferredTextInput } from "@/components/settings/common/deferred-text-input"
 import { isTauri } from "@/lib/tauri"
 import { HOST_KEY_PRESENT } from "@/lib/tts/keyring"
 import { useSettingsStore } from "@/stores/settings"
@@ -376,10 +377,14 @@ export function MistralConfig() {
       <ApiKeyInput provider="mistral" label={t("label.mistral")} />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
-        <Input
+        {/* Committed on blur / Enter: the id is host-writable, so a save per
+            keystroke queued a paired client's update for every prefix. */}
+        <DeferredTextInput
           value={voiceId}
-          onChange={(event) => void save({ mistralVoiceId: event.target.value })}
+          onCommit={(next) => void save({ mistralVoiceId: next })}
           placeholder={t("mistralVoiceIdPlaceholder")}
+          aria-label={t("voice")}
+          spellCheck={false}
         />
         <p className="text-[10px] text-muted-foreground">{t("mistralVoiceIdHint")}</p>
       </div>
@@ -469,10 +474,14 @@ export function ElevenLabsConfig() {
             elevenlabsVoice: voiceId,
           })}
         />
-        <Input
+        {/* Committed on blur / Enter, not per keystroke: the voice is
+            host-writable (one queued update per save on a paired client), and
+            the name-to-id lookup above re-ran for every letter typed. */}
+        <DeferredTextInput
           value={voice}
-          onChange={(event) => void save({ elevenlabsVoice: event.target.value })}
+          onCommit={(next) => void save({ elevenlabsVoice: next })}
           placeholder={t("elevenVoiceIdPlaceholder")}
+          aria-label={t("elevenVoiceIdPlaceholder")}
           spellCheck={false}
         />
       </div>

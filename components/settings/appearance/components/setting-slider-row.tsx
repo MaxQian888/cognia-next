@@ -8,11 +8,19 @@
 //
 // The label text is passed in already-translated; only the reset control's
 // aria-label is resolved here (appearance namespace) so callers stay terse.
+//
+// A drag is held locally and persisted once, on release (Radix
+// `onValueCommit`; a keyboard step commits at once). Persisting per drag frame
+// wrote the settings row dozens of times per gesture, and on a mirrored client
+// — `/me/appearance` embeds these tabs on a paired phone — each write is its
+// own queued `app_settings_update`, so one drag of the corner radius replayed
+// every intermediate value onto the desktop.
 
 import { RotateCcwIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { cn } from "@/lib/utils"
 
 export interface SettingSliderRowProps {
@@ -23,7 +31,13 @@ export interface SettingSliderRowProps {
   min: number
   max: number
   step: number
-  onChange: (value: number) => void
+  /**
+   * Persist a value. Called once per gesture (slider release, keyboard step,
+   * reset), never per drag frame. Return the save's promise: the row keeps
+   * showing the dragged value until it resolves, so the thumb does not jump
+   * back while the store catches up.
+   */
+  onChange: (value: number) => unknown
   /** Formats the numeric value for the read-out (e.g. `(v) => v.toFixed(3) + "rem"`). */
   format?: (value: number) => string
   /** Accessible name for the slider; defaults to `label`. */
@@ -34,6 +48,7 @@ export interface SettingSliderRowProps {
 // Float-safe "is this still the default?" check — slider steps like 0.005 make
 // exact equality unreliable after a round-trip through the DOM.
 const EPSILON = 1e-6
+const nearlyEqual = (a: number, b: number) => Math.abs(a - b) <= EPSILON
 
 export function SettingSliderRow({
   label,
@@ -48,8 +63,10 @@ export function SettingSliderRow({
   className,
 }: SettingSliderRowProps) {
   const t = useTranslations("settings.appearance")
-  const isModified = Math.abs(value - defaultValue) > EPSILON
-  const readout = format ? format(value) : String(value)
+  const draft = useSettingDraft(value, onChange, { equals: nearlyEqual })
+  const shown = draft.value
+  const isModified = !nearlyEqual(shown, defaultValue)
+  const readout = format ? format(shown) : String(shown)
   // Fraction of the track where the default sits, clamped to [0,1] so a stray
   // out-of-range default never paints the marker outside the track.
   const range = max - min
@@ -69,7 +86,7 @@ export function SettingSliderRow({
               className="size-5 text-muted-foreground hover:text-foreground"
               aria-label={t("resetToDefault", { name: label })}
               title={t("resetToDefault", { name: label })}
-              onClick={() => onChange(defaultValue)}
+              onClick={() => draft.commitValue(defaultValue)}
             >
               <RotateCcwIcon className="size-3" />
             </Button>
@@ -88,8 +105,9 @@ export function SettingSliderRow({
           min={min}
           max={max}
           step={step}
-          value={[value]}
-          onValueChange={([next]) => onChange(next)}
+          value={[shown]}
+          onValueChange={([next]) => draft.set(next)}
+          onValueCommit={([next]) => draft.commitValue(next)}
           aria-label={ariaLabel ?? label}
         />
       </div>

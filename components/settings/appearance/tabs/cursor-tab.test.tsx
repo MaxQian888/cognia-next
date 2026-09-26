@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import type { AppSettings } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
@@ -87,10 +87,13 @@ describe("CursorTab", () => {
     expect(screen.queryByTestId("cursor-role-preview")).toBeNull()
   })
 
-  it("writes the pointer size slider", () => {
+  it("writes the pointer size slider", async () => {
     setCursor({ enabled: true, packId: "aero", size: 1 })
     render(<CursorTab />)
-    fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowRight" })
+    // A keyboard step is its own commit, so it writes at once.
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowRight" })
+    })
     expect(patch().size).toBe(1.25)
   })
 
