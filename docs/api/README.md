@@ -39,7 +39,7 @@ Do not hand-edit generated RPC path inventories. The generator combines:
 - `protocol/companion-command-renames.json` for the old-name to new-name table (ADR-0175);
 - the Rust dispatch arms, scanned for the `arm` each remote descriptor names. The runtime
   allowlist is no longer typed by hand: the generator renders the contract into
-  `src-tauri/src/companion_api/generated/known_commands.rs` and `command_manifest.rs` reads it;
+  `crates/cognia-companion-contract/src/generated/known_commands.rs` and `command_manifest.rs` reads it;
 - Rust dispatch arms for command-specific required/optional request fields and primitive types;
 - the existing public specification for non-RPC route and reusable component schemas.
 

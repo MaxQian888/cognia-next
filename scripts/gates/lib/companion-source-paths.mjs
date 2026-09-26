@@ -18,6 +18,8 @@ import { join } from "node:path"
 export const COMPANION_API_DIR = "src-tauri/src/companion_api"
 /** `cognia-companion-bus`: the event bus, channel catalog, store bridges. */
 export const COMPANION_BUS_DIR = "crates/cognia-companion-bus/src"
+/** `cognia-companion-contract`: the generated command table and settings allowlist. */
+export const COMPANION_CONTRACT_DIR = "crates/cognia-companion-contract/src"
 
 export const COMPANION_SOURCES = Object.freeze({
   /** The RPC router: `KNOWN_COMMANDS`, `SERVICE_ONLY_COMMANDS`, the core arms. */
@@ -32,9 +34,9 @@ export const COMPANION_SOURCES = Object.freeze({
   api: `${COMPANION_API_DIR}/api.rs`,
   larkEntry: `${COMPANION_API_DIR}/lark_entry.rs`,
   /** Written by `gen-settings-sync.mjs`. */
-  settingsSyncGenerated: `${COMPANION_API_DIR}/settings_sync_generated.rs`,
+  settingsSyncGenerated: `${COMPANION_CONTRACT_DIR}/settings_sync_generated.rs`,
   /** Written by `gen-companion-api.mjs`. */
-  knownCommands: `${COMPANION_API_DIR}/generated/known_commands.rs`,
+  knownCommands: `${COMPANION_CONTRACT_DIR}/generated/known_commands.rs`,
   acpHandler: `${COMPANION_API_DIR}/acp/handler.rs`,
   syncRegistry: `${COMPANION_BUS_DIR}/sync_registry.rs`,
   /**

@@ -95,6 +95,9 @@ cognia-provider-diagnostics = { path = "../crates/cognia-provider-diagnostics" }
 # discovery, the cloudflared tunnel, reachability/signaling config and the
 # WebRTC peer, envelope and framing. `companion_api` re-exports each module at
 # its old path.
+# ADR-0196 P4 — the companion wire contract (generated command table, settings
+# allowlist, paging); `companion_api` re-exports each module at its old path.
+cognia-companion-contract = { path = "../crates/cognia-companion-contract" }
 cognia-companion-connectivity = { path = "../crates/cognia-companion-connectivity" }
 # ADR-0196 P4 — the companion's event bus, push delivery, store bridges and
 # remote execution contexts. `tauri-host` adds the two Tauri adapters

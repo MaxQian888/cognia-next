@@ -1,0 +1,34 @@
+# ADR-0196 P4 — the companion's wire contract as compiled into the host: the
+# command descriptors rendered from `protocol/companion-commands.json`, the
+# embedded Headless contract, the settings-sync allowlist and the paging
+# vocabulary. Data and lookups only, so it sits in the foundation layer next
+# to `cognia-headless-contract`, and every companion crate above can read it.
+#
+# `src-tauri/src/companion_api` re-exports each module at its old path.
+[package]
+name = "cognia-companion-contract"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Companion command contract: generated command descriptors, the embedded Headless contract, the settings-sync allowlist and paging."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_companion_contract"
+path = "src/lib.rs"
+
+[dependencies]
+# The embedded Headless contract `command_manifest::headless_contract` serves.
+cognia-headless-contract = { path = "../cognia-headless-contract" }
+# `paging` re-exports the page types the leaf crates already answer with.
+cognia-problem = { path = "../cognia-problem" }
+once_cell.workspace = true
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+# The contract tests parse `protocol/companion-commands.json`.
+serde_json.workspace = true
+
+[lints]
+workspace = true

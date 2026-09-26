@@ -129,5 +129,8 @@ test("refuses a contract it cannot map faithfully", () => {
 })
 
 test("the output path is where command_manifest looks", () => {
-  assert.equal(KNOWN_COMMANDS_RUST_PATH, "src-tauri/src/companion_api/generated/known_commands.rs")
+  assert.equal(
+    KNOWN_COMMANDS_RUST_PATH,
+    "crates/cognia-companion-contract/src/generated/known_commands.rs"
+  )
 })

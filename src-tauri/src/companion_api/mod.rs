@@ -18,6 +18,8 @@
 //! here at their old paths (ADR-0196 P4). The event bus, push delivery, store
 //! bridges and remote execution contexts live in `cognia-companion-bus`, likewise
 //! re-exported.
+//! The wire contract (`command_manifest` with its generated table,
+//! `settings_sync_generated`, `paging`) lives in `cognia-companion-contract`.
 //!
 //! # Tauri integration
 //!
@@ -37,7 +39,8 @@ pub mod browser_access;
 pub mod browser_gateway;
 /// Runtime discovery of the command contract (ADR-0175).
 pub mod catalog;
-pub mod command_manifest;
+mod command_contract_parity;
+pub use cognia_companion_contract::command_manifest;
 pub mod connector_events;
 pub mod data_plane;
 pub mod deny_list;
@@ -78,7 +81,7 @@ pub mod operations;
 /// What every dispatchable arm answers with (ADR-0175 B4).
 mod output_registry;
 /// Page tokens and the page envelope (ADR-0175 B3).
-pub mod paging;
+pub use cognia_companion_contract::paging;
 mod problem_surface;
 pub use cognia_companion_bus::push;
 pub use cognia_companion_bus::push_creds;
@@ -92,7 +95,7 @@ pub mod secret;
 pub mod security_store;
 pub mod server;
 pub mod session_media;
-pub mod settings_sync_generated;
+pub use cognia_companion_contract::settings_sync_generated;
 pub mod signaling;
 pub use cognia_companion_connectivity::signaling_config;
 pub mod skill_transactions;

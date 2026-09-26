@@ -7,7 +7,7 @@
  * wire and in which direction. Two consumers cannot import it directly, so they
  * are generated here and gated with `--check`:
  *
- *   1. `src-tauri/src/companion_api/settings_sync_generated.rs` — the server-side
+ *   1. `crates/cognia-companion-contract/src/settings_sync_generated.rs` — the server-side
  *      write allowlist (`APP_SETTINGS_MOBILE_ALLOWED_KEYS`) that
  *      `app_settings_update` enforces.
  *   2. `protocol/companion-request-schemas.json` — the canonical request schema
