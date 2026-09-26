@@ -5,7 +5,7 @@ description: "ADR-0067 把 Tauri crate `app_lib` 从 17 万行削到 6.7 万行�
 
 # ADR 0196 — 库 crate 只在被要求时才链接 Tauri
 
-**状态：** 已接受 — 实施中（P0–P4 已落地，P5 与 P6 部分落地；见下文"进展"）
+**状态：** 已接受 — 实施中（P0–P5 与 P7 已落地，P6 部分落地；见下文"进展"）
 **日期：** 2026-09-25
 **相关：** [ADR-0067](./0067-src-tauri-crate-decomposition-and-build-speed)（第一次拆分；本 ADR 是它的延续）、[ADR-0014](./0014-capacitor-mobile-shell)（headless 服务端）、[ADR-0021](./0021-webrtc-datachannel-wan-transport)（`companion_api` 持有的 WebRTC 传输）、[ADR-0059](./0059-cloud-deployment-headless-brain)（`cognia-server` 镜像）
 
@@ -129,14 +129,15 @@ headless 服务端移到 `crates/cognia-server`（lib + bin），不链接 Tauri
 
 ### 进展（2026-09-27）
 
-`src-tauri/src` 从 18.7 万行降到 14.1 万行，`scripts/gates/rust-architecture.json` 中的行数上限随每次抽取同步下调。
+`src-tauri/src` 从 18.7 万行降到 9.6 万行，`scripts/gates/rust-architecture.json` 中的行数上限随每次抽取同步下调。
 
 | 阶段 | 已落地 | 未完成 |
 | --- | --- | --- |
-| P0–P3 | 全部：修复并拆分 setup、工作区治理与门禁、分层修正、每个库 crate 的 `tauri-host` | 从 observability 的 `desktop-host` 中拆出 `tracing-host` |
+| P0–P3 | 全部：修复并拆分 setup、工作区治理与门禁、分层修正、每个库 crate 的 `tauri-host`，以及 observability 不依赖 Tauri 的 `tracing-host`（trace context 传播） | `desktop-host` 中其余供 `cognia-server` 使用的日志部分（P9） |
 | P4 | `cognia-companion-connectivity`、`-bus`、`-contract`、`-security` | — |
-| P5 | `RendererPort`（companion 不再持有 `AppHandle`）；终端宿主客户端及其资源目录（P5.6 的一部分） | `CommandDispatcher`、`RpcHost`、运行时钩子、拆分 `commands.rs` |
+| P5 | `RendererPort`；`CompanionRuntime`（分发与应用的路由）及 headless 槽位；`RpcError`、payload 能力门禁与审批权限检查移入核心；`cognia-power` 与 Wake-on-LAN 移出应用 | `RpcHost`（P5.3，随 P8）、拆分 `commands.rs` |
 | P6 | `cognia-codex-app`、`cognia-browser-cookies`、`cognia-hooks`、`cognia-fleet`、`cognia-task-workspace-host`、`cognia-terminal::host_client` 与 `::host_bridge`，GitHub 工作区与仓库导入并入 `cognia-git` | sidecar 定位器、codeserver、安装辅助二进制、`jobs` |
+| P7 | `cognia-companion`：核心（51 个文件、4.4 万行）；`companion_api` 成为门面，外加分发表、命令外壳与 `wiring` | — |
 
 计划与代码相遇之处：
 
@@ -144,7 +145,10 @@ headless 服务端移到 `crates/cognia-server`（lib + bin），不链接 Tauri
 - **终端桥分两步迁出。** `cognia-terminal::commands` 仍保留持久终端宿主出现之前的同名 `terminal_*` 命令（未注册），而 `#[tauri::command]` 会导出 crate 级的全局 `__cmd__*` 宏，因此在删除旧命令之前，桥无法并入该 crate。旧命令删除后，桥命令及其状态位于 `tauri-host` 之后的 `cognia_terminal::host_bridge`；`src-tauri/src/terminal_host_bridge.rs` 改为 glob 重导出（这种写法会带上那些宏），`lib.rs` 中的 `generate_handler!` 无需改动。只有 `terminal_host_service` 的命令外壳留在应用中：它的 LAN URL 兜底要读取 companion 服务端的状态，因此由外壳以闭包形式传给 crate 中的 `run_terminal_host_service`。
 - **hooks 运行时与 Fleet 通过槽位接触宿主二进制**（`cognia_hooks::host::HOST`、`cognia_fleet::companion::COMPANION`）：桌面端在启动时填充，`cognia-server` 在安装 headless 服务时填充。Fleet 的两处安装由源码测试固定。
 - **当桌面端自身的测试依赖某个 crate 的 `cfg(test)` 行为分叉时，改为 `test-support` 分叉**（Fleet 的恢复文件与 `git` 采集）。`src-tauri` 只在 dev-dependencies 中开启 `test-support`，发布构建不会带上它。
-- **`CommandDispatcher` 等到 P7。** 打破 rpc ↔ remote-execution 的循环只有在核心离开应用 crate 后才有收益；单独做反而会引入一个每条测试路径都要安装的槽位。
+- **核心的应用钩子是字段而非全局量。** `CompanionState.runtime`（`CompanionRuntime`：分发、是否存在宿主、IDE 中继路由）在构造状态时必填，忘记提供的二进制无法编译；若是全局安装，遗漏只会表现为静默的 503 或 404。headless 服务端的附加能力仍是进程级槽位（`runtime::HEADLESS`、`BRAIN`），因为其背后的服务本身就是进程级的，并且在安装这些服务的同一调用中填充。单元测试状态使用 `runtime::unwired()`。
+- **WebView 适配器留在应用中。** `TauriRenderer` 需要 bus 的 WebView 传输，而它位于 bus 的 `tauri-host` 之后；crate 不得开启其他 crate 的宿主 feature，且只有应用代码需要取回 `AppHandle`，因此它是 `src-tauri` 中的 `companion_api::host`。
+- **核心中所有 `cfg(test)` 分叉都改为 `test-support` 分叉**，理由与 Fleet 相同：应用的测试一直以 `cfg(test)` 编译核心（bridge 的 hello 超时、bridge 槽位归属）。有两个测试在旧 crate 中只是靠测试顺序通过（OIDC 中间件测试依赖另一个测试安装的代理策略），现在各自准备所需环境。
+- **`cognia-power` 是独立 crate。** 保持唤醒的断言同时被 sidecar、companion worker 和桌面端的屏幕常亮命令持有，因此位于三者之下，而不是按计划放进 connectivity。
 - **sidecar 定位器等待 `lib.rs`。** 插件运行时的解析器在该文件中安装，而它一直有其他会话的改动。
 
 ## 影响

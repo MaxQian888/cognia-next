@@ -5,7 +5,7 @@ description: "ADR-0067 cut the Tauri crate `app_lib` from 170k lines to 67k, and
 
 # ADR 0196 — A library crate links Tauri only when asked
 
-**Status:** Accepted — in progress (P0–P4 landed, P5 and P6 partly; see Progress below)
+**Status:** Accepted — in progress (P0–P5 and P7 landed, P6 partly; see Progress below)
 **Date:** 2026-09-25
 **Related:** [ADR-0067](./0067-src-tauri-crate-decomposition-and-build-speed) (the first decomposition; this ADR continues it), [ADR-0014](./0014-capacitor-mobile-shell) (the headless server), [ADR-0021](./0021-webrtc-datachannel-wan-transport) (the WebRTC transport `companion_api` owns), [ADR-0059](./0059-cloud-deployment-headless-brain) (the `cognia-server` image)
 
@@ -193,15 +193,16 @@ tests with and without `tauri-host`, `cargo check -p cognia-next`,
 
 ### Progress (2026-09-27)
 
-`src-tauri/src` is down from 187k lines to 141k, and the line ceiling in
+`src-tauri/src` is down from 187k lines to 96k, and the line ceiling in
 `scripts/gates/rust-architecture.json` follows each extraction down.
 
 | Phase | Landed | Open |
 | --- | --- | --- |
-| P0–P3 | All of it: setup fixed and split into steps, workspace governance and the gates, the layering fixes, and `tauri-host` on every library crate | `tracing-host` split out of observability's `desktop-host` |
+| P0–P3 | All of it: setup fixed and split into steps, workspace governance and the gates, the layering fixes, `tauri-host` on every library crate, and observability's tauri-free `tracing-host` (trace-context propagation) | The rest of `desktop-host`'s logging for `cognia-server` (P9) |
 | P4 | `cognia-companion-connectivity`, `-bus`, `-contract`, `-security` | — |
-| P5 | `RendererPort` (the companion holds no `AppHandle`); the terminal-host client and its resource dir (part of P5.6) | `CommandDispatcher`, `RpcHost`, runtime hooks, the `commands.rs` split |
+| P5 | `RendererPort`; `CompanionRuntime` (dispatch and the app's routes) and the headless slots; `RpcError`, the payload capability gate and the approval-authority check in the core; `cognia-power` and Wake-on-LAN out of the app | `RpcHost` (P5.3, with P8), the `commands.rs` split |
 | P6 | `cognia-codex-app`, `cognia-browser-cookies`, `cognia-hooks`, `cognia-fleet`, `cognia-task-workspace-host`, `cognia-terminal::host_client` and `::host_bridge`, GitHub workspace and repo import into `cognia-git` | The sidecar locator, codeserver, the setup binaries, `jobs` |
+| P7 | `cognia-companion`: the core (51 files, 44k lines); `companion_api` is a facade plus the dispatch table, command shells and `wiring` | — |
 
 Where the plan met the code:
 
@@ -227,9 +228,26 @@ Where the plan met the code:
   the desktop's own tests relied on them (Fleet's recovery file and `git`
   capture). `src-tauri` enables `test-support` only from its dev-dependencies,
   so release builds never see it.
-- **`CommandDispatcher` waits for P7.** Breaking the rpc ↔ remote-execution
-  cycle only pays off once the core leaves the app crate, and done alone it
-  adds an install every test path needs.
+- **The core's app hooks are a field, not a global.** `CompanionState.runtime`
+  (`CompanionRuntime`: dispatch, whether a host exists, the IDE relay routes)
+  is required when a state is built, so a binary that forgets it does not
+  compile; a missing global install would have been a silent 503 or 404. The
+  headless server's extras stay process-global slots (`runtime::HEADLESS`,
+  `BRAIN`) because the services behind them are, and they are filled in the
+  same call that installs those services. Unit-test states take
+  `runtime::unwired()`.
+- **The WebView adapter stayed in the app.** `TauriRenderer` needs the bus's
+  WebView transport, which is behind the bus's `tauri-host`; a crate may not
+  turn on another crate's host feature, and only app code recovers an
+  `AppHandle` anyway, so it is `companion_api::host` in `src-tauri`.
+- **Every `cfg(test)` fork in the core became a `test-support` fork**, for the
+  same reason as Fleet's: the app's tests had always compiled the core with
+  `cfg(test)` (the bridge hello timeout, bridge-slot ownership). Two tests
+  only passed through test order in the old crate (the OIDC middleware test
+  needed another test's proxy policy) and now set up what they use.
+- **`cognia-power` is its own crate.** The keep-awake assertion is held by the
+  sidecar, the companion worker and the desktop screen-hold command, so it
+  sits below all three rather than in connectivity as planned.
 - **The sidecar locator waits for `lib.rs`.** The plugin runtime's resolver is
   installed there, and that file has had other work in flight throughout.
 
