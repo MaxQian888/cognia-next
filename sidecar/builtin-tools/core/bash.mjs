@@ -1,4 +1,3 @@
-import { sandboxedProcessTarget, sandboxedProcessEnv } from "../shared/exec.mjs"
 // Core `bash` tool — free-form shell execution for the ai-sdk path.
 //
 // Deliberately DIFFERENT from `shell_execute_advanced` (allowlist-gated,
@@ -18,12 +17,9 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText, DANGEROUS_PATTERNS, findDangerousShellFragment } from "../safety.mjs"
 import { tailTruncate } from "../../src/shared/text/truncate.ts"
-import { pickStreamDecoder } from "../shared/console-decode.mjs"
-import {
-  activeShellDescriptor,
-  applyNonInteractiveEnv,
-  bashToolDescription,
-} from "../shared/shell-detect.mjs"
+import { pickStreamDecoder } from "../../src/platform/process/console-decode.ts"
+import { sandboxedProcessTarget, sandboxedProcessEnv } from "../../src/platform/process/exec.ts"
+import { activeShellDescriptor, applyNonInteractiveEnv } from "../../src/platform/process/shell.ts"
 import { detectInteractiveCommand } from "../shared/interactive-detect.mjs"
 import { resolveToolPath } from "./read.mjs"
 
@@ -115,10 +111,28 @@ export const killShellShape = {
 }
 
 /**
+ * Build the `bash` tool description for a given shell descriptor. The syntax hint
+ * is what tells the model to write PowerShell vs POSIX — it is the prompt half of
+ * the single-shell-abstraction design, read by the model every turn.
+ *
+ * @param {{ syntaxHint: string, label: string }} [descriptor]
+ */
+export function bashToolDescription(descriptor = activeShellDescriptor()) {
+  const base =
+    "Execute a shell command in the session working directory and return its combined output."
+  const hint = descriptor.syntaxHint ? ` ${descriptor.syntaxHint}` : ` Runs ${descriptor.label}.`
+  const tail =
+    "Long output keeps the tail. Set run_in_background to start a long-running command and poll it " +
+    "with bash_output. Each call is approval-gated unless a permission rule allows it. " +
+    "Interactive programs (REPLs, editors, ssh, login flows) do NOT work here — use terminal_repl_* for those."
+  return `${base}${hint} ${tail}`
+}
+
+/**
  * Resolve the platform shell + argv + scrubbed env for a command line (shared
  * sync/bg). The shell is the host's preferred interactive shell — PowerShell on
  * Windows when present, else cmd.exe, else `/bin/sh` — resolved once and cached
- * in shell-detect. `env` drops PowerShell injection vectors (PSModulePath, …) for
+ * in src/platform/process/shell.ts. `env` drops PowerShell injection vectors (PSModulePath, …) for
  * PowerShell shells and is the live `process.env` otherwise.
  */
 export function resolveShellInvocation(command, descriptor = activeShellDescriptor()) {

@@ -6,7 +6,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { assertNotSecretEscape } from "../confinement.mjs"
 import { toolError, toolText } from "../safety.mjs"
-import { statOrNull } from "../shared/fs-stat.mjs"
+import { statOrNull } from "../../src/platform/fs/stat.ts"
 
 /**
  * Refuse a transfer touching a credential path in EITHER position. Guarding the

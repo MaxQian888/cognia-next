@@ -12,7 +12,7 @@
 import { spawnSync } from "node:child_process"
 
 /** Windows code-page number → WHATWG TextDecoder label (Node ships full ICU). */
-const CODEPAGE_LABELS = {
+const CODEPAGE_LABELS: Readonly<Record<number, string>> = {
   65001: "utf-8",
   936: "gbk",
   950: "big5",
@@ -24,12 +24,12 @@ const CODEPAGE_LABELS = {
   874: "windows-874",
 }
 
-let cachedLabel = null
+let cachedLabel: string | null = null
 
 /** TextDecoder label for the active Windows console code page (cached); always
  * "utf-8" off Windows. Parsed from `chcp` ("Active code page: NNN" — the prefix
  * is localized, so we read the trailing number); any failure → UTF-8. */
-export function consoleDecoderLabel() {
+export function consoleDecoderLabel(): string {
   if (cachedLabel !== null) return cachedLabel
   if (process.platform !== "win32") {
     cachedLabel = "utf-8"
@@ -48,12 +48,12 @@ export function consoleDecoderLabel() {
 }
 
 /** Reset the cached code page — for tests exercising the detection branches. */
-export function __resetConsoleDecoderCache() {
+export function __resetConsoleDecoderCache(): void {
   cachedLabel = null
 }
 
 /** Decode a complete buffer: strict UTF-8 when valid, else the OEM code page. */
-export function decodeConsoleBytes(buf) {
+export function decodeConsoleBytes(buf: NodeJS.ArrayBufferView | ArrayBuffer): string {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(buf)
   } catch {
@@ -68,7 +68,7 @@ export function decodeConsoleBytes(buf) {
  * `decode(chunk, { stream: true })` for the rest of the stream and flushed with a
  * final `decode()` — so multibyte sequences split across chunks decode correctly.
  */
-export function pickStreamDecoder(firstChunk) {
+export function pickStreamDecoder(firstChunk: NodeJS.ArrayBufferView | ArrayBuffer): TextDecoder {
   try {
     new TextDecoder("utf-8", { fatal: true }).decode(firstChunk, { stream: true })
     return new TextDecoder("utf-8")

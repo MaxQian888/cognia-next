@@ -1,7 +1,8 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import type { ExecFileException } from "node:child_process"
 
-import { execFileAsync, runCapped } from "./exec.mjs"
+import { execFileAsync, runCapped } from "./exec.ts"
 
 test("execFileAsync resolves with stdout for a successful run", async () => {
   const { stdout } = await execFileAsync("node", ["-e", "process.stdout.write('hi')"])
@@ -13,13 +14,13 @@ test("execFileAsync keeps all standard streams connected for tool children", asy
     "-e",
     `const fs = require('node:fs'); process.stdout.write([0, 1, 2].map((fd) => { try { fs.fstatSync(fd); return 'open' } catch { return 'closed' } }).join(','))`,
   ])
-  assert.equal(stdout, "open,open,open")
+  assert.equal(String(stdout), "open,open,open")
 })
 
 test("execFileAsync rejects with code attached on non-zero exit", async () => {
   await assert.rejects(
     () => execFileAsync("node", ["-e", "process.exit(3)"]),
-    (err) => {
+    (err: ExecFileException) => {
       assert.equal(err.code, 3)
       return true
     }
@@ -39,7 +40,7 @@ test("runCapped returns stringified stdout/stderr", async () => {
 test("runCapped enforces the timeout", async () => {
   await assert.rejects(
     () => runCapped("node", ["-e", "setTimeout(() => {}, 5000)"], { timeoutMs: 50 }),
-    (err) => {
+    (err: ExecFileException) => {
       assert.ok(err.killed || err.signal === "SIGTERM")
       return true
     }
@@ -54,7 +55,7 @@ test("runCapped enforces maxBuffer", async () => {
 })
 
 test("sandbox process target never grants the requested cwd additional write access", async () => {
-  const { sandboxedProcessTarget } = await import("./exec.mjs")
+  const { sandboxedProcessTarget } = await import("./exec.ts")
   const scope = {
     launcher: process.execPath,
     writableRoots: [process.cwd()],
@@ -76,7 +77,7 @@ test("sandbox process target never grants the requested cwd additional write acc
 })
 
 test("shared-exec sandbox scope is isolated between concurrent tool sessions", async () => {
-  const { withProcessSandbox } = await import("./exec.mjs")
+  const { withProcessSandbox } = await import("./exec.ts")
   const denied = withProcessSandbox(
     { launcher: "", writableRoots: [], readableRoots: [], network: false },
     process.cwd(),
@@ -87,11 +88,11 @@ test("shared-exec sandbox scope is isolated between concurrent tool sessions", a
   )
   const allowed = execFileAsync(process.execPath, ["-e", "console.log('legacy')"])
   await assert.rejects(denied, /launcher is unavailable/)
-  assert.match((await allowed).stdout, /legacy/)
+  assert.match(String((await allowed).stdout), /legacy/)
 })
 
 test("sandbox process environment strips ambient credentials and injected loader options", async () => {
-  const { sandboxedProcessEnv } = await import("./exec.mjs")
+  const { sandboxedProcessEnv } = await import("./exec.ts")
   const env = sandboxedProcessEnv(
     {
       PATH: "/bin",

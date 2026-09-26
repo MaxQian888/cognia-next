@@ -21,7 +21,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import metadata from "../../lib/settings/builtin-tools-data.json" with { type: "json" }
 import { toolError, toolText } from "./safety.mjs"
-import { runCapped } from "./shared/exec.mjs"
+import { runCapped } from "../src/platform/process/exec.ts"
 
 const TOOLS_STARTED_AT = new Date().toISOString()
 const RUNTIME_FINGERPRINT = `${metadata.serverName}@${metadata.serverVersion}:${process.pid}:${TOOLS_STARTED_AT}`

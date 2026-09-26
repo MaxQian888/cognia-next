@@ -4,9 +4,9 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 
-import { statOrNull, ensureExists } from "./fs-stat.mjs"
+import { statOrNull, ensureExists } from "./stat.ts"
 
-let TMP
+let TMP = ""
 
 before(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-fsstat-"))

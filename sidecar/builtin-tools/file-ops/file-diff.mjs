@@ -6,7 +6,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { createPatch } from "diff"
 
 import { toolError, toolText } from "../safety.mjs"
-import { ensureExists } from "../shared/fs-stat.mjs"
+import { ensureExists } from "../../src/platform/fs/stat.ts"
 import { headTruncate } from "../../src/shared/text/truncate.ts"
 
 const MAX_DIFF_BYTES = 5 * 1024 * 1024 // 5 MB per side; bigger files refuse the diff

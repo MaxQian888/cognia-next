@@ -36,11 +36,8 @@ const DISCOVERY_PRUNE = Object.freeze(["**/.git/**", "**/node_modules/**"])
 /**
  * Convert one .gitignore line into zero or more fast-glob ignore patterns.
  * Exported for tests.
- *
- * @param {string} line
- * @returns {string[]}
  */
-export function gitignoreLineToGlobs(line) {
+export function gitignoreLineToGlobs(line: string): string[] {
   const trimmed = line.trim()
   if (trimmed.length === 0 || trimmed.startsWith("#") || trimmed.startsWith("!")) return []
 
@@ -55,7 +52,7 @@ export function gitignoreLineToGlobs(line) {
   const hasSlash = body.includes("/")
   const roots = anchored || hasSlash ? [body] : [`**/${body}`]
 
-  const out = []
+  const out: string[] = []
   for (const r of roots) {
     out.push(r)
     // Whether it names a directory explicitly or might be one, also ignore
@@ -67,14 +64,11 @@ export function gitignoreLineToGlobs(line) {
 
 /**
  * Anchor a converted glob to a directory relative to the search root. Root-level
- * patterns (`relDir === ""`) pass through unchanged; a nested directory prefixes
- * its path so the pattern only matches beneath that directory.
- *
- * @param {string} glob
- * @param {string} relDir POSIX-separated dir relative to root, or "".
- * @returns {string}
+ * patterns (`relDir === ""`, otherwise POSIX-separated) pass through unchanged;
+ * a nested directory prefixes its path so the pattern only matches beneath that
+ * directory.
  */
-function anchorGlob(glob, relDir) {
+function anchorGlob(glob: string, relDir: string): string {
   return relDir ? `${relDir}/${glob}` : glob
 }
 
@@ -85,13 +79,10 @@ function anchorGlob(glob, relDir) {
  *
  * For full fidelity (negation, `**` edge cases) ripgrep remains the primary
  * engine; this is the deterministic JS fallback that covers the common cases.
- *
- * @param {string} root
- * @returns {Promise<string[]>}
  */
-export async function loadIgnoreGlobs(root) {
-  const patterns = [...ALWAYS_IGNORE]
-  let files
+export async function loadIgnoreGlobs(root: string): Promise<string[]> {
+  const patterns: string[] = [...ALWAYS_IGNORE]
+  let files: string[]
   try {
     files = await fastGlob("**/.gitignore", {
       cwd: root,

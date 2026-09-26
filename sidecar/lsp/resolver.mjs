@@ -1,4 +1,4 @@
-import { sandboxedProcessTarget, sandboxedProcessEnv } from "../builtin-tools/shared/exec.mjs"
+import { sandboxedProcessTarget, sandboxedProcessEnv } from "../src/platform/process/exec.ts"
 // Agent-side LSP resolver.
 //
 // This is the thin layer that turns "the agent touched a file" into the

@@ -51,8 +51,8 @@ async function fixture(
     const source = (await fs.readFile(entry, "utf8"))
       .replace('"./resolver.mjs"', JSON.stringify(new URL("./resolver.mjs", import.meta.url).href))
       .replace(
-        '"../builtin-tools/shared/exec.mjs"',
-        JSON.stringify(new URL("../builtin-tools/shared/exec.mjs", import.meta.url).href)
+        '"../src/platform/process/exec.ts"',
+        JSON.stringify(new URL("../src/platform/process/exec.ts", import.meta.url).href)
       )
     await fs.writeFile(output, source)
   }

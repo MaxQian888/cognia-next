@@ -5,7 +5,7 @@
 // root upfront; `trimTail` caps output (a thin alias over the shared
 // head-truncate primitive so all output-capping behaviour lives in one place).
 
-import { runCapped } from "../shared/exec.mjs"
+import { runCapped } from "../../src/platform/process/exec.ts"
 import { headTruncate } from "../../src/shared/text/truncate.ts"
 
 export const MAX_OUTPUT_BYTES = 256 * 1024 // 256 KB display cap (trimTail)

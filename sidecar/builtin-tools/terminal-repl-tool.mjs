@@ -1,4 +1,4 @@
-import { sandboxedProcessTarget, sandboxedProcessEnv } from "./shared/exec.mjs"
+import { sandboxedProcessTarget, sandboxedProcessEnv } from "../src/platform/process/exec.ts"
 // terminal-repl-tool — agent-facing interactive REPL MCP tool.
 //
 // Wave 1 (orthogonal to dock-relay). Where `terminal_dock_*` ride

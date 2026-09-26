@@ -9,6 +9,7 @@ import {
   createKillShellTool,
   createListShellsTool,
   resolveShellInvocation,
+  bashToolDescription,
   tailTruncate,
   composeBashBody,
   DEFAULT_TIMEOUT_MS,
@@ -16,13 +17,13 @@ import {
   MAX_OUTPUT_CHARS,
 } from "./bash.mjs"
 import { createBgShellRegistry } from "./bash-sessions.mjs"
-import { resolveShellDescriptor, activeShellDescriptor } from "../shared/shell-detect.mjs"
+import { resolveShellDescriptor, activeShellDescriptor } from "../../src/platform/process/shell.ts"
 
 // Pin a deterministic shell for command-executing tests: cmd.exe on Windows
 // (lookup returns null → no PowerShell), /bin/sh elsewhere. This keeps the
 // plumbing assertions (spill, workdir, background) independent of whatever shell
 // the runner machine happens to have on PATH. Shell-selection itself is covered
-// by shell-detect.test.mjs.
+// by src/platform/process/shell.test.ts.
 const legacyShell = resolveShellDescriptor({ lookup: () => null })
 
 function textOf(result) {
@@ -253,6 +254,27 @@ test("bash scrubs PSModulePath from the PowerShell child env", { skip: !psHost }
     if (prev === undefined) delete process.env.PSModulePath
     else process.env.PSModulePath = prev
   }
+})
+
+test("bashToolDescription embeds the PowerShell syntax hint", () => {
+  const d = resolveShellDescriptor({
+    platform: "win32",
+    lookup: (n) => (n.startsWith("pwsh") ? n : null),
+  })
+  const desc = bashToolDescription(d)
+  assert.match(desc, /\$env:VAR/)
+  assert.match(desc, /run_in_background/)
+})
+
+test("bashToolDescription falls back to a 'Runs <label>' note for sh", () => {
+  const d = resolveShellDescriptor({ platform: "linux" })
+  const desc = bashToolDescription(d)
+  assert.match(desc, /Runs POSIX sh/)
+})
+
+test("bashToolDescription steers interactive programs to terminal_repl_*", () => {
+  const desc = bashToolDescription(resolveShellDescriptor({ platform: "linux" }))
+  assert.match(desc, /Interactive programs.*terminal_repl/)
 })
 
 test("resolveShellInvocation returns a platform shell + argv", () => {

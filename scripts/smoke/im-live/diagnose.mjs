@@ -100,7 +100,8 @@ const MODEL_NOT_INTERCEPTED_CAUSES = [
     detail:
       "The turn carried a frozen execution spec, so the claude-code subprocess environment was " +
       "rebuilt from an allowlist and the inherited ANTHROPIC_BASE_URL was dropped.",
-    where: "sidecar/dispatch/subprocess-env.mjs ENV_ALLOWLIST (see the COMPAT GATE comment).",
+    where:
+      "sidecar/src/platform/process/env.ts ENV_ALLOWLIST (see the COMPAT GATE comment in sidecar/dispatch/subprocess-env.mjs).",
   },
   {
     code: "target_started_without_the_fixture",

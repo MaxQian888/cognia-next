@@ -12,8 +12,24 @@
 // `src-tauri/src/terminal/session.rs::resolve_shell_binary`, kept in sync so the
 // agent tool and the integrated terminal pick the same shell on a given machine.
 
-import { existsSync } from "node:fs"
-import path from "node:path"
+import { findOnPathSync } from "./which.ts"
+
+type Env = Record<string, string | undefined>
+
+export type ShellKind = "sh" | "pwsh" | "powershell" | "cmd"
+
+/** The host shell the `bash` tool drives, and how to invoke it. */
+export interface ShellDescriptor {
+  kind: ShellKind
+  bin: string
+  isWin: boolean
+  label: string
+  /** Prompt text telling the model which syntax to write; empty for POSIX sh. */
+  syntaxHint: string
+  buildArgs(command: string): string[]
+  /** Drops shell-specific injection vectors; returns the same ref when nothing was dropped. */
+  sanitizeEnv<E extends Env>(env: E): E
+}
 
 /**
  * PowerShell environment-injection vectors. `$PSModulePath` auto-imports modules
@@ -25,7 +41,7 @@ import path from "node:path"
  * PowerShell to recompute its safe default module path. This is the sidecar-side
  * mirror of the Rust sandbox's `env.rs` denylist for the unsandboxed CLI path.
  */
-const PS_DANGEROUS_ENV = [/^PSModulePath$/i, /^PSExecutionPolicyPreference$/i]
+const PS_DANGEROUS_ENV: readonly RegExp[] = [/^PSModulePath$/i, /^PSExecutionPolicyPreference$/i]
 
 /** `-NoProfile -NonInteractive` keeps the run hermetic: no `$PROFILE` auto-source,
  * no interactive prompts that would hang a non-TTY child. */
@@ -65,21 +81,21 @@ export const NON_INTERACTIVE_ENV = Object.freeze({
  * so curses/color programs render plainly instead of spraying escape codes into
  * captured output; left untouched on Windows where the shells ignore it. Returns
  * a new object — the input is not mutated.
- *
- * @param {Record<string, string | undefined>} env
- * @param {{ isWin?: boolean }} [descriptor]
  */
-export function applyNonInteractiveEnv(env, descriptor = activeShellDescriptor()) {
-  const out = { ...env, ...NON_INTERACTIVE_ENV }
+export function applyNonInteractiveEnv(
+  env: Env,
+  descriptor: Pick<ShellDescriptor, "isWin"> = activeShellDescriptor()
+): Env {
+  const out: Env = { ...env, ...NON_INTERACTIVE_ENV }
   if (!descriptor.isWin) out.TERM = "dumb"
   return out
 }
 
 /** Return only the keys NOT matching any `patterns`. Returns the SAME object ref
  * when nothing was stripped, so callers can cheaply detect "unchanged". */
-function stripEnvKeys(env, patterns) {
+function stripEnvKeys<E extends Env>(env: E, patterns: readonly RegExp[]): E {
   let changed = false
-  const out = {}
+  const out: Env = {}
   for (const [k, v] of Object.entries(env)) {
     if (patterns.some((re) => re.test(k))) {
       changed = true
@@ -87,10 +103,14 @@ function stripEnvKeys(env, patterns) {
     }
     out[k] = v
   }
-  return changed ? out : env
+  // Only keys were removed, so the copy still satisfies every key E requires.
+  return changed ? (out as E) : env
 }
 
-function makeSh() {
+const identityEnv = <E extends Env>(env: E): E => env
+const stripPowerShellEnv = <E extends Env>(env: E): E => stripEnvKeys(env, PS_DANGEROUS_ENV)
+
+function makeSh(): ShellDescriptor {
   return {
     kind: "sh",
     bin: "/bin/sh",
@@ -98,11 +118,11 @@ function makeSh() {
     label: "POSIX sh",
     syntaxHint: "",
     buildArgs: (command) => ["-c", command],
-    sanitizeEnv: (env) => env,
+    sanitizeEnv: identityEnv,
   }
 }
 
-function makePwsh(bin) {
+function makePwsh(bin: string): ShellDescriptor {
   return {
     kind: "pwsh",
     bin,
@@ -110,11 +130,11 @@ function makePwsh(bin) {
     label: "PowerShell 7 (pwsh)",
     syntaxHint: PS_SYNTAX_HINT,
     buildArgs: (command) => [...PS_PRELUDE, command],
-    sanitizeEnv: (env) => stripEnvKeys(env, PS_DANGEROUS_ENV),
+    sanitizeEnv: stripPowerShellEnv,
   }
 }
 
-function makePowershell(bin) {
+function makePowershell(bin: string): ShellDescriptor {
   return {
     kind: "powershell",
     bin,
@@ -122,11 +142,11 @@ function makePowershell(bin) {
     label: "Windows PowerShell",
     syntaxHint: PS_SYNTAX_HINT,
     buildArgs: (command) => [...PS_PRELUDE, command],
-    sanitizeEnv: (env) => stripEnvKeys(env, PS_DANGEROUS_ENV),
+    sanitizeEnv: stripPowerShellEnv,
   }
 }
 
-function makeCmd(bin) {
+function makeCmd(bin: string): ShellDescriptor {
   return {
     kind: "cmd",
     bin,
@@ -134,46 +154,14 @@ function makeCmd(bin) {
     label: "cmd.exe",
     syntaxHint: CMD_SYNTAX_HINT,
     buildArgs: (command) => ["/d", "/s", "/c", command],
-    sanitizeEnv: (env) => env,
+    sanitizeEnv: identityEnv,
   }
 }
 
-/**
- * `which`-style lookup honoring `PATHEXT` on Windows when `name` has no
- * extension (so a bare `pwsh` matches `pwsh.exe`). Returns the matched leaf
- * (`name + ext`) on a hit, else null. All inputs are injectable for tests.
- *
- * @param {string} name
- * @param {{ platform?: NodeJS.Platform, pathVar?: string, pathext?: string,
- *           exists?: (p: string) => boolean }} [opts]
- * @returns {string | null}
- */
-export function findOnPathSync(name, opts = {}) {
-  const platform = opts.platform ?? process.platform
-  const isWin = platform === "win32"
-  const pathVar = opts.pathVar ?? process.env.PATH ?? ""
-  if (!pathVar) return null
-  const exists = opts.exists ?? existsSync
-  // Use platform-correct path semantics from the `platform` opt, not the host's
-  // — `path.join`/`extname` are host-bound, which would break simulated-platform
-  // unit tests (and, in theory, a non-native runner).
-  const p = isWin ? path.win32 : path.posix
-  const sep = isWin ? ";" : ":"
-  const hasExt = p.extname(name) !== ""
-  let exts
-  if (isWin && !hasExt) {
-    const pathext = opts.pathext ?? process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM"
-    exts = pathext.split(";").filter((s) => s.length > 0)
-  } else {
-    exts = [""]
-  }
-  for (const dir of pathVar.split(sep)) {
-    if (!dir) continue
-    for (const ext of exts) {
-      if (exists(p.join(dir, name + ext))) return name + ext
-    }
-  }
-  return null
+export interface ResolveShellOptions {
+  platform?: NodeJS.Platform
+  lookup?: (name: string) => string | null
+  comspec?: string
 }
 
 /**
@@ -181,46 +169,26 @@ export function findOnPathSync(name, opts = {}) {
  * probe PATH for `pwsh` → `powershell` → fall back to `cmd.exe`. Pure: every
  * environment dependency is injectable so the three Windows branches are unit
  * testable on any OS.
- *
- * @param {{ platform?: NodeJS.Platform,
- *           lookup?: (name: string) => string | null,
- *           comspec?: string }} [opts]
  */
-export function resolveShellDescriptor(opts = {}) {
+export function resolveShellDescriptor(opts: ResolveShellOptions = {}): ShellDescriptor {
   const platform = opts.platform ?? process.platform
   if (platform !== "win32") return makeSh()
-  const lookup = opts.lookup ?? ((name) => findOnPathSync(name, { platform }))
+  const lookup = opts.lookup ?? ((name: string) => findOnPathSync(name, { platform }))
   if (lookup("pwsh.exe") || lookup("pwsh")) return makePwsh("pwsh.exe")
   if (lookup("powershell.exe") || lookup("powershell")) return makePowershell("powershell.exe")
   return makeCmd(opts.comspec ?? process.env.ComSpec ?? "cmd.exe")
 }
 
-let cached = null
+let cached: ShellDescriptor | null = null
 
 /** The host shell descriptor, resolved once and cached (PATH probing is cheap
  * but not free, and the answer can't change within a process). */
-export function activeShellDescriptor() {
+export function activeShellDescriptor(): ShellDescriptor {
   if (cached === null) cached = resolveShellDescriptor()
   return cached
 }
 
 /** Reset the cached descriptor — for tests exercising the resolution branches. */
-export function __resetShellDetectCache() {
+export function __resetShellDetectCache(): void {
   cached = null
-}
-
-/**
- * Build the `bash` tool description for a given shell descriptor. The syntax hint
- * is what tells the model to write PowerShell vs POSIX — it is the prompt half of
- * the single-shell-abstraction design, read by the model every turn.
- */
-export function bashToolDescription(descriptor = activeShellDescriptor()) {
-  const base =
-    "Execute a shell command in the session working directory and return its combined output."
-  const hint = descriptor.syntaxHint ? ` ${descriptor.syntaxHint}` : ` Runs ${descriptor.label}.`
-  const tail =
-    "Long output keeps the tail. Set run_in_background to start a long-running command and poll it " +
-    "with bash_output. Each call is approval-gated unless a permission rule allows it. " +
-    "Interactive programs (REPLs, editors, ssh, login flows) do NOT work here — use terminal_repl_* for those."
-  return `${base}${hint} ${tail}`
 }

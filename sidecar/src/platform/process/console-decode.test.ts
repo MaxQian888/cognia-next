@@ -6,7 +6,7 @@ import {
   decodeConsoleBytes,
   pickStreamDecoder,
   __resetConsoleDecoderCache,
-} from "./console-decode.mjs"
+} from "./console-decode.ts"
 
 test("decodeConsoleBytes round-trips valid UTF-8 unchanged", () => {
   __resetConsoleDecoderCache()

@@ -8,7 +8,7 @@ import path from "node:path"
 import fsp from "node:fs/promises"
 import fastGlob from "fast-glob"
 
-import { loadIgnoreGlobs } from "./gitignore.mjs"
+import { loadIgnoreGlobs } from "../../src/platform/fs/gitignore.ts"
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024 // skip files >4 MB in the JS engine
 const BINARY_SNIFF_BYTES = 8 * 1024

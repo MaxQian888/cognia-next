@@ -33,7 +33,7 @@ import { codeModeToolDefs } from "./run-code/index.mjs"
 import { isProgrammaticReadOnly } from "./run-code/eligibility.mjs"
 import { bareToolName, assertToolCallWithinRoots } from "./confinement.mjs"
 import { toolError } from "./safety.mjs"
-import { withProcessSandbox } from "./shared/exec.mjs"
+import { withProcessSandbox } from "../src/platform/process/exec.ts"
 import { parseToolArgs, toolInputJsonSchema } from "./tool-args.mjs"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,

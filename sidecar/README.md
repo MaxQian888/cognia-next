@@ -67,6 +67,14 @@ Each migration batch appends its moves here (old → new).
 | `codex-app-control/control-cli.mjs` (implementation)                     | `codex-app-control/cli.ts`; `control-cli.mjs` is now its launcher  | 2           |
 | `codex-app-control/cdp-only-relaunch-worker.mjs` (implementation)        | `codex-app-control/relaunch-worker.ts`; the `.mjs` is its launcher | 2           |
 | `codex-app-control/one-shot-launcher.mjs` (implementation)               | `codex-app-control/one-shot.ts`; the `.mjs` is its launcher        | 2           |
+| `builtin-tools/shared/exec.mjs`                                          | `src/platform/process/exec.ts`                                     | 3a          |
+| `builtin-tools/shared/shell-detect.mjs`                                  | `src/platform/process/shell.ts`                                    | 3a          |
+| `findOnPathSync` (in `shell-detect.mjs`)                                 | `src/platform/process/which.ts`                                    | 3a          |
+| `bashToolDescription` (in `shell-detect.mjs`)                            | `builtin-tools/core/bash.mjs`                                      | 3a          |
+| `builtin-tools/shared/console-decode.mjs`                                | `src/platform/process/console-decode.ts`                           | 3a          |
+| `ENV_ALLOWLIST`, strip patterns (in `dispatch/subprocess-env.mjs`)       | `src/platform/process/env.ts`                                      | 3a          |
+| `builtin-tools/shared/fs-stat.mjs`                                       | `src/platform/fs/stat.ts`                                          | 3a          |
+| `builtin-tools/core/gitignore.mjs`                                       | `src/platform/fs/gitignore.ts`                                     | 3a          |
 
 ## Scripts (run from repo root)
 

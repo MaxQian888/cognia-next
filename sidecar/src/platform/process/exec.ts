@@ -7,12 +7,35 @@
 // stringified output of a successful run use `runCapped`.
 
 import { execFile, spawn } from "node:child_process"
+import type {
+  ChildProcess,
+  ExecFileException,
+  ExecFileOptions,
+  SpawnOptions,
+} from "node:child_process"
+import type { NonSharedBuffer } from "node:buffer"
 import fs from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { AsyncLocalStorage } from "node:async_hooks"
-import { ENV_ALLOWLIST, isStrippedName } from "../../dispatch/subprocess-env.mjs"
+import { ENV_ALLOWLIST, isStrippedName } from "./env.ts"
 
-const PROCESS_ENV_KEYS = new Set([
+/**
+ * The OS sandbox a session's native tool processes run in. `undefined` means
+ * unsandboxed; a scope with `unavailableReason` means sandboxing was required
+ * but cannot run, so every tool process refuses to start.
+ */
+export interface ProcessSandboxScope {
+  launcher?: string
+  writableRoots?: readonly string[]
+  readableRoots?: readonly string[]
+  network?: boolean
+  unavailableReason?: string
+}
+
+type Env = Record<string, string | undefined>
+
+const PROCESS_ENV_KEYS: ReadonlySet<string> = new Set([
   ...ENV_ALLOWLIST,
   "PWD",
   "CI",
@@ -33,11 +56,16 @@ const INJECTED_ENV =
 
 /** Native tools need runtime paths, not provider credentials or dynamic-loader
  * injection. Filter overrides before the launcher itself starts executing. */
-export function sandboxedProcessEnv(parentEnv, scope, overrides = {}) {
+export function sandboxedProcessEnv(
+  parentEnv: Env,
+  scope: ProcessSandboxScope | undefined,
+  overrides: Env = {}
+): Record<string, string | undefined> {
   if (scope === undefined) return { ...parentEnv, ...overrides }
-  const base = Object.fromEntries(
+  const base: Record<string, string> = Object.fromEntries(
     Object.entries(parentEnv).filter(
-      ([key, value]) => PROCESS_ENV_KEYS.has(key) && typeof value === "string"
+      (entry): entry is [string, string] =>
+        PROCESS_ENV_KEYS.has(entry[0]) && typeof entry[1] === "string"
     )
   )
   for (const [key, value] of Object.entries(overrides)) {
@@ -49,18 +77,41 @@ export function sandboxedProcessEnv(parentEnv, scope, overrides = {}) {
   )
 }
 
-const processScopes = new AsyncLocalStorage()
+/** A child `cwd` as a path (Node accepts `file:` URLs there too). */
+function cwdPath(cwd: string | URL | undefined): string | undefined {
+  return cwd instanceof URL ? fileURLToPath(cwd) : cwd
+}
+
+interface ProcessScope {
+  scope: ProcessSandboxScope | undefined
+  cwd: string | undefined
+}
+
+const processScopes = new AsyncLocalStorage<ProcessScope>()
 
 /** Each tool invocation keeps its session policy across asynchronous Git and
  * other shared-exec calls; concurrent sessions cannot overwrite this scope. */
-export function withProcessSandbox(scope, cwd, run) {
+export function withProcessSandbox<T>(
+  scope: ProcessSandboxScope | undefined,
+  cwd: string | undefined,
+  run: () => T
+): T {
   return processScopes.run({ scope, cwd }, run)
 }
 
 /** Raw streaming children (rg/AST) share the current tool's async scope. */
-export function spawnInProcessSandbox(command, args, options = {}) {
+export function spawnInProcessSandbox(
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions = {}
+): ChildProcess {
   const context = processScopes.getStore()
-  const target = sandboxedProcessTarget(command, args, options.cwd ?? context?.cwd, context?.scope)
+  const target = sandboxedProcessTarget(
+    command,
+    args,
+    cwdPath(options.cwd) ?? context?.cwd,
+    context?.scope
+  )
   return spawn(target.command, target.args, {
     ...options,
     ...(context?.scope
@@ -72,8 +123,13 @@ export function spawnInProcessSandbox(command, args, options = {}) {
 /** Preserve argv and process lifetime while placing native coding tools in the
  * existing OS sandbox. The launcher makes cwd writable, so verify its real
  * path against the host-provided roots before passing it across that boundary. */
-export function sandboxedProcessTarget(command, args, cwd, scope) {
-  if (scope === undefined) return { command, args }
+export function sandboxedProcessTarget(
+  command: string,
+  args: readonly string[],
+  cwd: string | undefined,
+  scope: ProcessSandboxScope | undefined
+): { command: string; args: string[] } {
+  if (scope === undefined) return { command, args: [...args] }
   if (scope?.unavailableReason) throw new Error(scope.unavailableReason)
   if (!scope?.launcher || !path.isAbsolute(scope.launcher)) {
     throw new Error(
@@ -112,6 +168,18 @@ export function sandboxedProcessTarget(command, args, cwd, scope) {
   }
 }
 
+/** `execFile` options plus an explicit stdio (normally piped on every fd). */
+export type ExecOptions = ExecFileOptions & { stdio?: SpawnOptions["stdio"] }
+
+/** Captured child output: a string, or a Buffer under `encoding: "buffer"`. */
+export type ExecOutput = string | NonSharedBuffer
+
+type ExecCallback = (
+  error: ExecFileException | null,
+  stdout: ExecOutput,
+  stderr: ExecOutput
+) => void
+
 /**
  * Keep every standard stream connected when a tool child is launched.
  *
@@ -121,34 +189,37 @@ export function sandboxedProcessTarget(command, args, cwd, scope) {
  * `/dev/null`. Explicit pipes prevent that fallback while preserving the
  * stdout/stderr capture contract used by every caller.
  */
-function execFileWithPipedStdio(file, args, options, callback) {
-  if (typeof options === "function") {
-    callback = options
-    options = {}
-  }
-  const normalizedOptions = options ?? {}
+function execFileWithPipedStdio(
+  file: string,
+  args: readonly string[],
+  options: ExecOptions,
+  callback: ExecCallback
+): ChildProcess {
   const context = processScopes.getStore()
+  let command = file
+  let argv = [...args]
   // Explicit process tools already rendered their launcher argv. Generic Git
   // and utility executors reach this seam with their original binary/argv.
   if (context?.scope && file !== context.scope.launcher) {
     const target = sandboxedProcessTarget(
       file,
       args,
-      normalizedOptions.cwd ?? context.cwd,
+      cwdPath(options.cwd) ?? context.cwd,
       context.scope
     )
-    file = target.command
-    args = target.args
+    command = target.command
+    argv = target.args
   }
   return execFile(
-    file,
-    args,
+    command,
+    argv,
     {
-      ...normalizedOptions,
+      ...options,
       ...(context?.scope
-        ? { env: sandboxedProcessEnv(normalizedOptions.env ?? process.env, context.scope) }
+        ? { env: sandboxedProcessEnv(options.env ?? process.env, context.scope) }
         : {}),
-      stdio: normalizedOptions.stdio ?? ["pipe", "pipe", "pipe"],
+      // Node forwards `stdio` to the spawned child even though ExecFileOptions omits it.
+      ...({ stdio: options.stdio ?? ["pipe", "pipe", "pipe"] } as ExecFileOptions),
     },
     callback
   )
@@ -156,7 +227,11 @@ function execFileWithPipedStdio(file, args, options, callback) {
 
 /** Promisified `execFile`. Rejects with `{ stdout, stderr, code, signal, killed }`
  *  attached on non-zero exit — callers that branch on those keep using this. */
-export function execFileAsync(file, args, options = {}) {
+export function execFileAsync(
+  file: string,
+  args: readonly string[],
+  options: ExecOptions = {}
+): Promise<{ stdout: ExecOutput; stderr: ExecOutput }> {
   return new Promise((resolve, reject) => {
     execFileWithPipedStdio(file, args, options, (error, stdout, stderr) => {
       if (error) {
@@ -174,13 +249,12 @@ export function execFileAsync(file, args, options = {}) {
  * Run a binary with an argv list (no shell interpolation), capped output and a
  * timeout, with `windowsHide` always set. Returns the stdout/stderr coerced to
  * strings. Throws (rejects) on non-zero exit, exactly like `execFileAsync`.
- *
- * @param {string} file Executable to run.
- * @param {ReadonlyArray<string>} args Argv list.
- * @param {{ cwd?: string, timeoutMs?: number, maxBuffer?: number }} [opts]
- * @returns {Promise<{ stdout: string, stderr: string }>}
  */
-export async function runCapped(file, args, { cwd, timeoutMs, maxBuffer } = {}) {
+export async function runCapped(
+  file: string,
+  args: readonly string[],
+  { cwd, timeoutMs, maxBuffer }: { cwd?: string; timeoutMs?: number; maxBuffer?: number } = {}
+): Promise<{ stdout: string; stderr: string }> {
   const { stdout, stderr } = await execFileAsync(file, args, {
     cwd,
     timeout: timeoutMs,

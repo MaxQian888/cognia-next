@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { gitignoreLineToGlobs, loadIgnoreGlobs, ALWAYS_IGNORE } from "./gitignore.mjs"
+import { gitignoreLineToGlobs, loadIgnoreGlobs, ALWAYS_IGNORE } from "./gitignore.ts"
 
 test("comments, blanks, and negations produce no globs", () => {
   assert.deepEqual(gitignoreLineToGlobs("# comment"), [])

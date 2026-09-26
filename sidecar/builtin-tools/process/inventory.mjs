@@ -8,7 +8,7 @@
 // Every process tool imports this single Set instance — do not re-declare it.
 
 import { ALLOWED_COMMANDS, BLOCKED_COMMANDS } from "../safety.mjs"
-import { execFileAsync } from "../shared/exec.mjs"
+import { execFileAsync } from "../../src/platform/process/exec.ts"
 
 export const MAX_OUTPUT_BYTES = 1 * 1024 * 1024 // 1 MB — process listings can be sizeable
 export const DEFAULT_TIMEOUT_MS = 15 * 1000

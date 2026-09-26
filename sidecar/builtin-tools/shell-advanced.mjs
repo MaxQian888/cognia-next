@@ -15,7 +15,11 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText, validateShellCommand } from "./safety.mjs"
-import { execFileAsync, sandboxedProcessTarget, sandboxedProcessEnv } from "./shared/exec.mjs"
+import {
+  execFileAsync,
+  sandboxedProcessTarget,
+  sandboxedProcessEnv,
+} from "../src/platform/process/exec.ts"
 import { headTruncate } from "../src/shared/text/truncate.ts"
 
 // Mirror src-tauri/src/shell.rs:17-19 caps so the two paths feel consistent.

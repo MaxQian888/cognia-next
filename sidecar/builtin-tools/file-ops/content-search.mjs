@@ -7,8 +7,8 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import fastGlob from "fast-glob"
 
 import { toolError, toolText } from "../safety.mjs"
-import { statOrNull } from "../shared/fs-stat.mjs"
-import { loadIgnoreGlobs } from "../core/gitignore.mjs"
+import { statOrNull } from "../../src/platform/fs/stat.ts"
+import { loadIgnoreGlobs } from "../../src/platform/fs/gitignore.ts"
 
 const MAX_CONTENT_MATCH_RESULTS = 500
 const MAX_FILE_READ_BYTES = 5 * 1024 * 1024 // skip files larger than 5 MB

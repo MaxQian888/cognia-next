@@ -14,73 +14,11 @@
 // process env and the spread is how they reach Claude Code today. Flipping
 // legacy sessions would break every current desktop install. Phase 6 moves
 // callers onto `execution`; Phase 9 deletes the legacy spread.
+//
+// The allowlist and strip classes themselves live in
+// src/platform/process/env.ts, shared with the sandboxed tool processes.
 
-/** Names inherited from the parent process (exact matches). */
-export const ENV_ALLOWLIST = new Set([
-  // POSIX basics
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "TMPDIR",
-  "TEMP",
-  "TMP",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "TZ",
-  "TERM",
-  "COLORTERM",
-  // TLS trust
-  "SSL_CERT_FILE",
-  "SSL_CERT_DIR",
-  "NODE_EXTRA_CA_CERTS",
-  // XDG dirs
-  "XDG_CONFIG_HOME",
-  "XDG_DATA_HOME",
-  "XDG_CACHE_HOME",
-  "XDG_RUNTIME_DIR",
-  // Windows
-  "USERPROFILE",
-  "APPDATA",
-  "LOCALAPPDATA",
-  "PROGRAMDATA",
-  "ProgramFiles",
-  "ProgramFiles(x86)",
-  "ProgramW6432",
-  "SystemRoot",
-  "SystemDrive",
-  "windir",
-  "ComSpec",
-  "PATHEXT",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "NUMBER_OF_PROCESSORS",
-  "OS",
-])
-
-/**
- * Documented strip classes. Everything not allowlisted is dropped anyway;
- * this list exists so tests can assert the dangerous names stay out even
- * when present in the parent env, and so reviewers can see the intent.
- */
-export const ENV_STRIP_PATTERNS = [
-  /^ANTHROPIC_/i,
-  /^CLAUDE_/i, // CLAUDE_CODE_*, CLAUDE_CONFIG_DIR, …
-  /^OPENAI_/i,
-  /^AZURE_OPENAI_/i,
-  /^GEMINI_/i,
-  /^GOOGLE_API_KEY$/i,
-  /^GOOGLE_APPLICATION_CREDENTIALS$/i,
-  /^OPENROUTER_/i,
-  /^AWS_/i,
-  /^(HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/i,
-  // Catch-all secret shapes.
-  /_API_KEY$/i,
-  /_SECRET$/i,
-  /_TOKEN$/i,
-]
+import { ENV_ALLOWLIST } from "../src/platform/process/env.ts"
 
 const PROXY_ENV_RE = /^(HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/i
 const MANAGED_PROXY_MARKER = "COGNIA_MANAGED_NETWORK_PROXY"
@@ -94,15 +32,11 @@ const CLAUDE_CREDENTIAL_NAMES = [
 // either. Keep unrelated Claude telemetry/temp settings and host proxy policy.
 const CLAUDE_AUTH_ENV_RE = /^(ANTHROPIC_|CLAUDE_CODE_(OAUTH_|API_KEY_|USE_))/i
 
-export function isStrippedName(name) {
-  return ENV_STRIP_PATTERNS.some((pattern) => pattern.test(name))
-}
-
 /**
  * OTel variables propagated to the Claude Code subprocess so its spans land in
  * the same collector as the sidecar's, under one trace.
  *
- * These are NOT in {@link ENV_ALLOWLIST}, and that is the point. `OTEL_*` and
+ * These are NOT in the ENV_ALLOWLIST, and that is the point. `OTEL_*` and
  * `CLAUDE_*` are both stripped from the ambient parent env, so a developer's
  * shell exporting `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` cannot silently start
  * shipping a user's agent traces somewhere. Propagation happens only through

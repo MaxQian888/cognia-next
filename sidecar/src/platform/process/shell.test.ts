@@ -2,60 +2,12 @@ import test from "node:test"
 import assert from "node:assert/strict"
 
 import {
-  findOnPathSync,
   resolveShellDescriptor,
-  bashToolDescription,
   activeShellDescriptor,
   applyNonInteractiveEnv,
   NON_INTERACTIVE_ENV,
   __resetShellDetectCache,
-} from "./shell-detect.mjs"
-
-// --- findOnPathSync -------------------------------------------------------
-
-test("findOnPathSync honors PATHEXT for an extensionless name on Windows", () => {
-  const seen = []
-  const exists = (p) => {
-    seen.push(p)
-    return p.toLowerCase().endsWith("pwsh.exe")
-  }
-  const hit = findOnPathSync("pwsh", {
-    platform: "win32",
-    pathVar: "C:\\a;C:\\b",
-    pathext: ".EXE;.CMD",
-    exists,
-  })
-  // Leaf comes back with the PATHEXT casing (.EXE); compared case-insensitively
-  // since the descriptor uses a fixed canonical bin name regardless.
-  assert.equal(hit.toLowerCase(), "pwsh.exe")
-  assert.ok(seen.some((p) => p.toLowerCase().endsWith("pwsh.exe")))
-})
-
-test("findOnPathSync respects an explicit extension and skips PATHEXT", () => {
-  const hit = findOnPathSync("powershell.exe", {
-    platform: "win32",
-    pathVar: "C:\\win",
-    exists: (p) => p.toLowerCase().endsWith("powershell.exe"),
-  })
-  assert.equal(hit, "powershell.exe")
-})
-
-test("findOnPathSync uses ':' separator and no PATHEXT off Windows", () => {
-  const hit = findOnPathSync("sh", {
-    platform: "linux",
-    pathVar: "/usr/bin:/bin",
-    exists: (p) => p === "/bin/sh",
-  })
-  assert.equal(hit, "sh")
-})
-
-test("findOnPathSync returns null when nothing matches or PATH is empty", () => {
-  assert.equal(findOnPathSync("pwsh", { platform: "win32", pathVar: "", exists: () => true }), null)
-  assert.equal(
-    findOnPathSync("pwsh", { platform: "win32", pathVar: "C:\\a", exists: () => false }),
-    null
-  )
-})
+} from "./shell.ts"
 
 // --- resolveShellDescriptor ----------------------------------------------
 
@@ -147,29 +99,6 @@ test("PowerShell sanitizeEnv returns the same ref when nothing to strip", () => 
   assert.equal(d.sanitizeEnv(env), env)
 })
 
-// --- bashToolDescription --------------------------------------------------
-
-test("bashToolDescription embeds the PowerShell syntax hint", () => {
-  const d = resolveShellDescriptor({
-    platform: "win32",
-    lookup: (n) => (n.startsWith("pwsh") ? n : null),
-  })
-  const desc = bashToolDescription(d)
-  assert.match(desc, /\$env:VAR/)
-  assert.match(desc, /run_in_background/)
-})
-
-test("bashToolDescription falls back to a 'Runs <label>' note for sh", () => {
-  const d = resolveShellDescriptor({ platform: "linux" })
-  const desc = bashToolDescription(d)
-  assert.match(desc, /Runs POSIX sh/)
-})
-
-test("bashToolDescription steers interactive programs to terminal_repl_*", () => {
-  const desc = bashToolDescription(resolveShellDescriptor({ platform: "linux" }))
-  assert.match(desc, /Interactive programs.*terminal_repl/)
-})
-
 // --- caching --------------------------------------------------------------
 
 test("activeShellDescriptor caches and __reset clears it", () => {
@@ -212,6 +141,7 @@ test("applyNonInteractiveEnv does not mutate its input", () => {
 
 test("NON_INTERACTIVE_ENV is frozen and covers the hang-causing vars", () => {
   assert.throws(() => {
+    // @ts-expect-error -- the frozen object is readonly; the write must throw at runtime too.
     NON_INTERACTIVE_ENV.PAGER = "less"
   })
   for (const key of [

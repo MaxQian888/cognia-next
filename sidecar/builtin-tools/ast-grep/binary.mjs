@@ -8,7 +8,7 @@
 // The result is cached for the process lifetime; callers return a clean
 // structured error when this resolves to null (never crash).
 
-import { spawnInProcessSandbox as spawn } from "../shared/exec.mjs"
+import { spawnInProcessSandbox as spawn } from "../../src/platform/process/exec.ts"
 import { createRequire } from "node:module"
 import fs from "node:fs"
 import path from "node:path"

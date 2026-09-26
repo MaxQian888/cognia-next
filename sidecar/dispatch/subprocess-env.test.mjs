@@ -1,12 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import {
-  buildSubprocessEnv,
-  childTelemetryEnv,
-  isStrippedName,
-  validateRouteEnv,
-} from "./subprocess-env.mjs"
+import { buildSubprocessEnv, childTelemetryEnv, validateRouteEnv } from "./subprocess-env.mjs"
 
 const execution = {
   specVersion: 1,
@@ -223,27 +218,6 @@ test("concurrent sessions with different spec envs never cross-bleed", () => {
   assert.equal(b.ANTHROPIC_API_KEY, "sk-session-B")
   // Building B did not mutate A (fresh objects, no shared state).
   assert.notEqual(a, b)
-})
-
-test("isStrippedName classifies the documented dangerous classes", () => {
-  for (const name of [
-    "ANTHROPIC_MODEL",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "OPENAI_BASE_URL",
-    "AZURE_OPENAI_ENDPOINT",
-    "GEMINI_API_KEY",
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    "OPENROUTER_API_KEY",
-    "AWS_SESSION_TOKEN",
-    "NO_PROXY",
-    "SOME_VENDOR_SECRET",
-    "GH_TOKEN",
-  ]) {
-    assert.equal(isStrippedName(name), true, name)
-  }
-  for (const name of ["PATH", "HOME", "MY_FEATURE_FLAG"]) {
-    assert.equal(isStrippedName(name), false, name)
-  }
 })
 
 test("validateRouteEnv rejects a gateway route whose overlay smuggles a foreign base URL", () => {

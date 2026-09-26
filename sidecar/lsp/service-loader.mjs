@@ -19,7 +19,7 @@ import {
   execFileAsync,
   sandboxedProcessTarget,
   sandboxedProcessEnv,
-} from "../builtin-tools/shared/exec.mjs"
+} from "../src/platform/process/exec.ts"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 // Bundling moves this module from lsp/ into the sidecar root. The packaged

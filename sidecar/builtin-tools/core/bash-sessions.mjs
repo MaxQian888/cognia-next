@@ -11,7 +11,7 @@
 
 import { spawn } from "node:child_process"
 
-import { pickStreamDecoder } from "../shared/console-decode.mjs"
+import { pickStreamDecoder } from "../../src/platform/process/console-decode.ts"
 import { randomUUID } from "node:crypto"
 
 /** Max bytes of combined stdout+stderr retained per background shell. */

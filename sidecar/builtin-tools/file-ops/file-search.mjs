@@ -6,8 +6,8 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import fastGlob from "fast-glob"
 
 import { toolError, toolText } from "../safety.mjs"
-import { statOrNull } from "../shared/fs-stat.mjs"
-import { loadIgnoreGlobs } from "../core/gitignore.mjs"
+import { statOrNull } from "../../src/platform/fs/stat.ts"
+import { loadIgnoreGlobs } from "../../src/platform/fs/gitignore.ts"
 
 const MAX_LIST_ITEMS = 5000
 

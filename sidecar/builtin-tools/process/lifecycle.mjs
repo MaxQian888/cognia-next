@@ -16,7 +16,11 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
-import { execFileAsync, sandboxedProcessTarget, sandboxedProcessEnv } from "../shared/exec.mjs"
+import {
+  execFileAsync,
+  sandboxedProcessTarget,
+  sandboxedProcessEnv,
+} from "../../src/platform/process/exec.ts"
 import { headTruncate } from "../../src/shared/text/truncate.ts"
 import { isProgramAllowed, trackedPids, MAX_OUTPUT_BYTES } from "./inventory.mjs"
 

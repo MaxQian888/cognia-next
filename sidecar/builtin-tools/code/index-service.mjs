@@ -13,7 +13,7 @@ import path from "node:path"
 import crypto from "node:crypto"
 import fastGlob from "fast-glob"
 
-import { loadIgnoreGlobs } from "../core/gitignore.mjs"
+import { loadIgnoreGlobs } from "../../src/platform/fs/gitignore.ts"
 import { isSupportedFile, languageFor } from "./languages/index.mjs"
 import { extractFile } from "./extractor.mjs"
 import { resolveAll } from "./resolver-pass.mjs"
