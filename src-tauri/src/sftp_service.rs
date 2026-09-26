@@ -318,9 +318,14 @@ fn field(snapshot: &Value, key: &str) -> Result<Value, SftpFailure> {
 /// host has no terminal service to do it with" are different answers and a
 /// client renders them differently.
 async fn sftp_call(app: Option<&tauri::AppHandle>, payload: Value) -> Result<Value, SftpFailure> {
-    let snapshot = crate::terminal_host_bridge::terminal_host_sftp(app, payload)
-        .await
-        .map_err(SftpFailure::internal)?;
+    let resource_dir = app.and_then(|app| {
+        use tauri::Manager as _;
+        app.path().resource_dir().ok()
+    });
+    let snapshot =
+        crate::terminal_host_bridge::terminal_host_sftp(resource_dir.as_deref(), payload)
+            .await
+            .map_err(SftpFailure::internal)?;
     snapshot_result(snapshot)
 }
 

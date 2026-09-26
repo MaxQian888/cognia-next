@@ -25,6 +25,10 @@ pub mod exec;
 pub mod headless;
 pub mod host;
 pub mod host_capabilities;
+// ADR-0196 P6e — the one-shot terminal-host client the companion's terminal
+// socket and RPC arms use, and the spawn/framing helpers the desktop bridge
+// shares. Tauri-free: callers pass the app resource dir, or `None`.
+pub mod host_client;
 pub mod host_wire;
 pub mod integration;
 pub mod multiplexer;

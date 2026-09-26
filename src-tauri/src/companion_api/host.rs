@@ -5,10 +5,11 @@
 //! `Option<Arc<dyn RendererPort>>` instead: `None` in tests and on the headless
 //! server, [`TauriRenderer`] on the desktop. Everything the companion does to
 //! the renderer is a method here; the few desktop-only paths that still need
-//! the `AppHandle` itself (managed state, the terminal host's resource dir,
-//! the desktop dispatch arm) reach it through [`tauri_app`].
+//! the `AppHandle` itself (managed state, the desktop dispatch arm) reach it
+//! through [`tauri_app`].
 
 use std::any::Any;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -25,6 +26,10 @@ pub trait RendererPort: Send + Sync + 'static {
     /// canonical store.
     fn bridge_transport(&self) -> Arc<dyn BridgeTransport>;
 
+    /// The app's resource dir, where the terminal host it may start finds its
+    /// shell-integration scripts.
+    fn resource_dir(&self) -> Option<PathBuf>;
+
     /// Lets [`tauri_app`] recover the desktop adapter.
     fn as_any(&self) -> &dyn Any;
 }
@@ -40,6 +45,11 @@ impl RendererPort for TauriRenderer {
 
     fn bridge_transport(&self) -> Arc<dyn BridgeTransport> {
         Arc::new(WebViewBridgeTransport(self.0.clone()))
+    }
+
+    fn resource_dir(&self) -> Option<PathBuf> {
+        use tauri::Manager as _;
+        self.0.path().resource_dir().ok()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -73,6 +83,10 @@ mod tests {
 
         fn bridge_transport(&self) -> Arc<dyn BridgeTransport> {
             unreachable!("RecordingRenderer carries no bridge")
+        }
+
+        fn resource_dir(&self) -> Option<PathBuf> {
+            None
         }
 
         fn as_any(&self) -> &dyn Any {

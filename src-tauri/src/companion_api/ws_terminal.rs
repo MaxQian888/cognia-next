@@ -168,16 +168,23 @@ async fn close_terminal_data_channel(channel: &dyn DataChannel) {
 async fn proxy_terminal_socket(mut socket: WebSocket, device_id: String, state: SharedState) {
     let identity =
         ClientIdentity::remote(format!("companion:{device_id}"), device_id.clone(), true);
-    let app = super::host::tauri_app(&state.renderer);
-    let host_stream =
-        match crate::terminal_host_bridge::connect_terminal_host_client(app, identity).await {
-            Ok(stream) => stream,
-            Err(message) => {
-                let _ = send_protocol_error(&mut socket, TerminalErrorCode::HostOffline, &message)
-                    .await;
-                return;
-            }
-        };
+    let resource_dir = state
+        .renderer
+        .as_ref()
+        .and_then(|renderer| renderer.resource_dir());
+    let host_stream = match crate::terminal_host_bridge::connect_terminal_host_client(
+        resource_dir.as_deref(),
+        identity,
+    )
+    .await
+    {
+        Ok(stream) => stream,
+        Err(message) => {
+            let _ =
+                send_protocol_error(&mut socket, TerminalErrorCode::HostOffline, &message).await;
+            return;
+        }
+    };
     let (mut host_reader, mut host_writer) = tokio::io::split(host_stream);
     let mut authorization_check = tokio::time::interval(Duration::from_secs(1));
     authorization_check.tick().await;
@@ -296,21 +303,28 @@ pub(crate) async fn proxy_terminal_datachannel(
 
     let identity =
         ClientIdentity::remote(format!("companion:{device_id}"), device_id.clone(), true);
-    let app = super::host::tauri_app(&state.renderer);
-    let host_stream =
-        match crate::terminal_host_bridge::connect_terminal_host_client(app, identity).await {
-            Ok(stream) => stream,
-            Err(message) => {
-                let _ = send_datachannel_protocol_error(
-                    channel.as_ref(),
-                    TerminalErrorCode::HostOffline,
-                    &message,
-                )
-                .await;
-                close_terminal_data_channel(channel.as_ref()).await;
-                return;
-            }
-        };
+    let resource_dir = state
+        .renderer
+        .as_ref()
+        .and_then(|renderer| renderer.resource_dir());
+    let host_stream = match crate::terminal_host_bridge::connect_terminal_host_client(
+        resource_dir.as_deref(),
+        identity,
+    )
+    .await
+    {
+        Ok(stream) => stream,
+        Err(message) => {
+            let _ = send_datachannel_protocol_error(
+                channel.as_ref(),
+                TerminalErrorCode::HostOffline,
+                &message,
+            )
+            .await;
+            close_terminal_data_channel(channel.as_ref()).await;
+            return;
+        }
+    };
     let (mut host_reader, mut host_writer) = tokio::io::split(host_stream);
     let (mut event_rx, event_pump) =
         spawn_terminal_dc_event_pump(std::sync::Arc::clone(&channel), TERMINAL_DC_QUEUE_CAPACITY);

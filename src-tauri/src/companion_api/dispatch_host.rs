@@ -384,6 +384,18 @@ impl DispatchHost {
         }
     }
 
+    /// The desktop's resource dir, where a terminal host this starts finds its
+    /// shell-integration scripts; `None` on the headless server.
+    fn resource_dir(&self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager as _;
+                app.path().resource_dir().ok()
+            }
+            Self::Headless(_) => None,
+        }
+    }
+
     /// Snapshot durable host-owned terminal sessions visible to the caller.
     pub async fn terminal_list_all(
         &self,
@@ -393,11 +405,9 @@ impl DispatchHost {
         if let Self::Headless(services) = self {
             return Ok(services.terminal_sessions_for_tests.read().await.clone());
         }
-        let app = match self {
-            Self::Tauri(app) => Some(app),
-            Self::Headless(_) => None,
-        };
-        crate::terminal_host_bridge::terminal_host_remote_list(app, device_id).await
+        let resource_dir = self.resource_dir();
+        crate::terminal_host_bridge::terminal_host_remote_list(resource_dir.as_deref(), device_id)
+            .await
     }
 
     pub async fn terminal_list_for_project(
@@ -416,11 +426,13 @@ impl DispatchHost {
     /// Terminate a durable host-owned terminal after taking its controller
     /// lease on behalf of the authenticated device.
     pub async fn terminal_kill(&self, device_id: &str, session_id: &str) -> Result<(), String> {
-        let app = match self {
-            Self::Tauri(app) => Some(app),
-            Self::Headless(_) => None,
-        };
-        crate::terminal_host_bridge::terminal_host_remote_kill(app, device_id, session_id).await
+        let resource_dir = self.resource_dir();
+        crate::terminal_host_bridge::terminal_host_remote_kill(
+            resource_dir.as_deref(),
+            device_id,
+            session_id,
+        )
+        .await
     }
 
     /// The terminal host's own settings, as the file on disk has them.
@@ -438,11 +450,12 @@ impl DispatchHost {
         &self,
         settings: crate::terminal_host_service::TerminalHostSettings,
     ) -> Result<crate::terminal_host_bridge::TerminalHostStatus, String> {
-        let app = match self {
-            Self::Tauri(app) => Some(app),
-            Self::Headless(_) => None,
-        };
-        crate::terminal_host_bridge::terminal_host_remote_configure(app, settings).await
+        let resource_dir = self.resource_dir();
+        crate::terminal_host_bridge::terminal_host_remote_configure(
+            resource_dir.as_deref(),
+            settings,
+        )
+        .await
     }
 
     /// Run one SFTP operation on the terminal host (ADR-0162).
@@ -455,11 +468,8 @@ impl DispatchHost {
         &self,
         payload: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
-        let app = match self {
-            Self::Tauri(app) => Some(app),
-            Self::Headless(_) => None,
-        };
-        crate::terminal_host_bridge::terminal_host_sftp(app, payload).await
+        let resource_dir = self.resource_dir();
+        crate::terminal_host_bridge::terminal_host_sftp(resource_dir.as_deref(), payload).await
     }
 
     /// Install a paired device's terminal profiles on the host.
@@ -468,12 +478,13 @@ impl DispatchHost {
         device_id: &str,
         profiles: Vec<serde_json::Value>,
     ) -> Result<usize, String> {
-        let app = match self {
-            Self::Tauri(app) => Some(app),
-            Self::Headless(_) => None,
-        };
-        crate::terminal_host_bridge::terminal_host_remote_sync_profiles(app, device_id, profiles)
-            .await
+        let resource_dir = self.resource_dir();
+        crate::terminal_host_bridge::terminal_host_remote_sync_profiles(
+            resource_dir.as_deref(),
+            device_id,
+            profiles,
+        )
+        .await
     }
 
     /// The sidecar host seam for this host — what `sidecar::spawn` needs.

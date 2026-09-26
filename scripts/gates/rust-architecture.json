@@ -106,7 +106,7 @@
   "appShell": {
     "package": "cognia-next",
     "srcDir": "src-tauri/src",
-    "maxLoc": 160682,
+    "maxLoc": 160380,
     "locSlack": 4000,
     "locBlocking": false,
     "modules": [
