@@ -191,6 +191,7 @@
     "0193-one-guide-kit",
     "0194-a-judgment-is-a-provider-not-a-prompt",
     "0195-a-plugin-writes-to-the-contract-not-around-it",
-    "0196-a-library-crate-links-tauri-only-when-asked"
+    "0196-a-library-crate-links-tauri-only-when-asked",
+    "0197-the-sidecar-runs-its-typescript-unbuilt"
   ]
 }
