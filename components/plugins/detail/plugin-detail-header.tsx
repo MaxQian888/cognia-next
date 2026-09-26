@@ -164,7 +164,12 @@ export function PluginDetailHeader({ plugin }: Props) {
         count follows the pane width instead of being fixed at two.
       */}
       <div className="flex flex-wrap items-center gap-1">
-        <PluginStatusPill status={plugin.status} enabled={plugin.enabled} loading={isLoading} />
+        <PluginStatusPill
+          status={plugin.status}
+          enabled={plugin.enabled}
+          loading={isLoading}
+          lifecycle={plugin.lifecycle}
+        />
         {lifecycleActual && lifecycleActual !== "active" && lifecycleActual !== "inactive" && (
           <Badge variant={lifecycleActual === "dirty" ? "destructive" : "secondary"}>
             {t(`lifecycle.${lifecycleActual}`)}

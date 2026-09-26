@@ -25557,6 +25557,7 @@
         "enabled": "已启用",
         "error": "异常",
         "loading": "加载中…",
+        "onDemand": "按需运行",
         "suspended": "已休眠"
       },
       "uninstall": "卸载",

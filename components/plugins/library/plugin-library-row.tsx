@@ -219,7 +219,12 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
                 aria-label={t("erroredAria")}
               />
             )}
-            <PluginStatusPill status={plugin.status} enabled={plugin.enabled} loading={isLoading} />
+            <PluginStatusPill
+              status={plugin.status}
+              enabled={plugin.enabled}
+              loading={isLoading}
+              lifecycle={plugin.lifecycle}
+            />
           </div>
         </div>
         <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">

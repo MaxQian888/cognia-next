@@ -24,10 +24,24 @@ export interface PluginStatusPillProps {
   enabled: boolean
   /** Set when the manager is mid-transition (loading / enabling / updating). */
   loading?: boolean
+  /**
+   * The row's lifecycle record. `enabled` is only the user's switch: a plugin
+   * nobody switched on or off (intent `auto`) is still started by an
+   * activation event (opening the page it contributes, calling its tool), and
+   * without this the pill called that running plugin "Disabled" while the
+   * detail overview beside it said "Running".
+   */
+  lifecycle?: Pick<NonNullable<PluginRow["lifecycle"]>, "intent" | "actual">
   className?: string
 }
 
-export function PluginStatusPill({ status, enabled, loading, className }: PluginStatusPillProps) {
+export function PluginStatusPill({
+  status,
+  enabled,
+  loading,
+  lifecycle,
+  className,
+}: PluginStatusPillProps) {
   const t = useTranslations("plugins.card.status")
   if (status === "error") {
     return (
@@ -47,6 +61,13 @@ export function PluginStatusPill({ status, enabled, loading, className }: Plugin
     return (
       <Badge variant="outline" className={cn("text-xs", className)}>
         {t("suspended")}
+      </Badge>
+    )
+  }
+  if (!enabled && lifecycle?.actual === "active" && lifecycle.intent !== "disabled") {
+    return (
+      <Badge variant="secondary" className={cn("text-xs", className)} data-status="on-demand">
+        {t("onDemand")}
       </Badge>
     )
   }

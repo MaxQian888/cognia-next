@@ -143,6 +143,25 @@ describe("PluginLibraryRow", () => {
     expect(container.querySelector('[data-active="true"]')).toBeTruthy()
   })
 
+  it("says a plugin an activation event started is running, not disabled", () => {
+    const h = handlers()
+    render(
+      <PluginLibraryRow
+        plugin={{
+          ...baseRow,
+          enabled: false,
+          status: "discovered",
+          lifecycle: { intent: "auto", actual: "active", revision: 2, updatedAt: 0 },
+        }}
+        selected={false}
+        active={false}
+        {...h}
+      />
+    )
+    expect(screen.getByText("onDemand")).toBeInTheDocument()
+    expect(screen.queryByText("disabled")).toBeNull()
+  })
+
   it("shows the inline error message when status=error", () => {
     const h = handlers()
     render(

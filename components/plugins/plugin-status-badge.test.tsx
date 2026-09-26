@@ -29,6 +29,37 @@ describe("PluginStatusPill", () => {
     expect(screen.getByText("disabled")).toBeInTheDocument()
   })
 
+  it("calls a plugin nobody switched on, but an activation event started, running on demand", () => {
+    render(
+      <PluginStatusPill
+        status="discovered"
+        enabled={false}
+        lifecycle={{ intent: "auto", actual: "active" }}
+      />
+    )
+    expect(screen.getByText("onDemand")).toBeInTheDocument()
+    expect(screen.queryByText("disabled")).toBeNull()
+  })
+
+  it("keeps a switched-off or idle plugin disabled", () => {
+    const { rerender } = render(
+      <PluginStatusPill
+        status="discovered"
+        enabled={false}
+        lifecycle={{ intent: "disabled", actual: "active" }}
+      />
+    )
+    expect(screen.getByText("disabled")).toBeInTheDocument()
+    rerender(
+      <PluginStatusPill
+        status="discovered"
+        enabled={false}
+        lifecycle={{ intent: "auto", actual: "inactive" }}
+      />
+    )
+    expect(screen.getByText("disabled")).toBeInTheDocument()
+  })
+
   it("renders the suspended variant when idle-suspended (status suspended, still enabled)", () => {
     render(<PluginStatusPill status="suspended" enabled={true} />)
     expect(screen.getByText("suspended")).toBeInTheDocument()

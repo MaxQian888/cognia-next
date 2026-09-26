@@ -25557,6 +25557,7 @@
         "enabled": "Enabled",
         "error": "Error",
         "loading": "Loading…",
+        "onDemand": "On demand",
         "suspended": "Suspended"
       },
       "uninstall": "Uninstall",

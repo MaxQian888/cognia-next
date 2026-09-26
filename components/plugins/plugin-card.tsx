@@ -191,7 +191,12 @@ export const PluginCard = memo(function PluginCard({
             </span>
           )}
         </div>
-        <PluginStatusPill status={status} enabled={plugin.enabled} loading={isLoading} />
+        <PluginStatusPill
+          status={status}
+          enabled={plugin.enabled}
+          loading={isLoading}
+          lifecycle={plugin.lifecycle}
+        />
         <PluginActivationProgress pluginId={plugin.id} pluginName={displayName} variant="card" />
       </div>
 
