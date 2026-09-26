@@ -33,7 +33,6 @@ use crate::external_agent::process::ExternalAgentProcessState;
 use crate::external_agent::terminal::AcpTerminalManagedInfo;
 use crate::mcp_server::{McpManagedInfo, McpServerState};
 use crate::terminal::headless::{HeadlessManagedInfo, HeadlessTerminalState};
-use crate::terminal::{TerminalSessionInfo, TerminalState};
 use cognia_plugin_runtime::lifecycle::{
     node_plugin_snapshot, stop_all_node_plugins, stop_node_plugin, NodePluginManagedInfo,
 };
@@ -54,12 +53,13 @@ pub enum ManagedSubsystem {
     ExternalAgent,
     ChatSidecar,
     AcpTerminal,
-    IntegratedTerminal,
     McpServer,
     CodeServer,
     /// Long-lived Node plugin hosts (one per running Node-runtime plugin).
     PluginHost,
-    /// Headless PTY sessions — a second, independent terminal registry.
+    /// Headless PTY sessions (agent/automation shells). The dock's integrated
+    /// terminals are not listed: their PTYs live in the durable
+    /// `cognia-server desktop-host`, which outlives the app by design.
     HeadlessTerminal,
     /// The cloudflared tunnel. Not a cognia binary, but a child we spawn and
     /// the only one that exposes a public hostname, so it belongs on the list.
@@ -158,29 +158,6 @@ fn acp_row(info: &AcpTerminalManagedInfo) -> ManagedProcess {
         can_kill: true,
         can_restart: false,
         detail: Some(info.session_id.clone()),
-    }
-}
-
-fn integrated_row(info: &TerminalSessionInfo) -> ManagedProcess {
-    ManagedProcess {
-        subsystem: ManagedSubsystem::IntegratedTerminal,
-        id: info.id.clone(),
-        name: info.shell.clone(),
-        pid: info.pid,
-        // Sessions are deliberately *kept* in the store after the shell exits
-        // so the renderer can still read scrollback, so presence proves
-        // nothing — only the waiter thread's `alive` flag does.
-        status: if info.alive {
-            ManagedStatus::Running
-        } else {
-            ManagedStatus::Stopped
-        },
-        // Kill on an exited session degrades to evicting the row (the PID is
-        // already reaped and may have been reused), which is what the user
-        // means by "clear this out".
-        can_kill: true,
-        can_restart: false,
-        detail: info.project_id.clone(),
     }
 }
 
@@ -344,13 +321,6 @@ pub async fn collect(app: &AppHandle) -> Vec<ManagedProcess> {
         }
     }
 
-    // Integrated terminal PTYs.
-    if let Some(st) = app.try_state::<TerminalState>() {
-        for info in st.inner().list_all() {
-            out.push(integrated_row(&info));
-        }
-    }
-
     // MCP server (one row for its Node sidecar).
     if let Some(st) = app.try_state::<McpServerState>() {
         if let Some(info) = st.inner().managed_snapshot() {
@@ -381,7 +351,7 @@ pub async fn collect(app: &AppHandle) -> Vec<ManagedProcess> {
         }
     }
 
-    // Headless PTYs (agent/automation shells), independent of `TerminalState`.
+    // Headless PTYs (agent/automation shells).
     if let Some(st) = app.try_state::<HeadlessTerminalState>() {
         for info in st.inner().managed_snapshot() {
             out.push(headless_row(&info));
@@ -432,18 +402,6 @@ async fn kill_subsystem(
             let st = app.state::<AcpTerminalState>();
             st.inner().0.kill(id).await?;
             let _ = st.inner().0.release(id).await;
-            Ok(())
-        }
-        ManagedSubsystem::IntegratedTerminal => {
-            let st = app.state::<TerminalState>();
-            let session = st
-                .inner()
-                .get(id)
-                .ok_or_else(|| format!("terminal {id} not found"))?;
-            // `PtySession::kill` is a no-op once the child has been reaped, so
-            // this is safe for the exited rows the panel also lists.
-            session.kill().map_err(|e| e.to_string())?;
-            st.inner().remove(id);
             Ok(())
         }
         ManagedSubsystem::McpServer => {
@@ -536,10 +494,9 @@ pub async fn list_managed_processes(app: AppHandle) -> Result<Vec<ManagedProcess
 /// This drift is not hypothetical — code-server was added to [`collect`] but
 /// not to the shutdown path, and leaked a Node server holding a port past every
 /// app exit until this list existed.
-pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 10] = [
+pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 9] = [
     ManagedSubsystem::ExternalAgent,
     ManagedSubsystem::AcpTerminal,
-    ManagedSubsystem::IntegratedTerminal,
     ManagedSubsystem::HeadlessTerminal,
     ManagedSubsystem::ChatSidecar,
     ManagedSubsystem::McpServer,
@@ -558,14 +515,13 @@ const fn subsystem_index(subsystem: ManagedSubsystem) -> usize {
     match subsystem {
         ManagedSubsystem::ExternalAgent => 0,
         ManagedSubsystem::AcpTerminal => 1,
-        ManagedSubsystem::IntegratedTerminal => 2,
-        ManagedSubsystem::HeadlessTerminal => 3,
-        ManagedSubsystem::ChatSidecar => 4,
-        ManagedSubsystem::McpServer => 5,
-        ManagedSubsystem::CodeServer => 6,
-        ManagedSubsystem::PluginHost => 7,
-        ManagedSubsystem::Tunnel => 8,
-        ManagedSubsystem::BackgroundJob => 9,
+        ManagedSubsystem::HeadlessTerminal => 2,
+        ManagedSubsystem::ChatSidecar => 3,
+        ManagedSubsystem::McpServer => 4,
+        ManagedSubsystem::CodeServer => 5,
+        ManagedSubsystem::PluginHost => 6,
+        ManagedSubsystem::Tunnel => 7,
+        ManagedSubsystem::BackgroundJob => 8,
     }
 }
 
@@ -581,15 +537,6 @@ async fn teardown_subsystem(app: &AppHandle, subsystem: ManagedSubsystem) {
         ManagedSubsystem::AcpTerminal => {
             if let Some(st) = app.try_state::<AcpTerminalState>() {
                 let _ = st.inner().0.clone().kill_all().await;
-            }
-        }
-        ManagedSubsystem::IntegratedTerminal => {
-            if let Some(st) = app.try_state::<TerminalState>() {
-                for info in st.inner().list_all() {
-                    if let Some(session) = st.inner().remove(&info.id) {
-                        let _ = session.kill();
-                    }
-                }
             }
         }
         ManagedSubsystem::ChatSidecar => {
@@ -655,7 +602,6 @@ pub async fn teardown(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal::SessionOrigin;
 
     #[test]
     fn subsystem_serializes_camel_case() {
@@ -663,10 +609,6 @@ mod tests {
         assert_eq!(s(&ManagedSubsystem::ExternalAgent), "\"externalAgent\"");
         assert_eq!(s(&ManagedSubsystem::ChatSidecar), "\"chatSidecar\"");
         assert_eq!(s(&ManagedSubsystem::AcpTerminal), "\"acpTerminal\"");
-        assert_eq!(
-            s(&ManagedSubsystem::IntegratedTerminal),
-            "\"integratedTerminal\""
-        );
         assert_eq!(s(&ManagedSubsystem::McpServer), "\"mcpServer\"");
         assert_eq!(s(&ManagedSubsystem::CodeServer), "\"codeServer\"");
     }
@@ -753,39 +695,6 @@ mod tests {
             ..info
         });
         assert_eq!(dead.status, ManagedStatus::Stopped);
-    }
-
-    fn pty_info(alive: bool) -> TerminalSessionInfo {
-        TerminalSessionInfo {
-            id: "pty-1".into(),
-            project_id: Some("proj-a".into()),
-            extension_id: None,
-            origin: SessionOrigin::Local,
-            shell: "/bin/zsh".into(),
-            pid: Some(11),
-            alive,
-        }
-    }
-
-    #[test]
-    fn integrated_row_uses_shell_and_project() {
-        let row = integrated_row(&pty_info(true));
-        assert_eq!(row.subsystem, ManagedSubsystem::IntegratedTerminal);
-        assert_eq!(row.name, "/bin/zsh");
-        assert_eq!(row.pid, Some(11));
-        assert_eq!(row.detail.as_deref(), Some("proj-a"));
-        assert_eq!(row.status, ManagedStatus::Running);
-        assert!(row.can_kill && !row.can_restart);
-    }
-
-    #[test]
-    fn integrated_row_reports_an_exited_shell_as_stopped() {
-        // Regression: the status was hardcoded `Running`, so a shell the user
-        // exited normally stayed listed as live forever with a stale PID.
-        let row = integrated_row(&pty_info(false));
-        assert_eq!(row.status, ManagedStatus::Stopped);
-        // Still killable — that is how the user evicts the dead row.
-        assert!(row.can_kill);
     }
 
     #[test]
@@ -916,7 +825,7 @@ mod tests {
         // `teardown_subsystem` is exhaustive by `match`, but the list it is
         // driven from is not. Pin the two together so a new variant cannot be
         // collected without also being shut down (the code-server leak).
-        assert_eq!(ALL_SUBSYSTEMS.len(), 10);
+        assert_eq!(ALL_SUBSYSTEMS.len(), 9);
         for (i, subsystem) in ALL_SUBSYSTEMS.iter().enumerate() {
             assert_eq!(
                 subsystem_index(*subsystem),

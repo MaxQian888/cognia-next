@@ -602,15 +602,12 @@ pub fn run() {
         .manage(plugin_api::wasm::WasmPluginState::default())
         // ADR-0028 Phase 14 — OAuth refresh watchers per Anthropic account.
         .manage(subscription::anthropic::credential::WatcherRegistry::new())
-        // Integrated terminal (`src-tauri/src/terminal/`) — VSCode-style
-        // PTY sessions exposed to the renderer via `tauri::ipc::Channel`.
-        // The store outlives the window; dropping it on app shutdown
-        // cascades into per-session Drop kills.
-        .manage(terminal::TerminalState::new())
+        // Integrated terminal — the connection to the durable
+        // `cognia-server desktop-host`, which owns the dock's PTY sessions.
         .manage(terminal_host_bridge::TerminalHostBridgeState::new())
         // Headless (unattended) terminal sessions — workflow nodes running
-        // shell lines with no visible dock tab. Independent of TerminalState
-        // so dock listing / audit views never see them.
+        // shell lines with no visible dock tab, so dock listing never sees
+        // them.
         .manage(terminal::headless::HeadlessTerminalState::new())
         // Source Control panel (ADR-0038) — the watcher map per active repo.
         // Stateless commands aside, this is the subsystem's only managed state.

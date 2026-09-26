@@ -80,10 +80,10 @@ describe("controlManaged", () => {
     expect(mockDestroyPane).not.toHaveBeenCalled()
   })
 
-  it("routes ACP + integrated terminals through the native command", async () => {
+  it("routes ACP + headless terminals through the native command", async () => {
     await controlManaged({ subsystem: "acpTerminal", id: "term_1" }, "kill")
-    await controlManaged({ subsystem: "integratedTerminal", id: "pty-1" }, "kill")
+    await controlManaged({ subsystem: "headlessTerminal", id: "hl-1" }, "kill")
     expect(mockControl).toHaveBeenNthCalledWith(1, "acpTerminal", "term_1", "kill")
-    expect(mockControl).toHaveBeenNthCalledWith(2, "integratedTerminal", "pty-1", "kill")
+    expect(mockControl).toHaveBeenNthCalledWith(2, "headlessTerminal", "hl-1", "kill")
   })
 })

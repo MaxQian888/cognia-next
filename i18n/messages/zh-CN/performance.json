@@ -143,7 +143,6 @@
       "codeServer": "Pro IDE（code-server）",
       "externalAgent": "外部 Agent",
       "headlessTerminal": "无头 Shell",
-      "integratedTerminal": "集成终端",
       "mcpServer": "MCP 服务器",
       "pluginHost": "插件宿主",
       "tunnel": "隧道"

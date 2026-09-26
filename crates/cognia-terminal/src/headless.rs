@@ -1,8 +1,8 @@
 //! Headless terminal execution (unattended workflow path).
 //!
 //! Runs shell command lines in a *real* shell with OSC 633 integration —
-//! exactly like a dock tab — but the PTY lives only in Rust: no
-//! `TerminalState` entry, no renderer session row, no visible tab. The
+//! exactly like a dock tab — but the PTY lives in this process, not the
+//! durable terminal host: no renderer session row, no visible tab. The
 //! renderer's policy layer (`lib/terminal/headless-exec.ts`) gates every
 //! call through the command-safety classifier before it reaches here.
 //!
@@ -125,8 +125,8 @@ pub struct HeadlessSession {
     exited: Arc<AtomicBool>,
 }
 
-/// Registry of live headless sessions — managed Tauri state alongside
-/// (but independent of) `TerminalState`.
+/// Registry of live headless sessions — managed Tauri state, independent of
+/// the dock's host-owned sessions.
 #[derive(Default)]
 pub struct HeadlessTerminalState {
     sessions: StdMutex<HashMap<String, Arc<HeadlessSession>>>,
@@ -160,9 +160,8 @@ impl HeadlessTerminalState {
     }
 
     /// Snapshot for the unified managed-process registry. Headless sessions
-    /// are a second, independent PTY registry alongside `TerminalState`, so
-    /// without this they were invisible to the performance panel and survived
-    /// app exit.
+    /// are their own PTY registry, so without this they were invisible to the
+    /// performance panel and survived app exit.
     pub fn managed_snapshot(&self) -> Vec<HeadlessManagedInfo> {
         self.sessions
             .lock()

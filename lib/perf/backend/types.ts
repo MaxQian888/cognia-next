@@ -152,7 +152,6 @@ export type ManagedSubsystem =
   | "externalAgent"
   | "chatSidecar"
   | "acpTerminal"
-  | "integratedTerminal"
   | "headlessTerminal"
   | "mcpServer"
   | "codeServer"

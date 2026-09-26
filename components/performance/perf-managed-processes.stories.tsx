@@ -37,7 +37,7 @@ const latest: PerfSample = {
     { subsystem: "externalAgent", id: "cfg-codex", name: "npx", pid: 100, status: "running", canKill: true, canRestart: true, detail: null }, // prettier-ignore
     { subsystem: "chatSidecar", id: "chat-sidecar", name: "claude-host.mjs", pid: 200, status: "running", canKill: true, canRestart: false, detail: null }, // prettier-ignore
     { subsystem: "mcpServer", id: "mcp-server", name: "127.0.0.1:8765", pid: null, status: "running", canKill: true, canRestart: false, detail: "2026-07-17T00:00:00Z" }, // prettier-ignore
-    { subsystem: "integratedTerminal", id: "pty-1", name: "/bin/zsh", pid: 300, status: "running", canKill: true, canRestart: false, detail: "proj-a" }, // prettier-ignore
+    { subsystem: "headlessTerminal", id: "hl-1", name: "/bin/zsh", pid: 300, status: "running", canKill: true, canRestart: false, detail: null }, // prettier-ignore
   ],
 }
 
