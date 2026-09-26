@@ -11,12 +11,13 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { CLI_LANGUAGES } from "./languages.mjs"
-import { runSg } from "./run.mjs"
-import { formatSearchResult, formatReplaceResult, getEmptyResultHint } from "./format.mjs"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { CLI_LANGUAGES } from "./languages.ts"
+import { runSg } from "./run.ts"
+import { formatSearchResult, formatReplaceResult, getEmptyResultHint } from "./format.ts"
 
-const langEnum = z.enum(/** @type {[string, ...string[]]} */ (CLI_LANGUAGES))
+const langEnum = z.enum(/** @type {[string, ...string[]]} */ CLI_LANGUAGES)
 
 // ---- ast_grep_search ------------------------------------------------------
 
@@ -37,13 +38,22 @@ export const astGrepSearchShape = {
   context: z.number().int().min(0).optional().describe("Context lines around each match."),
 }
 
+/** Injected runner (tests) plus the session cwd and the call's abort signal. */
+export interface AstGrepDeps {
+  run?: typeof runSg
+  cwd?: string | undefined
+  signal?: AbortSignal | undefined
+}
+
 /**
- * @param {z.infer<z.ZodObject<typeof astGrepSearchShape>>} args
- * @param {{ run?: typeof runSg, cwd?: string }} [deps] Injected runner (tests)
- *        plus the session cwd. The SDK passes its tool context here at runtime,
- *        which has neither field, so both fall back safely.
+ * `extra` is either {@link AstGrepDeps} or, when the SDK calls the static tool
+ * directly, its tool context (which may carry a `signal`).
  */
-export async function execAstGrepSearch(args, deps = {}) {
+export async function execAstGrepSearch(
+  args: ToolArgs<typeof astGrepSearchShape>,
+  extra: unknown = {}
+) {
+  const deps = (extra ?? {}) as AstGrepDeps
   const run = deps && typeof deps === "object" && typeof deps.run === "function" ? deps.run : runSg
   try {
     const result = await run({
@@ -98,12 +108,12 @@ export const astGrepReplaceShape = {
     ),
 }
 
-/**
- * @param {z.infer<z.ZodObject<typeof astGrepReplaceShape>>} args
- * @param {{ run?: typeof runSg, cwd?: string }} [deps] Injected runner (tests)
- *        plus the session cwd; see search.
- */
-export async function execAstGrepReplace(args, deps = {}) {
+/** See {@link execAstGrepSearch} for `extra`. */
+export async function execAstGrepReplace(
+  args: ToolArgs<typeof astGrepReplaceShape>,
+  extra: unknown = {}
+) {
+  const deps = (extra ?? {}) as AstGrepDeps
   const run = deps && typeof deps === "object" && typeof deps.run === "function" ? deps.run : runSg
   try {
     const dryRun = args.dry_run !== false
@@ -143,18 +153,16 @@ export const AST_GREP_TOOL_NAMES = Object.freeze(["ast_grep_search", "ast_grep_r
 /**
  * Session-bound ast-grep tools. The `ast-grep` child process must run in the
  * SESSION cwd, not the sidecar's — mirrors the `createProcessTools` pattern in
- * `../index.mjs`, which swaps a static category for a bound one at the same
+ * the registry, which swaps a static category for a bound one at the same
  * registration position.
- *
- * @param {{ cwd?: string }} [ctx]
  */
-export function createAstGrepTools({ cwd } = {}) {
+export function createAstGrepTools({ cwd }: { cwd?: string | undefined } = {}) {
   return [
     tool("ast_grep_search", astGrepSearchTool.description, astGrepSearchShape, (args, extra) =>
-      execAstGrepSearch(args, { cwd, signal: extra?.signal })
+      execAstGrepSearch(args, { cwd, signal: (extra as { signal?: AbortSignal })?.signal })
     ),
     tool("ast_grep_replace", astGrepReplaceTool.description, astGrepReplaceShape, (args, extra) =>
-      execAstGrepReplace(args, { cwd, signal: extra?.signal })
+      execAstGrepReplace(args, { cwd, signal: (extra as { signal?: AbortSignal })?.signal })
     ),
   ]
 }
@@ -164,9 +172,9 @@ export const astGrepTools = [astGrepSearchTool, astGrepReplaceTool]
 
 // Defensive: emitted order must match the public constant.
 for (let i = 0; i < astGrepTools.length; i++) {
-  if (astGrepTools[i].name !== AST_GREP_TOOL_NAMES[i]) {
+  if (astGrepTools[i]!.name !== AST_GREP_TOOL_NAMES[i]) {
     throw new Error(
-      `ast-grep tool order drift: expected ${AST_GREP_TOOL_NAMES[i]}, got ${astGrepTools[i].name}`
+      `ast-grep tool order drift: expected ${AST_GREP_TOOL_NAMES[i]}, got ${astGrepTools[i]!.name}`
     )
   }
 }

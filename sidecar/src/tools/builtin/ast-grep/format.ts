@@ -1,15 +1,10 @@
 // Human-readable rendering of ast-grep results, grouped by file. Ported from
 // oh-my-opencode-slim's `src/tools/ast-grep/utils.ts`.
 
-/** @typedef {import("./run.mjs").SgResult} SgResult */
-/** @typedef {import("./run.mjs").SgMatch} SgMatch */
+import type { SgMatch, SgResult } from "./run.ts"
 
-/**
- * @param {SgMatch[]} matches
- * @returns {Map<string, SgMatch[]>}
- */
-function groupByFile(matches) {
-  const byFile = new Map()
+function groupByFile(matches: SgMatch[]): Map<string, SgMatch[]> {
+  const byFile = new Map<string, SgMatch[]>()
   for (const match of matches) {
     const existing = byFile.get(match.file) ?? []
     existing.push(match)
@@ -18,15 +13,11 @@ function groupByFile(matches) {
   return byFile
 }
 
-/**
- * @param {SgResult} result
- * @returns {string}
- */
-export function formatSearchResult(result) {
+export function formatSearchResult(result: SgResult): string {
   if (result.error) return `Error: ${result.error}`
   if (result.matches.length === 0) return "No matches found."
 
-  const lines = []
+  const lines: string[] = []
   const byFile = groupByFile(result.matches)
   for (const [file, matches] of byFile) {
     lines.push(`\n${file}:`)
@@ -44,16 +35,11 @@ export function formatSearchResult(result) {
   return lines.join("\n")
 }
 
-/**
- * @param {SgResult} result
- * @param {boolean} isDryRun
- * @returns {string}
- */
-export function formatReplaceResult(result, isDryRun) {
+export function formatReplaceResult(result: SgResult, isDryRun: boolean): string {
   if (result.error) return `Error: ${result.error}`
   if (result.matches.length === 0) return "No matches found for replacement."
 
-  const lines = []
+  const lines: string[] = []
   const mode = isDryRun ? "[DRY RUN]" : "[APPLIED]"
   const byFile = groupByFile(result.matches)
   for (const [file, matches] of byFile) {
@@ -84,11 +70,8 @@ export function formatReplaceResult(result, isDryRun) {
 /**
  * Suggest a correction when a search returns nothing for a common malformed
  * pattern (the most frequent ast-grep beginner mistakes).
- * @param {string} pattern
- * @param {string} lang
- * @returns {string | null}
  */
-export function getEmptyResultHint(pattern, lang) {
+export function getEmptyResultHint(pattern: string, lang: string): string | null {
   const src = pattern.trim()
 
   if (lang === "python") {

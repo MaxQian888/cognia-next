@@ -5,7 +5,7 @@ import os from "node:os"
 import fsp from "node:fs/promises"
 
 import { pathToFileURL } from "node:url"
-import { detectAstGrep, __resetAstGrepCache, stagedBinaryPath, npmBinaryPath } from "./binary.mjs"
+import { detectAstGrep, __resetAstGrepCache, stagedBinaryPath, npmBinaryPath } from "./binary.ts"
 
 test("detectAstGrep honours COGNIA_AST_GREP_PATH when it exists", async () => {
   __resetAstGrepCache()

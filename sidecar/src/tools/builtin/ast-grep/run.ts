@@ -4,44 +4,67 @@
 // to cognia's `core/rg.mjs` spawn conventions (node:child_process, byte cap,
 // timeout, no-binary → structured error).
 
-import { spawnInProcessSandbox as spawn } from "../../src/platform/process/exec.ts"
-import { detectAstGrep } from "./binary.mjs"
+import { spawnInProcessSandbox as spawn } from "../../../platform/process/exec.ts"
+import { detectAstGrep } from "./binary.ts"
 
 export const DEFAULT_MAX_MATCHES = 100
 export const DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024 // 10 MB
 export const DEFAULT_TIMEOUT_MS = 30_000
 
-/**
- * @typedef {object} SgMatch
- * @property {string} file
- * @property {string} text
- * @property {{ start: { line: number, column: number }, end: { line: number, column: number } }} range
- * @property {string} [replacement]
- */
+export interface SgPosition {
+  line: number
+  column: number
+}
 
-/**
- * @typedef {object} SgResult
- * @property {SgMatch[]} matches
- * @property {number} totalMatches
- * @property {boolean} [truncated]
- * @property {string} [truncatedReason]
- * @property {string} [error]
- */
+export interface SgMatch {
+  file: string
+  text: string
+  range: { start: SgPosition; end: SgPosition }
+  replacement?: string
+}
 
-/**
- * Build the argv for an `ast-grep run` invocation.
- * @param {{
- *   pattern: string,
- *   lang: string,
- *   paths?: string[],
- *   globs?: string[],
- *   rewrite?: string,
- *   context?: number,
- *   updateAll?: boolean,
- * }} options
- * @returns {string[]}
- */
-export function buildArgs(options) {
+export interface SgResult {
+  matches: SgMatch[]
+  totalMatches: number
+  truncated?: boolean
+  truncatedReason?: string
+  error?: string
+}
+
+/** What to run: an `ast-grep run` search, or a rewrite when `rewrite` is set. */
+export interface SgRunOptions {
+  pattern: string
+  lang: string
+  paths?: string[] | undefined
+  globs?: string[] | undefined
+  rewrite?: string | undefined
+  context?: number | undefined
+  updateAll?: boolean | undefined
+  /**
+   * Accepted here but NOT read: `runSg` takes `cwd` and `signal` from its
+   * second argument only. The tool handlers pass them here, so today the
+   * child runs in the sidecar's cwd without the abort signal.
+   */
+  cwd?: string | undefined
+  signal?: AbortSignal | undefined
+}
+
+/** How to run it; the `*Impl` hooks are for tests. */
+export interface SgExecOptions {
+  cwd?: string | undefined
+  signal?: AbortSignal | undefined
+  timeoutMs?: number | undefined
+  maxBuffer?: number | undefined
+  maxMatches?: number | undefined
+  sgPath?: string | undefined
+  spawnImpl?: typeof spawn | undefined
+  detectImpl?: (() => Promise<string | null>) | undefined
+  /** Set on a rewrite that writes files, so an interrupted run says so. */
+  updateAll?: boolean | undefined
+}
+
+/** Build the argv for an `ast-grep run` invocation. */
+export function buildArgs(options: SgRunOptions): string[] {
   const args = ["run", "-p", options.pattern, "--lang", options.lang, "--json=compact"]
 
   if (options.rewrite) {
@@ -59,19 +82,28 @@ export function buildArgs(options) {
   return args
 }
 
+/** The fields of a raw `--json=compact` entry this reads. */
+interface RawSgEntry {
+  file?: unknown
+  text?: unknown
+  replacement?: unknown
+  range?: {
+    start?: { line?: unknown; column?: unknown }
+    end?: { line?: unknown; column?: unknown }
+  }
+}
+
 /**
  * Normalise one raw `--json=compact` entry into an `SgMatch`. ast-grep emits
  * 0-based line/column numbers under `range.start` / `range.end`.
- * @param {any} raw
- * @returns {SgMatch | null}
  */
-function toMatch(raw) {
-  if (!raw || typeof raw !== "object") return null
+function toMatch(value: unknown): SgMatch | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as RawSgEntry
   const range = raw.range && typeof raw.range === "object" ? raw.range : {}
   const start = range.start && typeof range.start === "object" ? range.start : {}
   const end = range.end && typeof range.end === "object" ? range.end : {}
-  /** @type {SgMatch} */
-  const match = {
+  const match: SgMatch = {
     file: typeof raw.file === "string" ? raw.file : "",
     text: typeof raw.text === "string" ? raw.text : "",
     range: {
@@ -86,14 +118,11 @@ function toMatch(raw) {
 /**
  * Parse ast-grep `--json=compact` stdout (a single JSON array) into matches,
  * applying the match cap. Exposed for unit tests.
- * @param {string} stdout
- * @param {number} [maxMatches]
- * @returns {SgResult}
  */
-export function parseSgJson(stdout, maxMatches = DEFAULT_MAX_MATCHES) {
+export function parseSgJson(stdout: string, maxMatches: number = DEFAULT_MAX_MATCHES): SgResult {
   const trimmed = stdout.trim()
   if (trimmed.length === 0) return { matches: [], totalMatches: 0 }
-  let parsed
+  let parsed: unknown
   try {
     parsed = JSON.parse(trimmed)
   } catch (err) {
@@ -104,7 +133,7 @@ export function parseSgJson(stdout, maxMatches = DEFAULT_MAX_MATCHES) {
     }
   }
   if (!Array.isArray(parsed)) return { matches: [], totalMatches: 0 }
-  const all = parsed.map(toMatch).filter((m) => m !== null)
+  const all = parsed.map(toMatch).filter((m): m is SgMatch => m !== null)
   const totalMatches = all.length
   if (totalMatches > maxMatches) {
     return {
@@ -121,28 +150,8 @@ export function parseSgJson(stdout, maxMatches = DEFAULT_MAX_MATCHES) {
  * Run ast-grep. Resolves an `SgResult`; never throws for "no matches" or a
  * missing binary — those are reported in the result so the tool surfaces a
  * clean message.
- * @param {{
- *   pattern: string,
- *   lang: string,
- *   paths?: string[],
- *   globs?: string[],
- *   rewrite?: string,
- *   context?: number,
- *   updateAll?: boolean,
- * }} options
- * @param {{
- *   cwd?: string,
- *   signal?: AbortSignal,
- *   timeoutMs?: number,
- *   maxBuffer?: number,
- *   maxMatches?: number,
- *   sgPath?: string,
- *   spawnImpl?: typeof spawn,
- *   detectImpl?: () => Promise<string | null>,
- * }} [opts]
- * @returns {Promise<SgResult>}
  */
-export async function runSg(options, opts = {}) {
+export async function runSg(options: SgRunOptions, opts: SgExecOptions = {}): Promise<SgResult> {
   const bin = opts.sgPath ?? (await (opts.detectImpl ?? detectAstGrep)())
   if (!bin) {
     return {
@@ -159,8 +168,8 @@ export async function runSg(options, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const spawnImpl = opts.spawnImpl ?? spawn
 
-  return new Promise((resolve) => {
-    let child
+  return new Promise<SgResult>((resolve) => {
+    let child: ReturnType<typeof spawn>
     try {
       child = spawnImpl(bin, args, {
         cwd: opts.cwd,
@@ -181,7 +190,7 @@ export async function runSg(options, opts = {}) {
     let err = ""
     let truncated = false
     let settled = false
-    const finish = (result) => {
+    const finish = (result: SgResult) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
@@ -202,7 +211,7 @@ export async function runSg(options, opts = {}) {
       })
     }, timeoutMs)
 
-    child.stdout?.on("data", (chunk) => {
+    child.stdout?.on("data", (chunk: Buffer | string) => {
       if (truncated) return
       out += chunk
       if (out.length > maxBuffer) {
@@ -215,13 +224,13 @@ export async function runSg(options, opts = {}) {
         }
       }
     })
-    child.stderr?.on("data", (chunk) => {
+    child.stderr?.on("data", (chunk: Buffer | string) => {
       if (err.length < 16 * 1024) err += chunk
     })
-    child.on("error", (e) => {
+    child.on("error", (e: unknown) => {
       finish({ matches: [], totalMatches: 0, error: e instanceof Error ? e.message : String(e) })
     })
-    child.on("close", (code) => {
+    child.on("close", (code: number | null) => {
       // ast-grep exits non-zero on a bad pattern/language; a truncated stream
       // killed the child so accept whatever code accompanies it.
       if (truncated) {

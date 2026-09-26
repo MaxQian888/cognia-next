@@ -96,7 +96,7 @@
   ],
   "public": [
     "sidecar/a2ui-tools/tool-defs.mjs",
-    "sidecar/builtin-tools/ast-grep/binary.mjs",
+    "sidecar/src/tools/builtin/ast-grep/binary.ts",
     "sidecar/builtin-tools/run-code/sandbox-child.mjs",
     "sidecar/dispatch/claude-executable.mjs",
     "sidecar/dispatch/feature-call.mjs",

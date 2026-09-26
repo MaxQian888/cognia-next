@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { CLI_LANGUAGES, isSupportedLanguage } from "./languages.mjs"
+import { CLI_LANGUAGES, isSupportedLanguage } from "./languages.ts"
 
 test("CLI_LANGUAGES lists the 25 supported languages, frozen and unique", () => {
   assert.equal(CLI_LANGUAGES.length, 25)

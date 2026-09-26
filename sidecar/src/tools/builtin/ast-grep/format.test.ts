@@ -1,9 +1,10 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { formatSearchResult, formatReplaceResult, getEmptyResultHint } from "./format.mjs"
+import { formatSearchResult, formatReplaceResult, getEmptyResultHint } from "./format.ts"
+import type { SgMatch } from "./run.ts"
 
-function match(file, line, text, replacement) {
+function match(file: string, line: number, text: string, replacement?: string): SgMatch {
   return {
     file,
     text,
@@ -83,15 +84,18 @@ test("formatReplaceResult handles errors, empty, missing replacement, truncation
 })
 
 test("getEmptyResultHint catches the trailing-colon python mistake", () => {
-  assert.match(getEmptyResultHint("def $F($$$):", "python"), /Remove the trailing colon/)
-  assert.match(getEmptyResultHint("class $C:", "python"), /Remove the trailing colon/)
-  assert.match(getEmptyResultHint("async def $F($$$):", "python"), /Remove the trailing colon/)
+  assert.match(getEmptyResultHint("def $F($$$):", "python") ?? "", /Remove the trailing colon/)
+  assert.match(getEmptyResultHint("class $C:", "python") ?? "", /Remove the trailing colon/)
+  assert.match(
+    getEmptyResultHint("async def $F($$$):", "python") ?? "",
+    /Remove the trailing colon/
+  )
 })
 
 test("getEmptyResultHint catches bare JS/TS function patterns", () => {
-  assert.match(getEmptyResultHint("function $NAME", "typescript"), /need params and body/)
+  assert.match(getEmptyResultHint("function $NAME", "typescript") ?? "", /need params and body/)
   assert.match(
-    getEmptyResultHint("export async function $FN", "javascript"),
+    getEmptyResultHint("export async function $FN", "javascript") ?? "",
     /need params and body/
   )
 })

@@ -3,8 +3,7 @@
 // its own module so both the tool schema (an enum) and the empty-result hints
 // share one source of truth.
 
-/** @type {readonly string[]} */
-export const CLI_LANGUAGES = Object.freeze([
+export const CLI_LANGUAGES: readonly string[] = Object.freeze([
   "bash",
   "c",
   "cpp",
@@ -32,7 +31,6 @@ export const CLI_LANGUAGES = Object.freeze([
   "yaml",
 ])
 
-/** @param {unknown} lang @returns {boolean} */
-export function isSupportedLanguage(lang) {
+export function isSupportedLanguage(lang: unknown): lang is string {
   return typeof lang === "string" && CLI_LANGUAGES.includes(lang)
 }

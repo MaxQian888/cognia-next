@@ -1,6 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
-import { npmBinaryPath } from "../../../sidecar/builtin-tools/ast-grep/binary.mjs"
+import { npmBinaryPath } from "../../../sidecar/src/tools/builtin/ast-grep/binary.ts"
 
 /** All CLI layouts carry the same installed, platform-specific AST search binary. */
 export function stageAstGrep({ outDir, platform = process.platform, arch = process.arch }) {

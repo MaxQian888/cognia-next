@@ -2,7 +2,8 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { EventEmitter } from "node:events"
 
-import { buildArgs, parseSgJson, runSg, DEFAULT_MAX_MATCHES } from "./run.mjs"
+import type { spawnInProcessSandbox } from "../../../platform/process/exec.ts"
+import { buildArgs, parseSgJson, runSg, DEFAULT_MAX_MATCHES } from "./run.ts"
 
 // ---- buildArgs ------------------------------------------------------------
 
@@ -50,7 +51,7 @@ test("parseSgJson returns empty for blank output", () => {
 test("parseSgJson reports a parse error on malformed JSON", () => {
   const r = parseSgJson("{not json")
   assert.equal(r.totalMatches, 0)
-  assert.match(r.error, /Failed to parse ast-grep output/)
+  assert.match(r.error ?? "", /Failed to parse ast-grep output/)
 })
 
 test("parseSgJson tolerates non-array JSON", () => {
@@ -68,9 +69,9 @@ test("parseSgJson normalises entries and defaults missing fields", () => {
   ])
   const r = parseSgJson(json)
   assert.equal(r.totalMatches, 2)
-  assert.equal(r.matches[0].range.start.line, 3)
-  assert.equal(r.matches[1].range.start.line, 0) // missing range → 0
-  assert.equal(r.matches[1].replacement, "z")
+  assert.equal(r.matches[0]!.range.start.line, 3)
+  assert.equal(r.matches[1]!.range.start.line, 0) // missing range → 0
+  assert.equal(r.matches[1]!.replacement, "z")
 })
 
 test("parseSgJson caps at the match limit and flags truncation", () => {
@@ -82,15 +83,34 @@ test("parseSgJson caps at the match limit and flags truncation", () => {
   assert.equal(r.matches.length, DEFAULT_MAX_MATCHES)
   assert.equal(r.totalMatches, DEFAULT_MAX_MATCHES + 5)
   assert.equal(r.truncated, true)
-  assert.match(r.truncatedReason, /match limit/)
+  assert.match(r.truncatedReason ?? "", /match limit/)
 })
 
 // ---- runSg (fake spawn) ---------------------------------------------------
 
 /** Build a fake child that emits the given stdout then closes with `code`. */
-function fakeSpawnFactory({ stdout = "", stderr = "", code = 0, emitError, hang = false } = {}) {
-  return () => {
-    const child = new EventEmitter()
+interface FakeChild extends EventEmitter {
+  stdout: EventEmitter
+  stderr: EventEmitter
+  killed: boolean
+  kill(): void
+}
+
+function fakeSpawnFactory({
+  stdout = "",
+  stderr = "",
+  code = 0,
+  emitError,
+  hang = false,
+}: {
+  stdout?: string
+  stderr?: string
+  code?: number
+  emitError?: string
+  hang?: boolean
+} = {}): typeof spawnInProcessSandbox {
+  return (() => {
+    const child = new EventEmitter() as FakeChild
     child.stdout = new EventEmitter()
     child.stderr = new EventEmitter()
     child.killed = false
@@ -108,13 +128,13 @@ function fakeSpawnFactory({ stdout = "", stderr = "", code = 0, emitError, hang 
       child.emit("close", code)
     })
     return child
-  }
+  }) as unknown as typeof spawnInProcessSandbox
 }
 
 test("runSg returns a clean error when no binary resolves", async () => {
   const r = await runSg({ pattern: "a", lang: "go" }, { detectImpl: async () => null })
   assert.equal(r.totalMatches, 0)
-  assert.match(r.error, /ast-grep is not available/)
+  assert.match(r.error ?? "", /ast-grep is not available/)
 })
 
 test("runSg parses a successful search via injected spawn", async () => {
@@ -130,7 +150,7 @@ test("runSg parses a successful search via injected spawn", async () => {
     { sgPath: "/fake/sg", spawnImpl: fakeSpawnFactory({ stdout }) }
   )
   assert.equal(r.totalMatches, 1)
-  assert.equal(r.matches[0].file, "a.ts")
+  assert.equal(r.matches[0]!.file, "a.ts")
 })
 
 test("runSg surfaces a CLI error (non-zero exit, empty stdout)", async () => {
@@ -138,7 +158,7 @@ test("runSg surfaces a CLI error (non-zero exit, empty stdout)", async () => {
     { pattern: "bad(", lang: "typescript" },
     { sgPath: "/fake/sg", spawnImpl: fakeSpawnFactory({ stderr: "pattern error", code: 1 }) }
   )
-  assert.match(r.error, /pattern error/)
+  assert.match(r.error ?? "", /pattern error/)
 })
 
 test("runSg reports spawn 'error' events", async () => {
@@ -146,7 +166,7 @@ test("runSg reports spawn 'error' events", async () => {
     { pattern: "a", lang: "go" },
     { sgPath: "/fake/sg", spawnImpl: fakeSpawnFactory({ emitError: "ENOENT" }) }
   )
-  assert.match(r.error, /ENOENT/)
+  assert.match(r.error ?? "", /ENOENT/)
 })
 
 test("runSg truncates when output exceeds maxBuffer", async () => {
@@ -164,7 +184,7 @@ test("runSg times out a hung process", async () => {
     { sgPath: "/fake/sg", spawnImpl: fakeSpawnFactory({ hang: true }), timeoutMs: 20 }
   )
   assert.equal(r.truncated, true)
-  assert.match(r.error, /timed out/)
+  assert.match(r.error ?? "", /timed out/)
 })
 
 test("runSg catches a synchronous spawn throw", async () => {
@@ -177,5 +197,5 @@ test("runSg catches a synchronous spawn throw", async () => {
       },
     }
   )
-  assert.match(r.error, /spawn EACCES/)
+  assert.match(r.error ?? "", /spawn EACCES/)
 })

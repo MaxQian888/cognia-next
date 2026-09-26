@@ -17,7 +17,7 @@ import { processTools, createProcessTools } from "../src/tools/builtin/process/i
 import { environmentTools } from "./environment.mjs"
 import { shellAdvancedTools, createShellAdvancedTools } from "./shell-advanced.mjs"
 import { terminalReplTools, createTerminalReplTools } from "./terminal-repl-tool.mjs"
-import { astGrepTools, createAstGrepTools } from "./ast-grep/index.mjs"
+import { astGrepTools, createAstGrepTools } from "../src/tools/builtin/ast-grep/index.ts"
 import { clonedepsTools } from "./clonedeps/index.mjs"
 import { webcloneTools } from "./webclone/index.mjs"
 import { createLspTools } from "./lsp.mjs"

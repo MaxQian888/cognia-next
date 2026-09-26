@@ -8,21 +8,21 @@
 // The result is cached for the process lifetime; callers return a clean
 // structured error when this resolves to null (never crash).
 
-import { spawnInProcessSandbox as spawn } from "../../src/platform/process/exec.ts"
+import { spawnInProcessSandbox as spawn } from "../../../platform/process/exec.ts"
 import { createRequire } from "node:module"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-/** @type {string | null | undefined} undefined = not probed yet */
-let cachedPath
+/** `undefined` = not probed yet. */
+let cachedPath: string | null | undefined
 
 /** Reset the cache (tests only). */
-export function __resetAstGrepCache() {
+export function __resetAstGrepCache(): void {
   cachedPath = undefined
 }
 
-function exeName(base) {
+function exeName(base: string): string {
   return process.platform === "win32" ? `${base}.exe` : base
 }
 
@@ -32,10 +32,9 @@ function exeName(base) {
  * resolve its binary the same way esbuild / @vscode/ripgrep do.
  * @returns {string | undefined}
  */
-function platformPackage(platform, arch) {
+function platformPackage(platform: string, arch: string): string | undefined {
   const key = `${platform}-${arch}`
-  /** @type {Record<string, string>} */
-  const map = {
+  const map: Record<string, string> = {
     "darwin-arm64": "@ast-grep/cli-darwin-arm64",
     "darwin-x64": "@ast-grep/cli-darwin-x64",
     "linux-x64": "@ast-grep/cli-linux-x64-gnu",
@@ -112,18 +111,18 @@ export function stagedBinaryPath(moduleUrl = import.meta.url, executablePath = p
  * @param {string} name
  * @returns {Promise<string | null>}
  */
-function pathLookup(name) {
-  const [cmd, args] =
+function pathLookup(name: string): Promise<string | null> {
+  const [cmd, args]: [string, string[]] =
     process.platform === "win32" ? ["where", [name]] : ["sh", ["-c", `command -v ${name}`]]
-  return new Promise((resolve) => {
+  return new Promise<string | null>((resolve) => {
     let settled = false
-    const finish = (val) => {
+    const finish = (val: string | null) => {
       if (!settled) {
         settled = true
         resolve(val)
       }
     }
-    let child
+    let child: ReturnType<typeof spawn>
     try {
       child = spawn(cmd, args, { windowsHide: true })
     } catch {
@@ -138,14 +137,14 @@ function pathLookup(name) {
       }
       finish(null)
     }, 5_000)
-    child.stdout?.on("data", (chunk) => {
+    child.stdout?.on("data", (chunk: Buffer | string) => {
       out += chunk
     })
     child.on("error", () => {
       clearTimeout(timer)
       finish(null)
     })
-    child.on("close", (code) => {
+    child.on("close", (code: number | null) => {
       clearTimeout(timer)
       if (code === 0) {
         const first = out.split(/\r?\n/).find((l) => l.trim().length > 0)
@@ -156,7 +155,7 @@ function pathLookup(name) {
   })
 }
 
-function knownLocations() {
+function knownLocations(): string[] {
   const home = process.env.USERPROFILE ?? process.env.HOME ?? ""
   if (process.platform === "win32") {
     const local = process.env.LOCALAPPDATA ?? ""
@@ -165,16 +164,18 @@ function knownLocations() {
       home && path.join(home, ".cargo", "bin", "ast-grep.exe"),
       local && path.join(local, "Microsoft", "WinGet", "Links", "ast-grep.exe"),
       "C:\\ProgramData\\chocolatey\\bin\\ast-grep.exe",
-    ].filter(Boolean)
+    ].filter((p): p is string => Boolean(p))
   }
-  return [home && path.join(home, ".cargo", "bin", "ast-grep")].filter(Boolean)
+  return [home && path.join(home, ".cargo", "bin", "ast-grep")].filter((p): p is string =>
+    Boolean(p)
+  )
 }
 
 /**
  * Resolve the ast-grep binary path, or null when unavailable. Cached.
  * @returns {Promise<string | null>}
  */
-export async function detectAstGrep() {
+export async function detectAstGrep(): Promise<string | null> {
   if (cachedPath !== undefined) return cachedPath
 
   const override = process.env.COGNIA_AST_GREP_PATH

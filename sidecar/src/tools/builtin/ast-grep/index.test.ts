@@ -7,12 +7,15 @@ import {
   astGrepReplaceTool,
   AST_GREP_TOOL_NAMES,
   __testExports,
-} from "./index.mjs"
+} from "./index.ts"
+import { firstText } from "../../../../test-support/tool-result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
+import type { SgResult, SgRunOptions } from "./run.ts"
 
 const { execAstGrepSearch, execAstGrepReplace } = __testExports
 
-function textOf(result) {
-  return result.content[0].text
+function textOf(result: ToolResult): string {
+  return firstText(result)
 }
 
 test("category exports the two tools in stable order", () => {
@@ -26,7 +29,7 @@ test("category exports the two tools in stable order", () => {
 })
 
 test("execAstGrepSearch formats matches via injected runner", async () => {
-  const run = async (opts) => {
+  const run = async (opts: SgRunOptions): Promise<SgResult> => {
     assert.equal(opts.pattern, "console.log($M)")
     assert.equal(opts.lang, "typescript")
     return {
@@ -46,7 +49,7 @@ test("execAstGrepSearch formats matches via injected runner", async () => {
 })
 
 test("execAstGrepSearch appends a hint on an empty result for a malformed pattern", async () => {
-  const run = async () => ({ matches: [], totalMatches: 0 })
+  const run = async (): Promise<SgResult> => ({ matches: [], totalMatches: 0 })
   const r = await execAstGrepSearch({ pattern: "function $NAME", lang: "typescript" }, { run })
   assert.ok(!r.isError)
   assert.match(textOf(r), /No matches found/)
@@ -54,14 +57,18 @@ test("execAstGrepSearch appends a hint on an empty result for a malformed patter
 })
 
 test("execAstGrepSearch surfaces runner errors as tool errors", async () => {
-  const run = async () => ({ matches: [], totalMatches: 0, error: "ast-grep is not available" })
+  const run = async (): Promise<SgResult> => ({
+    matches: [],
+    totalMatches: 0,
+    error: "ast-grep is not available",
+  })
   const r = await execAstGrepSearch({ pattern: "a", lang: "go" }, { run })
   assert.equal(r.isError, true)
   assert.match(textOf(r), /not available/)
 })
 
 test("execAstGrepSearch catches a thrown runner", async () => {
-  const run = async () => {
+  const run = async (): Promise<SgResult> => {
     throw new Error("kaboom")
   }
   const r = await execAstGrepSearch({ pattern: "a", lang: "go" }, { run })
@@ -70,8 +77,8 @@ test("execAstGrepSearch catches a thrown runner", async () => {
 })
 
 test("execAstGrepReplace defaults to dry-run (no disk write)", async () => {
-  let seen
-  const run = async (opts) => {
+  let seen: SgRunOptions | undefined
+  const run = async (opts: SgRunOptions): Promise<SgResult> => {
     seen = opts
     return {
       matches: [
@@ -85,17 +92,16 @@ test("execAstGrepReplace defaults to dry-run (no disk write)", async () => {
       totalMatches: 1,
     }
   }
-  const r = await execAstGrepReplace(
-    { pattern: "console.log($M)", rewrite: "logger.info($M)", lang: "typescript" },
-    { run }
-  )
-  assert.equal(seen.updateAll, false) // dry run → do not write
+  // No `dry_run`: exercises the handler's own fallback, not the schema default.
+  const input = { pattern: "console.log($M)", rewrite: "logger.info($M)", lang: "typescript" }
+  const r = await execAstGrepReplace(input as Parameters<typeof execAstGrepReplace>[0], { run })
+  assert.equal(seen?.updateAll, false) // dry run → do not write
   assert.match(textOf(r), /\[DRY RUN\]/)
 })
 
 test("execAstGrepReplace with dry_run:false writes (updateAll true)", async () => {
-  let seen
-  const run = async (opts) => {
+  let seen: SgRunOptions | undefined
+  const run = async (opts: SgRunOptions): Promise<SgResult> => {
     seen = opts
     return {
       matches: [
@@ -113,20 +119,20 @@ test("execAstGrepReplace with dry_run:false writes (updateAll true)", async () =
     { pattern: "a", rewrite: "b", lang: "rust", dry_run: false },
     { run }
   )
-  assert.equal(seen.updateAll, true)
+  assert.equal(seen?.updateAll, true)
   assert.match(textOf(r), /\[APPLIED\]/)
 })
 
 test("execAstGrepReplace surfaces runner errors and thrown runners", async () => {
   const err = await execAstGrepReplace(
-    { pattern: "a", rewrite: "b", lang: "go" },
+    { pattern: "a", rewrite: "b", lang: "go", dry_run: true },
     { run: async () => ({ matches: [], totalMatches: 0, error: "bad lang" }) }
   )
   assert.equal(err.isError, true)
   assert.match(textOf(err), /bad lang/)
 
   const thrown = await execAstGrepReplace(
-    { pattern: "a", rewrite: "b", lang: "go" },
+    { pattern: "a", rewrite: "b", lang: "go", dry_run: true },
     {
       run: async () => {
         throw new Error("nope")

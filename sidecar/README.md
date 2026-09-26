@@ -152,6 +152,7 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/git/*` (+ tests)                                          | `src/tools/builtin/git/*`                                          | 8a          |
 | `builtin-tools/file-ops/*` (+ tests)                                     | `src/tools/builtin/file-extras/*`                                  | 8b          |
 | `builtin-tools/process/*` (+ tests)                                      | `src/tools/builtin/process/*`                                      | 8c          |
+| `builtin-tools/ast-grep/*` (+ tests)                                     | `src/tools/builtin/ast-grep/*`                                     | 8d          |
 
 ## Scripts (run from repo root)
 
