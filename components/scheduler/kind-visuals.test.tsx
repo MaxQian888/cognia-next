@@ -62,6 +62,10 @@ describe("kind visuals", () => {
       "Backup completed"
     )
     expect(result.current({ type: "event", eventType: "outbound.queue" })).toBe("outbound.queue")
+    // The connector outbound rollup's trigger has a label, not a raw id.
+    expect(result.current({ type: "event", eventType: "connector:outbound" })).toBe(
+      "When a message is queued to send"
+    )
     expect(result.current({ type: "once" })).toBe("One Time")
     expect(result.current({ type: "once", runAtMs: Date.UTC(2026, 0, 1) })).toMatch(/2026|1\//)
   })

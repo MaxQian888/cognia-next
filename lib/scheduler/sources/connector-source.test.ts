@@ -95,6 +95,13 @@ describe("toUnifiedOutboundQueue", () => {
     expect(unified.kind).toBe("connector")
   })
 
+  it("names its trigger with a colon id the trigger column can label", () => {
+    expect(toUnifiedOutboundQueue(0).triggerSummary).toEqual({
+      type: "event",
+      eventType: "connector:outbound",
+    })
+  })
+
   it("marks the rollup as read-only (no actions surfaced)", () => {
     expect(toUnifiedOutboundQueue(0).capabilities).toEqual({
       runNow: false,

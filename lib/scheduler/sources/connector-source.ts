@@ -67,6 +67,12 @@ export const CONNECTOR_DIGEST_TYPE = "connection:scheduled:digest"
  */
 export const CONNECTOR_QUEUE_SOURCE_ID = "outbound:queue"
 
+/**
+ * The rollup's trigger, for display only: nothing emits it, and the row is
+ * read-only. Labelled under `scheduler.eventTypePresets`.
+ */
+export const CONNECTOR_OUTBOUND_EVENT = "connector:outbound"
+
 export interface ConnectorSourceScheduler {
   updateTask(taskId: string, input: UpdateScheduledTaskInput): Promise<ScheduledTask | null>
   deleteTask(taskId: string): Promise<boolean>
@@ -330,7 +336,10 @@ export function toUnifiedOutboundQueue(queueLength: number): UnifiedScheduledIte
     description: "Connector outbound delivery queue",
     descriptionKey: "unifiedNames.outboundQueueDescription",
     status: queueLength > 0 ? "active" : "unknown",
-    triggerSummary: { type: "event", eventType: "outbound.queue" },
+    // A colon id so the trigger column reads its preset label ("When a
+    // message is queued to send"). The dotted "outbound.queue" could not be a
+    // message key, so the row printed the raw id.
+    triggerSummary: { type: "event", eventType: CONNECTOR_OUTBOUND_EVENT },
     origin: {
       tableName: "outboundQueue",
       // `connectionsHref` owns the param spelling: the hand-written

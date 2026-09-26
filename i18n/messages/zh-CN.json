@@ -31426,6 +31426,7 @@
       "agent:completed": "代理任务完成",
       "backup:completed": "备份完成",
       "backup:needed": "需要备份",
+      "connector:outbound": "有消息待发送时",
       "custom": "自定义",
       "session:completed": "会话已结束",
       "session:created": "会话已创建",

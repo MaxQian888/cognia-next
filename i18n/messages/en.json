@@ -31426,6 +31426,7 @@
       "agent:completed": "Agent completed",
       "backup:completed": "Backup completed",
       "backup:needed": "Backup needed",
+      "connector:outbound": "When a message is queued to send",
       "custom": "Custom",
       "session:completed": "Session completed",
       "session:created": "Session created",
