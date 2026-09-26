@@ -14,18 +14,12 @@ import { query } from "@anthropic-ai/claude-agent-sdk"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { traceAsyncIterable } from "../src/platform/telemetry/index.ts"
 import { randomUUID } from "node:crypto"
-import {
-  buildCogniaToolsServer,
-  namesForDisabledCategories,
-  READ_ONLY_TOOL_NAMES,
-  SERVER_NAME as BUILTIN_SERVER_NAME,
-} from "../builtin-tools/index.mjs"
+import { buildCogniaToolsServer, namesForDisabledCategories } from "../builtin-tools/index.mjs"
+import { BUILTIN_SERVER_NAME, READ_ONLY_TOOL_NAMES } from "../src/policy/tool-catalog/catalog.ts"
+import { ASK_USER_TOOL_NAME, PLUGIN_TOOLS_SERVER_NAME } from "../src/policy/tool-catalog/names.ts"
 import { classifyPlanMode } from "../src/policy/plan-mode.ts"
 import { buildA2UIBridgeServer, SERVER_NAME as A2UI_SERVER_NAME } from "../a2ui-tools/index.mjs"
-import {
-  buildPluginToolsServer,
-  SERVER_NAME as PLUGIN_TOOLS_SERVER_NAME,
-} from "../builtin-tools/plugin-tools.mjs"
+import { buildPluginToolsServer } from "../builtin-tools/plugin-tools.mjs"
 import {
   modelPluginToolNameList,
   restorePluginToolName,
@@ -70,10 +64,6 @@ import {
 } from "./claude-sdk-options.mjs"
 import { sessionStoreFromSendOptions } from "./session-store.mjs"
 import { warmPool } from "./prewarm.mjs"
-
-/** Bare name of the `ask_user` elicitation tool (namespaced by the sidecar as
- * `mcp__cognia-plugin-tools__ask_user`). */
-const ASK_USER_TOOL_NAME = "ask_user"
 
 /**
  * True when a (possibly namespaced) tool name refers to the `ask_user`

@@ -6,7 +6,6 @@ import {
   modelPluginToolName,
   modelPluginToolNameList,
   planPluginToolNames,
-  qualifiedPluginToolName,
   restorePluginToolName,
   restorePluginToolNamesInSdkMessage,
 } from "./plugin-aliases.ts"
@@ -38,10 +37,6 @@ test("planPluginToolNames keeps a renamed tool distinct from a safe one it would
 
 test("qualified names split and restore on the plugin server only", () => {
   const aliases = new Map([["ocr_extract", "ocr.extract"]])
-  assert.equal(
-    qualifiedPluginToolName(SERVER, "ocr.extract"),
-    "mcp__cognia-plugin-tools__ocr.extract"
-  )
   assert.equal(bareNameOnServer(SERVER, "mcp__cognia-plugin-tools__ocr_extract"), "ocr_extract")
   assert.equal(bareNameOnServer(SERVER, "mcp__other__ocr_extract"), null)
   assert.equal(bareNameOnServer(SERVER, "Read"), null)

@@ -18,6 +18,8 @@
 // `PLAN_ALLOWED_HOST_TOOLS` in `cli/src/agent/tool-host/policy.ts`) that had
 // already drifted by one entry.
 
+import { splitToolName } from "./tool-catalog/names.ts"
+
 /**
  * Host/plugin tools permitted in plan mode.
  *
@@ -33,15 +35,6 @@ export const PLAN_ALLOWED_PLUGIN_TOOLS: ReadonlySet<string> = new Set([
   "load_skill",
   "load_skill_resource",
 ])
-
-/** Split `mcp__<server>__<tool>` into its parts; bare names pass through. */
-export function splitToolName(toolName: unknown): { server: string | null; bare: string } {
-  const parts = String(toolName).split("__")
-  return {
-    server: parts.length >= 3 ? (parts[1] ?? null) : null,
-    bare: parts.length >= 3 ? parts.slice(2).join("__") : String(toolName),
-  }
-}
 
 export interface PlanModeOptions {
   builtinServerName: string

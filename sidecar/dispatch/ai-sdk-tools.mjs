@@ -17,23 +17,22 @@ import { z } from "zod"
 import { randomUUID } from "node:crypto"
 import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 
+import { collectCogniaToolDefs } from "../builtin-tools/index.mjs"
 import {
-  collectCogniaToolDefs,
-  SERVER_NAME,
+  BUILTIN_SERVER_NAME as SERVER_NAME,
   READ_ONLY_TOOL_NAMES,
-} from "../builtin-tools/index.mjs"
-import { EXIT_PLAN_TOOL_NAME } from "../builtin-tools/exit-plan.mjs"
+} from "../src/policy/tool-catalog/catalog.ts"
+import {
+  ASK_USER_TOOL_NAME,
+  EXIT_PLAN_TOOL_NAME,
+  PLUGIN_TOOLS_SERVER_NAME,
+} from "../src/policy/tool-catalog/names.ts"
 import { PLAN_ALLOWED_PLUGIN_TOOLS } from "../src/policy/plan-mode.ts"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   toolBudgetMessage,
 } from "../builtin-tools/read-only-timeout.mjs"
 
-/** The `ask_user` elicitation tool name (a plugin tool, namespaced
- * `mcp__cognia-plugin-tools__ask_user`). It only pauses to ask the user a
- * question — no file/exec side effects — so it is permitted in plan mode for
- * parity with the Anthropic SDK, letting the agent clarify before it plans. */
-const ASK_USER_TOOL_NAME = "ask_user"
 import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { resolveForToolCall } from "../src/policy/permission/resolver.ts"
 import {
@@ -44,7 +43,6 @@ import { assertToolCallWithinRoots } from "../src/policy/confinement/enforce.ts"
 import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { markAiSdkToolSource } from "./ai-sdk-tool-search.mjs"
 
-const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
 const TOOL_RESULT_PII_ERROR = "Tool result blocked by the PII redaction gate"
 
 /**

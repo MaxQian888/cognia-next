@@ -22,8 +22,9 @@ import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
 import { toolError, toolText } from "../src/tools/kernel/result.ts"
 import { planPluginToolNames } from "../src/policy/tool-catalog/plugin-aliases.ts"
+import { PLUGIN_TOOLS_SERVER_NAME } from "../src/policy/tool-catalog/names.ts"
 
-export const SERVER_NAME = "cognia-plugin-tools"
+export const SERVER_NAME = PLUGIN_TOOLS_SERVER_NAME
 export const SERVER_VERSION = "0.1.0"
 
 const DEFAULT_PLUGIN_TOOL_TIMEOUT_MS = 120_000

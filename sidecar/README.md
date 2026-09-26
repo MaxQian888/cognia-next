@@ -105,6 +105,8 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/confinement.mjs` (credential paths)                       | `src/policy/confinement/secret-paths.ts`                           | 4b          |
 | `builtin-tools/confinement.mjs` (verdicts, tool classes)                 | `src/policy/confinement/classify.ts`                               | 4b          |
 | `builtin-tools/confinement.mjs` (tool-body guards)                       | `src/policy/confinement/enforce.ts`                                | 4b          |
+| `builtin-tools/index.mjs` (`SERVER_NAME`, `READ_ONLY_TOOL_NAMES`, …)     | `src/policy/tool-catalog/catalog.ts` (`BUILTIN_SERVER_NAME`, …)    | 4c          |
+| `ask_user`, `exit_plan_mode`, plugin-tools server name constants         | `src/policy/tool-catalog/names.ts`                                 | 4c          |
 
 ## Scripts (run from repo root)
 

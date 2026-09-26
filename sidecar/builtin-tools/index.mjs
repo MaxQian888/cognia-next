@@ -1,8 +1,8 @@
 // Compose the cognia-tools SDK MCP server.
 //
-// Loads metadata from `lib/settings/builtin-tools-data.json` (shared with
-// the React settings UI) so server name, version, and category-tool
-// associations stay in sync.
+// Server name, version, and category-tool associations come from
+// src/policy/tool-catalog/catalog.ts, which reads the metadata JSON the React
+// settings UI shares.
 //
 // `buildCogniaToolsServer({ enabled })` returns either:
 //   - `null` when no categories are enabled (caller should skip registration)
@@ -10,8 +10,6 @@
 //     `mcpServers` field of the SDK's `query()` options.
 
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk"
-
-import data from "../../lib/settings/builtin-tools-data.json" with { type: "json" }
 
 import { fileExtrasTools } from "./file-ops/index.mjs"
 import { gitTools } from "./git/index.mjs"
@@ -32,6 +30,12 @@ import { createPlanTools } from "./plan-tools.mjs"
 import { codeModeToolDefs } from "./run-code/index.mjs"
 import { isProgrammaticReadOnly } from "./run-code/eligibility.mjs"
 import { bareToolName } from "../src/policy/confinement/classify.ts"
+import {
+  BUILTIN_SERVER_NAME,
+  BUILTIN_SERVER_VERSION,
+  READ_ONLY_TOOL_NAMES,
+  TOOL_NAMES_BY_CATEGORY,
+} from "../src/policy/tool-catalog/catalog.ts"
 import { assertToolCallWithinRoots } from "../src/policy/confinement/enforce.ts"
 import { toolError } from "../src/tools/kernel/result.ts"
 import { withProcessSandbox } from "../src/platform/process/exec.ts"
@@ -92,32 +96,6 @@ const TOOLS_BY_CATEGORY = {
    */
   webclone: webcloneTools,
 }
-
-/**
- * Bare tool names for each category — read from the shared metadata JSON so
- * the sidecar and the UI never disagree about category membership.
- * @type {Record<string, ReadonlyArray<string>>}
- */
-export const TOOL_NAMES_BY_CATEGORY = Object.freeze(
-  Object.fromEntries(data.categories.map((c) => [c.id, c.tools.map((t) => t.name)]))
-)
-
-/**
- * Bare names of the read-only built-in tools (`requiresApproval === false`).
- * Plan mode allows only these and denies every mutating/exec tool, so the
- * non-Anthropic AI-SDK path enforces plan mode instead of trusting the model.
- * @type {ReadonlySet<string>}
- */
-export const READ_ONLY_TOOL_NAMES = Object.freeze(
-  new Set(
-    data.categories.flatMap((c) =>
-      c.tools.filter((t) => t.requiresApproval === false).map((t) => t.name)
-    )
-  )
-)
-
-export const SERVER_NAME = data.serverName
-export const SERVER_VERSION = data.serverVersion
 
 /**
  * Build the in-process SDK MCP server.
@@ -394,8 +372,8 @@ export function buildCogniaToolsServer({
   // No-op unless the renderer resolved a `maxToolResultTokens` budget.
   const capped = wrapDefsWithResultCap(guarded, maxToolResultTokens)
   return createSdkMcpServer({
-    name: SERVER_NAME,
-    version: SERVER_VERSION,
+    name: BUILTIN_SERVER_NAME,
+    version: BUILTIN_SERVER_VERSION,
     tools: wrapNativeToolResults(capped),
     ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
@@ -455,7 +433,7 @@ export function namesForDisabledCategories(enabled, resolvers) {
 }
 
 function namespacedName(toolName) {
-  return `mcp__${SERVER_NAME}__${toolName}`
+  return `mcp__${BUILTIN_SERVER_NAME}__${toolName}`
 }
 
 export { namespacedName }

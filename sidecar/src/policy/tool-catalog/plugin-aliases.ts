@@ -12,6 +12,7 @@
 // hands `canUseTool`, and the messages the SDK streams back.
 
 import { sanitizeToolMap } from "./model-names.ts"
+import { qualifiedToolName } from "./names.ts"
 
 /** A content block as the SDK streams it; only tool_use blocks carry a name. */
 interface ToolUseBlockLike {
@@ -31,11 +32,6 @@ interface SdkMessageLike {
 
 /** Bare `model → original` names for one MCP server's renamed tools. */
 type Aliases = ReadonlyMap<string, string> | undefined | null
-
-/** `mcp__<server>__<tool>` for one bare tool name. */
-export function qualifiedPluginToolName(serverName: string, bareName: string): string {
-  return `mcp__${serverName}__${bareName}`
-}
 
 /**
  * The bare tool name behind a qualified one on `serverName`, or `null` when
@@ -75,7 +71,7 @@ export function restorePluginToolName(aliases: Aliases, serverName: string, name
   const bare = bareNameOnServer(serverName, name)
   if (bare === null) return name
   const original = aliases.get(bare)
-  return original === undefined ? name : qualifiedPluginToolName(serverName, original)
+  return original === undefined ? name : qualifiedToolName(serverName, original)
 }
 
 /**
@@ -87,7 +83,7 @@ export function modelPluginToolName(aliases: Aliases, serverName: string, name: 
   const bare = bareNameOnServer(serverName, name)
   if (bare === null) return name
   for (const [model, original] of aliases) {
-    if (original === bare) return qualifiedPluginToolName(serverName, model)
+    if (original === bare) return qualifiedToolName(serverName, model)
   }
   return name
 }

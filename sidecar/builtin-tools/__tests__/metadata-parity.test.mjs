@@ -11,7 +11,11 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import data from "../../../lib/settings/builtin-tools-data.json" with { type: "json" }
-import { collectCogniaToolDefs, READ_ONLY_TOOL_NAMES, TOOL_NAMES_BY_CATEGORY } from "../index.mjs"
+import { collectCogniaToolDefs } from "../index.mjs"
+import {
+  READ_ONLY_TOOL_NAMES,
+  TOOL_NAMES_BY_CATEGORY,
+} from "../../src/policy/tool-catalog/catalog.ts"
 import { CORE_TOOL_NAMES } from "../core/core-tools.mjs"
 import { CODE_GRAPH_TOOL_NAMES } from "../code/names.mjs"
 

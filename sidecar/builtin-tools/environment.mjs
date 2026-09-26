@@ -19,12 +19,12 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import metadata from "../../lib/settings/builtin-tools-data.json" with { type: "json" }
+import { BUILTIN_SERVER_NAME, BUILTIN_SERVER_VERSION } from "../src/policy/tool-catalog/catalog.ts"
 import { toolError, toolText } from "../src/tools/kernel/result.ts"
 import { runCapped } from "../src/platform/process/exec.ts"
 
 const TOOLS_STARTED_AT = new Date().toISOString()
-const RUNTIME_FINGERPRINT = `${metadata.serverName}@${metadata.serverVersion}:${process.pid}:${TOOLS_STARTED_AT}`
+const RUNTIME_FINGERPRINT = `${BUILTIN_SERVER_NAME}@${BUILTIN_SERVER_VERSION}:${process.pid}:${TOOLS_STARTED_AT}`
 
 const SECRET_RE = /(key|secret|token|password|credential|passwd|api[_-]?key)/i
 
@@ -170,8 +170,8 @@ async function execSystemInfo() {
       homedir: os.homedir(),
       userInfoUsername: safeUser(),
       cogniaTools: {
-        serverName: metadata.serverName,
-        serverVersion: metadata.serverVersion,
+        serverName: BUILTIN_SERVER_NAME,
+        serverVersion: BUILTIN_SERVER_VERSION,
         pid: process.pid,
         startedAt: TOOLS_STARTED_AT,
         runtimeFingerprint: RUNTIME_FINGERPRINT,

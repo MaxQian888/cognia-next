@@ -30,7 +30,7 @@ import type { PermissionVerdict, Ruleset } from "./ruleset"
 /**
  * Server segment plugin-contributed tools are namespaced under on the AI-SDK
  * path (`mcp__cognia-plugin-tools__<tool>`); mirrors `PLUGIN_TOOLS_SERVER_NAME`
- * in `sidecar/dispatch/ai-sdk-tools.mjs`.
+ * in `sidecar/src/policy/tool-catalog/names.ts`.
  */
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
 
