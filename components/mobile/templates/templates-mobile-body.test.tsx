@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 
 let catalogDefinitions: Array<Record<string, unknown>> = []
 const mockPreflight = jest.fn()
@@ -142,6 +142,25 @@ describe("TemplatesMobileBody", () => {
       expect(searchParams.has("q")).toBe(false)
       expect(searchParams.has("domain")).toBe(false)
     })
+  })
+
+  it("leaves the description line out of a card that has none", () => {
+    catalogDefinitions = [
+      definition(),
+      definition({
+        id: "subscription.preset.ai21",
+        domain: "subscription",
+        metadata: { name: "AI21 Labs" },
+        contentHash: "sha256:ai21",
+      }),
+    ]
+    render(<TemplatesMobileBody />)
+    expect(screen.getByText("Take notes")).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId("templates-mobile-card-subscription.preset.ai21")).queryByText(
+        "empty.noDescription"
+      )
+    ).toBeNull()
   })
 
   it("names the screen and gives it a way back to Discover", () => {

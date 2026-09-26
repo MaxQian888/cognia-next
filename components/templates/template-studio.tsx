@@ -1021,9 +1021,15 @@ export function TemplateStudio() {
                           </div>
                         </CardHeader>
                         <CardContent className="space-y-2 text-sm">
-                          <p className="line-clamp-2 text-muted-foreground">
-                            {definition.metadata.description || t("empty.noDescription")}
-                          </p>
+                          {/* Omitted rather than "No description": the
+                              subscription presets have none, and the same
+                              placeholder on every one of them is noise. The
+                              inspector still says it. */}
+                          {definition.metadata.description ? (
+                            <p className="line-clamp-2 text-muted-foreground">
+                              {definition.metadata.description}
+                            </p>
+                          ) : null}
                           <div className="flex flex-wrap gap-1">
                             {/* Which shelf this came from. Ownership beats
                                 provenance, so a built-in you forked into one

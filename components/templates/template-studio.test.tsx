@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 
 let catalogDefinitions: Array<Record<string, unknown>> = []
 // `mock`-prefixed so the hoisted `jest.mock` factories may close over them.
@@ -152,6 +152,36 @@ describe("TemplateStudio", () => {
     // Same column, domain first: the name keeps the card's full width.
     expect(title.parentElement).toBe(domain.parentElement)
     expect(domain.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("leaves the description line out of a card that has none", async () => {
+    catalogDefinitions = [
+      {
+        apiVersion: "cognia.dev/templates/v1",
+        id: "subscription.ai21",
+        domain: "subscription",
+        version: "1.0.0",
+        status: "published",
+        revision: 1,
+        metadata: { name: "AI21 Labs" },
+        payload: {},
+        inputs: [],
+        dependencies: [],
+        capabilities: [],
+        compatibility: { platforms: ["mobile"] },
+        provenance: { source: "builtin", trust: "builtin" },
+        contentHash: "sha256:ai21",
+        baselineHash: "sha256:ai21",
+        createdAt: "2026-07-30T00:00:00.000Z",
+        updatedAt: "2026-07-30T00:00:00.000Z",
+      },
+    ]
+    await act(async () => {
+      render(<TemplateStudio />)
+    })
+    const grid = screen.getByTestId("template-studio-grid")
+    expect(within(grid).getByText("AI21 Labs")).toBeInTheDocument()
+    expect(within(grid).queryByText("empty.noDescription")).toBeNull()
   })
 
   it("selects a catalog definition from a deep link", async () => {

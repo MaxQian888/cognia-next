@@ -261,7 +261,6 @@ export function TemplatesMobileBody() {
                   ? undefined
                   : t(`trust.${definition.provenance.trust}`)
               }
-              fallbackDescription={t("empty.noDescription")}
               onOpen={() => route.setDefinitionId(definition.id)}
             />
           ))
@@ -390,7 +389,6 @@ function TemplateCard({
   domainLabel,
   statusLabel,
   trustLabel,
-  fallbackDescription,
   onOpen,
 }: {
   definition: TemplateDefinitionEnvelope
@@ -398,7 +396,6 @@ function TemplateCard({
   domainLabel: string
   statusLabel: string
   trustLabel?: string
-  fallbackDescription: string
   onOpen: () => void
 }) {
   return (
@@ -415,9 +412,14 @@ function TemplateCard({
             {domainLabel}
           </Badge>
         </span>
-        <span className="line-clamp-2 block text-sm text-muted-foreground">
-          {definition.metadata.description || fallbackDescription}
-        </span>
+        {/* No placeholder line: dozens of subscription presets carry no
+            description, and "No description" on each one tripled the list's
+            length without saying anything. The detail sheet still says it. */}
+        {definition.metadata.description ? (
+          <span className="line-clamp-2 block text-sm text-muted-foreground">
+            {definition.metadata.description}
+          </span>
+        ) : null}
         {/* Scope, version and trust on the card itself. A catalog mixing
             built-ins, plugin contributions and your own forks is unreadable
             when every row looks the same. */}
