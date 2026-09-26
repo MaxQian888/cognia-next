@@ -1,0 +1,65 @@
+# ADR-0196 P4 — the companion's event, push and bridge plumbing: the event bus
+# and its channel catalog, batcher and leases; push tokens, the FCM/APNs
+# dispatchers and their credentials; the request/response bridges to the
+# canonical store (WebView or headless brain); the headless SQLite store and
+# the sync-table registry; and the remote execution context registry. None of
+# it reads companion state, so it sits below the companion core.
+#
+# `src-tauri/src/companion_api` re-exports every module at its old path.
+[package]
+name = "cognia-companion-bus"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Companion event bus, push delivery, store bridges and the remote execution context registry."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_companion_bus"
+path = "src/lib.rs"
+
+[features]
+# ADR-0196 — the two Tauri adapters: `event_bus::register_tauri_event` (a
+# Tauri event forwarded into the bus) and `bridge_transport::WebViewBridgeTransport`
+# (a bridge frame emitted to the WebView). Off by default so the crate builds
+# and tests Tauri-free; `src-tauri` turns it on.
+default = []
+tauri-host = ["dep:tauri"]
+# Test-only accessors the desktop's own tests read across the crate boundary
+# (`cfg(test)` does not reach a dependent crate). `src-tauri` turns it on from
+# its dev-dependencies.
+test-support = []
+
+[dependencies]
+# `managed_client`: the dispatchers' HTTP clients honour the proxy policy.
+cognia-net = { path = "../cognia-net" }
+# FCM service-account and APNs key storage (`push_creds`).
+cognia-secrets = { path = "../cognia-secrets" }
+tauri = { workspace = true, optional = true }
+
+# `http2` for APNs (`http2_prior_knowledge`); the TLS and proxy features come
+# from `cognia-net`'s declaration of the same reqwest.
+reqwest = { workspace = true, features = ["http2", "json"] }
+# APNs provider tokens are ES256 JWTs; FCM exchanges an RS256 assertion.
+jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
+chrono.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+async-trait.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+parking_lot.workspace = true
+once_cell.workspace = true
+log.workspace = true
+thiserror.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+# Keep the push-credential tests off the real OS keyring.
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

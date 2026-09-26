@@ -35,6 +35,7 @@ import {
   splitParams,
   stripRustComments,
 } from "./check-rpc-semantic-parity.mjs"
+import { COMPANION_SOURCES } from "./lib/companion-source-paths.mjs"
 
 // ---------------------------------------------------------------------------
 // Rust source parsing
@@ -1088,7 +1089,7 @@ test("stripRustTestModules drops cfg(test) blocks and keeps the rest", () => {
 test("collectEmittedChannels ignores fixtures inside cfg(test)", () => {
   const emitted = collectEmittedChannels([
     {
-      file: "src-tauri/src/companion_api/event_bus.rs",
+      file: "crates/cognia-companion-bus/src/event_bus.rs",
       source: [
         'fn go() { bus.publish("notification://remote".to_string(), v); }',
         "#[cfg(test)]",
@@ -1121,7 +1122,7 @@ test("collectChannelReferences sees const definitions and template heads", () =>
     { file: "w.rs", source: 'pub const STATUS: &str = "git://status-changed";' },
     { file: "p.ts", source: "emit(`claude://message-${kind}`, payload)" },
     {
-      file: "src-tauri/src/companion_api/event_channels.rs",
+      file: COMPANION_SOURCES.eventChannels,
       source: 'pattern: "ghost://only-in-catalog",',
     },
   ])

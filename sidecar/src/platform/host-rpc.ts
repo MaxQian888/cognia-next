@@ -3,7 +3,7 @@
 //
 // Why this exists rather than reusing `plugin_tool_exec`: that frame is
 // forwarded to and answered by the RENDERER (see `lib/claude/plugin-tool-ipc.ts`
-// and the Companion relay in `src-tauri/src/companion_api/event_bus.rs`). A
+// and the Companion relay in `crates/cognia-companion-bus/src/event_bus.rs`). A
 // renderer-terminated channel cannot serve a headless host, where there is no
 // renderer at all, and it pays an extra hop when a remote client is driving.
 //

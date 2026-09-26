@@ -4,7 +4,7 @@
  * The connector runtime runs on exactly one host at a time — the Tauri
  * desktop webview or the headless brain — and both need to fan events out to
  * paired thin clients through the Rust companion event bus
- * (`src-tauri/src/companion_api/event_channels.rs`). The two hosts reach that
+ * (`crates/cognia-companion-bus/src/event_channels.rs`). The two hosts reach that
  * bus differently:
  *
  *  - Desktop webview: a plain Tauri `emit(topic, payload)`; the Rust side

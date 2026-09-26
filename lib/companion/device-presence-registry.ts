@@ -71,7 +71,7 @@ export type PresenceTransport = "ws" | "rtc"
 /**
  * One live event-plane connection, as the Host's Rust side sees it.
  *
- * Every field is server-minted (`src-tauri/src/companion_api/event_leases.rs`)
+ * Every field is server-minted (`crates/cognia-companion-bus/src/event_leases.rs`)
  * and arrives on `session_attach` as `callerEventStreams`. The renderer used to
  * mint its own synthetic id for a single imagined connection, which could not
  * express the two states that matter: a device holding two transports at once,

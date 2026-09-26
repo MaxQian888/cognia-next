@@ -2020,6 +2020,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-companion-bus"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "cognia-net",
+ "cognia-secrets",
+ "jsonwebtoken",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "reqwest 0.13.4",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "cognia-companion-connectivity"
 version = "0.1.0"
 dependencies = [
@@ -2418,6 +2441,7 @@ dependencies = [
  "cognia-agents",
  "cognia-automation",
  "cognia-ccswitch",
+ "cognia-companion-bus",
  "cognia-companion-connectivity",
  "cognia-connectors",
  "cognia-core",

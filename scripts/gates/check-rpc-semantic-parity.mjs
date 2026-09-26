@@ -764,7 +764,7 @@ export function parseDispositionNames(ledger) {
 
 /** Extract a `const NAME: &[&str] = &[ … ];` string array from Rust. */
 /**
- * Parse `EVENT_CHANNELS` out of `companion_api/event_channels.rs`.
+ * Parse `EVENT_CHANNELS` out of `cognia-companion-bus/src/event_channels.rs`.
  *
  * Read from the Rust rather than mirrored into a JSON asset on purpose: the
  * catalog is what the running host enforces, and a mirrored copy is one more

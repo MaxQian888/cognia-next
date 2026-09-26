@@ -71,7 +71,7 @@ const TIERS: Record<string, Tier> = {
   // ADR-0127 §5 — the two seedable acceptance scenarios. The streaming
   // (100 tok/s) and Companion-frames bars are pinned deterministically by
   // `hooks/chat/stream-coalescing.test.ts` and
-  // `src-tauri/src/companion_api/event_batcher.rs`, not here.
+  // `crates/cognia-companion-bus/src/event_batcher.rs`, not here.
   "adr0127-long": {
     // 1000 turns ⇒ 2000 messages, 40 images, 12 mermaid charts.
     turns: 1000,

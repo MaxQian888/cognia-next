@@ -56,21 +56,21 @@ manifest 附带诊断性的写入者元数据（`writer`：pid、host、CLI 版�
 
 ## 原生 SQLite 归属
 
-| 存储类别                                 | 源码负责人                                                    |
-| ---------------------------------------- | ------------------------------------------------------------- |
-| 向量与 payload                           | `crates/cognia-vector/src/db.rs`                              |
-| Agent 会话、转录和摘要                   | `crates/cognia-agent-state/src/agent_session_store/`          |
-| Provider profile 和目录修订              | `crates/cognia-agent-state/src/provider_profiles/`            |
-| 任务和监视器                             | `crates/cognia-jobs/src/store.rs`                             |
-| Scheduler 元数据                         | `crates/cognia-scheduling/src/scheduler/metadata_store.rs`    |
-| Workflow 运行、等待点、游标及事件        | `crates/cognia-scheduling/src/workflow/run_mirror.rs`         |
-| Integration spool 和 deadletter          | `crates/cognia-scheduling/src/workflow/integration_spool.rs`  |
-| 任务 workspace 注册、bundle 和 blob 文件 | `crates/cognia-task-workspace/src/store.rs`                   |
-| 每插件 SQL 和 managed IDE 状态           | `crates/cognia-plugin-runtime/src/api_bridge.rs`              |
-| Companion 消息与会话                     | `src-tauri/src/companion_api/store.rs`                        |
-| Companion 安全状态                       | `src-tauri/src/companion_api/security_store.rs`               |
+| 存储类别                                 | 源码负责人                                                                 |
+| ---------------------------------------- | -------------------------------------------------------------------------- |
+| 向量与 payload                           | `crates/cognia-vector/src/db.rs`                                           |
+| Agent 会话、转录和摘要                   | `crates/cognia-agent-state/src/agent_session_store/`                       |
+| Provider profile 和目录修订              | `crates/cognia-agent-state/src/provider_profiles/`                         |
+| 任务和监视器                             | `crates/cognia-jobs/src/store.rs`                                          |
+| Scheduler 元数据                         | `crates/cognia-scheduling/src/scheduler/metadata_store.rs`                 |
+| Workflow 运行、等待点、游标及事件        | `crates/cognia-scheduling/src/workflow/run_mirror.rs`                      |
+| Integration spool 和 deadletter          | `crates/cognia-scheduling/src/workflow/integration_spool.rs`               |
+| 任务 workspace 注册、bundle 和 blob 文件 | `crates/cognia-task-workspace/src/store.rs`                                |
+| 每插件 SQL 和 managed IDE 状态           | `crates/cognia-plugin-runtime/src/api_bridge.rs`                           |
+| Companion 消息与会话                     | `crates/cognia-companion-bus/src/store.rs`                                 |
+| Companion 安全状态                       | `src-tauri/src/companion_api/security_store.rs`                            |
 | Signaling 注册                           | `crates/cognia-companion-connectivity/src/signaling/registration_store.rs` |
-| RPC 幂等凭据                             | `src-tauri/src/companion_api/idempotency.rs`                  |
+| RPC 幂等凭据                             | `src-tauri/src/companion_api/idempotency.rs`                               |
 
 Integration spool 与 workflow mirror 共用数据库路径，Companion AppStore 和 SecurityStore 也可能共用文件。负责人数量和数据库文件数量应分别统计，连接设置可能影响其他负责人。当操作仍共享单连接互斥锁时，WAL 不会使其自动并行。
 

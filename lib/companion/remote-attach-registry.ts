@@ -84,7 +84,7 @@ export interface AttachSessionOptions {
   /**
    * The caller's live event-plane streams, exactly as the RPC boundary
    * reported them (`callerEventStreams`, minted in
-   * `src-tauri/src/companion_api/event_leases.rs`). Server-bound on purpose: a
+   * `crates/cognia-companion-bus/src/event_leases.rs`). Server-bound on purpose: a
    * self-asserted value would let a device claim it can hear a run it has no
    * stream for.
    */

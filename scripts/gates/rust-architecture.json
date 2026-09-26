@@ -22,6 +22,7 @@
     "cognia-provider-diagnostics": "platform",
     "cognia-exec-sandbox": "platform",
     "cognia-companion-connectivity": "platform",
+    "cognia-companion-bus": "platform",
 
     "cognia-git": "domain",
     "cognia-ocr": "domain",
@@ -99,7 +100,7 @@
   "appShell": {
     "package": "cognia-next",
     "srcDir": "src-tauri/src",
-    "maxLoc": 186913,
+    "maxLoc": 179529,
     "locSlack": 4000,
     "locBlocking": false,
     "modules": [

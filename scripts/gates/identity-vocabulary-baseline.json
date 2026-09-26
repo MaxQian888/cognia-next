@@ -183,6 +183,9 @@
     "crates/cognia-automation/src/automation/locked_use.rs": {
       "bareAccountIdRust": 6
     },
+    "crates/cognia-companion-bus/src/sync_bridge.rs": {
+      "bareAccountIdRust": 8
+    },
     "crates/cognia-files/src/files.rs": {
       "bareAccountIdRust": 10
     },
@@ -887,9 +890,6 @@
     },
     "src-tauri/src/companion_api/signaling/dispatch.rs": {
       "bareAccountIdRust": 1
-    },
-    "src-tauri/src/companion_api/sync_bridge.rs": {
-      "bareAccountIdRust": 8
     },
     "src-tauri/src/companion_api/workflow_api.rs": {
       "bareAccountIdRust": 5

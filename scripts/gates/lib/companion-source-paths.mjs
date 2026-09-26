@@ -16,6 +16,8 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 export const COMPANION_API_DIR = "src-tauri/src/companion_api"
+/** `cognia-companion-bus`: the event bus, channel catalog, store bridges. */
+export const COMPANION_BUS_DIR = "crates/cognia-companion-bus/src"
 
 export const COMPANION_SOURCES = Object.freeze({
   /** The RPC router: `KNOWN_COMMANDS`, `SERVICE_ONLY_COMMANDS`, the core arms. */
@@ -24,7 +26,7 @@ export const COMPANION_SOURCES = Object.freeze({
   rpcFamilyDir: `${COMPANION_API_DIR}/rpc`,
   /** Keys its arms on the same command literals as the RPC families. */
   browserGateway: `${COMPANION_API_DIR}/browser_gateway.rs`,
-  eventChannels: `${COMPANION_API_DIR}/event_channels.rs`,
+  eventChannels: `${COMPANION_BUS_DIR}/event_channels.rs`,
   /** The listener: route mounts and `DEFAULT_PORT`. */
   server: `${COMPANION_API_DIR}/server.rs`,
   api: `${COMPANION_API_DIR}/api.rs`,
@@ -34,7 +36,7 @@ export const COMPANION_SOURCES = Object.freeze({
   /** Written by `gen-companion-api.mjs`. */
   knownCommands: `${COMPANION_API_DIR}/generated/known_commands.rs`,
   acpHandler: `${COMPANION_API_DIR}/acp/handler.rs`,
-  syncRegistry: `${COMPANION_API_DIR}/sync_registry.rs`,
+  syncRegistry: `${COMPANION_BUS_DIR}/sync_registry.rs`,
   /**
    * Not under `companion_api`: `rpc/sftp.rs` hands off to this service, which
    * the desktop's own `#[tauri::command]` wrappers share, so the SFTP arms

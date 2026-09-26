@@ -330,7 +330,7 @@ impl PushDispatcher for ApnsDispatcher {
 /// `String`, and this keeps the conversion in one place rather than at each of
 /// the three call sites.
 fn managed_client(builder: reqwest::ClientBuilder, target: &str) -> Result<Client, String> {
-    crate::proxy_config::managed_client(builder, target).map_err(|error| error.to_string())
+    cognia_net::proxy_config::managed_client(builder, target).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

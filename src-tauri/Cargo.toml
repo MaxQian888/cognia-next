@@ -96,6 +96,11 @@ cognia-provider-diagnostics = { path = "../crates/cognia-provider-diagnostics" }
 # WebRTC peer, envelope and framing. `companion_api` re-exports each module at
 # its old path.
 cognia-companion-connectivity = { path = "../crates/cognia-companion-connectivity" }
+# ADR-0196 P4 — the companion's event bus, push delivery, store bridges and
+# remote execution contexts. `tauri-host` adds the two Tauri adapters
+# (`register_tauri_event`, `WebViewBridgeTransport`); `companion_api`
+# re-exports each module at its old path.
+cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["tauri-host"] }
 # Native local-video metadata, frame extraction, trimming, and analysis.
 cognia-media = { path = "../crates/cognia-media", features = ["tauri-host"] }
 # ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased
@@ -518,6 +523,9 @@ keyring = { version = "4", features = ["zbus-secret-service-keyring-store"] }
 # global becomes in-memory when tests build (dev-dep feature unification);
 # production builds never see the feature.
 cognia-secrets = { path = "../crates/cognia-secrets", features = ["test-inmemory"] }
+# `sync_bridge::pending_count`, which `ws_bridge`'s tests read across the crate
+# boundary.
+cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["test-support"] }
 # HTTP mock server for connectors::http_client and attachments tests.
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)

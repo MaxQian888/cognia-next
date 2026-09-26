@@ -126,15 +126,15 @@ impl PushCredStore for KeyringPushCredStore {
 }
 
 fn keyring_get(account: &str) -> Result<Option<String>, String> {
-    crate::secret_store::get(SERVICE, account)
+    cognia_secrets::secret_store::get(SERVICE, account)
 }
 
 fn keyring_set(account: &str, raw: &str) -> Result<(), String> {
-    crate::secret_store::set(SERVICE, account, raw)
+    cognia_secrets::secret_store::set(SERVICE, account, raw)
 }
 
 fn keyring_delete(account: &str) -> Result<(), String> {
-    crate::secret_store::delete(SERVICE, account)
+    cognia_secrets::secret_store::delete(SERVICE, account)
 }
 
 // ---------------------------------------------------------------------------

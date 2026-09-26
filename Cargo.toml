@@ -57,6 +57,9 @@ members = [
   # ADR-0196 P4 — the companion's transport leaves (TLS identity, mDNS/mesh,
   # tunnel, WebRTC peer/envelope/framing), out of `companion_api`.
   "crates/cognia-companion-connectivity",
+  # ADR-0196 P4 — the companion's event bus, push delivery, store bridges and
+  # remote execution contexts, out of `companion_api`.
+  "crates/cognia-companion-bus",
   # ADR-0182 — runtime environments: EnvironmentSpec, the two-level image
   # catalog, admission policy and the tenant environment store.
   "crates/cognia-environment",

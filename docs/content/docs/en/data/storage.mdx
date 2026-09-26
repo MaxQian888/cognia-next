@@ -57,21 +57,21 @@ The ledger path in `cli/src/serve/persistence/` has its own snapshot/journal and
 
 ## Native SQLite ownership
 
-| Store family                                    | Source owner                                                  |
-| ----------------------------------------------- | ------------------------------------------------------------- |
-| Vectors and payloads                            | `crates/cognia-vector/src/db.rs`                              |
-| Agent sessions, transcripts and summaries       | `crates/cognia-agent-state/src/agent_session_store/`          |
-| Provider profiles and catalog revisions         | `crates/cognia-agent-state/src/provider_profiles/`            |
-| Jobs and monitors                               | `crates/cognia-jobs/src/store.rs`                             |
-| Scheduler metadata                              | `crates/cognia-scheduling/src/scheduler/metadata_store.rs`    |
-| Workflow runs, waitpoints, cursors and events   | `crates/cognia-scheduling/src/workflow/run_mirror.rs`         |
-| Integration spool and deadletters               | `crates/cognia-scheduling/src/workflow/integration_spool.rs`  |
-| Task workspace registry, bundles and blob files | `crates/cognia-task-workspace/src/store.rs`                   |
-| Per-plugin SQL and managed IDE state            | `crates/cognia-plugin-runtime/src/api_bridge.rs`              |
-| Companion messages and sessions                 | `src-tauri/src/companion_api/store.rs`                        |
-| Companion security state                        | `src-tauri/src/companion_api/security_store.rs`               |
+| Store family                                    | Source owner                                                               |
+| ----------------------------------------------- | -------------------------------------------------------------------------- |
+| Vectors and payloads                            | `crates/cognia-vector/src/db.rs`                                           |
+| Agent sessions, transcripts and summaries       | `crates/cognia-agent-state/src/agent_session_store/`                       |
+| Provider profiles and catalog revisions         | `crates/cognia-agent-state/src/provider_profiles/`                         |
+| Jobs and monitors                               | `crates/cognia-jobs/src/store.rs`                                          |
+| Scheduler metadata                              | `crates/cognia-scheduling/src/scheduler/metadata_store.rs`                 |
+| Workflow runs, waitpoints, cursors and events   | `crates/cognia-scheduling/src/workflow/run_mirror.rs`                      |
+| Integration spool and deadletters               | `crates/cognia-scheduling/src/workflow/integration_spool.rs`               |
+| Task workspace registry, bundles and blob files | `crates/cognia-task-workspace/src/store.rs`                                |
+| Per-plugin SQL and managed IDE state            | `crates/cognia-plugin-runtime/src/api_bridge.rs`                           |
+| Companion messages and sessions                 | `crates/cognia-companion-bus/src/store.rs`                                 |
+| Companion security state                        | `src-tauri/src/companion_api/security_store.rs`                            |
 | Signaling registrations                         | `crates/cognia-companion-connectivity/src/signaling/registration_store.rs` |
-| RPC idempotency receipts                        | `src-tauri/src/companion_api/idempotency.rs`                  |
+| RPC idempotency receipts                        | `src-tauri/src/companion_api/idempotency.rs`                               |
 
 The integration spool shares the workflow mirror database path. Companion AppStore and SecurityStore can also share a file. Count owners and files separately; changing connection settings can affect another owner. WAL does not make operations parallel when callers still share one connection mutex.
 

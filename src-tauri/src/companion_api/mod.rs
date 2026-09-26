@@ -15,7 +15,9 @@
 //! The transport leaves (`tls`, `mdns`, `mesh`, `tunnel`, `tunnel_config`,
 //! `reachability_config`, `signaling_config` and the WebRTC half of
 //! `signaling`) live in `cognia-companion-connectivity` and are re-exported
-//! here at their old paths (ADR-0196 P4).
+//! here at their old paths (ADR-0196 P4). The event bus, push delivery, store
+//! bridges and remote execution contexts live in `cognia-companion-bus`, likewise
+//! re-exported.
 //!
 //! # Tauri integration
 //!
@@ -30,7 +32,7 @@ pub mod acp;
 pub mod admin_lease;
 pub mod api;
 pub mod audit;
-pub mod bridge_transport;
+pub use cognia_companion_bus::bridge_transport;
 pub mod browser_access;
 pub mod browser_gateway;
 /// Runtime discovery of the command contract (ADR-0175).
@@ -40,21 +42,21 @@ pub mod connector_events;
 pub mod data_plane;
 pub mod deny_list;
 pub mod deployment;
-pub mod desktop_messages_bridge;
-pub mod desktop_writes_bridge;
+pub use cognia_companion_bus::desktop_messages_bridge;
+pub use cognia_companion_bus::desktop_writes_bridge;
 pub mod device_grants;
 pub mod device_lifecycle;
 pub mod dispatch_host;
-pub mod dispatchers;
+pub use cognia_companion_bus::dispatchers;
 /// Runtime environments: the installed sandbox pool and what the companion
 /// API serves about it (ADR-0182).
 pub mod environment_pool;
 pub mod environment_ports;
-pub mod event_batcher;
-pub mod event_bus;
+pub use cognia_companion_bus::event_batcher;
+pub use cognia_companion_bus::event_bus;
 mod event_catalog_parity;
-pub mod event_channels;
-pub mod event_leases;
+pub use cognia_companion_bus::event_channels;
+pub use cognia_companion_bus::event_leases;
 pub mod extension_origin;
 pub mod external_bridge;
 pub mod healthz;
@@ -78,11 +80,11 @@ mod output_registry;
 /// Page tokens and the page envelope (ADR-0175 B3).
 pub mod paging;
 mod problem_surface;
-pub mod push;
-pub mod push_creds;
+pub use cognia_companion_bus::push;
+pub use cognia_companion_bus::push_creds;
 pub mod rate_limit;
+pub use cognia_companion_bus::remote_context;
 pub use cognia_companion_connectivity::reachability_config;
-pub mod remote_context;
 pub mod remote_execution;
 pub mod replay_cache;
 pub mod rpc;
@@ -95,9 +97,9 @@ pub mod signaling;
 pub use cognia_companion_connectivity::signaling_config;
 pub mod skill_transactions;
 pub mod spec_parity;
-pub mod store;
-pub mod sync_bridge;
-pub mod sync_registry;
+pub use cognia_companion_bus::store;
+pub use cognia_companion_bus::sync_bridge;
+pub use cognia_companion_bus::sync_registry;
 pub use cognia_companion_connectivity::tls;
 pub use cognia_companion_connectivity::tunnel;
 pub use cognia_companion_connectivity::tunnel_config;

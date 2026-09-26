@@ -54,8 +54,8 @@ flowchart TB
   subgraph Desktop["💻 Desktop (Tauri)"]
     direction TB
     DeskHTTP[axum POST /api/_rpc/sync_pull]
-    Bridge[companion_api/sync_bridge.rs]
-    Registry[companion_api/sync_registry.rs<br/>ALLOWED whitelist]
+    Bridge[cognia-companion-bus/src/sync_bridge.rs]
+    Registry[cognia-companion-bus/src/sync_registry.rs<br/>ALLOWED whitelist]
     Source[lib/sync/desktop-sync-source.ts<br/>installDesktopSyncSource]
     Dexie[(Desktop Dexie<br/>actual data)]
     RespCmd[companion_sync_pull_response<br/>Tauri command]
@@ -111,12 +111,12 @@ flowchart TB
 
 ### Rust Bridge (Companion API)
 
-| File                                           | Purpose                                                                               |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `src-tauri/src/companion_api/sync_bridge.rs`   | `_rpc/sync_pull` HTTP handler — forwards request to webview, awaits response          |
-| `src-tauri/src/companion_api/sync_registry.rs` | `ALLOWED` whitelist — prevents the phone from forging requests for non-allowed tables |
-| `src-tauri/src/companion_api/rpc.rs`           | RPC router — `"sync_pull"` routes to `sync_bridge`                                    |
-| `src-tauri/src/companion_api/commands.rs`      | `companion_sync_pull_response` — webview sends delta back through this command        |
+| File                                               | Purpose                                                                               |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `crates/cognia-companion-bus/src/sync_bridge.rs`   | `_rpc/sync_pull` HTTP handler — forwards request to webview, awaits response          |
+| `crates/cognia-companion-bus/src/sync_registry.rs` | `ALLOWED` whitelist — prevents the phone from forging requests for non-allowed tables |
+| `src-tauri/src/companion_api/rpc.rs`               | RPC router — `"sync_pull"` routes to `sync_bridge`                                    |
+| `src-tauri/src/companion_api/commands.rs`          | `companion_sync_pull_response` — webview sends delta back through this command        |
 
 ## Data Flow: One sync_pull
 
@@ -202,7 +202,7 @@ To add a new table:
 2. Add a new branch in `lib/sync/desktop-sync-source.ts:readDexieDelta`;
 3. Add `syncXxx` in `lib/sync/handlers/`;
 4. Register it in `lib/sync/companion-sync.ts:DEFAULT_HANDLERS`;
-5. Add the table name to the `ALLOWED` whitelist in Rust `companion_api/sync_registry.rs`.
+5. Add the table name to the `ALLOWED` whitelist in Rust `cognia-companion-bus/src/sync_registry.rs`.
 
 Any missing step fails safely: missing whitelist → 404 Not Implemented → client classifies as `reason: "not_implemented"`, UI shows "not yet supported on server" instead of a red error.
 

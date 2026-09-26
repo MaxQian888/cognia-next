@@ -7,10 +7,10 @@ After Phase B the desktop ships real `FcmDispatcher` and `ApnsDispatcher` implem
 ## What landed in Phase B
 
 - **B1 — persistent push-token registry**
-  `src-tauri/src/companion_api/push.rs::PushTokenRegistry::with_persistence` reads `<app_data>/cognia/companion/push-tokens.json` on construction and writes after every register/revoke. Wired into `CompanionServerState::with_data_dir` (used from `lib.rs::run`).
+  `crates/cognia-companion-bus/src/push.rs::PushTokenRegistry::with_persistence` reads `<app_data>/cognia/companion/push-tokens.json` on construction and writes after every register/revoke. Wired into `CompanionServerState::with_data_dir` (used from `lib.rs::run`).
 
 - **B3 — real dispatchers**
-  `src-tauri/src/companion_api/dispatchers.rs`:
+  `crates/cognia-companion-bus/src/dispatchers.rs`:
   - `FcmDispatcher` — POSTs to FCM HTTP v1 with an OAuth2 bearer fetched from the service-account JWT exchange and cached for one hour.
   - `ApnsDispatcher` — POSTs to APNs over HTTP/2 with an ES256-signed provider JWT. Picks sandbox vs production based on the `production` flag.
 
@@ -30,7 +30,7 @@ After Phase B the desktop ships real `FcmDispatcher` and `ApnsDispatcher` implem
 
 - **Settings UI card** — `PushCredentialsCard` in `components/settings/companion/companion-section.tsx` renders an FCM textarea (paste service-account JSON) and an APNs form (key id / team id / bundle id / `.p8` paste / production toggle). Each block shows a "configured" badge when persistent state reports the provider is set, plus a Clear button.
 
-- **Persistent secret storage** — new `companion_api/push_creds.rs` exposes a `PushCredStore` trait with two backends:
+- **Persistent secret storage** — new `cognia-companion-bus/src/push_creds.rs` exposes a `PushCredStore` trait with two backends:
   - `KeyringPushCredStore` (service `com.cognia.companion-push/v1`, accounts `fcm` and `apns`) — installed in `lib.rs::run` via the Tauri setup hook.
   - `FilePushCredStore` writing `<COGNIA_DATA_DIR>/push-credentials.{fcm,apns}.json` with 0600 perms on Unix — installed by `cognia-server::run_serve` for headless deployments.
   - `reinstall_persisted_dispatchers()` runs at boot from both entry points so the user's last upload survives a restart.

@@ -33,8 +33,8 @@ flowchart TB
   subgraph Desktop["💻 桌面 (Tauri)"]
     direction TB
     DeskHTTP[axum POST /api/_rpc/sync_pull]
-    Bridge[companion_api/sync_bridge.rs]
-    Registry[companion_api/sync_registry.rs<br/>ALLOWED 白名单]
+    Bridge[cognia-companion-bus/src/sync_bridge.rs]
+    Registry[cognia-companion-bus/src/sync_registry.rs<br/>ALLOWED 白名单]
     Source[lib/sync/desktop-sync-source.ts<br/>installDesktopSyncSource]
     Dexie[(桌面 Dexie<br/>实际数据)]
     RespCmd[companion_sync_pull_response<br/>Tauri command]
@@ -90,12 +90,12 @@ flowchart TB
 
 ### Rust 桥（companion API）
 
-| 文件                                           | 用途                                                          |
-| ---------------------------------------------- | ------------------------------------------------------------- |
-| `src-tauri/src/companion_api/sync_bridge.rs`   | `_rpc/sync_pull` HTTP handler —— 把请求转给 webview，等响应   |
-| `src-tauri/src/companion_api/sync_registry.rs` | `ALLOWED` 白名单 —— 防止手机伪造请求拉非允许表                |
-| `src-tauri/src/companion_api/rpc.rs`           | RPC 路由器 —— `"sync_pull"` 走 `sync_bridge`                  |
-| `src-tauri/src/companion_api/commands.rs`      | `companion_sync_pull_response` —— webview 通过它把 delta 回传 |
+| 文件                                               | 用途                                                          |
+| -------------------------------------------------- | ------------------------------------------------------------- |
+| `crates/cognia-companion-bus/src/sync_bridge.rs`   | `_rpc/sync_pull` HTTP handler —— 把请求转给 webview，等响应   |
+| `crates/cognia-companion-bus/src/sync_registry.rs` | `ALLOWED` 白名单 —— 防止手机伪造请求拉非允许表                |
+| `src-tauri/src/companion_api/rpc.rs`               | RPC 路由器 —— `"sync_pull"` 走 `sync_bridge`                  |
+| `src-tauri/src/companion_api/commands.rs`          | `companion_sync_pull_response` —— webview 通过它把 delta 回传 |
 
 ## 数据流：一次 sync_pull
 
@@ -181,7 +181,7 @@ sequenceDiagram
 2. 在 `lib/sync/desktop-sync-source.ts:readDexieDelta` 加新分支；
 3. 在 `lib/sync/handlers/` 加 `syncXxx`；
 4. 在 `lib/sync/companion-sync.ts:DEFAULT_HANDLERS` 注册；
-5. 在 Rust `companion_api/sync_registry.rs` 的 `ALLOWED` 白名单加表名。
+5. 在 Rust `cognia-companion-bus/src/sync_registry.rs` 的 `ALLOWED` 白名单加表名。
 
 任一步缺位都会 fail-safe：白名单缺失 → 404 Not Implemented → 客户端归为 `reason: "not_implemented"`，UI 标"服务端尚未支持"而不是红色错误。
 

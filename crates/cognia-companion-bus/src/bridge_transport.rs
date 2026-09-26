@@ -71,8 +71,10 @@ pub trait BridgeTransport: Send + Sync + 'static {
 }
 
 /// Desktop transport: emits a Tauri event the WebView is listening for.
+#[cfg(feature = "tauri-host")]
 pub struct WebViewBridgeTransport(pub tauri::AppHandle);
 
+#[cfg(feature = "tauri-host")]
 impl BridgeTransport for WebViewBridgeTransport {
     fn emit(&self, channel: &str, payload: Value) -> Result<(), String> {
         use tauri::Emitter;

@@ -325,6 +325,7 @@ fn register_remote_pending_request(payload: &Value) {
 /// same channel simply attaches a second listener (both forward the same
 /// event, harmless but wasteful).  The caller is responsible for deduplication
 /// if needed.
+#[cfg(feature = "tauri-host")]
 pub fn register_tauri_event(app: &tauri::AppHandle, bus: Arc<EventBus>, channel: &'static str) {
     use tauri::Listener as _;
     app.listen(channel, move |event| {
@@ -593,7 +594,7 @@ mod tests {
 
     #[test]
     fn publishing_a_proxy_request_registers_its_pending_response_id() {
-        let context = crate::companion_api::remote_context::global().register(
+        let context = crate::remote_context::global().register(
             "host-a",
             "device-a",
             "event-bus-pending-session",
@@ -610,7 +611,7 @@ mod tests {
             }),
         );
 
-        assert!(crate::companion_api::remote_context::global()
+        assert!(crate::remote_context::global()
             .validate_and_consume(
                 &context,
                 "device-a",

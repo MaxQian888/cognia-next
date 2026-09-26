@@ -3183,7 +3183,7 @@ export function buildHeadlessAsyncApi(contract, catalog, bridgeFixture) {
         }),
         // Client → server. The brain starts on the catalog's default channel
         // set and names the extra channels it wants; see
-        // `src-tauri/src/companion_api/event_channels.rs` for the catalog and
+        // `crates/cognia-companion-bus/src/event_channels.rs` for the catalog and
         // which entries a service-scope connection may take.
         SubscribeFrame: message("SubscribeFrame", {
           type: "object",
