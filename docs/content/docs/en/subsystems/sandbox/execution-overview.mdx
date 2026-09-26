@@ -249,11 +249,11 @@ throws rather than silently falling back to the OS tier (see [Sandboxed tools](.
 ## Audit surface
 
 Every OS and E2B sandbox call is recorded with a dedicated audit surface. The Rust `Surface` enum carries a
-`Sandbox` variant (`src-tauri/src/automation/permission.rs:53`); the dispatcher records an
+`Sandbox` variant (`crates/cognia-automation/src/automation/permission.rs:50`); the dispatcher records an
 allow/deny/error `AuditEntry` for each `sandbox_exec` call and emits an `automation:event`
-(`crates/cognia-automation/src/sandbox/mod.rs:99-158`). Because the sandbox owns its own strict-mode policy, the
+(`crates/cognia-automation/src/sandbox.rs:153-278`). Because the sandbox owns its own strict-mode policy, the
 shared permission gate short-circuits it — `Surface::Sandbox => Decision::Allow`
-(`permission.rs:325`) — while the global kill-switch still blocks for defence in depth. The
+(`permission.rs:661`) — while the global kill-switch still blocks for defence in depth. The
 Diagnostics tab renders these via `SandboxAuditCard`; see [Observability & UI](./observability-and-ui).
 
 Each stdout and stderr stream is capped independently at 1,000,000 UTF-8 bytes. Native backends read

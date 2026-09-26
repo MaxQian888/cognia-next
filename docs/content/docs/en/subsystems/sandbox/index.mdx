@@ -101,13 +101,18 @@ flowchart TB
 ## Code locations
 
 <Files>
-  <Folder name="crates/cognia-automation/src/sandbox/ (T1 — OS execution)" defaultOpen>
-    <File name="mod.rs — dispatcher + sandbox_exec / sandbox_health_probe Tauri commands" />
+  <Folder name="crates/cognia-exec-sandbox/src/ (T1 — OS execution)" defaultOpen>
+    <File name="lib.rs — run_confined (the one confined path) + current_backend()" />
     <File name="traits.rs — SandboxedExec trait" />
-    <File name="types.rs — SandboxCommand / Policy / Result / Error / Health / NetworkPolicy" />
+    <File name="types.rs — SandboxCommand / Policy / Result / Error / Health / NetworkPolicy / ProbeReport" />
     <File name="policy.rs — policy_for(tool, request) pure resolver" />
     <File name="linux.rs · macos.rs · windows.rs — per-platform backends" />
+    <File name="sbpl.rs · seccomp.rs · limits.rs · net_proxy.rs — SBPL rules, syscall filter, rlimits, filtering proxy" />
     <File name="uninstalled.rs · mock.rs — fallback + test double" />
+    <File name="bin/ — cognia-sandbox-exec, cognia-external-agent-launcher, cognia-agent-proxy-launcher" />
+  </Folder>
+  <Folder name="crates/cognia-automation/src/">
+    <File name="sandbox.rs — sandbox_exec / sandbox_health_probe / sandbox_health_check Tauri commands + admit_sandbox_call" />
   </Folder>
   <Folder name="crates/cognia-sandbox-runner/">
     <File name="src/main.rs — Windows restricted-token + low-integrity + Job Object runner with stdout/stderr capture" />
@@ -115,8 +120,8 @@ flowchart TB
   <Folder name="src-tauri/src/bin/">
     <File name="cognia-sandbox-setup.rs — reserved for future optional per-SID firewall setup" />
   </Folder>
-  <Folder name="src-tauri/src/cua_sandbox/ (CUA remote)">
-    <File name="mod.rs — cua_sandbox_start / stop / health" />
+  <Folder name="crates/cognia-automation/src/cua_sandbox/ (CUA remote)">
+    <File name="mod.rs — cua_sandbox_create / start / suspend / resume / stop / delete / inspect / health / exec / read_file" />
     <File name="lifecycle.rs · protocol.rs · registry.rs · remote_client.rs" />
   </Folder>
   <Folder name="lib/sandbox/">

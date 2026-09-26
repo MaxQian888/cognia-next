@@ -85,7 +85,7 @@ OS 可用性来自主动 confinement check，而不是只检查二进制是否�
   上次重启的时间戳。
 
 审计数据源自 Rust：`Surface` 枚举携带一个 `Sandbox` 变体
-（`src-tauri/src/automation/permission.rs:53`），`sandbox_exec` 为每次调用记录一条
+（`crates/cognia-automation/src/automation/permission.rs:50`），`sandbox_exec` 为每次调用记录一条
 `AuditEntry`（参见 [执行总览](./execution-overview)）。
 
 ## Automation → Sandboxes 标签页（CUA）—— 已发布并接通

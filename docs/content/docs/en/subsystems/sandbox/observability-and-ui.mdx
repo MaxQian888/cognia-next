@@ -87,7 +87,7 @@ unavailable selections remain visible and selected but disabled with an actionab
   last-restart stamp.
 
 The audit data originates in Rust: the `Surface` enum carries a `Sandbox` variant
-(`src-tauri/src/automation/permission.rs:53`), and `sandbox_exec` records an `AuditEntry` for every
+(`crates/cognia-automation/src/automation/permission.rs:50`), and `sandbox_exec` records an `AuditEntry` for every
 call (see [Execution overview](./execution-overview)).
 
 ## Automation → Sandboxes tab (CUA) — shipped & wired
