@@ -289,6 +289,55 @@ describe("<RemoteSessionDetail />", () => {
     expect(screen.getByTestId("remote-approval-card")).toBeInTheDocument()
   })
 
+  // Hiding the card from an observer made a run blocked on a decision look
+  // idle. They see it, redacted and without the buttons only control gets.
+  it("shows an observer the pending decision without a way to answer it", () => {
+    streamMock.mockReturnValue(
+      baseStream({
+        canControl: false,
+        pendingApproval: {
+          sessionId: "s1",
+          requestId: "r1",
+          toolUseID: "tu1",
+          toolName: "bash",
+          input: {},
+        },
+      })
+    )
+    render(<RemoteSessionDetail sessionId="s1" />)
+    expect(screen.getByTestId("remote-approval-card")).toBeInTheDocument()
+    expect(screen.queryByTestId("decision-allow")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("decision-deny")).not.toBeInTheDocument()
+  })
+
+  it("drops a pending decision once the session has ended", () => {
+    streamMock.mockReturnValue(
+      baseStream({
+        sessionEnded: true,
+        pendingApproval: {
+          sessionId: "s1",
+          requestId: "r1",
+          toolUseID: "tu1",
+          toolName: "bash",
+          input: {},
+        },
+      })
+    )
+    render(<RemoteSessionDetail sessionId="s1" />)
+    expect(screen.queryByTestId("remote-approval-card")).not.toBeInTheDocument()
+  })
+
+  // jsdom does no layout, so this pins the classes that let the badges drop
+  // to a second line on a phone instead of running off the edge.
+  it("lets the header's badges wrap rather than overflow", () => {
+    streamMock.mockReturnValue(
+      baseStream({ canControl: false, attachDowngrade: "missing-capability" })
+    )
+    render(<RemoteSessionDetail sessionId="s1" />)
+    expect(screen.getByTestId("remote-session-header")).toHaveClass("flex-wrap")
+    expect(screen.getByTestId("remote-observe-only")).toHaveClass("whitespace-normal")
+  })
+
   it("hides the composer and shows observe-only when control is denied", () => {
     streamMock.mockReturnValue(baseStream({ canControl: false }))
     render(<RemoteSessionDetail sessionId="s1" />)

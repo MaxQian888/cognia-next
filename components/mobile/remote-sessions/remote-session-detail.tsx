@@ -90,9 +90,15 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
 
   return (
     <div className="flex h-full flex-col" data-testid="remote-session-detail">
-      <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
+      {/* Wraps: the connection pill plus "Observe only — remote control is
+          off for this device" is wider than a phone, and neither could shrink,
+          so the header ran off the right edge. */}
+      <div
+        className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b px-4 py-2"
+        data-testid="remote-session-header"
+      >
         <span className="text-sm font-medium">{t("title")}</span>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           {connection ? (
             <Badge
               variant="outline"
@@ -120,7 +126,11 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
             // from the user: a missing grant stays until someone turns remote
             // control on for this device, while a stream that has not caught up
             // clears itself on reconnect.
-            <Badge variant="outline" data-testid="remote-observe-only">
+            <Badge
+              variant="outline"
+              className="max-w-full whitespace-normal text-left"
+              data-testid="remote-observe-only"
+            >
               {attachDowngrade === "missing-capability"
                 ? t("observeOnlyMissingGrant")
                 : attachDowngrade === "event-plane-not-ready"
@@ -211,9 +221,16 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
           </Tabs>
         )}
 
-        {pendingApproval && composable ? (
+        {/* An observer still sees that the run is waiting on a decision, in
+            the card's observe mode: arguments redacted, no buttons. Hiding it
+            made a blocked run look idle to anyone without control. */}
+        {pendingApproval && !sessionEnded && !notFound ? (
           <div className="shrink-0 p-4 pt-0">
-            <ApprovalCard approval={pendingApproval} onRespond={respond} />
+            <ApprovalCard
+              approval={pendingApproval}
+              onRespond={respond}
+              mode={composable ? "control" : "observe"}
+            />
           </div>
         ) : null}
 
