@@ -6517,13 +6517,6 @@ export interface Character {
   toolSearchRuntimeOverride?: ToolSearchRuntimeConfig
   /** Seeded built-ins are read-only (UI offers "Duplicate" instead of edit). */
   isBuiltIn?: boolean
-  /**
-   * Present when this agent is a variant of another: it owns only the profile
-   * fields listed in `ownFields` and follows its base for the rest (see
-   * `./agent-variant`). `resolveCharacterById` applies the overlay; the row
-   * itself keeps a full materialized profile as the fallback.
-   */
-  variant?: import("./agent-variant").CharacterVariantLink
   /** Whether this character is allowed to drive A2UI surfaces (4-tool whitelist + system prompt). */
   a2uiEnabled?: boolean
   /** Optional A2UI catalog this character defaults to (academic / financial / general / …). */
