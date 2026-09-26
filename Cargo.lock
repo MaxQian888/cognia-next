@@ -2573,6 +2573,7 @@ dependencies = [
  "cognia-skills",
  "cognia-subscription",
  "cognia-task-workspace",
+ "cognia-task-workspace-host",
  "cognia-tenant-auth",
  "cognia-terminal",
  "cognia-tts",
@@ -3027,6 +3028,29 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "uuid",
+]
+
+[[package]]
+name = "cognia-task-workspace-host"
+version = "0.1.0"
+dependencies = [
+ "cognia-companion-bus",
+ "cognia-core",
+ "cognia-git",
+ "cognia-git-mirror",
+ "cognia-hooks",
+ "cognia-problem",
+ "cognia-task-workspace",
+ "hex",
+ "log",
+ "parking_lot",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tauri",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

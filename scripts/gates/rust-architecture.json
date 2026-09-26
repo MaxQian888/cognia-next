@@ -44,6 +44,7 @@
     "cognia-mcp-server": "domain",
     "cognia-external-agent": "domain",
     "cognia-task-workspace": "domain",
+    "cognia-task-workspace-host": "domain",
     "cognia-observability": "domain",
     "cognia-agent-state": "domain",
     "cognia-sandbox-pool": "domain",
@@ -66,7 +67,9 @@
     "cognia-mcp-server -> cognia-automation",
     "cognia-plugin-runtime -> cognia-terminal",
     "cognia-agent-state -> cognia-gateway",
-    "cognia-sandbox-pool -> cognia-external-agent"
+    "cognia-sandbox-pool -> cognia-external-agent",
+    "cognia-task-workspace-host -> cognia-task-workspace",
+    "cognia-task-workspace-host -> cognia-git"
   ],
   "forbidden": [
     {
@@ -107,7 +110,7 @@
   "appShell": {
     "package": "cognia-next",
     "srcDir": "src-tauri/src",
-    "maxLoc": 157234,
+    "maxLoc": 155522,
     "locSlack": 4000,
     "locBlocking": false,
     "modules": [

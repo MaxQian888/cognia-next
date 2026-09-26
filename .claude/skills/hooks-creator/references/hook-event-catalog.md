@@ -48,7 +48,7 @@ TS bridge `lib/ai/agent/external/agent-hooks.ts`, and for the **goal judge** and
 
 | Event | Source | Payload |
 |---|---|---|
-| `WorktreeCreate` | managed Registry (`crates/cognia-task-workspace/src/lifecycle.rs`, sink installed in `src-tauri/src/task_workspace.rs`) after a worktree is locked and Active; TS `lib/git/commands.ts:gitWorktreeAdd` (agent-team allocator, source-control panel) | `worktree_path`, `workspace_root`, `branch`, `base_ref` (TS) / `base` (Rust), `owner_type` (`session`/`team`/`user`/…), `owner_ref`, `source` (`managed-registry` / `agent-team-allocator` / `worktree-panel` / `git-command`) |
+| `WorktreeCreate` | managed Registry (`crates/cognia-task-workspace/src/lifecycle.rs`, sink installed in `crates/cognia-task-workspace-host/src/host_surface.rs`) after a worktree is locked and Active; TS `lib/git/commands.ts:gitWorktreeAdd` (agent-team allocator, source-control panel) | `worktree_path`, `workspace_root`, `branch`, `base_ref` (TS) / `base` (Rust), `owner_type` (`session`/`team`/`user`/…), `owner_ref`, `source` (`managed-registry` / `agent-team-allocator` / `worktree-panel` / `git-command`) |
 | `WorktreeRemove` | Registry discard/prune; TS `gitWorktreeRemove` | same, plus `reason` (`discard`, `prune`, `cleanup`, `user`, `remove`) |
 
 Both are session-scoped observational events (`block` ignored). `session_id`

@@ -67,7 +67,7 @@ import {
 
 /**
  * The three renderer-owned commands WP-C registered over WP-D6's crate
- * (`src-tauri/src/task_workspace.rs`). They name a path on THIS machine and
+ * (`crates/cognia-task-workspace-host/src/host_surface.rs`). They name a path on THIS machine and
  * write the person's checkout, so they are `target: "client"`: a paired device
  * never calls them — it asks for the run's approval, and the apply happens
  * here.

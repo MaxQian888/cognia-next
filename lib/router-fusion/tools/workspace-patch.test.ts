@@ -201,7 +201,10 @@ describe("the host commands this port calls", () => {
   const repoRoot = join(__dirname, "../../..")
 
   it("names the three commands the desktop shell actually registers", () => {
-    const definitions = readFileSync(join(repoRoot, "src-tauri/src/task_workspace.rs"), "utf8")
+    const definitions = readFileSync(
+      join(repoRoot, "crates/cognia-task-workspace-host/src/host_surface.rs"),
+      "utf8"
+    )
     const registrations = readFileSync(join(repoRoot, "src-tauri/src/lib.rs"), "utf8")
     for (const command of Object.values(WORKSPACE_REVISION_COMMANDS)) {
       // Defined as a command, and reachable through the invoke handler: a

@@ -1,0 +1,59 @@
+# ADR-0196 P6f — the task-workspace host surface, out of `app_lib`: the
+# process's service slot and maintenance loop, the worktree-lifecycle hook
+# sink, the resource-event sinks and the `task_workspace_*` command bodies.
+#
+# A crate of its own rather than a module of `cognia-task-workspace`: that
+# crate is deliberately sync (no tokio; see `cognia-git-mirror`), and every
+# body here runs on the async runtime. `src-tauri/src/task_workspace.rs`
+# re-exports `host_surface` at its old path.
+[package]
+name = "cognia-task-workspace-host"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Task-workspace host surface: service slot, maintenance, hook and event sinks, and the task_workspace command bodies."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_task_workspace_host"
+path = "src/lib.rs"
+
+[features]
+# ADR-0196 — the `#[tauri::command]` attributes, and the four commands that
+# watch a run through the `AppHandle` (`TauriResourceEventSink`). Off by
+# default so the crate builds and tests Tauri-free; `src-tauri` turns it on.
+default = []
+tauri-host = ["dep:tauri"]
+
+[dependencies]
+cognia-task-workspace = { path = "../cognia-task-workspace" }
+# The shared mirror cache root and its sweep (ADR-0176).
+cognia-git-mirror = { path = "../cognia-git-mirror" }
+# `worktree::remove` behind the guarded manual removal.
+cognia-git = { path = "../cognia-git" }
+# `WorktreeCreate` / `WorktreeRemove` agent hook events.
+cognia-hooks = { path = "../cognia-hooks" }
+# `BusResourceEventSink` publishes resource events to companion clients.
+cognia-companion-bus = { path = "../cognia-companion-bus" }
+# Wire-schema transform on the status and envelope types.
+cognia-problem = { path = "../cognia-problem" }
+# `rt::spawn` for the hook sink, which fires from sync service code.
+cognia-core = { path = "../cognia-core", features = ["rt"] }
+tauri = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["rt", "time"] }
+parking_lot.workspace = true
+schemars.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+# The resource-read tests pin the content digest the service reports.
+hex.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

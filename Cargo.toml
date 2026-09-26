@@ -70,6 +70,9 @@ members = [
   # built-ins, trust, webhook/command handlers) and the settings readers, out
   # of `app_lib`.
   "crates/cognia-hooks",
+  # ADR-0196 P6f — the task-workspace host surface (service slot, maintenance,
+  # hook and event sinks, command bodies), out of `app_lib`.
+  "crates/cognia-task-workspace-host",
   # ADR-0196 P6g — Chromium cookie import (profile discovery, Safe Storage
   # decryption), out of `app_lib`.
   "crates/cognia-browser-cookies",
