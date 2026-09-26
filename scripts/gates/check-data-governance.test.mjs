@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { quotedValues, schemaSummary } from "./check-data-governance.mjs"
+import { handlerTableNames, quotedValues, schemaSummary } from "./check-data-governance.mjs"
 
 const SCHEMA = [
   "export const CURRENT_SCHEMA_VERSION = 213",
@@ -49,4 +49,20 @@ test("schemaSummary refuses a file with no schema declaration", () => {
     () => schemaSummary("export const CURRENT_SCHEMA_VERSION = 213\n"),
     /CURRENT_SCHEMA declaration/
   )
+})
+
+test("handlerTableNames reads past nested arrays inside a handler entry", () => {
+  const source = [
+    "const DEFAULT_HANDLERS: RegisteredHandler[] = [",
+    '  { table: "settings", stage: "critical", run: a },',
+    '  { table: "sessions", stage: "critical", run: b, after: ["characters"] },',
+    '  { table: "messages", stage: "deferred", run: c, after: ["sessions", "characters"] },',
+    "]",
+    'const OTHER = [{ table: "notAHandler" }]',
+  ].join("\n")
+  assert.deepEqual(handlerTableNames(source), ["settings", "sessions", "messages"])
+})
+
+test("handlerTableNames refuses a file with no handler array", () => {
+  assert.throws(() => handlerTableNames("const x = 1\n"), /DEFAULT_HANDLERS/)
 })

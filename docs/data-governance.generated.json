@@ -1,8 +1,8 @@
 {
-  "latestVersion": 225,
-  "schemaSha256": "ab98dcf6f5b609be0337c5f1c5e5c6d7b94d96d8938b6f9ca9a2dae7fafc9674",
-  "staticTableCount": 353,
-  "companionSyncTableCount": 47,
+  "latestVersion": 230,
+  "schemaSha256": "d0de8923ac0717224948b50953b6d156d043f8f250580c588b569bed533161ca",
+  "staticTableCount": 366,
+  "companionSyncTableCount": 48,
   "companionSyncTables": [
     "adapterInstances",
     "agentTaskAttempts",
@@ -37,6 +37,7 @@
     "platformIdentities",
     "plugins",
     "projects",
+    "sessionFolders",
     "sessionState",
     "sessions",
     "settings",

@@ -55,7 +55,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(355)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(366)
     db.close()
   })
 
@@ -439,4 +439,86 @@ it("keeps the message revision clock local, permanent, and metadata-only", () =>
   })
   expect(PORTABLE_BACKUP_TABLES.has("messageSyncClock")).toBe(false)
   expect(COMPANION_SYNC_TABLES.has("messageSyncClock")).toBe(false)
+})
+
+describe("Notification V2 (ADR-0190)", () => {
+  const tables = [
+    "notificationTargets",
+    "notificationSubscriptions",
+    "notificationProjectionWork",
+    "runResultSummaries",
+    "notificationPublications",
+    "notificationDeliveryIntents",
+    "notificationDeliveryAttempts",
+    "notificationPolicyState",
+    "notificationTimers",
+    "notificationAggregateMembers",
+  ] as const
+
+  it("stays on the host: account-scoped, out of companion sync and portable backup", () => {
+    for (const table of tables) {
+      expect(policyForTable(table)).toMatchObject({
+        accountScope: "account",
+        syncPolicy: { mode: "none" },
+        cleanupPolicy: "protected",
+      })
+      expect(PORTABLE_BACKUP_TABLES.has(table)).toBe(false)
+    }
+  })
+
+  it("encrypts the three rows that carry something a reader could use", () => {
+    // A conversation handle and label, a rendered payload, a run's quoted
+    // output. The rest are ids, states, cursors, hashes and error codes.
+    for (const table of [
+      "notificationTargets",
+      "notificationDeliveryIntents",
+      "runResultSummaries",
+    ] as const) {
+      expect(policyForTable(table)).toMatchObject({
+        sensitivity: "confidential",
+        contentProtection: "encrypted-content",
+      })
+    }
+    for (const table of tables.filter(
+      (name) =>
+        name !== "notificationTargets" &&
+        name !== "notificationDeliveryIntents" &&
+        name !== "runResultSummaries"
+    )) {
+      expect(policyForTable(table)?.contentProtection).toBe("metadata-only")
+    }
+  })
+
+  it("names the retry work queues, the send ledger an audit trail, and summaries a projection", () => {
+    for (const table of [
+      "notificationDeliveryIntents",
+      "notificationProjectionWork",
+      "notificationTimers",
+      "notificationAggregateMembers",
+    ] as const) {
+      expect(policyForTable(table)?.role).toBe("queue")
+    }
+    expect(policyForTable("notificationDeliveryAttempts")?.role).toBe("audit")
+    expect(policyForTable("runResultSummaries")).toMatchObject({
+      role: "projection",
+      backupPolicy: { mode: "derived" },
+    })
+    expect(policyForTable("notificationTargets")?.role).toBe("authoritative")
+    expect(policyForTable("notificationSubscriptions")?.role).toBe("authoritative")
+  })
+
+  it("is honest that nothing prunes these tables yet", () => {
+    // No delete path exists: rows are retired in place (a state, `deletedAt`,
+    // `flushedAt`). A `ttl` or `cap` here would describe a sweep that is not
+    // there.
+    for (const table of tables) {
+      expect(policyForTable(table)?.retentionPolicy).toMatchObject({
+        mode: "permanent",
+        enforcement: "explicit-delete",
+      })
+    }
+    expect(policyForTable("notificationDeliveryAttempts")?.retentionPolicy.reason).toMatch(
+      /nothing prunes it yet/
+    )
+  })
 })

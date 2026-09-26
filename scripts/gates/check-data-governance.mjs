@@ -47,6 +47,34 @@ export function schemaSummary(source) {
   }
 }
 
+/**
+ * The `table: "…"` names inside the `DEFAULT_HANDLERS` array literal.
+ *
+ * The array is cut at its own closing bracket, found by depth: handler
+ * entries carry nested arrays (`after: ["characters"]`), and cutting at the
+ * first `]` read only the entries before the first of them — three tables
+ * out of forty-eight, reported as drift.
+ */
+export function handlerTableNames(source) {
+  const declaration = source.indexOf("const DEFAULT_HANDLERS")
+  if (declaration < 0) throw new Error("Unable to locate DEFAULT_HANDLERS in the sync handlers")
+  const open = source.indexOf("= [", declaration)
+  if (open < 0) throw new Error("Unable to locate the DEFAULT_HANDLERS array")
+  let depth = 0
+  for (let index = open + 2; index < source.length; index++) {
+    const char = source[index]
+    if (char === "[") depth += 1
+    else if (char === "]") {
+      depth -= 1
+      if (depth === 0) {
+        const block = source.slice(open, index + 1)
+        return [...block.matchAll(/table:\s*"([A-Za-z0-9_]+)"/g)].map((match) => match[1])
+      }
+    }
+  }
+  throw new Error("Unterminated DEFAULT_HANDLERS array")
+}
+
 function sortedUnique(values, label) {
   const unique = [...new Set(values)].sort()
   if (unique.length !== values.length) throw new Error(`${label} contains duplicate entries`)
@@ -80,13 +108,7 @@ export async function collectGovernanceSummary(base = root) {
     quotedValues(catalog, "export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES"),
     "sync protocol catalog"
   )
-  const handlerStart = handlers.indexOf("const DEFAULT_HANDLERS")
-  const handlerArrayStart = handlers.indexOf("= [", handlerStart)
-  const handlerBlock = handlers.slice(handlerArrayStart, handlers.indexOf("]", handlerArrayStart))
-  const handlerTables = sortedUnique(
-    [...handlerBlock.matchAll(/table:\s*"([A-Za-z0-9_]+)"/g)].map((match) => match[1]),
-    "TypeScript sync handlers"
-  )
+  const handlerTables = sortedUnique(handlerTableNames(handlers), "TypeScript sync handlers")
   const rustBlock = rust.slice(rust.indexOf("fn default_tables()"), rust.indexOf("#[cfg(test)]"))
   const rustTables = sortedUnique(
     [...rustBlock.matchAll(/name:\s*"([A-Za-z0-9_]+)"\.to_string\(\)/g)].map((match) => match[1]),

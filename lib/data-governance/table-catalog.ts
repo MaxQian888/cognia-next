@@ -233,6 +233,15 @@ export const CORE_TABLE_NAMES = [
   "mobileOutboundQueue",
   "mobileStepReceipts",
   "modelsDevCatalog",
+  "notificationAggregateMembers",
+  "notificationDeliveryAttempts",
+  "notificationDeliveryIntents",
+  "notificationPolicyState",
+  "notificationProjectionWork",
+  "notificationPublications",
+  "notificationSubscriptions",
+  "notificationTargets",
+  "notificationTimers",
   "notifications",
   "ocrResults",
   "openApiImports",
@@ -301,6 +310,7 @@ export const CORE_TABLE_NAMES = [
   "retrievalTraces",
   "runLearningProposals",
   "runRecords",
+  "runResultSummaries",
   "runRetrospectives",
   "sandboxConnections",
   "scheduledTaskRuns",
@@ -706,6 +716,9 @@ const PROJECTION_TABLES = new Set<CoreTableName>([
   "remoteControlRunStatus",
   "retrievalActivePointers",
   "retrievalGenerations",
+  // ADR-0190. A run's result summary is derived, deterministically and without
+  // a model, from the run journal it cites; every revision can be re-derived.
+  "runResultSummaries",
   // ADR-0165 Phase 0. Per-source scan state for the external usage index:
   // fully rebuildable by re-running the scan, and never a source of truth.
   "usageSourceStates",
@@ -792,6 +805,9 @@ const AUDIT_TABLES = new Set<CoreTableName>([
   "governanceLineage",
   "governanceProvenance",
   "hostStateActions",
+  // ADR-0190: one row per actual send, never mutated — the evidence behind
+  // "did it send". Its `Attempts` suffix is not one the pattern above knows.
+  "notificationDeliveryAttempts",
   // The pet's append-only interaction ledger. The regex above keys on
   // `Events$` / `History$` and friends, and this one ends in `Log`, so it
   // needed naming explicitly rather than being left an "authoritative" table
@@ -816,6 +832,15 @@ QUEUE_TABLES.add("workSubmissions")
 // under the same protocol `claimMemoryJob` uses. The claims it produces are
 // ordinary portable memories, so the run row itself is recoverable work state.
 QUEUE_TABLES.add("projectMiningRuns")
+// Notification V2 (ADR-0190): the durable work behind an external delivery.
+// An intent is the retry unit (claimed, backed off, reconciled from its job's
+// evidence); projection work is the journal's leased dirty-marker; timers are
+// cancellable scheduled work; digest members hold a bucket until it flushes.
+// None is named with a queue suffix.
+QUEUE_TABLES.add("notificationDeliveryIntents")
+QUEUE_TABLES.add("notificationProjectionWork")
+QUEUE_TABLES.add("notificationTimers")
+QUEUE_TABLES.add("notificationAggregateMembers")
 
 const SECRET_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
 
@@ -923,6 +948,13 @@ const CONFIDENTIAL_TABLES = new Set<CoreTableName>([
   "matrixPendingEncryptedEvents",
   "workInputBatches",
   "executionContextBundles",
+  // ADR-0190. A target names an IM conversation (its sendable handle and the
+  // operator's label); an intent carries the rendered notification it will
+  // send; a result summary quotes what a run produced. The webhook URL itself
+  // is never stored — only a credential-store reference.
+  "notificationTargets",
+  "notificationDeliveryIntents",
+  "runResultSummaries",
 ])
 
 const GLOBAL_TABLES = new Set<CoreTableName>([
@@ -985,6 +1017,10 @@ const LARGE_TABLES = new Set<CoreTableName>([
   "automationAuditLog",
   "browserRecordings",
   "codeAdoptionTurns",
+  // ADR-0190: an intent per (fact, target) route, each with its rendered
+  // payload, and an attempt row per send — neither is pruned yet.
+  "notificationDeliveryIntents",
+  "notificationDeliveryAttempts",
   "evalSamples",
   "evalScores",
   "integrationEvents",
@@ -1279,6 +1315,45 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
   // by construction. Declared explicitly because the inherited default says
   // "retained until an explicit domain delete" and this table has no such
   // delete to wait for.
+  // Notification V2 (ADR-0190). No delete path exists for any of these yet, so
+  // each says so rather than claiming a sweep: rows are retired in place
+  // (a state, a `deletedAt`, a `flushedAt`) and leave with the account.
+  notificationTargets: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason:
+      "Deleting a target soft-deletes it (deletedAt) so frozen intents keep resolving; rows leave only with the owning account database.",
+  },
+  notificationSubscriptions: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason:
+      "Deleting a subscription soft-deletes it (deletedAt) so decisions keep their route; rows leave only with the owning account database.",
+  },
+  notificationDeliveryIntents: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason:
+      "Terminal intents stay as the run's delivery record (its Notifications tab reads them); nothing prunes them yet, so rows leave only with the owning account database.",
+  },
+  notificationDeliveryAttempts: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason:
+      "Append-only send evidence, never mutated; nothing prunes it yet, so rows leave only with the owning account database.",
+  },
+  notificationTimers: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason:
+      "Timers are retired in place (fired / cancelled / expired), not removed; rows leave only with the owning account database.",
+  },
+  notificationAggregateMembers: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason:
+      "A flushed member is marked (flushedAt), not removed; rows leave only with the owning account database.",
+  },
   threadHandoffTickets: {
     mode: "permanent",
     enforcement: "explicit-delete",
@@ -1473,6 +1548,24 @@ const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentPro
   // it. The name matches none of the content-ish spellings, and this row now
   // crosses to companions.
   connectorCallbackBindings: "encrypted-content",
+  // Notification V2 (ADR-0190), stated rather than inferred. Three rows carry
+  // something a reader could use: a target's conversation handle and label, an
+  // intent's rendered payload (and the address snapshot it goes to), and a
+  // result summary's headline, facts and digest quoted from a run. Existing
+  // plaintext rows stay readable; they are sealed on their next write.
+  notificationTargets: "encrypted-content",
+  notificationDeliveryIntents: "encrypted-content",
+  runResultSummaries: "encrypted-content",
+  // Ids, states, cursors, leases, hashes and error CODES (the types keep
+  // messages out on purpose). Several are read on the reconcile sweep, where a
+  // cipher round-trip would buy nothing.
+  notificationSubscriptions: "metadata-only",
+  notificationProjectionWork: "metadata-only",
+  notificationPublications: "metadata-only",
+  notificationDeliveryAttempts: "metadata-only",
+  notificationPolicyState: "metadata-only",
+  notificationTimers: "metadata-only",
+  notificationAggregateMembers: "metadata-only",
 }
 
 /**

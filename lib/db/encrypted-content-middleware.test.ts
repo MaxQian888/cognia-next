@@ -190,6 +190,89 @@ it("stores message content as ciphertext while preserving indexed metadata", asy
   db.close()
 })
 
+it("seals Notification V2's payloads, addresses and run summaries (ADR-0190)", async () => {
+  activateAccountContentCipher(
+    await AccountContentCipher.createForTesting("acct_crypto", DATABASE_NAME)
+  )
+  const db = new CogniaDB(DATABASE_NAME, "encrypted-content-test")
+  await db.open()
+  await db.notificationDeliveryIntents.put({
+    id: "intent_1",
+    scopeKey: "scope_1",
+    operationKey: "op_1",
+    targetId: "target_1",
+    status: "queued",
+    targetAddress: {
+      kind: "connector",
+      adapterId: "lark",
+      deliveryTarget: { chatId: "oc_secret" },
+    },
+    payload: { title: "Deploy to prod finished", body: "3 tests failed in billing" },
+    createdAt: 1,
+    updatedAt: 1,
+  } as never)
+  await db.runResultSummaries.put({
+    id: "summary_1",
+    scopeKey: "scope_1",
+    runId: "run_1",
+    revision: 1,
+    headline: "Migrated the invoices table",
+    digest: "invoices: 41 rows rewritten",
+    facts: [],
+    createdAt: 1,
+  } as never)
+
+  await expect(db.notificationDeliveryIntents.get("intent_1")).resolves.toMatchObject({
+    status: "queued",
+    payload: { title: "Deploy to prod finished" },
+  })
+  await expect(
+    db.notificationDeliveryIntents.where("status").equals("queued").count()
+  ).resolves.toBe(1)
+
+  const raw = new Dexie(DATABASE_NAME)
+  await raw.open()
+  const intent = (await raw.table("notificationDeliveryIntents").get("intent_1")) as Record<
+    string,
+    unknown
+  >
+  // Indexed columns stay queryable; the payload and the address do not.
+  expect(intent.status).toBe("queued")
+  expect(intent.payload).toBeUndefined()
+  expect(JSON.stringify(intent)).not.toContain("3 tests failed")
+  expect(JSON.stringify(intent)).not.toContain("oc_secret")
+  const summary = (await raw.table("runResultSummaries").get("summary_1")) as Record<
+    string,
+    unknown
+  >
+  expect(summary.runId).toBe("run_1")
+  expect(JSON.stringify(summary)).not.toContain("invoices")
+
+  // A target written before its table was encrypted still reads, and is
+  // sealed by its next write.
+  await raw.table("notificationTargets").put({
+    id: "target_1",
+    scopeKey: "scope_1",
+    enabledKey: 1,
+    addressFingerprint: "fp_1",
+    label: "Release channel",
+    updatedAt: 1,
+  })
+  await expect(db.notificationTargets.get("target_1")).resolves.toMatchObject({
+    label: "Release channel",
+  })
+  await db.notificationTargets.update("target_1", { updatedAt: 2 })
+  const sealed = (await raw.table("notificationTargets").get("target_1")) as Record<string, unknown>
+  expect(sealed.label).toBeUndefined()
+  expect(sealed.__cogniaEncryptedContent).toBeDefined()
+  await expect(db.notificationTargets.get("target_1")).resolves.toMatchObject({
+    label: "Release channel",
+    updatedAt: 2,
+  })
+  raw.close()
+  db.close()
+})
+
 it("fails closed when the account key is locked or replaced", async () => {
   activateAccountContentCipher(
     await AccountContentCipher.createForTesting("acct_crypto", DATABASE_NAME)
