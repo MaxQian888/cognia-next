@@ -20,7 +20,7 @@ import {
   READ_ONLY_TOOL_NAMES,
   SERVER_NAME as BUILTIN_SERVER_NAME,
 } from "../builtin-tools/index.mjs"
-import { classifyPlanMode } from "./plan-mode-policy.mjs"
+import { classifyPlanMode } from "../src/policy/plan-mode.ts"
 import { buildA2UIBridgeServer, SERVER_NAME as A2UI_SERVER_NAME } from "../a2ui-tools/index.mjs"
 import {
   buildPluginToolsServer,
@@ -30,14 +30,14 @@ import {
   modelPluginToolNameList,
   restorePluginToolName,
   restorePluginToolNamesInSdkMessage,
-} from "./plugin-tool-aliases.mjs"
+} from "../src/policy/tool-catalog/plugin-aliases.ts"
 import { makeInputStream } from "../src/shared/input-stream.ts"
 import { buildSubprocessEnv } from "./subprocess-env.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import { sessionEndedFromResult } from "./result-terminal.mjs"
 import { createProviderStreamLogger } from "./provider-stream-log.mjs"
 import { foldSystemPrompt, thinkingFromBudget } from "./system-prompt.mjs"
-import { resolveForToolCall } from "./permission-resolver.mjs"
+import { resolveForToolCall } from "../src/policy/permission/resolver.ts"
 import {
   classifyToolCallConfinement,
   combineVerdict,
@@ -55,7 +55,7 @@ import { buildLedgerToolHooks, createCallLedgerGate } from "./call-ledger-gate.m
 import { createNativeHookExecutor } from "./hook-native-executor.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
-import { createDoomLoopGuard } from "./doom-loop.mjs"
+import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
@@ -572,7 +572,7 @@ export function dispatchAnthropic(
   const resumeId = sendOptions.resumeSessionId ?? sendOptions.forkFromSessionId
   const isFork = sendOptions.forkFromSessionId != null
 
-  // Shared with the ai-sdk path's permission gate — see dispatch/doom-loop.mjs.
+  // Shared with the ai-sdk path's permission gate — see src/policy/doom-loop.ts.
   const doomGuard = createDoomLoopGuard()
 
   // Router + Fusion envelope mode (ADR-0188). Active only for a send carrying a

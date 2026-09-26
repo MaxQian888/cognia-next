@@ -23,7 +23,7 @@ import {
   READ_ONLY_TOOL_NAMES,
 } from "../builtin-tools/index.mjs"
 import { EXIT_PLAN_TOOL_NAME } from "../builtin-tools/exit-plan.mjs"
-import { PLAN_ALLOWED_PLUGIN_TOOLS } from "./plan-mode-policy.mjs"
+import { PLAN_ALLOWED_PLUGIN_TOOLS } from "../src/policy/plan-mode.ts"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   toolBudgetMessage,
@@ -35,13 +35,13 @@ import {
  * parity with the Anthropic SDK, letting the agent clarify before it plans. */
 const ASK_USER_TOOL_NAME = "ask_user"
 import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
-import { resolveForToolCall } from "./permission-resolver.mjs"
+import { resolveForToolCall } from "../src/policy/permission/resolver.ts"
 import {
   classifyToolCallConfinement,
   assertToolCallWithinRoots,
   buildPluginAccessMap,
 } from "../builtin-tools/confinement.mjs"
-import { createDoomLoopGuard } from "./doom-loop.mjs"
+import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { markAiSdkToolSource } from "./ai-sdk-tool-search.mjs"
 
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
@@ -54,7 +54,7 @@ const TOOL_RESULT_PII_ERROR = "Tool result blocked by the PII redaction gate"
  * read-only `Explore` / `Plan` subagents, so blocking these would break the
  * explore→plan flow on every non-Anthropic provider.
  *
- * The set itself now lives in `./plan-mode-policy.mjs` (imported at the top of
+ * The set itself now lives in `src/policy/plan-mode.ts` (imported at the top of
  * this file) — the Anthropic rail applies the SAME set to the cognia-owned MCP
  * servers, and the hand-maintained copies had already drifted from the CLI's
  * `PLAN_ALLOWED_HOST_TOOLS`.

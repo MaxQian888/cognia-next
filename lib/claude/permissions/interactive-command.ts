@@ -18,7 +18,7 @@
  * explicitly listed families are ever flagged, so a normal command is never
  * broken. A missed interactive command merely behaves as it does today.
  *
- * MIRROR: sidecar/builtin-tools/shared/interactive-detect.mjs is kept in sync
+ * MIRROR: sidecar/src/policy/shell/interactive.ts is kept in sync
  * with this rule set.
  */
 

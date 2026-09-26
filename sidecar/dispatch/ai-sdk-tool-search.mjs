@@ -9,7 +9,7 @@
 
 import { tool } from "ai"
 import { z } from "zod"
-import { modelToolName, restoreToolName } from "./ai-sdk-tool-names.mjs"
+import { modelToolName, restoreToolName } from "../src/policy/tool-catalog/model-names.ts"
 
 export const AI_SDK_TOOL_SEARCH_NAME = "ToolSearch"
 

@@ -8,7 +8,7 @@ import {
   restoreToolName,
   sanitizeModelToolName,
   sanitizeToolMap,
-} from "./ai-sdk-tool-names.mjs"
+} from "./model-names.ts"
 
 test("safe names pass through untouched", () => {
   for (const name of ["read", "git_status", "mcp__docs__search", "Tool-Search", "a".repeat(64)]) {

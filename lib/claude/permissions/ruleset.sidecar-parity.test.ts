@@ -3,7 +3,7 @@
  *
  * There are TWO matchers, and only one of them is the gate that actually runs.
  * `resolveBashPermission` (here, renderer-side) backs Auto-mode and the
- * approval UI. `resolveForToolCall` (`sidecar/dispatch/permission-resolver.mjs`)
+ * approval UI. `resolveForToolCall` (`sidecar/src/policy/permission/resolver.ts`)
  * is what `canUseTool` in `anthropic.mjs` consults to hard-reject a call before
  * it executes. The sidecar cannot import `lib/`, so it hand-mirrors this
  * module — and a mirror drifts silently.
@@ -13,8 +13,8 @@
  * the sidecar enforces the same thing.
  *
  * This test lives under `lib/` (not `/sidecar/`, which Jest ignores) and
- * imports BOTH; `permission-resolver.mjs` has zero imports so it transforms
- * cleanly.
+ * imports BOTH; the resolver's only import is the pure shell segmenter beside
+ * it, so it transforms cleanly.
  *
  * What parity means here: the two are NOT interchangeable by design. The
  * renderer prepends `DEFAULT_RULESET` (`*: allow`), so an unmatched command is
@@ -25,7 +25,7 @@
  * spelling the shell accepts.
  */
 import { resolveBashPermission, type Ruleset } from "./ruleset"
-import { resolveForToolCall } from "../../../sidecar/dispatch/permission-resolver.mjs"
+import { resolveForToolCall } from "../../../sidecar/src/policy/permission/resolver.ts"
 
 const sidecarVerdict = (ruleset: Ruleset, command: string): string =>
   (resolveForToolCall as (r: Ruleset, t: string, i: unknown) => string)(ruleset, "Bash", {

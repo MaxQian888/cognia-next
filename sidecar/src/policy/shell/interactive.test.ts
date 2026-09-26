@@ -1,16 +1,16 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { detectInteractiveCommand } from "./interactive-detect.mjs"
+import { detectInteractiveCommand } from "./interactive.ts"
 
-function interactive(cmd, head) {
+function interactive(cmd: string, head?: string): void {
   const r = detectInteractiveCommand(cmd)
   assert.equal(r.interactive, true, `expected interactive: ${cmd}`)
   if (head) assert.equal(r.head, head, `expected head ${head} for: ${cmd}`)
   assert.ok(r.reason, `expected a reason for: ${cmd}`)
 }
 
-function nonInteractive(cmd) {
+function nonInteractive(cmd: string): void {
   const r = detectInteractiveCommand(cmd)
   assert.equal(r.interactive, false, `expected non-interactive: ${cmd}`)
 }

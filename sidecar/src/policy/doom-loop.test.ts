@@ -3,10 +3,9 @@ import assert from "node:assert/strict"
 
 import {
   createDoomLoopGuard,
-  stableStringify,
   DEFAULT_DOOM_THRESHOLD,
   DEFAULT_DOOM_MAX_ENTRIES,
-} from "./doom-loop.mjs"
+} from "./doom-loop.ts"
 
 test("third identical call trips the guard", () => {
   const g = createDoomLoopGuard()
@@ -36,12 +35,6 @@ test("reset clears the counters", () => {
   g.check("t", {})
   g.reset()
   assert.equal(g.check("t", {}), null)
-})
-
-test("stableStringify sorts keys recursively and handles arrays/primitives", () => {
-  assert.equal(stableStringify({ b: [{ d: 1, c: 2 }], a: null }), '{"a":null,"b":[{"c":2,"d":1}]}')
-  assert.equal(stableStringify("s"), '"s"')
-  assert.equal(stableStringify(3), "3")
 })
 
 test("default threshold is 3", () => {

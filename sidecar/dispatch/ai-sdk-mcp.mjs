@@ -19,7 +19,7 @@ import { PassThrough } from "node:stream"
 import { createMCPClient } from "@ai-sdk/mcp"
 import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio"
 
-import { resolveForToolCall } from "./permission-resolver.mjs"
+import { resolveForToolCall } from "../src/policy/permission/resolver.ts"
 import { createLineBuffer, classifyMcpLogLine } from "./mcp-log.mjs"
 import {
   createEgressGuard as createMcpEgressGuard,

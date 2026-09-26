@@ -87,6 +87,14 @@ Each migration batch appends its moves here (old → new).
 | `telemetry.mjs` (`CogniaCorrelationSpanProcessor`)                       | `src/platform/telemetry/correlation.ts`                            | 3c          |
 | `telemetry.mjs` (`parentContext`, `withTraceparent`, `aiSdkTelemetry`)   | `src/platform/telemetry/trace.ts`                                  | 3c          |
 | `telemetry.mjs` (`traceAsyncIterable`, span repatriation)                | `src/platform/telemetry/local-spans.ts`                            | 3c          |
+| `dispatch/doom-loop.mjs`                                                 | `src/policy/doom-loop.ts`                                          | 4a          |
+| `stableStringify` (in `dispatch/doom-loop.mjs`)                          | `src/shared/stable-stringify.ts`                                   | 4a          |
+| `dispatch/plan-mode-policy.mjs`                                          | `src/policy/plan-mode.ts`                                          | 4a          |
+| `dispatch/ai-sdk-tool-names.mjs`                                         | `src/policy/tool-catalog/model-names.ts`                           | 4a          |
+| `dispatch/plugin-tool-aliases.mjs`                                       | `src/policy/tool-catalog/plugin-aliases.ts`                        | 4a          |
+| `dispatch/permission-resolver.mjs`                                       | `src/policy/permission/resolver.ts`                                | 4a          |
+| `builtin-tools/shared/interactive-detect.mjs`                            | `src/policy/shell/interactive.ts`                                  | 4a          |
+| Shell segmenter (copied in the two files above)                          | `src/policy/shell/segments.ts`                                     | 4a          |
 
 ## Scripts (run from repo root)
 

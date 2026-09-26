@@ -18,11 +18,11 @@ const MAX_LENGTH = 64
 const HASH_LENGTH = 7
 
 /** Whether a name can be sent to a provider unchanged. */
-export function isModelSafeToolName(name) {
+export function isModelSafeToolName(name: unknown): name is string {
   return typeof name === "string" && MODEL_TOOL_NAME_PATTERN.test(name)
 }
 
-function shortHash(value) {
+function shortHash(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, HASH_LENGTH)
 }
 
@@ -31,11 +31,8 @@ function shortHash(value) {
  * over-long name keeps its head and gains a short hash of the whole so two
  * long names that only differ in their tails stay distinct, and an empty
  * result is named after its hash so nothing collapses to a bare `_`.
- *
- * @param {string} name
- * @returns {string}
  */
-export function sanitizeModelToolName(name) {
+export function sanitizeModelToolName(name: unknown): string {
   const raw = String(name ?? "")
   let safe = raw.replace(/[^a-zA-Z0-9_-]+/g, "_")
   if (safe.replace(/_/g, "") === "") safe = `tool_${shortHash(raw)}`
@@ -53,21 +50,21 @@ export function sanitizeModelToolName(name) {
  * only holds the names that actually changed. A sanitized name that collides
  * with an existing key or another rename gets a numeric suffix, so the model
  * always has one distinct name per tool.
- *
- * @template T
- * @param {Record<string, T>} tools
- * @returns {{ tools: Record<string, T>, aliases: Map<string, string> }}
  */
-export function sanitizeToolMap(tools) {
-  const aliases = new Map()
-  const source = tools ?? {}
+export function sanitizeToolMap<T>(tools: Record<string, T> | null | undefined): {
+  tools: Record<string, T>
+  aliases: Map<string, string>
+} {
+  const aliases = new Map<string, string>()
+  const source: Record<string, T> = tools ?? {}
   const originals = Object.keys(source)
-  const safeSet = new Set(originals.filter(isModelSafeToolName))
-  /** @type {Record<string, T>} */
-  const out = {}
+  const safeSet = new Set<string>(originals.filter(isModelSafeToolName))
+  const out: Record<string, T> = {}
   for (const name of originals) {
+    // `originals` are the map's own keys, so every lookup below is present.
+    const tool = source[name] as T
     if (isModelSafeToolName(name)) {
-      out[name] = source[name]
+      out[name] = tool
       continue
     }
     let candidate = sanitizeModelToolName(name)
@@ -77,31 +74,29 @@ export function sanitizeToolMap(tools) {
     }
     safeSet.add(candidate)
     aliases.set(candidate, name)
-    out[candidate] = source[name]
+    out[candidate] = tool
   }
   return { tools: out, aliases }
 }
 
 /**
  * The original name for a model-facing one (identity when nothing was renamed).
- *
- * @param {Map<string, string> | undefined | null} aliases
- * @param {string} name
- * @returns {string}
  */
-export function restoreToolName(aliases, name) {
+export function restoreToolName(
+  aliases: ReadonlyMap<string, string> | undefined | null,
+  name: string
+): string {
   return (aliases && aliases.get(name)) ?? name
 }
 
 /**
  * The model-facing name for an original one, for callers that address tools
  * by their cognia name (ToolSearch `select:`, allow lists).
- *
- * @param {Map<string, string> | undefined | null} aliases
- * @param {string} name
- * @returns {string}
  */
-export function modelToolName(aliases, name) {
+export function modelToolName(
+  aliases: ReadonlyMap<string, string> | undefined | null,
+  name: string
+): string {
   if (!aliases) return name
   for (const [safe, original] of aliases) if (original === name) return safe
   return name

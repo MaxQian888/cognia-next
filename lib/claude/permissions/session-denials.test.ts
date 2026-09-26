@@ -12,7 +12,7 @@ import {
 import { resolveBashPermission, type Ruleset } from "./ruleset"
 // The gate that actually runs: unlike the renderer resolver it prepends no
 // `*: allow` default, so "no matching rule" reads as "ask" here.
-import { resolveForToolCall } from "../../../sidecar/dispatch/permission-resolver.mjs"
+import { resolveForToolCall } from "../../../sidecar/src/policy/permission/resolver.ts"
 
 beforeEach(() => {
   __resetSessionDenialsForTesting()

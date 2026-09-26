@@ -9,7 +9,7 @@ import {
   qualifiedPluginToolName,
   restorePluginToolName,
   restorePluginToolNamesInSdkMessage,
-} from "./plugin-tool-aliases.mjs"
+} from "./plugin-aliases.ts"
 
 const SERVER = "cognia-plugin-tools"
 
@@ -101,10 +101,10 @@ test("restorePluginToolNamesInSdkMessage rewrites the streamed vocabulary and no
   }
   const restored = restorePluginToolNamesInSdkMessage(aliases, SERVER, assistant)
   assert.notEqual(restored, assistant)
-  assert.equal(restored.message.content[1].name, "mcp__cognia-plugin-tools__ocr.extract")
-  assert.equal(restored.message.content[1].input, assistant.message.content[1].input)
+  assert.equal(restored.message.content[1]?.name, "mcp__cognia-plugin-tools__ocr.extract")
+  assert.equal(restored.message.content[1]?.input, assistant.message.content[1]?.input)
   assert.equal(restored.message.content[2], assistant.message.content[2])
-  assert.equal(assistant.message.content[1].name, "mcp__cognia-plugin-tools__ocr_extract")
+  assert.equal(assistant.message.content[1]?.name, "mcp__cognia-plugin-tools__ocr_extract")
 
   const plain = {
     type: "assistant",

@@ -1215,7 +1215,7 @@ export function dispatchAiSdk({
           toolsCache = {}
         } else {
           const { buildAiSdkTools } = await import("./ai-sdk-tools.mjs")
-          const { createDoomLoopGuard } = await import("./doom-loop.mjs")
+          const { createDoomLoopGuard } = await import("../src/policy/doom-loop.ts")
           // Own the tool gate's guard here so it can be reset per turn (F1).
           const toolDoomGuard = createDoomLoopGuard()
           doomGuards.push(toolDoomGuard)
@@ -1303,7 +1303,7 @@ export function dispatchAiSdk({
           // ToolSearch (`select:` by cognia name). Done on the sealed map so
           // every source (built-in, plugin, external MCP) is covered once.
           {
-            const { sanitizeToolMap } = await import("./ai-sdk-tool-names.mjs")
+            const { sanitizeToolMap } = await import("../src/policy/tool-catalog/model-names.ts")
             const renamed = sanitizeToolMap(toolsCache)
             toolsCache = renamed.tools
             toolNameAliases.clear()

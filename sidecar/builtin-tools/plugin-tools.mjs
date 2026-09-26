@@ -21,7 +21,7 @@ import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
 import { toolError, toolText } from "./safety.mjs"
-import { planPluginToolNames } from "../dispatch/plugin-tool-aliases.mjs"
+import { planPluginToolNames } from "../src/policy/tool-catalog/plugin-aliases.ts"
 
 export const SERVER_NAME = "cognia-plugin-tools"
 export const SERVER_VERSION = "0.1.0"

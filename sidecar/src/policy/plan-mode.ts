@@ -27,7 +27,7 @@
  * read-only tool allowlist. The Skill loaders only read scoped instructions and
  * resources.
  */
-export const PLAN_ALLOWED_PLUGIN_TOOLS = new Set([
+export const PLAN_ALLOWED_PLUGIN_TOOLS: ReadonlySet<string> = new Set([
   "dispatch_agent",
   "Task",
   "load_skill",
@@ -35,30 +35,31 @@ export const PLAN_ALLOWED_PLUGIN_TOOLS = new Set([
 ])
 
 /** Split `mcp__<server>__<tool>` into its parts; bare names pass through. */
-export function splitToolName(toolName) {
+export function splitToolName(toolName: unknown): { server: string | null; bare: string } {
   const parts = String(toolName).split("__")
   return {
-    server: parts.length >= 3 ? parts[1] : null,
+    server: parts.length >= 3 ? (parts[1] ?? null) : null,
     bare: parts.length >= 3 ? parts.slice(2).join("__") : String(toolName),
   }
 }
 
+export interface PlanModeOptions {
+  builtinServerName: string
+  pluginServerName: string
+  readOnlyBuiltins: ReadonlySet<string>
+  extraAllowedBare?: ReadonlySet<string>
+  governOnlyCogniaServers?: boolean
+}
+
 /**
- * Plan-mode verdict for a single tool call.
- *
- * @param {string} toolName
- * @param {{
- *   builtinServerName: string,
- *   pluginServerName: string,
- *   readOnlyBuiltins: Set<string>,
- *   extraAllowedBare?: Set<string>,
- *   governOnlyCogniaServers?: boolean,
- * }} opts
- * @returns {"allow" | "deny" | "not-governed"}
- *   `not-governed` means this policy has no opinion — the caller should fall
- *   through to its own handling (on the Anthropic rail, that is the SDK).
+ * Plan-mode verdict for a single tool call. `not-governed` means this policy
+ * has no opinion — the caller should fall through to its own handling (on the
+ * Anthropic rail, that is the SDK).
  */
-export function classifyPlanMode(toolName, opts) {
+export function classifyPlanMode(
+  toolName: string,
+  opts: PlanModeOptions
+): "allow" | "deny" | "not-governed" {
   const {
     builtinServerName,
     pluginServerName,

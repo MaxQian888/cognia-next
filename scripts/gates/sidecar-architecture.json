@@ -89,6 +89,8 @@
     "lib/ai/providers/models-dev-capabilities.json"
   ],
   "isomorphic": [
+    "sidecar/src/policy/permission/resolver.ts",
+    "sidecar/src/policy/shell/segments.ts",
     "sidecar/src/providers/provider-protocol.ts",
     "sidecar/src/providers/reasoning-effort-tables.ts"
   ],
@@ -101,12 +103,12 @@
     "sidecar/dispatch/claude-executable.mjs",
     "sidecar/dispatch/compaction.mjs",
     "sidecar/dispatch/feature-call.mjs",
-    "sidecar/dispatch/permission-resolver.mjs",
     "sidecar/dispatch/protocol-adapters/openai-compatible-variant-adapter.mjs",
     "sidecar/dispatch/protocol-adapters/registry.mjs",
     "sidecar/dispatch/usage-normalize.mjs",
     "sidecar/pi-extension/cognia-pi-extension.ts",
     "sidecar/src/platform/net/egress-guard.ts",
+    "sidecar/src/policy/permission/resolver.ts",
     "sidecar/src/providers/provider-protocol.ts",
     "sidecar/src/providers/reasoning-effort-tables.ts",
     "sidecar/test-support/live-harness.ts"

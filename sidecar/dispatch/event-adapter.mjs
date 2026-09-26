@@ -20,7 +20,7 @@
 
 import { randomUUID } from "node:crypto"
 import { normalizeUsageBlock } from "./usage-normalize.mjs"
-import { restoreToolName } from "./ai-sdk-tool-names.mjs"
+import { restoreToolName } from "../src/policy/tool-catalog/model-names.ts"
 
 /**
  * Shape a tool-result payload for the renderer's `tool_result` content block.

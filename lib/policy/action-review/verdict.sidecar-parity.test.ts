@@ -8,11 +8,12 @@
  *
  * It matters because the sidecar is the one producer that cannot import the
  * contract. `sidecar/package.json` has exactly one workspace dependency
- * (`@cognia/redact`), so `permission-resolver.mjs` is a hand-mirror with no
- * type checking against `action-review.ts` whatsoever. If someone adds a
- * fourth verdict there — a "prompt" or a "defer" — nothing else in the repo
- * fails; the value simply flows into an `ActionReviewRequest.verdict` field
- * typed to reject it, and gets persisted onto a receipt as a lie.
+ * (`@cognia/redact`), so `src/policy/permission/resolver.ts` is a hand-mirror
+ * typed only against its own verdict union, never against `action-review.ts`.
+ * If someone adds a fourth verdict there — a "prompt" or a "defer" — nothing
+ * else in the repo fails; the value simply flows into an
+ * `ActionReviewRequest.verdict` field typed to reject it, and gets persisted
+ * onto a receipt as a lie.
  *
  * Like the other parity guards: if this fails, add the member to the contract
  * (and its constant, and the i18n keys), do not widen the expectation.
@@ -25,7 +26,7 @@ import type { Ruleset } from "@/lib/claude/permissions/ruleset"
 import {
   resolveForToolCall,
   resolveToolVerdict,
-} from "../../../sidecar/dispatch/permission-resolver.mjs"
+} from "../../../sidecar/src/policy/permission/resolver.ts"
 
 const forToolCall = resolveForToolCall as (r: Ruleset, tool: string, input: unknown) => string
 const forTool = resolveToolVerdict as (r: Ruleset, tool: string, target: string) => string

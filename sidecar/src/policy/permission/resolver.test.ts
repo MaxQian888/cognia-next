@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { resolveToolVerdict, resolveForToolCall, matchGlob } from "./permission-resolver.mjs"
+import { resolveToolVerdict, resolveForToolCall, matchGlob } from "./resolver.ts"
 
 test("matchGlob handles * and basename fallback", () => {
   assert.equal(matchGlob("git push*", "git push origin"), true)

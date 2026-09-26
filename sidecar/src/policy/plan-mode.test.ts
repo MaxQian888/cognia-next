@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { classifyPlanMode, PLAN_ALLOWED_PLUGIN_TOOLS } from "./plan-mode-policy.mjs"
+import { classifyPlanMode, PLAN_ALLOWED_PLUGIN_TOOLS } from "./plan-mode.ts"
 
 const options = {
   builtinServerName: "cognia-tools",

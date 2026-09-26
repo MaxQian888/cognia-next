@@ -460,7 +460,7 @@ function tokenize(segment: string): ParsedToken[] {
  * an unquoted Windows path (`type C:\\a\\b`) canonicalises to nonsense
  * (`type C:ab`), which can fail to match a rule but must never be allowed to
  * satisfy one. See `resolveBashPermission`, and its sidecar mirror in
- * `sidecar/dispatch/permission-resolver.mjs`, which must stay identical —
+ * `sidecar/src/policy/permission/resolver.ts`, which must stay identical —
  * `ruleset.sidecar-parity.test.ts` pins that.
  */
 export function canonicalizeCommand(command: string): string {

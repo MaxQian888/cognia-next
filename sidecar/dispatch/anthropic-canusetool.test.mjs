@@ -11,7 +11,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { createAnthropicCanUseTool } from "./anthropic.mjs"
-import { createDoomLoopGuard } from "./doom-loop.mjs"
+import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 
 function mkRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "cognia-canusetool-"))

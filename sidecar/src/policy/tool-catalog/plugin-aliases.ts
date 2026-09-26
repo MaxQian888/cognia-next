@@ -11,22 +11,37 @@
 // vocabularies meet: the option lists we hand the SDK, the tool name the SDK
 // hands `canUseTool`, and the messages the SDK streams back.
 
-import { sanitizeToolMap } from "./ai-sdk-tool-names.mjs"
+import { sanitizeToolMap } from "./model-names.ts"
+
+/** A content block as the SDK streams it; only tool_use blocks carry a name. */
+interface ToolUseBlockLike {
+  type?: unknown
+  name?: unknown
+}
+
+/** The fields of an SDK message that can carry a tool name. */
+interface SdkMessageLike {
+  type?: unknown
+  subtype?: unknown
+  message?: { content?: ToolUseBlockLike[] }
+  event?: { type?: unknown; content_block?: ToolUseBlockLike }
+  tools?: unknown[]
+  tool_name?: unknown
+}
+
+/** Bare `model → original` names for one MCP server's renamed tools. */
+type Aliases = ReadonlyMap<string, string> | undefined | null
 
 /** `mcp__<server>__<tool>` for one bare tool name. */
-export function qualifiedPluginToolName(serverName, bareName) {
+export function qualifiedPluginToolName(serverName: string, bareName: string): string {
   return `mcp__${serverName}__${bareName}`
 }
 
 /**
  * The bare tool name behind a qualified one on `serverName`, or `null` when
  * the name belongs to another server or is not qualified at all.
- *
- * @param {string} serverName
- * @param {unknown} name
- * @returns {string | null}
  */
-export function bareNameOnServer(serverName, name) {
+export function bareNameOnServer(serverName: string, name: unknown): string | null {
   if (typeof name !== "string") return null
   const prefix = `mcp__${serverName}__`
   return name.startsWith(prefix) && name.length > prefix.length ? name.slice(prefix.length) : null
@@ -35,17 +50,18 @@ export function bareNameOnServer(serverName, name) {
 /**
  * Model-facing names for a manifest, plus the alias table `model → original`
  * holding only the names that changed.
- *
- * @param {Array<{ name: string }>} tools
- * @returns {{ modelNameOf: Map<string, string>, aliases: Map<string, string> }}
  */
-export function planPluginToolNames(tools) {
-  const byName = {}
-  for (const t of Array.isArray(tools) ? tools : []) {
-    if (t && typeof t.name === "string") byName[t.name] = true
+export function planPluginToolNames(tools: unknown): {
+  modelNameOf: Map<string, string>
+  aliases: Map<string, string>
+} {
+  const byName: Record<string, true> = {}
+  for (const t of Array.isArray(tools) ? (tools as unknown[]) : []) {
+    const name = (t as { name?: unknown } | null)?.name
+    if (t && typeof name === "string") byName[name] = true
   }
   const { aliases } = sanitizeToolMap(byName)
-  const modelNameOf = new Map()
+  const modelNameOf = new Map<string, string>()
   for (const [model, original] of aliases) modelNameOf.set(original, model)
   return { modelNameOf, aliases }
 }
@@ -53,13 +69,8 @@ export function planPluginToolNames(tools) {
 /**
  * The original qualified name for a qualified model-facing one. Identity for
  * names that were never renamed or that belong to another server.
- *
- * @param {Map<string, string> | undefined | null} aliases bare `model → original`
- * @param {string} serverName
- * @param {string} name
- * @returns {string}
  */
-export function restorePluginToolName(aliases, serverName, name) {
+export function restorePluginToolName(aliases: Aliases, serverName: string, name: string): string {
   if (!aliases || aliases.size === 0) return name
   const bare = bareNameOnServer(serverName, name)
   if (bare === null) return name
@@ -70,13 +81,8 @@ export function restorePluginToolName(aliases, serverName, name) {
 /**
  * The model-facing qualified name for an original qualified one. Identity for
  * names that need no rename.
- *
- * @param {Map<string, string> | undefined | null} aliases bare `model → original`
- * @param {string} serverName
- * @param {string} name
- * @returns {string}
  */
-export function modelPluginToolName(aliases, serverName, name) {
+export function modelPluginToolName(aliases: Aliases, serverName: string, name: string): string {
   if (!aliases || aliases.size === 0) return name
   const bare = bareNameOnServer(serverName, name)
   if (bare === null) return name
@@ -90,21 +96,18 @@ export function modelPluginToolName(aliases, serverName, name) {
  * Translate a tool-name list (allowedTools, disallowedTools) to the names the
  * SDK will compare against. Non-string entries and other servers pass through,
  * and the list keeps its order and identity when nothing changes.
- *
- * @param {Map<string, string> | undefined | null} aliases
- * @param {string} serverName
- * @param {unknown} list
  */
-export function modelPluginToolNameList(aliases, serverName, list) {
+export function modelPluginToolNameList<L>(aliases: Aliases, serverName: string, list: L): L {
   if (!Array.isArray(list) || !aliases || aliases.size === 0) return list
   let changed = false
-  const out = list.map((entry) => {
+  const out = (list as unknown[]).map((entry) => {
     if (typeof entry !== "string") return entry
     const mapped = modelPluginToolName(aliases, serverName, entry)
     if (mapped !== entry) changed = true
     return mapped
   })
-  return changed ? out : list
+  // Same length and element kinds as `list`, so the list's own type still holds.
+  return changed ? (out as L) : list
 }
 
 /**
@@ -112,58 +115,58 @@ export function modelPluginToolNameList(aliases, serverName, list) {
  * vocabulary: `tool_use` blocks of an assistant message, the `tool_use` block
  * that opens a streamed content block, and the tool inventory of the init
  * message. Returns the same object when nothing needed to change, so the
- * common case allocates nothing.
- *
- * @template T
- * @param {Map<string, string> | undefined | null} aliases
- * @param {string} serverName
- * @param {T} evt
- * @returns {T}
+ * common case allocates nothing. The copy keeps every other field, so it
+ * stays the caller's message type.
  */
-export function restorePluginToolNamesInSdkMessage(aliases, serverName, evt) {
+export function restorePluginToolNamesInSdkMessage<T>(
+  aliases: Aliases,
+  serverName: string,
+  evt: T
+): T {
   if (!aliases || aliases.size === 0 || !evt || typeof evt !== "object") return evt
-  const restore = (name) => restorePluginToolName(aliases, serverName, name)
+  const restore = (name: string): string => restorePluginToolName(aliases, serverName, name)
+  const message = evt as SdkMessageLike
 
-  if (evt.type === "assistant" && Array.isArray(evt.message?.content)) {
+  if (message.type === "assistant" && Array.isArray(message.message?.content)) {
     let changed = false
-    const content = evt.message.content.map((block) => {
+    const content = message.message.content.map((block: ToolUseBlockLike) => {
       if (block?.type !== "tool_use" || typeof block.name !== "string") return block
       const name = restore(block.name)
       if (name === block.name) return block
       changed = true
       return { ...block, name }
     })
-    return changed ? { ...evt, message: { ...evt.message, content } } : evt
+    return changed ? ({ ...message, message: { ...message.message, content } } as T) : evt
   }
 
-  if (evt.type === "stream_event") {
-    const block = evt.event?.content_block
+  if (message.type === "stream_event") {
+    const block = message.event?.content_block
     if (
-      evt.event?.type === "content_block_start" &&
+      message.event?.type === "content_block_start" &&
       block?.type === "tool_use" &&
       typeof block.name === "string"
     ) {
       const name = restore(block.name)
       if (name === block.name) return evt
-      return { ...evt, event: { ...evt.event, content_block: { ...block, name } } }
+      return { ...message, event: { ...message.event, content_block: { ...block, name } } } as T
     }
     return evt
   }
 
-  if (evt.type === "system" && evt.subtype === "init" && Array.isArray(evt.tools)) {
+  if (message.type === "system" && message.subtype === "init" && Array.isArray(message.tools)) {
     let changed = false
-    const tools = evt.tools.map((name) => {
+    const tools = message.tools.map((name: unknown) => {
       if (typeof name !== "string") return name
       const restored = restore(name)
       if (restored !== name) changed = true
       return restored
     })
-    return changed ? { ...evt, tools } : evt
+    return changed ? ({ ...message, tools } as T) : evt
   }
 
-  if (evt.type === "tool_progress" && typeof evt.tool_name === "string") {
-    const name = restore(evt.tool_name)
-    return name === evt.tool_name ? evt : { ...evt, tool_name: name }
+  if (message.type === "tool_progress" && typeof message.tool_name === "string") {
+    const name = restore(message.tool_name)
+    return name === message.tool_name ? evt : ({ ...message, tool_name: name } as T)
   }
 
   return evt

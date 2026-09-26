@@ -1071,7 +1071,7 @@ test("disallowedTools filters plugin tools too", () => {
 test("doom-loop guard forces a prompt on the third identical allowed call", async () => {
   const events = []
   const pendingApprovals = new Map()
-  const { createDoomLoopGuard } = await import("./doom-loop.mjs")
+  const { createDoomLoopGuard } = await import("../src/policy/doom-loop.ts")
   const gate = createToolPermissionGate({
     emit: (m) => events.push(m),
     sessionId: "s1",

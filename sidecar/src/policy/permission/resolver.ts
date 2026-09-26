@@ -10,17 +10,32 @@
 // judge live renderer-side (the Auto-mode Layer B in use-claude-chat); this
 // fast-path only honors the static rules the user/character/plugin configured.
 
-const VERDICTS = new Set(["allow", "ask", "deny"])
-const VERDICT_RANK = { allow: 0, ask: 1, deny: 2 }
+import { extractSubstitutions, splitTopLevel } from "../shell/segments.ts"
 
-function escapeRegex(s) {
+export type Verdict = "allow" | "ask" | "deny"
+
+/**
+ * A serialized permission ruleset: a verdict per tool, or glob → verdict per
+ * tool, with `"*"` as the any-tool key. It arrives from the renderer
+ * unchecked, so entries that are not verdicts are skipped.
+ */
+export type PermissionRuleset = Record<string, unknown>
+
+const VERDICTS: ReadonlySet<unknown> = new Set(["allow", "ask", "deny"])
+const VERDICT_RANK: Record<Verdict, number> = { allow: 0, ask: 1, deny: 2 }
+
+function isVerdict(value: unknown): value is Verdict {
+  return VERDICTS.has(value)
+}
+
+function escapeRegex(s: string): string {
   return s.replace(/[.+^${}()|[\]\\]/g, "\\$&")
 }
 
-function globToRegExp(glob) {
+function globToRegExp(glob: string): RegExp {
   let re = ""
   for (let i = 0; i < glob.length; i++) {
-    const c = glob[i]
+    const c = glob.charAt(i)
     if (c === "*") {
       if (glob[i + 1] === "*") {
         re += ".*"
@@ -37,8 +52,8 @@ function globToRegExp(glob) {
   return new RegExp(`^${re}$`)
 }
 
-const regexCache = new Map()
-function cachedRegex(glob) {
+const regexCache = new Map<string, RegExp>()
+function cachedRegex(glob: string): RegExp {
   let r = regexCache.get(glob)
   if (!r) {
     r = globToRegExp(glob)
@@ -47,19 +62,19 @@ function cachedRegex(glob) {
   return r
 }
 
-function basename(p) {
+function basename(p: string): string {
   const parts = p.split(/[\\/]/)
   return parts[parts.length - 1] ?? p
 }
 
-export function matchGlob(glob, target) {
+export function matchGlob(glob: string, target: string): boolean {
   const re = cachedRegex(glob)
   if (re.test(target)) return true
   if (!glob.includes("/") && !glob.includes("\\")) return re.test(basename(target))
   return false
 }
 
-function specificity(glob) {
+function specificity(glob: string): number {
   let n = 0
   for (const c of glob) if (c !== "*" && c !== "?") n++
   return n
@@ -69,18 +84,23 @@ function specificity(glob) {
  * Resolve a single (tool, target) against the ruleset. Returns the matched
  * verdict ("allow"|"ask"|"deny"), or `null` when no rule matched.
  */
-export function resolveToolVerdict(ruleset, toolName, target) {
+export function resolveToolVerdict(
+  ruleset: unknown,
+  toolName: string,
+  target: string | undefined
+): Verdict | null {
   if (!ruleset || typeof ruleset !== "object") return null
-  let best = null // { toolScore, globScore, verdict }
+  const rules = ruleset as PermissionRuleset
+  let best: RuleMatch | null = null
   for (const toolKey of [toolName, "*"]) {
-    const entry = ruleset[toolKey]
+    const entry = rules[toolKey]
     if (entry == null) continue
     const toolScore = toolKey === toolName ? 2 : 1
     if (typeof entry === "string") {
-      if (VERDICTS.has(entry)) best = better(best, { toolScore, globScore: 0, verdict: entry })
+      if (isVerdict(entry)) best = better(best, { toolScore, globScore: 0, verdict: entry })
     } else if (typeof entry === "object") {
       for (const [glob, verdict] of Object.entries(entry)) {
-        if (!VERDICTS.has(verdict)) continue
+        if (!isVerdict(verdict)) continue
         if (matchGlob(glob, target ?? "")) {
           best = better(best, { toolScore, globScore: specificity(glob), verdict })
         }
@@ -90,198 +110,23 @@ export function resolveToolVerdict(ruleset, toolName, target) {
   return best ? best.verdict : null
 }
 
-function better(a, b) {
+interface RuleMatch {
+  toolScore: number
+  globScore: number
+  verdict: Verdict
+}
+
+function better(a: RuleMatch | null, b: RuleMatch): RuleMatch {
   if (!a) return b
   if (b.toolScore !== a.toolScore) return b.toolScore > a.toolScore ? b : a
   return b.globScore >= a.globScore ? b : a
-}
-
-/** Index of the `)` matching the `(` at `openIdx`, or -1. Quote-aware. */
-function matchParen(text, openIdx) {
-  let depth = 0
-  let inSingle = false
-  let inDouble = false
-  for (let i = openIdx; i < text.length; i++) {
-    const c = text[i]
-    if (inSingle) {
-      if (c === "'") inSingle = false
-      continue
-    }
-    if (inDouble) {
-      if (c === '"') inDouble = false
-      continue
-    }
-    if (c === "'") {
-      inSingle = true
-      continue
-    }
-    if (c === '"') {
-      inDouble = true
-      continue
-    }
-    if (c === "(") depth++
-    else if (c === ")") {
-      depth--
-      if (depth === 0) return i
-    }
-  }
-  return -1
-}
-
-/** Split a command into top-level statements, respecting quotes + paren depth. */
-function splitTopLevel(command) {
-  const out = []
-  let cur = ""
-  let inSingle = false
-  let inDouble = false
-  let inBacktick = false
-  let depth = 0
-  const flush = () => {
-    if (cur.trim()) out.push(cur.trim())
-    cur = ""
-  }
-  for (let i = 0; i < command.length; i++) {
-    const c = command[i]
-    const next = command[i + 1]
-    if (inSingle) {
-      cur += c
-      if (c === "'") inSingle = false
-      continue
-    }
-    if (inDouble) {
-      cur += c
-      if (c === '"') inDouble = false
-      continue
-    }
-    if (inBacktick) {
-      cur += c
-      if (c === "`") inBacktick = false
-      continue
-    }
-    if (c === "'") {
-      inSingle = true
-      cur += c
-      continue
-    }
-    if (c === '"') {
-      inDouble = true
-      cur += c
-      continue
-    }
-    if (c === "`") {
-      inBacktick = true
-      cur += c
-      continue
-    }
-    if (c === "(") {
-      depth++
-      cur += c
-      continue
-    }
-    if (c === ")") {
-      if (depth > 0) depth--
-      cur += c
-      continue
-    }
-    if (depth > 0) {
-      cur += c
-      continue
-    }
-    if (c === "&" && next === "&") {
-      flush()
-      i++
-      continue
-    }
-    if (c === "|" && next === "|") {
-      flush()
-      i++
-      continue
-    }
-    if (c === ";" || c === "\n" || c === "|" || c === "&") {
-      flush()
-      continue
-    }
-    cur += c
-  }
-  flush()
-  return out
-}
-
-/**
- * Pull `$(...)`, backtick, and `(...)` spans out of `text`. Returns their inner
- * command strings (for recursive processing) plus a `stripped` copy with each
- * span replaced by a space.
- */
-function extractSubstitutions(text) {
-  const inner = []
-  let stripped = ""
-  let inSingle = false
-  let inDouble = false
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i]
-    if (inSingle) {
-      stripped += c
-      if (c === "'") inSingle = false
-      continue
-    }
-    if (inDouble) {
-      stripped += c
-      if (c === '"') inDouble = false
-      continue
-    }
-    if (c === "'") {
-      inSingle = true
-      stripped += c
-      continue
-    }
-    if (c === '"') {
-      inDouble = true
-      stripped += c
-      continue
-    }
-    if (c === "`") {
-      const end = text.indexOf("`", i + 1)
-      if (end === -1) {
-        stripped += c
-        continue
-      }
-      inner.push(text.slice(i + 1, end))
-      i = end
-      stripped += " "
-      continue
-    }
-    if (c === "$" && text[i + 1] === "(") {
-      const close = matchParen(text, i + 1)
-      if (close === -1) {
-        stripped += c
-        continue
-      }
-      inner.push(text.slice(i + 2, close))
-      i = close
-      stripped += " "
-      continue
-    }
-    if (c === "(") {
-      const close = matchParen(text, i)
-      if (close === -1) {
-        stripped += c
-        continue
-      }
-      inner.push(text.slice(i + 1, close))
-      i = close
-      stripped += " "
-      continue
-    }
-    stripped += c
-  }
-  return { inner, stripped }
 }
 
 /**
  * Byte-for-byte mirror of `readAnsiCQuote` in
  * `lib/claude/permissions/command-parse.ts`.
  */
-function readAnsiCQuote(segment, start) {
+function readAnsiCQuote(segment: string, start: number): { text: string; next: number } {
   let out = ""
   let i = start + 2
   while (i < segment.length && segment[i] !== "'") {
@@ -363,7 +208,7 @@ function readAnsiCQuote(segment, start) {
  * allow. `ruleset.sidecar-parity.test.ts` pins the two implementations
  * together.
  */
-export function canonicalizeCommand(command) {
+export function canonicalizeCommand(command: string | null | undefined): string {
   const text = command ?? ""
   let out = ""
   let inSingle = false
@@ -376,8 +221,9 @@ export function canonicalizeCommand(command) {
       continue
     }
     if (inDouble) {
-      if (c === "\\" && text[i + 1] !== undefined && '$`"\\'.includes(text[i + 1])) {
-        out += text[i + 1]
+      const next = text[i + 1]
+      if (c === "\\" && next !== undefined && '$`"\\'.includes(next)) {
+        out += next
         i++
       } else if (c === '"') inDouble = false
       else out += c
@@ -409,7 +255,7 @@ export function canonicalizeCommand(command) {
 
 const MAX_SPLIT_DEPTH = 20
 
-function collectSegments(command, out, depth) {
+function collectSegments(command: string, out: string[], depth: number): void {
   if (depth > MAX_SPLIT_DEPTH) return
   for (const raw of splitTopLevel(command)) {
     const trimmed = raw.trim()
@@ -435,8 +281,8 @@ function collectSegments(command, out, depth) {
  * this hard gate into the approval round-trip. Splitting inside quotes was the
  * other half of the mismatch: `git commit -m "a; b"` became two bogus segments.
  */
-function splitBash(command) {
-  const out = []
+function splitBash(command: unknown): string[] {
+  const out: string[] = []
   collectSegments(String(command ?? ""), out, 0)
   return out
 }
@@ -449,8 +295,9 @@ function splitBash(command) {
 const CORE_BASH_NAMES = new Set(["bash", "mcp__cognia-tools__bash"])
 
 /** Pull the resolution target out of a tool-call input. */
-function extractTarget(toolName, input) {
-  const obj = input && typeof input === "object" ? input : {}
+function extractTarget(toolName: string, input: unknown): string {
+  const obj: Record<string, unknown> =
+    input && typeof input === "object" ? (input as Record<string, unknown>) : {}
   if (toolName === "Bash" || CORE_BASH_NAMES.has(toolName)) {
     return typeof obj.command === "string" ? obj.command : ""
   }
@@ -475,7 +322,7 @@ function extractTarget(toolName, input) {
  * when EVERY segment is explicitly allowed; everything else → "ask" (round
  * trip). Non-shell tools resolve their single target directly.
  */
-export function resolveForToolCall(ruleset, toolName, input) {
+export function resolveForToolCall(ruleset: unknown, toolName: string, input: unknown): Verdict {
   const canonical = [
     "mcp__cognia-tools__start_process",
     "mcp__cognia-tools__shell_execute_advanced",
@@ -496,7 +343,7 @@ export function resolveForToolCall(ruleset, toolName, input) {
   const segments = splitBash(target)
   const targets = segments.length ? segments : [target]
   let allAllow = true
-  let worst = "allow"
+  let worst: Verdict = "allow"
   for (const t of targets) {
     // Core bash also honours rules keyed under its literal tool name; when
     // both a `Bash` rule and a tool-name rule match, the more severe wins.

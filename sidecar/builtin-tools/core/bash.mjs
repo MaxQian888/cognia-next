@@ -20,7 +20,7 @@ import { tailTruncate } from "../../src/shared/text/truncate.ts"
 import { pickStreamDecoder } from "../../src/platform/process/console-decode.ts"
 import { sandboxedProcessTarget, sandboxedProcessEnv } from "../../src/platform/process/exec.ts"
 import { activeShellDescriptor, applyNonInteractiveEnv } from "../../src/platform/process/shell.ts"
-import { detectInteractiveCommand } from "../shared/interactive-detect.mjs"
+import { detectInteractiveCommand } from "../../src/policy/shell/interactive.ts"
 import { resolveToolPath } from "./read.mjs"
 
 // Re-exported for back-compat: the canonical implementation now lives in
