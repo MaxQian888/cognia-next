@@ -136,12 +136,12 @@ headless 服务端移到 `crates/cognia-server`（lib + bin），不链接 Tauri
 | P0–P3 | 全部：修复并拆分 setup、工作区治理与门禁、分层修正、每个库 crate 的 `tauri-host` | 从 observability 的 `desktop-host` 中拆出 `tracing-host` |
 | P4 | `cognia-companion-connectivity`、`-bus`、`-contract`、`-security` | — |
 | P5 | `RendererPort`（companion 不再持有 `AppHandle`）；终端宿主客户端及其资源目录（P5.6 的一部分） | `CommandDispatcher`、`RpcHost`、运行时钩子、拆分 `commands.rs` |
-| P6 | `cognia-codex-app`、`cognia-browser-cookies`、`cognia-hooks`、`cognia-fleet`、`cognia-task-workspace-host`、`cognia-terminal::host_client`，GitHub 工作区与仓库导入并入 `cognia-git` | sidecar 定位器、codeserver、安装辅助二进制、`jobs` |
+| P6 | `cognia-codex-app`、`cognia-browser-cookies`、`cognia-hooks`、`cognia-fleet`、`cognia-task-workspace-host`、`cognia-terminal::host_client` 与 `::host_bridge`，GitHub 工作区与仓库导入并入 `cognia-git` | sidecar 定位器、codeserver、安装辅助二进制、`jobs` |
 
 计划与代码相遇之处：
 
 - **`cognia-task-workspace-host` 是独立 crate，而不是 `cognia-task-workspace` 的模块。** 后者刻意保持同步（不引入 tokio），而宿主层的每个函数体都跑在异步运行时上。
-- **桌面端终端桥及其命令留在应用中。** `cognia-terminal::commands` 已有同名但未注册的命令，而 `#[tauri::command]` 会导出 crate 级的全局宏，两者在删除旧命令前无法共存于同一 crate。只有不依赖 Tauri 的宿主客户端迁出。
+- **终端桥分两步迁出。** `cognia-terminal::commands` 仍保留持久终端宿主出现之前的同名 `terminal_*` 命令（未注册），而 `#[tauri::command]` 会导出 crate 级的全局 `__cmd__*` 宏，因此在删除旧命令之前，桥无法并入该 crate。旧命令删除后，桥命令及其状态位于 `tauri-host` 之后的 `cognia_terminal::host_bridge`；`src-tauri/src/terminal_host_bridge.rs` 改为 glob 重导出（这种写法会带上那些宏），`lib.rs` 中的 `generate_handler!` 无需改动。只有 `terminal_host_service` 的命令外壳留在应用中：它的 LAN URL 兜底要读取 companion 服务端的状态，因此由外壳以闭包形式传给 crate 中的 `run_terminal_host_service`。
 - **hooks 运行时与 Fleet 通过槽位接触宿主二进制**（`cognia_hooks::host::HOST`、`cognia_fleet::companion::COMPANION`）：桌面端在启动时填充，`cognia-server` 在安装 headless 服务时填充。Fleet 的两处安装由源码测试固定。
 - **当桌面端自身的测试依赖某个 crate 的 `cfg(test)` 行为分叉时，改为 `test-support` 分叉**（Fleet 的恢复文件与 `git` 采集）。`src-tauri` 只在 dev-dependencies 中开启 `test-support`，发布构建不会带上它。
 - **`CommandDispatcher` 等到 P7。** 打破 rpc ↔ remote-execution 的循环只有在核心离开应用 crate 后才有收益；单独做反而会引入一个每条测试路径都要安装的槽位。

@@ -201,18 +201,24 @@ tests with and without `tauri-host`, `cargo check -p cognia-next`,
 | P0–P3 | All of it: setup fixed and split into steps, workspace governance and the gates, the layering fixes, and `tauri-host` on every library crate | `tracing-host` split out of observability's `desktop-host` |
 | P4 | `cognia-companion-connectivity`, `-bus`, `-contract`, `-security` | — |
 | P5 | `RendererPort` (the companion holds no `AppHandle`); the terminal-host client and its resource dir (part of P5.6) | `CommandDispatcher`, `RpcHost`, runtime hooks, the `commands.rs` split |
-| P6 | `cognia-codex-app`, `cognia-browser-cookies`, `cognia-hooks`, `cognia-fleet`, `cognia-task-workspace-host`, `cognia-terminal::host_client`, GitHub workspace and repo import into `cognia-git` | The sidecar locator, codeserver, the setup binaries, `jobs` |
+| P6 | `cognia-codex-app`, `cognia-browser-cookies`, `cognia-hooks`, `cognia-fleet`, `cognia-task-workspace-host`, `cognia-terminal::host_client` and `::host_bridge`, GitHub workspace and repo import into `cognia-git` | The sidecar locator, codeserver, the setup binaries, `jobs` |
 
 Where the plan met the code:
 
 - **`cognia-task-workspace-host` is a crate, not a module of
   `cognia-task-workspace`.** That crate is deliberately sync (no tokio), and
   every host-surface body runs on the async runtime.
-- **The desktop terminal bridge and its commands stay in the app.**
-  `cognia-terminal::commands` already defines unregistered commands with the
-  same names, and `#[tauri::command]` exports crate-global macros, so the two
-  cannot share a crate until the old ones are deleted. Only the Tauri-free
-  host client moved.
+- **The terminal bridge moved in two steps.** `cognia-terminal::commands`
+  still defined the pre-durable-host `terminal_*` commands under the same
+  names, unregistered, and `#[tauri::command]` exports crate-global
+  `__cmd__*` macros, so the bridge could not join that crate until they were
+  deleted. With them gone, the bridge commands and their state live in
+  `cognia_terminal::host_bridge` behind `tauri-host`, and
+  `src-tauri/src/terminal_host_bridge.rs` is a glob re-export, which carries
+  those macros, so `generate_handler!` in `lib.rs` did not change. Only the
+  `terminal_host_service` shell stays in the app: its LAN URL fallback reads
+  the companion server's state, so the shell passes it to the crate's
+  `run_terminal_host_service` as a closure.
 - **The hooks runtime and Fleet reach the binary through slots**
   (`cognia_hooks::host::HOST`, `cognia_fleet::companion::COMPANION`), which the
   desktop fills at boot and `cognia-server` fills with its headless services.
