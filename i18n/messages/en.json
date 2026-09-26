@@ -22108,6 +22108,7 @@
     },
     "settingsPanel": {
       "defaultModel": "Default model",
+      "displayAndModelTitle": "Display & model",
       "fontScale": "Font scale",
       "fontScaleLg": "L",
       "fontScaleMd": "M",

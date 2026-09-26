@@ -178,13 +178,19 @@ describe("MobilePreferencesPage", () => {
     ).toMatchObject({ enabled: true })
   })
 
-  it("writes the default model patch and enqueues a server-bound update", async () => {
+  it("writes the default model once, on blur, not per keystroke", async () => {
     render(<Page />)
-    fireEvent.change(screen.getByTestId("pref-default-model"), {
-      target: { value: "claude-sonnet-4-6" },
-    })
+    const input = screen.getByTestId("pref-default-model")
+    // Each save mirrors to a paired desktop as its own queued job, so typing
+    // must not write "c", "cl", "cla", …
+    fireEvent.change(input, { target: { value: "claude" } })
+    fireEvent.change(input, { target: { value: "claude-sonnet-4-6 " } })
+    expect(saveMock).not.toHaveBeenCalled()
+    expect(input).toHaveValue("claude-sonnet-4-6 ")
+    fireEvent.blur(input)
     await Promise.resolve()
     await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledTimes(1)
     expect(saveMock).toHaveBeenCalledWith({ defaultModel: "claude-sonnet-4-6" })
     // Host mirroring moved out of `useSettingsPatch` and into the persistence
     // funnel (`lib/settings/mirror-to-host.ts`) so it also covers the mobile
@@ -235,9 +241,30 @@ describe("MobilePreferencesPage", () => {
     }
     render(<Page />)
     fireEvent.change(screen.getByTestId("pref-default-model"), { target: { value: "" } })
+    fireEvent.blur(screen.getByTestId("pref-default-model"))
     await Promise.resolve()
     await Promise.resolve()
     expect(saveMock).toHaveBeenCalledWith({ defaultModel: undefined })
+  })
+
+  it("commits the default model on Enter, and skips an unchanged value", async () => {
+    settingsRef.current = {
+      fontScale: "md",
+      defaultModel: "claude-opus-4-8",
+      biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD },
+    }
+    render(<Page />)
+    const input = screen.getByTestId("pref-default-model")
+    fireEvent.change(input, { target: { value: " claude-opus-4-8 " } })
+    fireEvent.blur(input)
+    await Promise.resolve()
+    expect(saveMock).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: "claude-haiku-4-5" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledWith({ defaultModel: "claude-haiku-4-5" })
   })
 
   it("falls back to safe defaults when settings are absent", () => {

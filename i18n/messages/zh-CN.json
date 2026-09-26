@@ -22108,6 +22108,7 @@
     },
     "settingsPanel": {
       "defaultModel": "默认模型",
+      "displayAndModelTitle": "显示与模型",
       "fontScale": "字号",
       "fontScaleLg": "大",
       "fontScaleMd": "中",

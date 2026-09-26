@@ -15,7 +15,7 @@
  */
 
 import { useTranslations } from "next-intl"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { BiometricRow } from "@/components/mobile/me/biometric-row"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
@@ -31,6 +31,7 @@ import {
 import type { BiometricGuardPolicy } from "@cognia/agent-config-types"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
+import { isImeComposing } from "@/lib/ui/ime"
 import {
   getBehaviorTelemetrySettings,
   setBehaviorTelemetryEnabled,
@@ -61,6 +62,25 @@ export default function MobilePreferencesPage() {
     }
   }, [settings?.behaviorTelemetry, settings?.telemetryEnabled])
 
+  // The model id is typed, so it is committed on blur or Enter, not per
+  // keystroke. Each save mirrors to a paired desktop as its own queued
+  // `app_settings_update`: typing "claude-opus" queued eleven jobs and set the
+  // desktop's default model to "c", "cl", "cla", … on the way. The draft is
+  // released once the write lands, unless typing has moved on since.
+  const [modelDraft, setModelDraft] = useState<string | null>(null)
+  const commitDefaultModel = () => {
+    if (modelDraft === null) return
+    const draft = modelDraft
+    const next = draft.trim()
+    if (next === defaultModel) {
+      setModelDraft(null)
+      return
+    }
+    void Promise.resolve(update({ defaultModel: next || undefined })).finally(() =>
+      setModelDraft((current) => (current === draft ? null : current))
+    )
+  }
+
   const updateBiometric = (patch: Partial<BiometricGuardPolicy>) =>
     update({ biometricRequiredFor: { ...policy, ...patch } })
 
@@ -71,7 +91,9 @@ export default function MobilePreferencesPage() {
       testid="mobile-preferences-page"
     >
       <div className="flex flex-col gap-4">
-        <MeSection title={tPanel("fontScale")} testid="me-section-pref-display">
+        {/* Titled for both rows: "Font scale" headed a section whose second
+            row is the default model. */}
+        <MeSection title={tPanel("displayAndModelTitle")} testid="me-section-pref-display">
           <Item size="sm" className="px-0">
             <ItemContent>
               <ItemTitle className="text-xs">{tPanel("fontScale")}</ItemTitle>
@@ -79,7 +101,11 @@ export default function MobilePreferencesPage() {
                 value={fontScale}
                 onValueChange={(v) => void update({ fontScale: v as never })}
               >
-                <SelectTrigger data-testid="pref-font-scale" className="mt-1">
+                <SelectTrigger
+                  data-testid="pref-font-scale"
+                  className="mt-1"
+                  aria-label={tPanel("fontScale")}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -94,9 +120,19 @@ export default function MobilePreferencesPage() {
             <ItemContent>
               <ItemTitle className="text-xs">{tPanel("defaultModel")}</ItemTitle>
               <Input
-                value={defaultModel}
-                onChange={(e) => void update({ defaultModel: e.target.value || undefined })}
+                value={modelDraft ?? defaultModel}
+                onChange={(e) => setModelDraft(e.target.value)}
+                onBlur={commitDefaultModel}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" || isImeComposing(e)) return
+                  e.preventDefault()
+                  commitDefaultModel()
+                }}
                 placeholder="claude-sonnet-4-6"
+                aria-label={tPanel("defaultModel")}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 data-testid="pref-default-model"
                 className="mt-1"
               />
