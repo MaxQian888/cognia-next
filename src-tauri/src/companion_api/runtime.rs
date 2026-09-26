@@ -178,6 +178,83 @@ pub fn brain_status() -> Option<BrainStatus> {
     BRAIN.try_get().map(|brain| brain.status())
 }
 
+/// A headless runtime for the core's own tests: the server's reads answer
+/// "not ready, nothing configured", its routes are empty, and orchestration
+/// replies are recorded instead of reaching an MCP server. Hold
+/// `ws_bridge::test_support::lock_slot()` while it is installed; the slot is
+/// process-global.
+#[cfg(test)]
+pub mod test_support {
+    use super::*;
+    use parking_lot::Mutex;
+
+    #[derive(Default)]
+    pub struct FakeHeadless {
+        /// The ids of the orchestration replies handed over, in order.
+        pub orchestration_replies: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl HeadlessRuntime for FakeHeadless {
+        async fn sidecar_ready(&self) -> bool {
+            false
+        }
+
+        fn sidecar_restart_count(&self) -> u64 {
+            0
+        }
+
+        fn gateway_enabled(&self) -> bool {
+            false
+        }
+
+        fn gateway_running(&self) -> bool {
+            false
+        }
+
+        fn gateway_health(&self) -> Value {
+            serde_json::json!({ "running": false })
+        }
+
+        fn resolve_orchestration_reply(
+            &self,
+            id: &str,
+            _reply: crate::mcp_server::orchestration_proxy::OrchestrationReply,
+        ) {
+            self.orchestration_replies.lock().push(id.to_string());
+        }
+
+        fn connectors(&self) -> crate::connectors::state::ConnectorsState {
+            crate::connectors::state::ConnectorsState::new()
+        }
+
+        fn event_bus(&self) -> Arc<EventBus> {
+            EventBus::new()
+        }
+
+        fn mcp_oauth_routes(&self) -> Router<SharedState> {
+            Router::new()
+        }
+
+        fn ide_content_routes(&self) -> Router<SharedState> {
+            Router::new()
+        }
+    }
+
+    /// Install a [`FakeHeadless`], making this process look like
+    /// `cognia-server` to the core.
+    pub fn install_fake_headless() -> Arc<FakeHeadless> {
+        let fake = Arc::new(FakeHeadless::default());
+        let _ = HEADLESS.set(fake.clone() as Arc<dyn HeadlessRuntime>);
+        fake
+    }
+
+    /// Empty the slot: the desktop topology.
+    pub fn clear_headless() {
+        let _ = HEADLESS.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

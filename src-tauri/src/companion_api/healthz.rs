@@ -291,7 +291,7 @@ mod tests {
         // The headless-services slot is process-global; serialize on the same
         // lock the other global-slot tests use.
         let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
 
         let router = build_router(test_state());
         let req = Request::builder()
@@ -307,9 +307,7 @@ mod tests {
             "desktop must not report sidecar"
         );
 
-        crate::headless::install_headless_services(Some(
-            crate::headless::HeadlessServices::stub_for_tests(),
-        ));
+        crate::companion_api::runtime::test_support::install_fake_headless();
         let router = build_router(test_state());
         let req = Request::builder()
             .method("GET")
@@ -325,7 +323,7 @@ mod tests {
         assert_eq!(body["sidecar"]["ready"], false);
         assert!(body["sidecar"]["restart_count"].is_number());
 
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
     }
 
     #[tokio::test]

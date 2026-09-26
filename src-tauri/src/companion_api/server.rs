@@ -1066,7 +1066,7 @@ mod tests {
     /// temporarily install process-global headless services.
     async fn build_desktop_router() -> (tokio::sync::MutexGuard<'static, ()>, Router) {
         let guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
         (guard, build_router(test_state()))
     }
 
@@ -1192,7 +1192,7 @@ mod tests {
         use tower::ServiceExt as _;
 
         let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
 
         let router = build_router_for_mode(
             test_state(),
@@ -1220,7 +1220,7 @@ mod tests {
         use tower::ServiceExt as _;
 
         let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
 
         let response = build_router_for_mode(
             test_state(),
@@ -1250,7 +1250,7 @@ mod tests {
         // desktop topology this contract pins, or a concurrent headless-route
         // test can attach service-auth middleware to an otherwise absent path.
         let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
 
         async fn status(path: &str, method: &str) -> StatusCode {
             let mut request = axum::http::Request::builder()
@@ -1351,7 +1351,7 @@ mod tests {
         use tower::ServiceExt as _;
 
         let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
 
         let response = build_router(test_state())
             .oneshot(
@@ -1395,7 +1395,7 @@ mod tests {
         // other global-slot tests.
         let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
 
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
         let router = build_router(test_state());
         let resp = router
             .oneshot(
@@ -1415,9 +1415,7 @@ mod tests {
         // layer — see `acp_route_requires_socket_ticket`.
         assert_eq!(resp.status().as_u16(), 404, "desktop has no ingress");
 
-        crate::headless::install_headless_services(Some(
-            crate::headless::HeadlessServices::stub_for_tests(),
-        ));
+        crate::companion_api::runtime::test_support::install_fake_headless();
         let router = build_router(test_state());
         let resp = router
             .oneshot(
@@ -1447,23 +1445,10 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status().as_u16(), 404, "unregistered adapter → 404");
 
-        let resp = build_router(test_state())
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri("/integrations/mcp/oauth/callback")
-                    .extension(test_peer())
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            resp.status(),
-            StatusCode::BAD_REQUEST,
-            "headless mounts the public MCP OAuth callback"
-        );
-
-        crate::headless::install_headless_services(None);
+        // The headless-only routes the server contributes (the MCP OAuth
+        // callback, the IDE content broker) are pinned beside them in
+        // `headless::tests`, against the real handlers.
+        crate::companion_api::runtime::test_support::clear_headless();
     }
 
     /// `/ws/acp` accepts only the canonical single-use socket ticket.

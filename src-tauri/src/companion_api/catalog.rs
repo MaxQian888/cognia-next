@@ -313,7 +313,7 @@ mod tests {
     #[tokio::test]
     async fn internal_catalog_roundtrips_its_etag_and_refuses_without_a_token() {
         let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
         let router = crate::companion_api::server::build_router(test_state());
         let (service, _) =
             crate::companion_api::jwt::issue_service_jwt(SECRET, ACCOUNT_ID).expect("service jwt");

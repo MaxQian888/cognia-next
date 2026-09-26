@@ -1934,9 +1934,7 @@ mod tests {
     #[tokio::test]
     async fn orchestration_response_routes_to_the_headless_mcp_state() {
         let _guard = lock_slot().await;
-        crate::headless::install_headless_services(Some(
-            crate::headless::HeadlessServices::stub_for_tests(),
-        ));
+        let headless = crate::companion_api::runtime::test_support::install_fake_headless();
 
         resolve_orchestration_response(json!({
             "id": "unknown-request",
@@ -1945,7 +1943,12 @@ mod tests {
         }))
         .expect("unknown reply ids are an idempotent no-op");
 
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
+        assert_eq!(
+            headless.orchestration_replies.lock().as_slice(),
+            ["unknown-request".to_string()],
+            "the reply must reach the headless server's MCP state"
+        );
     }
 
     #[tokio::test]

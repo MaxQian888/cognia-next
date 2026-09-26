@@ -1569,7 +1569,6 @@ mod tests {
     #[test]
     fn chat_submodule_responses_match_their_enforced_output_contracts() {
         use crate::agents::commands::{AgentReadResult, AgentWriteResult};
-        use crate::claude::commands::SidecarStatus;
 
         let read_ok = AgentReadResult {
             path: Some("/home/a/.claude/settings.json".to_string()),
@@ -1603,10 +1602,9 @@ mod tests {
         };
 
         let cases: Vec<(&str, Value)> = vec![
-            (
-                "claude_sidecar_status",
-                serde_json::to_value(SidecarStatus { ready: true }).unwrap(),
-            ),
+            // `claude::commands::SidecarStatus`, whose serialization is pinned
+            // beside it.
+            ("claude_sidecar_status", json!({ "ready": true })),
             ("read_agent_config", serde_json::to_value(read_ok).unwrap()),
             (
                 "read_agent_config",

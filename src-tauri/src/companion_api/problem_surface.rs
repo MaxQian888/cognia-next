@@ -48,7 +48,7 @@ mod tests {
 
     async fn desktop_router() -> (tokio::sync::MutexGuard<'static, ()>, Router) {
         let guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::headless::install_headless_services(None);
+        crate::companion_api::runtime::test_support::clear_headless();
         (
             guard,
             crate::companion_api::server::build_router(test_state()),

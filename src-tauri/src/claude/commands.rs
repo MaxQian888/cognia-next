@@ -1295,6 +1295,17 @@ pub async fn sidecar_restart_count(state: State<'_, SidecarState>) -> Result<u64
 mod tests {
     use super::*;
 
+    /// `claude_sidecar_status` answers this struct over the companion RPC, and
+    /// its declared output contract is the `{ "ready": bool }` object
+    /// `remote_execution`'s contract test validates.
+    #[test]
+    fn sidecar_status_serializes_as_the_ready_object() {
+        assert_eq!(
+            serde_json::to_value(SidecarStatus { ready: true }).unwrap(),
+            serde_json::json!({ "ready": true })
+        );
+    }
+
     fn parse(json_str: &str) -> SendOptions {
         serde_json::from_str(json_str).expect("valid SendOptions JSON")
     }

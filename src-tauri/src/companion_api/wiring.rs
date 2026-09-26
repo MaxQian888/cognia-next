@@ -154,6 +154,66 @@ mod tests {
         assert!(table_has_host);
     }
 
+    /// The headless server's own routes, against their real handlers: the
+    /// public MCP OAuth callback answers a request with no query as a bad
+    /// request, and the IDE content broker is mounted behind the service
+    /// token. Neither exists on the desktop.
+    #[tokio::test]
+    async fn the_headless_server_mounts_its_own_routes() {
+        use tower::ServiceExt as _;
+        let _slot = super::super::ws_bridge::test_support::lock_slot().await;
+        let peer = axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 34567)));
+        let request = |method: &str, uri: &str| {
+            axum::http::Request::builder()
+                .method(method)
+                .uri(uri)
+                .extension(peer)
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+
+        crate::headless::install_headless_services(None);
+        let desktop = super::super::server::build_router(unit_state());
+        for (method, uri) in [
+            ("GET", "/integrations/mcp/oauth/callback"),
+            ("POST", "/ide/content"),
+        ] {
+            let response = desktop.clone().oneshot(request(method, uri)).await.unwrap();
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::NOT_FOUND,
+                "the desktop does not mount {uri}"
+            );
+        }
+
+        crate::headless::install_headless_services(Some(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        ));
+        let headless = super::super::server::build_router(unit_state());
+        let callback = headless
+            .clone()
+            .oneshot(request("GET", "/integrations/mcp/oauth/callback"))
+            .await
+            .unwrap()
+            .status();
+        let content = headless
+            .oneshot(request("POST", "/ide/content"))
+            .await
+            .unwrap()
+            .status();
+        crate::headless::install_headless_services(None);
+        assert_eq!(
+            callback,
+            axum::http::StatusCode::BAD_REQUEST,
+            "headless mounts the public MCP OAuth callback"
+        );
+        assert_eq!(
+            content,
+            axum::http::StatusCode::UNAUTHORIZED,
+            "headless mounts the IDE content broker behind the service token"
+        );
+    }
+
     fn unit_state() -> SharedState {
         use super::super::*;
         Arc::new(CompanionState {
