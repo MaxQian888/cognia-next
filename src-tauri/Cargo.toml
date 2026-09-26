@@ -349,15 +349,6 @@ serde_urlencoded = "0.7"
 # CI). Pure-Rust, MIT-licensed, no transitive system deps.
 local-ip-address = "0.6"
 
-# Twin code-repo importer (ADR-0003 / next.config.ts node-only purge) —
-# walks a local git repo from Rust instead of `simple-git`. We only ever
-# `Repository::open` a path the user picked via the file dialog, so the
-# default `https` / `ssh` features (which pull OpenSSL + libssh2) are off.
-# `vendored-libgit2` ships libgit2's C source inside `libgit2-sys` so
-# developer machines don't need a system install — critical on Windows
-# where libgit2 isn't typically present.
-git2 = { workspace = true, features = ["vendored-libgit2"] }
-
 # `notify` watches imported agent-session directories
 # (`session_import_watch.rs`); `flate2` + `tar` read and write the gzipped
 # tarballs in `codeserver`, `headless` backups and `cli_bridge`. (The plugin

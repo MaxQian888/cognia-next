@@ -124,7 +124,7 @@ fn clone_args<'a>(remote: &'a str, destination: &'a str, branch: &'a str) -> [&'
 /// Allocate a worktree under `<base_dir>/<sanitized-repo>/<base36-stamp>` and
 /// clone the requested branch into it. Returns the absolute path and
 /// allocation timestamp so the TS side can synthesize a `WorkspaceHandle`.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, String> {
     // Captured before the line below folds the absent case into the *relative*
     // `DEFAULT_BASE_DIR`: handing that default to `mirror_root` is exactly the
@@ -205,7 +205,7 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
 /// commit SHA. Errors with `commitAndPush: no changes to commit` when
 /// `git status --porcelain` is empty (matches the legacy JS behavior the
 /// workflow node already pattern-matches against).
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn github_workspace_commit_and_push(args: CommitAndPushArgs) -> Result<String, String> {
     let agent_workspace = PathBuf::from(&args.workspace_path);
     let push_branch = args.remote_branch.as_deref().unwrap_or(&args.branch);
@@ -294,7 +294,7 @@ pub async fn github_workspace_commit_and_push(args: CommitAndPushArgs) -> Result
 /// Recursive `rm -rf` over the workspace. Returns `true` on success or when
 /// the path is already gone; surfaces real errors as `Err` so the TS wrapper
 /// can log and demote to `false`, preserving the legacy GC-pass semantics.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn github_workspace_remove(path: String) -> Result<bool, String> {
     match tokio::fs::remove_dir_all(&path).await {
         Ok(()) => Ok(true),
@@ -305,7 +305,7 @@ pub async fn github_workspace_remove(path: String) -> Result<bool, String> {
 
 /// Equivalent of the JS `statWorkspace` — `mtimeMs` if the path exists,
 /// `{ exists: false }` otherwise. Never throws.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn github_workspace_stat(path: String) -> Result<StatResult, String> {
     match tokio::fs::metadata(&path).await {
         Err(_) => Ok(StatResult {
@@ -775,7 +775,7 @@ mod tests {
         let mirrors: Vec<_> = fs::read_dir(&cache)
             .unwrap()
             .flatten()
-            .filter(|entry| cognia_task_workspace::is_mirror(&entry.path()))
+            .filter(|entry| cognia_git_mirror::is_mirror(&entry.path()))
             .collect();
         assert_eq!(mirrors.len(), 1, "one repository is one mirror");
     }
@@ -809,7 +809,7 @@ mod tests {
                 .unwrap()
                 .flatten()
                 .map(|entry| entry.path())
-                .find(|path| cognia_task_workspace::is_mirror(path))
+                .find(|path| cognia_git_mirror::is_mirror(path))
                 .expect("a mirror");
             let shared: Vec<_> = packs(&mirror)
                 .into_iter()
@@ -863,13 +863,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (_origin, url) = upstream(tmp.path());
         let cache = tmp.path().join("cache");
-        let junk = cognia_task_workspace::mirror_path(&cache, &url).unwrap();
+        let junk = cognia_git_mirror::mirror_path(&cache, &url).unwrap();
         fs::create_dir_all(junk.join("objects")).unwrap();
         fs::write(junk.join("stray.txt"), b"half a clone").unwrap();
 
         let dest = tmp.path().join("work");
         assert!(derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "").await);
-        assert!(cognia_task_workspace::is_mirror(&junk));
+        assert!(cognia_git_mirror::is_mirror(&junk));
         assert!(!junk.join("stray.txt").exists());
     }
 
@@ -885,7 +885,7 @@ mod tests {
         fs::write(origin.join("b.txt"), "second\n").unwrap();
         sh(&origin, &["add", "b.txt"]);
         sh(&origin, &["commit", "-m", "second"]);
-        let mirror = cognia_task_workspace::mirror_path(&cache, &url).unwrap();
+        let mirror = cognia_git_mirror::mirror_path(&cache, &url).unwrap();
         fs::remove_file(mirror.join("cognia-fetched-at")).unwrap();
 
         let second = tmp.path().join("second");

@@ -55,7 +55,7 @@ pub struct CommitRecord {
 /// Tauri command surface. Heavy lifting runs on a blocking thread because
 /// libgit2 is sync; we don't want to wedge the tokio reactor on a 500-commit
 /// walk.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn twin_parse_git_repo(args: ParseGitRepoArgs) -> Result<Vec<CommitRecord>, String> {
     tokio::task::spawn_blocking(move || parse_repo_blocking(args))
         .await

@@ -1,5 +1,7 @@
 //! GitHub subsystem — Rust-side helpers for the GitHub Delivery plugin
-//! (ADR-0018). Today only hosts the `workspace` module that backs
-//! `lib/github/workspace.ts`; future Rust ports of GitHub plumbing go here.
+//! (ADR-0018). The `workspace` module that backs `lib/github/workspace.ts`
+//! lives in `cognia_git::github` (ADR-0196 P6); this re-export keeps the
+//! `github::workspace::…` paths the command registry and the companion RPC
+//! arms name.
 
-pub mod workspace;
+pub use cognia_git::github::workspace;

@@ -45,9 +45,14 @@ parking_lot.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
+# `github::workspace` parses the GitHub host a clone targets.
+url.workspace = true
+# `github::workspace` pushes from a throwaway trusted clone.
+tempfile.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
+# `github::workspace` tests build the credential header they expect a clone to send.
+base64.workspace = true
 
 [lints]
 workspace = true

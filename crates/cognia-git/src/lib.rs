@@ -14,6 +14,9 @@ pub mod branch;
 // ADR-0067 Tier C — local code-adoption tracking moved in from `app_lib`;
 // its only cross-module need was this crate's `diff::file_diff`.
 pub mod code_adoption;
+// ADR-0196 P6 — the Twin git-history importer, out of `app_lib`, where it was
+// the last direct `git2` user.
+pub mod code_repo;
 /// The Tauri command shells; only `src-tauri` enables them (ADR-0196).
 #[cfg(feature = "tauri-host")]
 pub mod commands;
@@ -22,6 +25,9 @@ pub mod diff;
 pub mod diff_stat;
 pub mod error;
 pub mod exec;
+// ADR-0196 P6 — the plugin GitHub workspace (clone, commit-and-push), out of
+// `app_lib`.
+pub mod github;
 pub mod history;
 pub mod interactive_rebase;
 pub mod merge;
