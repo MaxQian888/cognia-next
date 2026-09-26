@@ -43,12 +43,17 @@ import {
   normalizeProtocol,
   isMisroutedToOpenAi,
 } from "../src/providers/provider-protocol.ts"
-import { shouldCompact, estimateTokens, makeSummaryMessage, summaryVersion } from "./compaction.mjs"
-import { planStrategy } from "./compaction-strategies.mjs"
+import {
+  shouldCompact,
+  estimateTokens,
+  makeSummaryMessage,
+  summaryVersion,
+} from "../src/context/compaction.ts"
+import { planStrategy } from "../src/context/strategies.ts"
 import { queryPreCompactDecision } from "./pre-compact-hook.mjs"
 import { runPluginHookHandler, PLUGIN_HOOK_BROADCAST } from "./plugin-hook-exec.mjs"
-import { capToolResults } from "./tool-result-cap.mjs"
-import { sanitizeToolMessagePairs } from "./tool-message-pairing.mjs"
+import { capToolResults } from "../src/context/tool-result-cap.ts"
+import { sanitizeToolMessagePairs } from "../src/context/tool-message-pairing.ts"
 import { buildMcpLogEvent } from "./mcp-log.mjs"
 
 // Recent user/assistant messages kept verbatim when compacting; everything

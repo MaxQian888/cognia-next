@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { scoreMessage, messageText } from "./importance.mjs"
+import { scoreMessage, messageText } from "./importance.ts"
 
 test("messageText flattens string and block content", () => {
   assert.equal(messageText({ content: "hi" }), "hi")

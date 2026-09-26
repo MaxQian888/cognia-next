@@ -1,21 +1,21 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { sanitizeToolMessagePairs } from "./tool-message-pairing.mjs"
+import { sanitizeToolMessagePairs } from "./tool-message-pairing.ts"
 
 // Helpers mirroring the AI SDK `ModelMessage` shapes the dispatcher builds.
-const asstCall = (id, name = "bash") => ({
+const asstCall = (id: string, name = "bash") => ({
   role: "assistant",
   content: [{ type: "tool-call", toolCallId: id, toolName: name, input: {} }],
 })
-const asstTextCall = (text, id) => ({
+const asstTextCall = (text: string, id: string) => ({
   role: "assistant",
   content: [
     { type: "text", text },
     { type: "tool-call", toolCallId: id, toolName: "bash", input: {} },
   ],
 })
-const toolResult = (id, name = "bash") => ({
+const toolResult = (id: string, name = "bash") => ({
   role: "tool",
   content: [
     { type: "tool-result", toolCallId: id, toolName: name, output: { type: "text", value: "ok" } },
@@ -53,7 +53,7 @@ test("keeps assistant text when its only tool-call is dangling", () => {
   const history = [asstTextCall("thinking…", "c1")]
   const out = sanitizeToolMessagePairs(history)
   assert.equal(out.length, 1)
-  assert.deepEqual(out[0].content, [{ type: "text", text: "thinking…" }])
+  assert.deepEqual(out[0]?.content, [{ type: "text", text: "thinking…" }])
 })
 
 test("drops an orphan tool-result (result with no preceding call)", () => {
@@ -70,8 +70,8 @@ test("prunes only the unpaired part in a mixed tool message", () => {
   ]
   const out = sanitizeToolMessagePairs(history)
   assert.equal(out.length, 2)
-  assert.equal(out[1].content.length, 1)
-  assert.equal(out[1].content[0].toolCallId, "c1")
+  assert.equal(out[1]?.content.length, 1)
+  assert.equal(out[1]?.content[0]?.toolCallId, "c1")
 })
 
 test("prunes only the unpaired call in a multi-call assistant message", () => {
@@ -87,9 +87,9 @@ test("prunes only the unpaired call in a multi-call assistant message", () => {
   ]
   const out = sanitizeToolMessagePairs(history)
   // c2 has no result → dropped; c1 stays; the tool message stays.
-  assert.equal(out[0].content.length, 1)
-  assert.equal(out[0].content[0].toolCallId, "c1")
-  assert.equal(out[1].content[0].toolCallId, "c1")
+  assert.equal(out[0]?.content.length, 1)
+  assert.equal(out[0]?.content[0]?.toolCallId, "c1")
+  assert.equal(out[1]?.content[0]?.toolCallId, "c1")
 })
 
 test("leaves string-content assistant/user/system messages alone", () => {

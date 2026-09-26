@@ -15,8 +15,62 @@
 // Common assembly pieces (systemHead, frozen, keep, tail) are reused by the
 // orchestrator as `[...systemHead, ...frozen, ...keep, <summary>, ...tail]`.
 
-import { planCompaction, estimateTokens, getContextWindow } from "./compaction.mjs"
-import { scoreMessage as defaultScoreMessage } from "./importance.mjs"
+import { planCompaction, estimateTokens, getContextWindow } from "./compaction.ts"
+import type { ConversationMessage } from "./compaction.ts"
+import { scoreMessage as defaultScoreMessage } from "./importance.ts"
+import type { MessageScore } from "./importance.ts"
+
+/** The `CompressionStrategy` values this planner understands (types/system/compression.ts). */
+export type CompressionStrategy =
+  "summary" | "hybrid" | "sliding-window" | "selective" | "recursive" | "optical"
+
+type Messages = ConversationMessage[]
+
+/** What to compact and how; the orchestrator runs the summary calls. */
+export type StrategyPlan =
+  | { kind: "none" }
+  | { kind: "rebuild"; rebuilt: Messages }
+  | {
+      kind: "single" | "optical"
+      systemHead: Messages
+      frozen: Messages
+      keep: Messages
+      middle: Messages
+      tail: Messages
+    }
+  | {
+      kind: "selective"
+      systemHead: Messages
+      frozen: Messages
+      keep: Messages
+      summarizeSet: Messages
+      tail: Messages
+    }
+  | {
+      kind: "chunked"
+      systemHead: Messages
+      frozen: Messages
+      keep: Messages
+      chunks: Messages[]
+      tail: Messages
+    }
+
+export interface PlanStrategyOptions {
+  /** Unknown strategies plan like "summary". */
+  strategy?: CompressionStrategy | (string & {})
+  conversation: readonly ConversationMessage[]
+  keepRecent?: number
+  preserveSystemMessages?: boolean
+  recursiveChunkSize?: number
+  importanceThreshold?: number
+  retainedFraction?: unknown
+  contextWindow?: unknown
+  modelId?: string | null
+  scoreMessage?: (
+    message: ConversationMessage,
+    position: { index: number; total: number }
+  ) => MessageScore
+}
 
 /** Floor on the verbatim tail — the drain-line never evicts below this. */
 export const MIN_TAIL = 2
@@ -37,7 +91,7 @@ export function planStrategy({
   contextWindow,
   modelId,
   scoreMessage = defaultScoreMessage,
-}) {
+}: PlanStrategyOptions): StrategyPlan {
   const base = planCompaction({ conversation, keepRecentMessages: keepRecent })
   if (!base) return { kind: "none" }
   const { systemHead, frozen } = base
@@ -70,7 +124,7 @@ export function planStrategy({
     const fixedCost = estimateTokens([...systemHead, ...frozen])
     let tailCost = estimateTokens(tail)
     while (tail.length > MIN_TAIL && fixedCost + tailCost > budget) {
-      const evicted = tail.shift()
+      const evicted = tail.shift()!
       tailCost -= estimateTokens([evicted])
       middle.push(evicted)
     }
@@ -86,8 +140,8 @@ export function planStrategy({
 
   if (strategy === "selective") {
     const total = conversation.length
-    const keep = []
-    const summarizeSet = []
+    const keep: Messages = []
+    const summarizeSet: Messages = []
     middle.forEach((m, idx) => {
       if (preserveSystemMessages && m.role === "system") {
         keep.push(m)
@@ -108,7 +162,7 @@ export function planStrategy({
     const keep = protectedSystems()
     const summarizable = preserveSystemMessages ? middle.filter((m) => m.role !== "system") : middle
     const size = Math.max(1, recursiveChunkSize)
-    const chunks = []
+    const chunks: Messages[] = []
     for (let i = 0; i < summarizable.length; i += size) chunks.push(summarizable.slice(i, i + size))
     if (chunks.length === 0) {
       return { kind: "rebuild", rebuilt: [...systemHead, ...frozen, ...keep, ...tail] }

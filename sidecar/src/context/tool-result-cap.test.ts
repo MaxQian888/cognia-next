@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { capToolResults } from "./tool-result-cap.mjs"
+import { capToolResults } from "./tool-result-cap.ts"
 
 const big = "x".repeat(4000) // 4000 chars ≈ 1000 tokens
 
@@ -15,16 +15,17 @@ test("caps an oversized role:tool string body and adds the metadata header", () 
   const convo = [{ role: "tool", name: "bash", content: big }]
   const out = capToolResults(convo, { maxToolResultTokens: 100, preserveToolCallMetadata: true })
   assert.notEqual(out[0], convo[0]) // new object
-  assert.ok(out[0].content.length < big.length)
-  assert.match(out[0].content, /tool result truncated/)
-  assert.match(out[0].content, /\[tool: bash \| status: ok\]/)
+  const body = String(out[0]?.content)
+  assert.ok(body.length < big.length)
+  assert.match(body, /tool result truncated/)
+  assert.match(body, /\[tool: bash \| status: ok\]/)
 })
 
 test("omits the header when preserveToolCallMetadata is false", () => {
   const convo = [{ role: "tool", name: "bash", content: big }]
   const out = capToolResults(convo, { maxToolResultTokens: 100, preserveToolCallMetadata: false })
-  assert.doesNotMatch(out[0].content, /\[tool:/)
-  assert.match(out[0].content, /tool result truncated/)
+  assert.doesNotMatch(String(out[0]?.content), /\[tool:/)
+  assert.match(String(out[0]?.content), /tool result truncated/)
 })
 
 test("leaves an under-limit tool result untouched (same ref)", () => {
@@ -41,8 +42,9 @@ test("caps a tool-result block part's string body", () => {
     },
   ]
   const out = capToolResults(convo, { maxToolResultTokens: 100, preserveToolCallMetadata: true })
-  assert.ok(out[0].content[0].output.length < big.length)
-  assert.match(out[0].content[0].output, /\[tool: read \| status: error\]/)
+  const output = String(out[0]?.content[0]?.output)
+  assert.ok(output.length < big.length)
+  assert.match(output, /\[tool: read \| status: error\]/)
 })
 
 test("never touches non-tool messages", () => {
@@ -72,7 +74,8 @@ test("caps Anthropic-shaped nested tool_result content arrays", () => {
     },
   ]
   const out = capToolResults(conversation, { maxToolResultTokens: 100 })
-  const block = out[0].content[0].content[0]
+  const block = out[0]?.content[0]?.content[0]
+  assert.ok(block)
   assert.ok(block.text.length < big.length)
   assert.match(block.text, /truncated/)
 })

@@ -15,7 +15,7 @@ import {
   summaryVersion,
   makeSummaryMessage,
   makeOpticalMessage,
-} from "./compaction.mjs"
+} from "./compaction.ts"
 
 test("AUTO_COMPACT_FRACTION mirrors the renderer constant", () => {
   assert.equal(AUTO_COMPACT_FRACTION, 0.835)
@@ -119,7 +119,7 @@ test("frozen-summary markers round-trip", () => {
   assert.equal(msg.role, "user")
   assert.ok(isSummaryMessage(msg))
   assert.equal(summaryVersion(msg), 3)
-  assert.match(msg.content, /KEY FACTS/)
+  assert.match(String(msg.content), /KEY FACTS/)
   // Non-summary messages
   assert.equal(isSummaryMessage({ role: "user", content: "hello" }), false)
   assert.equal(
@@ -161,7 +161,7 @@ test("planCompaction protects leading system + frozen summaries from re-summariz
 
 test("optical archives are recognized and protected as frozen artifacts", () => {
   const imageParts = [
-    { type: "image", image: "data:image/png;base64,AAAA", mediaType: "image/png" },
+    { type: "image" as const, image: "data:image/png;base64,AAAA", mediaType: "image/png" },
   ]
   const archive = makeOpticalMessage(imageParts, { messageCount: 4, frameCount: 1 }, 2)
   assert.ok(isSummaryMessage(archive), "array-content optical archive is a frozen artifact")
@@ -180,6 +180,7 @@ test("optical archives are recognized and protected as frozen artifacts", () => 
     { role: "assistant", content: "a-recent" },
   ]
   const plan = planCompaction({ conversation, keepRecentMessages: 2 })
+  assert.ok(plan)
   assert.equal(plan.frozen.length, 1)
   assert.ok(isOpticalMessage(plan.frozen[0]))
   assert.deepEqual(
@@ -204,12 +205,12 @@ test("applyCompactionIncremental keeps prior frozen byte-identical and appends a
     summary: "NEW SUMMARY",
     nextVersion: 2,
   })
-  assert.equal(next[0].content, "sys")
+  assert.equal(next[0]?.content, "sys")
   // Prior frozen summary survives unchanged (prefix-cache stability).
   assert.equal(next[1], prior)
   assert.equal(summaryVersion(next[1]), 1)
   assert.equal(summaryVersion(next[2]), 2)
-  assert.match(next[2].content, /NEW SUMMARY/)
+  assert.match(String(next[2]?.content), /NEW SUMMARY/)
   assert.deepEqual(
     next.slice(3).map((m) => m.content),
     ["u-recent", "a-recent"]
@@ -232,7 +233,7 @@ test("applyCompactionRegenerated collapses all summaries into one", () => {
     summary: "MERGED",
     version: 3,
   })
-  assert.equal(next[0].content, "sys")
+  assert.equal(next[0]?.content, "sys")
   // Only ONE summary remains.
   assert.ok(isSummaryMessage(next[1]))
   assert.equal(summaryVersion(next[1]), 3)
@@ -283,9 +284,9 @@ test("planCompaction returns null when there is nothing old enough to summarize"
 
 test("applyCompaction rebuilds head + summary + tail", () => {
   const next = applyCompaction({ conversation: convo(), keepRecentMessages: 2, summary: "SUMMARY" })
-  assert.equal(next[0].content, "sys")
-  assert.equal(next[1].role, "user")
-  assert.match(next[1].content, /SUMMARY/)
+  assert.equal(next[0]?.content, "sys")
+  assert.equal(next[1]?.role, "user")
+  assert.match(String(next[1]?.content), /SUMMARY/)
   assert.deepEqual(
     next.slice(2).map((m) => m.content),
     ["u3", "a3"]

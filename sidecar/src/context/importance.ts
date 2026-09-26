@@ -2,12 +2,37 @@
 //
 // Mirrors the renderer's `MessageImportanceScore` / `ImportanceSignal` shape
 // (`types/system/compression.ts`). The sidecar can NOT import `lib/`, so the
-// scorer lives here and is injected into `planStrategy` (compaction-strategies.mjs).
+// scorer lives here and is injected into `planStrategy` (./strategies.ts).
 // Messages scoring at/above the configured `importanceThreshold` are KEPT
 // verbatim by the selective strategy; the rest are summarized.
 
 /** Per-signal weights. `score = min(1, Σ matched weights)`. */
-const SIGNAL_WEIGHTS = {
+/** Signals a message can carry; the renderer's `ImportanceSignal`. */
+export type ImportanceSignal =
+  | "system"
+  | "decision"
+  | "code"
+  | "error"
+  | "recency"
+  | "tool-call"
+  | "artifact"
+  | "question"
+  | "structured-data"
+  | "url"
+
+export interface MessageScore {
+  score: number
+  signals: ImportanceSignal[]
+}
+
+/** The message fields scoring reads. */
+export interface ScorableMessage {
+  role?: string
+  content?: unknown
+  tool_calls?: unknown
+}
+
+const SIGNAL_WEIGHTS: Record<ImportanceSignal, number> = {
   system: 1.0,
   decision: 0.9,
   code: 0.8,
@@ -29,22 +54,24 @@ const ARTIFACT_RE =
 const STRUCTURED_RE = /(\{[\s\S]*[:,][\s\S]*\}|\[[\s\S]*\]|(^|\n)\s*\|.*\|)/
 
 /** Flatten a message's content to a plain string for signal detection. */
-export function messageText(message) {
+export function messageText(message: ScorableMessage | null | undefined): string {
   const c = message?.content
   if (typeof c === "string") return c
   if (Array.isArray(c)) {
-    return c.map((p) => (typeof p === "string" ? p : (p?.text ?? ""))).join("")
+    return (c as unknown[])
+      .map((p) => (typeof p === "string" ? p : ((p as { text?: unknown } | null)?.text ?? "")))
+      .join("")
   }
   return ""
 }
 
 /** True when the message represents a tool call or tool result. */
-function isToolMessage(message) {
+function isToolMessage(message: ScorableMessage | null | undefined): boolean {
   if (!message) return false
   if (message.role === "tool") return true
   if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return true
   if (Array.isArray(message.content)) {
-    return message.content.some(
+    return (message.content as ({ type?: unknown } | null | undefined)[]).some(
       (p) =>
         p &&
         (p.type === "tool-call" ||
@@ -56,20 +83,17 @@ function isToolMessage(message) {
   return false
 }
 
-/**
- * Score one message in [0,1] with the contributing signals.
- *
- * @param {{role?:string, content?:any, tool_calls?:any[]}} message
- * @param {{ index?: number, total?: number }} [pos]
- * @returns {{ score: number, signals: string[] }}
- */
 /** Cap the text fed to the signal regexes: STRUCTURED_RE has two unbounded
  * `[\s\S]*` segments, so a multi-hundred-KB tool body with an unmatched `{`
  * scans quadratically. The signals are prefix-detectable; 20 KB is plenty. */
 const SIGNAL_SCAN_CAP = 20_000
 
-export function scoreMessage(message, { index = 0, total = 1 } = {}) {
-  const signals = []
+/** Score one message in [0,1] with the contributing signals. */
+export function scoreMessage(
+  message: ScorableMessage | null | undefined,
+  { index = 0, total = 1 }: { index?: number; total?: number } = {}
+): MessageScore {
+  const signals: ImportanceSignal[] = []
   const fullText = messageText(message)
   const text = fullText.length > SIGNAL_SCAN_CAP ? fullText.slice(0, SIGNAL_SCAN_CAP) : fullText
 

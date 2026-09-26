@@ -18,6 +18,13 @@
 // unpaired parts (and any message left empty by the drop) so the history is
 // always well-formed when it reaches the provider.
 
+/** A history message as far as pairing cares: tool parts carry a `toolCallId`. */
+interface PairedMessage {
+  role?: unknown
+  content?: ({ type?: unknown; toolCallId?: unknown } | null | undefined)[] | unknown
+  [field: string]: unknown
+}
+
 /**
  * Drop unpaired tool-call / tool-result parts so the history satisfies the
  * tool-call ↔ tool-result pairing invariant. Pairs strictly by `toolCallId`:
@@ -27,19 +34,18 @@
  * Identity-preserving on a well-formed history: every message whose content is
  * untouched is returned as the same object reference (so a downstream
  * `cacheControl` breakpoint spread still lands on the original message), and a
- * history with no corruption yields a structurally identical array.
- *
- * @param {Array<any>} messages AI SDK `ModelMessage[]` (assistant/tool/user/system).
- * @returns {Array<any>} A new array with unpaired tool parts and emptied messages removed.
+ * history with no corruption yields a structurally identical array. A
+ * non-array passes through untouched.
  */
-export function sanitizeToolMessagePairs(messages) {
+export function sanitizeToolMessagePairs<T>(messages: T): T {
   if (!Array.isArray(messages)) return messages
+  const list = messages as (PairedMessage | null | undefined)[]
 
   // Collect the call/result id sets in a single pass so the rewrite below can
   // decide each part in O(1).
-  const callIds = new Set()
-  const resultIds = new Set()
-  for (const msg of messages) {
+  const callIds = new Set<unknown>()
+  const resultIds = new Set<unknown>()
+  for (const msg of list) {
     if (!msg || !Array.isArray(msg.content)) continue
     if (msg.role === "assistant") {
       for (const part of msg.content) {
@@ -52,8 +58,8 @@ export function sanitizeToolMessagePairs(messages) {
     }
   }
 
-  const out = []
-  for (const msg of messages) {
+  const out: (PairedMessage | null | undefined)[] = []
+  for (const msg of list) {
     // Assistant: drop dangling `tool-call` parts (a call with no result).
     if (msg && msg.role === "assistant" && Array.isArray(msg.content)) {
       const filtered = msg.content.filter(
@@ -76,5 +82,5 @@ export function sanitizeToolMessagePairs(messages) {
     }
     out.push(msg)
   }
-  return out
+  return out as T
 }

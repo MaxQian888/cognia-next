@@ -89,7 +89,7 @@ test("drops blank system messages so they never reach the provider", () => {
 })
 
 test("leaves mid-history system messages in place and opts them back in", () => {
-  // compaction-strategies.mjs can leave a system turn mid-array; hoisting it
+  // src/context/strategies.ts can leave a system turn mid-array; hoisting it
   // would reorder what the model sees, so it stays put.
   const messages = [
     { role: "user", content: "hi" },

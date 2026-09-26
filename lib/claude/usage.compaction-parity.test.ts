@@ -1,10 +1,10 @@
 /**
  * Cross-boundary parity guard.
  *
- * The sidecar cannot import `lib/`, so `sidecar/dispatch/compaction.mjs`
+ * The sidecar cannot import `lib/`, so `sidecar/src/context/compaction.ts`
  * hand-mirrors the context-window table + auto-compact fraction + default
  * window from `lib/claude/usage.ts`. This test imports BOTH modules (it lives
- * under `lib/`, not `/sidecar/`, so Jest runs it; `compaction.mjs` has zero
+ * under `lib/`, not `/sidecar/`, so Jest runs it; `compaction.ts` has zero
  * imports so it transforms cleanly) and asserts they agree across a model-id
  * matrix. If anyone edits one window table without the other, this goes red.
  */
@@ -17,7 +17,7 @@ import {
   AUTO_COMPACT_FRACTION as SIDECAR_FRACTION,
   DEFAULT_CONTEXT_WINDOW as SIDECAR_DEFAULT,
   getContextWindow,
-} from "../../sidecar/dispatch/compaction.mjs"
+} from "../../sidecar/src/context/compaction.ts"
 
 // Every model family the AI-SDK path can drive, plus the explicit build markers
 // and the unknown/undefined fall-through. First-match-wins ordering must agree

@@ -14,6 +14,20 @@
 // Anthropic families are included for completeness since a custom provider can
 // declare the anthropic protocol.
 
+/**
+ * A conversation message as the ai-sdk rail keeps it: an AI SDK `ModelMessage`
+ * (or a looser record from an older session), with `content` a string or a
+ * part array.
+ */
+export interface ConversationMessage {
+  role: string
+  content?: unknown
+  [field: string]: unknown
+}
+
+/** A content part as it may appear in `ConversationMessage.content`. */
+export type ContentPart = Record<string, unknown>
+
 /** Mirrors `lib/claude/usage.ts:AUTO_COMPACT_FRACTION`. */
 export const AUTO_COMPACT_FRACTION = 0.835
 
@@ -25,7 +39,7 @@ export const AUTO_COMPACT_FRACTION = 0.835
 export const DEFAULT_CONTEXT_WINDOW = 128_000
 
 // First match wins; mirrors the ordering in `lib/claude/usage.ts`.
-const MODEL_CONTEXT_WINDOWS = [
+const MODEL_CONTEXT_WINDOWS: readonly (readonly [RegExp, number])[] = [
   [/\[1m\]/i, 1_000_000],
   [/[-._]1m(\b|$)/i, 1_000_000],
   [/claude-opus-4-(6|7|8)/i, 1_000_000],
@@ -42,7 +56,7 @@ const MODEL_CONTEXT_WINDOWS = [
 ]
 
 /** Context-window size for a model id (mirrors the renderer's table). */
-export function getContextWindow(modelId) {
+export function getContextWindow(modelId: string | null | undefined): number {
   if (!modelId) return DEFAULT_CONTEXT_WINDOW
   for (const [pattern, window] of MODEL_CONTEXT_WINDOWS) {
     if (pattern.test(modelId)) return window
@@ -52,17 +66,18 @@ export function getContextWindow(modelId) {
 
 /** Character size of a structured tool-result body (string | text-part array |
  * arbitrary object). Bounded, non-throwing. */
-function toolBodyLength(body) {
+function toolBodyLength(body: unknown): number {
   if (body == null) return 0
   if (typeof body === "string") return body.length
   if (Array.isArray(body)) {
     let n = 0
-    for (const b of body) n += toolBodyLength(b)
+    for (const b of body as unknown[]) n += toolBodyLength(b)
     return n
   }
   if (typeof body === "object") {
-    if (typeof body.text === "string") return body.text.length
-    if ("value" in body) return toolBodyLength(body.value)
+    const record = body as { text?: unknown; value?: unknown }
+    if (typeof record.text === "string") return record.text.length
+    if ("value" in record) return toolBodyLength(record.value)
     try {
       return JSON.stringify(body).length
     } catch {
@@ -72,11 +87,11 @@ function toolBodyLength(body) {
   return String(body).length
 }
 
-function textLength(content) {
+function textLength(content: unknown): number {
   if (typeof content === "string") return content.length
   if (Array.isArray(content)) {
     let n = 0
-    for (const part of content) {
+    for (const part of content as (ContentPart | string | null | undefined)[]) {
       if (typeof part === "string") n += part.length
       else if (part && typeof part.text === "string") n += part.text.length
       else if (part && typeof part === "object") {
@@ -96,7 +111,9 @@ function textLength(content) {
  * informational before/after figures on the boundary marker — the compaction
  * TRIGGER uses the provider's real `usage.inputTokens`, not this.
  */
-export function estimateTokens(messages) {
+export function estimateTokens(
+  messages: readonly (ConversationMessage | null | undefined)[]
+): number {
   let chars = 0
   for (const m of messages) chars += textLength(m?.content)
   return Math.round(chars / 4)
@@ -127,7 +144,15 @@ export function shouldCompact({
   trigger,
   messageCount,
   messageCountThreshold,
-}) {
+}: {
+  lastInputTokens?: unknown
+  modelId?: string | null
+  contextWindow?: unknown
+  fraction?: number
+  trigger?: unknown
+  messageCount?: unknown
+  messageCountThreshold?: unknown
+}): boolean {
   if (trigger === "manual") return false
   if (trigger === "message-count") {
     if (typeof messageCount !== "number" || typeof messageCountThreshold !== "number") return false
@@ -154,12 +179,14 @@ export const SUMMARY_OPEN_TAG = "<conversation-summary"
 /** Leading text of a summary/optical message (the sentinel-bearing header),
  * whether content is a plain string or a `[text, …image]` array (the optical
  * strategy renders the archive as image parts after the header). */
-function leadingText(m) {
+function leadingText(m: ConversationMessage | null | undefined): string | null {
   if (!m || m.role !== "user") return null
   if (typeof m.content === "string") return m.content
   if (Array.isArray(m.content)) {
-    const first = m.content.find((p) => p && p.type === "text" && typeof p.text === "string")
-    return first ? first.text : null
+    const first = (m.content as (ContentPart | null | undefined)[]).find(
+      (p) => p && p.type === "text" && typeof p.text === "string"
+    )
+    return first ? (first.text as string) : null
   }
   return null
 }
@@ -168,29 +195,29 @@ function leadingText(m) {
  * Both are protected as frozen so prior archives are carried forward verbatim
  * instead of being fed back into `middle` (and, for optical, silently lost — an
  * image part yields no text to re-summarize). */
-export function isSummaryMessage(m) {
+export function isSummaryMessage(m: ConversationMessage | null | undefined): boolean {
   const head = leadingText(m)
   return head != null && head.startsWith(SUMMARY_OPEN_TAG)
 }
 
 /** True when the frozen artifact is an optical (image-bearing) archive. */
-export function isOpticalMessage(m) {
+export function isOpticalMessage(m: ConversationMessage | null | undefined): boolean {
   return (
     isSummaryMessage(m) &&
-    Array.isArray(m.content) &&
-    m.content.some((p) => p && p.type === "image")
+    Array.isArray(m!.content) &&
+    (m!.content as (ContentPart | null | undefined)[]).some((p) => p && p.type === "image")
   )
 }
 
 /** Version parsed from a summary/optical message's `v="N"` header (0 absent). */
-export function summaryVersion(m) {
+export function summaryVersion(m: ConversationMessage | null | undefined): number {
   if (!isSummaryMessage(m)) return 0
-  const match = leadingText(m).match(/^<conversation-summary\s+v="(\d+)"/)
+  const match = leadingText(m)!.match(/^<conversation-summary\s+v="(\d+)"/)
   return match ? Number(match[1]) : 0
 }
 
 /** Render one versioned, prefix-cache-stable summary message. */
-export function makeSummaryMessage(summary, version) {
+export function makeSummaryMessage(summary: string, version: number): ConversationMessage {
   const v = Number.isFinite(version) && version > 0 ? version : 1
   return {
     role: "user",
@@ -202,11 +229,12 @@ export function makeSummaryMessage(summary, version) {
  * Render one versioned optical-archive message: a sentinel-bearing text header
  * followed by the rendered image parts. Recognized as frozen by
  * {@link isSummaryMessage}, so it is carried forward verbatim across turns.
- * @param {Array<{type:"image", image:string, mediaType?:string}>} imageParts
- * @param {{ messageCount?:number, frameCount?:number }} info
- * @param {number} version
  */
-export function makeOpticalMessage(imageParts, info, version) {
+export function makeOpticalMessage(
+  imageParts: readonly OpticalImagePart[],
+  info: { messageCount?: number; frameCount?: number } | null | undefined,
+  version: number
+): ConversationMessage {
   const v = Number.isFinite(version) && version > 0 ? version : 1
   const frames = imageParts.length
   const msgs = info?.messageCount
@@ -219,6 +247,22 @@ export function makeOpticalMessage(imageParts, info, version) {
   return { role: "user", content: [{ type: "text", text: header }, ...imageParts] }
 }
 
+/** One rendered optical frame, as an AI SDK image part. */
+export interface OpticalImagePart {
+  type: "image"
+  image: string
+  mediaType?: string
+}
+
+/** How `planCompaction` splits a conversation. */
+export interface CompactionPlan {
+  head: ConversationMessage[]
+  systemHead: ConversationMessage[]
+  frozen: ConversationMessage[]
+  middle: ConversationMessage[]
+  tail: ConversationMessage[]
+}
+
 /**
  * Split the conversation into:
  *  - `systemHead` — the leading `role:"system"` block (never summarized),
@@ -228,12 +272,16 @@ export function makeOpticalMessage(imageParts, info, version) {
  *  - `tail` — the most-recent `keepRecentMessages` kept verbatim.
  * `head` = `systemHead` + `frozen` (kept for back-compat). Returns null when
  * there is nothing new enough to be worth summarizing.
- *
- * @param {{ conversation: Array<{role:string, content:any}>, keepRecentMessages: number }} p
  */
-export function planCompaction({ conversation, keepRecentMessages }) {
+export function planCompaction({
+  conversation,
+  keepRecentMessages,
+}: {
+  conversation: readonly ConversationMessage[]
+  keepRecentMessages: number
+}): CompactionPlan | null {
   let i = 0
-  while (i < conversation.length && conversation[i].role === "system") i++
+  while (i < conversation.length && conversation[i]!.role === "system") i++
   const systemHead = conversation.slice(0, i)
   let j = i
   while (j < conversation.length && isSummaryMessage(conversation[j])) j++
@@ -258,7 +306,12 @@ export function applyCompactionIncremental({
   keepRecentMessages,
   summary,
   nextVersion,
-}) {
+}: {
+  conversation: readonly ConversationMessage[]
+  keepRecentMessages: number
+  summary: string
+  nextVersion: number
+}): readonly ConversationMessage[] {
   const plan = planCompaction({ conversation, keepRecentMessages })
   if (!plan) return conversation
   return [
@@ -274,7 +327,17 @@ export function applyCompactionIncremental({
  * single fresh summary message. Accepts a one-time prefix-cache break to bound
  * growth once too many frozen summaries have accumulated.
  */
-export function applyCompactionRegenerated({ conversation, keepRecentMessages, summary, version }) {
+export function applyCompactionRegenerated({
+  conversation,
+  keepRecentMessages,
+  summary,
+  version,
+}: {
+  conversation: readonly ConversationMessage[]
+  keepRecentMessages: number
+  summary: string
+  version: number
+}): readonly ConversationMessage[] {
   const plan = planCompaction({ conversation, keepRecentMessages })
   if (!plan) return conversation
   return [...plan.systemHead, makeSummaryMessage(summary, version), ...plan.tail]
@@ -284,6 +347,14 @@ export function applyCompactionRegenerated({ conversation, keepRecentMessages, s
  * Back-compat wrapper: a single incremental compaction at version 1. Retained
  * for callers/tests that just want "head + summary + tail".
  */
-export function applyCompaction({ conversation, keepRecentMessages, summary }) {
+export function applyCompaction({
+  conversation,
+  keepRecentMessages,
+  summary,
+}: {
+  conversation: readonly ConversationMessage[]
+  keepRecentMessages: number
+  summary: string
+}): readonly ConversationMessage[] {
   return applyCompactionIncremental({ conversation, keepRecentMessages, summary, nextVersion: 1 })
 }

@@ -7,17 +7,24 @@
 // tool name/status header when `preserveToolCallMetadata` is on. Reuses the
 // sidecar's own `headTruncate` (sidecar→sidecar import is allowed).
 
-import { headTruncate } from "../src/shared/text/truncate.ts"
+import { headTruncate } from "../shared/text/truncate.ts"
+import type { ConversationMessage } from "./compaction.ts"
+
+type Part = Record<string, unknown>
 
 const APPROX_CHARS_PER_TOKEN = 4
 const MARKER = "\n... (tool result truncated)"
 
-function toolHeader(name, status) {
+function toolHeader(name: unknown, status: unknown): string {
   return `[tool: ${name || "tool"} | status: ${status || "ok"}]`
 }
 
 /** Cap a string body; prepend a metadata header only when it was truncated. */
-function capBody(text, maxChars, header) {
+function capBody(
+  text: string,
+  maxChars: number,
+  header: string
+): { text: string; truncated: boolean } {
   const { text: capped, truncated } = headTruncate(text, maxChars, { marker: MARKER })
   if (!truncated) return { text, truncated: false }
   return {
@@ -26,17 +33,21 @@ function capBody(text, maxChars, header) {
   }
 }
 
-function statusOf(part, message) {
+function statusOf(part: Part | null, message: ConversationMessage): unknown {
   if (part?.isError || message?.isError) return "error"
   return part?.status || message?.status || "ok"
 }
 
-function nameOf(part, message) {
+function nameOf(part: Part | null, message: ConversationMessage): unknown {
   return part?.toolName || part?.tool_name || message?.name || message?.toolName || "tool"
 }
 
 /** Cap one message's tool-result body, returning the same ref when unchanged. */
-function capMessage(message, maxChars, preserveMeta) {
+function capMessage<M extends ConversationMessage | null | undefined>(
+  message: M,
+  maxChars: number,
+  preserveMeta: boolean
+): M {
   if (!message) return message
 
   // role:"tool" with a string body — the dominant large-output shape.
@@ -49,14 +60,16 @@ function capMessage(message, maxChars, preserveMeta) {
   // Block content — cap any tool-result part whose body is a string.
   if (Array.isArray(message.content)) {
     let changed = false
-    const content = message.content.map((part) => {
-      if (!part || typeof part !== "object") return part
+    const content = (message.content as unknown[]).map((item) => {
+      if (!item || typeof item !== "object") return item
+      const part = item as Part
       const isToolResult = part.type === "tool-result" || part.type === "tool_result"
       if (!isToolResult) return part
       const header = preserveMeta ? toolHeader(nameOf(part, message), statusOf(part, message)) : ""
       for (const field of ["output", "result", "text", "content"]) {
-        if (typeof part[field] === "string") {
-          const { text, truncated } = capBody(part[field], maxChars, header)
+        const body = part[field]
+        if (typeof body === "string") {
+          const { text, truncated } = capBody(body, maxChars, header)
           if (truncated) {
             changed = true
             return { ...part, [field]: text }
@@ -66,9 +79,10 @@ function capMessage(message, maxChars, preserveMeta) {
         // Anthropic-shaped nested body: `content: [{ type:"text", text }, …]`
         // (exactly what buildToolResultMessage emits). Cap each text block —
         // previously the LARGEST results escaped the cap entirely.
-        if (Array.isArray(part[field])) {
+        const nested = part[field]
+        if (Array.isArray(nested)) {
           let blockChanged = false
-          const blocks = part[field].map((b) => {
+          const blocks = (nested as (Part | null | undefined)[]).map((b) => {
             if (!b || b.type !== "text" || typeof b.text !== "string") return b
             const { text, truncated } = capBody(b.text, maxChars, header)
             if (!truncated) return b
@@ -93,14 +107,14 @@ function capMessage(message, maxChars, preserveMeta) {
 /**
  * Cap every tool-result body in the conversation. No-op when
  * `maxToolResultTokens` is unset / non-positive. Non-tool messages are untouched.
- *
- * @param {Array<{role?:string, content?:any}>} conversation
- * @param {{ maxToolResultTokens?: number, preserveToolCallMetadata?: boolean }} [opts]
  */
-export function capToolResults(
-  conversation,
-  { maxToolResultTokens, preserveToolCallMetadata = true } = {}
-) {
+export function capToolResults<M extends ConversationMessage | null | undefined>(
+  conversation: readonly M[],
+  {
+    maxToolResultTokens,
+    preserveToolCallMetadata = true,
+  }: { maxToolResultTokens?: unknown; preserveToolCallMetadata?: boolean } = {}
+): readonly M[] {
   if (typeof maxToolResultTokens !== "number" || maxToolResultTokens <= 0) return conversation
   const maxChars = maxToolResultTokens * APPROX_CHARS_PER_TOKEN
   return conversation.map((m) => capMessage(m, maxChars, preserveToolCallMetadata))

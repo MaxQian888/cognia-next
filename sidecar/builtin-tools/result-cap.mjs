@@ -1,7 +1,7 @@
 // Shared per-tool RESULT cap for built-in tools (Anthropic dispatch path).
 //
-// The ai-sdk path caps oversized tool outputs during compaction (`dispatch/
-// tool-result-cap.mjs`, driven by `CompressionSettings.maxToolResultTokens`).
+// The ai-sdk path caps oversized tool outputs during compaction (`src/context/
+// tool-result-cap.ts`, driven by `CompressionSettings.maxToolResultTokens`).
 // The Anthropic path has no equivalent: the Claude Agent SDK calls each tool's
 // handler itself and forwards the result verbatim, so a single huge bash/grep/
 // read output can bloat the context window uncontrolled. This wraps every

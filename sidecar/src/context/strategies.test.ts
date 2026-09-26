@@ -1,14 +1,22 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { planStrategy, MIN_TAIL } from "./compaction-strategies.mjs"
+import type { ConversationMessage } from "./compaction.ts"
+import { planStrategy, MIN_TAIL } from "./strategies.ts"
+import type { StrategyPlan } from "./strategies.ts"
 
-function convo(n, { withSystem = true } = {}) {
-  const out = withSystem ? [{ role: "system", content: "sys" }] : []
+function convo(n: number, { withSystem = true } = {}): ConversationMessage[] {
+  const out: ConversationMessage[] = withSystem ? [{ role: "system", content: "sys" }] : []
   for (let i = 0; i < n; i++) {
     out.push({ role: i % 2 === 0 ? "user" : "assistant", content: `m${i}` })
   }
   return out
+}
+
+/** The verbatim tail of a plan that has one. */
+function tailOf(plan: StrategyPlan): ConversationMessage[] {
+  assert.ok("tail" in plan, `a ${plan.kind} plan has no tail`)
+  return plan.tail
 }
 
 test("returns none when nothing is old enough", () => {
@@ -80,8 +88,8 @@ test("recursive chunks the middle by recursiveChunkSize", () => {
   })
   assert.equal(plan.kind, "chunked")
   assert.equal(plan.chunks.length, 3) // 11 → 5 + 5 + 1
-  assert.equal(plan.chunks[0].length, 5)
-  assert.equal(plan.chunks[2].length, 1)
+  assert.equal(plan.chunks[0]?.length, 5)
+  assert.equal(plan.chunks[2]?.length, 1)
 })
 
 test("drain-line evicts oldest tail into the summarize set when retained is over budget", () => {
@@ -134,7 +142,7 @@ test("preserveSystemMessages keeps interleaved system messages out of the summar
 })
 
 test("drain-line prefers the caller's authoritative contextWindow", () => {
-  const mk = (i) => ({ role: i % 2 ? "assistant" : "user", content: "m".repeat(4000) })
+  const mk = (i: number) => ({ role: i % 2 ? "assistant" : "user", content: "m".repeat(4000) })
   const conversation = Array.from({ length: 20 }, (_, i) => mk(i))
   // With a huge window the budget is never exceeded → tail stays full-length.
   const wide = planStrategy({
@@ -156,13 +164,13 @@ test("drain-line prefers the caller's authoritative contextWindow", () => {
     contextWindow: 4_000,
     modelId: "totally-unknown-model",
   })
-  assert.equal(wide.tail.length, 8)
-  assert.ok(tight.tail.length < 8)
-  assert.ok(tight.tail.length >= MIN_TAIL)
+  assert.equal(tailOf(wide).length, 8)
+  assert.ok(tailOf(tight).length < 8)
+  assert.ok(tailOf(tight).length >= MIN_TAIL)
 })
 
 test("hybrid engages the drain-line by default (distinct from summary)", () => {
-  const mk = (i) => ({ role: i % 2 ? "assistant" : "user", content: "m".repeat(400_000) })
+  const mk = (i: number) => ({ role: i % 2 ? "assistant" : "user", content: "m".repeat(400_000) })
   const conversation = Array.from({ length: 20 }, (_, i) => mk(i))
   const summary = planStrategy({
     strategy: "summary",
@@ -177,8 +185,8 @@ test("hybrid engages the drain-line by default (distinct from summary)", () => {
     contextWindow: 128_000,
   })
   // summary (no retainedFraction) keeps the full tail; hybrid drains to MIN_TAIL.
-  assert.equal(summary.tail.length, 8)
-  assert.equal(hybrid.tail.length, MIN_TAIL)
+  assert.equal(tailOf(summary).length, 8)
+  assert.equal(tailOf(hybrid).length, MIN_TAIL)
 })
 
 test("optical produces an optical plan carrying the middle (fallback-compatible)", () => {

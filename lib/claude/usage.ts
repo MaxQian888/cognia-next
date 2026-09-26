@@ -14,7 +14,7 @@
  * conservative 128k for anything unknown.
  *
  * IMPORTANT: this table + {@link DEFAULT_CONTEXT_WINDOW} + {@link AUTO_COMPACT_FRACTION}
- * are MIRRORED in `sidecar/dispatch/compaction.mjs` (the sidecar cannot import
+ * are MIRRORED in `sidecar/src/context/compaction.ts` (the sidecar cannot import
  * `lib/`). The two are kept in lock-step by `lib/claude/usage.compaction-parity.test.ts`
  * — update both sides together or that test goes red.
  */
@@ -28,7 +28,7 @@ import type { UsageInfo } from "@/lib/claude/adapter"
  * and under-reporting the window is the safe direction (the auto-compact trigger
  * fires early rather than overflowing a genuinely-128k model — `0.835 × 200k`
  * would exceed a real 128k window before compaction ever ran). Mirrored in
- * `sidecar/dispatch/compaction.mjs`.
+ * `sidecar/src/context/compaction.ts`.
  */
 export const DEFAULT_CONTEXT_WINDOW = 128_000
 

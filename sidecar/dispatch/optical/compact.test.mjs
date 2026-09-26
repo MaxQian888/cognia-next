@@ -7,7 +7,7 @@ import {
   isOpticalMessage,
   summaryVersion,
   makeOpticalMessage,
-} from "../compaction.mjs"
+} from "../../src/context/compaction.ts"
 
 // A middle of substantial ASCII dialogue so optical is worthwhile.
 function makeMiddle(n) {

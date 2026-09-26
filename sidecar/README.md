@@ -113,6 +113,11 @@ Each migration batch appends its moves here (old → new).
 | `dispatch/anthropic.mjs` (`createAnthropicCanUseTool`, …)                | `src/policy/permission/sdk-can-use-tool.ts`                        | 4d          |
 | `dispatch/anthropic.mjs` (`enforceAnthropicPermissionChannel`)           | `src/policy/permission/delegated-approval.ts`                      | 4d          |
 | `dispatch/tool-search-policy.mjs`                                        | `src/policy/tool-search.ts`                                        | 4e          |
+| `dispatch/compaction.mjs`                                                | `src/context/compaction.ts`                                        | 5a          |
+| `dispatch/compaction-strategies.mjs`                                     | `src/context/strategies.ts`                                        | 5a          |
+| `dispatch/importance.mjs`                                                | `src/context/importance.ts`                                        | 5a          |
+| `dispatch/tool-result-cap.mjs`                                           | `src/context/tool-result-cap.ts`                                   | 5a          |
+| `dispatch/tool-message-pairing.mjs`                                      | `src/context/tool-message-pairing.ts`                              | 5a          |
 
 ## Scripts (run from repo root)
 

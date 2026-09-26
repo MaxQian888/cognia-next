@@ -12,7 +12,7 @@ import { normalizeForOptical } from "./normalize.mjs"
 import { planOpticalFrames } from "./layout.mjs"
 import { renderSnapcompactPng } from "./render.mjs"
 import { checkReadability } from "./readability.mjs"
-import { makeOpticalMessage } from "../compaction.mjs"
+import { makeOpticalMessage } from "../../src/context/compaction.ts"
 
 function stripUndefined(obj) {
   const out = {}
