@@ -56442,6 +56442,10 @@
       },
       "cachedNote": "Cached copy of the server roster.",
       "configureCollaboration": "Set up collaboration",
+      "confirmOffboardBody": "They lose access to every workspace in the organization, not only this one.",
+      "confirmOffboardTitle": "Remove {name} from the organization?",
+      "confirmRemoveBody": "They lose access to this workspace. You can invite them again later.",
+      "confirmRemoveTitle": "Remove {name} from this workspace?",
       "empty": "Nobody else is in this workspace yet.",
       "errors": {
         "forbidden": "The collaboration server refused: your seat does not allow that change.",
@@ -56529,6 +56533,7 @@
       },
       "roleAria": "Workspace role",
       "roleFilterAria": "Filter members by role",
+      "signIn": "Sign in",
       "standingAria": "Workspace standing",
       "title": "Members",
       "toast": {

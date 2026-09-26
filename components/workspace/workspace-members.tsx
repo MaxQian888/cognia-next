@@ -49,6 +49,16 @@ import { toast } from "sonner"
 
 import { CollabRefreshStaleBadge } from "@/components/issues/collab-refresh-stale-badge"
 import { ConsoleSection } from "@/components/surface/console-section"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -62,6 +72,7 @@ import {
 import { listOrgMembers, listWorkspaceRoster, type WorkspaceRosterEntry } from "@/lib/db/identity"
 import { ORG_ROLES, WORKSPACE_ROLES, type OrgRole, type WorkspaceRole } from "@/types/identity"
 import { cn } from "@/lib/utils"
+import { settingsHref } from "@/lib/settings/deep-link"
 import {
   membershipFailureMessage,
   toMembershipAdminFailure,
@@ -102,6 +113,15 @@ export interface WorkspaceMembersProps {
 
 export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersProps) {
   const t = useTranslations("workspace.members")
+  const tCommon = useTranslations("common")
+  // Removing someone, and above all offboarding them from the organization,
+  // took one tap on a 24px icon with no second chance. Both now name the
+  // person and what they lose before anything is sent.
+  const [confirm, setConfirm] = useState<{
+    kind: "remove" | "offboard"
+    userId: string
+    name: string
+  } | null>(null)
   const [roleFilter, setRoleFilter] = useState<string>("all")
   const [inviteOpen, setInviteOpen] = useState(false)
   /** Bumped after every server write, so the live sections below re-read. */
@@ -392,7 +412,13 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
                         disabled={admin.busy}
                         title={t("remove")}
                         aria-label={t("remove")}
-                        onClick={() => void remove(entry.membership.userId)}
+                        onClick={() =>
+                          setConfirm({
+                            kind: "remove",
+                            userId: entry.membership.userId,
+                            name: entry.user?.displayName ?? entry.membership.userId,
+                          })
+                        }
                         data-testid={`workspace-member-remove-${entry.membership.userId}`}
                       >
                         <UserMinusIcon aria-hidden className="size-3.5" />
@@ -406,7 +432,13 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
                         disabled={admin.busy}
                         title={t("offboard")}
                         aria-label={t("offboard")}
-                        onClick={() => void offboard(entry.membership.userId)}
+                        onClick={() =>
+                          setConfirm({
+                            kind: "offboard",
+                            userId: entry.membership.userId,
+                            name: entry.user?.displayName ?? entry.membership.userId,
+                          })
+                        }
                         data-testid={`workspace-member-offboard-${entry.membership.userId}`}
                       >
                         <UserXIcon aria-hidden className="size-3.5" />
@@ -419,7 +451,7 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
           </ul>
         )}
 
-        <div className="flex items-center gap-2 border-t pt-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-2">
           {/*
             Present and refused, not absent. See the file header: the reason
             the button is off is the useful fact, so it rides on the button.
@@ -438,11 +470,25 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
             {t("invite")}
           </Button>
           {inviteDisabledReason ? (
+            // Wraps rather than truncates: the reason is the useful fact, and
+            // on a phone one line held only its first few words.
             <p
-              className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
+              className="min-w-0 flex-1 basis-48 text-[11px] text-muted-foreground"
               data-testid="workspace-members-invite-reason"
             >
               {inviteDisabledReason}
+              {admin.status === "unavailable" && admin.reason === "not-signed-in" ? (
+                <>
+                  {" "}
+                  <Link
+                    href={settingsHref("account")}
+                    className="text-foreground underline underline-offset-2 hover:text-primary"
+                    data-testid="workspace-members-sign-in"
+                  >
+                    {t("signIn")}
+                  </Link>
+                </>
+              ) : null}
             </p>
           ) : (
             <p className="min-w-0 flex-1 text-right text-[11px] text-muted-foreground">
@@ -453,6 +499,34 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
         <WorkspaceInvitations admin={admin} reloadKey={writes} />
         <WorkspaceMembershipAudit admin={admin} reloadKey={writes} />
       </div>
+      <AlertDialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
+        <AlertDialogContent data-testid="workspace-member-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirm?.kind === "offboard"
+                ? t("confirmOffboardTitle", { name: confirm.name })
+                : t("confirmRemoveTitle", { name: confirm?.name ?? "" })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirm?.kind === "offboard" ? t("confirmOffboardBody") : t("confirmRemoveBody")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={admin.busy}
+              onClick={() => {
+                if (!confirm) return
+                void (confirm.kind === "offboard" ? offboard : remove)(confirm.userId)
+              }}
+              data-testid="workspace-member-confirm-action"
+            >
+              {confirm?.kind === "offboard" ? t("offboard") : t("remove")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <WorkspaceInviteDialog
         open={inviteOpen}
         onOpenChange={setInviteOpen}

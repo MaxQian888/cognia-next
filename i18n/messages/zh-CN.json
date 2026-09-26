@@ -56442,6 +56442,10 @@
       },
       "cachedNote": "服务端名册的本地缓存。",
       "configureCollaboration": "设置协作",
+      "confirmOffboardBody": "对方将失去该组织内所有工作区的访问权限，而不只是这一个。",
+      "confirmOffboardTitle": "将 {name} 移出组织？",
+      "confirmRemoveBody": "对方将失去此工作区的访问权限，之后可以重新邀请。",
+      "confirmRemoveTitle": "将 {name} 移出此工作区？",
       "empty": "这个工作区还没有其他人。",
       "errors": {
         "forbidden": "协作服务器拒绝了这次更改：你当前的席位没有这个权限。",
@@ -56529,6 +56533,7 @@
       },
       "roleAria": "工作区角色",
       "roleFilterAria": "按角色筛选成员",
+      "signIn": "登录",
       "standingAria": "工作区身份",
       "title": "成员",
       "toast": {

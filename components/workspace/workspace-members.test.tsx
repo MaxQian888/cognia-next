@@ -164,6 +164,11 @@ describe("WorkspaceMembers", () => {
     expect(screen.getByTestId("workspace-members-invite-reason")).toHaveTextContent(
       "unavailable.not-signed-in"
     )
+    // The one refusal the reader can clear themselves comes with the way to.
+    expect(screen.getByTestId("workspace-members-sign-in")).toHaveAttribute(
+      "href",
+      expect.stringContaining("section=account")
+    )
     // A plain member on a configured plane is refused with a different reason.
     expect(screen.queryByTestId("workspace-member-role-usr_ada")).not.toBeInTheDocument()
   })
@@ -215,7 +220,13 @@ describe("WorkspaceMembers", () => {
     const invite = screen.getByTestId("workspace-members-invite")
     await waitFor(() => expect(invite).not.toBeDisabled())
 
+    // Nothing is sent on the tap itself: it asks first, naming what is lost.
     fireEvent.click(screen.getByTestId("workspace-member-remove-usr_cleo"))
+    expect(await screen.findByTestId("workspace-member-confirm")).toHaveTextContent(
+      "confirmRemoveTitle"
+    )
+    expect(client.removeWorkspaceMember).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("workspace-member-confirm-action"))
     await waitFor(() =>
       expect(client.removeWorkspaceMember).toHaveBeenCalledWith(
         ORG,
@@ -227,6 +238,11 @@ describe("WorkspaceMembers", () => {
     expect(refresh).toHaveBeenCalledWith(getActiveAccountId())
 
     fireEvent.click(screen.getByTestId("workspace-member-offboard-usr_cleo"))
+    expect(await screen.findByTestId("workspace-member-confirm")).toHaveTextContent(
+      "confirmOffboardBody"
+    )
+    expect(client.offboardOrgMember).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("workspace-member-confirm-action"))
     await waitFor(() =>
       expect(client.offboardOrgMember).toHaveBeenCalledWith(ORG, "usr_cleo", "reason.offboarded")
     )
@@ -315,11 +331,33 @@ describe("WorkspaceMembers", () => {
     }
     render(<WorkspaceMembers workspaceId={WORKSPACE} adminDeps={managerDeps(client)} />)
     fireEvent.click(await screen.findByTestId("workspace-member-remove-usr_cleo"))
+    fireEvent.click(await screen.findByTestId("workspace-member-confirm-action"))
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("toast.failed", {
         description: "errors.server",
       })
     )
+  })
+
+  it("sends nothing when the confirmation is cancelled", async () => {
+    await putOrgMembership({ orgId: ORG, userId: "usr_ada", role: "admin", now: 1 })
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [
+        { userId: "usr_ada", displayName: "Ada", role: "maintainer", orgMember: true },
+        { userId: "usr_cleo", displayName: "Cleo", role: "member", orgMember: true },
+      ],
+      now: 1,
+    })
+    const client = { offboardOrgMember: jest.fn(async () => undefined) }
+    render(<WorkspaceMembers workspaceId={WORKSPACE} adminDeps={managerDeps(client)} />)
+    fireEvent.click(await screen.findByTestId("workspace-member-offboard-usr_cleo"))
+    fireEvent.click(await screen.findByRole("button", { name: "cancel" }))
+    await waitFor(() =>
+      expect(screen.queryByTestId("workspace-member-confirm")).not.toBeInTheDocument()
+    )
+    expect(client.offboardOrgMember).not.toHaveBeenCalled()
   })
 
   it("refuses a plain member with the permission reason and no controls", async () => {
