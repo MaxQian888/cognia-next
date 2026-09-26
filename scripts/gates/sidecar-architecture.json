@@ -97,8 +97,6 @@
   "public": [
     "sidecar/a2ui-tools/tool-defs.mjs",
     "sidecar/builtin-tools/ast-grep/binary.mjs",
-    "sidecar/builtin-tools/code/languages/index.mjs",
-    "sidecar/builtin-tools/code/parser.mjs",
     "sidecar/builtin-tools/run-code/sandbox-child.mjs",
     "sidecar/dispatch/claude-executable.mjs",
     "sidecar/dispatch/feature-call.mjs",
@@ -110,6 +108,8 @@
     "sidecar/src/providers/provider-protocol.ts",
     "sidecar/src/providers/reasoning-effort-tables.ts",
     "sidecar/src/providers/usage-normalize.ts",
+    "sidecar/src/services/code-graph/languages/index.ts",
+    "sidecar/src/services/code-graph/parser.ts",
     "sidecar/src/services/lsp/servers.ts",
     "sidecar/test-support/live-harness.ts"
   ],

@@ -161,7 +161,7 @@ rustc-ice-*.txt
 .cognia/codegraph.db-*
 # Code-graph tree-sitter grammars are build artifacts copied from
 # tree-sitter-wasms by scripts/build/copy-codegraph-grammars.mjs.
-sidecar/builtin-tools/code/grammars/*.wasm
+sidecar/src/services/code-graph/grammars/*.wasm
 # External Bridge stdio MCP sidecar — bundled from
 # lib/external-bridge/mcp-server/standalone-entry.ts by
 # scripts/build/build-mcp-sidecar.mjs (prebuild), not authored here.

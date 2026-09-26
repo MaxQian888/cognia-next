@@ -45,7 +45,7 @@ export const GENERATED_FILES = ["sidecar/cognia-mcp.mjs"]
 export const GENERATED_DIRS = [
   "sidecar/webclone/dist/",
   "sidecar/vscode-ext-host/dist/",
-  "sidecar/builtin-tools/code/grammars/",
+  "sidecar/src/services/code-graph/grammars/",
 ]
 
 /**

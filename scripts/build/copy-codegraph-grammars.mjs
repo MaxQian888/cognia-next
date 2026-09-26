@@ -2,7 +2,7 @@
 /**
  * Copy the tree-sitter grammar `.wasm` files the code-graph subsystem needs
  * from `sidecar/node_modules/tree-sitter-wasms/out` into
- * `sidecar/builtin-tools/code/grammars/` so the Tauri production build (which
+ * `sidecar/src/services/code-graph/grammars/` so the Tauri production build (which
  * ships only enumerated sidecar paths) and the CLI bundle can load them
  * offline. esbuild can't inline `.wasm` data files, so they must be copied as
  * sibling assets — the same pattern as `copy-monaco-assets.mjs`.
@@ -16,12 +16,12 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { grammarAssets } from "../../sidecar/builtin-tools/code/languages/index.mjs"
+import { grammarAssets } from "../../sidecar/src/services/code-graph/languages/index.ts"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, "../..")
 const SRC = path.resolve(ROOT, "sidecar", "node_modules", "tree-sitter-wasms", "out")
-const DST = path.resolve(ROOT, "sidecar", "builtin-tools", "code", "grammars")
+const DST = path.resolve(ROOT, "sidecar", "src", "services", "code-graph", "grammars")
 
 if (!fs.existsSync(SRC)) {
   console.log(`[codegraph] skip: ${SRC} not found (tree-sitter-wasms not installed?)`)

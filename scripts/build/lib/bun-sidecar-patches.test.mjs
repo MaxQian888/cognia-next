@@ -27,7 +27,7 @@ test("the loader matches the patched module's language", () => {
 })
 
 test("the codegraph patch inlines the sibling schema and drops the file read", () => {
-  const patch = BUN_SIDECAR_PATCHES.find((p) => p.file.endsWith("store-sqlite.mjs"))
+  const patch = BUN_SIDECAR_PATCHES.find((p) => p.file.endsWith("store-sqlite.ts"))
   const filePath = path.join(root, patch.file)
   const patched = applySidecarPatch(patch, fs.readFileSync(filePath, "utf8"), { root, filePath })
   const schema = fs.readFileSync(path.join(path.dirname(filePath), "schema.sql"), "utf8")

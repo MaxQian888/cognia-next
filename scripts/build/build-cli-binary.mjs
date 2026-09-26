@@ -381,10 +381,10 @@ console.log(`build-cli-binary: wrote ${path.relative(root, mcpSidecarBundle)}`)
 // 2b. Copy the sidecar's runtime-read data files next to the bundle. esbuild
 // inlines the JS but NOT files loaded via `fs.readFileSync(import.meta.url-
 // relative path)`; in the bundle `import.meta.url` resolves to claude-host.mjs,
-// so each such file must sit beside it. store-sqlite.mjs reads `schema.sql` at
+// so each such file must sit beside it. store-sqlite.ts reads `schema.sql` at
 // module load (a top-level read — it runs even before the sqlite store is
 // constructed), so a missing file crashes the sidecar before it emits `ready`.
-const SIDECAR_DATA_FILES = [path.join(root, "sidecar/builtin-tools/code/schema.sql")]
+const SIDECAR_DATA_FILES = [path.join(root, "sidecar/src/services/code-graph/schema.sql")]
 for (const src of SIDECAR_DATA_FILES) {
   if (!fs.existsSync(src)) {
     console.error(`build-cli-binary: missing sidecar data file ${path.relative(root, src)}`)

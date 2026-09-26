@@ -40,7 +40,7 @@ import { buildAgentHooks, mergeHookMaps } from "./agent-hooks.mjs"
 import { buildLedgerToolHooks, createCallLedgerGate } from "./call-ledger-gate.mjs"
 import { createNativeHookExecutor } from "./hook-native-executor.mjs"
 import { makeLazyLspResolver } from "../src/services/lsp/lazy-resolver.ts"
-import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
+import { makeLazyCodeGraphResolver } from "../src/services/code-graph/lazy-resolver.ts"
 import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
@@ -269,7 +269,7 @@ export function dispatchAnthropic(
   const lsp = makeLazyLspResolver({ sendOptions, log })
   const { lspEnabled, lspResolver } = lsp
   // Per-session code-graph index (resolver-bound like LSP — see
-  // codegraph-resolver-factory.mjs). Lazily built on first tool call.
+  // src/services/code-graph/lazy-resolver.ts). Lazily built on first tool call.
   const codeGraph = makeLazyCodeGraphResolver({ sendOptions, log })
 
   // Read-before-write tracking for the coreFiles suite. On this path the

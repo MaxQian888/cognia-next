@@ -131,6 +131,8 @@ Each migration batch appends its moves here (old → new).
 | `dispatch/lsp-resolver-factory.mjs`                                      | `src/services/lsp/lazy-resolver.ts`                                | 6a          |
 | `lsp/detect.mjs` (dead code)                                             | deleted                                                            | 6a          |
 | Root-relative lookups (`../vscode-ext-host`, …)                          | `src/platform/sidecar-paths.ts`                                    | 6a          |
+| `builtin-tools/code/*` (engine, `schema.sql`, `grammars/`, `languages/`) | `src/services/code-graph/*`                                        | 6b          |
+| `dispatch/codegraph-resolver-factory.mjs`                                | `src/services/code-graph/lazy-resolver.ts`                         | 6b          |
 
 ## Scripts (run from repo root)
 

@@ -2,7 +2,7 @@
 //
 // Exposed as the `codeGraph` category of the cognia-tools MCP server. Like the
 // LSP tools these are bound to a per-session resolver (the lazy code-graph
-// index service from `dispatch/codegraph-resolver-factory.mjs`), so the agent
+// index service from `src/services/code-graph/lazy-resolver.ts`), so the agent
 // only ever queries its own session cwd. All tools are read-only.
 //
 // Each handler first `syncStale()`s the index (lazily building it on the first
@@ -13,7 +13,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod"
 
 import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { GRAPH_TRAVERSAL_MAX } from "./graph.mjs"
+import { GRAPH_TRAVERSAL_MAX } from "../../src/services/code-graph/graph.ts"
 
 // Output bounds — mirror the file-ops/process tools' `{total, truncated, note}`
 // contract so a large graph traversal or source body never dumps unbounded

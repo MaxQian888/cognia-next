@@ -45,8 +45,8 @@ const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"))
 /** @type {SidecarPatch[]} */
 export const BUN_SIDECAR_PATCHES = [
   {
-    file: "sidecar/builtin-tools/code/store-sqlite.mjs",
-    loader: "js",
+    file: "sidecar/src/services/code-graph/store-sqlite.ts",
+    loader: "ts",
     edits: [
       {
         label: "codegraph schema inline",

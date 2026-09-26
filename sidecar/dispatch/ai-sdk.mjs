@@ -32,7 +32,7 @@ import {
   withIdleTimeout,
 } from "../src/providers/stream-watchdog.ts"
 import { makeLazyLspResolver } from "../src/services/lsp/lazy-resolver.ts"
-import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
+import { makeLazyCodeGraphResolver } from "../src/services/code-graph/lazy-resolver.ts"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"

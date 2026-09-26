@@ -382,7 +382,7 @@ for (const variant of variants) {
     path.join(layoutRoot, "tree-sitter.wasm")
   )
   fs.cpSync(
-    path.join(root, "sidecar/builtin-tools/code/grammars"),
+    path.join(root, "sidecar/src/services/code-graph/grammars"),
     path.join(layoutRoot, "grammars"),
     { recursive: true }
   )

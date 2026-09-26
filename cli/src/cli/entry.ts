@@ -62,7 +62,7 @@ async function boot(): Promise<number> {
     return probe.status ?? 1
   }
   if (role === "codegraph-probe") {
-    const { getParser } = await import("../../../sidecar/builtin-tools/code/parser.mjs")
+    const { getParser } = await import("../../../sidecar/src/services/code-graph/parser.ts")
     const parser = await getParser("typescript")
     const tree = parser.parse("const answer: number = 42")
     const ok = Boolean(tree.rootNode?.namedChildren?.length)

@@ -38,7 +38,7 @@ import {
 import { wrapDefsWithResultCap } from "./builtin-tools/result-cap.mjs"
 import { parseToolArgs, toolInputJsonSchema } from "./builtin-tools/tool-args.mjs"
 import { makeLazyLspResolver } from "./src/services/lsp/lazy-resolver.ts"
-import { makeLazyCodeGraphResolver } from "./dispatch/codegraph-resolver-factory.mjs"
+import { makeLazyCodeGraphResolver } from "./src/services/code-graph/lazy-resolver.ts"
 
 const COGNIA_TOOLS_SERVER = "cognia-tools"
 const COGNIA_PLUGIN_TOOLS_SERVER = "cognia-plugin-tools"

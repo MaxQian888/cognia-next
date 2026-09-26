@@ -12,7 +12,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import { buildAiSdkTools, assertModelSafeToolOutput } from "./ai-sdk-tools.mjs"
 import { makeLazyLspResolver } from "../src/services/lsp/lazy-resolver.ts"
-import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
+import { makeLazyCodeGraphResolver } from "../src/services/code-graph/lazy-resolver.ts"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
