@@ -5,7 +5,8 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import type { ToolArgs } from "../../kernel/define.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
-import { runGit, assertRepo } from "./run.ts"
+import { runGit } from "../../../platform/process/git.ts"
+import { assertRepo } from "./run.ts"
 
 const gitStatusShape = {
   cwd: z.string().min(1).describe("Absolute path inside the git repo."),

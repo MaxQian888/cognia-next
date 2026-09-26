@@ -5,7 +5,8 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import type { ToolArgs } from "../../kernel/define.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
-import { runGit, assertRepo, trimTail } from "./run.ts"
+import { runGit } from "../../../platform/process/git.ts"
+import { assertRepo, trimTail } from "./run.ts"
 
 const gitDiffShape = {
   cwd: z.string().min(1).describe("Absolute path inside the git repo."),

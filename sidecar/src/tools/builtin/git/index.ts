@@ -23,7 +23,8 @@ import {
   execGitChanges,
 } from "./inspect.ts"
 import { gitStageTool, gitCommitTool, execGitStage, execGitCommit } from "./write.ts"
-import { runGit, assertRepo, trimTail } from "./run.ts"
+import { runGit } from "../../../platform/process/git.ts"
+import { assertRepo, trimTail } from "./run.ts"
 
 /** Fixed registration order — do not reorder (prompt-cache stability). */
 export const GIT_TOOL_NAMES = Object.freeze([
