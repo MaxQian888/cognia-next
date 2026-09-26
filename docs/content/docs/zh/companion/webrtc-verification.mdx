@@ -177,4 +177,5 @@ Worker 健康接口没有全局房间/连接数，也没有 Axum 的 Prometheus 
 - [ADR 0021 — WebRTC DataChannel WAN 通道](../adr/0021-webrtc-datachannel-wan-transport)
 - [companion/turn-byo](./turn-byo) — TURN 凭据来源
 - `lib/tauri/transport-rtc.ts` — TS 状态机
-- `src-tauri/src/companion_api/signaling/` — Rust peer / hub / client
+- `src-tauri/src/companion_api/signaling/` — Rust hub / client / dispatcher
+- `crates/cognia-companion-connectivity/src/signaling/` — Rust peer / envelope / DataChannel framing

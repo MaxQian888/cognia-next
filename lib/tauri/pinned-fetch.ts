@@ -8,8 +8,9 @@
  * # Why this exists
  *
  * After M2.9 the companion server terminates HTTPS with a self-signed cert
- * (`src-tauri/src/companion_api/tls.rs`). The browser-level `fetch` and
- * `WebSocket` rely on the OS trust store, which won't accept that cert.
+ * (`crates/cognia-companion-connectivity/src/tls.rs`). The browser-level
+ * `fetch` and `WebSocket` rely on the OS trust store, which won't accept that
+ * cert.
  *
  * On Capacitor we use `@capacitor/core`'s `CapacitorHttp` plugin which runs
  * on the native HTTP stack (URLSession / OkHttp) and supports a

@@ -20,20 +20,23 @@
 //! - [`pairing`] — one-shot rooms that let a device pair over the relay
 //!   before it has an identity (ADR-0170, `cgnp4`).
 
-pub mod carrier;
 pub mod client;
-pub mod datachannel_framing;
 pub mod dispatch;
-pub mod envelope;
 pub mod pairing;
-pub mod peer;
-pub mod registration_store;
+// The WebRTC leaves live in `cognia-companion-connectivity` (ADR-0196 P4);
+// they are re-exported so `super::peer` and friends still resolve here.
+pub use cognia_companion_connectivity::signaling::{
+    carrier, datachannel_framing, envelope, peer, registration_store,
+};
+pub use cognia_companion_connectivity::signaling::{
+    DeviceRegistration, IceServerSpec, SignalingConfigPatch,
+};
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use webrtc::peer_connection::RTCIceServer;
 
 use std::time::{Duration, Instant};
@@ -716,56 +719,6 @@ impl Default for SignalingHub {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Device registration wire shapes
-// ---------------------------------------------------------------------------
-
-/// Per-device configuration the renderer pushes via
-/// `companion_signaling_sync_devices`. One entry per paired device that
-/// has a room descriptor and a host signing-key reference.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceRegistration {
-    pub device_id: String,
-    pub rendezvous_id: String,
-    pub room_descriptor: cognia_signaling_core::proto::RoomDescriptor,
-    pub signaling_key_ref: String,
-}
-
-/// Configuration patch the renderer pushes via
-/// `companion_signaling_configure` (called whenever the user edits the
-/// WebRTC card in settings).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SignalingConfigPatch {
-    pub enabled: bool,
-    pub signaling_url: String,
-    /// Plain `RTCIceServer` URL list (one entry per row in the textarea).
-    pub ice_servers: Vec<IceServerSpec>,
-    pub turn_servers: Vec<IceServerSpec>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IceServerSpec {
-    /// One or more `stun:` / `turn:` / `turns:` URLs.
-    pub urls: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub username: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub credential: Option<String>,
-}
-
-impl From<IceServerSpec> for RTCIceServer {
-    fn from(value: IceServerSpec) -> Self {
-        RTCIceServer {
-            urls: value.urls,
-            username: value.username.unwrap_or_default(),
-            credential: value.credential.unwrap_or_default(),
-        }
-    }
-}
-
 /// Snapshot returned by `companion_signaling_status`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -972,31 +925,6 @@ mod tests {
             },
             signaling_key_ref: device_id.into(),
         }
-    }
-
-    #[test]
-    fn ice_server_spec_converts_to_rtc_ice_server() {
-        let spec = IceServerSpec {
-            urls: vec!["turn:t.example:3478".into()],
-            username: Some("alice".into()),
-            credential: Some("s3cr3t".into()),
-        };
-        let server: RTCIceServer = spec.into();
-        assert_eq!(server.urls, vec!["turn:t.example:3478".to_string()]);
-        assert_eq!(server.username, "alice");
-        assert_eq!(server.credential, "s3cr3t");
-    }
-
-    #[test]
-    fn ice_server_spec_omits_optional_fields() {
-        let spec = IceServerSpec {
-            urls: vec!["stun:s.example:3478".into()],
-            username: None,
-            credential: None,
-        };
-        let server: RTCIceServer = spec.into();
-        assert_eq!(server.username, "");
-        assert_eq!(server.credential, "");
     }
 
     #[test]

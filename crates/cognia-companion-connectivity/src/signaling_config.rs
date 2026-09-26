@@ -72,7 +72,7 @@ pub fn save(data_dir: Option<&Path>, patch: &SignalingConfigPatch) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::companion_api::signaling::IceServerSpec;
+    use crate::signaling::IceServerSpec;
 
     #[test]
     fn round_trips_and_reads_absent_as_none() {

@@ -102,12 +102,13 @@ export async function probeOriginReachable(
  * `https://` on loopback earns no exemption, and this used to be the bug: the
  * exemption assumed such a Host is "a dev certificate the user already
  * trusted", which is false for the one Host this function exists to describe.
- * `src-tauri/src/companion_api/tls.rs` mints the listener's certificate with
- * rcgen and no CA — self-signed on `127.0.0.1` exactly as on the LAN. Returning
- * `true` there skipped the `tls_untrusted` arm in `pair-failure.ts` and let an
- * opaque `TypeError: Failed to fetch` fall through to `unreachable`, whose
- * advice is "confirm the Host is listening on that address" — while it was
- * listening on exactly that address. The certificate was the whole problem.
+ * `crates/cognia-companion-connectivity/src/tls.rs` mints the listener's
+ * certificate with rcgen and no CA — self-signed on `127.0.0.1` exactly as on
+ * the LAN. Returning `true` there skipped the `tls_untrusted` arm in
+ * `pair-failure.ts` and let an opaque `TypeError: Failed to fetch` fall through
+ * to `unreachable`, whose advice is "confirm the Host is listening on that
+ * address" — while it was listening on exactly that address. The certificate
+ * was the whole problem.
  *
  * This is consulted only AFTER an attempt has failed and nothing answered even
  * opaquely (`pair-failure.ts` gates on `peerAnswered === false`), so a false

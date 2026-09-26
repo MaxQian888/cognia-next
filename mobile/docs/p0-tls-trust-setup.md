@@ -2,7 +2,7 @@
 
 Status: **JS layer done. Android native config landed. iOS PENDING (requires `cap add ios` + Apple Developer account + device build).**
 
-After M2.9 the desktop companion server terminates HTTPS with a self-signed certificate generated at runtime by `src-tauri/src/companion_api/tls.rs`. The JS layer routes through `CapacitorHttp` with `serverTrustMode: "self-signed"` (see `lib/tauri/pinned-fetch.ts`). The remaining work below is required for true cert pinning at the platform layer.
+After M2.9 the desktop companion server terminates HTTPS with a self-signed certificate generated at runtime by `crates/cognia-companion-connectivity/src/tls.rs`. The JS layer routes through `CapacitorHttp` with `serverTrustMode: "self-signed"` (see `lib/tauri/pinned-fetch.ts`). The remaining work below is required for true cert pinning at the platform layer.
 
 ## What the JS layer already does
 

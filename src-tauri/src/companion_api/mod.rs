@@ -12,6 +12,11 @@
 //! - [`security_store`]   — durable device, policy, run, and audit state.
 //! - [`server`]           — Axum server spawn and route composition.
 //!
+//! The transport leaves (`tls`, `mdns`, `mesh`, `tunnel`, `tunnel_config`,
+//! `reachability_config`, `signaling_config` and the WebRTC half of
+//! `signaling`) live in `cognia-companion-connectivity` and are re-exported
+//! here at their old paths (ADR-0196 P4).
+//!
 //! # Tauri integration
 //!
 //! The Tauri command `companion_server_start` (in [`commands`]) is the entry
@@ -59,8 +64,8 @@ pub(crate) mod langfuse;
 pub mod lark_entry;
 pub mod locked_use_allow_list;
 pub mod maintenance;
-pub mod mdns;
-pub mod mesh;
+pub use cognia_companion_connectivity::mdns;
+pub use cognia_companion_connectivity::mesh;
 pub mod metrics;
 pub mod middleware;
 pub mod oidc;
@@ -74,7 +79,7 @@ mod problem_surface;
 pub mod push;
 pub mod push_creds;
 pub mod rate_limit;
-pub mod reachability_config;
+pub use cognia_companion_connectivity::reachability_config;
 pub mod remote_execution;
 pub mod replay_cache;
 pub mod rpc;
@@ -84,15 +89,15 @@ pub mod server;
 pub mod session_media;
 pub mod settings_sync_generated;
 pub mod signaling;
-pub mod signaling_config;
+pub use cognia_companion_connectivity::signaling_config;
 pub mod skill_transactions;
 pub mod spec_parity;
 pub mod store;
 pub mod sync_bridge;
 pub mod sync_registry;
-pub mod tls;
-pub mod tunnel;
-pub mod tunnel_config;
+pub use cognia_companion_connectivity::tls;
+pub use cognia_companion_connectivity::tunnel;
+pub use cognia_companion_connectivity::tunnel_config;
 pub mod web_origin;
 pub mod workflow_api;
 pub mod workflow_app_api;

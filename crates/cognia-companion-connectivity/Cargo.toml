@@ -1,0 +1,74 @@
+# ADR-0196 P4 — how a paired device reaches the desktop companion: the
+# listener's self-signed TLS identity, LAN discovery (mDNS, mesh VPN
+# addresses), the cloudflared tunnel, the reachability and signaling config
+# files, and the WebRTC transport leaves (peer connection, envelope crypto,
+# DataChannel framing, relay carrier, registration store). None of it reads
+# companion state, so it sits below the companion core, and it keeps the
+# WebRTC, mDNS and certificate stacks out of every crate that does not dial.
+#
+# The companion hub, signaling client, dispatcher and pairing rooms stay in
+# `src-tauri/src/companion_api`, which re-exports these modules at their old
+# paths.
+[package]
+name = "cognia-companion-connectivity"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Companion transport leaves: TLS identity, mDNS/mesh discovery, cloudflared tunnel, reachability/signaling config and the WebRTC peer, envelope and framing."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_companion_connectivity"
+path = "src/lib.rs"
+
+[dependencies]
+# `ensure_crypto_provider` before the first DTLS handshake (`signaling::peer`).
+cognia-net = { path = "../cognia-net" }
+# The tunnel token (`tunnel_config`) and the per-device signaling keys
+# (`signaling::envelope`) live in the OS credential store.
+cognia-secrets = { path = "../cognia-secrets" }
+# The relay's wire types (`RoomDescriptor`, protocol envelopes).
+cognia-signaling-core = { path = "../../services/signaling-server/core" }
+
+# WebRTC stack (ADR-0021) — the current 0.20 API uses a runtime-agnostic
+# PeerConnection builder, one event-handler object per connection, and polled
+# DataChannel events. Keep the minimum on the patched 0.20.2 release; Cargo
+# may take compatible 0.20.x fixes. Re-exported as `webrtc`.
+webrtc = "0.20.2"
+# `_cognia._tcp.local.` advertisement and discovery (`mdns`).
+mdns-sd = "0.20"
+# LAN and mesh-VPN interface enumeration (`mdns`, `mesh`).
+local-ip-address = "0.6"
+# Self-signed listener certificate; the client pins its SPKI fingerprint, so
+# no CA is involved (`tls`).
+rcgen.workspace = true
+time = { version = "0.3", features = ["std"] }
+# ECDSA/ECDH/AES-GCM signaling envelope (`signaling::envelope`).
+p256 = { version = "0.14", features = ["ecdsa", "ecdh"] }
+hkdf = "0.13"
+aes-gcm = { workspace = true, features = ["aes"] }
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "sync", "time"] }
+async-trait.workspace = true
+bytes.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+regex.workspace = true
+parking_lot.workspace = true
+once_cell.workspace = true
+log.workspace = true
+thiserror.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+# Keep the envelope and tunnel-token tests off the real OS keyring.
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

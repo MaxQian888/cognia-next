@@ -2020,6 +2020,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-companion-connectivity"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm 0.11.0",
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "cognia-net",
+ "cognia-secrets",
+ "cognia-signaling-core",
+ "hex",
+ "hkdf 0.13.0",
+ "local-ip-address",
+ "log",
+ "mdns-sd",
+ "once_cell",
+ "p256 0.14.0",
+ "parking_lot",
+ "rcgen",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.20",
+ "time",
+ "tokio",
+ "uuid",
+ "webrtc",
+]
+
+[[package]]
 name = "cognia-connectors"
 version = "0.1.0"
 dependencies = [
@@ -2385,6 +2418,7 @@ dependencies = [
  "cognia-agents",
  "cognia-automation",
  "cognia-ccswitch",
+ "cognia-companion-connectivity",
  "cognia-connectors",
  "cognia-core",
  "cognia-environment",
@@ -2425,7 +2459,6 @@ dependencies = [
  "futures-util",
  "git2",
  "hex",
- "hkdf 0.13.0",
  "hmac 0.13.0",
  "hyper",
  "hyper-util",
@@ -2435,7 +2468,6 @@ dependencies = [
  "liteparse",
  "local-ip-address",
  "log",
- "mdns-sd",
  "notify",
  "objc2",
  "objc2-app-kit",
@@ -2486,7 +2518,6 @@ dependencies = [
  "tauri-plugin-window-state",
  "tempfile",
  "thiserror 2.0.20",
- "time",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",

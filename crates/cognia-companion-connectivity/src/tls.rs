@@ -32,11 +32,11 @@ const VALIDITY_YEARS: i64 = 10;
 /// Loaded TLS material — paths plus the SHA-256 SubjectPublicKeyInfo
 /// fingerprint that gets encoded into pair QR payloads.
 ///
-/// The path fields are read by [`commands::companion_tls_paths`] (a
-/// diagnostics command — surfaces where the cert lives so a user can
-/// inspect / rotate it) and are also reserved for the eventual HTTPS
-/// server bring-up (M2.9), at which point `axum-server` will load the
-/// PEM + key from these paths.
+/// The path fields are read by
+/// `companion_api::commands::companion_tls_paths` (a diagnostics command —
+/// surfaces where the cert lives so a user can inspect / rotate it) and are
+/// also reserved for the eventual HTTPS server bring-up (M2.9), at which point
+/// `axum-server` will load the PEM + key from these paths.
 #[derive(Debug, Clone)]
 pub struct TlsMaterial {
     pub cert_pem_path: PathBuf,
@@ -138,9 +138,10 @@ fn fingerprint_from_pem(cert_pem: &str) -> Result<String, TlsError> {
     spki_fingerprint_from_der(&der)
 }
 
-/// Compute the pairing fingerprint directly from a TLS peer certificate. Used
-/// by the desktop Pro IDE relay before it sends a DPoP-bound access token upstream.
-pub(crate) fn spki_fingerprint_from_der(der: &[u8]) -> Result<String, TlsError> {
+/// Compute the pairing fingerprint directly from a TLS peer certificate. The
+/// desktop Pro IDE relay and the cloud-deployment gateway client pin a peer
+/// with it before sending a DPoP-bound access token upstream.
+pub fn spki_fingerprint_from_der(der: &[u8]) -> Result<String, TlsError> {
     let spki = extract_spki(der)?;
     let mut hasher = Sha256::new();
     hasher.update(&spki);
@@ -148,7 +149,10 @@ pub(crate) fn spki_fingerprint_from_der(der: &[u8]) -> Result<String, TlsError> 
     Ok(hex::encode(digest))
 }
 
-pub(crate) fn pem_to_der(pem: &str) -> Result<Vec<u8>, TlsError> {
+/// Decode a single-certificate PEM into DER by base64-decoding every line that
+/// is not a `-----` armour line. The Pro IDE relay's pinning tests use it to
+/// fingerprint a certificate they minted.
+pub fn pem_to_der(pem: &str) -> Result<Vec<u8>, TlsError> {
     let mut iter = pem.lines().filter(|l| !l.starts_with("-----"));
     let body: String = iter.by_ref().collect();
     use base64::{engine::general_purpose::STANDARD, Engine as _};

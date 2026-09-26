@@ -73,17 +73,17 @@ fn config_path(data_dir: Option<&Path>) -> PathBuf {
 
 /// Store the connector token.
 pub fn save_token(token: &str) -> Result<(), String> {
-    crate::secret_store::set(KEYRING_SERVICE, KEYRING_ACCOUNT, token)
+    cognia_secrets::secret_store::set(KEYRING_SERVICE, KEYRING_ACCOUNT, token)
 }
 
 /// Read the connector token.
 pub fn load_token() -> Result<Option<String>, String> {
-    crate::secret_store::get(KEYRING_SERVICE, KEYRING_ACCOUNT)
+    cognia_secrets::secret_store::get(KEYRING_SERVICE, KEYRING_ACCOUNT)
 }
 
 /// Remove the token.
 pub fn clear_token() -> Result<(), String> {
-    crate::secret_store::delete(KEYRING_SERVICE, KEYRING_ACCOUNT)
+    cognia_secrets::secret_store::delete(KEYRING_SERVICE, KEYRING_ACCOUNT)
 }
 
 // ---------------------------------------------------------------------------

@@ -250,7 +250,7 @@ impl PeerSession {
         // `aws-lc-rs` are in the dep graph. Install one idempotently here so
         // peer connections work even when spawned outside `main.rs` (tests,
         // headless entry points).
-        crate::companion_api::ensure_crypto_provider();
+        cognia_net::proxy_config::ensure_crypto_provider();
 
         let config = RTCConfigurationBuilder::default()
             .with_ice_servers(ice_servers)
@@ -606,7 +606,7 @@ mod tests {
     async fn build_test_peer(
         handler: Arc<dyn PeerConnectionEventHandler>,
     ) -> Arc<dyn PeerConnection> {
-        crate::companion_api::ensure_crypto_provider();
+        cognia_net::proxy_config::ensure_crypto_provider();
         Arc::new(
             PeerConnectionBuilder::new()
                 .with_handler(handler)

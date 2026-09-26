@@ -19,8 +19,9 @@
 //! the server was `fleet_monitor_restore`, and it starts it *loopback-only*
 //! (`bind_loopback_only = true`), which no off-machine client can reach.
 //!
-//! This module stores the user's intent so [`super::commands::
-//! companion_reachability_restore`] can re-establish it at boot.
+//! This module stores the user's intent so
+//! `companion_api::commands::companion_reachability_restore` can re-establish
+//! it at boot.
 //!
 //! # What is deliberately NOT written here
 //!
@@ -35,9 +36,9 @@
 //! # Relationship to the other channel configs
 //!
 //! Follows the same split as [`super::tunnel_config`] and
-//! [`super::browser_access`]: non-secret preferences in a plain JSON file under
-//! the data dir, `0o600`, absent file == "nothing enabled". There is no secret
-//! here, so no keyring leg.
+//! `companion_api::browser_access`: non-secret preferences in a plain JSON
+//! file under the data dir, `0o600`, absent file == "nothing enabled". There is
+//! no secret here, so no keyring leg.
 //!
 //! Config file: `<data_dir>/cognia/reachability.json`
 
@@ -60,7 +61,7 @@ pub struct ReachabilityConfig {
     /// Start the companion HTTPS listener at boot.
     #[serde(default)]
     pub server_enabled: bool,
-    /// Port to bind. Defaults to [`super::server::DEFAULT_PORT`].
+    /// Port to bind. Defaults to [`crate::DEFAULT_PORT`].
     #[serde(default = "default_port")]
     pub port: u16,
     /// `true` → `127.0.0.1` (this machine only); `false` → `0.0.0.0` (LAN).
@@ -86,7 +87,7 @@ pub struct ReachabilityConfig {
 }
 
 fn default_port() -> u16 {
-    super::server::DEFAULT_PORT
+    crate::DEFAULT_PORT
 }
 
 fn default_bind_loopback_only() -> bool {

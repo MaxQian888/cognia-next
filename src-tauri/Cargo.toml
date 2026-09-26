@@ -91,6 +91,11 @@ cognia-net = { path = "../crates/cognia-net" }
 # ADR-0196 P2 — the balance-script sandbox; `provider_diagnostics.rs` keeps the
 # three command shells and re-exports the crate.
 cognia-provider-diagnostics = { path = "../crates/cognia-provider-diagnostics" }
+# ADR-0196 P4 — the companion transport leaves: TLS identity, mDNS/mesh
+# discovery, the cloudflared tunnel, reachability/signaling config and the
+# WebRTC peer, envelope and framing. `companion_api` re-exports each module at
+# its old path.
+cognia-companion-connectivity = { path = "../crates/cognia-companion-connectivity" }
 # Native local-video metadata, frame extraction, trimming, and analysis.
 cognia-media = { path = "../crates/cognia-media", features = ["tauri-host"] }
 # ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased
@@ -319,7 +324,6 @@ tower-http = { workspace = true, features = ["limit", "trace", "cors"] }
 hmac.workspace = true
 sha1 = "0.11"
 sha2.workspace = true
-hkdf = "0.13"
 p256 = { version = "0.14", features = ["ecdsa", "ecdh"] }
 argon2 = "0.5"
 ed25519-dalek.workspace = true
@@ -348,22 +352,6 @@ local-ip-address = "0.6"
 # developer machines don't need a system install — critical on Windows
 # where libgit2 isn't typically present.
 git2 = { workspace = true, features = ["vendored-libgit2"] }
-
-# Companion TLS (Wave 1.4 / M2.8) — self-signed certificate generation +
-# SHA-256 SubjectPublicKeyInfo fingerprint computation. The mobile client
-# pins the fingerprint via the QR pair payload, so the cert chain is never
-# validated by hostname; this avoids needing a real CA.
-rcgen.workspace = true
-time = { version = "0.3", features = ["std"] }
-
-# mDNS (Wave 1.5 / M2.9) — service advertisement for `_cognia._tcp.local.`
-# so the mobile app can pick the desktop server out of the LAN without
-# manual baseUrl entry.
-mdns-sd = "0.20"
-
-# Cloudflared launcher (Wave 1.6) — runs the cloudflared subprocess and
-# parses the trycloudflare URL out of stderr. We use std::process via
-# tokio::process; no extra crate is required.
 
 # `notify` watches imported agent-session directories
 # (`session_import_watch.rs`); `flate2` + `tar` read and write the gzipped
@@ -534,6 +522,10 @@ cognia-secrets = { path = "../crates/cognia-secrets", features = ["test-inmemory
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)
 wiremock.workspace = true
+# Test certificates for the `account_auth::cloud_deployment` pinning tests.
+# (The companion listener's own certificate is minted in
+# `cognia-companion-connectivity`.)
+rcgen.workspace = true
 
 # ADR-0024 — standard desktop builds include PaddleOCR; other native OCR
 # bindings remain explicit opt-ins. Placeholder registrations keep the

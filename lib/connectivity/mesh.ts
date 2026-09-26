@@ -1,7 +1,7 @@
 /**
- * Renderer half of `src-tauri/src/companion_api/mesh.rs`: the shape the
- * `companion_mesh_status` command returns, and the pure choices the settings
- * surface makes over it.
+ * Renderer half of `crates/cognia-companion-connectivity/src/mesh.rs`: the
+ * shape the `companion_mesh_status` command returns, and the pure choices the
+ * settings surface makes over it.
  */
 
 export type MeshProvider = "tailscale" | "zerotier"

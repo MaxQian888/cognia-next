@@ -112,13 +112,9 @@ async fn harden_internal_response(request: Request, next: Next) -> Response {
     response
 }
 
-/// Default companion API port.  Configurable via `companion_server_start`.
-/// Used by M2.8 settings UI.
-///
-/// 27890 — deliberately outside the 789x range: 7890/7891 are the Clash
-/// mixed/SOCKS defaults (see `proxy_config::detect::KNOWN_PORTS`), so binding
-/// there collides with FlClash/Clash Verge on developer machines.
-pub const DEFAULT_PORT: u16 = 27890;
+// Defined with the other transport leaves (ADR-0196 P4); `server::DEFAULT_PORT`
+// is the path the app, `fleet` and the headless binary name it by.
+pub use cognia_companion_connectivity::DEFAULT_PORT;
 const MAX_DRAIN_DURATION: Duration = Duration::from_secs(300);
 static DRAINING: AtomicBool = AtomicBool::new(false);
 static WRITES_PAUSED: AtomicBool = AtomicBool::new(false);
@@ -1850,18 +1846,5 @@ mod tests {
             assert!(code.chars().all(|c| c.is_ascii_lowercase() || c == '_'));
         }
         assert_eq!(bare_error_code(StatusCode::IM_A_TEAPOT), "http_418");
-    }
-
-    #[test]
-    fn default_port_avoids_known_proxy_ports() {
-        assert_eq!(DEFAULT_PORT, 27890);
-        // Guard against regressing back into the Clash/V2Ray default range —
-        // every entry in proxy_config's known-port probe list is off-limits.
-        for (port, _, _) in crate::proxy_config::detect::KNOWN_PORTS {
-            assert_ne!(
-                DEFAULT_PORT, *port,
-                "DEFAULT_PORT collides with a known proxy port"
-            );
-        }
     }
 }

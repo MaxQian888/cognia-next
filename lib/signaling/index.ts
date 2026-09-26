@@ -3,7 +3,10 @@
  *
  * Consumers:
  *   - `lib/tauri/transport-rtc.ts` (mobile WebRTC driver)
- *   - `src-tauri/src/companion_api/signaling/` (desktop counterpart — Rust)
+ *   - `src-tauri/src/companion_api/signaling/` (desktop counterpart — Rust hub,
+ *     client and dispatcher) and
+ *     `crates/cognia-companion-connectivity/src/signaling/` (its WebRTC peer,
+ *     envelope crypto and DataChannel framing)
  */
 
 export {

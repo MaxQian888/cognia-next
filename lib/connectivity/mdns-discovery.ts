@@ -10,10 +10,11 @@
  *     `lib/capacitor/register-plugins.ts`). When the plugin is absent
  *     `subscribe()` degrades to a no-op and `lan-scanner` falls back to the
  *     IP-segment probe.
- *   - **Desktop**: advertises via Rust (`src-tauri/src/companion_api/mdns.rs`),
- *     and browses via `lib/connectivity/mdns-browse.ts`. The Tauri command
- *     surface is kept here so any TS code that wants to start/stop the
- *     broadcaster has one place to import.
+ *   - **Desktop**: advertises via Rust
+ *     (`crates/cognia-companion-connectivity/src/mdns.rs`), and browses via
+ *     `lib/connectivity/mdns-browse.ts`. The Tauri command surface is kept
+ *     here so any TS code that wants to start/stop the broadcaster has one
+ *     place to import.
  */
 
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"

@@ -54,6 +54,9 @@ members = [
   # ADR-0196 P2 — the provider balance-script sandbox (QuickJS) and its token
   # storage, out of the foundation crate `cognia-net`.
   "crates/cognia-provider-diagnostics",
+  # ADR-0196 P4 — the companion's transport leaves (TLS identity, mDNS/mesh,
+  # tunnel, WebRTC peer/envelope/framing), out of `companion_api`.
+  "crates/cognia-companion-connectivity",
   # ADR-0182 — runtime environments: EnvironmentSpec, the two-level image
   # catalog, admission policy and the tenant environment store.
   "crates/cognia-environment",

@@ -62,7 +62,7 @@ export type StartOutcome =
   | { kind: "unsupported" }
   | { kind: "error"; message: string }
 
-/** Mirror of `TunnelError::Busy`'s message in `companion_api/tunnel.rs`. */
+/** Mirror of `TunnelError::Busy`'s message in `cognia-companion-connectivity/src/tunnel.rs`. */
 const BUSY_RE = /^tunnel_busy: already exposing (\S+) at (\S+)$/
 
 /** Read the origin conflict out of a `companion_tunnel_start` failure. */
@@ -100,7 +100,7 @@ export async function startTunnel(
   }
 }
 
-/** Mirror of the Rust `TunnelProbe` (`companion_api/tunnel.rs`). */
+/** Mirror of the Rust `TunnelProbe` (`cognia-companion-connectivity/src/tunnel.rs`). */
 export interface TunnelProbe {
   installed: boolean
   path?: string | null

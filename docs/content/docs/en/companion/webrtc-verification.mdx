@@ -206,4 +206,5 @@ For every PR that touches the WebRTC tier, attach to the PR description:
 - [ADR 0021 — WebRTC DataChannel WAN transport](../adr/0021-webrtc-datachannel-wan-transport)
 - [companion/turn-byo](./turn-byo) — TURN credential providers
 - `lib/tauri/transport-rtc.ts` — TS state machine
-- `src-tauri/src/companion_api/signaling/` — Rust peer / hub / client
+- `src-tauri/src/companion_api/signaling/` — Rust hub / client / dispatcher
+- `crates/cognia-companion-connectivity/src/signaling/` — Rust peer / envelope / DataChannel framing

@@ -3,11 +3,11 @@
     P0.2 native — Android Network Security Config for the companion API.
 
     The desktop server terminates HTTPS with a runtime-generated self-signed
-    cert (src-tauri/src/companion_api/tls.rs). The Capacitor WebView's
-    underlying OkHttp stack will reject it by default. This config grants
-    explicit trust to the loopback + the well-known cognia-companion.local
-    SAN so the pinned-fetch (lib/tauri/pinned-fetch.ts) can complete the
-    handshake.
+    cert (crates/cognia-companion-connectivity/src/tls.rs). The Capacitor
+    WebView's underlying OkHttp stack will reject it by default. This config
+    grants explicit trust to the loopback + the well-known
+    cognia-companion.local SAN so the pinned-fetch (lib/tauri/pinned-fetch.ts)
+    can complete the handshake.
 
     Wave 4.x — `cognia-companion.local` carries a `<pin-set>` block that
     `mobile/scripts/inject-server-fingerprint.mjs` rewrites at build time

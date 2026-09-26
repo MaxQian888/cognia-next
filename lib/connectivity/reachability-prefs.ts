@@ -2,7 +2,7 @@
 
 /**
  * Persisted reachability preference — the renderer half of
- * `src-tauri/src/companion_api/reachability_config.rs`.
+ * `crates/cognia-companion-connectivity/src/reachability_config.rs`.
  *
  * The companion listener and the mDNS broadcaster used to be per-session UI
  * state: switching them on in Settings did not survive a restart, and nothing
