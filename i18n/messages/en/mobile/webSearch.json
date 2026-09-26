@@ -10,7 +10,7 @@
   "provider": "Preferred provider",
   "providerHelp": "Which search engine to use first.",
   "providerKeyAria": "{name} API key",
-  "providersDescription": "Standalone mode only — keys are stored on this phone and used for in-app web search.",
+  "providersDescription": "Standalone mode only — keys are stored on this device and used for in-app web search.",
   "providersTitle": "Search provider keys",
   "resultsCount": "{count, plural, one {# result} other {# results}}",
   "revealKeyAria": "Show or hide the {name} API key",
