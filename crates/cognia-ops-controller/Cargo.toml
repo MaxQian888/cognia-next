@@ -30,7 +30,6 @@ cognia-tenant-auth = { path = "../cognia-tenant-auth", features = ["oidc"] }
 futures-util = "0.3"
 hex.workspace = true
 ed25519-dalek.workspace = true
-jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
 parking_lot.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
 rcgen = { workspace = true, features = ["pem", "x509-parser"] }

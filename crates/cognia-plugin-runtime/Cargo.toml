@@ -54,7 +54,6 @@ wait-timeout.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "sync", "time", "io-util", "fs"] }
-async-trait.workspace = true
 futures-util = { workspace = true }
 parking_lot.workspace = true
 once_cell.workspace = true

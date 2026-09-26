@@ -37,6 +37,11 @@ base64.workspace = true
 hex.workspace = true
 reqwest = { workspace = true, features = ["rustls-no-provider"], optional = true }
 rusqlite = { workspace = true, features = ["bundled"], optional = true }
+# Not referenced in code, and not unused: `reqwest` above is built with
+# `rustls-no-provider`, and rustls 0.23 installs a process-default crypto
+# provider on its own only when exactly one provider feature is enabled on the
+# rustls crate. This line is what enables `ring`, so a registry client works in
+# a binary that never calls `CryptoProvider::install_default`.
 rustls = { workspace = true, features = ["ring", "std", "tls12"], optional = true }
 schemars.workspace = true
 serde = { workspace = true, features = ["derive"] }

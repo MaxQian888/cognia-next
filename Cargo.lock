@@ -2059,7 +2059,6 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tower",
- "tower-http 0.7.0",
  "url",
  "uuid",
  "wiremock",
@@ -2118,7 +2117,6 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.20",
  "url",
- "uuid",
 ]
 
 [[package]]
@@ -2598,7 +2596,6 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "futures-util",
  "hex",
- "jsonwebtoken",
  "parking_lot",
  "rcgen",
  "reqwest 0.13.4",
@@ -2624,7 +2621,6 @@ dependencies = [
 name = "cognia-plugin-runtime"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "base64 0.23.1",
  "cap-fs-ext",
  "cap-std",
@@ -2944,8 +2940,6 @@ dependencies = [
  "serde_json",
  "tauri",
  "tokio",
- "tokio-tungstenite",
- "uuid",
 ]
 
 [[package]]
