@@ -1,8 +1,27 @@
 /** @jest-environment jsdom */
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
-    values ? `${key}:${JSON.stringify(values)}` : key,
+  useTranslations: () => {
+    const t = (key: string, values?: Record<string, unknown>) =>
+      values ? `${key}:${JSON.stringify(values)}` : key
+    // `rich` renders the key, then whatever the `link` tag makes of its label,
+    // so a case can find the link a sentence carries.
+    t.rich = (key: string, values?: { link?: (chunks: string) => unknown }) => (
+      <>
+        {key}
+        {values?.link ? values.link(`${key}.link`) : null}
+      </>
+    )
+    return t
+  },
+}))
+jest.mock("next/link", () => ({
+  __esModule: true,
+  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
 }))
 
 const listSkillsMock = jest.fn()
@@ -181,6 +200,35 @@ it("says so when a library is empty instead of rendering a blank section", () =>
   render(<WorkspaceCapabilities workspaceId="w1" />)
 
   expect(screen.getByTestId("workspace-skill-empty")).toHaveTextContent("noSkills")
+  // The page it names is a place to go, not a path to type out by hand.
+  expect(screen.getByTestId("workspace-capabilities-settings-link-skills")).toHaveAttribute(
+    "href",
+    expect.stringContaining("section=skills")
+  )
+})
+
+it("links the Settings pages its sentences name", () => {
+  listMcpServersMock.mockReturnValue([])
+  seed()
+  render(<WorkspaceCapabilities workspaceId="w1" />)
+
+  expect(screen.getByTestId("workspace-capabilities-settings-link-mcp")).toHaveAttribute(
+    "href",
+    expect.stringContaining("section=mcp")
+  )
+  expect(screen.getByTestId("workspace-capabilities-settings-link-plugins")).toHaveAttribute(
+    "href",
+    expect.stringContaining("section=plugins")
+  )
+})
+
+// jsdom does no layout, so this pins the classes that let the toggle drop
+// below the name on a phone instead of squeezing it to a sliver.
+it("lets a row's toggle wrap below the name rather than truncate it", () => {
+  seed()
+  render(<WorkspaceCapabilities workspaceId="w1" />)
+
+  expect(screen.getByTestId("workspace-capability-mcpServer-mcp-1")).toHaveClass("flex-wrap")
 })
 
 /**

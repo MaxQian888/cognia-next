@@ -16,8 +16,9 @@
  * lying about what the agent will actually load.
  */
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
+import Link from "next/link"
 import { FileStackIcon, PlugIcon, SparklesIcon, type LucideIcon } from "lucide-react"
 
 import { ConsoleSection } from "@/components/surface/console-section"
@@ -28,6 +29,8 @@ import { useClientLiveQuery } from "@/hooks/data"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listSkills } from "@/lib/db/skills"
 import { listTemplateOwners } from "@/lib/db/template-platform"
+import { settingsHref } from "@/lib/settings/deep-link"
+import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { useTemplateCatalog } from "@/hooks/use-template-catalog"
 import {
   capabilityStateOf,
@@ -181,7 +184,7 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
         kind="skill"
         icon={SparklesIcon}
         title={t("skills")}
-        empty={t("noSkills")}
+        empty={t.rich("noSkills", { link: settingsLink("skills") })}
         loading={skills === undefined}
         rows={skillRows}
         overlay={overlay}
@@ -194,7 +197,7 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
         kind="mcpServer"
         icon={PlugIcon}
         title={t("mcpServers")}
-        empty={t("noMcpServers")}
+        empty={t.rich("noMcpServers", { link: settingsLink("mcp") })}
         loading={servers === undefined}
         rows={serverRows}
         overlay={overlay}
@@ -227,10 +230,29 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
         className="text-xs text-muted-foreground"
         data-testid="workspace-capabilities-plugins-note"
       >
-        {t("pluginsAreGlobal")}
+        {t.rich("pluginsAreGlobal", { link: settingsLink("plugins") })}
       </p>
     </div>
   )
+}
+
+/**
+ * The Settings page a sentence names, as a place to go. "Add them in Settings
+ * → MCP" used to be text, which left the reader to find the page by hand.
+ */
+function settingsLink(section: SettingsSectionId) {
+  function SettingsLink(chunks: ReactNode) {
+    return (
+      <Link
+        href={settingsHref(section)}
+        className="text-foreground underline underline-offset-2 hover:text-primary"
+        data-testid={`workspace-capabilities-settings-link-${section}`}
+      >
+        {chunks}
+      </Link>
+    )
+  }
+  return SettingsLink
 }
 
 function CapabilitySection({
@@ -249,7 +271,7 @@ function CapabilitySection({
   kind: WorkspaceCapabilityKind
   icon: LucideIcon
   title: string
-  empty: string
+  empty: ReactNode
   loading: boolean
   rows: CapabilityRow[]
   overlay: WorkspaceCapabilityOverlay | undefined
@@ -291,12 +313,14 @@ function CapabilitySection({
               !row.unavailable &&
               resolveCapabilityEnabled(row.globallyEnabled, overlay, kind, row.id)
             return (
+              // Wraps: kept on one line, the three-way toggle left a phone a
+              // 120px column that cut every name and its status mid-word.
               <li
                 key={row.id}
-                className="flex items-center gap-3 rounded-control border px-3 py-2"
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control border px-3 py-2"
                 data-testid={`workspace-capability-${kind}-${row.id}`}
               >
-                <div className="flex min-w-0 flex-1 flex-col">
+                <div className="flex min-w-0 flex-1 basis-40 flex-col">
                   <span className="truncate text-sm">{row.name}</span>
                   <span className="truncate text-[11px] text-muted-foreground">
                     {live ? t("effectiveOn") : t("effectiveOff")}
@@ -319,7 +343,7 @@ function CapabilitySection({
                     // "no change requested".
                     if (value) onSet(kind, row.id, value as WorkspaceCapabilityState)
                   }}
-                  className="text-xs"
+                  className="ml-auto text-xs"
                 >
                   {STATES.map((candidate) => (
                     <ToggleGroupItem
