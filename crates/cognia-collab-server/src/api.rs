@@ -19,7 +19,6 @@ use cognia_tenant_auth::grant::{GrantClaims, GrantSigner};
 use cognia_tenant_auth::membership::resolve_workspace_access;
 use cognia_tenant_auth::oidc::Authenticator;
 use cognia_tenant_auth::{OrgId, OrgRole, UserId, WorkspaceCapability, WorkspaceRole};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -987,7 +986,7 @@ async fn create_invitation(
     .await?;
 
     let mut token_bytes = [0_u8; 32];
-    rand::rng().fill_bytes(&mut token_bytes);
+    rand::fill(&mut token_bytes);
     let token = URL_SAFE_NO_PAD.encode(token_bytes);
     let now = (state.now)();
     let invitation = Invitation {
@@ -1246,7 +1245,7 @@ async fn verify_subject(state: &AppState, headers: &HeaderMap) -> Result<Subject
 }
 
 fn sha256_hex(value: &str) -> String {
-    format!("{:x}", Sha256::digest(value.as_bytes()))
+    hex::encode(Sha256::digest(value.as_bytes()))
 }
 
 /// Constant-time comparison of two hex digests. Both sides are digests of a
@@ -2466,7 +2465,7 @@ async fn authorize_workspace_member_mutation(
 }
 
 fn invitation_token_hash(token: &str) -> String {
-    format!("{:x}", Sha256::digest(token.as_bytes()))
+    hex::encode(Sha256::digest(token.as_bytes()))
 }
 
 fn request_id(headers: &HeaderMap) -> String {
@@ -2551,6 +2550,21 @@ fn authorization(headers: &HeaderMap) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Stored rows are matched by these hashes (invitation tokens, and the
+    /// values `sha256_hex` fingerprints), so their spelling is part of the
+    /// schema: a change would stop every existing row from matching.
+    #[test]
+    fn stored_hashes_are_lowercase_sha256_hex() {
+        assert_eq!(
+            sha256_hex("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            invitation_token_hash("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
     use std::time::Duration;
 
     use axum::body::Body;

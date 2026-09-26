@@ -1673,7 +1673,7 @@ struct LeaseResponse {
     token: String,
 }
 fn token_hash(value: &str) -> String {
-    format!("{:x}", Sha256::digest(value.as_bytes()))
+    hex::encode(Sha256::digest(value.as_bytes()))
 }
 
 async fn get_active_run_lease(
@@ -2580,7 +2580,7 @@ async fn upload_attachment(
         AttachmentTicketAction::Upload,
     )
     .await?;
-    let digest = format!("{:x}", Sha256::digest(&body));
+    let digest = hex::encode(Sha256::digest(&body));
     if attachment.status != "pending"
         || body.len() as i64 != attachment.byte_length
         || digest != attachment.sha256
@@ -2633,7 +2633,7 @@ async fn commit_attachment(
     let bytes =
         bytes.map_err(|_| ChatFailure::BadRequest("attachment upload is incomplete".into()))?;
     if bytes.len() as i64 != attachment.byte_length
-        || format!("{:x}", Sha256::digest(&bytes)) != attachment.sha256
+        || hex::encode(Sha256::digest(&bytes)) != attachment.sha256
     {
         state.chat_metrics.attachment_failed();
         return Err(ChatFailure::BadRequest(
@@ -2845,6 +2845,16 @@ mod tests {
         ));
     }
     use super::*;
+
+    /// Chat tokens are looked up by this hash, so its spelling is part of the
+    /// stored schema.
+    #[test]
+    fn chat_token_hashes_are_lowercase_sha256_hex() {
+        assert_eq!(
+            token_hash("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     #[tokio::test]
     async fn export_authorization_uses_current_membership_and_never_caches_success() {

@@ -23,7 +23,7 @@ path = "src/bin/bootstrap.rs"
 anyhow.workspace = true
 async-trait.workspace = true
 axum = { workspace = true, features = ["macros", "ws"] }
-base64 = "0.22"
+base64.workspace = true
 bytes.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 cognia-tenant-auth = { path = "../cognia-tenant-auth", features = ["grants", "oidc"] }
@@ -32,12 +32,14 @@ futures-util = { workspace = true }
 parking_lot.workspace = true
 object_store = { version = "0.14", default-features = false, features = ["aws-base", "reqwest", "ring", "fs"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
-rand = "0.9"
+rand.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
 rustls-native-certs.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-sha2 = "0.10"
+sha2.workspace = true
+# sha2 0.11's digest output does not implement LowerHex; `hex` renders it.
+hex.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
