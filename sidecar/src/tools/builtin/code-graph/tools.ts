@@ -12,8 +12,11 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { GRAPH_TRAVERSAL_MAX } from "../../src/services/code-graph/graph.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { GRAPH_TRAVERSAL_MAX } from "../../../services/code-graph/graph.ts"
+import type { CodeContext } from "../../../services/code-graph/context-builder.ts"
+import type { CodeGraphIndex } from "../../../services/code-graph/index-service.ts"
+import type { GraphNode } from "../../../services/code-graph/store-memory.ts"
 
 // Output bounds — mirror the file-ops/process tools' `{total, truncated, note}`
 // contract so a large graph traversal or source body never dumps unbounded
@@ -23,7 +26,7 @@ export const MAX_ROWS = 100
 export const MAX_SOURCE_CHARS = 12_000
 
 /** Compact node row (token-frugal). */
-function row(node) {
+function row(node: GraphNode | null | undefined) {
   if (!node) return null
   return {
     id: node.id,
@@ -40,7 +43,7 @@ function row(node) {
  * alongside the true `total` and a `truncated` flag so the model is never
  * misled into thinking a capped list was complete.
  */
-function capRows(rows, limit = MAX_ROWS) {
+function capRows<T>(rows: T[], limit: number = MAX_ROWS) {
   if (rows.length <= limit) return { rows, total: rows.length, truncated: false }
   return { rows: rows.slice(0, limit), total: rows.length, truncated: true }
 }
@@ -50,9 +53,15 @@ function capRows(rows, limit = MAX_ROWS) {
  * `note` fields when the list was clipped. Wraps the result with the staleness
  * banner so callers stay one-liners.
  */
-function withCappedRows(resolver, payload, key, rows, { limit = MAX_ROWS, hint } = {}) {
+function withCappedRows(
+  resolver: CodeGraphIndex,
+  payload: Record<string, unknown>,
+  key: string,
+  rows: unknown[],
+  { limit = MAX_ROWS, hint }: { limit?: number; hint?: string } = {}
+) {
   const { rows: shown, total, truncated } = capRows(rows, limit)
-  const out = { ...payload, [key]: shown }
+  const out: Record<string, unknown> = { ...payload, [key]: shown }
   if (truncated) {
     out.truncated = true
     out.total = total
@@ -65,25 +74,25 @@ function withCappedRows(resolver, payload, key, rows, { limit = MAX_ROWS, hint }
 }
 
 /** Byte-cap a verbatim source body so a huge symbol can't flood the context. */
-function capSource(text) {
+function capSource(text: unknown) {
   if (typeof text !== "string" || text.length <= MAX_SOURCE_CHARS) return text
   return `${text.slice(0, MAX_SOURCE_CHARS)}\n… (source truncated at ${MAX_SOURCE_CHARS} chars — use the read tool for the full body)`
 }
 
 /** Attach the staleness banner to a payload as a leading `warning` field. */
-function withBanner(resolver, payload) {
+function withBanner<P extends object>(resolver: CodeGraphIndex, payload: P) {
   const banner = resolver.stalenessBanner()
   return banner ? { warning: banner, ...payload } : payload
 }
 
 /** Resolve `target` (a node id or qualified name) to a node, or throw. */
-function resolveTarget(resolver, target) {
+function resolveTarget(resolver: CodeGraphIndex, target: string): GraphNode {
   const node = resolver.getNode(target)
   if (!node) throw new Error(`no indexed symbol matches "${target}" (try codegraph_search first)`)
   return node
 }
 
-async function run(resolver, name, fn) {
+async function run(resolver: CodeGraphIndex, name: string, fn: () => Promise<unknown>) {
   try {
     await resolver.syncStale()
     return toolText(await fn())
@@ -92,17 +101,8 @@ async function run(resolver, name, fn) {
   }
 }
 
-/**
- * Build the code-graph tool set bound to a session resolver.
- * @param {{
- *   ensureIndexed: Function, syncStale: Function, search: Function,
- *   getNode: Function, snippetFor: Function, callers: Function,
- *   callees: Function, impact: Function, context: Function, files: Function,
- *   status: Function, stalenessBanner: Function,
- * }} resolver
- * @returns {Array} tool defs
- */
-export function createCodeGraphTools(resolver) {
+/** Build the code-graph tool set bound to a session resolver. */
+export function createCodeGraphTools(resolver: CodeGraphIndex) {
   return [
     tool(
       "codegraph_status",
@@ -276,7 +276,7 @@ export function createCodeGraphTools(resolver) {
   ]
 }
 
-function formatContext(resolver, ctx) {
+function formatContext(resolver: CodeGraphIndex, ctx: CodeContext) {
   return withBanner(resolver, {
     summary: ctx.summary,
     entryPoints: ctx.entryPoints.map(row),
@@ -291,4 +291,4 @@ function formatContext(resolver, ctx) {
   })
 }
 
-export { CODE_GRAPH_TOOL_NAMES } from "./names.mjs"
+export { CODE_GRAPH_TOOL_NAMES } from "./names.ts"

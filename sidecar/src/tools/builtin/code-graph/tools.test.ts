@@ -1,15 +1,43 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import {
-  createCodeGraphTools,
-  CODE_GRAPH_TOOL_NAMES,
-  MAX_ROWS,
-  MAX_SOURCE_CHARS,
-} from "./tools.mjs"
+import { createCodeGraphTools, CODE_GRAPH_TOOL_NAMES, MAX_ROWS, MAX_SOURCE_CHARS } from "./tools.ts"
+import { findTool, firstText, firstJson } from "../../../../test-support/tool-result.ts"
+import type { CallableTool } from "../../../../test-support/tool-result.ts"
+import type { CodeGraphIndex } from "../../../services/code-graph/index-service.ts"
+import type { Reached } from "../../../services/code-graph/graph.ts"
+import type { GraphNode } from "../../../services/code-graph/store-memory.ts"
+
+/** A compact node row as the tools emit it. */
+interface Row {
+  id: string
+  qualified_name: string
+  distance?: number
+}
+
+/** Every field the code-graph tools answer with; each test reads its own. */
+interface GraphOutput {
+  results: Row[]
+  files: { symbols: number }[]
+  callers: Row[]
+  callees: Row[]
+  impacted: Row[]
+  impactCount: number
+  entryPoints: Row[]
+  snippets: { source: string }[]
+  source: string
+  summary: string
+  warning: string
+  is_exported: boolean
+  truncated?: boolean
+  total?: number
+  note?: string
+}
+
+type FakeResolver = CodeGraphIndex & { _node: GraphNode; readonly syncCount: number }
 
 /** A fake resolver implementing the index-service query surface. */
-function fakeResolver(over = {}) {
+function fakeResolver(over: Partial<CodeGraphIndex> = {}): FakeResolver {
   const node = {
     id: "a.ts::foo::1",
     kind: "function",
@@ -43,7 +71,7 @@ function fakeResolver(over = {}) {
       binding: "memory",
     }),
     search: () => [node],
-    getNode: (t) => (t === node.id || t === node.qualified_name ? node : null),
+    getNode: (t: string) => (t === node.id || t === node.qualified_name ? node : null),
     snippetFor: () => "function foo() { return 1; }",
     callers: () => [{ node, distance: 1 }],
     callees: () => [{ node, distance: 1 }],
@@ -59,15 +87,15 @@ function fakeResolver(over = {}) {
     files: () => [{ path: "a.ts", language: "typescript", node_count: 1, errors: null }],
     stalenessBanner: () => "",
     ...over,
-  }
+  } as unknown as FakeResolver
 }
 
-function byName(tools) {
-  return new Map(tools.map((t) => [t.name, t]))
+/** Tools by name; `get` fails the test for an unknown name. */
+function byName(tools: readonly { name: string }[]): { get(name: string): CallableTool } {
+  return { get: (name) => findTool(tools, name) }
 }
-function parse(result) {
-  assert.equal(result.content[0].type, "text")
-  return JSON.parse(result.content[0].text)
+function parse(result: { content: readonly unknown[] }): GraphOutput {
+  return firstJson<GraphOutput>(result)
 }
 
 test("createCodeGraphTools exposes exactly the named tool set, all callable", () => {
@@ -86,8 +114,8 @@ test("every tool syncs the index before answering", async () => {
 test("codegraph_search returns compact rows", async () => {
   const tools = byName(createCodeGraphTools(fakeResolver()))
   const out = parse(await tools.get("codegraph_search").handler({ query: "foo", limit: 20 }))
-  assert.equal(out.results[0].qualified_name, "foo")
-  assert.equal(out.results[0].id, "a.ts::foo::1")
+  assert.equal(out.results[0]!.qualified_name, "foo")
+  assert.equal(out.results[0]!.id, "a.ts::foo::1")
 })
 
 test("codegraph_node returns source + metadata", async () => {
@@ -101,13 +129,13 @@ test("codegraph_node errors clearly when the symbol is unknown", async () => {
   const tools = byName(createCodeGraphTools(fakeResolver()))
   const res = await tools.get("codegraph_node").handler({ target: "missing" })
   assert.equal(res.isError, true)
-  assert.match(res.content[0].text, /no indexed symbol matches/)
+  assert.match(firstText(res), /no indexed symbol matches/)
 })
 
 test("callers / callees / impact carry distance", async () => {
   const tools = byName(createCodeGraphTools(fakeResolver()))
   const callers = parse(await tools.get("codegraph_callers").handler({ target: "foo", depth: 3 }))
-  assert.equal(callers.callers[0].distance, 1)
+  assert.equal(callers.callers[0]!.distance, 1)
   const impact = parse(await tools.get("codegraph_impact").handler({ target: "foo", depth: 4 }))
   assert.equal(impact.impactCount, 1)
 })
@@ -115,8 +143,8 @@ test("callers / callees / impact carry distance", async () => {
 test("codegraph_context / explore format the composite result", async () => {
   const tools = byName(createCodeGraphTools(fakeResolver()))
   const ctx = parse(await tools.get("codegraph_context").handler({ query: "foo" }))
-  assert.equal(ctx.entryPoints[0].qualified_name, "foo")
-  assert.equal(ctx.snippets[0].source, "function foo()")
+  assert.equal(ctx.entryPoints[0]!.qualified_name, "foo")
+  assert.equal(ctx.snippets[0]!.source, "function foo()")
   const exp = parse(await tools.get("codegraph_explore").handler({ seeds: ["foo"] }))
   assert.match(exp.summary, /relevant symbol/)
 })
@@ -131,12 +159,13 @@ test("the staleness banner is prepended as a warning field", async () => {
 test("codegraph_files surfaces per-file symbol counts", async () => {
   const tools = byName(createCodeGraphTools(fakeResolver()))
   const out = parse(await tools.get("codegraph_files").handler({}))
-  assert.equal(out.files[0].symbols, 1)
+  assert.equal(out.files[0]!.symbols, 1)
 })
 
 /** Build N distinct fake nodes for cap tests. */
-function manyNodes(n, base) {
+function manyNodes(n: number, base: GraphNode): Reached[] {
   return Array.from({ length: n }, (_, i) => ({
+    id: `a.ts::foo::${i}`,
     node: { ...base, id: `a.ts::foo::${i}`, qualified_name: `foo${i}` },
     distance: 1,
   }))
@@ -151,7 +180,7 @@ test("codegraph_impact row-caps the impacted array but keeps the true impactCoun
   assert.equal(out.impactCount, MAX_ROWS + 25) // true total, uncapped
   assert.equal(out.impacted.length, MAX_ROWS) // array clipped
   assert.equal(out.truncated, true)
-  assert.match(out.note, /more not shown/)
+  assert.match(out.note ?? "", /more not shown/)
 })
 
 test("codegraph_callers / callees clip to MAX_ROWS with total + note", async () => {
@@ -190,5 +219,5 @@ test("codegraph_search flags a full page as possibly-more", async () => {
   const tools = byName(createCodeGraphTools(resolver))
   const out = parse(await tools.get("codegraph_search").handler({ query: "foo", limit: 20 }))
   assert.equal(out.results.length, 20)
-  assert.match(out.note, /capped at limit=20/)
+  assert.match(out.note ?? "", /capped at limit=20/)
 })

@@ -14,13 +14,43 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod"
 import { fileURLToPath } from "node:url"
-import { formatDiagnostics } from "../src/services/lsp/report.ts"
-import { toolError, toolText } from "../src/tools/kernel/result.ts"
+import type { LazyLspResolver } from "../../../services/lsp/lazy-resolver.ts"
+import { formatDiagnostics } from "../../../services/lsp/report.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+
+interface LspPosition {
+  line?: number
+  character?: number
+}
+
+interface LspRange {
+  start?: LspPosition
+}
+
+/** A Location or a LocationLink: `uri`/`range`, or `targetUri`/`targetRange`. */
+interface LspLocationLike {
+  uri?: string
+  range?: LspRange
+  targetUri?: string
+  targetRange?: LspRange
+  targetSelectionRange?: LspRange
+}
+
+/** A DocumentSymbol (nested `children`) or a SymbolInformation (`location`). */
+interface LspSymbolLike {
+  name: string
+  kind: number
+  range?: LspRange
+  location?: { range?: LspRange }
+  children?: LspSymbolLike[]
+}
+
+type HoverContent = string | { value?: string } | (string | { value?: string })[]
 
 /** Render an LSP Location / Location[] / LocationLink[] into concise text. */
-export function formatLocations(result) {
+export function formatLocations(result: unknown): string {
   if (result == null) return "No results."
-  const arr = Array.isArray(result) ? result : [result]
+  const arr = (Array.isArray(result) ? result : [result]) as LspLocationLike[]
   if (arr.length === 0) return "No results."
   const lines = arr.map((loc) => {
     // LocationLink uses `targetUri`/`targetRange`; Location uses `uri`/`range`.
@@ -40,9 +70,10 @@ export function formatLocations(result) {
 }
 
 /** Render an LSP Hover result into text. */
-export function formatHover(result) {
-  if (!result || result.contents == null) return "No hover information."
-  const c = result.contents
+export function formatHover(result: unknown): string {
+  const hover = result as { contents?: HoverContent | null } | null | undefined
+  if (!hover || hover.contents == null) return "No hover information."
+  const c = hover.contents
   if (typeof c === "string") return c
   if (Array.isArray(c)) {
     return c.map((part) => (typeof part === "string" ? part : (part?.value ?? ""))).join("\n\n")
@@ -51,9 +82,9 @@ export function formatHover(result) {
 }
 
 /** Render LSP DocumentSymbol[] / SymbolInformation[] into an indented tree. */
-export function formatSymbols(result) {
+export function formatSymbols(result: unknown): string {
   if (!Array.isArray(result) || result.length === 0) return "No symbols."
-  const SYMBOL_KIND = {
+  const SYMBOL_KIND: Record<number, string> = {
     5: "class",
     6: "method",
     9: "constructor",
@@ -63,8 +94,8 @@ export function formatSymbols(result) {
     14: "constant",
     23: "struct",
   }
-  const out = []
-  const walk = (nodes, depth) => {
+  const out: string[] = []
+  const walk = (nodes: LspSymbolLike[], depth: number) => {
     for (const n of nodes) {
       const kind = SYMBOL_KIND[n.kind] ?? "symbol"
       const line = (n.range?.start?.line ?? n.location?.range?.start?.line ?? 0) + 1
@@ -72,13 +103,13 @@ export function formatSymbols(result) {
       if (Array.isArray(n.children)) walk(n.children, depth + 1)
     }
   }
-  walk(result, 0)
+  walk(result as LspSymbolLike[], 0)
   return out.join("\n")
 }
 
-const pos = (line, character) => ({ line: line - 1, character: character - 1 })
+const pos = (line: number, character: number) => ({ line: line - 1, character: character - 1 })
 
-async function runLspTool(name, fn) {
+async function runLspTool(name: string, fn: () => Promise<string>) {
   try {
     return toolText(await fn())
   } catch (err) {
@@ -86,12 +117,8 @@ async function runLspTool(name, fn) {
   }
 }
 
-/**
- * Build the LSP tool set bound to a session resolver.
- * @param {{ request: Function, getDiagnostics: Function }} resolver
- * @returns {Array} tool defs
- */
-export function createLspTools(resolver) {
+/** Build the LSP tool set bound to a session resolver. */
+export function createLspTools(resolver: LazyLspResolver) {
   return [
     tool(
       "lsp_goto_definition",
@@ -174,7 +201,7 @@ export function createLspTools(resolver) {
   ]
 }
 
-/** Bare tool names — for the disabled-category denylist in index.mjs. */
+/** Bare tool names — for the disabled-category denylist in the registry. */
 export const LSP_TOOL_NAMES = [
   "lsp_goto_definition",
   "lsp_find_references",

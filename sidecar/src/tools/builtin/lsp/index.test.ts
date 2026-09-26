@@ -6,24 +6,41 @@ import {
   formatLocations,
   formatHover,
   formatSymbols,
-} from "../lsp.mjs"
+} from "./index.ts"
+import { findTool, firstText } from "../../../../test-support/tool-result.ts"
 
-function fakeResolver({ requestResult, diagnostics } = {}) {
-  const calls = { request: [], getDiagnostics: [] }
+interface RequestCall {
+  file: string
+  method: string
+  payload?: { position?: unknown }
+}
+
+function fakeResolver({
+  requestResult,
+  diagnostics,
+}: { requestResult?: unknown; diagnostics?: unknown[] } = {}) {
+  const calls: { request: RequestCall[]; getDiagnostics: string[] } = {
+    request: [],
+    getDiagnostics: [],
+  }
   return {
     calls,
-    async request(file, method, payload) {
+    async request(
+      file: string,
+      method: string,
+      payload?: Record<string, unknown>
+    ): Promise<unknown> {
       calls.request.push({ file, method, payload })
       return requestResult
     },
-    async getDiagnostics(file) {
+    async getDiagnostics(file: string): Promise<unknown[]> {
       calls.getDiagnostics.push(file)
       return diagnostics ?? []
     },
   }
 }
 
-const find = (tools, name) => tools.find((t) => t.name === name)
+const find = findTool
 
 test("createLspTools exposes the documented tool set", () => {
   const tools = createLspTools(fakeResolver())
@@ -41,14 +58,14 @@ test("goto_definition converts 1-based position to 0-based and formats", async (
     line: 10,
     character: 3,
   })
-  assert.equal(resolver.calls.request[0].method, "definition")
-  assert.deepEqual(resolver.calls.request[0].payload.position, { line: 9, character: 2 })
-  assert.match(res.content[0].text, /a\.ts:5:3/)
+  assert.equal(resolver.calls.request[0]!.method, "definition")
+  assert.deepEqual(resolver.calls.request[0]!.payload?.position, { line: 9, character: 2 })
+  assert.match(firstText(res), /a\.ts:5:3/)
 })
 
 test("goto_definition returns resolver failures as compact tool errors", async () => {
   const resolver = fakeResolver()
-  resolver.request = async () => {
+  resolver.request = async (): Promise<unknown> => {
     throw new Error("resolver down")
   }
   const tools = createLspTools(resolver)
@@ -58,8 +75,7 @@ test("goto_definition returns resolver failures as compact tool errors", async (
     character: 3,
   })
   assert.equal(res.isError, true)
-  assert.equal(res.content[0].type, "text")
-  assert.match(res.content[0].text, /lsp_goto_definition: resolver down/)
+  assert.match(firstText(res), /lsp_goto_definition: resolver down/)
 })
 
 test("find_references routes to the references method", async () => {
@@ -70,8 +86,8 @@ test("find_references routes to the references method", async () => {
     line: 1,
     character: 1,
   })
-  assert.equal(resolver.calls.request[0].method, "references")
-  assert.equal(res.content[0].text, "No results.")
+  assert.equal(resolver.calls.request[0]!.method, "references")
+  assert.equal(firstText(res), "No results.")
 })
 
 test("hover renders markdown content value", async () => {
@@ -80,7 +96,7 @@ test("hover renders markdown content value", async () => {
   })
   const tools = createLspTools(resolver)
   const res = await find(tools, "lsp_hover").handler({ file: "/p/a.ts", line: 2, character: 2 })
-  assert.equal(res.content[0].text, "fn foo()")
+  assert.equal(firstText(res), "fn foo()")
 })
 
 test("document_symbols routes to the documentSymbol method", async () => {
@@ -89,8 +105,8 @@ test("document_symbols routes to the documentSymbol method", async () => {
   })
   const tools = createLspTools(resolver)
   const res = await find(tools, "lsp_document_symbols").handler({ file: "/p/a.ts" })
-  assert.equal(resolver.calls.request[0].method, "documentSymbol")
-  assert.match(res.content[0].text, /class Foo/)
+  assert.equal(resolver.calls.request[0]!.method, "documentSymbol")
+  assert.match(firstText(res), /class Foo/)
 })
 
 test("diagnostics formats cached errors and warnings", async () => {
@@ -99,14 +115,14 @@ test("diagnostics formats cached errors and warnings", async () => {
   })
   const tools = createLspTools(resolver)
   const res = await find(tools, "lsp_diagnostics").handler({ file: "/p/a.ts" })
-  assert.match(res.content[0].text, /1:1 ERROR boom/)
+  assert.match(firstText(res), /1:1 ERROR boom/)
 })
 
 test("diagnostics reports clean files", async () => {
   const resolver = fakeResolver({ diagnostics: [] })
   const tools = createLspTools(resolver)
   const res = await find(tools, "lsp_diagnostics").handler({ file: "/p/a.ts" })
-  assert.equal(res.content[0].text, "No diagnostics.")
+  assert.equal(firstText(res), "No diagnostics.")
 })
 
 test("formatLocations handles LocationLink and empty input", () => {
