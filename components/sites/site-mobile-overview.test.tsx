@@ -67,9 +67,13 @@ it("lists the Sites this device's own database holds", () => {
   expect(screen.getByTestId("sites-mobile-row-site_2")).toHaveTextContent("Marketing")
 })
 
-it("prefers the live URL over the worker name", () => {
+it("prefers the live URL over the worker name, and opens it", () => {
   render(<SiteMobileOverview sites={[site()]} activeDeployments={[deployment()]} loading={false} />)
   expect(screen.getByTestId("sites-mobile-row-site_1")).toHaveTextContent(
+    "https://docs.example.com"
+  )
+  expect(screen.getByTestId("sites-mobile-url-site_1")).toHaveAttribute(
+    "href",
     "https://docs.example.com"
   )
 })
@@ -77,6 +81,8 @@ it("prefers the live URL over the worker name", () => {
 it("falls back to the worker name before anything is deployed", () => {
   render(<SiteMobileOverview sites={[site()]} activeDeployments={[]} loading={false} />)
   expect(screen.getByTestId("sites-mobile-row-site_1")).toHaveTextContent("cognia-docs")
+  // A name is not an address; there is nothing to open yet.
+  expect(screen.queryByTestId("sites-mobile-url-site_1")).not.toBeInTheDocument()
 })
 
 it("shows a skeleton while reading, not the empty explanation", () => {

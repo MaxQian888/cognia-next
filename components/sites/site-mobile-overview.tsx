@@ -19,6 +19,7 @@
 import { useTranslations } from "next-intl"
 import { CloudIcon, GlobeIcon } from "lucide-react"
 
+import { ExternalLink } from "@/components/shared/external-link"
 import { Surface } from "@/components/surface/surface"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -91,9 +92,21 @@ export function SiteMobileOverview({ sites, activeDeployments, loading }: SiteMo
                         className="shrink-0 px-1.5 text-[10px]"
                       />
                     </span>
-                    <span className="block truncate font-mono text-xs text-muted-foreground">
-                      {url ?? site.providerConfig.workerName}
-                    </span>
+                    {/* The live URL is the one thing a phone can do with a
+                        Site, so it opens it rather than only printing it. */}
+                    {url ? (
+                      <ExternalLink
+                        href={url}
+                        className="block truncate font-mono text-xs text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
+                        data-testid={`sites-mobile-url-${site.id}`}
+                      >
+                        {url}
+                      </ExternalLink>
+                    ) : (
+                      <span className="block truncate font-mono text-xs text-muted-foreground">
+                        {site.providerConfig.workerName}
+                      </span>
+                    )}
                   </span>
                 </Surface>
               </li>
