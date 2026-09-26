@@ -19,7 +19,10 @@ import {
   shellAdvancedTools,
   createShellAdvancedTools,
 } from "../src/tools/builtin/shell-advanced/index.ts"
-import { terminalReplTools, createTerminalReplTools } from "./terminal-repl-tool.mjs"
+import {
+  terminalReplTools,
+  createTerminalReplTools,
+} from "../src/tools/builtin/terminal-repl/index.ts"
 import { astGrepTools, createAstGrepTools } from "../src/tools/builtin/ast-grep/index.ts"
 import { clonedepsTools } from "./clonedeps/index.mjs"
 import { webcloneTools } from "./webclone/index.mjs"

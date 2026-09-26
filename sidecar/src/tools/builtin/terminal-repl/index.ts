@@ -1,4 +1,5 @@
-import { sandboxedProcessTarget, sandboxedProcessEnv } from "../src/platform/process/exec.ts"
+import { sandboxedProcessTarget, sandboxedProcessEnv } from "../../../platform/process/exec.ts"
+import type { ProcessSandboxScope } from "../../../platform/process/exec.ts"
 // terminal-repl-tool — agent-facing interactive REPL MCP tool.
 //
 // Wave 1 (orthogonal to dock-relay). Where `terminal_dock_*` ride
@@ -35,17 +36,85 @@ import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../src/tools/kernel/result.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 const OUTPUT_RING_BYTES = 256 * 1024
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000
 const MAX_SESSIONS_PER_AGENT = 8
 
-/**
- * Per-session in-memory state.
- * @type {Map<string, { id: string, agentId: string, shell: string, pty: any, buffer: Buffer, truncated: boolean, exited: boolean, exitCode: number|null, createdAt: number, lastActivityAt: number }>}
- */
-const sessions = new Map()
+/** How a PTY reports its exit. */
+export interface PtyExit {
+  exitCode: number | null
+  signal?: string | number | null
+}
+
+/** The slice of node-pty's `IPty` this module drives. */
+export interface PtyProcess {
+  write(data: string): void
+  resize?(cols: number, rows: number): void
+  kill(signal?: string): void
+  onData(listener: (data: string | Buffer) => void): unknown
+  onExit?(listener: (exit: PtyExit) => void): unknown
+}
+
+export interface PtySpawnOptions {
+  name: string
+  cols: number
+  rows: number
+  cwd: string
+  env: Record<string, string | undefined>
+}
+
+/** node-pty's module surface, or the Bun adapter below. */
+export interface PtyModule {
+  spawn(shell: string, args: string[], options: PtySpawnOptions): PtyProcess
+}
+
+/** The slice of Bun's runtime API the PTY adapter uses. */
+export interface BunPtyRuntime {
+  Terminal: unknown
+  spawn(
+    argv: string[],
+    options: {
+      cwd: string
+      env: Record<string, string | undefined>
+      terminal: {
+        name: string
+        cols: number
+        rows: number
+        data(terminal: unknown, data: Uint8Array | string): void
+      }
+    }
+  ): {
+    exited: Promise<number | null>
+    terminal: { write(data: string): void; resize(cols: number, rows: number): void; close(): void }
+    kill(signal?: string): void
+  }
+}
+
+interface ReplSession {
+  id: string
+  agentId: string
+  shell: string
+  pty: PtyProcess
+  buffer: Buffer
+  truncated: boolean
+  exited: boolean
+  exitCode: number | null
+  createdAt: number
+  lastActivityAt: number
+}
+
+/** The host session the tools are bound to; model input cannot override it. */
+export interface TerminalReplContext {
+  sessionId?: string | undefined
+  builtinProcessSandbox?: ProcessSandboxScope | undefined
+}
+
+/** Per-session in-memory state. */
+const sessions = new Map<string, ReplSession>()
 
 /**
  * Lazy node-pty loader. Returns null on failure so `spawn` can surface
@@ -55,15 +124,15 @@ const sessions = new Map()
  * Exposed so the test harness can swap in a stub without touching the
  * native module loader.
  */
-let cachedNodePty = undefined
-let nodePtyLoadError = null
+let cachedNodePty: PtyModule | null | undefined = undefined
+let nodePtyLoadError: string | null = null
 
 /** Repair the executable bit lost by some package archives before native spawn. */
 export function prepareNodePtyHelper(
-  packageRoot,
-  platform = process.platform,
-  arch = process.arch
-) {
+  packageRoot: string,
+  platform: string = process.platform,
+  arch: string = process.arch
+): void {
   if (platform === "win32") return
   for (const directory of ["build/Release", "build/Debug", `prebuilds/${platform}-${arch}`]) {
     const helper = path.join(packageRoot, directory, "spawn-helper")
@@ -74,24 +143,25 @@ export function prepareNodePtyHelper(
         fs.chmodSync(helper, mode | 0o111)
       } catch (error) {
         throw new Error(
-          `PTY helper is not executable: ${helper}. Reinstall node-pty or restore its executable permission. ${error.message}`
+          `PTY helper is not executable: ${helper}. Reinstall node-pty or restore its executable permission. ${(error as Error).message}`
         )
       }
     }
   }
 }
 
-export function isBunPtyRuntime(runtime) {
-  return typeof runtime?.Terminal === "function" && typeof runtime?.spawn === "function"
+export function isBunPtyRuntime(runtime: unknown): runtime is BunPtyRuntime {
+  const candidate = runtime as Partial<BunPtyRuntime> | null | undefined
+  return typeof candidate?.Terminal === "function" && typeof candidate?.spawn === "function"
 }
 
 /** Adapt Bun's built-in PTY to the narrow node-pty surface used below. */
-export function createBunPtyModule(runtime) {
+export function createBunPtyModule(runtime: BunPtyRuntime): PtyModule {
   return {
     spawn(shell, args, options) {
-      let dataListener = null
-      let exitListener = null
-      let settledExit = null
+      let dataListener: ((data: string) => void) | null = null
+      let exitListener: ((exit: PtyExit) => void) | null = null
+      let settledExit: PtyExit | null = null
       const proc = runtime.spawn([shell, ...args], {
         cwd: options.cwd,
         env: options.env,
@@ -133,9 +203,9 @@ export function createBunPtyModule(runtime) {
   }
 }
 
-async function loadNodePty() {
+async function loadNodePty(): Promise<{ mod: PtyModule | null; error: string | null }> {
   if (cachedNodePty !== undefined) return { mod: cachedNodePty, error: nodePtyLoadError }
-  const bun = globalThis.Bun
+  const bun = (globalThis as { Bun?: unknown }).Bun
   if (isBunPtyRuntime(bun)) {
     cachedNodePty = createBunPtyModule(bun)
     nodePtyLoadError = null
@@ -144,7 +214,8 @@ async function loadNodePty() {
   try {
     const require = createRequire(import.meta.url)
     prepareNodePtyHelper(path.dirname(require.resolve("node-pty/package.json")))
-    cachedNodePty = await import("node-pty")
+    // node-pty's own IPty is wider than the slice this module drives.
+    cachedNodePty = (await import("node-pty")) as unknown as PtyModule
     nodePtyLoadError = null
   } catch (err) {
     cachedNodePty = null
@@ -153,12 +224,15 @@ async function loadNodePty() {
   return { mod: cachedNodePty, error: nodePtyLoadError }
 }
 
-export function __setNodePtyForTesting(mod, error = null) {
+export function __setNodePtyForTesting(
+  mod: PtyModule | null | undefined,
+  error: string | null = null
+) {
   cachedNodePty = mod
   nodePtyLoadError = error
 }
 
-function appendToRing(session, chunk) {
+function appendToRing(session: ReplSession, chunk: Buffer): void {
   const max = OUTPUT_RING_BYTES
   if (session.buffer.length + chunk.length <= max) {
     session.buffer = Buffer.concat([session.buffer, chunk])
@@ -170,13 +244,16 @@ function appendToRing(session, chunk) {
   session.truncated = true
 }
 
-function ensureOwner(session, agentId) {
+function ensureOwner(
+  session: ReplSession | undefined,
+  agentId: string
+): { ok: true; session: ReplSession } | { ok: false; reason: string } {
   if (!session) return { ok: false, reason: "unknown session" }
   if (session.agentId !== agentId) return { ok: false, reason: "session belongs to another agent" }
-  return { ok: true }
+  return { ok: true, session }
 }
 
-function countSessionsForAgent(agentId) {
+function countSessionsForAgent(agentId: string): number {
   let n = 0
   for (const session of sessions.values()) {
     if (session.agentId === agentId && !session.exited) n++
@@ -189,7 +266,7 @@ function countSessionsForAgent(agentId) {
  * lastActivityAt is older than IDLE_TIMEOUT_MS so abandoned REPLs don't
  * leak.
  */
-function reapIdleSessions(now = Date.now()) {
+function reapIdleSessions(now: number = Date.now()): void {
   for (const session of sessions.values()) {
     if (session.exited) continue
     if (now - session.lastActivityAt < IDLE_TIMEOUT_MS) continue
@@ -234,7 +311,9 @@ const ownerAgentIdParam = z
   .describe("Caller identity — must match the agentId that spawned the session.")
 const sessionIdParam = z.string().min(1).describe("The sessionId returned by terminal_repl_spawn.")
 
-async function execSpawn(args, ctx = {}) {
+/** `extra` is a {@link TerminalReplContext}, or the SDK tool context for the static tools. */
+async function execSpawn(args: ToolArgs<typeof spawnShape>, extra: unknown = {}) {
+  const ctx = (extra ?? {}) as TerminalReplContext
   reapIdleSessions()
   if (!fs.existsSync(args.cwd)) {
     return toolError(`cwd does not exist: ${args.cwd}`, "terminal_repl_spawn")
@@ -254,8 +333,7 @@ async function execSpawn(args, ctx = {}) {
     )
   }
 
-  /** @type {any} */
-  let pty
+  let pty: PtyProcess
   try {
     const target = sandboxedProcessTarget(
       args.shell,
@@ -279,7 +357,7 @@ async function execSpawn(args, ctx = {}) {
 
   const id = randomUUID()
   const now = Date.now()
-  const session = {
+  const session: ReplSession = {
     id,
     agentId: args.agentId,
     shell: args.shell,
@@ -293,12 +371,12 @@ async function execSpawn(args, ctx = {}) {
   }
   sessions.set(id, session)
 
-  pty.onData((data) => {
+  pty.onData((data: string | Buffer) => {
     const chunk = Buffer.isBuffer(data) ? data : Buffer.from(String(data), "utf8")
     appendToRing(session, chunk)
     session.lastActivityAt = Date.now()
   })
-  pty.onExit?.(({ exitCode, signal }) => {
+  pty.onExit?.(({ exitCode, signal }: PtyExit) => {
     session.exited = true
     session.exitCode = typeof exitCode === "number" ? exitCode : null
     // Track signal in the buffer footer so callers reading after exit
@@ -318,11 +396,11 @@ const writeShape = {
   data: z.string().describe("Bytes to write to PTY stdin. Append `\\n` to submit a command."),
 }
 
-async function execWrite(args) {
+async function execWrite(args: ToolArgs<typeof writeShape>) {
   reapIdleSessions()
-  const session = sessions.get(args.sessionId)
-  const owns = ensureOwner(session, args.agentId)
+  const owns = ensureOwner(sessions.get(args.sessionId), args.agentId)
   if (!owns.ok) return toolError(owns.reason, "terminal_repl_write")
+  const { session } = owns
   if (session.exited) {
     return toolError("session has exited", "terminal_repl_write")
   }
@@ -356,11 +434,11 @@ const readShape = {
     .describe("Max bytes to return (most-recent). The ring buffer caps at 256 KiB."),
 }
 
-async function execRead(args) {
+async function execRead(args: ToolArgs<typeof readShape>) {
   reapIdleSessions()
-  const session = sessions.get(args.sessionId)
-  const owns = ensureOwner(session, args.agentId)
+  const owns = ensureOwner(sessions.get(args.sessionId), args.agentId)
   if (!owns.ok) return toolError(owns.reason, "terminal_repl_read")
+  const { session } = owns
   const slice =
     session.buffer.length <= args.maxBytes
       ? session.buffer
@@ -389,11 +467,11 @@ const killShape = {
     .describe('POSIX signal name to send, e.g. "SIGTERM" (Unix only; ignored on Windows).'),
 }
 
-async function execKill(args) {
+async function execKill(args: ToolArgs<typeof killShape>) {
   reapIdleSessions()
-  const session = sessions.get(args.sessionId)
-  const owns = ensureOwner(session, args.agentId)
+  const owns = ensureOwner(sessions.get(args.sessionId), args.agentId)
   if (!owns.ok) return toolError(owns.reason, "terminal_repl_kill")
+  const { session } = owns
   if (!session.exited) {
     try {
       session.pty.kill(args.signal)
@@ -445,16 +523,21 @@ export const terminalReplTools = Object.freeze([
 ])
 
 /** Bind terminal ownership and confinement to the host session, not model input. */
-export function createTerminalReplTools(ctx = {}) {
-  const handlers = [execSpawn, execWrite, execRead, execKill]
+export function createTerminalReplTools(ctx: TerminalReplContext = {}) {
+  // Each handler takes its own tool's parsed arguments, in the same order as
+  // terminalReplTools.
+  const handlers = [execSpawn, execWrite, execRead, execKill] as ((
+    args: Record<string, unknown>,
+    extra?: unknown
+  ) => Promise<ToolResult>)[]
   return terminalReplTools.map((definition, index) => ({
     ...definition,
-    handler: (args) =>
-      handlers[index](ctx.sessionId ? { ...args, agentId: ctx.sessionId } : args, ctx),
+    handler: (args: Record<string, unknown>) =>
+      handlers[index]!(ctx.sessionId ? { ...args, agentId: ctx.sessionId } : args, ctx),
   }))
 }
 
-export function disposeTerminalRepls(agentId) {
+export function disposeTerminalRepls(agentId: string): void {
   for (const [id, session] of sessions) {
     if (session.agentId !== agentId) continue
     try {
@@ -466,7 +549,7 @@ export function disposeTerminalRepls(agentId) {
   }
 }
 
-// Test-only helpers — used by `terminal-repl-tool.test.mjs`.
+// Test-only helpers — used by `index.test.ts`.
 export const __testExports = {
   execSpawn,
   execWrite,

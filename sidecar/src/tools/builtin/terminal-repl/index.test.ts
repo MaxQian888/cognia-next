@@ -1,4 +1,4 @@
-// Tests for terminal-repl-tool.mjs — interactive node-pty REPL surface.
+// Tests for the terminal-repl tools — interactive node-pty REPL surface.
 //
 // We don't rely on node-pty actually being installed (it's
 // optionalDependencies for exactly this reason). The test harness
@@ -19,7 +19,10 @@ import {
   __setNodePtyForTesting,
   createBunPtyModule,
   isBunPtyRuntime,
-} from "../terminal-repl-tool.mjs"
+  prepareNodePtyHelper,
+} from "./index.ts"
+import type { BunPtyRuntime, PtyExit, PtyModule, PtySpawnOptions } from "./index.ts"
+import { firstText, firstJson } from "../../../../test-support/tool-result.ts"
 
 const {
   execSpawn,
@@ -30,15 +33,46 @@ const {
   sessions,
   reapIdleSessions,
   IDLE_TIMEOUT_MS,
+  OUTPUT_RING_BYTES,
 } = __testExports
 
+/** Every field the REPL tools answer with; each test reads its own. */
+interface ReplOutput {
+  sessionId: string
+  shell: string
+  data: string
+  truncated: boolean
+  exited: boolean
+  exitCode: number | null
+  ok?: boolean
+}
+
+/** A fake PTY handle, with the test's recording fields. */
+interface FakePtyHandle {
+  shell: string
+  args: string[]
+  opts: PtySpawnOptions
+  writeBuffer: string[]
+  killed: boolean
+  signal: string | null
+  dataListener: ((data: string | Buffer) => void) | null
+  exitListener: ((exit: PtyExit) => void) | null
+  write(s: string): void
+  kill(signal?: string): void
+  onData(cb: (data: string | Buffer) => void): void
+  onExit(cb: (exit: PtyExit) => void): void
+  emitData(data: string | Buffer): void
+}
+
+type FakePtyModule = PtyModule & { __ptys: FakePtyHandle[] }
+
 /** Build a minimal node-pty-shaped mock that the tool can drive. */
-function makeFakePty({ failSpawn = false } = {}) {
-  const ptys = []
-  const mod = {
+function makeFakePty({ failSpawn = false }: { failSpawn?: boolean } = {}): FakePtyModule {
+  const ptys: FakePtyHandle[] = []
+  const mod: FakePtyModule = {
     spawn: (shell, args, opts) => {
       if (failSpawn) throw new Error("spawn refused by host")
-      const ptyHandle = {
+      const ptyHandle: FakePtyHandle = {
         shell,
         args,
         opts,
@@ -75,7 +109,7 @@ function makeFakePty({ failSpawn = false } = {}) {
   return mod
 }
 
-let tmpdir
+let tmpdir: string
 test.before(() => {
   tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "term-repl-"))
 })
@@ -90,9 +124,9 @@ test.beforeEach(() => {
 // ── spawn ─────────────────────────────────────────────────────────────
 
 test("Bun.Terminal is adapted to the existing node-pty-shaped session seam", async () => {
-  let captured
-  let resolveExit
-  const exited = new Promise((resolve) => {
+  let captured: { command: string[]; options: Parameters<BunPtyRuntime["spawn"]>[1] } | undefined
+  let resolveExit: (code: number) => void = () => {}
+  const exited = new Promise<number | null>((resolve) => {
     resolveExit = resolve
   })
   const terminal = {
@@ -100,7 +134,7 @@ test("Bun.Terminal is adapted to the existing node-pty-shaped session seam", asy
     resize: () => {},
     close: () => {},
   }
-  const runtime = {
+  const runtime: BunPtyRuntime = {
     Terminal: class {},
     spawn(command, options) {
       captured = { command, options }
@@ -115,13 +149,14 @@ test("Bun.Terminal is adapted to the existing node-pty-shaped session seam", asy
     env: { TERM: "xterm" },
   })
   let output = ""
-  let exitCode = null
+  let exitCode: number | null = null
   pty.onData((data) => {
-    output += data
+    output += String(data)
   })
-  pty.onExit((event) => {
+  pty.onExit?.((event) => {
     exitCode = event.exitCode
   })
+  assert.ok(captured)
   captured.options.terminal.data(terminal, Buffer.from("ready\n"))
   resolveExit(7)
   await exited
@@ -152,11 +187,11 @@ test("execSpawn returns a sessionId for a happy-path spawn", async () => {
     cols: 80,
     rows: 24,
   })
-  const body = JSON.parse(result.content[0].text)
+  const body = firstJson<ReplOutput>(result)
   assert.equal(typeof body.sessionId, "string")
   assert.equal(body.shell, "/bin/bash")
   assert.equal(fake.__ptys.length, 1)
-  assert.equal(fake.__ptys[0].opts.cwd, tmpdir)
+  assert.equal(fake.__ptys[0]!.opts.cwd, tmpdir)
 })
 
 test("execSpawn fails when cwd does not exist", async () => {
@@ -180,7 +215,7 @@ test("execSpawn surfaces a clean error when node-pty is unavailable", async () =
     rows: 24,
   })
   assert.equal(result.isError, true)
-  assert.match(result.content[0].text, /node-pty/)
+  assert.match(firstText(result), /node-pty/)
 })
 
 test("execSpawn surfaces node-pty.spawn() throws as a tool error", async () => {
@@ -193,7 +228,7 @@ test("execSpawn surfaces node-pty.spawn() throws as a tool error", async () => {
     rows: 24,
   })
   assert.equal(result.isError, true)
-  assert.match(result.content[0].text, /spawn refused/)
+  assert.match(firstText(result), /spawn refused/)
 })
 
 test("execSpawn enforces the per-agent session cap", async () => {
@@ -231,9 +266,9 @@ test("execWrite forwards bytes to the PTY", async () => {
     cols: 80,
     rows: 24,
   })
-  const { sessionId } = JSON.parse(spawnResult.content[0].text)
+  const { sessionId } = firstJson<ReplOutput>(spawnResult)
   await execWrite({ agentId: "a", sessionId, data: "echo hi\n" })
-  assert.deepEqual(fake.__ptys[0].writeBuffer, ["echo hi\n"])
+  assert.deepEqual(fake.__ptys[0]!.writeBuffer, ["echo hi\n"])
 })
 
 test("execWrite rejects writes from a non-owner agent", async () => {
@@ -245,7 +280,7 @@ test("execWrite rejects writes from a non-owner agent", async () => {
     cols: 80,
     rows: 24,
   })
-  const { sessionId } = JSON.parse(spawnResult.content[0].text)
+  const { sessionId } = firstJson<ReplOutput>(spawnResult)
   const result = await execWrite({ agentId: "thief", sessionId, data: "ls\n" })
   assert.equal(result.isError, true)
 })
@@ -253,11 +288,10 @@ test("execWrite rejects writes from a non-owner agent", async () => {
 test("execWrite refuses to write to an exited session", async () => {
   const fake = makeFakePty()
   __setNodePtyForTesting(fake)
-  const { sessionId } = JSON.parse(
-    (await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 }))
-      .content[0].text
+  const { sessionId } = firstJson<ReplOutput>(
+    await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 })
   )
-  fake.__ptys[0].exitListener?.({ exitCode: 0, signal: null })
+  fake.__ptys[0]!.exitListener?.({ exitCode: 0, signal: null })
   const result = await execWrite({ agentId: "a", sessionId, data: "x\n" })
   assert.equal(result.isError, true)
 })
@@ -267,18 +301,17 @@ test("execWrite refuses to write to an exited session", async () => {
 test("execRead returns accumulated output and drains by default", async () => {
   const fake = makeFakePty()
   __setNodePtyForTesting(fake)
-  const { sessionId } = JSON.parse(
-    (await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 }))
-      .content[0].text
+  const { sessionId } = firstJson<ReplOutput>(
+    await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 })
   )
-  fake.__ptys[0].emitData("hello world\n")
-  fake.__ptys[0].emitData("more output\n")
-  const first = JSON.parse(
-    (await execRead({ agentId: "a", sessionId, drain: true })).content[0].text
+  fake.__ptys[0]!.emitData("hello world\n")
+  fake.__ptys[0]!.emitData("more output\n")
+  const first = firstJson<ReplOutput>(
+    await execRead({ maxBytes: OUTPUT_RING_BYTES, agentId: "a", sessionId, drain: true })
   )
   assert.equal(first.data, "hello world\nmore output\n")
-  const second = JSON.parse(
-    (await execRead({ agentId: "a", sessionId, drain: true })).content[0].text
+  const second = firstJson<ReplOutput>(
+    await execRead({ maxBytes: OUTPUT_RING_BYTES, agentId: "a", sessionId, drain: true })
   )
   assert.equal(second.data, "")
 })
@@ -286,13 +319,16 @@ test("execRead returns accumulated output and drains by default", async () => {
 test("execRead with drain=false leaves the buffer intact", async () => {
   const fake = makeFakePty()
   __setNodePtyForTesting(fake)
-  const { sessionId } = JSON.parse(
-    (await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 }))
-      .content[0].text
+  const { sessionId } = firstJson<ReplOutput>(
+    await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 })
   )
-  fake.__ptys[0].emitData("peek\n")
-  const a = JSON.parse((await execRead({ agentId: "a", sessionId, drain: false })).content[0].text)
-  const b = JSON.parse((await execRead({ agentId: "a", sessionId, drain: false })).content[0].text)
+  fake.__ptys[0]!.emitData("peek\n")
+  const a = firstJson<ReplOutput>(
+    await execRead({ maxBytes: OUTPUT_RING_BYTES, agentId: "a", sessionId, drain: false })
+  )
+  const b = firstJson<ReplOutput>(
+    await execRead({ maxBytes: OUTPUT_RING_BYTES, agentId: "a", sessionId, drain: false })
+  )
   assert.equal(a.data, "peek\n")
   assert.equal(b.data, "peek\n")
 })
@@ -300,13 +336,12 @@ test("execRead with drain=false leaves the buffer intact", async () => {
 test("execRead reports the exit state once the PTY has exited", async () => {
   const fake = makeFakePty()
   __setNodePtyForTesting(fake)
-  const { sessionId } = JSON.parse(
-    (await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 }))
-      .content[0].text
+  const { sessionId } = firstJson<ReplOutput>(
+    await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 })
   )
-  fake.__ptys[0].exitListener?.({ exitCode: 42, signal: null })
-  const result = JSON.parse(
-    (await execRead({ agentId: "a", sessionId, drain: true })).content[0].text
+  fake.__ptys[0]!.exitListener?.({ exitCode: 42, signal: null })
+  const result = firstJson<ReplOutput>(
+    await execRead({ maxBytes: OUTPUT_RING_BYTES, agentId: "a", sessionId, drain: true })
   )
   assert.equal(result.exited, true)
   assert.equal(result.exitCode, 42)
@@ -315,14 +350,13 @@ test("execRead reports the exit state once the PTY has exited", async () => {
 test("output ring marks truncated=true when overflowing", async () => {
   const fake = makeFakePty()
   __setNodePtyForTesting(fake)
-  const { sessionId } = JSON.parse(
-    (await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 }))
-      .content[0].text
+  const { sessionId } = firstJson<ReplOutput>(
+    await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 })
   )
   const big = Buffer.alloc(__testExports.OUTPUT_RING_BYTES + 1024, 0x61) // 'a'
-  fake.__ptys[0].emitData(big)
-  const result = JSON.parse(
-    (await execRead({ agentId: "a", sessionId, drain: true })).content[0].text
+  fake.__ptys[0]!.emitData(big)
+  const result = firstJson<ReplOutput>(
+    await execRead({ maxBytes: OUTPUT_RING_BYTES, agentId: "a", sessionId, drain: true })
   )
   assert.equal(result.truncated, true)
   // The slice should be exactly OUTPUT_RING_BYTES wide.
@@ -334,14 +368,13 @@ test("output ring marks truncated=true when overflowing", async () => {
 test("execKill is idempotent and reports exitCode", async () => {
   const fake = makeFakePty()
   __setNodePtyForTesting(fake)
-  const { sessionId } = JSON.parse(
-    (await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 }))
-      .content[0].text
+  const { sessionId } = firstJson<ReplOutput>(
+    await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 })
   )
-  const first = JSON.parse((await execKill({ agentId: "a", sessionId })).content[0].text)
+  const first = firstJson<ReplOutput>(await execKill({ agentId: "a", sessionId }))
   assert.equal(first.ok, true)
-  assert.equal(fake.__ptys[0].killed, true)
-  const second = JSON.parse((await execKill({ agentId: "a", sessionId })).content[0].text)
+  assert.equal(fake.__ptys[0]!.killed, true)
+  const second = firstJson<ReplOutput>(await execKill({ agentId: "a", sessionId }))
   assert.equal(second.ok, true)
 })
 
@@ -350,14 +383,14 @@ test("execKill is idempotent and reports exitCode", async () => {
 test("reapIdleSessions kills sessions past the idle window", async () => {
   const fake = makeFakePty()
   __setNodePtyForTesting(fake)
-  const { sessionId } = JSON.parse(
-    (await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 }))
-      .content[0].text
+  const { sessionId } = firstJson<ReplOutput>(
+    await execSpawn({ agentId: "a", shell: "/bin/bash", cwd: tmpdir, cols: 80, rows: 24 })
   )
   const session = sessions.get(sessionId)
+  assert.ok(session)
   session.lastActivityAt = Date.now() - IDLE_TIMEOUT_MS - 1000
   reapIdleSessions()
-  assert.equal(fake.__ptys[0].killed, true)
+  assert.equal(fake.__ptys[0]!.killed, true)
   assert.equal(session.exited, true)
 })
 
@@ -381,7 +414,7 @@ test("session-bound PTYs use sandbox argv, prevent forged ownership, and dispose
       network: false,
     },
   })
-  const result = await tools[0].handler({
+  const result = await tools[0]!.handler({
     agentId: "forged",
     shell: "/bin/sh",
     args: ["-i"],
@@ -389,14 +422,56 @@ test("session-bound PTYs use sandbox argv, prevent forged ownership, and dispose
     cols: 80,
     rows: 24,
   })
-  const { sessionId } = JSON.parse(result.content[0].text)
-  assert.equal(fake.__ptys[0].shell, process.execPath)
-  assert.deepEqual(fake.__ptys[0].args.slice(-3), ["--", "/bin/sh", "-i"])
-  assert.equal(sessions.get(sessionId).agentId, "owner1")
+  const { sessionId } = firstJson<ReplOutput>(result)
+  assert.equal(fake.__ptys[0]!.shell, process.execPath)
+  assert.deepEqual(fake.__ptys[0]!.args.slice(-3), ["--", "/bin/sh", "-i"])
+  assert.equal(sessions.get(sessionId)!.agentId, "owner1")
   const other = createTerminalReplTools({ sessionId: "owner2" })
-  const denied = await other[1].handler({ agentId: "owner1", sessionId, data: "echo unsafe\n" })
+  const denied = await other[1]!.handler({ agentId: "owner1", sessionId, data: "echo unsafe\n" })
   assert.equal(denied.isError, true)
   disposeTerminalRepls("owner1")
-  assert.equal(fake.__ptys[0].killed, true)
+  assert.equal(fake.__ptys[0]!.killed, true)
   assert.equal(sessions.has(sessionId), false)
+})
+
+// ── packaged node-pty helper ──────────────────────────────────────────
+
+test("restores packaged PTY helper execute permission without changing other bits", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pty-helper-"))
+  try {
+    const directory = path.join(root, "prebuilds/darwin-arm64")
+    fs.mkdirSync(directory, { recursive: true })
+    const helper = path.join(directory, "spawn-helper")
+    fs.writeFileSync(helper, "helper", { mode: 0o640 })
+    prepareNodePtyHelper(root, "darwin", "arm64")
+    assert.equal(fs.statSync(helper).mode & 0o777, 0o751)
+    prepareNodePtyHelper(root, "darwin", "arm64")
+    assert.equal(fs.statSync(helper).mode & 0o777, 0o751)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("missing optional helpers and Windows need no permission mutation", () => {
+  assert.doesNotThrow(() => prepareNodePtyHelper("/nonexistent/node-pty", "darwin", "arm64"))
+  assert.doesNotThrow(() => prepareNodePtyHelper("/nonexistent/node-pty", "win32", "x64"))
+})
+
+test("read-only installations expose a repair instruction", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pty-helper-readonly-"))
+  try {
+    const directory = path.join(root, "build/Release")
+    fs.mkdirSync(directory, { recursive: true })
+    fs.writeFileSync(path.join(directory, "spawn-helper"), "helper", { mode: 0o644 })
+    t.mock.method(fs, "chmodSync", () => {
+      throw new Error("EROFS")
+    })
+    assert.throws(
+      () => prepareNodePtyHelper(root, "darwin", "arm64"),
+      /PTY helper is not executable:.*Reinstall node-pty.*EROFS/
+    )
+  } finally {
+    t.mock.restoreAll()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })

@@ -1,4 +1,4 @@
-import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
+import { disposeTerminalRepls } from "../src/tools/builtin/terminal-repl/index.ts"
 // AI SDK dispatcher: runs a turn against `streamText()` from the `ai` package
 // using `@ai-sdk/<provider>`'s client builder.
 //

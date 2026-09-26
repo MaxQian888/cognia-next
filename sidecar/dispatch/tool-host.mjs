@@ -17,7 +17,7 @@ import { makeLazyCodeGraphResolver } from "../src/services/code-graph/lazy-resol
 import { createReadTracker } from "../src/tools/state/read-tracker.ts"
 import { createSessionTaskStore } from "../src/tools/state/tasks.ts"
 import { createSessionBgShellRegistry } from "../src/tools/state/host-background-shells.ts"
-import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
+import { disposeTerminalRepls } from "../src/tools/builtin/terminal-repl/index.ts"
 import { awaitPluginToolResponse } from "../src/tools/plugin/server.ts"
 
 const SERVERS = ["cognia-tools", "cognia-plugin-tools"]

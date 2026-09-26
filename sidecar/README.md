@@ -158,6 +158,7 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/{plan-tools,exit-plan}.mjs` (+ tests)                     | `src/tools/builtin/plan/*`                                         | 8f          |
 | `builtin-tools/environment.mjs` (+ `__tests__/environment.test.mjs`)     | `src/tools/builtin/environment/index.ts` (+ test)                  | 8g          |
 | `builtin-tools/shell-advanced.mjs` (+ `__tests__` test)                  | `src/tools/builtin/shell-advanced/index.ts` (+ test)               | 8g          |
+| `builtin-tools/terminal-repl-tool.mjs` (+ both test suites, merged)      | `src/tools/builtin/terminal-repl/index.ts` (+ test)                | 8h          |
 
 ## Scripts (run from repo root)
 

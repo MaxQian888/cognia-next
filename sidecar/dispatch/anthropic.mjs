@@ -1,4 +1,4 @@
-import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
+import { disposeTerminalRepls } from "../src/tools/builtin/terminal-repl/index.ts"
 // Anthropic dispatch: thin wrapper around `@anthropic-ai/claude-agent-sdk`'s
 // `query()` plus the in-process MCP servers (cognia-tools + a2ui-bridge).
 //
