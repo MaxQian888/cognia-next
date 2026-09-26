@@ -40,6 +40,7 @@
     "toolRenderers": "Tool result cards",
     "tools": "Agent tools",
     "viewContainers": "View containers",
+    "viewContainerUnavailable": "That view is no longer available. The plugin may have been disabled.",
     "views": "Views",
     "webviews": "Webviews",
     "workflowNodes": "Workflow nodes",

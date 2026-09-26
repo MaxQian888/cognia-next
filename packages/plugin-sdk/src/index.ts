@@ -296,6 +296,10 @@ export { defineDeploymentFilter } from "./define/define-deployment-filter"
 export { defineProtocolAdapter } from "./define/define-protocol-adapter"
 export { defineToolRoute } from "./define/define-tool-route"
 export { defineViewContainer } from "./define/define-view-container"
+// `ctx.ui.openViewContainer` refusals. The guard is pure (no host state), so
+// it belongs on the root beside the types.
+export { isViewContainerOpenError } from "@/lib/plugin/api/view-container-errors"
+export type { ViewContainerOpenErrorCode } from "@/lib/plugin/api/view-container-errors"
 export { defineTreeDataProvider, defineView } from "./define/define-view"
 export { defineWebview } from "./define/define-webview"
 export { defineAuthProvider } from "./define/define-auth-provider"

@@ -167,6 +167,15 @@ def test_pack_params_mirrors_the_host_packing():
     assert pack_params(("a",), {"b": 1}) == {"args": ["a"], "b": 1}
 
 
+def test_ui_open_view_container_reaches_the_host_positionally(fresh_runtime):
+    # `ctx.ui.openViewContainer` is the only opener for a `location: "panel"`
+    # view container. The host method takes the id as its first argument, so
+    # the positional call must arrive as a lone `args` array.
+    seen = _record_calls(fresh_runtime, result=None)
+    asyncio.run(cognia.ctx.ui.openViewContainer("report"))
+    assert seen == [("ui.openViewContainer", {"args": ["report"]})]
+
+
 def test_ai_embed_reaches_the_host_now_the_namespace_is_open(fresh_runtime):
     # The catalog edit opened ctx.ai wholesale; `embed` is the method that
     # motivated it, and the one with a plain JSON-shaped return.

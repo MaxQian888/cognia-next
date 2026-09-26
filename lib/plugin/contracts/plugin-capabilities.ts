@@ -1619,14 +1619,17 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // middle-column panel hosting its views. Declarative `manifest.viewsContainers`
     // registered through the `view-container` overlay capability on enable and
     // bulk-removed on disable. The rail (`guild-rail`) renders a button per
-    // container; selecting one swaps to `plugin-view-container-panel`.
+    // `location: "rail"` container; selecting one swaps to
+    // `plugin-view-container-panel`. `ctx.ui.openViewContainer` (view-container-api)
+    // opens the plugin's own `rail` or `panel` containers programmatically.
     id: "view-container",
     support: "supported",
     manifestFields: ["viewsContainers"],
     runtimeBinding:
-      "manifest.viewsContainers → view-container overlay capability → guild-rail button + plugin-view-container-panel",
+      "manifest.viewsContainers → view-container overlay capability → guild-rail button / ctx.ui.openViewContainer → plugin-view-container-panel",
     hostBindings: [
       "lib/plugin/registries/view-container-registry.ts",
+      "lib/plugin/api/view-container-api.ts",
       "components/shell/plugin-view-container-panel.tsx",
       "lib/plugin/contracts/capability-bridge-map.ts",
     ],
@@ -1638,6 +1641,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/registries/view-container-registry.test.ts",
+      "lib/plugin/api/view-container-api.test.ts",
       "components/shell/plugin-view-container-panel.test.tsx",
     ],
   },

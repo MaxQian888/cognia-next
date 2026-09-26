@@ -87,6 +87,12 @@ describe("plugin-sdk root barrel", () => {
     expect(rootBarrel.MessageBusConfig).toBeUndefined()
   })
 
+  it("publishes the view-container refusal guard, not the host opener", () => {
+    expect(typeof rootBarrel.isViewContainerOpenError).toBe("function")
+    expect(rootBarrel.createViewContainerAPI).toBeUndefined()
+    expect(rootBarrel.showViewContainer).toBeUndefined()
+  })
+
   it("publishes the catalog-backed runtime constants", () => {
     expect(rootBarrel.SystemEvents).toBeDefined()
     expect(rootBarrel.CANONICAL_EXTENSION_POINTS).toBeDefined()

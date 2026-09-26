@@ -208,6 +208,7 @@ import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createTrayAPI } from "@/lib/plugin/api/tray-api"
 import { createQuickActionsAPI } from "@/lib/plugin/api/quick-actions-api"
 import { requestPluginNavigation } from "@/lib/plugin/api/navigation-request"
+import { createViewContainerAPI } from "@/lib/plugin/api/view-container-api"
 import { prefixPluginKind } from "../bridge/kind-prefix"
 import { dispatchPluginTrigger } from "../bridge/plugin-trigger-dispatch"
 import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
@@ -686,8 +687,12 @@ function createUIAPI(pluginId: string): PluginUIAPI {
     })
   }
 
+  // Guarded by `extension:ui` and scoped to this plugin's own containers.
+  const viewContainers = createViewContainerAPI(pluginId)
+
   return {
     navigate: (href: string) => requestPluginNavigation(pluginId, href),
+    openViewContainer: (containerId: string) => viewContainers.openViewContainer(containerId),
     showNotification: async (options: PluginNotification) => {
       try {
         // `plugin_show_notification(app, args: ShowNotificationArgs)` takes a

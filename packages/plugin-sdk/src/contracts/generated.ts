@@ -2476,6 +2476,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.ui.navigate": {
     kind: "none",
   },
+  "ctx.ui.openViewContainer": {
+    kind: "none",
+  },
   "ctx.userScheduler.createTask": {
     kind: "none",
   },

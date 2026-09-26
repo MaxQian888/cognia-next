@@ -23,8 +23,12 @@ export interface PluginViewContainerDef {
   icon?: PluginIconName
   /**
    * Where the container mounts. `rail` (default) adds a rail button that swaps
-   * the middle column; `panel` registers the container without a rail button
-   * (for containers a plugin opens programmatically / via a command).
+   * the middle column; `panel` registers the container without a rail button.
+   * Either kind is opened programmatically with
+   * `ctx.ui.openViewContainer(id)` (`lib/plugin/api/view-container-api.ts`:
+   * requires `extension:ui`, only the calling plugin's own containers) — the
+   * way to show a `panel` container, typically from one of the plugin's
+   * commands. The plugin detail "Contributed" tab also opens both kinds.
    */
   location?: "rail" | "panel"
   /** Sort order among plugin rail buttons (ascending). Defaults to 0. */

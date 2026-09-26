@@ -14,7 +14,12 @@ describe("plugin interface catalog", () => {
   it("indexes the canonical ctx method surface", () => {
     // A canary, not a fact worth memorising: any catalog edit lands here so
     // the method surface cannot grow or shrink without someone noticing.
-    expect(listPluginApiMethodContracts()).toHaveLength(836)
+    expect(listPluginApiMethodContracts()).toHaveLength(837)
+    // The one opener for a `location: "panel"` view container; guarded, not free.
+    expect(getPluginApiMethodContract("ui.openViewContainer")).toMatchObject({
+      requiredPermissions: ["extension:ui"],
+      namespace: { authorPath: "ctx.ui" },
+    })
     expect(
       [
         "bots.getInstallation",

@@ -34,7 +34,10 @@
  * Where the host already has a way to OPEN a contribution, the chip is a
  * button: commands and quick actions open the command palette on their name,
  * a view container (or a view/webview inside one) switches the shell to it,
- * and a Bot links to the Bots page. The rest stay informational.
+ * and a Bot links to the Bots page. The rest stay informational. View
+ * containers open through `showViewContainer` — the same opener behind
+ * `ctx.ui.openViewContainer` — so a `location: "panel"` container, which has
+ * no rail button, is reachable from here too.
  *
  * Categories with zero contributions are hidden so the panel collapses to
  * only what is relevant for this specific plugin. When no category is
@@ -45,6 +48,7 @@ import { useEffect, useState, useSyncExternalStore } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { ExternalLinkIcon } from "lucide-react"
+import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { PluginDetailGroup, PluginDetailNone } from "./plugin-detail-group"
 import { getPluginManager } from "@/lib/plugin/core/manager"
@@ -92,8 +96,8 @@ import {
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 import { requestCommandPalette } from "@/lib/shell/command-palette-request"
+import { isViewContainerOpenError, showViewContainer } from "@/lib/plugin/api/view-container-api"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
-import { useUIStore } from "@/stores/ui"
 
 interface Props {
   pluginId: string
@@ -224,14 +228,11 @@ export function PluginContributedTab({ pluginId }: Props) {
   const label = (key: string | undefined, fallback: string) =>
     resolvePluginLabel(rootT as never, pluginId, key, fallback)
 
-  // View containers the shell can switch to. `panel` containers have no rail
-  // button and are opened by the plugin itself, so they are not a target.
+  // Every registered container is a target — `rail` and `panel` alike. A
+  // `panel` container has no rail button, so this chip is the user's only way
+  // to reach one besides the plugin calling `ctx.ui.openViewContainer`.
   const containers = getViewContainerSnapshot().filter((c) => c.pluginId === pluginId)
-  const openableContainers = new Set(
-    getViewContainerSnapshot()
-      .filter((c) => c.def.location !== "panel")
-      .map((c) => c.fullId)
-  )
+  const openableContainers = new Set(getViewContainerSnapshot().map((c) => c.fullId))
   const containerAction = (containerId: string | undefined): ContributionAction | undefined =>
     containerId && openableContainers.has(containerId)
       ? { kind: "viewContainer", containerId }
@@ -434,11 +435,14 @@ export function PluginContributedTab({ pluginId }: Props) {
         requestCommandPalette({ query: action.query })
         return
       case "viewContainer":
-        useUIStore.getState().setSelectedGuild({
-          kind: "plugin-view",
-          containerId: action.containerId,
-        })
-        router.push("/")
+        try {
+          showViewContainer(action.containerId, (href) => router.push(href))
+        } catch (error) {
+          // The plugin was disabled between render and click: the registry
+          // dropped the container, and the chip disappears on the next render.
+          if (!isViewContainerOpenError(error, "not-registered")) throw error
+          toast.error(t("viewContainerUnavailable"))
+        }
         return
       case "route":
         router.push(action.href)

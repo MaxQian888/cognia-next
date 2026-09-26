@@ -16181,6 +16181,20 @@ API_NAMESPACE_CONTRACTS = [
                     "kind": "none",
                 },
             },
+            {
+                "id": "ui.openViewContainer",
+                "name": "openViewContainer",
+                "requiredPermissions": [
+                    "extension:ui",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
         ],
     },
     {

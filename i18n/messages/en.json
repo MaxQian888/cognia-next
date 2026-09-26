@@ -25936,6 +25936,7 @@
         },
         "toolRenderers": "Tool result cards",
         "tools": "Agent tools",
+        "viewContainerUnavailable": "That view is no longer available. The plugin may have been disabled.",
         "viewContainers": "View containers",
         "views": "Views",
         "webviews": "Webviews",

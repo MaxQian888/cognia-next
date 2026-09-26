@@ -49,6 +49,11 @@ import { subscribePluginApiAudit, pluginApiRuntimeForType } from "../contracts/i
 import { PLUGIN_API_NAMESPACE_CONTRACTS } from "@cognia/plugin-sdk/contracts"
 import { routePythonHostRequest } from "@/lib/plugin/python/host-request-router"
 import { clearAllLinkMatchers, getLinkMatcher } from "@/lib/plugin/api/link-matchers"
+import {
+  registerViewContainer,
+  __resetViewContainersForTesting,
+} from "@/lib/plugin/registries/view-container-registry"
+import { useUIStore } from "@/stores/ui"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
@@ -805,6 +810,50 @@ describe("createPluginContext", () => {
       settle(true)
 
       await expect(pending).resolves.toBe(true)
+    })
+
+    describe("openViewContainer", () => {
+      beforeEach(() => {
+        resetPermissionGuard()
+        __resetViewContainersForTesting()
+        useUIStore.getState().setSelectedGuild({ kind: "dm" })
+      })
+      afterEach(() => __resetViewContainersForTesting())
+
+      it("opens the plugin's own panel container through the governed full context", async () => {
+        getPermissionGuard().registerPlugin("test-plugin", ["extension:ui"])
+        registerViewContainer(
+          { id: "report", title: "Report", location: "panel" },
+          { pluginId: "test-plugin" }
+        )
+        const context = createFullPluginContext(createMockPlugin(), mockManager)
+
+        await context.ui.openViewContainer("report")
+
+        expect(useUIStore.getState().selectedGuild).toEqual({
+          kind: "plugin-view",
+          containerId: "test-plugin:report",
+        })
+      })
+
+      it("rejects without extension:ui and leaves the shell alone", async () => {
+        getPermissionGuard().registerPlugin("test-plugin", [])
+        registerViewContainer({ id: "report", title: "Report" }, { pluginId: "test-plugin" })
+        const context = createPluginContext(createMockPlugin(), mockManager)
+
+        await expect(context.ui.openViewContainer("report")).rejects.toBeInstanceOf(PermissionError)
+        expect(useUIStore.getState().selectedGuild).toEqual({ kind: "dm" })
+      })
+
+      it("rejects another plugin's container", async () => {
+        getPermissionGuard().registerPlugin("test-plugin", ["extension:ui"])
+        registerViewContainer({ id: "x", title: "X" }, { pluginId: "other-plugin" })
+        const context = createPluginContext(createMockPlugin(), mockManager)
+
+        await expect(context.ui.openViewContainer("other-plugin:x")).rejects.toMatchObject({
+          code: "foreign",
+        })
+      })
     })
   })
 

@@ -52,6 +52,14 @@ export { createCharacterPacksAPI } from "./character-packs-api"
 export { createUserSchedulerAPI } from "./scheduler-tasks"
 export { createWorkspaceAPI, clearWorkspaceBackendsForPluginContext } from "./workspace-api"
 export { createModalAPI } from "./modal-api"
+export {
+  createViewContainerAPI,
+  showViewContainer,
+  resolveOwnViewContainer,
+  ViewContainerOpenError,
+  isViewContainerOpenError,
+  VIEW_CONTAINER_HOST_ROUTE,
+} from "./view-container-api"
 export { createWebviewAPI } from "./webview-api"
 export { createAuthAPI } from "./auth-api"
 export { createUriAPI } from "./uri-api"
@@ -133,6 +141,7 @@ export type {
 export type { PluginUserSchedulerAPI } from "./scheduler-tasks"
 export type { PluginWorkspaceAPI } from "./workspace-api"
 export type { PluginModalAPI } from "./modal-api"
+export type { PluginViewContainerAPI, ViewContainerOpenErrorCode } from "./view-container-api"
 export type { CreateWebviewInput, PluginWebviewAPI } from "./webview-api"
 export type { CreateAuthAPIOptions, PluginAuthAPI, PluginAuthProvider } from "./auth-api"
 export type { PluginUriAPI, PluginUriHandlerDef } from "./uri-api"

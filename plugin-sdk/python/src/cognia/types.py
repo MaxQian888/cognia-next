@@ -166,7 +166,10 @@ class ViewContainerDef:
     """A custom view container (B1), mirroring the host's
     ``PluginViewContainerDef``. Declared in ``manifest.viewsContainers``; the
     host renders a rail icon that swaps the middle column to the container's
-    panel. ``location`` is ``"rail"`` (default) or ``"panel"``.
+    panel. ``location`` is ``"rail"`` (default) or ``"panel"``. A ``"panel"``
+    container has no rail icon; show it (or a rail one) with
+    ``await ctx.ui.openViewContainer("<id>")`` — requires the ``extension:ui``
+    permission and only opens this plugin's own containers.
     """
 
     id: str

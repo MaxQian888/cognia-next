@@ -25936,6 +25936,7 @@
         },
         "toolRenderers": "工具结果卡片",
         "tools": "Agent 工具",
+        "viewContainerUnavailable": "该视图已不可用，插件可能已被停用。",
         "viewContainers": "视图容器",
         "views": "视图",
         "webviews": "Webview 视图",

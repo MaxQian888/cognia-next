@@ -197,6 +197,33 @@ Use `contextPanels[]` for a resource-scoped right workbench panel. Use
 unifies the view hosts inside a container; it does not treat a context panel
 and a rail container as interchangeable navigation.
 
+A container's `location` decides whether it gets a rail button: `"rail"` (the
+default) adds one, `"panel"` does not. Open either kind from code with
+`ctx.ui.openViewContainer(id)`, which selects the container and routes the
+shell to it. That call is the only way to show a `"panel"` container, so wire
+it to one of your commands or to a button in another surface.
+
+```ts
+// plugin.json: "permissions": ["extension:ui"],
+//   "viewsContainers": [{ "id": "report", "title": "Report", "location": "panel" }]
+import { isViewContainerOpenError } from "@cognia/plugin-sdk"
+
+try {
+  await ctx.ui.openViewContainer("report") // local id, or "<pluginId>:report"
+} catch (error) {
+  if (isViewContainerOpenError(error, "not-registered")) ctx.logger.warn("report view is gone")
+  else throw error
+}
+```
+
+It requires the `extension:ui` permission and only opens **your own**
+containers. It rejects with a `ViewContainerOpenError` whose `code` is
+`invalid-id` (empty id), `not-registered` (nothing by that id, or your plugin
+is disabled) or `foreign` (another plugin's container). Python plugins call it
+the same way, positionally: `await ctx.ui.openViewContainer("report")`. The
+plugin's detail page ("Contributed" tab) also opens both kinds, so users can
+reach a `"panel"` container even when the plugin offers no entry point.
+
 ## Design tokens
 
 The host publishes its design system as CSS custom properties on `:root`. React

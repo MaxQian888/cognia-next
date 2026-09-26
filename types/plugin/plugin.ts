@@ -2772,6 +2772,16 @@ export interface PluginUIAPI {
    * and does nothing for anything that is not an in-app path.
    */
   navigate: (href: string) => boolean
+  /**
+   * Show one of this plugin's own view containers (`manifest.viewsContainers`)
+   * in the shell's middle column — the only way to open a
+   * `location: "panel"` container, which has no rail button; works for `rail`
+   * containers too. Pass the local id from `viewsContainers[].id` (or the
+   * namespaced `<pluginId>:<id>`). Requires the `extension:ui` permission.
+   * Rejects for an empty id, an id this plugin has not registered, or another
+   * plugin's container. Implemented by `lib/plugin/api/view-container-api.ts`.
+   */
+  openViewContainer: (containerId: string) => Promise<void>
 }
 
 export interface PluginNotification {

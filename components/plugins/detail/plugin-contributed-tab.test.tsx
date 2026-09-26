@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { act, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
@@ -16,6 +16,11 @@ jest.mock("next-intl", () => ({
 const mockPush = jest.fn()
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, replace: jest.fn() }),
+}))
+
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: { error: (...args: unknown[]) => mockToastError(...args) },
 }))
 
 const mockRequestCommandPalette = jest.fn()
@@ -123,6 +128,8 @@ beforeEach(() => {
   mockGetHooksByPlugin.mockReturnValue([])
   mockPush.mockClear()
   mockRequestCommandPalette.mockClear()
+  mockToastError.mockClear()
+  useUIStore.getState().setSelectedGuild({ kind: "dm" })
   __resetCommandRegistryForTesting()
   __resetViewContainersForTesting()
   __resetBotsForTesting()
@@ -281,6 +288,44 @@ describe("PluginContributedTab", () => {
         containerId: "p1:explorer",
       })
       expect(mockPush).toHaveBeenCalledWith("/")
+    })
+
+    // A `panel` container has no rail button; before `ctx.ui.openViewContainer`
+    // it was listed here as an inert badge and could never be opened.
+    it("opens a panel-located view container", async () => {
+      const user = userEvent.setup()
+      registerViewContainer(
+        { id: "report", title: "Report", location: "panel" },
+        { pluginId: "p1" }
+      )
+      render(<PluginContributedTab pluginId="p1" />)
+
+      const chip = screen.getByRole("button", { name: "actionAria.viewContainer:Report" })
+      expect(chip).toHaveAttribute("title", "p1:report")
+      await user.click(chip)
+
+      expect(useUIStore.getState().selectedGuild).toEqual({
+        kind: "plugin-view",
+        containerId: "p1:report",
+      })
+      expect(mockPush).toHaveBeenCalledWith("/")
+    })
+
+    it("explains, instead of switching, when the container vanished before the click", () => {
+      const unregister = registerViewContainer(
+        { id: "report", title: "Report", location: "panel" },
+        { pluginId: "p1" }
+      )
+      render(<PluginContributedTab pluginId="p1" />)
+      const chip = screen.getByRole("button", { name: "actionAria.viewContainer:Report" })
+      // The registry notifies on a microtask; clicking in the same tick hits
+      // the stale chip before the tab re-renders without it.
+      unregister()
+      fireEvent.click(chip)
+
+      expect(mockToastError).toHaveBeenCalledWith("viewContainerUnavailable")
+      expect(useUIStore.getState().selectedGuild).toEqual({ kind: "dm" })
+      expect(mockPush).not.toHaveBeenCalled()
     })
 
     it("lists subagents, Bots and tool-result cards", async () => {

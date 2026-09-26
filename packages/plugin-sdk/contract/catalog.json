@@ -12109,6 +12109,18 @@
           "resourceEffect": {
             "kind": "none"
           }
+        },
+        {
+          "id": "ui.openViewContainer",
+          "name": "openViewContainer",
+          "requiredPermissions": ["extension:ui"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
         }
       ]
     },
