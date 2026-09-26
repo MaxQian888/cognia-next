@@ -1945,6 +1945,7 @@ mod tests {
             secret: RwLock::new(vec![0u8; 32]),
             deny_list: Arc::new(DenyList::new()),
             renderer: None,
+            runtime: crate::companion_api::runtime::unwired(),
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: SyncBridge::new(),

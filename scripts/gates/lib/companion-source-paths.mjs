@@ -33,6 +33,16 @@ export const COMPANION_SOURCES = Object.freeze({
   server: `${COMPANION_API_DIR}/server.rs`,
   api: `${COMPANION_API_DIR}/api.rs`,
   larkEntry: `${COMPANION_API_DIR}/lark_entry.rs`,
+  /**
+   * The app's routes on the listener (the Pro IDE relay), handed to the core
+   * through `CompanionRuntime` (ADR-0196 P5.4).
+   */
+  runtimeWiring: `${COMPANION_API_DIR}/wiring.rs`,
+  /**
+   * The headless server's routes (the MCP OAuth callback, the IDE content
+   * broker), handed to the core through `HeadlessRuntime`.
+   */
+  headlessServices: "src-tauri/src/headless/mod.rs",
   /** Written by `gen-settings-sync.mjs`. */
   settingsSyncGenerated: `${COMPANION_CONTRACT_DIR}/settings_sync_generated.rs`,
   /** Written by `gen-companion-api.mjs`. */

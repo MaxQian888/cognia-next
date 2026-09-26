@@ -33,6 +33,7 @@ pub mod a2a;
 pub mod acp;
 pub use cognia_companion_security::admin_lease;
 pub mod api;
+pub mod backup;
 pub use cognia_companion_bus::bridge_transport;
 pub use cognia_companion_security::audit;
 pub mod browser_access;
@@ -109,6 +110,7 @@ pub use cognia_companion_connectivity::tls;
 pub use cognia_companion_connectivity::tunnel;
 pub use cognia_companion_connectivity::tunnel_config;
 pub mod web_origin;
+pub mod wiring;
 pub mod workflow_api;
 pub mod workflow_app_api;
 pub mod workflow_app_challenge;
@@ -168,6 +170,9 @@ pub struct CompanionState {
     /// The renderer this server runs beside — `None` in unit tests and on the
     /// headless server, the desktop WebView in production.
     pub renderer: Option<Arc<dyn host::RendererPort>>,
+    /// What the app adds to the server (ADR-0196 P5.4): production states
+    /// take [`wiring::runtime`], unit-test states [`runtime::unwired`].
+    pub runtime: Arc<dyn runtime::CompanionRuntime>,
     /// Per-device idempotency cache for `POST /api/_rpc/:name`.
     ///
     /// Keyed by `(device_id, Idempotency-Key header)`.  Successful responses
@@ -622,6 +627,7 @@ mod tests {
             secret: RwLock::new(vec![0u8; 32]),
             deny_list: Arc::new(DenyList::new()),
             renderer: None,
+            runtime: crate::companion_api::runtime::unwired(),
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: sync_bridge::SyncBridge::new(),

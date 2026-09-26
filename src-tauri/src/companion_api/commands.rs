@@ -101,6 +101,7 @@ pub async fn companion_server_start(
         secret: RwLock::new(signing_secret),
         deny_list: Arc::clone(&state.deny_list),
         renderer: Some(Arc::new(super::host::TauriRenderer(app_handle))),
+        runtime: super::wiring::runtime(),
         idempotency: Arc::new(idempotency),
         event_bus,
         // Same Arc as the long-lived CompanionServerState — keeps the

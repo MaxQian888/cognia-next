@@ -27,7 +27,7 @@ async fn coordinated_backup(request: BackupRequest) -> Result<serde_json::Value,
         .map(PathBuf::from)
         .ok_or_else(|| "COGNIA_DATA_DIR is required for online backup".to_string())?;
     let _write_pause = super::server::pause_writes().await?;
-    let result = crate::headless::backup::create_backup(&data_dir, &request.backup_id).await?;
+    let result = super::backup::create_backup(&data_dir, &request.backup_id).await?;
     serde_json::to_value(result).map_err(|error| format!("serialize backup result: {error}"))
 }
 

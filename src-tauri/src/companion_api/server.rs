@@ -666,18 +666,7 @@ fn build_router_for_mode(
         )
         // Remote Pro IDE relay. The companion owns code-server and revalidates
         // the paired device on every HTTP request and WebSocket upgrade.
-        .route(
-            "/ide/relay/{relay_id}",
-            any(crate::codeserver::remote::relay_root_handler),
-        )
-        .route(
-            "/ide/relay/{relay_id}/",
-            any(crate::codeserver::remote::relay_root_handler),
-        )
-        .route(
-            "/ide/relay/{relay_id}/{*tail}",
-            any(crate::codeserver::remote::relay_handler),
-        )
+        .merge(state.runtime.ide_relay_routes())
         // A2A server (Agent2Agent, a2a-protocol.org) — external agents drive
         // cognia over JSON-RPC. Same baseline-chat trust model as ACP: reaches
         // `claude_*` commands through `remote_execution`, so a device access
@@ -809,15 +798,14 @@ fn build_router_for_mode(
     // connector runtime, retiring the cloudflared-tunnel requirement for
     // cloud installs. Nested after `with_state` because the connectors
     // router carries its own (already-resolved) `ConnectorsState`.
-    if let Some(services) = crate::headless::headless_services() {
+    let headless = super::runtime::headless();
+    if let Some(services) = headless.as_deref() {
         let emitter: std::sync::Arc<dyn crate::connectors::axum_app::EventEmitter> =
             std::sync::Arc::new(
-                crate::companion_api::connector_events::ConnectorEventEmitter(
-                    std::sync::Arc::clone(&services.event_bus),
-                ),
+                crate::companion_api::connector_events::ConnectorEventEmitter(services.event_bus()),
             );
         let connectors_router =
-            crate::connectors::axum_app::build_router(services.connectors.clone(), emitter)
+            crate::connectors::axum_app::build_router(services.connectors(), emitter)
                 .layer(from_fn(middleware::pre_auth_rate_limit));
         router = router.nest("/connectors", connectors_router);
 
@@ -830,11 +818,8 @@ fn build_router_for_mode(
             .layer(from_fn(middleware::pre_auth_rate_limit));
         router = router.nest("/integrations/lark", lark_router);
 
-        let mcp_oauth_router = Router::new()
-            .route(
-                "/oauth/callback",
-                get(crate::mcp_oauth::headless_callback_handler),
-            )
+        let mcp_oauth_router = services
+            .mcp_oauth_routes()
             .with_state(state.clone())
             .layer(from_fn(middleware::pre_auth_rate_limit));
         router = router.nest("/integrations/mcp", mcp_oauth_router);
@@ -869,26 +854,19 @@ fn build_router_for_mode(
             .layer(from_fn(reject_mutations_while_draining))
             .with_state(state.clone()),
     );
-    if crate::headless::headless_services().is_none() {
+    let Some(services) = headless else {
         return router
             .layer(from_fn_with_state(
                 origin_policy,
                 super::web_origin::enforce,
             ))
             .layer(from_fn(problem_for_bare_errors));
-    }
+    };
     // Raw broker content deliberately sits outside the default JSON/webhook
     // body limit. It has its own 64 MiB cap and requires the same loopback-only
     // service principal as the other Headless routes.
-    let content_router = Router::new()
-        .route(
-            "/ide/content",
-            post(crate::codeserver::content_bridge::upload_content),
-        )
-        .route(
-            "/ide/content/{handle_id}",
-            get(crate::codeserver::content_bridge::redeem_content),
-        )
+    let content_router = services
+        .ide_content_routes()
         .layer(RequestBodyLimitLayer::new(64 * 1024 * 1024))
         .layer(from_fn_with_state(
             state.clone(),
@@ -1070,6 +1048,7 @@ mod tests {
             secret: RwLock::new(SECRET.to_vec()),
             deny_list: Arc::new(DenyList::new()),
             renderer: None,
+            runtime: crate::companion_api::runtime::unwired(),
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),

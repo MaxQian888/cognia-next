@@ -124,6 +124,7 @@ fn harness_state() -> SharedState {
         secret: RwLock::new(vec![0u8; 32]),
         deny_list: Arc::new(DenyList::new()),
         renderer: None,
+        runtime: app_lib::companion_api::wiring::runtime(),
         idempotency: Arc::new(IdempotencyCache::new()),
         event_bus: EventBus::new(),
         sync_bridge: SyncBridge::new(),

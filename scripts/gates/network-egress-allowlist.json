@@ -259,7 +259,7 @@
       "note": "Self-connectivity check against this host's own companion listener."
     },
     {
-      "file": "src-tauri/src/headless/backup.rs",
+      "file": "src-tauri/src/companion_api/backup.rs",
       "kind": "no-proxy",
       "reason": "server-side",
       "note": "Runs in the headless brain, where the process proxy environment is the policy."

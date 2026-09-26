@@ -432,6 +432,7 @@ mod tests {
             secret: parking_lot::RwLock::new(uuid::Uuid::new_v4().as_bytes().to_vec()),
             deny_list: Arc::new(deny_list::DenyList::new()),
             renderer: None,
+            runtime: crate::companion_api::runtime::unwired(),
             idempotency: Arc::new(idempotency::IdempotencyCache::new()),
             event_bus: event_bus::EventBus::new(),
             sync_bridge: sync_bridge::SyncBridge::new(),

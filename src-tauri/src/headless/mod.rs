@@ -14,7 +14,7 @@
 //! with install/read accessors, so the many `CompanionState` constructors
 //! don't have to thread it.
 
-pub mod backup;
+pub use crate::companion_api::backup;
 pub mod brain;
 pub mod deployment_id;
 pub mod gateway_host;
@@ -482,6 +482,37 @@ impl crate::companion_api::runtime::HeadlessRuntime for HeadlessServices {
         reply: crate::mcp_server::orchestration_proxy::OrchestrationReply,
     ) {
         self.mcp_server.resolve_orchestration_reply(id, reply);
+    }
+
+    fn connectors(&self) -> ConnectorsState {
+        self.connectors.clone()
+    }
+
+    fn event_bus(&self) -> Arc<EventBus> {
+        Arc::clone(&self.event_bus)
+    }
+
+    // `gen-companion-api.mjs` reads these routes into the route contract, and
+    // it recognizes the bare `get(`/`post(` spelling.
+    fn mcp_oauth_routes(&self) -> axum::Router<crate::companion_api::SharedState> {
+        use axum::routing::get;
+        axum::Router::new().route(
+            "/oauth/callback",
+            get(crate::mcp_oauth::headless_callback_handler),
+        )
+    }
+
+    fn ide_content_routes(&self) -> axum::Router<crate::companion_api::SharedState> {
+        use axum::routing::{get, post};
+        axum::Router::new()
+            .route(
+                "/ide/content",
+                post(crate::codeserver::content_bridge::upload_content),
+            )
+            .route(
+                "/ide/content/{handle_id}",
+                get(crate::codeserver::content_bridge::redeem_content),
+            )
     }
 }
 

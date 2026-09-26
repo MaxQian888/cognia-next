@@ -2468,6 +2468,7 @@ mod tests {
             secret: RwLock::new(vec![0_u8; 32]),
             deny_list: Arc::new(super::super::deny_list::DenyList::new()),
             renderer: None,
+            runtime: crate::companion_api::runtime::unwired(),
             idempotency: Arc::new(super::super::idempotency::IdempotencyCache::new()),
             event_bus: super::super::event_bus::EventBus::new(),
             sync_bridge: super::super::sync_bridge::SyncBridge::new(),

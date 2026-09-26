@@ -1594,6 +1594,7 @@ async fn run_serve(
         secret: RwLock::new(signing_secret),
         deny_list,
         renderer: None,
+        runtime: app_lib::companion_api::wiring::runtime(),
         idempotency: Arc::new(idempotency),
         event_bus: EventBus::new(),
         sync_bridge: SyncBridge::new(),

@@ -69,6 +69,11 @@ const RPC_DISPATCH_SOURCE_PATHS = [
 const RUNTIME_ROUTE_SOURCES = [
   { path: COMPANION_SOURCES.server },
   { path: COMPANION_SOURCES.api },
+  { path: COMPANION_SOURCES.runtimeWiring },
+  // Its MCP OAuth callback router is nested under `/integrations/mcp`, but the
+  // contract has always recorded the route as `server.rs` registered it: by
+  // its relative path.
+  { path: COMPANION_SOURCES.headlessServices },
   { path: "crates/cognia-fleet/src/routes.rs" },
   { path: COMPANION_SOURCES.larkEntry, mount: "/integrations/lark" },
   { path: "crates/cognia-connectors/src/axum_app.rs", mount: "/connectors" },

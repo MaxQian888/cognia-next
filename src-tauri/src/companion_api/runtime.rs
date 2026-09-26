@@ -1,22 +1,52 @@
-//! What the companion core reads from the headless server (ADR-0196 P5.4).
+//! What the companion core reads from the app above it (ADR-0196 P5.4).
 //!
-//! `/healthz`, `/metrics`, the bridge's orchestration replies and the Lark
-//! admin surface behave differently on `cognia-server`: they report and reach
-//! its sidecar, gateway and MCP server, and the brain child it supervises.
-//! Those live in the server's own services, above this core, so the core reads
-//! them through two slots:
+//! The core cannot name the app, so what it needs from it arrives two ways.
+//!
+//! [`CompanionRuntime`] is what every binary provides: a field of
+//! [`CompanionState`](super::CompanionState), so a binary that builds a state
+//! without one does not compile. Production states take
+//! [`super::wiring::runtime`]; unit-test states take [`unwired`].
+//!
+//! The headless server's extras are process-global slots, because the
+//! services behind them are:
 //!
 //! - [`HEADLESS`], set and cleared by `headless::install_headless_services`
 //!   together with the services themselves, so every existing install path
-//!   (the server's boot, the tests' stubs) fills it with no extra call;
+//!   (the server's boot, the tests' stubs) fills it with no extra call. It
+//!   feeds `/healthz`, `/metrics`, the bridge's orchestration replies, the
+//!   Lark admin surface and the headless-only routes;
 //! - [`BRAIN`], set by `headless::brain::install_brain`.
 //!
 //! On the desktop both stay empty, which is what "not headless" means here.
 
 use std::sync::Arc;
 
+use axum::Router;
 use cognia_core::installed::Replaceable;
 use serde_json::Value;
+
+use super::event_bus::EventBus;
+use super::SharedState;
+
+/// What the app adds to every companion server it runs.
+pub trait CompanionRuntime: Send + Sync + 'static {
+    /// The remote Pro IDE relay (`/ide/relay/{relay_id}[/{*tail}]`), mounted
+    /// behind device access.
+    fn ide_relay_routes(&self) -> Router<SharedState>;
+}
+
+/// A runtime that adds nothing, for unit-test states that never reach the
+/// app's routes.
+#[cfg(test)]
+pub fn unwired() -> Arc<dyn CompanionRuntime> {
+    struct Unwired;
+    impl CompanionRuntime for Unwired {
+        fn ide_relay_routes(&self) -> Router<SharedState> {
+            Router::new()
+        }
+    }
+    Arc::new(Unwired)
+}
 
 /// Env var naming the brain bundle `cognia-server` supervises. Set, the
 /// server is not ready until the brain has said hello.
@@ -41,6 +71,17 @@ pub trait HeadlessRuntime: Send + Sync + 'static {
         id: &str,
         reply: crate::mcp_server::orchestration_proxy::OrchestrationReply,
     );
+    /// The connector runtime the public webhook ingress (`/connectors`)
+    /// serves.
+    fn connectors(&self) -> crate::connectors::state::ConnectorsState;
+    /// The bus webhook events are published onto.
+    fn event_bus(&self) -> Arc<EventBus>;
+    /// `/oauth/callback` for remote MCP servers, nested under
+    /// `/integrations/mcp`.
+    fn mcp_oauth_routes(&self) -> Router<SharedState>;
+    /// The Pro IDE content broker (`/ide/content`, `/ide/content/{handle_id}`),
+    /// mounted behind the service token.
+    fn ide_content_routes(&self) -> Router<SharedState>;
 }
 
 /// The installed headless runtime; empty on the desktop.
