@@ -136,7 +136,10 @@ describe("SquadReadinessCard", () => {
       "href",
       expect.stringContaining("section=squads")
     )
-    expect(screen.getByTestId("squad-readiness-open-on-host")).toBeInTheDocument()
+    // The host blocker's sentence says where to go; there is no pretend button.
+    expect(screen.getByText(/blockers.host_unavailable/)).toBeInTheDocument()
+    expect(screen.queryByTestId("squad-readiness-open-on-host")).not.toBeInTheDocument()
+    expect(screen.queryByText(/actions.openOnHost/)).not.toBeInTheDocument()
   })
 
   it("binds the active workspace root as the primary repository in one click", () => {

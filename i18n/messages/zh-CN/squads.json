@@ -17,6 +17,27 @@
     "boardUnselectedTitle": "先选一个小队",
     "clearFilters": "清除筛选",
     "configure": "配置这个小队",
+    "control": {
+      "failed": {
+        "pause": "无法暂停小队",
+        "resume": "无法恢复小队",
+        "start": "无法启动小队",
+        "stop": "无法停止小队"
+      },
+      "refusal": {
+        "already_terminal": "该运行已经结束。",
+        "not_pausable": "该运行当前状态无法暂停。",
+        "not_resumable": "该运行当前状态无法恢复。",
+        "recovery_required": "最近的检查点未被确认安全，请先决定如何恢复该运行。",
+        "run_not_found": "没有可控制的运行。"
+      },
+      "startRefusal": {
+        "already_running": "该小队已在运行。",
+        "not_ready": "尚未就绪，下方清单列出了缺少的内容。",
+        "runtime_not_ready": "小队运行时仍在启动，请稍后再试。",
+        "squad_not_found": "该小队已不存在。"
+      }
+    },
     "createCta": "新建小队",
     "defaultLeadName": "队长",
     "description": "每个小队此刻在做什么。",
@@ -33,7 +54,7 @@
     "manageAction": "管理小队",
     "memberCount": "{count, plural, =0 {暂无成员} other {# 名成员}}",
     "mobile": {
-      "configureOnDesktop": "成员、治理与自动编排在桌面端的设置里。"
+      "configureHint": "成员、治理与自动编排在设置里编辑，入口是上方的“配置这个小队”。"
     },
     "newSquadName": "新小队",
     "noMatchesDescription": "放宽筛选，或清空搜索，看剩下的。",
@@ -69,19 +90,18 @@
       "no_teammates": "没有可派发的成员。请在负责人之外至少添加一名成员。",
       "missing_primary_repository": "尚未绑定仓库。小队需要在一个主仓库内工作。",
       "ambiguous_primary_repository": "绑定了多个主仓库（{repositoryIds}）。请只保留一个。",
-      "missing_environment_ref": "尚未绑定执行环境。每次运行都需要一个不可变的环境版本。",
-      "environment_not_found": "绑定的环境版本已不存在（{versionId}）。",
-      "environment_unenforceable": "当前主机无法满足该环境的要求（{missingCapabilities}）。",
-      "host_unavailable": "当前设备不是权威主机。小队由桌面应用派发。",
-      "workspace_controller_unavailable": "当前主机没有工作区控制器。小队由桌面应用派发。"
+      "missing_environment_ref": "尚未选择环境。每次运行都从一个已保存的环境版本开始。",
+      "environment_not_found": "所选的环境版本已被删除，请另选一个。",
+      "environment_unenforceable": "这台电脑无法满足该环境的要求（{missingCapabilities}）。",
+      "host_unavailable": "小队在 Cognia 桌面应用里运行，请在那里启动。",
+      "workspace_controller_unavailable": "小队需要桌面应用的工作区服务才能运行，请在 Cognia 桌面应用里启动。"
     },
     "actions": {
       "bindWorkspaceRepository": "绑定工作区仓库",
       "bindEnvironment": "绑定环境",
       "createDefaultEnvironment": "创建默认环境",
       "openEnvironments": "打开环境设置",
-      "addTeammate": "添加成员",
-      "openOnHost": "在桌面端打开"
+      "addTeammate": "添加成员"
     },
     "bound": {
       "repository": "已绑定仓库：{path}",

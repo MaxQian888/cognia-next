@@ -12,10 +12,12 @@ import { SquadInspector } from "./squad-inspector"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam, TeamStatus } from "@/types/agent/agent-team"
 
-const start = jest.fn(async () => {})
-const pause = jest.fn(async () => {})
-const resume = jest.fn(async () => {})
-const shutdown = jest.fn(async () => {})
+const start = jest.fn(async (): Promise<unknown> => ({ started: true }))
+const pause = jest.fn(async (): Promise<unknown> => ({ ok: true }))
+const resume = jest.fn(async (): Promise<unknown> => ({ ok: true }))
+const shutdown = jest.fn(async (): Promise<unknown> => ({ ok: true }))
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => mockToastError(...a) } }))
 jest.mock("@/hooks/squads/use-squad-readiness", () => ({
   useSquadReadiness: () => ({ ready: true, loading: false, blockers: [], evaluatedAt: 1 }),
 }))
@@ -104,4 +106,41 @@ it("sends configuration to Settings, deep-linked to this Squad", () => {
   const link = screen.getByTestId("squad-fleet-configure")
   expect(link).toHaveAttribute("href", expect.stringContaining("section=squads"))
   expect(link).toHaveAttribute("href", expect.stringContaining("squadTab=squad%3Aa"))
+})
+
+/** A refused tap used to be swallowed, so it looked like a dead button. */
+it("says why a start was refused, in words rather than the refusal code", async () => {
+  start.mockRejectedValueOnce(new Error("Squad run refused: runtime_not_ready"))
+  render(<SquadInspector squadId="a" />)
+  await userEvent.click(screen.getByTestId("start-team"))
+  expect(mockToastError).toHaveBeenCalledWith("Couldn't start the Squad", {
+    description: "The Squad runtime is still starting. Try again in a moment.",
+  })
+})
+
+it("prints an unknown start failure as thrown", async () => {
+  start.mockRejectedValueOnce(new Error("disk full"))
+  render(<SquadInspector squadId="a" />)
+  await userEvent.click(screen.getByTestId("start-team"))
+  expect(mockToastError).toHaveBeenCalledWith("Couldn't start the Squad", {
+    description: "disk full",
+  })
+})
+
+it("reports a pause the run refused", async () => {
+  seed("executing")
+  pause.mockResolvedValueOnce({ ok: false, reason: "not_pausable" })
+  render(<SquadInspector squadId="a" />)
+  await userEvent.click(screen.getByTestId("pause-team"))
+  expect(mockToastError).toHaveBeenCalledWith("Couldn't pause the Squad", {
+    description: "The run can't be paused in its current state.",
+  })
+})
+
+it("stays quiet when a control goes through", async () => {
+  seed("paused")
+  render(<SquadInspector squadId="a" />)
+  await userEvent.click(screen.getByTestId("resume-team"))
+  expect(resume).toHaveBeenCalledWith("a")
+  expect(mockToastError).not.toHaveBeenCalled()
 })

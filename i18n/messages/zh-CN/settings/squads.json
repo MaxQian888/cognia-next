@@ -45,6 +45,7 @@
     "noMatches": "没有匹配的小队。",
     "noSquads": "还没有小队。可以从模板开始，或直接新建。",
     "openList": "显示小队列表",
+    "listTitle": "小队",
     "searchPlaceholder": "搜索小队",
     "squadsLabel": "你的小队",
     "static": {

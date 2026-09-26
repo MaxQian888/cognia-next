@@ -17,6 +17,27 @@
     "boardUnselectedTitle": "Pick a Squad",
     "clearFilters": "Clear filters",
     "configure": "Configure this Squad",
+    "control": {
+      "failed": {
+        "pause": "Couldn't pause the Squad",
+        "resume": "Couldn't resume the Squad",
+        "start": "Couldn't start the Squad",
+        "stop": "Couldn't stop the Squad"
+      },
+      "refusal": {
+        "already_terminal": "The run has already finished.",
+        "not_pausable": "The run can't be paused in its current state.",
+        "not_resumable": "The run can't be resumed in its current state.",
+        "recovery_required": "The last checkpoint isn't verified as safe. Decide how to recover the run first.",
+        "run_not_found": "There is no run to control."
+      },
+      "startRefusal": {
+        "already_running": "This Squad is already running.",
+        "not_ready": "It isn't ready yet. The checklist below says what's missing.",
+        "runtime_not_ready": "The Squad runtime is still starting. Try again in a moment.",
+        "squad_not_found": "This Squad no longer exists."
+      }
+    },
     "createCta": "New Squad",
     "defaultLeadName": "Team Lead",
     "description": "What every Squad is doing right now.",
@@ -33,7 +54,7 @@
     "manageAction": "Manage Squads",
     "memberCount": "{count, plural, =0 {no members} =1 {1 member} other {# members}}",
     "mobile": {
-      "configureOnDesktop": "Roster, governance and auto-compose live in Settings on a desktop."
+      "configureHint": "Roster, governance and auto-compose are edited in Settings, under Configure this Squad."
     },
     "newSquadName": "New Squad",
     "noMatchesDescription": "Widen the filter or clear the search to see the rest.",
@@ -69,19 +90,18 @@
       "no_teammates": "No teammate to dispatch. Add at least one member besides the lead.",
       "missing_primary_repository": "No repository is bound. Squads work inside one primary repository.",
       "ambiguous_primary_repository": "More than one primary repository is bound ({repositoryIds}). Keep exactly one.",
-      "missing_environment_ref": "No execution environment is bound. Every run needs an immutable environment version.",
-      "environment_not_found": "The bound environment version no longer exists ({versionId}).",
-      "environment_unenforceable": "This host cannot enforce the environment's requirements ({missingCapabilities}).",
-      "host_unavailable": "This device is not the authoritative host. Squads dispatch from the desktop app.",
-      "workspace_controller_unavailable": "This host has no workspace controller. Squads dispatch from the desktop app."
+      "missing_environment_ref": "No environment is chosen. Every run starts from a saved environment version.",
+      "environment_not_found": "The chosen environment version was deleted. Choose another.",
+      "environment_unenforceable": "This computer can't provide what the environment needs ({missingCapabilities}).",
+      "host_unavailable": "Squads run in the Cognia desktop app. Start this one there.",
+      "workspace_controller_unavailable": "Squads need the desktop app's workspace service to run. Start this one in the Cognia desktop app."
     },
     "actions": {
       "bindWorkspaceRepository": "Bind workspace repository",
       "bindEnvironment": "Bind environment",
       "createDefaultEnvironment": "Create a default environment",
       "openEnvironments": "Open environments",
-      "addTeammate": "Add a teammate",
-      "openOnHost": "Open on the desktop"
+      "addTeammate": "Add a teammate"
     },
     "bound": {
       "repository": "Repository bound: {path}",

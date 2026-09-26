@@ -231,6 +231,13 @@ describe("AgentTeamTemplatesSection", () => {
     expect(screen.getByTestId(`agent-team-template-row-${userTpl.id}`)).toBeInTheDocument()
   })
 
+  // jsdom does no layout, so this pins the classes that let the actions drop
+  // below the title on a phone instead of pushing past the screen edge.
+  it("lets the header actions wrap below the title rather than overflow", () => {
+    render(<AgentTeamTemplatesSection runtime={makeRuntime().runtime} />)
+    expect(screen.getByTestId("agent-team-templates-header")).toHaveClass("flex-wrap")
+  })
+
   it("shows the Built-in badge only on built-in rows", () => {
     render(<AgentTeamTemplatesSection runtime={makeRuntime().runtime} />)
     const builtRow = screen.getByTestId(`agent-team-template-row-${builtIn.id}`)

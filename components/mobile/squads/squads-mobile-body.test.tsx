@@ -4,7 +4,7 @@
 // suite, testing a `useIsMobile()` branch inside the desktop component. They
 // now test a body of its own, which is the point.
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { SquadsMobileBody } from "./squads-mobile-body"
@@ -190,9 +190,29 @@ describe("detail", () => {
   })
 
   /** Said, not hidden. A control that simply is not there reads as a bug. */
-  it("names what configuration a phone does not get", () => {
+  it("names where the configuration lives, without sending a phone to a desktop", () => {
     render(<SquadsMobileBody route={route({ selectedId: "b" })} />)
-    expect(screen.getByTestId("squads-mobile-configure-note")).toBeInTheDocument()
+    const note = screen.getByTestId("squads-mobile-configure-note")
+    expect(note).toHaveTextContent(/Settings/)
+    expect(note).not.toHaveTextContent(/desktop/i)
+    // The link it points at is right there in the same drawer.
+    expect(screen.getByTestId("squad-fleet-configure")).toHaveAttribute(
+      "href",
+      expect.stringContaining("section=squads")
+    )
+  })
+
+  /**
+   * The drawer gives its children neither padding nor a scroller, and its
+   * header already names the Squad. The body scrolls on its own and the
+   * inspector does not print the name a second time.
+   */
+  it("scrolls its own body and does not repeat the drawer's title", () => {
+    render(<SquadsMobileBody route={route({ selectedId: "b" })} />)
+    expect(screen.getByTestId("squads-mobile-detail-body")).toHaveClass("overflow-y-auto")
+    expect(
+      within(screen.getByTestId("squad-fleet-inspector")).queryByText("Bravo")
+    ).not.toBeInTheDocument()
   })
 
   it("leaves the sheet shut when nothing is selected", () => {
@@ -225,6 +245,8 @@ describe("creation", () => {
     render(<SquadsMobileBody route={route()} />)
     await userEvent.click(screen.getByTestId("squad-fleet-create"))
     expect(createSquadMock).toHaveBeenCalled()
+    // And lands on it, rather than leaving a new row to go looking for.
+    await waitFor(() => expect(setSelectedId).toHaveBeenCalledWith("new"))
   })
 
   it("still points at Settings for everything a phone cannot author", () => {

@@ -140,7 +140,7 @@ function SquadsSectionInner() {
   return (
     <SettingsMasterDetail
       nav={() => nav}
-      navTitle={t("nav.openList")}
+      navTitle={t("nav.listTitle")}
       mobileTriggerLabel={t("nav.openList")}
       activeKey={activePanel}
       navWidth={300}

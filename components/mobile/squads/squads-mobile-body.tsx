@@ -162,12 +162,24 @@ export function SquadsMobileBody({ route }: SquadsMobileBodyProps) {
         {...(selected?.description ? { description: selected.description } : {})}
       >
         {selected ? (
-          <div className="space-y-3">
-            <SquadInspector squadId={selected.id} />
-            {/* Said, not hidden. A control that simply is not there reads as a
-                bug, where a sentence naming where it lives does not. */}
-            <p className="text-xs text-muted-foreground" data-testid="squads-mobile-configure-note">
-              {t("mobile.configureOnDesktop")}
+          // The drawer hands children no padding and no scroller: the note
+          // below ran into both screen edges, and a readiness card with a few
+          // blockers was cut off at 85vh with no way to reach the rest.
+          <div
+            className="min-h-0 space-y-3 overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))]"
+            data-testid="squads-mobile-detail-body"
+          >
+            {/* The drawer header already carries the name and description. */}
+            <SquadInspector squadId={selected.id} showIdentity={false} />
+            {/* Said, not hidden: the inspector has no roster or governance
+                controls, so this names where they live. It used to say "on a
+                desktop", but Settings opens on a phone and the Configure link
+                just above goes straight there. */}
+            <p
+              className="px-3 text-xs text-muted-foreground"
+              data-testid="squads-mobile-configure-note"
+            >
+              {t("mobile.configureHint")}
             </p>
           </div>
         ) : null}

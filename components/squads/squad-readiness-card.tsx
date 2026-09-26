@@ -184,7 +184,9 @@ export function SquadReadinessCard({ squadId, className }: SquadReadinessCardPro
       data-testid="squad-readiness"
       data-ready={readiness.loading ? "loading" : readiness.ready ? "true" : "false"}
     >
-      <div className="flex items-center gap-2">
+      {/* Wraps: in the Settings panel on a phone the blocked summary is wider
+          than what is left beside the title and ran past the card's edge. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <p className="font-medium">{t("title")}</p>
         {readiness.loading ? (
           <Badge variant="outline" className="gap-1">
@@ -197,7 +199,11 @@ export function SquadReadinessCard({ squadId, className }: SquadReadinessCardPro
             {t("ready")}
           </Badge>
         ) : (
-          <Badge variant="destructive" className="gap-1" data-testid="squad-readiness-blocked">
+          <Badge
+            variant="destructive"
+            className="max-w-full gap-1 whitespace-normal"
+            data-testid="squad-readiness-blocked"
+          >
             <AlertTriangleIcon aria-hidden className="size-3" />
             {t("blockedSummary", { count: readiness.blockers.length })}
           </Badge>
@@ -299,11 +305,10 @@ export function SquadReadinessCard({ squadId, className }: SquadReadinessCardPro
                   <ExternalLinkIcon aria-hidden className="size-3" />
                 </Link>
               ) : null}
-              {blocker.action === "open_on_host" ? (
-                <p className="text-muted-foreground" data-testid="squad-readiness-open-on-host">
-                  {t("actions.openOnHost")}
-                </p>
-              ) : null}
+              {/* `open_on_host` gets no control on purpose. Nothing on this
+                  device can open the desktop app, and the muted "Open on the
+                  desktop" line that stood here looked like a button that did
+                  nothing. The blocker sentence itself says where to go. */}
             </li>
           ))}
         </ul>

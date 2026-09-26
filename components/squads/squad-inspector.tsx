@@ -16,12 +16,14 @@
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import { ExternalLinkIcon, SettingsIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { TeamRunControls } from "@/components/agent/workspace/team-run-controls"
 import { squadPanelId } from "@/components/settings/squads/nav-config"
 import { SquadReadinessCard } from "@/components/squads/squad-readiness-card"
 import { useSquadReadiness } from "@/hooks/squads/use-squad-readiness"
 import { agentTeamManager } from "@/lib/ai/agent/team/agent-team"
+import type { SquadControlResult } from "@/lib/ai/agent/team/squad/squad-control"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { settingsHref } from "@/lib/settings/deep-link"
 import { cn } from "@/lib/utils"
@@ -30,9 +32,28 @@ export interface SquadInspectorProps {
   squadId: string
   children?: React.ReactNode
   className?: string
+  /**
+   * Print the Squad's name and description. Off where the host already titles
+   * the surface with them (the phone drawer's header), which otherwise showed
+   * both twice, one line apart.
+   */
+  showIdentity?: boolean
 }
 
-export function SquadInspector({ squadId, children, className }: SquadInspectorProps) {
+/** Start refusals with copy of their own; anything else prints as thrown. */
+const START_REFUSALS: ReadonlySet<string> = new Set([
+  "runtime_not_ready",
+  "already_running",
+  "not_ready",
+  "squad_not_found",
+])
+
+export function SquadInspector({
+  squadId,
+  children,
+  className,
+  showIdentity = true,
+}: SquadInspectorProps) {
   const t = useTranslations("squads.fleet")
   const tReadiness = useTranslations("squads.readiness")
   const squad = useAgentTeamStore((s) => s.teams[squadId])
@@ -50,6 +71,36 @@ export function SquadInspector({ squadId, children, className }: SquadInspectorP
           missingCapabilities: (firstBlocker.detail?.missingCapabilities ?? []).join(", "),
         })
       : undefined
+
+  const tControl = useTranslations("squads.fleet.control")
+  // `start` throws "Squad run refused: <code>[:detail]"; the code is what a
+  // reader can act on, the rest is for logs.
+  const reportStartRefused = (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err)
+    const code = /Squad run refused: ([a-z_]+)/.exec(message)?.[1]
+    toast.error(tControl("failed.start"), {
+      description:
+        code && START_REFUSALS.has(code) ? tControl(`startRefusal.${code}` as never) : message,
+    })
+  }
+  const control = async (
+    action: "pause" | "resume" | "stop",
+    pending: Promise<SquadControlResult>
+  ) => {
+    try {
+      const result = await pending
+      if (!result.ok) {
+        toast.error(tControl(`failed.${action}`), {
+          description: result.reason ? tControl(`refusal.${result.reason}`) : undefined,
+        })
+      }
+    } catch (err) {
+      toast.error(tControl(`failed.${action}`), {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
   if (!squad) return null
 
   return (
@@ -58,9 +109,13 @@ export function SquadInspector({ squadId, children, className }: SquadInspectorP
       data-testid="squad-fleet-inspector"
     >
       <div className="shrink-0 space-y-1 border-b p-3">
-        <p className="truncate text-sm font-medium">{squad.name}</p>
-        {squad.description ? (
-          <p className="line-clamp-2 text-xs text-muted-foreground">{squad.description}</p>
+        {showIdentity ? (
+          <>
+            <p className="truncate text-sm font-medium">{squad.name}</p>
+            {squad.description ? (
+              <p className="line-clamp-2 text-xs text-muted-foreground">{squad.description}</p>
+            ) : null}
+          </>
         ) : null}
         {/* Start, pause, resume, stop. Without them a fleet console could say
             what every Squad was doing and do nothing about any of it, and these
@@ -69,17 +124,19 @@ export function SquadInspector({ squadId, children, className }: SquadInspectorP
             configuration, so this is the surface for it.
 
             Fire-and-forget: every one of these settles at terminal state and
-            the row's own status is what reports back. */}
+            the row's own status is what reports back. A refusal is the one
+            answer the row cannot give (nothing changed), so it is toasted;
+            swallowing it made a refused tap look like a dead button. */}
         <TeamRunControls
           status={squad.status}
           ultracodeEnabled={squad.config?.ultracode?.enabled}
-          onStart={() => void agentTeamManager.start(squad.id).catch(() => undefined)}
+          onStart={() => void agentTeamManager.start(squad.id).catch(reportStartRefused)}
           onStartUltracode={() =>
-            void agentTeamManager.start(squad.id, { ultracode: true }).catch(() => undefined)
+            void agentTeamManager.start(squad.id, { ultracode: true }).catch(reportStartRefused)
           }
-          onPause={() => void agentTeamManager.pause(squad.id).catch(() => undefined)}
-          onResume={() => void agentTeamManager.resume(squad.id).catch(() => undefined)}
-          onStop={() => void agentTeamManager.shutdown(squad.id).catch(() => undefined)}
+          onPause={() => void control("pause", agentTeamManager.pause(squad.id))}
+          onResume={() => void control("resume", agentTeamManager.resume(squad.id))}
+          onStop={() => void control("stop", agentTeamManager.shutdown(squad.id))}
           {...(startDisabledReason ? { startDisabledReason } : {})}
           className="pt-1"
         />

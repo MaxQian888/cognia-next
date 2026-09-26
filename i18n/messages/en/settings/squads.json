@@ -45,6 +45,7 @@
     "noMatches": "No Squad matches that.",
     "noSquads": "No Squads yet. Start from a template, or create one.",
     "openList": "Show Squad list",
+    "listTitle": "Squads",
     "searchPlaceholder": "Search Squads",
     "squadsLabel": "Your Squads",
     "static": {

@@ -401,15 +401,21 @@ export function AgentTeamTemplatesSection({ runtime }: AgentTeamTemplatesSection
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
+      {/* Wraps rather than shrinks: on a phone the two buttons kept their
+          width, squeezed the title into a one-word column and pushed "New
+          template" past the screen edge. */}
+      <div
+        className="flex flex-wrap items-start justify-between gap-3"
+        data-testid="agent-team-templates-header"
+      >
+        <div className="min-w-0 flex-1 basis-60 space-y-1">
           <Label className="flex items-center gap-2">
             <UsersIcon className="size-4" />
             {t("title")}
           </Label>
           <p className="text-xs text-muted-foreground">{t("description")}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           {/* The platform's import, with its signature, manifest and size
               checks. The store's `importTemplates` took bare JSON with none of
               them and had no caller at all. */}
@@ -655,14 +661,17 @@ function TemplateRow({
       data-testid={`agent-team-template-row-${template.id}`}
       data-builtin={template.isBuiltIn ? "true" : "false"}
     >
-      <div className="flex items-start gap-3">
+      {/* The actions drop to their own line when the row is narrow. Kept
+          beside the text, they left a phone a 120px column in which the name
+          broke over two lines and the description showed two words. */}
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <span
           className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base"
           aria-hidden
         >
           {template.icon?.charAt(0) ?? template.name.charAt(0).toUpperCase()}
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-48">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-medium">{template.name}</p>
             {template.isBuiltIn && (
@@ -728,7 +737,10 @@ function TemplateRow({
             {t("teammateCount", { count: template.teammates.length })}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div
+          className="ml-auto flex shrink-0 items-center gap-1"
+          data-testid={`agent-team-template-actions-${template.id}`}
+        >
           <Button
             variant="ghost"
             size="icon"

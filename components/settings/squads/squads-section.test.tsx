@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { SquadsSection } from "./squads-section"
@@ -13,6 +13,13 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock }),
   usePathname: () => "/settings",
   useSearchParams: () => new URLSearchParams(searchString),
+}))
+
+// `deleteTeam` purges the Squad's durable runtime rows before it drops the
+// store entry. That is Dexie's job and has its own suite; stubbed here so a
+// delete settles the way it does once the purge succeeds.
+jest.mock("@/lib/db/agent-team-runtime", () => ({
+  purgeAgentTeam: jest.fn(async () => undefined),
 }))
 
 // The template gallery is a whole surface of its own with a store, a plugin
@@ -51,6 +58,14 @@ describe("SquadsSection", () => {
     render(<SquadsSection />)
     expect(screen.getByTestId("squad-detail")).toBeInTheDocument()
     expect(screen.queryByTestId("templates-gallery")).not.toBeInTheDocument()
+  })
+
+  // The narrow-pane sheet used to reuse the trigger's verb phrase, so the
+  // list opened under a heading that read like a button: "Show Squad list".
+  it("titles the list sheet with what it holds, not the button that opened it", async () => {
+    render(<SquadsSection />)
+    await userEvent.click(screen.getByTestId("squads-nav-sheet-trigger"))
+    expect(await screen.findByRole("dialog", { name: "Squads" })).toBeInTheDocument()
   })
 
   it("opens on the gallery for someone with none", () => {
@@ -121,6 +136,7 @@ describe("SquadsSection", () => {
     await userEvent.click(screen.getByTestId("squad-delete"))
     await userEvent.click(screen.getByRole("button", { name: /^delete$/i }))
     // Onto the neighbour, not onto a pane addressing something that is gone.
-    expect(replaceMock.mock.calls.at(-1)![0]).toContain("squadTab=squad%3Ab")
+    // `deleteTeam` is async, so the move lands a tick after the click.
+    await waitFor(() => expect(replaceMock.mock.calls.at(-1)?.[0]).toContain("squadTab=squad%3Ab"))
   })
 })
