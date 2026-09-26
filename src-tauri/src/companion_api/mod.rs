@@ -92,6 +92,7 @@ pub use cognia_companion_security::rate_limit;
 pub mod remote_execution;
 pub use cognia_companion_security::replay_cache;
 pub mod rpc;
+pub mod runtime;
 pub use cognia_companion_security::secret;
 pub use cognia_companion_security::security_store;
 pub mod server;

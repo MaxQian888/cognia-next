@@ -28,7 +28,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use parking_lot::RwLock as PlRwLock;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{watch, Mutex};
@@ -38,7 +37,7 @@ use crate::companion_api::{ws_bridge, SharedState};
 use crate::supervision_backoff::CrashBackoff;
 
 /// Env var naming the brain entry script. Set by `Dockerfile.cognia-server`.
-pub const BRAIN_ENTRY_ENV: &str = "COGNIA_BRAIN_ENTRY";
+pub use crate::companion_api::runtime::BRAIN_ENTRY_ENV;
 
 /// How often the supervisor re-mints and pushes a fresh service token over
 /// the bridge (tokens live 24h; refresh at half-life).
@@ -139,33 +138,34 @@ pub fn build_brain_env(config: &BrainConfig, service_token: &str) -> Vec<(String
     env
 }
 
-/// Snapshot for `/healthz` — see [`brain_status`].
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct BrainStatus {
-    /// A child process is currently alive.
-    pub running: bool,
-    /// The child completed the bridge hello (data plane live).
-    pub ready: bool,
-    /// Times a child has been spawned since boot.
-    pub restart_count: u64,
-    /// Latest RSS gauge from the brain's pong frames (0 = unknown).
-    pub rss_bytes: u64,
-    /// `brainVersion` from the hello frame, when connected.
-    pub version: Option<String>,
-}
+/// Snapshot for `/healthz` — see [`brain_status`]. Defined by the companion
+/// core, which reads it through `companion_api::runtime::BRAIN`.
+pub use crate::companion_api::runtime::BrainStatus;
 
-/// Process-global supervisor handle so `/healthz` can report the brain
+/// Publish the supervisor so `/healthz` and `/metrics` can report the brain
 /// without threading through `CompanionState` (same idiom as
-/// `TLS_FINGERPRINT`).
-static BRAIN: PlRwLock<Option<Arc<BrainSupervisor>>> = PlRwLock::new(None);
-
+/// `TLS_FINGERPRINT`). `None` clears it.
 pub fn install_brain(supervisor: Option<Arc<BrainSupervisor>>) {
-    *BRAIN.write() = supervisor;
+    use crate::companion_api::runtime::BRAIN;
+    match supervisor {
+        Some(supervisor) => {
+            BRAIN.set(supervisor);
+        }
+        None => {
+            BRAIN.clear();
+        }
+    }
 }
 
 /// The installed supervisor's status, if any (`None` on desktop).
 pub fn brain_status() -> Option<BrainStatus> {
-    BRAIN.read().as_ref().map(|b| b.status())
+    crate::companion_api::runtime::brain_status()
+}
+
+impl crate::companion_api::runtime::BrainProbe for BrainSupervisor {
+    fn status(&self) -> BrainStatus {
+        BrainSupervisor::status(self)
+    }
 }
 
 pub struct BrainSupervisor {

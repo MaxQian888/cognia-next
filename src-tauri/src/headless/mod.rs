@@ -420,6 +420,16 @@ static SERVICES: RwLock<Option<Arc<HeadlessServices>>> = RwLock::new(None);
 /// Called by the `cognia-server` binary at boot (R8), before the axum
 /// server spawns. Idempotent.
 pub fn install_headless_services(services: Option<Arc<HeadlessServices>>) {
+    // The companion core reads these services through its runtime slot; set
+    // and clear it in the same call so the two can never disagree.
+    match &services {
+        Some(services) => {
+            crate::companion_api::runtime::HEADLESS.set(Arc::clone(services) as _);
+        }
+        None => {
+            crate::companion_api::runtime::HEADLESS.clear();
+        }
+    }
     // The hooks runtime merges this process's plugin `commandHooks` through
     // its host. Unit-test states never had that layer, so tests install none.
     // Fleet snapshots project tenants through the companion core the same way.
@@ -433,6 +443,46 @@ pub fn install_headless_services(services: Option<Arc<HeadlessServices>>) {
         ));
     }
     *SERVICES.write() = services;
+}
+
+#[async_trait::async_trait]
+impl crate::companion_api::runtime::HeadlessRuntime for HeadlessServices {
+    async fn sidecar_ready(&self) -> bool {
+        self.sidecar.is_ready().await
+    }
+
+    fn sidecar_restart_count(&self) -> u64 {
+        self.sidecar.restart_count()
+    }
+
+    fn gateway_enabled(&self) -> bool {
+        self.gateway.config().enabled
+    }
+
+    fn gateway_running(&self) -> bool {
+        self.gateway.status().running
+    }
+
+    fn gateway_health(&self) -> serde_json::Value {
+        let gateway_status = self.gateway.status();
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        serde_json::json!({
+            "running": gateway_status.running,
+            "boundPort": gateway_status.bound_port,
+            "snapshotGeneratedAtMs": gateway_status.snapshot_generated_at_ms,
+            "snapshotProviderCount": gateway_status.snapshot_provider_count,
+            "profileVersion": self.profiles.profile_version().ok(),
+            "activeTickets": self.gateway.tickets.active_count(now_ms),
+        })
+    }
+
+    fn resolve_orchestration_reply(
+        &self,
+        id: &str,
+        reply: crate::mcp_server::orchestration_proxy::OrchestrationReply,
+    ) {
+        self.mcp_server.resolve_orchestration_reply(id, reply);
+    }
 }
 
 /// The installed headless services, if any. `None` on desktop and in

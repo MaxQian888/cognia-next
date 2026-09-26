@@ -863,9 +863,9 @@ fn resolve_orchestration_response(payload: Value) -> Result<(), String> {
             payload,
         )
         .map_err(|error| error.to_string())?;
-    let services = crate::headless::headless_services()
+    let services = super::runtime::headless()
         .ok_or_else(|| "headless services are unavailable".to_string())?;
-    services.mcp_server.resolve_orchestration_reply(&id, reply);
+    services.resolve_orchestration_reply(&id, reply);
     Ok(())
 }
 

@@ -1384,7 +1384,7 @@ pub async fn admin_handler(
     State(state): State<SharedState>,
     Json(body): Json<AdminBody>,
 ) -> Response {
-    if crate::headless::headless_services().is_none() {
+    if super::runtime::headless().is_none() {
         return error_json(StatusCode::SERVICE_UNAVAILABLE, "admin_unavailable");
     }
     if !ADMIN_OPS.contains(&body.op.as_str()) {

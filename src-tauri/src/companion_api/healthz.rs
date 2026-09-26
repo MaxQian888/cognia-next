@@ -66,15 +66,15 @@ pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMa
         "headlessContract": contract_ready,
     });
     let mut ready = accepting_writes && revision_ready && contract_ready;
-    if let Some(services) = crate::headless::headless_services() {
+    if let Some(services) = super::runtime::headless() {
         let storage_ready = super::data_plane::headless_store().is_some();
-        let brain_required = std::env::var_os(crate::headless::brain::BRAIN_ENTRY_ENV).is_some();
-        let brain_ready = !brain_required
-            || crate::headless::brain::brain_status().is_some_and(|status| status.ready);
-        let sidecar_ready = services.sidecar.is_ready().await;
-        let gateway_required = services.gateway.config().enabled
+        let brain_required = std::env::var_os(super::runtime::BRAIN_ENTRY_ENV).is_some();
+        let brain_ready =
+            !brain_required || super::runtime::brain_status().is_some_and(|status| status.ready);
+        let sidecar_ready = services.sidecar_ready().await;
+        let gateway_required = services.gateway_enabled()
             || std::env::var("COGNIA_GATEWAY").is_ok_and(|value| value == "1" || value == "true");
-        let gateway_ready = !gateway_required || services.gateway.status().running;
+        let gateway_ready = !gateway_required || services.gateway_running();
         ready &= storage_ready && brain_ready && sidecar_ready && gateway_ready;
         checks = json!({
             "draining": !accepting_writes,
@@ -132,13 +132,13 @@ pub async fn healthz_handler(State(state): State<SharedState>) -> Response {
     } else {
         payload["headlessContract"] = json!({ "available": false });
     }
-    if let Some(services) = crate::headless::headless_services() {
+    if let Some(services) = super::runtime::headless() {
         let obj = payload.as_object_mut().expect("payload is an object");
         // `brain` reports the supervisor when one is installed; a headless
         // server booted without a brain entry reports `configured: false`.
         obj.insert(
             "brain".to_string(),
-            match crate::headless::brain::brain_status() {
+            match super::runtime::brain_status() {
                 Some(status) => {
                     let mut b = serde_json::to_value(status).unwrap_or_else(|_| json!({}));
                     if let Some(map) = b.as_object_mut() {
@@ -152,24 +152,12 @@ pub async fn healthz_handler(State(state): State<SharedState>) -> Response {
         obj.insert(
             "sidecar".to_string(),
             json!({
-                "ready": services.sidecar.is_ready().await,
-                "restart_count": services.sidecar.restart_count(),
+                "ready": services.sidecar_ready().await,
+                "restart_count": services.sidecar_restart_count(),
             }),
         );
         // ADR-0090 Phase 2 — headless LLM Gateway health.
-        let gateway_status = services.gateway.status();
-        let now_ms = chrono::Utc::now().timestamp_millis();
-        obj.insert(
-            "gateway".to_string(),
-            json!({
-                "running": gateway_status.running,
-                "boundPort": gateway_status.bound_port,
-                "snapshotGeneratedAtMs": gateway_status.snapshot_generated_at_ms,
-                "snapshotProviderCount": gateway_status.snapshot_provider_count,
-                "profileVersion": services.profiles.profile_version().ok(),
-                "activeTickets": services.gateway.tickets.active_count(now_ms),
-            }),
-        );
+        obj.insert("gateway".to_string(), services.gateway_health());
     }
     (StatusCode::OK, Json(payload)).into_response()
 }

@@ -557,7 +557,7 @@ pub fn render_prometheus() -> String {
     }
 
     // Supervision blocks (headless installs only; 0/absent on desktop).
-    if let Some(status) = crate::headless::brain::brain_status() {
+    if let Some(status) = super::runtime::brain_status() {
         push_metric(
             &mut out,
             "cognia_brain_ready",
@@ -580,13 +580,13 @@ pub fn render_prometheus() -> String {
             status.rss_bytes,
         );
     }
-    if let Some(services) = crate::headless::headless_services() {
+    if let Some(services) = super::runtime::headless() {
         push_metric(
             &mut out,
             "cognia_sidecar_restarts_total",
             "counter",
             "Sidecar spawns since boot.",
-            services.sidecar.restart_count(),
+            services.sidecar_restart_count(),
         );
     }
     out
