@@ -7,13 +7,18 @@
 import { useTranslations } from "next-intl"
 import { SparklesIcon } from "lucide-react"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Spinner } from "@/components/ui/spinner"
-import { usePluginMarketplace } from "@/hooks/plugins"
+import type { UsePluginMarketplace } from "@/hooks/plugins"
 import { InstallButton } from "./_shared/install-button"
-import { PluginEmptyState } from "./_shared/plugin-empty-state"
 import { PluginVersionBadge } from "./_shared/plugin-version-badge"
 
 interface Props {
+  /**
+   * The marketplace panel's own query state. The strip used to run a second
+   * `usePluginMarketplace()`, which sent every registry request twice on
+   * Discover and never saw `installingId` move (installs run through the
+   * panel's hook), so its spinner could not show.
+   */
+  market: Pick<UsePluginMarketplace, "state" | "featured" | "installingId">
   /**
    * Install handler. The discovery surface always routes through this so
    * the caller (today: the marketplace panel) can run the pre-install
@@ -24,23 +29,17 @@ interface Props {
   onInstall: (id: string, version?: string) => void
 }
 
-export function PluginDiscovery({ onInstall }: Props) {
+export function PluginDiscovery({ market, onInstall }: Props) {
   const t = useTranslations("plugins.discovery")
-  const market = usePluginMarketplace()
 
-  if (market.state.kind === "loading") {
-    return (
-      <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner />
-        <span>{t("loading")}</span>
-      </div>
-    )
-  }
+  // The strip is a nudge above the marketplace, and the marketplace below it
+  // already reports its own loading and empty states. Echoing both here
+  // stacked two spinners, then two "Nothing here yet" cards, one above the
+  // other. With nothing to feature, the strip steps aside.
+  if (market.state.kind === "loading") return null
 
   const featured = market.featured.slice(0, 6)
-  if (featured.length === 0) {
-    return <PluginEmptyState icon={<SparklesIcon className="size-5" />} hint={t("empty")} />
-  }
+  if (featured.length === 0) return null
 
   return (
     <div className="flex flex-col gap-3">

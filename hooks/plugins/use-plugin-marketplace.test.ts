@@ -15,6 +15,7 @@ import { getPluginMarketplace } from "@/lib/plugin/package/marketplace"
 import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
 
 import {
+  describeSearchFailure,
   loadPluginMarketplaceClient,
   usePluginMarketplace,
   __resetPluginMarketplaceClientForTests,
@@ -229,12 +230,56 @@ describe("source mode reporting", () => {
     expect(state.latestDiagnostic?.operation).toBe("search")
     expect(state.latestDiagnostic?.message).toContain("registry unreachable")
   })
+
+  it("reads the registry client's error record instead of printing [object Object]", async () => {
+    __resetPluginMarketplaceClientForTests({
+      searchPlugins: jest.fn(async () => {
+        throw { category: "rate_limit", message: "HTTP 429", retryable: true, status: 429 }
+      }),
+      getPlugin: jest.fn(async () => null),
+      installPlugin: jest.fn(async () => undefined),
+    })
+    const { result } = renderHook(() => usePluginMarketplace({ autoLoad: false }))
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.state).toEqual({ kind: "error", error: "HTTP 429" })
+    expect(usePluginMarketplaceStore.getState().sourceState.lastFailureCategory).toBe("rate_limit")
+  })
+})
+
+describe("describeSearchFailure", () => {
+  it("keeps an Error's message as a retryable network failure", () => {
+    expect(describeSearchFailure(new Error("Failed to fetch"))).toEqual({
+      message: "Failed to fetch",
+      category: "network",
+      retryable: true,
+    })
+  })
+
+  it("maps a category the store does not know to unknown", () => {
+    expect(
+      describeSearchFailure({ category: "signature_invalid", message: "bad sig", retryable: false })
+    ).toEqual({ message: "bad sig", category: "unknown", retryable: false })
+  })
+
+  it("stringifies anything else", () => {
+    expect(describeSearchFailure("offline")).toEqual({
+      message: "offline",
+      category: "network",
+      retryable: true,
+    })
+  })
 })
 
 describe("loadPluginMarketplaceClient", () => {
   const registryEntry = { id: "r1", name: "Registry One", version: "1.0.0", source: "marketplace" }
   const market = {
-    searchPlugins: jest.fn(async () => ({ plugins: [registryEntry], total: 1, hasMore: false })),
+    searchPluginsStrict: jest.fn(async () => ({
+      plugins: [registryEntry],
+      total: 1,
+      hasMore: false,
+    })),
     getFeaturedPlugins: jest.fn(async () => [registryEntry]),
     getPopularPlugins: jest.fn(async () => []),
     getRecentPlugins: jest.fn(async () => []),
@@ -254,9 +299,15 @@ describe("loadPluginMarketplaceClient", () => {
     expect(await client.searchPlugins({ query: "q" })).toEqual({
       plugins: [{ ...registryEntry, type: "plugin" }],
     })
-    expect(market.searchPlugins).toHaveBeenCalledWith({ query: "q" })
+    expect(market.searchPluginsStrict).toHaveBeenCalledWith({ query: "q" })
     expect(await client.getFeaturedPlugins?.()).toEqual([{ ...registryEntry, type: "plugin" }])
     expect(await client.getVersions?.("r1")).toEqual([{ version: "1.0.0", changelog: "first" }])
+  })
+
+  it("lets an unreachable registry reject rather than read as an empty catalog", async () => {
+    market.searchPluginsStrict.mockRejectedValueOnce(new Error("Failed to fetch"))
+    const client = await loadPluginMarketplaceClient()
+    await expect(client.searchPlugins({ query: "" })).rejects.toThrow("Failed to fetch")
   })
 
   it("turns a resolved install failure into a rejection", async () => {

@@ -26301,10 +26301,8 @@
       "originLabel": "来源"
     },
     "discovery": {
-      "empty": "暂无精选插件。",
       "install": "安装",
       "installing": "安装中…",
-      "loading": "加载精选插件中…",
       "title": "精选插件"
     },
     "enableFailure": {
@@ -26453,6 +26451,9 @@
       "tauriRequiredError": "本地插件加载需要在桌面应用中使用。"
     },
     "marketplace": {
+      "addSource": "添加 GitHub 源",
+      "clearSearch": "清除搜索",
+      "emptySearch": "没有匹配“{query}”的插件。",
       "emptySection": "此分区暂无内容。",
       "error": "市场错误：{message}",
       "installCancelled": {
@@ -26466,7 +26467,7 @@
       "loading": "加载市场中…",
       "manageSources": "GitHub 源",
       "modeBanner": {
-        "degradedHint": "正在显示上次同步的本地缓存，安装与更新操作在网络恢复前不可用。",
+        "degradedHint": "暂时无法连接共享插件注册表。内置插件和你的 GitHub 源仍可使用。",
         "degradedTitle": "插件市场不可达",
         "demoHint": "你正在浏览示例目录，在此模式下安装为模拟，不会真正运行插件代码。",
         "demoTitle": "演示市场"

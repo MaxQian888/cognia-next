@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("@/lib/native/utils", () => ({
   ...jest.requireActual("@/lib/native/utils"),
@@ -17,7 +17,15 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-import { __resetPluginMarketplaceClientForTests } from "@/hooks/plugins"
+jest.mock("@/hooks/plugins", () => ({
+  // The strip must read the panel's state, never run its own query: a second
+  // hook sent every registry request twice on Discover.
+  usePluginMarketplace: () => {
+    throw new Error("PluginDiscovery must not run its own marketplace query")
+  },
+}))
+
+import type { UsePluginMarketplace } from "@/hooks/plugins"
 import { PluginDiscovery } from "./plugin-discovery"
 
 const SAMPLE = [
@@ -25,56 +33,50 @@ const SAMPLE = [
     id: "p1",
     name: "Plugin 1",
     version: "1.0.0",
-    type: "plugin",
+    type: "plugin" as const,
     description: "",
   },
 ]
 
-beforeEach(() => {
-  __resetPluginMarketplaceClientForTests({
-    searchPlugins: jest.fn(async () => SAMPLE),
-    getFeaturedPlugins: jest.fn(async () => SAMPLE),
-    getPopularPlugins: jest.fn(async () => SAMPLE),
-    getRecentPlugins: jest.fn(async () => SAMPLE),
-    getPlugin: jest.fn(async () => null),
-    installPlugin: jest.fn(async () => undefined),
-  })
-})
+type MarketState = Pick<UsePluginMarketplace, "state" | "featured" | "installingId">
+
+function market(overrides: Partial<MarketState> = {}): MarketState {
+  return {
+    state: { kind: "ready", results: SAMPLE },
+    featured: SAMPLE,
+    installingId: null,
+    ...overrides,
+  }
+}
 
 describe("PluginDiscovery", () => {
-  it("renders featured entries returned by the marketplace", async () => {
-    const { container } = render(<PluginDiscovery onInstall={jest.fn()} />)
-    await waitFor(() => expect(screen.getByText("Plugin 1")).toBeInTheDocument())
+  it("renders featured entries from the panel's marketplace state", () => {
+    const { container } = render(<PluginDiscovery market={market()} onInstall={jest.fn()} />)
+    expect(screen.getByText("Plugin 1")).toBeInTheDocument()
     expect(container.querySelector("[data-slot='card-header']")).not.toBeNull()
     expect(container.querySelector("[data-slot='card-content']")).not.toBeNull()
     expect(container.querySelector("[data-slot='card-footer']")).not.toBeNull()
   })
 
-  it("install button delegates to the onInstall prop with id + version", async () => {
+  it("renders nothing while loading or when nothing is featured", () => {
+    // The marketplace below owns the spinner and the empty card.
+    const { container, rerender } = render(
+      <PluginDiscovery market={market({ state: { kind: "loading" } })} onInstall={jest.fn()} />
+    )
+    expect(container).toBeEmptyDOMElement()
+    rerender(<PluginDiscovery market={market({ featured: [] })} onInstall={jest.fn()} />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("install button delegates to the onInstall prop with id + version", () => {
     const onInstall = jest.fn()
-    render(<PluginDiscovery onInstall={onInstall} />)
-    await waitFor(() => expect(screen.getByText("Plugin 1")).toBeInTheDocument())
+    render(<PluginDiscovery market={market()} onInstall={onInstall} />)
     fireEvent.click(screen.getByText("install"))
     expect(onInstall).toHaveBeenCalledWith("p1", "1.0.0")
   })
 
-  it("does NOT call the marketplace client install directly when the user clicks install", async () => {
-    const directInstall = jest.fn(async () => undefined)
-    __resetPluginMarketplaceClientForTests({
-      searchPlugins: jest.fn(async () => SAMPLE),
-      getFeaturedPlugins: jest.fn(async () => SAMPLE),
-      getPopularPlugins: jest.fn(async () => SAMPLE),
-      getRecentPlugins: jest.fn(async () => SAMPLE),
-      getPlugin: jest.fn(async () => null),
-      installPlugin: directInstall,
-    })
-    const onInstall = jest.fn()
-    render(<PluginDiscovery onInstall={onInstall} />)
-    await waitFor(() => expect(screen.getByText("Plugin 1")).toBeInTheDocument())
-    fireEvent.click(screen.getByText("install"))
-    expect(onInstall).toHaveBeenCalledWith("p1", "1.0.0")
-    // The pre-install chain owns the install — the marketplace client must
-    // not be invoked directly from the discovery surface.
-    expect(directInstall).not.toHaveBeenCalled()
+  it("shows the installing state for the entry the panel is installing", () => {
+    render(<PluginDiscovery market={market({ installingId: "p1" })} onInstall={jest.fn()} />)
+    expect(screen.getByText("installing")).toBeInTheDocument()
   })
 })

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 
 const mockCanUseTauriInvoke = jest.fn(() => true)
 jest.mock("@/lib/native/utils", () => ({
@@ -133,6 +133,7 @@ beforeEach(() => {
   // Both Discover axes live in the plugins store now, so reset them or a
   // previous case leaks its origin into the next one.
   usePluginsStore.setState({ discoverCuration: "all", discoverOrigin: "all" })
+  usePluginsStore.getState().setQuery("")
   installedRows.length = 0
   githubSourceEntries.length = 0
   githubSourcePresets.length = 0
@@ -187,6 +188,62 @@ describe("PluginMarketplace", () => {
     expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0)
   })
 
+  it("offers to add a source when the catalog is empty, with one empty card", async () => {
+    __resetPluginMarketplaceClientForTests({
+      searchPlugins: jest.fn(async () => []),
+      getFeaturedPlugins: jest.fn(async () => []),
+      getPopularPlugins: jest.fn(async () => []),
+      getRecentPlugins: jest.fn(async () => []),
+      getPlugin: jest.fn(async () => null),
+      installPlugin: jest.fn(async () => undefined),
+    })
+    render(<PluginMarketplace />)
+    const empty = await screen.findByTestId("plugin-marketplace-empty-section")
+    // The featured strip steps aside instead of stacking a second empty card.
+    // (Its empty card used the default `plugin-empty-state` test id.)
+    expect(screen.queryByTestId("plugin-empty-state")).toBeNull()
+    fireEvent.click(within(empty).getByRole("button", { name: "addSource" }))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("shows one retryable error, not the degraded banner too, when the registry is down", async () => {
+    const searchPlugins = jest.fn(async () => {
+      throw new Error("Failed to fetch")
+    })
+    __resetPluginMarketplaceClientForTests({
+      searchPlugins,
+      getFeaturedPlugins: jest.fn(async () => []),
+      getPopularPlugins: jest.fn(async () => []),
+      getRecentPlugins: jest.fn(async () => []),
+      getPlugin: jest.fn(async () => null),
+      installPlugin: jest.fn(async () => undefined),
+    })
+    render(<PluginMarketplace />)
+    const card = await screen.findByTestId("plugin-error-card")
+    // One query for the page: the featured strip reads the panel's state.
+    expect(searchPlugins).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId("plugin-marketplace-mode-banner-degraded")).toBeNull()
+    expect(screen.queryByTestId("plugin-marketplace-empty-section")).toBeNull()
+    fireEvent.click(within(card).getByRole("button"))
+    await waitFor(() => expect(searchPlugins).toHaveBeenCalledTimes(2))
+  })
+
+  it("clears a search that matched nothing from its empty state", async () => {
+    __resetPluginMarketplaceClientForTests({
+      searchPlugins: jest.fn(async () => []),
+      getFeaturedPlugins: jest.fn(async () => []),
+      getPopularPlugins: jest.fn(async () => []),
+      getRecentPlugins: jest.fn(async () => []),
+      getPlugin: jest.fn(async () => null),
+      installPlugin: jest.fn(async () => undefined),
+    })
+    act(() => usePluginsStore.getState().setQuery("zzz"))
+    render(<PluginMarketplace />)
+    const empty = await screen.findByTestId("plugin-marketplace-empty-search")
+    fireEvent.click(within(empty).getByRole("button", { name: "clearSearch" }))
+    expect(usePluginsStore.getState().filters.query).toBe("")
+  })
+
   it("clears a ranking the newly picked origin cannot answer", () => {
     act(() => usePluginsStore.getState().setDiscoverCuration("featured"))
     act(() => usePluginsStore.getState().setDiscoverOrigin("vscode"))
@@ -206,6 +263,30 @@ describe("PluginMarketplace", () => {
     await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
     act(() => usePluginsStore.getState().setDiscoverOrigin("builtin"))
     await waitFor(() => expect(screen.getByText("Builtin One")).toBeInTheDocument())
+  })
+
+  it("keeps Built-in usable while the shared registry is down, and says so", async () => {
+    installedRows.push({
+      id: "builtin-1",
+      name: "Builtin One",
+      version: "1.0.0",
+      source: "builtin",
+      capabilities: [],
+      manifest: {},
+    } as never)
+    __resetPluginMarketplaceClientForTests({
+      searchPlugins: jest.fn(async () => {
+        throw new Error("Failed to fetch")
+      }),
+      getPlugin: jest.fn(async () => null),
+      installPlugin: jest.fn(async () => undefined),
+    })
+    render(<PluginMarketplace />)
+    await screen.findByTestId("plugin-error-card")
+    act(() => usePluginsStore.getState().setDiscoverOrigin("builtin"))
+    await waitFor(() => expect(screen.getByText("Builtin One")).toBeInTheDocument())
+    expect(screen.queryByTestId("plugin-error-card")).toBeNull()
+    expect(screen.getByTestId("plugin-marketplace-mode-banner-degraded")).toBeInTheDocument()
   })
 
   it("install click invokes the marketplace install path", async () => {

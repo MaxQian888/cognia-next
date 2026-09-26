@@ -6,7 +6,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { PluginSource } from "@/types/plugin"
-import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
+import {
+  usePluginMarketplaceStore,
+  type MarketplaceErrorCategory,
+} from "@/stores/plugin-runtime/plugin-marketplace-store"
 
 export type PluginMarketplaceQueryState =
   | { kind: "idle" }
@@ -115,8 +118,12 @@ function toEntry(entry: RegistryEntry): PluginMarketplaceEntry & RegistryEntry {
  */
 function adaptRegistryClient(market: RegistryClient): MarketplaceClient {
   return {
+    // Strict: the lenient `searchPlugins` turns an unreachable registry into
+    // an empty list, so `refresh()` never reached its error branch. The pane
+    // then said "Nothing here yet" with no retry, and the degraded banner that
+    // branch sets could not appear.
     searchPlugins: async ({ query }) => {
-      const result = await market.searchPlugins({ query })
+      const result = await market.searchPluginsStrict({ query })
       return { plugins: result.plugins.map(toEntry) }
     },
     getFeaturedPlugins: async () => (await market.getFeaturedPlugins()).map(toEntry),
@@ -145,6 +152,44 @@ const loadClient = loadPluginMarketplaceClient
 
 export function __resetPluginMarketplaceClientForTests(client: MarketplaceClient | null) {
   cachedClient = client
+}
+
+const STORE_ERROR_CATEGORIES: ReadonlySet<string> = new Set<MarketplaceErrorCategory>([
+  "network",
+  "auth",
+  "rate_limit",
+  "validation",
+  "unsupported_env",
+  "install_conflict",
+  "unknown",
+])
+
+/**
+ * What a failed search threw, read in whichever shape it arrived. The
+ * registry client's strict search throws a plain `{ category, message,
+ * retryable }` record rather than an Error, which printed as
+ * "Marketplace error: [object Object]".
+ */
+export function describeSearchFailure(err: unknown): {
+  message: string
+  category: MarketplaceErrorCategory
+  retryable: boolean
+} {
+  if (err instanceof Error) return { message: err.message, category: "network", retryable: true }
+  if (
+    err &&
+    typeof err === "object" &&
+    typeof (err as { message?: unknown }).message === "string"
+  ) {
+    const record = err as { message: string; category?: unknown; retryable?: unknown }
+    const category =
+      typeof record.category === "string" && STORE_ERROR_CATEGORIES.has(record.category)
+        ? (record.category as MarketplaceErrorCategory)
+        : "unknown"
+    const retryable = typeof record.retryable === "boolean" ? record.retryable : true
+    return { message: record.message, category, retryable }
+  }
+  return { message: String(err), category: "network", retryable: true }
 }
 
 function normalizeEntries(result: unknown): PluginMarketplaceEntry[] {
@@ -209,12 +254,12 @@ export function usePluginMarketplace(options?: UsePluginMarketplaceOptions): Use
       setRecent(normalizeEntries(r))
       setRemoteMode()
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const { message, category, retryable } = describeSearchFailure(err)
       setState({ kind: "error", error: message })
       // The store redacts the message before storing it, so a token that
       // leaked into a fetch error never reaches the ring buffer.
-      setFallbackMode("network", message)
-      recordDiagnostic({ operation: "search", category: "network", retryable: true, message })
+      setFallbackMode(category, message)
+      recordDiagnostic({ operation: "search", category, retryable, message })
     }
   }, [query, setRemoteMode, setFallbackMode, recordDiagnostic])
 

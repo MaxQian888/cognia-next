@@ -1,4 +1,7 @@
 {
+  "addSource": "Add a GitHub source",
+  "clearSearch": "Clear search",
+  "emptySearch": "No plugins match “{query}”.",
   "emptySection": "Nothing in this section yet.",
   "error": "Marketplace error: {message}",
   "installCancelled": {
@@ -12,7 +15,7 @@
   "loading": "Loading marketplace…",
   "manageSources": "GitHub sources",
   "modeBanner": {
-    "degradedHint": "Showing cached entries from your last successful sync. Install and update actions are disabled until the connection recovers.",
+    "degradedHint": "The shared plugin registry can't be reached right now. Built-in plugins and your GitHub sources still work.",
     "degradedTitle": "Marketplace is unreachable",
     "demoHint": "You're browsing a sample catalog. Installs in this mode are simulated and won't run real plugin code.",
     "demoTitle": "Demo marketplace"

@@ -100,6 +100,7 @@ export function PluginMarketplace() {
    * reset above.
    */
   const storeQuery = usePluginsStore((s) => s.filters.query)
+  const setQuery = usePluginsStore((s) => s.setQuery)
   const [seenQuery, setSeenQuery] = useState(storeQuery)
   if (storeQuery !== seenQuery) {
     setSeenQuery(storeQuery)
@@ -328,15 +329,24 @@ export function PluginMarketplace() {
       : openVsx.state.kind === "loading" && sectionEntries.length === 0
         ? { kind: "loading" }
         : { kind: "ready" }
-    : market.state.kind === "loading"
-      ? { kind: "loading" }
-      : market.state.kind === "error"
-        ? {
-            kind: "error",
-            message: t("error", { message: market.state.error }),
-            retry: () => void market.refresh(),
-          }
-        : { kind: "ready" }
+    : // Built-in reads the local plugin rows and Workspace the user's GitHub
+      // catalogs; neither asks the shared registry, so its failure must not
+      // blank them. The degraded banner above says the registry is down.
+      origin === "builtin"
+      ? { kind: "ready" }
+      : origin === "workspace"
+        ? sources.loading && sectionEntries.length === 0
+          ? { kind: "loading" }
+          : { kind: "ready" }
+        : market.state.kind === "loading"
+          ? { kind: "loading" }
+          : market.state.kind === "error"
+            ? {
+                kind: "error",
+                message: t("error", { message: market.state.error }),
+                retry: () => void market.refresh(),
+              }
+            : { kind: "ready" }
 
   // Discovery is shown as a hero strip whenever the user is in the default
   // "all" view with no active query — nudges first-time users toward
@@ -355,8 +365,14 @@ export function PluginMarketplace() {
 
   return (
     <div className="@container/plugin-discover flex w-full min-w-0 max-w-full flex-col gap-4 overflow-x-clip">
-      <PluginMarketplaceModeBanner />
-      {showDiscovery && <PluginDiscovery onInstall={(id, version) => onInstallById(id, version)} />}
+      {/* While the content region shows the registry's error card, the
+          banner would only repeat it one card higher. It earns its place on
+          the origins that still answer (Built-in, GitHub sources), where it is
+          the one thing saying the shared registry is down. */}
+      {status.kind !== "error" && <PluginMarketplaceModeBanner />}
+      {showDiscovery && (
+        <PluginDiscovery market={market} onInstall={(id, version) => onInstallById(id, version)} />
+      )}
       {/* Search, ranking and source now live in the page header's controls
           tier (`PluginDiscoverHeader`), the same tier every other section
           uses. What is left here are the two actions that open something. */}
@@ -386,7 +402,30 @@ export function PluginMarketplace() {
       ) : status.kind === "error" ? (
         <PluginErrorCard message={status.message} onRetry={status.retry} />
       ) : sectionEntries.length === 0 && !showPresets ? (
-        <PluginEmptyState hint={isVscodeSection ? tv("vscodeEmpty") : t("emptySection")} />
+        // Say which empty this is and offer the way out of it. A search that
+        // matched nothing is cleared; a catalog with nothing in it is filled
+        // by adding a source. "Nothing in this section yet" with no action
+        // left both as a dead end.
+        storeQuery.trim() !== "" ? (
+          <PluginEmptyState
+            hint={t("emptySearch", { query: storeQuery.trim() })}
+            action={{ label: t("clearSearch"), onClick: () => setQuery("") }}
+            dataTestId="plugin-marketplace-empty-search"
+          />
+        ) : isVscodeSection ? (
+          <PluginEmptyState hint={tv("vscodeEmpty")} />
+        ) : (
+          <PluginEmptyState
+            hint={t("emptySection")}
+            // Built-in ships with the app; a GitHub source cannot fill it.
+            action={
+              origin === "builtin"
+                ? undefined
+                : { label: t("addSource"), onClick: () => setSourcesDialogOpen(true) }
+            }
+            dataTestId="plugin-marketplace-empty-section"
+          />
+        )
       ) : (
         <>
           {showPresets && (

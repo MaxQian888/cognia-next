@@ -26293,7 +26293,7 @@
       "curationUnavailable": "Rankings come from the Cognia registry, so they do not apply to this source.",
       "origin": {
         "all": "All sources",
-        "builtin": "Built in",
+        "builtin": "Built-in",
         "registry": "Cognia registry",
         "vscode": "Open VSX",
         "workspace": "Workspace catalogs"
@@ -26301,10 +26301,8 @@
       "originLabel": "Source"
     },
     "discovery": {
-      "empty": "No featured plugins to highlight right now.",
       "install": "Install",
       "installing": "Installing…",
-      "loading": "Loading featured plugins…",
       "title": "Featured plugins"
     },
     "enableFailure": {
@@ -26453,6 +26451,9 @@
       "tauriRequiredError": "Loading local plugins requires the Cognia desktop app."
     },
     "marketplace": {
+      "addSource": "Add a GitHub source",
+      "clearSearch": "Clear search",
+      "emptySearch": "No plugins match “{query}”.",
       "emptySection": "Nothing in this section yet.",
       "error": "Marketplace error: {message}",
       "installCancelled": {
@@ -26466,7 +26467,7 @@
       "loading": "Loading marketplace…",
       "manageSources": "GitHub sources",
       "modeBanner": {
-        "degradedHint": "Showing cached entries from your last successful sync. Install and update actions are disabled until the connection recovers.",
+        "degradedHint": "The shared plugin registry can't be reached right now. Built-in plugins and your GitHub sources still work.",
         "degradedTitle": "Marketplace is unreachable",
         "demoHint": "You're browsing a sample catalog. Installs in this mode are simulated and won't run real plugin code.",
         "demoTitle": "Demo marketplace"
