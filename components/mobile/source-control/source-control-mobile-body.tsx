@@ -69,7 +69,11 @@ import { CommitDetail } from "@/components/source-control/commit-detail"
 import { ConflictResolver } from "@/components/source-control/conflict-resolver"
 import { DiffPane } from "@/components/source-control/diff-pane"
 import { StashPanel } from "@/components/source-control/stash-panel"
-import { SequencerBanner, StaleStatusBanner } from "@/components/source-control/status-banners"
+import {
+  SequencerBanner,
+  StaleStatusBanner,
+  WriteUnavailableBanner,
+} from "@/components/source-control/status-banners"
 import { TimelineView } from "@/components/source-control/timeline-view"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
@@ -377,6 +381,7 @@ export function SourceControlMobileBody({ initialDiffOpen = false }: SourceContr
         onRetry={() => void refreshSafely()}
         density="touch"
       />
+      <WriteUnavailableBanner density="touch" />
 
       <LayoutGroup id={tabGroup}>
         <div

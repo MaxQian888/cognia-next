@@ -65,7 +65,7 @@ import { RootSwitcher } from "./root-switcher"
 import { RepositoryNavigator } from "./repository-navigator"
 import { StackPanel } from "./stack-panel"
 import { StashPanel } from "./stash-panel"
-import { SequencerBanner, StaleStatusBanner } from "./status-banners"
+import { SequencerBanner, StaleStatusBanner, WriteUnavailableBanner } from "./status-banners"
 import { SyncToolbar } from "./sync-toolbar"
 import { TagPanel } from "./tag-panel"
 import { TimelineView } from "./timeline-view"
@@ -462,6 +462,7 @@ export function SourceControlPanel() {
 
       <SequencerBanner operation={repoState?.operationInProgress ?? null} actions={actions} />
       <StaleStatusBanner message={loadError && status ? loadError : null} onRetry={refreshSafely} />
+      <WriteUnavailableBanner />
 
       {!status && loadingStatus ? (
         <div

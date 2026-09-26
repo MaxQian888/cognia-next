@@ -1,6 +1,15 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { useGitStore } from "@/stores/git/git-store"
-import { SequencerBanner, StaleStatusBanner } from "./status-banners"
+import { SequencerBanner, StaleStatusBanner, WriteUnavailableBanner } from "./status-banners"
+
+let mockWriteVerdict: { available: boolean; reason: string | null } = {
+  available: true,
+  reason: null,
+}
+const mockGate = jest.fn((_command: string) => mockWriteVerdict)
+jest.mock("@/hooks/workspace/use-workspace-command-gate", () => ({
+  useWorkspaceCommandGate: () => mockGate,
+}))
 
 function sequencerActions(available = true) {
   return {
@@ -76,5 +85,31 @@ describe("StaleStatusBanner", () => {
     expect(screen.getByTestId("sc-load-error-banner")).toHaveTextContent(/index\.lock exists/)
     fireEvent.click(screen.getByTestId("sc-load-error-retry"))
     expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("WriteUnavailableBanner", () => {
+  beforeEach(() => {
+    mockWriteVerdict = { available: true, reason: null }
+    mockGate.mockClear()
+  })
+
+  it("stays out of the way while git writes are allowed", () => {
+    render(<WriteUnavailableBanner />)
+    expect(screen.queryByTestId("sc-write-unavailable-banner")).toBeNull()
+  })
+
+  it("says once why every write control is disabled", () => {
+    // Pull, Push, Commit and Stash all gate on the same grant and lease, so
+    // the phone greyed out its whole toolbar with no word of why.
+    mockWriteVerdict = {
+      available: false,
+      reason: "This device is missing the Remote control permission.",
+    }
+    render(<WriteUnavailableBanner density="touch" />)
+    expect(screen.getByTestId("sc-write-unavailable-banner")).toHaveTextContent(
+      "This device is missing the Remote control permission."
+    )
+    expect(mockGate).toHaveBeenCalledWith("git_commit")
   })
 })

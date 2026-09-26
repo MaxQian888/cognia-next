@@ -1,13 +1,16 @@
 "use client"
 
 /**
- * The two strips that sit between the Source Control header and its body.
+ * The strips that sit between the Source Control header and its body.
  *
  *  - `SequencerBanner`: a merge, rebase, cherry-pick or revert stopped
  *    half-way. Continue and Abort are the only ways out, so they live on the
  *    strip itself rather than in a menu.
  *  - `StaleStatusBanner`: a refresh failed while an earlier snapshot is still
  *    on screen. The list below is honest about being old, with a retry.
+ *  - `WriteUnavailableBanner`: this device can read the repository but not
+ *    change it (a paired phone without the grant, or the host's approval
+ *    lease). Every write control is disabled then; this says why once.
  *
  * Shared by the desktop panel and the phone body. The phone had neither, so a
  * rebase stopped on a conflict left it with no way to continue or abort and a
@@ -19,7 +22,7 @@
 
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion } from "motion/react"
-import { AlertTriangleIcon, RefreshCwIcon } from "lucide-react"
+import { AlertTriangleIcon, LockIcon, RefreshCwIcon } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -28,6 +31,7 @@ import { cn } from "@/lib/utils"
 import { useGitStore } from "@/stores/git/git-store"
 import type { GitOperationKind } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
 
 type Density = "compact" | "touch"
 
@@ -141,6 +145,39 @@ export function StaleStatusBanner({
             <RefreshCwIcon className="size-3" />
             {t("repository.retry")}
           </Button>
+        </AlertDescription>
+      </Alert>
+    </Reveal>
+  )
+}
+
+/**
+ * Why Pull, Push, Commit, Stash and the rest are greyed out.
+ *
+ * Those controls gate on `can(command)` and went grey with no word of
+ * explanation, so a phone missing the write grant looked broken rather than
+ * one switch away. `git_commit` stands for the set: every git write needs the
+ * same `git.write` grant and the same approval lease, so one sentence covers
+ * them all instead of a tooltip per button that a touch screen cannot show.
+ */
+export function WriteUnavailableBanner({ density = "compact" }: { density?: Density }) {
+  const gate = useWorkspaceCommandGate()
+  const verdict = gate("git_commit")
+  const touch = density === "touch"
+
+  return (
+    <Reveal show={!verdict.available} id="write-unavailable">
+      <Alert
+        role="status"
+        className={cn(
+          "rounded-none border-x-0 border-t-0 bg-muted/40 px-3",
+          touch ? "py-2" : "py-1.5"
+        )}
+        data-testid="sc-write-unavailable-banner"
+      >
+        <LockIcon className="size-3.5 shrink-0" />
+        <AlertDescription className="text-xs text-muted-foreground">
+          {verdict.reason}
         </AlertDescription>
       </Alert>
     </Reveal>

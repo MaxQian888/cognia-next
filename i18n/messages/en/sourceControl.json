@@ -211,7 +211,7 @@
   },
   "remote": {
     "noWorkspace": "No authorized Git workspace",
-    "noWorkspaceDescription": "Open a project on the paired desktop to authorize its roots for this account, then refresh this page."
+    "noWorkspaceDescription": "Open a project on the paired desktop to authorize it for this account. It shows up here on its own within a few seconds."
   },
   "remotes": {
     "add": "Add Remote",

@@ -211,7 +211,7 @@
   },
   "remote": {
     "noWorkspace": "没有已授权的 Git 工作区",
-    "noWorkspaceDescription": "请先在已配对桌面端打开项目，为当前账号授权项目根目录，然后刷新此页面。"
+    "noWorkspaceDescription": "请先在已配对桌面端打开项目，为当前账号授权。几秒内会自动显示在这里。"
   },
   "remotes": {
     "add": "添加远程",
