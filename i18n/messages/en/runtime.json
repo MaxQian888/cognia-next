@@ -6,7 +6,7 @@
     "pairHost": "Pair or switch host",
     "readOnly": "Read-only mode: {reason}",
     "reasons": {
-      "companion-not-paired": "This target has no usable pairing credentials.",
+      "companion-not-paired": "This device isn't paired with a host yet, or its pairing no longer works.",
       "connection-offline": "The current host is offline. This action will not be replayed automatically.",
       "host-admin-only": "This operation is restricted to host administrators.",
       "host-manifest-missing": "The host did not provide a compatible capability manifest.",
@@ -27,7 +27,7 @@
       "requires-grant": "Device permission required",
       "requires-pairing": "Pairing required",
       "requires-unlock": "Vault locked",
-      "unsupported": "Capability unavailable on this target"
+      "unsupported": "Not available on this device"
     },
     "unlockVault": "Unlock Vault"
   }

@@ -30965,7 +30965,7 @@
       "pairHost": "配对或切换主机",
       "readOnly": "只读模式：{reason}",
       "reasons": {
-        "companion-not-paired": "当前目标没有可用的配对凭证。",
+        "companion-not-paired": "此设备尚未与主机配对，或配对已失效。",
         "connection-offline": "当前主机离线，此操作不会自动重放。",
         "host-admin-only": "此操作仅限主机管理员。",
         "host-manifest-missing": "主机没有提供兼容的能力清单。",
@@ -30986,7 +30986,7 @@
         "requires-grant": "需要设备授权",
         "requires-pairing": "需要配对",
         "requires-unlock": "Vault 已锁定",
-        "unsupported": "当前目标不支持此能力"
+        "unsupported": "此设备暂不支持"
       },
       "unlockVault": "解锁 Vault"
     }
