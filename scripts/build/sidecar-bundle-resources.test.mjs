@@ -74,8 +74,8 @@ test("walks past the entry points into their transitive dependencies", () => {
   for (const entry of SIDECAR_ENTRY_POINTS) assert.ok(closure.has(entry), `missing ${entry}`)
   // Regression pin: these three were imported by the entry points yet absent
   // from bundle.resources, which is what broke the staged sidecar.
-  assert.ok(closure.has("sidecar/fetch-interceptor.mjs"))
-  assert.ok(closure.has("sidecar/host-rpc.mjs"))
+  assert.ok(closure.has("sidecar/src/platform/net/install-fetch-interceptor.ts"))
+  assert.ok(closure.has("sidecar/src/platform/host-rpc.ts"))
   assert.ok(closure.has("sidecar/telemetry.mjs"))
   // The closure must leave sidecar/ when an import does.
   assert.ok(closure.has("lib/settings/builtin-tools-data.json"))
@@ -205,5 +205,5 @@ test("reports a dependency that no resource entry covers", () => {
   const uncovered = findUncoveredResources(root, ["../sidecar/agent-host.mjs"])
 
   assert.ok(uncovered.length > 0, "a one-entry list must leave dependencies uncovered")
-  assert.ok(uncovered.includes("sidecar/host-rpc.mjs"))
+  assert.ok(uncovered.includes("sidecar/src/platform/host-rpc.ts"))
 })

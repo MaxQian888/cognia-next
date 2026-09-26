@@ -21,26 +21,65 @@ export const DEFAULT_HOST_RPC_TIMEOUT_MS = 30_000
 /** Margin added to a caller-supplied wait so the host answers before we give up. */
 export const HOST_RPC_TIMEOUT_MARGIN_MS = 5_000
 
-/**
- * Create a host-RPC client bound to an `emit` function.
- *
- * @param {{ emit: (payload: any) => void, timeoutMs?: number }} opts
- */
-export function createHostRpc({ emit, timeoutMs = DEFAULT_HOST_RPC_TIMEOUT_MS }) {
-  /** @type {Map<string, { resolve: (v: any) => void, reject: (e: Error) => void, timer: any }>} */
-  const pending = new Map()
-  let seq = 0
-  let closed = false
+/** The frame one call emits toward the host. */
+export interface HostRpcRequestFrame {
+  type: "host_rpc"
+  rpcId: string
+  method: string
+  params: unknown
+}
 
+/** The fields of an inbound `host_rpc_result` frame this client reads. */
+interface HostRpcResultFrame {
+  rpcId?: unknown
+  ok?: unknown
+  result?: unknown
+  error?: unknown
+}
+
+export interface HostRpcOptions {
+  emit: (frame: HostRpcRequestFrame) => void
+  timeoutMs?: number
+}
+
+export interface HostRpcClient {
   /**
    * Issue one call. Resolves with the host's `result`, rejects on `ok: false`,
    * on timeout, or if the channel closes while in flight.
-   *
-   * @param {string} method
-   * @param {any} params
-   * @param {{ timeoutMs?: number }} [options]
    */
-  function call(method, params, options = {}) {
+  call(method: string, params: unknown, options?: { timeoutMs?: number }): Promise<unknown>
+  /**
+   * Settle an in-flight call from an inbound `host_rpc_result` frame and say
+   * whether it matched one. Unknown ids are ignored — a late reply after a
+   * timeout must not throw.
+   */
+  resolveResult(msg: unknown): boolean
+  /** Fail every in-flight call. Called when the host channel goes away. */
+  rejectAll(reason?: unknown): void
+  readonly pendingCount: number
+  readonly isClosed: boolean
+}
+
+interface PendingCall {
+  resolve: (result: unknown) => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+/** Create a host-RPC client bound to an `emit` function. */
+export function createHostRpc({
+  emit,
+  timeoutMs = DEFAULT_HOST_RPC_TIMEOUT_MS,
+}: HostRpcOptions): HostRpcClient {
+  const pending = new Map<string, PendingCall>()
+  let seq = 0
+  let closed = false
+
+  function call(
+    method: string,
+    params: unknown,
+    options: { timeoutMs?: number } = {}
+  ): Promise<unknown> {
     if (closed) {
       return Promise.reject(new Error("host_rpc channel is closed"))
     }
@@ -59,27 +98,22 @@ export function createHostRpc({ emit, timeoutMs = DEFAULT_HOST_RPC_TIMEOUT_MS })
     })
   }
 
-  /**
-   * Settle an in-flight call from an inbound `host_rpc_result` frame.
-   * Unknown ids are ignored — a late reply after a timeout must not throw.
-   *
-   * @returns {boolean} whether the frame matched a pending call
-   */
-  function resolveResult(msg) {
-    const entry = msg && msg.rpcId ? pending.get(msg.rpcId) : undefined
-    if (!entry) return false
-    pending.delete(msg.rpcId)
+  function resolveResult(msg: unknown): boolean {
+    const frame = typeof msg === "object" && msg !== null ? (msg as HostRpcResultFrame) : undefined
+    const rpcId = typeof frame?.rpcId === "string" ? frame.rpcId : undefined
+    const entry = rpcId ? pending.get(rpcId) : undefined
+    if (!frame || !rpcId || !entry) return false
+    pending.delete(rpcId)
     clearTimeout(entry.timer)
-    if (msg.ok === false) {
-      entry.reject(new Error(String(msg.error ?? "host_rpc failed")))
+    if (frame.ok === false) {
+      entry.reject(new Error(String(frame.error ?? "host_rpc failed")))
     } else {
-      entry.resolve(msg.result)
+      entry.resolve(frame.result)
     }
     return true
   }
 
-  /** Fail every in-flight call. Called when the host channel goes away. */
-  function rejectAll(reason) {
+  function rejectAll(reason?: unknown): void {
     closed = true
     const err = new Error(String(reason ?? "host_rpc channel closed"))
     for (const [, entry] of pending) {

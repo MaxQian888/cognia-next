@@ -17,7 +17,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
 import { resolveShellInvocation } from "./bash.mjs"
-import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../host-rpc.mjs"
+import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../src/platform/host-rpc.ts"
 
 /** Past this, stop blocking and let the durable watch deliver. */
 export const BLOCKING_THRESHOLD_MS = 5 * 60_000

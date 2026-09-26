@@ -24,7 +24,7 @@ import { createLineBuffer, classifyMcpLogLine } from "./mcp-log.mjs"
 import {
   createEgressGuard as createMcpEgressGuard,
   validateRemoteUrl,
-} from "../mcp-oauth-helper.mjs"
+} from "../src/platform/net/egress-guard.ts"
 
 /**
  * Build an AI SDK MCP transport (instance or config) from a Claude-Agent-SDK-

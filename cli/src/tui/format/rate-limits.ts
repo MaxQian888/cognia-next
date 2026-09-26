@@ -1,7 +1,7 @@
 /**
  * Pure parser + formatters for the LIVE Anthropic API rate-limit headers.
  *
- * The sidecar's `fetch-interceptor.mjs` captures every `anthropic-ratelimit-*`
+ * The sidecar's `src/platform/net/fetch-interceptor.ts` captures every `anthropic-ratelimit-*`
  * response header from `api.anthropic.com` and writes it to stdout as a
  * `usage_headers` message. The TUI subscribes to that channel
  * (`useAgentSession`) and folds the headers into a {@link RateLimitSnapshot}

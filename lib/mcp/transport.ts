@@ -262,8 +262,8 @@ export interface OpenMcpDeps {
 }
 
 async function createDefaultEgressGuard(allowPrivateNetwork: boolean): Promise<McpEgressGuard> {
-  const { createEgressGuard } = await import("../../sidecar/mcp-oauth-helper.mjs")
-  return createEgressGuard({ allowPrivateNetwork }) as McpEgressGuard
+  const { createEgressGuard } = await import("../../sidecar/src/platform/net/egress-guard.ts")
+  return createEgressGuard({ allowPrivateNetwork })
 }
 
 /** The slice of a Node readable stream the stderr drain touches. */

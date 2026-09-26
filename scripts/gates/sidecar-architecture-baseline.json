@@ -20,7 +20,6 @@
     "cycle: sidecar/builtin-tools/clonedeps -> sidecar/builtin-tools",
     "cycle: sidecar/builtin-tools/clonedeps -> sidecar/builtin-tools/git",
     "cycle: sidecar/builtin-tools/code -> sidecar/builtin-tools",
-    "cycle: sidecar/builtin-tools/core -> sidecar",
     "cycle: sidecar/builtin-tools/core -> sidecar/builtin-tools",
     "cycle: sidecar/builtin-tools/file-ops -> sidecar/builtin-tools",
     "cycle: sidecar/builtin-tools/git -> sidecar/builtin-tools",
@@ -37,9 +36,6 @@
     "cycle: sidecar/dispatch/optical -> sidecar/dispatch",
     "cycle: sidecar/dispatch/protocol-adapters -> sidecar",
     "cycle: sidecar/dispatch/protocol-adapters -> sidecar/dispatch",
-    "launcher-import: sidecar/claude-host.mjs imports the process entry sidecar/agent-host.mjs",
-    "launcher-import: sidecar/dispatch/ai-sdk-mcp.mjs imports the process entry sidecar/mcp-oauth-helper.mjs",
-    "launcher-import: sidecar/dispatch/mcp-runtime-gateway.mjs imports the process entry sidecar/mcp-oauth-helper.mjs",
-    "launcher-import: sidecar/mcp-stdio-relay.mjs imports the process entry sidecar/mcp-oauth-helper.mjs"
+    "launcher-import: sidecar/claude-host.mjs imports the process entry sidecar/agent-host.mjs"
   ]
 }

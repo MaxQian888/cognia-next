@@ -1,4 +1,4 @@
-// Proxy/geo-consistency tests for fetch-interceptor.mjs.
+// Proxy/geo-consistency tests for fetch-interceptor.ts.
 //
 // The interceptor routes the sidecar's *in-process* fetch (the ai-sdk
 // dispatch path used by every non-Anthropic provider) through the user's
@@ -18,28 +18,38 @@
 // proxy below therefore handles BOTH forms and records each separately, and
 // the assertions check that the proxy saw the request, not which form it used.
 //
-// Run: node --test fetch-interceptor.test.mjs
+// Run: node --test fetch-interceptor.test.ts
 
 import { test, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
 import http from "node:http"
 import net from "node:net"
+import type { AddressInfo } from "node:net"
 
-let connectHits = []
-let forwardHits = []
-let originHits = []
-let proxyServer
-let originServer
-let originPort
+interface IsolatedRun {
+  code: number | null
+  signal: NodeJS.Signals | null
+  stdout: string
+  stderr: string
+}
 
-function listen(server) {
+let connectHits: string[] = []
+let forwardHits: string[] = []
+let originHits: string[] = []
+let proxyServer: http.Server | undefined
+let originServer: http.Server | undefined
+let originPort = 0
+
+const INSTALLER_URL = new URL("./install-fetch-interceptor.ts", import.meta.url).href
+
+function listen(server: http.Server): Promise<number> {
   return new Promise((resolve) =>
-    server.listen(0, "127.0.0.1", () => resolve(server.address().port))
+    server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port))
   )
 }
 
-function runIsolatedInterceptor(source, env) {
+function runIsolatedInterceptor(source: string, env: Record<string, string>): Promise<IsolatedRun> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["--input-type=module", "--eval", source], {
       env: {
@@ -65,7 +75,7 @@ function runIsolatedInterceptor(source, env) {
 
 before(async () => {
   originServer = http.createServer((req, res) => {
-    originHits.push(req.url)
+    originHits.push(req.url ?? "")
     res.writeHead(200, { "content-type": "text/plain" })
     res.end("origin-ok")
   })
@@ -77,9 +87,9 @@ before(async () => {
   //   - absolute-form `GET http://host/path` (undici's path for http: targets)
   //   - `CONNECT host:port` tunnel (undici's path for https: targets)
   proxyServer = http.createServer((req, res) => {
-    let target
+    let target: URL
     try {
-      target = new URL(req.url)
+      target = new URL(req.url ?? "")
     } catch {
       res.writeHead(400)
       res.end("expected absolute-form request or CONNECT")
@@ -100,7 +110,7 @@ before(async () => {
     req.pipe(upstream)
   })
   proxyServer.on("connect", (req, clientSocket, head) => {
-    connectHits.push(req.url)
+    connectHits.push(req.url ?? "")
     const upstream = net.connect(originPort, "127.0.0.1", () => {
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n")
       if (head && head.length) upstream.write(head)
@@ -119,7 +129,7 @@ before(async () => {
   process.env.HTTPS_PROXY = proxyUrl
   process.env.NO_PROXY = "127.0.0.1,localhost"
 
-  await import("./fetch-interceptor.mjs")
+  await import("./install-fetch-interceptor.ts")
 })
 
 after(async () => {
@@ -174,7 +184,7 @@ test("bypasses the proxy for NO_PROXY hosts (local providers)", async () => {
 })
 
 test("supports IP/CIDR bypass without weakening all other proxy routing", async () => {
-  const moduleUrl = new URL("./fetch-interceptor.mjs", import.meta.url).href
+  const moduleUrl = INSTALLER_URL
   const result = await runIsolatedInterceptor(
     `await import(${JSON.stringify(moduleUrl)});
      const response = await fetch(${JSON.stringify(`http://127.0.0.1:${originPort}/cidr`)});
@@ -191,7 +201,7 @@ test("supports IP/CIDR bypass without weakening all other proxy routing", async 
 })
 
 test("redacts proxy userinfo from startup diagnostics", async () => {
-  const moduleUrl = new URL("./fetch-interceptor.mjs", import.meta.url).href
+  const moduleUrl = INSTALLER_URL
   const result = await runIsolatedInterceptor(`await import(${JSON.stringify(moduleUrl)});`, {
     HTTP_PROXY: "http://alice:top-secret@127.0.0.1:9",
     HTTPS_PROXY: "http://alice:top-secret@127.0.0.1:9",
@@ -203,7 +213,7 @@ test("redacts proxy userinfo from startup diagnostics", async () => {
 })
 
 test("fails sidecar startup instead of falling back direct for an invalid active proxy", async () => {
-  const moduleUrl = new URL("./fetch-interceptor.mjs", import.meta.url).href
+  const moduleUrl = INSTALLER_URL
   const result = await runIsolatedInterceptor(
     `try {
        await import(${JSON.stringify(moduleUrl)});

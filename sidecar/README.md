@@ -75,6 +75,11 @@ Each migration batch appends its moves here (old → new).
 | `ENV_ALLOWLIST`, strip patterns (in `dispatch/subprocess-env.mjs`)       | `src/platform/process/env.ts`                                      | 3a          |
 | `builtin-tools/shared/fs-stat.mjs`                                       | `src/platform/fs/stat.ts`                                          | 3a          |
 | `builtin-tools/core/gitignore.mjs`                                       | `src/platform/fs/gitignore.ts`                                     | 3a          |
+| `fetch-interceptor.mjs` (side-effect import)                             | `src/platform/net/install-fetch-interceptor.ts`                    | 3b          |
+| `fetch-interceptor.mjs` (implementation)                                 | `src/platform/net/fetch-interceptor.ts`                            | 3b          |
+| IP/CIDR parsing (in `fetch-interceptor.mjs`)                             | `src/platform/net/ip.ts`                                           | 3b          |
+| Egress guard (in `mcp-oauth-helper.mjs`)                                 | `src/platform/net/egress-guard.ts`                                 | 3b          |
+| `host-rpc.mjs`                                                           | `src/platform/host-rpc.ts`                                         | 3b          |
 
 ## Scripts (run from repo root)
 

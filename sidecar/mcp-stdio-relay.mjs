@@ -7,7 +7,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 
-import { createEgressGuard } from "./mcp-oauth-helper.mjs"
+import { createEgressGuard } from "./src/platform/net/egress-guard.ts"
 
 const CONFIG_ENV = "COGNIA_MCP_RELAY_CONFIG"
 

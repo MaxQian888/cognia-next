@@ -1,4 +1,4 @@
-// Side-effect import that monkey-patches `globalThis.fetch` to:
+// Wraps the process-wide `globalThis.fetch` to:
 //   1. Capture `anthropic-ratelimit-*` headers from any response on
 //      `api.anthropic.com` (used by the subscription usage tracker).
 //   2. Route all outbound fetches through the user's configured proxy when
@@ -6,15 +6,22 @@
 //      Tauri's `src-tauri/src/claude/sidecar.rs` injects these from
 //      `proxy_config::env_vars()` whenever the user enables the proxy.
 //
-// MUST be imported *before* `@anthropic-ai/claude-agent-sdk` so all SDK
-// fetches go through the wrapper. Header capture remains best-effort, but
-// proxy installation is deliberately fail-closed: an enabled proxy must
-// never degrade to a direct first request.
+// The host installs it through `./install-fetch-interceptor.ts`, imported
+// before `@anthropic-ai/claude-agent-sdk` so all SDK fetches go through the
+// wrapper. Header capture remains best-effort, but proxy installation is
+// deliberately fail-closed: an enabled proxy must never degrade to a direct
+// first request.
 
-const ORIGINAL_FETCH = globalThis.fetch
+import type { Dispatcher } from "undici"
+
+import { cidrContains, parseCidr, parseIp } from "./ip.ts"
+import type { ParsedCidr, ParsedIp } from "./ip.ts"
+
+type Undici = typeof import("undici")
+
 const ANTHROPIC_HOST_RE = /^https?:\/\/api\.anthropic\.com\//i
 
-function proxyEnvUrl() {
+function proxyEnvUrl(): string {
   return (
     process.env.HTTPS_PROXY ||
     process.env.https_proxy ||
@@ -24,7 +31,7 @@ function proxyEnvUrl() {
   )
 }
 
-function redactedProxyEndpoint(value) {
+function redactedProxyEndpoint(value: string): string {
   try {
     const parsed = new URL(value)
     return `${parsed.protocol}//${parsed.host}`
@@ -33,7 +40,7 @@ function redactedProxyEndpoint(value) {
   }
 }
 
-function validateProxyEnvironment() {
+function validateProxyEnvironment(): void {
   for (const value of [
     process.env.HTTPS_PROXY,
     process.env.https_proxy,
@@ -41,7 +48,7 @@ function validateProxyEnvironment() {
     process.env.http_proxy,
   ]) {
     if (!value) continue
-    let parsed
+    let parsed: URL
     try {
       parsed = new URL(value)
     } catch {
@@ -53,77 +60,19 @@ function validateProxyEnvironment() {
   }
 }
 
-function parseIpv4(input) {
-  const parts = input.split(".")
-  if (parts.length !== 4) return null
-  let value = 0n
-  for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return null
-    const octet = Number(part)
-    if (octet > 255) return null
-    value = (value << 8n) | BigInt(octet)
-  }
-  return { bits: 32, value }
+interface NoProxySplit {
+  directCidrs: ParsedCidr[]
+  directIps: ParsedIp[]
+  /** The remaining host-name entries, in undici's `noProxy` syntax. */
+  noProxy: string
 }
 
-function ipv6Words(part) {
-  if (!part) return []
-  const words = []
-  for (const token of part.split(":")) {
-    if (!token) return null
-    if (token.includes(".")) {
-      const ipv4 = parseIpv4(token)
-      if (!ipv4) return null
-      words.push(Number((ipv4.value >> 16n) & 0xffffn), Number(ipv4.value & 0xffffn))
-      continue
-    }
-    if (!/^[0-9a-f]{1,4}$/i.test(token)) return null
-    words.push(Number.parseInt(token, 16))
-  }
-  return words
-}
-
-function parseIpv6(input) {
-  const normalized = input.replace(/^\[|\]$/g, "")
-  const halves = normalized.split("::")
-  if (halves.length > 2) return null
-  const left = ipv6Words(halves[0] ?? "")
-  const right = ipv6Words(halves[1] ?? "")
-  if (!left || !right) return null
-  const omitted = 8 - left.length - right.length
-  if (halves.length === 1 ? omitted !== 0 : omitted < 1) return null
-  const words = [...left, ...Array.from({ length: omitted }, () => 0), ...right]
-  if (words.length !== 8) return null
-  let value = 0n
-  for (const word of words) value = (value << 16n) | BigInt(word)
-  return { bits: 128, value }
-}
-
-function parseIp(input) {
-  return parseIpv4(input) ?? parseIpv6(input)
-}
-
-function parseCidr(entry) {
-  const separator = entry.lastIndexOf("/")
-  if (separator <= 0) return null
-  const network = parseIp(entry.slice(0, separator))
-  const prefix = Number(entry.slice(separator + 1))
-  if (!network || !Number.isInteger(prefix) || prefix < 0 || prefix > network.bits) return null
-  return { ...network, prefix }
-}
-
-function cidrContains(cidr, hostname) {
-  const target = parseIp(hostname.replace(/^\[|\]$/g, ""))
-  if (!target || target.bits !== cidr.bits) return false
-  const shift = BigInt(cidr.bits - cidr.prefix)
-  return target.value >> shift === cidr.value >> shift
-}
-
-function splitNoProxy() {
+/** undici's NO_PROXY matching knows host names only; exact IPs and CIDRs are split off here. */
+function splitNoProxy(): NoProxySplit {
   const value = process.env.no_proxy ?? process.env.NO_PROXY ?? ""
-  const directCidrs = []
-  const directIps = []
-  const standardEntries = []
+  const directCidrs: ParsedCidr[] = []
+  const directIps: ParsedIp[] = []
+  const standardEntries: string[] = []
   for (const entry of value.split(/[,\s]+/).filter(Boolean)) {
     const cidr = parseCidr(entry)
     if (cidr) directCidrs.push(cidr)
@@ -136,15 +85,22 @@ function splitNoProxy() {
   return { directCidrs, directIps, noProxy: standardEntries.join(",") }
 }
 
-function dispatcherWithCidrBypass(undici) {
+/** The part of a Dispatcher the global slot uses, routing each request direct or via the proxy. */
+interface BypassRouter {
+  dispatch: Dispatcher["dispatch"]
+  close(): Promise<unknown>
+  destroy(error?: Error | null): Promise<unknown>
+}
+
+function dispatcherWithCidrBypass(undici: Undici): Dispatcher {
   const { directCidrs, directIps, noProxy } = splitNoProxy()
   const proxied = new undici.EnvHttpProxyAgent({ noProxy })
   if (directCidrs.length === 0 && directIps.length === 0) return proxied
 
   const direct = new undici.Agent()
-  return {
+  const router: BypassRouter = {
     dispatch(options, handler) {
-      const hostname = new URL(options.origin).hostname
+      const hostname = new URL(String(options.origin)).hostname
       const target = parseIp(hostname.replace(/^\[|\]$/g, ""))
       const exactMatch =
         target !== null &&
@@ -157,20 +113,22 @@ function dispatcherWithCidrBypass(undici) {
       return Promise.all([direct.close(), proxied.close()])
     },
     destroy(error) {
-      return Promise.all([direct.destroy(error), proxied.destroy(error)])
+      return Promise.all([direct.destroy(error ?? null), proxied.destroy(error ?? null)])
     },
   }
+  // undici's global slot checks only `dispatch`, and fetch calls only the
+  // three methods above; the rest of the Dispatcher surface is never reached.
+  return router as Dispatcher
 }
 
-// Wire the configured proxy into undici's global dispatcher. The top-level
-// await is the startup gate: the importing host cannot load the SDK or issue
-// its first fetch until the dispatcher is ready.
-async function installProxyDispatcher() {
+// Wire the configured proxy into undici's global dispatcher. The caller awaits
+// this before the SDK can load or issue its first fetch.
+async function installProxyDispatcher(): Promise<void> {
   const proxyUrl = proxyEnvUrl()
   if (!proxyUrl) return
   validateProxyEnvironment()
 
-  let undici
+  let undici: Undici
   try {
     undici = await import("undici")
   } catch {
@@ -198,9 +156,7 @@ async function installProxyDispatcher() {
   }
 }
 
-await installProxyDispatcher()
-
-function emitUsageHeaders(headersBag) {
+function emitUsageHeaders(headersBag: Record<string, string>): void {
   try {
     process.stdout.write(JSON.stringify({ type: "usage_headers", headers: headersBag }) + "\n")
   } catch {
@@ -208,8 +164,8 @@ function emitUsageHeaders(headersBag) {
   }
 }
 
-function extractRatelimitHeaders(headers) {
-  const out = {}
+function extractRatelimitHeaders(headers: Headers | undefined): Record<string, string> {
+  const out: Record<string, string> = {}
   // `Headers.forEach` is available on both Node fetch and undici.
   if (typeof headers?.forEach === "function") {
     headers.forEach((value, key) => {
@@ -222,18 +178,19 @@ function extractRatelimitHeaders(headers) {
   return out
 }
 
-function urlOfFetchArg(input) {
+function urlOfFetchArg(input: unknown): string {
   if (typeof input === "string") return input
   if (input && typeof input === "object") {
-    if (typeof input.url === "string") return input.url
-    if (typeof input.href === "string") return input.href
+    const { url, href } = input as { url?: unknown; href?: unknown }
+    if (typeof url === "string") return url
+    if (typeof href === "string") return href
   }
   return ""
 }
 
-if (typeof ORIGINAL_FETCH === "function") {
-  globalThis.fetch = async function patchedFetch(...args) {
-    const response = await ORIGINAL_FETCH.apply(this, args)
+function withUsageHeaderCapture(original: typeof fetch): typeof fetch {
+  return async function patchedFetch(this: unknown, ...args: Parameters<typeof fetch>) {
+    const response = await original.apply(this, args)
     try {
       const url = urlOfFetchArg(args[0])
       if (ANTHROPIC_HOST_RE.test(url)) {
@@ -247,4 +204,25 @@ if (typeof ORIGINAL_FETCH === "function") {
     }
     return response
   }
+}
+
+async function install(): Promise<void> {
+  // Captured before the proxy dispatcher is installed, as the wrapper target.
+  const original = globalThis.fetch
+  await installProxyDispatcher()
+  if (typeof original === "function") globalThis.fetch = withUsageHeaderCapture(original)
+}
+
+const INSTALLED = Symbol.for("cognia.sidecar.fetch-interceptor")
+
+/**
+ * Install the proxy dispatcher and the header-capturing fetch wrapper once per
+ * process. Later calls (a second host entry, a bundled copy of this module)
+ * share the first installation instead of wrapping fetch twice. Rejects with a
+ * `PROXY_*` error when an enabled proxy cannot be installed.
+ */
+export function installFetchInterceptor(): Promise<void> {
+  const slot = globalThis as { [INSTALLED]?: Promise<void> }
+  slot[INSTALLED] ??= install()
+  return slot[INSTALLED]
 }

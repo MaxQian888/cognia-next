@@ -558,10 +558,9 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// has the entry but not these is a torn copy, not a sidecar.
 const REQUIRED_SIDECAR_ENTRIES: &[&str] = &[
     "agent-host.mjs",
-    "fetch-interceptor.mjs",
-    "host-rpc.mjs",
     "telemetry.mjs",
     "package.json",
+    "src",
     "dispatch",
     "builtin-tools",
     "node_modules",
@@ -721,8 +720,8 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
     // Inject the user's network proxy config so the Node sidecar's outbound
     // HTTP (Anthropic SDK + any provider relays) routes through the same
     // proxy as the rest of the app. The interceptor at
-    // `sidecar/fetch-interceptor.mjs` reads HTTPS_PROXY at boot and wraps
-    // the global undici dispatcher.
+    // `sidecar/src/platform/net/fetch-interceptor.ts` reads HTTPS_PROXY at boot
+    // and wraps the global undici dispatcher.
     let proxy_cfg = crate::proxy_config::current().map_err(|error| error.to_string())?;
     apply_managed_proxy_env(&mut cmd, &proxy_cfg)?;
 
@@ -1429,13 +1428,14 @@ mod tests {
     fn a_torn_staging_copy_is_skipped_not_spawned() {
         // The 2026-08-27 shape: the entry file landed, its first import did
         // not. Accepting this directory spawns a Node process that exits on
-        // `import "./fetch-interceptor.mjs"` and burns the recovery budget.
+        // `import "./src/platform/net/install-fetch-interceptor.ts"` and burns
+        // the recovery budget.
         let tmp = tempfile::tempdir().expect("tempdir");
         let encoded = tmp.path().join("_up_").join("sidecar");
         stub_complete_sidecar(&encoded);
-        std::fs::remove_file(encoded.join("fetch-interceptor.mjs")).expect("tear the copy");
+        std::fs::remove_dir_all(encoded.join("src")).expect("tear the copy");
 
-        assert_eq!(missing_sidecar_entry(&encoded), Some("fetch-interceptor.mjs"));
+        assert_eq!(missing_sidecar_entry(&encoded), Some("src"));
         assert_eq!(packaged_sidecar_dir(tmp.path()), None);
     }
 

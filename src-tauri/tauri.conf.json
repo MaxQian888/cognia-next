@@ -45,8 +45,6 @@
     "targets": "all",
     "resources": [
       "../sidecar/agent-host.mjs",
-      "../sidecar/fetch-interceptor.mjs",
-      "../sidecar/host-rpc.mjs",
       "../sidecar/telemetry.mjs",
       "../sidecar/claude-host.mjs",
       "../sidecar/a2ui-mcp.mjs",

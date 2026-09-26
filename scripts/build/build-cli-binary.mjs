@@ -52,6 +52,7 @@ const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const cliEntry = path.join(root, "cli/src/cli/entry.ts")
 const sidecarEntry = path.join(root, "sidecar/claude-host.mjs")
 const mcpRelayEntry = path.join(root, "sidecar/mcp-stdio-relay.mjs")
+const mcpOauthHelperEntry = path.join(root, "sidecar/mcp-oauth-helper.mjs")
 // The Cognia tool-host MCP bridge an EXTERNAL agent spawns. It lives in the
 // sidecar bundle because that is where the real built-in tool definitions and
 // handlers are, and it ships beside claude-host.mjs so the packaged binary can
@@ -337,6 +338,23 @@ await esbuild.build({
 })
 console.log(`build-cli-binary: wrote ${path.relative(root, mcpRelayBundle)}`)
 
+// Rust spawns the MCP OAuth helper by path beside cognia-mcp.mjs. It imports
+// the sidecar's TypeScript egress guard and loads the MCP SDK, neither of which
+// the layout's node_modules carries, so it ships bundled like the relay.
+const mcpOauthHelperBundle = path.join(sidecarOutDir, "mcp-oauth-helper.mjs")
+await esbuild.build({
+  entryPoints: [mcpOauthHelperEntry],
+  outfile: mcpOauthHelperBundle,
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node26",
+  external: ["undici"],
+  banner: { js: CREATE_REQUIRE_BANNER },
+  logLevel: "info",
+})
+console.log(`build-cli-binary: wrote ${path.relative(root, mcpOauthHelperBundle)}`)
+
 // The embedded External Bridge MCP server is a separate stdio sidecar owned
 // by the Rust HTTP proxy. Bundle its canonical TypeScript implementation into
 // the same host layout so cognia-server never depends on a client-supplied
@@ -366,10 +384,7 @@ console.log(`build-cli-binary: wrote ${path.relative(root, mcpSidecarBundle)}`)
 // so each such file must sit beside it. store-sqlite.mjs reads `schema.sql` at
 // module load (a top-level read — it runs even before the sqlite store is
 // constructed), so a missing file crashes the sidecar before it emits `ready`.
-const SIDECAR_DATA_FILES = [
-  path.join(root, "sidecar/builtin-tools/code/schema.sql"),
-  path.join(root, "sidecar/mcp-oauth-helper.mjs"),
-]
+const SIDECAR_DATA_FILES = [path.join(root, "sidecar/builtin-tools/code/schema.sql")]
 for (const src of SIDECAR_DATA_FILES) {
   if (!fs.existsSync(src)) {
     console.error(`build-cli-binary: missing sidecar data file ${path.relative(root, src)}`)

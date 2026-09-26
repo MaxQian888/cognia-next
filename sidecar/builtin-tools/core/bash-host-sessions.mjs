@@ -21,7 +21,7 @@
 
 import { createBgShellRegistry } from "./bash-sessions.mjs"
 
-import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../host-rpc.mjs"
+import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../src/platform/host-rpc.ts"
 
 /** Cap on bytes pulled per host round-trip. */
 const READ_CHUNK_BYTES = 30_000

@@ -106,6 +106,7 @@
     "sidecar/dispatch/protocol-adapters/registry.mjs",
     "sidecar/dispatch/usage-normalize.mjs",
     "sidecar/pi-extension/cognia-pi-extension.ts",
+    "sidecar/src/platform/net/egress-guard.ts",
     "sidecar/src/providers/provider-protocol.ts",
     "sidecar/src/providers/reasoning-effort-tables.ts",
     "sidecar/test-support/live-harness.ts"

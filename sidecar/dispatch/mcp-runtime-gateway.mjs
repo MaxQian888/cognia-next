@@ -1,6 +1,6 @@
 import { createMCPClient } from "@ai-sdk/mcp"
 
-import { createEgressGuard as createDefaultEgressGuard } from "../mcp-oauth-helper.mjs"
+import { createEgressGuard as createDefaultEgressGuard } from "../src/platform/net/egress-guard.ts"
 import { toMcpTransport } from "./ai-sdk-mcp.mjs"
 
 const DEFAULT_TIMEOUT_MS = 15_000

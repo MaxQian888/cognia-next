@@ -41,7 +41,7 @@
 // before the Claude agent SDK loads. The interceptor emits a `usage_headers`
 // event for every response on `api.anthropic.com`, which the renderer's
 // usage-collector subscribes to (Phase 4a of the Claude subscription ADR).
-import "./fetch-interceptor.mjs"
+import "./src/platform/net/install-fetch-interceptor.ts"
 import { initializeTelemetry, shutdownTelemetry } from "./telemetry.mjs"
 
 initializeTelemetry()
@@ -79,7 +79,7 @@ import {
   buildControlResponse,
 } from "./dispatch/control.mjs"
 import { createFeatureCallHandler } from "./dispatch/feature-call.mjs"
-import { createHostRpc } from "./host-rpc.mjs"
+import { createHostRpc } from "./src/platform/host-rpc.ts"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { guardAnthropicRemoteMcpServers } from "./dispatch/anthropic-mcp-relay.mjs"
 
@@ -1316,7 +1316,7 @@ function startReadLoop() {
         permission_response: handlePermissionResponse,
         plugin_tool_response: handlePluginToolResponse,
         plugin_hook_response: handlePluginHookResponse,
-        // Answered by Rust directly (never by the renderer) — see host-rpc.mjs.
+        // Answered by Rust directly (never by the renderer) — see src/platform/host-rpc.ts.
         host_rpc_result: (m) => hostRpc.resolveResult(m),
         tool_result_decision: handleToolResultDecision,
         call_reserve_decision: (m) => {

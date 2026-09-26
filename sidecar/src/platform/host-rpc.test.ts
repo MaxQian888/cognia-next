@@ -1,10 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { createHostRpc, DEFAULT_HOST_RPC_TIMEOUT_MS } from "./host-rpc.mjs"
+import { createHostRpc, DEFAULT_HOST_RPC_TIMEOUT_MS } from "./host-rpc.ts"
+import type { HostRpcRequestFrame } from "./host-rpc.ts"
 
-function harness(opts = {}) {
-  const emitted = []
+function harness(opts: { timeoutMs?: number } = {}) {
+  const emitted: HostRpcRequestFrame[] = []
   const rpc = createHostRpc({ emit: (p) => emitted.push(p), ...opts })
   return { rpc, emitted }
 }
@@ -14,17 +15,17 @@ test("call emits a host_rpc frame carrying the method and params", () => {
   rpc.call("jobs.spawn", { command: "echo hi" }).catch(() => {})
 
   assert.equal(emitted.length, 1)
-  assert.equal(emitted[0].type, "host_rpc")
-  assert.equal(emitted[0].method, "jobs.spawn")
-  assert.deepEqual(emitted[0].params, { command: "echo hi" })
-  assert.ok(emitted[0].rpcId, "every call carries a correlation id")
+  assert.equal(emitted[0]?.type, "host_rpc")
+  assert.equal(emitted[0]?.method, "jobs.spawn")
+  assert.deepEqual(emitted[0]?.params, { command: "echo hi" })
+  assert.ok(emitted[0]?.rpcId, "every call carries a correlation id")
 })
 
 test("each call gets a distinct rpcId so concurrent calls do not collide", () => {
   const { rpc, emitted } = harness()
   rpc.call("a", {}).catch(() => {})
   rpc.call("b", {}).catch(() => {})
-  assert.notEqual(emitted[0].rpcId, emitted[1].rpcId)
+  assert.notEqual(emitted[0]?.rpcId, emitted[1]?.rpcId)
 })
 
 test("a matching host_rpc_result resolves the call with its result", async () => {
@@ -32,7 +33,7 @@ test("a matching host_rpc_result resolves the call with its result", async () =>
   const pending = rpc.call("jobs.list", {})
   const matched = rpc.resolveResult({
     type: "host_rpc_result",
-    rpcId: emitted[0].rpcId,
+    rpcId: emitted[0]?.rpcId,
     ok: true,
     result: { jobs: [{ id: "j1" }] },
   })
@@ -47,7 +48,7 @@ test("ok:false rejects with the host's error message", async () => {
   const pending = rpc.call("jobs.kill", { jobId: "nope" })
   rpc.resolveResult({
     type: "host_rpc_result",
-    rpcId: emitted[0].rpcId,
+    rpcId: emitted[0]?.rpcId,
     ok: false,
     error: "no job with id nope",
   })
@@ -61,8 +62,8 @@ test("results are routed to the right caller when several are in flight", async 
   const second = rpc.call("two", {})
 
   // Answer out of order — routing must be by id, not arrival order.
-  rpc.resolveResult({ rpcId: emitted[1].rpcId, ok: true, result: "second" })
-  rpc.resolveResult({ rpcId: emitted[0].rpcId, ok: true, result: "first" })
+  rpc.resolveResult({ rpcId: emitted[1]?.rpcId, ok: true, result: "second" })
+  rpc.resolveResult({ rpcId: emitted[0]?.rpcId, ok: true, result: "first" })
 
   assert.equal(await first, "first")
   assert.equal(await second, "second")
@@ -81,7 +82,7 @@ test("a late reply after a timeout is ignored and does not throw", async () => {
   await assert.rejects(pending, /timed out after 10 ms/)
 
   // The host eventually answers; nothing is listening and that must be safe.
-  assert.equal(rpc.resolveResult({ rpcId: emitted[0].rpcId, ok: true, result: 1 }), false)
+  assert.equal(rpc.resolveResult({ rpcId: emitted[0]?.rpcId, ok: true, result: 1 }), false)
 })
 
 test("a call times out on its own budget, overriding the client default", async () => {

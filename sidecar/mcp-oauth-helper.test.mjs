@@ -11,8 +11,6 @@ import {
   parseCallback,
   randomState,
   buildProvider,
-  createEgressGuard,
-  validateRemoteUrl,
   runFlow,
   prepareHeadlessFlow,
   completeHeadlessFlow,
@@ -71,12 +69,12 @@ test("bundled library import cannot consume host IPC or exit after its first com
     await build({
       stdin: {
         contents: `
-import {isPrivateOrReservedHost} from ${JSON.stringify(path.join(import.meta.dirname, "mcp-oauth-helper.mjs"))};
+import {parseCallback} from ${JSON.stringify(path.join(import.meta.dirname, "mcp-oauth-helper.mjs"))};
 import readline from "node:readline";
 const rl = readline.createInterface({input: process.stdin});
 rl.on("line", line => {
   const command = JSON.parse(line);
-  setImmediate(() => process.stdout.write(JSON.stringify({type: "control_response", requestId: command.requestId, privateHost: isPrivateOrReservedHost("localhost")}) + "\\n"));
+  setImmediate(() => process.stdout.write(JSON.stringify({type: "control_response", requestId: command.requestId, callbackCode: parseCallback("/cb?code=ok").code}) + "\\n"));
 });
 process.stdout.write('{"type":"ready"}\\n');
 `,
@@ -201,43 +199,6 @@ test("runFlow rejects stdio servers as unsupported", async () => {
   const out = await runFlow({ server: { transport: "stdio", config: {} }, mode: "authenticate" })
   assert.equal(out.result.ok, false)
   assert.equal(out.result.status, "unsupported")
-})
-
-test("OAuth egress rejects insecure and private endpoints unless explicitly reviewed", () => {
-  assert.throws(() => validateRemoteUrl("http://example.com/mcp"), /HTTPS/)
-  assert.throws(() => validateRemoteUrl("https://127.0.0.1/mcp"), /private or reserved/)
-  assert.equal(validateRemoteUrl("http://127.0.0.1/mcp", true).href, "http://127.0.0.1/mcp")
-  assert.throws(() => validateRemoteUrl("http://example.com/mcp", true), /HTTPS/)
-})
-
-test("guarded OAuth fetch denies redirects and carries a socket-level DNS guard", async () => {
-  let agentOptions
-  const dispatcher = { close: async () => undefined }
-  class FakeAgent {
-    constructor(options) {
-      agentOptions = options
-      return dispatcher
-    }
-  }
-  let receivedInit
-  const guard = createEgressGuard({
-    AgentCtor: FakeAgent,
-    lookup: (_hostname, _options, callback) =>
-      callback(null, [{ address: "127.0.0.1", family: 4 }]),
-    fetchImpl: async (_input, init) => {
-      receivedInit = init
-      return { ok: true }
-    },
-  })
-  await guard.fetch("https://example.com/token", { redirect: "follow" })
-  assert.equal(receivedInit.redirect, "error")
-  assert.equal(receivedInit.dispatcher, dispatcher)
-  assert.equal(typeof agentOptions.connect.lookup, "function")
-  const lookupError = await new Promise((resolve) => {
-    agentOptions.connect.lookup("rebinding.example", {}, (error) => resolve(error))
-  })
-  assert.match(lookupError.message, /private or reserved/)
-  await guard.close()
 })
 
 test("runFlow blocks a private endpoint before starting the callback server", async () => {

@@ -71,11 +71,11 @@ describe("cognia-agent bundle", () => {
     }
   })
 
-  it("loads the HTTP MCP helper with the CLI runtime dependencies", () => {
+  it("loads the HTTP MCP egress guard with the CLI runtime dependencies", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "cli/package.json"), "utf8"))
     expect(manifest.dependencies.undici).toBeDefined()
     const chunks = path.join(REPO_ROOT, "cli/dist/chunks")
-    const helpers = fs.readdirSync(chunks).filter((name) => /^mcp-oauth-helper-.*\.mjs$/.test(name))
+    const helpers = fs.readdirSync(chunks).filter((name) => /^egress-guard-.*\.mjs$/.test(name))
     expect(helpers.length).toBeGreaterThan(0)
     const result = spawnSync(
       process.execPath,
