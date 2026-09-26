@@ -3,9 +3,10 @@
 //! These installs used to live in a first `.setup(..)` closure in `lib.rs`.
 //! Tauri keeps only the last closure handed to `Builder::setup`
 //! (`self.setup = Box::new(setup)`), and `lib.rs` registered a second one, so
-//! none of them ever ran on desktop. They now run inside the one setup hook the
-//! builder keeps, right after the logger is installed (so their failures are
-//! recorded) and before the gateway auto-start step (which needs the bridge).
+//! none of them ever ran on desktop. They now run as the `host_services` boot
+//! step (see `startup::STEPS`), right after the logger is installed (so their
+//! failures are recorded) and before the gateway auto-start step (which needs
+//! the bridge).
 //!
 //! Every step logs and continues on failure: a boot that cannot, say, widen
 //! the backups fs scope must still open its window.
@@ -130,23 +131,6 @@ fn capture_primary_screen_png() -> Option<Vec<u8>> {
 mod tests {
     use super::*;
 
-    /// Tauri keeps only the last `Builder::setup` closure, so a second
-    /// `.setup(` in `lib.rs` silently discards the first one's work.
-    #[test]
-    fn lib_rs_registers_exactly_one_setup_hook() {
-        let lib_rs = include_str!("../lib.rs");
-        let setup_calls = lib_rs
-            .lines()
-            .map(str::trim_start)
-            .filter(|line| !line.starts_with("//"))
-            .filter(|line| line.starts_with(".setup("))
-            .count();
-        assert_eq!(
-            setup_calls, 1,
-            "lib.rs must register exactly one setup hook"
-        );
-    }
-
     #[test]
     fn the_formerly_dead_installs_are_all_listed() {
         assert_eq!(
@@ -170,25 +154,5 @@ mod tests {
             backup_scope_dir(app_data),
             PathBuf::from("/data/com.cognia.app/backups")
         );
-    }
-
-    /// The setup hook installs host services after the logger exists (a record
-    /// written before `logging::bootstrap` is dropped) and before the gateway
-    /// auto-start step spawns, which needs the brain bridge in place.
-    #[test]
-    fn the_setup_hook_installs_host_services_between_logging_and_gateway() {
-        let lib_rs = include_str!("../lib.rs");
-        let position = |needle: &str| {
-            lib_rs
-                .find(needle)
-                .unwrap_or_else(|| panic!("lib.rs no longer contains `{needle}`"))
-        };
-        let setup_at = position("\n        .setup(|app| {");
-        let logging_at = position("logging::bootstrap(app)");
-        let install_at = position("startup::host_services::install(app);");
-        let gateway_at = position("Inbound LLM gateway auto-start");
-        assert!(setup_at < logging_at);
-        assert!(logging_at < install_at);
-        assert!(install_at < gateway_at);
     }
 }
