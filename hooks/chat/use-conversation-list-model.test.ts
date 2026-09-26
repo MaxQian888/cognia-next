@@ -119,6 +119,31 @@ describe("useConversationListModel", () => {
       .map((s) => (s.kind === "group" ? s.group.id : ""))
     expect(keys).toEqual(["__ungrouped__", "t1", "t2"])
   })
+
+  it("passes dateRunsInGroups through, and re-derives when it flips", () => {
+    const teams = [{ id: "t1", name: "Alpha" }]
+    const sessions = [session("a", { kind: "team", teamId: "t1" })]
+    const { result, rerender } = renderHook(
+      ({ dated }: { dated: boolean }) =>
+        useConversationListModel({
+          sessions,
+          query: "",
+          now: NOW,
+          groupBy: "team",
+          teams,
+          dateRunsInGroups: dated,
+        }),
+      { initialProps: { dated: true } }
+    )
+    const runsOf = () => {
+      const squad = result.current.sections.find((s) => s.kind === "group")
+      if (squad?.kind !== "group") throw new Error("expected the squad's group")
+      return squad.dateRuns
+    }
+    expect(runsOf()?.map((r) => r.bucket)).toEqual(["today"])
+    rerender({ dated: false })
+    expect(runsOf()).toBeUndefined()
+  })
 })
 
 describe("useConversationListModel time zone", () => {

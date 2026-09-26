@@ -26,6 +26,9 @@ describe("conversationSectionKindOf", () => {
     expect(conversationSectionKindOf("workspace:project-abc")).toBe("workspace")
     expect(conversationSectionKindOf("agent:char_x")).toBe("agent")
     expect(conversationSectionKindOf("recent")).toBe("recent")
+    expect(conversationSectionKindOf("team:t_1")).toBe("team")
+    // A squad's date run reports as its group.
+    expect(conversationSectionKindOf("team:t_1/date:today")).toBe("team")
   })
 
   it("refuses shapes it does not know rather than mislabel them", () => {

@@ -103,7 +103,9 @@
         "team": "对话 / 团队",
         "workspace": "工作区"
       },
-      "scopeTreeNote": "展开的侧栏始终按团队分组。此选项作用于收起侧栏时浮出的列表和窄窗口下的抽屉。"
+      "scopeTreeNote": "展开的侧栏始终先按团队分组。下方选项作用于收起侧栏时浮出的列表和窄窗口下的抽屉。",
+      "teamDateHeadings": "团队内按日期分段",
+      "teamDateHeadingsSortNote": "按标题或未读排序时没有可分段的日期。"
     },
     "groupEmpty": "还没有会话",
     "groupShowAll": "显示全部 {count} 条",

@@ -9,7 +9,9 @@ import {
 } from "@/lib/chat/conversation-order-freeze"
 import {
   conversationSectionKey,
+  DATE_BUCKET_ORDER,
   type ConversationSection,
+  type DateBucket,
 } from "@/lib/chat/conversation-list-model"
 
 /**
@@ -60,6 +62,12 @@ export interface UseConversationOrderFreezeParams {
    * from the new live order instead of pinning the one the reader just left.
    */
   orderKey?: string
+  /**
+   * The order date headers run in (`dateBucketOrderFor(sortBy)`) — where a
+   * held group puts a date run the live list only just grew. Defaults to
+   * newest first.
+   */
+  dateBucketOrder?: readonly DateBucket[]
 }
 
 export interface ConversationOrderFreeze {
@@ -85,6 +93,7 @@ export function useConversationOrderFreeze({
   disabled = false,
   preserveEmptyGroups = false,
   orderKey = "",
+  dateBucketOrder = DATE_BUCKET_ORDER,
 }: UseConversationOrderFreezeParams): ConversationOrderFreeze {
   const [hovering, setHovering] = useState(false)
   const [held, setHeld] = useState<FrozenConversationLayout | null>(null)
@@ -132,19 +141,26 @@ export function useConversationOrderFreeze({
 
   const displayed = useMemo(() => {
     if (!layout) return sections
-    const projected = projectFrozenSections(layout, sections, { preserveEmptyGroups })
+    const projected = projectFrozenSections(layout, sections, {
+      preserveEmptyGroups,
+      bucketOrder: dateBucketOrder,
+    })
     // Nothing moved since the capture — the usual case, and every hover
     // starts in it. Hand back the live array so the list below sees the same
     // identity and skips its render entirely.
     return sameLayout(projected, sections) ? sections : projected
-  }, [layout, sections, preserveEmptyGroups])
+  }, [layout, sections, preserveEmptyGroups, dateBucketOrder])
   return useMemo(
     () => ({ sections: displayed, onPointerEnter, onPointerLeave }),
     [displayed, onPointerEnter, onPointerLeave]
   )
 }
 
-/** Same sections, same rows (by identity), same order, same fold state. */
+/**
+ * Same sections, same rows (by identity), same order, same fold state — and,
+ * for a group split by date, the same runs: the rows can stay put while the
+ * cut between "Today" and "Yesterday" moves.
+ */
 function sameLayout(a: readonly ConversationSection[], b: readonly ConversationSection[]): boolean {
   if (a === b) return true
   if (a.length !== b.length) return false
@@ -158,6 +174,7 @@ function sameLayout(a: readonly ConversationSection[], b: readonly ConversationS
     }
     if (left.kind === "group" && right.kind === "group") {
       if ((left.previewHidden ?? 0) !== (right.previewHidden ?? 0)) return false
+      if (!sameDateRuns(left.dateRuns, right.dateRuns)) return false
     }
     if (left.sessions.length !== right.sessions.length) return false
     for (let j = 0; j < left.sessions.length; j++) {
@@ -165,4 +182,15 @@ function sameLayout(a: readonly ConversationSection[], b: readonly ConversationS
     }
   }
   return true
+}
+
+function sameDateRuns(
+  a: Extract<ConversationSection, { kind: "group" }>["dateRuns"],
+  b: Extract<ConversationSection, { kind: "group" }>["dateRuns"]
+): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  return a.every(
+    (run, i) => run.bucket === b[i]!.bucket && run.sessions.length === b[i]!.sessions.length
+  )
 }

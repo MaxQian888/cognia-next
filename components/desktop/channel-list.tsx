@@ -166,8 +166,18 @@ import type {
   ConversationSidebarTitleMotion,
   ConversationSortBy,
 } from "@cognia/agent-config-types"
-import { conversationSectionKey, UNGROUPED_ID } from "@/lib/chat/conversation-list-model"
-import type { ConversationGroupAxis, DateBucket } from "@/lib/chat/conversation-list-model"
+import {
+  conversationSectionKey,
+  dateBucketOrderFor,
+  owningGroupSectionKey,
+  UNGROUPED_ID,
+} from "@/lib/chat/conversation-list-model"
+import type {
+  ConversationDateSection,
+  ConversationGroupAxis,
+  DateBucket,
+} from "@/lib/chat/conversation-list-model"
+import { conversationReorderUnits } from "@/lib/chat/conversation-date-runs"
 import {
   applyTeamGroupPreviewCaps,
   isChatsScopeGroup,
@@ -195,6 +205,7 @@ import {
   CONVERSATION_SORT_BY_OPTIONS,
   DEFAULT_CONVERSATION_SORT_BY,
   resolveConversationSortBy,
+  sortSupportsDateBuckets,
   sortSupportsManualOrder,
 } from "@/lib/chat/conversation-filters"
 import {
@@ -1080,6 +1091,7 @@ function ChannelListBodyImpl({
   const showCustomIcons = sidebarSettings?.showCustomIcons ?? true
   const showTimestamps = sidebarSettings?.showTimestamps ?? true
   const groupBy = resolveConversationGroupBy(sidebarSettings)
+  const teamDateHeadings = sidebarSettings?.teamDateHeadings ?? true
   const sortBy = resolveConversationSortBy(sidebarSettings)
   const showUnreadBadges = sidebarSettings?.showUnreadBadges ?? true
   // What a query is allowed to reach: workspaces, archived rows, message
@@ -1273,6 +1285,10 @@ function ChannelListBodyImpl({
   // grouping; the merged rail's ⋯ menu still offers it, with a note saying
   // that is where it applies.
   const effectiveGroupBy: ConversationGroupBy = merged ? "team" : groupBy
+  const dateRunsOn = merged && teamDateHeadings
+  // The order the date headers run in — where a held (hovered) group slots a
+  // run the live list only just grew. A module constant per sort.
+  const dateBucketOrder = dateBucketOrderFor(sortBy)
   // Tell the session query's owner which grouping is on screen (see the prop).
   // A layout effect, so a switch to or from the merged rail re-scopes the
   // query before the frame that would show the other scope's rows.
@@ -1416,6 +1432,10 @@ function ChannelListBodyImpl({
       // the Chats group is always drawn. Archived browsing only lists what the
       // archive holds, so there empty headers would be noise.
       emitEmptyGroups: merged && view === "active",
+      // The scope tree's second level: each team group split by date. Only
+      // the merged rail draws the tree; the compact surfaces' grouping is the
+      // `groupBy` preference alone.
+      dateRunsInGroups: dateRunsOn,
       contentMatchIds: searchOptions.content ? contentMatchIds : undefined,
       searchIncludesArchived: searchOptions.includeArchived,
     })
@@ -1952,7 +1972,8 @@ function ChannelListBodyImpl({
     preserveEmptyGroups: merged,
     // Picking a grouping or sort from the menu inside this list is the reader
     // re-arranging it on purpose; the hold must follow, not pin the old order.
-    orderKey: `${effectiveGroupBy}:${sortBy}`,
+    orderKey: `${effectiveGroupBy}:${sortBy}:${dateRunsOn ? "dated" : "flat"}`,
+    dateBucketOrder,
   })
   // Drop the projection the moment it stops being needed: `settled` means the
   // store now carries the dropped order; `stale` means the store moved
@@ -1965,17 +1986,20 @@ function ChannelListBodyImpl({
   // Maps each session id to the ordered ids of the section it renders in (and
   // that section's stable key), so a drop can reorder that section (pinned /
   // date bucket / folder / recent) and tag the persisted order with the
-  // section it belongs to. Search results aren't reorderable and are
-  // intentionally excluded. Built from the *displayed* order so a second drag
-  // that starts before the store caught up still reasons about what is on
-  // screen.
+  // section it belongs to. In a group split by date the unit is the date run
+  // (`conversationReorderUnits`): a row's run follows from its timestamp, so
+  // a drop into another run has no order to keep and is refused. Search
+  // results aren't reorderable and are intentionally excluded. Built from the
+  // *displayed* order so a second drag that starts before the store caught up
+  // still reasons about what is on screen.
   const sectionIdsBySession = useMemo(() => {
     const map = new Map<string, { ids: string[]; key: string }>()
     for (const section of displaySections) {
       if (section.kind === "search") continue
-      const ids = section.sessions.map((s) => s.id)
-      const key = conversationSectionKey(section)
-      for (const id of ids) map.set(id, { ids, key })
+      for (const unit of conversationReorderUnits(section)) {
+        const ids = unit.sessions.map((s) => s.id)
+        for (const id of ids) map.set(id, { ids, key: unit.key })
+      }
     }
     return map
   }, [displaySections])
@@ -2030,9 +2054,11 @@ function ChannelListBodyImpl({
       if (e.active.data?.current?.type === "team") {
         // Landing on another squad's header targets that squad; landing on a
         // conversation row targets the squad its group belongs to (its
-        // section key is `team:<id>`), so the whole block is a drop zone.
+        // section key is `team:<id>`, or `team:<id>/date:<bucket>` for a row
+        // in one of the group's date runs), so the whole block is a drop zone.
         const overId = e.over ? String(e.over.id) : null
-        const overKey = overId ? sectionIdsBySession.get(overId)?.key : undefined
+        const overRowKey = overId ? sectionIdsBySession.get(overId)?.key : undefined
+        const overKey = overRowKey ? owningGroupSectionKey(overRowKey) : undefined
         const targetId =
           e.over?.data?.current?.type === "team"
             ? overId
@@ -2073,7 +2099,9 @@ function ChannelListBodyImpl({
       // the projection overrides exactly that snapshot and steps aside the
       // moment the live query moves. Persist first so a synchronous throw
       // never leaves a projection with nothing behind it.
-      const stored = cappedSections.find((s) => conversationSectionKey(s) === overSection.key)
+      const stored = cappedSections
+        .flatMap(conversationReorderUnits)
+        .find((unit) => unit.key === overSection.key)
       const baseIds = stored ? stored.sessions.map((s) => s.id) : overSection.ids
       const pending: PendingReorder = { sectionKey: overSection.key, baseIds, ids: action.ids }
       const persisted = rowActions.onReorderSessions(action.ids, overSection.key)
@@ -2216,6 +2244,7 @@ function ChannelListBodyImpl({
     showCustomIcons,
     showTimestamps,
     groupBy,
+    teamDateHeadings,
     sortBy,
     showUnreadBadges,
     searchOptions,
@@ -3080,6 +3109,8 @@ interface HeaderActionsProps {
   showCustomIcons: boolean
   showTimestamps: boolean
   groupBy: ConversationGroupBy
+  /** Date headings inside the expanded sidebar's team groups. */
+  teamDateHeadings: boolean
   sortBy: ConversationSortBy
   showUnreadBadges: boolean
   searchOptions: ResolvedConversationSearchOptions
@@ -3103,6 +3134,7 @@ function HeaderActions({
   showCustomIcons,
   showTimestamps,
   groupBy,
+  teamDateHeadings,
   sortBy,
   showUnreadBadges,
   searchOptions,
@@ -3272,11 +3304,13 @@ function HeaderActions({
             ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        {/* The merged rail's own grouping is not a preference — it is the scope
-            tree itself, always the team axis. The choice is still live on the
-            surfaces that draw a scoped list (the collapsed rail's peek, the
-            narrow-window drawer), so it stays reachable here and says where it
-            applies instead of disappearing without a word. */}
+        {/* The merged rail's first level is not a preference — it is the scope
+            tree itself, always the team axis; its second level, date headings
+            inside each group, is the switch at the top of this submenu. The
+            axis choice is still live on the surfaces that draw a scoped list
+            (the collapsed rail's peek, the narrow-window drawer), so it stays
+            reachable here and says where it applies instead of disappearing
+            without a word. */}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className="gap-2" data-testid="channel-list-menu-group">
             <ListTreeIcon className="size-4 text-muted-foreground" aria-hidden />
@@ -3287,12 +3321,34 @@ function HeaderActions({
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-56">
             {compact ? (
-              <DropdownMenuLabel
-                className="text-[11px] font-normal text-muted-foreground"
-                data-testid="channel-list-group-compact-note"
-              >
-                {t("groupBy.scopeTreeNote")}
-              </DropdownMenuLabel>
+              <>
+                <DropdownMenuCheckboxItem
+                  checked={teamDateHeadings}
+                  onCheckedChange={(checked) =>
+                    onUpdateDisplay({ teamDateHeadings: Boolean(checked) })
+                  }
+                  onSelect={keepMenuOpen}
+                  disabled={!sortSupportsDateBuckets(sortBy)}
+                  data-testid="channel-list-group-date-headings"
+                >
+                  {t("groupBy.teamDateHeadings")}
+                </DropdownMenuCheckboxItem>
+                {sortSupportsDateBuckets(sortBy) ? null : (
+                  <DropdownMenuLabel
+                    className="text-[11px] font-normal text-muted-foreground"
+                    data-testid="channel-list-group-date-headings-note"
+                  >
+                    {t("groupBy.teamDateHeadingsSortNote")}
+                  </DropdownMenuLabel>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel
+                  className="text-[11px] font-normal text-muted-foreground"
+                  data-testid="channel-list-group-compact-note"
+                >
+                  {t("groupBy.scopeTreeNote")}
+                </DropdownMenuLabel>
+              </>
             ) : null}
             <DropdownMenuRadioGroup
               value={groupBy}
@@ -3721,6 +3777,7 @@ function ConversationSectionsImpl({
                 }
                 collapsed={section.collapsed}
                 sessions={section.sessions}
+                dateRuns={section.dateRuns}
                 previewHidden={section.previewHidden ?? 0}
                 previewExpanded={teamGroupPreviewExpanded(section, scopeTree.previewExpanded)}
                 unreadCount={
@@ -3891,6 +3948,55 @@ function ConversationDragOverlay({
       ) : null}
     </DragOverlay>,
     document.body
+  )
+}
+
+/**
+ * One date run of a scope-tree group: a quiet "Today" / "Yesterday" label
+ * over the rows it holds, indented with them.
+ *
+ * The label is deliberately *not* sticky: the group header above it already
+ * sticks at the same offset, and a second stuck strip would cover the one that
+ * says which squad the rows belong to. The run is its own sortable block
+ * under its own section key, so a drag reorders inside it and a manual order
+ * made here stays here when a row ages into the next run.
+ */
+function DateRunRows({
+  run,
+  nested,
+  sortable,
+  renderRow,
+  rowsProps,
+}: {
+  run: ConversationDateSection
+  nested: boolean
+  sortable: boolean
+  renderRow: (s: ChatSession) => ReactNode
+  rowsProps: SectionRowsProps
+}) {
+  const t = useTranslations("desktop.channelList")
+  const runKey = conversationSectionKey(run)
+  const label = t(BUCKET_LABEL_KEY[run.bucket])
+  return (
+    <div role="group" aria-label={label} data-testid={`sidebar-date-run-${runKey}`}>
+      <div
+        className={cn(
+          "flex h-5 items-center pt-1 text-[10px] font-medium text-muted-foreground/70",
+          nested ? "pl-6" : "pl-2.5"
+        )}
+        aria-hidden
+      >
+        <span className="truncate">{label}</span>
+      </div>
+      <SectionRows
+        sectionKey={runKey}
+        sessions={run.sessions}
+        sortable={sortable}
+        renderRow={renderRow}
+        className={nested ? "pl-4" : undefined}
+        {...rowsProps}
+      />
+    </div>
   )
 }
 
@@ -4162,6 +4268,7 @@ function ScopeTreeGroupSection({
   name,
   collapsed,
   sessions,
+  dateRuns,
   previewHidden,
   previewExpanded,
   unreadCount,
@@ -4185,6 +4292,11 @@ function ScopeTreeGroupSection({
   collapsed: boolean
   /** The preview slice — `previewHidden` more rows sit behind "Show more". */
   sessions: ChatSession[]
+  /**
+   * The same rows split by date ("Today", "Yesterday", …) when the tree's
+   * date headings are on; each run is its own reorder block.
+   */
+  dateRuns?: readonly ConversationDateSection[]
   previewHidden: number
   /** The cap was lifted AND the group is long enough that it matters. */
   previewExpanded: boolean
@@ -4247,6 +4359,17 @@ function ScopeTreeGroupSection({
           {t("chatsEmpty")}
         </button>
       )
+    ) : dateRuns ? (
+      dateRuns.map((run) => (
+        <DateRunRows
+          key={run.bucket}
+          run={run}
+          nested={nested}
+          sortable={sortable}
+          renderRow={renderRow}
+          rowsProps={rowsProps}
+        />
+      ))
     ) : (
       <SectionRows
         sectionKey={sectionKey}

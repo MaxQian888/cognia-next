@@ -11,6 +11,7 @@
  * reveal ladder all read the same capped truth the paint does.
  */
 
+import { sliceGroupRows } from "./conversation-date-runs"
 import {
   conversationSectionKey,
   UNGROUPED_ID,
@@ -58,11 +59,9 @@ export function applyTeamGroupPreviewCaps(
     // A remainder of one or two rows buys nothing — show the tail rather than
     // an expander row nearly as tall as what it hides.
     if (hidden <= PREVIEW_TAIL_TOLERANCE) return section
-    return {
-      ...section,
-      sessions: section.sessions.slice(0, limit),
-      previewHidden: hidden,
-    }
+    // A split group's runs are cut at the same row, so the preview draws
+    // only the date headers its rows sit under.
+    return { ...sliceGroupRows(section, limit), previewHidden: hidden }
   })
 }
 

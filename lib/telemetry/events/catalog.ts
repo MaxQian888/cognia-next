@@ -6,7 +6,7 @@ type AiSurface = "chat" | "agent-team" | "workflow" | "connector"
 
 /** The section kinds a conversation-list row can live in — the prefix of `conversationSectionKey`. */
 export type ConversationListSectionKind =
-  "pinned" | "folder" | "date" | "recent" | "workspace" | "agent" | "search"
+  "pinned" | "folder" | "date" | "recent" | "workspace" | "agent" | "team" | "search"
 
 export interface TelemetryEventCatalog {
   "chat.message.sent": {

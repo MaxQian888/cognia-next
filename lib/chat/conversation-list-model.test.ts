@@ -4,7 +4,10 @@ import {
   buildConversationSections,
   conversationSectionKey,
   dateBucketFor,
+  dateBucketOrderFor,
+  dateRunSectionKey,
   dedupeSessionsById,
+  owningGroupSectionKey,
   DATE_BUCKET_ORDER,
   assignableFolders,
   folderAcceptsSession,
@@ -342,6 +345,148 @@ describe("groupBy: team", () => {
   it("keys team sections separately from a workspace sharing the id", () => {
     const group = { id: "x", name: "X" }
     expect(conversationSectionKey({ kind: "group", axis: "team", group })).toBe("team:x")
+  })
+})
+
+describe("date runs inside groups (dateRunsInGroups)", () => {
+  const teams = [{ id: "t1", name: "Alpha" }]
+  const today = session("today", { kind: "team", teamId: "t1", updatedAt: NOW - 1000 })
+  const today2 = session("today2", { kind: "team", teamId: "t1", updatedAt: NOW - 2000 })
+  const yesterday = session("yesterday", { kind: "team", teamId: "t1", updatedAt: NOW - DAY })
+  const old = session("old", { kind: "team", teamId: "t1", updatedAt: NOW - 90 * DAY })
+  const dm = session("dm", { updatedAt: NOW - 3 * DAY })
+
+  function groupOf(
+    sections: ReturnType<typeof buildConversationSections>["sections"],
+    key: string
+  ) {
+    const section = sections.find((s) => conversationSectionKey(s) === key)
+    if (section?.kind !== "group") throw new Error(`no group ${key}`)
+    return section
+  }
+
+  it("splits each group by date, runs in header order, rows flattened in the same order", () => {
+    const { sections, orderedIds } = buildConversationSections(
+      [old, yesterday, dm, today2, today],
+      [],
+      opts({ groupBy: "team", teams, dateRunsInGroups: true })
+    )
+    const squad = groupOf(sections, "team:t1")
+    expect(squad.dateRuns!.map((run) => run.bucket)).toEqual(["today", "yesterday", "older"])
+    expect(squad.dateRuns!.map((run) => run.sessions.map((s) => s.id))).toEqual([
+      ["today", "today2"],
+      ["yesterday"],
+      ["old"],
+    ])
+    expect(squad.sessions.map((s) => s.id)).toEqual(["today", "today2", "yesterday", "old"])
+    // Each run is scoped to its group, so its key differs from the top-level
+    // bucket and from the same bucket under another group.
+    expect(squad.dateRuns!.map((run) => conversationSectionKey(run))).toEqual([
+      "team:t1/date:today",
+      "team:t1/date:yesterday",
+      "team:t1/date:older",
+    ])
+    const chats = groupOf(sections, `team:${UNGROUPED_ID}`)
+    expect(chats.dateRuns!.map((run) => conversationSectionKey(run))).toEqual([
+      `team:${UNGROUPED_ID}/date:prev7`,
+    ])
+    expect(orderedIds).toEqual(["dm", "today", "today2", "yesterday", "old"])
+  })
+
+  it("leaves groups unsplit when the option is off", () => {
+    const { sections } = buildConversationSections(
+      [today, yesterday],
+      [],
+      opts({ groupBy: "team", teams })
+    )
+    expect(groupOf(sections, "team:t1").dateRuns).toBeUndefined()
+  })
+
+  it("follows the sort's date axis: reversed for oldest-first, none for title", () => {
+    const oldest = buildConversationSections(
+      [today, yesterday, old],
+      [],
+      opts({ groupBy: "team", teams, dateRunsInGroups: true, sortBy: "oldest" })
+    )
+    expect(groupOf(oldest.sections, "team:t1").dateRuns!.map((run) => run.bucket)).toEqual([
+      "older",
+      "yesterday",
+      "today",
+    ])
+    const byTitle = buildConversationSections(
+      [today, yesterday],
+      [],
+      opts({ groupBy: "team", teams, dateRunsInGroups: true, sortBy: "title" })
+    )
+    expect(groupOf(byTitle.sections, "team:t1").dateRuns).toBeUndefined()
+  })
+
+  it("cuts by creation time under the created sort", () => {
+    const madeLongAgo = session("made", {
+      kind: "team",
+      teamId: "t1",
+      createdAt: NOW - 40 * DAY,
+      updatedAt: NOW,
+    })
+    const { sections } = buildConversationSections(
+      [madeLongAgo],
+      [],
+      opts({ groupBy: "team", teams, dateRunsInGroups: true, sortBy: "created" })
+    )
+    expect(groupOf(sections, "team:t1").dateRuns!.map((run) => run.bucket)).toEqual(["older"])
+  })
+
+  it("keeps a manual order inside the run it was made in", () => {
+    // Dragged to the top of Today; a day later the row is in Yesterday, where
+    // that rank means nothing — recency places it, not the stale rank.
+    const draggedToday = session("dragged", {
+      kind: "team",
+      teamId: "t1",
+      updatedAt: NOW - DAY - 5000,
+      manualOrder: 0,
+      manualOrderSection: "team:t1/date:today",
+    })
+    const rankedHere = session("ranked", {
+      kind: "team",
+      teamId: "t1",
+      updatedAt: NOW - DAY - 9000,
+      manualOrder: 0,
+      manualOrderSection: "team:t1/date:yesterday",
+    })
+    const newer = session("newer", { kind: "team", teamId: "t1", updatedAt: NOW - DAY })
+    const { sections } = buildConversationSections(
+      [draggedToday, rankedHere, newer],
+      [],
+      opts({ groupBy: "team", teams, dateRunsInGroups: true })
+    )
+    const run = groupOf(sections, "team:t1").dateRuns!.find((r) => r.bucket === "yesterday")!
+    // `ranked` holds its rank for this run; the others slot in by recency.
+    expect(run.sessions.map((s) => s.id)).toEqual(["newer", "dragged", "ranked"])
+  })
+
+  it("keeps an empty group's header with no runs when empty groups are emitted", () => {
+    const { sections } = buildConversationSections(
+      [dm],
+      [],
+      opts({ groupBy: "team", teams, dateRunsInGroups: true, emitEmptyGroups: true })
+    )
+    const squad = groupOf(sections, "team:t1")
+    expect(squad.sessions).toEqual([])
+    expect(squad.dateRuns).toEqual([])
+  })
+})
+
+describe("section-key helpers for date runs", () => {
+  it("names a run under its group and resolves it back to the group", () => {
+    expect(dateRunSectionKey("team:t1", "today")).toBe("team:t1/date:today")
+    expect(owningGroupSectionKey("team:t1/date:today")).toBe("team:t1")
+    expect(owningGroupSectionKey("team:t1")).toBe("team:t1")
+    expect(owningGroupSectionKey("date:today")).toBe("date:today")
+  })
+
+  it("orders date headers newest first unless the sort is oldest-first", () => {
+    expect(dateBucketOrderFor("recent")).toEqual(DATE_BUCKET_ORDER)
+    expect(dateBucketOrderFor("oldest")).toEqual([...DATE_BUCKET_ORDER].reverse())
   })
 })
 

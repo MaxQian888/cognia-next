@@ -72,27 +72,60 @@ export const UNGROUPED_ID = "__ungrouped__"
  */
 export type ConversationGroupAxis = "workspace" | "agent" | "team"
 
+/**
+ * One relative-date bucket of rows.
+ *
+ * At the top level (`groupBy: "date"`) it is a section of its own. Nested in a
+ * group's {@link ConversationGroupSection.dateRuns} it is a *run* of that
+ * group — "Today" under a squad — and carries the group's section key as its
+ * `scope`, so its own key (`team:<id>/date:today`) is distinct from both the
+ * top-level bucket and the same bucket under every other group.
+ */
+export interface ConversationDateSection {
+  kind: "date"
+  bucket: DateBucket
+  sessions: ChatSession[]
+  /** The enclosing group's section key, for a run nested in a group. */
+  scope?: string
+}
+
+/** One workspace / agent / team, under `groupBy: "workspace" | "agent" | "team"`. */
+export interface ConversationGroupSection {
+  kind: "group"
+  axis: ConversationGroupAxis
+  group: ConversationGroup
+  /**
+   * Every row of the group in render order. With {@link dateRuns} set, this
+   * is exactly the runs' rows concatenated — every consumer that asks "which
+   * rows are in this group" (counts, keyboard order, reveal, selection) reads
+   * this and never has to know the runs exist.
+   */
+  sessions: ChatSession[]
+  collapsed: boolean
+  /**
+   * Rows cut from view by the renderer's preview cap ("Show more"). Never
+   * set by the model itself — `applyTeamGroupPreviewCaps` annotates the
+   * sections it slices so the row count and the expander agree.
+   */
+  previewHidden?: number
+  /**
+   * The group's rows split by relative date (`dateRunsInGroups`), in header
+   * order, empty runs omitted. Absent when the group is not split — the
+   * option is off, or the sort has no date axis. Anything that reorders or
+   * slices `sessions` must keep the two in step; the helpers in
+   * `lib/chat/conversation-date-runs.ts` do.
+   */
+  dateRuns?: ConversationDateSection[]
+}
+
 export type ConversationSection =
   | { kind: "pinned"; sessions: ChatSession[] }
   | { kind: "folder"; folder: SessionFolder; sessions: ChatSession[]; collapsed: boolean }
-  | { kind: "date"; bucket: DateBucket; sessions: ChatSession[] }
+  | ConversationDateSection
   // Flat "recent" list emitted instead of buckets when grouping is off.
   | { kind: "recent"; sessions: ChatSession[] }
   | { kind: "search"; sessions: ChatSession[] }
-  // One per workspace / agent / team, under `groupBy: "workspace" | "agent" | "team"`.
-  | {
-      kind: "group"
-      axis: ConversationGroupAxis
-      group: ConversationGroup
-      sessions: ChatSession[]
-      collapsed: boolean
-      /**
-       * Rows cut from view by the renderer's preview cap ("Show more"). Never
-       * set by the model itself — `applyTeamGroupPreviewCaps` annotates the
-       * sections it slices so the row count and the expander agree.
-       */
-      previewHidden?: number
-    }
+  | ConversationGroupSection
 
 export interface BuildSectionsOptions {
   /** Search text. Empty/whitespace = grouped; non-empty = flat result list. */
@@ -158,6 +191,17 @@ export interface BuildSectionsOptions {
    * ungrouped bucket is emitted too, for the same reason.
    */
   emitEmptyGroups?: boolean
+  /**
+   * Split every group's rows into relative-date runs ("Today", "Yesterday",
+   * …) inside the group — the second level of the merged rail's scope tree,
+   * whose first level is always the team axis. Follows the same date axis the
+   * top-level buckets do: `created` cuts by creation time, `oldest` reverses
+   * the run order with the rows, and `title` / `unread` (no date axis) leave
+   * the groups unsplit. Each run orders its rows under its own section key
+   * (`<group>/date:<bucket>`), so a hand-dragged order made inside "Today"
+   * does not pin a row to the top of "Yesterday" once it ages into it.
+   */
+  dateRunsInGroups?: boolean
   /**
    * Optional set of session ids whose message *content* matched the query
    * (resolved async by the caller). In search mode a session matches when its
@@ -338,6 +382,7 @@ export function conversationSectionKey(
   section: Pick<ConversationSection, "kind"> & {
     folder?: SessionFolder
     bucket?: DateBucket
+    scope?: string
     axis?: ConversationGroupAxis
     group?: ConversationGroup
   }
@@ -348,7 +393,9 @@ export function conversationSectionKey(
     case "folder":
       return `folder:${section.folder!.id}`
     case "date":
-      return `date:${section.bucket!}`
+      return section.scope != null
+        ? dateRunSectionKey(section.scope, section.bucket!)
+        : `date:${section.bucket!}`
     case "recent":
       return "recent"
     case "search":
@@ -356,6 +403,34 @@ export function conversationSectionKey(
     case "group":
       return `${section.axis!}:${section.group!.id}`
   }
+}
+
+const OLDEST_FIRST_BUCKET_ORDER: readonly DateBucket[] = [...DATE_BUCKET_ORDER].reverse()
+
+/**
+ * The order date headers run in under `sortBy`: newest first, except
+ * oldest-first, which reverses the headers along with the rows.
+ */
+export function dateBucketOrderFor(sortBy: ConversationSortBy): readonly DateBucket[] {
+  return sortBy === "oldest" ? OLDEST_FIRST_BUCKET_ORDER : DATE_BUCKET_ORDER
+}
+
+/** Separates a group's key from its nested date run's in a section key. */
+const DATE_RUN_KEY_SEPARATOR = "/date:"
+
+/** Section key of the `bucket` run nested in the group keyed `groupKey`. */
+export function dateRunSectionKey(groupKey: string, bucket: DateBucket): string {
+  return `${groupKey}${DATE_RUN_KEY_SEPARATOR}${bucket}`
+}
+
+/**
+ * The group a section key belongs to: the key itself, or — for a nested date
+ * run — the enclosing group's. What a drop on a row resolves to when it asks
+ * "which squad is this".
+ */
+export function owningGroupSectionKey(sectionKey: string): string {
+  const cut = sectionKey.indexOf(DATE_RUN_KEY_SEPARATOR)
+  return cut === -1 ? sectionKey : sectionKey.slice(0, cut)
 }
 
 /**
@@ -747,6 +822,10 @@ function groupSessions(
  * reverses the header order along with the rows, and `title` / `unread` — which
  * have no date axis at all — fall back to one flat `recent` section.
  *
+ * With `dateRunsInGroups`, every group is split once more into date runs on
+ * that same axis (`ConversationGroupSection.dateRuns`), each ordered under its
+ * own run key.
+ *
  * `groupBy: "workspace"` additionally sorts the active workspace first and
  * starts every other workspace collapsed. Inside every section rows follow
  * `sortBy` (recency by default, the only mode honoring a manual drag order);
@@ -772,6 +851,7 @@ export function buildConversationSections(
     activeWorkspaceId = null,
     groupCollapseOverrides = EMPTY_COLLAPSE_OVERRIDES,
     emitEmptyGroups = false,
+    dateRunsInGroups = false,
     contentMatchIds,
     searchIncludesArchived = false,
     sortBy = "recent",
@@ -899,6 +979,23 @@ export function buildConversationSections(
   // `title` and `unread` have no date axis, so date buckets would put headers on
   // a list they do not explain — those modes render one flat section instead.
   const dateAxisApplies = sortSupportsDateBuckets(sortBy)
+  // Oldest-first orders the rows *and* the headers: leaving "Today" on top
+  // while the rows under it ran oldest-first was the same disagreement the
+  // basis fixes one level down.
+  const bucketOrder = dateBucketOrderFor(sortBy)
+  const splitByDate = (list: readonly ChatSession[]) => {
+    const buckets = new Map<DateBucket, ChatSession[]>()
+    for (const s of list) {
+      const bucket = dateBucketFor(now, conversationTimeOf(s, timeBasis), timeZone)
+      const members = buckets.get(bucket)
+      if (members) members.push(s)
+      else buckets.set(bucket, [s])
+    }
+    return bucketOrder.flatMap((bucket) => {
+      const members = buckets.get(bucket)
+      return members?.length ? [{ bucket, members }] : []
+    })
+  }
   if (groupBy === "none" || (groupBy === "date" && !dateAxisApplies)) {
     if (loose.length) sections.push({ kind: "recent", sessions: orderIn(loose, "recent") })
   } else if (groupBy === "workspace" || groupBy === "agent" || groupBy === "team") {
@@ -933,34 +1030,42 @@ export function buildConversationSections(
         activeWorkspaceId != null &&
         group.id !== activeWorkspaceId &&
         group.id !== UNGROUPED_ID
-      sections.push({
-        kind: "group",
-        axis,
-        group,
-        sessions: orderIn(members, key),
-        collapsed: groupCollapseOverrides[key] ?? collapsedByDefault,
-      })
+      const collapsed = groupCollapseOverrides[key] ?? collapsedByDefault
+      if (dateRunsInGroups && dateAxisApplies) {
+        // Each run is ordered under its own key — see `dateRunsInGroups`.
+        const dateRuns: ConversationDateSection[] = splitByDate(members).map(
+          ({ bucket, members: runMembers }) => ({
+            kind: "date",
+            bucket,
+            scope: key,
+            sessions: orderIn(runMembers, dateRunSectionKey(key, bucket)),
+          })
+        )
+        sections.push({
+          kind: "group",
+          axis,
+          group,
+          sessions: dateRuns.flatMap((run) => run.sessions),
+          collapsed,
+          dateRuns,
+        })
+      } else {
+        sections.push({
+          kind: "group",
+          axis,
+          group,
+          sessions: orderIn(members, key),
+          collapsed,
+        })
+      }
     }
   } else {
-    const buckets = new Map<DateBucket, ChatSession[]>()
-    for (const s of loose) {
-      const bucket = dateBucketFor(now, conversationTimeOf(s, timeBasis), timeZone)
-      const list = buckets.get(bucket)
-      if (list) list.push(s)
-      else buckets.set(bucket, [s])
-    }
-    // Oldest-first orders the rows *and* the headers: leaving "Today" on top
-    // while the rows under it ran oldest-first was the same disagreement the
-    // basis fixes one level down.
-    const bucketOrder = sortBy === "oldest" ? [...DATE_BUCKET_ORDER].reverse() : DATE_BUCKET_ORDER
-    for (const bucket of bucketOrder) {
-      const list = buckets.get(bucket)
-      if (list?.length)
-        sections.push({
-          kind: "date",
-          bucket,
-          sessions: orderIn(list, `date:${bucket}`),
-        })
+    for (const { bucket, members } of splitByDate(loose)) {
+      sections.push({
+        kind: "date",
+        bucket,
+        sessions: orderIn(members, `date:${bucket}`),
+      })
     }
   }
 

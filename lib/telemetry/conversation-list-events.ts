@@ -30,12 +30,14 @@ const SECTION_KINDS: ReadonlySet<ConversationListSectionKind> =
     "recent",
     "workspace",
     "agent",
+    "team",
     "search",
   ])
 
 /**
  * The kind a `conversationSectionKey` denotes — the part before the first
- * `:` (`folder:f_123` → `folder`, `date:today` → `date`, `pinned` → `pinned`).
+ * `:` (`folder:f_123` → `folder`, `date:today` → `date`, `pinned` → `pinned`;
+ * a squad's date run `team:t_1/date:today` reports as its group, `team`).
  * Unknown shapes resolve to `null` so a future section kind is dropped from
  * telemetry rather than reported under a wrong label.
  */

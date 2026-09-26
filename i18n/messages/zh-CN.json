@@ -50643,7 +50643,6 @@
       "agentTurn": {
         "allowedTools": {
           "hint": "限制临时角色的工具面。留空 = 主机默认。",
-          "hintAgent": "本轮收窄该智能体可用的工具。留空则沿用智能体自己的工具面。",
           "label": "允许的工具（逗号分隔）",
           "placeholder": "Bash, Read, Edit"
         },
@@ -50655,39 +50654,13 @@
           "hint": "工具调用的作用范围（仅桌面端）。",
           "label": "工作目录"
         },
-        "disallowedTools": {
-          "empty": "未禁用任何工具。",
-          "hint": "无论智能体允许与否，本轮都不会提供这些工具。",
-          "label": "禁用工具"
-        },
-        "instructions": {
-          "hint": "追加在智能体自身提示词之后，仅作用于本轮，不会替换原提示词。",
-          "label": "额外指令"
-        },
-        "knowledgeBaseIds": {
-          "hint": "本轮与智能体自己的知识库一起检索。需要桌面端向量库。",
-          "label": "额外知识库"
-        },
         "maxTurns": {
           "hint": "智能体步骤的上限。",
           "label": "最大回合数"
         },
-        "mcpServerIds": {
-          "hint": "为本轮附加已启用的服务器。未启用的服务器会被忽略，不会被自动开启。",
-          "label": "额外 MCP 服务器"
-        },
         "model": {
           "hint": "默认使用提供方配置的模型。",
-          "hintAgent": "本轮覆盖该智能体的模型。留空则沿用智能体自己的模型。",
           "label": "模型（可选）"
-        },
-        "permissionCap": {
-          "acceptEdits": "自动接受编辑",
-          "default": "执行前询问",
-          "hint": "只能降低智能体本轮的权限模式，不能提高。",
-          "label": "权限上限",
-          "none": "不设上限",
-          "plan": "计划（只读）"
         },
         "piiGate": {
           "block": "阻断敏感数据",
@@ -50701,10 +50674,6 @@
         "requireTools": {
           "hint": "sidecar 不可用时（Web/移动端）直接失败，而不是降级为纯文本。",
           "label": "必须有工具"
-        },
-        "skillIds": {
-          "hint": "在智能体自身技能之外，为本轮附加的技能。",
-          "label": "额外技能"
         },
         "systemPrompt": {
           "hint": "未选择角色时使用。",
@@ -52928,7 +52897,6 @@
         "addLiteral": "使用「{value}」",
         "character": "选择角色",
         "externalAgent": "选择外部智能体",
-        "knowledgeBase": "添加知识库",
         "mcpServer": "选择 MCP 服务器",
         "model": "选择模型",
         "noResults": "无匹配项",

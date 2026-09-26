@@ -38,15 +38,24 @@ jest.mock("@/components/chat/ui/hover-scroll-text", () => {
   }
 })
 
-jest.mock("@cognia/logging", () => ({
-  loggers: {
-    ui: {
-      info: (...args: unknown[]) => logInfo(...args),
-      warn: jest.fn(),
-      error: jest.fn(),
-    },
-  },
-}))
+// Complete logger mock: the delete confirm's live query comes from the
+// `@/hooks/data` barrel, whose chain reaches lib/execution/broker — that calls
+// createLogger() at module load, and other modules on the way read loggers of
+// their own namespaces. `loggers.ui.info` stays observable.
+jest.mock("@cognia/logging", () => {
+  const makeLogger = (): Record<string, unknown> => ({
+    info: (...args: unknown[]) => logInfo(...args),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    child: () => makeLogger(),
+  })
+  return {
+    loggers: new Proxy({}, { get: () => makeLogger() }),
+    createLogger: () => makeLogger(),
+  }
+})
 
 // The branch count behind the delete confirm is a Dexie live query. Stubbed so
 // the count is a test input rather than a seeded database.

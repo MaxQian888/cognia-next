@@ -184,6 +184,42 @@ describe("projectPendingReorder", () => {
     )
   })
 
+  it("projects a drop inside one date run of a split group", () => {
+    const split: ConversationSection[] = [
+      {
+        kind: "group",
+        axis: "team",
+        group: { id: "t1", name: "T" },
+        collapsed: false,
+        sessions: [a, b, c],
+        dateRuns: [
+          { kind: "date", bucket: "today", scope: "team:t1", sessions: [a, b] },
+          { kind: "date", bucket: "older", scope: "team:t1", sessions: [c] },
+        ],
+      },
+    ]
+    const runPending: PendingReorder = {
+      sectionKey: "team:t1/date:today",
+      baseIds: ["a", "b"],
+      ids: ["b", "a"],
+    }
+    const result = projectPendingReorder(split, runPending)
+    expect(result.status).toBe("applied")
+    const group = result.sections[0]!
+    if (group.kind !== "group") throw new Error("expected a group")
+    expect(group.sessions).toEqual([b, a, c])
+    expect(group.dateRuns![0]!.sessions).toEqual([b, a])
+    expect(group.dateRuns![1]!.sessions).toEqual([c])
+    // The group's own key is not a reorder unit once it is split.
+    expect(
+      projectPendingReorder(split, {
+        sectionKey: "team:t1",
+        baseIds: ["a", "b", "c"],
+        ids: ["b", "a", "c"],
+      }).status
+    ).toBe("stale")
+  })
+
   it("matches sections by their stable key, so a folder and a date bucket never collide", () => {
     const foldered: ConversationSection[] = [
       {

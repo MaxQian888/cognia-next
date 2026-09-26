@@ -1,8 +1,11 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 
+import { flattenDateRuns, isDateRunHost, nestDateRuns } from "@/lib/chat/conversation-date-runs"
 import {
   conversationSectionKey,
+  DATE_BUCKET_ORDER,
   type ConversationSection,
+  type DateBucket,
 } from "@/lib/chat/conversation-list-model"
 
 /**
@@ -104,12 +107,17 @@ export interface FrozenConversationLayout {
   sections: Array<{ section: ConversationSection; ids: readonly string[] }>
 }
 
-/** Snapshot the layout currently on screen. */
+/**
+ * Snapshot the layout currently on screen.
+ *
+ * A group split into date runs is held run by run (`flattenDateRuns`): the
+ * run a row sits in is membership too, the same as a top-level date bucket.
+ */
 export function freezeConversationLayout(
   sections: readonly ConversationSection[]
 ): FrozenConversationLayout {
   return {
-    sections: sections.map((section) => ({
+    sections: flattenDateRuns(sections).map((section) => ({
       section,
       ids: section.sessions.map((s) => s.id),
     })),
@@ -131,16 +139,31 @@ export function freezeConversationLayout(
  * with `preserveEmptyGroups`, `group` sections too: in the scope tree an
  * empty squad group is a navigation entity (its header still folds, serves
  * its menu and takes drops), so it must not flicker out under the pointer.
+ *
+ * Split groups are projected run by run and folded back together, their runs
+ * in `bucketOrder` — the order the list's date headers run in (newest first
+ * unless the sort is oldest-first; `dateBucketOrderFor`).
  */
 export function projectFrozenSections(
   frozen: FrozenConversationLayout,
-  live: readonly ConversationSection[],
-  opts: { preserveEmptyGroups?: boolean } = {}
+  liveSections: readonly ConversationSection[],
+  opts: { preserveEmptyGroups?: boolean; bucketOrder?: readonly DateBucket[] } = {}
 ): readonly ConversationSection[] {
   // Identity is preserved in the common case: this runs on every live-query
   // emit and feeds the render memos below it.
-  if (frozen.sections.length === 0) return live
+  if (frozen.sections.length === 0) return liveSections
+  const live = flattenDateRuns(liveSections)
+  return nestDateRuns(projectFlatSections(frozen, live, opts), {
+    bucketOrder: opts.bucketOrder ?? DATE_BUCKET_ORDER,
+    preserveEmptyGroups: opts.preserveEmptyGroups,
+  })
+}
 
+function projectFlatSections(
+  frozen: FrozenConversationLayout,
+  live: readonly ConversationSection[],
+  opts: { preserveEmptyGroups?: boolean }
+): readonly ConversationSection[] {
   // Fresh row data by id, and where the live model would put each row.
   const rowById = new Map<string, ChatSession>()
   const liveSectionOf = new Map<string, string>()
@@ -190,8 +213,11 @@ export function projectFrozenSections(
       ? mergeFrozenOrder(surviving, [...liveOrder, ...elsewhere])
       : surviving
     const sessions = ids.map((id) => rowById.get(id)!).filter(Boolean)
+    // A split group's host never holds rows of its own; whether it survives
+    // is decided once its runs are folded back in (`nestDateRuns`).
     const keepEmpty =
       entry.section.kind === "folder" ||
+      isDateRunHost(entry.section) ||
       (opts.preserveEmptyGroups && entry.section.kind === "group")
     if (sessions.length === 0 && !keepEmpty) continue
     // Carry the live section's own metadata (a folder rename, a collapse the

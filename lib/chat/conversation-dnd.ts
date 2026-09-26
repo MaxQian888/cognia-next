@@ -8,12 +8,16 @@
  *  - Drop an unpinned conversation onto the Pinned section's header (or the
  *    "drop here to pin" zone the list shows while nothing is pinned) → pin it.
  *  - Drop a conversation onto another conversation in the same section →
- *    reorder that section (Pinned, a date bucket, a folder, or the flat
- *    "recent" list). Both rows must belong to the same section; dropping across
- *    sections (e.g. between two date buckets) has no manual-order meaning.
+ *    reorder that section (Pinned, a date bucket, a folder, the flat "recent"
+ *    list, or one date run of a split group). Both rows must belong to the
+ *    same section; dropping across sections (e.g. between two date buckets, or
+ *    two runs of one squad) has no manual-order meaning.
  */
 
-import { conversationSectionKey, type ConversationSection } from "./conversation-list-model"
+import type { ChatSession } from "@cognia/agent-config-types"
+
+import { conversationReorderUnits, replaceReorderUnitSessions } from "./conversation-date-runs"
+import type { ConversationSection } from "./conversation-list-model"
 
 /** Minimal shape of a @dnd-kit draggable/droppable identifier + payload. */
 export interface DndNode {
@@ -128,7 +132,10 @@ export function resolveConversationDrop(
  * carry the row into the slot it will keep.
  */
 export interface PendingReorder {
-  /** `conversationSectionKey` of the section the drop happened in. */
+  /**
+   * `conversationSectionKey` of the section the drop happened in — for a
+   * split group, of the date run (`conversationReorderUnits`).
+   */
   sectionKey: string
   /** That section's ids as the *store* had them at drop time — the snapshot the projection overrides. */
   baseIds: readonly string[]
@@ -165,21 +172,35 @@ export function projectPendingReorder<S extends ConversationSection>(
   pending: PendingReorder | null
 ): { sections: readonly S[]; status: PendingReorderStatus } {
   if (!pending) return { sections, status: "idle" }
-  const index = sections.findIndex(
-    (section) => conversationSectionKey(section) === pending.sectionKey
-  )
+  let index = -1
+  let unitSessions: readonly ChatSession[] = []
+  for (let i = 0; i < sections.length && index === -1; i++) {
+    const unit = conversationReorderUnits(sections[i]!).find(
+      (candidate) => candidate.key === pending.sectionKey
+    )
+    if (unit) {
+      index = i
+      unitSessions = unit.sessions
+    }
+  }
   if (index === -1) return { sections, status: "stale" }
   const section = sections[index]!
-  const currentIds = section.sessions.map((s) => s.id)
+  const currentIds = unitSessions.map((s) => s.id)
   if (sameOrder(currentIds, pending.ids)) return { sections, status: "settled" }
   if (!sameOrder(currentIds, pending.baseIds)) return { sections, status: "stale" }
-  const byId = new Map(section.sessions.map((s) => [s.id, s]))
+  const byId = new Map(unitSessions.map((s) => [s.id, s]))
   // A dropped order is a permutation of the snapshot by construction
   // (`resolveConversationDrop`); anything else cannot be projected honestly.
   if (pending.ids.length !== byId.size || !pending.ids.every((id) => byId.has(id))) {
     return { sections, status: "stale" }
   }
+  const replaced = replaceReorderUnitSessions(
+    section,
+    pending.sectionKey,
+    pending.ids.map((id) => byId.get(id)!)
+  )
+  if (!replaced) return { sections, status: "stale" }
   const projected = sections.slice()
-  projected[index] = { ...section, sessions: pending.ids.map((id) => byId.get(id)!) }
+  projected[index] = replaced
   return { sections: projected, status: "applied" }
 }

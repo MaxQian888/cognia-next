@@ -103,7 +103,9 @@
         "team": "Chats / Team",
         "workspace": "Workspace"
       },
-      "scopeTreeNote": "The expanded sidebar always groups by team. This choice applies to the list in the collapsed sidebar and the narrow-window drawer."
+      "scopeTreeNote": "The expanded sidebar always groups by team first. The options below apply to the list in the collapsed sidebar and the narrow-window drawer.",
+      "teamDateHeadings": "Date headings in each team",
+      "teamDateHeadingsSortNote": "Title and unread sorts have no date to split by."
     },
     "groupEmpty": "No conversations yet",
     "groupShowAll": "Show all {count}",

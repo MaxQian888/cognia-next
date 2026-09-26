@@ -4551,6 +4551,167 @@ describe("scope tree (merged rail)", () => {
     expect(screen.getByTestId("sidebar-scope-chats")).toBeInTheDocument()
     expect(screen.getByTestId("sidebar-scope-t-1")).toBeInTheDocument()
   })
+
+  describe("date headings inside each group", () => {
+    const DAY_MS = 86_400_000
+    const squadRows = () => {
+      const now = Date.now()
+      return [
+        baseSession("s-fresh", { kind: "team", teamId: "t-1", title: "Fresh", updatedAt: now }),
+        baseSession("s-fresh2", {
+          kind: "team",
+          teamId: "t-1",
+          title: "Fresh 2",
+          updatedAt: now - 1,
+        }),
+        baseSession("s-stale", {
+          kind: "team",
+          teamId: "t-1",
+          title: "Stale",
+          updatedAt: now - 90 * DAY_MS,
+        }),
+      ]
+    }
+    const runOf = (key: string) => screen.getByTestId(`sidebar-date-run-${key}`)
+
+    it("splits a squad's rows under Today / Older labels by default", () => {
+      renderMerged(squadRows())
+      const alpha = screen.getByTestId("sidebar-scope-t-1")
+      const today = within(alpha).getByTestId("sidebar-date-run-team:t-1/date:today")
+      expect(today).toHaveAttribute("role", "group")
+      expect(today).toHaveAttribute("aria-label", "bucketToday")
+      expect(within(today).getByText("Fresh")).toBeInTheDocument()
+      expect(within(today).getByText("Fresh 2")).toBeInTheDocument()
+      const older = runOf("team:t-1/date:older")
+      expect(within(older).getByText("Stale")).toBeInTheDocument()
+      expect(today.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it("draws only the headers the capped preview's rows sit under", () => {
+      const now = Date.now()
+      renderMerged([
+        ...Array.from({ length: 2 }, (_, i) =>
+          baseSession(`s-t${i}`, {
+            kind: "team",
+            teamId: "t-1",
+            title: `Today ${i}`,
+            updatedAt: now - i,
+          })
+        ),
+        ...Array.from({ length: 5 }, (_, i) =>
+          baseSession(`s-o${i}`, {
+            kind: "team",
+            teamId: "t-1",
+            title: `Old ${i}`,
+            updatedAt: now - 90 * DAY_MS - i,
+          })
+        ),
+      ])
+      const alpha = screen.getByTestId("sidebar-scope-t-1")
+      expect(within(alpha).getByTestId("sidebar-date-run-team:t-1/date:today")).toBeInTheDocument()
+      expect(within(alpha).queryByTestId("sidebar-date-run-team:t-1/date:older")).toBeNull()
+      expect(within(alpha).getByTestId("sidebar-scope-more-t-1")).toHaveTextContent(
+        'groupShowMore:{"count":5}'
+      )
+    })
+
+    it("leaves groups unsplit when the preference is off", () => {
+      conversationSidebar = { teamDateHeadings: false }
+      renderMerged(squadRows())
+      const alpha = screen.getByTestId("sidebar-scope-t-1")
+      expect(within(alpha).getByText("Stale")).toBeInTheDocument()
+      expect(document.querySelector('[data-testid^="sidebar-date-run-"]')).toBeNull()
+    })
+
+    it("leaves groups unsplit under a sort with no date axis", () => {
+      conversationSidebar = { sortBy: "title" }
+      renderMerged(squadRows())
+      expect(document.querySelector('[data-testid^="sidebar-date-run-"]')).toBeNull()
+    })
+
+    it("reorders inside one run, tagged with the run's key", () => {
+      const onReorderSessions = jest.fn(() => Promise.resolve(true))
+      renderMerged(squadRows(), { onReorderSessions })
+      act(() => {
+        mockDragEnd?.({
+          active: { id: "s-fresh2", data: { current: { type: "session", folderId: null } } },
+          over: { id: "s-fresh", data: { current: { type: "session", folderId: null } } },
+          activatorEvent: new MouseEvent("pointerdown"),
+        })
+      })
+      expect(onReorderSessions).toHaveBeenCalledWith(["s-fresh2", "s-fresh"], "team:t-1/date:today")
+    })
+
+    it("refuses a drop into another run — a row's run follows its date", () => {
+      const onReorderSessions = jest.fn(() => Promise.resolve(true))
+      renderMerged(squadRows(), { onReorderSessions })
+      act(() => {
+        mockDragEnd?.({
+          active: { id: "s-stale", data: { current: { type: "session", folderId: null } } },
+          over: { id: "s-fresh", data: { current: { type: "session", folderId: null } } },
+          activatorEvent: new MouseEvent("pointerdown"),
+        })
+      })
+      expect(onReorderSessions).not.toHaveBeenCalled()
+    })
+
+    it("lets a squad header land on a row inside another squad's run", () => {
+      const save = jest.fn(async () => {})
+      act(() => {
+        teamOrderSettingsStore.setState({ settings: {} as never, save: save as never })
+      })
+      renderMerged([
+        ...squadRows(),
+        baseSession("s-beta", {
+          kind: "team",
+          teamId: "t-2",
+          title: "Beta work",
+          updatedAt: Date.now(),
+        }),
+      ])
+      act(() => {
+        mockDragEnd?.({
+          active: { id: "t-2", data: { current: { type: "team", teamId: "t-2" } } },
+          over: { id: "s-stale", data: { current: { type: "session", folderId: null } } },
+        })
+      })
+      expect(save).toHaveBeenCalledWith({
+        conversationSidebar: { teamOrder: ["t-2", "t-1"] },
+      })
+      act(() => {
+        teamOrderSettingsStore.setState({ settings: {} as never })
+      })
+    })
+
+    it("offers the switch in the group-by menu and saves it", async () => {
+      conversationSidebar = {}
+      const user = userEvent.setup()
+      renderMerged([dmSession])
+      await user.click(screen.getByRole("button", { name: "listActions" }))
+      await openMenuSection("group")
+      const toggle = await screen.findByTestId("channel-list-group-date-headings")
+      expect(toggle).toHaveAttribute("aria-checked", "true")
+      expect(screen.queryByTestId("channel-list-group-date-headings-note")).toBeNull()
+      await pick(toggle)
+      expect(saveSettings).toHaveBeenCalledWith({
+        conversationSidebar: { teamDateHeadings: false },
+      })
+    })
+
+    it("greys the switch out and says why under a sort with no dates", async () => {
+      conversationSidebar = { sortBy: "unread" }
+      const user = userEvent.setup()
+      renderMerged([dmSession])
+      await user.click(screen.getByRole("button", { name: "listActions" }))
+      await openMenuSection("group")
+      expect(await screen.findByTestId("channel-list-group-date-headings")).toHaveAttribute(
+        "data-disabled"
+      )
+      expect(screen.getByTestId("channel-list-group-date-headings-note")).toHaveTextContent(
+        "groupBy.teamDateHeadingsSortNote"
+      )
+    })
+  })
 })
 
 describe("drop animation, settle mark and list telemetry", () => {

@@ -240,8 +240,9 @@ export const DEFAULTS: AppSettings = {
   // summaries off (they cost one model call per turn).
   conversationTimeline: { enabled: true, expanded: false, labelSummary: { enabled: false } },
   // Conversation sidebar (ChannelList) — comfortable density, no preview line,
-  // workspace grouping (the axis conversations are already stamped with) +
-  // unread badges on, title-only search (content search is opt-in).
+  // workspace grouping (the axis conversations are already stamped with), date
+  // headings inside the expanded sidebar's team groups, unread badges on,
+  // title-only search (content search is opt-in).
   // Every field the sidebar reads is named here, including the five that used
   // to rely on a `??` fallback in the component. `changed-settings` and
   // `profile-transfer` diff against DEFAULTS, so an omitted key read as
@@ -252,6 +253,7 @@ export const DEFAULTS: AppSettings = {
     showCustomIcons: true,
     showTimestamps: true,
     groupBy: "workspace",
+    teamDateHeadings: true,
     sortBy: "recent",
     showUnreadBadges: true,
     searchScope: "title",

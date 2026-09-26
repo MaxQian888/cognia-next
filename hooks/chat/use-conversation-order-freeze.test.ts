@@ -193,6 +193,58 @@ describe("useConversationOrderFreeze", () => {
     expect(result.current.sections).toBe(reEmitted)
   })
 
+  it("holds a squad's date runs, and hands back the live list while nothing moved", () => {
+    function squad(runs: Array<["today" | "yesterday", string[]]>): ConversationSection {
+      const dateRuns = runs.map(([b, ids]) => ({
+        kind: "date" as const,
+        bucket: b,
+        scope: "team:t1",
+        sessions: ids.map(row),
+      }))
+      return {
+        kind: "group",
+        axis: "team",
+        group: { id: "t1", name: "T" },
+        collapsed: false,
+        dateRuns,
+        sessions: dateRuns.flatMap((r) => r.sessions),
+      }
+    }
+    const shown = [
+      squad([
+        ["today", ["a"]],
+        ["yesterday", ["b"]],
+      ]),
+    ]
+    const { result, rerender, enter } = setup({ sections: shown })
+    enter()
+    const reEmitted = [
+      squad([
+        ["today", ["a"]],
+        ["yesterday", ["b"]],
+      ]),
+    ]
+    rerender({ sections: reEmitted })
+    expect(result.current.sections).toBe(reEmitted)
+    // The rows keep their order but the cut moves (`b` is Today's now): the
+    // held runs, not the live array, are what the reader keeps seeing.
+    rerender({ sections: [squad([["today", ["a", "b"]]])] })
+    const cutMoved = result.current.sections[0]!
+    expect(cutMoved.kind === "group" && cutMoved.dateRuns!.map((r) => r.bucket)).toEqual([
+      "today",
+      "yesterday",
+    ])
+    // `b` gains a message: live it moves to Today; held it stays in Yesterday.
+    rerender({ sections: [squad([["today", ["b", "a"]]])] })
+    const held = result.current.sections[0]!
+    expect(
+      held.kind === "group" && held.dateRuns!.map((r) => [r.bucket, r.sessions.map((s) => s.id)])
+    ).toEqual([
+      ["today", ["a"]],
+      ["yesterday", ["b"]],
+    ])
+  })
+
   it("costs one render per pointer crossing, and keeps its handlers stable", () => {
     const { result, enter, leave, renders } = setup({ sections: [bucket("today", ["a"])] })
     const { onPointerEnter, onPointerLeave } = result.current

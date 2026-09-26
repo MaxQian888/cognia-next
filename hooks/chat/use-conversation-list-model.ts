@@ -70,6 +70,11 @@ export interface UseConversationListModelParams {
    * buckets of whatever matched. See `BuildSectionsOptions.emitEmptyGroups`.
    */
   emitEmptyGroups?: boolean
+  /**
+   * Split each group into relative-date runs — the merged rail's second
+   * level. See `BuildSectionsOptions.dateRunsInGroups`.
+   */
+  dateRunsInGroups?: boolean
   /** Session ids whose message content matched the query (title OR content). */
   contentMatchIds?: ReadonlySet<string>
   /** Let a query reach past the archive split (search only, never browsing). */
@@ -125,6 +130,7 @@ export function useConversationListModel({
   activeWorkspaceId = null,
   groupCollapseOverrides = EMPTY_COLLAPSE_OVERRIDES,
   emitEmptyGroups = false,
+  dateRunsInGroups = false,
   contentMatchIds,
   searchIncludesArchived = false,
   sortBy = "recent",
@@ -151,6 +157,7 @@ export function useConversationListModel({
         activeWorkspaceId,
         groupCollapseOverrides,
         emitEmptyGroups,
+        dateRunsInGroups,
         contentMatchIds,
         searchIncludesArchived,
         sortBy,
@@ -173,6 +180,7 @@ export function useConversationListModel({
       activeWorkspaceId,
       groupCollapseOverrides,
       emitEmptyGroups,
+      dateRunsInGroups,
       contentMatchIds,
       searchIncludesArchived,
       sortBy,

@@ -18,7 +18,22 @@ jest.mock("next-intl", () => ({
   useNow: () => new Date(1_750_000_000_000),
   useTimeZone: () => "UTC",
 }))
-jest.mock("@cognia/logging", () => ({ loggers: { ui: { info: jest.fn(), warn: jest.fn() } } }))
+// Complete logger mock: the row's delete confirm reaches lib/execution/broker
+// through the `@/hooks/data` barrel, and that calls createLogger() at load.
+jest.mock("@cognia/logging", () => {
+  const makeLogger = (): Record<string, unknown> => ({
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    child: () => makeLogger(),
+  })
+  return {
+    loggers: new Proxy({}, { get: () => makeLogger() }),
+    createLogger: () => makeLogger(),
+  }
+})
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 jest.mock("@tauri-apps/api/path", () => ({ homeDir: jest.fn(async () => "/home/u") }))
 jest.mock("@/lib/cli-bridge/detect-cli", () => ({ detectCli: jest.fn() }))

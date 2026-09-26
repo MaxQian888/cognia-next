@@ -207,3 +207,84 @@ describe("projectFrozenSections", () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 })
+
+describe("projectFrozenSections over date-split groups", () => {
+  function splitGroup(id: string, runs: Array<["today" | "yesterday" | "older", string[]]>) {
+    const scope = `team:${id}`
+    const dateRuns = runs.map(([bucket, ids]) => ({
+      kind: "date" as const,
+      bucket,
+      scope,
+      sessions: ids.map((r) => row(r)),
+    }))
+    return {
+      kind: "group",
+      axis: "team",
+      group: { id, name: id },
+      collapsed: false,
+      dateRuns,
+      sessions: dateRuns.flatMap((r) => r.sessions),
+    } as ConversationSection
+  }
+  const runsOf = (section: ConversationSection) =>
+    section.kind === "group"
+      ? section.dateRuns!.map((r) => [r.bucket, r.sessions.map((s) => s.id)])
+      : null
+
+  it("holds a row in the run it was shown in", () => {
+    // `b` picks up a message while the pointer is over the list: live, it is
+    // Today's; held, it stays under Yesterday where the reader was aiming.
+    const frozen = freezeConversationLayout([
+      splitGroup("t1", [
+        ["today", ["a"]],
+        ["yesterday", ["b", "c"]],
+      ]),
+    ])
+    const live = [
+      splitGroup("t1", [
+        ["today", ["b", "a"]],
+        ["yesterday", ["c"]],
+      ]),
+    ]
+    const out = projectFrozenSections(frozen, live)
+    expect(out).toHaveLength(1)
+    expect(runsOf(out[0]!)).toEqual([
+      ["today", ["a"]],
+      ["yesterday", ["b", "c"]],
+    ])
+    expect(out[0]!.sessions.map((s) => s.id)).toEqual(["a", "b", "c"])
+  })
+
+  it("lets a new run in, placed by the header order", () => {
+    const frozen = freezeConversationLayout([splitGroup("t1", [["older", ["a"]]])])
+    const live = [
+      splitGroup("t1", [
+        ["today", ["new"]],
+        ["older", ["a"]],
+      ]),
+    ]
+    expect(runsOf(projectFrozenSections(frozen, live)[0]!)).toEqual([
+      ["today", ["new"]],
+      ["older", ["a"]],
+    ])
+    expect(
+      runsOf(
+        projectFrozenSections(frozen, live, {
+          bucketOrder: ["older", "prev30", "prev7", "yesterday", "today"],
+        })[0]!
+      )
+    ).toEqual([
+      ["older", ["a"]],
+      ["today", ["new"]],
+    ])
+  })
+
+  it("keeps an emptied squad's header only when empty groups are preserved", () => {
+    const frozen = freezeConversationLayout([splitGroup("t1", [["today", ["a"]]])])
+    const live = [{ ...splitGroup("t1", []), dateRuns: [] } as ConversationSection]
+    expect(projectFrozenSections(frozen, live)).toEqual([])
+    const kept = projectFrozenSections(frozen, live, { preserveEmptyGroups: true })
+    expect(kept).toHaveLength(1)
+    expect(kept[0]!.sessions).toEqual([])
+  })
+})

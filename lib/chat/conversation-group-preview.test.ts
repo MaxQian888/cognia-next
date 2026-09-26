@@ -68,6 +68,27 @@ describe("applyTeamGroupPreviewCaps", () => {
     if (b.kind === "group") expect(b.sessions).toHaveLength(10)
   })
 
+  it("cuts a date-split group's runs at the preview row", () => {
+    const rows = teamGroup("t-1", 8).sessions
+    const split: ConversationSection = {
+      ...teamGroup("t-1", 8),
+      dateRuns: [
+        { kind: "date", bucket: "today", scope: "team:t-1", sessions: rows.slice(0, 1) },
+        { kind: "date", bucket: "yesterday", scope: "team:t-1", sessions: rows.slice(1, 5) },
+        { kind: "date", bucket: "older", scope: "team:t-1", sessions: rows.slice(5) },
+      ],
+    }
+    const [capped] = applyTeamGroupPreviewCaps([split], EMPTY)
+    if (capped.kind !== "group") throw new Error("expected a group")
+    expect(capped.sessions).toEqual(rows.slice(0, SQUAD_GROUP_PREVIEW_LIMIT))
+    // Only the headers the preview rows sit under are drawn.
+    expect(capped.dateRuns!.map((run) => [run.bucket, run.sessions.length])).toEqual([
+      ["today", 1],
+      ["yesterday", SQUAD_GROUP_PREVIEW_LIMIT - 1],
+    ])
+    expect(capped.previewHidden).toBe(8 - SQUAD_GROUP_PREVIEW_LIMIT)
+  })
+
   it("leaves non-team groups and non-group sections alone", () => {
     const otherAxis: ConversationSection = {
       kind: "group",
