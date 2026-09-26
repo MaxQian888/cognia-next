@@ -39,7 +39,7 @@ fn with_gateway<R>(
     if let Some(services) = host.headless() {
         return Ok(f(&services.gateway, "headless"));
     }
-    let Some(app) = state.app_handle.as_ref() else {
+    let Some(app) = crate::companion_api::host::tauri_app(&state.renderer) else {
         return Err(no_gateway("gateway state is unavailable on this host"));
     };
     let Some(gateway) = app.try_state::<GatewayState>() else {
@@ -233,7 +233,8 @@ pub(super) async fn dispatch(
             let rows = if let Some(services) = host.headless() {
                 services.gateway.probe_upstream(&model).await
             } else {
-                let Some(app) = state.app_handle.clone() else {
+                let Some(app) = crate::companion_api::host::tauri_app(&state.renderer).cloned()
+                else {
                     return Err(no_gateway("gateway state is unavailable on this host"));
                 };
                 let Some(gateway) = app.try_state::<GatewayState>() else {

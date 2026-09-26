@@ -171,7 +171,7 @@ mod tests {
         std::sync::Arc::new(CompanionState {
             secret: parking_lot::RwLock::new(SECRET.to_vec()),
             deny_list: std::sync::Arc::new(DenyList::new()),
-            app_handle: None,
+            renderer: None,
             idempotency: std::sync::Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),

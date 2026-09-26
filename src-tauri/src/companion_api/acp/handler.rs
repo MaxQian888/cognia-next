@@ -1693,7 +1693,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
             deny_list: Arc::new(DenyList::new()),
-            app_handle: None,
+            renderer: None,
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),

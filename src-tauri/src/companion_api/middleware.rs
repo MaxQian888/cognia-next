@@ -459,7 +459,7 @@ async fn authenticate_request(
     let response = next.run(request).await;
 
     // ── 7. Best-effort device-seen event ────────────────────────────────────
-    if let Some(app) = state.app_handle.clone() {
+    if let Some(renderer) = state.renderer.clone() {
         let seen_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -470,8 +470,7 @@ async fn authenticate_request(
         // unlocked account id, and a tenant never matches one.
         let account_namespace = host_identity::event_namespace_for_tenant(&account_id);
         tokio::spawn(async move {
-            use tauri::Emitter as _;
-            let _ = app.emit(
+            renderer.emit(
                 "companion://device-seen",
                 json!({
                     "device_id": device_id,
@@ -608,7 +607,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             deny_list: Arc::new(DenyList::new()),
-            app_handle: None,
+            renderer: None,
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),

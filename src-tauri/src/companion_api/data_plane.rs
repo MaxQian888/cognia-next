@@ -37,7 +37,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    bridge_transport::{BridgeTransport, WebViewBridgeTransport},
+    bridge_transport::BridgeTransport,
     desktop_messages_bridge::DesktopMessagesBridge,
     store::{AppStore, MessageRow, StoreError},
     SharedState,
@@ -81,10 +81,10 @@ impl DataPlane {
                 transport: socket,
             });
         }
-        if let Some(app) = state.app_handle.as_ref() {
+        if let Some(renderer) = state.renderer.as_ref() {
             return Some(DataPlane::Bridge {
                 bridge: Arc::clone(&state.desktop_messages_bridge),
-                transport: Arc::new(WebViewBridgeTransport(app.clone())),
+                transport: renderer.bridge_transport(),
             });
         }
         if let Some(store) = headless_store() {
@@ -767,7 +767,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
             deny_list: Arc::new(DenyList::new()),
-            app_handle: None,
+            renderer: None,
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),

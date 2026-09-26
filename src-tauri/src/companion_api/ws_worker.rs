@@ -27,7 +27,7 @@ use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tauri::{ipc::Channel, Emitter};
+use tauri::ipc::Channel;
 use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{interval, Instant};
 
@@ -770,8 +770,8 @@ fn publish_fleet_update(state: &super::SharedState, tenant_id: &str) {
         return;
     };
     object.insert("tenantId".to_string(), Value::String(tenant_id.to_string()));
-    if let Some(app) = &state.app_handle {
-        let _ = app.emit(crate::fleet::UPDATE_EVENT, payload);
+    if let Some(renderer) = &state.renderer {
+        renderer.emit(crate::fleet::UPDATE_EVENT, payload);
     } else {
         state
             .event_bus

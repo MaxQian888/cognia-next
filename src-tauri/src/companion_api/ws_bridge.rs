@@ -57,7 +57,7 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{interval, Duration, Instant};
 
-use super::bridge_transport::{BridgeRequestGuard, BridgeTransport, WebViewBridgeTransport};
+use super::bridge_transport::{BridgeRequestGuard, BridgeTransport};
 use super::middleware::DeviceContext;
 use super::SharedState;
 
@@ -531,8 +531,8 @@ pub fn resolve_bridge_transport(state: &SharedState) -> Result<Arc<dyn BridgeTra
     if let Some(socket) = socket_bridge_transport_for_state(state) {
         return Ok(socket);
     }
-    if let Some(app) = state.app_handle.clone() {
-        return Ok(Arc::new(WebViewBridgeTransport(app)));
+    if let Some(renderer) = state.renderer.as_ref() {
+        return Ok(renderer.bridge_transport());
     }
     Err("no bridge transport available (no connected brain, no WebView)".to_string())
 }
@@ -1157,7 +1157,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: parking_lot::RwLock::new(SECRET.to_vec()),
             deny_list: Arc::new(DenyList::new()),
-            app_handle: None,
+            renderer: None,
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: SyncBridge::new(),

@@ -2749,7 +2749,7 @@ pub fn control_commands() -> &'static [&'static str] {
 /// `device_id` currently holds the remote-control capability.
 ///
 /// Factored out of the dispatch arm so it is unit-testable without an
-/// `AppHandle`: in test mode `state.app_handle` is `None`, so the HTTP path
+/// `AppHandle`: in test mode `state.renderer` is `None`, so the HTTP path
 /// short-circuits to 503 before reaching the `match`, and `dispatch` itself
 /// cannot be called without a real handle. This pure helper lets the
 /// `{ allowed }` logic be asserted directly.
@@ -2960,7 +2960,7 @@ pub async fn rpc_handler(
         .map(str::to_owned);
 
     // Reject unknown command names before requiring the AppHandle so the
-    // public 404 contract holds in test mode (where `state.app_handle` is
+    // public 404 contract holds in test mode (where `state.renderer` is
     // intentionally `None`). Keep `KNOWN_COMMANDS` in lockstep with the
     // `match name` arms in `dispatch()` below — drift will silently bypass
     // the 503 path for genuinely unknown commands.

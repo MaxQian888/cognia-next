@@ -716,7 +716,7 @@ fn apply_lifecycle(
         &super::device_lifecycle::LifecycleContext {
             event_bus: Some(std::sync::Arc::clone(&state.event_bus)),
             deny_list: Some(std::sync::Arc::clone(&state.deny_list)),
-            app_handle: state.app_handle.clone(),
+            renderer: state.renderer.clone(),
         },
         // Never the trust root: a remote owner must not be able to revoke the
         // last owner device and lock the deployment out of its own API. The
@@ -1517,9 +1517,8 @@ pub(crate) fn browser_device_paired_event(
 /// Emit `companion://device-paired` on the same rail as `device-seen`.
 pub(crate) fn publish_device_paired(state: &SharedState, event: DevicePairedEvent) {
     let payload = serde_json::to_value(&event).unwrap_or(Value::Null);
-    if let Some(app) = state.app_handle.clone() {
-        use tauri::Emitter as _;
-        let _ = app.emit("companion://device-paired", payload);
+    if let Some(renderer) = state.renderer.as_ref() {
+        renderer.emit("companion://device-paired", payload);
     } else {
         state
             .event_bus
@@ -2468,7 +2467,7 @@ mod tests {
         Arc::new(super::super::CompanionState {
             secret: RwLock::new(vec![0_u8; 32]),
             deny_list: Arc::new(super::super::deny_list::DenyList::new()),
-            app_handle: None,
+            renderer: None,
             idempotency: Arc::new(super::super::idempotency::IdempotencyCache::new()),
             event_bus: super::super::event_bus::EventBus::new(),
             sync_bridge: super::super::sync_bridge::SyncBridge::new(),

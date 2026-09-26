@@ -63,6 +63,7 @@ pub use cognia_companion_bus::event_leases;
 pub mod extension_origin;
 pub mod external_bridge;
 pub mod healthz;
+pub mod host;
 pub mod host_consent;
 pub use cognia_companion_security::host_identity;
 pub use cognia_companion_security::idempotency;
@@ -163,8 +164,9 @@ pub struct CompanionState {
     /// via `Arc` so Tauri commands (`companion_revoke_device`, etc.) can mutate
     /// it even when the axum server holds a clone of the same `SharedState`.
     pub deny_list: Arc<DenyList>,
-    /// Tauri `AppHandle` — `None` in unit tests, `Some` in production.
-    pub app_handle: Option<tauri::AppHandle>,
+    /// The renderer this server runs beside — `None` in unit tests and on the
+    /// headless server, the desktop WebView in production.
+    pub renderer: Option<Arc<dyn host::RendererPort>>,
     /// Per-device idempotency cache for `POST /api/_rpc/:name`.
     ///
     /// Keyed by `(device_id, Idempotency-Key header)`.  Successful responses
@@ -618,7 +620,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
             deny_list: Arc::new(DenyList::new()),
-            app_handle: None,
+            renderer: None,
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: sync_bridge::SyncBridge::new(),

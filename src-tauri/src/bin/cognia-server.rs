@@ -1574,7 +1574,7 @@ async fn run_serve(
     let idempotency = IdempotencyCache::open(data_dir.join("companion-idempotency.sqlite"))
         .map_err(|error| format!("idempotency store: {error}"))?;
 
-    // Build a SharedState with `app_handle: None`; dispatch resolves the
+    // Build a SharedState with `renderer: None`; dispatch resolves the
     // headless services registry instead (ADR-0059 R5/R7).
     let signing_secret = secret::load_or_generate()?;
     // Rebuild the deny-list cache from the store before the listener starts.
@@ -1593,7 +1593,7 @@ async fn run_serve(
     let shared: SharedState = Arc::new(CompanionState {
         secret: RwLock::new(signing_secret),
         deny_list,
-        app_handle: None,
+        renderer: None,
         idempotency: Arc::new(idempotency),
         event_bus: EventBus::new(),
         sync_bridge: SyncBridge::new(),

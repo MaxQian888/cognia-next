@@ -245,7 +245,7 @@ pub(super) fn test_state() -> super::super::SharedState {
     Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
-        app_handle: None,
+        renderer: None,
         idempotency: Arc::new(IdempotencyCache::new()),
         event_bus: EventBus::new(),
         sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
@@ -3453,7 +3453,7 @@ async fn idempotency_cache_hit_returns_cached_body() {
     let state = Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
-        app_handle: None,
+        renderer: None,
         idempotency: cache,
         event_bus: crate::companion_api::event_bus::EventBus::new(),
         sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
@@ -3499,7 +3499,7 @@ async fn different_idempotency_keys_run_independently() {
     let state = Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
-        app_handle: None,
+        renderer: None,
         idempotency: cache,
         event_bus: crate::companion_api::event_bus::EventBus::new(),
         sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
@@ -3540,7 +3540,7 @@ async fn read_only_commands_skip_cache() {
     let state = Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
-        app_handle: None,
+        renderer: None,
         idempotency: Arc::clone(&cache),
         event_bus: crate::companion_api::event_bus::EventBus::new(),
         sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
@@ -3600,7 +3600,7 @@ async fn expired_idempotency_key_causes_re_execution() {
     let state = Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
-        app_handle: None,
+        renderer: None,
         idempotency: cache,
         event_bus: crate::companion_api::event_bus::EventBus::new(),
         sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
@@ -4016,7 +4016,7 @@ async fn session_list_skips_idempotency_cache() {
     let state = Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
-        app_handle: None,
+        renderer: None,
         idempotency: Arc::clone(&cache),
         event_bus: crate::companion_api::event_bus::EventBus::new(),
         sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
@@ -4738,7 +4738,7 @@ async fn app_settings_update_rejects_unknown_key() {
     let state = Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
-        app_handle: None,
+        renderer: None,
         idempotency: Arc::clone(&cache),
         event_bus: crate::companion_api::event_bus::EventBus::new(),
         sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
@@ -4791,7 +4791,7 @@ async fn app_settings_update_accepts_color_theme_key() {
     let state = Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
-        app_handle: None,
+        renderer: None,
         idempotency: Arc::clone(&cache),
         event_bus: crate::companion_api::event_bus::EventBus::new(),
         sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),

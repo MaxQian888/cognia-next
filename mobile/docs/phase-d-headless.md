@@ -58,7 +58,7 @@ The `cognia-server serve` subcommand:
 2. Calls `tls::ensure_certificate` to load / generate the self-signed cert.
 3. Installs the SqliteAppStore via `install_headless_store`.
 4. Publishes the cert fingerprint via `set_tls_fingerprint` (so `/api/v1/whoami` returns it — P0.3).
-5. Builds a `SharedState` with `app_handle: None`.
+5. Builds a `SharedState` with `renderer: None`.
 6. Calls `server::spawn_server(port, false /* LAN bind */, tls_material, shared)`.
 7. Awaits Ctrl-C, then triggers graceful shutdown.
 

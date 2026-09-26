@@ -148,7 +148,7 @@ pub enum LifecycleError {
 pub struct LifecycleContext {
     pub event_bus: Option<Arc<EventBus>>,
     pub deny_list: Option<Arc<DenyList>>,
-    pub app_handle: Option<tauri::AppHandle>,
+    pub renderer: Option<Arc<dyn super::host::RendererPort>>,
 }
 
 /// Change one device's lifecycle state and apply every consequence.
@@ -264,9 +264,8 @@ pub fn apply(
     }
 
     // ── 8. Renderer mirror ──────────────────────────────────────────────────
-    if let Some(app) = context.app_handle.as_ref() {
-        use tauri::Emitter as _;
-        let _ = app.emit(RENDERER_LIFECYCLE_EVENT, payload);
+    if let Some(renderer) = context.renderer.as_ref() {
+        renderer.emit(RENDERER_LIFECYCLE_EVENT, payload);
     }
 
     Ok(outcome)
@@ -401,7 +400,7 @@ mod tests {
         LifecycleContext {
             event_bus: Some(EventBus::new()),
             deny_list: Some(Arc::new(DenyList::new())),
-            app_handle: None,
+            renderer: None,
         }
     }
 

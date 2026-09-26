@@ -168,7 +168,7 @@ async fn close_terminal_data_channel(channel: &dyn DataChannel) {
 async fn proxy_terminal_socket(mut socket: WebSocket, device_id: String, state: SharedState) {
     let identity =
         ClientIdentity::remote(format!("companion:{device_id}"), device_id.clone(), true);
-    let app = state.app_handle.as_ref();
+    let app = super::host::tauri_app(&state.renderer);
     let host_stream =
         match crate::terminal_host_bridge::connect_terminal_host_client(app, identity).await {
             Ok(stream) => stream,
@@ -296,7 +296,7 @@ pub(crate) async fn proxy_terminal_datachannel(
 
     let identity =
         ClientIdentity::remote(format!("companion:{device_id}"), device_id.clone(), true);
-    let app = state.app_handle.as_ref();
+    let app = super::host::tauri_app(&state.renderer);
     let host_stream =
         match crate::terminal_host_bridge::connect_terminal_host_client(app, identity).await {
             Ok(stream) => stream,

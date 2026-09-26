@@ -85,7 +85,7 @@ pub(super) async fn dispatch(
             // is persisted beside the other channel configs and reapplied by
             // `cognia-server serve` (ADR-0170). The desktop keeps its copy in
             // `AppSettings` and needs no file.
-            if state.app_handle.is_none() {
+            if state.renderer.is_none() {
                 let data_dir = host.data_dir().map_err(RpcError::internal)?;
                 crate::companion_api::signaling_config::save(Some(&data_dir), &patch)
                     .map_err(RpcError::internal)?;

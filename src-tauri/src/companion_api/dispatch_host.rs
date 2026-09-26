@@ -64,8 +64,8 @@ impl DispatchHost {
     /// by `cognia-server` at boot. `None` in bare unit-test states — the
     /// caller maps that to the historical test-mode 503.
     pub fn from_state(state: &SharedState) -> Option<Self> {
-        if let Some(app) = state.app_handle.clone() {
-            return Some(Self::Tauri(app));
+        if let Some(app) = super::host::tauri_app(&state.renderer) {
+            return Some(Self::Tauri(app.clone()));
         }
         crate::headless::headless_services().map(Self::Headless)
     }

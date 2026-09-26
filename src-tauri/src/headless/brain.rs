@@ -520,7 +520,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: RwLock::new(b"test-secret-32-bytes-exactly____".to_vec()),
             deny_list: Arc::new(DenyList::new()),
-            app_handle: None,
+            renderer: None,
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: SyncBridge::new(),

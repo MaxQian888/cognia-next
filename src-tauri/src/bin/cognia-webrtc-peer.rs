@@ -117,13 +117,13 @@ where
 }
 
 /// Build the same `SharedState` shape `cognia-server` builds, minus every
-/// service the WebRTC transport doesn't touch. `app_handle: None` is the
+/// service the WebRTC transport doesn't touch. `renderer: None` is the
 /// documented bare-state configuration (see `companion_api::CompanionState`).
 fn harness_state() -> SharedState {
     Arc::new(CompanionState {
         secret: RwLock::new(vec![0u8; 32]),
         deny_list: Arc::new(DenyList::new()),
-        app_handle: None,
+        renderer: None,
         idempotency: Arc::new(IdempotencyCache::new()),
         event_bus: EventBus::new(),
         sync_bridge: SyncBridge::new(),

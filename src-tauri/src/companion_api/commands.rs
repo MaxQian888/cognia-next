@@ -100,7 +100,7 @@ pub async fn companion_server_start(
     let shared: SharedState = Arc::new(CompanionState {
         secret: RwLock::new(signing_secret),
         deny_list: Arc::clone(&state.deny_list),
-        app_handle: Some(app_handle),
+        renderer: Some(Arc::new(super::host::TauriRenderer(app_handle))),
         idempotency: Arc::new(idempotency),
         event_bus,
         // Same Arc as the long-lived CompanionServerState — keeps the
@@ -151,7 +151,7 @@ pub async fn companion_server_start(
     // their next reconnect.
     {
         use tauri::Manager as _;
-        let app = shared.app_handle.as_ref().expect("app_handle present");
+        let app = super::host::tauri_app(&shared.renderer).expect("desktop renderer present");
         if let Some(hub) = app.try_state::<std::sync::Arc<super::signaling::SignalingHub>>() {
             let hub_arc = Arc::clone(hub.inner());
             super::signaling::install_hub(Some(&hub_arc));
@@ -344,7 +344,7 @@ pub fn companion_host_state_publish(
 
 /// Build the lifecycle context from whatever this process currently has.
 ///
-/// `event_bus` and `app_handle` are `None` until the server has started; the
+/// `event_bus` and `renderer` are `None` until the server has started; the
 /// store write still happens, which is the part that has to be durable.
 fn lifecycle_context(
     state: &CompanionServerState,
@@ -355,7 +355,9 @@ fn lifecycle_context(
         // the server stopped still writes the store, which is the durable half.
         event_bus: state.event_bus.read().clone(),
         deny_list: Some(Arc::clone(&state.deny_list)),
-        app_handle,
+        renderer: app_handle.map(|app| {
+            Arc::new(super::host::TauriRenderer(app)) as Arc<dyn super::host::RendererPort>
+        }),
     }
 }
 
