@@ -28,7 +28,7 @@ import type { OutboundJobRow } from "@/lib/db/connector-types"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { scopeKeyOf } from "@/types/notifications/scope"
-import type { NotificationDeliveryIntent } from "@/types/notifications/delivery"
+import type { WholeNotificationDeliveryIntent } from "@/types/notifications/delivery"
 import type { NotificationRenderedPayload } from "@/types/notifications/result"
 import type { NotificationPurpose, NotificationCategory } from "@/types/notifications/decision"
 import { getNotificationTarget } from "@/lib/db/notification-targets"
@@ -45,8 +45,8 @@ export interface PreparedNotificationDelivery {
    * the transaction fills. `outboundJobId` is linked at commit time.
    */
   intent: Omit<
-    NotificationDeliveryIntent,
-    "id" | "createdAt" | "updatedAt" | "attemptCount" | "outboundJobId" | "status"
+    WholeNotificationDeliveryIntent,
+    "id" | "createdAt" | "updatedAt" | "attemptCount" | "outboundJobId" | "status" | "compactedAt"
   >
   /** The operation-authority key stamped on BOTH rows (unique on each). */
   operationKey: string
@@ -301,7 +301,7 @@ export async function persistGovernedNotificationInsideTransaction(
   // 5. Write the intent, linked to the job — the durable intent the receipt
   //    reconciler and delivery diagnostics read.
   const intentId = `ndi_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-  const intent: NotificationDeliveryIntent = {
+  const intent: WholeNotificationDeliveryIntent = {
     ...prepared.intent,
     id: intentId,
     status: "queued",

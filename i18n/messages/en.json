@@ -21673,6 +21673,7 @@
         "quietHoursTitle": "Do not disturb",
         "resetDefaults": "Reset to defaults",
         "retentionDays": "Keep for",
+        "retentionDaysHelp": "Also how long messages sent to chats and webhooks keep their text in delivery history. After that, only the record that they were sent is kept.",
         "retentionItems": "Max stored",
         "retentionTitle": "Retention",
         "snoozeAutoWake": "Wake on activity",
@@ -35639,10 +35640,6 @@
             "description": "Whether this agent may render interactive A2UI surfaces. A session or agent mode can still override it.",
             "label": "A2UI surfaces"
           },
-          "a2uiCatalog": {
-            "description": "Component catalog for surfaces this agent renders without naming one. Overrides the app default; a surface that names its own catalog keeps it.",
-            "label": "A2UI catalog"
-          },
           "builtInSkills": {
             "default": "Default (off)",
             "description": "Expose built-in skills (calendar, IM and similar) in desktop chats. Messaging-platform chats always get them.",
@@ -41832,6 +41829,7 @@
       "perSourceHint": "Turn a source off to mute its toast/desktop/push — it still appears in the center history.",
       "perSourceLabel": "Sources",
       "resetDefaults": "Reset to defaults",
+      "retentionDaysHint": "Also how long messages sent to chats and webhooks keep their text in delivery history. After that, only the record that they were sent is kept.",
       "retentionDaysLabel": "Keep for (days)",
       "retentionItemsLabel": "Maximum stored",
       "snoozeAutoWakeHint": "Re-surface a snoozed notification when new activity arrives in the same thread.",

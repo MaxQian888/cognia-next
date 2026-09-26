@@ -22,7 +22,7 @@ import {
   listSendableIntents,
   listStaleSendingIntents,
 } from "./notification-delivery"
-import type { NotificationDeliveryIntent } from "@/types/notifications/delivery"
+import type { WholeNotificationDeliveryIntent } from "@/types/notifications/delivery"
 import type { NotificationScope } from "@/types/notifications/scope"
 
 const dbFixture = createDbTestFixture()
@@ -39,8 +39,8 @@ const scope: NotificationScope = {
 const SCOPE_KEY = "scope-A"
 
 function intentInput(
-  over: Partial<NotificationDeliveryIntent> = {}
-): Omit<NotificationDeliveryIntent, "id" | "createdAt" | "updatedAt" | "attemptCount"> {
+  over: Partial<WholeNotificationDeliveryIntent> = {}
+): Omit<WholeNotificationDeliveryIntent, "id" | "createdAt" | "updatedAt" | "attemptCount"> {
   return {
     scopeKey: SCOPE_KEY,
     scope,

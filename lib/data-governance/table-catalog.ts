@@ -1315,9 +1315,11 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
   // by construction. Declared explicitly because the inherited default says
   // "retained until an explicit domain delete" and this table has no such
   // delete to wait for.
-  // Notification V2 (ADR-0190). No delete path exists for any of these yet, so
-  // each says so rather than claiming a sweep: rows are retired in place
-  // (a state, a `deletedAt`, a `flushedAt`) and leave with the account.
+  // Notification V2 (ADR-0190). The delivery ledger follows the inbox's own
+  // window (`NotificationPreferences.retentionMaxAgeMs`, 30 days by default,
+  // 0 = keep): `lib/db/notification-delivery-retention.ts` compacts settled
+  // intents and deletes settled bookkeeping past it, through the central
+  // sweep. Targets and subscriptions are retired in place (`deletedAt`).
   notificationTargets: {
     mode: "permanent",
     enforcement: "explicit-delete",
@@ -1334,25 +1336,39 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     mode: "permanent",
     enforcement: "explicit-delete",
     reason:
-      "Terminal intents stay as the run's delivery record (its Notifications tab reads them); nothing prunes them yet, so rows leave only with the owning account database.",
+      "A row is the operationKey that stops a fact being delivered twice, so it is never deleted: past the notification retention window a settled intent is compacted (rendered text and address snapshot dropped) by the notificationDelivery sweep; delivery-unknown intents stay whole.",
   },
   notificationDeliveryAttempts: {
-    mode: "permanent",
-    enforcement: "explicit-delete",
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "notificationDelivery",
     reason:
-      "Append-only send evidence, never mutated; nothing prunes it yet, so rows leave only with the owning account database.",
+      "Deleted with their intent's compaction once it settles past the notification retention window (default 30 days, user-configurable).",
   },
   notificationTimers: {
-    mode: "permanent",
-    enforcement: "explicit-delete",
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "notificationDelivery",
     reason:
-      "Timers are retired in place (fired / cancelled / expired), not removed; rows leave only with the owning account database.",
+      "Fired, cancelled and expired timers are deleted past the notification retention window (default 30 days, user-configurable); armed ones stay.",
   },
   notificationAggregateMembers: {
-    mode: "permanent",
-    enforcement: "explicit-delete",
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "notificationDelivery",
     reason:
-      "A flushed member is marked (flushedAt), not removed; rows leave only with the owning account database.",
+      "Flushed digest members are deleted past the notification retention window (default 30 days, user-configurable); unflushed ones stay.",
+  },
+  notificationPublications: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "notificationDelivery",
+    reason:
+      "Closed or superseded publications no uncompacted intent points at are deleted past the notification retention window (default 30 days, user-configurable).",
   },
   threadHandoffTickets: {
     mode: "permanent",

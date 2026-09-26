@@ -223,6 +223,12 @@ describe("NotificationPreferencesSection", () => {
     expect(end).toHaveValue("07:00")
   })
 
+  it("says the day window also bounds delivery history", () => {
+    settingsRef.current = { notificationPreferences: { quietHours: { enabled: false } } }
+    render(<NotificationPreferencesSection />)
+    expect(screen.getByText("retentionDaysHelp")).toBeInTheDocument()
+  })
+
   it("saves each retention drag once, on release, not per frame", async () => {
     settingsRef.current = { notificationPreferences: { quietHours: { enabled: false } } }
     render(<NotificationPreferencesSection />)

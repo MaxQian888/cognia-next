@@ -10,13 +10,20 @@
 
 import { nanoid } from "nanoid"
 import { getDb, type CogniaDB } from "./schema"
-import type {
+import {
+  isWholeIntent,
+  type NotificationDeliveryAttempt,
+  type NotificationDeliveryIntent,
+  type NotificationAttemptOutcome,
+  type WholeNotificationDeliveryIntent,
+} from "@/types/notifications/delivery"
+
+export type {
   NotificationDeliveryAttempt,
   NotificationDeliveryIntent,
   NotificationAttemptOutcome,
-} from "@/types/notifications/delivery"
-
-export type { NotificationDeliveryAttempt, NotificationDeliveryIntent, NotificationAttemptOutcome }
+  WholeNotificationDeliveryIntent,
+}
 
 /** Terminal intent statuses — no further send transitions out of these. */
 export const TERMINAL_INTENT_STATUSES: readonly NotificationDeliveryIntent["status"][] = [
@@ -36,21 +43,24 @@ export const TERMINAL_INTENT_STATUSES: readonly NotificationDeliveryIntent["stat
  * treats as "already persisted" (idempotent re-entry). Returns the row.
  */
 export async function persistDeliveryIntent(
-  intent: Omit<NotificationDeliveryIntent, "id" | "createdAt" | "updatedAt" | "attemptCount"> & {
+  intent: Omit<
+    WholeNotificationDeliveryIntent,
+    "id" | "createdAt" | "updatedAt" | "attemptCount"
+  > & {
     attemptCount?: number
   },
   txDb?: CogniaDB
-): Promise<NotificationDeliveryIntent> {
+): Promise<WholeNotificationDeliveryIntent> {
   const db = txDb ?? getDb()
   const now = Date.now()
-  const row: NotificationDeliveryIntent = {
+  const row: WholeNotificationDeliveryIntent = {
     ...intent,
     id: nanoid(),
     attemptCount: intent.attemptCount ?? 0,
     createdAt: now,
     updatedAt: now,
   }
-  const run = async (): Promise<NotificationDeliveryIntent> => {
+  const run = async (): Promise<WholeNotificationDeliveryIntent> => {
     await db.notificationDeliveryIntents.put(row)
     return row
   }
@@ -79,21 +89,29 @@ export async function getLiveIntentForSlot(
   return rows.find((r) => !TERMINAL_INTENT_STATUSES.includes(r.status))
 }
 
-/** CAS-update an intent's status — the send lifecycle's transitions. */
+/**
+ * CAS-update an intent's status — the send lifecycle's transitions. A
+ * compacted intent is settled history and never transitions.
+ */
 export async function transitionIntent(
   intentId: string,
   expectedStatus:
     NotificationDeliveryIntent["status"] | readonly NotificationDeliveryIntent["status"][],
-  patch: Partial<NotificationDeliveryIntent>,
+  patch: Partial<WholeNotificationDeliveryIntent>,
   txDb?: CogniaDB
-): Promise<NotificationDeliveryIntent | undefined> {
+): Promise<WholeNotificationDeliveryIntent | undefined> {
   const db = txDb ?? getDb()
   const now = Date.now()
   const allowed = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus]
-  const run = async (): Promise<NotificationDeliveryIntent | undefined> => {
+  const run = async (): Promise<WholeNotificationDeliveryIntent | undefined> => {
     const row = await db.notificationDeliveryIntents.get(intentId)
-    if (!row || !allowed.includes(row.status)) return undefined
-    const next: NotificationDeliveryIntent = { ...row, ...patch, id: row.id, updatedAt: now }
+    if (!row || !isWholeIntent(row) || !allowed.includes(row.status)) return undefined
+    const next: WholeNotificationDeliveryIntent = {
+      ...row,
+      ...patch,
+      id: row.id,
+      updatedAt: now,
+    }
     await db.notificationDeliveryIntents.put(next)
     return next
   }
@@ -231,9 +249,14 @@ export async function listIntentsForRun(runId: string): Promise<NotificationDeli
     .toArray()
 }
 
-/** Intents still eligible to send at `now` — the delivery runtime's scan. */
-export async function listSendableIntents(now = Date.now()): Promise<NotificationDeliveryIntent[]> {
-  return getDb()
+/**
+ * Intents still eligible to send at `now` — the delivery runtime's scan.
+ * Unsettled rows are never compacted; the guard says so to the type system.
+ */
+export async function listSendableIntents(
+  now = Date.now()
+): Promise<WholeNotificationDeliveryIntent[]> {
+  const rows = await getDb()
     .notificationDeliveryIntents.where("status")
     .anyOf("prepared", "queued")
     .filter((i) => {
@@ -243,6 +266,7 @@ export async function listSendableIntents(now = Date.now()): Promise<Notificatio
       return true
     })
     .toArray()
+  return rows.filter(isWholeIntent)
 }
 
 /**
@@ -252,10 +276,11 @@ export async function listSendableIntents(now = Date.now()): Promise<Notificatio
  */
 export async function listStaleSendingIntents(
   staleBefore: number
-): Promise<NotificationDeliveryIntent[]> {
-  return getDb()
+): Promise<WholeNotificationDeliveryIntent[]> {
+  const rows = await getDb()
     .notificationDeliveryIntents.where("status")
     .equals("sending")
     .filter((i) => (i.lastAttemptAt ?? i.updatedAt) < staleBefore)
     .toArray()
+  return rows.filter(isWholeIntent)
 }

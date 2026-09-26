@@ -74,6 +74,7 @@
   "perSourceHint": "关闭某来源会静音其 toast/桌面/推送——它仍会出现在中心历史中。",
   "perSourceLabel": "来源",
   "resetDefaults": "恢复默认",
+  "retentionDaysHint": "也决定发往群聊和 Webhook 的消息在投递记录里保留正文多久；超过后只保留已发送的记录。",
   "retentionDaysLabel": "保留天数",
   "retentionItemsLabel": "最多保存条数",
   "snoozeAutoWakeHint": "同一会话有新动态时，重新唤起被暂停的通知。",

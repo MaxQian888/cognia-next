@@ -21673,6 +21673,7 @@
         "quietHoursTitle": "勿扰",
         "resetDefaults": "恢复默认",
         "retentionDays": "保留时长",
+        "retentionDaysHelp": "也决定发往群聊和 Webhook 的消息在投递记录里保留正文多久；超过后只保留已发送的记录。",
         "retentionItems": "最多保存",
         "retentionTitle": "保留",
         "snoozeAutoWake": "活动时唤醒",
@@ -35639,10 +35640,6 @@
             "description": "此智能体是否可以渲染交互式 A2UI 界面。会话或智能体模式仍可覆盖。",
             "label": "A2UI 界面"
           },
-          "a2uiCatalog": {
-            "description": "此智能体渲染未指定目录的界面时使用的组件目录，覆盖应用默认值；界面自己指定的目录仍然优先。",
-            "label": "A2UI 组件目录"
-          },
           "builtInSkills": {
             "default": "默认（关闭）",
             "description": "在桌面对话中提供内置技能（日历、IM 等）。消息平台对话始终可用。",
@@ -41832,6 +41829,7 @@
       "perSourceHint": "关闭某来源会静音其 toast/桌面/推送——它仍会出现在中心历史中。",
       "perSourceLabel": "来源",
       "resetDefaults": "恢复默认",
+      "retentionDaysHint": "也决定发往群聊和 Webhook 的消息在投递记录里保留正文多久；超过后只保留已发送的记录。",
       "retentionDaysLabel": "保留天数",
       "retentionItemsLabel": "最多保存条数",
       "snoozeAutoWakeHint": "同一会话有新动态时，重新唤起被暂停的通知。",

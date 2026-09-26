@@ -9,6 +9,7 @@ import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { saveSettings, getSettings, DEFAULTS } from "@/lib/db/settings"
 import { DEFAULT_OCR_SETTINGS } from "@/types/ocr"
+import { DEFAULT_NOTIFICATION_PREFERENCES } from "@/types/notifications"
 
 // Wrap getSettings so one test can force the read to reject; every other call
 // falls through to the real implementation (which reads the saved row).
@@ -122,6 +123,7 @@ describe("pruneRetainedTables", () => {
       { id: "evalOnline", removed: 0 },
       { id: "workSubmissions", removed: 0 },
       { id: "memoryGovernance", removed: 0 },
+      { id: "notificationDelivery", removed: 0 },
       { id: "ocrResults", removed: 0 },
       { id: "retrievalControl", removed: 0 },
       { id: "workflowAppData", removed: 0 },
@@ -331,4 +333,68 @@ it("uses safe fallback windows when legacy settings and optional defaults omit r
     DEFAULTS.storageRetention = traceDefaults
     DEFAULTS.ocrSettings = ocrDefaults
   }
+})
+
+describe("notification delivery retention", () => {
+  const target = () => RETENTION_TARGETS.find((t) => t.id === "notificationDelivery")!
+
+  async function seedSettledIntent(updatedAt: number) {
+    await getDb().notificationDeliveryIntents.put({
+      id: "i1",
+      scopeKey: "scope",
+      scope: { namespaceId: "n", accountId: "a", authorityHostId: "h" },
+      operationKey: "op-1",
+      targetId: "t",
+      targetAddress: { kind: "feishu-webhook", endpointSecretRef: "ref", region: "feishu" },
+      targetVersion: 1,
+      purpose: "result-summary",
+      category: "run.result",
+      status: "accepted",
+      payload: {
+        title: "Deploy finished",
+        body: "body",
+        level: "info",
+        disclosureLevel: "internal",
+        clippedFactCount: 0,
+        contentHash: "h",
+      },
+      attemptCount: 1,
+      maxAttempts: 3,
+      createdAt: updatedAt,
+      updatedAt,
+    })
+  }
+
+  afterEach(async () => {
+    await getDb().notificationDeliveryIntents.clear()
+    await saveSettings({ notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES })
+  })
+
+  it("is a row-expiry target that follows the inbox's retention window", async () => {
+    expect(target().policy).toBe("row-expiry")
+    await saveSettings({
+      notificationPreferences: {
+        ...DEFAULT_NOTIFICATION_PREFERENCES,
+        retentionMaxAgeMs: 7 * MS_PER_DAY,
+      },
+    })
+    await seedSettledIntent(Date.now() - 8 * MS_PER_DAY)
+    // The sweeper hands row-expiry targets "now"; the window is the inbox's.
+    expect(await target().prune(Date.now())).toBe(1)
+    expect((await getDb().notificationDeliveryIntents.get("i1"))?.compactedAt).toBeDefined()
+  })
+
+  it("keeps everything when the inbox keeps everything", async () => {
+    await saveSettings({
+      notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFERENCES, retentionMaxAgeMs: 0 },
+    })
+    await seedSettledIntent(Date.now() - 400 * MS_PER_DAY)
+    expect(await target().prune(Date.now())).toBe(0)
+    expect((await getDb().notificationDeliveryIntents.get("i1"))?.compactedAt).toBeUndefined()
+  })
+
+  it("leaves a delivery still inside the default 30-day window alone", async () => {
+    await seedSettledIntent(Date.now() - 10 * MS_PER_DAY)
+    expect(await target().prune(Date.now())).toBe(0)
+  })
 })

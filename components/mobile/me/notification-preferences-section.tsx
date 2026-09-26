@@ -284,6 +284,7 @@ export function NotificationPreferencesSection() {
               aria-label={t("retentionDays")}
               className="mt-2"
             />
+            <ItemDescription className="text-[11px]">{t("retentionDaysHelp")}</ItemDescription>
           </ItemContent>
         </Item>
         <Item size="sm" className="px-0">

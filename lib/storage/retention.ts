@@ -31,6 +31,8 @@ import { pruneExpiredWorkflowAppData } from "@/lib/workflow/apps/retention-servi
 import { pruneOnlineEvalData } from "@/lib/db/eval-online"
 import { pruneMemoryGovernanceData } from "@/lib/db/memory-governance"
 import { pruneRetrievalControlData } from "@/lib/db/retrieval-control"
+import { pruneNotificationDelivery } from "@/lib/db/notification-delivery-retention"
+import { resolvePreferences } from "@/lib/notifications/preferences"
 import {
   SITE_ARTIFACT_GC_DEFAULTS,
   collectUnreferencedSiteArtifacts,
@@ -105,6 +107,25 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
     policy: "configured-window",
     prune: (cutoff) => pruneAgentTraces(cutoff),
   },
+  // Notification V2's delivery ledger (ADR-0190) follows the inbox's own
+  // window, read live so a Settings change lands on the next sweep. `0` keeps
+  // everything, the same as it does for the inbox.
+  notificationDelivery: {
+    policy: "row-expiry",
+    prune: async () => {
+      const maxAgeMs = await readNotificationRetentionMs()
+      if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0) return 0
+      const now = Date.now()
+      const report = await pruneNotificationDelivery({ cutoff: now - maxAgeMs, now })
+      return (
+        report.intentsCompacted +
+        report.attemptsDeleted +
+        report.timersDeleted +
+        report.aggregateMembersDeleted +
+        report.publicationsDeleted
+      )
+    },
+  },
   evalArtifacts: {
     policy: "row-expiry",
     prune: async () => {
@@ -151,6 +172,12 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
       })
     },
   },
+}
+
+/** The inbox's retention window, which the delivery ledger shares. */
+async function readNotificationRetentionMs(): Promise<number> {
+  const settings = await getSettings()
+  return resolvePreferences(settings.notificationPreferences).retentionMaxAgeMs
 }
 
 function governedRetentionTargets(): RetentionTarget[] {

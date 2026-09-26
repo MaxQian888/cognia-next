@@ -14,7 +14,7 @@
 
 import { getDb, type CogniaDB } from "@/lib/db/schema"
 import { nanoid } from "nanoid"
-import type { NotificationDeliveryIntent } from "@/types/notifications/delivery"
+import { isWholeIntent, type WholeNotificationDeliveryIntent } from "@/types/notifications/delivery"
 import type { NotificationTarget } from "@/types/notifications/target"
 import type { NotificationRenderedPayload } from "@/types/notifications/result"
 import type { NotificationCategory, NotificationPurpose } from "@/types/notifications/decision"
@@ -35,8 +35,9 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 async function listPendingWebhookIntents(
   now: number,
   limit: number
-): Promise<NotificationDeliveryIntent[]> {
-  return getDb()
+): Promise<WholeNotificationDeliveryIntent[]> {
+  // Unsettled rows are never compacted; the guard says so to the type system.
+  const rows = await getDb()
     .notificationDeliveryIntents.where("status")
     .anyOf("prepared", "queued")
     .filter((i) => {
@@ -48,6 +49,7 @@ async function listPendingWebhookIntents(
     })
     .limit(limit)
     .toArray()
+  return rows.filter(isWholeIntent)
 }
 
 /**
@@ -315,7 +317,7 @@ export async function persistWebhookIntentInsideTransaction(
     .equals(input.operationKey)
     .first()
   if (existing) return existing.id
-  const intent: NotificationDeliveryIntent = {
+  const intent: WholeNotificationDeliveryIntent = {
     id: `ndi_${now.toString(36)}_${nanoid(6)}`,
     scopeKey: scopeKeyOf(target.scope),
     scope: target.scope,

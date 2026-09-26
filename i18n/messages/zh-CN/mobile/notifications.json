@@ -48,6 +48,7 @@
     "quietHoursTitle": "勿扰",
     "resetDefaults": "恢复默认",
     "retentionDays": "保留时长",
+    "retentionDaysHelp": "也决定发往群聊和 Webhook 的消息在投递记录里保留正文多久；超过后只保留已发送的记录。",
     "retentionItems": "最多保存",
     "retentionTitle": "保留",
     "snoozeAutoWake": "活动时唤醒",

@@ -48,6 +48,7 @@
     "quietHoursTitle": "Do not disturb",
     "resetDefaults": "Reset to defaults",
     "retentionDays": "Keep for",
+    "retentionDaysHelp": "Also how long messages sent to chats and webhooks keep their text in delivery history. After that, only the record that they were sent is kept.",
     "retentionItems": "Max stored",
     "retentionTitle": "Retention",
     "snoozeAutoWake": "Wake on activity",

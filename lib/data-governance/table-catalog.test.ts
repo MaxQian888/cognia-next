@@ -142,6 +142,7 @@ describe("DataTableCatalog", () => {
       "evalOnline",
       "workSubmissions",
       "memoryGovernance",
+      "notificationDelivery",
       "ocrResults",
       "retrievalControl",
       "workflowAppData",
@@ -507,18 +508,40 @@ describe("Notification V2 (ADR-0190)", () => {
     expect(policyForTable("notificationSubscriptions")?.role).toBe("authoritative")
   })
 
-  it("is honest that nothing prunes these tables yet", () => {
-    // No delete path exists: rows are retired in place (a state, `deletedAt`,
-    // `flushedAt`). A `ttl` or `cap` here would describe a sweep that is not
-    // there.
-    for (const table of tables) {
+  it("follows the inbox's retention window through one central sweep", () => {
+    for (const table of [
+      "notificationDeliveryAttempts",
+      "notificationTimers",
+      "notificationAggregateMembers",
+      "notificationPublications",
+    ] as const) {
+      expect(policyForTable(table)?.retentionPolicy).toMatchObject({
+        mode: "ttl",
+        days: 30,
+        enforcement: "central",
+        executorId: "notificationDelivery",
+      })
+    }
+    // Intents are the dedupe key: compacted by the same sweep, never deleted.
+    expect(policyForTable("notificationDeliveryIntents")?.retentionPolicy).toMatchObject({
+      mode: "permanent",
+      enforcement: "explicit-delete",
+    })
+    expect(policyForTable("notificationDeliveryIntents")?.retentionPolicy.reason).toMatch(
+      /compacted/
+    )
+    // What a re-projection is decided against is left alone.
+    for (const table of [
+      "notificationTargets",
+      "notificationSubscriptions",
+      "notificationProjectionWork",
+      "notificationPolicyState",
+      "runResultSummaries",
+    ] as const) {
       expect(policyForTable(table)?.retentionPolicy).toMatchObject({
         mode: "permanent",
         enforcement: "explicit-delete",
       })
     }
-    expect(policyForTable("notificationDeliveryAttempts")?.retentionPolicy.reason).toMatch(
-      /nothing prunes it yet/
-    )
   })
 })

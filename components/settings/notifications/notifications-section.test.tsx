@@ -127,6 +127,13 @@ it("saves a quiet-hours time once, on blur, and reverts a cleared one", async ()
   expect(end).toHaveValue("08:00")
 })
 
+it("says the day window also bounds delivery history", () => {
+  render(<NotificationsSection />)
+  expect(screen.getByTestId("notification-retention-days-hint")).toHaveTextContent(
+    "settings.notifications.retentionDaysHint"
+  )
+})
+
 it("saves each retention drag once, on release, not per frame", async () => {
   render(<NotificationsSection />)
   const days = screen.getByRole("slider", { name: "settings.notifications.retentionDaysLabel" })

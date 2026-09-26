@@ -74,6 +74,7 @@
   "perSourceHint": "Turn a source off to mute its toast/desktop/push — it still appears in the center history.",
   "perSourceLabel": "Sources",
   "resetDefaults": "Reset to defaults",
+  "retentionDaysHint": "Also how long messages sent to chats and webhooks keep their text in delivery history. After that, only the record that they were sent is kept.",
   "retentionDaysLabel": "Keep for (days)",
   "retentionItemsLabel": "Maximum stored",
   "snoozeAutoWakeHint": "Re-surface a snoozed notification when new activity arrives in the same thread.",

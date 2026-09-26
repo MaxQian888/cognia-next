@@ -31,8 +31,42 @@ export type NotificationIntentStatus =
   | "cancelled" // revoked before send (target/subscription removed, expiry)
   | "expired" // validity window passed while queued
 
-/** One durable intent to perform ONE external delivery operation. */
-export interface NotificationDeliveryIntent {
+/**
+ * Terminal statuses retention may compact. Every terminal status except
+ * `delivery-unknown`, which stays whole and visible until someone resolves it.
+ */
+export const COMPACTABLE_INTENT_STATUSES = [
+  "accepted",
+  "rejected",
+  "failed",
+  "superseded",
+  "cancelled",
+  "expired",
+] as const satisfies readonly NotificationIntentStatus[]
+export type CompactableIntentStatus = (typeof COMPACTABLE_INTENT_STATUSES)[number]
+
+/**
+ * What an aged, settled intent keeps of its rendered payload: the hash that
+ * suppress-if-unchanged compares against and that a late receipt folds onto
+ * its publication, plus the classification it went out under. The title, body
+ * and actions are dropped.
+ */
+export type CompactedNotificationPayload = Pick<
+  NotificationRenderedPayload,
+  "level" | "disclosureLevel" | "clippedFactCount" | "contentHash"
+>
+
+/**
+ * What an aged, settled intent keeps of its frozen address: the lane it went
+ * out on. The conversation handle, reply anchor and credential references are
+ * dropped; the target row itself still carries them while it exists.
+ */
+export interface CompactedNotificationTargetAddress {
+  kind: NotificationTargetAddress["kind"]
+}
+
+/** Fields every intent carries, whole or compacted. */
+interface NotificationDeliveryIntentBase {
   id: string
   scopeKey: string
   scope: NotificationScope
@@ -50,8 +84,6 @@ export interface NotificationDeliveryIntent {
   operationKey: string
   /** The operation's semantic identity (slot addressing). */
   targetId: string
-  /** Frozen address snapshot — resolved target at persist time. */
-  targetAddress: NotificationTargetAddress
   /** The target row version the address was frozen from. */
   targetVersion: number
   purpose: NotificationPurpose
@@ -67,14 +99,6 @@ export interface NotificationDeliveryIntent {
   subscriptionVersion?: number
   /** The decision this intent was minted from. */
   decisionRevision?: number
-  status: NotificationIntentStatus
-  /**
-   * Frozen sendable payload — the post-disclosure rendered view, already
-   * clipped to the target's ceiling. Typed as `NotificationRenderedPayload`
-   * so the same shape flows from the clipper straight into the sendable
-   * intent (the `clippedFactCount` "+N more" count rides along).
-   */
-  payload: NotificationRenderedPayload
   /** When the intent stops being valid (deferred approval expiry, etc.). */
   expiresAt?: number
   /** Earliest time it may send (deferred / quiet-hours release). */
@@ -91,6 +115,53 @@ export interface NotificationDeliveryIntent {
   policyVersion?: number
   createdAt: number
   updatedAt: number
+}
+
+/** An intent as written: everything a send needs. */
+export interface WholeNotificationDeliveryIntent extends NotificationDeliveryIntentBase {
+  status: NotificationIntentStatus
+  /** Frozen address snapshot — resolved target at persist time. */
+  targetAddress: NotificationTargetAddress
+  /**
+   * Frozen sendable payload — the post-disclosure rendered view, already
+   * clipped to the target's ceiling. Typed as `NotificationRenderedPayload`
+   * so the same shape flows from the clipper straight into the sendable
+   * intent (the `clippedFactCount` "+N more" count rides along).
+   */
+  payload: NotificationRenderedPayload
+  compactedAt?: undefined
+}
+
+/**
+ * A settled intent past the notification retention window, compacted by
+ * `lib/db/notification-delivery-retention.ts`. The row stays: its
+ * `operationKey` is what stops a re-projected fact from being sent twice, and
+ * the run's Notifications tab still lists it. Only content goes.
+ */
+export interface CompactedNotificationDeliveryIntent extends NotificationDeliveryIntentBase {
+  status: CompactableIntentStatus
+  targetAddress: CompactedNotificationTargetAddress
+  payload: CompactedNotificationPayload
+  /** When retention compacted it. */
+  compactedAt: number
+}
+
+/** One durable intent to perform ONE external delivery operation. */
+export type NotificationDeliveryIntent =
+  WholeNotificationDeliveryIntent | CompactedNotificationDeliveryIntent
+
+/** Whether retention has compacted this intent (see {@link CompactedNotificationDeliveryIntent}). */
+export function isCompactedIntent(
+  intent: NotificationDeliveryIntent
+): intent is CompactedNotificationDeliveryIntent {
+  return intent.compactedAt !== undefined
+}
+
+/** The intent still carries everything a send needs. */
+export function isWholeIntent(
+  intent: NotificationDeliveryIntent
+): intent is WholeNotificationDeliveryIntent {
+  return intent.compactedAt === undefined
 }
 
 // ─── Delivery attempts (append-only) ─────────────────────────────────────────

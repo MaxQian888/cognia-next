@@ -295,6 +295,9 @@ export function NotificationsSection() {
           onValueChange={([v]) => retentionDays.set(v ?? 30)}
           onValueCommit={([v]) => retentionDays.commitValue(v ?? 30)}
         />
+        <p className="text-xs text-muted-foreground" data-testid="notification-retention-days-hint">
+          {t("retentionDaysHint")}
+        </p>
         <div className="flex items-center justify-between pt-1">
           <Label className="text-sm">{t("retentionItemsLabel")}</Label>
           <span className="text-sm tabular-nums text-muted-foreground">{retentionItems.value}</span>

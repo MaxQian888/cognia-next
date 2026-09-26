@@ -5,7 +5,7 @@
 
 import { stableStringify, stableHash, materialHashOfFacts, judgeMateriality } from "./materiality"
 import type { RunResultFact } from "@/types/notifications/result"
-import type { NotificationDeliveryIntent } from "@/types/notifications/delivery"
+import type { WholeNotificationDeliveryIntent } from "@/types/notifications/delivery"
 
 function fact(over: Partial<RunResultFact> = {}): RunResultFact {
   return {
@@ -17,7 +17,9 @@ function fact(over: Partial<RunResultFact> = {}): RunResultFact {
   }
 }
 
-function intent(over: Partial<NotificationDeliveryIntent> = {}): NotificationDeliveryIntent {
+function intent(
+  over: Partial<WholeNotificationDeliveryIntent> = {}
+): WholeNotificationDeliveryIntent {
   return {
     id: over.id ?? "i1",
     scopeKey: "s",
