@@ -8,8 +8,17 @@
 // / `alwaysLoadServers` / `alwaysLoadTools`. These helpers translate that
 // policy into per-server / per-tool `alwaysLoad` decisions.
 //
-// Extracted from `anthropic.mjs` so the decision logic is unit-testable
-// without spawning a real `query()` (which needs the bundled CLI binary).
+// Kept apart from the Agent SDK dispatcher so the decision logic is
+// unit-testable without spawning a real `query()` (which needs the bundled CLI
+// binary).
+
+/** The `SendOptions` fields that carry the tool-search policy. */
+export interface ToolSearchOptions {
+  toolSearchEnabled?: unknown
+  alwaysLoadServers?: unknown
+  alwaysLoadTools?: unknown
+  [field: string]: unknown
+}
 
 /**
  * Build a `serverAlwaysLoad(name)` predicate from a SendOptions blob.
@@ -19,14 +28,15 @@
  *   bundled CLI would otherwise auto-defer past its context threshold.
  * - Tool search ON: only servers named in `alwaysLoadServers` stay resident;
  *   the rest defer behind tool search (`false`).
- *
- * @param {Record<string, any>} sendOptions
- * @returns {(serverName: string) => boolean}
  */
-export function makeServerAlwaysLoad(sendOptions) {
+export function makeServerAlwaysLoad(
+  sendOptions: ToolSearchOptions | null | undefined
+): (serverName: string) => boolean {
   const enabled = sendOptions?.toolSearchEnabled === true
-  const names = new Set(
-    Array.isArray(sendOptions?.alwaysLoadServers) ? sendOptions.alwaysLoadServers : []
+  const names = new Set<unknown>(
+    Array.isArray(sendOptions?.alwaysLoadServers)
+      ? (sendOptions.alwaysLoadServers as unknown[])
+      : []
   )
   return (serverName) => !enabled || names.has(serverName)
 }
@@ -35,25 +45,23 @@ export function makeServerAlwaysLoad(sendOptions) {
  * The set of bare tool names to pin resident at per-tool granularity. Only
  * meaningful when tool search is enabled; when off, server-level always-load
  * already keeps everything resident.
- *
- * @param {Record<string, any>} sendOptions
- * @returns {Set<string>}
  */
-export function alwaysLoadToolSet(sendOptions) {
-  return new Set(Array.isArray(sendOptions?.alwaysLoadTools) ? sendOptions.alwaysLoadTools : [])
+export function alwaysLoadToolSet(sendOptions: ToolSearchOptions | null | undefined): Set<unknown> {
+  return new Set<unknown>(
+    Array.isArray(sendOptions?.alwaysLoadTools) ? (sendOptions.alwaysLoadTools as unknown[]) : []
+  )
 }
 
 /**
  * Re-key a user `mcpServers` map, stamping `alwaysLoad: true` onto each server
  * config the policy says should stay resident. Non-object configs pass through
  * untouched. Returns a NEW map (does not mutate the input).
- *
- * @param {Record<string, unknown>} servers  name → server config
- * @param {(serverName: string) => boolean} serverAlwaysLoad
- * @returns {Record<string, unknown>}
  */
-export function stampUserServersAlwaysLoad(servers, serverAlwaysLoad) {
-  const out = {}
+export function stampUserServersAlwaysLoad(
+  servers: Readonly<Record<string, unknown>> | null | undefined,
+  serverAlwaysLoad: (serverName: string) => boolean
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
   for (const [name, cfg] of Object.entries(servers ?? {})) {
     out[name] =
       cfg && typeof cfg === "object"

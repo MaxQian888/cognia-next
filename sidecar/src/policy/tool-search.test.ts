@@ -4,7 +4,9 @@ import {
   makeServerAlwaysLoad,
   alwaysLoadToolSet,
   stampUserServersAlwaysLoad,
-} from "./tool-search-policy.mjs"
+} from "./tool-search.ts"
+
+type Json = Record<string, unknown>
 
 test("tool search OFF (default) → every server stays always-load", () => {
   const pred = makeServerAlwaysLoad({})
@@ -45,7 +47,7 @@ test("stampUserServersAlwaysLoad stamps only servers the predicate keeps residen
     keep: { type: "stdio", command: "x" },
     defer: { type: "http", url: "u" },
   }
-  const pred = (name) => name === "keep"
+  const pred = (name: string) => name === "keep"
   const out = stampUserServersAlwaysLoad(servers, pred)
   assert.deepEqual(out.keep, { type: "stdio", command: "x", alwaysLoad: true })
   assert.deepEqual(out.defer, { type: "http", url: "u" })
@@ -73,9 +75,9 @@ test("stampUserServersAlwaysLoad handles undefined/empty maps", () => {
 test("end-to-end: OFF policy stamps every user server resident", () => {
   const sendOptions = { mcpServers: { a: { type: "stdio" }, b: { type: "http" } } }
   const pred = makeServerAlwaysLoad(sendOptions)
-  const out = stampUserServersAlwaysLoad(sendOptions.mcpServers, pred)
-  assert.equal(out.a.alwaysLoad, true)
-  assert.equal(out.b.alwaysLoad, true)
+  const out = stampUserServersAlwaysLoad(sendOptions.mcpServers, pred) as Record<string, Json>
+  assert.equal(out.a?.alwaysLoad, true)
+  assert.equal(out.b?.alwaysLoad, true)
 })
 
 test("end-to-end: ON policy stamps only the allowlisted user server", () => {
@@ -85,7 +87,7 @@ test("end-to-end: ON policy stamps only the allowlisted user server", () => {
     mcpServers: { a: { type: "stdio" }, b: { type: "http" } },
   }
   const pred = makeServerAlwaysLoad(sendOptions)
-  const out = stampUserServersAlwaysLoad(sendOptions.mcpServers, pred)
-  assert.equal(out.a.alwaysLoad, true)
-  assert.equal("alwaysLoad" in out.b, false)
+  const out = stampUserServersAlwaysLoad(sendOptions.mcpServers, pred) as Record<string, Json>
+  assert.equal(out.a?.alwaysLoad, true)
+  assert.equal("alwaysLoad" in (out.b ?? {}), false)
 })

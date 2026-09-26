@@ -34,7 +34,7 @@ import {
   makeServerAlwaysLoad,
   alwaysLoadToolSet,
   stampUserServersAlwaysLoad,
-} from "./tool-search-policy.mjs"
+} from "../src/policy/tool-search.ts"
 import { buildLspHooks } from "./lsp-hooks.mjs"
 import { buildAgentHooks, mergeHookMaps } from "./agent-hooks.mjs"
 import { buildLedgerToolHooks, createCallLedgerGate } from "./call-ledger-gate.mjs"
@@ -248,7 +248,7 @@ export function dispatchAnthropic(
   // would otherwise auto-defer once deferred-tool tokens cross its ~10%
   // context threshold. These are sidecar-protocol fields: they are NOT in the
   // `options` allowlist below, so they never reach `query()` verbatim. See
-  // `./tool-search-policy.mjs` for the (unit-tested) decision logic.
+  // `../src/policy/tool-search.ts` for the (unit-tested) decision logic.
   const serverAlwaysLoad = makeServerAlwaysLoad(sendOptions)
   const alwaysLoadToolNames = alwaysLoadToolSet(sendOptions)
 

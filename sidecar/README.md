@@ -112,6 +112,7 @@ Each migration batch appends its moves here (old → new).
 | `dispatch/ai-sdk-tools.mjs` (`createToolPermissionGate`)                 | `src/policy/permission/ai-sdk-gate.ts`                             | 4d          |
 | `dispatch/anthropic.mjs` (`createAnthropicCanUseTool`, …)                | `src/policy/permission/sdk-can-use-tool.ts`                        | 4d          |
 | `dispatch/anthropic.mjs` (`enforceAnthropicPermissionChannel`)           | `src/policy/permission/delegated-approval.ts`                      | 4d          |
+| `dispatch/tool-search-policy.mjs`                                        | `src/policy/tool-search.ts`                                        | 4e          |
 
 ## Scripts (run from repo root)
 
