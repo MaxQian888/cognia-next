@@ -15,6 +15,7 @@
  */
 
 import { useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -40,6 +41,7 @@ import { COMPACT_PAGE_MIN_H } from "@/lib/shell/compact-shell"
 
 export function GoalsMobileBody() {
   const t = useTranslations("goal")
+  const router = useRouter()
   const goals = useLiveQuery(() => listAllGoals(), [])
   const [selected, setSelected] = useState<Goal | null>(null)
   const [section, setSection] = useState<GoalMobileSection>("overview")
@@ -97,6 +99,18 @@ export function GoalsMobileBody() {
             <EmptyState
               spotIcon="goals"
               title={section === "overview" ? t("console.activeEmpty") : t("history.empty")}
+              // The copy says goals start from /goal in a chat, and nothing
+              // on the screen led there. Chat's composer "+" menu carries the
+              // Goal row that inserts the command.
+              cta={
+                section === "overview"
+                  ? {
+                      label: t("console.openChat"),
+                      onSelect: () => router.push("/"),
+                      testId: "mobile-goals-open-chat",
+                    }
+                  : undefined
+              }
             />
           ) : (
             // One surface with hairline rows. A frame per goal turned a

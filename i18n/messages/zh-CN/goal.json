@@ -106,6 +106,7 @@
   "console": {
     "activeEmpty": "暂无活跃目标。在聊天里用 /goal 命令开始一个。",
     "newGoal": "新建目标",
+    "openChat": "打开聊天",
     "openGoalsHeading": "进行中的目标",
     "prefs": {
       "defaultTab": "默认标签",

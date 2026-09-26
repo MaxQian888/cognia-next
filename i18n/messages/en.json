@@ -15854,6 +15854,7 @@
     "console": {
       "activeEmpty": "No active goals. Start one with the /goal command in a chat.",
       "newGoal": "New goal",
+      "openChat": "Open chat",
       "openGoalsHeading": "Open goals",
       "prefs": {
         "defaultTab": "Default tab",

@@ -9,6 +9,12 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import type { Goal } from "@/types/goal"
 
+const mockPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush, back: jest.fn(), replace: jest.fn(), prefetch: jest.fn() }),
+  usePathname: () => "/goals",
+  useSearchParams: () => new URLSearchParams(),
+}))
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("@/lib/sync/companion-sync", () => ({ runSyncDown: jest.fn().mockResolvedValue([]) }))
 jest.mock("@/lib/db/goals", () => ({ listAllGoals: jest.fn() }))
@@ -93,6 +99,13 @@ describe("<GoalsMobileBody />", () => {
     render(<GoalsMobileBody />)
     expect(screen.getByTestId("empty-state")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-spot-icon-goals")).toBeInTheDocument()
+  })
+
+  it("leads from the empty overview to chat, where /goal starts one", async () => {
+    liveQuery.mockReturnValue([])
+    render(<GoalsMobileBody />)
+    await userEvent.click(screen.getByTestId("mobile-goals-open-chat"))
+    expect(mockPush).toHaveBeenCalledWith("/")
   })
 
   it("opens the goal detail sheet on tap", async () => {
