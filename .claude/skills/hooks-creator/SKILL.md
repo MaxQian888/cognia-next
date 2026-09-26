@@ -101,7 +101,7 @@ id through `builtinHookOverrides` (id → enabled), so users keep final control.
   calls `buildBuiltinHookGroups` and merges it under user hooks via `loadHooks`.
   A new registry entry is picked up automatically.
 - **Desktop:** the Rust settings loader merges the same registry under
-  user/project/local settings (`src-tauri/src/hooks/`).
+  user/project/local settings (`crates/cognia-hooks/src/`).
 - **Override field:** `builtinHookOverrides` exists in the CLI config schema and
   the desktop settings; the Settings → Hooks "Built-in hooks" list toggles it.
 

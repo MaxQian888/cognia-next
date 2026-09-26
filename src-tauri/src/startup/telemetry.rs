@@ -14,13 +14,15 @@ pub(crate) fn native_logging(app: &App) {
 }
 
 /// Crash subsystem. Register the app handle so capture paths can emit
-/// `crash://captured` to the webview; detect an abnormal previous exit
+/// `crash://captured` to the webview (and give the hooks runtime its desktop
+/// host); detect an abnormal previous exit
 /// (BEFORE writing this session's sentinel) and stash it for the next-launch
 /// dialog; then mark this session running. Finally push an initial meta
 /// snapshot to the out-of-process monitor so an immediate native crash still
 /// carries app state.
 pub(crate) fn crash_and_recovery(app: &App) {
     crate::crash::install_app_handle(app.handle().clone());
+    crate::hooks::install_desktop_host(app.handle().clone());
     let pending = crate::crash::sentinel::take_pending();
     crate::crash::sentinel::mark_start();
 

@@ -92,7 +92,7 @@ const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
 
 `PLUGIN_CAPABILITY_CONTRACTS`（`plugin-capabilities.ts:77`）编目 72 个 `PluginCapability` 契约 —— 插件可以在 manifest 中声明的特性。每个条目携带 `id`、`support` 级别（`"supported" | "partial" | "experimental" | "blocked"`）、其激活的 `manifestFields`、`runtimeBinding` 摘要、`hostBindings` / `typescriptSdk` / `pythonSdk` 证明路径、`docs` 与 `requiredTests`（`plugin-capabilities.ts:8-49`）。其中 68 个为 `supported`；4 个 `experimental` 条目已记录在案但免于证明审计。
 
-`command-hooks` 是最新条目（`plugin-capabilities.ts:277-301`）：声明它会把一个 settings 形态的 `hooks` 块在每条执行轨道上合并到用户钩子之下、内置钩子之上 —— CLI（`cli/src/hooks/plugin-hooks.ts`）、桌面端（`src-tauri/src/hooks/plugin.rs`）与生态转换器（`lib/plugin/convert/ecosystem.ts`）。SDK：`defineCommandHooks`（`packages/plugin-sdk/src/define/define-command-hooks.ts`）。
+`command-hooks` 是最新条目（`plugin-capabilities.ts:277-301`）：声明它会把一个 settings 形态的 `hooks` 块在每条执行轨道上合并到用户钩子之下、内置钩子之上 —— CLI（`cli/src/hooks/plugin-hooks.ts`）、桌面端（`crates/cognia-plugin-runtime/src/command_hooks.rs`）与生态转换器（`lib/plugin/convert/ecosystem.ts`）。SDK：`defineCommandHooks`（`packages/plugin-sdk/src/define/define-command-hooks.ts`）。
 
 ## 可证明的贡献
 

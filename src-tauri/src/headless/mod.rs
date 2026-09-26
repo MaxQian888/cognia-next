@@ -420,6 +420,16 @@ static SERVICES: RwLock<Option<Arc<HeadlessServices>>> = RwLock::new(None);
 /// Called by the `cognia-server` binary at boot (R8), before the axum
 /// server spawns. Idempotent.
 pub fn install_headless_services(services: Option<Arc<HeadlessServices>>) {
+    // The hooks runtime merges this process's plugin `commandHooks` through
+    // its host. Unit-test states never had that layer, so tests install none.
+    #[cfg(not(test))]
+    if let Some(services) = &services {
+        cognia_hooks::host::HOST.set(Arc::new(
+            crate::plugin_api::command_hooks::HeadlessHooksHost(Arc::clone(
+                &services.plugin_runtime,
+            )),
+        ));
+    }
     *SERVICES.write() = services;
 }
 

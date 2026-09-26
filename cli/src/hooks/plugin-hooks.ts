@@ -1,6 +1,6 @@
 /**
  * Plugin-contributed command hooks (`manifest.commandHooks`, `command-hooks`
- * capability) for the CLI rail. Mirrors `src-tauri/src/hooks/plugin.rs`: each
+ * capability) for the CLI rail. Mirrors `crates/cognia-plugin-runtime/src/command_hooks.rs`: each
  * enabled plugin's block merges UNDER the user's own groups and above
  * built-ins — the same settings.json `Event → HookGroup[]` shape the runner
  * already executes, so plugin handlers get identical blocking / context /

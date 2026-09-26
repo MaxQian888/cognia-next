@@ -88,7 +88,7 @@ export function loadHooks(opts: {
    * Enabled plugins' merged `commandHooks` block (see `plugin-hooks.ts`).
    * Merged UNDER the user's own groups and above built-ins — for each event
    * the final order is cognia → claude → plugin → builtin, matching the
-   * desktop rail (`src-tauri/src/hooks/mod.rs:load_effective_settings`).
+   * desktop rail (`crates/cognia-hooks/src/lib.rs:load_effective_settings`).
    */
   plugin?: HooksConfig
   /**

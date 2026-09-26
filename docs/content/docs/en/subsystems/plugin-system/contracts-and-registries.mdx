@@ -92,7 +92,7 @@ The bridge maps are **not** keyed by point-id; they are keyed by manifest field 
 
 `PLUGIN_CAPABILITY_CONTRACTS` (`plugin-capabilities.ts:77`) catalogs the 72 `PluginCapability` contracts — the manifest-level features a plugin may declare. Each entry carries `id`, a `support` level (`"supported" | "partial" | "experimental" | "blocked"`), the `manifestFields` it activates, a `runtimeBinding` summary, `hostBindings` / `typescriptSdk` / `pythonSdk` proof paths, `docs`, and `requiredTests` (`plugin-capabilities.ts:8-49`). 68 are `supported`; the 4 `experimental` entries are documented but exempt from the proof audit.
 
-`command-hooks` is the newest entry (`plugin-capabilities.ts:277-301`): declaring it merges a settings-shaped `hooks` block under user hooks and above built-ins on every rail — CLI (`cli/src/hooks/plugin-hooks.ts`), desktop (`src-tauri/src/hooks/plugin.rs`), and the ecosystem converter (`lib/plugin/convert/ecosystem.ts`). SDK: `defineCommandHooks` (`packages/plugin-sdk/src/define/define-command-hooks.ts`).
+`command-hooks` is the newest entry (`plugin-capabilities.ts:277-301`): declaring it merges a settings-shaped `hooks` block under user hooks and above built-ins on every rail — CLI (`cli/src/hooks/plugin-hooks.ts`), desktop (`crates/cognia-plugin-runtime/src/command_hooks.rs`), and the ecosystem converter (`lib/plugin/convert/ecosystem.ts`). SDK: `defineCommandHooks` (`packages/plugin-sdk/src/define/define-command-hooks.ts`).
 
 ## Provable contribution
 

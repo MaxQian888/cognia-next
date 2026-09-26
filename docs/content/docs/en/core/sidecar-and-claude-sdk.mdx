@@ -140,7 +140,7 @@ Settings → Built-in agent runtime exposes the capability snapshot, guarded rol
 - `onResponse(content, usage)` — called after a turn completes.
 - `onError(err)` — called when the sidecar reports an error.
 
-Hooks run as user-defined code (snippets stored in Dexie or shell commands). They are **not** for Cognia internals — those live in `lib/chat/`. The Rust counterpart (`src-tauri/src/hooks/`) lets hooks run shell commands without going through the main webview.
+Hooks run as user-defined code (snippets stored in Dexie or shell commands). They are **not** for Cognia internals — those live in `lib/chat/`. The Rust counterpart (`crates/cognia-hooks/src/`) lets hooks run shell commands without going through the main webview.
 
 ## A2UI MCP sidecar
 

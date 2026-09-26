@@ -1,7 +1,7 @@
 # Hook event catalog (System B)
 
 The 27 lifecycle events the settings.json runtime knows, where they fire, and
-whether a hook on them can block. Canonical source: `src-tauri/src/hooks/types.rs`
+whether a hook on them can block. Canonical source: `crates/cognia-hooks/src/types.rs`
 (Rust) mirrored in `cli/src/hooks/types.ts` and `lib/claude/hooks.ts`. Mapping
 from the agent stream lives in `src-tauri/src/hooks/classify.rs` and
 `cli/src/hooks/classify.ts`.

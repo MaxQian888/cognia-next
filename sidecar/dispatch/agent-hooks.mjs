@@ -7,7 +7,7 @@
 //
 // Self-contained by necessity: the sidecar is not in the pnpm workspace, so we
 // cannot import `@/` or `cli/` code. The matcher + decision-parse + merge
-// semantics are ported verbatim from `src-tauri/src/hooks/{mod,command,types}.rs`
+// semantics are ported verbatim from `crates/cognia-hooks/src/{lib,command,types}.rs`
 // so behaviour is identical to the retired HOST engines.
 //
 // Exit-code / stdout-JSON contract (per Claude Code docs, mirrors command.rs):
@@ -100,7 +100,7 @@ export function hookMatchTarget(eventName, input) {
   return typeof value === "string" ? value : ""
 }
 
-// --- Matcher (port of src-tauri/src/hooks/mod.rs:matcher_matches) -----------
+// --- Matcher (port of crates/cognia-hooks/src/lib.rs:matcher_matches) -----------
 
 /**
  * Test whether a hook group's matcher applies to `target`.

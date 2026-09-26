@@ -108,6 +108,10 @@ cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["t
 # grants, rate limits and audit trail; `companion_api` re-exports each module at
 # its old path.
 cognia-companion-security = { path = "../crates/cognia-companion-security" }
+# ADR-0196 P6c — the settings-hook runtime and the Claude settings readers;
+# `hooks` and `settings` re-export it at their old paths. `tauri-host` adds the
+# command attributes and the three writers that emit through the `AppHandle`.
+cognia-hooks = { path = "../crates/cognia-hooks", features = ["tauri-host"] }
 # ADR-0196 P6g — Chromium cookie import; `browser/cookie_import` keeps the
 # command shells, the macOS keychain adapter and the WebKit sink.
 cognia-browser-cookies = { path = "../crates/cognia-browser-cookies" }

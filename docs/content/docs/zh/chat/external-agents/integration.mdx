@@ -187,7 +187,7 @@ Agent。要接入说**全新协议**的 Agent，插件需贡献一个*协议适�
   共用该解析器，故被判 `executable` 的预设必然能 spawn。ACP 终端子协议（`acp_terminal_create`、`_output`、
   `_kill`、`_write`…）支撑 [ACP 客户端的终端处理器](./acp-client)。app 退出时两个管理器的 `kill_all()` 在
   `RunEvent::Exit` 处理器（`lib.rs`）中运行，使自动拉起的服务器与终端不会变成孤儿。
-- **Hook 运行时** —— `src-tauri/src/hooks/commands.rs`：`run_agent_hook`（`:55`，登记于 `lib.rs:308`）为一个
+- **Hook 运行时** —— `crates/cognia-hooks/src/commands.rs`：`run_agent_hook`（`:55`，登记于 `lib.rs:308`）为一个
   外部 Agent 生命周期事件运行一个 settings.json hook（工具或会话作用域），`set_trusted_workspaces`（`:102`）
   是 project/local 信任闸门。TS 调用方是 [`agent-hooks.ts:54`](./observability-hooks)。
 

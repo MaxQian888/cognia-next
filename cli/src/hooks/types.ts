@@ -3,7 +3,7 @@
  * schema (`settings.json` `hooks.{Event}` arrays) that the TUI supports, so a
  * user's existing `~/.claude/settings.json` round-trips into the CLI.
  *
- * Ported from `src-tauri/src/hooks/types.rs` (the desktop Rust implementation).
+ * Ported from `crates/cognia-hooks/src/types.rs` (the desktop Rust implementation).
  * The string union mirrors the Rust `HookEvent` enum verbatim so classified
  * events line up across both shells.
  *

@@ -208,7 +208,7 @@ External agents only execute on the Tauri desktop shell. There are **two** Rust 
   [ACP client's terminal handlers](./acp-client). On app exit both managers'
   `kill_all()` run from the `RunEvent::Exit` handler (`lib.rs`) so auto-spawned servers and
   terminals are not orphaned.
-- **Hook runtime** — `src-tauri/src/hooks/commands.rs`: `run_agent_hook` (`:55`, registered
+- **Hook runtime** — `crates/cognia-hooks/src/commands.rs`: `run_agent_hook` (`:55`, registered
   `lib.rs:308`) runs a settings.json hook for an external-agent lifecycle event (tool- or
   session-scoped), and `set_trusted_workspaces` (`:102`) is the project/local trust gate. The TS
   caller is [`agent-hooks.ts:54`](./observability-hooks).

@@ -79,7 +79,7 @@ context so a runaway file can't blow the prompt budget.
 Add matching entries to:
 
 - `lib/claude/hooks/builtin-hooks.ts` for the renderer/CLI runtime
-- `src-tauri/src/hooks/builtin.rs` for the Rust desktop runtime
+- `crates/cognia-hooks/src/builtin.rs` for the Rust desktop runtime
 
 The two catalogs are intentionally mirrored; neither is generated from the
 other. Keep `id`, event, matcher, script, and default-enabled state identical.
@@ -106,7 +106,7 @@ id through `builtinHookOverrides` (id → enabled), so users keep final control.
 - **CLI:** `createHookRunner` (`cli/src/tui/runtime/hook-runner.ts`) already
   calls `buildBuiltinHookGroups` and merges it under user hooks via `loadHooks`.
   A new registry entry is picked up automatically.
-- **Desktop:** `src-tauri/src/hooks/builtin.rs` builds and merges the Rust
+- **Desktop:** `crates/cognia-hooks/src/builtin.rs` builds and merges the Rust
   catalog under user/project/local settings.
 - **Override field:** `builtinHookOverrides` exists in the CLI config schema and
   the desktop settings; the Settings → Hooks "Built-in hooks" list toggles it.
@@ -118,7 +118,7 @@ id through `builtinHookOverrides` (id → enabled), so users keep final control.
   assert exit code + stdout/stderr for the allow, block, and inject paths.
 - If you added a registry entry, assert `buildBuiltinHookGroups` emits/omits it
   under the right `overrides`.
-- Extend the Rust tests in `src-tauri/src/hooks/builtin.rs` so catalog parity,
+- Extend the Rust tests in `crates/cognia-hooks/src/builtin.rs` so catalog parity,
   defaults, overrides, and command construction stay covered.
 - Run `rtk pnpm test -- lib/claude/hooks/builtin-hooks.test.ts` and
   `rtk cargo test --manifest-path src-tauri/Cargo.toml hooks::builtin`.

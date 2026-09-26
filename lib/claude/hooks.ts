@@ -1,4 +1,4 @@
-// Frontend hook configuration types mirror `src-tauri/src/hooks/types.rs`.
+// Frontend hook configuration types mirror `crates/cognia-hooks/src/types.rs`.
 // Claude SDK hooks execute in the sidecar; host adapters use the native rail.
 // Both share these settings and the event catalog used by the settings UI.
 

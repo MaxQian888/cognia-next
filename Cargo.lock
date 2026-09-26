@@ -2408,6 +2408,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-hooks"
+version = "0.1.0"
+dependencies = [
+ "cognia-core",
+ "cognia-net",
+ "dirs 6.0.0",
+ "log",
+ "regex",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "cognia-instrument"
 version = "0.1.0"
 dependencies = [
@@ -2538,6 +2555,7 @@ dependencies = [
  "cognia-git",
  "cognia-git-mirror",
  "cognia-headless-contract",
+ "cognia-hooks",
  "cognia-instrument",
  "cognia-jobs",
  "cognia-mcp-server",
@@ -2765,6 +2783,7 @@ dependencies = [
  "chrono",
  "cognia-core",
  "cognia-exec-sandbox",
+ "cognia-hooks",
  "cognia-net",
  "cognia-secrets",
  "cognia-terminal",

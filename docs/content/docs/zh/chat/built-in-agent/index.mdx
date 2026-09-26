@@ -22,7 +22,7 @@ description: 应用内 Claude Agent 运行时——一次对话如何从输入�
   <Stat label="装配贡献者" value="41" hint="resolveSendOptions 中的有序段落，build-options.ts:336-1380" />
   <Stat label="Sidecar 协议消息" value="5 / 6" hint="入站 send/interrupt/permission_response/plugin_tool_response/close · 出站 event/permission_request/…" />
   <Stat label="权限层数" value="2" hint="sidecar canUseTool（A 层）+ use-claude-chat Auto-mode（B 层）" />
-  <Stat label="Hook 生命周期事件" value="27" hint="HookEvent 枚举，src-tauri/src/hooks/types.rs:14" />
+  <Stat label="Hook 生命周期事件" value="27" hint="HookEvent 枚举，crates/cognia-hooks/src/types.rs:14" />
   <Stat label="内置子代理" value="4" hint="workflow designer/debugger/refactorer/doc-writer" />
   <Stat label="记忆类型" value="3" hint="semantic · episodic · procedural —— Dexie v65" />
 </StatGrid>
@@ -70,7 +70,7 @@ flowchart TB
   subgraph MODULES["能力模块"]
     direction TB
     PERM["权限 / Auto-mode<br/>permissions/ · ADR-0041"]
-    HOOKS["Hooks 运行时<br/>src-tauri/src/hooks/ · ADR-0040"]
+    HOOKS["Hooks 运行时<br/>crates/cognia-hooks/src/ · ADR-0040"]
     SUBAG["子代理<br/>agents/subagents/"]
     TOOLS["工具 / MCP / 技能<br/>sidecar/builtin-tools/"]
     MEM["长期记忆<br/>lib/memory/ · Dexie v65"]

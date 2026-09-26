@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 use crate::settings::ClaudeSettings;
 
@@ -87,12 +87,12 @@ fn is_enabled(def: &BuiltinHookDef, overrides: &Map<String, Value>) -> bool {
 }
 
 #[cfg(not(windows))]
-pub(super) fn quote(value: &str) -> String {
+pub fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 #[cfg(windows)]
-pub(super) fn quote(value: &str) -> String {
+pub fn quote(value: &str) -> String {
     // Hook commands run through cmd.exe on Windows. Quotes protect whitespace
     // and metacharacters; doubling percent signs prevents environment-variable
     // expansion in paths supplied by the installation layout.
@@ -169,22 +169,26 @@ fn overrides_from(settings: &ClaudeSettings) -> Map<String, Value> {
 /// CWD-relative `hooks/builtin` resolves to the non-existent
 /// `src-tauri/hooks/builtin` — `node` then dies with a "Cannot find module"
 /// (`cjs/loader`) crash on every SessionStart / UserPromptSubmit. Anchor on the
-/// compile-time manifest dir's parent (the repo root) instead — the same
-/// resource-dir-then-manifest-parent pattern `sidecar::sidecar_dir` uses — and
-/// fall back to the CWD-relative path only as a last resort.
+/// compile-time workspace root (two levels above this crate) instead — the
+/// same resource-dir-then-repo-root pattern `sidecar::sidecar_dir` uses — and
+/// fall back to the CWD-relative path only as a last resort. The resource dir
+/// comes from the [`crate::host::HOST`] the binary installed.
 fn builtin_base_dir() -> PathBuf {
     #[cfg(not(test))]
-    if let Some(app) = crate::crash::app_handle() {
-        use tauri::Manager;
-        if let Ok(res) = app.path().resource_dir() {
-            let cand = res.join("hooks").join("builtin");
-            if cand.is_dir() {
-                return cand;
-            }
+    if let Some(res) = crate::host::HOST
+        .try_get()
+        .and_then(|host| host.resource_dir())
+    {
+        let cand = res.join("hooks").join("builtin");
+        if cand.is_dir() {
+            return cand;
         }
     }
-    // Dev: walk up from the Cargo manifest dir (`src-tauri/`) to the repo root.
-    if let Some(root) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent() {
+    // Dev: walk up from this crate's manifest dir to the repo root.
+    if let Some(root) = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+    {
         let cand = root.join("hooks").join("builtin");
         if cand.is_dir() {
             return cand;

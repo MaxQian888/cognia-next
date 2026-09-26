@@ -439,7 +439,7 @@ describe("command-auth-gate.mjs", () => {
 
 describe("TS ↔ Rust lockstep", () => {
   it("matches the shared registry table", () => {
-    // The registry is declared twice (here and `src-tauri/src/hooks/builtin.rs`)
+    // The registry is declared twice (here and `crates/cognia-hooks/src/builtin.rs`)
     // and was hand-maintained with nothing enforcing agreement. Because
     // `builtinHookOverrides` is keyed by id, a drifted id also orphans the
     // user's enable/disable choice on one shell. Both sides assert this table.

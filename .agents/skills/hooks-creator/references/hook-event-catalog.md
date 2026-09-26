@@ -3,7 +3,7 @@
 The 27 lifecycle events the settings.json runtime knows, where they fire, and
 whether a hook on them can block. Canonical product metadata lives in
 `lib/claude/hooks/event-catalog.ts`; wire types mirror it in
-`src-tauri/src/hooks/types.rs`, `cli/src/hooks/types.ts`, and
+`crates/cognia-hooks/src/types.rs`, `cli/src/hooks/types.ts`, and
 `lib/claude/hooks.ts`. Agent-stream classification lives in
 `src-tauri/src/hooks/classify.rs` and `cli/src/hooks/classify.ts`.
 
@@ -66,7 +66,7 @@ UI badges them "no trigger source yet". Add a source before relying on them.
 ## Built-in hooks shipped today
 
 See the mirrored catalogs in `lib/claude/hooks/builtin-hooks.ts` and
-`src-tauri/src/hooks/builtin.rs`, plus `hooks/builtin/`:
+`crates/cognia-hooks/src/builtin.rs`, plus `hooks/builtin/`:
 
 - `auto-context-loader.mjs` — injects `.cognia/agent-context.md` (SessionStart + UserPromptSubmit; default ON).
 - `cost-quota-guard.mjs` — denies a turn over the session token budget (UserPromptSubmit; default OFF).

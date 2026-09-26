@@ -1,7 +1,7 @@
 // Bridges the Dexie workspace-trust ledger into the Rust hooks trust gate.
 //
 // Project/local-scope settings.json hooks load only for trusted workspace roots,
-// and that gate is enforced in Rust (`src-tauri/src/hooks/trust.rs`) so a
+// and that gate is enforced in Rust (`crates/cognia-hooks/src/trust.rs`) so a
 // compromised renderer can't bypass it. The trust ledger itself lives in Dexie
 // (`lib/db/trusted-workspaces.ts`); this module pushes the current set into Rust
 // at startup and after every trust change. No-op on web/mobile.

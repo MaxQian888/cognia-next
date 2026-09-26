@@ -249,7 +249,7 @@ SDK 边界采用版本化和自动审计，而不是透传任意 JSON。`protoco
 - `onError(err)` —— sidecar 上报错误时。
 
 Hooks 跑用户定义的代码（存在 Dexie 中的代码片段，或 shell 命令）。它们**不是** Cognia 内部用的 ——
-内部逻辑放在 `lib/chat/`。Rust 侧（`src-tauri/src/hooks/`）允许 hooks 跑 shell 命令而不必经过主 webview。
+内部逻辑放在 `lib/chat/`。Rust 侧（`crates/cognia-hooks/src/`）允许 hooks 跑 shell 命令而不必经过主 webview。
 
 ## A2UI 工具面
 

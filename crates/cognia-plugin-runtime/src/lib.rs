@@ -28,6 +28,7 @@ pub mod api_bridge;
 mod archive_limits;
 pub mod backup;
 pub mod cli_exec;
+pub mod command_hooks;
 pub mod commands;
 mod contained_path;
 pub mod context_menu;
@@ -86,7 +87,7 @@ pub struct PluginRuntimeSnapshot {
 }
 
 /// Cached result of one `collect_command_hooks` pass
-/// (`src-tauri/src/hooks/plugin.rs`). `signature` fingerprints the enabled
+/// (`crates/cognia-plugin-runtime/src/command_hooks.rs`). `signature` fingerprints the enabled
 /// ledger plus each manifest's resolved path, mtime, and length — an
 /// enable/disable flip, install, or manifest rewrite changes it and forces a
 /// recollect; other dispatches reuse `merged` without touching disk.
@@ -181,7 +182,7 @@ pub struct PluginRuntimeState {
     /// `shell:execute` permission is the other half).
     pub shell_allowlist: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// Memoized `collect_command_hooks` merge product used by the hooks
-    /// pipeline (`src-tauri/src/hooks/plugin.rs`). Without it every hook
+    /// pipeline (`crates/cognia-plugin-runtime/src/command_hooks.rs`). Without it every hook
     /// dispatch would read + parse every enabled plugin manifest off disk.
     /// Self-invalidating: the cached signature covers the enabled ledger and
     /// each manifest's mtime+len, so ledger or file changes recompute

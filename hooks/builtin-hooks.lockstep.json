@@ -4,7 +4,7 @@
     "",
     "The registry is declared TWICE — `lib/claude/hooks/builtin-hooks.ts` (used by",
     "the settings UI, the mobile read-only list and the CLI) and",
-    "`src-tauri/src/hooks/builtin.rs` (used by the desktop's host-side merge). They",
+    "`crates/cognia-hooks/src/builtin.rs` (used by the desktop's host-side merge). They",
     "are hand-maintained and nothing enforced that they agreed, so a hook added or",
     "an id renamed on one side silently changed behaviour on only one shell — and",
     "`builtinHookOverrides` is keyed by id, so a drifted id also orphans a user's",

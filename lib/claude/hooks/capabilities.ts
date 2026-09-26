@@ -60,7 +60,7 @@ export const HOOK_RUNTIME_CAPABILITIES: Readonly<Record<HookRuntimeId, HookRunti
     id: "rust-host",
     version: "1",
     events: HOOK_EVENTS,
-    // Genuinely command/HTTP only: `HookHandler` in `src-tauri/src/hooks/
+    // Genuinely command/HTTP only: `HookHandler` in `crates/cognia-hooks/src/
     // types.rs` deserializes the model-backed three to `Unsupported`, which
     // soft-allows with a warning.
     handlers: commandAndHttpHandlers,

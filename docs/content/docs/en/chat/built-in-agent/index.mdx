@@ -24,7 +24,7 @@ The **built-in agent** is the Claude agent that runs *inside* Cognia: the one yo
   <Stat label="Assembly contributors" value="41" hint="ordered sections in resolveSendOptions, build-options.ts:336-1380" />
   <Stat label="Sidecar protocol msgs" value="5 / 6" hint="inbound send/interrupt/permission_response/plugin_tool_response/close · outbound event/permission_request/…" />
   <Stat label="Permission layers" value="2" hint="sidecar canUseTool (Layer A) + use-claude-chat Auto-mode (Layer B)" />
-  <Stat label="Hook lifecycle events" value="27" hint="HookEvent enum, src-tauri/src/hooks/types.rs:14" />
+  <Stat label="Hook lifecycle events" value="27" hint="HookEvent enum, crates/cognia-hooks/src/types.rs:14" />
   <Stat label="Built-in subagents" value="4" hint="workflow designer/debugger/refactorer/doc-writer" />
   <Stat label="Memory types" value="3" hint="semantic · episodic · procedural — Dexie v65" />
 </StatGrid>
@@ -72,7 +72,7 @@ flowchart TB
   subgraph MODULES["Capability modules"]
     direction TB
     PERM["Permissions / Auto-mode<br/>permissions/ · ADR-0041"]
-    HOOKS["Hooks runtime<br/>src-tauri/src/hooks/ · ADR-0040"]
+    HOOKS["Hooks runtime<br/>crates/cognia-hooks/src/ · ADR-0040"]
     SUBAG["Subagents<br/>agents/subagents/"]
     TOOLS["Tools / MCP / Skills<br/>sidecar/builtin-tools/"]
     MEM["Long-term memory<br/>lib/memory/ · Dexie v65"]

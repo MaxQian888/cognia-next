@@ -14,8 +14,8 @@ use serde_json::Value;
 
 use super::trust;
 use super::{
-    HookAgentIdentity, HookDecision, HookEvent, hook_event_name, load_effective_settings,
-    run_session_scoped, run_tool_scoped,
+    hook_event_name, load_effective_settings, run_session_scoped, run_tool_scoped,
+    HookAgentIdentity, HookDecision, HookEvent,
 };
 
 /// Wire shape returned to TS. `block` set ⇒ the caller should treat the action
@@ -55,7 +55,7 @@ fn parse_event(event: &str) -> Option<HookEvent> {
 ///   is tested against. Optional so a caller that genuinely has no identity
 ///   (and accepts never matching a narrowed hook) can omit it.
 /// - `payload`: event-specific fields merged into the hook payload `fields`.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn run_agent_hook(
     event: String,
     session_id: String,
@@ -115,7 +115,7 @@ pub async fn run_agent_hook(
 
 /// Replace the Rust-side trusted-workspace set with the frontend's ledger.
 /// Called on startup and whenever the user grants/revokes workspace trust.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn set_trusted_workspaces(paths: Vec<String>) {
     trust::set_trusted_paths(paths);
 }

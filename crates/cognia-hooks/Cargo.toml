@@ -1,0 +1,49 @@
+# ADR-0196 P6c — the settings-hook runtime: `.claude/settings.json` hook groups
+# and their matchers, the command and webhook handlers, the bundled built-in
+# hooks, workspace trust, and the settings readers/writers they sit on. What
+# varies by binary (the resource dir, the plugin runtime's `commandHooks`) is
+# the `host::HooksHost` slot; `cognia-plugin-runtime` merges plugin hooks.
+#
+# `src-tauri/src/hooks` and `src-tauri/src/settings.rs` re-export this crate at
+# their old paths.
+[package]
+name = "cognia-hooks"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Settings-hook runtime: hook groups, command and webhook handlers, built-ins, trust and the Claude settings readers."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_hooks"
+path = "src/lib.rs"
+
+[features]
+# ADR-0196 — `#[tauri::command]` on the hook and settings commands, and the
+# three settings writers that emit `claude-settings-changed` through the
+# `AppHandle`. Off by default so the crate builds and tests Tauri-free;
+# `src-tauri` turns it on.
+default = []
+tauri-host = ["dep:tauri"]
+
+[dependencies]
+# `fs_atomic` for the settings writers; `installed::Replaceable` for the host.
+cognia-core = { path = "../cognia-core" }
+# Webhook handlers honour the proxy policy.
+cognia-net = { path = "../cognia-net" }
+tauri = { workspace = true, optional = true }
+reqwest.workspace = true
+tokio = { workspace = true, features = ["io-util", "process", "time"] }
+regex.workspace = true
+dirs.workspace = true
+log.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

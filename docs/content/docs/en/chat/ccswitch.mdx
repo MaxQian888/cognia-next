@@ -34,8 +34,8 @@ crates/cognia-ccswitch/src/
   commands.rs   # 5 read commands + 3 agent-env write commands
   watcher.rs    # ccswitch_watch_start/stop → ccswitch://db-changed events
 
-src-tauri/src/settings.rs   # write_claude_settings_env (the claude-code writer)
-src-tauri/src/lib.rs        # `pub use cognia_ccswitch as ccswitch` (ADR-0067 split)
+crates/cognia-hooks/src/settings.rs  # write_claude_settings_env (the claude-code writer)
+src-tauri/src/lib.rs                 # `pub use cognia_ccswitch as ccswitch` (ADR-0067 split)
 
 types/ccswitch/  # CcswitchProvider / SwitchPlan / ActiveProviderState / CcswitchAgentId …
 
@@ -161,7 +161,7 @@ writeGeminiSettingsEnv(envUpdates)   // env block of ~/.gemini/settings.json
 writeOpencodeAuthEnv(envUpdates)     // {type:"api",key} entry in opencode's auth.json
 ```
 
-The claude-code writer lives in `src-tauri/src/settings.rs`; the other three live alongside the readers in `crates/cognia-ccswitch/src/commands.rs`. Every writer:
+The claude-code writer lives in `crates/cognia-hooks/src/settings.rs`; the other three live alongside the readers in `crates/cognia-ccswitch/src/commands.rs`. Every writer:
 
 - resolves the target file itself (e.g. `writeClaudeSettingsEnv` patches the `env` block of `~/.claude/settings.json` — where the Claude Code CLI reads environment variables, **not** `~/.claude.json`, which is the MCP config);
 - refuses when the agent isn't installed (missing `~/.codex/` etc. — we never materialise an auth file for a CLI the user never set up);

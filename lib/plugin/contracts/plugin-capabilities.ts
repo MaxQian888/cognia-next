@@ -305,8 +305,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding:
       "settings-shaped hook blocks merged under user hooks and above built-ins on every rail",
     hostBindings: [
-      "src-tauri/src/hooks/plugin.rs",
-      "src-tauri/src/hooks/mod.rs",
+      "crates/cognia-plugin-runtime/src/command_hooks.rs",
+      "crates/cognia-hooks/src/lib.rs",
       "cli/src/hooks/plugin-hooks.ts",
       "cli/src/hooks/load-hooks.ts",
       "lib/plugin/convert/ecosystem.ts",

@@ -16,7 +16,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tokio::time::{Instant, timeout};
+use tokio::time::{timeout, Instant};
 
 use super::types::HookOutcome;
 

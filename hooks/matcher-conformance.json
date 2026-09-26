@@ -3,7 +3,7 @@
     "Cross-rail conformance table for hook-group matcher semantics.",
     "",
     "Three runners evaluate the SAME settings.json `matcher` string: the sidecar",
-    "(sidecar/dispatch/agent-hooks.mjs), the Rust host (src-tauri/src/hooks/mod.rs)",
+    "(sidecar/dispatch/agent-hooks.mjs), the Rust host (crates/cognia-hooks/src/lib.rs)",
     "and the CLI (cli/src/hooks/run-hooks.ts). They drifted into three different",
     "rules, so the same config behaved differently depending on which shell ran the",
     "turn. The sidecar's rule is canonical because it is the rail that carries the",

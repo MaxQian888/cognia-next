@@ -66,6 +66,10 @@ members = [
   # ADR-0196 P4 — the companion's security ledger, identity resolution, tokens,
   # grants, rate limits and audit trail, out of `companion_api`.
   "crates/cognia-companion-security",
+  # ADR-0196 P6c — the settings-hook runtime (`.claude/settings.json` hooks,
+  # built-ins, trust, webhook/command handlers) and the settings readers, out
+  # of `app_lib`.
+  "crates/cognia-hooks",
   # ADR-0196 P6g — Chromium cookie import (profile discovery, Safe Storage
   # decryption), out of `app_lib`.
   "crates/cognia-browser-cookies",

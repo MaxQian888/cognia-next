@@ -1,6 +1,6 @@
 /**
  * `resolvePluginCommandHooks` — the CLI rail's plugin `commandHooks`
- * collector. Mirrors `src-tauri/src/hooks/plugin.rs`: capability-gated,
+ * collector. Mirrors `crates/cognia-plugin-runtime/src/command_hooks.rs`: capability-gated,
  * enabled-only, root tokens bound per install dir, deterministic order.
  */
 import path from "node:path"

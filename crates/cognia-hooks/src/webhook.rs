@@ -66,7 +66,7 @@ pub async fn run_webhook_handler(
         .min(HARD_TIMEOUT_CAP_SECS);
 
     let builder = reqwest::Client::builder().timeout(Duration::from_secs(timeout_secs));
-    let (builder, _) = match crate::proxy_config::apply_reqwest_policy(builder, url) {
+    let (builder, _) = match cognia_net::proxy_config::apply_reqwest_policy(builder, url) {
         Ok(policy) => policy,
         Err(error) => {
             return HookOutcome::InternalError {

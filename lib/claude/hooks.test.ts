@@ -118,9 +118,9 @@ describe("dormant handler fields", () => {
   const ROOT = join(__dirname, "../..")
   const RUNNERS = [
     "sidecar/dispatch/agent-hooks.mjs",
-    "src-tauri/src/hooks/command.rs",
-    "src-tauri/src/hooks/webhook.rs",
-    "src-tauri/src/hooks/types.rs",
+    "crates/cognia-hooks/src/command.rs",
+    "crates/cognia-hooks/src/webhook.rs",
+    "crates/cognia-hooks/src/types.rs",
     "cli/src/hooks/run-hooks.ts",
   ]
 

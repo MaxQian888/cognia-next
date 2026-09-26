@@ -25,6 +25,7 @@
     "cognia-companion-connectivity": "platform",
     "cognia-companion-bus": "platform",
     "cognia-companion-security": "platform",
+    "cognia-hooks": "platform",
     "cognia-browser-cookies": "platform",
 
     "cognia-git": "domain",
@@ -106,7 +107,7 @@
   "appShell": {
     "package": "cognia-next",
     "srcDir": "src-tauri/src",
-    "maxLoc": 160380,
+    "maxLoc": 157234,
     "locSlack": 4000,
     "locBlocking": false,
     "modules": [

@@ -13,10 +13,11 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
-use crate::plugin_api::PluginRuntimeState;
-use crate::settings::ClaudeSettings;
+use cognia_hooks::builtin::{merge_builtin_under, quote};
+use cognia_hooks::host::HooksHost;
+use cognia_hooks::settings::ClaudeSettings;
 
-use super::builtin::{merge_builtin_under, quote};
+use crate::PluginRuntimeState;
 
 /// Plugin-root spellings bound to the install dir at collection time. Mirrors
 /// `lib/plugin/utils/plugin-root-tokens.ts` so converted bundles (canonical
@@ -199,7 +200,7 @@ pub fn collect_command_hooks(runtime: &PluginRuntimeState) -> Option<Map<String,
     }
 
     let merged = collect_from_manifests(&resolved);
-    *runtime.command_hooks_cache.write() = Some(crate::plugin_api::CachedCommandHooks {
+    *runtime.command_hooks_cache.write() = Some(crate::CachedCommandHooks {
         signature,
         merged: merged.clone(),
     });
@@ -254,6 +255,21 @@ fn collect_from_manifests(resolved: &[(String, PathBuf, PathBuf)]) -> Option<Map
     }
 }
 
+/// The hooks host for a process that owns its plugin runtime outright — the
+/// headless `cognia-server`. It ships no resource dir, so built-in hooks
+/// resolve from the repository in a dev checkout.
+pub struct HeadlessHooksHost(pub std::sync::Arc<PluginRuntimeState>);
+
+impl HooksHost for HeadlessHooksHost {
+    fn resource_dir(&self) -> Option<PathBuf> {
+        None
+    }
+
+    fn apply_plugin_command_hooks(&self, settings: &mut ClaudeSettings) {
+        apply_plugin_command_hooks(settings, &self.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,12 +300,8 @@ mod tests {
             serde_json::to_string(&manifest).unwrap(),
         )
         .unwrap();
-        crate::plugin_api::lifecycle::plugin_set_status_for_state(
-            state,
-            id.to_string(),
-            status.to_string(),
-        )
-        .unwrap();
+        crate::lifecycle::plugin_set_status_for_state(state, id.to_string(), status.to_string())
+            .unwrap();
     }
 
     fn hook_manifest(command_hooks: Value) -> Value {
@@ -369,8 +381,8 @@ mod tests {
         .unwrap();
         state.plugins.write().insert(
             id.to_string(),
-            crate::plugin_api::PluginRecord {
-                snapshot: crate::plugin_api::PluginRuntimeSnapshot {
+            crate::PluginRecord {
+                snapshot: crate::PluginRuntimeSnapshot {
                     plugin_id: id.to_string(),
                     version: "1.0.0".into(),
                     status: status.to_string(),
@@ -455,10 +467,12 @@ mod tests {
             "enabled",
         );
 
-        let mut settings = ClaudeSettings::default();
-        settings.hooks = Some(json!({
-            "SessionStart": [{ "hooks": [{ "type": "command", "command": "echo user" }] }]
-        }));
+        let mut settings = ClaudeSettings {
+            hooks: Some(json!({
+                "SessionStart": [{ "hooks": [{ "type": "command", "command": "echo user" }] }]
+            })),
+            ..Default::default()
+        };
         apply_plugin_command_hooks(&mut settings, &state);
 
         let groups = settings.hooks.unwrap()["SessionStart"]
@@ -541,12 +555,8 @@ mod tests {
         );
 
         // A status flip changes the enabled ledger → the plugin drops out.
-        crate::plugin_api::lifecycle::plugin_set_status_for_state(
-            &state,
-            "guard".into(),
-            "disabled".into(),
-        )
-        .unwrap();
+        crate::lifecycle::plugin_set_status_for_state(&state, "guard".into(), "disabled".into())
+            .unwrap();
         assert!(collect_command_hooks(&state).is_none());
     }
 }
