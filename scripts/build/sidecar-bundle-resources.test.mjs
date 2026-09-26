@@ -76,7 +76,7 @@ test("walks past the entry points into their transitive dependencies", () => {
   // from bundle.resources, which is what broke the staged sidecar.
   assert.ok(closure.has("sidecar/src/platform/net/install-fetch-interceptor.ts"))
   assert.ok(closure.has("sidecar/src/platform/host-rpc.ts"))
-  assert.ok(closure.has("sidecar/telemetry.mjs"))
+  assert.ok(closure.has("sidecar/src/platform/telemetry/index.ts"))
   // The closure must leave sidecar/ when an import does.
   assert.ok(closure.has("lib/settings/builtin-tools-data.json"))
   // A file spawned by URL (the run_code sandbox child) is a runtime file too.

@@ -558,7 +558,6 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// has the entry but not these is a torn copy, not a sidecar.
 const REQUIRED_SIDECAR_ENTRIES: &[&str] = &[
     "agent-host.mjs",
-    "telemetry.mjs",
     "package.json",
     "src",
     "dispatch",

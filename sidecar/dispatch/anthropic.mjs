@@ -12,7 +12,7 @@ import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
 
 import { query } from "@anthropic-ai/claude-agent-sdk"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
-import { traceAsyncIterable } from "../telemetry.mjs"
+import { traceAsyncIterable } from "../src/platform/telemetry/index.ts"
 import { randomUUID } from "node:crypto"
 import {
   buildCogniaToolsServer,

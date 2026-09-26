@@ -42,7 +42,7 @@
 // event for every response on `api.anthropic.com`, which the renderer's
 // usage-collector subscribes to (Phase 4a of the Claude subscription ADR).
 import "./src/platform/net/install-fetch-interceptor.ts"
-import { initializeTelemetry, shutdownTelemetry } from "./telemetry.mjs"
+import { initializeTelemetry, shutdownTelemetry } from "./src/platform/telemetry/index.ts"
 
 initializeTelemetry()
 let telemetryShutdown = null

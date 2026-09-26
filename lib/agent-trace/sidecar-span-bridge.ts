@@ -7,10 +7,11 @@
  * configures no collector, so the renderer's waterfall showed a chat span with
  * a multi-second hole in the middle and nothing to put in it.
  *
- * `sidecar/telemetry.mjs` now also emits each finished span back over the
- * existing `ClaudeEvent` channel. This module turns those events into real
- * spans through the ordinary emitter, so they land in Dexie, the waterfall, and
- * any configured OTLP export by exactly the same path as renderer-side spans.
+ * `sidecar/src/platform/telemetry/local-spans.ts` now also emits each finished
+ * span back over the existing `ClaudeEvent` channel. This module turns those
+ * events into real spans through the ordinary emitter, so they land in Dexie,
+ * the waterfall, and any configured OTLP export by exactly the same path as
+ * renderer-side spans.
  *
  * Shaped after `lib/mcp/log-bridge.ts`, which does the same for `mcp_log`.
  */

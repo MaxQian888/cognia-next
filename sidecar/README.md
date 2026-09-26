@@ -80,6 +80,13 @@ Each migration batch appends its moves here (old → new).
 | IP/CIDR parsing (in `fetch-interceptor.mjs`)                             | `src/platform/net/ip.ts`                                           | 3b          |
 | Egress guard (in `mcp-oauth-helper.mjs`)                                 | `src/platform/net/egress-guard.ts`                                 | 3b          |
 | `host-rpc.mjs`                                                           | `src/platform/host-rpc.ts`                                         | 3b          |
+| `telemetry.mjs` (init, shutdown, AI SDK registration)                    | `src/platform/telemetry/index.ts`                                  | 3c          |
+| `telemetry.mjs` (OTLP headers, PostHog destinations)                     | `src/platform/telemetry/config.ts`                                 | 3c          |
+| `telemetry.mjs` (OTLP/PostHog span filtering)                            | `src/platform/telemetry/privacy.ts`                                | 3c          |
+| `telemetry.mjs` (Langfuse consent filtering, processor)                  | `src/platform/telemetry/langfuse.ts`                               | 3c          |
+| `telemetry.mjs` (`CogniaCorrelationSpanProcessor`)                       | `src/platform/telemetry/correlation.ts`                            | 3c          |
+| `telemetry.mjs` (`parentContext`, `withTraceparent`, `aiSdkTelemetry`)   | `src/platform/telemetry/trace.ts`                                  | 3c          |
+| `telemetry.mjs` (`traceAsyncIterable`, span repatriation)                | `src/platform/telemetry/local-spans.ts`                            | 3c          |
 
 ## Scripts (run from repo root)
 

@@ -1,10 +1,6 @@
 {
   "$comment": "Written by `pnpm audit:sidecar-architecture:baseline`. Rows are layering violations of the legacy sidecar tree; the list may only shrink (ADR-0197).",
   "findings": [
-    "cycle: sidecar -> sidecar/a2ui-tools",
-    "cycle: sidecar -> sidecar/builtin-tools",
-    "cycle: sidecar -> sidecar/builtin-tools/core",
-    "cycle: sidecar -> sidecar/dispatch",
     "cycle: sidecar/a2ui-tools -> sidecar/builtin-tools",
     "cycle: sidecar/builtin-tools -> sidecar/builtin-tools/ast-grep",
     "cycle: sidecar/builtin-tools -> sidecar/builtin-tools/clonedeps",
@@ -26,7 +22,6 @@
     "cycle: sidecar/builtin-tools/process -> sidecar/builtin-tools",
     "cycle: sidecar/builtin-tools/run-code -> sidecar/builtin-tools",
     "cycle: sidecar/builtin-tools/webclone -> sidecar/builtin-tools",
-    "cycle: sidecar/dispatch -> sidecar",
     "cycle: sidecar/dispatch -> sidecar/a2ui-tools",
     "cycle: sidecar/dispatch -> sidecar/builtin-tools",
     "cycle: sidecar/dispatch -> sidecar/builtin-tools/code",
@@ -34,7 +29,6 @@
     "cycle: sidecar/dispatch -> sidecar/dispatch/optical",
     "cycle: sidecar/dispatch -> sidecar/dispatch/protocol-adapters",
     "cycle: sidecar/dispatch/optical -> sidecar/dispatch",
-    "cycle: sidecar/dispatch/protocol-adapters -> sidecar",
     "cycle: sidecar/dispatch/protocol-adapters -> sidecar/dispatch",
     "launcher-import: sidecar/claude-host.mjs imports the process entry sidecar/agent-host.mjs"
   ]

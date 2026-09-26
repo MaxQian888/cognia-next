@@ -18,7 +18,7 @@ import {
 } from "../../src/providers/provider-protocol.ts"
 import { buildBedrockProviderOptions } from "../bedrock.mjs"
 import { partitionPrompt } from "../prompt-partition.mjs"
-import { aiSdkTelemetry, withTraceparent } from "../../telemetry.mjs"
+import { aiSdkTelemetry, withTraceparent } from "../../src/platform/telemetry/index.ts"
 import {
   EFFORT_TO_BUDGET,
   OPENAI_EFFORT_VALUES,

@@ -268,7 +268,7 @@ let sharedPool = null
  * Process-wide rather than per-session because the whole point is to have a
  * subprocess ready BEFORE the next session exists. `startup` is imported
  * lazily so this module stays loadable in contexts without the SDK installed
- * (the same reason `telemetry.mjs` defers its imports).
+ * (the same reason `src/platform/telemetry/index.ts` defers its imports).
  *
  * @param {{ log?: (level: string, message: string) => void }} [deps]
  */
