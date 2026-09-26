@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { usePlatform } from "@/hooks/use-platform"
+import { useUrlSearchDraft } from "@/hooks/ui/use-url-search-draft"
 import { refreshTemplateOwners } from "@/lib/global-search/providers/library"
 import { useScopedTemplateCatalog } from "@/hooks/templates/use-scoped-template-catalog"
 import {
@@ -195,6 +196,9 @@ export function TemplateStudio() {
   const route = useTemplateRouteState()
   const { query, domain, trust, scope: tier } = route
   const { setQuery, setDomain, setTrust, setScope: setTier } = route
+  // A draft of its own, so typing (and an IME above all) is not reset by the
+  // URL round trip. See the hook.
+  const search = useUrlSearchDraft(query, setQuery)
   // Scoped, not raw: a definition confined to another workspace is not this
   // workspace's to list, and one this workspace hid should not come back
   // because the Studio asked a different question than the phone did.
@@ -921,12 +925,7 @@ export function TemplateStudio() {
                   <div className="mb-3 grid gap-2 md:grid-cols-[1fr_180px_180px]">
                     <div className="relative">
                       <SearchIcon className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                      <Input
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        placeholder={t("filters.search")}
-                        className="pl-9"
-                      />
+                      <Input {...search} placeholder={t("filters.search")} className="pl-9" />
                     </div>
                     <Select
                       value={domain}

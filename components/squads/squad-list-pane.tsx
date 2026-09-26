@@ -30,7 +30,6 @@
  * not counted as Squads; the empty state points at them instead.
  */
 
-import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { PlusIcon, SearchIcon, UsersIcon } from "lucide-react"
 
@@ -51,6 +50,7 @@ import {
   type SquadFilter,
   type SquadRouteState,
 } from "@/hooks/squads/use-squad-route-state"
+import { useUrlSearchDraft } from "@/hooks/ui/use-url-search-draft"
 import { cn } from "@/lib/utils"
 
 export interface SquadListPaneProps {
@@ -78,23 +78,9 @@ export function SquadListPane({
   const t = useTranslations("squads.fleet")
   const { squads, total, live, waiting, loading } = fleet
 
-  // The box shows its own draft, not the URL. Bound to `route.query`, every
-  // keystroke went through `router.replace` and came back a render later,
-  // which reset the input under an IME: pinyin was committed half-typed and
-  // fast typing dropped characters. The URL is written when a character is
-  // final (never mid-composition), and the draft follows the URL only when
-  // the change did not come from this box.
-  const searchRef = useRef<HTMLInputElement>(null)
-  const [draft, setDraft] = useState(route.query)
-  useEffect(() => {
-    if (document.activeElement === searchRef.current) return
-    // Following a navigation this box did not make.
-    setDraft(route.query)
-  }, [route.query])
-  const clearFilters = () => {
-    setDraft("")
-    route.clearFilters()
-  }
+  // Its own draft, not the URL: see the hook for why a URL-bound box broke
+  // IME input and dropped characters.
+  const search = useUrlSearchDraft(route.query, route.setQuery)
   // A Team has no run state, so "Needs you" / "Working" cannot match one.
   const showBuiltIns = builtInTeams.length > 0 && route.filter === "all"
 
@@ -129,15 +115,7 @@ export function SquadListPane({
               className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
             />
             <Input
-              ref={searchRef}
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value)
-                if (!(event.nativeEvent as InputEvent).isComposing) {
-                  route.setQuery(event.target.value)
-                }
-              }}
-              onCompositionEnd={(event) => route.setQuery(event.currentTarget.value)}
+              {...search}
               placeholder={t("search")}
               aria-label={t("search")}
               className="pl-9"
@@ -194,7 +172,7 @@ export function SquadListPane({
                     : t("emptyDescription")
               }
               {...(route.narrowed
-                ? { cta: { label: t("clearFilters"), onSelect: clearFilters } }
+                ? { cta: { label: t("clearFilters"), onSelect: route.clearFilters } }
                 : onCreate
                   ? {
                       cta: {

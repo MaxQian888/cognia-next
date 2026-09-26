@@ -48,6 +48,7 @@ import { Surface } from "@/components/surface/surface"
 import { useTemplateRouteState } from "@/hooks/templates/use-template-route-state"
 import { useScopedTemplateCatalog } from "@/hooks/templates/use-scoped-template-catalog"
 import { usePlatform } from "@/hooks/use-platform"
+import { useUrlSearchDraft } from "@/hooks/ui/use-url-search-draft"
 import type { TemplateDefinitionEnvelope, TemplateDomain } from "@/lib/templates/contracts"
 import { TEMPLATE_FULL_DOMAINS } from "@/lib/templates/contracts"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
@@ -66,6 +67,9 @@ export function TemplatesMobileBody() {
   const templatePlatform = platform === "mobile" ? "mobile" : platform === "web" ? "web" : "desktop"
   const runtime = useMemo(() => getTemplateRuntime(), [])
   const route = useTemplateRouteState()
+  // A draft of its own, so typing (and an IME above all) is not reset by the
+  // URL round trip. See the hook.
+  const search = useUrlSearchDraft(route.query, route.setQuery)
 
   const { definitions, tierOf, hiddenCount, revision } = useScopedTemplateCatalog(
     {
@@ -213,8 +217,7 @@ export function TemplatesMobileBody() {
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            value={route.query}
-            onChange={(event) => route.setQuery(event.target.value)}
+            {...search}
             placeholder={t("filters.search")}
             aria-label={t("filters.search")}
             className="pl-9"
