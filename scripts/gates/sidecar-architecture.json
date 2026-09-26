@@ -97,7 +97,7 @@
   "public": [
     "sidecar/a2ui-tools/tool-defs.mjs",
     "sidecar/src/tools/builtin/ast-grep/binary.ts",
-    "sidecar/builtin-tools/run-code/sandbox-child.mjs",
+    "sidecar/src/tools/builtin/run-code/sandbox-child.ts",
     "sidecar/dispatch/claude-executable.mjs",
     "sidecar/dispatch/feature-call.mjs",
     "sidecar/pi-extension/cognia-pi-extension.ts",

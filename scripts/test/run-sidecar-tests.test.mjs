@@ -55,7 +55,7 @@ test("nested packages are excluded only at the sidecar top level; node_modules e
 
 test("the real tree includes the run-code suites no folder glob used to name", () => {
   const suites = discoverSidecarSuites()
-  assert.ok(suites.includes("sidecar/builtin-tools/run-code/supervisor.test.mjs"))
+  assert.ok(suites.includes("sidecar/src/tools/builtin/run-code/supervisor.test.ts"))
   assert.ok(suites.includes("sidecar/pi-extension/cognia-pi-extension.test.ts"))
   assert.ok(!suites.some(isLiveSuite), "live suites stay out of the unit sweep")
 })

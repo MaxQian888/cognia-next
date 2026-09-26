@@ -9,7 +9,7 @@ import { z } from "zod"
 // without requiring bwrap/sandbox-exec on the test machine.
 const LAUNCHER = JSON.stringify(["/usr/bin/env"])
 
-import { applyToolPresentation } from "../index.mjs"
+import { applyToolPresentation } from "./index.mjs"
 
 const CALLS = []
 

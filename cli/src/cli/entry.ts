@@ -47,7 +47,7 @@ async function boot(): Promise<number> {
   }
   if (role === "run-code") {
     const { runSandboxChild } =
-      await import("../../../sidecar/builtin-tools/run-code/sandbox-child.mjs")
+      await import("../../../sidecar/src/tools/builtin/run-code/sandbox-child.ts")
     runSandboxChild()
     return 0
   }

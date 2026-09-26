@@ -13,7 +13,8 @@ import {
   resolveSandboxSpawn,
   runCodeProgram,
   sandboxEnv,
-} from "./supervisor.mjs"
+} from "./supervisor.ts"
+import type { CodeModeLimits, SandboxProbe } from "./supervisor.ts"
 
 // `/usr/bin/env` is a real exec wrapper that passes fds through, so it
 // exercises the launcher path end to end without needing bwrap installed.
@@ -21,8 +22,14 @@ const TEST_LAUNCHER = ["/usr/bin/env"]
 const SANDBOXED = { canSpawnProcess: true, strictSandbox: true, launcher: TEST_LAUNCHER }
 
 /** Run a program with a recording tool broker. */
-async function run(source, options = {}) {
-  const calls = []
+async function run(
+  source: string,
+  options: {
+    config?: CodeModeLimits
+    toolImpl?: (name: string, input: unknown) => unknown
+  } = {}
+) {
+  const calls: { name: string; input: unknown }[] = []
   const result = await runCodeProgram({
     source,
     probe: SANDBOXED,
@@ -53,7 +60,8 @@ test("fails closed when no strict sandbox is available", () => {
 
 test("an unprobed host is treated as unsandboxed", () => {
   assert.throws(() => assertSandboxable(undefined), SandboxUnavailableError)
-  assert.throws(() => assertSandboxable({}), SandboxUnavailableError)
+  // Deliberately malformed: a probe with no fields at all.
+  assert.throws(() => assertSandboxable({} as SandboxProbe), SandboxUnavailableError)
 })
 
 test("probeSandbox reports strictSandbox only when a launcher is configured", () => {
@@ -305,7 +313,7 @@ test("exposes the eligible read tools", async () => {
 test("rejects oversized source before spawning anything", async () => {
   const outcome = await run("return 1", { config: { ...smallConfig(), maxSourceBytes: 4 } })
   assert.equal(outcome.ok, false)
-  assert.equal(outcome.limit.kind, "source-too-large")
+  assert.equal(outcome.limit!.kind, "source-too-large")
   assert.equal(outcome.callsUsed, 0)
 })
 
@@ -315,8 +323,8 @@ test("stops the run when the tool-call budget is exhausted", async () => {
     { config: { ...smallConfig(), maxToolCalls: 3 } }
   )
   assert.equal(outcome.ok, false)
-  assert.equal(outcome.limit.kind, "tool-calls")
-  assert.equal(outcome.limit.limit, 3)
+  assert.equal(outcome.limit!.kind, "tool-calls")
+  assert.equal(outcome.limit!.limit, 3)
   assert.equal(outcome.calls.length, 3)
 })
 
@@ -325,7 +333,7 @@ test("kills a program that exceeds its wall time", async () => {
     config: { ...smallConfig(), wallTimeMs: 300 },
   })
   assert.equal(outcome.ok, false)
-  assert.equal(outcome.limit.kind, "wall-time")
+  assert.equal(outcome.limit!.kind, "wall-time")
 })
 
 test("kills the sandbox process group when resident memory exceeds the limit", async () => {
@@ -333,9 +341,9 @@ test("kills the sandbox process group when resident memory exceeds the limit", a
     config: { ...smallConfig(), maxMemoryBytes: 1 },
   })
   assert.equal(outcome.ok, false)
-  assert.equal(outcome.limit.kind, "memory")
-  assert.equal(outcome.limit.limit, 1)
-  assert.ok(outcome.limit.observed > 1)
+  assert.equal(outcome.limit!.kind, "memory")
+  assert.equal(outcome.limit!.limit, 1)
+  assert.ok(outcome.limit!.observed! > 1)
 })
 
 test("rejects an oversized result", async () => {
@@ -343,7 +351,7 @@ test("rejects an oversized result", async () => {
     config: { ...smallConfig(), maxResultBytes: 100 },
   })
   assert.equal(outcome.ok, false)
-  assert.equal(outcome.limit.kind, "result-too-large")
+  assert.equal(outcome.limit!.kind, "result-too-large")
 })
 
 test("reports a program that threw as a failure, not an empty result", async () => {
@@ -384,7 +392,7 @@ function describe_budget() {
     budget.release()
     const exhausted = budget.tryAcquire()
     assert.equal(exhausted.ok, false)
-    assert.equal(exhausted.exceeded.kind, "tool-calls")
+    assert.equal(exhausted.exceeded!.kind, "tool-calls")
   })
 
   test("CallBudget release never lowers the spent total", () => {

@@ -11,9 +11,11 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { SandboxUnavailableError, probeSandbox, runCodeProgram } from "./supervisor.mjs"
-import { generateSdkDeclaration } from "./sdk-declaration.mjs"
+import { toolError, toolText } from "../../kernel/result.ts"
+import type { SandboxProbe } from "./supervisor.ts"
+import type { SdkTool } from "./sdk-declaration.ts"
+import { SandboxUnavailableError, probeSandbox, runCodeProgram } from "./supervisor.ts"
+import { generateSdkDeclaration } from "./sdk-declaration.ts"
 
 export const RUN_CODE_TOOL_NAME = "run_code"
 
@@ -27,17 +29,20 @@ const runCodeShape = {
 }
 
 /**
- * Build the `run_code` tool definition.
- *
- * @param {object} deps
- * @param {(name: string, input: unknown) => Promise<unknown>} deps.callTool
- * @param {() => { canSpawnProcess: boolean, strictSandbox: boolean }} [deps.probe]
- * @param {Array<{ name: string, description?: string, inputSchema?: object }>} [deps.sdkTools]
- *        The eligible tools, for the generated SDK declaration. Empty means the
- *        description carries no API — the model then has a tool it cannot use,
- *        so callers should always pass this.
- */
-export function createRunCodeTool({ callTool, probe = probeSandbox, sdkTools = [] }) {
+/** What `run_code` needs from the host. */
+export interface RunCodeDeps {
+  callTool: (name: string, input: unknown) => Promise<unknown>
+  probe?: (() => SandboxProbe) | undefined
+  /**
+   * The eligible tools, for the generated SDK declaration. Empty means the
+   * description carries no API — the model then has a tool it cannot use, so
+   * callers should always pass this.
+   */
+  sdkTools?: readonly SdkTool[] | undefined
+}
+
+/** Build the `run_code` tool definition. */
+export function createRunCodeTool({ callTool, probe = probeSandbox, sdkTools = [] }: RunCodeDeps) {
   const description =
     "Run read-only JavaScript against the typed tool SDK. Cannot write, spawn, or reach the network." +
     (sdkTools.length > 0 ? `\n\n${generateSdkDeclaration(sdkTools)}` : "")
@@ -97,15 +102,15 @@ export function createRunCodeTool({ callTool, probe = probeSandbox, sdkTools = [
  * an unsupported host has no executor to reach at all rather than one that
  * refuses per call.
  */
-export function codeModeToolDefs(deps) {
+export function codeModeToolDefs(deps: RunCodeDeps) {
   const probe = (deps.probe ?? probeSandbox)()
   if (!probe.canSpawnProcess || !probe.strictSandbox) return []
   return [createRunCodeTool(deps)]
 }
 
-export { generateSdkDeclaration } from "./sdk-declaration.mjs"
+export { generateSdkDeclaration } from "./sdk-declaration.ts"
 
-// The SDK declaration is generated HERE, from `sdk-declaration.mjs`, because
+// The SDK declaration is generated HERE, from `sdk-declaration.ts`, because
 // this is the only layer that has the tools' real `inputSchema`. The renderer
 // only ever sees tool names, so a generator there would have had to invent
 // signatures — and generated code that type-checks against an invented

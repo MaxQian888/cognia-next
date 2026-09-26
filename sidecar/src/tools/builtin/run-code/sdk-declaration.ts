@@ -12,30 +12,47 @@
 // them together means a session that does not offer `run_code` cannot end up
 // advertising an SDK for it.
 
-import limits from "../../../lib/ai/code-mode/limits.json" with { type: "json" }
+import limits from "../../../../../lib/ai/code-mode/limits.json" with { type: "json" }
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 
+/** The JSON Schema keywords the renderer reads; anything else is ignored. */
+interface JsonSchemaLike {
+  enum?: unknown
+  anyOf?: unknown
+  oneOf?: unknown
+  type?: unknown
+  items?: unknown
+  properties?: Record<string, JsonSchemaLike | undefined>
+  required?: unknown
+  additionalProperties?: unknown
+  description?: unknown
+}
+
+/** A tool as the declaration lists it. */
+export interface SdkTool {
+  name: string
+  description?: string | undefined
+  inputSchema?: unknown
+}
+
 /**
  * Render one JSON Schema as a TypeScript type.
- *
- * @param {object | undefined} schema
- * @param {number} depth
- * @returns {string}
  */
-export function renderSchema(schema, depth = 0) {
-  if (!schema || typeof schema !== "object") return "unknown"
+export function renderSchema(input: unknown, depth = 0): string {
+  if (!input || typeof input !== "object") return "unknown"
+  const schema = input as JsonSchemaLike
 
   if (Array.isArray(schema.enum) && schema.enum.length > 0) {
-    return schema.enum.map((value) => JSON.stringify(value)).join(" | ")
+    return schema.enum.map((value: unknown) => JSON.stringify(value)).join(" | ")
   }
 
   const union = schema.anyOf ?? schema.oneOf
   if (Array.isArray(union) && union.length > 0) {
-    return union.map((member) => renderSchema(member, depth)).join(" | ")
+    return union.map((member: unknown) => renderSchema(member, depth)).join(" | ")
   }
 
-  const type = Array.isArray(schema.type) ? schema.type[0] : schema.type
+  const type: unknown = Array.isArray(schema.type) ? schema.type[0] : schema.type
   switch (type) {
     case "string":
       return "string"
@@ -57,7 +74,7 @@ export function renderSchema(schema, depth = 0) {
   }
 }
 
-function renderObject(schema, depth) {
+function renderObject(schema: JsonSchemaLike, depth: number): string {
   const properties = schema.properties ?? {}
   const names = Object.keys(properties)
   if (names.length === 0) {
@@ -68,7 +85,7 @@ function renderObject(schema, depth) {
 
   const pad = "  ".repeat(depth + 2)
   const closePad = "  ".repeat(depth + 1)
-  const required = new Set(Array.isArray(schema.required) ? schema.required : [])
+  const required = new Set<unknown>(Array.isArray(schema.required) ? schema.required : [])
   const body = names.map((name) => {
     const property = properties[name] ?? {}
     const optional = required.has(name) ? "" : "?"
@@ -79,28 +96,28 @@ function renderObject(schema, depth) {
   return `{\n${body.join("\n")}\n${closePad}}`
 }
 
-function propertyKey(name) {
+function propertyKey(name: string): string {
   return IDENTIFIER.test(name) ? name : JSON.stringify(name)
 }
 
-function escapeComment(text) {
+function escapeComment(text: string): string {
   return text.replace(/\*\//g, "*\\/")
 }
 
-function formatBytes(bytes) {
+function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${bytes / (1024 * 1024)} MiB`
   return `${bytes / 1024} KiB`
 }
 
 /**
- * Render the full declaration.
- *
- * @param {Array<{ name: string, description?: string, inputSchema?: object }>} tools
- *        The eligible tools, already filtered by the allowlist and by what this
- *        session actually enabled.
- * @param {object} [config] limit overrides, for tests
+ * Render the full declaration. `tools` are the eligible tools, already
+ * filtered by the allowlist and by what this session actually enabled;
+ * `config` overrides the limits, for tests.
  */
-export function generateSdkDeclaration(tools, config = limits) {
+export function generateSdkDeclaration(
+  tools: readonly SdkTool[],
+  config: typeof limits = limits
+): string {
   const lines = [
     "Read-only tool SDK available inside `run_code` as `cognia`.",
     "",

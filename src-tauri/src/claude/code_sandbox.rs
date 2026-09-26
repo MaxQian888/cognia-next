@@ -22,7 +22,7 @@ use std::path::Path;
 
 use cognia_automation::sandbox::launcher::LaunchScope;
 
-/// Env var the sidecar's `run-code/supervisor.mjs` reads.
+/// Env var the sidecar's `src/tools/builtin/run-code/supervisor.ts` reads.
 pub const CODE_SANDBOX_LAUNCHER_ENV: &str = "COGNIA_CODE_SANDBOX_LAUNCHER";
 
 /// Build the filesystem/network scope for a `run_code` child.

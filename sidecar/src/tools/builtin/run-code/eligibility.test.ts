@@ -1,12 +1,12 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import metadata from "../../../lib/settings/builtin-tools-data.json" with { type: "json" }
+import metadata from "../../../../../lib/settings/builtin-tools-data.json" with { type: "json" }
 import {
   checkToolEligibility,
   isProgrammaticReadOnly,
   programmaticReadOnlyToolNames,
-} from "./eligibility.mjs"
+} from "./eligibility.ts"
 
 const ALL_TOOLS = metadata.categories.flatMap((c) => c.tools)
 
@@ -25,7 +25,7 @@ test("every eligible tool is also non-approval-requiring", () => {
   // needed a per-call prompt could not be called in a loop from generated code.
   for (const name of programmaticReadOnlyToolNames()) {
     const meta = ALL_TOOLS.find((t) => t.name === name)
-    assert.equal(meta.requiresApproval, false, `${name} must not require approval`)
+    assert.equal(meta!.requiresApproval, false, `${name} must not require approval`)
   }
 })
 

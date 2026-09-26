@@ -12,10 +12,10 @@
 // `readOnlyHint` annotation, which third-party servers declare about
 // themselves.
 
-import metadata from "../../../lib/settings/builtin-tools-data.json" with { type: "json" }
+import metadata from "../../../../../lib/settings/builtin-tools-data.json" with { type: "json" }
 
-/** @returns {ReadonlyArray<string>} bare names of every eligible tool */
-export function programmaticReadOnlyToolNames() {
+/** Bare names of every eligible tool. */
+export function programmaticReadOnlyToolNames(): readonly string[] {
   return Object.freeze(
     metadata.categories.flatMap((category) =>
       category.tools.filter((t) => t.programmaticReadOnly === true).map((t) => t.name)
@@ -31,18 +31,18 @@ const ELIGIBLE = new Set(programmaticReadOnlyToolNames())
  */
 const KNOWN = new Set(metadata.categories.flatMap((c) => c.tools.map((t) => t.name)))
 
-/** @param {string} name */
-export function isProgrammaticReadOnly(name) {
-  return ELIGIBLE.has(typeof name === "string" ? name.trim() : name)
+/** Is `name` a tool code mode may call? Non-strings are never eligible. */
+export function isProgrammaticReadOnly(name: unknown): boolean {
+  return typeof name === "string" && ELIGIBLE.has(name.trim())
 }
 
 /**
- * The choke point every sandbox tool request passes through.
- *
- * @param {string} name
- * @returns {{ allowed: true } | { allowed: false, reason: "unknown-tool" | "not-programmatic-read-only" }}
+ * The choke point every sandbox tool request passes through. `name` comes
+ * from the untrusted child, so anything but a string is an unknown tool.
  */
-export function checkToolEligibility(name) {
+export function checkToolEligibility(
+  name: unknown
+): { allowed: true } | { allowed: false; reason: "unknown-tool" | "not-programmatic-read-only" } {
   const trimmed = typeof name === "string" ? name.trim() : ""
   if (ELIGIBLE.has(trimmed)) return { allowed: true }
   return {

@@ -80,7 +80,7 @@ test("walks past the entry points into their transitive dependencies", () => {
   // The closure must leave sidecar/ when an import does.
   assert.ok(closure.has("lib/settings/builtin-tools-data.json"))
   // A file spawned by URL (the run_code sandbox child) is a runtime file too.
-  assert.ok(closure.has("sidecar/builtin-tools/run-code/sandbox-child.mjs"))
+  assert.ok(closure.has("sidecar/src/tools/builtin/run-code/sandbox-child.ts"))
 })
 
 test("keeps an entry point in the closure even when the build has not written it", () => {

@@ -10,20 +10,70 @@
 // exists to make unrepresentable.
 
 import { fork, spawn, spawnSync } from "node:child_process"
+import type { SpawnOptions } from "node:child_process"
 import { fileURLToPath } from "node:url"
 
-import limits from "../../../lib/ai/code-mode/limits.json" with { type: "json" }
-import { checkToolEligibility, programmaticReadOnlyToolNames } from "./eligibility.mjs"
-import { CHILD_MESSAGE_KINDS } from "./sandbox-child.mjs"
+import limits from "../../../../../lib/ai/code-mode/limits.json" with { type: "json" }
+import { checkToolEligibility, programmaticReadOnlyToolNames } from "./eligibility.ts"
+import { CHILD_MESSAGE_KINDS } from "./sandbox-child.ts"
 
-const CHILD_PATH = fileURLToPath(new URL("./sandbox-child.mjs", import.meta.url))
+const CHILD_PATH = fileURLToPath(new URL("./sandbox-child.ts", import.meta.url))
 
 export { limits as CODE_MODE_LIMITS }
 
+/** The code-mode budgets; tests override single fields. */
+export type CodeModeLimits = typeof limits
+
+export type SandboxUnavailableReason = "no-fork" | "no-strict-sandbox" | "no-workdir"
+
+/** What the host can offer a program: a process to run it in, and confinement. */
+export interface SandboxProbe {
+  canSpawnProcess: boolean
+  strictSandbox: boolean
+  launcher?: string[] | null | undefined
+}
+
+/** A budget a run hit. */
+export interface CodeLimit {
+  kind: string
+  limit: number
+  observed?: number | undefined
+}
+
+export interface CodeRunLog {
+  level: string
+  text: string
+}
+
+export type CodeRunResult =
+  | { ok: true; result: unknown; callsUsed: number; logs: CodeRunLog[] }
+  | {
+      ok: false
+      error: { name: string; message: string }
+      limit?: CodeLimit | undefined
+      callsUsed: number
+      logs: CodeRunLog[]
+    }
+
+/** A child message, as far as the supervisor reads it; every field is untrusted. */
+interface ChildMessage {
+  kind?: unknown
+  id?: unknown
+  name?: unknown
+  input?: unknown
+  level?: unknown
+  text?: unknown
+  result?: unknown
+  error?: unknown
+}
+
+const errorText = (err: unknown) => String((err as { message?: unknown } | null)?.message ?? err)
+
 /** Thrown when the strict sandbox is unavailable. Never downgraded to a warning. */
 export class SandboxUnavailableError extends Error {
-  /** @param {"no-fork" | "no-strict-sandbox" | "no-workdir"} reason */
-  constructor(reason) {
+  declare reason: SandboxUnavailableReason
+
+  constructor(reason: SandboxUnavailableReason) {
     super(`Code mode requires a strict sandbox (${reason})`)
     this.name = "SandboxUnavailableError"
     this.reason = reason
@@ -53,17 +103,14 @@ export const SANDBOX_LAUNCHER_ENV = "COGNIA_CODE_SANDBOX_LAUNCHER"
  * Malformed is treated as absent rather than as an error, because the
  * consequence of "absent" is failing closed — the safe direction — whereas
  * throwing here would turn a misconfigured host into a crash.
- *
- * @param {string | undefined} raw
- * @returns {string[] | null}
  */
-export function parseSandboxLauncher(raw) {
+export function parseSandboxLauncher(raw: string | undefined): string[] | null {
   if (typeof raw !== "string" || raw.trim() === "") return null
   try {
-    const argv = JSON.parse(raw)
+    const argv: unknown = JSON.parse(raw)
     if (!Array.isArray(argv) || argv.length === 0) return null
     if (!argv.every((part) => typeof part === "string" && part.length > 0)) return null
-    return argv
+    return argv as string[]
   } catch {
     return null
   }
@@ -74,11 +121,11 @@ export function parseSandboxLauncher(raw) {
  *
  * Returns the same shape `lib/ai/code-mode/availability.ts` consumes, so the
  * renderer's "is Code offered?" and the sidecar's "may I spawn?" answer the
- * same question from the same evidence.
- *
- * @param {{ fork?: unknown, launcher?: string[] | null }} [overrides] injected in tests
+ * same question from the same evidence. `overrides` are injected by tests.
  */
-export function probeSandbox(overrides = {}) {
+export function probeSandbox(
+  overrides: { fork?: unknown; launcher?: string[] | null } = {}
+): SandboxProbe & { launcher: string[] | null } {
   const canSpawnProcess =
     overrides.fork !== undefined ? Boolean(overrides.fork) : typeof fork === "function"
   const launcher =
@@ -88,8 +135,7 @@ export function probeSandbox(overrides = {}) {
   return { canSpawnProcess, strictSandbox: Array.isArray(launcher), launcher: launcher ?? null }
 }
 
-/** @param {{ canSpawnProcess: boolean, strictSandbox: boolean, launcher?: string[] | null }} probe */
-export function assertSandboxable(probe) {
+export function assertSandboxable(probe: SandboxProbe | null | undefined): void {
   if (!probe?.canSpawnProcess) throw new SandboxUnavailableError("no-fork")
   if (!probe.strictSandbox || !Array.isArray(probe.launcher) || probe.launcher.length === 0) {
     throw new SandboxUnavailableError("no-strict-sandbox")
@@ -103,7 +149,10 @@ export function assertSandboxable(probe) {
  * sidecar's environment carries ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN,
  * and a deny-list would leak every future secret nobody remembered to add.
  */
-export function sandboxEnv({ standalone = false } = {}) {
+export function sandboxEnv({ standalone = false }: { standalone?: boolean } = {}): Record<
+  string,
+  string
+> {
   return {
     COGNIA_CODE_SANDBOX_CHILD: "1",
     // Node itself needs almost nothing. NODE_ENV is passed so the child's
@@ -114,12 +163,24 @@ export function sandboxEnv({ standalone = false } = {}) {
 }
 
 /** Resolve the strict-launcher command without treating a compiled CLI as Node. */
-export function resolveSandboxSpawn({ standalone, launcher, execPath, childPath, maxMemoryBytes }) {
+export function resolveSandboxSpawn({
+  standalone,
+  launcher,
+  execPath,
+  childPath,
+  maxMemoryBytes,
+}: {
+  standalone: boolean
+  launcher: readonly string[]
+  execPath: string
+  childPath: string
+  maxMemoryBytes: number
+}): { command: string; args: string[]; env: Record<string, string> } {
   const runtimeArgs = standalone
     ? []
     : [`--max-old-space-size=${Math.floor(maxMemoryBytes / (1024 * 1024))}`, childPath]
   return {
-    command: launcher[0],
+    command: launcher[0]!,
     args: [...launcher.slice(1), execPath, ...runtimeArgs],
     env: sandboxEnv({ standalone }),
   }
@@ -134,7 +195,18 @@ export function resolveSandboxSpawn({ standalone, launcher, execPath, childPath,
  * missing or unparsable `ps` result fails closed instead of silently dropping
  * the documented memory boundary.
  */
-export function readProcessGroupRssBytes(processGroupId, { spawnSyncImpl = spawnSync } = {}) {
+export function readProcessGroupRssBytes(
+  processGroupId: number | undefined,
+  {
+    spawnSyncImpl = spawnSync,
+  }: {
+    spawnSyncImpl?: (
+      command: string,
+      args: string[],
+      options: { encoding: "utf8"; timeout: number }
+    ) => { status: number | null; signal?: NodeJS.Signals | null; stdout?: unknown }
+  } = {}
+): number {
   const result = spawnSyncImpl("ps", ["-axo", "pid=,pgid=,rss="], {
     encoding: "utf8",
     timeout: 2_000,
@@ -166,17 +238,24 @@ export function readProcessGroupRssBytes(processGroupId, { spawnSyncImpl = spawn
  * JSON so the numbers cannot diverge.
  */
 export class CallBudget {
-  constructor(config = limits) {
+  declare config: Pick<CodeModeLimits, "maxToolCalls" | "maxConcurrency">
+  declare used: number
+  declare inFlight: number
+
+  constructor(config: Pick<CodeModeLimits, "maxToolCalls" | "maxConcurrency"> = limits) {
     this.config = config
     this.used = 0
     this.inFlight = 0
   }
 
-  get callsUsed() {
+  get callsUsed(): number {
     return this.used
   }
 
-  tryAcquire() {
+  tryAcquire():
+    | { ok: true }
+    | { ok: false; exceeded: CodeLimit }
+    | { ok: false; retry: true; exceeded?: undefined } {
     if (this.used >= this.config.maxToolCalls) {
       return { ok: false, exceeded: { kind: "tool-calls", limit: this.config.maxToolCalls } }
     }
@@ -186,7 +265,7 @@ export class CallBudget {
     return { ok: true }
   }
 
-  release() {
+  release(): void {
     this.inFlight = Math.max(0, this.inFlight - 1)
   }
 }
@@ -194,19 +273,24 @@ export class CallBudget {
 /**
  * Run one program.
  *
- * @param {object} options
- * @param {string} options.source
- * @param {(name: string, input: unknown) => Promise<unknown>} options.callTool
- *        Re-enters the host's real tool registry. The supervisor never touches
- *        a tool implementation directly — argument validation, permissions,
- *        confinement, and the canonical event log all live behind this call.
- * @param {{ canSpawnProcess: boolean, strictSandbox: boolean }} [options.probe]
- * @param {object} [options.config] limit overrides, for tests
- * @param {(level: string, text: string) => void} [options.onLog]
- * @returns {Promise<{ ok: true, result: unknown, callsUsed: number, logs: Array<{level: string, text: string}> }
- *   | { ok: false, error: { name: string, message: string }, limit?: object, callsUsed: number, logs: Array<{level: string, text: string}> }>}
+ * `callTool` re-enters the host's real tool registry. The supervisor never
+ * touches a tool implementation directly — argument validation, permissions,
+ * confinement, and the canonical event log all live behind this call.
+ * `config` overrides the limits, for tests.
  */
-export async function runCodeProgram({ source, callTool, probe, config = limits, onLog }) {
+export async function runCodeProgram({
+  source,
+  callTool,
+  probe,
+  config = limits,
+  onLog,
+}: {
+  source: string
+  callTool: (name: string, input: unknown) => Promise<unknown>
+  probe?: SandboxProbe | undefined
+  config?: CodeModeLimits | undefined
+  onLog?: ((level: string, text: string) => void) | undefined
+}): Promise<CodeRunResult> {
   const resolvedProbe = probe ?? probeSandbox()
   assertSandboxable(resolvedProbe)
 
@@ -216,17 +300,19 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
   }
 
   const budget = new CallBudget(config)
-  const logs = []
+  const logs: CodeRunLog[] = []
   const toolNames = programmaticReadOnlyToolNames()
-  const standalone = Boolean(globalThis.Bun?.isStandaloneExecutable)
+  const standalone = Boolean(
+    (globalThis as { Bun?: { isStandaloneExecutable?: boolean } }).Bun?.isStandaloneExecutable
+  )
   const target = resolveSandboxSpawn({
     standalone,
-    launcher: resolvedProbe.launcher,
+    launcher: resolvedProbe.launcher ?? [],
     execPath: process.execPath,
     childPath: CHILD_PATH,
     maxMemoryBytes: config.maxMemoryBytes,
   })
-  const spawnOptions = {
+  const spawnOptions: SpawnOptions = {
     // No `cwd` override on purpose. The launcher's policy defines the child's
     // filesystem view — `bwrap` chdirs into its own scratch bind, and the
     // macOS profile scopes reads and writes explicitly. An earlier version
@@ -257,8 +343,8 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
       })()
 
   let settled = false
-  let timer = null
-  let memoryTimer = null
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let memoryTimer: ReturnType<typeof setInterval> | null = null
 
   const cleanup = () => {
     if (timer) clearTimeout(timer)
@@ -271,8 +357,13 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
     }
   }
 
-  return await new Promise((resolve) => {
-    const settle = (value) => {
+  /** A run outcome before the budget and logs are attached. */
+  type Outcome =
+    | { ok: true; result: unknown }
+    | { ok: false; error: { name: string; message: string }; limit?: CodeLimit }
+
+  return await new Promise<CodeRunResult>((resolve) => {
+    const settle = (value: Outcome) => {
       if (settled) return
       settled = true
       cleanup()
@@ -299,7 +390,7 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
       } catch (error) {
         settle({
           ok: false,
-          error: { name: "SandboxError", message: String(error?.message ?? error) },
+          error: { name: "SandboxError", message: errorText(error) },
         })
       }
     }
@@ -310,7 +401,7 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
     child.on("error", (error) => {
       settle({
         ok: false,
-        error: { name: "SandboxError", message: String(error?.message ?? error) },
+        error: { name: "SandboxError", message: errorText(error) },
       })
     })
 
@@ -327,8 +418,9 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
       })
     })
 
-    child.on("message", (message) => {
-      if (!message || typeof message !== "object") return
+    child.on("message", (raw: unknown) => {
+      if (!raw || typeof raw !== "object") return
+      const message = raw as ChildMessage
 
       switch (message.kind) {
         case CHILD_MESSAGE_KINDS.READY:
@@ -363,7 +455,14 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
         }
 
         case CHILD_MESSAGE_KINDS.FAILED:
-          settle({ ok: false, error: message.error ?? { name: "Error", message: "unknown" } })
+          settle({
+            ok: false,
+            // The child sends only `{ name, message }` (see sandbox-child.ts).
+            error: (message.error as { name: string; message: string } | undefined) ?? {
+              name: "Error",
+              message: "unknown",
+            },
+          })
           return
 
         default:
@@ -371,8 +470,8 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
       }
     })
 
-    async function handleToolCall(message) {
-      const reply = (patch) => {
+    async function handleToolCall(message: ChildMessage) {
+      const reply = (patch: { result?: unknown; error?: string }) => {
         if (settled) return
         child.send({ kind: CHILD_MESSAGE_KINDS.TOOL_RESULT, id: message.id, ...patch })
       }
@@ -382,7 +481,9 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
       // die at this boundary, not at the registry.
       const eligibility = checkToolEligibility(message.name)
       if (!eligibility.allowed) {
-        reply({ error: `tool "${message.name}" is not callable from code (${eligibility.reason})` })
+        reply({
+          error: `tool "${String(message.name)}" is not callable from code (${eligibility.reason})`,
+        })
         return
       }
 
@@ -401,10 +502,10 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
       }
 
       try {
-        const result = await callTool(message.name, message.input)
+        const result = await callTool(message.name as string, message.input)
         reply({ result })
       } catch (error) {
-        reply({ error: String(error?.message ?? error) })
+        reply({ error: errorText(error) })
       } finally {
         budget.release()
       }
@@ -412,7 +513,7 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
   })
 }
 
-function failure(kind, limit, observed) {
+function failure(kind: string, limit: number, observed: number): CodeRunResult {
   return {
     ok: false,
     error: { name: "CodeLimitExceeded", message: kind },
@@ -422,7 +523,7 @@ function failure(kind, limit, observed) {
   }
 }
 
-function safeStringify(value) {
+function safeStringify(value: unknown): string {
   try {
     return JSON.stringify(value ?? null) ?? "null"
   } catch {

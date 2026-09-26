@@ -1,8 +1,8 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { generateSdkDeclaration, renderSchema } from "./sdk-declaration.mjs"
-import limits from "../../../lib/ai/code-mode/limits.json" with { type: "json" }
+import { generateSdkDeclaration, renderSchema } from "./sdk-declaration.ts"
+import limits from "../../../../../lib/ai/code-mode/limits.json" with { type: "json" }
 
 test("maps the JSON Schema primitives", () => {
   assert.equal(renderSchema({ type: "string" }), "string")

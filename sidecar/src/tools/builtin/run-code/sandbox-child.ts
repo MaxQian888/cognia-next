@@ -33,6 +33,36 @@ export const CHILD_MESSAGE_KINDS = Object.freeze({
   LOG: "log",
 })
 
+/** Hands one tool call to the host; the result or error comes back as text. */
+type Bridge = (
+  name: string,
+  input: unknown,
+  resolve: (json: string) => void,
+  reject: (message: string) => void
+) => void
+
+type LogBridge = (level: unknown, text: unknown) => void
+
+/** The in-context factory `BOOTSTRAP_SOURCE` evaluates to. */
+type BuildGlobals = (
+  bridge: Bridge,
+  logBridge: LogBridge,
+  toolNames: string[]
+) => { cognia: unknown; console: unknown }
+
+/** A supervisor message, as far as the child reads it; every field is untrusted. */
+interface SupervisorMessage {
+  kind?: unknown
+  id?: unknown
+  error?: unknown
+  result?: unknown
+  source?: unknown
+  toolNames?: unknown
+}
+
+/** The fields of a thrown value the child reports back. */
+type ThrownLike = { name?: unknown; message?: unknown } | null | undefined
+
 /**
  * Bootstrap that builds `cognia` and `console` **inside** the sandbox realm.
  *
@@ -93,16 +123,20 @@ const BOOTSTRAP_SOURCE = `(function (bridge, logBridge, toolNames) {
 })`
 
 /**
- * Run one program to completion inside a restricted context.
- *
- * @param {object} options
- * @param {string} options.source
- * @param {ReadonlyArray<string>} options.toolNames
- * @param {(name: string, input: unknown) => Promise<unknown>} options.invoke
- * @param {(level: string, text: string) => void} [options.onLog]
- * @returns {Promise<unknown>} whatever the program returns
+ * Run one program to completion inside a restricted context; resolves to
+ * whatever the program returns.
  */
-export async function runProgram({ source, toolNames, invoke, onLog }) {
+export async function runProgram({
+  source,
+  toolNames,
+  invoke,
+  onLog,
+}: {
+  source: string
+  toolNames: readonly string[]
+  invoke: (name: string, input: unknown) => Promise<unknown>
+  onLog?: ((level: string, text: string) => void) | undefined
+}): Promise<unknown> {
   const context = vm.createContext(Object.create(null), {
     name: "cognia-code-sandbox",
     codeGeneration: { strings: false, wasm: false },
@@ -110,18 +144,18 @@ export async function runProgram({ source, toolNames, invoke, onLog }) {
 
   const buildGlobals = new vm.Script(BOOTSTRAP_SOURCE, {
     filename: "cognia-sdk-bootstrap.js",
-  }).runInContext(context)
+  }).runInContext(context) as BuildGlobals
 
   // `bridge` and `logBridge` are host functions, but they are only ever
   // arguments to the in-context factory — they are captured in its closure and
   // never become reachable from the program.
-  const bridge = (name, input, resolve, reject) => {
+  const bridge: Bridge = (name, input, resolve, reject) => {
     Promise.resolve()
       .then(() => invoke(name, input))
       .then((result) => resolve(JSON.stringify(result ?? null)))
-      .catch((error) => reject(String(error?.message ?? error)))
+      .catch((error: unknown) => reject(String((error as ThrownLike)?.message ?? error)))
   }
-  const logBridge = (level, text) => onLog?.(String(level), String(text))
+  const logBridge: LogBridge = (level, text) => onLog?.(String(level), String(text))
 
   // Read back the in-context objects and install them as globals. The values
   // crossing this line were created inside the sandbox, so nothing host-realm
@@ -137,7 +171,7 @@ export async function runProgram({ source, toolNames, invoke, onLog }) {
     filename: "program.js",
   })
 
-  return await script.runInContext(context)
+  return (await script.runInContext(context)) as unknown
 }
 
 /**
@@ -145,23 +179,23 @@ export async function runProgram({ source, toolNames, invoke, onLog }) {
  * exports above stay unit-testable without spawning anything.
  */
 export function runSandboxChild() {
-  /** @type {Map<number, { resolve: (v: unknown) => void, reject: (e: Error) => void }>} */
-  const pending = new Map()
+  const pending = new Map<unknown, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
   let nextCallId = 0
 
-  const send = (message) => {
+  const send = (message: Record<string, unknown>) => {
     process.send?.(message)
   }
 
-  const invoke = (name, input) =>
-    new Promise((resolve, reject) => {
+  const invoke = (name: string, input: unknown) =>
+    new Promise<unknown>((resolve, reject) => {
       const id = ++nextCallId
       pending.set(id, { resolve, reject })
       send({ kind: CHILD_MESSAGE_KINDS.TOOL_CALL, id, name, input })
     })
 
-  process.on("message", (message) => {
-    if (!message || typeof message !== "object") return
+  process.on("message", (raw: unknown) => {
+    if (!raw || typeof raw !== "object") return
+    const message = raw as SupervisorMessage
 
     if (message.kind === CHILD_MESSAGE_KINDS.TOOL_RESULT) {
       const entry = pending.get(message.id)
@@ -175,19 +209,20 @@ export function runSandboxChild() {
     if (message.kind === CHILD_MESSAGE_KINDS.START) {
       runProgram({
         source: String(message.source ?? ""),
-        toolNames: Array.isArray(message.toolNames) ? message.toolNames : [],
+        toolNames: Array.isArray(message.toolNames) ? (message.toolNames as string[]) : [],
         invoke,
         onLog: (level, text) => send({ kind: CHILD_MESSAGE_KINDS.LOG, level, text }),
       })
         .then((result) => {
           send({ kind: CHILD_MESSAGE_KINDS.DONE, result: safeResult(result) })
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
+          const thrown = error as ThrownLike
           send({
             kind: CHILD_MESSAGE_KINDS.FAILED,
             // Only the message and name cross the boundary. A stack would carry
             // host filesystem paths back into something the model can read.
-            error: { name: error?.name ?? "Error", message: String(error?.message ?? error) },
+            error: { name: thrown?.name ?? "Error", message: String(thrown?.message ?? error) },
           })
         })
     }
@@ -203,7 +238,7 @@ export function runSandboxChild() {
  * function or a cyclic object would otherwise kill the IPC channel and look
  * like a sandbox crash.
  */
-export function safeResult(value) {
+export function safeResult(value: unknown): unknown {
   try {
     return JSON.parse(JSON.stringify(value ?? null))
   } catch {

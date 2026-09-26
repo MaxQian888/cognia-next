@@ -168,6 +168,8 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/core/{notebook-edit,apply-patch}.mjs` (+ tests)           | `src/tools/builtin/core-files/*.ts`                                | 8k          |
 | `builtin-tools/core/{bash,monitor}.mjs` (+ tests)                        | `src/tools/builtin/core-files/*.ts`                                | 8k          |
 | `builtin-tools/core/core-tools.mjs` (+ test)                             | `src/tools/builtin/core-files/index.ts`                            | 8k          |
+| `builtin-tools/run-code/*` (+ tests)                                     | `src/tools/builtin/run-code/*`                                     | 8l          |
+| `builtin-tools/run-code/presentation.test.mjs`                           | `builtin-tools/presentation.test.mjs` (tests the registry)         | 8l          |
 
 ## Scripts (run from repo root)
 

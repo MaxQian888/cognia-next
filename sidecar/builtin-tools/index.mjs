@@ -37,8 +37,8 @@ import { createCoreTools } from "../src/tools/builtin/core-files/index.ts"
 import { createMonitorTools } from "../src/tools/builtin/core-files/monitor.ts"
 import { createExitPlanTool } from "../src/tools/builtin/plan/exit-plan.ts"
 import { createPlanTools } from "../src/tools/builtin/plan/plan-tools.ts"
-import { codeModeToolDefs } from "./run-code/index.mjs"
-import { isProgrammaticReadOnly } from "./run-code/eligibility.mjs"
+import { codeModeToolDefs } from "../src/tools/builtin/run-code/index.ts"
+import { isProgrammaticReadOnly } from "../src/tools/builtin/run-code/eligibility.ts"
 import { bareToolName } from "../src/policy/confinement/classify.ts"
 import {
   BUILTIN_SERVER_NAME,
