@@ -1,4 +1,5 @@
 {
+  "characterHint": "The teammate runs as this agent, including its knowledge bases and memory settings. Its own prompt, model and tools above override the agent's.",
   "description": "Edit identity, prompt, tools, and plugin capabilities for this teammate.",
   "executionBinding": {
     "candidateIds": "Candidate deployments",

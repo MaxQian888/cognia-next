@@ -95,6 +95,13 @@ export interface AgentCapabilityGrantV1 {
   }
   /** Knowledge bases queried for this run on top of the profile's own. */
   knowledgeBases?: { add?: string[] }
+  /**
+   * Native subagents (the SDK `agents` map) this run may delegate to. `only`
+   * keeps just the listed ids out of whatever the session registered; it never
+   * registers one. A bare id also matches a plugin's namespaced
+   * `<pluginId>:<id>` entry. An empty list leaves the run no subagents.
+   */
+  subagents?: { only?: string[] }
   /** Narrow-only permission cap. It can lower the resolved mode, never raise it. */
   permissionMode?: AgentPermissionMode
 }
@@ -158,6 +165,7 @@ export function validateAgentCapabilityGrant(v: unknown): ValidationResult<Agent
   checkDelta(v.mcpServers, "mcpServers", ["add", "remove", "only"], errors)
   checkDelta(v.tools, "tools", ["add", "deny", "restrictTo"], errors)
   checkDelta(v.knowledgeBases, "knowledgeBases", ["add"], errors)
+  checkDelta(v.subagents, "subagents", ["only"], errors)
   if (
     v.permissionMode !== undefined &&
     !Object.prototype.hasOwnProperty.call(AUTHORITY_RANK, v.permissionMode as string)
@@ -222,7 +230,7 @@ function intersectOptional(
  * compose in order; narrowing fields only ever narrow further:
  *
  *   - `tools.deny` is a union, so a later layer cannot re-admit a denied tool;
- *   - `tools.restrictTo` and `mcpServers.only` intersect;
+ *   - `tools.restrictTo`, `mcpServers.only` and `subagents.only` intersect;
  *   - `permissionMode` keeps the less privileged of the two.
  *
  * The result carries the inner grant's `source`.
@@ -273,6 +281,9 @@ export function mergeCapabilityGrants(
   const kb = uniq([...(outer.knowledgeBases?.add ?? []), ...(inner.knowledgeBases?.add ?? [])])
   if (kb.length > 0) merged.knowledgeBases = { add: kb }
 
+  const subagentsOnly = intersectOptional(outer.subagents?.only, inner.subagents?.only)
+  if (subagentsOnly) merged.subagents = { only: subagentsOnly }
+
   if (outer.permissionMode && inner.permissionMode) {
     merged.permissionMode = narrowAuthority(outer.permissionMode, inner.permissionMode)
   } else if (outer.permissionMode ?? inner.permissionMode) {
@@ -291,6 +302,31 @@ export function foldCapabilityGrants(
     folded = folded ? mergeCapabilityGrants(folded, grant) : grant
   }
   return folded
+}
+
+/**
+ * Whether an SDK agent-map key is named by a `subagents.only` id: the exact
+ * key, or a bare id naming a plugin's `<pluginId>:<id>` entry.
+ */
+export function subagentKeyMatches(key: string, id: string): boolean {
+  if (key === id) return true
+  return !id.includes(":") && key.endsWith(`:${id}`)
+}
+
+/**
+ * The agent map a run keeps under a grant's `subagents.only`. `undefined` when
+ * nothing is left, so an emptied map is removed rather than advertised.
+ */
+export function filterSubagentsByGrant<T>(
+  agents: Record<string, T> | undefined,
+  grant: Pick<AgentCapabilityGrantV1, "subagents"> | undefined
+): Record<string, T> | undefined {
+  const only = grant?.subagents?.only
+  if (!agents || !only) return agents
+  const kept = Object.entries(agents).filter(([key]) =>
+    only.some((id) => subagentKeyMatches(key, id))
+  )
+  return kept.length > 0 ? Object.fromEntries(kept) : undefined
 }
 
 /**

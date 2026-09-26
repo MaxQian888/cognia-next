@@ -3531,6 +3531,8 @@
       },
       "name": "团队名称",
       "plugins": {
+        "a2uiTemplatesInert": "此团队模板附带了 {count} 个 A2UI 模板，队友运行暂不使用它们。",
+        "characterHint": "每个队友都以这里选中的第一个智能体运行，队友自己的提示词、模型和工具叠加在其上。队友单独选择的智能体会覆盖此处设置。",
         "intro": "这些插件能力将被团队所有队友继承。在队员配置中可以单独覆盖。"
       },
       "prFeedback": {
@@ -3749,6 +3751,7 @@
     "teamNameRequired": "请填写团队名称。",
     "teamUpdated": "团队已更新。",
     "teammateConfig": {
+      "characterHint": "队友以此智能体运行，包括其知识库和记忆设置。上方为队友单独设置的提示词、模型和工具会覆盖智能体的配置。",
       "description": "编辑该队友的身份、提示词、工具与插件能力。",
       "executionBinding": {
         "candidateIds": "候选部署",

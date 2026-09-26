@@ -69,6 +69,17 @@ The settings list shows variants resolved, badges them with their base and
 how many fields they override, and offers create, reset and detach. The editor
 says it is editing a variant.
 
+### A teammate can run as a saved agent
+
+A team member's resolved `characterPackIds` (agent ids: user agents, variants
+or plugin-pack characters) name the agent it runs as. `dispatchTeammate`
+resolves the first id through `resolveCharacterById`, so a variant arrives
+with its overlay applied, and `teammateToCharacter` starts from that profile:
+knowledge bases, memory policy, output style and the rest come from the agent.
+The teammate's own prompt, model, provider and tools override it, and the
+team's MCP servers and skills are added to the agent's. An id that no longer
+resolves fails the dispatch instead of running a generic teammate.
+
 ### A workspace names its default agent
 
 `Project.defaultCharacterId` is the agent a person's new conversation in that
@@ -86,5 +97,6 @@ is how one repository gets its own configuration of a shared agent.
 - Variants add one optional, non-indexed field, so there is no Dexie version bump.
 - Consumers that read raw rows with `getCharacter` see the snapshot, not the
   live overlay. Runtime paths use `resolveCharacterById`.
+- Teams reuse configured agents instead of restating them per member.
 - Deleting a widely used base needs an explicit detach or delete of its
   variants first.

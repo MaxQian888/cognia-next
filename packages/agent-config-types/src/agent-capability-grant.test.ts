@@ -2,8 +2,10 @@ import {
   AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
   applyCapabilityIdDelta,
   capPermissionModeByGrant,
+  filterSubagentsByGrant,
   foldCapabilityGrants,
   mergeCapabilityGrants,
+  subagentKeyMatches,
   validateAgentCapabilityGrant,
 } from "./agent-capability-grant"
 import type { AgentCapabilityGrantV1 } from "./agent-capability-grant"
@@ -29,10 +31,27 @@ describe("validateAgentCapabilityGrant", () => {
         mcpServers: { only: ["github"], add: ["linear"], remove: ["slack"] },
         tools: { add: ["Read"], deny: ["Bash"], restrictTo: ["Read", "Grep"] },
         knowledgeBases: { add: ["kb-1"] },
+        subagents: { only: ["workflow-designer"] },
         permissionMode: "plan",
       })
     )
     expect(result.ok).toBe(true)
+  })
+
+  it("rejects a malformed subagent restriction", () => {
+    const result = validateAgentCapabilityGrant({
+      ...grant(),
+      subagents: { only: [""], add: ["x"] },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          "subagents.add is not a recognised field",
+          "subagents.only must be an array of non-empty strings",
+        ])
+      )
+    }
   })
 
   it("rejects a non-object, a wrong version and an unknown source", () => {
@@ -157,6 +176,18 @@ describe("mergeCapabilityGrants", () => {
     )
   })
 
+  it("intersects subagent restrictions and keeps a one-sided one", () => {
+    expect(
+      mergeCapabilityGrants(
+        grant({ subagents: { only: ["a", "b"] } }),
+        grant({ subagents: { only: ["b", "c"] } })
+      ).subagents
+    ).toEqual({ only: ["b"] })
+    expect(mergeCapabilityGrants(grant(), grant({ subagents: { only: [] } })).subagents).toEqual({
+      only: [],
+    })
+  })
+
   it("omits empty sections", () => {
     const merged = mergeCapabilityGrants(grant(), grant())
     expect(Object.keys(merged).sort()).toEqual(["schemaVersion", "source"])
@@ -179,6 +210,25 @@ describe("foldCapabilityGrants", () => {
     ])
     expect(folded?.model).toBe("b")
     expect(folded?.tools).toEqual({ deny: ["Bash"] })
+  })
+})
+
+describe("filterSubagentsByGrant", () => {
+  const agents = { "workflow-designer": 1, "acme:reviewer": 2, "template:notes": 3 }
+
+  it("matches exact keys and bare ids of namespaced plugin entries", () => {
+    expect(subagentKeyMatches("acme:reviewer", "reviewer")).toBe(true)
+    expect(subagentKeyMatches("acme:reviewer", "other:reviewer")).toBe(false)
+    expect(
+      filterSubagentsByGrant(agents, { subagents: { only: ["reviewer", "workflow-designer"] } })
+    ).toEqual({ "workflow-designer": 1, "acme:reviewer": 2 })
+  })
+
+  it("drops the map when nothing survives and leaves it alone without a restriction", () => {
+    expect(filterSubagentsByGrant(agents, { subagents: { only: [] } })).toBeUndefined()
+    expect(filterSubagentsByGrant(agents, { subagents: { only: ["missing"] } })).toBeUndefined()
+    expect(filterSubagentsByGrant(agents, undefined)).toBe(agents)
+    expect(filterSubagentsByGrant(undefined, { subagents: { only: ["a"] } })).toBeUndefined()
   })
 })
 

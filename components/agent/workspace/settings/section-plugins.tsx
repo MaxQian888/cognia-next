@@ -75,6 +75,8 @@ function editorStateToBundle(
     characterPackIds: current?.characterPackIds,
     externalAgentPresetIds: current?.externalAgentPresetIds,
     subagentIds: state.subagentIds,
+    // Not editable here; kept so a save never erases what a team template declared.
+    a2uiTemplateIds: current?.a2uiTemplateIds,
   }
 }
 
@@ -124,6 +126,8 @@ export function PluginsSection({ team }: PluginsSectionProps) {
     [team.id, team.config.capabilities, updateTeamCapabilities]
   )
 
+  const a2uiTemplateCount = team.config.capabilities?.a2uiTemplateIds?.length ?? 0
+
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">{t("intro")}</p>
@@ -135,6 +139,9 @@ export function PluginsSection({ team }: PluginsSectionProps) {
         defaultOpen={false}
       />
       <NativeToolsSection state={editorState} onPatch={handlePatch} />
+      <p className="text-xs text-muted-foreground" data-testid="team-character-hint">
+        {t("characterHint")}
+      </p>
       <CharacterSection
         state={editorState}
         onPatch={handlePatch}
@@ -150,6 +157,14 @@ export function PluginsSection({ team }: PluginsSectionProps) {
         selectedIds={team.config.capabilities?.externalAgentPresetIds ?? []}
         onPatchMulti={patchExternalPresets}
       />
+      {a2uiTemplateCount > 0 ? (
+        <p
+          className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground"
+          data-testid="team-a2ui-templates-inert"
+        >
+          {t("a2uiTemplatesInert", { count: a2uiTemplateCount })}
+        </p>
+      ) : null}
     </div>
   )
 }

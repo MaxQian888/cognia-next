@@ -1,4 +1,5 @@
 {
+  "characterHint": "队友以此智能体运行，包括其知识库和记忆设置。上方为队友单独设置的提示词、模型和工具会覆盖智能体的配置。",
   "description": "编辑该队友的身份、提示词、工具与插件能力。",
   "executionBinding": {
     "candidateIds": "候选部署",

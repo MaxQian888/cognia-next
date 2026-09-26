@@ -1,4 +1,10 @@
-import { teammateToCharacter, teammateCharacterId } from "./teammate-character"
+import type { Character } from "@cognia/agent-config-types"
+import {
+  teammateBaseAgentId,
+  teammateCharacterId,
+  teammateSystemPrompt,
+  teammateToCharacter,
+} from "./teammate-character"
 import {
   EMPTY_RESOLVED_CAPABILITIES,
   type AgentTeam,
@@ -208,5 +214,117 @@ describe("teammateToCharacter — OS sandbox (ADR-0028)", () => {
     // Writable narrowed to under the team root; an `off` ceiling forces offline.
     expect(c.sandboxPolicy?.writableRoots).toEqual(["/ws/pkg"])
     expect(c.sandboxPolicy?.network).toBe("off")
+  })
+})
+
+describe("teammateToCharacter — backed by a saved agent", () => {
+  const reviewer = {
+    id: "agent-reviewer",
+    name: "Reviewer",
+    avatarColor: "red",
+    systemPrompt: "Review like a hawk.",
+    model: "claude-opus-4-8",
+    providerId: "anthropic",
+    allowedTools: ["Read", "Grep"],
+    mcpServerIds: ["github"],
+    skillIds: ["style"],
+    pluginSkillIds: ["acme:lint"],
+    knowledgeBaseIds: ["kb-guidelines"],
+    outputStyle: "concise",
+    workingDir: "/elsewhere",
+    variant: { baseId: "base", ownFields: ["model"] },
+    createdAt: 1,
+    updatedAt: 1,
+  } as Character
+
+  it("runs on the agent's profile under the teammate's identity", () => {
+    const c = teammateToCharacter({
+      team: makeTeam(),
+      teammate: makeTeammate(),
+      resolvedCaps: EMPTY_RESOLVED_CAPABILITIES,
+      cwd: "/repo",
+      baseAgent: reviewer,
+    })
+    expect(c).toMatchObject({
+      id: teammateCharacterId({ id: "tm1" }),
+      name: "Security Reviewer",
+      systemPrompt: "Review like a hawk.",
+      model: "claude-opus-4-8",
+      providerId: "anthropic",
+      allowedTools: ["Read", "Grep"],
+      mcpServerIds: ["github"],
+      skillIds: ["style"],
+      pluginSkillIds: ["acme:lint"],
+      knowledgeBaseIds: ["kb-guidelines"],
+      outputStyle: "concise",
+      workingDir: "/repo",
+    })
+    expect(c.variant).toBeUndefined()
+  })
+
+  it("lets the teammate's explicit settings and the team's lists win or widen", () => {
+    const c = teammateToCharacter({
+      team: makeTeam(),
+      teammate: makeTeammate({
+        config: { systemPrompt: "Mine.", model: "claude-haiku-4-5", tools: ["Read"] },
+      }),
+      resolvedCaps: {
+        ...EMPTY_RESOLVED_CAPABILITIES,
+        mcpServerIds: ["linear"],
+        skillIds: ["report"],
+      },
+      baseAgent: reviewer,
+    })
+    expect(c.systemPrompt).toBe("Mine.")
+    expect(c.model).toBe("claude-haiku-4-5")
+    expect(c.allowedTools).toEqual(["Read"])
+    expect(c.mcpServerIds).toEqual(["github", "linear"])
+    expect(c.skillIds).toEqual(["style", "report"])
+    expect(c.pluginSkillIds).toEqual(["acme:lint", "report"])
+    expect(c.workingDir).toBeUndefined()
+  })
+
+  it("prefers the agent's prompt over the team default", () => {
+    expect(
+      teammateSystemPrompt({ team: makeTeam(), teammate: makeTeammate(), baseAgent: reviewer })
+    ).toBe("Review like a hawk.")
+    expect(
+      teammateSystemPrompt({
+        team: makeTeam(),
+        teammate: makeTeammate(),
+        baseAgent: reviewer,
+        override: "  Dispatch prompt.  ",
+      })
+    ).toBe("Dispatch prompt.")
+    expect(teammateSystemPrompt({ team: makeTeam(), teammate: makeTeammate() })).toBe(
+      "Team default prompt."
+    )
+  })
+
+  it("names the first resolved character id as the backing agent", () => {
+    expect(teammateBaseAgentId(EMPTY_RESOLVED_CAPABILITIES)).toBeUndefined()
+    expect(
+      teammateBaseAgentId({ ...EMPTY_RESOLVED_CAPABILITIES, characterPackIds: ["a", "b"] })
+    ).toBe("a")
+  })
+})
+
+describe("teammateToCharacter — inert A2UI template ids", () => {
+  it("ignores a2uiTemplateIds: no teammate run reads them", () => {
+    const withTemplates = teammateToCharacter({
+      team: makeTeam(),
+      teammate: makeTeammate(),
+      resolvedCaps: { ...EMPTY_RESOLVED_CAPABILITIES, a2uiTemplateIds: ["tpl-1"] },
+    })
+    const without = teammateToCharacter({
+      team: makeTeam(),
+      teammate: makeTeammate(),
+      resolvedCaps: EMPTY_RESOLVED_CAPABILITIES,
+    })
+    expect({ ...withTemplates, createdAt: 0, updatedAt: 0 }).toEqual({
+      ...without,
+      createdAt: 0,
+      updatedAt: 0,
+    })
   })
 })

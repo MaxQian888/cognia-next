@@ -260,6 +260,13 @@ describe("TeammateConfigDialog", () => {
     expect(screen.getByText(/Alice/)).toBeInTheDocument()
   })
 
+  it("explains that the chosen agent backs the teammate", () => {
+    render(
+      <TeammateConfigDialog open={true} onOpenChange={() => {}} teammate={teammate} team={team} />
+    )
+    expect(screen.getByTestId("teammate-character-hint")).toHaveTextContent("characterHint")
+  })
+
   it("mounts without throwing when team has no capability default pool", () => {
     expect(() =>
       render(

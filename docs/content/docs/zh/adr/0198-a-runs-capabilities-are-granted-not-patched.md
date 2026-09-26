@@ -40,9 +40,10 @@ description: "启动智能体的功能（定时任务、工作流节点、插件
 | `tools.deny` | 禁用列表，插件钩子之后再次施加 | 收窄 |
 | `tools.restrictTo` | 插件钩子之后与允许列表取交集 | 收窄 |
 | `knowledgeBases.add` | 智能体知识检索 | 增加 |
+| `subagents.only` | 原生子智能体映射，在各分支注册之后、`@agent` 路由之前 | 收窄 |
 | `permissionMode` | 对解析结果的上限 | 只能收窄 |
 
-`BuildOptionsContext.capabilityGrants` 接受一个有序列表。纯函数 `mergeCapabilityGrants` / `foldCapabilityGrants` 负责逐层合并：禁用项取并集，后面的层无法撤销；`restrictTo` 和 `mcpServers.only` 取交集；权限上限保留权限更低的那个。
+`BuildOptionsContext.capabilityGrants` 接受一个有序列表。纯函数 `mergeCapabilityGrants` / `foldCapabilityGrants` 负责逐层合并：禁用项取并集，后面的层无法撤销；`restrictTo`、`mcpServers.only` 和 `subagents.only` 取交集；权限上限保留权限更低的那个。
 
 ### 允许增加，但仍受约束
 
@@ -53,6 +54,7 @@ description: "启动智能体的功能（定时任务、工作流节点、插件
 - **定时任务：** `buildSchedulerCapabilityGrant` 把 payload 转成一条授予。`disallowedTools` 改为并入禁用列表，`permissionMode` 改为上限。技能任务的技能通过 `ephemeralSkillIds` 传入。智能体已被删除、或技能在任何地方都未启用时，运行直接失败，而不是以无人设的默认智能体运行。
 - **`executeAgent`：** 自身参数转成授予（`executeAgentConfigGrant`）：有 `characterId` 时，`model` 位于解析链最前，`allowedTools` 起收窄作用。`maxSteps` 终于作为 `maxTurns` 生效，`capabilityGrants` 原样透传。文本通道以指定智能体的身份发言。当智能体或授予绑定了知识库或数字分身时，工具通道会构建检索依赖。用户级长期记忆仍只属于聊天界面。
 - **工作流 `action.agent.turn`：** 支持额外技能、MCP 服务器、知识库、禁用工具、追加指令和权限上限；追加指令同样经过节点的出站守卫。
+- **智能体团队：** 队友解析出的 `subagentIds` 通过 `subagents.only` 收窄团队会话的原生子智能体。列表为空时保留整个团队范围，与 MCP 服务器一致。
 - **插件与 Bot：** `runPluginAgentTurn` 和 `ctx.agent.run` 接受 `capabilityGrants`（会校验，并把调用方标记为来源）以及组合选择。Bot 传入完整的投影组合。
 
 `resolveTurnAgentMode` 接受调用方提供的 `selection`，修复了上面的连接器割裂问题。

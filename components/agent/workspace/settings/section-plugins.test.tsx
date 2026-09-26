@@ -132,6 +132,23 @@ describe("PluginsSection", () => {
     expect(screen.getByText("intro")).toBeInTheDocument()
   })
 
+  it("explains that the first selected agent backs each teammate", () => {
+    render(<PluginsSection team={makeTeam()} />)
+    expect(screen.getByTestId("team-character-hint")).toHaveTextContent("characterHint")
+  })
+
+  it("labels template-declared A2UI templates as unused and keeps them on save", () => {
+    const { rerender } = render(<PluginsSection team={makeTeam()} />)
+    expect(screen.queryByTestId("team-a2ui-templates-inert")).toBeNull()
+    rerender(<PluginsSection team={makeTeam({ a2uiTemplateIds: ["tpl-1"] })} />)
+    expect(screen.getByTestId("team-a2ui-templates-inert")).toHaveTextContent("a2uiTemplatesInert")
+    fireEvent.click(screen.getByTestId("tools-patch"))
+    expect(updateTeamCapabilitiesMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({ a2uiTemplateIds: ["tpl-1"] })
+    )
+  })
+
   it("renders all sub-section stubs", () => {
     render(<PluginsSection team={makeTeam()} />)
     expect(screen.getByTestId("tools-patch")).toBeInTheDocument()

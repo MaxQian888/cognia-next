@@ -28,6 +28,7 @@ import { recordTeamUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import { priceTokensForModel } from "@/lib/usage/pricing"
 import type { SpanUsage } from "@/types/agent-trace/span"
 import type { AgentTeammate, ResolvedCapabilities } from "@/types/agent/agent-team"
+import type { Character } from "@cognia/agent-config-types"
 import {
   deriveExternalSessionPermission,
   MODE_RANK,
@@ -40,7 +41,11 @@ import {
 import { resolveTeammateCapabilities } from "./capability-resolver"
 import { resolveTeammatePinnedConfigId } from "./resolve-external-backing"
 import { ExternalAgentBindingError } from "@/lib/ai/agent/external/config/agent-binding"
-import { teammateToCharacter } from "./teammate-character"
+import {
+  teammateBaseAgentId,
+  teammateSystemPrompt,
+  teammateToCharacter,
+} from "./teammate-character"
 import { applyTeammateTwinContext } from "./twin-context"
 import type { TeamRunContext } from "../team-run-context"
 import { isTaskReviewEnabled } from "../gates/task-review-policy"
@@ -69,9 +74,6 @@ import {
 import { requestWorkerWake, shouldAttemptWake } from "../workers/wake-worker"
 import { runMemberFusionTurn } from "./member-fusion-turn"
 import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
-
-const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
-  "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
 
 const DEFAULT_PER_TASK_TIMEOUT_MS = 600_000
 
@@ -219,7 +221,8 @@ async function runToolEnabled(
   cwdOverride?: string,
   spanId?: string,
   onSessionCreated?: (sessionId: string) => Promise<void | (() => void)>,
-  taskKind?: DispatchTeammateArgs["taskKind"]
+  taskKind?: DispatchTeammateArgs["taskKind"],
+  baseAgent?: Character
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const cwd = cwdOverride ?? teamCtx.team.config?.workingDir
   const character = teammateToCharacter({
@@ -228,6 +231,7 @@ async function runToolEnabled(
     resolvedCaps,
     cwd,
     modelHint,
+    ...(baseAgent ? { baseAgent } : {}),
   })
   // The dispatch's resolved system prompt wins over the bridge's default.
   character.systemPrompt = systemPrompt
@@ -276,6 +280,20 @@ async function runToolEnabled(
       character,
       appSettings: appSettings ?? null,
       ...(ceiling ? { permissionCeiling: ceiling } : {}),
+      // The teammate's resolved `subagentIds` narrow the team session's native
+      // subagents to the ones this member was given. An empty list means the
+      // team configured none, so the whole team surface stays (as for MCP).
+      ...(resolvedCaps.subagentIds.length > 0
+        ? {
+            capabilityGrants: [
+              {
+                schemaVersion: 1 as const,
+                source: { kind: "agent-team" as const, id: `${teamCtx.teamId}:${teammate.id}` },
+                subagents: { only: [...resolvedCaps.subagentIds] },
+              },
+            ],
+          }
+        : {}),
       routingSurface: "agent",
       routingContextHint: {
         promptText: prompt,
@@ -829,11 +847,27 @@ export async function dispatchTeammate(
     const timeoutSignal = AbortSignal.timeout(timeoutMs)
     let combinedSignal = args.signal ? AbortSignal.any([args.signal, timeoutSignal]) : timeoutSignal
 
-    const systemPrompt =
-      args.systemPrompt?.trim() ||
-      teammate.config?.systemPrompt?.trim() ||
-      teamCtx.team.config?.defaultSystemPrompt?.trim() ||
-      DEFAULT_TEAMMATE_SYSTEM_PROMPT
+    // A teammate backed by a saved agent (or variant, or pack character) runs
+    // on that agent's effective profile. One that no longer resolves fails the
+    // dispatch rather than quietly running as a generic teammate.
+    const baseAgentId = teammateBaseAgentId(resolvedCaps)
+    let baseAgent: Character | undefined
+    if (baseAgentId) {
+      const { resolveCharacterById } = await import("@/lib/db/characters")
+      baseAgent = await resolveCharacterById(baseAgentId)
+      if (!baseAgent) {
+        throw new Error(
+          `Teammate "${teammate.name}" is backed by agent "${baseAgentId}", which was not found`
+        )
+      }
+    }
+
+    const systemPrompt = teammateSystemPrompt({
+      team: teamCtx.team,
+      teammate,
+      baseAgent,
+      override: args.systemPrompt,
+    })
 
     const modelHint = teamCtx.modelPref.get().modelHint
     const accountingModel = teammate.config?.cogniaModel?.modelId ?? modelHint
@@ -1598,7 +1632,8 @@ export async function dispatchTeammate(
                   sessionId
                 )
             : undefined,
-          args.taskKind
+          args.taskKind,
+          baseAgent
         )
       }
 

@@ -327,14 +327,20 @@ export interface TeamGovernancePolicy {
  *   - `skillIds` → host skills + `skill-registry` overlay (scope=team|global).
  *   - `nativeAnthropicToolIds` → `native-anthropic-tool-registry`
  *     (e.g. `computer_20251124` / `bash_20250124` / `text_editor_20250728`).
- *   - `characterPackIds` → `character-pack-registry`. The team uses
- *     `getPackCharacterByRuntimeId` to project a pack character into a
- *     teammate's persona at run time.
+ *   - `characterPackIds` → agent ids: user agents, variants, or plugin-pack
+ *     characters (`cognia-pack:…` runtime ids). The FIRST resolved id backs
+ *     the teammate: `dispatchTeammate` resolves it with
+ *     `resolveCharacterById` and the teammate runs on that agent's effective
+ *     profile, its own config on top (`teammateToCharacter`). An id that no
+ *     longer resolves fails the dispatch.
  *   - `externalAgentPresetIds` → `lib/ai/agent/external/config/presets.ts`.
- *   - `subagentIds` → built-in name or `<pluginId>:<subagentId>`
- *     resolved through `resolveAllSubagents`.
- *   - `a2uiTemplateIds` → A2UI template registry (existing) consumed by
- *     the IM ⇄ A2UI bridge.
+ *   - `subagentIds` → built-in name or `<pluginId>:<subagentId>`. When
+ *     non-empty they narrow the team session's native subagents through a
+ *     `subagents.only` capability grant (ADR-0198); empty keeps them all.
+ *   - `a2uiTemplateIds` → A2UI template ids. INERT: declared by team
+ *     templates and checked by the capability audit, but no teammate run
+ *     reads them. The team settings label them unused, and
+ *     `section-plugins.test.tsx` pins that label.
  */
 export interface TeamCapabilityBundle {
   mcpServerIds?: string[]

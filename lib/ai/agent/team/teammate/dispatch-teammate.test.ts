@@ -90,6 +90,13 @@ jest.mock("@/lib/db/sessions", () => ({
   deleteSession: (...a: Parameters<typeof deleteSessionMock>) => deleteSessionMock(...a),
 }))
 
+const resolveCharacterByIdMock = jest.fn((..._a: unknown[]) =>
+  Promise.resolve(undefined as unknown)
+)
+jest.mock("@/lib/db/characters", () => ({
+  resolveCharacterById: (...a: unknown[]) => resolveCharacterByIdMock(...a),
+}))
+
 const getSettingsMock = jest.fn().mockResolvedValue({})
 jest.mock("@/lib/db/settings", () => ({ getSettings: () => getSettingsMock() }))
 
@@ -1028,6 +1035,87 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     )
     expect(deleteSessionMock).toHaveBeenCalledWith("sess1")
     expect(executeAgentMock).not.toHaveBeenCalled()
+  })
+
+  it("narrows the team subagents to the teammate's resolved subagentIds", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "ok" })
+    const { ctx } = makeCtx(
+      makeTeammate({
+        config: { capabilities: { subagentIds: { add: ["acme:reviewer"] } } },
+      }),
+      { capabilities: { subagentIds: ["workflow-designer"] } }
+    )
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit" })
+
+    expect(resolveSendOptionsMock.mock.calls[0][0]).toMatchObject({
+      capabilityGrants: [
+        {
+          schemaVersion: 1,
+          source: { kind: "agent-team", id: "team1:tm1" },
+          subagents: { only: ["workflow-designer", "acme:reviewer"] },
+        },
+      ],
+    })
+  })
+
+  it("runs a teammate on the saved agent its capabilities name", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "ok" })
+    resolveCharacterByIdMock.mockResolvedValueOnce({
+      id: "agent-strict",
+      name: "Strict reviewer",
+      avatarColor: "red",
+      systemPrompt: "Review like a hawk.",
+      knowledgeBaseIds: ["kb-1"],
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const { ctx } = makeCtx(
+      makeTeammate({ config: { capabilities: { characterPackIds: { add: ["agent-strict"] } } } })
+    )
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit" })
+
+    expect(resolveCharacterByIdMock).toHaveBeenCalledWith("agent-strict")
+    expect(resolveSendOptionsMock.mock.calls[0][0]).toMatchObject({
+      character: {
+        id: "__teammate__:tm1",
+        systemPrompt: "Review like a hawk.",
+        knowledgeBaseIds: ["kb-1"],
+      },
+    })
+  })
+
+  it("fails the dispatch when the backing agent no longer resolves", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveCharacterByIdMock.mockResolvedValueOnce(undefined)
+    const { ctx, pool } = makeCtx(
+      makeTeammate({ config: { capabilities: { characterPackIds: { add: ["gone"] } } } })
+    )
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "edit" })).rejects.toThrow(
+      'Teammate "Worker" is backed by agent "gone", which was not found'
+    )
+    expect(runAndCaptureMock).not.toHaveBeenCalled()
+    expect(pool.recordFailure).toHaveBeenCalled()
+  })
+
+  it("leaves the team subagent surface alone when none are configured", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "ok" })
+    const { ctx } = makeCtx(makeTeammate())
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit" })
+
+    expect(resolveSendOptionsMock.mock.calls[0][0]).not.toHaveProperty("capabilityGrants")
   })
 
   it("attributes teammate planning to agent and retries a pre-commit failure", async () => {

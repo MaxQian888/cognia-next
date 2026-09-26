@@ -3531,6 +3531,8 @@
       },
       "name": "Team name",
       "plugins": {
+        "a2uiTemplatesInert": "{count, plural, one {# A2UI template came} other {# A2UI templates came}} with this team's template. Teammate runs don't use them yet.",
+        "characterHint": "Each teammate runs as the first agent selected here, with its own prompt, model and tools on top. A teammate that picks its own agent overrides this.",
         "intro": "These plugin capabilities are inherited by every teammate. Use per-teammate overlays to override them on a specific member."
       },
       "prFeedback": {
@@ -3749,6 +3751,7 @@
     "teamNameRequired": "Team name is required.",
     "teamUpdated": "Team updated.",
     "teammateConfig": {
+      "characterHint": "The teammate runs as this agent, including its knowledge bases and memory settings. Its own prompt, model and tools above override the agent's.",
       "description": "Edit identity, prompt, tools, and plugin capabilities for this teammate.",
       "executionBinding": {
         "candidateIds": "Candidate deployments",

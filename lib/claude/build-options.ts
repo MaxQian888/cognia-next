@@ -179,6 +179,7 @@ import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/age
 import {
   applyCapabilityIdDelta,
   capPermissionModeByGrant,
+  filterSubagentsByGrant,
   foldCapabilityGrants,
   type AgentCapabilityGrantV1,
 } from "@cognia/agent-config-types/agent-capability-grant"
@@ -4517,6 +4518,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     } catch (err) {
       console.warn("project markdown subagent registration failed:", err)
     }
+  }
+
+  // --- Capability-grant subagent restriction ------------------------------
+  // A grant's `subagents.only` keeps just the named entries of the map every
+  // branch above registered (a teammate's `subagentIds`, for instance). Runs
+  // before `@agent` routing so a turn cannot be routed to a filtered agent.
+  if (grant?.subagents?.only) {
+    const kept = filterSubagentsByGrant(opts.agents, grant)
+    if (kept) opts.agents = kept
+    else delete opts.agents
   }
 
   // --- @agent single-turn routing ------------------------------------------

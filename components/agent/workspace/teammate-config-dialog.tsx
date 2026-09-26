@@ -465,6 +465,9 @@ export function TeammateConfigDialog({
                 </SettingsCard>
                 <NativeToolsSection state={state} onPatch={onPatch} />
                 <CharacterSection state={state} onPatch={onPatch} />
+                <p className="text-xs text-muted-foreground" data-testid="teammate-character-hint">
+                  {t("characterHint")}
+                </p>
                 <SubagentSection state={state} onPatch={onPatch} />
                 <ExternalPresetSection state={state} onPatch={onPatch} />
                 <TeamCapabilityOverlaySection state={state} teamBundle={team.config.capabilities} />

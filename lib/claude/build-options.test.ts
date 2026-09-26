@@ -7313,6 +7313,24 @@ describe("resolveSendOptions — capability grants", () => {
     )
   })
 
+  it("keeps only the subagents a grant names and drops a routed turn to a filtered one", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      targetAgentId: "workflow-doc-writer",
+      capabilityGrants: [grant({ subagents: { only: ["workflow-designer"] } })],
+    })
+    expect(Object.keys(opts.agents ?? {})).toEqual(["workflow-designer"])
+    expect(opts.agent).toBeUndefined()
+  })
+
+  it("removes the agent map when a grant leaves no subagent", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      capabilityGrants: [grant({ subagents: { only: [] } })],
+    })
+    expect(opts.agents).toBeUndefined()
+  })
+
   it("resolves the turn's preset from a caller-owned composition selection", async () => {
     selectPreset("standard")
     const opts = await resolveSendOptions({

@@ -59,12 +59,13 @@ prompt delta, tools and authority came from the desktop composer's last choice.
 | `tools.deny` | the deny list, re-applied after the plugin hook | narrows |
 | `tools.restrictTo` | intersects the allow list after the plugin hook | narrows |
 | `knowledgeBases.add` | agent knowledge retrieval | adds |
+| `subagents.only` | the native subagent map, after every branch registered it and before `@agent` routing | narrows |
 | `permissionMode` | a cap on the resolved mode | narrows only |
 
 `BuildOptionsContext.capabilityGrants` takes an ordered list. The pure helpers
 `mergeCapabilityGrants` / `foldCapabilityGrants` compose layers so that denials
-are a union no later layer can undo, `restrictTo` and `mcpServers.only`
-intersect, and permission caps keep the less privileged value.
+are a union no later layer can undo, `restrictTo`, `mcpServers.only` and
+`subagents.only` intersect, and permission caps keep the less privileged value.
 
 ### Additions are allowed and still clamped
 
@@ -89,6 +90,9 @@ that is not enabled in the run's workspace is ignored, never switched on.
 - **Workflow `action.agent.turn`:** extra skills, MCP servers, knowledge bases,
   denied tools, instructions and a permission cap, with instructions going
   through the node's egress guard.
+- **Agent teams:** a teammate's resolved `subagentIds` narrow the team
+  session's native subagents with `subagents.only`. An empty list keeps the
+  whole team surface, as for MCP servers.
 - **Plugins and bots:** `runPluginAgentTurn` and `ctx.agent.run` accept
   `capabilityGrants` (validated, with the caller stamped as source) and a
   composition. Bots pass their whole projected composition.
