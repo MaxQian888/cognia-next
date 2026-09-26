@@ -22,9 +22,14 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useLiveQuery } from "dexie-react-hooks"
+import {
+  getTwinEmbeddingStatus,
+  type TwinEmbeddingStatus,
+} from "@/lib/twin/runtime/twin-embedding-status"
 import { useTranslations } from "next-intl"
 import { ExternalLinkIcon, LinkIcon, Link2OffIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -166,6 +171,8 @@ export function TwinBindingSection({ value, onChange, excludeCharacterId }: Prop
 
       <TwinStatsStrip twinId={value.twinId!} t={t} />
 
+      <TwinEmbeddingLine twinId={value.twinId!} t={t} />
+
       <RuntimeKnobs t={t} settings={settings} onChange={updateSettings} />
     </Card>
   )
@@ -285,6 +292,60 @@ function TwinStatsStrip({ twinId, t }: { twinId: string; t: ReturnType<typeof us
   )
 }
 
+/**
+ * What the bound twin embeds with. Embedding is a twin setting (one twin can
+ * back several agents, and its index must be queried with the model that built
+ * it), so the agent editor only shows it and points to the Workbench.
+ */
+function TwinEmbeddingLine({
+  twinId,
+  t,
+}: {
+  twinId: string
+  t: ReturnType<typeof useTranslations>
+}) {
+  const status = useLiveQuery(() => getTwinEmbeddingStatus(twinId), [twinId], undefined)
+  if (!status) return null
+  return <TwinEmbeddingSummary status={status} t={t} />
+}
+
+export function TwinEmbeddingSummary({
+  status,
+  t,
+}: {
+  status: TwinEmbeddingStatus
+  t: ReturnType<typeof useTranslations>
+}) {
+  return (
+    <div className="space-y-1 text-xs" data-testid="twin-embedding-summary">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-muted-foreground text-[10px] uppercase tracking-wide">
+          {t("embeddingLabel")}
+        </span>
+        <span className="font-medium">
+          {t("embeddingValue", {
+            provider: status.effective.provider,
+            model: status.effective.model,
+          })}
+        </span>
+        <Badge variant="outline" className="text-[10px]">
+          {status.source === "twin" ? t("embeddingSourceTwin") : t("embeddingSourceGlobal")}
+        </Badge>
+      </div>
+      {!status.credentialsReady ? (
+        <p className="text-destructive" role="status">
+          {t("embeddingNoCredentials")}
+        </p>
+      ) : status.rebuildRequired ? (
+        <p className="text-destructive" role="status">
+          {t("embeddingRebuildRequired")}
+        </p>
+      ) : null}
+      <p className="text-muted-foreground text-[10px]">{t("embeddingHint")}</p>
+    </div>
+  )
+}
+
 function Stat({ label, value, small = false }: { label: string; value: string; small?: boolean }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -295,6 +356,18 @@ function Stat({ label, value, small = false }: { label: string; value: string; s
 }
 
 // ─── Runtime knobs (RAG + style few-shot) ─────────────────────────────────────
+
+/** Citation styles named after their standards; the names are not translated. */
+const NAMED_CITATION_STYLES: ReadonlyArray<{
+  value: NonNullable<TwinSettings["citationStyle"]>
+  label: string
+}> = [
+  { value: "apa", label: "APA" },
+  { value: "mla", label: "MLA" },
+  { value: "chicago", label: "Chicago" },
+  { value: "harvard", label: "Harvard" },
+  { value: "ieee", label: "IEEE" },
+]
 
 function RuntimeKnobs({
   t,
@@ -431,12 +504,12 @@ function RuntimeKnobs({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="simple">simple</SelectItem>
-              <SelectItem value="apa">APA</SelectItem>
-              <SelectItem value="mla">MLA</SelectItem>
-              <SelectItem value="chicago">Chicago</SelectItem>
-              <SelectItem value="harvard">Harvard</SelectItem>
-              <SelectItem value="ieee">IEEE</SelectItem>
+              <SelectItem value="simple">{t("citationStyleSimple")}</SelectItem>
+              {NAMED_CITATION_STYLES.map((style) => (
+                <SelectItem key={style.value} value={style.value}>
+                  {style.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

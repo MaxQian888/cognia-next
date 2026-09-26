@@ -34,6 +34,7 @@ import {
   assertEmbeddingProviderRuntimeAvailable,
   calculateSimilarity,
   embeddingProviderRequiresApiKey,
+  embeddingProviderSettingsKey,
   findMostSimilar,
   generateEmbedding,
   generateEmbeddings,
@@ -363,6 +364,14 @@ describe("embedding provider configuration and runtime guards", () => {
     expect(isEmbeddingProviderConfigured("ollama", {})).toBe(true)
     expect(isEmbeddingProviderConfigured("openai", {})).toBe(false)
     expect(isEmbeddingProviderConfigured("openai", { openai: { apiKey: "sk" } })).toBe(true)
+  })
+
+  it("maps embedding providers to the chat-provider settings key they share", () => {
+    expect(embeddingProviderSettingsKey("openai")).toBe("openai")
+    expect(embeddingProviderSettingsKey("ollama")).toBe("ollama")
+    expect(embeddingProviderSettingsKey("amazon-bedrock")).toBe("bedrock")
+    expect(embeddingProviderSettingsKey("voyage")).toBeUndefined()
+    expect(embeddingProviderSettingsKey("transformersjs")).toBeUndefined()
   })
 
   it("detects Transformers runtime availability and throws typed runtime errors", () => {

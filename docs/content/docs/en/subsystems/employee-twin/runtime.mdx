@@ -52,6 +52,13 @@ All six `TwinSettings` are resolved once in `settingsFor(character)` (`apply-twi
 defaulting via `?? DEFAULT_TWIN_SETTINGS.*`. The user message is embedded a single time and that one vector
 feeds both the RAG and style passes — team chat skips even that by passing `precomputedQueryEmbedding`.
 
+The embedding used for that vector is the **twin's** effective embedding (`loadTwinEmbeddingPlan`): a
+`Twin.embedding` override when set, else the global config in `deps.embedding`. A precomputed vector is only
+reused when both name the same provider/model. When the twin's recorded `embeddingIndex` was built with another
+model the turn degrades with `rebuild-required: …` (no twin RAG, style few-shot on token overlap); an override
+without credentials degrades with `twin-embedding-unconfigured: …`. See
+[Per-twin embedding](../../data/vector-store#per-twin-embedding-and-the-index-fingerprint).
+
 ### Over-fetch + vector search
 
 When a reranker is configured, retrieval over-fetches a wider candidate pool (default 3×) so the rerank pass

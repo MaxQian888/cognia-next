@@ -1,9 +1,5 @@
 import { getTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { createVectorStore } from "@cognia/vector/store"
-import {
-  embeddingProviderRequiresApiKey,
-  embeddingProviderRequiresBaseURL,
-} from "@cognia/provider-embedding/embedding-catalog"
 import { createLlmRerankScorer, lexicalRerankScorer } from "./reranker"
 import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
 import {
@@ -14,6 +10,7 @@ import { createLlmClient, createTwinLanguageModel } from "@/lib/twin/distill/llm
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 import type { TwinRuntimeSettings } from "@/types/twin"
 import { getTwinVectorConfigId } from "./vector-credentials"
+import { isTwinEmbeddingConfigReady } from "./twin-embedding"
 
 export type TwinDepsForBuild = TwinRuntimeDepsForBuild
 
@@ -27,12 +24,7 @@ export type TwinRuntimeAdapterBuildResult =
 type StoreConfig = Parameters<typeof createVectorStore>[0]
 
 function hasRequiredEmbeddingConfiguration(settings: TwinRuntimeSettings): boolean {
-  const embedding = settings.embedding
-  if (!embedding.model.trim()) return false
-  if (embeddingProviderRequiresApiKey(embedding.provider) && !embedding.apiKey.trim()) return false
-  if (embeddingProviderRequiresBaseURL(embedding.provider) && !embedding.baseURL?.trim())
-    return false
-  return true
+  return isTwinEmbeddingConfigReady(settings.embedding)
 }
 
 export function deriveTwinVectorStoreConfig(

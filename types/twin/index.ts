@@ -583,8 +583,40 @@ export interface Twin {
   cron?: TwinCronSettings
   /** Hidden from the default list but rows remain reachable by id. */
   archived?: boolean
+  /**
+   * Embedding model this twin embeds with. Absent means the twin inherits the
+   * global `TwinRuntimeSettings.embedding`. Credentials are never stored here:
+   * see `resolveTwinEmbeddingConfig` in `lib/twin/runtime/twin-embedding.ts`.
+   */
+  embedding?: TwinEmbeddingOverride
+  /**
+   * What built the twin's current vector index. Written by the ingest worker
+   * once every chunk of the twin comes from one embedding model, cleared by
+   * `rebuildTwinIndex`. Absent on a twin indexed before this field existed
+   * (a "legacy" index): retrieval then relies on the dimension guard alone.
+   */
+  embeddingIndex?: TwinEmbeddingIndexRecord
   createdAt: number
   updatedAt: number
+}
+
+/** Per-twin embedding choice. Provider + model only; no secrets. */
+export interface TwinEmbeddingOverride {
+  provider: RagEmbeddingProvider
+  /** Blank or absent means the catalog's default model for `provider`. */
+  model?: string
+}
+
+/** The embedding model a twin's vector index was built with. */
+export interface TwinEmbeddingIndexRecord {
+  provider: RagEmbeddingProvider
+  model: string
+  /** Vector length observed when the chunks were written. */
+  dimensions?: number
+  /** `${provider}::${model}::${dimensions}` (see `twinEmbeddingFingerprint`). */
+  fingerprint: string
+  /** Epoch ms of the last ingest that wrote chunks under this record. */
+  builtAt: number
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

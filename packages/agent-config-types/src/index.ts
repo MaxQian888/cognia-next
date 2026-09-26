@@ -6450,12 +6450,13 @@ export interface Character {
    */
   sandboxPolicy?: SandboxResourcePolicy
   /**
-   * Provider id meant for embedding this character's twin sources,
-   * independently of its chat provider.
+   * @deprecated Embeddings belong to the twin whose vectors they build, not to
+   * an agent: one twin can back several agents, and its index must be queried
+   * with the model it was built with. Set a twin's embedding in the twin
+   * Workbench instead.
    *
-   * INERT: stored and carried through plugin-pack projection and diffs, but no
-   * runtime path reads it; twin embedding uses the app-level provider. The
-   * agent editor does not offer it, and
+   * Still stored and carried through plugin-pack projection and diffs, but no
+   * runtime path reads it. The agent editor does not offer it, and
    * `components/settings/character/agent-overrides.test.ts` pins that.
    */
   embeddingProviderId?: string

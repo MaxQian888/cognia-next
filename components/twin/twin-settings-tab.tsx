@@ -52,6 +52,7 @@ import {
 } from "@/types/twin"
 import { TwinOverviewCard } from "./twin-overview-card"
 import { TwinCronCard } from "./twin-cron-card"
+import { TwinEmbeddingCard } from "./twin-embedding-card"
 import { TwinInjectLogCard } from "./twin-inject-log-card"
 import { TwinSettingsPluginSlot } from "./twin-plugin-slots"
 import { deriveTwinVectorStoreConfig } from "@/lib/twin/runtime/build-deps"
@@ -100,6 +101,7 @@ export function TwinSettingsTab({ twinId }: { twinId: string }) {
       </Card>
       <TwinOverviewCard twinId={twinId} />
       <TwinCronCard twinId={twinId} />
+      <TwinEmbeddingCard twinId={twinId} />
       <Card className="p-4">
         <h3 className="mb-2 text-sm font-medium">{t("ragDefaultsTitle")}</h3>
         <p className="text-muted-foreground text-xs">{t("ragDefaultsBody")}</p>

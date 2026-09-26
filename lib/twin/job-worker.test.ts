@@ -22,6 +22,8 @@ jest.mock("./ingest/job-runner", () => ({
 import { processJob, type JobWorkerConfig } from "./job-worker"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { cancelJob, createTwinJob, getTwinJob, pauseJob } from "@/lib/db/twin-jobs"
+import { createTwin, getTwin, setTwinEmbeddingIndex } from "@/lib/db/twins"
+import { createTwinChunk } from "@/lib/db/twin-chunks"
 import type { LlmClient } from "./distill/llm"
 import type { RunDistillResult } from "./distill/job-runner"
 
@@ -94,6 +96,7 @@ describe("processJob — ingest nameHints forwarding", () => {
       totalEmbeddingTokens: 0,
       totalChunks: 0,
       parsedSourceIds: [],
+      writtenSourceIds: [],
     })
     const job = await createTwinJob({
       twinId: "twin_alice",
@@ -168,5 +171,128 @@ describe("processJob — cooperative running-job control", () => {
       phase: "cancelled",
       errorMessage: "[USER_CANCELLED] user request",
     })
+  })
+})
+
+describe("processJob — per-twin embedding", () => {
+  const ingestResult = (overrides: Record<string, unknown> = {}) => ({
+    failureSummary: { allFailed: false, failures: [], failureCount: 0 },
+    totalEmbeddingTokens: 5,
+    totalChunks: 2,
+    parsedSourceIds: ["src_1"],
+    writtenSourceIds: ["src_1"],
+    embeddingDimensions: 3072,
+    ...overrides,
+  })
+
+  async function ingestJob(twinId: string) {
+    return createTwinJob({ twinId, kind: "ingest", sourceIds: [], status: "running" })
+  }
+
+  beforeEach(async () => {
+    await Promise.all([getDb().twins.clear(), getDb().twinChunks.clear()])
+    mockRunIngest.mockReset()
+  })
+
+  it("ingests with the twin's override and records what built the index", async () => {
+    const twin = await createTwin({
+      name: "Override",
+      embedding: { provider: "openai", model: "text-embedding-3-large" },
+    })
+    mockRunIngest.mockResolvedValue(ingestResult())
+    const job = await ingestJob(twin.id)
+
+    await processJob(job.id, {
+      ...baseConfig,
+      store: { provider: "native" } as never,
+      now: () => 777,
+    })
+
+    expect(mockRunIngest.mock.calls[0][0].embedding).toEqual({
+      provider: "openai",
+      model: "text-embedding-3-large",
+      apiKey: "sk-test",
+    })
+    expect((await getTwinJob(job.id))?.status).toBe("completed")
+    expect((await getTwin(twin.id))?.embeddingIndex).toEqual({
+      provider: "openai",
+      model: "text-embedding-3-large",
+      dimensions: 3072,
+      fingerprint: "openai::text-embedding-3-large::3072",
+      builtAt: 777,
+    })
+  })
+
+  it("fails (without retry) instead of mixing models into a recorded index", async () => {
+    const twin = await createTwin({ name: "Stale" })
+    await setTwinEmbeddingIndex(twin.id, {
+      provider: "cohere",
+      model: "embed-english-v3.0",
+      dimensions: 1024,
+      fingerprint: "cohere::embed-english-v3.0::1024",
+      builtAt: 1,
+    })
+    await createTwinChunk({
+      twinId: twin.id,
+      sourceId: "kept_source",
+      content: "x",
+      contentRedacted: "x",
+      charStart: 0,
+      charEnd: 1,
+      vectorBackend: "native",
+      vectorCollection: `cognia_twin_${twin.id}`,
+      vectorDocId: "kept",
+      strategy: "paragraph",
+      tokenCount: 1,
+      metadata: {},
+    })
+    const job = await ingestJob(twin.id)
+
+    await processJob(job.id, { ...baseConfig, store: { provider: "native" } as never })
+
+    expect(mockRunIngest).not.toHaveBeenCalled()
+    const failed = await getTwinJob(job.id)
+    // Failed outright — not requeued with backoff (`requeueJob` would leave
+    // it `queued` with a `nextAttemptAt`).
+    expect(failed?.status).toBe("failed")
+    expect(failed?.nextAttemptAt).toBeUndefined()
+    expect(failed?.errorMessage).toMatch(/^rebuild-required:/)
+  })
+
+  it("fails an ingest whose override has no credentials", async () => {
+    const twin = await createTwin({ name: "NoKey", embedding: { provider: "cohere" } })
+    const job = await ingestJob(twin.id)
+
+    await processJob(job.id, { ...baseConfig, store: { provider: "native" } as never })
+
+    expect(mockRunIngest).not.toHaveBeenCalled()
+    expect((await getTwinJob(job.id))?.errorMessage).toMatch(/^twin-embedding-unconfigured:/)
+  })
+
+  it("distills style samples with the twin's effective embedding", async () => {
+    const twin = await createTwin({
+      name: "Distill",
+      embedding: { provider: "openai", model: "text-embedding-3-large" },
+    })
+    mockRunDistill.mockResolvedValue(distillResult({}))
+    const job = await createTwinJob({ twinId: twin.id, kind: "distill", sourceIds: [] })
+
+    await processJob(job.id, baseConfig)
+
+    expect(mockRunDistill.mock.calls[0][0].embedding).toMatchObject({
+      provider: "openai",
+      model: "text-embedding-3-large",
+    })
+  })
+
+  it("distills without embeddings when the override has no credentials", async () => {
+    const twin = await createTwin({ name: "NoKey", embedding: { provider: "mistral" } })
+    mockRunDistill.mockResolvedValue(distillResult({}))
+    const job = await createTwinJob({ twinId: twin.id, kind: "distill", sourceIds: [] })
+
+    await processJob(job.id, baseConfig)
+
+    expect(mockRunDistill.mock.calls[0][0].embedding).toBeUndefined()
+    expect((await getTwinJob(job.id))?.status).toBe("completed")
   })
 })

@@ -53,8 +53,8 @@ Web 模式（`!isTauri()`）会在孪生设置中隐藏 native 选项；必须�
 </Tabs>
 
 <Callout type="info" title="切换后端">
-  重新嵌入需**手动**。切后端后请在孪生 Sources tab 用"重新嵌入"动作 —— 维度、距离度量、元数据 schema
-  可能不同。
+  切换后端需**手动**重建索引。切后端后请在孪生工作台 Settings tab 的「该孪生的嵌入模型」卡片点击「重建索引」
+  —— 维度、距离度量、元数据 schema 可能不同。
 </Callout>
 
 ## 桌面为何选 sqlite-vec
@@ -249,7 +249,7 @@ await targetStore.importCollection(data, /* overwrite */ true)
 ```
 
 注意 export 携带原始 embedding 向量；如果新后端使用不同的 embedding 模型，`importCollection` 不会
-重新生成向量 —— 那种情况下应该走孪生 Sources tab 的"重新嵌入"流程（详见下文）。
+重新生成向量 —— 那种情况下应该对孪生执行「重建索引」（详见下文）。
 
 ## Embedding 供应商
 
@@ -263,33 +263,63 @@ await targetStore.importCollection(data, /* overwrite */ true)
 | `mistral`        | `mistral-embed`           | 1024     |
 | `transformersjs` | `Xenova/all-MiniLM-L6-v2` | 384      |
 
-`DEFAULT_EMBEDDING_MODELS`（`lib/vector/embedding.ts:21`）持有默认配置。`Character.embeddingProviderId`
-可独立于 chat provider 设置 —— 例如用 Anthropic 聊天、用 OpenAI 做 embedding。
+`DEFAULT_EMBEDDING_MODELS`（`packages/vector/src/embedding.ts`）持有默认配置，完整的 provider 列表以
+`packages/provider-embedding/src/embedding-catalog.ts` 的 `RAG_EMBEDDING_PROVIDERS` 为准。孪生的嵌入模型
+属于**孪生**，而不是角色：见下一节。
 
-## Embedding 配置版本化与迁移
+## 孪生的嵌入模型与索引指纹
 
-`apply-twin-context.ts:27` 定义了 `TwinRuntimeEmbeddingConfig`：
+默认情况下，所有孪生 / 记忆 / 知识库都使用同一份全局配置 `TwinRuntimeSettings.embedding`（设置 → 孪生 →
+运行时）。每个孪生可以在 `Twin.embedding` 上覆盖它（`types/twin/index.ts`）：
 
-```ts title="lib/twin/runtime/apply-twin-context.ts"
-export interface TwinRuntimeEmbeddingConfig {
-  provider: "openai" | "google" | "cohere" | "mistral" | "transformersjs"
-  model: string
-  apiKey: string
-  baseURL?: string
+```ts title="types/twin/index.ts"
+export interface TwinEmbeddingOverride {
+  provider: RagEmbeddingProvider
+  model?: string // 留空 = 该 provider 在目录中的默认模型
 }
 ```
 
-切换 embedding 模型或 provider 意味着 **维度 / 距离度量 / 语义空间** 都可能变。当前实现：
+**生效顺序**（`lib/twin/runtime/twin-embedding.ts` 的 `resolveTwinEmbeddingConfig`）：
 
-- **chunk 行打标签** —— `twinChunks` 每行带 `vectorBackend` + `vectorCollection` + `embeddingModel`
-  - `embeddingDimensions`（在 metadata 里）。
-- **检测 + banner** —— 工作台 Settings tab 在检测到当前 `Character.embeddingProviderId` 与 chunk 标签
-  不匹配时显示 "re-embed required" banner。
-- **重新嵌入** —— 用户在 Sources tab 触发"重新嵌入"动作；ingest 流水线跳过 parse + redact，直接
-  从 `embed` 阶段开始（用现有的脱敏文本），写回新维度的向量。**不会**清空原 chunk，而是新建一个
-  新 collection 然后切换 `Character.embeddingProviderId`。
+1. `Twin.embedding`（provider + 可选 model）。
+2. 全局 `TwinRuntimeSettings.embedding`。
 
-旧 collection 保留以便回滚或人工 export → import 到其他后端。
+覆盖不保存任何密钥：与全局同一 provider 时复用全局的 key / baseURL / Bedrock 配置；换成其他 provider 时从
+「设置 → 提供商」的对应条目解析 key（与插件向量 API 相同的 `resolveEmbeddingApiKey`），本地引擎的 baseURL
+取提供商设置，缺省为该引擎的默认 localhost 端口。记忆、项目知识库、Agent 知识库**不受**覆盖影响，仍用全局模型。
+
+**索引指纹。** 每次导入写入 chunk 后，job worker 在 Twin 行上记录 `Twin.embeddingIndex`：
+
+```ts
+{ provider, model, dimensions, fingerprint: `${provider}::${model}::${dimensions}`, builtAt }
+```
+
+同一指纹也写入该素材的检索 generation（`persistChunks` 的 `profileFingerprint`），取代以前只含维度的
+`legacy:<backend>:<dim>`。只有当孪生的**所有** chunk 都出自同一模型时才会记录（全新孪生、全量重导入或重建之后）。
+
+**检索时的校验**（`applyTwinContext`）：
+
+- 解析孪生的生效嵌入；与 `deps.embedding`（全局）的 provider/model 不同时，用孪生自己的配置重新嵌入查询，
+  忽略调用方预先计算好的查询向量（那是全局模型的向量）。
+- 若记录的 `embeddingIndex` 的 provider/model 与生效配置不一致，本轮以 `rebuild-required: …` 降级：跳过孪生
+  RAG，风格少样本退回 token 重叠打分，聊天照常进行。维度仍由原有的维度守卫检查（`dimension-mismatch:`）。
+- 覆盖的 provider 缺少凭据时以 `twin-embedding-unconfigured: <provider>` 降级。
+- **旧索引**（没有 `embeddingIndex` 记录）保持原行为：只有维度守卫。同维度模型（cohere / mistral / voyage /
+  bedrock 均为 1024 维）之间的切换在旧索引上无法被发现，因此工作台会建议重建。
+
+**导入时的保护。** 记录的模型与生效模型不一致、且本次任务之外仍有旧模型的 chunk 时，导入任务直接失败
+（`rebuild-required: …`，不重试），不会把两种模型的向量混进同一索引。覆盖缺少凭据时任务以
+`twin-embedding-unconfigured: …` 失败。
+
+**重建。** `rebuildTwinIndex(twinId)`（`lib/twin/lifecycle.ts`）：先确认运行时就绪（worker 已启用、向量库已配置）
+且生效嵌入有凭据，否则什么都不删；然后取消该孪生排队 / 运行中的导入任务，删除 chunk 指向的所有 collection
+（含 `cognia_twin_{twinId}`），在一个 Dexie 事务里删除 chunk 行、把未删除的素材重置为 `pending`、清掉风格样本的缓存向量、
+清除 `embeddingIndex`，最后为这些素材排一个导入任务。worker 用生效配置重新嵌入并写入新的 `embeddingIndex`。
+重建完成前，该孪生没有索引，回答不带检索上下文。
+
+工作台 Settings tab 的「该孪生的嵌入模型」卡片（`components/twin/twin-embedding-card.tsx`）提供覆盖选择、
+「索引由 … 构建」状态行、需要重建时的警告，以及「重建索引」按钮。其他界面（例如 Agent 编辑器）可调用
+`getTwinEmbeddingStatus(twinId)`（`lib/twin/runtime/twin-embedding-status.ts`）读取同样的状态。
 
 ## 设置
 
@@ -306,8 +336,8 @@ export interface TwinRuntimeEmbeddingConfig {
 切换后端**不会**自动迁移。两条路径：
 
 1. **离线迁移** —— 在旧后端调 `exportCollection`，在新后端调 `importCollection`。维度 / 距离度量必须一致。
-2. **重新嵌入** —— 在孪生工作台 Sources tab 触发"重新嵌入"，针对新后端重跑 ingest 流水线的 embed + persist
-   阶段。这是切换 embedding model 或 provider 时唯一正确的选择。
+2. **重建索引** —— 在孪生工作台 Settings tab 点击「重建索引」（`rebuildTwinIndex`），清空该孪生的索引并用
+   生效嵌入对全部素材重跑导入。这是切换 embedding model 或 provider 时唯一正确的选择。
 
 实现参考：`apply-twin-context.ts:120-125` 的 retrieve 路径；切换时 collection 名 `cognia_twin_{twinId}`
 通常保持不变，但若 backend 改变 collection 命名约定也可能跟着改。
@@ -337,9 +367,9 @@ export interface TwinRuntimeEmbeddingConfig {
 />
 
 <Callout type="info" title="不要混维度">
-  切换嵌入模型意味着切换向量维度 —— 在查询之前必须重新嵌入所有 chunk。
-  存储不会自动检测维度错配；你只会拿到无意义的最近邻，而不是清晰错误。 工作台 Settings tab 的
-  "re-embed required" banner 是发现错配的唯一稳定路径。
+  切换嵌入模型可能切换向量维度 —— 查询前必须重建索引。维度不同时，维度守卫
+  （`packages/vector/src/dimension-guard.ts`）会在写入 / 查询前报错；维度相同但模型不同时，只有记录了
+  `embeddingIndex` 的孪生会以 `rebuild-required` 拒绝检索，旧索引仍可能返回无意义的最近邻。
 </Callout>
 
 ## 向量文档 ID 设计

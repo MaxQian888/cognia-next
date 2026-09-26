@@ -644,3 +644,12 @@ describe("TwinSettingsTab — embedding & distill providers", () => {
     })
   })
 })
+
+describe("TwinSettingsTab — per-twin embedding card", () => {
+  it("mounts the per-twin embedding card next to the runtime config", () => {
+    mockedUsePlatform.mockReturnValue("web")
+    renderTab()
+    expect(screen.getByTestId("twin-embedding-card")).toBeInTheDocument()
+    expect(screen.getByText("Embedding for this twin")).toBeInTheDocument()
+  })
+})

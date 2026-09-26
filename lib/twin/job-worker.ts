@@ -43,6 +43,13 @@ import {
   registerActiveTwinJob,
   throwIfTwinJobInterrupted,
 } from "./job-control"
+import {
+  TwinEmbeddingRebuildRequiredError,
+  TwinEmbeddingUnconfiguredError,
+  assertTwinIngestCompatible,
+  loadTwinEmbeddingPlan,
+  recordTwinEmbeddingIndexAfterIngest,
+} from "./runtime/twin-embedding-status"
 
 const log = loggers.scheduler
 
@@ -55,7 +62,12 @@ const log = loggers.scheduler
 export type SourceLoader = (source: TwinSource) => Promise<RawSource>
 
 export interface JobWorkerConfig {
-  /** Embedding provider config + API key. */
+  /**
+   * The GLOBAL twin-runtime embedding (provider config + API key). Each job
+   * resolves its twin's effective embedding from it: a twin with its own
+   * `Twin.embedding` override embeds with that instead (see
+   * `loadTwinEmbeddingPlan`).
+   */
   embedding: EmbeddingConfig
   /** Vector backend identifier (must match `store.provider`). */
   vectorBackend: VectorBackend
@@ -136,11 +148,30 @@ async function processClaimedJob(
   if (job.kind === "ingest") {
     const store = resolveStore(config)
     try {
+      const plan = await loadTwinEmbeddingPlan(job.twinId, config.embedding)
       const sources = await loadSourcesForJob(job, config.sourceLoader, signal)
+      try {
+        await assertTwinIngestCompatible(
+          plan,
+          sources.map((source) => source.id)
+        )
+      } catch (err) {
+        if (
+          err instanceof TwinEmbeddingRebuildRequiredError ||
+          err instanceof TwinEmbeddingUnconfiguredError
+        ) {
+          // Configuration state, not a transient failure: retrying cannot
+          // succeed until the user rebuilds the index or adds credentials.
+          await failJob(job.id, err.message)
+          log.warn("twin job-worker: ingest refused", { jobId: job.id, reason: err.code })
+          return
+        }
+        throw err
+      }
       const result = await runIngestJob({
         job,
         rawSources: sources,
-        embedding: config.embedding,
+        embedding: plan.config,
         vectorBackend: config.vectorBackend,
         store,
         nameHints: config.nameHints,
@@ -155,6 +186,23 @@ async function processClaimedJob(
         return
       }
       throwIfTwinJobInterrupted(signal)
+      // Record what built the index. Best-effort: the chunks are already
+      // written, and a missing record only means retrieval falls back to the
+      // dimension guard (legacy behaviour) until the next ingest records it.
+      try {
+        await recordTwinEmbeddingIndexAfterIngest({
+          twinId: job.twinId,
+          embedding: plan.config,
+          dimensions: result.embeddingDimensions,
+          writtenSourceIds: result.writtenSourceIds,
+          now: (config.now ?? Date.now)(),
+        })
+      } catch (err) {
+        log.warn("twin job-worker: failed to record the embedding index", {
+          jobId: job.id,
+          message: err instanceof Error ? err.message : String(err),
+        })
+      }
       // Ingest embeds every chunk. That is billable input on a cloud embedder
       // and was metered nowhere — a large corpus import showed as $0.
       swallowUsageWrite(
@@ -192,14 +240,19 @@ async function processClaimedJob(
       return
     }
     try {
+      // Style samples must live in the same vector space as the query the
+      // runtime embeds for this twin, so distill uses the twin's effective
+      // embedding. Without credentials the samples are stored un-embedded and
+      // the runtime's lazy backfill fills them once credentials exist.
+      const plan = await loadTwinEmbeddingPlan(job.twinId, config.embedding)
       const result = await runDistillJob({
         job,
         llm: withJobSignal(config.llm, signal),
         maxChunks: config.distillMaxChunks,
-        // Forward the worker's embedding config so distill can populate
+        // Forward the twin's embedding config so distill can populate
         // `StyleSample.embedding` inline — runtime few-shot then scores
         // by cosine instead of the token-overlap fallback.
-        embedding: config.embedding,
+        ...(plan.credentialsReady ? { embedding: plan.config } : {}),
         signal,
       })
       throwIfTwinJobInterrupted(signal)

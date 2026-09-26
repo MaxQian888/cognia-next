@@ -67,7 +67,10 @@ lib/db/twin-*.ts # 5 张 Dexie 表（schema v14 加入）
 />
 
 多个角色可以共享一个孪生（例如"个人"孪生与"工作"孪生都绑到同一个用户角色）。一个 Dexie 数据库里可同时存在多个孪生。
-`Character.embeddingProviderId` 可与 chat provider 独立选择 —— 例如用 OpenAI 做 embedding、用 Anthropic 聊天。
+孪生的嵌入模型属于**孪生**而非角色：默认使用全局 `TwinRuntimeSettings.embedding`，也可以在 `Twin.embedding`
+上为单个孪生覆盖（provider + 可选 model）。导入会在 `Twin.embeddingIndex` 记录构建索引的
+`provider::model::dimensions` 指纹；检索发现生效模型与记录不一致时以 `rebuild-required` 跳过孪生 RAG，
+工作台可一键重建索引。细节见 [vector-store](../data/vector-store)「孪生的嵌入模型与索引指纹」。
 
 ## Ingest 流水线（7 阶段）
 
@@ -248,8 +251,10 @@ flowchart TB
   <Step>
     ### 嵌入用户消息
 
-    若调用方传入 `precomputedQueryEmbedding`（team chat 在多成员间共享），跳过 embed；否则
-    通过 `lib/ai/embedding/embedding.ts` 把最近一条用户消息嵌入一次。
+    先解析孪生的生效嵌入（`Twin.embedding` 覆盖，否则全局配置）。若调用方传入
+    `precomputedQueryEmbedding`（team chat 在多成员间共享）且孪生与全局使用同一 provider/model，跳过 embed；
+    否则用孪生自己的配置把最近一条用户消息嵌入一次。记录的 `embeddingIndex` 与生效模型不一致时本轮以
+    `rebuild-required: …` 降级、跳过召回；覆盖缺少凭据时以 `twin-embedding-unconfigured: …` 降级。
 
   </Step>
   <Step>
@@ -353,7 +358,7 @@ Team chat（多个孪生角色在同一轮回复）通过 `BuildOptionsContext.p
 | **Sources**  | 粘贴 / 拖入文本。格式选择、状态标记、ingest 按钮。列出已有 sources 与大小、状态。                      |
 | **Jobs**     | ingest 与 distill 任务的实时进度。展示 `twinJobs` 中的 `phase` 与 `progress`。手动入队 / 取消 / 重试。 |
 | **Drafts**   | 优先排序待审核草稿。Accept 流写入真实 `Character` / `Skill` 行 + 把 draft 标记为已接受。               |
-| **Settings** | 只读画像统计（chunk 数、风格样本数、上次蒸馏时间、向量后端、embedding provider）。                     |
+| **Settings** | 画像统计、cron、「该孪生的嵌入模型」卡片（覆盖选择、索引构建模型、需重建警告、重建索引）、运行时配置。 |
 
 工作台是孪生生命周期的主入口，所有动作都从这里发起。
 
@@ -364,6 +369,9 @@ Team chat（多个孪生角色在同一轮回复）通过 `BuildOptionsContext.p
 - 新任务一旦 worker 空闲就处理。
 - 失败任务以指数退避重试（3 次失败后置 `status: "failed"`）。
 - 并发度由 `maxConcurrentIngest` 与 `maxConcurrentDistill` 控制（默认各 1）。
+- 每个任务按孪生解析生效嵌入（`loadTwinEmbeddingPlan`）：ingest 与 distill 的风格样本向量都用它；
+  会把两种模型混进同一索引的 ingest（`rebuild-required`）或缺少凭据的覆盖（`twin-embedding-unconfigured`）
+  直接失败、不重试。成功后写入 `Twin.embeddingIndex`。
 - Worker 是每浏览器 tab **单租户** —— `lib/scheduler/tab-lock.ts` 用 BroadcastChannel + visibilitychange
   实现的"领导者"锁保证只有一个 tab 跑 worker。其他 tab 仍能看 Jobs UI 但不消费队列。
 

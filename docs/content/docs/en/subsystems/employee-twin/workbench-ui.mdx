@@ -137,10 +137,11 @@ re-distill.
 
 ## Settings tab
 
-`twin-settings-tab.tsx:60` stacks a profile stats card and four cards:
+`twin-settings-tab.tsx:60` stacks a profile stats card and five cards:
 
 - **`TwinOverviewCard`** (`twin-overview-card.tsx:73`) — recharts dashboard: 7-day chunk-growth area, source-kind pie, chunking-strategy bar, status row.
 - **`TwinCronCard`** (`twin-cron-card.tsx:42`) — the enabled switch plus ingest/distill cron fields with a `CRON_PRESETS` picker and a human-readable preview; saving calls `updateTwin` then `syncTwinCronToScheduler`, and `CronTriggerInfo` reads the scheduler rows for last/next run.
+- **`TwinEmbeddingCard`** (`twin-embedding-card.tsx`) — the per-twin embedding override (inherit global, or a provider + optional model), the "index built with …" status line from `Twin.embeddingIndex`, the rebuild-required / legacy-index / missing-credential warnings, and a confirm-guarded **Rebuild index** button calling `rebuildTwinIndex`. Saving calls `setTwinEmbeddingOverride`.
 - **`RuntimeConfigCard`** (`twin-settings-tab.tsx:101`) — the live `TwinRuntimeSettings` editor: worker-enabled + reranker switches, the embedding provider/model/key, the distill LLM, and the vector-store backend with per-backend fields (`native` shown only on Tauri, with open-folder / test-connection / reset-store actions). Saving calls `saveTwinRuntimeSettings`.
 - **`TwinInjectLogCard`** (`twin-inject-log-card.tsx:30`) — the last 50 entries of the in-memory inject ring buffer (applied / skipped / degraded + chunk/sample/token counts). As noted in the [runtime page](./runtime), this is currently fed only by the workflow path.
 

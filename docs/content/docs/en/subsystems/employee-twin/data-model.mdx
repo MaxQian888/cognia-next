@@ -61,7 +61,7 @@ erDiagram
 | **Profile** | `TwinProfile` (L270), `StyleSample` (L188), `Playbook` (L228), `ProfileEntity` (L245), `DecisionRecord` (L257) | The distilled 1:1-per-twin profile. Every sub-record carries a `pinned?` flag (re-distill protection). |
 | **Drafts** | `TwinDraft` (L330), `TwinDraftPayload` (L300), `TwinDraftProvenance` (L312), `TwinDraftEvaluation` (L321) | Synthesised Character / Skill drafts awaiting review, with provenance + evaluator scores. |
 | **Jobs** | `TwinJob` (L368), `TwinJobKind` (L356), `TwinJobStatus` (L358) | Durable ingest / distill / re-distill job state with `nextAttemptAt` (backoff) + `leaseExpiresAt` (crash recovery). |
-| **Bindings** | `TwinSettings` (L425), `DEFAULT_TWIN_SETTINGS` (L445), `Twin` (L480), `TwinCronSettings` (L460) | The soft Character binding, per-twin cron, and the multi-twin registry row. |
+| **Bindings** | `TwinSettings` (L425), `DEFAULT_TWIN_SETTINGS` (L445), `Twin` (L480), `TwinCronSettings` (L460) | The soft Character binding, per-twin cron, and the multi-twin registry row (incl. the optional `embedding` override and the `embeddingIndex` record of what built the index — `TwinEmbeddingOverride` / `TwinEmbeddingIndexRecord`). |
 | **Runtime config** | `TwinRuntimeSettings` (L541), `TwinRuntimeStorageConfig` (L502), `TwinRuntimeEmbeddingSettings` (L511), `TwinRuntimeRerankSettings` (L526) | Vector backend + embedding + distill LLM + reranker, stored as one settings row. |
 
 ### Source format families
@@ -124,7 +124,7 @@ directly — they go through these.
 
 | Module | Notable entry points |
 | --- | --- |
-| `twins.ts` (231) | `createTwin` · `listTwins` · `renameTwin` · `cloneTwin` (metadata only) · `archiveTwin` · **`deleteTwin`** (cascade, L110) · `backfillTwinRegistryFromUsage` (registry backfill, L195) |
+| `twins.ts` (231) | `createTwin` · `listTwins` · `renameTwin` · `cloneTwin` (metadata only) · `archiveTwin` · **`deleteTwin`** (cascade, L110) · `backfillTwinRegistryFromUsage` (registry backfill, L195) · `setTwinEmbeddingOverride` / `setTwinEmbeddingIndex` / `resetTwinEmbeddingIndex` (per-twin embedding + rebuild reset) |
 | `twin-sources.ts` (114) | `createTwinSource` · `listTwinSourcesByTwinAndStatus` · `listTwinSourcesByTwinAndKind` · **`findTwinSourceByFingerprint`** (L67, dedupe) · `getTwinSourcesByIds` (bulkGet) · `deleteTwinSource` (cascades chunks) |
 | `twin-chunks.ts` (143) | `bulkCreateTwinChunks` · **`getTwinChunkByVectorDocId`** (L78, RAG hit → chunk) · `getTwinChunksByVectorDocIds` · `listTwinChunksByTwin` · **`getTwinChunksVersion`** (L115, BM25 cache key) · `deleteTwinChunksBySource` |
 | `twin-profile.ts` (473) | `ensureTwinProfile` · `upsertStyleSamples` / `upsertPlaybooks` / `upsertEntities` (re-distill-safe, pin-preserving) · `backfillStyleSampleEmbeddings` · per-item `add*` / `update*` / `remove*` / `set*Pinned` for the persona browser |

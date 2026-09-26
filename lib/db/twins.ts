@@ -14,7 +14,8 @@
  * the wiring.
  */
 
-import type { Twin } from "@/types/twin"
+import type { Twin, TwinEmbeddingIndexRecord, TwinEmbeddingOverride } from "@/types/twin"
+import { isRagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import { getDb } from "./schema"
 import { recordTombstones } from "@/lib/sync/tombstones"
 
@@ -35,6 +36,7 @@ export async function createTwin(draft: TwinInput): Promise<Twin> {
     createdAt: draft.createdAt ?? now,
     updatedAt: draft.updatedAt ?? now,
     archived: draft.archived,
+    ...(draft.embedding ? { embedding: normalizeOverride(draft.embedding) } : {}),
   }
   await getDb().twins.add(row)
   return row
@@ -89,7 +91,110 @@ export async function cloneTwin(sourceId: string, newName: string): Promise<Twin
     name: newName.trim() || `${source.name} (copy)`,
     color: source.color,
     description: source.description,
+    // The embedding choice is configuration and travels with the clone; the
+    // index record does not, because the clone starts with no chunks.
+    ...(source.embedding ? { embedding: source.embedding } : {}),
   })
+}
+
+function normalizeOverride(override: TwinEmbeddingOverride): TwinEmbeddingOverride {
+  if (!isRagEmbeddingProvider(override.provider)) {
+    throw new Error(`twin embedding override: unknown provider "${String(override.provider)}"`)
+  }
+  const model = override.model?.trim()
+  return model ? { provider: override.provider, model } : { provider: override.provider }
+}
+
+/**
+ * Set (or with `undefined`, clear) the twin's embedding override. The recorded
+ * `embeddingIndex` is left untouched on purpose: when the new choice differs
+ * from it, retrieval reports `rebuild-required` until the index is rebuilt.
+ */
+export async function setTwinEmbeddingOverride(
+  id: string,
+  override: TwinEmbeddingOverride | undefined
+): Promise<Twin | undefined> {
+  const next = override ? normalizeOverride(override) : undefined
+  const db = getDb()
+  await db.twins.update(id, (row) => {
+    const target = row as Twin
+    if (next) target.embedding = next
+    else delete target.embedding
+    target.updatedAt = Date.now()
+  })
+  return db.twins.get(id)
+}
+
+/** Record what built the twin's current vector index (written by ingest). */
+export async function setTwinEmbeddingIndex(
+  id: string,
+  record: TwinEmbeddingIndexRecord
+): Promise<Twin | undefined> {
+  return updateTwin(id, { embeddingIndex: record })
+}
+
+export interface ResetTwinEmbeddingIndexResult {
+  /** Local chunk rows removed. */
+  chunks: number
+  /** Sources reset to `pending` — the set a rebuild re-ingests. */
+  sourceIds: string[]
+  /** Style samples whose cached embedding was dropped. */
+  styleEmbeddingsCleared: number
+}
+
+/**
+ * Local half of a twin index rebuild, in one Dexie transaction: drop every
+ * chunk row, reset each live source to `pending`, drop cached style-sample
+ * embeddings (they were produced by the old model and the lazy backfill
+ * re-embeds them with the current one), and clear `embeddingIndex`. The remote
+ * vector collection is the caller's job (`rebuildTwinIndex` in
+ * `lib/twin/lifecycle.ts`).
+ */
+export async function resetTwinEmbeddingIndex(id: string): Promise<ResetTwinEmbeddingIndexResult> {
+  const db = getDb()
+  const result: ResetTwinEmbeddingIndexResult = {
+    chunks: 0,
+    sourceIds: [],
+    styleEmbeddingsCleared: 0,
+  }
+  await db.transaction(
+    "rw",
+    [db.twins, db.twinChunks, db.twinSources, db.twinProfile],
+    async () => {
+      result.chunks = await db.twinChunks.where("twinId").equals(id).delete()
+      const sources = await db.twinSources.where("twinId").equals(id).toArray()
+      for (const source of sources) {
+        if (source.status === "deleted") continue
+        await db.twinSources.update(source.id, (row) => {
+          row.status = "pending"
+          row.chunkCount = 0
+          delete row.errorMessage
+          delete row.parsedAt
+        })
+        result.sourceIds.push(source.id)
+      }
+      const profile = await db.twinProfile.where("twinId").equals(id).first()
+      if (profile) {
+        let cleared = 0
+        const styleSamples = profile.styleSamples.map((sample) => {
+          if (!Array.isArray(sample.embedding)) return sample
+          cleared += 1
+          const { embedding: _dropped, ...rest } = sample
+          return rest
+        })
+        if (cleared > 0) {
+          await db.twinProfile.put({ ...profile, styleSamples, updatedAt: Date.now() })
+          result.styleEmbeddingsCleared = cleared
+        }
+      }
+      await db.twins.update(id, (row) => {
+        const target = row as Twin
+        delete target.embeddingIndex
+        target.updatedAt = Date.now()
+      })
+    }
+  )
+  return result
 }
 
 /**

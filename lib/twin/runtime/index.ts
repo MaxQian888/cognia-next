@@ -21,3 +21,17 @@ export { selectFewShotSamples } from "./few-shot-selector"
 
 export type { TwinInjectLogEntry } from "./inject-log"
 export { recordTwinInject, readTwinInjectLog, subscribeTwinInjectLog } from "./inject-log"
+
+export type {
+  TwinEffectiveEmbedding,
+  TwinEmbeddingModelRef,
+  TwinEmbeddingSource,
+} from "./twin-embedding"
+export {
+  TWIN_EMBEDDING_REBUILD_REQUIRED,
+  TWIN_EMBEDDING_UNCONFIGURED,
+  resolveTwinEmbeddingConfig,
+  twinEmbeddingFingerprint,
+} from "./twin-embedding"
+export type { TwinEmbeddingPlan, TwinEmbeddingStatus } from "./twin-embedding-status"
+export { getTwinEmbeddingStatus, loadTwinEmbeddingPlan } from "./twin-embedding-status"

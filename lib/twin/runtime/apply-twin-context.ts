@@ -46,6 +46,12 @@ import { buildExpandedKeywordQuery } from "@/lib/ai/retrieval/query-expansion"
 import { filterByGrade } from "@/lib/ai/retrieval/corrective-filter"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { LanguageModel } from "ai"
+import {
+  TWIN_EMBEDDING_UNCONFIGURED,
+  describeTwinIndexMismatch,
+  sameEmbeddingModel,
+} from "./twin-embedding"
+import { loadTwinEmbeddingPlan, type TwinEmbeddingPlan } from "./twin-embedding-status"
 
 export interface TwinRuntimeEmbeddingConfig {
   provider: RagEmbeddingProvider
@@ -69,7 +75,13 @@ function embed(text: string, config: TwinRuntimeEmbeddingConfig, vectorBackend: 
 export interface ApplyTwinContextDeps {
   /** The remote vector store the twin's chunks live in. */
   store: IVectorStore
-  /** Embedding config used to vectorise the user's query. */
+  /**
+   * The GLOBAL twin-runtime embedding. The same deps object also feeds the
+   * memory / project-KB / agent-KB legs, which embed with this config. The
+   * twin leg resolves the twin's own effective embedding from it (a
+   * `Twin.embedding` override wins) and only uses this config directly when
+   * the twin has no override.
+   */
   embedding: TwinRuntimeEmbeddingConfig
   /** Vector backend label persisted on chunks (defaults to store.provider). */
   vectorBackend?: VectorBackend
@@ -93,6 +105,15 @@ export interface ApplyTwinContextDeps {
    * dep — this only carries the LLM handle + strategy.
    */
   expansion?: { model: LanguageModel; strategy: "hyde" | "stepback" }
+  /**
+   * Resolves the twin's effective embedding + recorded index. Defaults to
+   * `loadTwinEmbeddingPlan` (reads the Twin row and the provider settings);
+   * injectable for callers that already hold the plan and for tests.
+   */
+  resolveTwinEmbedding?: (
+    twinId: string,
+    globalEmbedding: TwinRuntimeEmbeddingConfig
+  ) => Promise<TwinEmbeddingPlan>
 }
 
 export interface ApplyTwinContextInput {
@@ -102,7 +123,10 @@ export interface ApplyTwinContextInput {
   /**
    * Optional pre-embedded query vector. Team chat passes this in once per
    * turn so all twin-bound members share a single embed call. When provided,
-   * the runtime skips `generateEmbedding(userMessage)`.
+   * the runtime skips `generateEmbedding(userMessage)` — unless the twin
+   * embeds with a different provider/model than `deps.embedding` (a
+   * `Twin.embedding` override), in which case the vector is ignored and the
+   * query is embedded again with the twin's own config.
    */
   precomputedQueryEmbedding?: number[]
   /**
@@ -226,7 +250,6 @@ export async function applyTwinContext(
   const settings = settingsFor(character)
   const collection = deps.vectorCollection ?? vectorCollectionName(character.twinId)
 
-  let queryEmbedding: number[] | null = input.precomputedQueryEmbedding ?? null
   let degraded = false
   let degradedReason: string | undefined
 
@@ -245,10 +268,57 @@ export async function applyTwinContext(
       err instanceof Error ? `profile-load-failed: ${err.message}` : "profile-load-failed: unknown"
   }
 
-  // Embed the user message — needed by both the RAG and style passes.
-  if (!queryEmbedding && (settings.enableRag || settings.enableStyleFewShot)) {
+  // Resolve the embedding THIS twin embeds with. A twin row that cannot be
+  // read keeps the legacy behaviour (global config, dimension guard only).
+  let twinEmbedding: TwinRuntimeEmbeddingConfig = deps.embedding
+  // When set, the twin index cannot be searched this turn: rebuild-required or
+  // the override has no credentials. The turn still runs, without twin RAG.
+  let twinEmbeddingBlocked = false
+  // Style samples may carry vectors from the model that built the stale index;
+  // cosine against a query from another model would rank garbage.
+  let styleCosineUsable = true
+  try {
+    const plan = await (deps.resolveTwinEmbedding ?? loadTwinEmbeddingPlan)(
+      character.twinId,
+      deps.embedding
+    )
+    twinEmbedding = plan.config
+    // Only an override can be "unconfigured" here: a global config without
+    // credentials never produced these deps (`tryBuildTwinDeps` refuses it).
+    if (plan.source === "twin" && !plan.credentialsReady) {
+      twinEmbeddingBlocked = true
+      styleCosineUsable = false
+      degraded = true
+      degradedReason = `${TWIN_EMBEDDING_UNCONFIGURED}: ${plan.config.provider}`
+    } else if (plan.rebuildRequired && plan.index) {
+      twinEmbeddingBlocked = true
+      styleCosineUsable = false
+      degraded = true
+      degradedReason = describeTwinIndexMismatch(plan.config, plan.index)
+    }
+  } catch {
+    twinEmbedding = deps.embedding
+  }
+
+  // The caller's precomputed vector was embedded with `deps.embedding`; it is
+  // only reusable when the twin embeds with the same provider + model, and is
+  // never used against a blocked (stale / unconfigured) twin index.
+  let queryEmbedding: number[] | null =
+    !twinEmbeddingBlocked &&
+    input.precomputedQueryEmbedding &&
+    sameEmbeddingModel(twinEmbedding, deps.embedding)
+      ? input.precomputedQueryEmbedding
+      : null
+
+  // Embed the user message — needed by both the RAG and style passes. Skipped
+  // when the twin index is blocked: nothing could use the vector.
+  if (
+    !twinEmbeddingBlocked &&
+    !queryEmbedding &&
+    (settings.enableRag || settings.enableStyleFewShot)
+  ) {
     try {
-      const result = await embed(userMessage, deps.embedding, deps.vectorBackend ?? "native")
+      const result = await embed(userMessage, twinEmbedding, deps.vectorBackend ?? "native")
       queryEmbedding = result.embedding
     } catch (err) {
       degraded = true
@@ -272,8 +342,8 @@ export async function applyTwinContext(
       // embedding model than the one now configured, block before searching
       // with a mismatched query vector (cloud backends error / native rejects).
       await ensureCollectionDimensionCompatible(deps.store, collection, queryEmbedding.length, {
-        provider: deps.embedding.provider,
-        model: deps.embedding.model,
+        provider: twinEmbedding.provider,
+        model: twinEmbedding.model,
       })
 
       const vectorHits = await deps.store.searchByEmbedding(collection, queryEmbedding, {
@@ -293,7 +363,7 @@ export async function applyTwinContext(
                 : await generateHypotheticalAnswer(userMessage, deps.expansion.model)
             if (expandedText.trim().length > 0) {
               const expEmbedding = (
-                await embed(expandedText, deps.embedding, deps.vectorBackend ?? "native")
+                await embed(expandedText, twinEmbedding, deps.vectorBackend ?? "native")
               ).embedding
               const expHits = await deps.store.searchByEmbedding(collection, expEmbedding, {
                 limit: fetchLimit,
@@ -452,21 +522,32 @@ export async function applyTwinContext(
   // token-overlap only for the gaps. A single un-embedded sample therefore no
   // longer drags the whole profile onto the lossy path. We still kick off a
   // background backfill so the remaining gaps light up cosine on a later turn.
-  if (settings.enableStyleFewShot && profile && profile.styleSamples.length > 0 && queryEmbedding) {
+  if (
+    settings.enableStyleFewShot &&
+    styleCosineUsable &&
+    profile &&
+    profile.styleSamples.length > 0 &&
+    queryEmbedding
+  ) {
     maybeBackfillStyleEmbeddings(
       character.twinId,
       profile.styleSamples,
-      deps.embedding,
+      twinEmbedding,
       deps.vectorBackend ?? "native"
     )
   }
+  // With a blocked twin embedding there is no query vector; style few-shot
+  // still runs on the query-aware token-overlap path (every sample embedding
+  // passed as null) so the persona keeps its voice while the index is stale.
   const styleSamples =
-    settings.enableStyleFewShot && profile && queryEmbedding
+    settings.enableStyleFewShot && profile && (queryEmbedding || !styleCosineUsable)
       ? selectFewShotSamples({
-          queryEmbedding,
+          queryEmbedding: styleCosineUsable && queryEmbedding ? queryEmbedding : [],
           samples: profile.styleSamples,
           sampleEmbeddings: profile.styleSamples.map((s) =>
-            Array.isArray(s.embedding) && s.embedding.length > 0 ? s.embedding : null
+            styleCosineUsable && Array.isArray(s.embedding) && s.embedding.length > 0
+              ? s.embedding
+              : null
           ),
           queryText: userMessage,
           topK: settings.styleSamplesK,

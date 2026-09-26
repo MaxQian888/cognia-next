@@ -15,11 +15,14 @@ import {
   listTwins,
   observeTwins,
   renameTwin,
+  resetTwinEmbeddingIndex,
+  setTwinEmbeddingIndex,
+  setTwinEmbeddingOverride,
   updateTwin,
 } from "./twins"
 import { createTwinSource } from "./twin-sources"
 import { createTwinChunk } from "./twin-chunks"
-import { ensureTwinProfile } from "./twin-profile"
+import { appendStyleSamples, ensureTwinProfile, getTwinProfile } from "./twin-profile"
 import { createTwinDraft } from "./twin-drafts"
 import { createTwinJob } from "./twin-jobs"
 import { getDb } from "./schema"
@@ -150,6 +153,128 @@ describe("twins CRUD", () => {
 
   it("cloneTwin throws when the source row is missing", async () => {
     await expect(cloneTwin("missing", "x")).rejects.toThrow(/not found/)
+  })
+})
+
+describe("per-twin embedding", () => {
+  const record = {
+    provider: "openai" as const,
+    model: "text-embedding-3-small",
+    dimensions: 1536,
+    fingerprint: "openai::text-embedding-3-small::1536",
+    builtAt: 10,
+  }
+
+  it("sets, normalises and clears the embedding override", async () => {
+    const twin = await createTwin({ name: "E" })
+    const set = await setTwinEmbeddingOverride(twin.id, {
+      provider: "cohere",
+      model: "  embed-v4 ",
+    })
+    expect(set?.embedding).toEqual({ provider: "cohere", model: "embed-v4" })
+
+    const blankModel = await setTwinEmbeddingOverride(twin.id, { provider: "mistral", model: " " })
+    expect(blankModel?.embedding).toEqual({ provider: "mistral" })
+
+    const cleared = await setTwinEmbeddingOverride(twin.id, undefined)
+    expect(cleared?.embedding).toBeUndefined()
+    expect("embedding" in (cleared as object)).toBe(false)
+  })
+
+  it("rejects an unknown provider", async () => {
+    const twin = await createTwin({ name: "E" })
+    await expect(setTwinEmbeddingOverride(twin.id, { provider: "nope" as never })).rejects.toThrow(
+      /unknown provider/
+    )
+  })
+
+  it("keeps the recorded index when the override changes", async () => {
+    const twin = await createTwin({ name: "E" })
+    await setTwinEmbeddingIndex(twin.id, record)
+    const next = await setTwinEmbeddingOverride(twin.id, { provider: "cohere" })
+    expect(next?.embeddingIndex).toEqual(record)
+  })
+
+  it("clone copies the override but never the index record", async () => {
+    const twin = await createTwin({
+      name: "E",
+      embedding: { provider: "voyage", model: "voyage-3" },
+    })
+    await setTwinEmbeddingIndex(twin.id, record)
+    const clone = await cloneTwin(twin.id, "E2")
+    expect(clone.embedding).toEqual({ provider: "voyage", model: "voyage-3" })
+    expect(clone.embeddingIndex).toBeUndefined()
+  })
+
+  it("resetTwinEmbeddingIndex drops chunks, resets live sources, style vectors and the record", async () => {
+    const twin = await createTwin({ name: "R" })
+    await setTwinEmbeddingIndex(twin.id, record)
+    const live = await createTwinSource({
+      twinId: twin.id,
+      kind: "document",
+      format: "markdown",
+      source: "a",
+      title: "a",
+      bytes: 1,
+      fingerprint: "fa",
+      redacted: true,
+    })
+    await getDb().twinSources.update(live.id, {
+      status: "parsed",
+      chunkCount: 1,
+      parsedAt: 5,
+      errorMessage: "old",
+    })
+    const deleted = await createTwinSource({
+      twinId: twin.id,
+      kind: "document",
+      format: "markdown",
+      source: "b",
+      title: "b",
+      bytes: 1,
+      fingerprint: "fb",
+      redacted: true,
+    })
+    await getDb().twinSources.update(deleted.id, { status: "deleted" })
+    await createTwinChunk({
+      twinId: twin.id,
+      sourceId: live.id,
+      content: "hello",
+      contentRedacted: "hello",
+      charStart: 0,
+      charEnd: 5,
+      vectorBackend: "native",
+      vectorCollection: "cognia_twin_x",
+      vectorDocId: "doc-r",
+      strategy: "paragraph",
+      tokenCount: 1,
+      metadata: {},
+    })
+    await appendStyleSamples(twin.id, [
+      {
+        id: "ss_1",
+        contextLabel: "l",
+        original: "o",
+        summary: "s",
+        sourceChunkId: "c",
+        tone: [],
+        addedAt: 1,
+        addedBy: "distill",
+        embedding: [1, 2, 3],
+      },
+    ])
+
+    const result = await resetTwinEmbeddingIndex(twin.id)
+
+    expect(result).toEqual({ chunks: 1, sourceIds: [live.id], styleEmbeddingsCleared: 1 })
+    expect(await getDb().twinChunks.where("twinId").equals(twin.id).count()).toBe(0)
+    const reset = await getDb().twinSources.get(live.id)
+    expect(reset).toMatchObject({ status: "pending", chunkCount: 0 })
+    expect(reset?.parsedAt).toBeUndefined()
+    expect(reset?.errorMessage).toBeUndefined()
+    expect((await getDb().twinSources.get(deleted.id))?.status).toBe("deleted")
+    expect((await getTwinProfile(twin.id))?.styleSamples[0].embedding).toBeUndefined()
+    expect((await getTwin(twin.id))?.embeddingIndex).toBeUndefined()
   })
 })
 

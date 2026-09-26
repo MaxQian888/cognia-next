@@ -19,6 +19,11 @@ jest.mock("@cognia/vector/embedding", () => ({
     return { ...mockEmbeddingResult, usage: undefined }
   }),
   generateEmbeddings: jest.fn(async () => ({ embeddings: [], usage: undefined })),
+  // The twin-embedding resolver reads provider credentials through these; keep
+  // them real so a cross-provider override resolves like production.
+  embeddingProviderSettingsKey: jest.requireActual("@cognia/vector/embedding")
+    .embeddingProviderSettingsKey,
+  resolveEmbeddingApiKey: jest.requireActual("@cognia/vector/embedding").resolveEmbeddingApiKey,
 }))
 
 // Wrap getTwinProfile / keywordSearch as jest.fns that call through to the real
@@ -57,6 +62,8 @@ import {
   getTwinProfile,
 } from "@/lib/db/twin-profile"
 import { __resetTwinBm25Cache, keywordSearch } from "./bm25-index"
+import { createTwin, setTwinEmbeddingIndex } from "@/lib/db/twins"
+import type { TwinEmbeddingPlan } from "./twin-embedding-status"
 import { buildExpandedKeywordQuery } from "@/lib/ai/retrieval/query-expansion"
 import { generateHypotheticalAnswer } from "@cognia/rag/query-expansion"
 import type { Character } from "@cognia/agent-config-types"
@@ -811,5 +818,171 @@ describe("applyTwinContext — flagship stages (Part 2)", () => {
     })
     expect(searchSpy.mock.calls.length).toBe(1)
     expect(result.degradedReason).toBe("expansion-pii-skip")
+  })
+})
+
+describe("applyTwinContext — per-twin embedding", () => {
+  const generateEmbeddingMock = () =>
+    jest.requireMock("@cognia/vector/embedding").generateEmbedding as jest.Mock
+
+  const styleSample = {
+    id: "ss_style",
+    contextLabel: "rejection",
+    original: "Sorry, not now.",
+    summary: "polite rejection",
+    sourceChunkId: "c1",
+    tone: ["concise"],
+    addedAt: 1,
+    addedBy: "distill" as const,
+    embedding: [1, 0, 0],
+  }
+
+  beforeEach(() => {
+    generateEmbeddingMock().mockClear()
+  })
+
+  it("embeds with the twin's override and ignores a precomputed vector from the global model", async () => {
+    await createTwin({
+      id: "twin_alice",
+      name: "Alice",
+      embedding: { provider: "openai", model: "text-embedding-3-large" },
+    })
+    const searched: number[][] = []
+    const store = makeFakeStore({
+      onSearch: (_collection, embedding) => {
+        searched.push(embedding)
+        return []
+      },
+    })
+
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "what did Alice say?",
+      precomputedQueryEmbedding: [9, 9, 9],
+      deps: { ...baseDeps, store },
+    })
+
+    expect(generateEmbeddingMock()).toHaveBeenCalledTimes(1)
+    expect(generateEmbeddingMock().mock.calls[0][1]).toMatchObject({
+      provider: "openai",
+      model: "text-embedding-3-large",
+      apiKey: "sk-test",
+    })
+    expect(searched).toEqual([FAKE_EMBEDDING])
+    expect(result.degraded).toBe(false)
+  })
+
+  it("reuses the precomputed vector when the override resolves to the global model", async () => {
+    await createTwin({
+      id: "twin_alice",
+      name: "Alice",
+      embedding: { provider: "openai", model: "text-embedding-3-small" },
+    })
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "hello",
+      precomputedQueryEmbedding: [0.4, 0.5, 0.6],
+      deps: baseDeps,
+    })
+    expect(generateEmbeddingMock()).not.toHaveBeenCalled()
+    expect(result.degraded).toBe(false)
+  })
+
+  it("degrades with rebuild-required, skips twin RAG, and keeps token-overlap style few-shot", async () => {
+    await createTwin({ id: "twin_alice", name: "Alice" })
+    await setTwinEmbeddingIndex("twin_alice", {
+      provider: "cohere",
+      model: "embed-english-v3.0",
+      dimensions: 1024,
+      fingerprint: "cohere::embed-english-v3.0::1024",
+      builtAt: 1,
+    })
+    await ensureTwinProfile("twin_alice")
+    await appendStyleSamples("twin_alice", [styleSample])
+    const store = makeFakeStore()
+
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "draft a polite rejection",
+      precomputedQueryEmbedding: [0.1, 0.2, 0.3],
+      deps: { ...baseDeps, store },
+    })
+
+    expect(result.degraded).toBe(true)
+    expect(result.degradedReason).toMatch(/^rebuild-required: /)
+    expect(result.degradedReason).toContain("cohere::embed-english-v3.0::1024")
+    expect(store.searchByEmbedding).not.toHaveBeenCalled()
+    expect(generateEmbeddingMock()).not.toHaveBeenCalled()
+    expect(result.retrievedChunks).toEqual([])
+    expect(result.selectedStyleSamples.map((sample) => sample.id)).toEqual(["ss_style"])
+    await __flushStyleBackfills()
+  })
+
+  it("degrades with twin-embedding-unconfigured when the override has no credentials", async () => {
+    const store = makeFakeStore()
+    const plan: TwinEmbeddingPlan = {
+      twinId: "twin_alice",
+      config: { provider: "cohere", model: "embed-english-v3.0", apiKey: "" },
+      source: "twin",
+      credentialsReady: false,
+      rebuildRequired: false,
+    }
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "hello",
+      deps: { ...baseDeps, store, resolveTwinEmbedding: async () => plan },
+    })
+    expect(result.degradedReason).toBe("twin-embedding-unconfigured: cohere")
+    expect(store.searchByEmbedding).not.toHaveBeenCalled()
+    expect(generateEmbeddingMock()).not.toHaveBeenCalled()
+  })
+
+  it("keeps the legacy global path when the twin row cannot be read", async () => {
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "hello",
+      precomputedQueryEmbedding: [0.1, 0.2, 0.3],
+      deps: {
+        ...baseDeps,
+        resolveTwinEmbedding: async () => {
+          throw new Error("dexie locked")
+        },
+      },
+    })
+    expect(generateEmbeddingMock()).not.toHaveBeenCalled()
+    expect(result.degraded).toBe(false)
+  })
+
+  it("resolves a cross-provider override through the chat-provider settings", async () => {
+    const plans: TwinEmbeddingPlan[] = []
+    const { loadTwinEmbeddingPlan } = jest.requireActual("./twin-embedding-status") as {
+      loadTwinEmbeddingPlan: typeof import("./twin-embedding-status").loadTwinEmbeddingPlan
+    }
+    await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "hello",
+      deps: {
+        ...baseDeps,
+        resolveTwinEmbedding: async (twinId, global) => {
+          const plan = await loadTwinEmbeddingPlan(twinId, global, {
+            getTwin: async () => ({
+              id: "twin_alice",
+              name: "Alice",
+              createdAt: 1,
+              updatedAt: 1,
+              embedding: { provider: "mistral" },
+            }),
+            loadProviderSettings: async () => ({ mistral: { apiKey: "mi-key" } }),
+          })
+          plans.push(plan)
+          return plan
+        },
+      },
+    })
+    expect(plans[0].config).toMatchObject({ provider: "mistral", apiKey: "mi-key" })
+    expect(generateEmbeddingMock().mock.calls[0][1]).toMatchObject({
+      provider: "mistral",
+      model: "mistral-embed",
+    })
   })
 })

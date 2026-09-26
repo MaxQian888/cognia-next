@@ -29,6 +29,7 @@ import { prepareChunks } from "./chunk"
 import { redactText, translateOffsetsThroughRedaction, unredactText } from "@cognia/redact"
 import { encryptRedactionMap } from "./redaction-key"
 import { throwIfTwinJobInterrupted } from "@/lib/twin/job-control"
+import { twinEmbeddingFingerprint } from "@/lib/twin/runtime/twin-embedding"
 
 export interface RunIngestInput {
   job: TwinJob
@@ -71,6 +72,13 @@ export interface RunIngestResult {
   parsedSourceIds: string[]
   totalChunks: number
   totalEmbeddingTokens: number
+  /**
+   * Vector length the embedder produced in this run (`undefined` when no
+   * chunk was embedded). The worker records it in `Twin.embeddingIndex`.
+   */
+  embeddingDimensions?: number
+  /** Sources whose chunks were written to the index in this run. */
+  writtenSourceIds: string[]
   /** Populated by `finalizeIngestRun`; surfaces in completeJob/failJob. */
   failureSummary: IngestFailureSummary
 }
@@ -184,11 +192,14 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
       totalTokens: 0,
       failures: [],
       attemptedCount: 0,
+      writtenSourceIds: [],
     })
   }
 
   let totalChunks = 0
   let totalTokens = 0
+  let embeddingDimensions: number | undefined
+  const writtenSourceIds: string[] = []
   const parsedIds: string[] = []
   const failures: IngestSourceFailure[] = []
 
@@ -320,6 +331,10 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
         (stageBase + 5) / TOTAL_STAGES,
         input.signal
       )
+      // The generation is stamped with the embedding that produced it
+      // (`provider::model::dimensions`) instead of the dimension-only legacy
+      // fingerprint, so a same-dimension model swap is visible in the record.
+      const dimensions = embeddingResult.embeddings[0]?.length
       const persisted = await persistChunks({
         twinId: job.twinId,
         sourceId: row.id,
@@ -329,8 +344,15 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
         contentHash: row.fingerprint,
         chunks: enriched,
         embeddings: embeddingResult.embeddings,
+        profileFingerprint: twinEmbeddingFingerprint({
+          provider: embedding.provider,
+          model: embedding.model,
+          dimensions,
+        }),
       })
       totalChunks += persisted.rows.length
+      if (dimensions !== undefined) embeddingDimensions = dimensions
+      writtenSourceIds.push(row.id)
       parsedIds.push(row.id)
     } catch (err) {
       if (input.signal?.aborted) throw err
@@ -352,6 +374,8 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
     totalTokens,
     failures,
     attemptedCount: rawSources.length,
+    embeddingDimensions,
+    writtenSourceIds,
   })
 }
 
@@ -362,6 +386,8 @@ interface FinalizeInput {
   totalTokens: number
   failures: IngestSourceFailure[]
   attemptedCount: number
+  embeddingDimensions?: number
+  writtenSourceIds: string[]
 }
 
 /**
@@ -416,6 +442,10 @@ export async function finalizeIngestRun(input: FinalizeInput): Promise<RunIngest
     parsedSourceIds: parsedIds,
     totalChunks,
     totalEmbeddingTokens: totalTokens,
+    ...(input.embeddingDimensions !== undefined
+      ? { embeddingDimensions: input.embeddingDimensions }
+      : {}),
+    writtenSourceIds: input.writtenSourceIds,
     failureSummary,
   }
 }

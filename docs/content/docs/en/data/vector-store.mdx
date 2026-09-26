@@ -51,8 +51,9 @@ Web mode hides the native option in twin settings (`!isTauri()`); cloud is requi
 </Tabs>
 
 <Callout type="info" title="Switching backends">
-  Re-embedding is **manual**. Use the "Re-embed all" action in the twin Sources tab after switching
-  backends — dimensions, distance metrics, and metadata schemas may differ.
+  Re-indexing is **manual**. After switching backends, use **Rebuild index** on the "Embedding for
+  this twin" card in the twin workbench Settings tab — dimensions, distance metrics, and metadata
+  schemas may differ.
 </Callout>
 
 ## Why sqlite-vec on desktop
@@ -192,7 +193,41 @@ The user picks their backend in **Settings → Twin → Vector store**:
 
 ## Re-ingest on backend switch
 
-Switching backends does **not** automatically migrate. The Sources tab in the twin workbench has a "Re-embed all" action that re-runs the embed + persist stages of the ingest pipeline against the new backend. This is the only safe way: dimensions, distance metrics, and metadata schemas may differ.
+Switching backends does **not** automatically migrate. Rebuild each twin's index (**Rebuild index** in the twin workbench Settings tab, `rebuildTwinIndex` in `lib/twin/lifecycle.ts`): it re-runs ingestion of every source against the current backend with the twin's effective embedding. This is the only safe way: dimensions, distance metrics, and metadata schemas may differ.
+
+## Per-twin embedding and the index fingerprint
+
+Embedding settings belong to the **twin**, not to a character. Every twin inherits the global `TwinRuntimeSettings.embedding` unless its row carries an override:
+
+```ts title="types/twin/index.ts"
+export interface TwinEmbeddingOverride {
+  provider: RagEmbeddingProvider
+  model?: string // blank = the catalog default model for that provider
+}
+```
+
+**Precedence** (`resolveTwinEmbeddingConfig` in `lib/twin/runtime/twin-embedding.ts`): `Twin.embedding` first, then the global config. The override stores no secrets. On the global provider it reuses the global key / base URL / Bedrock settings; on another provider it resolves the key from **Settings → Providers** through `resolveEmbeddingApiKey` (the same seam the plugin vector API uses), and a local engine's base URL from its provider settings, falling back to the engine's default localhost port. Memory, project knowledge, and agent knowledge bases are **not** affected: they keep the global model.
+
+**Fingerprint.** After an ingest writes chunks, the job worker records on the twin row:
+
+```ts
+Twin.embeddingIndex = { provider, model, dimensions, fingerprint: `${provider}::${model}::${dimensions}`, builtAt }
+```
+
+The same fingerprint stamps each source's retrieval generation (`persistChunks`' `profileFingerprint`) instead of the dimension-only `legacy:<backend>:<dim>`. The record is written only when it is true for **every** chunk of the twin (a fresh twin, a full re-ingest, or a rebuild).
+
+**Retrieval** (`applyTwinContext`):
+
+- The twin's effective embedding is resolved per turn. When it differs from the shared `deps.embedding` (the global model, also used by memory / KB legs), the query is embedded again with the twin's config and a caller's `precomputedQueryEmbedding` is ignored.
+- When the recorded `embeddingIndex` names another provider/model, the turn degrades with `rebuild-required: …`: twin RAG is skipped, style few-shot falls back to token-overlap scoring, and the chat still runs. Dimension checks stay with the existing guard (`dimension-mismatch: …`).
+- An override without credentials degrades with `twin-embedding-unconfigured: <provider>`.
+- A **legacy** index (no record) keeps the old behaviour — dimension guard only — so a swap between same-dimension models (cohere / mistral / voyage / bedrock are all 1024-dim) is not detected there. The workbench recommends a rebuild for it.
+
+**Ingest guard.** An ingest job fails without retry (`rebuild-required: …`) when the recorded model differs from the effective one and chunks from the recorded model would survive the job — two models never share one index. An override without credentials fails the job with `twin-embedding-unconfigured: …`.
+
+**Rebuild** (`rebuildTwinIndex`): pre-flight first (runtime ready — worker enabled, vector store configured — and effective embedding has credentials; nothing is destroyed otherwise), then cancel the twin's active ingest jobs, drop every collection its chunks point at (plus `cognia_twin_{twinId}`), and in one Dexie transaction delete the chunk rows, reset live sources to `pending`, drop cached style-sample vectors, and clear `embeddingIndex`. Finally one ingest job is queued over those sources; the worker embeds them with the effective config and records the new fingerprint. Until it finishes the twin has no index and answers without retrieved context.
+
+The workbench card (`components/twin/twin-embedding-card.tsx`) holds the override picker, the "index built with …" status line, the rebuild-required warning, and the **Rebuild index** button. Other surfaces read the same state through `getTwinEmbeddingStatus(twinId)` in `lib/twin/runtime/twin-embedding-status.ts`.
 
 ## Performance notes
 
@@ -219,10 +254,11 @@ Switching backends does **not** automatically migrate. The Sources tab in the tw
   }}
 />
 
-<Callout type="info" title="Don't mix dimensions">
-  Switching the embedding model means switching the vector dimension — re-embed every chunk before
-  querying. The store doesn't auto-detect mismatched dimensions; you'll get nearest-neighbour
-  garbage instead of a clean error.
+<Callout type="info" title="Don't mix models">
+  Switching the embedding model can switch the vector dimension — rebuild the index before querying.
+  A different dimension is caught by the dimension guard (`packages/vector/src/dimension-guard.ts`)
+  before any write or search. A same-dimension model swap is caught only on twins that recorded an
+  `embeddingIndex` (`rebuild-required`); a legacy index can still return nearest-neighbour garbage.
 </Callout>
 
 ## Where to start contributing

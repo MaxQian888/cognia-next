@@ -226,6 +226,7 @@
     "twinBinding": {
       "cancel": "Cancel",
       "citationStyleLabel": "Citation style",
+      "citationStyleSimple": "Simple",
       "confirmBind": "Bind",
       "createNew": "Create new twin",
       "enableCitations": "Source citations",
@@ -262,7 +263,14 @@
       "unbindBody": "The twin's data is preserved — only this character's link to it is removed.",
       "unbindConfirm": "Unbind",
       "unbindTitle": "Unbind twin?",
-      "unboundDescription": "Link this character to a Digital Twin to inject RAG-retrieved chunks and writing-style few-shots into every send."
+      "unboundDescription": "Link this character to a Digital Twin to inject RAG-retrieved chunks and writing-style few-shots into every send.",
+      "embeddingLabel": "Embedding",
+      "embeddingValue": "{provider} · {model}",
+      "embeddingSourceTwin": "Set on this twin",
+      "embeddingSourceGlobal": "Twin runtime default",
+      "embeddingNoCredentials": "The twin's embedding provider has no credentials, so twin knowledge is skipped.",
+      "embeddingRebuildRequired": "The twin's index was built with another model, so twin knowledge is skipped until it is rebuilt in the Workbench.",
+      "embeddingHint": "Embedding belongs to the twin and is shared by every agent bound to it. Change it in the Workbench."
     },
     "useDefault": "Use app default",
     "voice": {

@@ -226,6 +226,7 @@
     "twinBinding": {
       "cancel": "取消",
       "citationStyleLabel": "引用格式",
+      "citationStyleSimple": "简洁",
       "confirmBind": "绑定",
       "createNew": "新建孪生",
       "enableCitations": "来源引用",
@@ -262,7 +263,14 @@
       "unbindBody": "孪生的数据会保留，仅断开当前角色与它之间的关联。",
       "unbindConfirm": "解绑",
       "unbindTitle": "确认解绑孪生？",
-      "unboundDescription": "把当前角色绑定到一个数字孪生（Digital Twin），系统会在每次发送前注入 RAG 检索到的片段以及写作风格的少样本示例。"
+      "unboundDescription": "把当前角色绑定到一个数字孪生（Digital Twin），系统会在每次发送前注入 RAG 检索到的片段以及写作风格的少样本示例。",
+      "embeddingLabel": "嵌入",
+      "embeddingValue": "{provider} · {model}",
+      "embeddingSourceTwin": "分身单独设置",
+      "embeddingSourceGlobal": "分身运行时默认值",
+      "embeddingNoCredentials": "分身的嵌入提供商缺少凭据，将跳过分身知识检索。",
+      "embeddingRebuildRequired": "分身的索引由其他模型构建，在工作台中重建之前将跳过分身知识检索。",
+      "embeddingHint": "嵌入设置属于分身，由绑定它的所有智能体共享，请在工作台中修改。"
     },
     "useDefault": "使用应用默认值",
     "voice": {

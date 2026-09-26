@@ -12,7 +12,7 @@
  */
 
 import { fireEvent, render, screen, within } from "@testing-library/react"
-import { TwinBindingSection } from "./twin-binding-section"
+import { TwinBindingSection, TwinEmbeddingSummary } from "./twin-binding-section"
 import { DEFAULT_TWIN_SETTINGS } from "@/types/twin"
 
 // useLiveQuery returns its `defaultResult` synchronously when the query
@@ -52,6 +52,21 @@ jest.mock("@/lib/db/twin-profile", () => ({
     voiceSummary: "",
     updatedAt: 1700000000000,
   }),
+}))
+// Returned synchronously so the useLiveQuery stub above hands it straight back.
+const embeddingStatus = {
+  twinId: "twin_x",
+  exists: true,
+  source: "twin",
+  effective: { provider: "ollama", model: "nomic-embed-text" },
+  global: { provider: "openai", model: "text-embedding-3-small" },
+  credentialsReady: true,
+  chunkCount: 42,
+  legacyIndex: false,
+  rebuildRequired: false,
+}
+jest.mock("@/lib/twin/runtime/twin-embedding-status", () => ({
+  getTwinEmbeddingStatus: () => embeddingStatus,
 }))
 jest.mock("@/lib/db/twin-sources", () => ({
   listTwinSourcesByTwin: async () => [{}, {}, {}],
@@ -110,6 +125,38 @@ describe("<TwinBindingSection />", () => {
     expect(screen.getByText("hybridKeywordWeight")).toBeInTheDocument()
     expect(screen.getByText("enableStyleFewShot")).toBeInTheDocument()
     expect(screen.getByText("styleSamplesK")).toBeInTheDocument()
+  })
+
+  it("shows what the bound twin embeds with and where to change it", () => {
+    render(
+      <TwinBindingSection
+        value={{ twinId: "twin_x", twinSettings: DEFAULT_TWIN_SETTINGS }}
+        onChange={jest.fn()}
+      />
+    )
+    const summary = screen.getByTestId("twin-embedding-summary")
+    expect(within(summary).getByText("embeddingSourceTwin")).toBeInTheDocument()
+    expect(within(summary).getByText("embeddingHint")).toBeInTheDocument()
+    expect(within(summary).queryByRole("status")).not.toBeInTheDocument()
+  })
+
+  it("warns when the twin's index needs a rebuild or its provider lacks credentials", () => {
+    const t = ((key: string) => key) as never
+    const { rerender } = render(
+      <TwinEmbeddingSummary
+        status={{ ...embeddingStatus, source: "global", rebuildRequired: true } as never}
+        t={t}
+      />
+    )
+    expect(screen.getByText("embeddingSourceGlobal")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("embeddingRebuildRequired")
+    rerender(
+      <TwinEmbeddingSummary
+        status={{ ...embeddingStatus, credentialsReady: false } as never}
+        t={t}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("embeddingNoCredentials")
   })
 
   it("toggling enableHybrid calls onChange with updated settings", () => {

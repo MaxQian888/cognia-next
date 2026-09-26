@@ -117,6 +117,15 @@ export function getEmbeddingApiKey(
   return settings?.apiKey || null
 }
 
+/**
+ * The chat-provider settings key an embedding provider shares its credentials
+ * (and, for local engines, its base URL) with. `undefined` for providers that
+ * have no shared chat-settings entry (voyage, transformersjs).
+ */
+export function embeddingProviderSettingsKey(provider: EmbeddingProvider): string | undefined {
+  return PROVIDER_MAP[provider]
+}
+
 export function resolveEmbeddingApiKey(
   provider: EmbeddingProvider,
   providerSettings: Record<string, EmbeddingProviderSettings>

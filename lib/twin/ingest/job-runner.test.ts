@@ -152,6 +152,23 @@ describe("runIngestJob — pageMap threading", () => {
     }
   })
 
+  it("stamps the generation with the embedding fingerprint and reports what it wrote", async () => {
+    const result = await runIngestJob({
+      ...runInput(),
+      embedding: { provider: "cohere", model: "embed-english-v3.0", apiKey: "k" },
+    })
+
+    expect(mockPersist.mock.calls[0][0].profileFingerprint).toBe("cohere::embed-english-v3.0::2")
+    expect(result.embeddingDimensions).toBe(2)
+    expect(result.writtenSourceIds).toEqual(["src1"])
+  })
+
+  it("reports no dimensions and no written sources when nothing was embedded", async () => {
+    const result = await runIngestJob({ ...runInput(), rawSources: [] })
+    expect(result.embeddingDimensions).toBeUndefined()
+    expect(result.writtenSourceIds).toEqual([])
+  })
+
   it("honours a cooperative cancellation before parsing without marking the source failed", async () => {
     const controller = new AbortController()
     controller.abort("cancel")
