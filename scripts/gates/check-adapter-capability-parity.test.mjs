@@ -133,6 +133,30 @@ test("extractCommandCapabilities reads the command map", () => {
   assert.deepEqual(extractCommandCapabilities(src), { compact: "compaction", steer: "steer" })
 })
 
+test("the sidecar tables are still read once they carry TypeScript annotations", () => {
+  const adapters =
+    extractAdapterCapabilities(`export const ADAPTER_CAPABILITIES: Record<RuntimeAdapterId, ReadonlySet<AgentCapabilityId>> = {
+  "claude-agent-sdk": new Set<AgentCapabilityId>([
+    "compaction",
+    "steer",
+  ]),
+  "ai-sdk": new Set<AgentCapabilityId>([
+    "compaction",
+  ]),
+}
+`)
+  assert.deepEqual([...adapters["claude-agent-sdk"]], ["compaction", "steer"])
+  assert.deepEqual([...adapters["ai-sdk"]], ["compaction"])
+  assert.deepEqual(
+    extractCommandCapabilities(`export const COMMAND_CAPABILITIES: Record<string, AgentCapabilityId> = {
+  compact: "compaction",
+  steer: "steer",
+}
+`),
+    { compact: "compaction", steer: "steer" }
+  )
+})
+
 test("extractCapabilityIds reads the contract array", () => {
   const src = `export const AGENT_CAPABILITY_IDS: readonly AgentCapabilityId[] = [\n  "steer",\n  "mcp",\n]\n`
   assert.deepEqual([...extractCapabilityIds(src)], ["steer", "mcp"])

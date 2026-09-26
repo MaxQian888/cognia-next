@@ -76,9 +76,14 @@ export function extractRuntimeCapabilities(source) {
  * @param {string} source
  */
 export function extractAdapterCapabilities(source) {
-  const body = source.match(/export const ADAPTER_CAPABILITIES = \{([\s\S]*?)\n\}/)?.[1]
+  const body = source.match(
+    /export const ADAPTER_CAPABILITIES(?::[^=]*)?\s*=\s*\{([\s\S]*?)\n\}/
+  )?.[1]
   if (!body) throw new Error("runtime-adapter.mjs: `ADAPTER_CAPABILITIES` not found")
-  return parseAdapterBlocks(body, /(?:"([^"]+)"|(\w[\w-]*)):\s*new Set\(\[([\s\S]*?)\n {2}\]\)/g)
+  return parseAdapterBlocks(
+    body,
+    /(?:"([^"]+)"|(\w[\w-]*)):\s*new Set(?:<[^>(]*>)?\(\[([\s\S]*?)\n {2}\]\)/g
+  )
 }
 
 function parseAdapterBlocks(body, pattern) {
@@ -94,7 +99,9 @@ function parseAdapterBlocks(body, pattern) {
  * @param {string} source
  */
 export function extractCommandCapabilities(source) {
-  const body = source.match(/export const COMMAND_CAPABILITIES = \{([\s\S]*?)\n\}/)?.[1]
+  const body = source.match(
+    /export const COMMAND_CAPABILITIES(?::[^=]*)?\s*=\s*\{([\s\S]*?)\n\}/
+  )?.[1]
   if (!body) throw new Error("runtime-adapter.mjs: `COMMAND_CAPABILITIES` not found")
   return Object.fromEntries([...body.matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]))
 }

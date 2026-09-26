@@ -1,0 +1,128 @@
+{
+  "$comment": "Layer map for the Claude sidecar (ADR-0197), read by scripts/gates/check-sidecar-architecture.mjs. `layers` maps each sidecar/src/<layer>/ to the layers it may import (its own layer is always allowed). Everything else under sidecar/ that is not a launcher, a self-contained tree, test-support or a test is LEGACY: code the migration has not moved yet. Legacy may import src/, src/ may not import legacy.",
+  "scope": "sidecar/",
+  "nestedPackages": [
+    "sidecar/vscode-ext-host/",
+    "sidecar/webclone/",
+    "sidecar/codeserver-agent-ext/"
+  ],
+  "generated": ["sidecar/cognia-mcp.mjs"],
+  "sourceRoot": "sidecar/src/",
+  "layers": {
+    "shared": [],
+    "platform": ["shared"],
+    "policy": ["shared", "platform"],
+    "services": ["shared", "platform"],
+    "context": ["shared", "platform"],
+    "providers": ["shared", "platform"],
+    "tools": ["shared", "platform", "policy", "services"],
+    "hooks": ["shared", "platform", "policy", "services"],
+    "mcp": ["shared", "platform", "policy", "services", "tools"],
+    "runtimes": [
+      "shared",
+      "platform",
+      "policy",
+      "services",
+      "context",
+      "providers",
+      "tools",
+      "hooks",
+      "mcp"
+    ],
+    "host": [
+      "shared",
+      "platform",
+      "policy",
+      "services",
+      "context",
+      "providers",
+      "tools",
+      "hooks",
+      "mcp",
+      "runtimes"
+    ],
+    "entry": ["shared", "platform", "tools", "mcp", "host"]
+  },
+  "withinLayer": [
+    {
+      "from": "sidecar/src/tools/builtin/*/",
+      "allow": ["sidecar/src/tools/kernel/", "sidecar/src/tools/state/"],
+      "why": "a builtin category depends on the tool kernel and shared tool state, never on another category"
+    },
+    {
+      "from": "sidecar/src/tools/plugin/",
+      "allow": ["sidecar/src/tools/kernel/"],
+      "why": "plugin tools are a separate MCP server built on the kernel alone"
+    },
+    {
+      "from": "sidecar/src/tools/a2ui/",
+      "allow": ["sidecar/src/tools/kernel/"],
+      "why": "a2ui tools are a separate MCP server built on the kernel alone"
+    },
+    {
+      "from": "sidecar/src/runtimes/claude-agent-sdk/",
+      "deny": ["sidecar/src/runtimes/ai-sdk/"],
+      "why": "the two rails share code through runtimes/common, never directly"
+    },
+    {
+      "from": "sidecar/src/runtimes/ai-sdk/",
+      "deny": ["sidecar/src/runtimes/claude-agent-sdk/"],
+      "why": "the two rails share code through runtimes/common, never directly"
+    }
+  ],
+  "launchers": [
+    "sidecar/agent-host.mjs",
+    "sidecar/claude-host.mjs",
+    "sidecar/a2ui-mcp.mjs",
+    "sidecar/cognia-tool-bridge.mjs",
+    "sidecar/mcp-oauth-helper.mjs",
+    "sidecar/mcp-stdio-relay.mjs",
+    "sidecar/codex-app-control/control-cli.mjs",
+    "sidecar/codex-app-control/cdp-only-relaunch-worker.mjs",
+    "sidecar/codex-app-control/one-shot-launcher.mjs"
+  ],
+  "selfContained": ["sidecar/codex-app-control/", "sidecar/pi-extension/"],
+  "testSupport": "sidecar/test-support/",
+  "externalData": [
+    "lib/settings/builtin-tools-data.json",
+    "lib/ai/code-mode/limits.json",
+    "lib/ai/providers/models-dev-capabilities.json"
+  ],
+  "isomorphic": [
+    "sidecar/dispatch/protocol-adapters/provider-protocol.mjs",
+    "sidecar/dispatch/protocol-adapters/reasoning-effort-tables.mjs"
+  ],
+  "public": [
+    "sidecar/a2ui-tools/tool-defs.mjs",
+    "sidecar/builtin-tools/ast-grep/binary.mjs",
+    "sidecar/builtin-tools/code/languages/index.mjs",
+    "sidecar/builtin-tools/code/parser.mjs",
+    "sidecar/builtin-tools/run-code/sandbox-child.mjs",
+    "sidecar/dispatch/claude-executable.mjs",
+    "sidecar/dispatch/compaction.mjs",
+    "sidecar/dispatch/feature-call.mjs",
+    "sidecar/dispatch/live-harness.mjs",
+    "sidecar/dispatch/permission-resolver.mjs",
+    "sidecar/dispatch/protocol-adapters/openai-compatible-variant-adapter.mjs",
+    "sidecar/dispatch/protocol-adapters/provider-protocol.mjs",
+    "sidecar/dispatch/protocol-adapters/reasoning-effort-tables.mjs",
+    "sidecar/dispatch/protocol-adapters/registry.mjs",
+    "sidecar/dispatch/usage-normalize.mjs",
+    "sidecar/pi-extension/cognia-pi-extension.ts"
+  ],
+  "externalScanRoots": [
+    ".storybook/",
+    "app/",
+    "cli/src/",
+    "components/",
+    "hooks/",
+    "lib/",
+    "packages/",
+    "plugins/",
+    "scripts/",
+    "stores/",
+    "tests/",
+    "types/"
+  ],
+  "legacyMjsAllowed": true
+}

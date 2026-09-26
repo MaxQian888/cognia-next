@@ -51,9 +51,14 @@ export function extractTsUnion(source) {
   return new Set([...m[1].matchAll(/"([A-Za-z_][\w]*)"/g)].map((x) => x[1]))
 }
 
-/** `export const CONTROL_METHODS = new Set([ ... ])` */
+/**
+ * `export const CONTROL_METHODS = new Set([ ... ])`, with or without a type
+ * annotation or `new Set<T>` argument (the sidecar is moving to TypeScript).
+ */
 export function extractSidecarSet(source) {
-  const m = source.match(/export const CONTROL_METHODS = new Set\(\[([\s\S]*?)\]\)/)
+  const m = source.match(
+    /export const CONTROL_METHODS(?::[^=]*)?\s*=\s*new Set(?:<[^>(]*>)?\(\[([\s\S]*?)\]\)/
+  )
   if (!m) throw new Error("could not locate `CONTROL_METHODS`")
   return new Set([...m[1].matchAll(/"([A-Za-z_][\w]*)"/g)].map((x) => x[1]))
 }
@@ -86,7 +91,9 @@ export function extractRustTestList(source) {
  * no-arg `default` are simply absent.
  */
 export function extractControlArgs(source) {
-  const body = source.match(/export function controlArgs\(method, params\) \{([\s\S]*?)\n\}/)?.[1]
+  const body = source.match(
+    /export function controlArgs\(method\b[^,]*,\s*params\b[^)]*\)[^{]*\{([\s\S]*?)\n\}/
+  )?.[1]
   if (!body) throw new Error("control.mjs: could not locate `controlArgs`")
   /** @type {Record<string, string[]>} */
   const out = {}
@@ -114,7 +121,9 @@ export function extractSessionApiUnion(source) {
 
 /** `export const SESSION_API_METHODS = { name: { mutates, store }, … }` */
 export function extractSessionApiSpecs(source) {
-  const body = source.match(/export const SESSION_API_METHODS = \{([\s\S]*?)\n\}/)?.[1]
+  const body = source.match(
+    /export const SESSION_API_METHODS(?::[^=]*)?\s*=\s*\{([\s\S]*?)\n\}/
+  )?.[1]
   if (!body) throw new Error("session-api.mjs: could not locate `SESSION_API_METHODS`")
   /** @type {Record<string, { mutates: boolean, store: boolean }>} */
   const out = {}

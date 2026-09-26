@@ -190,6 +190,40 @@ test("extractSidecarSet reads the Set literal", () => {
   assert.deepEqual([...extractSidecarSet(src)], ["getContextUsage", "steer"])
 })
 
+test("the sidecar extractors read the same tables once they carry TypeScript annotations", () => {
+  assert.deepEqual(
+    [
+      ...extractSidecarSet(
+        `export const CONTROL_METHODS: ReadonlySet<string> = new Set<SessionControlMethod>([\n  "getContextUsage",\n  "steer",\n])\n`
+      ),
+    ],
+    ["getContextUsage", "steer"]
+  )
+  assert.deepEqual(
+    extractControlArgs(`
+export function controlArgs(method: string, params: Record<string, unknown> | undefined): unknown[] {
+  const p = params ?? {}
+  switch (method) {
+    case "toggleMcpServer":
+      return [p.serverName, p.enabled]
+    default:
+      return []
+  }
+}
+`),
+    { toggleMcpServer: ["serverName", "enabled"] }
+  )
+  assert.deepEqual(
+    extractSessionApiSpecs(`export const SESSION_API_METHODS: Record<SessionApiMethod, SessionApiSpec> = {
+  listSessions: { mutates: false, store: true },
+  deleteSession: { mutates: true, store: true },
+  resolveSettings: { mutates: false, store: false },
+}
+`),
+    SESSION_SPECS
+  )
+})
+
 test("extractRustAllowlist reads the matches! arm", () => {
   const src = `pub fn is_allowed_control_method(method: &str) -> bool {
     matches!(

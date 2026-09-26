@@ -189,6 +189,9 @@ const REGISTRY = [
   // cost every sandboxed OpenCode session its resume history.
   { script: "audit:agent-capabilities", group: "audit" },
   { script: "audit:agent-control-methods", group: "audit" },
+  // ADR-0197 — the sidecar's src/ layers, no directory cycles, no launcher
+  // imports, and a public surface for lib/, packages/ and cli/. Ratcheted.
+  { script: "audit:sidecar-architecture", group: "audit" },
   { script: "audit:trusted-publishers", group: "audit" },
   { script: "audit:silent-flags", group: "audit" },
   { script: "audit:pii-boundaries", group: "audit" },
