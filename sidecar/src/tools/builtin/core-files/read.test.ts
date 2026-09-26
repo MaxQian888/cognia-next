@@ -4,11 +4,12 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { createReadTool, formatCatN, DEFAULT_LIMIT } from "./read.mjs"
-import { createReadTracker } from "../../src/tools/state/read-tracker.ts"
+import { createReadTool, formatCatN, DEFAULT_LIMIT } from "./read.ts"
+import { createReadTracker } from "../../state/read-tracker.ts"
+import { asCallable } from "../../../../test-support/tool-result.ts"
 
-function textOf(result) {
-  return result.content.map((b) => b.text).join("\n")
+function textOf(result: { content: unknown[] }): string {
+  return result.content.map((b) => (b as { text?: string }).text).join("\n")
 }
 
 async function fixture() {
@@ -21,7 +22,7 @@ async function fixture() {
 test("read returns cat -n numbered content and records into the tracker", async () => {
   const { dir, file } = await fixture()
   const tracker = createReadTracker()
-  const tool = createReadTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: tracker }))
   try {
     const res = await tool.handler({ file_path: "f.txt" }, {})
     const text = textOf(res)
@@ -38,7 +39,7 @@ test("read returns an explicit notice for an empty file and still records it", a
   const file = path.join(dir, "empty.txt")
   await fsp.writeFile(file, "")
   const tracker = createReadTracker()
-  const tool = createReadTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: tracker }))
   try {
     const res = await tool.handler({ file_path: "empty.txt" }, {})
     const text = textOf(res)
@@ -52,7 +53,7 @@ test("read returns an explicit notice for an empty file and still records it", a
 
 test("read windows with offset/limit and emits a continuation hint", async () => {
   const { dir } = await fixture()
-  const tool = createReadTool({ cwd: dir, readTracker: createReadTracker() })
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: createReadTracker() }))
   try {
     const res = await tool.handler({ file_path: "f.txt", offset: 2, limit: 2 }, {})
     const text = textOf(res)
@@ -67,7 +68,7 @@ test("read windows with offset/limit and emits a continuation hint", async () =>
 
 test("read errors when offset is beyond EOF and when the file is missing", async () => {
   const { dir } = await fixture()
-  const tool = createReadTool({ cwd: dir, readTracker: createReadTracker() })
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: createReadTracker() }))
   try {
     const beyond = await tool.handler({ file_path: "f.txt", offset: 99 }, {})
     assert.equal(beyond.isError, true)
@@ -82,7 +83,7 @@ test("read errors when offset is beyond EOF and when the file is missing", async
 test("read lists directories", async () => {
   const { dir } = await fixture()
   await fsp.mkdir(path.join(dir, "sub"))
-  const tool = createReadTool({ cwd: dir, readTracker: createReadTracker() })
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: createReadTracker() }))
   try {
     const res = await tool.handler({ file_path: "." }, {})
     const text = textOf(res)
@@ -99,7 +100,7 @@ test("read reports binary files without dumping bytes, and does not track them",
   const tracker = createReadTracker()
   const bin = path.join(dir, "x.bin")
   await fsp.writeFile(bin, Buffer.from([0x00, 0x01, 0x02]))
-  const tool = createReadTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: tracker }))
   try {
     const res = await tool.handler({ file_path: "x.bin" }, {})
     assert.match(textOf(res), /binary file/)
@@ -116,7 +117,7 @@ test("formatCatN truncates very long lines", () => {
 })
 
 test("read tool metadata: name + default limit sanity", async () => {
-  const tool = createReadTool({ cwd: ".", readTracker: createReadTracker() })
+  const tool = asCallable(createReadTool({ cwd: ".", readTracker: createReadTracker() }))
   assert.equal(tool.name, "read")
   assert.equal(DEFAULT_LIMIT, 2000)
 })
@@ -135,7 +136,7 @@ test("read renders .ipynb notebooks as text and tracks them", async () => {
     nb,
     JSON.stringify({ cells: [{ cell_type: "code", source: ["print(1)\n"], outputs: [] }] })
   )
-  const tool = createReadTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: tracker }))
   try {
     const res = await tool.handler({ file_path: "n.ipynb" }, {})
     assert.match(textOf(res), /Cell 1 \[code\]/)
@@ -151,18 +152,21 @@ test("read returns an image content block for a vision-capable model", async () 
   const img = path.join(dir, "p.png")
   const tracker = createReadTracker()
   await fsp.writeFile(img, PNG_1X1)
-  const tool = createReadTool({
-    cwd: dir,
-    readTracker: tracker,
-    provider: "anthropic",
-    model: "claude-opus-4-5",
-  })
+  const tool = asCallable(
+    createReadTool({
+      cwd: dir,
+      readTracker: tracker,
+      provider: "anthropic",
+      model: "claude-opus-4-5",
+    })
+  )
   try {
     const res = await tool.handler({ file_path: "p.png" }, {})
-    const imageBlock = res.content.find((b) => b.type === "image")
+    const imageBlock = res.content.find((b) => (b as { type?: string }).type === "image") as
+      { mimeType?: string; data?: string } | undefined
     assert.ok(imageBlock, "expected an image content block")
-    assert.equal(imageBlock.mimeType, "image/png")
-    assert.equal(imageBlock.data, PNG_1X1.toString("base64"))
+    assert.equal(imageBlock!.mimeType, "image/png")
+    assert.equal(imageBlock!.data, PNG_1X1.toString("base64"))
     assert.equal(tracker.hasRead(img), true)
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
@@ -173,11 +177,11 @@ test("read gives an honest redirect for an image when the model has no vision", 
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "read-img2-"))
   const img = path.join(dir, "p.png")
   await fsp.writeFile(img, PNG_1X1)
-  const tool = createReadTool({ cwd: dir, readTracker: createReadTracker() }) // no model
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: createReadTracker() })) // no model
   try {
     const res = await tool.handler({ file_path: "p.png" }, {})
     assert.match(textOf(res), /cannot accept image input|vision-capable/)
-    assert.ok(!res.content.some((b) => b.type === "image"))
+    assert.ok(!res.content.some((b) => (b as { type?: string }).type === "image"))
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
   }
@@ -200,7 +204,7 @@ test("read extracts text from a real PDF and records it", async () => {
   const pdf = path.join(dir, "d.pdf")
   await fsp.writeFile(pdf, MINIMAL_PDF, "latin1")
   const tracker = createReadTracker()
-  const tool = createReadTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: tracker }))
   try {
     const res = await tool.handler({ file_path: "d.pdf" }, {})
     assert.match(textOf(res), /Hello PDF World/)
@@ -215,7 +219,7 @@ test("read falls back to the attachment redirect when a PDF can't be parsed", as
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "read-pdf-"))
   const pdf = path.join(dir, "d.pdf")
   await fsp.writeFile(pdf, Buffer.from("%PDF-1.4\n%binary\x00", "latin1"))
-  const tool = createReadTool({ cwd: dir, readTracker: createReadTracker() })
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: createReadTracker() }))
   try {
     const res = await tool.handler({ file_path: "d.pdf" }, {})
     assert.match(textOf(res), /PDF/)

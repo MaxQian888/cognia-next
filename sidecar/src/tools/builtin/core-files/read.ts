@@ -9,18 +9,21 @@ import path from "node:path"
 import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
+import type { Stats } from "node:fs"
 
-import { toolError, toolText, toolImage } from "../../src/tools/kernel/result.ts"
-import { looksBinary } from "../../src/tools/builtin/core-files/js-search.ts"
-import { decodeText } from "../../src/tools/builtin/core-files/text-io.ts"
-import { resolveToolPath } from "../../src/platform/fs/paths.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText, toolImage } from "../../kernel/result.ts"
+import { looksBinary } from "./js-search.ts"
+import { decodeText } from "./text-io.ts"
+import { resolveToolPath } from "../../../platform/fs/paths.ts"
 import {
   imageMimeFor,
   modelSupportsImageInput,
   readImageBlock,
   renderNotebook,
   extractPdfText,
-} from "../../src/tools/builtin/core-files/read-media.ts"
+} from "./read-media.ts"
+import type { CoreFileToolContext } from "./context.ts"
 
 export const DEFAULT_LIMIT = 2000
 export const MAX_LINE_CHARS = 2000
@@ -49,8 +52,8 @@ export const readShape = {
     .describe(`Maximum number of lines to read (default ${DEFAULT_LIMIT}).`),
 }
 
-/** Resolve a possibly-relative tool path against the session cwd. */
-export function formatCatN(lines, startLine) {
+/** Number `lines` cat -n style from `startLine`, clipping over-long lines. */
+export function formatCatN(lines: readonly string[], startLine: number): string {
   return lines
     .map((line, i) => {
       const text =
@@ -60,11 +63,11 @@ export function formatCatN(lines, startLine) {
     .join("\n")
 }
 
-export function createReadTool({ cwd, readTracker, model, provider } = {}) {
-  async function execRead(args) {
+export function createReadTool({ cwd, readTracker, model, provider }: CoreFileToolContext = {}) {
+  async function execRead(args: ToolArgs<typeof readShape>) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
-      let st
+      let st: Stats
       try {
         st = await fsp.stat(abs)
       } catch {
@@ -81,7 +84,9 @@ export function createReadTool({ cwd, readTracker, model, provider } = {}) {
           readTracker?.record(abs, st)
           return toolText(rendered)
         } catch (err) {
-          return toolError(`could not parse notebook ${abs}: ${err?.message ?? err}`)
+          return toolError(
+            `could not parse notebook ${abs}: ${err instanceof Error ? err.message : String(err)}`
+          )
         }
       }
 
@@ -166,7 +171,7 @@ export function createReadTool({ cwd, readTracker, model, provider } = {}) {
       let clipped = false
       if (Buffer.byteLength(body, "utf-8") > MAX_OUTPUT_BYTES) {
         // Trim whole lines until the body fits.
-        const out = []
+        const out: string[] = []
         let bytes = 0
         for (const line of body.split("\n")) {
           const b = Buffer.byteLength(line, "utf-8") + 1

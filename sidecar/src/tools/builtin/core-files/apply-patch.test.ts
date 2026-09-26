@@ -5,13 +5,14 @@ import os from "node:os"
 import fsp from "node:fs/promises"
 import { createPatch } from "diff"
 
-import { createApplyPatchTool } from "./apply-patch.mjs"
-import { createReadTracker } from "../../src/tools/state/read-tracker.ts"
+import { createApplyPatchTool } from "./apply-patch.ts"
+import { createReadTracker } from "../../state/read-tracker.ts"
+import { asCallable } from "../../../../test-support/tool-result.ts"
 
 const BOM = String.fromCharCode(0xfeff)
 
-function textOf(result) {
-  return result.content.map((b) => b.text).join("\n")
+function textOf(result: { content: unknown[] }): string {
+  return result.content.map((b) => (b as { text?: string }).text).join("\n")
 }
 
 async function tmp() {
@@ -21,7 +22,7 @@ async function tmp() {
 test("applies a single-file modification (round-trip) after a prior read", async () => {
   const dir = await tmp()
   const tracker = createReadTracker()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker }))
   try {
     const abs = path.join(dir, "foo.txt")
     await fsp.writeFile(abs, "a\nb\nc\n")
@@ -39,7 +40,7 @@ test("applies a single-file modification (round-trip) after a prior read", async
 
 test("modifying an existing file requires a prior read (nothing written)", async () => {
   const dir = await tmp()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: createReadTracker() })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: createReadTracker() }))
   try {
     const abs = path.join(dir, "foo.txt")
     await fsp.writeFile(abs, "a\nb\nc\n")
@@ -57,7 +58,7 @@ test("modifying an existing file requires a prior read (nothing written)", async
 test("creates a new file from a /dev/null source hunk", async () => {
   const dir = await tmp()
   const tracker = createReadTracker()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker }))
   try {
     const patch = ["--- /dev/null", "+++ new.txt", "@@ -0,0 +1,2 @@", "+hello", "+world", ""].join(
       "\n"
@@ -76,7 +77,7 @@ test("creates a new file from a /dev/null source hunk", async () => {
 
 test("refuses to create over an existing file", async () => {
   const dir = await tmp()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: createReadTracker() })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: createReadTracker() }))
   try {
     const abs = path.join(dir, "exists.txt")
     await fsp.writeFile(abs, "original\n")
@@ -93,7 +94,7 @@ test("refuses to create over an existing file", async () => {
 test("deletes a file via a /dev/null target hunk (after a read)", async () => {
   const dir = await tmp()
   const tracker = createReadTracker()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker }))
   try {
     const abs = path.join(dir, "old.txt")
     await fsp.writeFile(abs, "hello\nworld\n")
@@ -112,7 +113,7 @@ test("deletes a file via a /dev/null target hunk (after a read)", async () => {
 test("is atomic across files: a failing hunk writes nothing", async () => {
   const dir = await tmp()
   const tracker = createReadTracker()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker }))
   try {
     const absA = path.join(dir, "a.txt")
     const absB = path.join(dir, "b.txt")
@@ -139,7 +140,7 @@ test("is atomic across files: a failing hunk writes nothing", async () => {
 test("preserves BOM and CRLF on modify", async () => {
   const dir = await tmp()
   const tracker = createReadTracker()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker }))
   try {
     const abs = path.join(dir, "crlf.txt")
     await fsp.writeFile(abs, `${BOM}a\r\nb\r\nc\r\n`)
@@ -156,7 +157,7 @@ test("preserves BOM and CRLF on modify", async () => {
 
 test("rejects an empty / unparseable patch", async () => {
   const dir = await tmp()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: createReadTracker() })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: createReadTracker() }))
   try {
     const res = await tool.handler({ patch: "not a diff at all" }, {})
     assert.equal(res.isError, true)
@@ -174,7 +175,7 @@ test("surfaces LSP diagnostics after a successful patch", async () => {
       { severity: 1, range: { start: { line: 1, character: 0 } }, message: "boom" },
     ],
   }
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker, lspResolver })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker, lspResolver }))
   try {
     const abs = path.join(dir, "foo.txt")
     await fsp.writeFile(abs, "a\nb\nc\n")
@@ -191,7 +192,7 @@ test("surfaces LSP diagnostics after a successful patch", async () => {
 test("fuzzy-rescues a hunk whose context drifted past strict apply", async () => {
   const dir = await tmp()
   const tracker = createReadTracker()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker }))
   try {
     const abs = path.join(dir, "f.txt")
     // Disk has a 4-space-indented context line; the patch was authored against a
@@ -212,7 +213,7 @@ test("fuzzy-rescues a hunk whose context drifted past strict apply", async () =>
 test("refuses to rescue when the hunk context is nowhere in the file (nothing written)", async () => {
   const dir = await tmp()
   const tracker = createReadTracker()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker }))
   try {
     const abs = path.join(dir, "f.txt")
     await fsp.writeFile(abs, "alpha\nbeta\n")
@@ -231,7 +232,7 @@ test("refuses to rescue when the hunk context is nowhere in the file (nothing wr
 test("preserves CRLF + BOM through a fuzzy-rescued hunk", async () => {
   const dir = await tmp()
   const tracker = createReadTracker()
-  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker }))
   try {
     const abs = path.join(dir, "f.txt")
     // CRLF + BOM on disk, with a trailing-space drift on the context line.

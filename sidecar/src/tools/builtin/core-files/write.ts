@@ -4,14 +4,17 @@
 
 import path from "node:path"
 import fsp from "node:fs/promises"
+import type { Stats } from "node:fs"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
-import { canonicalKey } from "../../src/tools/state/read-tracker.ts"
-import { decodeText, encodeText, withFileLock } from "../../src/tools/builtin/core-files/text-io.ts"
-import { resolveToolPath } from "../../src/platform/fs/paths.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { assertNotSecretEscape } from "../../../policy/confinement/enforce.ts"
+import { canonicalKey } from "../../state/read-tracker.ts"
+import { decodeText, encodeText, withFileLock } from "./text-io.ts"
+import { resolveToolPath } from "../../../platform/fs/paths.ts"
+import type { CoreFileToolContext, DiagnosticsSource } from "./context.ts"
 
 export const LSP_DIAG_TIMEOUT_MS = 3_000
 export const LSP_DIAG_MAX_CHARS = 4_000
@@ -30,15 +33,18 @@ export const writeShape = {
  * Best-effort diagnostics block after a mutation. Never throws; returns ""
  * when LSP is unavailable, slow, or clean.
  */
-export async function diagnosticsAfterWrite(lspResolver, absPath) {
+export async function diagnosticsAfterWrite(
+  lspResolver: DiagnosticsSource | null | undefined,
+  absPath: string
+): Promise<string> {
   if (!lspResolver || typeof lspResolver.getDiagnostics !== "function") return ""
   try {
     const diags = await Promise.race([
       lspResolver.getDiagnostics(absPath),
-      new Promise((resolve) => setTimeout(() => resolve(null), LSP_DIAG_TIMEOUT_MS)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), LSP_DIAG_TIMEOUT_MS)),
     ])
     if (!Array.isArray(diags) || diags.length === 0) return ""
-    const { formatDiagnostics } = await import("../../src/services/lsp/report.ts")
+    const { formatDiagnostics } = await import("../../../services/lsp/report.ts")
     const block = formatDiagnostics(absPath, diags, { minSeverity: 2 })
     if (!block) return ""
     const clipped =
@@ -49,15 +55,15 @@ export async function diagnosticsAfterWrite(lspResolver, absPath) {
   }
 }
 
-export function createWriteTool({ cwd, readTracker, lspResolver }) {
-  async function execWrite(args) {
+export function createWriteTool({ cwd, readTracker, lspResolver }: CoreFileToolContext) {
+  async function execWrite(args: ToolArgs<typeof writeShape>) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
       // Defence-in-depth: never write into a credential path, even when no
       // confinement policy is configured for this session.
       assertNotSecretEscape(cwd, abs)
       return await withFileLock(canonicalKey(abs), async () => {
-        let existing = null
+        let existing: Stats | null = null
         try {
           existing = await fsp.stat(abs)
         } catch {

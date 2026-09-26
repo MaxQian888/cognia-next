@@ -1,21 +1,26 @@
 // Core `edit` + `multi_edit` tools — exact-string replacement with the
-// opencode-style fuzzy fallback cascade (fuzzy-replace.mjs), read-before-edit
+// opencode-style fuzzy fallback cascade (fuzzy-replace.ts), read-before-edit
 // enforcement, BOM/EOL preservation, per-file serialization, and best-effort
 // LSP diagnostics after the edit. `multi_edit` applies its edits sequentially
 // against an in-memory buffer and aborts atomically on the first failure.
 
 import fsp from "node:fs/promises"
+import type { Stats } from "node:fs"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
-import { canonicalKey } from "../../src/tools/state/read-tracker.ts"
-import { decodeText, encodeText, withFileLock } from "../../src/tools/builtin/core-files/text-io.ts"
-import { replaceWithFallback } from "../../src/tools/builtin/core-files/fuzzy-replace.ts"
-import { resolveToolPath } from "../../src/platform/fs/paths.ts"
-import { formatCatN } from "./read.mjs"
-import { diagnosticsAfterWrite } from "./write.mjs"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { assertNotSecretEscape } from "../../../policy/confinement/enforce.ts"
+import { canonicalKey } from "../../state/read-tracker.ts"
+import type { ReadTracker } from "../../state/read-tracker.ts"
+import { decodeText, encodeText, withFileLock } from "./text-io.ts"
+import type { DecodedText } from "./text-io.ts"
+import { replaceWithFallback } from "./fuzzy-replace.ts"
+import { resolveToolPath } from "../../../platform/fs/paths.ts"
+import { formatCatN } from "./read.ts"
+import { diagnosticsAfterWrite } from "./write.ts"
+import type { CoreFileToolContext } from "./context.ts"
 
 // Post-edit snippet (Claude Code parity): after a successful edit we echo the
 // changed region as `cat -n` so the model can confirm the edit landed in the
@@ -26,14 +31,13 @@ export const SNIPPET_CONTEXT = 4
 export const SNIPPET_MAX_LINES = 50
 
 /**
- * Render the edited region of `content` (LF-normalized) as a `cat -n` block.
+ * Render the edited region of `content` (LF-normalized) as a `cat -n` block:
+ * a labelled snippet, or "" when the anchor is unknown.
  *
- * @param {string} content   final file content, LF-normalized
- * @param {number} anchorIndex  char offset where the first replacement begins
- * @param {string} newText   the replacement text (LF-normalized); "" for a deletion
- * @returns {string} a labelled snippet block, or "" when the anchor is unknown
+ * `anchorIndex` is the char offset where the first replacement begins;
+ * `newText` is the LF-normalized replacement text ("" for a deletion).
  */
-export function renderEditSnippet(content, anchorIndex, newText) {
+export function renderEditSnippet(content: string, anchorIndex: number, newText: string): string {
   if (!Number.isInteger(anchorIndex) || anchorIndex < 0) return ""
   const lines = content.split("\n")
   // 0-based line index of the anchor: count newlines before it.
@@ -96,8 +100,11 @@ export const multiEditShape = {
     ),
 }
 
-async function loadForEdit(abs, readTracker) {
-  let st
+async function loadForEdit(
+  abs: string,
+  readTracker: ReadTracker | undefined
+): Promise<DecodedText> {
+  let st: Stats
   try {
     st = await fsp.stat(abs)
   } catch {
@@ -109,14 +116,19 @@ async function loadForEdit(abs, readTracker) {
   return decodeText(raw)
 }
 
-async function saveEdited(abs, content, traits, readTracker) {
+async function saveEdited(
+  abs: string,
+  content: string,
+  traits: DecodedText,
+  readTracker: ReadTracker | undefined
+): Promise<void> {
   await fsp.writeFile(abs, encodeText(content, traits), "utf-8")
   const st = await fsp.stat(abs)
   readTracker?.record(abs, st)
 }
 
-export function createEditTool({ cwd, readTracker, lspResolver }) {
-  async function execEdit(args) {
+export function createEditTool({ cwd, readTracker, lspResolver }: CoreFileToolContext) {
+  async function execEdit(args: ToolArgs<typeof editShape>) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
       assertNotSecretEscape(cwd, abs)
@@ -148,8 +160,8 @@ export function createEditTool({ cwd, readTracker, lspResolver }) {
   )
 }
 
-export function createMultiEditTool({ cwd, readTracker, lspResolver }) {
-  async function execMultiEdit(args) {
+export function createMultiEditTool({ cwd, readTracker, lspResolver }: CoreFileToolContext) {
+  async function execMultiEdit(args: ToolArgs<typeof multiEditShape>) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
       assertNotSecretEscape(cwd, abs)
@@ -158,11 +170,11 @@ export function createMultiEditTool({ cwd, readTracker, lspResolver }) {
         let content = traits.content
         // Anchor the post-edit snippet on the FIRST edit, tracking how later
         // edits shift its position as the buffer mutates beneath it.
-        let anchorIndex = null
+        let anchorIndex: number | null = null
         let anchorNewText = ""
-        const applied = []
+        const applied: string[] = []
         for (let i = 0; i < args.edits.length; i++) {
-          const e = args.edits[i]
+          const e = args.edits[i]!
           try {
             const oldLf = decodeText(e.old_string).content
             const newLf = decodeText(e.new_string).content
@@ -186,7 +198,7 @@ export function createMultiEditTool({ cwd, readTracker, lspResolver }) {
           } catch (err) {
             // Atomic: nothing is written when any edit fails.
             return toolError(
-              `edit #${i + 1} of ${args.edits.length} failed — no changes were written. ${err.message}`,
+              `edit #${i + 1} of ${args.edits.length} failed — no changes were written. ${err instanceof Error ? err.message : String(err)}`,
               "multi_edit"
             )
           }

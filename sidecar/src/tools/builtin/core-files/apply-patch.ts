@@ -13,17 +13,20 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { applyPatch, parsePatch } from "diff"
+import type { StructuredPatch, StructuredPatchHunk } from "diff"
+import type { Stats } from "node:fs"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
-import { canonicalKey } from "../../src/tools/state/read-tracker.ts"
-import { decodeText, encodeText, withFileLock } from "../../src/tools/builtin/core-files/text-io.ts"
-import { resolveToolPath } from "../../src/platform/fs/paths.ts"
-import { diagnosticsAfterWrite } from "./write.mjs"
-import {
-  replaceWithFallback,
-  ReplaceError,
-} from "../../src/tools/builtin/core-files/fuzzy-replace.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { assertNotSecretEscape } from "../../../policy/confinement/enforce.ts"
+import { canonicalKey } from "../../state/read-tracker.ts"
+import type { ReadTracker } from "../../state/read-tracker.ts"
+import { decodeText, encodeText, withFileLock } from "./text-io.ts"
+import type { DecodedText } from "./text-io.ts"
+import { resolveToolPath } from "../../../platform/fs/paths.ts"
+import { diagnosticsAfterWrite } from "./write.ts"
+import { replaceWithFallback, ReplaceError } from "./fuzzy-replace.ts"
+import type { CoreFileToolContext } from "./context.ts"
 
 export const applyPatchShape = {
   patch: z
@@ -39,8 +42,14 @@ export const applyPatchShape = {
 
 const DEV_NULL = "/dev/null"
 
+/** One file's validated change, written in the commit phase. */
+type PlannedFileChange =
+  | { abs: string; action: "delete" }
+  | { abs: string; action: "create"; content: string }
+  | { abs: string; action: "modify"; content: string; traits: DecodedText }
+
 /** A diff header naming /dev/null means the file is being created or deleted. */
-function isDevNull(name) {
+function isDevNull(name: string | undefined): boolean {
   return !name || name === DEV_NULL
 }
 
@@ -49,8 +58,8 @@ function isDevNull(name) {
  * resolves against the session cwd. `parsePatch` already removes the trailing
  * tab+timestamp some tools append.
  */
-function stripGitPrefix(name) {
-  if (isDevNull(name)) return name
+function stripGitPrefix(name: string | undefined): string | undefined {
+  if (!name || isDevNull(name)) return name
   return name.replace(/^[ab]\//, "")
 }
 
@@ -60,9 +69,9 @@ function stripGitPrefix(name) {
  * are skipped. Returns null when the hunk has no usable old block (pure
  * insertion against unknown context — let strict applyPatch own that case).
  */
-function hunkBlocks(hunk) {
-  const oldLines = []
-  const newLines = []
+function hunkBlocks(hunk: StructuredPatchHunk): { oldBlock: string; newBlock: string } | null {
+  const oldLines: string[] = []
+  const newLines: string[] = []
   for (const line of hunk.lines ?? []) {
     const tag = line[0]
     const body = line.slice(1)
@@ -92,7 +101,7 @@ function hunkBlocks(hunk) {
  * before. Applies hunks in reverse file order so earlier edits don't shift
  * later anchors.
  */
-function tryFuzzyRescue(sourceContent, fp) {
+function tryFuzzyRescue(sourceContent: string, fp: StructuredPatch): string | null {
   const hunks = Array.isArray(fp.hunks) ? [...fp.hunks] : []
   if (hunks.length === 0) return null
   hunks.sort((a, b) => (b.oldStart ?? 0) - (a.oldStart ?? 0))
@@ -119,16 +128,20 @@ function tryFuzzyRescue(sourceContent, fp) {
  * mismatch — read-before-edit violation, missing file, or a hunk that doesn't
  * apply. Reads only; the write happens later in the commit phase.
  */
-async function planFilePatch(fp, cwd, readTracker) {
+async function planFilePatch(
+  fp: StructuredPatch,
+  cwd: string | undefined,
+  readTracker: ReadTracker | undefined
+): Promise<PlannedFileChange> {
   const creation = isDevNull(fp.oldFileName)
   const deletion = isDevNull(fp.newFileName)
   const rel = deletion ? stripGitPrefix(fp.oldFileName) : stripGitPrefix(fp.newFileName)
-  if (isDevNull(rel)) throw new Error("patch is missing a target file path")
+  if (!rel || isDevNull(rel)) throw new Error("patch is missing a target file path")
   const abs = resolveToolPath(cwd, rel)
   assertNotSecretEscape(cwd, abs)
 
   if (deletion) {
-    let st
+    let st: Stats
     try {
       st = await fsp.stat(abs)
     } catch {
@@ -155,7 +168,7 @@ async function planFilePatch(fp, cwd, readTracker) {
   }
 
   // Modification.
-  let st
+  let st: Stats
   try {
     st = await fsp.stat(abs)
   } catch {
@@ -167,13 +180,13 @@ async function planFilePatch(fp, cwd, readTracker) {
   const traits = decodeText(raw)
   // applyPatch compares against LF-normalized source so CRLF files still match;
   // the original traits are re-applied on write to preserve EOL/BOM.
-  let out = applyPatch(traits.content, fp)
+  let out: string | false | null = applyPatch(traits.content, fp)
   if (out === false) {
     // Strict apply failed (context drifted past the diff fuzz factor). Try a
     // bounded, unique-match-only fuzzy rescue before giving up — but never
     // guess: an ambiguous or unfound hunk still aborts the whole patch.
     out = tryFuzzyRescue(traits.content, fp)
-    if (out === null || out === false) {
+    if (out === null) {
       throw new Error(
         `patch does not apply cleanly: ${abs} — re-read the file and regenerate the diff`
       )
@@ -182,13 +195,16 @@ async function planFilePatch(fp, cwd, readTracker) {
   return { abs, action: "modify", content: out, traits }
 }
 
-export function createApplyPatchTool({ cwd, readTracker, lspResolver }) {
-  async function execApplyPatch(args) {
-    let parsed
+export function createApplyPatchTool({ cwd, readTracker, lspResolver }: CoreFileToolContext) {
+  async function execApplyPatch(args: ToolArgs<typeof applyPatchShape>) {
+    let parsed: StructuredPatch[]
     try {
       parsed = parsePatch(args.patch)
     } catch (err) {
-      return toolError(`could not parse patch: ${err.message}`, "apply_patch")
+      return toolError(
+        `could not parse patch: ${err instanceof Error ? err.message : String(err)}`,
+        "apply_patch"
+      )
     }
     if (!Array.isArray(parsed) || parsed.length === 0) {
       return toolError("no file patches found in the input", "apply_patch")
@@ -196,18 +212,21 @@ export function createApplyPatchTool({ cwd, readTracker, lspResolver }) {
 
     // Plan phase — resolve and validate every file change in memory. Nothing is
     // written until all hunks across all files apply cleanly (atomic).
-    const plans = []
+    const plans: PlannedFileChange[] = []
     try {
       for (const fp of parsed) {
         plans.push(await planFilePatch(fp, cwd, readTracker))
       }
     } catch (err) {
-      return toolError(`${err.message}. No changes were written.`, "apply_patch")
+      return toolError(
+        `${err instanceof Error ? err.message : String(err)}. No changes were written.`,
+        "apply_patch"
+      )
     }
 
     // Commit phase — apply each planned change under its own file lock.
-    const summary = []
-    const touched = []
+    const summary: string[] = []
+    const touched: string[] = []
     for (const p of plans) {
       await withFileLock(canonicalKey(p.abs), async () => {
         if (p.action === "delete") {

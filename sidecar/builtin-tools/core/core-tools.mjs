@@ -10,12 +10,12 @@
 // layer supplies the per-session working directory, read tracker, and the
 // lazy LSP resolver.
 
-import { createGrepTool } from "./grep.mjs"
-import { createGlobTool } from "./glob.mjs"
-import { createReadTool } from "./read.mjs"
+import { createGrepTool } from "../../src/tools/builtin/core-files/grep.ts"
+import { createGlobTool } from "../../src/tools/builtin/core-files/glob.ts"
+import { createReadTool } from "../../src/tools/builtin/core-files/read.ts"
 import { createLsTool } from "../../src/tools/builtin/core-files/ls.ts"
-import { createEditTool, createMultiEditTool } from "./edit.mjs"
-import { createWriteTool } from "./write.mjs"
+import { createEditTool, createMultiEditTool } from "../../src/tools/builtin/core-files/edit.ts"
+import { createWriteTool } from "../../src/tools/builtin/core-files/write.ts"
 import {
   createBashTool,
   createBashOutputTool,
@@ -27,8 +27,11 @@ import {
   createSessionTaskTools,
   SESSION_TASK_TOOL_NAMES,
 } from "../../src/tools/builtin/core-files/tasks.ts"
-import { createNotebookEditTool, NOTEBOOK_EDIT_NAME } from "./notebook-edit.mjs"
-import { createApplyPatchTool } from "./apply-patch.mjs"
+import {
+  createNotebookEditTool,
+  NOTEBOOK_EDIT_NAME,
+} from "../../src/tools/builtin/core-files/notebook-edit.ts"
+import { createApplyPatchTool } from "../../src/tools/builtin/core-files/apply-patch.ts"
 import { createMonitorTools, MONITOR_TOOL_NAMES } from "./monitor.mjs"
 
 /**

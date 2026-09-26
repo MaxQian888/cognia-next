@@ -4,10 +4,11 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { createGrepTool, pageLines, groupByFile, DEFAULT_HEAD_LIMIT } from "./grep.mjs"
+import { createGrepTool, pageLines, groupByFile, DEFAULT_HEAD_LIMIT } from "./grep.ts"
+import { asCallable } from "../../../../test-support/tool-result.ts"
 
-function textOf(result) {
-  return result.content.map((b) => b.text).join("\n")
+function textOf(result: { content: unknown[] }): string {
+  return result.content.map((b) => (b as { text?: string }).text).join("\n")
 }
 
 async function fixture() {
@@ -25,7 +26,7 @@ async function fixture() {
 test("files_with_matches mode lists matching files only (default)", async () => {
   const dir = await fixture()
   try {
-    const tool = createGrepTool({ cwd: dir })
+    const tool = asCallable(createGrepTool({ cwd: dir }))
     const text = textOf(await tool.handler({ pattern: "needle" }, {}))
     assert.ok(text.includes("a.ts"))
     assert.ok(text.includes("b.md"))
@@ -39,7 +40,7 @@ test("files_with_matches mode lists matching files only (default)", async () => 
 test("content mode groups multi-match files under one path header (token-saving)", async () => {
   const dir = await fixture()
   try {
-    const tool = createGrepTool({ cwd: dir })
+    const tool = asCallable(createGrepTool({ cwd: dir }))
     const text = textOf(await tool.handler({ pattern: "needle", output_mode: "content" }, {}))
     // a.ts has two hits ⇒ path hoisted once, then bare `line:text` rows.
     assert.match(text, /^src\/a\.ts$/m)
@@ -57,7 +58,7 @@ test("content mode groups multi-match files under one path header (token-saving)
 test("path accepts a single file", async () => {
   const dir = await fixture()
   try {
-    const tool = createGrepTool({ cwd: dir })
+    const tool = asCallable(createGrepTool({ cwd: dir }))
     const text = textOf(
       await tool.handler(
         { pattern: "needle", path: path.join(dir, "src", "a.ts"), output_mode: "content" },
@@ -91,7 +92,7 @@ test("groupByFile hoists a repeated path but leaves lone matches and non-matches
 test("content mode with context lines includes neighbours", async () => {
   const dir = await fixture()
   try {
-    const tool = createGrepTool({ cwd: dir })
+    const tool = asCallable(createGrepTool({ cwd: dir }))
     const text = textOf(
       await tool.handler({ pattern: "needle here", output_mode: "content", context: 1 }, {})
     )
@@ -105,7 +106,7 @@ test("content mode with context lines includes neighbours", async () => {
 test("count mode returns per-file counts", async () => {
   const dir = await fixture()
   try {
-    const tool = createGrepTool({ cwd: dir })
+    const tool = asCallable(createGrepTool({ cwd: dir }))
     const text = textOf(await tool.handler({ pattern: "needle", output_mode: "count" }, {}))
     assert.match(text, /a\.ts:2/)
     assert.match(text, /b\.md:1/)
@@ -117,7 +118,7 @@ test("count mode returns per-file counts", async () => {
 test("glob filter narrows the searched files", async () => {
   const dir = await fixture()
   try {
-    const tool = createGrepTool({ cwd: dir })
+    const tool = asCallable(createGrepTool({ cwd: dir }))
     const text = textOf(await tool.handler({ pattern: "needle", glob: "**/*.md" }, {}))
     assert.ok(text.includes("b.md"))
     assert.ok(!text.includes("a.ts"))
@@ -129,7 +130,7 @@ test("glob filter narrows the searched files", async () => {
 test("case_insensitive matches differently-cased text", async () => {
   const dir = await fixture()
   try {
-    const tool = createGrepTool({ cwd: dir })
+    const tool = asCallable(createGrepTool({ cwd: dir }))
     const text = textOf(await tool.handler({ pattern: "NEEDLE", case_insensitive: true }, {}))
     assert.ok(text.includes("a.ts"))
   } finally {
@@ -140,7 +141,7 @@ test("case_insensitive matches differently-cased text", async () => {
 test("no matches yields a clean message", async () => {
   const dir = await fixture()
   try {
-    const tool = createGrepTool({ cwd: dir })
+    const tool = asCallable(createGrepTool({ cwd: dir }))
     const text = textOf(await tool.handler({ pattern: "zzz_absent" }, {}))
     assert.match(text, /No matches found/)
   } finally {
@@ -151,7 +152,7 @@ test("no matches yields a clean message", async () => {
 test("head_limit + offset page through content with a continuation note", async () => {
   const dir = await fixture()
   try {
-    const tool = createGrepTool({ cwd: dir })
+    const tool = asCallable(createGrepTool({ cwd: dir }))
     const first = textOf(
       await tool.handler({ pattern: "needle", output_mode: "content", head_limit: 1 }, {})
     )
@@ -172,7 +173,7 @@ test("head_limit + offset page through content with a continuation note", async 
 test("invalid regex surfaces as a tool error", async () => {
   const dir = await fixture()
   try {
-    const tool = createGrepTool({ cwd: dir })
+    const tool = asCallable(createGrepTool({ cwd: dir }))
     const res = await tool.handler({ pattern: "([" }, {})
     assert.equal(res.isError, true)
   } finally {

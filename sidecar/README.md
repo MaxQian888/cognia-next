@@ -164,6 +164,8 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/clonedeps/*` (+ tests)                                    | `src/tools/builtin/dependency-research/*`                          | 8j          |
 | `builtin-tools/core/{text-io,fuzzy-replace,js-search,rg,ls}.mjs`         | `src/tools/builtin/core-files/*.ts`                                | 8k          |
 | `builtin-tools/core/{read-media,todo,tasks}.mjs` (+ tests)               | `src/tools/builtin/core-files/*.ts`                                | 8k          |
+| `builtin-tools/core/{read,write,edit,glob,grep}.mjs` (+ tests)           | `src/tools/builtin/core-files/*.ts`                                | 8k          |
+| `builtin-tools/core/{notebook-edit,apply-patch}.mjs` (+ tests)           | `src/tools/builtin/core-files/*.ts`                                | 8k          |
 
 ## Scripts (run from repo root)
 

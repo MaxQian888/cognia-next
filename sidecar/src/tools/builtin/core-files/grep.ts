@@ -10,11 +10,13 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { detectRipgrep, runRipgrep } from "../../src/tools/builtin/core-files/rg.ts"
-import { jsGrep } from "../../src/tools/builtin/core-files/js-search.ts"
-import { decodeText } from "../../src/tools/builtin/core-files/text-io.ts"
-import { resolveToolPath } from "../../src/platform/fs/paths.ts"
+import type { ToolArgs, ToolHandlerExtra } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { detectRipgrep, runRipgrep } from "./rg.ts"
+import { jsGrep } from "./js-search.ts"
+import { decodeText } from "./text-io.ts"
+import { resolveToolPath } from "../../../platform/fs/paths.ts"
+import type { CoreFileToolContext } from "./context.ts"
 
 export const DEFAULT_HEAD_LIMIT = 250
 export const MAX_LINE_CHARS = 1000
@@ -80,8 +82,19 @@ export const grepShape = {
     .describe("Skip the first N lines/entries before applying head_limit (paging)."),
 }
 
+type GrepArgs = ToolArgs<typeof grepShape>
+
+/** Output lines from either engine, and whether the engine capped its output. */
+interface EngineLines {
+  lines: string[]
+  streamTruncated: boolean
+}
+
 /** Apply offset + head_limit to a list of output lines. */
-export function pageLines(lines, { offset = 0, headLimit = DEFAULT_HEAD_LIMIT }) {
+export function pageLines(
+  lines: string[],
+  { offset = 0, headLimit = DEFAULT_HEAD_LIMIT }: { offset?: number; headLimit?: number }
+): { lines: string[]; truncated: boolean } {
   const afterOffset = offset > 0 ? lines.slice(offset) : lines
   if (headLimit === 0) return { lines: afterOffset, truncated: false }
   return {
@@ -90,21 +103,21 @@ export function pageLines(lines, { offset = 0, headLimit = DEFAULT_HEAD_LIMIT })
   }
 }
 
-function clipLine(text) {
+function clipLine(text: string): string {
   return text.length > MAX_LINE_CHARS ? `${text.slice(0, MAX_LINE_CHARS)}…` : text
 }
 
-function normalizeRgLine(line) {
+function normalizeRgLine(line: string): string {
   return line.replace(/\\/g, "/").replace(/^\.\//, "")
 }
 
-function parseSortableLine(line) {
+function parseSortableLine(line: string): { file: string; line: number; text: string } {
   const match = /^(.*?):(\d+):([\s\S]*)$/.exec(line)
   if (!match) return { file: line, line: 0, text: "" }
-  return { file: match[1], line: Number(match[2]), text: match[3] }
+  return { file: match[1]!, line: Number(match[2]), text: match[3]! }
 }
 
-function compareGrepLines(a, b) {
+function compareGrepLines(a: string, b: string): number {
   const left = parseSortableLine(a)
   const right = parseSortableLine(b)
   return (
@@ -131,26 +144,26 @@ function compareGrepLines(a, b) {
  * caller only applies this when no context lines were requested. The model can
  * still cite `src/foo/bar.ts:12` from the grouped form.
  */
-export function groupByFile(lines) {
-  const parsed = lines.map((line) => {
+export function groupByFile(lines: string[]): string[] {
+  const parsed = lines.map((line): { file?: string; rest?: string; raw: string } => {
     const m = /^(.*?):(\d+):([\s\S]*)$/.exec(line)
-    return m ? { file: m[1], rest: `${m[2]}:${m[3]}`, raw: line } : { raw: line }
+    return m ? { file: m[1]!, rest: `${m[2]}:${m[3]}`, raw: line } : { raw: line }
   })
-  const out = []
+  const out: string[] = []
   let i = 0
   while (i < parsed.length) {
-    const head = parsed[i]
+    const head = parsed[i]!
     if (head.file === undefined) {
       out.push(head.raw)
       i++
       continue
     }
     let j = i + 1
-    while (j < parsed.length && parsed[j].file === head.file) j++
+    while (j < parsed.length && parsed[j]!.file === head.file) j++
     const run = parsed.slice(i, j)
     if (run.length >= 2) {
       out.push(head.file)
-      for (const r of run) out.push(r.rest)
+      for (const r of run) out.push(r.rest!)
     } else {
       out.push(head.raw)
     }
@@ -159,7 +172,15 @@ export function groupByFile(lines) {
   return out
 }
 
-async function execWithRipgrep(args, { root, target, rgPath, signal }) {
+async function execWithRipgrep(
+  args: GrepArgs,
+  {
+    root,
+    target,
+    rgPath,
+    signal,
+  }: { root: string; target: string; rgPath: string; signal?: AbortSignal | undefined }
+): Promise<EngineLines> {
   const rgArgs = ["--no-config", "--no-heading", "--glob", "!.git/**"]
   if (args.case_insensitive) rgArgs.push("-i")
   if (args.multiline) rgArgs.push("-U", "--multiline-dotall")
@@ -200,7 +221,10 @@ async function execWithRipgrep(args, { root, target, rgPath, signal }) {
   return { lines, streamTruncated }
 }
 
-async function execWithJsFallback(args, { root, target }) {
+async function execWithJsFallback(
+  args: GrepArgs,
+  { root, target }: { root: string; target: string }
+): Promise<EngineLines> {
   const { matches, truncated } = await jsGrep({
     pattern: args.pattern,
     root,
@@ -215,7 +239,7 @@ async function execWithJsFallback(args, { root, target }) {
     return { lines: files, streamTruncated: truncated }
   }
   if (mode === "count") {
-    const counts = new Map()
+    const counts = new Map<string, number>()
     for (const m of matches) counts.set(m.file, (counts.get(m.file) ?? 0) + 1)
     return {
       lines: [...counts.entries()].map(([f, c]) => `${f}:${c}`),
@@ -226,8 +250,8 @@ async function execWithJsFallback(args, { root, target }) {
   // content mode — reconstruct context windows from the files.
   const before = args.before_context ?? args.context ?? 0
   const after = args.after_context ?? args.context ?? 0
-  const fileCache = new Map()
-  const lines = []
+  const fileCache = new Map<string, string[] | null>()
+  const lines: string[] = []
   for (const m of matches) {
     if (before === 0 && after === 0) {
       lines.push(clipLine(`${m.file}:${m.line}:${m.text}`))
@@ -258,8 +282,8 @@ async function execWithJsFallback(args, { root, target }) {
   return { lines, streamTruncated: truncated }
 }
 
-export function createGrepTool({ cwd }) {
-  async function execGrep(args, extra) {
+export function createGrepTool({ cwd }: CoreFileToolContext) {
+  async function execGrep(args: GrepArgs, extra?: unknown) {
     try {
       const resolvedPath = resolveToolPath(cwd, args.path ?? ".")
       const stat = await fsp.stat(resolvedPath)
@@ -267,7 +291,7 @@ export function createGrepTool({ cwd }) {
       const root = isFile ? path.dirname(resolvedPath) : resolvedPath
       const target = isFile ? path.basename(resolvedPath) : "."
       const rgPath = await detectRipgrep()
-      const signal = extra?.signal
+      const signal = (extra as ToolHandlerExtra | undefined)?.signal
       const { lines, streamTruncated } = rgPath
         ? await execWithRipgrep(args, { root, target, rgPath, signal })
         : await execWithJsFallback(args, { root, target })
@@ -287,7 +311,7 @@ export function createGrepTool({ cwd }) {
       const mode = args.output_mode ?? "files_with_matches"
       const hasContext = Boolean(args.context || args.before_context || args.after_context)
       const displayed = mode === "content" && !hasContext ? groupByFile(shown) : shown
-      const notes = []
+      const notes: string[] = []
       if (truncated) {
         const nextOffset = (args.offset ?? 0) + shown.length
         notes.push(

@@ -1,17 +1,19 @@
 // Core `glob` tool — file pattern matching, mtime-sorted (newest first).
 //
 // Engine: ripgrep `--files --glob` when available (full gitignore fidelity),
-// otherwise the fast-glob fallback from js-search.mjs (root .gitignore only).
+// otherwise the fast-glob fallback from js-search.ts (root .gitignore only).
 
 import path from "node:path"
 import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { detectRipgrep, runRipgrep } from "../../src/tools/builtin/core-files/rg.ts"
-import { jsGlob } from "../../src/tools/builtin/core-files/js-search.ts"
-import { resolveToolPath } from "../../src/platform/fs/paths.ts"
+import type { ToolArgs, ToolHandlerExtra } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { detectRipgrep, runRipgrep } from "./rg.ts"
+import { jsGlob } from "./js-search.ts"
+import { resolveToolPath } from "../../../platform/fs/paths.ts"
+import type { CoreFileToolContext } from "./context.ts"
 
 export const MAX_FILES = 1000
 
@@ -31,11 +33,16 @@ export const globShape = {
 /**
  * Enumerate matching files (relative paths). Exported for the grep tool's
  * fallback and for tests.
- *
- * @param {{ pattern: string, root: string }} opts
- * @returns {Promise<{ files: string[], truncated: boolean }>}
  */
-export async function enumerateGlob({ pattern, root, signal }) {
+export async function enumerateGlob({
+  pattern,
+  root,
+  signal,
+}: {
+  pattern: string
+  root: string
+  signal?: AbortSignal | undefined
+}): Promise<{ files: string[]; truncated: boolean }> {
   const rgPath = await detectRipgrep()
   if (rgPath) {
     const { stdout, truncated } = await runRipgrep(
@@ -53,14 +60,14 @@ export async function enumerateGlob({ pattern, root, signal }) {
   return jsGlob({ pattern, cwd: root, cap: MAX_FILES })
 }
 
-export function createGlobTool({ cwd }) {
-  async function execGlob(args, extra) {
+export function createGlobTool({ cwd }: CoreFileToolContext) {
+  async function execGlob(args: ToolArgs<typeof globShape>, extra?: unknown) {
     try {
       const root = resolveToolPath(cwd, args.path ?? ".")
       const { files, truncated } = await enumerateGlob({
         pattern: args.pattern,
         root,
-        signal: extra?.signal,
+        signal: (extra as ToolHandlerExtra | undefined)?.signal,
       })
       if (files.length === 0) return toolText("No files matched the pattern.")
 

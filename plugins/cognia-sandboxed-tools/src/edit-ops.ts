@@ -1,8 +1,8 @@
 /**
  * Pure, renderer-safe file-edit operations for the sandboxed file tools.
  *
- * The Node sidecar's `sidecar/builtin-tools/core/edit.mjs` is filesystem-
- * coupled and cannot be imported into this renderer-side plugin, so the
+ * The Node sidecar's `sidecar/src/tools/builtin/core-files/edit.ts` is
+ * filesystem-coupled and cannot be imported into this renderer-side plugin, so the
  * literal str-replace / insert logic lives here as pure string transforms.
  * The actual disk read + write are performed inside the OS sandbox by
  * `index.ts`; these functions only compute the new file content in memory.

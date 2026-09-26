@@ -4,10 +4,11 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { createGlobTool, enumerateGlob } from "./glob.mjs"
+import { createGlobTool, enumerateGlob } from "./glob.ts"
+import { asCallable } from "../../../../test-support/tool-result.ts"
 
-function textOf(result) {
-  return result.content.map((b) => b.text).join("\n")
+function textOf(result: { content: unknown[] }): string {
+  return result.content.map((b) => (b as { text?: string }).text).join("\n")
 }
 
 async function fixture() {
@@ -24,12 +25,12 @@ async function fixture() {
 test("glob matches the pattern and sorts newest-first", async () => {
   const dir = await fixture()
   try {
-    const tool = createGlobTool({ cwd: dir })
+    const tool = asCallable(createGlobTool({ cwd: dir }))
     const text = textOf(await tool.handler({ pattern: "**/*.ts" }, {}))
     const lines = text.split("\n")
     assert.equal(lines.length, 2)
-    assert.match(lines[0], /new\.ts/)
-    assert.match(lines[1], /old\.ts/)
+    assert.match(lines[0]!, /new\.ts/)
+    assert.match(lines[1]!, /old\.ts/)
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
   }
@@ -38,7 +39,7 @@ test("glob matches the pattern and sorts newest-first", async () => {
 test("glob reports no matches cleanly", async () => {
   const dir = await fixture()
   try {
-    const tool = createGlobTool({ cwd: dir })
+    const tool = asCallable(createGlobTool({ cwd: dir }))
     const text = textOf(await tool.handler({ pattern: "**/*.rs" }, {}))
     assert.match(text, /No files matched/)
   } finally {
@@ -49,7 +50,7 @@ test("glob reports no matches cleanly", async () => {
 test("glob accepts an explicit path", async () => {
   const dir = await fixture()
   try {
-    const tool = createGlobTool({ cwd: os.tmpdir() })
+    const tool = asCallable(createGlobTool({ cwd: os.tmpdir() }))
     const text = textOf(await tool.handler({ pattern: "*.ts", path: path.join(dir, "src") }, {}))
     assert.match(text, /new\.ts/)
     assert.match(text, /old\.ts/)

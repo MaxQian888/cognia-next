@@ -9,12 +9,14 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
-import { canonicalKey } from "../../src/tools/state/read-tracker.ts"
-import { withFileLock } from "../../src/tools/builtin/core-files/text-io.ts"
-import { resolveToolPath } from "../../src/platform/fs/paths.ts"
-import { editNotebook } from "../../src/tools/builtin/core-files/read-media.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { assertNotSecretEscape } from "../../../policy/confinement/enforce.ts"
+import { canonicalKey } from "../../state/read-tracker.ts"
+import { withFileLock } from "./text-io.ts"
+import { resolveToolPath } from "../../../platform/fs/paths.ts"
+import { editNotebook } from "./read-media.ts"
+import type { CoreFileToolContext } from "./context.ts"
 
 export const NOTEBOOK_EDIT_NAME = "NotebookEdit"
 
@@ -57,8 +59,8 @@ export const notebookEditShape = {
     ),
 }
 
-export function createNotebookEditTool({ cwd, readTracker } = {}) {
-  async function execNotebookEdit(args) {
+export function createNotebookEditTool({ cwd, readTracker }: CoreFileToolContext = {}) {
+  async function execNotebookEdit(args: ToolArgs<typeof notebookEditShape>) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
       assertNotSecretEscape(cwd, abs)

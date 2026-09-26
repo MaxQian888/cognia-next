@@ -4,19 +4,20 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { createWriteTool, diagnosticsAfterWrite, LSP_DIAG_TIMEOUT_MS } from "./write.mjs"
-import { createReadTracker } from "../../src/tools/state/read-tracker.ts"
+import { createWriteTool, diagnosticsAfterWrite, LSP_DIAG_TIMEOUT_MS } from "./write.ts"
+import { createReadTracker } from "../../state/read-tracker.ts"
+import { asCallable } from "../../../../test-support/tool-result.ts"
 
 const BOM = String.fromCharCode(0xfeff)
 
-function textOf(result) {
-  return result.content.map((b) => b.text).join("\n")
+function textOf(result: { content: unknown[] }): string {
+  return result.content.map((b) => (b as { text?: string }).text).join("\n")
 }
 
 test("write creates a new file (parent dirs included) and records the read state", async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wr-"))
   const tracker = createReadTracker()
-  const tool = createWriteTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createWriteTool({ cwd: dir, readTracker: tracker }))
   try {
     const res = await tool.handler(
       { file_path: "deep/nested/new.txt", content: "hello\nworld\n" },
@@ -33,7 +34,7 @@ test("write creates a new file (parent dirs included) and records the read state
 
 test("overwriting an existing file requires a prior read", async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wr-"))
-  const tool = createWriteTool({ cwd: dir, readTracker: createReadTracker() })
+  const tool = asCallable(createWriteTool({ cwd: dir, readTracker: createReadTracker() }))
   try {
     const abs = path.join(dir, "exists.txt")
     await fsp.writeFile(abs, "original")
@@ -49,7 +50,7 @@ test("overwriting an existing file requires a prior read", async () => {
 test("overwrite preserves BOM and CRLF of the existing file", async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wr-"))
   const tracker = createReadTracker()
-  const tool = createWriteTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createWriteTool({ cwd: dir, readTracker: tracker }))
   try {
     const abs = path.join(dir, "crlf.txt")
     await fsp.writeFile(abs, `${BOM}a\r\nb\r\n`)
@@ -65,7 +66,7 @@ test("overwrite preserves BOM and CRLF of the existing file", async () => {
 test("overwrite is rejected when the file changed since the read", async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wr-"))
   const tracker = createReadTracker()
-  const tool = createWriteTool({ cwd: dir, readTracker: tracker })
+  const tool = asCallable(createWriteTool({ cwd: dir, readTracker: tracker }))
   try {
     const abs = path.join(dir, "stale.txt")
     await fsp.writeFile(abs, "v1")
@@ -86,7 +87,9 @@ test("write appends LSP diagnostics when the resolver reports problems", async (
       { severity: 1, message: "type error: oops", range: { start: { line: 0, character: 0 } } },
     ],
   }
-  const tool = createWriteTool({ cwd: dir, readTracker: createReadTracker(), lspResolver })
+  const tool = asCallable(
+    createWriteTool({ cwd: dir, readTracker: createReadTracker(), lspResolver })
+  )
   try {
     const res = await tool.handler({ file_path: "diag.ts", content: "bad code\n" }, {})
     const text = textOf(res)
@@ -100,7 +103,7 @@ test("write appends LSP diagnostics when the resolver reports problems", async (
 test("diagnosticsAfterWrite is best-effort: slow or broken resolvers yield empty", async () => {
   const slow = {
     getDiagnostics: () =>
-      new Promise((r) =>
+      new Promise<unknown[]>((r) =>
         setTimeout(() => r([{ severity: 1, message: "late" }]), LSP_DIAG_TIMEOUT_MS + 500)
       ),
   }
