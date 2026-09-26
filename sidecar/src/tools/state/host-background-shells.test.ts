@@ -1,25 +1,56 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { applyLineFilter, createHostBgShellRegistry } from "./bash-host-sessions.mjs"
+import type { BgShellRegistry } from "./background-shells.ts"
+import {
+  applyLineFilter,
+  createHostBgShellRegistry,
+  createSessionBgShellRegistry,
+} from "./host-background-shells.ts"
+import type { HostReadResult, HostRpcCaller } from "./host-background-shells.ts"
+
+type Params = Record<string, unknown>
+
+interface Call {
+  method: string
+  params: Params
+  options: { timeoutMs?: number } | undefined
+}
 
 /**
  * Scriptable fake host. `handlers[method]` receives params and returns the
  * result; calls are recorded so tests can assert on the wire traffic.
  */
-function fakeHost(handlers) {
-  const calls = []
-  return {
-    calls,
-    hostRpc: {
-      async call(method, params, options) {
-        calls.push({ method, params, options })
-        const handler = handlers[method]
-        if (!handler) throw new Error(`unexpected host_rpc method ${method}`)
-        return handler(params)
-      },
+function fakeHost(handlers: Record<string, (params: Params) => unknown>) {
+  const calls: Call[] = []
+  const hostRpc: HostRpcCaller = {
+    async call(method, params, options) {
+      calls.push({ method, params: params as Params, options })
+      const handler = handlers[method]
+      if (!handler) throw new Error(`unexpected host_rpc method ${method}`)
+      return handler(params as Params)
     },
   }
+  return { calls, hostRpc }
+}
+
+/** The `i`th recorded call. */
+function nth(calls: Call[], i: number): Call {
+  const call = calls[i]
+  assert.ok(call, `no host call #${i}`)
+  return call
+}
+
+/** Narrow a read to its success branch. */
+function ok(result: HostReadResult): Extract<HostReadResult, { ok: true }> {
+  assert.ok(result.ok, "expected a successful read")
+  return result
+}
+
+/** The reason of a failed result. */
+function reasonOf(result: { ok: true } | { ok: false; reason: string }): string {
+  assert.ok(!result.ok, "expected a failure")
+  return result.reason
 }
 
 function slice({
@@ -28,6 +59,12 @@ function slice({
   status = "running",
   exitCode = null,
   hasMore = false,
+}: {
+  data?: string
+  nextOffset?: number
+  status?: string
+  exitCode?: number | null
+  hasMore?: boolean
 }) {
   return { data, nextOffset, status, exitCode, hasMore, fromOffset: 0 }
 }
@@ -63,9 +100,9 @@ test("spawnBackground sends the session owner and returns the host record", asyn
   })
 
   assert.equal(entry.id, "job-1")
-  assert.deepEqual(calls[0].params.owner, { kind: "session", sessionId: "s1" })
-  assert.equal(calls[0].params.program, "/bin/sh")
-  assert.deepEqual(calls[0].params.args, ["-c", "pnpm dev"])
+  assert.deepEqual(nth(calls, 0).params.owner, { kind: "session", sessionId: "s1" })
+  assert.equal(nth(calls, 0).params.program, "/bin/sh")
+  assert.deepEqual(nth(calls, 0).params.args, ["-c", "pnpm dev"])
 })
 
 test("detach promotes the job to app ownership so it outlives the session", async () => {
@@ -73,7 +110,7 @@ test("detach promotes the job to app ownership so it outlives the session", asyn
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
   await reg.spawnBackground({ command: "x", shell: "sh", shellArgs: [], cwd: "/", detach: true })
-  assert.deepEqual(calls[0].params.owner, { kind: "app" })
+  assert.deepEqual(nth(calls, 0).params.owner, { kind: "app" })
 })
 
 test("read advances the cursor so the next read returns only new bytes", async () => {
@@ -88,10 +125,10 @@ test("read advances the cursor so the next read returns only new bytes", async (
   })
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
-  assert.equal((await reg.read("job-1")).data, "first")
-  assert.equal(calls[0].params.fromOffset, 0)
-  assert.equal((await reg.read("job-1")).data, "second")
-  assert.equal(calls[1].params.fromOffset, 5, "second read resumes at the cursor")
+  assert.equal(ok(await reg.read("job-1")).data, "first")
+  assert.equal(nth(calls, 0).params.fromOffset, 0)
+  assert.equal(ok(await reg.read("job-1")).data, "second")
+  assert.equal(nth(calls, 1).params.fromOffset, 5, "second read resumes at the cursor")
 })
 
 test("an explicit fromOffset is a look-back that does not disturb the cursor", async () => {
@@ -109,7 +146,7 @@ test("an explicit fromOffset is a look-back that does not disturb the cursor", a
   await reg.read("job-1", { fromOffset: 0 }) // look-back, cursor unchanged
   await reg.read("job-1")
 
-  assert.equal(calls[2].params.fromOffset, 4, "cursor survived the look-back")
+  assert.equal(nth(calls, 2).params.fromOffset, 4, "cursor survived the look-back")
 })
 
 test("read surfaces a host error as ok:false instead of throwing", async () => {
@@ -119,9 +156,7 @@ test("read surfaces a host error as ok:false instead of throwing", async () => {
     },
   })
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
-  const r = await reg.read("ghost")
-  assert.equal(r.ok, false)
-  assert.match(r.reason, /no job with id ghost/)
+  assert.match(reasonOf(await reg.read("ghost")), /no job with id ghost/)
 })
 
 test("waitForOutput returns on the first bytes when no filter is given", async () => {
@@ -130,7 +165,7 @@ test("waitForOutput returns on the first bytes when no filter is given", async (
   })
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
-  const r = await reg.waitForOutput("job-1", { waitMs: 1000 })
+  const r = ok(await reg.waitForOutput("job-1", { waitMs: 1000 }))
   assert.equal(r.data, "hello")
   assert.equal(r.status, "running")
 })
@@ -148,7 +183,7 @@ test("a filtered wait keeps polling until the pattern matches", async () => {
   const { hostRpc, calls } = fakeHost({ "jobs.wait": () => chunks[i++] })
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
-  const r = await reg.waitForOutput("job-1", { filter: "ready", waitMs: 5000 })
+  const r = ok(await reg.waitForOutput("job-1", { filter: "ready", waitMs: 5000 }))
   assert.equal(r.data, "server ready")
   assert.equal(calls.length, 3, "polled until the pattern appeared")
   // And the intervening output was not lost — the cursor tracks the raw stream.
@@ -162,7 +197,7 @@ test("a filtered wait gives up when the job exits without matching", async () =>
   })
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
-  const r = await reg.waitForOutput("job-1", { filter: "ready", waitMs: 5000 })
+  const r = ok(await reg.waitForOutput("job-1", { filter: "ready", waitMs: 5000 }))
   assert.equal(r.data, "", "no matching lines")
   assert.equal(r.status, "exited")
   assert.equal(r.exitCode, 1)
@@ -176,9 +211,10 @@ test("waitForOutput passes an rpc timeout that outlasts the host-side wait", asy
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
   await reg.waitForOutput("job-1", { waitMs: 10_000 })
+  const { options, params } = nth(calls, 0)
   assert.ok(
-    calls[0].options.timeoutMs > calls[0].params.waitMs,
-    `rpc timeout ${calls[0].options.timeoutMs} must exceed wait ${calls[0].params.waitMs}`
+    Number(options?.timeoutMs) > Number(params.waitMs),
+    `rpc timeout ${options?.timeoutMs} must exceed wait ${String(params.waitMs)}`
   )
 })
 
@@ -187,7 +223,8 @@ test("waitForOutput clamps the budget to the 30s schema cap", async () => {
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
   await reg.waitForOutput("job-1", { waitMs: 999_999 })
-  assert.ok(calls[0].params.waitMs <= 30_000, `got ${calls[0].params.waitMs}`)
+  const { waitMs } = nth(calls, 0).params
+  assert.ok(Number(waitMs) <= 30_000, `got ${String(waitMs)}`)
 })
 
 test("kill scopes the request to the calling session", async () => {
@@ -198,7 +235,7 @@ test("kill scopes the request to the calling session", async () => {
 
   const r = await reg.kill("job-1")
   assert.equal(r.ok, true)
-  assert.deepEqual(calls[0].params.requester, { kind: "session", sessionId: "s1" })
+  assert.deepEqual(nth(calls, 0).params.requester, { kind: "session", sessionId: "s1" })
 })
 
 test("kill reports a host rejection rather than pretending it worked", async () => {
@@ -209,9 +246,7 @@ test("kill reports a host rejection rather than pretending it worked", async () 
   })
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
-  const r = await reg.kill("job-9")
-  assert.equal(r.ok, false)
-  assert.match(r.reason, /owned by another session/)
+  assert.match(reasonOf(await reg.kill("job-9")), /owned by another session/)
 })
 
 test("killAll reaps only session-owned jobs, leaving detached ones alive", async () => {
@@ -219,7 +254,7 @@ test("killAll reaps only session-owned jobs, leaving detached ones alive", async
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
   await reg.killAll()
-  assert.deepEqual(calls[0].params.owner, { kind: "session", sessionId: "s1" })
+  assert.deepEqual(nth(calls, 0).params.owner, { kind: "session", sessionId: "s1" })
 })
 
 test("killAll swallows host failures so teardown never throws", async () => {
@@ -253,6 +288,7 @@ test("list maps host records onto the legacy row shape", async () => {
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
   const [row] = await reg.list()
+  assert.ok(row)
   assert.equal(row.id, "job-1")
   assert.equal(row.status, "exited")
   assert.equal(row.exitCode, 0)
@@ -273,6 +309,7 @@ test("list reports a terminal status distinct from the legacy running/exited pai
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
 
   const [row] = await reg.list()
+  assert.ok(row)
   assert.equal(row.status, "exited")
   assert.equal(row.terminalStatus, "interrupted")
 })
@@ -292,7 +329,7 @@ test("list surfaces a host failure instead of reporting zero shells", async () =
 })
 
 test("explicit sidecar host uses local jobs despite an RPC object", async () => {
-  const { createSessionBgShellRegistry } = await import("./bash-host-sessions.mjs")
+  // With the sidecar named as the host, the in-process registry answers.
   const registry = createSessionBgShellRegistry({
     hostRpc: {
       call() {
@@ -301,9 +338,9 @@ test("explicit sidecar host uses local jobs despite an RPC object", async () => 
     },
     sessionId: "cli",
     backgroundProcessHost: "sidecar",
-  })
+  }) as BgShellRegistry
   try {
-    const entry = await registry.spawnBackground({
+    const entry = registry.spawnBackground({
       command: "fixture",
       shell: process.execPath,
       shellArgs: ["-e", "console.log('LOCAL_BACKGROUND_READY')"],
@@ -312,12 +349,13 @@ test("explicit sidecar host uses local jobs despite an RPC object", async () => 
     let output = ""
     for (let i = 0; i < 100; i++) {
       const result = await registry.waitForOutput(entry.id, { waitMs: 50 })
-      output += result.data ?? ""
+      assert.ok(result.ok)
+      output += result.data
       if (result.status === "exited") break
     }
     assert.match(output, /LOCAL_BACKGROUND_READY/)
-    assert.deepEqual(await registry.killByPid(2147483647), { matched: false })
-    assert.equal((await registry.killByPid(entry.pid)).matched, true)
+    assert.deepEqual(registry.killByPid(2147483647), { matched: false })
+    assert.equal(registry.killByPid(entry.pid!).matched, true)
   } finally {
     registry.killAll()
   }

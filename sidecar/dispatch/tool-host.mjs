@@ -16,7 +16,7 @@ import { makeLazyLspResolver } from "../src/services/lsp/lazy-resolver.ts"
 import { makeLazyCodeGraphResolver } from "../src/services/code-graph/lazy-resolver.ts"
 import { createReadTracker } from "../src/tools/state/read-tracker.ts"
 import { createSessionTaskStore } from "../src/tools/state/tasks.ts"
-import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
+import { createSessionBgShellRegistry } from "../src/tools/state/host-background-shells.ts"
 import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
 import { awaitPluginToolResponse } from "../src/tools/plugin/server.ts"
 

@@ -1,10 +1,9 @@
 // Host-backed background-shell registry.
 //
 // Implements the SAME port interface as the in-process registry in
-// `src/tools/state/background-shells.ts` (`spawnBackground` / `read` /
-// `waitForOutput` / `kill` / `killAll` / `list`), so `bash.mjs` and the
-// dispatch modules are unchanged — only the
-// adapter behind the port swaps. What changes is where the processes actually
+// `./background-shells.ts` (`spawnBackground` / `read` / `waitForOutput` /
+// `kill` / `killAll` / `list`), so `bash.mjs` and the dispatch modules are
+// unchanged — only the adapter behind the port swaps. What changes is where the processes actually
 // live: the Rust supervisor (`crates/cognia-jobs`) instead of this Node
 // process.
 //
@@ -20,9 +19,10 @@
 // re-read a range. That is what makes `filter` mean "wait until this matches"
 // instead of "eat everything, then show what matched".
 
-import { createBgShellRegistry } from "../../src/tools/state/background-shells.ts"
-
-import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../src/platform/host-rpc.ts"
+import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../platform/host-rpc.ts"
+import type { HostRpcClient } from "../../platform/host-rpc.ts"
+import { createBgShellRegistry } from "./background-shells.ts"
+import type { BgShellRegistry, SpawnBackgroundOptions } from "./background-shells.ts"
 
 /** Cap on bytes pulled per host round-trip. */
 const READ_CHUNK_BYTES = 30_000
@@ -30,13 +30,101 @@ const READ_CHUNK_BYTES = 30_000
 /** Longest a single long-poll may block, mirroring the tool schema's cap. */
 export const MAX_WAIT_MS = 30_000
 
+/** Who owns a host job: the session that started it, or the app (detached). */
+export type JobOwner = { kind: "session"; sessionId: string } | { kind: "app" }
+
+/** A byte range of a job's output, as `jobs.read` / `jobs.wait` return it. */
+export interface HostJobSlice {
+  data: string
+  nextOffset: number
+  status: string
+  exitCode?: number | null
+  hasMore?: boolean
+}
+
+/** A job record, as `jobs.spawn` / `jobs.kill` / `jobs.list` return it. */
+export interface HostJobRecord {
+  id: string
+  command?: string
+  cwd?: string
+  status?: string
+  exitCode?: number | null
+  startedAtMs: number
+  endedAtMs?: number | null
+  owner?: JobOwner
+  droppedOutputBytes?: number
+}
+
+export interface HostSpawnOptions extends SpawnBackgroundOptions {
+  /** Promote the job to app ownership so it outlives the session. */
+  detach?: boolean | undefined
+  label?: string | null | undefined
+}
+
+export interface HostReadOptions {
+  filter?: string | undefined
+  maxChars?: number | undefined
+  /** An explicit look-back offset; leaves the cursor alone. */
+  fromOffset?: number | undefined
+}
+
+export type HostReadResult =
+  | {
+      ok: true
+      data: string
+      status: string
+      exitCode: number | null
+      nextOffset: number
+      hasMore: boolean
+    }
+  | { ok: false; reason: string }
+
+export type HostKillResult = { ok: true; exitCode: number | null } | { ok: false; reason: string }
+
+export type HostKillByPidResult =
+  | { matched: false }
+  | { matched: true; ok: true; jobId: string | null }
+  | { matched: true; ok: false; reason: string }
+
+export interface HostBgShellRow {
+  id: string
+  command: string | undefined
+  status: "running" | "exited"
+  exitCode: number | null
+  startedAt: number
+  endedAt: number | null
+  durationMs: number
+  cwd: string | undefined
+  owner: JobOwner | undefined
+  terminalStatus: string | undefined
+  droppedOutputBytes: number
+}
+
+export interface HostBgShellRegistry {
+  spawnBackground(opts: HostSpawnOptions): Promise<HostJobRecord>
+  read(id: string, opts?: HostReadOptions): Promise<HostReadResult>
+  waitForOutput(
+    id: string,
+    opts?: { filter?: string | undefined; maxChars?: number | undefined; waitMs?: number }
+  ): Promise<HostReadResult>
+  kill(id: string): Promise<HostKillResult>
+  killByPid(pid: number): Promise<HostKillByPidResult>
+  killAll(): Promise<void>
+  list(): Promise<HostBgShellRow[]>
+}
+
+/** The host-RPC surface this adapter uses. */
+export type HostRpcCaller = Pick<HostRpcClient, "call">
+
+const errorText = (err: unknown) => String((err as { message?: unknown } | null)?.message ?? err)
+
 /**
  * Keep only lines matching `filter`. An invalid regex degrades to "no filter"
  * rather than failing the read — same tolerance the previous implementation had.
  */
-export function applyLineFilter(text, filter) {
+export function applyLineFilter(text: string, filter: string | undefined): string {
   if (!filter || !text) return text
-  let re
+  let re: RegExp
   try {
     re = new RegExp(filter)
   } catch {
@@ -48,24 +136,34 @@ export function applyLineFilter(text, filter) {
     .join("\n")
 }
 
-/**
- * @param {{
- *   hostRpc: { call: (m: string, p: any, o?: any) => Promise<any> },
- *   sessionId: string,
- * }} ctx
- */
-export function createHostBgShellRegistry({ hostRpc, sessionId }) {
+export function createHostBgShellRegistry({
+  hostRpc,
+  sessionId,
+}: {
+  hostRpc: HostRpcCaller
+  sessionId: string
+}): HostBgShellRegistry {
   /** shellId → next unread absolute byte offset. */
-  const cursors = new Map()
+  const cursors = new Map<string, number>()
   /** shellId → the command line, for `list` output before the host answers. */
-  const known = new Set()
+  const known = new Set<string>()
 
-  const sessionOwner = { kind: "session", sessionId }
+  const sessionOwner: JobOwner = { kind: "session", sessionId }
   /** `detach` promotes a job past the session that started it. */
-  const ownerFor = (detach) => (detach ? { kind: "app" } : sessionOwner)
+  const ownerFor = (detach: boolean | undefined): JobOwner =>
+    detach ? { kind: "app" } : sessionOwner
 
-  async function spawnBackground({ command, shell, shellArgs, cwd, isWin, env, detach, label }) {
-    const record = await hostRpc.call("jobs.spawn", {
+  async function spawnBackground({
+    command,
+    shell,
+    shellArgs,
+    cwd,
+    isWin,
+    env,
+    detach,
+    label,
+  }: HostSpawnOptions): Promise<HostJobRecord> {
+    const record = (await hostRpc.call("jobs.spawn", {
       command,
       program: shell,
       args: shellArgs,
@@ -74,28 +172,32 @@ export function createHostBgShellRegistry({ hostRpc, sessionId }) {
       owner: ownerFor(detach),
       windowsVerbatimArguments: Boolean(isWin),
       label: label ?? null,
-    })
+    })) as HostJobRecord
     cursors.set(record.id, 0)
     known.add(record.id)
     return record
   }
 
   /** One non-blocking read from the caller's cursor (or an explicit offset). */
-  async function read(id, { filter, maxChars, fromOffset } = {}) {
-    const start = Number.isFinite(fromOffset) ? Number(fromOffset) : (cursors.get(id) ?? 0)
-    let slice
+  async function read(
+    id: string,
+    { filter, maxChars, fromOffset }: HostReadOptions = {}
+  ): Promise<HostReadResult> {
+    const lookBack = fromOffset !== undefined && Number.isFinite(fromOffset)
+    const start = lookBack ? Number(fromOffset) : (cursors.get(id) ?? 0)
+    let slice: HostJobSlice
     try {
-      slice = await hostRpc.call("jobs.read", {
+      slice = (await hostRpc.call("jobs.read", {
         jobId: id,
         fromOffset: start,
         maxBytes: clampChunk(maxChars),
-      })
+      })) as HostJobSlice
     } catch (err) {
-      return { ok: false, reason: String(err?.message ?? err) }
+      return { ok: false, reason: errorText(err) }
     }
     // Only advance the shared cursor for a cursor-relative read; an explicit
     // `fromOffset` is a look-back and must not disturb the caller's position.
-    if (!Number.isFinite(fromOffset)) cursors.set(id, slice.nextOffset)
+    if (!lookBack) cursors.set(id, slice.nextOffset)
     return toResult(slice, filter)
   }
 
@@ -107,28 +209,33 @@ export function createHostBgShellRegistry({ hostRpc, sessionId }) {
    * the old implementation advanced its cursor past non-matching bytes and lost
    * them, so a filtered wait could never actually wait for a pattern.
    */
-  async function waitForOutput(id, { filter, maxChars, waitMs = 0 } = {}) {
+  async function waitForOutput(
+    id: string,
+    {
+      filter,
+      maxChars,
+      waitMs = 0,
+    }: { filter?: string | undefined; maxChars?: number | undefined; waitMs?: number } = {}
+  ): Promise<HostReadResult> {
     const budget = Math.min(Math.max(0, Math.floor(waitMs)), MAX_WAIT_MS)
     const deadline = Date.now() + budget
     const cap = clampChunk(maxChars)
     let cursor = cursors.get(id) ?? 0
     let accumulated = ""
-    let last = null
 
     for (;;) {
       const remaining = Math.max(0, deadline - Date.now())
-      let slice
+      let slice: HostJobSlice
       try {
-        slice = await hostRpc.call(
+        slice = (await hostRpc.call(
           "jobs.wait",
           { jobId: id, fromOffset: cursor, maxBytes: cap, waitMs: remaining },
           // Outlast the host's own wait, or we would time out on a healthy poll.
           { timeoutMs: remaining + HOST_RPC_TIMEOUT_MARGIN_MS }
-        )
+        )) as HostJobSlice
       } catch (err) {
-        return { ok: false, reason: String(err?.message ?? err) }
+        return { ok: false, reason: errorText(err) }
       }
-      last = slice
       cursor = slice.nextOffset
       accumulated += slice.data
       cursors.set(id, cursor)
@@ -153,17 +260,17 @@ export function createHostBgShellRegistry({ hostRpc, sessionId }) {
     }
   }
 
-  async function kill(id) {
+  async function kill(id: string): Promise<HostKillResult> {
     try {
-      const record = await hostRpc.call("jobs.kill", {
+      const record = (await hostRpc.call("jobs.kill", {
         jobId: id,
         // Scoped: an agent may only kill what its own session owns. The host
         // rejects anything else, so one chat cannot reach another's jobs.
         requester: sessionOwner,
-      })
+      })) as HostJobRecord
       return { ok: true, exitCode: record.exitCode ?? null }
     } catch (err) {
-      return { ok: false, reason: String(err?.message ?? err) }
+      return { ok: false, reason: errorText(err) }
     }
   }
 
@@ -174,13 +281,16 @@ export function createHostBgShellRegistry({ hostRpc, sessionId }) {
    * failure, so the caller can fall back to signalling the pid directly
    * instead of refusing to act on a process we simply do not own.
    */
-  async function killByPid(pid) {
+  async function killByPid(pid: number): Promise<HostKillByPidResult> {
     try {
-      const res = await hostRpc.call("jobs.killByPid", { pid, requester: sessionOwner })
+      const res = (await hostRpc.call("jobs.killByPid", { pid, requester: sessionOwner })) as {
+        matched?: boolean
+        job?: { id?: string } | null
+      } | null
       if (!res?.matched) return { matched: false }
       return { matched: true, ok: true, jobId: res.job?.id ?? null }
     } catch (err) {
-      return { matched: true, ok: false, reason: String(err?.message ?? err) }
+      return { matched: true, ok: false, reason: errorText(err) }
     }
   }
 
@@ -189,7 +299,7 @@ export function createHostBgShellRegistry({ hostRpc, sessionId }) {
    * app-owned precisely so it survives this, and a scheduled task's job belongs
    * to the task, not to the chat turn that happened to start it.
    */
-  async function killAll() {
+  async function killAll(): Promise<void> {
     try {
       await hostRpc.call("jobs.killOwnedBy", { owner: sessionOwner })
     } catch {
@@ -200,25 +310,30 @@ export function createHostBgShellRegistry({ hostRpc, sessionId }) {
     known.clear()
   }
 
-  async function list() {
+  async function list(): Promise<HostBgShellRow[]> {
     // Deliberately NOT catch-and-return-[]. An empty array is a factual claim
     // ("this session has no background shells") and swallowing an RPC failure
     // — a 30 s host timeout, a closed channel — made "we could not ask" look
     // identical to "there are none". `list_shells` surfaces the throw as a
     // tool error instead.
-    const { jobs } = await hostRpc.call("jobs.list", { owner: sessionOwner })
+    const { jobs } = (await hostRpc.call("jobs.list", { owner: sessionOwner })) as {
+      jobs?: HostJobRecord[] | null
+    }
     return (jobs ?? []).map(toListRow)
   }
 
   return { spawnBackground, read, waitForOutput, kill, killByPid, killAll, list }
 }
 
-function clampChunk(maxChars) {
-  const n = Number.isFinite(maxChars) ? Math.floor(Number(maxChars)) : READ_CHUNK_BYTES
+function clampChunk(maxChars: number | undefined): number {
+  const n =
+    maxChars !== undefined && Number.isFinite(maxChars)
+      ? Math.floor(Number(maxChars))
+      : READ_CHUNK_BYTES
   return Math.min(Math.max(1, n), READ_CHUNK_BYTES)
 }
 
-function toResult(slice, filter) {
+function toResult(slice: HostJobSlice, filter: string | undefined): HostReadResult {
   return {
     ok: true,
     data: applyLineFilter(slice.data, filter),
@@ -230,7 +345,7 @@ function toResult(slice, filter) {
 }
 
 /** Shape a host record like the old `list()` rows so callers are unchanged. */
-function toListRow(job) {
+function toListRow(job: HostJobRecord): HostBgShellRow {
   const endedAt = job.endedAtMs ?? null
   return {
     id: job.id,
@@ -249,7 +364,15 @@ function toListRow(job) {
 }
 
 /** Choose an implemented host port; an RPC transport alone is not jobs readiness. */
-export function createSessionBgShellRegistry({ hostRpc, sessionId, backgroundProcessHost }) {
+export function createSessionBgShellRegistry({
+  hostRpc,
+  sessionId,
+  backgroundProcessHost,
+}: {
+  hostRpc?: HostRpcCaller | null | undefined
+  sessionId: string
+  backgroundProcessHost?: string | undefined
+}): HostBgShellRegistry | BgShellRegistry {
   return hostRpc && backgroundProcessHost !== "sidecar"
     ? createHostBgShellRegistry({ hostRpc, sessionId })
     : createBgShellRegistry()
