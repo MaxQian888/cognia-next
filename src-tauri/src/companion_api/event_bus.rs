@@ -44,7 +44,7 @@ use serde_json::Value;
 // ---------------------------------------------------------------------------
 
 /// Maximum number of frames retained in the replay buffer.
-pub(super) const BUFFER_CAPACITY: usize = 10_000;
+pub const BUFFER_CAPACITY: usize = 10_000;
 
 /// How long (ms) to retain a frame in the replay buffer.
 const RETENTION_MS: i64 = 24 * 60 * 60 * 1000;
@@ -122,24 +122,6 @@ pub struct EventBus {
     buffer: Mutex<VecDeque<EventFrame>>,
     seq_counter: AtomicU64,
     last_prune_ms: AtomicI64,
-}
-
-/// Connector event sink shared by the public ingress router and connector
-/// command-plane RPC arms in headless mode.
-pub struct ConnectorEventEmitter(pub Arc<EventBus>);
-
-impl crate::connectors::axum_app::EventEmitter for ConnectorEventEmitter {
-    fn emit(&self, topic: &str, payload: Value) {
-        self.0.publish(topic.to_string(), payload);
-    }
-
-    fn emit_ephemeral_to_brain(&self, topic: &str, payload: Value) {
-        self.0.publish_ephemeral_to(
-            topic.to_string(),
-            payload,
-            super::jwt::SERVICE_DEVICE_ID.to_string(),
-        );
-    }
 }
 
 impl EventBus {
@@ -315,7 +297,7 @@ fn register_remote_pending_request(payload: &Value) {
     let Some(context_value) = payload.get("remoteExecutionContext") else {
         return;
     };
-    let Ok(context) = serde_json::from_value::<super::remote_execution::RemoteExecutionContext>(
+    let Ok(context) = serde_json::from_value::<super::remote_context::RemoteExecutionContext>(
         context_value.clone(),
     ) else {
         return;
@@ -329,7 +311,7 @@ fn register_remote_pending_request(payload: &Value) {
     }
     .and_then(Value::as_str);
     if let Some(response_id) = response_id {
-        let _ = super::remote_execution::global().register_pending(&context, response_id);
+        let _ = super::remote_context::global().register_pending(&context, response_id);
     }
 }
 
@@ -611,7 +593,7 @@ mod tests {
 
     #[test]
     fn publishing_a_proxy_request_registers_its_pending_response_id() {
-        let context = crate::companion_api::remote_execution::global().register(
+        let context = crate::companion_api::remote_context::global().register(
             "host-a",
             "device-a",
             "event-bus-pending-session",
@@ -628,7 +610,7 @@ mod tests {
             }),
         );
 
-        assert!(crate::companion_api::remote_execution::global()
+        assert!(crate::companion_api::remote_context::global()
             .validate_and_consume(
                 &context,
                 "device-a",

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::dispatchers::{ApnsCredentials, ApnsDispatcher, FcmDispatcher, FcmServiceAccount};
-use super::push_dispatchers;
+use super::push::push_dispatchers;
 
 const SERVICE: &str = "com.cognia.companion-push/v1";
 const FCM_ACCOUNT: &str = "fcm";

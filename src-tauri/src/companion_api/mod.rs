@@ -36,6 +36,7 @@ pub mod browser_gateway;
 /// Runtime discovery of the command contract (ADR-0175).
 pub mod catalog;
 pub mod command_manifest;
+pub mod connector_events;
 pub mod data_plane;
 pub mod deny_list;
 pub mod deployment;
@@ -51,6 +52,7 @@ pub mod environment_pool;
 pub mod environment_ports;
 pub mod event_batcher;
 pub mod event_bus;
+mod event_catalog_parity;
 pub mod event_channels;
 pub mod event_leases;
 pub mod extension_origin;
@@ -80,6 +82,7 @@ pub mod push;
 pub mod push_creds;
 pub mod rate_limit;
 pub use cognia_companion_connectivity::reachability_config;
+pub mod remote_context;
 pub mod remote_execution;
 pub mod replay_cache;
 pub mod rpc;
@@ -193,16 +196,7 @@ pub struct CompanionState {
     pub push_tokens: Arc<push::PushTokenRegistry>,
 }
 
-/// Currently configured push dispatchers (Phase B2). Process-wide singleton
-/// (mirrors `TLS_FINGERPRINT`) so the many test constructors of
-/// `CompanionState` aren't forced to pass it. Populated via the
-/// `companion_push_configure_{fcm,apns}` Tauri commands.
-static PUSH_DISPATCHERS: once_cell::sync::Lazy<Arc<push::DispatcherSet>> =
-    once_cell::sync::Lazy::new(push::DispatcherSet::new);
-
-pub fn push_dispatchers() -> Arc<push::DispatcherSet> {
-    Arc::clone(&PUSH_DISPATCHERS)
-}
+pub use push::push_dispatchers;
 
 /// SHA-256 SPKI fingerprint of the server's TLS cert (M2.9). Stored as a
 /// process-wide value rather than a field on `CompanionState` so the many

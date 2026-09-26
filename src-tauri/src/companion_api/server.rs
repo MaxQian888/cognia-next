@@ -811,9 +811,11 @@ fn build_router_for_mode(
     // router carries its own (already-resolved) `ConnectorsState`.
     if let Some(services) = crate::headless::headless_services() {
         let emitter: std::sync::Arc<dyn crate::connectors::axum_app::EventEmitter> =
-            std::sync::Arc::new(crate::companion_api::event_bus::ConnectorEventEmitter(
-                std::sync::Arc::clone(&services.event_bus),
-            ));
+            std::sync::Arc::new(
+                crate::companion_api::connector_events::ConnectorEventEmitter(
+                    std::sync::Arc::clone(&services.event_bus),
+                ),
+            );
         let connectors_router =
             crate::connectors::axum_app::build_router(services.connectors.clone(), emitter)
                 .layer(from_fn(middleware::pre_auth_rate_limit));

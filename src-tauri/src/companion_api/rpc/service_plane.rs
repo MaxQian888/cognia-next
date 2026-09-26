@@ -1011,9 +1011,10 @@ pub(super) async fn dispatch(
             // dropping it here made a reconnect on the brain come back under a
             // fresh id while the adapter was still listening on the old one.
             let handle_id: Option<String> = optional_aliased(&args, "handle_id", "handleId")?;
-            let emitter = std::sync::Arc::new(super::super::event_bus::ConnectorEventEmitter(
-                std::sync::Arc::clone(&services.event_bus),
-            ));
+            let emitter =
+                std::sync::Arc::new(super::super::connector_events::ConnectorEventEmitter(
+                    std::sync::Arc::clone(&services.event_bus),
+                ));
             let handle_id = match handle_id {
                 Some(id) => {
                     crate::connectors::ws_client::open_ws_with_handle(emitter, url, headers, id)
@@ -1100,9 +1101,10 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
-            let emitter = std::sync::Arc::new(super::super::event_bus::ConnectorEventEmitter(
-                std::sync::Arc::clone(&services.event_bus),
-            ));
+            let emitter =
+                std::sync::Arc::new(super::super::connector_events::ConnectorEventEmitter(
+                    std::sync::Arc::clone(&services.event_bus),
+                ));
             let handle_id = crate::connectors::lark_ws::open(emitter, adapter_id)
                 .await
                 .map_err(RpcError::internal)?;

@@ -336,6 +336,16 @@ impl DispatcherSet {
     }
 }
 
+/// Currently configured push dispatchers (Phase B2). Process-wide singleton
+/// (mirrors `TLS_FINGERPRINT`) so the many test constructors of
+/// `CompanionState` aren't forced to pass it. Populated via the
+/// `companion_push_configure_{fcm,apns}` Tauri commands.
+static PUSH_DISPATCHERS: once_cell::sync::Lazy<Arc<DispatcherSet>> =
+    once_cell::sync::Lazy::new(DispatcherSet::new);
+
+pub fn push_dispatchers() -> Arc<DispatcherSet> {
+    Arc::clone(&PUSH_DISPATCHERS)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
