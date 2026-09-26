@@ -12,7 +12,10 @@ import fs from "node:fs"
 import path from "node:path"
 import test from "node:test"
 
-const ROOT = path.resolve(import.meta.dirname)
+// The tool tree spans the legacy `builtin-tools/` and its new home under
+// `src/tools/` while the categories move (ADR-0197); scan both.
+const SIDECAR = path.resolve(import.meta.dirname, "..")
+const ROOTS = [path.join(SIDECAR, "builtin-tools"), path.join(SIDECAR, "src", "tools")]
 
 /**
  * Files allowed to write `isError: true` without a classification, and why.
@@ -20,12 +23,16 @@ const ROOT = path.resolve(import.meta.dirname)
  */
 const WAIVERS = new Map([
   [
-    "core/bash.mjs",
+    "src/tools/kernel/result.ts",
+    "the result constructor itself: toolText sets `isError` for its callers, and toolError, which every failure goes through, attaches the classification.",
+  ],
+  [
+    "builtin-tools/core/bash.mjs",
     "a non-zero exit is not a tool failure: the command ran and its output IS the answer. Classifying it would tell the model the tool broke when the truth is the command returned 1, which is often the useful result (grep, test runners, diff).",
   ],
 ])
 
-/** Every .mjs under builtin-tools, excluding tests and node_modules. */
+/** Every tool source file (.mjs / .ts), excluding tests and node_modules. */
 function sourceFiles(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === "node_modules" || entry.name === "__tests__") continue
@@ -34,22 +41,22 @@ function sourceFiles(dir, out = []) {
       sourceFiles(full, out)
       continue
     }
-    if (!entry.name.endsWith(".mjs")) continue
-    if (entry.name.endsWith(".test.mjs")) continue
+    if (!/\.(mjs|ts)$/.test(entry.name)) continue
+    if (/\.test\.(mjs|ts)$/.test(entry.name)) continue
     out.push(full)
   }
   return out
 }
 
 test("every isError site is classified or explicitly waived", () => {
-  const files = sourceFiles(ROOT)
+  const files = ROOTS.flatMap((root) => sourceFiles(root))
   // Guard the guard: an empty walk would pass this test while proving nothing.
   assert.ok(files.length > 40, `expected to scan the tool tree, saw ${files.length} files`)
 
   const offenders = []
   let sitesSeen = 0
   for (const file of files) {
-    const relative = path.relative(ROOT, file).split(path.sep).join("/")
+    const relative = path.relative(SIDECAR, file).split(path.sep).join("/")
     const text = fs.readFileSync(file, "utf8")
     const lines = text.split("\n")
     for (let i = 0; i < lines.length; i++) {
@@ -75,7 +82,7 @@ test("every isError site is classified or explicitly waived", () => {
 
 test("every waiver names a file that still exists", () => {
   for (const relative of WAIVERS.keys()) {
-    const full = path.join(ROOT, relative)
+    const full = path.join(SIDECAR, relative)
     assert.ok(fs.existsSync(full), `stale waiver: ${relative} no longer exists`)
   }
 })
