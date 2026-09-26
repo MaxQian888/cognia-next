@@ -302,6 +302,16 @@ describe("<MobileChannelRow />", () => {
       expect(props.onCommitRename).not.toHaveBeenCalled()
     })
 
+    it("does not save when Enter picks an IME candidate", () => {
+      const { props } = renderRow({ renaming: true })
+      const input = screen.getByTestId("mobile-channel-rename-s1")
+      fireEvent.change(input, { target: { value: "每日站会" } })
+      fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })
+      expect(props.onCommitRename).not.toHaveBeenCalled()
+      fireEvent.keyDown(input, { key: "Enter" })
+      expect(props.onCommitRename).toHaveBeenCalledWith("s1", "每日站会")
+    })
+
     it("treats an unchanged or blank title as a cancel", async () => {
       const user = userEvent.setup()
       const { props } = renderRow({ renaming: true })

@@ -14,12 +14,8 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  CONTEXT_MENU_KIT,
-  DROPDOWN_MENU_KIT,
-  SessionRowMenuItems,
-  type SessionRowMenuItemsProps,
-} from "./session-row-menu-items"
+import { CONTEXT_MENU_KIT, DROPDOWN_MENU_KIT } from "@/components/shared/menu-kit"
+import { SessionRowMenuItems, type SessionRowMenuItemsProps } from "./session-row-menu-items"
 
 const session: ChatSession = {
   id: "s-1",

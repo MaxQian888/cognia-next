@@ -21074,7 +21074,6 @@
       "workspaceReady": "工作区就绪"
     },
     "home": {
-      "actionLocked": "该会话正在交接到另一台设备，期间为只读。",
       "actions": {
         "devices": "设备",
         "discover": "发现",
@@ -21121,7 +21120,6 @@
       "folderEmpty": "空文件夹——长按聊天即可移到这里。",
       "hideSection": "隐藏{section}",
       "loadingChats": "正在加载会话…",
-      "markRead": "标为已读",
       "pinned": "置顶",
       "presenceStreaming": "回复中",
       "quickActions": "快捷操作",
@@ -21145,7 +21143,6 @@
       "swipePin": "置顶",
       "swipeUnarchive": "取消归档",
       "swipeUnpin": "取消置顶",
-      "undo": "撤销",
       "ungroupedAgent": "未绑定角色",
       "ungroupedTeam": "对话",
       "ungroupedWorkspace": "未归属工作区",

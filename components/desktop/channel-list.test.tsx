@@ -148,9 +148,10 @@ let mockGuildUnread: { dm: number; teams: ReadonlyMap<string, number>; total: nu
   teams: new Map<string, number>(),
   total: 0,
 }
-// Partial: the compact band's own `useGuildUnread` is stubbed (it would drain
-// the live-query queue below), while the scope tree aggregates through the real
-// pure `aggregateGuildUnread` over the list's own unread read.
+// Partial: the compact band's `useGuildUnread` is stubbed so a test can set
+// its counts (the real one reads the window's shared unread store), while the
+// scope tree aggregates through the real pure `aggregateGuildUnread` over the
+// list's own unread read.
 jest.mock("@/hooks/shell/use-guild-unread", () => ({
   ...jest.requireActual<typeof import("@/hooks/shell/use-guild-unread")>(
     "@/hooks/shell/use-guild-unread"
@@ -313,7 +314,6 @@ jest.mock("@/components/shell/sidebar-guild-sections", () => {
     guildSectionRows: unknown
     activeGuildKey: unknown
     GuildScopeMenuItems: unknown
-    GuildUnreadPill: unknown
     GuildMutedGlyph: unknown
     TEAM_SETTINGS_ROUTE: unknown
   }
@@ -325,7 +325,6 @@ jest.mock("@/components/shell/sidebar-guild-sections", () => {
     // they are what the headers are *for*, so stubbing them would test a
     // different component than the one that ships.
     GuildScopeMenuItems: actual.GuildScopeMenuItems,
-    GuildUnreadPill: actual.GuildUnreadPill,
     GuildMutedGlyph: actual.GuildMutedGlyph,
     SidebarGuildSectionRows: ({
       rows,

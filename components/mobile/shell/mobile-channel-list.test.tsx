@@ -124,6 +124,10 @@ jest.mock("sonner", () => ({
   },
 }))
 
+jest.mock("@/components/chat/conversation-export-dialog", () => ({
+  ConversationExportDialog: ({ session }: { session: { id: string } | null }) =>
+    session ? <div data-testid="export-dialog">{session.id}</div> : null,
+}))
 jest.mock("@/components/thread-handoff/thread-handoff-source-dialog", () => ({
   ThreadHandoffSourceDialog: ({ session }: { session: { id: string } }) => (
     <div data-testid="handoff-dialog">{session.id}</div>
@@ -776,7 +780,7 @@ describe("<MobileChannelList />", () => {
       expect(screen.getByTestId("mobile-channel-row-a1")).toBeInTheDocument()
       await user.click(screen.getByTestId("swipe-action-archive"))
       await waitFor(() => expect(onUnarchive).toHaveBeenCalledWith("a1"))
-      expect(toastSuccess).toHaveBeenCalledWith("Restored")
+      expect(toastSuccess).toHaveBeenCalledWith("Restored", undefined)
     })
 
     it("moves between views with the arrow keys, as a radio group", () => {
@@ -808,7 +812,7 @@ describe("<MobileChannelList />", () => {
       const row = screen.getByTestId("mobile-channel-row-s1").closest("[data-swipe-row]") as HTMLElement
       await user.click(within(row).getByTestId("swipe-action-pin"))
       expect(props.onSetPinned).toHaveBeenCalledWith(["s1"], false)
-      await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Unpinned it"))
+      await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Unpinned it", undefined))
     })
 
     it("archives via the swipe action and offers an undo", async () => {
@@ -838,7 +842,7 @@ describe("<MobileChannelList />", () => {
       await user.click(within(row).getByTestId("swipe-action-delete"))
       // Nothing is deleted by the swipe itself.
       expect(onDelete).not.toHaveBeenCalled()
-      await user.click(await screen.findByTestId("mobile-channel-delete-confirm-action"))
+      await user.click(await screen.findByTestId("conversation-delete-confirm-action"))
       await waitFor(() => expect(onDelete).toHaveBeenCalledWith("s2"))
       expect(listSessionBranches).toHaveBeenCalledWith("s2")
     })
@@ -850,7 +854,7 @@ describe("<MobileChannelList />", () => {
       const row = screen.getByTestId("mobile-channel-row-s2").closest("[data-swipe-row]") as HTMLElement
       await user.click(within(row).getByTestId("swipe-action-delete"))
       await user.click(await screen.findByRole("button", { name: "cancel" }))
-      await waitFor(() => expect(screen.queryByTestId("mobile-channel-delete-confirm")).toBeNull())
+      await waitFor(() => expect(screen.queryByTestId("conversation-delete-confirm")).toBeNull())
       expect(onDelete).not.toHaveBeenCalled()
     })
 
@@ -886,7 +890,7 @@ describe("<MobileChannelList />", () => {
       await longPress(screen.getByTestId("mobile-channel-row-s2"))
       // Clicks inside the vaul sheet go through fireEvent (jsdom has no
       // computed transform for vaul to read on pointerup).
-      fireEvent.click(await screen.findByTestId("mobile-channel-action-rename"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-rename-s2"))
       const input = await screen.findByTestId("mobile-channel-rename-s2")
       await user.clear(input)
       await user.type(input, "Renamed{Enter}")
@@ -900,7 +904,7 @@ describe("<MobileChannelList />", () => {
       const user = userEvent.setup()
       renderList({ onRename })
       fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s2"))
-      fireEvent.click(await screen.findByTestId("mobile-channel-action-rename"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-rename-s2"))
       const input = await screen.findByTestId("mobile-channel-rename-s2")
       await user.type(input, "!{Enter}")
       await waitFor(() =>
@@ -912,7 +916,7 @@ describe("<MobileChannelList />", () => {
       sessionStatesRef.value = [{ sessionId: "s2", lastReadAt: 0, unreadCount: 2 }]
       renderList()
       fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s2"))
-      fireEvent.click(await screen.findByTestId("mobile-channel-action-mark-read"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-mark-read-s2"))
       await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("s2"))
     })
 
@@ -922,17 +926,44 @@ describe("<MobileChannelList />", () => {
       ] as SessionFolder[]
       const { props } = renderList({ folders })
       fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s2"))
-      fireEvent.click(await screen.findByTestId("mobile-channel-action-move"))
-      fireEvent.click(screen.getByTestId("mobile-channel-action-folder-f1"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-move-folder-s2"))
+      fireEvent.click(screen.getByTestId("session-row-sheet-folder-f1-s2"))
       await waitFor(() => expect(props.onAssignToFolder).toHaveBeenCalledWith("s2", "f1"))
-      expect(toastSuccess).toHaveBeenCalledWith("Moved")
+      expect(toastSuccess).toHaveBeenCalledWith("Moved", undefined)
     })
 
     it("opens the device handoff from the sheet", async () => {
       renderList()
       fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s2"))
-      fireEvent.click(await screen.findByTestId("mobile-channel-action-handoff"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-handoff-s2"))
       expect(await screen.findByTestId("handoff-dialog")).toHaveTextContent("s2")
+    })
+
+    it("branches a conversation from the sheet and opens the branch", async () => {
+      const onBranch = jest.fn(async () => baseSession("b1", { title: "Branch" }))
+      const { props } = renderList({ onBranch })
+      fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s2"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-branch-s2"))
+      await waitFor(() => expect(props.onSelect).toHaveBeenCalledWith("b1"))
+      expect(onBranch).toHaveBeenCalledWith("s2")
+    })
+
+    it("opens the export and share dialog for the row", async () => {
+      renderList()
+      fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s2"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-export-s2"))
+      expect(await screen.findByTestId("export-dialog")).toHaveTextContent("s2")
+    })
+
+    it("opens the next conversation after deleting the open one", async () => {
+      const user = userEvent.setup()
+      const { props } = renderList({ activeSessionId: "s2" })
+      fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s2"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-delete-s2"))
+      await user.click(await screen.findByTestId("conversation-delete-confirm-action"))
+      await waitFor(() => expect(props.onDelete).toHaveBeenCalledWith("s2"))
+      await waitFor(() => expect(props.onSelect).toHaveBeenCalled())
+      expect(props.onSelect).not.toHaveBeenCalledWith("s2")
     })
 
     it("opens the sheet from the swipe strip's More", async () => {

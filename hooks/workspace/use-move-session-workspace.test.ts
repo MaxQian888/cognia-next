@@ -17,7 +17,11 @@ jest.mock("sonner", () => ({
 
 import { getExecutionBroker } from "@/lib/execution/broker"
 import { useProjectStore } from "@/stores/project/project-store"
-import { useMoveSessionWorkspace, type MovableSession } from "./use-move-session-workspace"
+import {
+  useMoveSessionWorkspace,
+  useSessionWorkspaceMoveMenu,
+  type MovableSession,
+} from "./use-move-session-workspace"
 
 const session: MovableSession = { id: "s1", projectId: "project-a" }
 
@@ -129,5 +133,41 @@ describe("useMoveSessionWorkspace", () => {
       useProjectStore.getState().projects.find((project) => project.id === "project-b")?.sessionIds
     ).toEqual([])
     expect(result.current.busy).toBe(false)
+  })
+})
+
+describe("useSessionWorkspaceMoveMenu", () => {
+  it("offers the unarchived workspaces and moves through the shared writer", async () => {
+    seed()
+    useProjectStore.setState((state) => ({
+      projects: [
+        ...state.projects,
+        { id: "project-c", name: "Gone", roots: [], sessionIds: [], isArchived: true },
+      ] as unknown as Project[],
+    }))
+    const { result } = renderHook(() => useSessionWorkspaceMoveMenu(session))
+    expect(result.current.workspaceTargets.map((workspace) => workspace.id)).toEqual([
+      "project-a",
+      "project-b",
+    ])
+    expect(result.current.canMoveWorkspace).toBe(true)
+    await act(async () => {
+      result.current.onMoveWorkspace("project-b")
+      await Promise.resolve()
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(updateSession).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({ projectId: "project-b" })
+    )
+  })
+
+  it("has nowhere to move a conversation when its workspace is the only one", () => {
+    seed()
+    useProjectStore.setState((state) => ({ projects: state.projects.slice(0, 1) }))
+    const { result } = renderHook(() => useSessionWorkspaceMoveMenu(session))
+    expect(result.current.canMoveWorkspace).toBe(false)
   })
 })

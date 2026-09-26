@@ -24,7 +24,7 @@
  *     including by keyboard and screen reader.
  */
 
-import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useMemo } from "react"
 import { useFormatter, useNow, useTimeZone, useTranslations } from "next-intl"
 import {
   ArchiveIcon,
@@ -52,6 +52,7 @@ import { PlatformBadge } from "@/components/inbox/platform-badge"
 import { SessionRunIndicator } from "@/components/chat/session-run-indicator"
 import { getModelDisplayName, getProviderDisplayName } from "@/lib/ai/icons"
 import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
+import { useInlineRename } from "@/hooks/ui/use-inline-rename"
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import {
   CONVERSATION_TIMESTAMP_FORMATS,
@@ -60,6 +61,7 @@ import {
 import type { ConversationGroupAxis } from "@/lib/chat/conversation-list-model"
 import { avatarColor, avatarGlyph, type AvatarSubject } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
+import { CountPill } from "@/components/shared/count-pill"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 import type {
   Character,
@@ -390,15 +392,11 @@ function MobileChannelRowImpl({
                   )}
                 </time>
               ) : null}
-              {unread > 0 ? (
-                <span
-                  className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-pill bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums"
-                  data-testid={`mobile-channel-unread-${session.id}`}
-                >
-                  <span aria-hidden="true">{unread > 99 ? "99+" : unread}</span>
-                  <span className="sr-only">{t("unreadCount", { count: unread })}</span>
-                </span>
-              ) : null}
+              <CountPill
+                count={unread}
+                srLabel={t("unreadCount", { count: unread })}
+                testId={`mobile-channel-unread-${session.id}`}
+              />
             </span>
             {contentMatch ? (
               <span
@@ -557,54 +555,23 @@ function MobileChannelRenameField({
   onCommit: (id: string, title: string) => void
   onCancel: (id: string) => void
 }) {
-  const [draft, setDraft] = useState(initialTitle)
-  const inputRef = useRef<HTMLInputElement>(null)
-  // Enter commits and then the blur that follows would commit again.
-  const settledRef = useRef(false)
-
-  useEffect(() => {
-    const input = inputRef.current
-    if (!input) return
-    input.focus({ preventScroll: true })
-    input.select()
-  }, [])
-
-  const commit = () => {
-    if (settledRef.current) return
-    settledRef.current = true
-    const next = draft.trim()
-    if (next && next !== initialTitle) onCommit(sessionId, next)
-    else onCancel(sessionId)
-  }
-  const cancel = () => {
-    if (settledRef.current) return
-    settledRef.current = true
-    onCancel(sessionId)
-  }
+  // The shared inline field: IME-safe Enter (picking a candidate no longer
+  // saves a half-typed title), one settle per edit, Escape kept from the drawer.
+  const { inputProps } = useInlineRename({
+    initial: initialTitle,
+    onCommit: (next) => onCommit(sessionId, next),
+    onCancel: () => onCancel(sessionId),
+  })
 
   return (
     <div className={cn("flex items-center px-3", compact ? "min-h-11 py-1" : "min-h-14 py-1.5")}>
       <Input
-        ref={inputRef}
+        {...inputProps}
         type="text"
         enterKeyHint="done"
         autoComplete="off"
-        value={draft}
         aria-label={label}
         data-testid={`mobile-channel-rename-${sessionId}`}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault()
-            commit()
-          } else if (e.key === "Escape") {
-            e.preventDefault()
-            // The drawer answers Escape too; this one belongs to the field.
-            e.stopPropagation()
-            cancel()
-          }
-        }}
         className="h-11 w-full min-w-0"
       />
     </div>

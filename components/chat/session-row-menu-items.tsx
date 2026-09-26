@@ -3,10 +3,11 @@
 /**
  * One conversation row's actions, as menu items.
  *
- * Rendered twice by `SessionRow` — into the hover "⋯" dropdown and into the
- * row's right-click menu — by handing over the matching primitives (the
- * `workflow-action-items.tsx` pattern). One list, so the two menus can never
- * offer different things for the same row.
+ * Rendered by the desktop `SessionRow` into its hover "⋯" dropdown and its
+ * right-click menu, and by the mobile list into its long-press action sheet —
+ * each by handing over its primitives (`components/shared/menu-kit.tsx`; the
+ * sheet's kit is `components/mobile/shell/session-row-sheet-kit.tsx`). One
+ * list, so no surface can offer different things for the same row.
  *
  * The row owns every piece of state an item reads (dialog open flags, the CLI
  * probe, the Codex dispatch spinner) and every handler; this component only
@@ -23,7 +24,7 @@
  * fail on click (`assertSessionWritable` refuses them all).
  */
 
-import type { ComponentType, MouseEvent as ReactMouseEvent, ReactNode } from "react"
+import type { MouseEvent as ReactMouseEvent } from "react"
 import { useTranslations } from "next-intl"
 import {
   ArchiveIcon,
@@ -48,73 +49,16 @@ import {
   Trash2Icon,
 } from "lucide-react"
 
-import {
-  ContextMenuItem,
-  ContextMenuLabel,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-} from "@/components/ui/context-menu"
-import {
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-} from "@/components/ui/dropdown-menu"
+import type { MenuKit } from "@/components/shared/menu-kit"
 import { Spinner } from "@/components/ui/spinner"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
-
-interface KitItemProps {
-  children?: ReactNode
-  disabled?: boolean
-  className?: string
-  title?: string
-  onSelect?: (event: Event) => void
-  onClick?: (event: ReactMouseEvent) => void
-  "data-testid"?: string
-}
-
-/** The primitives both Radix menus share — an item list renders into either. */
-export interface SessionRowMenuKit {
-  Item: ComponentType<KitItemProps>
-  Label: ComponentType<{ children?: ReactNode; className?: string }>
-  Separator: ComponentType
-  Sub: ComponentType<{ children?: ReactNode }>
-  SubTrigger: ComponentType<{
-    children?: ReactNode
-    disabled?: boolean
-    "data-testid"?: string
-  }>
-  SubContent: ComponentType<{ children?: ReactNode; className?: string }>
-}
-
-export const DROPDOWN_MENU_KIT: SessionRowMenuKit = {
-  Item: DropdownMenuItem as ComponentType<KitItemProps>,
-  Label: DropdownMenuLabel,
-  Separator: DropdownMenuSeparator,
-  Sub: DropdownMenuSub,
-  SubTrigger: DropdownMenuSubTrigger,
-  SubContent: DropdownMenuSubContent,
-}
-
-export const CONTEXT_MENU_KIT: SessionRowMenuKit = {
-  Item: ContextMenuItem as ComponentType<KitItemProps>,
-  Label: ContextMenuLabel,
-  Separator: ContextMenuSeparator,
-  Sub: ContextMenuSub,
-  SubTrigger: ContextMenuSubTrigger,
-  SubContent: ContextMenuSubContent,
-}
 
 export type CogniaAgentStatus = "unknown" | "checking" | "available" | "missing"
 
 export interface SessionRowMenuItemsProps {
-  kit: SessionRowMenuKit
-  /** Distinguishes the two renders in test ids (`…-menu-dropdown-…`). */
-  surface: "dropdown" | "context"
+  kit: MenuKit
+  /** Distinguishes the renders in test ids (`session-row-<surface>-<action>-<id>`). */
+  surface: "dropdown" | "context" | "sheet"
   session: ChatSession
   /** Part of the multi-selection — flips Select to Deselect. */
   selected: boolean
@@ -177,7 +121,7 @@ export function SessionRowMenuItems({
   onDelete,
 }: SessionRowMenuItemsProps) {
   const t = useTranslations("desktop.sessionRow")
-  const { Item, Label, Separator, Sub, SubTrigger, SubContent } = kit
+  const { Item, Label, Separator, Sub, SubTrigger, SubContent, Shortcut } = kit
   const locked = Boolean(session.handoffLock)
   const isArchived = session.archivedAt != null
   const testId = (name: string) => `session-row-${surface}-${name}-${session.id}`
@@ -203,7 +147,7 @@ export function SessionRowMenuItems({
       <Item onSelect={onRename} disabled={locked} data-testid={testId("rename")}>
         <PencilIcon className="mr-2 size-4" />
         {t("rename")}
-        <MenuShortcut>F2</MenuShortcut>
+        <Shortcut>F2</Shortcut>
       </Item>
       {onTogglePinned ? (
         <Item onSelect={onTogglePinned} disabled={locked} data-testid={testId("pin")}>
@@ -264,6 +208,7 @@ export function SessionRowMenuItems({
               <Item
                 key={folder.id}
                 onSelect={() => onAssignToFolder(folder.id)}
+                aria-current={session.folderId === folder.id ? "true" : undefined}
                 data-testid={testId(`folder-${folder.id}`)}
               >
                 {session.folderId === folder.id ? (
@@ -301,6 +246,7 @@ export function SessionRowMenuItems({
                 <Item
                   key={workspace.id}
                   disabled={current}
+                  aria-current={current ? "true" : undefined}
                   onSelect={() => onMoveWorkspace(workspace.id)}
                   data-testid={
                     surface === "dropdown"
@@ -374,17 +320,8 @@ export function SessionRowMenuItems({
       >
         <Trash2Icon className="mr-2 size-4" />
         {t("delete")}
-        <MenuShortcut>{t("deleteShortcut")}</MenuShortcut>
+        <Shortcut>{t("deleteShortcut")}</Shortcut>
       </Item>
     </>
-  )
-}
-
-/** Trailing key hint, the way both Radix menus' own `*Shortcut` parts draw it. */
-function MenuShortcut({ children }: { children: ReactNode }) {
-  return (
-    <span className="ml-auto pl-4 text-xs tracking-widest text-muted-foreground" aria-hidden>
-      {children}
-    </span>
   )
 }

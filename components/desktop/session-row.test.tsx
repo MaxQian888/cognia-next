@@ -61,11 +61,27 @@ jest.mock("dexie-react-hooks", () => ({
 
 // The move itself (planner, writes, toasts) is the hook's suite. Here only the
 // menu that reaches it.
-const mockMoveToWorkspace = jest.fn(async () => true)
+const mockMoveToWorkspace = jest.fn(async (..._args: unknown[]) => true)
 let mockMoveBusy = false
-jest.mock("@/hooks/workspace/use-move-session-workspace", () => ({
-  useMoveSessionWorkspace: () => ({ move: mockMoveToWorkspace, busy: mockMoveBusy }),
-}))
+jest.mock("@/hooks/workspace/use-move-session-workspace", () => {
+  const { useProjectStore: projectStore } = jest.requireActual<
+    typeof import("@/stores/project/project-store")
+  >("@/stores/project/project-store")
+  return {
+    // The menu model over the mocked writer: targets from the real store.
+    useSessionWorkspaceMoveMenu: (session: { projectId?: string }) => {
+      const workspaceTargets = projectStore((s) => s.projects).filter(
+        (workspace) => !workspace.isArchived
+      )
+      return {
+        workspaceTargets,
+        canMoveWorkspace: workspaceTargets.some((workspace) => workspace.id !== session.projectId),
+        movingWorkspace: mockMoveBusy,
+        onMoveWorkspace: (workspaceId: string) => void mockMoveToWorkspace(session, workspaceId),
+      }
+    },
+  }
+})
 
 import { useProjectStore } from "@/stores/project/project-store"
 import { SessionRow, sessionRowPropsEqual } from "./session-row"

@@ -654,6 +654,14 @@ export function folderAcceptsSession(
   return !folder.projectId || !session.projectId || folder.projectId === session.projectId
 }
 
+/** The folders `session` may be filed into — the "Move to folder" choices. */
+export function assignableFolders<F extends Pick<SessionFolder, "projectId">>(
+  session: Pick<ChatSession, "projectId">,
+  folders: readonly F[]
+): F[] {
+  return folders.filter((folder) => folderAcceptsSession(folder, session))
+}
+
 /**
  * Workspace render order: the one you are working in first, the rest in the
  * order the caller supplied (the project store's own order).

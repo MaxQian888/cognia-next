@@ -1,6 +1,5 @@
 "use client"
 
-import dynamic from "next/dynamic"
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -102,7 +101,6 @@ import { SidebarRowsScope } from "@/components/shell/sidebar-row-roving"
 import {
   GuildMutedGlyph,
   GuildScopeMenuItems,
-  GuildUnreadPill,
   SidebarCreateTeamRow,
   SidebarGuildSectionRows,
   TEAM_SETTINGS_ROUTE,
@@ -250,27 +248,15 @@ import {
 } from "react"
 import { ChannelListBulkActions } from "./channel-list-bulk-actions"
 import { useChannelListActions } from "./channel-list/use-channel-list-actions"
+import type { ConversationRowExtraActions } from "@/hooks/chat/use-conversation-row-actions"
+import { ConversationExportDialog } from "@/components/chat/conversation-export-dialog"
+import { CountPill } from "@/components/shared/count-pill"
 import { createRowDecorations } from "./channel-list/row-decorations"
-import {
-  SessionRow,
-  sessionRowPropsEqual,
-  type SessionRowExtraActions,
-  type SessionRowMetadataItem,
-} from "./session-row"
+import { SessionRow, sessionRowPropsEqual, type SessionRowMetadataItem } from "./session-row"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 import { inFlightIdSet } from "@/lib/chat/aggregate-run-state"
 
-// The single-conversation export / share-link dialog: loaded on first use —
-// it pulls in the HTML exporters and theme gallery, which the list itself
-// never needs.
-const SingleExportDialog = dynamic(
-  () =>
-    import("@/components/data/export/single-export-dialog").then(
-      (module) => module.SingleExportDialog
-    ),
-  { ssr: false }
-)
-import { isImeComposing } from "@/lib/ui/ime"
+import { useInlineRename } from "@/hooks/ui/use-inline-rename"
 
 const log = loggers.ui
 
@@ -2677,15 +2663,7 @@ function ChannelListBodyImpl({
           </DndContext>
         ) : null}
         {merged ? <SidebarFooter /> : null}
-        {exportSession ? (
-          <SingleExportDialog
-            session={exportSession}
-            open
-            onOpenChange={(open) => {
-              if (!open) closeExport()
-            }}
-          />
-        ) : null}
+        <ConversationExportDialog session={exportSession} onClose={closeExport} />
       </div>
     </PerfBoundary>
   )
@@ -3557,7 +3535,7 @@ function ConversationSectionsImpl({
   onFolderRenameSettled?: (id: string) => void
   onJumpToParent?: (parentSessionId: string) => void
   /** Read state, duplicate, copy link, export — one stable object for every row. */
-  extraActions?: SessionRowExtraActions
+  extraActions?: ConversationRowExtraActions
   /** Non-idle turn state per conversation. */
   runStatusById?: ReadonlyMap<string, ChatStatus>
   /** Conversations with unread messages, badges on or off. */
@@ -4424,7 +4402,7 @@ function ScopeTreeGroupSection({
               {muted ? (
                 <GuildMutedGlyph testId={`sidebar-scope-muted-${scopeKey}`} />
               ) : (
-                <GuildUnreadPill count={unreadCount} testId={`sidebar-scope-unread-${scopeKey}`} />
+                <CountPill count={unreadCount} testId={`sidebar-scope-unread-${scopeKey}`} />
               )}
               {/* The fold affordance sits at the row's end (Codex-style), a
                   second trigger on the same disclosure — pointer-only: the
@@ -4584,18 +4562,21 @@ function FolderSectionHeader({
   // A just-created folder mounts straight into its editor, with the
   // placeholder name selected so typing replaces it.
   const [editing, setEditing] = useState(autoRename)
-  const [draft, setDraft] = useState(folder.name)
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const settle = () => {
     setEditing(false)
     if (autoRename) onRenameSettled?.(folder.id)
   }
-  const commit = () => {
-    const next = draft.trim()
-    if (next && next !== folder.name) void onRename?.(folder.id, next)
-    settle()
-  }
+  const rename = useInlineRename({
+    active: editing,
+    initial: folder.name,
+    onCommit: (next) => {
+      void onRename?.(folder.id, next)
+      settle()
+    },
+    onCancel: settle,
+  })
 
   return (
     <div
@@ -4612,22 +4593,9 @@ function FolderSectionHeader({
           <SectionChevron collapsed={collapsed} />
           <FolderIcon className="size-3.5 shrink-0 opacity-70" aria-hidden />
           <Input
-            autoFocus
-            // Select the placeholder so the first keystroke replaces it.
-            onFocus={(event) => event.currentTarget.select()}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !isImeComposing(e)) {
-                e.preventDefault()
-                commit()
-              } else if (e.key === "Escape") {
-                e.preventDefault()
-                setDraft(folder.name)
-                settle()
-              }
-            }}
-            onBlur={commit}
+            // Focused with the name selected, so the first keystroke replaces
+            // a new folder's placeholder (`useInlineRename`).
+            {...rename.inputProps}
             className="h-5 px-1 py-0 text-[11px]"
             aria-label={t("renameFolder")}
           />

@@ -17,7 +17,7 @@
  * the conversation list mounts it, and almost none of them ever moves.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -87,4 +87,34 @@ export function useMoveSessionWorkspace(): MoveSessionWorkspace {
   )
 
   return { move, busy }
+}
+
+export interface SessionWorkspaceMoveMenu {
+  /** Non-archived workspaces; the conversation's own is listed checked and inert. */
+  workspaceTargets: readonly { id: string; name: string }[]
+  /** There is somewhere else to move it. */
+  canMoveWorkspace: boolean
+  movingWorkspace: boolean
+  onMoveWorkspace: (workspaceId: string) => void
+}
+
+/**
+ * The "Move to workspace" submenu for one conversation row — what the desktop
+ * row menu and the mobile action sheet both offer. Archived workspaces are not
+ * destinations. Reads the stable store array and filters it here, so a row
+ * does not re-render for unrelated project-store writes.
+ */
+export function useSessionWorkspaceMoveMenu(session: MovableSession): SessionWorkspaceMoveMenu {
+  const projects = useProjectStore((s) => s.projects)
+  const workspaceTargets = useMemo(
+    () => projects.filter((workspace) => !workspace.isArchived),
+    [projects]
+  )
+  const { move, busy } = useMoveSessionWorkspace()
+  return {
+    workspaceTargets,
+    canMoveWorkspace: workspaceTargets.some((workspace) => workspace.id !== session.projectId),
+    movingWorkspace: busy,
+    onMoveWorkspace: (workspaceId) => void move(session, workspaceId),
+  }
 }

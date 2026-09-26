@@ -1,8 +1,6 @@
 "use client"
 
-import { useLiveQuery } from "dexie-react-hooks"
-import { listSessionBranches } from "@/lib/db/sessions"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { HoverScrollText } from "@/components/chat/ui/hover-scroll-text"
 import { JumpFlash } from "@/components/chat/jump-flash"
@@ -10,41 +8,32 @@ import { ThreadHandoffSourceDialog } from "@/components/thread-handoff/thread-ha
 import { PlatformBadge } from "@/components/inbox/platform-badge"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { SessionRunIndicator } from "@/components/chat/session-run-indicator"
+import { ConversationDeleteConfirm } from "@/components/chat/conversation-delete-confirm"
 import {
-  CONTEXT_MENU_KIT,
-  DROPDOWN_MENU_KIT,
   SessionRowMenuItems,
   type CogniaAgentStatus,
   type SessionRowMenuItemsProps,
-} from "@/components/desktop/session-row-menu-items"
+} from "@/components/chat/session-row-menu-items"
+import { CONTEXT_MENU_KIT, DROPDOWN_MENU_KIT } from "@/components/shared/menu-kit"
 import type { ChatStatus } from "@/stores/chat/chat-store"
-import { isImeComposing } from "@/lib/ui/ime"
+import { useInlineRename } from "@/hooks/ui/use-inline-rename"
+import type { ConversationRowExtraActions } from "@/hooks/chat/use-conversation-row-actions"
 import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
 import { cn } from "@/lib/utils"
+import { CountPill } from "@/components/shared/count-pill"
 import { HOVER_REVEAL_CONTROL_CLASS, HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import {
   CONVERSATION_TIMESTAMP_FORMATS,
   conversationTimestampShape,
 } from "@/lib/chat/conversation-timestamp"
-import { folderAcceptsSession } from "@/lib/chat/conversation-list-model"
-import { useMoveSessionWorkspace } from "@/hooks/workspace/use-move-session-workspace"
-import { useProjectStore } from "@/stores/project/project-store"
+import { assignableFolders } from "@/lib/chat/conversation-list-model"
+import { useSessionWorkspaceMoveMenu } from "@/hooks/workspace/use-move-session-workspace"
 import type { AvatarSubject } from "@/lib/ui/avatar"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
@@ -99,22 +88,6 @@ const METADATA_ICON = {
   workspace: BoxesIcon,
 } satisfies Record<SessionRowMetadataKind, typeof BotIcon>
 
-/**
- * Row actions beyond the list's core writes, bundled so the list threads one
- * stable object through its sections instead of a prop per action. Each takes
- * the row's id; an absent one hides its menu item.
- */
-export interface SessionRowExtraActions {
-  onMarkRead?: (id: string) => void
-  onMarkUnread?: (id: string) => void
-  /** Branch the whole conversation into a new, linked one. */
-  onBranch?: (id: string) => void
-  /** Copy a link that opens this conversation. */
-  onCopyLink?: (id: string) => void
-  /** Open the single-conversation export / share-link dialog. */
-  onExportShare?: (id: string) => void
-}
-
 interface SessionRowProps {
   session: ChatSession
   active: boolean
@@ -131,7 +104,7 @@ interface SessionRowProps {
    */
   isUnread?: boolean
   /** Mark read / unread, branch, copy link, export & share. */
-  extraActions?: SessionRowExtraActions
+  extraActions?: ConversationRowExtraActions
   /**
    * Roving tab stop. `false` takes the row's controls out of the Tab order —
    * the list keeps a single tab stop and moves between rows with the arrow
@@ -306,6 +279,9 @@ function SessionRowImpl({
   settleFlash,
 }: SessionRowProps) {
   const t = useTranslations("desktop.sessionRow")
+  // "3 unread" — the rail's wording, so a screen reader hears the same words for
+  // a row's count as for its team's.
+  const tRail = useTranslations("desktop.guildRail")
   // Locale-aware timestamp formatting (the previous hand-rolled "3m"/"2d"
   // helper rendered raw English abbreviations for zh-CN). The shape is decided
   // in the zone the formatter prints in, or "today" and the printed clock time
@@ -319,24 +295,10 @@ function SessionRowImpl({
   const [editing, setEditing] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [handoffDialogOpen, setHandoffDialogOpen] = useState(false)
-  const [draft, setDraft] = useState(session.title)
   const [cogniaAgentStatus, setCogniaAgentStatus] = useState<CogniaAgentStatus>("unknown")
   const [codexDispatching, setCodexDispatching] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
   const liRef = useRef<HTMLLIElement>(null)
   const selectButtonRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!editing) setDraft(session.title)
-  }, [editing, session.title])
-
-  useEffect(() => {
-    if (editing) {
-      inputRef.current?.focus()
-      inputRef.current?.select()
-    }
-  }, [editing])
 
   // Keep the keyboard-focused row visible as the user arrows through the list.
   useEffect(() => {
@@ -371,34 +333,21 @@ function SessionRowImpl({
     [nodeRef]
   )
 
-  const commit = () => {
-    const next = draft.trim()
-    if (next && next !== session.title) {
+  // The shared inline field: IME-safe Enter, one settle per edit, Escape
+  // kept from the list's own Escape handling.
+  const rename = useInlineRename({
+    active: editing,
+    initial: session.title,
+    onCommit: (next) => {
       log.info("session rename commit", { sessionId: session.id, length: next.length })
       void onRename(session.id, next)
-    } else {
-      setDraft(session.title)
-    }
-    setEditing(false)
-  }
-
-  const cancel = () => {
-    log.info("session rename cancel", { sessionId: session.id })
-    setDraft(session.title)
-    setEditing(false)
-  }
-
-  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    // Enter while an IME is composing picks a candidate; committing there saved
-    // half-typed titles for anyone typing Chinese or Japanese.
-    if (e.key === "Enter" && !isImeComposing(e)) {
-      e.preventDefault()
-      commit()
-    } else if (e.key === "Escape") {
-      e.preventDefault()
-      cancel()
-    }
-  }
+      setEditing(false)
+    },
+    onCancel: () => {
+      log.info("session rename cancel", { sessionId: session.id })
+      setEditing(false)
+    },
+  })
 
   const locked = Boolean(session.handoffLock)
   const startRename = () => {
@@ -472,25 +421,14 @@ function SessionRowImpl({
   // here and be gone after the next workspace switch. Both sides are optional
   // (either predates workspace isolation), so only a known mismatch is dropped.
   const sessionProjectId = session.projectId
-  const assignableFolders = useMemo(
-    () =>
-      (folders ?? []).filter((folder) =>
-        folderAcceptsSession(folder, { projectId: sessionProjectId })
-      ),
+  const assignableFoldersForRow = useMemo(
+    () => assignableFolders({ projectId: sessionProjectId }, folders ?? []),
     [folders, sessionProjectId]
   )
 
   // Attribution is correctable from where a misplaced conversation is noticed:
-  // the list. Archived workspaces are not destinations. Read as the stable
-  // store array and filtered here, so a row does not re-render per keystroke
-  // elsewhere in the store.
-  const workspaces = useProjectStore((s) => s.projects)
-  const workspaceTargets = useMemo(
-    () => workspaces.filter((workspace) => !workspace.isArchived),
-    [workspaces]
-  )
-  const canMoveWorkspace = workspaceTargets.some((workspace) => workspace.id !== sessionProjectId)
-  const { move: moveToWorkspace, busy: movingWorkspace } = useMoveSessionWorkspace()
+  // the list (shared with the mobile action sheet).
+  const workspaceMove = useSessionWorkspaceMoveMenu(session)
 
   const handleArchive = () => {
     log.info("session archive", { sessionId: session.id })
@@ -630,14 +568,11 @@ function SessionRowImpl({
       : undefined,
     onArchive: onArchive ? handleArchive : undefined,
     onUnarchive: onUnarchive ? handleUnarchive : undefined,
-    assignableFolders,
+    assignableFolders: assignableFoldersForRow,
     onAssignToFolder: onAssignToFolder
       ? (folderId) => void onAssignToFolder(session.id, folderId)
       : undefined,
-    workspaceTargets,
-    canMoveWorkspace,
-    movingWorkspace,
-    onMoveWorkspace: (workspaceId) => void moveToWorkspace(session, workspaceId),
+    ...workspaceMove,
     onHandoff: () => setHandoffDialogOpen(true),
     desktop: isTauri()
       ? {
@@ -745,11 +680,7 @@ function SessionRowImpl({
             <div className={cn("flex flex-1 items-center gap-2 pr-1", rowPadding)}>
               <Icon className="size-3.5 shrink-0 text-muted-foreground" />
               <Input
-                ref={inputRef}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={onKey}
-                onBlur={commit}
+                {...rename.inputProps}
                 aria-label={t("renameInput", { title: displayTitle })}
                 className="h-6 px-1 py-0 text-sm"
               />
@@ -858,11 +789,10 @@ function SessionRowImpl({
                       )}
                     </span>
                   ) : null}
-                  {unread && unread > 0 ? (
-                    <span className="shrink-0 rounded-pill bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
-                      {unread > 99 ? "99+" : unread}
-                    </span>
-                  ) : null}
+                  <CountPill
+                    count={unread ?? 0}
+                    srLabel={tRail("unreadCount", { count: unread ?? 0 })}
+                  />
                 </span>
                 {contentMatch ? (
                   <span
@@ -971,34 +901,14 @@ function SessionRowImpl({
               </div>
             </div>
           ) : null}
-          <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-            <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {t("deleteConfirmTitle", { title: displayTitle })}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t("deleteConfirmBody")}
-                  <DeleteConfirmBranchNote sessionId={session.id} />
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
-                <AlertDialogCancel className="w-full sm:w-auto">{t("cancel")}</AlertDialogCancel>
-                <AlertDialogAction
-                  className={buttonVariants({
-                    variant: "destructive",
-                    className: "w-full sm:w-auto",
-                  })}
-                  onClick={() => {
-                    setDeleteConfirmOpen(false)
-                    handleDelete()
-                  }}
-                >
-                  {t("deleteConfirmAction")}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <ConversationDeleteConfirm
+            session={deleteConfirmOpen ? session : null}
+            onCancel={() => setDeleteConfirmOpen(false)}
+            onConfirm={() => {
+              setDeleteConfirmOpen(false)
+              handleDelete()
+            }}
+          />
           {/* Mounted only while open, for the same reason the delete confirm's
            * message count is: this row renders once per conversation, and the
            * dialog body holds a live query over `pairedDevices`, the handoff
@@ -1015,24 +925,6 @@ function SessionRowImpl({
       </ContextMenuContent>
     </ContextMenu>
   )
-}
-
-/**
- * Branches are standalone conversations — `direct` mode copies the messages
- * outright — so deleting the parent leaves them alone and re-points them at
- * their grandparent. Say so, or the count in the sidebar not dropping reads as
- * a bug.
- *
- * Its own component so the branch count's live query exists only while the
- * confirm is open: the dialog content (and so this) is mounted only then. In
- * the row itself it was one index subscription per sidebar row, re-run on
- * every session write, with the dialog closed.
- */
-function DeleteConfirmBranchNote({ sessionId }: { sessionId: string }) {
-  const t = useTranslations("desktop.sessionRow")
-  const branchCount =
-    useLiveQuery(async () => (await listSessionBranches(sessionId)).length, [sessionId]) ?? 0
-  return branchCount > 0 ? <> {t("deleteConfirmBranches", { count: branchCount })}</> : null
 }
 
 function sameStyle(a: CSSProperties | undefined, b: CSSProperties | undefined): boolean {

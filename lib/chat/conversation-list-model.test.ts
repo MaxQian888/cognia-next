@@ -6,6 +6,7 @@ import {
   dateBucketFor,
   dedupeSessionsById,
   DATE_BUCKET_ORDER,
+  assignableFolders,
   folderAcceptsSession,
   shareUnchangedSessions,
   UNGROUPED_ID,
@@ -628,6 +629,15 @@ describe("buildConversationSections time zone", () => {
       )
     expect(bucketIn("Asia/Shanghai")).toEqual(["today"])
     expect(bucketIn("UTC")).toEqual(["yesterday"])
+  })
+})
+
+describe("assignableFolders", () => {
+  it("keeps same-workspace and unscoped folders, drops foreign ones", () => {
+    const folders = [{ id: "a", projectId: "w1" }, { id: "b" }, { id: "c", projectId: "w2" }]
+    expect(assignableFolders({ projectId: "w1" }, folders).map((f) => f.id)).toEqual(["a", "b"])
+    // A conversation from before workspace isolation can go anywhere.
+    expect(assignableFolders({}, folders).map((f) => f.id)).toEqual(["a", "b", "c"])
   })
 })
 

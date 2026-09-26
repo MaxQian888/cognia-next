@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { MOBILE_EASE, MOBILE_DURATION, MOBILE_SPRING, STAGGER_INTERVAL } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
+import { formatBadgeCount } from "@/lib/ui/badge-count"
 import { useMobileTabLayout } from "./use-mobile-tab-layout"
 import type { MobileTabId } from "@/types/shell/mobile-tabs"
 
@@ -256,7 +257,7 @@ export function MobileTabBar({ className, badges, keyboardHidden = false }: Mobi
                         aria-label={tBar("unread", { count: badge })}
                         className="h-4 min-w-[16px] rounded-pill px-1 text-[9px] font-semibold"
                       >
-                        {badge > 99 ? "99+" : badge}
+                        {formatBadgeCount(badge)}
                       </Badge>
                     </motion.span>
                   ) : null}

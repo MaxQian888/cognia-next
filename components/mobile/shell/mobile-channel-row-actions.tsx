@@ -4,46 +4,25 @@
  * The action sheet behind a long-press (or the swipe strip's "More") on a
  * mobile conversation row.
  *
- * Before this, pin / archive / delete existed only as swipe gestures and
- * rename only behind an unannounced 500ms hold, so nothing told a user they
- * were there and a screen-reader user could not reach most of them. The sheet
- * is the one place every row action lives — the desktop row menu's set
- * (`session-row.tsx`), minus the desktop-only terminal / Codex handoffs:
+ * Its items are the desktop row menu's (`SessionRowMenuItems`), rendered
+ * through the sheet kit (`session-row-sheet-kit.tsx`) — one list, so the phone
+ * offers exactly what the desktop "⋯" and right-click menus do, in the same
+ * order, disabled the same way on a handed-off conversation, minus only the
+ * desktop-only terminal / Codex hand-offs and multi-select:
  *
- *   Rename · Pin/Unpin · Mark as read · Archive/Unarchive · Move to folder ·
- *   Continue on another device (or its status) · Delete
+ *   Rename · Pin · Mark read/unread · Branch · Copy link · Export & share ·
+ *   Archive · Move to folder · Move to workspace · Continue on another device ·
+ *   Delete
  *
- * "Move to folder" opens a second page in the same sheet rather than a nested
- * menu, and offers only folders of the conversation's own workspace — the rule
- * the desktop applies, for the same reason: a folder is workspace-scoped, and
- * filing a row into another workspace's folder shows here and is gone after
- * the next workspace switch.
- *
- * A conversation handed off to another device is read-only. Its writes are
- * refused by the session write guard, so the sheet says so up front and
- * disables them instead of letting each one fail.
+ * "Move to folder" and "Move to workspace" open a second page of the sheet
+ * instead of a flyout. Every write goes through the list's shared boundary
+ * (`useConversationRowActions`); the sheet only decides what is offered.
  */
 
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import {
-  ArchiveIcon,
-  ArchiveRestoreIcon,
-  ArrowLeftIcon,
-  ArrowRightLeftIcon,
-  CheckCheckIcon,
-  CheckIcon,
-  FolderIcon,
-  FolderInputIcon,
-  FolderOutputIcon,
-  LockKeyholeIcon,
-  PencilIcon,
-  PinIcon,
-  PinOffIcon,
-  Trash2Icon,
-  type LucideIcon,
-} from "lucide-react"
 
+import { SessionRowMenuItems } from "@/components/chat/session-row-menu-items"
 import {
   Drawer,
   DrawerContent,
@@ -51,36 +30,35 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer"
-import { cn } from "@/lib/utils"
+import type {
+  ConversationRowActions,
+  ConversationRowExtraActions,
+} from "@/hooks/chat/use-conversation-row-actions"
+import { useSessionWorkspaceMoveMenu } from "@/hooks/workspace/use-move-session-workspace"
+import { assignableFolders } from "@/lib/chat/conversation-list-model"
+import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
+
+import { SHEET_MENU_KIT, SessionRowSheetMenu } from "./session-row-sheet-kit"
 
 export interface MobileChannelRowActionsProps {
   /** The conversation the sheet is for; `null` closes it. */
   session: ChatSession | null
-  /** Unread messages in it — "Mark as read" is offered only above zero. */
+  /** Unread messages in it — decides Mark as read vs. Mark as unread. */
   unread: number
   folders: readonly SessionFolder[]
   onClose: () => void
+  /** Opens the row's inline rename field. */
   onRename: (session: ChatSession) => void
-  onTogglePin: (session: ChatSession) => void
-  onMarkRead: (session: ChatSession) => void
-  onToggleArchive: (session: ChatSession) => void
-  onMoveToFolder: (session: ChatSession, folderId: string | null) => void
   onContinueOnDevice: (session: ChatSession) => void
+  /** Asks to confirm the delete. */
   onDelete: (session: ChatSession) => void
-}
-
-/**
- * Folders a conversation may be filed into. Both sides are optional (either
- * can predate workspace isolation), so only a known mismatch is dropped.
- */
-export function assignableFoldersFor(
-  session: Pick<ChatSession, "projectId">,
-  folders: readonly SessionFolder[]
-): SessionFolder[] {
-  return folders.filter(
-    (folder) => !folder.projectId || !session.projectId || folder.projectId === session.projectId
-  )
+  /** The list's write boundary — the same one the desktop sidebar uses. */
+  rowActions: Pick<
+    ConversationRowActions,
+    "onTogglePinned" | "onArchive" | "onUnarchive" | "onAssignToFolder"
+  >
+  extraActions: ConversationRowExtraActions
 }
 
 export function MobileChannelRowActions(props: MobileChannelRowActionsProps) {
@@ -137,30 +115,22 @@ function ActionsBody({
   folders,
   onClose,
   onRename,
-  onTogglePin,
-  onMarkRead,
-  onToggleArchive,
-  onMoveToFolder,
   onContinueOnDevice,
   onDelete,
+  rowActions,
+  extraActions,
 }: MobileChannelRowActionsProps & { session: ChatSession }) {
   const t = useTranslations("mobile.home")
   // Row vocabulary shared with the desktop row menu.
   const tRow = useTranslations("desktop.sessionRow")
-  const tCommon = useTranslations("common")
-  const [page, setPage] = useState<"main" | "folders">("main")
-
-  const locked = session.handoffLock != null
-  const archived = session.archivedAt != null
-  const assignable = assignableFoldersFor(session, folders)
-  const canMove = assignable.length > 0 || session.folderId != null
-  const title = session.title || tRow("untitled")
-
-  /** Close first, then act: the action may open the next surface. */
-  const run = (action: (target: ChatSession) => void) => () => {
-    onClose()
-    action(session)
-  }
+  const workspaceMove = useSessionWorkspaceMoveMenu(session)
+  const title = sessionDisplayTitle(session.title, {
+    untitled: tRow("untitled"),
+    placeholder: tRow("placeholderTitle"),
+  })
+  const id = session.id
+  const bind = (action: ((id: string) => unknown) | undefined) =>
+    action ? () => void action(id) : undefined
 
   return (
     <>
@@ -168,146 +138,42 @@ function ActionsBody({
         <DrawerTitle className="truncate text-base">{title}</DrawerTitle>
         <DrawerDescription className="sr-only">{t("actionsDescription")}</DrawerDescription>
       </DrawerHeader>
-      {locked ? (
-        <p
-          className="mx-4 mb-2 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
-          role="note"
-          data-testid="mobile-channel-actions-locked"
-        >
-          <LockKeyholeIcon className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden />
-          <span>{t("actionLocked")}</span>
-        </p>
-      ) : null}
-      {page === "main" ? (
-        <div className="flex flex-col px-2 pb-3" role="group" aria-label={title}>
-          <ActionItem
-            icon={PencilIcon}
-            label={tRow("rename")}
-            disabled={locked}
-            onSelect={run(onRename)}
-            testId="mobile-channel-action-rename"
-          />
-          <ActionItem
-            icon={session.pinned ? PinOffIcon : PinIcon}
-            label={session.pinned ? tRow("unpin") : tRow("pin")}
-            disabled={locked}
-            onSelect={run(onTogglePin)}
-            testId="mobile-channel-action-pin"
-          />
-          {unread > 0 ? (
-            <ActionItem
-              icon={CheckCheckIcon}
-              label={t("markRead")}
-              onSelect={run(onMarkRead)}
-              testId="mobile-channel-action-mark-read"
-            />
-          ) : null}
-          <ActionItem
-            icon={archived ? ArchiveRestoreIcon : ArchiveIcon}
-            label={archived ? tRow("unarchive") : tRow("archive")}
-            disabled={locked}
-            onSelect={run(onToggleArchive)}
-            testId="mobile-channel-action-archive"
-          />
-          {canMove ? (
-            <ActionItem
-              icon={FolderInputIcon}
-              label={tRow("moveToFolder")}
-              disabled={locked}
-              onSelect={() => setPage("folders")}
-              testId="mobile-channel-action-move"
-            />
-          ) : null}
-          <ActionItem
-            icon={ArrowRightLeftIcon}
-            label={locked ? tRow("handoffStatus") : tRow("continueOnDevice")}
-            onSelect={run(onContinueOnDevice)}
-            testId="mobile-channel-action-handoff"
-          />
-          <ActionItem
-            icon={Trash2Icon}
-            label={tRow("delete")}
-            destructive
-            disabled={locked}
-            onSelect={run(onDelete)}
-            testId="mobile-channel-action-delete"
-          />
-        </div>
-      ) : (
-        <div className="flex flex-col px-2 pb-3" role="group" aria-label={tRow("moveToFolder")}>
-          <ActionItem
-            icon={ArrowLeftIcon}
-            label={tCommon("back")}
-            onSelect={() => setPage("main")}
-            testId="mobile-channel-action-folders-back"
-          />
-          <div className="max-h-[50vh] overflow-y-auto">
-            {assignable.map((folder) => (
-              <ActionItem
-                key={folder.id}
-                icon={session.folderId === folder.id ? CheckIcon : FolderIcon}
-                label={folder.name}
-                checked={session.folderId === folder.id}
-                onSelect={() => {
-                  onClose()
+      <SessionRowSheetMenu label={title} onPicked={onClose}>
+        <SessionRowMenuItems
+          kit={SHEET_MENU_KIT}
+          surface="sheet"
+          session={session}
+          selected={false}
+          unread={unread > 0}
+          onRename={() => onRename(session)}
+          onTogglePinned={
+            rowActions.onTogglePinned
+              ? () => void rowActions.onTogglePinned!(id, !session.pinned)
+              : undefined
+          }
+          onMarkRead={bind(extraActions.onMarkRead)}
+          onMarkUnread={bind(extraActions.onMarkUnread)}
+          onBranch={bind(extraActions.onBranch)}
+          onCopyLink={bind(extraActions.onCopyLink)}
+          onExportShare={bind(extraActions.onExportShare)}
+          onArchive={bind(rowActions.onArchive)}
+          onUnarchive={bind(rowActions.onUnarchive)}
+          assignableFolders={assignableFolders(session, folders)}
+          onAssignToFolder={
+            rowActions.onAssignToFolder
+              ? (folderId) => {
                   // Re-filing into the folder it is already in is a no-op.
-                  if (session.folderId !== folder.id) onMoveToFolder(session, folder.id)
-                }}
-                testId={`mobile-channel-action-folder-${folder.id}`}
-              />
-            ))}
-          </div>
-          {session.folderId ? (
-            <ActionItem
-              icon={FolderOutputIcon}
-              label={tRow("removeFromFolder")}
-              onSelect={() => {
-                onClose()
-                onMoveToFolder(session, null)
-              }}
-              testId="mobile-channel-action-folder-remove"
-            />
-          ) : null}
-        </div>
-      )}
+                  if (folderId !== (session.folderId ?? null)) {
+                    void rowActions.onAssignToFolder!(id, folderId)
+                  }
+                }
+              : undefined
+          }
+          {...workspaceMove}
+          onHandoff={() => onContinueOnDevice(session)}
+          onDelete={() => onDelete(session)}
+        />
+      </SessionRowSheetMenu>
     </>
-  )
-}
-
-function ActionItem({
-  icon: Icon,
-  label,
-  onSelect,
-  disabled = false,
-  destructive = false,
-  checked,
-  testId,
-}: {
-  icon: LucideIcon
-  label: string
-  onSelect: () => void
-  disabled?: boolean
-  destructive?: boolean
-  /** Set for a choice in a list (the folder page), where the current one is marked. */
-  checked?: boolean
-  testId: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={disabled}
-      aria-current={checked ? "true" : undefined}
-      data-testid={testId}
-      className={cn(
-        "flex min-h-12 w-full min-w-0 items-center gap-3 rounded-md px-3 text-left text-base outline-none",
-        "active:bg-accent focus-visible:ring-2 focus-visible:ring-ring pointer-fine:hover:bg-accent/60",
-        "disabled:pointer-events-none disabled:opacity-50",
-        destructive && "text-destructive"
-      )}
-    >
-      <Icon className="size-5 shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-    </button>
   )
 }

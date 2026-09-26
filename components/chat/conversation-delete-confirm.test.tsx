@@ -38,7 +38,7 @@ jest.mock("@/hooks/data", () => {
   }
 })
 
-import { MobileChannelDeleteConfirm } from "./mobile-channel-delete-confirm"
+import { ConversationDeleteConfirm } from "./conversation-delete-confirm"
 
 const session: ChatSession = {
   id: "s1",
@@ -53,34 +53,38 @@ beforeEach(() => {
   listSessionBranches.mockClear()
 })
 
-describe("<MobileChannelDeleteConfirm />", () => {
+describe("<ConversationDeleteConfirm />", () => {
   it("asks before deleting, naming the conversation", async () => {
-    render(<MobileChannelDeleteConfirm session={session} onCancel={jest.fn()} onConfirm={jest.fn()} />)
-    const dialog = await screen.findByTestId("mobile-channel-delete-confirm")
+    render(
+      <ConversationDeleteConfirm session={session} onCancel={jest.fn()} onConfirm={jest.fn()} />
+    )
+    const dialog = await screen.findByTestId("conversation-delete-confirm")
     expect(dialog).toHaveTextContent('deleteConfirmTitle:{"title":"Daily standup"}')
     expect(dialog).toHaveTextContent("deleteConfirmBody")
   })
 
   it("mentions the branches that will be kept", async () => {
     branchesRef.current = 2
-    render(<MobileChannelDeleteConfirm session={session} onCancel={jest.fn()} onConfirm={jest.fn()} />)
-    expect(
-      await screen.findByText(/deleteConfirmBranches:\{"count":2\}/)
-    ).toBeInTheDocument()
+    render(
+      <ConversationDeleteConfirm session={session} onCancel={jest.fn()} onConfirm={jest.fn()} />
+    )
+    expect(await screen.findByText(/deleteConfirmBranches:\{"count":2\}/)).toBeInTheDocument()
     expect(listSessionBranches).toHaveBeenCalledWith("s1")
   })
 
   it("does not query branches while closed", () => {
-    render(<MobileChannelDeleteConfirm session={null} onCancel={jest.fn()} onConfirm={jest.fn()} />)
-    expect(screen.queryByTestId("mobile-channel-delete-confirm")).toBeNull()
+    render(<ConversationDeleteConfirm session={null} onCancel={jest.fn()} onConfirm={jest.fn()} />)
+    expect(screen.queryByTestId("conversation-delete-confirm")).toBeNull()
     expect(listSessionBranches).not.toHaveBeenCalled()
   })
 
   it("deletes only on the explicit confirm", async () => {
     const user = userEvent.setup()
     const onConfirm = jest.fn()
-    render(<MobileChannelDeleteConfirm session={session} onCancel={jest.fn()} onConfirm={onConfirm} />)
-    await user.click(await screen.findByTestId("mobile-channel-delete-confirm-action"))
+    render(
+      <ConversationDeleteConfirm session={session} onCancel={jest.fn()} onConfirm={onConfirm} />
+    )
+    await user.click(await screen.findByTestId("conversation-delete-confirm-action"))
     expect(onConfirm).toHaveBeenCalledWith(session)
   })
 
@@ -88,7 +92,9 @@ describe("<MobileChannelDeleteConfirm />", () => {
     const user = userEvent.setup()
     const onCancel = jest.fn()
     const onConfirm = jest.fn()
-    render(<MobileChannelDeleteConfirm session={session} onCancel={onCancel} onConfirm={onConfirm} />)
+    render(
+      <ConversationDeleteConfirm session={session} onCancel={onCancel} onConfirm={onConfirm} />
+    )
     await user.click(await screen.findByRole("button", { name: "cancel" }))
     expect(onCancel).toHaveBeenCalled()
     expect(onConfirm).not.toHaveBeenCalled()
@@ -96,14 +102,27 @@ describe("<MobileChannelDeleteConfirm />", () => {
 
   it("names an untitled conversation instead of quoting nothing", async () => {
     render(
-      <MobileChannelDeleteConfirm
+      <ConversationDeleteConfirm
         session={{ ...session, title: "" }}
         onCancel={jest.fn()}
         onConfirm={jest.fn()}
       />
     )
-    expect(await screen.findByTestId("mobile-channel-delete-confirm")).toHaveTextContent(
+    expect(await screen.findByTestId("conversation-delete-confirm")).toHaveTextContent(
       'deleteConfirmTitle:{"title":"untitled"}'
+    )
+  })
+
+  it("names a placeholder-titled conversation in the reader's words", async () => {
+    render(
+      <ConversationDeleteConfirm
+        session={{ ...session, title: "New chat" }}
+        onCancel={jest.fn()}
+        onConfirm={jest.fn()}
+      />
+    )
+    expect(await screen.findByTestId("conversation-delete-confirm")).toHaveTextContent(
+      'deleteConfirmTitle:{"title":"placeholderTitle"}'
     )
   })
 })

@@ -1,5 +1,4 @@
 {
-  "actionLocked": "This conversation is read-only while it is handed off to another device.",
   "actions": {
     "discover": "Discover",
     "fleet": "Agent fleet",
@@ -46,7 +45,6 @@
   "folderEmpty": "Empty — long-press a chat to move it here.",
   "hideSection": "Hide {section}",
   "loadingChats": "Loading conversations…",
-  "markRead": "Mark as read",
   "pinned": "Pinned",
   "presenceStreaming": "Streaming",
   "quickActions": "Quick actions",
@@ -70,7 +68,6 @@
   "swipePin": "Pin",
   "swipeUnarchive": "Unarchive",
   "swipeUnpin": "Unpin",
-  "undo": "Undo",
   "ungroupedAgent": "No agent",
   "ungroupedTeam": "Chats",
   "ungroupedWorkspace": "No workspace",

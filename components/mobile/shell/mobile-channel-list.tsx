@@ -45,7 +45,6 @@ import {
   PlusIcon,
 } from "lucide-react"
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual"
-import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { LoadingRegion } from "@/components/ui/loading-region"
@@ -82,8 +81,8 @@ import {
 import { resolveConversationSearchOptions } from "@/lib/chat/conversation-search-scope"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { inFlightIdSet } from "@/lib/chat/aggregate-run-state"
-import { useSessionWrite } from "@/hooks/chat/use-session-write"
-import { markSessionRead } from "@/lib/db/session-state"
+import { useConversationRowActions } from "@/hooks/chat/use-conversation-row-actions"
+import { ConversationExportDialog } from "@/components/chat/conversation-export-dialog"
 import { cn } from "@/lib/utils"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -115,7 +114,7 @@ import {
   type MobileChannelSwipeActionId,
 } from "./mobile-channel-row"
 import { MobileChannelRowActions } from "./mobile-channel-row-actions"
-import { MobileChannelDeleteConfirm } from "./mobile-channel-delete-confirm"
+import { ConversationDeleteConfirm } from "@/components/chat/conversation-delete-confirm"
 import { MobileChannelSearchField } from "./mobile-channel-search-field"
 
 
@@ -145,6 +144,11 @@ export interface MobileChannelListProps {
    * sidebar. Absent → no conversation is shown as running.
    */
   runStatusById?: ReadonlyMap<string, ChatStatus>
+  /**
+   * Branch a whole conversation (`branchWholeConversation`); the list opens
+   * the branch. Absent, the row sheet offers no Branch.
+   */
+  onBranch?: (id: string) => Promise<ChatSession | null>
 }
 
 /** Maps a date bucket to its `mobile.home` label key. */
@@ -186,13 +190,12 @@ function MobileChannelListBody({
   onAssignToFolder,
   folders = NO_FOLDERS,
   runStatusById,
+  onBranch,
 }: MobileChannelListProps) {
   const t = useTranslations("mobile.home")
   const tShell = useTranslations("mobile.shell")
   // Filter vocabulary shared with the desktop sidebar.
   const tFilters = useTranslations("conversationFilters")
-  // Success toasts shared with the desktop sidebar's row and bulk actions.
-  const tBulk = useTranslations("desktop.channelList.bulk")
   const {
     characters,
     teams,
@@ -454,80 +457,47 @@ function MobileChannelListBody({
   const handoffSession = handoffId ? (sessionsById.get(handoffId) ?? null) : null
   const renaming = renamingId && sessionsById.has(renamingId) ? renamingId : null
 
-  /**
-   * Run one row write and surface its failure — shared with the desktop list
-   * (`hooks/chat/use-session-write.ts`), so both refuse a handed-off
-   * conversation and word a failed write the same way.
-   */
-  const runWrite = useSessionWrite()
+  // Every row write goes through the list boundary the desktop sidebar uses
+  // (`useConversationRowActions`): the same lock refusal, failure and success
+  // toasts, archive undo, telemetry — and deleting or archiving the open
+  // conversation opens the one that takes its place.
+  const { rowActions, extraActions, exportSessionId, closeExport } = useConversationRowActions({
+    onDelete,
+    onRename,
+    onTogglePinned: (id, pinned) => onSetPinned([id], pinned),
+    onArchive,
+    onUnarchive,
+    onAssignToFolder,
+    onBranch,
+    resolveSessions: (ids) => ids.flatMap((id) => sessionsById.get(id) ?? []),
+    getRenderedOrder: () => orderedIds,
+    activeSessionId,
+    onSelect,
+  })
+  const exportSession = exportSessionId ? (sessionsById.get(exportSessionId) ?? null) : null
 
-  const togglePin = useCallback(
-    async (session: ChatSession) => {
-      const next = !session.pinned
-      if (await runWrite(next ? "pin" : "unpin", session, () => onSetPinned([session.id], next))) {
-        toast.success(tBulk(next ? "pinSuccess" : "unpinSuccess", { count: 1 }))
-      }
-    },
-    [runWrite, onSetPinned, tBulk]
-  )
-  const unarchive = useCallback(
-    async (session: ChatSession) => {
-      if (await runWrite("unarchive", session, () => onUnarchive(session.id))) {
-        toast.success(tBulk("unarchiveSuccess", { count: 1 }))
-      }
-    },
-    [runWrite, onUnarchive, tBulk]
-  )
-  const toggleArchive = useCallback(
-    async (session: ChatSession) => {
-      if (session.archivedAt != null) {
-        await unarchive(session)
-        return
-      }
-      if (await runWrite("archive", session, () => onArchive(session.id))) {
-        // The row leaves the active view, so the way back is offered right here.
-        toast.success(tBulk("archiveSuccess", { count: 1 }), {
-          action: { label: t("undo"), onClick: () => void unarchive(session) },
-        })
-      }
-    },
-    [runWrite, onArchive, unarchive, tBulk, t]
-  )
-  const moveToFolder = useCallback(
-    async (session: ChatSession, folderId: string | null) => {
-      if (await runWrite("move", session, () => onAssignToFolder(session.id, folderId))) {
-        toast.success(tBulk("moveSuccess", { count: 1 }))
-      }
-    },
-    [runWrite, onAssignToFolder, tBulk]
-  )
-  const markRead = useCallback(
-    (session: ChatSession) => void runWrite("markRead", session, () => markSessionRead(session.id)),
-    [runWrite]
-  )
   const confirmDelete = useCallback(
     (session: ChatSession) => {
       setDeleteId(null)
-      void runWrite("delete", session, () => onDelete(session.id))
+      void rowActions.onDelete(session.id)
     },
-    [runWrite, onDelete]
+    [rowActions]
   )
   const commitRename = useCallback(
     (id: string, title: string) => {
       setRenamingId(null)
-      const session = sessionsById.get(id)
-      if (session) void runWrite("rename", session, () => onRename(id, title))
+      void rowActions.onRename(id, title)
     },
-    [sessionsById, runWrite, onRename]
+    [rowActions]
   )
 
   // Rows get id-taking callbacks whose identity never changes, read through a
   // ref that is refreshed after every commit. A callback that closed over the
   // session map would change on every session write and re-render every
   // memoized row on screen for a change to one of them.
-  const latest = useRef({ onSelect, sessionsById, togglePin, toggleArchive, commitRename })
+  const latest = useRef({ onSelect, sessionsById, rowActions, commitRename })
   useEffect(() => {
-    latest.current = { onSelect, sessionsById, togglePin, toggleArchive, commitRename }
+    latest.current = { onSelect, sessionsById, rowActions, commitRename }
   })
   const handleRowSelect = useCallback((id: string) => latest.current.onSelect(id), [])
   const handleOpenActions = useCallback((id: string) => setActionsId(id), [])
@@ -536,8 +506,9 @@ function MobileChannelListBody({
     if (!session) return
     if (action === "more") setActionsId(id)
     else if (action === "delete") setDeleteId(id)
-    else if (action === "pin") void latest.current.togglePin(session)
-    else void latest.current.toggleArchive(session)
+    else if (action === "pin") void latest.current.rowActions.onTogglePinned?.(id, !session.pinned)
+    else if (session.archivedAt != null) void latest.current.rowActions.onUnarchive?.(id)
+    else void latest.current.rowActions.onArchive?.(id)
   }, [])
   const handleCommitRename = useCallback(
     (id: string, title: string) => latest.current.commitRename(id, title),
@@ -802,14 +773,13 @@ function MobileChannelListBody({
         folders={folders}
         onClose={() => setActionsId(null)}
         onRename={(session) => setRenamingId(session.id)}
-        onTogglePin={(session) => void togglePin(session)}
-        onMarkRead={markRead}
-        onToggleArchive={(session) => void toggleArchive(session)}
-        onMoveToFolder={(session, folderId) => void moveToFolder(session, folderId)}
         onContinueOnDevice={(session) => setHandoffId(session.id)}
         onDelete={(session) => setDeleteId(session.id)}
+        rowActions={rowActions}
+        extraActions={extraActions}
       />
-      <MobileChannelDeleteConfirm
+      <ConversationExportDialog session={exportSession} onClose={closeExport} />
+      <ConversationDeleteConfirm
         session={deleteSession}
         onCancel={() => setDeleteId(null)}
         onConfirm={confirmDelete}

@@ -91,6 +91,7 @@ import {
   type ResolvedConversationView,
 } from "@/lib/chat/conversation-views"
 import { cn } from "@/lib/utils"
+import { CountPill } from "@/components/shared/count-pill"
 import {
   defaultOpenFacetEntries,
   groupFacetSections,
@@ -432,19 +433,15 @@ function FilterTrigger({
   )
 }
 
-/** Small count pill used on section rows (desktop + mobile). */
-function CountPill({ count, className }: { count: number; className?: string }) {
-  if (count <= 0) return null
+/** A section's active-filter tally — the shared pill in its informational tone. */
+function SectionCount({ count, className }: { count: number; className?: string }) {
   return (
-    <span
-      className={cn(
-        "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-pill bg-primary/15 px-1 text-[10px] leading-none font-medium text-primary tabular-nums",
-        className
-      )}
-      data-testid="conversation-filter-section-count"
-    >
-      {count}
-    </span>
+    <CountPill
+      count={count}
+      tone="soft"
+      className={className}
+      testId="conversation-filter-section-count"
+    />
   )
 }
 
@@ -541,7 +538,7 @@ function FacetSectionSubmenu({ section, testId }: { section: FacetSection; testI
         {section.summary ? (
           <span className="max-w-24 truncate text-xs text-muted-foreground">{section.summary}</span>
         ) : null}
-        <CountPill count={section.activeCount} />
+        <SectionCount count={section.activeCount} />
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="max-h-[min(70vh,480px)] w-56 overflow-y-auto">
         {section.groups.map((group, index) => (
@@ -717,7 +714,7 @@ function FilterDropdown({
                     {familySummary(entry)}
                   </span>
                 ) : null}
-                <CountPill count={entry.activeCount} />
+                <SectionCount count={entry.activeCount} />
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-56">
                 {entry.sections.map((section) => (
@@ -761,7 +758,7 @@ function FacetSectionAccordionItem({ section, testId }: { section: FacetSection;
               {section.summary}
             </span>
           ) : null}
-          <CountPill count={section.activeCount} className="ml-auto" />
+          <SectionCount count={section.activeCount} className="ml-auto" />
         </span>
       </AccordionTrigger>
       <AccordionContent className="pb-2">
@@ -955,7 +952,7 @@ function FilterDrawer({
                             {familySummary(entry)}
                           </span>
                         ) : null}
-                        <CountPill count={entry.activeCount} className="ml-auto" />
+                        <SectionCount count={entry.activeCount} className="ml-auto" />
                       </span>
                     </AccordionTrigger>
                     {/* Nested, not flattened with a heading: the whole point of
