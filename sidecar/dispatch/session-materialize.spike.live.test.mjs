@@ -29,7 +29,7 @@ import { mkdtempSync, readdirSync, statSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { startMockAnthropic, spawnSidecar } from "./live-harness.mjs"
+import { startMockAnthropic, spawnSidecar } from "../test-support/live-harness.ts"
 
 /** Recursively list files under dir (missing dir ⇒ empty). */
 function listFilesRecursive(dir) {

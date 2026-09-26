@@ -89,8 +89,8 @@
     "lib/ai/providers/models-dev-capabilities.json"
   ],
   "isomorphic": [
-    "sidecar/dispatch/protocol-adapters/provider-protocol.mjs",
-    "sidecar/dispatch/protocol-adapters/reasoning-effort-tables.mjs"
+    "sidecar/src/providers/provider-protocol.ts",
+    "sidecar/src/providers/reasoning-effort-tables.ts"
   ],
   "public": [
     "sidecar/a2ui-tools/tool-defs.mjs",
@@ -101,14 +101,14 @@
     "sidecar/dispatch/claude-executable.mjs",
     "sidecar/dispatch/compaction.mjs",
     "sidecar/dispatch/feature-call.mjs",
-    "sidecar/dispatch/live-harness.mjs",
     "sidecar/dispatch/permission-resolver.mjs",
     "sidecar/dispatch/protocol-adapters/openai-compatible-variant-adapter.mjs",
-    "sidecar/dispatch/protocol-adapters/provider-protocol.mjs",
-    "sidecar/dispatch/protocol-adapters/reasoning-effort-tables.mjs",
     "sidecar/dispatch/protocol-adapters/registry.mjs",
     "sidecar/dispatch/usage-normalize.mjs",
-    "sidecar/pi-extension/cognia-pi-extension.ts"
+    "sidecar/pi-extension/cognia-pi-extension.ts",
+    "sidecar/src/providers/provider-protocol.ts",
+    "sidecar/src/providers/reasoning-effort-tables.ts",
+    "sidecar/test-support/live-harness.ts"
   ],
   "externalScanRoots": [
     ".storybook/",

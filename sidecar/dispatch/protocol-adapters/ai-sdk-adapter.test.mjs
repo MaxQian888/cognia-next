@@ -568,7 +568,10 @@ test("buildModel wraps every protocol with <think>-tag reasoning extraction", as
 
 test("gpt-oss streaming fixture marks raw analysis and prevents display or persistence", async () => {
   const fixture = JSON.parse(
-    readFileSync(new URL("../fixtures/gpt-oss-raw-analysis-stream.json", import.meta.url), "utf8")
+    readFileSync(
+      new URL("../../test-support/fixtures/gpt-oss-raw-analysis-stream.json", import.meta.url),
+      "utf8"
+    )
   )
   const rawModel = {
     specificationVersion: "v3",

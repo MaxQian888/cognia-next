@@ -20,7 +20,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { startMockAnthropic, spawnSidecar, assistantText } from "./live-harness.mjs"
+import { startMockAnthropic, spawnSidecar, assistantText } from "../test-support/live-harness.ts"
 
 test("anthropic dispatch handles two sequential turns on one session without stalling", async () => {
   // Key each reply on the request CONTENT, not the call index: depending on the

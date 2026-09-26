@@ -8,17 +8,24 @@
 //   - tailTruncate: keep the TAIL — the end carries the verdict for shell runs.
 //     Used by the core `bash` tool.
 
-/**
- * Keep the first `max` chars; append `marker` when truncated.
- *
- * @param {string} text
- * @param {number} max
- * @param {{ marker?: string, inclusive?: boolean }} [opts]
- *   `inclusive` truncates when `length >= max` (shell-advanced) instead of the
- *   default `length > max` (git).
- * @returns {{ text: string, truncated: boolean }}
- */
-export function headTruncate(text, max, { marker = "\n... (truncated)", inclusive = false } = {}) {
+export interface Truncated {
+  text: string
+  truncated: boolean
+}
+
+export interface HeadTruncateOptions {
+  /** Appended when the text was cut. */
+  marker?: string
+  /** Truncate when `length >= max` (shell-advanced) instead of the default `length > max` (git). */
+  inclusive?: boolean
+}
+
+/** Keep the first `max` chars; append `marker` when truncated. */
+export function headTruncate(
+  text: string,
+  max: number,
+  { marker = "\n... (truncated)", inclusive = false }: HeadTruncateOptions = {}
+): Truncated {
   const over = inclusive ? text.length >= max : text.length > max
   if (!over) return { text, truncated: false }
   return { text: text.slice(0, max) + marker, truncated: true }
@@ -27,14 +34,8 @@ export function headTruncate(text, max, { marker = "\n... (truncated)", inclusiv
 /** Default tail budget — mirrors the core bash tool's MAX_OUTPUT_CHARS. */
 export const DEFAULT_TAIL_MAX = 30_000
 
-/**
- * Keep the last `max` chars, prefixed with a dropped-count note when truncated.
- *
- * @param {string} text
- * @param {number} [max]
- * @returns {{ text: string, truncated: boolean }}
- */
-export function tailTruncate(text, max = DEFAULT_TAIL_MAX) {
+/** Keep the last `max` chars, prefixed with a dropped-count note when truncated. */
+export function tailTruncate(text: string, max: number = DEFAULT_TAIL_MAX): Truncated {
   if (text.length <= max) return { text, truncated: false }
   return {
     text: `… (${text.length - max} earlier characters dropped)\n${text.slice(-max)}`,

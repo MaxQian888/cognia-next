@@ -11,7 +11,7 @@ import {
 } from "@cognia/provider-types/built-in-provider-catalog"
 import { LOCAL_PROVIDER_CONFIGS, normalizeBaseUrl } from "./local-providers"
 import { isTauri, proxyFetch } from "./runtime-adapters"
-import { resolveProviderProtocol } from "../../../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
+import { resolveProviderProtocol } from "../../../../sidecar/src/providers/provider-protocol.ts"
 
 export interface ApiTestResult {
   success: boolean

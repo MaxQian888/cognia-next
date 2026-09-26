@@ -1,4 +1,5 @@
-// Shared harness for the *.live.test.mjs sidecar tests.
+// Shared harness for the *.live.test.* sidecar suites and the ADR-0090
+// conformance suite (tests/conformance/harness/sidecar-process.mjs).
 //
 // These tests boot the REAL sidecar (`claude-host.mjs`) — which runs the real
 // `@anthropic-ai/claude-agent-sdk` `query()` and the claude-code CLI subprocess
@@ -7,26 +8,53 @@
 // is the same enabler the Tauri chat E2E specs use, so these node-only tests
 // cover the compose→sidecar→stream boundary without a browser or Tauri shell.
 //
-// This file is intentionally NOT named `*.test.mjs` so the `node --test` glob
-// doesn't execute it as a test suite — it is a helper module.
+// Lives in test-support/, which is never shipped and never imported by
+// production code (audit:sidecar-architecture).
 
 import http from "node:http"
+import type { ServerResponse } from "node:http"
+import type { AddressInfo } from "node:net"
 import { spawn } from "node:child_process"
+import type { ChildProcessWithoutNullStreams } from "node:child_process"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SIDECAR = path.resolve(HERE, "..", "claude-host.mjs")
 
+/** One JSON line the sidecar wrote to stdout (the host protocol's frames). */
+export interface SidecarFrame {
+  type?: string
+  event?: { type?: string; message?: { content?: unknown } }
+  [key: string]: unknown
+}
+
+/** A parsed `/v1/messages` request body the mock received. */
+export type MessagesRequest = Record<string, unknown> & { model?: string }
+
+export interface MockAnthropicOptions {
+  chunks?: string[]
+  /** Vary the reply per call; key it on `body`, not `callIndex` (see below). */
+  replyFor?: (body: MessagesRequest, callIndex: number) => string[]
+  delayMs?: number
+}
+
+export interface MockAnthropic {
+  readonly messagesCalls: MessagesRequest[]
+  listen(): Promise<string>
+  readonly baseUrl: string
+  close(): Promise<void>
+}
+
 /** Write one Anthropic Messages SSE response carrying `chunks` as text deltas. */
-function writeMessagesSse(res, chunks, model) {
+function writeMessagesSse(res: ServerResponse, chunks: string[], model: string | undefined): void {
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     connection: "keep-alive",
   })
   const id = `msg_mock_${Math.random().toString(36).slice(2, 8)}`
-  const send = (event, data) => {
+  const send = (event: string, data: unknown): void => {
     res.write(`event: ${event}\n`)
     res.write(`data: ${JSON.stringify(data)}\n\n`)
   }
@@ -74,23 +102,27 @@ function writeMessagesSse(res, chunks, model) {
  * claude-code CLI can issue auxiliary /v1/messages calls (title generation,
  * probes) whose count varies by CLI version, so call indices are not stable.
  */
-export function startMockAnthropic({ chunks = ["PONG"], replyFor, delayMs = 0 } = {}) {
-  const messagesCalls = []
+export function startMockAnthropic({
+  chunks = ["PONG"],
+  replyFor,
+  delayMs = 0,
+}: MockAnthropicOptions = {}): MockAnthropic {
+  const messagesCalls: MessagesRequest[] = []
   const server = http.createServer((req, res) => {
     let body = ""
-    req.on("data", (c) => (body += c))
+    req.on("data", (c: Buffer) => (body += c))
     req.on("end", async () => {
-      if (req.method === "POST" && req.url.startsWith("/v1/messages")) {
-        let parsed = {}
+      if (req.method === "POST" && req.url?.startsWith("/v1/messages")) {
+        let parsed: MessagesRequest = {}
         try {
-          parsed = JSON.parse(body || "{}")
+          parsed = JSON.parse(body || "{}") as MessagesRequest
         } catch {
           parsed = {}
         }
         messagesCalls.push(parsed)
         const reply = replyFor ? replyFor(parsed, messagesCalls.length - 1) : chunks
         if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
-        writeMessagesSse(res, reply, parsed.model)
+        writeMessagesSse(res, reply, typeof parsed.model === "string" ? parsed.model : undefined)
         return
       }
       // The claude-code CLI probes `HEAD /` (and may hit other paths); answer
@@ -104,9 +136,9 @@ export function startMockAnthropic({ chunks = ["PONG"], replyFor, delayMs = 0 } 
   return {
     messagesCalls,
     listen() {
-      return new Promise((resolve) => {
+      return new Promise<string>((resolve) => {
         server.listen(0, "127.0.0.1", () => {
-          const addr = server.address()
+          const addr = server.address() as AddressInfo
           baseUrl = `http://127.0.0.1:${addr.port}`
           resolve(baseUrl)
         })
@@ -116,9 +148,32 @@ export function startMockAnthropic({ chunks = ["PONG"], replyFor, delayMs = 0 } 
       return baseUrl
     },
     close() {
-      return new Promise((resolve) => server.close(() => resolve()))
+      return new Promise<void>((resolve) => server.close(() => resolve()))
     },
   }
+}
+
+export interface SpawnSidecarOptions {
+  baseUrl: string
+  apiKey?: string
+  extraEnv?: NodeJS.ProcessEnv
+}
+
+export interface WaitForOptions {
+  timeoutMs?: number
+  label?: string
+  /** Only consider events at or after this index (from `mark()`). */
+  sinceIndex?: number
+}
+
+export interface SidecarController {
+  readonly child: ChildProcessWithoutNullStreams
+  readonly events: SidecarFrame[]
+  send(command: unknown): void
+  mark(): number
+  waitFor(pred: (frame: SidecarFrame) => boolean, opts?: WaitForOptions): Promise<SidecarFrame>
+  close(): Promise<void>
+  readonly stderr: string
 }
 
 /**
@@ -126,9 +181,16 @@ export function startMockAnthropic({ chunks = ["PONG"], replyFor, delayMs = 0 } 
  * controller: `send` a JSON-line command, `waitFor(predicate)` an emitted
  * stdout message, and `close()` to tear down.
  */
-export function spawnSidecar({ baseUrl, apiKey = "test-e2e-key", extraEnv = {} } = {}) {
-  const events = []
-  const waiters = []
+export function spawnSidecar({
+  baseUrl,
+  apiKey = "test-e2e-key",
+  extraEnv = {},
+}: SpawnSidecarOptions): SidecarController {
+  const events: SidecarFrame[] = []
+  const waiters: Array<{
+    pred: (frame: SidecarFrame) => boolean
+    resolve: (frame: SidecarFrame) => void
+  }> = []
   let stderr = ""
 
   const child = spawn("node", [SIDECAR], {
@@ -146,16 +208,16 @@ export function spawnSidecar({ baseUrl, apiKey = "test-e2e-key", extraEnv = {} }
   })
 
   let buf = ""
-  child.stdout.on("data", (d) => {
+  child.stdout.on("data", (d: Buffer) => {
     buf += d.toString()
     let i
     while ((i = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, i).trim()
       buf = buf.slice(i + 1)
       if (!line) continue
-      let msg
+      let msg: SidecarFrame
       try {
-        msg = JSON.parse(line)
+        msg = JSON.parse(line) as SidecarFrame
       } catch {
         continue
       }
@@ -168,28 +230,31 @@ export function spawnSidecar({ baseUrl, apiKey = "test-e2e-key", extraEnv = {} }
       }
     }
   })
-  child.stderr.on("data", (d) => {
+  child.stderr.on("data", (d: Buffer) => {
     stderr += d.toString()
   })
 
-  function send(obj) {
+  function send(obj: unknown): void {
     child.stdin.write(JSON.stringify(obj) + "\n")
   }
 
   /** Current event count — capture before `send` to wait only for NEW events
    *  (pass as `sinceIndex` to `waitFor`) so a second turn doesn't re-match the
    *  first turn's stale `assistant`/`result`. */
-  function mark() {
+  function mark(): number {
     return events.length
   }
 
-  function waitFor(pred, { timeoutMs = 25_000, label = "event", sinceIndex = 0 } = {}) {
+  function waitFor(
+    pred: (frame: SidecarFrame) => boolean,
+    { timeoutMs = 25_000, label = "event", sinceIndex = 0 }: WaitForOptions = {}
+  ): Promise<SidecarFrame> {
     const existing = events.slice(sinceIndex).find(pred)
     if (existing) return Promise.resolve(existing)
     return new Promise((resolve, reject) => {
       const entry = {
         pred,
-        resolve: (m) => {
+        resolve: (m: SidecarFrame) => {
           clearTimeout(timer)
           resolve(m)
         },
@@ -210,7 +275,7 @@ export function spawnSidecar({ baseUrl, apiKey = "test-e2e-key", extraEnv = {} }
     })
   }
 
-  async function close() {
+  async function close(): Promise<void> {
     try {
       child.stdin.end()
     } catch {
@@ -237,10 +302,14 @@ export function spawnSidecar({ baseUrl, apiKey = "test-e2e-key", extraEnv = {} }
 }
 
 /** Extract concatenated assistant text from an `assistant` SDK event. */
-export function assistantText(assistantEvent) {
-  const blocks = assistantEvent?.event?.message?.content ?? []
+export function assistantText(assistantEvent: SidecarFrame | undefined): string {
+  const blocks = assistantEvent?.event?.message?.content
+  if (!Array.isArray(blocks)) return ""
   return blocks
-    .filter((b) => b && b.type === "text")
+    .filter(
+      (b): b is { type: "text"; text: string } =>
+        typeof b === "object" && b !== null && b.type === "text" && typeof b.text === "string"
+    )
     .map((b) => b.text)
     .join("")
 }

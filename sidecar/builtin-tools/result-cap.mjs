@@ -14,7 +14,7 @@
 // tool routed through them). The Anthropic path's NATIVE SDK Bash/Grep/Read are
 // the SDK's own tools and are not shaped here — the SDK bounds those itself.
 
-import { headTruncate } from "./shared/truncate.mjs"
+import { headTruncate } from "../src/shared/text/truncate.ts"
 
 const APPROX_CHARS_PER_TOKEN = 4
 const MARKER = "\n... (tool result truncated to fit the context window)"

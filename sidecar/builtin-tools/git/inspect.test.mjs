@@ -2,7 +2,7 @@ import { test, before, after } from "node:test"
 import assert from "node:assert/strict"
 
 import { execGitRepoInspect, execGitChanges } from "./inspect.mjs"
-import { seededRepo, rm } from "./_fixtures.mjs"
+import { seededRepo, rm } from "../../test-support/git-repo.ts"
 
 let REPO
 before(() => {

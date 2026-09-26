@@ -5,7 +5,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
 import { statOrNull } from "../shared/fs-stat.mjs"
-import { mimeForPath } from "../shared/mime.mjs"
+import { mimeForPath } from "../../src/shared/mime.ts"
 
 // ---- file_info ------------------------------------------------------------
 

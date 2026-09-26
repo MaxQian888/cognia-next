@@ -7,7 +7,7 @@
 // tool name/status header when `preserveToolCallMetadata` is on. Reuses the
 // sidecar's own `headTruncate` (sidecar→sidecar import is allowed).
 
-import { headTruncate } from "../builtin-tools/shared/truncate.mjs"
+import { headTruncate } from "../src/shared/text/truncate.ts"
 
 const APPROX_CHARS_PER_TOKEN = 4
 const MARKER = "\n... (tool result truncated)"

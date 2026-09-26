@@ -14,7 +14,7 @@ import {
   isOpenAiNativeSurface,
   isMisroutedToOpenAi,
   decideOpenAiEndpointFlavor,
-} from "./provider-protocol.mjs"
+} from "./provider-protocol.ts"
 
 test("isOpenAiNativeSurface covers genuine OpenAI, the Codex backend, and codex relays", () => {
   // Genuine OpenAI (or the implicit default endpoint).
@@ -175,5 +175,13 @@ test("CommandCode routes Claude to Messages and other models to Chat Completions
   assert.equal(
     decideOpenAiEndpointFlavor({ providerId: "commandcode", apiFlavor: "responses" }),
     "chat"
+  )
+})
+
+test("RESPONSES_ONLY_PROVIDERS is exactly the id-based Responses override (codex)", () => {
+  assert.deepEqual([...RESPONSES_ONLY_PROVIDERS], ["codex"])
+  assert.equal(
+    decideOpenAiEndpointFlavor({ providerId: "codex", baseURL: "https://relay.example" }),
+    "responses"
   )
 })

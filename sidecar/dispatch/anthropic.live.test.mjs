@@ -13,7 +13,7 @@ import assert from "node:assert/strict"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { startMockAnthropic, spawnSidecar, assistantText } from "./live-harness.mjs"
+import { startMockAnthropic, spawnSidecar, assistantText } from "../test-support/live-harness.ts"
 
 test("latest SDK controls reload styles, persist local settings and report summary context", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "cognia-sdk-controls-"))

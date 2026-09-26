@@ -17,7 +17,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
 import { execFileAsync, sandboxedProcessTarget, sandboxedProcessEnv } from "../shared/exec.mjs"
-import { headTruncate } from "../shared/truncate.mjs"
+import { headTruncate } from "../../src/shared/text/truncate.ts"
 import { isProgramAllowed, trackedPids, MAX_OUTPUT_BYTES } from "./inventory.mjs"
 
 // Per-stream display cap for captured output. The 1 MB `maxBuffer` bounds what

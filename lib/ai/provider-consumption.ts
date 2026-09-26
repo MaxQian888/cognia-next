@@ -57,12 +57,12 @@ import { createBedrockSidecarLanguageModel } from "@/lib/claude/feature-call"
 import { protectRawAnalysis } from "@/lib/ai/raw-analysis"
 // Single source of truth for provider→protocol (shared with the sidecar; the
 // sidecar can't import `lib/`, so the file lives under `sidecar/` and TS imports
-// it — see sidecar/dispatch/protocol-adapters/provider-protocol.mjs).
+// it — see sidecar/src/providers/provider-protocol.ts).
 import {
   resolveProviderProtocol,
   normalizeProtocol,
   decideOpenAiEndpointFlavor,
-} from "../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
+} from "../../sidecar/src/providers/provider-protocol.ts"
 
 // =============================================================================
 // Types
@@ -140,7 +140,7 @@ export interface ProviderSettingsSnapshot {
 /** Convert a rich custom-provider row to the resolver-facing shape. */
 function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefinition {
   // `apiProtocol` uses the renderer name 'gemini'; the resolver wants 'google'.
-  // normalizeProtocol is the single gemini→google bridge (provider-protocol.mjs).
+  // normalizeProtocol is the single gemini→google bridge (provider-protocol.ts).
   let protocol: CustomProviderDefinition["protocol"] | undefined = rich.protocol
   if (!protocol && rich.apiProtocol) {
     protocol = normalizeProtocol(rich.apiProtocol) as CustomProviderDefinition["protocol"]

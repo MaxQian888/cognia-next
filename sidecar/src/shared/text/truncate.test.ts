@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { headTruncate, tailTruncate, DEFAULT_TAIL_MAX } from "./truncate.mjs"
+import { headTruncate, tailTruncate, DEFAULT_TAIL_MAX } from "./truncate.ts"
 
 test("headTruncate leaves short strings untouched", () => {
   assert.deepEqual(headTruncate("x".repeat(10), 100), { text: "x".repeat(10), truncated: false })

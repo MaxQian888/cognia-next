@@ -5,7 +5,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { execGitStatus } from "./status.mjs"
-import { seededRepo, initRepo, git, rm } from "./_fixtures.mjs"
+import { seededRepo, initRepo, git, rm } from "../../test-support/git-repo.ts"
 
 let REPO
 before(() => {

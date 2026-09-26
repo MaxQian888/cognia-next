@@ -15,11 +15,14 @@ import {
   decideOpenAiEndpointFlavor,
   RESPONSES_ONLY_PROVIDERS,
   resolveProviderProtocol,
-} from "./provider-protocol.mjs"
+} from "../../src/providers/provider-protocol.ts"
 import { buildBedrockProviderOptions } from "../bedrock.mjs"
 import { partitionPrompt } from "../prompt-partition.mjs"
 import { aiSdkTelemetry, withTraceparent } from "../../telemetry.mjs"
-import { EFFORT_TO_BUDGET, OPENAI_EFFORT_VALUES } from "./reasoning-effort-tables.mjs"
+import {
+  EFFORT_TO_BUDGET,
+  OPENAI_EFFORT_VALUES,
+} from "../../src/providers/reasoning-effort-tables.ts"
 
 export { isGenuineOpenAiEndpoint, isResponsesOnlyEndpoint }
 

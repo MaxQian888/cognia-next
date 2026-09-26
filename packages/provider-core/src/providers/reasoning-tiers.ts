@@ -32,7 +32,7 @@ import {
   EFFORT_TO_BUDGET,
   GENERIC_REASONING_EFFORT,
   OPENAI_EFFORT_VALUES,
-} from "../../../../sidecar/dispatch/protocol-adapters/reasoning-effort-tables.mjs"
+} from "../../../../sidecar/src/providers/reasoning-effort-tables.ts"
 
 /**
  * A reasoning tier as the APP names it. Superset of any single provider's

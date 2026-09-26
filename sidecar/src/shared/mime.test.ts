@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { MIME_BY_EXT, mimeForPath } from "./mime.mjs"
+import { MIME_BY_EXT, mimeForPath } from "./mime.ts"
 
 test("mimeForPath maps known extensions", () => {
   assert.equal(mimeForPath("a.json"), "application/json")

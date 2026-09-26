@@ -4,17 +4,18 @@
 // very different consumers:
 //
 //   - downstream, the adapters that fold the app's effort onto the wire
-//     (`ai-sdk-adapter.mjs`, `openai-compatible-variant-adapter.mjs`), and
+//     (`ai-sdk-adapter`, `openai-compatible-variant-adapter`), and
 //   - upstream, the renderer deciding which tiers to even OFFER
 //     (`packages/provider-core/src/providers/reasoning-tiers.ts`).
 //
-// The upstream consumer runs in the browser bundle, and `ai-sdk-adapter.mjs`
+// The upstream consumer runs in the browser bundle, and `ai-sdk-adapter`
 // drags in the whole AI SDK — so the tables cannot live there and be imported
 // from the UI. Keeping them here lets both sides read the same constants
 // without either pulling the other's dependencies, which is the only way
 // "which tiers we offer" and "what the wire accepts" stay in agreement.
 //
-// Same reasoning (and same directory) as `provider-protocol.mjs`.
+// Same reasoning (and same directory) as `provider-protocol.ts`; isomorphic
+// for the same reason.
 
 /**
  * Fallback budget tiers for the budget-driven providers (anthropic / google)
@@ -37,7 +38,7 @@ export const EFFORT_TO_BUDGET = Object.freeze({
  * carries `max`, which OpenAI rejects (400) and which
  * `normalizeOpenAiEffort` folds down to `xhigh`.
  */
-export const OPENAI_EFFORT_VALUES = Object.freeze(
+export const OPENAI_EFFORT_VALUES: ReadonlySet<string> = Object.freeze(
   new Set(["none", "minimal", "low", "medium", "high", "xhigh"])
 )
 

@@ -10,7 +10,7 @@
  * plugin can never shadow a native execution path.
  */
 
-import { BUILTIN_PROTOCOL_NAMES } from "../../../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
+import { BUILTIN_PROTOCOL_NAMES } from "../../../../sidecar/src/providers/provider-protocol.ts"
 
 export interface OpenAiCompatibleVariantResponsePaths {
   textDelta: string

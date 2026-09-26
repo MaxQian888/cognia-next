@@ -5,7 +5,7 @@
 // tool list feeds provider prompt-cache prefix matching, so registration order
 // must stay byte-stable across turns and sessions. New tools are APPENDED.
 
-import { mimeForPath } from "../shared/mime.mjs"
+import { mimeForPath } from "../../src/shared/mime.ts"
 
 import { fileHashTool, execFileHash } from "./file-hash.mjs"
 import { fileDiffTool, execFileDiff } from "./file-diff.mjs"

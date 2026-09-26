@@ -76,6 +76,7 @@ on:
       - "plugins/computer-use/rust/**"
       - "sidecar/package.json"
       - "sidecar/*.mjs"
+      - "sidecar/src/**"
       - "sidecar/vscode-ext-host/package.json"
       - "sidecar/webclone/package.json"
       - "hooks/builtin/**"

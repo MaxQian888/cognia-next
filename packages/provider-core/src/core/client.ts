@@ -26,7 +26,7 @@ import {
   isGenuineOpenAiEndpoint,
   resolveProviderProtocol,
   decideOpenAiEndpointFlavor,
-} from "../../../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
+} from "../../../../sidecar/src/providers/provider-protocol.ts"
 
 export type { ProviderName } from "@cognia/provider-types"
 // Re-exported for back-compat with importers that pulled it from here.

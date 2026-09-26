@@ -264,10 +264,10 @@
       "entries": ["agent-sdk:query"],
       "note": "Native prompt/agent hooks: an Agent SDK query under the hook's own $0.25 budget governor, not the CallLedger."
     },
-    "sidecar/dispatch/live-harness.mjs": {
+    "sidecar/test-support/live-harness.ts": {
       "reason": "not-a-provider-call",
       "entries": ["endpoint:anthropic-messages"],
-      "note": "Helper for the *.live.test.mjs suites: an in-process mock of the Anthropic Messages API; it never reaches a provider."
+      "note": "Helper for the *.live.test.* suites and the conformance suite: an in-process mock of the Anthropic Messages API; it never reaches a provider."
     },
     "sidecar/dispatch/prewarm.mjs": {
       "reason": "not-a-provider-call",

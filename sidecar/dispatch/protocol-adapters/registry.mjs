@@ -7,7 +7,7 @@
 import { makeAiSdkAdapter } from "./ai-sdk-adapter.mjs"
 import { makeCodeAdapter } from "./code-adapter.mjs"
 import { makeOpenAiCompatVariantAdapter } from "./openai-compatible-variant-adapter.mjs"
-import { BUILTIN_PROTOCOL_NAMES } from "./provider-protocol.mjs"
+import { BUILTIN_PROTOCOL_NAMES } from "../../src/providers/provider-protocol.ts"
 
 /**
  * Protocols the built-in `@ai-sdk/*` adapter handles, derived from the single

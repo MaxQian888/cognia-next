@@ -9,7 +9,7 @@
 // renderer round-trip path is the planned phase-2 escape hatch).
 
 import { getPath } from "./json-path-lite.mjs"
-import { GENERIC_REASONING_EFFORT } from "./reasoning-effort-tables.mjs"
+import { GENERIC_REASONING_EFFORT } from "../../src/providers/reasoning-effort-tables.ts"
 
 /** Keys a well-formed spec must carry (parity-tested against the renderer). */
 export const SPEC_REQUIRED_KEYS = ["kind", "urlTemplate", "responsePaths"]

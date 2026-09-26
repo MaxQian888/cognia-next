@@ -22,7 +22,7 @@ it("re-exports the canonical event-kind guard at the execution boundary", () => 
 // produce identical envelope shapes for the same context.
 const fixture = JSON.parse(
   readFileSync(
-    join(process.cwd(), "sidecar", "dispatch", "agent-event-envelope.fixture.json"),
+    join(process.cwd(), "sidecar", "test-support", "fixtures", "agent-event-envelope.json"),
     "utf8"
   )
 ) as {

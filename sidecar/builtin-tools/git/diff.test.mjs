@@ -5,7 +5,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { execGitDiff } from "./diff.mjs"
-import { seededRepo, initRepo, git, rm } from "./_fixtures.mjs"
+import { seededRepo, initRepo, git, rm } from "../../test-support/git-repo.ts"
 
 let REPO
 before(() => {

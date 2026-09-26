@@ -125,10 +125,24 @@ export function moduleReferences(fileName, source) {
   return refs
 }
 
+/** A real `import.meta` expression (the AST's meta-property), not a mention in a comment. */
+function usesImportMeta(fileName, source) {
+  const kind = /\.[mc]?tsx?$/.test(fileName) ? ts.ScriptKind.TSX : ts.ScriptKind.JS
+  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, kind)
+  let found = false
+  const visit = (node) => {
+    if (found) return
+    if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) found = true
+    else ts.forEachChild(node, visit)
+  }
+  visit(sf)
+  return found
+}
+
 /** Does the file use `import.meta`, a Node built-in, or a package? (isomorphic check) */
 export function isomorphicViolations(fileName, source) {
   const problems = []
-  if (/\bimport\.meta\b/.test(source)) problems.push("import.meta")
+  if (usesImportMeta(fileName, source)) problems.push("import.meta")
   for (const { specifier, typeOnly } of moduleReferences(fileName, source)) {
     if (typeOnly || specifier.startsWith(".")) continue
     problems.push(isBuiltin(specifier) ? `node built-in ${specifier}` : `package ${specifier}`)

@@ -1,12 +1,13 @@
-// Test-only git fixtures. Underscore-prefixed so it is never matched by the
-// `*.test.mjs` runner glob and never imported by production assemblers.
+// Test-only git fixtures for the git tool suites. Lives in test-support/,
+// which is never shipped and never imported by production code
+// (audit:sidecar-architecture).
 
 import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-export function git(args, cwd) {
+export function git(args: readonly string[], cwd: string): string {
   return execFileSync("git", args, {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
@@ -15,7 +16,7 @@ export function git(args, cwd) {
 }
 
 /** A bare initialised repo (main branch, test identity) — no commits. */
-export function initRepo(prefix = "cognia-git-w-") {
+export function initRepo(prefix = "cognia-git-w-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
   git(["init", "-q", "-b", "main"], dir)
   git(["config", "user.email", "test@example.com"], dir)
@@ -31,7 +32,7 @@ export function initRepo(prefix = "cognia-git-w-") {
  * The standard seeded repo used by the read-only tool tests: a.txt is committed
  * then modified in the working tree, b.txt is untracked, tag v0.1.0 exists.
  */
-export function seededRepo() {
+export function seededRepo(): string {
   const dir = initRepo("cognia-git-")
   fs.writeFileSync(path.join(dir, "a.txt"), "alpha\nbeta\n")
   git(["add", "a.txt"], dir)
@@ -45,6 +46,6 @@ export function seededRepo() {
   return dir
 }
 
-export function rm(dir) {
+export function rm(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true })
 }

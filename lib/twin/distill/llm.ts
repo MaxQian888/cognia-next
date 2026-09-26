@@ -22,7 +22,7 @@ import {
   normalizeProtocol,
   resolveProviderProtocol,
   decideOpenAiEndpointFlavor,
-} from "../../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
+} from "../../../sidecar/src/providers/provider-protocol.ts"
 import { webviewSafeTelemetry } from "../../ai/webview-safe-telemetry"
 
 export interface LlmClientCallOptions {

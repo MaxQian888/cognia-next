@@ -563,7 +563,7 @@ export type ApiProtocol = BuiltInApiProtocol | (string & {})
  * Google's family `gemini`; here it is `google`, plus `mistral`/`cohere` (which
  * have no custom-provider picker entry but are dispatchable). The
  * renderer→execution bridge is `normalizeProtocol` in
- * `sidecar/dispatch/protocol-adapters/provider-protocol.mjs` (gemini → google),
+ * `sidecar/src/providers/provider-protocol.ts` (gemini → google),
  * guarded by `protocol-adapter-spec.parity.test.ts`. Defined here so the two
  * resolvers (`lib/ai/provider-consumption.ts`,
  * `packages/provider-core/.../provider-persistence.ts`) share one definition.
@@ -591,7 +591,7 @@ export type ResolutionFailureNextAction =
  * heuristic — this is what unlocks the Responses API on Azure OpenAI, on
  * compatible gateways that proxy `/responses`, and on custom base URLs. "auto"
  * (or undefined) falls back to the heuristic in
- * `decideOpenAiEndpointFlavor` (provider-protocol.mjs).
+ * `decideOpenAiEndpointFlavor` (provider-protocol.ts).
  */
 export type ApiFlavor = "auto" | "responses" | "chat"
 

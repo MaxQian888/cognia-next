@@ -43,7 +43,6 @@
     "cycle: sidecar/dispatch -> sidecar/builtin-tools",
     "cycle: sidecar/dispatch -> sidecar/builtin-tools/code",
     "cycle: sidecar/dispatch -> sidecar/builtin-tools/core",
-    "cycle: sidecar/dispatch -> sidecar/builtin-tools/shared",
     "cycle: sidecar/dispatch -> sidecar/dispatch/optical",
     "cycle: sidecar/dispatch -> sidecar/dispatch/protocol-adapters",
     "cycle: sidecar/dispatch -> sidecar/lsp",

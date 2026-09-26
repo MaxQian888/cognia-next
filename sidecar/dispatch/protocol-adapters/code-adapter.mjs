@@ -16,7 +16,7 @@
 // stays the single normalizer no matter which adapter served the turn.
 
 import { randomUUID } from "node:crypto"
-import { makeInputStream } from "../input-stream.mjs"
+import { makeInputStream } from "../../src/shared/input-stream.ts"
 
 /**
  * Register a pending execution channel for an execId. The host's

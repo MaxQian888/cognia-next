@@ -17,7 +17,7 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText, DANGEROUS_PATTERNS, findDangerousShellFragment } from "../safety.mjs"
-import { tailTruncate } from "../shared/truncate.mjs"
+import { tailTruncate } from "../../src/shared/text/truncate.ts"
 import { pickStreamDecoder } from "../shared/console-decode.mjs"
 import {
   activeShellDescriptor,
@@ -28,7 +28,7 @@ import { detectInteractiveCommand } from "../shared/interactive-detect.mjs"
 import { resolveToolPath } from "./read.mjs"
 
 // Re-exported for back-compat: the canonical implementation now lives in
-// shared/truncate.mjs (shared with future tail-keeping tools). bash.test.mjs
+// src/shared/text/truncate.ts (shared with future tail-keeping tools). bash.test.mjs
 // imports it from here.
 export { tailTruncate }
 

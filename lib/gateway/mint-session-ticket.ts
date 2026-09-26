@@ -17,7 +17,7 @@
  */
 
 import { getAllProviders } from "@cognia/provider-types/provider"
-import { resolveProviderProtocol } from "@/sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
+import { resolveProviderProtocol } from "@/sidecar/src/providers/provider-protocol.ts"
 import { isAgentExecutionFlagEnabled } from "@/lib/ai/agent/execution/feature-flags"
 import {
   gatewayGetStatus,

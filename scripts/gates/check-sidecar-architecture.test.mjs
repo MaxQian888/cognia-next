@@ -150,6 +150,10 @@ test("isomorphic modules use no Node built-ins, packages or import.meta", () => 
     ),
     ["import.meta", "node built-in node:fs", "package zod"]
   )
+  assert.deepEqual(
+    isomorphicViolations("p.ts", "// never touch `import.meta` here\nexport const x = 1\n"),
+    []
+  )
   const { findings } = run({ "sidecar/src/providers/protocol.ts": 'import os from "node:os"\n' })
   assert.deepEqual(findings, [
     "isomorphic: sidecar/src/providers/protocol.ts uses node built-in node:os",

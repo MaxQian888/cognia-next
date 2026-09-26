@@ -6,7 +6,7 @@
 // head-truncate primitive so all output-capping behaviour lives in one place).
 
 import { runCapped } from "../shared/exec.mjs"
-import { headTruncate } from "../shared/truncate.mjs"
+import { headTruncate } from "../../src/shared/text/truncate.ts"
 
 export const MAX_OUTPUT_BYTES = 256 * 1024 // 256 KB display cap (trimTail)
 // The child may BUFFER far more than we DISPLAY. Keeping the execFile maxBuffer

@@ -7,7 +7,7 @@ import { createPatch } from "diff"
 
 import { toolError, toolText } from "../safety.mjs"
 import { ensureExists } from "../shared/fs-stat.mjs"
-import { headTruncate } from "../shared/truncate.mjs"
+import { headTruncate } from "../../src/shared/text/truncate.ts"
 
 const MAX_DIFF_BYTES = 5 * 1024 * 1024 // 5 MB per side; bigger files refuse the diff
 // Two near-5 MB files can produce a multi-MB patch; cap the model-facing text

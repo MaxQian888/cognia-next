@@ -11,18 +11,20 @@
 // 404s a gateway. This module is the one place that knowledge lives now.
 //
 // CONSTRAINTS: zero dependencies, pure data + pure functions. The sidecar ships
-// standalone (`sidecar/**` only, no compiled TS), so this MUST be a runtime
-// `.mjs` under sidecar/. The renderer/CLI (TypeScript) import it directly — the
-// repo idiom for "sidecar and renderer must agree" (see
+// standalone, so this lives under sidecar/ and the renderer/CLI import it
+// directly — the repo idiom for "sidecar and renderer must agree" (see
 // lib/claude/usage.compaction-parity.test.ts). `sidecar` cannot import `lib/`,
-// so the dependency direction is always renderer/CLI → this file.
+// so the dependency direction is always renderer/CLI → this file. The renderer
+// bundles it, so it stays isomorphic (no Node built-ins, packages or
+// `import.meta`; enforced by audit:sidecar-architecture) and within the root
+// tsconfig's ES2018 target.
 
 /**
  * The AI SDK families with a first-party `@ai-sdk/*` package. A protocol id NOT
  * in this set is either an alias (`gemini` → `google`, normalize first) or a
  * plugin-contributed adapter id resolved through the protocol-adapter registry.
  */
-export const BUILTIN_PROTOCOL_NAMES = Object.freeze([
+export const BUILTIN_PROTOCOL_NAMES: readonly string[] = Object.freeze([
   "openai",
   "anthropic",
   "google",
@@ -32,10 +34,10 @@ export const BUILTIN_PROTOCOL_NAMES = Object.freeze([
   "bedrock",
 ])
 
-const BUILTIN_PROTOCOL_SET = new Set(BUILTIN_PROTOCOL_NAMES)
+const BUILTIN_PROTOCOL_SET: ReadonlySet<string> = new Set(BUILTIN_PROTOCOL_NAMES)
 
 /** Is `protocol` one of the first-party AI SDK families (vs a plugin adapter)? */
-export function isBuiltInProtocol(protocol) {
+export function isBuiltInProtocol(protocol: unknown): boolean {
   return typeof protocol === "string" && BUILTIN_PROTOCOL_SET.has(normalizeProtocol(protocol))
 }
 
@@ -43,7 +45,7 @@ export function isBuiltInProtocol(protocol) {
  * `gemini` is the historical alias for the `google` AI SDK family. Normalize it
  * here, in the ONE place, so no call site has to special-case the alias again.
  */
-export function normalizeProtocol(protocol) {
+export function normalizeProtocol(protocol: string): string {
   return protocol === "gemini" ? "google" : protocol
 }
 
@@ -57,7 +59,7 @@ export function normalizeProtocol(protocol) {
  * custom baseURL. Custom provider ids aren't here; they carry an explicit
  * `providerCredentials.protocol`.
  */
-export const PROVIDER_PROTOCOL = Object.freeze({
+export const PROVIDER_PROTOCOL: Readonly<Record<string, string>> = Object.freeze({
   // Native first-party families.
   anthropic: "anthropic",
   google: "google",
@@ -98,7 +100,7 @@ export const PROVIDER_PROTOCOL = Object.freeze({
  * an unknown id — the caller must then rely on an explicit
  * `providerCredentials.protocol` (custom providers always carry one).
  */
-export function resolveProviderProtocol(providerId, modelId) {
+export function resolveProviderProtocol(providerId: string, modelId?: string): string | null {
   // CommandCode's documented endpoints reject the wrong model family.
   if (providerId === "commandcode" && typeof modelId === "string") {
     return /(^|\/)claude-/.test(modelId) ? "anthropic" : "openai"
@@ -112,7 +114,7 @@ export function resolveProviderProtocol(providerId, modelId) {
  * at `chatgpt.com`, whose host fails the `*.openai.com` check, so it needs an
  * id-based override to reach `/responses`.
  */
-export const RESPONSES_ONLY_PROVIDERS = new Set(["codex"])
+export const RESPONSES_ONLY_PROVIDERS: ReadonlySet<string> = new Set(["codex"])
 
 /**
  * Built-in openai-PROTOCOL provider ids that legitimately dispatch to an
@@ -124,7 +126,9 @@ export const RESPONSES_ONLY_PROVIDERS = new Set(["codex"])
  * resolver fills that base URL from the provider catalog before each turn; this
  * set is the sidecar's last-line check that the value actually arrived.
  */
-export const OPENAI_HOST_PROVIDERS = Object.freeze(new Set(["openai", "codex"]))
+export const OPENAI_HOST_PROVIDERS: ReadonlySet<string> = Object.freeze(
+  new Set(["openai", "codex"])
+)
 
 /**
  * True when dispatching the (already openai-protocol) built-in provider
@@ -140,7 +144,10 @@ export const OPENAI_HOST_PROVIDERS = Object.freeze(new Set(["openai", "codex"]))
  * openai protocols, and for unknown/custom ids (which carry their own protocol
  * + base URL and are the user's responsibility).
  */
-export function isMisroutedToOpenAi(providerId, baseURL) {
+export function isMisroutedToOpenAi(
+  providerId: string | null | undefined,
+  baseURL?: string | null
+): boolean {
   if (!providerId || OPENAI_HOST_PROVIDERS.has(providerId)) return false
   if (resolveProviderProtocol(providerId) !== "openai") return false
   return isGenuineOpenAiEndpoint(baseURL)
@@ -154,7 +161,7 @@ export function isMisroutedToOpenAi(providerId, baseURL) {
  * endpoint. Anything that doesn't parse, or whose host isn't *.openai.com, is
  * treated as a compatible gateway so we fail safe onto `/chat/completions`.
  */
-export function isGenuineOpenAiEndpoint(baseURL) {
+export function isGenuineOpenAiEndpoint(baseURL?: string | null): boolean {
   if (!baseURL || typeof baseURL !== "string") return true
   try {
     const host = new URL(baseURL).host.toLowerCase()
@@ -170,7 +177,7 @@ export function isGenuineOpenAiEndpoint(baseURL) {
  * `*.openai.com`, so `isGenuineOpenAiEndpoint` would misroute it to Chat
  * Completions. Detect it explicitly so Codex subscription turns hit `/responses`.
  */
-export function isResponsesOnlyEndpoint(baseURL) {
+export function isResponsesOnlyEndpoint(baseURL?: string | null): boolean {
   if (!baseURL || typeof baseURL !== "string") return false
   try {
     const host = new URL(baseURL).host.toLowerCase()
@@ -192,15 +199,28 @@ export function isResponsesOnlyEndpoint(baseURL) {
  * unknown field, so they must stay out — which is why this is an allowlist of
  * native surfaces rather than a "not a gateway" check.
  */
-export function isOpenAiNativeSurface({ providerId, baseURL } = {}) {
+export function isOpenAiNativeSurface({
+  providerId,
+  baseURL,
+}: { providerId?: string | null; baseURL?: string | null } = {}): boolean {
   if (providerId && RESPONSES_ONLY_PROVIDERS.has(providerId)) return true
   if (isResponsesOnlyEndpoint(baseURL)) return true
   return isGenuineOpenAiEndpoint(baseURL)
 }
 
+/** Which OpenAI client surface a model is built on. */
+export type OpenAiEndpointFlavor = "responses" | "chat"
+
+export interface EndpointFlavorInput {
+  /** The user's explicit choice; "auto" (or absent) defers to the heuristic. */
+  apiFlavor?: string | null
+  baseURL?: string | null
+  providerId?: string | null
+}
+
 /**
  * THE single decision for "build this openai/azure model via `.responses()` or
- * `.chat()`?". Used by both the sidecar (`ai-sdk-adapter.mjs:buildModel`) and the
+ * `.chat()`?". Used by both the sidecar (`ai-sdk-adapter`'s `buildModel`) and the
  * renderer (`provider-core/client.ts:getProviderModel`) so they never disagree.
  *
  * Precedence:
@@ -213,11 +233,12 @@ export function isOpenAiNativeSurface({ providerId, baseURL } = {}) {
  *      providers and genuine *.openai.com / chatgpt.com → "responses"; every
  *      other endpoint (compatible gateways, Azure with no explicit flavor) →
  *      "chat", the universally-supported default.
- *
- * @param {{ apiFlavor?: "auto"|"responses"|"chat", baseURL?: string, providerId?: string }} [args]
- * @returns {"responses"|"chat"}
  */
-export function decideOpenAiEndpointFlavor({ apiFlavor, baseURL, providerId } = {}) {
+export function decideOpenAiEndpointFlavor({
+  apiFlavor,
+  baseURL,
+  providerId,
+}: EndpointFlavorInput = {}): OpenAiEndpointFlavor {
   if (providerId === "commandcode") return "chat"
   if (apiFlavor === "responses") return "responses"
   if (apiFlavor === "chat") return "chat"

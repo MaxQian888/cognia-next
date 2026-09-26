@@ -31,7 +31,7 @@ import {
   restorePluginToolName,
   restorePluginToolNamesInSdkMessage,
 } from "./plugin-tool-aliases.mjs"
-import { makeInputStream } from "./input-stream.mjs"
+import { makeInputStream } from "../src/shared/input-stream.ts"
 import { buildSubprocessEnv } from "./subprocess-env.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import { sessionEndedFromResult } from "./result-terminal.mjs"

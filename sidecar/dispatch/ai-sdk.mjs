@@ -14,7 +14,7 @@ import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
 
 import { randomUUID } from "node:crypto"
 import { createEventAdapter } from "./event-adapter.mjs"
-import { makeInputStream } from "./input-stream.mjs"
+import { makeInputStream } from "../src/shared/input-stream.ts"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import {
   classifyCallError,
@@ -42,7 +42,7 @@ import {
   resolveProviderProtocol,
   normalizeProtocol,
   isMisroutedToOpenAi,
-} from "./protocol-adapters/provider-protocol.mjs"
+} from "../src/providers/provider-protocol.ts"
 import { shouldCompact, estimateTokens, makeSummaryMessage, summaryVersion } from "./compaction.mjs"
 import { planStrategy } from "./compaction-strategies.mjs"
 import { queryPreCompactDecision } from "./pre-compact-hook.mjs"

@@ -1,13 +1,13 @@
 // Shared extension → MIME mapping for built-in tools.
 //
-// Extracted from file-extras.mjs (used by file_info). Broad map covering text,
+// Extracted from file-extras (used by file_info). Broad map covering text,
 // code, image, and archive types; unknown extensions fall back to
 // application/octet-stream. Distinct from core/read-media.mjs's IMAGE_MIME,
 // which is an intentional vision-support whitelist (a different concern).
 
 import path from "node:path"
 
-export const MIME_BY_EXT = new Map([
+export const MIME_BY_EXT = new Map<string, string>([
   [".txt", "text/plain"],
   [".md", "text/markdown"],
   [".json", "application/json"],
@@ -46,13 +46,8 @@ export const MIME_BY_EXT = new Map([
   [".yml", "application/yaml"],
 ])
 
-/**
- * Best-effort MIME type for a path by extension.
- *
- * @param {string} p
- * @returns {string} The mapped MIME, or `application/octet-stream`.
- */
-export function mimeForPath(p) {
+/** Best-effort MIME type for a path by extension; `application/octet-stream` when unknown. */
+export function mimeForPath(p: string): string {
   const ext = path.extname(p).toLowerCase()
   return MIME_BY_EXT.get(ext) ?? "application/octet-stream"
 }

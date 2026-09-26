@@ -4,7 +4,7 @@ import path from "node:path"
 import fs from "node:fs"
 
 import { execGitStage, execGitCommit } from "./write.mjs"
-import { initRepo, git, rm } from "./_fixtures.mjs"
+import { initRepo, git, rm } from "../../test-support/git-repo.ts"
 
 function decodeJSON(result) {
   return JSON.parse(result.content[0].text)

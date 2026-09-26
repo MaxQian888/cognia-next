@@ -141,9 +141,6 @@
         // `ai` and the Langfuse processor share one otel instance.
         "@ai-sdk/otel",
       ],
-      "ignoreIssues": {
-        "dispatch/protocol-adapters/provider-protocol.d.mts": ["files"],
-      },
     },
     "sidecar/vscode-ext-host": {
       "entry": ["tests/fixtures/**/*.{js,mjs,ts}"],

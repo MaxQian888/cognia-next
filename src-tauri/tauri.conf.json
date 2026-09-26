@@ -57,6 +57,7 @@
       "../sidecar/pi-extension/**/*",
       "../sidecar/package.json",
       "../sidecar/node_modules/**/*",
+      "../sidecar/src/**/*",
       "../sidecar/dispatch/**/*",
       "../sidecar/builtin-tools/**/*",
       "../sidecar/lsp/**/*",

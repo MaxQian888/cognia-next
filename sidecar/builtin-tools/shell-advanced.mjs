@@ -16,7 +16,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText, validateShellCommand } from "./safety.mjs"
 import { execFileAsync, sandboxedProcessTarget, sandboxedProcessEnv } from "./shared/exec.mjs"
-import { headTruncate } from "./shared/truncate.mjs"
+import { headTruncate } from "../src/shared/text/truncate.ts"
 
 // Mirror src-tauri/src/shell.rs:17-19 caps so the two paths feel consistent.
 const MAX_OUTPUT_BYTES = 64 * 1024 // model-facing display cap (headTruncate)
