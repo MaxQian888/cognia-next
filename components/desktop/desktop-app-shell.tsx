@@ -13,7 +13,7 @@
  *   │                       │ Rail  │    a browser tab already has chrome, so the
  *   ├──────────── StatusBar ────────┤    columns draw their own headers instead.
  *
- * - The rail's edge is `settings.sidebarSide` (default `"right"`, as drawn).
+ * - The rail's edge is `settings.sidebarSide` (default `"left"`; drawn right).
  *   It is the outermost column on whichever side it takes, so the transient
  *   extension host bar appearing beside it never shifts it.
  *

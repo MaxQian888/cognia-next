@@ -18,6 +18,12 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 // list installs so the reorder path can be driven with a synthetic drop — the
 // same seam `bar-customizer.test.tsx` uses.
 let lastDragEnd: ((event: unknown) => void) | undefined
+let lastAccessibility:
+  | {
+      announcements: Record<string, (event: unknown) => string | undefined>
+      screenReaderInstructions: { draggable: string }
+    }
+  | undefined
 jest.mock("@dnd-kit/core", () => {
   const actual = jest.requireActual<typeof import("@dnd-kit/core")>("@dnd-kit/core")
   return {
@@ -25,11 +31,14 @@ jest.mock("@dnd-kit/core", () => {
     DndContext: ({
       children,
       onDragEnd,
+      accessibility,
     }: {
       children: React.ReactNode
       onDragEnd: (event: unknown) => void
+      accessibility?: typeof lastAccessibility
     }) => {
       lastDragEnd = onDragEnd
+      lastAccessibility = accessibility
       return <>{children}</>
     },
   }
@@ -244,12 +253,25 @@ describe("CustomizerLists — reordering", () => {
   it("starts a keyboard drag from the grip without throwing", () => {
     renderThreeBuckets()
     const handle = screen.getByTestId(`${PREFIX}-handle-inbox`)
-    expect(handle).toHaveAttribute("aria-label", "drag Inbox")
+    // Localized (`desktop.navReorder.dragHandle`), not a hard-coded "drag".
+    expect(handle).toHaveAttribute("aria-label", "Drag Inbox")
     act(() => {
       fireEvent.keyDown(handle, { code: "Space" })
       fireEvent.keyDown(handle, { code: "ArrowDown" })
       fireEvent.keyDown(handle, { code: "Space" })
     })
     expect(screen.getByTestId(`${PREFIX}-pinned-inbox`)).toBeInTheDocument()
+  })
+
+  it("speaks localized reorder announcements naming the item and its position", () => {
+    renderThreeBuckets()
+    const a11y = lastAccessibility!
+    expect(a11y.screenReaderInstructions.draggable).toMatch(/Space or Enter/)
+    const pickedUp = a11y.announcements.onDragStart({ active: { id: "inbox" } })
+    expect(pickedUp).toMatch(/Inbox/)
+    expect(pickedUp).toMatch(/1 of/)
+    expect(a11y.announcements.onDragEnd({ active: { id: "inbox" }, over: null })).toMatch(
+      /cancelled/i
+    )
   })
 })

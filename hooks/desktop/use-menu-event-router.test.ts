@@ -44,20 +44,6 @@ jest.mock("@/lib/desktop/menu-actions", () => {
     "language-en",
     "language-zh-cn",
     "toggle-reduce-motion",
-    "go-inbox",
-    "go-workflows",
-    "go-sites",
-    "go-twin",
-    "go-skills",
-    "go-plugins",
-    "go-squads",
-    "go-scheduler",
-    "go-discover",
-    "go-a2ui",
-    "go-dms",
-    "go-canvas",
-    "go-logs",
-    "go-settings",
     "automation-kill-switch",
     "manage-connectors",
     "manage-mcp-server",
@@ -68,8 +54,21 @@ jest.mock("@/lib/desktop/menu-actions", () => {
     "documentation",
     "about",
   ]
+  // The real Go ids are derived from the navigation catalog; mirror that
+  // derivation so the router is exercised against every destination.
+  const { SIDEBAR_NAV_META } =
+    jest.requireActual<typeof import("@/types/shell/sidebar")>("@/types/shell/sidebar")
+  const goIds = [
+    ...SIDEBAR_NAV_META.map((meta) => `go-${meta.id}`),
+    "go-dms",
+    "go-canvas",
+    "go-settings",
+  ]
+  const goIdSet = new Set(goIds)
   return {
-    MENU_ACTION_IDS: ids,
+    MENU_ACTION_IDS: [...ids, ...goIds],
+    GO_MENU_IDS: goIds,
+    isGoMenuId: (id: string) => goIdSet.has(id),
     newChatAction: () => track("newChatAction")(),
     newWorkflowAction: (r: unknown) => track("newWorkflowAction")(r),
     newAgentTeamAction: (r: unknown) => track("newAgentTeamAction")(r),
@@ -180,9 +179,12 @@ beforeEach(() => {
 test("subscribes to one channel per menu id (minus zoom + reload + fullscreen) plus tray fallback", async () => {
   renderHook(() => useMenuEventRouter())
   await flush()
-  // 48 ids in our mocked list minus 5 skipped (reload, toggle-fullscreen, zoom-in/out/reset)
+  const { MENU_ACTION_IDS } = jest.requireMock<{ MENU_ACTION_IDS: string[] }>(
+    "@/lib/desktop/menu-actions"
+  )
+  // Every mocked id minus 5 skipped (reload, toggle-fullscreen, zoom-in/out/reset)
   // plus 1 tray fallback => exact count.
-  expect(subscribers.size).toBe(48 - 5 + 1)
+  expect(subscribers.size).toBe(MENU_ACTION_IDS.length - 5 + 1)
   // Spot-check both kinds of subscription.
   expect(subscribers.has("menu://new-chat")).toBe(true)
   expect(subscribers.has("tray://open-logs")).toBe(true)
@@ -229,7 +231,7 @@ test("each menu event routes to the right action helper", async () => {
     ["go-twin", "goAction"],
     ["go-dms", "goAction"],
     ["go-canvas", "goAction"],
-    ["go-logs", "openLogsAction"],
+    ["go-logs", "goAction"],
     ["go-settings", "goAction"],
     ["automation-kill-switch", "automationKillSwitchAction"],
     ["manage-connectors", "manageConnectorsAction"],
@@ -248,6 +250,24 @@ test("each menu event routes to the right action helper", async () => {
     listener?.()
     await flush()
     expect(calls.find((c) => c.name === helper)).toBeDefined()
+  }
+})
+
+test("every Go-menu id routes through goAction with its own id", async () => {
+  const { GO_MENU_IDS } = jest.requireMock<{ GO_MENU_IDS: string[] }>("@/lib/desktop/menu-actions")
+  renderHook(() => useMenuEventRouter())
+  await flush()
+
+  // Catalog destinations the old hand-listed switch never knew about must
+  // reach goAction too — the regression this guard exists for.
+  expect(GO_MENU_IDS).toEqual(expect.arrayContaining(["go-issues", "go-goals", "go-devices"]))
+  for (const id of GO_MENU_IDS) {
+    calls.length = 0
+    const listener = subscribers.get(`menu://${id}`)
+    expect(listener).toBeDefined()
+    listener?.()
+    await flush()
+    expect(calls).toEqual([{ name: "goAction", args: [expect.anything(), id] }])
   }
 })
 

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, within } from "@testing-library/react"
 
 import { SidebarCustomizer } from "./sidebar-customizer"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -22,15 +22,27 @@ jest.mock("@/hooks/use-platform", () => ({
 }))
 
 interface SavePatch {
-  sidebarLayout?: { pinned: string[]; hidden: string[] }
+  sidebarLayout?: {
+    pinned: string[]
+    hidden: string[]
+    modes?: { order: string[]; hidden: string[] }
+  }
   sidebarSide?: "left" | "right"
 }
 
 const saveMock = jest.fn(async (_patch?: SavePatch) => {})
 
-function setLayout(pinned: string[], hidden: string[], side?: "left" | "right") {
+function setLayout(
+  pinned: string[],
+  hidden: string[],
+  side?: "left" | "right",
+  modes?: { order: string[]; hidden: string[] }
+) {
   useSettingsStore.setState({
-    settings: { sidebarLayout: { pinned, hidden }, sidebarSide: side } as never,
+    settings: {
+      sidebarLayout: { pinned, hidden, ...(modes ? { modes } : {}) },
+      sidebarSide: side,
+    } as never,
     save: saveMock as never,
   })
 }
@@ -44,6 +56,7 @@ beforeEach(() => {
       sidebarPeekEnabled: true,
       sidebarSearchCollapsible: true,
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
+      guildRailCollapsed: false,
     })
   })
 })
@@ -151,10 +164,11 @@ describe("SidebarCustomizer", () => {
   it("renders empty-state placeholders", () => {
     setLayout([], [])
     renderCustomizer()
+    const features = within(screen.getByTestId("sidebar-customizer"))
     // No pinned items → pinned empty placeholder.
-    expect(screen.getByText("customize.pinnedEmpty")).toBeInTheDocument()
+    expect(features.getByText("customize.pinnedEmpty")).toBeInTheDocument()
     // Nothing hidden → hidden empty placeholder.
-    expect(screen.getByText("customize.hiddenEmpty")).toBeInTheDocument()
+    expect(features.getByText("customize.hiddenEmpty")).toBeInTheDocument()
   })
 
   it("shows the More-empty placeholder when every item is pinned or hidden", () => {
@@ -268,5 +282,69 @@ describe("SidebarCustomizer behaviour block", () => {
     renderCustomizer()
     fireEvent.click(screen.getByTestId("sidebar-customizer-peek"))
     expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  // The web shell has no title bar by default and no native menu, which were
+  // the rail's only two switches — this one is always reachable.
+  it("shows and hides the navigation rail", () => {
+    renderCustomizer()
+    const rail = screen.getByTestId("sidebar-customizer-show-rail")
+    expect(rail).toBeChecked()
+    fireEvent.click(rail)
+    expect(useUIStore.getState().guildRailCollapsed).toBe(true)
+    expect(screen.getByTestId("sidebar-customizer-show-rail")).not.toBeChecked()
+    fireEvent.click(screen.getByTestId("sidebar-customizer-show-rail"))
+    expect(useUIStore.getState().guildRailCollapsed).toBe(false)
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it("does not offer the rail switch on the mobile shell", () => {
+    platformValue = "mobile"
+    renderCustomizer()
+    expect(screen.queryByTestId("sidebar-customizer-show-rail")).toBeNull()
+  })
+})
+
+describe("SidebarCustomizer — workspace modes", () => {
+  const modesSaved = () => lastSaved() as NonNullable<SavePatch["sidebarLayout"]>
+
+  it("lists Canvas on the rail by default, with nothing to restore", () => {
+    renderCustomizer()
+    expect(screen.getByTestId("sidebar-customizer-modes-pinned-canvas")).toBeInTheDocument()
+    expect(screen.getByTestId("sidebar-customizer-modes-reset")).toBeDisabled()
+  })
+
+  it("hides Canvas without touching the pinned features", () => {
+    renderCustomizer()
+    fireEvent.click(screen.getByTestId("sidebar-customizer-modes-hide-canvas"))
+    expect(modesSaved()).toEqual({
+      pinned: ["workflows", "inbox"],
+      hidden: [],
+      modes: { order: [], hidden: ["canvas"] },
+    })
+  })
+
+  it("shows a hidden mode again and restores the mode defaults on their own", async () => {
+    setLayout(["workflows"], [], undefined, { order: ["canvas"], hidden: ["canvas"] })
+    renderCustomizer()
+    expect(screen.getByTestId("sidebar-customizer-modes-row-canvas")).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("sidebar-customizer-modes-show-canvas"))
+    })
+    expect(modesSaved().modes).toEqual({ order: ["canvas"], hidden: [] })
+
+    // Queued behind the first write (layout mutations are serialized).
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("sidebar-customizer-modes-reset"))
+    })
+    expect(modesSaved()).toEqual({ pinned: ["workflows"], hidden: [] })
+  })
+
+  it("keeps the mode arrangement when the features are restored", () => {
+    const modes = { order: ["canvas"], hidden: ["canvas"] }
+    setLayout(["workflows"], ["logs"], undefined, modes)
+    renderCustomizer()
+    fireEvent.click(screen.getByTestId("sidebar-customizer-reset"))
+    expect(modesSaved()).toEqual({ ...DEFAULT_SIDEBAR_LAYOUT, modes })
   })
 })

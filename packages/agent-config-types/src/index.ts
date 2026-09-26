@@ -3150,6 +3150,19 @@ export interface ConversationSidebarSettings {
    * that follows the profile, not an edit to shared team data.
    */
   teamOrder?: string[]
+  /**
+   * Team ids the user muted from the navigation: their unread conversations
+   * stop counting toward the team's badge, the app badge and the dock count,
+   * and the team shows a muted glyph instead. The conversations themselves
+   * are untouched and keep their own per-row unread state. Absent means none
+   * muted; ids of deleted teams are ignored. Read through
+   * `lib/shell/guild-mute.ts`; written through `hooks/shell/use-team-mute.ts`,
+   * which shares the `teamOrder` write queue.
+   *
+   * Beside `teamOrder` for the same reason: a preference of this profile's
+   * sidebar, not shared team data.
+   */
+  mutedTeamIds?: string[]
 }
 
 /**

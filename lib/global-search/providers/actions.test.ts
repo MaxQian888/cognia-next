@@ -1,4 +1,4 @@
-import { makeProviderInput, makeTestContext } from "../testing"
+import { TEST_SHELL_NAV, makeProviderInput, makeTestContext } from "../testing"
 import { actionCandidates, actionsProvider } from "./actions"
 
 const hostDefaults: ReturnType<typeof makeTestContext>["host"] = {
@@ -10,6 +10,7 @@ const hostDefaults: ReturnType<typeof makeTestContext>["host"] = {
   pluginQuickActions: [],
   workbenchPanels: [],
   canBrowseHostFolders: true,
+  shellNav: TEST_SHELL_NAV,
 }
 
 const host = (over: Partial<ReturnType<typeof makeTestContext>["host"]> = {}) =>
@@ -82,6 +83,117 @@ describe("actions provider", () => {
     })
     // Hidden rather than disabled where they cannot run, so no greyed row.
     expect(on.find((c) => c.id === "toggle-desktop-pet")!.extra).toBeUndefined()
+  })
+
+  describe("navigation customization", () => {
+    const nav = (over: Partial<typeof TEST_SHELL_NAV> = {}) =>
+      host({ shellNav: { ...TEST_SHELL_NAV, ...over } })
+    const ids = (ctx: ReturnType<typeof makeTestContext>) => actionCandidates(ctx).map((c) => c.id)
+    const inbox = { id: "inbox", i18nKey: "inbox" }
+
+    it("offers no page command off every catalog route", () => {
+      const out = ids(nav())
+      expect(out).not.toContain("pin-current-page")
+      expect(out).not.toContain("unpin-current-page")
+      expect(out).not.toContain("hide-current-page")
+    })
+
+    it("offers pin + hide for an unpinned page, titled with its rail label", () => {
+      const rows = actionCandidates(nav({ currentPage: inbox }))
+      expect(rows.find((c) => c.id === "pin-current-page")).toMatchObject({
+        title: 'globalSearch.actions.pinPage:{"page":"desktop.guildRail.inbox"}',
+        subtitle: undefined,
+      })
+      expect(rows.find((c) => c.id === "hide-current-page")).toMatchObject({
+        title: 'globalSearch.actions.hidePage:{"page":"desktop.guildRail.inbox"}',
+        subtitle: "globalSearch.actions.hidePageHint",
+      })
+      expect(rows.some((c) => c.id === "unpin-current-page")).toBe(false)
+    })
+
+    it("labels through the i18n key, not the id", () => {
+      const rows = actionCandidates(
+        nav({ currentPage: { id: "source-control", i18nKey: "sourceControl" } })
+      )
+      expect(rows.find((c) => c.id === "pin-current-page")!.title).toBe(
+        'globalSearch.actions.pinPage:{"page":"desktop.guildRail.sourceControl"}'
+      )
+    })
+
+    it("offers unpin + hide for a pinned page", () => {
+      const out = ids(nav({ currentPage: inbox, currentPinned: true }))
+      expect(out).toEqual(expect.arrayContaining(["unpin-current-page", "hide-current-page"]))
+      expect(out).not.toContain("pin-current-page")
+    })
+
+    it("offers only pin for a hidden page, and says pinning shows it again", () => {
+      const rows = actionCandidates(nav({ currentPage: inbox, currentHidden: true }))
+      expect(rows.find((c) => c.id === "pin-current-page")!.subtitle).toBe(
+        "globalSearch.actions.pinHiddenPageHint"
+      )
+      expect(rows.some((c) => c.id === "hide-current-page")).toBe(false)
+      expect(rows.some((c) => c.id === "unpin-current-page")).toBe(false)
+    })
+
+    it("offers the page commands on mobile, where the drawer draws the pinned block", () => {
+      const out = ids(
+        makeTestContext({
+          platform: "mobile",
+          host: {
+            ...hostDefaults,
+            shellNav: { ...TEST_SHELL_NAV, currentPage: inbox, railChrome: false },
+          },
+        })
+      )
+      expect(out).toEqual(expect.arrayContaining(["pin-current-page", "hide-current-page"]))
+      // No rail chrome to fold or move there.
+      expect(out).not.toContain("hide-nav-rail")
+      expect(out).not.toContain("show-nav-rail")
+      expect(out).not.toContain("move-nav-rail-right")
+      expect(out).not.toContain("move-nav-rail-left")
+    })
+
+    it("opens the customizer only where its settings section is reachable", () => {
+      expect(ids(nav())).not.toContain("customize-navigation")
+      const reachable = actionCandidates(host({ reachableSettingsSections: new Set(["sidebar"]) }))
+      expect(reachable.find((c) => c.id === "customize-navigation")).toMatchObject({
+        title: "globalSearch.actions.customizeNavigation",
+      })
+    })
+
+    it("names the rail's outcome: show when folded, hide when showing", () => {
+      expect(ids(nav())).toContain("hide-nav-rail")
+      expect(ids(nav())).not.toContain("show-nav-rail")
+      const folded = actionCandidates(nav({ railCollapsed: true }))
+      expect(folded.find((c) => c.id === "show-nav-rail")!.title).toBe(
+        "globalSearch.actions.showNavRail"
+      )
+      expect(folded.some((c) => c.id === "hide-nav-rail")).toBe(false)
+    })
+
+    it("names the edge the rail moves to", () => {
+      const left = ids(nav({ side: "left" }))
+      expect(left).toContain("move-nav-rail-right")
+      expect(left).not.toContain("move-nav-rail-left")
+      const right = actionCandidates(nav({ side: "right" }))
+      expect(right.find((c) => c.id === "move-nav-rail-left")!.title).toBe(
+        "globalSearch.actions.moveNavRailLeft"
+      )
+      expect(right.some((c) => c.id === "move-nav-rail-right")).toBe(false)
+    })
+
+    it("finds the navigation commands by Chinese and English terms", async () => {
+      const ctx = nav({ currentPage: inbox })
+      const zh = await actionsProvider.search(makeProviderInput("固定", { ctx }))
+      expect(zh.items.map((i) => i.id)).toContain("action:pin-current-page")
+      const en = await actionsProvider.search(makeProviderInput("rail", { ctx }))
+      expect(en.items.map((i) => i.action)).toEqual(
+        expect.arrayContaining([
+          { type: "command", id: "hide-nav-rail" },
+          { type: "command", id: "move-nav-rail-right" },
+        ])
+      )
+    })
   })
 
   it("finds the pet actions by their Chinese and English names", async () => {

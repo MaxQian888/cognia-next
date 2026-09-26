@@ -51,6 +51,8 @@ export const SURFACE_CONTRACTS = [
   {
     id: "integrations",
     route: "/integrations",
+    // A rail / More-menu destination since it joined `SIDEBAR_NAV_META`.
+    navigation: true,
     standalone: "full",
     companion: "remote",
     offline: "cached-read",
@@ -221,7 +223,8 @@ export const SURFACE_CONTRACTS = [
   {
     id: "issue-projects",
     route: "/projects",
-    navigation: true,
+    // Still routable (old links land here), but no longer a navigation entry:
+    // the tracker's projects moved into its own tabs and left the catalog.
     standalone: "full",
     companion: "remote",
     offline: "cached-read",
@@ -463,8 +466,16 @@ export const INTERNAL_ROUTE_EXEMPTIONS = [
   // an old bookmark or an old message still resolves.
   "/agent-teams",
   "/agent-teams/workspace",
+  // The reply copilot's frameless overlay panel (ADR-0194 §8), opened only by
+  // `chat_copilot_open` in its own Tauri window. Same category as
+  // `/selection-toolbar`: nothing navigates here and no runtime is chosen.
+  "/chat-copilot",
   "/deep-link",
   "/e2e/plugin-ui-surfaces",
+  // Invitation landing: stores the token for the tab and redirects to `/`,
+  // before anybody is signed in. It talks to no server, so it has no runtime
+  // target to classify — redemption happens behind the root's cloud gate.
+  "/invite",
   "/island",
   "/lark/entry",
   "/lark/shortcut",
@@ -495,6 +506,9 @@ export const INTERNAL_ROUTE_EXEMPTIONS = [
   // deliberately boots no account, no target and no transport.
   "/status",
   "/tray-panel",
+  // The Capacity Dock's transparent always-on-top window (ADR-0165), opened
+  // only by `usage_dock_open`. Same category as `/tray-panel`.
+  "/usage-dock",
 ] as const
 
 const CONTRACT_BY_ID = new Map<string, SurfaceContract>(

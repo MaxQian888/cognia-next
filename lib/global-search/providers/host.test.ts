@@ -1,6 +1,6 @@
 import type { QuickActionEntry } from "@/lib/plugin/registries/quick-action-registry"
 
-import { makeProviderInput, makeTestContext } from "../testing"
+import { TEST_SHELL_NAV, makeProviderInput, makeTestContext } from "../testing"
 import { pluginActionsProvider, workbenchPanelsProvider } from "./host"
 
 const host = (over: Partial<ReturnType<typeof makeTestContext>["host"]>) =>
@@ -14,6 +14,7 @@ const host = (over: Partial<ReturnType<typeof makeTestContext>["host"]>) =>
       pluginQuickActions: [],
       workbenchPanels: [],
       canBrowseHostFolders: true,
+      shellNav: TEST_SHELL_NAV,
       ...over,
     },
   })

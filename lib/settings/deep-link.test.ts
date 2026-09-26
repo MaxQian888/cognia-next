@@ -3,7 +3,9 @@ import {
   mcpHref,
   providerSettingsHref,
   SETTINGS_ROUTE,
+  TEAM_SETTINGS_PARAM,
   settingsHref,
+  teamSettingsHref,
 } from "./deep-link"
 import { SETTINGS_NAV } from "@/components/settings/settings-nav-config"
 
@@ -129,5 +131,12 @@ describe("providerSettingsHref", () => {
     expect(providerSettingsHref({ provider: "anthropic" })).toBe(
       "/settings?section=ai-connections&provider=anthropic"
     )
+  })
+})
+
+describe("teamSettingsHref", () => {
+  it("opens the teams section, with the team to edit when one is named", () => {
+    expect(teamSettingsHref()).toBe("/settings?section=teams")
+    expect(teamSettingsHref("team 1")).toBe(`/settings?section=teams&${TEAM_SETTINGS_PARAM}=team+1`)
   })
 })

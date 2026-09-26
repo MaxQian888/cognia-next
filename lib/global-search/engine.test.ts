@@ -11,6 +11,7 @@ import {
 import { parseGlobalSearchQuery } from "./query-parser"
 import { normalizeMessageScore, scoreTitleMatch } from "./scoring"
 import { __resetGlobalSearchRegistryForTesting, registerGlobalSearchProvider } from "./registry"
+import { TEST_SHELL_NAV } from "./testing"
 import type {
   GlobalSearchContext,
   GlobalSearchGroup,
@@ -40,6 +41,7 @@ const ctx = (scope: GlobalSearchContext["scope"] = "all"): GlobalSearchContext =
     pluginQuickActions: [],
     workbenchPanels: [],
     canBrowseHostFolders: true,
+    shellNav: TEST_SHELL_NAV,
   },
 })
 

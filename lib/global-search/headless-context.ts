@@ -128,6 +128,15 @@ export async function buildHeadlessSearchContext(
       workbenchPanels: [],
       // The one field that is genuinely knowable here.
       canBrowseHostFolders: isTauri(),
+      // A graph has no route in front and no rail on screen.
+      shellNav: {
+        currentPage: null,
+        currentPinned: false,
+        currentHidden: false,
+        railCollapsed: false,
+        side: "left",
+        railChrome: false,
+      },
     },
   }
 }

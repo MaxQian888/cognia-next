@@ -186,3 +186,16 @@ it("reset restores the default preferences", async () => {
     })
   )
 })
+
+it("switches the app icon badge off and back on, separate from the bell's badge", async () => {
+  render(<NotificationsSection />)
+  const label = screen.getByText("settings.notifications.appBadgeLabel")
+  expect(screen.getByText("settings.notifications.appBadgeHint")).toBeInTheDocument()
+  const row = label.closest("div")!.parentElement!
+  const toggle = within(row).getByRole("switch")
+  expect(toggle).toBeChecked()
+  await userEvent.click(toggle)
+  expect(save).toHaveBeenLastCalledWith({
+    notificationPreferences: expect.objectContaining({ appBadge: false, badge: true }),
+  })
+})

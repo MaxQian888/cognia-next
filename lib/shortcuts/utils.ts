@@ -57,8 +57,17 @@ export function parseKeyEvent(event: KeyboardEvent): Chord {
   // physical keys — fold them to the unshifted key so a chord can never contain
   // `+` (which is also the token separator) and so e.g. Ctrl+= and Ctrl+Shift+=
   // address the same binding, the convention VS Code uses for zoom.
+  //
+  // With Alt held, macOS layouts turn a digit into a symbol (⌥1 is `¡`, ⌥2 is
+  // `™`), so the printed key could never match an `alt+1` binding there. The
+  // physical digit row is layout-independent in `event.code`, so a digit under
+  // Alt is read from it — the one case where the character is not the key the
+  // user pressed. Letters are left alone: their Alt-variants are real text
+  // input on many layouts, and no Alt+letter chord depends on this.
+  const altDigit = event.altKey ? /^Digit([0-9])$/.exec(event.code ?? "")?.[1] : undefined
   const raw =
-    event.key === " " ? "Space" : event.key === "+" ? "=" : event.key === "_" ? "-" : event.key
+    altDigit ??
+    (event.key === " " ? "Space" : event.key === "+" ? "=" : event.key === "_" ? "-" : event.key)
   const key = raw.length === 1 ? raw.toUpperCase() : raw
   if (!["Control", "Alt", "Shift", "Meta"].includes(key)) {
     parts.push(key)
@@ -124,4 +133,37 @@ export function formatKeybinding(keyCombo: Chord, isMac: boolean = isMacPlatform
       return lower.length === 1 ? lower.toUpperCase() : key.trim()
     })
     .join(isMac ? "" : "+")
+}
+
+/**
+ * Map a stored chord to the `aria-keyshortcuts` form (WAI-ARIA 1.2): modifier
+ * names spelled out, with the folded command modifier resolved to the one this
+ * platform actually uses — `Meta` on Apple keyboards, `Control` elsewhere.
+ * Returns `undefined` for an unbound chord so callers can spread it straight
+ * into the attribute.
+ */
+export function toAriaKeyShortcuts(
+  keyCombo: Chord,
+  isMac: boolean = isMacPlatform()
+): string | undefined {
+  if (!keyCombo) return undefined
+  const names: Record<string, string> = {
+    ctrl: isMac ? "Meta" : "Control",
+    control: isMac ? "Meta" : "Control",
+    cmd: "Meta",
+    meta: "Meta",
+    super: "Meta",
+    alt: "Alt",
+    option: "Alt",
+    shift: "Shift",
+  }
+  return keyCombo
+    .split("+")
+    .map((key) => {
+      const lower = key.trim().toLowerCase()
+      const name = names[lower]
+      if (name) return name
+      return lower.length === 1 ? lower.toUpperCase() : key.trim()
+    })
+    .join("+")
 }

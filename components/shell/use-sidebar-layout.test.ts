@@ -4,7 +4,12 @@
 
 import { act, renderHook } from "@testing-library/react"
 
-import { useSidebarLayout } from "./use-sidebar-layout"
+import {
+  hideSidebarItem,
+  pinSidebarItem,
+  unpinSidebarItem,
+  useSidebarLayout,
+} from "./use-sidebar-layout"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
@@ -14,7 +19,11 @@ import {
 } from "@/lib/runtime/runtime-snapshot-store"
 
 interface SavePatch {
-  sidebarLayout?: { pinned: string[]; hidden: string[] }
+  sidebarLayout?: {
+    pinned: string[]
+    hidden: string[]
+    modes?: { order: string[]; hidden: string[] }
+  }
   sidebarSide?: "left" | "right"
 }
 
@@ -43,6 +52,7 @@ const lastSaved = () =>
   lastPatch()?.sidebarLayout as {
     pinned: string[]
     hidden: string[]
+    modes?: { order: string[]; hidden: string[] }
   }
 
 describe("useSidebarLayout", () => {
@@ -184,12 +194,174 @@ describe("useSidebarLayout", () => {
     expect(lastSaved().pinned).toEqual(["inbox", "workflows"])
   })
 
+  it("keeps stored pins the runtime-filtered catalog cannot show during a reorder", async () => {
+    // `browser` is host-backed: a standalone web target has no paired desktop,
+    // so the catalog omits it — but the pin must survive a drag of the others.
+    useSettingsStore.setState({
+      settings: {
+        sidebarLayout: { pinned: ["workflows", "browser", "inbox"], hidden: [] },
+      } as never,
+    })
+    const { result } = renderHook(() => useSidebarLayout())
+    expect(result.current.resolved.pinned.map((i) => i.id)).toEqual(["workflows", "inbox"])
+    await act(async () => {
+      await result.current.reorderPinned(["inbox", "workflows"])
+    })
+    expect(lastSaved().pinned).toEqual(["inbox", "workflows", "browser"])
+  })
+
+  it("drops retired ids and duplicates from a reorder", async () => {
+    useSettingsStore.setState({
+      settings: { sidebarLayout: { pinned: ["workflows", "retired-page"], hidden: [] } } as never,
+    })
+    const { result } = renderHook(() => useSidebarLayout())
+    await act(async () => {
+      await result.current.reorderPinned(["workflows", "workflows"])
+    })
+    expect(lastSaved().pinned).toEqual(["workflows"])
+  })
+
+  describe("renamed ids", () => {
+    beforeEach(() => {
+      useSettingsStore.setState({
+        settings: { sidebarLayout: { pinned: ["agent-teams", "inbox"], hidden: [] } } as never,
+      })
+    })
+
+    it("hides an item stored under its legacy id", async () => {
+      const { result } = renderHook(() => useSidebarLayout())
+      expect(result.current.resolved.pinned.map((i) => i.id)).toContain("squads")
+      await act(async () => {
+        await result.current.hide("squads")
+      })
+      expect(lastSaved()).toEqual({ pinned: ["inbox"], hidden: ["squads"] })
+    })
+
+    it("moves an item stored under its legacy id to More", async () => {
+      const { result } = renderHook(() => useSidebarLayout())
+      await act(async () => {
+        await result.current.unpin("squads")
+      })
+      expect(lastSaved()).toEqual({ pinned: ["inbox"], hidden: [] })
+    })
+
+    it("does not duplicate a pin that exists under both names", async () => {
+      useSettingsStore.setState({
+        settings: {
+          sidebarLayout: { pinned: ["agent-teams", "squads", "inbox"], hidden: [] },
+        } as never,
+      })
+      const { result } = renderHook(() => useSidebarLayout())
+      await act(async () => {
+        await result.current.pin("inbox")
+      })
+      expect(lastSaved().pinned).toEqual(["squads", "inbox"])
+    })
+  })
+
   it("resets to the default layout", async () => {
     const { result } = renderHook(() => useSidebarLayout())
     await act(async () => {
       await result.current.reset()
     })
     expect(lastSaved()).toEqual(DEFAULT_SIDEBAR_LAYOUT)
+  })
+
+  it("moves a pinned item by one slot, and not past either end", async () => {
+    const { result } = renderHook(() => useSidebarLayout())
+    await act(async () => {
+      await result.current.movePinned("workflows", 1)
+    })
+    expect(lastSaved().pinned).toEqual(["inbox", "workflows"])
+    saveMock.mockClear()
+    await act(async () => {
+      await result.current.movePinned("workflows", -1)
+      await result.current.movePinned("inbox", 1)
+    })
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it("exposes the mutations as plain functions for callers outside React", async () => {
+    await act(async () => {
+      await pinSidebarItem("twin")
+    })
+    expect(lastSaved().pinned).toEqual(["workflows", "inbox", "twin"])
+    await act(async () => {
+      await unpinSidebarItem("inbox")
+    })
+    expect(lastSaved().pinned).toEqual(["workflows"])
+    await act(async () => {
+      await hideSidebarItem("workflows")
+    })
+    expect(lastSaved()).toEqual({ pinned: ["inbox"], hidden: ["workflows"] })
+  })
+
+  describe("workspace modes", () => {
+    const modes = { order: ["p:a", "canvas"], hidden: ["canvas"] }
+    beforeEach(() => {
+      useSettingsStore.setState({
+        settings: { sidebarLayout: { pinned: ["workflows"], hidden: [], modes } } as never,
+        save: saveMock as never,
+      })
+    })
+
+    it("reads an absent mode layout as the default", () => {
+      useSettingsStore.setState({
+        settings: { sidebarLayout: { pinned: ["workflows"], hidden: [] } } as never,
+      })
+      const { result } = renderHook(() => useSidebarLayout())
+      expect(result.current.modes).toBeUndefined()
+      expect(result.current.layout).toEqual({ pinned: ["workflows"], hidden: [] })
+    })
+
+    it("never drops the mode layout when a feature is pinned, unpinned, hidden or shown", async () => {
+      const { result } = renderHook(() => useSidebarLayout())
+      expect(result.current.modes).toEqual(modes)
+      for (const run of [
+        () => result.current.pin("twin"),
+        () => result.current.unpin("workflows"),
+        () => result.current.hide("inbox"),
+        () => result.current.show("inbox"),
+        () => result.current.reorderPinned(["workflows"]),
+      ]) {
+        await act(async () => {
+          await run()
+        })
+        expect(lastSaved().modes).toEqual(modes)
+      }
+    })
+
+    it("hides and shows a mode, keeping its slot", async () => {
+      const { result } = renderHook(() => useSidebarLayout())
+      await act(async () => {
+        await result.current.hideMode("p:a")
+      })
+      expect(lastSaved().modes).toEqual({ order: ["p:a", "canvas"], hidden: ["canvas", "p:a"] })
+      await act(async () => {
+        await result.current.showMode("canvas")
+      })
+      expect(lastSaved().modes).toEqual({ order: ["p:a", "canvas"], hidden: [] })
+    })
+
+    it("reorders modes, keeping stored ids the caller cannot see after them", async () => {
+      const { result } = renderHook(() => useSidebarLayout())
+      await act(async () => {
+        await result.current.reorderModes(["canvas", "canvas"])
+      })
+      expect(lastSaved().modes).toEqual({ order: ["canvas", "p:a"], hidden: ["canvas"] })
+    })
+
+    it("resets the modes on their own, and the features without touching them", async () => {
+      const { result } = renderHook(() => useSidebarLayout())
+      await act(async () => {
+        await result.current.resetModes()
+      })
+      expect(lastSaved()).toEqual({ pinned: ["workflows"], hidden: [] })
+      await act(async () => {
+        await result.current.reset()
+      })
+      expect(lastSaved()).toEqual({ ...DEFAULT_SIDEBAR_LAYOUT, modes })
+    })
   })
 
   describe("side", () => {

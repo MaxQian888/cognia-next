@@ -1,9 +1,20 @@
-import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT, DEFAULT_PINNED_IDS } from "@/types/shell/sidebar"
+import {
+  CANVAS_MODE_ID,
+  SIDEBAR_NAV_META,
+  DEFAULT_SIDEBAR_LAYOUT,
+  DEFAULT_PINNED_IDS,
+} from "@/types/shell/sidebar"
 import {
   SIDEBAR_NAV_ICONS,
   applyDragReorder,
+  defaultModeOrder,
   getSidebarCatalog,
+  mergeVisibleModeOrder,
+  migrateLegacyIds,
+  moveVisibleMode,
+  navItemForPath,
   resolveSidebarLayout,
+  resolveSidebarModes,
   type SidebarCatalogItem,
 } from "./sidebar-nav"
 import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
@@ -13,6 +24,36 @@ describe("SIDEBAR_NAV_ICONS", () => {
     for (const m of SIDEBAR_NAV_META) {
       expect(SIDEBAR_NAV_ICONS[m.id]).toBeTruthy()
     }
+  })
+
+  it("maps nothing outside the catalog", () => {
+    const ids = new Set(SIDEBAR_NAV_META.map((m) => m.id))
+    expect(Object.keys(SIDEBAR_NAV_ICONS).filter((id) => !ids.has(id))).toEqual([])
+  })
+})
+
+describe("migrateLegacyIds", () => {
+  it("returns the same object when nothing needs renaming", () => {
+    const layout = { pinned: ["inbox"], hidden: ["logs"] }
+    expect(migrateLegacyIds(layout)).toBe(layout)
+  })
+
+  it("renames legacy ids in pinned and hidden", () => {
+    expect(migrateLegacyIds({ pinned: ["agent-teams"], hidden: [] })).toEqual({
+      pinned: ["squads"],
+      hidden: [],
+    })
+    expect(migrateLegacyIds({ pinned: [], hidden: ["agent-teams"] })).toEqual({
+      pinned: [],
+      hidden: ["squads"],
+    })
+  })
+
+  it("collapses a legacy id that collides with its new name, keeping first position", () => {
+    expect(migrateLegacyIds({ pinned: ["inbox", "agent-teams", "squads"], hidden: [] })).toEqual({
+      pinned: ["inbox", "squads"],
+      hidden: [],
+    })
   })
 })
 
@@ -228,5 +269,85 @@ describe("applyDragReorder", () => {
   it("returns null when an id is not in the list", () => {
     expect(applyDragReorder(["a", "b"], "ghost", "a")).toBeNull()
     expect(applyDragReorder(["a", "b"], "a", "ghost")).toBeNull()
+  })
+})
+
+describe("workspace modes", () => {
+  const canvas = { id: CANVAS_MODE_ID }
+  const alpha = { id: "p:alpha", order: 5 }
+  const beta = { id: "p:beta", order: 1 }
+  const gamma = { id: "p:gamma" }
+
+  it("puts Canvas first, then plugin containers by declared order (absent = 0)", () => {
+    expect(defaultModeOrder([alpha, beta, gamma, canvas]).map((m) => m.id)).toEqual([
+      CANVAS_MODE_ID,
+      "p:gamma",
+      "p:beta",
+      "p:alpha",
+    ])
+  })
+
+  it("resolves an absent layout to the default order with nothing hidden", () => {
+    const resolved = resolveSidebarModes([alpha, canvas, beta], undefined)
+    expect(resolved.visible.map((m) => m.id)).toEqual([CANVAS_MODE_ID, "p:beta", "p:alpha"])
+    expect(resolved.hidden).toEqual([])
+  })
+
+  it("lets the stored order win and appends modes it never mentioned", () => {
+    const resolved = resolveSidebarModes([canvas, alpha, beta, gamma], {
+      order: ["p:alpha", CANVAS_MODE_ID, "p:retired"],
+      hidden: ["p:beta"],
+    })
+    expect(resolved.order.map((m) => m.id)).toEqual([
+      "p:alpha",
+      CANVAS_MODE_ID,
+      "p:gamma",
+      "p:beta",
+    ])
+    expect(resolved.visible.map((m) => m.id)).toEqual(["p:alpha", CANVAS_MODE_ID, "p:gamma"])
+    expect(resolved.hidden.map((m) => m.id)).toEqual(["p:beta"])
+  })
+
+  it("keeps hidden modes in their slots when the visible ones are rearranged", () => {
+    const order = ["canvas", "p:a", "p:b", "p:c"]
+    const hidden = new Set(["p:a"])
+    expect(mergeVisibleModeOrder(order, hidden, ["p:c", "canvas", "p:b"])).toEqual([
+      "p:c",
+      "p:a",
+      "canvas",
+      "p:b",
+    ])
+  })
+
+  it("moves a visible mode past its visible neighbour, or refuses at an end", () => {
+    const order = ["canvas", "p:a", "p:b"]
+    const hidden = new Set(["p:a"])
+    expect(moveVisibleMode(order, hidden, "canvas", 1)).toEqual(["p:b", "p:a", "canvas"])
+    expect(moveVisibleMode(order, hidden, "canvas", -1)).toBeNull()
+    expect(moveVisibleMode(order, hidden, "p:b", 1)).toBeNull()
+    expect(moveVisibleMode(order, hidden, "p:a", 1)).toBeNull()
+  })
+})
+
+describe("navItemForPath", () => {
+  const catalog = [
+    { id: "inbox", route: "/inbox" },
+    { id: "issues", route: "/issues" },
+    { id: "issues-board", route: "/issues/board" },
+  ]
+
+  it("matches a route and anything below it", () => {
+    expect(navItemForPath("/inbox", catalog)?.id).toBe("inbox")
+    expect(navItemForPath("/inbox/123", catalog)?.id).toBe("inbox")
+  })
+
+  it("prefers the longest matching route", () => {
+    expect(navItemForPath("/issues/board/x", catalog)?.id).toBe("issues-board")
+    expect(navItemForPath("/issues/42", catalog)?.id).toBe("issues")
+  })
+
+  it("does not match a route that only shares a prefix, or no route at all", () => {
+    expect(navItemForPath("/inboxes", catalog)).toBeNull()
+    expect(navItemForPath("/", catalog)).toBeNull()
   })
 })

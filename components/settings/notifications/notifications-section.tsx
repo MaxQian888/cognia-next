@@ -257,6 +257,7 @@ export function NotificationsSection() {
           [
             ["sound", prefs.sound, (on: boolean) => update({ sound: on })],
             ["badge", prefs.badge, (on: boolean) => update({ badge: on })],
+            ["appBadge", prefs.appBadge, (on: boolean) => update({ appBadge: on })],
             [
               "focusAware",
               prefs.connectorFocusAware,

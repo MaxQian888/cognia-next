@@ -1,5 +1,5 @@
 import { renderHook, waitFor } from "@testing-library/react"
-import { computeWindowTitle, useWindowTitle } from "./use-window-title"
+import { computeDocumentTitle, computeWindowTitle, useWindowTitle } from "./use-window-title"
 
 const labelRef = { value: null as string | null }
 jest.mock("@/hooks/chat/use-active-session-label", () => ({
@@ -12,7 +12,12 @@ jest.mock("@/hooks/chat/use-active-session-label", () => ({
 }))
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => (key === "appName" ? "Cognia" : key),
+  useTranslations: () => (key: string, values?: { count: number; title: string }) =>
+    key === "appName"
+      ? "Cognia"
+      : key === "titleWithCount" && values
+        ? `(${values.count}) ${values.title}`
+        : key,
 }))
 
 const isTauriMock = jest.fn(() => false)
@@ -116,5 +121,33 @@ describe("useWindowTitle", () => {
     // The effect guards on the last computed title, so an unchanged value is
     // not written again.
     expect(document.title).toBe("tampered")
+  })
+})
+
+describe("computeDocumentTitle", () => {
+  const format = ({ count, title }: { count: number; title: string }) => `(${count}) ${title}`
+  it("prefixes a waiting count and leaves a zero alone", () => {
+    expect(computeDocumentTitle("Cognia", 3, format)).toBe("(3) Cognia")
+    expect(computeDocumentTitle("Cognia", 0, format)).toBe("Cognia")
+  })
+})
+
+describe("useWindowTitle — attention count", () => {
+  it("puts the count in the browser tab's title", () => {
+    labelRef.value = "Plan"
+    const { rerender } = renderHook(({ count }) => useWindowTitle(count), {
+      initialProps: { count: 4 },
+    })
+    expect(document.title).toBe("(4) Plan · Cognia")
+    rerender({ count: 0 })
+    expect(document.title).toBe("Plan · Cognia")
+  })
+
+  it("keeps the desktop window title clean — the dock carries the count there", async () => {
+    isTauriMock.mockReturnValue(true)
+    labelRef.value = "Ship it"
+    renderHook(() => useWindowTitle(7))
+    await waitFor(() => expect(setTitleMock).toHaveBeenCalledWith("Ship it · Cognia"))
+    expect(document.title).toBe("Ship it · Cognia")
   })
 })

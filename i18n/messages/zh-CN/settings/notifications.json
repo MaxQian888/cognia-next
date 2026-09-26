@@ -1,4 +1,6 @@
 {
+  "appBadgeHint": "在应用图标（macOS 程序坞）和浏览器标签页标题上显示未读对话与待处理事项的数量。",
+  "appBadgeLabel": "应用图标角标",
   "badgeHint": "在通知铃铛上显示未读角标。",
   "badgeLabel": "角标",
   "channel": {

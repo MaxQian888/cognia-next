@@ -1,8 +1,14 @@
 import {
   APP_SHORTCUT_CATALOG,
+  PINNED_NAV_SHORTCUT_IDS,
+  PINNED_NAV_SHORTCUT_SLOTS,
   getAppShortcutDescriptor,
   getDefaultAcceptedChords,
+  pinnedNavShortcutId,
 } from "./app-catalog"
+import { getReservedShortcutConflict } from "./reserved"
+import enMessages from "@/i18n/messages/en.json"
+import zhMessages from "@/i18n/messages/zh-CN.json"
 
 describe("app-catalog", () => {
   it("every descriptor is app-scoped with a non-empty id and label key", () => {
@@ -92,5 +98,61 @@ describe("skills.record", () => {
     // The other `skills.*` chords are scoped by the panel's mount; this one is
     // global, so a bare letter would swallow typing on every route.
     expect(getDefaultAcceptedChords("skills.record")).toEqual(["ctrl+alt+r"])
+  })
+})
+
+describe("navigation rail shortcuts", () => {
+  it("binds ⌥1…⌥9 to the nine pinned slots, in order", () => {
+    expect(PINNED_NAV_SHORTCUT_SLOTS).toBe(9)
+    expect(PINNED_NAV_SHORTCUT_IDS).toEqual(
+      Array.from({ length: 9 }, (_, index) => pinnedNavShortcutId(index + 1))
+    )
+    PINNED_NAV_SHORTCUT_IDS.forEach((id, index) => {
+      expect(getAppShortcutDescriptor(id)).toMatchObject({
+        scope: "app",
+        category: "app.navigation",
+        labelKey: `settings.shortcuts.catalog.navPinned${index + 1}`,
+      })
+      expect(getDefaultAcceptedChords(id)).toEqual([`alt+${index + 1}`])
+    })
+  })
+
+  it("claims no Alt+digit chord another entry already uses, or the OS reserves", () => {
+    const pinned = new Set(PINNED_NAV_SHORTCUT_IDS)
+    for (const descriptor of APP_SHORTCUT_CATALOG) {
+      if (pinned.has(descriptor.id)) continue
+      for (const chord of getDefaultAcceptedChords(descriptor.id)) {
+        expect(chord).not.toMatch(/^alt\+[0-9]$/)
+      }
+    }
+    for (const id of PINNED_NAV_SHORTCUT_IDS) {
+      const [chord] = getDefaultAcceptedChords(id)
+      for (const os of ["macos", "windows", "linux"] as const) {
+        expect(getReservedShortcutConflict(chord, os)).toBeNull()
+      }
+    }
+  })
+
+  it("stands the web ⌘, binding down under Tauri, where the native accelerator owns it", () => {
+    expect(getAppShortcutDescriptor("shell.settings.open")).toMatchObject({
+      defaultChord: "ctrl+,",
+      when: "!platform.tauri",
+      category: "app.navigation",
+    })
+    const others = APP_SHORTCUT_CATALOG.filter(
+      (d) => d.id !== "shell.settings.open" && d.defaultChord === "ctrl+,"
+    )
+    expect(others).toEqual([])
+  })
+
+  it.each([
+    ["en", enMessages],
+    ["zh-CN", zhMessages],
+  ])("labels every new entry in %s", (_locale, messages) => {
+    const catalog = messages.settings.shortcuts.catalog as Record<string, string>
+    for (const id of [...PINNED_NAV_SHORTCUT_IDS, "shell.settings.open"]) {
+      const key = getAppShortcutDescriptor(id)!.labelKey.replace("settings.shortcuts.catalog.", "")
+      expect(catalog[key]).toEqual(expect.any(String))
+    }
   })
 })

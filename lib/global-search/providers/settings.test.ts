@@ -1,7 +1,7 @@
 import { SETTING_CONTROLS } from "@/components/settings/finder/control-registry"
 import { SETTINGS_NAV } from "@/components/settings/settings-nav-config"
 
-import { makeProviderInput, makeTestContext } from "../testing"
+import { TEST_SHELL_NAV, makeProviderInput, makeTestContext } from "../testing"
 import { settingsCandidates, settingsProvider } from "./settings"
 
 const allSections = new Set(SETTINGS_NAV.map((n) => n.id))
@@ -16,6 +16,7 @@ const ctxAll = () =>
       pluginQuickActions: [],
       workbenchPanels: [],
       canBrowseHostFolders: true,
+      shellNav: TEST_SHELL_NAV,
     },
   })
 
@@ -37,6 +38,7 @@ describe("settings provider", () => {
           pluginQuickActions: [],
           workbenchPanels: [],
           canBrowseHostFolders: true,
+          shellNav: TEST_SHELL_NAV,
         },
       })
     )
@@ -157,6 +159,7 @@ describe("settings provider", () => {
         pluginQuickActions: [],
         workbenchPanels: [],
         canBrowseHostFolders: true,
+        shellNav: TEST_SHELL_NAV,
       },
     })
     const rows = settingsCandidates(ctx, {

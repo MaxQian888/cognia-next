@@ -13,9 +13,16 @@
  * The behaviour block edits `useUIStore` rather than `settings.sidebarLayout`.
  * That is where the rail's other shell-local state already lives (collapse,
  * width, the folded guild band), and it is the difference between a preference
- * about this window and one that syncs with the account. Both switches are
+ * about this window and one that syncs with the account. Every switch is
  * defaults-on, so the block is a way back to the older behaviour rather than a
- * feature that has to be discovered before the rail works.
+ * feature that has to be discovered before the rail works. "Show navigation
+ * rail" is here because the rail's other two switches — the View menu and the
+ * title bar's layout dropdown — are both absent from the web shell by default,
+ * so a rail switched off there had no way back.
+ *
+ * Below the features, a second editor orders and hides the workspace modes —
+ * Canvas and the plugin view containers — which have no "More" home, so they
+ * get the two-bucket shape (`SidebarLayout.modes`).
  *
  * The dnd/row plumbing lives in `components/shell/customizer-list.tsx` so the
  * discover category customizer can reuse it verbatim.
@@ -23,15 +30,20 @@
 
 import * as React from "react"
 import { useTranslations } from "next-intl"
-import { PanelLeftIcon, PanelRightIcon } from "lucide-react"
+import { PanelLeftIcon, PanelRightIcon, PencilRulerIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { usePlatform } from "@/hooks/use-platform"
+import { toggleGuildRailAction } from "@/lib/desktop/menu-actions"
+import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
+import { mergeVisibleModeOrder } from "@/lib/shell/sidebar-nav"
 import { SIDEBAR_WIDTH_DEFAULT, useUIStore } from "@/stores/ui"
 import { CustomizerLists, type CustomizerItem } from "./customizer-list"
+import { ResolvedRailIcon } from "./plugin-view-container-panel"
+import { useShellModes, type ShellMode } from "./use-shell-nav"
 import { useSidebarLayout } from "./use-sidebar-layout"
 import { DEFAULT_SIDEBAR_LAYOUT, type SidebarSide } from "@/types/shell/sidebar"
 
@@ -62,11 +74,85 @@ function SwitchRow({
   )
 }
 
+/** A plugin mode's rail glyph, as the `Icon` component a customizer row takes. */
+function modeIcon(mode: ShellMode): CustomizerItem["Icon"] {
+  if (mode.kind === "canvas") return PencilRulerIcon
+  const name = mode.container.def.icon
+  function PluginModeIcon({ className }: { className?: string }) {
+    return <ResolvedRailIcon name={name} className={className} />
+  }
+  return PluginModeIcon
+}
+
+/**
+ * Order and visibility of the workspace modes. Lists exactly the modes the
+ * rail could draw right now (`useShellModes`), so a plugin container whose
+ * `when` is false is not offered until it could actually appear.
+ */
+function ModesCustomizer() {
+  const t = useTranslations("desktop.guildRail")
+  const pluginT = useTranslations()
+  const { modes: stored, hideMode, showMode, reorderModes, resetModes } = useSidebarLayout()
+  const { modes } = useShellModes(stored)
+  const toItem = React.useCallback(
+    (mode: ShellMode): CustomizerItem => ({
+      id: mode.id,
+      Icon: modeIcon(mode),
+      label:
+        mode.kind === "canvas"
+          ? t("canvas")
+          : resolvePluginLabel(
+              pluginT as never,
+              mode.container.pluginId,
+              mode.container.def.titleKey,
+              mode.container.def.title
+            ),
+    }),
+    [t, pluginT]
+  )
+  const visible = React.useMemo(() => modes.visible.map(toItem), [modes.visible, toItem])
+  const hidden = React.useMemo(() => modes.hidden.map(toItem), [modes.hidden, toItem])
+  const orderIds = modes.order.map((mode) => mode.id)
+  const hiddenIds = new Set(modes.hidden.map((mode) => mode.id))
+  return (
+    <div className="space-y-2">
+      <div>
+        <p className="text-sm font-medium">{t("customize.modes")}</p>
+        <p className="text-xs text-muted-foreground">{t("customize.modesHint")}</p>
+      </div>
+      <CustomizerLists
+        testIdPrefix="sidebar-customizer-modes"
+        pinned={visible}
+        hidden={hidden}
+        // The shipped state is "no stored mode layout at all".
+        isDefault={stored === undefined}
+        labels={{
+          restoreDefaults: t("customize.restoreDefaults"),
+          pinned: t("customize.modesShown"),
+          dragHint: t("customize.dragHint"),
+          pinnedEmpty: t("customize.modesShownEmpty"),
+          hidden: t("customize.hidden"),
+          hiddenEmpty: t("customize.hiddenEmpty"),
+          hideItem: t("customize.hideItem"),
+          showItem: t("customize.showItem"),
+        }}
+        onReorderPinned={(ids) =>
+          void reorderModes(mergeVisibleModeOrder(orderIds, hiddenIds, ids))
+        }
+        onHide={(id) => void hideMode(id)}
+        onShow={(id) => void showMode(id)}
+        onReset={() => void resetModes()}
+      />
+    </div>
+  )
+}
+
 export function SidebarCustomizer(): React.ReactElement {
   const t = useTranslations("desktop.guildRail")
   const platform = usePlatform()
   const { resolved, pin, unpin, hide, show, reorderPinned, reset, side, setSide } =
     useSidebarLayout()
+  const railCollapsed = useUIStore((state) => state.guildRailCollapsed)
   const peekEnabled = useUIStore((state) => state.sidebarPeekEnabled)
   const setPeekEnabled = useUIStore((state) => state.setSidebarPeekEnabled)
   const searchCollapsible = useUIStore((state) => state.sidebarSearchCollapsible)
@@ -100,8 +186,8 @@ export function SidebarCustomizer(): React.ReactElement {
           mobile shell, where it is the nav drawer's leading column and there is
           no side to choose. Gating this on `tauri` alone was narrower than
           `desktop-app-shell.tsx`, which honours `sidebarSide` for every
-          non-mobile platform: the browser build took the new right-edge default
-          with no editor to move it back and nothing saying why. */}
+          non-mobile platform: the browser build had a side preference with no
+          editor to change it and nothing saying why. */}
       {platform !== "mobile" ? (
         <div className="space-y-2">
           <p className="text-sm font-medium">{t("customize.side")}</p>
@@ -134,6 +220,17 @@ export function SidebarCustomizer(): React.ReactElement {
         <div className="space-y-2">
           <p className="text-sm font-medium">{t("customize.behaviour")}</p>
           <div className="space-y-2 rounded-md border p-3">
+            <SwitchRow
+              id="sidebar-customizer-show-rail"
+              label={t("customize.showRail")}
+              hint={t("customize.showRailHint")}
+              checked={!railCollapsed}
+              onCheckedChange={(show) => {
+                // The store only offers a toggle (see `guildRailCollapsed`), so
+                // flip it only when the switch asks for the other state.
+                if (show === railCollapsed) toggleGuildRailAction()
+              }}
+            />
             <SwitchRow
               id="sidebar-customizer-peek"
               label={t("customize.peek")}
@@ -197,6 +294,7 @@ export function SidebarCustomizer(): React.ReactElement {
         onShow={(id) => void show(id)}
         onReset={() => void reset()}
       />
+      <ModesCustomizer />
     </div>
   )
 }

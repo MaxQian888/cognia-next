@@ -23,12 +23,47 @@ const clearAllRecents = jest.fn()
 const isTauriMock = jest.fn(() => true)
 const toggleDesktopPetWindow = jest.fn(async () => true)
 const trackEvent = jest.fn(async () => true)
+const pinSidebarItem = jest.fn(async (_id: string) => undefined)
+const unpinSidebarItem = jest.fn(async (_id: string) => undefined)
+const hideSidebarItem = jest.fn(async (_id: string) => undefined)
+const toggleGuildRailAction = jest.fn()
+const saveSettings = jest.fn(async (_patch: Record<string, unknown>) => undefined)
+const settingsState: { settings: { sidebarSide?: "left" | "right" } | null } = { settings: {} }
+let mockPathname: string | null = "/inbox/c"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
-jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push }),
+  usePathname: () => mockPathname,
+}))
+// The desktop catalog: every rail destination, whatever the snapshot says.
+jest.mock("@/lib/platform/detect", () => ({ detectPlatform: () => "tauri" }))
+jest.mock("@/lib/runtime/runtime-snapshot-store", () => ({
+  getRuntimeSnapshot: () => ({
+    target: null,
+    vaultState: "unavailable",
+    connectionState: "offline",
+  }),
+}))
+jest.mock("@/components/shell/use-sidebar-layout", () => ({
+  pinSidebarItem: (id: string) => pinSidebarItem(id),
+  unpinSidebarItem: (id: string) => unpinSidebarItem(id),
+  hideSidebarItem: (id: string) => hideSidebarItem(id),
+}))
+jest.mock("@/lib/desktop/menu-actions", () => ({
+  toggleGuildRailAction: () => toggleGuildRailAction(),
+}))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: {
+    getState: () => ({
+      ...settingsState,
+      save: (patch: Record<string, unknown>) => saveSettings(patch),
+    }),
+  },
+}))
 jest.mock("@/lib/telemetry/events/track-event", () => ({
   trackEvent: (...args: unknown[]) => trackEvent(...(args as [])),
 }))
@@ -89,7 +124,7 @@ const projectState = { activeProjectId: "p1", setActiveProject: jest.fn() }
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { getState: () => projectState },
 }))
-const uiState = { setSelectedGuild: jest.fn(), toggleSidebar: jest.fn() }
+const uiState = { setSelectedGuild: jest.fn(), toggleSidebar: jest.fn(), guildRailCollapsed: false }
 jest.mock("@/stores/ui", () => ({ useUIStore: { getState: () => uiState } }))
 
 import { focusSession, useGlobalSearchActions } from "./use-global-search-actions"
@@ -129,6 +164,9 @@ beforeEach(() => {
   chatState.activeSessionId = "s1"
   jump.mockResolvedValue(true)
   runQuickAction.mockResolvedValue(undefined)
+  mockPathname = "/inbox/c"
+  uiState.guildRailCollapsed = false
+  settingsState.settings = {}
 })
 
 describe("focusSession", () => {
@@ -272,6 +310,7 @@ describe("useGlobalSearchActions", () => {
 
     await run("toggle-theme")
     expect(setTheme).toHaveBeenCalledWith("light")
+    expect(saveSettings).toHaveBeenCalledWith({ theme: "light" })
     await run("toggle-sidebar")
     expect(uiState.toggleSidebar).toHaveBeenCalled()
     /*
@@ -334,6 +373,100 @@ describe("useGlobalSearchActions", () => {
     await run("check-updates")
     expect(toast.info).toHaveBeenCalledWith("toasts.updatesDesktopOnly")
     expect(checkForUpdate).not.toHaveBeenCalled()
+  })
+
+  describe("navigation customization", () => {
+    it("pins, unpins and hides the page the route is on, naming it in the toast", async () => {
+      const { result } = setup()
+      await act(() => result.current.runCommand("pin-current-page"))
+      // `/inbox/c` is Inbox by the rail's prefix rule.
+      expect(pinSidebarItem).toHaveBeenCalledWith("inbox")
+      expect(toast.success).toHaveBeenLastCalledWith('toasts.pagePinned:{"page":"inbox"}')
+      await act(() => result.current.runCommand("unpin-current-page"))
+      expect(unpinSidebarItem).toHaveBeenCalledWith("inbox")
+      expect(toast.success).toHaveBeenLastCalledWith('toasts.pageUnpinned:{"page":"inbox"}')
+      await act(() => result.current.runCommand("hide-current-page"))
+      expect(hideSidebarItem).toHaveBeenCalledWith("inbox")
+      expect(toast.success).toHaveBeenLastCalledWith('toasts.pageHidden:{"page":"inbox"}')
+    })
+
+    it("resolves the page when it runs, so a replayed recent acts on the page in front", async () => {
+      mockPathname = "/source-control"
+      const { result } = setup()
+      act(() => result.current.runStoredAction({ type: "command", id: "pin-current-page" }))
+      await waitFor(() => expect(pinSidebarItem).toHaveBeenCalledWith("source-control"))
+      // Labelled through the i18n key, which differs from the id here.
+      await waitFor(() =>
+        expect(toast.success).toHaveBeenCalledWith('toasts.pagePinned:{"page":"sourceControl"}')
+      )
+    })
+
+    it("says so, and writes nothing, off every catalog route", async () => {
+      for (const path of ["/", "/settings", null]) {
+        mockPathname = path
+        const { result } = setup()
+        await act(() => result.current.runCommand("hide-current-page"))
+      }
+      expect(hideSidebarItem).not.toHaveBeenCalled()
+      expect(toast.info).toHaveBeenCalledTimes(3)
+      expect(toast.info).toHaveBeenLastCalledWith("toasts.noNavigationPage")
+    })
+
+    it("surfaces a failed layout write", async () => {
+      unpinSidebarItem.mockRejectedValueOnce(new Error("disk full"))
+      const { result } = setup()
+      await act(() => result.current.runCommand("unpin-current-page"))
+      expect(toast.error).toHaveBeenCalledWith(
+        'toasts.navigationUpdateFailed:{"message":"disk full"}'
+      )
+      expect(toast.success).not.toHaveBeenCalled()
+      hideSidebarItem.mockRejectedValueOnce("nope")
+      await act(() => result.current.runCommand("hide-current-page"))
+      expect(toast.error).toHaveBeenLastCalledWith(
+        'toasts.navigationUpdateFailed:{"message":"nope"}'
+      )
+    })
+
+    it("opens the rail customizer's settings section", async () => {
+      const { result, host } = setup()
+      await act(() => result.current.runCommand("customize-navigation"))
+      expect(host.onOpenSettings).toHaveBeenCalledWith("sidebar")
+    })
+
+    it("shows and hides the rail only when that changes something", async () => {
+      const { result } = setup()
+      // Showing already → "show" is a no-op, "hide" toggles.
+      await act(() => result.current.runCommand("show-nav-rail"))
+      expect(toggleGuildRailAction).not.toHaveBeenCalled()
+      await act(() => result.current.runCommand("hide-nav-rail"))
+      expect(toggleGuildRailAction).toHaveBeenCalledTimes(1)
+      uiState.guildRailCollapsed = true
+      await act(() => result.current.runCommand("hide-nav-rail"))
+      expect(toggleGuildRailAction).toHaveBeenCalledTimes(1)
+      await act(() => result.current.runCommand("show-nav-rail"))
+      expect(toggleGuildRailAction).toHaveBeenCalledTimes(2)
+    })
+
+    it("moves the rail to the named edge, on its own settings key", async () => {
+      const { result } = setup()
+      // Unset reads as the shipped left edge.
+      await act(() => result.current.runCommand("move-nav-rail-left"))
+      expect(saveSettings).not.toHaveBeenCalled()
+      await act(() => result.current.runCommand("move-nav-rail-right"))
+      expect(saveSettings).toHaveBeenLastCalledWith({ sidebarSide: "right" })
+      settingsState.settings = { sidebarSide: "right" }
+      await act(() => result.current.runCommand("move-nav-rail-left"))
+      expect(saveSettings).toHaveBeenLastCalledWith({ sidebarSide: "left" })
+      settingsState.settings = null
+      saveSettings.mockRejectedValueOnce(new Error("locked"))
+      await act(() => result.current.runCommand("move-nav-rail-right"))
+      expect(toast.error).toHaveBeenCalledWith('toasts.navigationUpdateFailed:{"message":"locked"}')
+      saveSettings.mockRejectedValueOnce("offline")
+      await act(() => result.current.runCommand("move-nav-rail-right"))
+      expect(toast.error).toHaveBeenLastCalledWith(
+        'toasts.navigationUpdateFailed:{"message":"offline"}'
+      )
+    })
   })
 
   it("opens the browser preview route", async () => {

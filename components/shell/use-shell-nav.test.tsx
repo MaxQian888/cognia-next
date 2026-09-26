@@ -57,7 +57,14 @@ jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => "tauri" }))
 const containers: Array<{
   fullId: string
   pluginId: string
-  def: { id: string; location?: string; when?: string; title: string; icon: string }
+  def: {
+    id: string
+    location?: string
+    when?: string
+    title: string
+    icon: string
+    order?: number
+  }
 }> = []
 jest.mock("@/lib/plugin/registries/view-container-registry", () => ({
   subscribeViewContainers: () => () => {},
@@ -195,5 +202,33 @@ describe("useShellNav", () => {
     expect(result.current.railContainers.map((c) => c.fullId)).toEqual(["a:rail"])
     expect(result.current.isViewContainerActive("a:rail")).toBe(true)
     expect(result.current.isViewContainerActive("a:panel")).toBe(false)
+  })
+
+  it("resolves the workspace modes: Canvas first, plugins by declared order, then the user's order", () => {
+    containers.push(
+      { fullId: "a:late", pluginId: "a", def: { id: "late", title: "L", icon: "box", order: 5 } },
+      { fullId: "a:early", pluginId: "a", def: { id: "early", title: "E", icon: "box", order: 1 } }
+    )
+    const { result, unmount } = renderHook(() => useShellNav())
+    expect(result.current.railContainers.map((c) => c.fullId)).toEqual(["a:early", "a:late"])
+    expect(result.current.modes.visible.map((m) => m.id)).toEqual(["canvas", "a:early", "a:late"])
+    unmount()
+
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          sidebarLayout: {
+            pinned: [],
+            hidden: [],
+            modes: { order: ["a:late", "canvas"], hidden: ["a:early"] },
+          },
+        } as never,
+      })
+    })
+    const { result: stored } = renderHook(() => useShellNav())
+    expect(stored.current.modes.visible.map((m) => m.id)).toEqual(["a:late", "canvas"])
+    expect(stored.current.modes.hidden.map((m) => m.id)).toEqual(["a:early"])
+    // The declared order is still what `railContainers` reports.
+    expect(stored.current.railContainers.map((c) => c.fullId)).toEqual(["a:early", "a:late"])
   })
 })

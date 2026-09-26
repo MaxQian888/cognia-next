@@ -21,9 +21,14 @@
  * the only way back in.
  *
  * dnd-kit setup mirrors `components/settings/ocr/tabs/ocr-platform-overrides-tab.tsx`.
+ * Its spoken announcements and the grip's name are localized in-house
+ * (`desktop.navReorder.*`, shared with the navigation's own drag lists) rather
+ * than taken from every caller's labels: they say the same thing on every
+ * surface, and dnd-kit's English defaults are read aloud otherwise.
  */
 
 import * as React from "react"
+import { useTranslations } from "next-intl"
 import {
   EllipsisIcon,
   EyeIcon,
@@ -53,6 +58,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { applyDragReorder } from "@/lib/shell/sidebar-nav"
 import { cn } from "@/lib/utils"
+import { useReorderAnnouncements } from "./nav-sortable"
 
 /** A generic customizable item — icon + label keyed by a stable id. */
 export interface CustomizerItem {
@@ -146,6 +152,15 @@ export function CustomizerLists(props: CustomizerListsProps): React.ReactElement
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
+  const pinnedIds = React.useMemo(() => pinned.map((i) => i.id), [pinned])
+  const labelOf = React.useCallback(
+    (id: string) => pinned.find((item) => item.id === id)?.label ?? id,
+    [pinned]
+  )
+  const { announcements, instructions } = useReorderAnnouncements(pinnedIds, labelOf, {
+    keyboard: true,
+  })
+
   const handleDragEnd = (event: DragEndEvent) => {
     const next = applyDragReorder(
       pinned.map((i) => i.id),
@@ -179,6 +194,7 @@ export function CustomizerLists(props: CustomizerListsProps): React.ReactElement
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
+            accessibility={{ announcements, screenReaderInstructions: { draggable: instructions } }}
           >
             <SortableContext items={pinned.map((i) => i.id)} strategy={verticalListSortingStrategy}>
               <ul className="space-y-1">
@@ -403,6 +419,7 @@ function PinnedRow({
   moveToMore?: { label: string; onClick: () => void }
   onHide: () => void
 }) {
+  const t = useTranslations("desktop.navReorder")
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.id,
   })
@@ -420,7 +437,7 @@ function PinnedRow({
       <button
         type="button"
         className="flex size-6 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing"
-        aria-label={`drag ${item.label}`}
+        aria-label={t("dragHandle", { item: item.label })}
         data-testid={`${testIdPrefix}-handle-${item.id}`}
         {...attributes}
         {...listeners}

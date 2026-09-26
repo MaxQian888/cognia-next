@@ -67,7 +67,7 @@ jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => "tauri" }))
 const containers: Array<{
   fullId: string
   pluginId: string
-  def: { id: string; location?: string; title: string; icon: string }
+  def: { id: string; location?: string; title: string; icon: string; order?: number }
 }> = []
 jest.mock("@/lib/plugin/registries/view-container-registry", () => ({
   subscribeViewContainers: () => () => {},
@@ -86,6 +86,7 @@ jest.mock("@/lib/plugin/i18n/plugin-label", () => ({
 }))
 
 import { SidebarNavSection, SidebarRow } from "./sidebar-nav-section"
+import { __resetNavBadgesForTests, setNavBadgeSourceCount } from "@/lib/shell/nav-badges"
 
 const saveMock = jest.fn(
   async (_patch?: { sidebarLayout?: { pinned: string[]; hidden: string[] } }) => {}
@@ -97,6 +98,7 @@ const lastSavedLayout = () =>
   }
 
 beforeEach(() => {
+  __resetNavBadgesForTests()
   routerPush.mockReset()
   saveMock.mockClear()
   setSelectedGuild.mockClear()
@@ -201,13 +203,14 @@ describe("SidebarNavSection", () => {
       })
       expect(trigger).toHaveAttribute("aria-busy", "true")
       expect(trigger.querySelector(".animate-spin")).toBeInTheDocument()
-      expect(screen.getByRole("status")).toHaveTextContent("loading")
+      // dnd-kit mounts its own (empty) live regions beside the nav's status.
+      expect(screen.getByText("loading")).toHaveAttribute("role", "status")
       await act(async () => {
         ready = true
         resolve()
       })
       expect(trigger).toHaveAttribute("aria-busy", "false")
-      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+      expect(screen.queryByText("loading")).not.toBeInTheDocument()
     }
   )
 
@@ -308,5 +311,113 @@ describe("SidebarNavSection", () => {
     })
     await user.click(screen.getByText("customize.hideItem"))
     expect(lastSavedLayout().hidden).toContain("workflows")
+  })
+
+  it("orders plugin containers by their declared order, after Canvas", () => {
+    containers.push(
+      { fullId: "p:late", pluginId: "p", def: { id: "late", title: "Late", icon: "a", order: 9 } },
+      {
+        fullId: "p:early",
+        pluginId: "p",
+        def: { id: "early", title: "Early", icon: "b", order: 1 },
+      }
+    )
+    render(<SidebarNavSection />)
+    const ids = Array.from(
+      screen
+        .getByRole("group", { name: "workspacesGroup" })
+        .querySelectorAll("[data-testid^='sidebar-nav-']")
+    ).map((node) => node.getAttribute("data-testid"))
+    expect(ids).toEqual([
+      "sidebar-nav-canvas",
+      "sidebar-nav-view-container-p:early",
+      "sidebar-nav-view-container-p:late",
+    ])
+  })
+
+  it("follows the stored mode order and leaves hidden modes out", () => {
+    containers.push({ fullId: "p:v", pluginId: "p", def: { id: "v", title: "Vault", icon: "x" } })
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          sidebarLayout: {
+            ...DEFAULT_SIDEBAR_LAYOUT,
+            modes: { order: ["p:v", "canvas"], hidden: ["canvas"] },
+          },
+        } as never,
+      })
+    })
+    render(<SidebarNavSection />)
+    expect(screen.queryByTestId("sidebar-nav-canvas")).toBeNull()
+    expect(screen.getByTestId("sidebar-nav-view-container-p:v")).toBeInTheDocument()
+  })
+
+  it("a mode row's menu hides it or moves it, with the ends disabled", () => {
+    containers.push({ fullId: "p:v", pluginId: "p", def: { id: "v", title: "Vault", icon: "x" } })
+    render(<SidebarNavSection />)
+    fireEvent.contextMenu(screen.getByTestId("sidebar-nav-canvas"))
+    expect(screen.getByTestId("sidebar-nav-canvas-menu-move-up")).toHaveAttribute("data-disabled")
+    // A mode has no "More" to move to.
+    expect(screen.queryByTestId("sidebar-nav-canvas-menu-unpin")).toBeNull()
+    fireEvent.click(screen.getByTestId("sidebar-nav-canvas-menu-move-down"))
+    const saved = saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0] as {
+      sidebarLayout: { modes?: { order: string[]; hidden: string[] } }
+    }
+    expect(saved.sidebarLayout.modes).toEqual({ order: ["p:v", "canvas"], hidden: [] })
+  })
+
+  it("a pinned row moves down from its menu and cannot move past the ends", () => {
+    render(<SidebarNavSection />)
+    const [first, second] = DEFAULT_SIDEBAR_LAYOUT.pinned
+    fireEvent.contextMenu(screen.getByTestId(`sidebar-nav-feature-${first}`))
+    expect(screen.getByTestId(`sidebar-nav-feature-${first}-menu-move-up`)).toHaveAttribute(
+      "data-disabled"
+    )
+    fireEvent.click(screen.getByTestId(`sidebar-nav-feature-${first}-menu-move-down`))
+    expect(lastSavedLayout().pinned.slice(0, 2)).toEqual([second, first])
+  })
+
+  it("a pinned row carries its live count and its ⌥N chord", () => {
+    render(<SidebarNavSection />)
+    act(() => setNavBadgeSourceCount("inbox.drafts", 5))
+    const inbox = screen.getByTestId("sidebar-nav-feature-inbox")
+    expect(screen.getByTestId("sidebar-nav-feature-inbox-badge")).toHaveTextContent("5")
+    expect(inbox).toHaveAttribute("aria-label", "inbox, badgeCount")
+    const slot = DEFAULT_SIDEBAR_LAYOUT.pinned.indexOf("inbox") + 1
+    expect(inbox).toHaveAttribute("aria-keyshortcuts", `Alt+${slot}`)
+    expect(inbox).toHaveAttribute("title", "shortcutHint")
+  })
+
+  it("More shows a dot and names the count when something behind it is waiting", () => {
+    render(<SidebarNavSection />)
+    expect(screen.queryByTestId("sidebar-nav-more-badge")).toBeNull()
+    act(() => setNavBadgeSourceCount("bots.attention", 2))
+    expect(screen.getByTestId("sidebar-nav-more-badge")).toBeInTheDocument()
+    expect(screen.getByTestId("sidebar-nav-more")).toHaveAttribute("aria-label", "more, badgeCount")
+  })
+
+  it("opens More toward the content from a right-docked sidebar", async () => {
+    act(() => {
+      useSettingsStore.setState({
+        settings: { sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT }, sidebarSide: "right" } as never,
+      })
+    })
+    const user = userEvent.setup()
+    render(<SidebarNavSection />)
+    await user.click(screen.getByTestId("sidebar-nav-more"))
+    const content = screen
+      .getByTestId("sidebar-nav-more-filter")
+      .closest("[data-radix-popper-content-wrapper] > *")
+    expect(content).toHaveAttribute("data-side", "left")
+  })
+
+  it("groups its rows under labelled groups", () => {
+    render(<SidebarNavSection />)
+    expect(screen.getByRole("group", { name: "workspacesGroup" })).toContainElement(
+      screen.getByTestId("sidebar-nav-canvas")
+    )
+    expect(screen.getByRole("group", { name: "featuresGroup" })).toContainElement(
+      screen.getByTestId("sidebar-nav-more")
+    )
   })
 })

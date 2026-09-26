@@ -82,6 +82,12 @@ jest.mock("@/components/account/runtime-target-menu-section", () => ({
 }))
 
 import { SidebarUserCard } from "./sidebar-user-card"
+import { act } from "@testing-library/react"
+import { formatKeybinding, toAriaKeyShortcuts } from "@/lib/shortcuts/utils"
+import {
+  __resetAppKeybindingStoreForTesting,
+  useAppKeybindingStore,
+} from "@/stores/shortcuts/app-keybinding-store"
 
 function open() {
   render(<SidebarUserCard />)
@@ -240,4 +246,43 @@ it("does not offer vault lock for a profile that unlocks automatically on this d
   render(<SidebarUserCard />)
   fireEvent.click(screen.getByTestId("sidebar-user-card"))
   expect(screen.queryByTestId("sidebar-user-lock")).not.toBeInTheDocument()
+})
+
+describe("SidebarUserCard — menu details", () => {
+  it("heads the menu with the same picture the card shows", async () => {
+    activeAccount = {
+      id: "a-1",
+      displayName: "Irma Salazar",
+      avatarDataUrl: "data:image/png;base64,AA",
+    }
+    await open()
+    const header = screen.getByTestId("sidebar-user-menu-avatar")
+    expect(header.querySelector("img")).toHaveAttribute("src", "data:image/png;base64,AA")
+    activeAccount = { id: "a-1", displayName: "Irma Salazar" }
+  })
+
+  it("falls back to the initial in the menu header without a picture", async () => {
+    await open()
+    expect(screen.getByTestId("sidebar-user-menu-avatar")).toHaveTextContent("I")
+  })
+
+  it("draws the pet row with the pet glyph, not an emoji", async () => {
+    await open()
+    const pet = screen.getByTestId("sidebar-user-pet")
+    expect(pet.querySelector("svg")).not.toBeNull()
+    expect(pet).not.toHaveTextContent("🐾")
+  })
+
+  it("prints the Settings chord the dispatcher fires, in this platform's notation", async () => {
+    __resetAppKeybindingStoreForTesting()
+    await open()
+    const settings = screen.getByTestId("sidebar-user-settings")
+    expect(settings).toHaveTextContent(formatKeybinding("ctrl+,"))
+    expect(settings).toHaveAttribute("aria-keyshortcuts", toAriaKeyShortcuts("ctrl+,"))
+    act(() => useAppKeybindingStore.getState().setOverride("shell.settings.open", "ctrl+shift+s"))
+    expect(screen.getByTestId("sidebar-user-settings")).toHaveTextContent(
+      formatKeybinding("ctrl+shift+s")
+    )
+    __resetAppKeybindingStoreForTesting()
+  })
 })

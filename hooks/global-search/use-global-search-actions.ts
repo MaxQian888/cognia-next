@@ -13,7 +13,7 @@
 
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useCallback } from "react"
 import { toast } from "sonner"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -28,6 +28,7 @@ import type { BuiltinCommandId } from "@/lib/global-search/providers/actions"
 import { clearAllGlobalSearchRecents, recordRecentItem } from "@/lib/global-search/recents"
 import type { GlobalSearchAction, GlobalSearchItem } from "@/lib/global-search/types"
 import { piPackageInstallHref } from "@/lib/pi-packages/deep-link"
+import { detectPlatform } from "@/lib/platform/detect"
 import { getQuickAction, runQuickAction } from "@/lib/plugin/registries/quick-action-registry"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { isTauri } from "@/lib/tauri"
@@ -38,8 +39,15 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { requestWorkspaceDialog } from "@/lib/workspace/workspace-dialog-request"
 import { useUIStore } from "@/stores/ui"
 import { requestComposerReference } from "@/lib/chat/composer-reference-request"
+import { DEFAULT_SIDEBAR_SIDE, type SidebarSide } from "@/types/shell/sidebar"
 
 const log = loggers.ui
+
+/** The palette commands that edit the rail layout for the page in front. */
+type PageLayoutCommand = Extract<
+  BuiltinCommandId,
+  "pin-current-page" | "unpin-current-page" | "hide-current-page"
+>
 
 /** Shell-specific behaviour the dialog cannot decide on its own. */
 export interface GlobalSearchHost {
@@ -90,7 +98,10 @@ export function useGlobalSearchActions({
   close,
 }: UseGlobalSearchActionsOptions) {
   const t = useTranslations("globalSearch")
+  const railT = useTranslations("desktop.guildRail")
   const router = useRouter()
+  // Read at render, while the dialog is still open over the page it acts on.
+  const pathname = usePathname()
   const { theme, setTheme } = useTheme()
 
   const openSession = useCallback(
@@ -109,6 +120,89 @@ export function useGlobalSearchActions({
       })
     },
     [sessions, host, select, t]
+  )
+
+  /*
+    Pin / unpin / hide the page in front. The command carries no page id: the
+    page is resolved from the route here, against the same catalog the rail
+    draws (`getSidebarCatalog`), so a replayed recent acts on the page the
+    user is on now. The layout writers are the plain exports of
+    `use-sidebar-layout` because this runs after the dialog closed, with no
+    component left to own the hook. All three modules are imported on demand
+    to keep the settings store (Dexie, keyring) and the rail's icon set out of
+    this hook's eager graph.
+  */
+  const runPageLayoutCommand = useCallback(
+    async (id: PageLayoutCommand) => {
+      const [{ getSidebarCatalog, navItemForPath }, { getRuntimeSnapshot }, layout] =
+        await Promise.all([
+          import("@/lib/shell/sidebar-nav"),
+          import("@/lib/runtime/runtime-snapshot-store"),
+          import("@/components/shell/use-sidebar-layout"),
+        ])
+      const catalog = getSidebarCatalog(detectPlatform(), getRuntimeSnapshot())
+      const page = navItemForPath(pathname ?? "", catalog)
+      if (!page) {
+        toast.info(t("toasts.noNavigationPage"))
+        return
+      }
+      const label = railT(page.i18nKey)
+      // Literal keys on purpose, so the i18n audits can see every one in use.
+      const [write, done]: [(pageId: string) => Promise<void>, string] =
+        id === "pin-current-page"
+          ? [layout.pinSidebarItem, t("toasts.pagePinned", { page: label })]
+          : id === "unpin-current-page"
+            ? [layout.unpinSidebarItem, t("toasts.pageUnpinned", { page: label })]
+            : [layout.hideSidebarItem, t("toasts.pageHidden", { page: label })]
+      try {
+        await write(page.id)
+        log.info("global-search navigation layout", { id, page: page.id })
+        toast.success(done)
+      } catch (err) {
+        log.error("global-search navigation layout failed", err, { id, page: page.id })
+        toast.error(
+          t("toasts.navigationUpdateFailed", {
+            message: err instanceof Error ? err.message : String(err),
+          })
+        )
+      }
+    },
+    [pathname, t, railT]
+  )
+
+  /*
+    Show or hide the rail. Each command states its outcome, so the current
+    state is checked first and only a real change goes through the one toggle
+    the menu bar and shortcuts share; a replayed "Hide" never shows it again.
+  */
+  const setNavRailCollapsed = useCallback(async (collapsed: boolean) => {
+    if (useUIStore.getState().guildRailCollapsed === collapsed) return
+    const { toggleGuildRailAction } = await import("@/lib/desktop/menu-actions")
+    toggleGuildRailAction()
+  }, [])
+
+  /*
+    Move the rail to `side`. Written on its own settings key, the way the
+    customizer's `setSide` writes it, so it never touches the pinned layout.
+  */
+  const moveNavRail = useCallback(
+    async (side: SidebarSide) => {
+      const { useSettingsStore } = await import("@/stores/settings")
+      const state = useSettingsStore.getState()
+      if ((state.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE) === side) return
+      try {
+        await state.save({ sidebarSide: side })
+        log.info("global-search navigation rail moved", { side })
+      } catch (err) {
+        log.error("global-search navigation rail move failed", err, { side })
+        toast.error(
+          t("toasts.navigationUpdateFailed", {
+            message: err instanceof Error ? err.message : String(err),
+          })
+        )
+      }
+    },
+    [t]
   )
 
   const runCommand = useCallback(
@@ -166,6 +260,28 @@ export function useGlobalSearchActions({
         }
         case "toggle-sidebar":
           useUIStore.getState().toggleSidebar()
+          return
+        case "pin-current-page":
+        case "unpin-current-page":
+        case "hide-current-page":
+          await runPageLayoutCommand(id as PageLayoutCommand)
+          return
+        case "customize-navigation":
+          // The settings section that hosts the rail customizer (id kept as
+          // `sidebar` for deep links, see `settings-nav-config.ts`).
+          host.onOpenSettings("sidebar")
+          return
+        case "show-nav-rail":
+          await setNavRailCollapsed(false)
+          return
+        case "hide-nav-rail":
+          await setNavRailCollapsed(true)
+          return
+        case "move-nav-rail-left":
+          await moveNavRail("left")
+          return
+        case "move-nav-rail-right":
+          await moveNavRail("right")
           return
         /*
           All four go through the always-mounted `WorkspaceDialogHost`, which
@@ -267,7 +383,17 @@ export function useGlobalSearchActions({
           log.warn("global-search unknown command", { id })
       }
     },
-    [host, create, router, t, theme, setTheme]
+    [
+      host,
+      create,
+      router,
+      t,
+      theme,
+      setTheme,
+      runPageLayoutCommand,
+      setNavRailCollapsed,
+      moveNavRail,
+    ]
   )
 
   const runAction = useCallback(

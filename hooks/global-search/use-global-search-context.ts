@@ -5,16 +5,19 @@
  *
  * Everything providers need that lives behind a hook — the cross-workspace
  * session list, the project store, theme, settings reachability, plugin quick
- * actions filtered for the palette surface, the active workbench's panels —
+ * actions filtered for the palette surface, the active workbench's panels, the
+ * navigation rail's layout as seen from the route in front —
  * is read here once and handed to the engine as plain data. Providers stay
  * store-free; this hook is the only place that knows where each fact lives.
  */
 
 import { useTheme } from "next-themes"
 import { useLocale, useNow, useTranslations } from "next-intl"
+import { usePathname } from "next/navigation"
 import { useMemo, useSyncExternalStore } from "react"
 import type { ChatSession } from "@cognia/agent-config-types"
 
+import { useSidebarLayout } from "@/components/shell/use-sidebar-layout"
 import { usePluginQuickActions } from "@/hooks/plugins/use-plugin-quick-actions"
 import { useSettingsSectionReachability } from "@/hooks/settings/use-settings-section-reachability"
 import { useRecorderAvailable } from "@/hooks/skills/use-skill-recorder"
@@ -26,13 +29,19 @@ import {
   getActiveWorkbenchPanels,
   subscribeActiveContext,
 } from "@/lib/context-workbench/active-context"
-import type { GlobalSearchContext, GlobalSearchScope } from "@/lib/global-search/types"
+import type {
+  GlobalSearchContext,
+  GlobalSearchScope,
+  GlobalSearchShellNav,
+} from "@/lib/global-search/types"
 import { isPetAvailable } from "@/lib/pet/access/availability"
 import { getPetWindowRole } from "@/lib/pet/window-role"
+import { navItemForPath } from "@/lib/shell/sidebar-nav"
 import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
+import { useUIStore } from "@/stores/ui"
 
 export interface UseGlobalSearchContextOptions {
   sessions: readonly ChatSession[]
@@ -86,6 +95,24 @@ export function useGlobalSearchContext({
   const workspaces = useProjectStore((s) => s.projects)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const hasApiKey = useSettingsStore((s) => Boolean(s.settings?.apiKey))
+  // The rail as it resolves right now, for the navigation-customization
+  // commands: the same layout hook the rail draws from, so a page the palette
+  // calls pinned is the one the rail shows pinned.
+  const pathname = usePathname()
+  const { catalog, resolved, side } = useSidebarLayout()
+  const railCollapsed = useUIStore((s) => s.guildRailCollapsed)
+  const shellNav = useMemo<GlobalSearchShellNav>(() => {
+    const page = navItemForPath(pathname ?? "", catalog)
+    return {
+      currentPage: page ? { id: page.id, i18nKey: page.i18nKey } : null,
+      currentPinned: page ? resolved.pinned.some((item) => item.id === page.id) : false,
+      currentHidden: page ? resolved.hidden.some((item) => item.id === page.id) : false,
+      railCollapsed,
+      side,
+      // The mobile drawer draws the rail but never folds or moves it.
+      railChrome: platform !== "mobile",
+    }
+  }, [pathname, catalog, resolved, side, railCollapsed, platform])
   // A stable "now" per mount (no update interval) — recency scoring does not
   // need to tick, and reading the clock during render would be impure.
   const now = useNow()
@@ -132,6 +159,7 @@ export function useGlobalSearchContext({
         workbenchPanels,
         // Same rule the workspace switcher applies, read from the same gate.
         canBrowseHostFolders: isTauri() || workspaceDirGate("fs_list_workspace_dir").available,
+        shellNav,
       },
     }),
     [
@@ -154,6 +182,7 @@ export function useGlobalSearchContext({
       hasApiKey,
       pluginQuickActions,
       workbenchPanels,
+      shellNav,
     ]
   )
 }

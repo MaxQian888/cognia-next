@@ -121,6 +121,8 @@ beforeEach(() => {
   })
 })
 
+import { OverlaySideContext } from "./rail-overlay-side"
+
 function renderSwitcher() {
   return render(
     <TooltipProvider>
@@ -429,5 +431,28 @@ describe("WorkspaceSwitcher", () => {
     fireEvent.click(screen.getByTestId("workspace-switcher"))
     await act(async () => {})
     expect(screen.queryByTestId("workspace-switcher-adopt")).not.toBeInTheDocument()
+  })
+})
+
+describe("WorkspaceSwitcher — overlay side", () => {
+  it("opens its list inward from a right-docked rail", () => {
+    render(
+      <TooltipProvider>
+        <OverlaySideContext.Provider value="left">
+          <WorkspaceSwitcher />
+        </OverlaySideContext.Provider>
+        <WorkspaceDialogHost />
+      </TooltipProvider>
+    )
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    const content = document.querySelector("[data-radix-popper-content-wrapper] > [data-side]")
+    expect(content).toHaveAttribute("data-side", "left")
+  })
+
+  it("opens rightward by default, as from the left rail", () => {
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    const content = document.querySelector("[data-radix-popper-content-wrapper] > [data-side]")
+    expect(content).toHaveAttribute("data-side", "right")
   })
 })

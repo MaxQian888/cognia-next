@@ -9,6 +9,16 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+// The nav rows have their own suite; here they are a marker, so this file
+// tests only when the flyout decides to carry them.
+jest.mock("./sidebar-nav-section", () => ({
+  SidebarNavSection: ({ className }: { className?: string }) => (
+    <nav data-testid="sidebar-nav" className={className} />
+  ),
+}))
+
+import { act } from "@testing-library/react"
+import { useUIStore } from "@/stores/ui"
 import {
   PEEK_SHADOW_ROOM_PX,
   SidebarPeekEdge,
@@ -256,5 +266,61 @@ describe("SidebarPeekFrame", () => {
     fireEvent.mouseLeave(panel)
     expect(onMouseEnter).toHaveBeenCalledTimes(1)
     expect(onMouseLeave).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("SidebarPeekFrame — navigation when the rail is off", () => {
+  afterEach(() => {
+    act(() => useUIStore.setState({ guildRailCollapsed: false }))
+  })
+
+  it("leads the flyout with the nav rows while the icon rail is switched off", () => {
+    act(() => useUIStore.setState({ guildRailCollapsed: true }))
+    render(
+      <SidebarPeekFrame {...frameProps} armed open>
+        <div data-testid="list" />
+      </SidebarPeekFrame>
+    )
+    const panel = screen.getByTestId("sidebar-peek-panel")
+    const nav = screen.getByTestId("sidebar-nav")
+    expect(panel).toContainElement(nav)
+    expect(
+      nav.compareDocumentPosition(screen.getByTestId("list")) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it("does not repeat the nav while the icon rail is on screen", () => {
+    render(
+      <SidebarPeekFrame {...frameProps} armed open>
+        <div />
+      </SidebarPeekFrame>
+    )
+    expect(screen.queryByTestId("sidebar-nav")).toBeNull()
+  })
+
+  it("never adds the nav to the expanded (unarmed) rail, which hosts its own", () => {
+    act(() => useUIStore.setState({ guildRailCollapsed: true }))
+    render(
+      <SidebarPeekFrame {...frameProps} armed={false} open={false}>
+        <div />
+      </SidebarPeekFrame>
+    )
+    expect(screen.queryByTestId("sidebar-nav")).toBeNull()
+  })
+
+  it("switching the rail off does not remount the list", () => {
+    const mounts = jest.fn()
+    function List() {
+      useEffect(() => mounts(), [])
+      return <div />
+    }
+    render(
+      <SidebarPeekFrame {...frameProps} armed open>
+        <List />
+      </SidebarPeekFrame>
+    )
+    act(() => useUIStore.setState({ guildRailCollapsed: true }))
+    expect(screen.getByTestId("sidebar-nav")).toBeInTheDocument()
+    expect(mounts).toHaveBeenCalledTimes(1)
   })
 })

@@ -15,20 +15,31 @@
  * discoverable, the buttons keep them one click.
  *
  * The 56px icon column keeps its own gear (`guild-rail.tsx`), so collapsing the
- * sidebar still finds Settings in the same corner.
+ * sidebar still finds Settings in the same corner. Both gears also carry
+ * "Customize navigation" in their context menus: they are the controls the
+ * user can never hide, so a navigation emptied of every item still has a way
+ * back to its editor.
  */
 
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
-import { MoonIcon, SettingsIcon, SunIcon, SunMoonIcon } from "lucide-react"
+import { MoonIcon, SettingsIcon, SlidersHorizontalIcon, SunIcon, SunMoonIcon } from "lucide-react"
 
 import type { AppTheme } from "@cognia/agent-config-types"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { Button } from "@/components/ui/button"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import { useAppShortcutLabel } from "@/hooks/shortcuts/use-app-shortcut-label"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
+import { ShellLayoutDialog } from "./shell-layout-dialog"
 import { SidebarUserCard } from "./sidebar-user-card"
 import { SharedSessionJoin } from "@/components/chat/shared-session-join"
 
@@ -38,7 +49,10 @@ const THEME_CYCLE: AppTheme[] = ["system", "light", "dark"]
 
 export function SidebarFooter({ className }: { className?: string }) {
   const t = useTranslations("desktop.sidebarUser")
+  const railT = useTranslations("desktop.guildRail")
   const router = useRouter()
+  const settingsShortcut = useAppShortcutLabel("shell.settings.open")
+  const [customizeOpen, setCustomizeOpen] = useState(false)
   const { theme, setTheme } = useTheme()
   const save = useSettingsStore((s) => s.save)
 
@@ -85,20 +99,41 @@ export function SidebarFooter({ className }: { className?: string }) {
         >
           <ThemeIcon className="size-4" aria-hidden />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
-          onClick={() => router.push("/settings")}
-          aria-label={t("settings")}
-          title={t("settings")}
-          aria-keyshortcuts="Meta+Comma"
-          data-testid="sidebar-footer-settings"
-        >
-          <SettingsIcon className="size-4" aria-hidden />
-        </Button>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={() => router.push("/settings")}
+              aria-label={t("settings")}
+              title={
+                settingsShortcut.label
+                  ? railT("shortcutHint", {
+                      label: t("settings"),
+                      shortcut: settingsShortcut.label,
+                    })
+                  : t("settings")
+              }
+              aria-keyshortcuts={settingsShortcut.aria}
+              data-testid="sidebar-footer-settings"
+            >
+              <SettingsIcon className="size-4" aria-hidden />
+            </Button>
+          </ContextMenuTrigger>
+          <ContextMenuContent data-testid="sidebar-footer-settings-menu">
+            <ContextMenuItem
+              onSelect={() => setCustomizeOpen(true)}
+              data-testid="sidebar-footer-settings-menu-customize"
+            >
+              <SlidersHorizontalIcon className="size-4" />
+              {railT("customize.title")}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       </div>
       <SharedSessionJoin />
+      <ShellLayoutDialog open={customizeOpen} onOpenChange={setCustomizeOpen} surface="sidebar" />
     </div>
   )
 }

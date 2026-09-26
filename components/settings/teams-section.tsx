@@ -55,7 +55,9 @@ import {
   UsersIcon,
 } from "lucide-react"
 import { useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
+import { TEAM_SETTINGS_PARAM } from "@/lib/settings/deep-link"
 import { useTranslations } from "next-intl"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { createLogger } from "@cognia/logging"
@@ -73,11 +75,46 @@ const COLOR_PALETTE = [
 
 export function TeamsSection() {
   const t = useTranslations("settings.teams")
-  const teams = useLiveQuery(() => listTeams(), []) ?? []
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const loadedTeams = useLiveQuery(() => listTeams(), [])
+  const teams = loadedTeams ?? []
   const characters = useLiveQuery(() => listCharacters(), []) ?? []
   const mcpServers = useLiveQuery(() => listMcpServers(), []) ?? []
   const [editing, setEditing] = useState<Team | null>(null)
   const [creating, setCreating] = useState(false)
+
+  // `?team=<id>` — the navigation's "Edit team" (`teamSettingsHref`). Opens
+  // that team's editor once the list has loaded, brings its row into view,
+  // then drops the param so a refresh or a back-navigation does not reopen
+  // it. A built-in team has no editor to open (its row's edit button is
+  // disabled), so it is only scrolled to. An id that names no team is dropped
+  // without a word: the user still landed on the teams they have.
+  const requestedTeamId = searchParams?.get(TEAM_SETTINGS_PARAM) ?? null
+  useEffect(() => {
+    if (!requestedTeamId || loadedTeams === undefined) return
+    const team = loadedTeams.find((row) => row.id === requestedTeamId)
+    if (team) {
+      if (!team.isBuiltIn) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- consuming a one-shot URL request
+        setCreating(false)
+        setEditing(team)
+      }
+      log.info("team_deep_link_opened", { id: team.id, editable: !team.isBuiltIn })
+      requestAnimationFrame(() => {
+        // Matched by attribute value rather than a selector string, so an id
+        // carrying selector syntax can never throw or match the wrong row.
+        Array.from(document.querySelectorAll<HTMLElement>("[data-team-id]"))
+          .find((node) => node.getAttribute("data-team-id") === team.id)
+          ?.scrollIntoView?.({ behavior: "smooth", block: "center" })
+      })
+    } else {
+      log.info("team_deep_link_missing", { id: requestedTeamId })
+    }
+    const next = new URLSearchParams(searchParams?.toString() ?? "")
+    next.delete(TEAM_SETTINGS_PARAM)
+    router.replace(`?${next.toString()}`, { scroll: false })
+  }, [requestedTeamId, loadedTeams, searchParams, router])
 
   return (
     <div className="space-y-4">
@@ -219,26 +256,28 @@ function TeamRow({
   const tOrch = useTranslations("settings.teams.orchestration")
   if (editing) {
     return (
-      <TeamEditor
-        initial={{
-          name: team.name,
-          description: team.description ?? "",
-          avatarColor: team.avatarColor,
-          avatarEmoji: team.avatarEmoji ?? "",
-          members: team.members.map((m) => ({ ...m })),
-          orchestration: team.orchestration,
-          responseCap: (team.maxResponses ?? 4).toString(),
-          autoRounds: (team.maxAutoRounds ?? 0).toString(),
-          replyConcurrency: team.replyConcurrency ?? "sequential",
-          supervisorCharacterId: team.supervisorCharacterId,
-          mcpServerIds: team.mcpServerIds,
-        }}
-        characters={characters}
-        mcpServers={mcpServers}
-        submitLabel={t("save")}
-        onCancel={onEditCancel}
-        onSave={onSave}
-      />
+      <div data-team-id={team.id}>
+        <TeamEditor
+          initial={{
+            name: team.name,
+            description: team.description ?? "",
+            avatarColor: team.avatarColor,
+            avatarEmoji: team.avatarEmoji ?? "",
+            members: team.members.map((m) => ({ ...m })),
+            orchestration: team.orchestration,
+            responseCap: (team.maxResponses ?? 4).toString(),
+            autoRounds: (team.maxAutoRounds ?? 0).toString(),
+            replyConcurrency: team.replyConcurrency ?? "sequential",
+            supervisorCharacterId: team.supervisorCharacterId,
+            mcpServerIds: team.mcpServerIds,
+          }}
+          characters={characters}
+          mcpServers={mcpServers}
+          submitLabel={t("save")}
+          onCancel={onEditCancel}
+          onSave={onSave}
+        />
+      </div>
     )
   }
 
@@ -247,7 +286,7 @@ function TeamRow({
     .join(" · ")
 
   return (
-    <Card className="p-3">
+    <Card className="p-3" data-team-id={team.id}>
       <div className="flex items-start gap-3">
         <span
           className="flex size-10 shrink-0 items-center justify-center rounded-full text-base"

@@ -30,6 +30,7 @@ import {
   GaugeIcon,
   LaptopIcon,
   LockKeyholeIcon,
+  PawPrintIcon,
   SettingsIcon,
   UserRoundIcon,
   UsersRoundIcon,
@@ -43,6 +44,7 @@ import { AccountManageDialog } from "@/components/account/account-manage-dialog"
 import { RuntimeTargetMenuSection } from "@/components/account/runtime-target-menu-section"
 import { unlocksWithoutPrompt } from "@/lib/accounts/desktop-local-account"
 import { useSidebarIdentity } from "@/hooks/shell/use-sidebar-identity"
+import { useAppShortcutLabel } from "@/hooks/shortcuts/use-app-shortcut-label"
 import { usePlatform } from "@/hooks/use-platform"
 import { toggleDesktopPetWindow } from "@/lib/pet/commands"
 import { avatarColor } from "@/lib/ui/avatar"
@@ -59,17 +61,21 @@ function MenuRow({
   detail,
   onClick,
   testId,
+  keyshortcuts,
 }: {
   icon: React.ReactNode
   label: string
   detail?: React.ReactNode
   onClick: () => void
   testId: string
+  /** `aria-keyshortcuts` for a row whose `detail` prints a chord. */
+  keyshortcuts?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-keyshortcuts={keyshortcuts}
       data-testid={testId}
       className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-foreground transition-colors hover:bg-accent"
     >
@@ -92,6 +98,9 @@ export function SidebarUserCard({ className }: { className?: string }) {
   const [open, setOpen] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
   const identity = useSidebarIdentity(open)
+  // The chord the dispatcher actually fires, in this platform's notation —
+  // `⌘,` on a Mac, `Ctrl+,` elsewhere, the user's own chord once rebound.
+  const settingsShortcut = useAppShortcutLabel("shell.settings.open")
 
   const displayName = identity.displayName ?? activeAccount?.displayName ?? t("noProfile")
   const initial = displayName.trim().charAt(0).toUpperCase() || "?"
@@ -186,8 +195,20 @@ export function SidebarUserCard({ className }: { className?: string }) {
               aria-hidden
               className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
               style={{ backgroundColor: tint }}
+              data-testid="sidebar-user-menu-avatar"
             >
-              {initial}
+              {/* The same picture the card shows — a menu that opened on a
+                  photo and headed itself with a letter read as someone else. */}
+              {activeAccount?.avatarDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={activeAccount.avatarDataUrl}
+                  alt=""
+                  className="size-8 rounded-full object-cover"
+                />
+              ) : (
+                initial
+              )}
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-sm font-medium">{displayName}</span>
@@ -247,7 +268,7 @@ export function SidebarUserCard({ className }: { className?: string }) {
               the toggle quietly did nothing, so it is not offered there. */}
           {desktopShell ? (
             <MenuRow
-              icon={<span aria-hidden>🐾</span>}
+              icon={<PawPrintIcon className="size-4" />}
               label={t("showPet")}
               onClick={togglePet}
               testId="sidebar-user-pet"
@@ -257,11 +278,14 @@ export function SidebarUserCard({ className }: { className?: string }) {
             icon={<SettingsIcon className="size-4" />}
             label={t("settings")}
             detail={
-              <Kbd aria-hidden className="text-[10px]">
-                ⌘,
-              </Kbd>
+              settingsShortcut.label ? (
+                <Kbd aria-hidden className="text-[10px]">
+                  {settingsShortcut.label}
+                </Kbd>
+              ) : undefined
             }
             onClick={() => go("/settings")}
+            keyshortcuts={settingsShortcut.aria}
             testId="sidebar-user-settings"
           />
           {/* Cognia's "sign out": the vault closes and every decrypted store

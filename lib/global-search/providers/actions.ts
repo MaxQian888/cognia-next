@@ -6,19 +6,29 @@
  */
 
 import {
+  ArrowLeftToLineIcon,
+  ArrowRightToLineIcon,
   CheckIcon,
   DownloadIcon,
+  EyeOffIcon,
   FolderOpenIcon,
   FolderPlusIcon,
   FolderSearchIcon,
   GlobeIcon,
   KeyRoundIcon,
   MoonIcon,
+  PanelLeftCloseIcon,
   PanelLeftIcon,
+  PanelLeftOpenIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   PawPrintIcon,
+  PinIcon,
+  PinOffIcon,
   PlusIcon,
   RefreshCwIcon,
   ServerIcon,
+  Settings2Icon,
   SettingsIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
@@ -41,6 +51,14 @@ export type BuiltinCommandId =
   | "clear-conversation"
   | "toggle-theme"
   | "toggle-sidebar"
+  | "pin-current-page"
+  | "unpin-current-page"
+  | "hide-current-page"
+  | "customize-navigation"
+  | "show-nav-rail"
+  | "hide-nav-rail"
+  | "move-nav-rail-left"
+  | "move-nav-rail-right"
   | "open-folder"
   | "new-workspace"
   | "adopt-workspaces"
@@ -98,6 +116,7 @@ export function actionCandidates(ctx: GlobalSearchContext): ActionCandidate[] {
       keywords: ["sidebar", "rail", "collapse", "侧栏"],
       icon: { lucide: PanelLeftIcon },
     },
+    ...navigationCandidates(ctx),
     {
       id: "export-markdown",
       title: t("globalSearch.actions.exportMd"),
@@ -255,6 +274,106 @@ export function actionCandidates(ctx: GlobalSearchContext): ActionCandidate[] {
       icon: { lucide: Trash2Icon },
     },
   ]
+  return rows
+}
+
+/** Words every navigation-customization row answers to, in both languages. */
+const NAV_KEYWORDS = ["navigation", "nav", "rail", "sidebar", "导航", "导航栏", "侧栏"]
+
+/**
+ * Navigation-rail customization: pin, unpin and hide the page in front, open
+ * the customizer, and fold or move the rail.
+ *
+ * The three page commands name the page but carry no id. The handler resolves
+ * the page from the route again when it runs, so a recent pin replayed on
+ * another page acts on the page in front (its toast names which), never on one
+ * the user has left. They are offered on mobile too: the drawer renders the
+ * rail's pinned block and More menu from the same layout, so a pin shows there.
+ *
+ * Folding and moving the rail only exist where the rail is window chrome
+ * (`railChrome`), and the customizer only where its settings section is
+ * reachable (the desktop shell, `profiles: ["desktop"]`).
+ */
+function navigationCandidates(ctx: GlobalSearchContext): ActionCandidate[] {
+  const t = ctx.t
+  const nav = ctx.host.shellNav
+  const rows: ActionCandidate[] = []
+  const page = nav.currentPage
+  if (page) {
+    const label = t(`desktop.guildRail.${page.i18nKey}`)
+    if (!nav.currentPinned) {
+      rows.push({
+        id: "pin-current-page",
+        title: t("globalSearch.actions.pinPage", { page: label }),
+        // Pinning un-hides, which is worth saying when the page is hidden now.
+        subtitle: nav.currentHidden ? t("globalSearch.actions.pinHiddenPageHint") : undefined,
+        keywords: [...NAV_KEYWORDS, "pin", "page", "固定", "页面"],
+        icon: { lucide: PinIcon },
+      })
+    } else {
+      rows.push({
+        id: "unpin-current-page",
+        title: t("globalSearch.actions.unpinPage", { page: label }),
+        subtitle: t("globalSearch.actions.unpinPageHint"),
+        keywords: [...NAV_KEYWORDS, "unpin", "more", "page", "取消固定", "更多", "页面"],
+        icon: { lucide: PinOffIcon },
+      })
+    }
+    if (!nav.currentHidden) {
+      rows.push({
+        id: "hide-current-page",
+        title: t("globalSearch.actions.hidePage", { page: label }),
+        subtitle: t("globalSearch.actions.hidePageHint"),
+        keywords: [...NAV_KEYWORDS, "hide", "remove", "page", "隐藏", "页面"],
+        icon: { lucide: EyeOffIcon },
+      })
+    }
+  }
+  if (ctx.host.reachableSettingsSections.has("sidebar")) {
+    rows.push({
+      id: "customize-navigation",
+      title: t("globalSearch.actions.customizeNavigation"),
+      keywords: [...NAV_KEYWORDS, "customize", "reorder", "pin", "hide", "自定义", "排序", "固定"],
+      icon: { lucide: Settings2Icon },
+    })
+  }
+  if (nav.railChrome) {
+    const right = nav.side === "right"
+    /*
+      One id per outcome rather than a toggle, so the row's title and a
+      replayed recent agree: a recent "Show navigation rail" shows it, and is a
+      no-op when it is already showing, instead of flipping it away again.
+    */
+    rows.push(
+      nav.railCollapsed
+        ? {
+            id: "show-nav-rail",
+            title: t("globalSearch.actions.showNavRail"),
+            keywords: [...NAV_KEYWORDS, "show", "expand", "显示", "展开"],
+            icon: { lucide: right ? PanelRightOpenIcon : PanelLeftOpenIcon },
+          }
+        : {
+            id: "hide-nav-rail",
+            title: t("globalSearch.actions.hideNavRail"),
+            keywords: [...NAV_KEYWORDS, "hide", "collapse", "隐藏", "折叠"],
+            icon: { lucide: right ? PanelRightCloseIcon : PanelLeftCloseIcon },
+          },
+      // Named by the edge it goes TO, like the theme row names the theme.
+      right
+        ? {
+            id: "move-nav-rail-left",
+            title: t("globalSearch.actions.moveNavRailLeft"),
+            keywords: [...NAV_KEYWORDS, "move", "side", "left", "移动", "位置", "左侧"],
+            icon: { lucide: ArrowLeftToLineIcon },
+          }
+        : {
+            id: "move-nav-rail-right",
+            title: t("globalSearch.actions.moveNavRailRight"),
+            keywords: [...NAV_KEYWORDS, "move", "side", "right", "移动", "位置", "右侧"],
+            icon: { lucide: ArrowRightToLineIcon },
+          }
+    )
+  }
   return rows
 }
 

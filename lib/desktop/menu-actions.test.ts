@@ -49,9 +49,11 @@ const toggleSidebar = jest.fn()
 const toggleGuildRail = jest.fn()
 const toggleStatusBar = jest.fn()
 const requestCreate = jest.fn()
+const requestChatHome = jest.fn()
 jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: {
     getState: () => ({
+      requestChatHome,
       setSelectedGuild,
       toggleSidebar,
       toggleGuildRail,
@@ -99,9 +101,19 @@ jest.mock("@cognia/logging", () => ({
   },
 }))
 
+import { readFileSync } from "fs"
+import { join } from "path"
+
+import { SIDEBAR_NAV_META } from "@/types/shell/sidebar"
+
 import {
   MENU_ACTION_IDS,
+  MENU_COMMAND_IDS,
+  GO_MENU_IDS,
   GO_ROUTES,
+  RENDERER_ONLY_IDS,
+  RUST_ONLY_IDS,
+  isGoMenuId,
   newChatAction,
   newWorkflowAction,
   newAgentTeamAction,
@@ -149,6 +161,7 @@ beforeEach(() => {
   toggleGuildRail.mockClear()
   toggleStatusBar.mockClear()
   requestCreate.mockClear()
+  requestChatHome.mockClear()
   settingsSave.mockClear().mockResolvedValue(undefined)
   openFolderAsWorkspace.mockReset().mockResolvedValue(null)
   killSwitch.mockClear().mockResolvedValue(undefined)
@@ -165,12 +178,64 @@ test("MENU_ACTION_IDS is a stable list — every id is unique", () => {
   expect(set.size).toBe(MENU_ACTION_IDS.length)
 })
 
-test("GO_ROUTES covers every non-DM/Canvas go-* id", () => {
-  const goIds = MENU_ACTION_IDS.filter((id) => id.startsWith("go-"))
-  for (const id of goIds) {
+test("GO_MENU_IDS is one go-<id> per catalog entry plus DMs / Canvas / Settings", () => {
+  expect(GO_MENU_IDS).toEqual([
+    ...SIDEBAR_NAV_META.map((meta) => `go-${meta.id}`),
+    "go-dms",
+    "go-canvas",
+    "go-settings",
+  ])
+})
+
+test("GO_MENU_IDS keeps every id the menus and accelerators already use", () => {
+  expect(GO_MENU_IDS).toEqual(
+    expect.arrayContaining([
+      "go-inbox",
+      "go-workflows",
+      "go-sites",
+      "go-twin",
+      "go-skills",
+      "go-plugins",
+      "go-squads",
+      "go-scheduler",
+      "go-discover",
+      "go-a2ui",
+      "go-logs",
+      "go-settings",
+      "go-dms",
+      "go-canvas",
+    ])
+  )
+  // Destinations the hand-kept list used to miss, `issues` being a default pin.
+  expect(GO_MENU_IDS).toEqual(
+    expect.arrayContaining(["go-issues", "go-goals", "go-templates", "go-memory", "go-bots"])
+  )
+})
+
+test("MENU_ACTION_IDS is the command ids followed by the go ids, with no go id hand-listed", () => {
+  expect(MENU_ACTION_IDS).toEqual([...MENU_COMMAND_IDS, ...GO_MENU_IDS])
+  expect(MENU_COMMAND_IDS.filter((id) => id.startsWith("go-"))).toEqual([])
+})
+
+test("GO_ROUTES maps every non-DM/Canvas go id to its catalog route", () => {
+  for (const meta of SIDEBAR_NAV_META) {
+    const id = `go-${meta.id}`
+    expect(GO_ROUTES[id]).toBe(id === "go-inbox" ? "/inbox/all" : meta.route)
+  }
+  expect(GO_ROUTES["go-settings"]).toBe("/settings")
+  expect(GO_ROUTES["go-dms"]).toBeUndefined()
+  expect(GO_ROUTES["go-canvas"]).toBeUndefined()
+  for (const id of GO_MENU_IDS) {
     if (id === "go-dms" || id === "go-canvas") continue
     expect(GO_ROUTES[id]).toBeDefined()
   }
+})
+
+test("isGoMenuId accepts exactly the go ids", () => {
+  for (const id of GO_MENU_IDS) expect(isGoMenuId(id)).toBe(true)
+  expect(isGoMenuId("go-agent-teams")).toBe(false)
+  expect(isGoMenuId("go-")).toBe(false)
+  expect(isGoMenuId("new-chat")).toBe(false)
 })
 
 // Rust broadcasts menu:// / tray:// to every window, and the pet overlay /
@@ -179,14 +244,16 @@ test("GO_ROUTES covers every non-DM/Canvas go-* id", () => {
 test("newChatAction is a no-op outside the main window", () => {
   isMainAppWindowMock.mockReturnValue(false)
   newChatAction()
+  expect(requestChatHome).not.toHaveBeenCalled()
   expect(startNewSessionMock).not.toHaveBeenCalled()
-  expect(setSelectedGuild).not.toHaveBeenCalled()
 })
 
-test("newChatAction starts a conversation and resets guild", () => {
+// The conversation is only created when the user sends from the welcome
+// surface, so the menu action itself never starts a session.
+test("newChatAction requests the DM welcome surface without creating a session", () => {
   newChatAction()
-  expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
-  expect(startNewSessionMock).toHaveBeenCalled()
+  expect(requestChatHome).toHaveBeenCalledWith({ kind: "dm" })
+  expect(startNewSessionMock).not.toHaveBeenCalled()
 })
 
 test("newWorkflowAction requests workflow creation and routes to /workflows", () => {
@@ -404,10 +471,29 @@ test("goAction handles go-canvas by switching guild and routing to /", () => {
   expect(router.push).toHaveBeenCalledWith("/")
 })
 
+test("goAction routes catalog destinations the old hand-kept map missed", () => {
+  goAction(router, "go-issues")
+  expect(router.push).toHaveBeenLastCalledWith("/issues")
+  goAction(router, "go-agent-runs")
+  expect(router.push).toHaveBeenLastCalledWith("/agent-runs")
+  goAction(router, "go-devices")
+  expect(router.push).toHaveBeenLastCalledWith("/devices")
+})
+
+test("goAction keeps go-inbox on /inbox/all and go-settings on /settings", () => {
+  goAction(router, "go-inbox")
+  expect(router.push).toHaveBeenLastCalledWith("/inbox/all")
+  goAction(router, "go-settings")
+  expect(router.push).toHaveBeenLastCalledWith("/settings")
+})
+
 test("goAction is a no-op for ids without a route entry", () => {
   // Passing a non-go id never matches; nothing should happen.
   goAction(router, "new-chat")
+  // Spelled like a go id but not a destination (the retired Rust spelling).
+  goAction(router, "go-agent-teams")
   expect(router.push).not.toHaveBeenCalled()
+  expect(setSelectedGuild).not.toHaveBeenCalled()
 })
 
 test("automationKillSwitchAction invokes the automation client", async () => {
@@ -502,6 +588,16 @@ describe("verifyMenuActionParity", () => {
     expect(report?.missingInRenderer).toEqual([])
   })
 
+  test("does not report the Rust-only toggle-devtools as drift", async () => {
+    const rustIds = [
+      ...MENU_ACTION_IDS.filter((id) => !RENDERER_ONLY_IDS.has(id)),
+      "toggle-devtools",
+    ]
+    invokeMock.mockResolvedValueOnce(rustIds)
+    const report = await verifyMenuActionParity()
+    expect(report).toEqual({ missingInRust: [], missingInRenderer: [] })
+  })
+
   test("reports Rust ids the renderer hasn't learned yet", async () => {
     const rustIds = [...MENU_ACTION_IDS, "future-rust-only-id"]
     invokeMock.mockResolvedValueOnce(rustIds)
@@ -520,5 +616,72 @@ describe("verifyMenuActionParity", () => {
     invokeMock.mockResolvedValueOnce({ not: "an array" } as unknown)
     const report = await verifyMenuActionParity()
     expect(report).toBeNull()
+  })
+})
+
+/**
+ * Parity with the Rust side without running Tauri: parse the `MENU_IDS`
+ * array out of `src-tauri/src/commands.rs` and the Go table out of
+ * `src-tauri/src/menu.rs`. `verifyMenuActionParity` only runs inside the
+ * desktop shell, so without this a renamed or missing id (the old
+ * `go-agent-teams` vs `go-squads`) would only surface as a dead menu item.
+ */
+describe("Rust menu parity (source-parsed)", () => {
+  const tauriSrc = join(__dirname, "..", "..", "src-tauri", "src")
+
+  function quotedIdsIn(block: string): string[] {
+    const withoutComments = block
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, ""))
+      .join("\n")
+    return [...withoutComments.matchAll(/"([^"]+)"/g)].map((m) => m[1])
+  }
+
+  function rustMenuIds(): string[] {
+    const source = readFileSync(join(tauriSrc, "commands.rs"), "utf8")
+    const match = source.match(/pub const MENU_IDS: &\[&str\] = &\[([\s\S]*?)\n\];/)
+    if (!match) throw new Error("MENU_IDS array not found in src-tauri/src/commands.rs")
+    return quotedIdsIn(match[1])
+  }
+
+  function rustGoMenuTableIds(): string[] {
+    const source = readFileSync(join(tauriSrc, "menu.rs"), "utf8")
+    const match = source.match(/const GO_MENU_SECTIONS: [^=]+= &\[([\s\S]*?)\n\];/)
+    if (!match) throw new Error("GO_MENU_SECTIONS table not found in src-tauri/src/menu.rs")
+    // Each entry is `("go-…", "Label", accelerator)`; the id is its first string.
+    return [...match[1].matchAll(/\(\s*"([^"]+)"\s*,/g)].map((m) => m[1])
+  }
+
+  test("Rust MENU_IDS has no duplicates", () => {
+    const ids = rustMenuIds()
+    expect(ids.length).toBeGreaterThan(0)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  test("Rust MENU_IDS go ids equal the renderer's GO_MENU_IDS", () => {
+    const rustGo = rustMenuIds().filter((id) => id.startsWith("go-"))
+    expect([...rustGo].sort()).toEqual([...GO_MENU_IDS].sort())
+  })
+
+  test("the native Go submenu builds exactly the renderer's go ids", () => {
+    expect([...rustGoMenuTableIds()].sort()).toEqual([...GO_MENU_IDS].sort())
+  })
+
+  test("the whole Rust list matches the renderer, minus each side's documented exclusives", () => {
+    const rust = rustMenuIds()
+    const rustOnly = rust.filter((id) => !(MENU_ACTION_IDS as readonly string[]).includes(id))
+    expect(rustOnly).toEqual([...RUST_ONLY_IDS])
+    const rendererExpected = MENU_ACTION_IDS.filter((id) => !RENDERER_ONLY_IDS.has(id))
+    expect([...rust.filter((id) => !RUST_ONLY_IDS.has(id))].sort()).toEqual(
+      [...rendererExpected].sort()
+    )
+  })
+
+  test("verifyMenuActionParity reports no drift against the real Rust list", async () => {
+    invokeMock.mockResolvedValueOnce(rustMenuIds())
+    await expect(verifyMenuActionParity()).resolves.toEqual({
+      missingInRust: [],
+      missingInRenderer: [],
+    })
   })
 })

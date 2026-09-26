@@ -55,6 +55,30 @@ jest.mock("@/stores/chat", () => ({
   useChatStore: (selector: (s: { activeSessionId: string | null }) => unknown) =>
     selector(chatSessionRef),
 }))
+let mockPathname: string | null = "/"
+jest.mock("next/navigation", () => ({ usePathname: () => mockPathname }))
+// The layout hook's own resolution is covered by its spec; here only what the
+// context makes of it. One stable object, as the hook memoises its own.
+const sidebarLayout = {
+  catalog: [
+    { id: "inbox", route: "/inbox", i18nKey: "inbox" },
+    { id: "source-control", route: "/source-control", i18nKey: "sourceControl" },
+    { id: "logs", route: "/logs", i18nKey: "logs" },
+  ],
+  resolved: {
+    pinned: [{ id: "inbox" }],
+    overflow: [{ id: "source-control" }],
+    hidden: [{ id: "logs" }],
+  },
+  side: "right" as "left" | "right",
+}
+jest.mock("@/components/shell/use-sidebar-layout", () => ({
+  useSidebarLayout: () => sidebarLayout,
+}))
+const uiState = { guildRailCollapsed: false }
+jest.mock("@/stores/ui", () => ({
+  useUIStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
+}))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: { settings: { apiKey?: string } }) => unknown) =>
     selector({ settings: { apiKey: "sk" } }),
@@ -66,6 +90,8 @@ describe("useGlobalSearchContext", () => {
   beforeEach(() => {
     panels.length = 0
     mockPlatform = "web"
+    mockPathname = "/"
+    uiState.guildRailCollapsed = false
   })
 
   it("assembles the context from hooks and stores", () => {
@@ -114,6 +140,50 @@ describe("useGlobalSearchContext", () => {
     mockPlatform = "mobile"
     const { result } = renderHook(() => useGlobalSearchContext({ sessions: [], scope: "all" }))
     expect(result.current.host.petHostAvailable).toBe(false)
+  })
+
+  describe("shellNav", () => {
+    const shellNav = () =>
+      renderHook(() => useGlobalSearchContext({ sessions: [], scope: "all" })).result.current.host
+        .shellNav
+
+    it("has no current page off every catalog route", () => {
+      for (const path of ["/", "/settings", null]) {
+        mockPathname = path
+        expect(shellNav()).toMatchObject({
+          currentPage: null,
+          currentPinned: false,
+          currentHidden: false,
+        })
+      }
+    })
+
+    it("resolves the route in front onto the catalog, pinned or not", () => {
+      mockPathname = "/inbox/c"
+      expect(shellNav()).toEqual({
+        currentPage: { id: "inbox", i18nKey: "inbox" },
+        currentPinned: true,
+        currentHidden: false,
+        railCollapsed: false,
+        side: "right",
+        railChrome: true,
+      })
+      mockPathname = "/source-control"
+      expect(shellNav()).toMatchObject({
+        currentPage: { id: "source-control", i18nKey: "sourceControl" },
+        currentPinned: false,
+        currentHidden: false,
+      })
+      mockPathname = "/logs"
+      expect(shellNav()).toMatchObject({ currentPinned: false, currentHidden: true })
+    })
+
+    it("reads the rail's fold state and marks the mobile drawer as no rail chrome", () => {
+      uiState.guildRailCollapsed = true
+      expect(shellNav()).toMatchObject({ railCollapsed: true, railChrome: true })
+      mockPlatform = "mobile"
+      expect(shellNav().railChrome).toBe(false)
+    })
   })
 
   it("keeps the context identity stable across re-renders with the same inputs", () => {

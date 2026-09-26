@@ -7,6 +7,7 @@
 import type {
   GlobalSearchContext,
   GlobalSearchProviderInput,
+  GlobalSearchShellNav,
   ParsedGlobalSearchQuery,
 } from "./types"
 import { parseGlobalSearchQuery } from "./query-parser"
@@ -20,6 +21,19 @@ export function testTranslate(
 ): string {
   if (!values || Object.keys(values).length === 0) return key
   return `${key}:${JSON.stringify(values)}`
+}
+
+/**
+ * A desktop rail on a route the catalog does not list (`/`): no current page,
+ * so the pin / unpin / hide commands stay out of every default fixture.
+ */
+export const TEST_SHELL_NAV: GlobalSearchShellNav = {
+  currentPage: null,
+  currentPinned: false,
+  currentHidden: false,
+  railCollapsed: false,
+  side: "left",
+  railChrome: true,
 }
 
 export function makeTestContext(over: Partial<GlobalSearchContext> = {}): GlobalSearchContext {
@@ -46,6 +60,7 @@ export function makeTestContext(over: Partial<GlobalSearchContext> = {}): Global
       pluginQuickActions: [],
       workbenchPanels: [],
       canBrowseHostFolders: true,
+      shellNav: TEST_SHELL_NAV,
     },
     ...over,
   }

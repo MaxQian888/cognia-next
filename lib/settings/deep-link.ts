@@ -126,3 +126,15 @@ export const PROVIDER_SETTINGS_PARAM = "provider"
 export function providerSettingsHref(link: { provider?: string } = {}): string {
   return settingsHref("ai-connections", { params: { [PROVIDER_SETTINGS_PARAM]: link.provider } })
 }
+
+/** The team-selection param `components/settings/teams-section.tsx` consumes. */
+export const TEAM_SETTINGS_PARAM = "team"
+
+/**
+ * Deep-link into Teams, optionally opening one team's editor (`?team=`). The
+ * navigation's team menus use it for "Edit team", so the click lands on that
+ * team's form rather than on a list to find it in.
+ */
+export function teamSettingsHref(teamId?: string): string {
+  return settingsHref("teams", { params: { [TEAM_SETTINGS_PARAM]: teamId } })
+}

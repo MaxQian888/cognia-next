@@ -1,4 +1,6 @@
 {
+  "appBadgeHint": "Show the number of unread conversations and items waiting for you on the app icon — the Dock on macOS — and in the browser tab's title.",
+  "appBadgeLabel": "App icon badge",
   "badgeHint": "Show the unread badge on the bell.",
   "badgeLabel": "Badge",
   "channel": {

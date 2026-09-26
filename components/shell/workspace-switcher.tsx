@@ -13,6 +13,7 @@ import {
   useWorkspacePickerRequests,
   WorkspacePickerList,
 } from "@/components/workspace/workspace-picker-list"
+import { useOverlaySide } from "./rail-overlay-side"
 
 /**
  * Rail entry point for the active workspace. The trigger shows the active
@@ -25,8 +26,10 @@ import {
  */
 interface WorkspaceSwitcherProps {
   /**
-   * `rail` (the default) is the 40px square initial in the icon column, with a
-   * tooltip for the name and a popover opening rightward. `wide` is a text
+   * `rail` (the default) is the square initial in the icon column, with a
+   * tooltip for the name and a popover opening inward — rightward from a left
+   * rail, leftward from a right one (`OverlaySideContext`, provided by the
+   * rail). `wide` is a text
    * trigger for the title bar's start zone above the expanded sidebar:
    * initial, name, chevron, with the popover opening downward under it. Same
    * list, same actions.
@@ -52,6 +55,7 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
   const triggerLabel = active ? t("active", { name: active.name }) : t("none")
   const initial = active?.name.trim().charAt(0).toUpperCase()
   const wide = variant === "wide"
+  const overlaySide = useOverlaySide()
 
   return (
     <>
@@ -103,11 +107,11 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
                 </Button>
               </PopoverTrigger>
             </TooltipTrigger>
-            <TooltipContent side="right">{triggerLabel}</TooltipContent>
+            <TooltipContent side={overlaySide}>{triggerLabel}</TooltipContent>
           </Tooltip>
         )}
 
-        <PopoverContent side={wide ? "bottom" : "right"} align="start" className="w-72 p-1">
+        <PopoverContent side={wide ? "bottom" : overlaySide} align="start" className="w-72 p-1">
           <WorkspacePickerList actions={actions} onSwitched={() => setOpen(false)} />
         </PopoverContent>
       </Popover>

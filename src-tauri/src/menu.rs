@@ -5,13 +5,65 @@ use tauri::{
     App, Emitter, Manager,
 };
 
-const GO_SITES_MENU_ID: &str = "go-sites";
 const TOGGLE_RIGHT_SIDEBAR_MENU_ID: &str = "toggle-right-sidebar";
 const TOGGLE_TERMINAL_MENU_ID: &str = "toggle-terminal";
 
 // `MENU_IDS` lives in `crate::commands` so the `menu_action_ids` Tauri
 // command can be registered on every platform — see
 // `commands::MENU_IDS` and `commands::menu_action_ids`.
+
+/// One native Go-menu entry: `(menu id, English label, accelerator)`.
+type GoMenuItem = (&'static str, &'static str, Option<&'static str>);
+
+/// The native Go submenu, section by section — a separator goes between
+/// sections. Mirrors `lib/desktop/menu-actions.ts:GO_MENU_IDS`, which derives
+/// one `go-<id>` per entry of the navigation catalog
+/// (`types/shell/sidebar.ts:SIDEBAR_NAV_META`) plus `go-dms`, `go-canvas`
+/// and `go-settings`. Labels for catalog entries follow the rail's
+/// `desktop.guildRail.*` English strings.
+///
+/// Every id here must be in `commands::MENU_IDS` and vice versa: the tests
+/// below pin that, and `lib/desktop/menu-actions.test.ts` pins `MENU_IDS`
+/// against the renderer's list.
+const GO_MENU_SECTIONS: &[&[GoMenuItem]] = &[
+    &[
+        ("go-inbox", "Inbox", Some("CmdOrCtrl+1")),
+        ("go-workflows", "Workflows", Some("CmdOrCtrl+2")),
+        ("go-sites", "Sites", None),
+        ("go-twin", "Twin Workbench", Some("CmdOrCtrl+3")),
+        ("go-skills", "Skills", Some("CmdOrCtrl+4")),
+        ("go-plugins", "Plugins", Some("CmdOrCtrl+5")),
+        ("go-squads", "Squads", Some("CmdOrCtrl+6")),
+        ("go-scheduler", "Scheduler", Some("CmdOrCtrl+7")),
+        ("go-discover", "Discover", Some("CmdOrCtrl+8")),
+    ],
+    &[
+        ("go-issues", "Issues", None),
+        ("go-templates", "Templates", None),
+        ("go-goals", "Goals", None),
+        ("go-pet", "Pet", None),
+        ("go-browser", "Browser", None),
+    ],
+    &[
+        ("go-a2ui", "Mini-Apps", None),
+        ("go-dms", "Direct Messages", None),
+        ("go-canvas", "Canvas", None),
+    ],
+    &[
+        ("go-source-control", "Source Control", None),
+        ("go-agent-runs", "Agent runs", None),
+        ("go-workspace", "Workspace", None),
+        ("go-memory", "Memory", None),
+        ("go-servers", "Servers", None),
+        ("go-integrations", "Integrations", None),
+        ("go-devices", "Devices", None),
+        ("go-bots", "Bots", None),
+        ("go-eval", "Evaluation", None),
+        ("go-performance", "Performance", None),
+        ("go-me", "Me", None),
+    ],
+    &[("go-logs", "Logs", None), ("go-settings", "Settings", None)],
+];
 
 /// Build the application menu (File / Edit / View / Go / Tools / Window /
 /// Help) and route menu events to the frontend as `menu://<id>` events.
@@ -151,72 +203,20 @@ pub fn install(app: &App) -> tauri::Result<()> {
         .build()?;
 
     // -------------------- Go --------------------
-    let go_inbox = MenuItemBuilder::new("Inbox")
-        .id("go-inbox")
-        .accelerator("CmdOrCtrl+1")
-        .build(handle)?;
-    let go_workflows = MenuItemBuilder::new("Workflows")
-        .id("go-workflows")
-        .accelerator("CmdOrCtrl+2")
-        .build(handle)?;
-    let go_sites = MenuItemBuilder::new("Sites")
-        .id(GO_SITES_MENU_ID)
-        .build(handle)?;
-    let go_twin = MenuItemBuilder::new("Twin Workbench")
-        .id("go-twin")
-        .accelerator("CmdOrCtrl+3")
-        .build(handle)?;
-    let go_skills = MenuItemBuilder::new("Skills")
-        .id("go-skills")
-        .accelerator("CmdOrCtrl+4")
-        .build(handle)?;
-    let go_plugins = MenuItemBuilder::new("Plugins")
-        .id("go-plugins")
-        .accelerator("CmdOrCtrl+5")
-        .build(handle)?;
-    let go_agent_teams = MenuItemBuilder::new("Agent Teams")
-        .id("go-agent-teams")
-        .accelerator("CmdOrCtrl+6")
-        .build(handle)?;
-    let go_scheduler = MenuItemBuilder::new("Scheduler")
-        .id("go-scheduler")
-        .accelerator("CmdOrCtrl+7")
-        .build(handle)?;
-    let go_discover = MenuItemBuilder::new("Discover")
-        .id("go-discover")
-        .accelerator("CmdOrCtrl+8")
-        .build(handle)?;
-    let go_a2ui = MenuItemBuilder::new("Mini-Apps")
-        .id("go-a2ui")
-        .build(handle)?;
-    let go_dms = MenuItemBuilder::new("Direct Messages")
-        .id("go-dms")
-        .build(handle)?;
-    let go_canvas = MenuItemBuilder::new("Canvas")
-        .id("go-canvas")
-        .build(handle)?;
-    let go_logs = MenuItemBuilder::new("Logs").id("go-logs").build(handle)?;
-    let go_settings = MenuItemBuilder::new("Settings")
-        .id("go-settings")
-        .build(handle)?;
-    let go = SubmenuBuilder::new(handle, "Go")
-        .item(&go_inbox)
-        .item(&go_workflows)
-        .item(&go_sites)
-        .item(&go_twin)
-        .item(&go_skills)
-        .item(&go_plugins)
-        .item(&go_agent_teams)
-        .item(&go_scheduler)
-        .item(&go_discover)
-        .separator()
-        .item(&go_a2ui)
-        .item(&go_dms)
-        .item(&go_canvas)
-        .separator()
-        .item(&go_logs)
-        .item(&go_settings)
-        .build()?;
+    let mut go = SubmenuBuilder::new(handle, "Go");
+    for (index, section) in GO_MENU_SECTIONS.iter().enumerate() {
+        if index > 0 {
+            go = go.separator();
+        }
+        for &(id, label, accelerator) in section.iter() {
+            let mut item = MenuItemBuilder::new(label).id(id);
+            if let Some(accelerator) = accelerator {
+                item = item.accelerator(accelerator);
+            }
+            go = go.item(&item.build(handle)?);
+        }
+    }
+    let go = go.build()?;
 
     // -------------------- Tools --------------------
     let tools_command_palette = MenuItemBuilder::new("Command Palette…")
@@ -326,12 +326,55 @@ pub fn install(app: &App) -> tauri::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GO_SITES_MENU_ID, TOGGLE_RIGHT_SIDEBAR_MENU_ID, TOGGLE_TERMINAL_MENU_ID};
+    use super::{GO_MENU_SECTIONS, TOGGLE_RIGHT_SIDEBAR_MENU_ID, TOGGLE_TERMINAL_MENU_ID};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn go_menu_items() -> impl Iterator<Item = &'static super::GoMenuItem> {
+        GO_MENU_SECTIONS.iter().flat_map(|section| section.iter())
+    }
 
     #[test]
-    fn sites_item_uses_a_registered_go_menu_id() {
-        assert_eq!(GO_SITES_MENU_ID, "go-sites");
-        assert!(crate::commands::MENU_IDS.contains(&GO_SITES_MENU_ID));
+    fn go_menu_ids_are_exactly_the_registered_go_ids() {
+        let mut table_ids = BTreeSet::new();
+        for (id, _, _) in go_menu_items() {
+            assert!(table_ids.insert(*id), "duplicate Go menu id: {id}");
+        }
+        let registered: BTreeSet<&str> = crate::commands::MENU_IDS
+            .iter()
+            .copied()
+            .filter(|id| id.starts_with("go-"))
+            .collect();
+        assert_eq!(table_ids, registered);
+    }
+
+    #[test]
+    fn go_menu_keeps_its_accelerators_on_the_same_items() {
+        let accelerators: BTreeMap<&str, &str> = go_menu_items()
+            .filter_map(|(id, _, accelerator)| accelerator.map(|a| (*id, a)))
+            .collect();
+        let expected: BTreeMap<&str, &str> = [
+            ("go-inbox", "CmdOrCtrl+1"),
+            ("go-workflows", "CmdOrCtrl+2"),
+            ("go-twin", "CmdOrCtrl+3"),
+            ("go-skills", "CmdOrCtrl+4"),
+            ("go-plugins", "CmdOrCtrl+5"),
+            ("go-squads", "CmdOrCtrl+6"),
+            ("go-scheduler", "CmdOrCtrl+7"),
+            ("go-discover", "CmdOrCtrl+8"),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(accelerators, expected);
+    }
+
+    #[test]
+    fn go_menu_sections_and_labels_are_non_empty() {
+        for section in GO_MENU_SECTIONS {
+            assert!(!section.is_empty(), "empty Go menu section");
+        }
+        for (id, label, _) in go_menu_items() {
+            assert!(!label.trim().is_empty(), "Go menu item {id} has no label");
+        }
     }
 
     #[test]

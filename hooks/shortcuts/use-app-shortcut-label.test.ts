@@ -1,0 +1,72 @@
+/**
+ * @jest-environment jsdom
+ */
+
+import { act, renderHook } from "@testing-library/react"
+
+import {
+  useAppShortcutChord,
+  useAppShortcutLabel,
+  useAppShortcutLabels,
+} from "./use-app-shortcut-label"
+import { PINNED_NAV_SHORTCUT_IDS } from "@/lib/shortcuts/app-catalog"
+import { formatKeybinding, toAriaKeyShortcuts } from "@/lib/shortcuts/utils"
+import {
+  __resetAppKeybindingStoreForTesting,
+  useAppKeybindingStore,
+} from "@/stores/shortcuts/app-keybinding-store"
+
+beforeEach(() => __resetAppKeybindingStoreForTesting())
+
+describe("useAppShortcutChord", () => {
+  it("is the catalog default until the user rebinds it", () => {
+    const { result } = renderHook(() => useAppShortcutChord("shell.settings.open"))
+    expect(result.current).toBe("ctrl+,")
+    act(() => useAppKeybindingStore.getState().setOverride("shell.settings.open", "ctrl+shift+p"))
+    expect(result.current).toBe("ctrl+shift+p")
+  })
+
+  it("is empty for an unknown id or a cleared binding", () => {
+    expect(renderHook(() => useAppShortcutChord("nope")).result.current).toBe("")
+    act(() => useAppKeybindingStore.getState().setOverride("shell.settings.open", ""))
+    expect(renderHook(() => useAppShortcutChord("shell.settings.open")).result.current).toBe("")
+  })
+})
+
+describe("useAppShortcutLabel", () => {
+  it("formats the chord for display and for aria-keyshortcuts", () => {
+    const { result } = renderHook(() => useAppShortcutLabel("shell.settings.open"))
+    expect(result.current).toEqual({
+      label: formatKeybinding("ctrl+,"),
+      aria: toAriaKeyShortcuts("ctrl+,"),
+    })
+  })
+
+  it("prints nothing for an unbound shortcut", () => {
+    act(() => useAppKeybindingStore.getState().setOverride("shell.settings.open", ""))
+    const { result } = renderHook(() => useAppShortcutLabel("shell.settings.open"))
+    expect(result.current).toEqual({ label: "", aria: undefined })
+  })
+})
+
+describe("useAppShortcutLabels", () => {
+  it("labels every pinned slot in order, and follows a rebind", () => {
+    const { result } = renderHook(() => useAppShortcutLabels(PINNED_NAV_SHORTCUT_IDS))
+    expect(result.current.map((entry) => entry.aria)).toEqual(
+      PINNED_NAV_SHORTCUT_IDS.map((_, index) => `Alt+${index + 1}`)
+    )
+    const before = result.current
+    act(() =>
+      useAppKeybindingStore.getState().setOverride(PINNED_NAV_SHORTCUT_IDS[0], "alt+shift+1")
+    )
+    expect(result.current).not.toBe(before)
+    expect(result.current[0].aria).toBe("Alt+Shift+1")
+  })
+
+  it("keeps its result stable while nothing changes", () => {
+    const { result, rerender } = renderHook(() => useAppShortcutLabels(PINNED_NAV_SHORTCUT_IDS))
+    const first = result.current
+    rerender()
+    expect(result.current).toBe(first)
+  })
+})

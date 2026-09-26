@@ -12,11 +12,6 @@ import { guildFromSession } from "@/lib/claude/guild"
  * snapshot. The desktop workspace owns the side effects (select / create / etc).
  */
 
-/** Stable identity for a guild, used to detect guild changes across renders. */
-export function guildKeyOf(g: SelectedGuild): string {
-  return g.kind === "team" ? `team:${g.teamId}` : g.kind
-}
-
 /** Whether a session belongs to the bucket the given guild displays. */
 export function sessionMatchesGuild(s: ChatSession, g: SelectedGuild): boolean {
   if (g.kind === "team") return s.kind === "team" && s.teamId === g.teamId

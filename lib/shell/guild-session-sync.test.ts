@@ -1,7 +1,6 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 import {
-  guildKeyOf,
   sessionMatchesGuild,
   latestMatchingSession,
   planGuildReconcile,
@@ -20,15 +19,6 @@ function session(partial: Partial<ChatSession>): ChatSession {
 
 const dm: SelectedGuild = { kind: "dm" }
 const teamA: SelectedGuild = { kind: "team", teamId: "A" }
-
-describe("guildKeyOf", () => {
-  it("namespaces team guilds by id and uses the kind otherwise", () => {
-    expect(guildKeyOf(teamA)).toBe("team:A")
-    expect(guildKeyOf(dm)).toBe("dm")
-    expect(guildKeyOf({ kind: "canvas" })).toBe("canvas")
-    expect(guildKeyOf({ kind: "plugin-view", containerId: "c" })).toBe("plugin-view")
-  })
-})
 
 describe("sessionMatchesGuild", () => {
   it("matches team sessions to their own team only", () => {

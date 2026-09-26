@@ -18,6 +18,12 @@
  * flyout that repeated the nav rows and the account card would be a second copy
  * of a column the user is already looking at.
  *
+ * Unless that column is switched off (`guildRailCollapsed`). Then nothing on
+ * screen navigates at all — on the web shell the title bar that carries the
+ * rail's toggle is off by default too — so the flyout leads with the nav rows
+ * (`SidebarNavSection`) instead: the peek is the one surface still reachable,
+ * and it has to be able to take the user somewhere.
+ *
  * The flyout stays mounted while the rail is collapsed and animates its
  * transform rather than mounting on hover. That is what makes the motion
  * reversible: a pointer that brushes the strip and leaves mid-slide reverses
@@ -35,7 +41,9 @@ import { Surface } from "@/components/surface/surface"
 import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { cn } from "@/lib/utils"
+import { useUIStore } from "@/stores/ui"
 import type { SidebarSide } from "@/types/shell/sidebar"
+import { SidebarNavSection } from "./sidebar-nav-section"
 
 /** Width of the invisible hover target, in px. Wide enough to hit, narrow enough to cross. */
 export const SIDEBAR_PEEK_STRIP_PX = 12
@@ -124,6 +132,7 @@ export function SidebarPeekFrame({
   const t = useTranslations("desktop.channelList")
   const onRight = side === "right"
   const frameRef = useRef<HTMLDivElement>(null)
+  const railCollapsed = useUIStore((s) => s.guildRailCollapsed)
   // Arming changes the panel from in-flow to parked. Animate only a real
   // open/close gesture, or the just-collapsed list flashes back into view.
   const animatingPeek = useEdgePanelTransition(open, { element: frameRef, enabled: armed })
@@ -211,6 +220,9 @@ export function SidebarPeekFrame({
               "flex min-h-0 flex-1 flex-col bg-transparent"
         }
       >
+        {/* A fixed slot (null when unused), so toggling it never shifts the
+            list's position among its siblings and remounts it. */}
+        {armed && railCollapsed ? <SidebarNavSection className="border-b" /> : null}
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>
         {/* The frame's own strip, not a control floated over the list. A peek
             is a borrowed surface and the borrower needs one thing the rail

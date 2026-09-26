@@ -40,7 +40,13 @@ jest.mock("./sidebar-user-card", () => ({
   ),
 }))
 
+jest.mock("./shell-layout-dialog", () => ({
+  ShellLayoutDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="shell-layout-dialog" /> : null,
+}))
+
 import { SidebarFooter } from "./sidebar-footer"
+import { toAriaKeyShortcuts } from "@/lib/shortcuts/utils"
 
 beforeEach(() => {
   routerPush.mockClear()
@@ -86,5 +92,21 @@ describe("SidebarFooter", () => {
   it("takes a caller's class so the rail can place it", () => {
     render(<SidebarFooter className="mt-2" />)
     expect(screen.getByTestId("sidebar-footer")).toHaveClass("mt-2")
+  })
+
+  it("announces the Settings chord for this platform rather than a hard-coded Mac one", () => {
+    render(<SidebarFooter />)
+    expect(screen.getByTestId("sidebar-footer-settings")).toHaveAttribute(
+      "aria-keyshortcuts",
+      toAriaKeyShortcuts("ctrl+,")
+    )
+  })
+
+  it("keeps Customize navigation one right-click away on the gear", () => {
+    render(<SidebarFooter />)
+    fireEvent.contextMenu(screen.getByTestId("sidebar-footer-settings"))
+    fireEvent.click(screen.getByTestId("sidebar-footer-settings-menu-customize"))
+    expect(screen.getByTestId("shell-layout-dialog")).toBeInTheDocument()
+    expect(routerPush).not.toHaveBeenCalled()
   })
 })

@@ -57,6 +57,43 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     defaultChord: "ctrl+b",
     when: "!view.canvas && !platform.tauri",
   },
+  // Open Settings. The desktop shell has always advertised ⌘, for it — the
+  // account menu and the sidebar footer both print it — but the only binding
+  // was the native menu accelerator (`src-tauri/src/menu.rs`, `open-settings`),
+  // so in the web shell the printed chord did nothing. Same split as
+  // `shell.sidebar.toggle` above: the DOM binding stands down under Tauri,
+  // where the accelerator reaches the renderer through `useMenuEventRouter`,
+  // so one press never opens Settings twice.
+  {
+    id: "shell.settings.open",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.settingsOpen",
+    category: "app.navigation",
+    defaultChord: "ctrl+,",
+    when: "!platform.tauri",
+  },
+  // ── Navigation rail ─────────────────────────────────────────────────────
+  //
+  // ⌥1…⌥9 / Alt+1…Alt+9 open the Nth *pinned* rail item, in the order the
+  // user arranged. Unlike the workbench's `ctrl+1..7` (bound per activity, see
+  // below) these are positional on purpose: the pinned list IS the user's own
+  // numbered shortlist, and it is short enough to count on the rail. A slot
+  // with nothing pinned in it is inert.
+  //
+  // Collisions checked: no other `alt+<digit>` exists in this catalog, the
+  // canvas/editor keymaps, `reserved.ts`, or the Rust global/tray shortcuts
+  // (those use `alt+shift+*`). The ⌘K dialog switches its scope tabs on the
+  // same chords, but only with focus inside it — its input is editable, which
+  // these never fire in (typing ⌥1 on a Mac keyboard produces "¡"), and the
+  // rail's handler stands down on a keystroke the dialog already consumed.
+  // Registered by the desktop rail only, so the mobile drawer never binds them.
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((slot): ShortcutDescriptor => ({
+    id: `shell.nav.pinned${slot}`,
+    scope: "app",
+    labelKey: `settings.shortcuts.catalog.navPinned${slot}`,
+    category: "app.navigation",
+    defaultChord: `alt+${slot}`,
+  })),
   // Move the active conversation up / down the sidebar's visible order (what
   // the list shows after grouping, filters and search). ⌘⌥[ / ⌘⌥] — bracket
   // pairs read as prev / next the way tab strips bind them, and, unlike a
@@ -476,6 +513,20 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     defaultChord: "ctrl+e",
   },
 ]
+
+/** Shortcut id that opens the Nth (1-based) pinned rail item. */
+export function pinnedNavShortcutId(slot: number): string {
+  return `shell.nav.pinned${slot}`
+}
+
+/** How many pinned rail items have a shortcut (⌥1…⌥9). */
+export const PINNED_NAV_SHORTCUT_SLOTS = 9
+
+/** `pinnedNavShortcutId(1…9)`, as one stable list for batch label reads. */
+export const PINNED_NAV_SHORTCUT_IDS: readonly string[] = Array.from(
+  { length: PINNED_NAV_SHORTCUT_SLOTS },
+  (_, index) => pinnedNavShortcutId(index + 1)
+)
 
 const CATALOG_BY_ID: Map<string, ShortcutDescriptor> = new Map(
   APP_SHORTCUT_CATALOG.map((d) => [d.id, d])

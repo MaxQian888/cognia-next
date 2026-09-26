@@ -7,6 +7,7 @@ import {
   getPendingAskUserBySurface,
   pendingAskUserCount,
   resolveAskUser,
+  subscribePendingAskUsers,
   toggleAskUserValue,
   __resetAskUserRegistryForTesting,
   DEFAULT_ASK_USER_TTL_MS,
@@ -169,5 +170,59 @@ describe("ask-user-registry", () => {
     resolveAskUser("sess-1", "use-1", { selected: [], text: "", cancelled: true }, "cancelled")
     await p
     expect(getPendingAskUser("sess-1", "use-1")).toBeUndefined()
+  })
+
+  it("announces every change to the pending set", async () => {
+    const counts: number[] = []
+    const unsubscribe = subscribePendingAskUsers(() => counts.push(pendingAskUserCount()))
+    const answered = awaitAskUser("sess-1", "use-1", { meta: meta() })
+    const controller = new AbortController()
+    const aborted = awaitAskUser("sess-1", "use-2", {
+      meta: meta({ surfaceId: "s2" }),
+      signal: controller.signal,
+    })
+    expect(counts).toEqual([1, 2])
+    resolveAskUser("sess-1", "use-1", { selected: ["a"], text: "", cancelled: false })
+    controller.abort()
+    await Promise.all([answered, aborted])
+    expect(counts).toEqual([1, 2, 1, 0])
+    // A press on a prompt that is already gone changes nothing, so says nothing.
+    resolveAskUser("sess-1", "use-1", { selected: [], text: "", cancelled: true })
+    expect(counts).toHaveLength(4)
+    unsubscribe()
+    const later = awaitAskUser("sess-1", "use-3", { meta: meta({ surfaceId: "s3" }) })
+    expect(counts).toHaveLength(4)
+    resolveAskUser("sess-1", "use-3", { selected: [], text: "", cancelled: true }, "cancelled")
+    await later
+  })
+
+  it("announces a prompt that expires on its TTL", async () => {
+    jest.useFakeTimers()
+    try {
+      const listener = jest.fn()
+      subscribePendingAskUsers(listener)
+      const expiring = awaitAskUser("sess-1", "use-1", { meta: meta(), ttlMs: 50 })
+      expect(listener).toHaveBeenCalledTimes(1)
+      jest.advanceTimersByTime(50)
+      await expect(expiring).resolves.toMatchObject({ reason: "expired" })
+      expect(listener).toHaveBeenCalledTimes(2)
+      expect(pendingAskUserCount()).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("a throwing listener does not break the prompt", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    subscribePendingAskUsers(() => {
+      throw new Error("boom")
+    })
+    const p = awaitAskUser("sess-1", "use-1", { meta: meta() })
+    expect(resolveAskUser("sess-1", "use-1", { selected: [], text: "", cancelled: true })).toBe(
+      true
+    )
+    await expect(p).resolves.toMatchObject({ reason: "answered" })
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
   })
 })

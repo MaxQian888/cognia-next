@@ -83,6 +83,34 @@ export interface PendingAskUser {
 
 const pending = new Map<string, PendingAskUser>()
 
+// Change listeners for the pending set — the same shape as
+// `approval-registry.ts`, so a badge can read `pendingAskUserCount()` through
+// `useSyncExternalStore` instead of polling a Map nothing announces changes to.
+const listeners = new Set<() => void>()
+
+function notify(): void {
+  for (const cb of listeners) {
+    try {
+      cb()
+    } catch (err) {
+      // A throwing subscriber must never break the elicitation flow itself.
+      console.warn("[ask-user-registry] listener threw", err)
+    }
+  }
+}
+
+/**
+ * Subscribe to pending-set changes (a prompt opened, answered, expired or
+ * aborted). Returns the unsubscribe function. `useSyncExternalStore`-
+ * compatible: the callback carries no payload; read `pendingAskUserCount()`.
+ */
+export function subscribePendingAskUsers(cb: () => void): () => void {
+  listeners.add(cb)
+  return () => {
+    listeners.delete(cb)
+  }
+}
+
 function key(sessionId: string, toolUseId: string): string {
   return `${sessionId}:${toolUseId}`
 }
@@ -144,13 +172,18 @@ export function awaitAskUser(
     const abort = () => {
       if (!pending.delete(k)) return
       if (entry.timer) clearTimeout(entry.timer)
+      notify()
       settle(cancelled)
     }
     entry.timer = setTimeout(() => {
       if (!pending.delete(k)) return
+      notify()
       settle({ answer: { selected: [], text: "", cancelled: true }, reason: "expired" })
     }, ttlMs)
     pending.set(k, entry)
+    // One notification for a superseded prompt too: the count is unchanged
+    // but the entry behind it is new, and listeners only read the count.
+    notify()
     opts.signal?.addEventListener("abort", abort, { once: true })
   })
   return promise
@@ -174,6 +207,7 @@ export function resolveAskUser(
   if (!entry) return false
   if (entry.timer) clearTimeout(entry.timer)
   pending.delete(k)
+  notify()
   entry.settle({ answer, reason, ...(messageId ? { messageId } : {}) })
   return true
 }
@@ -232,4 +266,5 @@ export function __resetAskUserRegistryForTesting(): void {
     if (entry.timer) clearTimeout(entry.timer)
   }
   pending.clear()
+  listeners.clear()
 }

@@ -25,7 +25,18 @@
     "openFolderNeedsHost": "Pair with a host to browse folders. This device has no filesystem to open.",
     "newWorkspace": "New workspace",
     "adoptWorkspaces": "Adopt detected folders",
-    "manageWorkspaceRoots": "Manage workspace folders"
+    "manageWorkspaceRoots": "Manage workspace folders",
+    "pinPage": "Pin {page} to navigation",
+    "pinHiddenPageHint": "Hidden right now; pinning shows it again",
+    "unpinPage": "Unpin {page}",
+    "unpinPageHint": "Moves it to the More menu",
+    "hidePage": "Hide {page} from navigation",
+    "hidePageHint": "Bring it back from Customize navigation",
+    "customizeNavigation": "Customize navigation…",
+    "showNavRail": "Show navigation rail",
+    "hideNavRail": "Hide navigation rail",
+    "moveNavRailLeft": "Move navigation rail to the left",
+    "moveNavRailRight": "Move navigation rail to the right"
   },
   "badges": {
     "archived": "Archived",
@@ -177,7 +188,12 @@
     "upToDate": "You're on the latest version.",
     "updateAvailable": "Update available: {version}",
     "updateFailed": "Update check failed: {message}",
-    "updatesDesktopOnly": "Updates are only available in the desktop build."
+    "updatesDesktopOnly": "Updates are only available in the desktop build.",
+    "pagePinned": "{page} pinned to the navigation.",
+    "pageUnpinned": "{page} moved to the More menu.",
+    "pageHidden": "{page} hidden from the navigation.",
+    "noNavigationPage": "This page isn't part of the navigation.",
+    "navigationUpdateFailed": "Couldn't update the navigation: {message}"
   },
   "untitledConversation": "Untitled conversation"
 }

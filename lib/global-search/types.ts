@@ -384,6 +384,39 @@ export interface GlobalSearchHostContext {
    * a paired phone while the palette said "desktop only".
    */
   canBrowseHostFolders: boolean
+  /** The navigation rail's customization, as seen from the route in front. */
+  shellNav: GlobalSearchShellNav
+}
+
+/**
+ * Navigation-rail facts the palette's customization commands gate on and
+ * title with. Read from `useSidebarLayout()` (the same resolution the rail
+ * draws), the route in front and the UI store's rail flag.
+ */
+export interface GlobalSearchShellNav {
+  /**
+   * The rail catalog entry the route in front belongs to (`navItemForPath`),
+   * or `null` off every catalog route: `/`, `/settings`, a page the rail does
+   * not list. Only what a title needs: the id the layout stores and the
+   * `desktop.guildRail.*` label key.
+   */
+  currentPage: { id: string; i18nKey: string } | null
+  /** `currentPage` sits in the pinned block. `false` when there is no page. */
+  currentPinned: boolean
+  /** `currentPage` is hidden from the rail and More. `false` when there is no page. */
+  currentHidden: boolean
+  /** The rail is folded away (`useUIStore().guildRailCollapsed`). */
+  railCollapsed: boolean
+  /** The window edge the rail occupies (`settings.sidebarSide`). */
+  side: "left" | "right"
+  /**
+   * The rail is window chrome this shell can fold away and move between
+   * edges: every non-mobile shell. The mobile drawer renders the rail too
+   * (pinned block + More, from the same layout), so pinning and hiding still
+   * mean something there, but the drawer always opens from the left and is
+   * never collapsed, so those two commands would act on nothing.
+   */
+  railChrome: boolean
 }
 
 export interface GlobalSearchProviderInput {

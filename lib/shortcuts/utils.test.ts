@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { normalizeKeyCombo, parseKeyEvent, formatKeybinding } from "./utils"
+import { normalizeKeyCombo, parseKeyEvent, formatKeybinding, toAriaKeyShortcuts } from "./utils"
 
 describe("normalizeKeyCombo", () => {
   it("lowercases, trims and joins on '+'", () => {
@@ -122,5 +122,39 @@ describe("formatKeybinding", () => {
 
   it("tolerates whitespace and odd casing from a user-edited binding", () => {
     expect(formatKeybinding("Alt + Shift + 5", true)).toBe("⌥⇧5")
+  })
+})
+
+describe("parseKeyEvent — Alt + digit", () => {
+  // A macOS layout types ⌥1 as "¡"; the physical digit comes from `code`.
+  it("reads the digit from the physical key when Alt turns it into a symbol", () => {
+    const event = new KeyboardEvent("keydown", { key: "¡", code: "Digit1", altKey: true })
+    expect(normalizeKeyCombo(parseKeyEvent(event))).toBe("alt+1")
+  })
+
+  it("keeps the printed key for Alt + letter", () => {
+    const event = new KeyboardEvent("keydown", { key: "ø", code: "KeyO", altKey: true })
+    expect(parseKeyEvent(event)).toBe("Alt+Ø")
+  })
+
+  it("does not consult the physical key without Alt", () => {
+    const event = new KeyboardEvent("keydown", { key: "!", code: "Digit1", shiftKey: true })
+    expect(parseKeyEvent(event)).toBe("Shift+!")
+  })
+})
+
+describe("toAriaKeyShortcuts", () => {
+  it("resolves the folded command modifier per platform", () => {
+    expect(toAriaKeyShortcuts("ctrl+,", true)).toBe("Meta+,")
+    expect(toAriaKeyShortcuts("ctrl+,", false)).toBe("Control+,")
+  })
+
+  it("spells out every modifier and upper-cases single keys", () => {
+    expect(toAriaKeyShortcuts("alt+shift+k", false)).toBe("Alt+Shift+K")
+    expect(toAriaKeyShortcuts("alt+1", true)).toBe("Alt+1")
+  })
+
+  it("is undefined for an unbound chord", () => {
+    expect(toAriaKeyShortcuts("", true)).toBeUndefined()
   })
 })

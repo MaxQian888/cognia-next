@@ -98,10 +98,12 @@ jest.mock("@/hooks/data", () => ({
 }))
 
 let guildUnread = { dm: 0, teams: new Map<string, number>(), total: 0 }
-const markGuildRead = jest.fn(async (_target: unknown) => 1)
+const markGuildRead = jest.fn(async (_target: unknown, _scope: unknown) => 1)
 jest.mock("@/hooks/shell/use-guild-unread", () => ({
   useGuildUnread: () => guildUnread,
-  markGuildRead: (target: unknown) => markGuildRead(target as never),
+  useGuildUnreadScope: () => ({ kind: "workspace", projectId: "p-test" }),
+  markGuildRead: (target: unknown, scope: unknown) =>
+    markGuildRead(target as never, scope as never),
 }))
 const startGuildConversation = jest.fn(async (_options: unknown) => ({}) as never)
 jest.mock("@/lib/shell/start-guild-conversation", () => ({
@@ -128,6 +130,9 @@ jest.mock("@/hooks/use-platform", () => ({
 }))
 
 import { GuildRail } from "./guild-rail"
+import { __resetNavBadgesForTests, setNavBadgeSourceCount } from "@/lib/shell/nav-badges"
+import { __resetAppRuntimeForTesting, getAppRegistration } from "@/lib/shortcuts/app-runtime"
+import { __resetTeamOrderQueueForTests } from "@/hooks/shell/use-ordered-teams"
 
 const saveMock = jest.fn(
   async (_patch?: { sidebarLayout?: { pinned: string[]; hidden: string[] } }) => {}
@@ -139,6 +144,9 @@ const lastSavedLayout = () =>
   }
 
 beforeEach(() => {
+  __resetNavBadgesForTests()
+  __resetAppRuntimeForTesting()
+  __resetTeamOrderQueueForTests()
   logInfo.mockReset()
   routerPush.mockReset()
   saveMock.mockClear()
@@ -208,13 +216,14 @@ test.each(["inbox", "logs"])(
     const trigger = screen.getByRole("button", { name: destination === "logs" ? "more" : "inbox" })
     expect(trigger).toHaveAttribute("aria-busy", "true")
     expect(trigger.querySelector(".animate-spin")).toBeInTheDocument()
-    expect(screen.getByRole("status")).toHaveTextContent("loading")
+    // dnd-kit mounts its own (empty) live regions beside the rail's status.
+    expect(screen.getByText("loading")).toHaveAttribute("role", "status")
     await act(async () => {
       ready = true
       resolve()
     })
     expect(trigger).toHaveAttribute("aria-busy", "false")
-    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    expect(screen.queryByText("loading")).not.toBeInTheDocument()
   }
 )
 
@@ -525,7 +534,11 @@ test("right-click on a team button starts a conversation, marks read, or manages
 
   fireEvent.contextMenu(screen.getByTestId("guild-team-t-1"))
   fireEvent.click(screen.getByTestId("guild-menu-mark-read-t-1"))
-  expect(markGuildRead).toHaveBeenCalledWith({ kind: "team", teamId: "t-1" })
+  // Clears within the badge's own workspace reach, never beyond it.
+  expect(markGuildRead).toHaveBeenCalledWith(
+    { kind: "team", teamId: "t-1" },
+    { kind: "workspace", projectId: "p-test" }
+  )
 
   fireEvent.contextMenu(screen.getByTestId("guild-team-t-2"))
   // Nothing unread there — the item is present but inert.
@@ -563,9 +576,9 @@ test("stays within the guild-rail chrome control budget", () => {
   const { container } = render(
     withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
   )
-  expect(countControls(container.querySelector("aside"))).toBeLessThanOrEqual(
-    CHROME_BUDGET.guildRail
-  )
+  expect(
+    countControls(container.querySelector('nav[data-testid="guild-rail"]'))
+  ).toBeLessThanOrEqual(CHROME_BUDGET.guildRail)
 })
 
 // ── variant ────────────────────────────────────────────────────────────────
@@ -579,7 +592,7 @@ test("the default rail variant keeps the md breakpoint gate", () => {
   const { container } = render(
     withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
   )
-  const aside = container.querySelector("aside")!
+  const aside = container.querySelector('nav[data-testid="guild-rail"]')!
   expect(aside).toHaveAttribute("data-variant", "rail")
   expect(aside.className).toContain("hidden")
   expect(aside.className).toContain("md:flex")
@@ -594,7 +607,7 @@ test("collapses to zero width instead of unmounting", () => {
   const { container } = render(
     withTooltipProvider(<GuildRail collapsed onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
   )
-  const aside = container.querySelector("aside")!
+  const aside = container.querySelector('nav[data-testid="guild-rail"]')!
   expect(aside).toHaveStyle({ width: "0px" })
   expect(aside).toHaveAttribute("data-collapsed", "true")
   expect(aside.className).toContain("overflow-hidden")
@@ -607,7 +620,7 @@ test("expands to the width the shell's own constant names", () => {
   const { container } = render(
     withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
   )
-  const aside = container.querySelector("aside")!
+  const aside = container.querySelector('nav[data-testid="guild-rail"]')!
   expect(aside).toHaveStyle({ width: `${GUILD_RAIL_WIDTH_PX}px` })
   expect(aside).not.toHaveAttribute("data-collapsed")
   expect(aside.className).not.toContain("overflow-hidden")
@@ -620,7 +633,7 @@ test("keeps the icons at full width behind the clip while it animates", () => {
   rerender(
     withTooltipProvider(<GuildRail collapsed onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
   )
-  const aside = container.querySelector("aside")!
+  const aside = container.querySelector('nav[data-testid="guild-rail"]')!
   expect(aside.className).toContain("transition-[width]")
   expect(aside.className).toContain(SHELL_DOCK_TIMING_CLASS)
   // A fixed-width inner column: the buttons are clipped, never squeezed toward
@@ -644,7 +657,7 @@ test.each([
   const { container } = render(
     withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
   )
-  expect(container.querySelector("aside")!.className).toContain(expected)
+  expect(container.querySelector('nav[data-testid="guild-rail"]')!.className).toContain(expected)
 })
 
 test("never collapses the sheet variant, where the rail is the drawer's column", () => {
@@ -653,7 +666,7 @@ test("never collapses the sheet variant, where the rail is the drawer's column",
       <GuildRail variant="sheet" collapsed onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
     )
   )
-  const aside = container.querySelector("aside")!
+  const aside = container.querySelector<HTMLElement>('nav[data-testid="guild-rail"]')!
   expect(aside).not.toHaveAttribute("data-collapsed")
   expect(aside.style.width).toBe("")
 })
@@ -664,7 +677,7 @@ test("the sheet variant renders unconditionally on a phone viewport", () => {
       <GuildRail variant="sheet" onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
     )
   )
-  const aside = container.querySelector("aside")!
+  const aside = container.querySelector('nav[data-testid="guild-rail"]')!
   expect(aside).toHaveAttribute("data-variant", "sheet")
   // `hidden` would be `display:none` at every width a phone can be.
   expect(aside.className).not.toContain("hidden")
@@ -707,7 +720,10 @@ describe("which edge the rail occupies", () => {
     const { container } = render(
       withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
     )
-    expect(container.querySelector("aside")).toHaveAttribute("data-side", DEFAULT_SIDEBAR_SIDE)
+    expect(container.querySelector('nav[data-testid="guild-rail"]')).toHaveAttribute(
+      "data-side",
+      DEFAULT_SIDEBAR_SIDE
+    )
   })
 
   test("borders against the workbench on the right, but not on the left", () => {
@@ -717,12 +733,16 @@ describe("which edge the rail occupies", () => {
     )
     // Both this rail and ContextWorkbench declare data-bg-target="sidebar", so
     // with a wallpaper on, tone alone leaves no seam between them.
-    expect(container.querySelector("aside")!.className).toContain("border-l")
+    expect(container.querySelector('nav[data-testid="guild-rail"]')!.className).toContain(
+      "border-l"
+    )
 
     setSide("left")
     rerender(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
     // Nothing to its left but the window edge — a border would draw the seam twice.
-    expect(container.querySelector("aside")!.className).not.toContain("border-l")
+    expect(container.querySelector('nav[data-testid="guild-rail"]')!.className).not.toContain(
+      "border-l"
+    )
   })
 
   // Only the rail-on-the-right direction is asserted through Radix. jsdom has
@@ -760,8 +780,13 @@ describe("which edge the rail occupies", () => {
         <GuildRail variant="sheet" onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
       )
     )
-    expect(container.querySelector("aside")).toHaveAttribute("data-side", "left")
-    expect(container.querySelector("aside")!.className).not.toContain("border-l")
+    expect(container.querySelector('nav[data-testid="guild-rail"]')).toHaveAttribute(
+      "data-side",
+      "left"
+    )
+    expect(container.querySelector('nav[data-testid="guild-rail"]')!.className).not.toContain(
+      "border-l"
+    )
   })
 })
 
@@ -776,7 +801,9 @@ test("mounts global status above Settings outside the squads scroll area", () =>
   const status = screen.getByTestId("web-status-rail")
   const settings = screen.getByTestId("guild-open-settings")
   expect(status).toContainElement(screen.getByTestId("segment-runStatus"))
-  expect(status.parentElement).toBe(settings.parentElement)
+  // Settings sits in its context-menu trigger (the "Customize navigation"
+  // menu), which is the status rail's sibling in the column.
+  expect(status.parentElement).toBe(settings.parentElement?.parentElement)
   expect(status.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(status.closest('[data-slot="scroll-area"]')).toBeNull()
   rerender(
@@ -787,4 +814,248 @@ test("mounts global status above Settings outside the squads scroll area", () =>
     )
   )
   expect(screen.queryByTestId("web-status-rail")).toBeNull()
+})
+
+describe("feature badges", () => {
+  test("a pinned feature draws its live count and says it in its name", () => {
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    act(() => {
+      setNavBadgeSourceCount("inbox.drafts", 2)
+      setNavBadgeSourceCount("inbox.approvals", 1)
+    })
+    expect(screen.getByTestId("guild-feature-inbox-unread")).toHaveTextContent("3")
+    expect(screen.getByTestId("guild-feature-inbox")).toHaveAttribute(
+      "aria-label",
+      "inbox, badgeCount"
+    )
+    expect(screen.queryByTestId("guild-feature-workflows-unread")).toBeNull()
+  })
+
+  test("a count behind More puts a dot on More and a number on the entry", async () => {
+    const user = userEvent.setup()
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    expect(screen.queryByTestId("guild-more-badge")).toBeNull()
+    act(() => setNavBadgeSourceCount("agent-runs.attention", 4))
+    expect(screen.getByTestId("guild-more-badge")).toBeInTheDocument()
+    expect(screen.getByTestId("guild-more")).toHaveAttribute("aria-label", "more, badgeCount")
+    await user.click(screen.getByTestId("guild-more"))
+    expect(screen.getByTestId("guild-more-badge-agent-runs")).toHaveTextContent("4")
+  })
+
+  test("a hidden destination shows no badge anywhere", () => {
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          sidebarLayout: { pinned: ["workflows"], hidden: ["inbox", "agent-runs"] },
+        } as never,
+      })
+    })
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    act(() => setNavBadgeSourceCount("agent-runs.attention", 4))
+    expect(screen.queryByTestId("guild-feature-inbox")).toBeNull()
+    expect(screen.queryByTestId("guild-more-badge")).toBeNull()
+  })
+})
+
+describe("pinned shortcuts", () => {
+  test("⌥N opens the Nth pinned item, and an empty slot does nothing", () => {
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    const event = new KeyboardEvent("keydown", { key: "1", altKey: true, cancelable: true })
+    act(() => getAppRegistration("shell.nav.pinned1")!.handler(event))
+    expect(routerPush).toHaveBeenCalledWith(`/${DEFAULT_SIDEBAR_LAYOUT.pinned[0]}`)
+    expect(event.defaultPrevented).toBe(true)
+
+    routerPush.mockClear()
+    act(() =>
+      getAppRegistration("shell.nav.pinned9")!.handler(
+        new KeyboardEvent("keydown", { key: "9", altKey: true })
+      )
+    )
+    expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  test("stands down on a keystroke something else already consumed", () => {
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    const event = new KeyboardEvent("keydown", { key: "1", altKey: true, cancelable: true })
+    event.preventDefault()
+    act(() => getAppRegistration("shell.nav.pinned1")!.handler(event))
+    expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  test("announces the chord on the pinned buttons, in order", () => {
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    DEFAULT_SIDEBAR_LAYOUT.pinned.forEach((id, index) => {
+      expect(screen.getByTestId(`guild-feature-${id}`)).toHaveAttribute(
+        "aria-keyshortcuts",
+        `Alt+${index + 1}`
+      )
+    })
+  })
+
+  test("registers ⌘, for Settings in the web shell's rail", () => {
+    const onOpenSettings = jest.fn()
+    render(
+      withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={onOpenSettings} />)
+    )
+    const registration = getAppRegistration("shell.settings.open")!
+    expect(registration.when).toBe("!platform.tauri")
+    act(() => registration.handler(new KeyboardEvent("keydown", { key: ",", ctrlKey: true })))
+    expect(onOpenSettings).toHaveBeenCalled()
+  })
+
+  test("the mobile drawer's copy binds nothing", () => {
+    render(
+      withTooltipProvider(
+        <GuildRail variant="sheet" onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
+      )
+    )
+    expect(getAppRegistration("shell.nav.pinned1")).toBeUndefined()
+    expect(getAppRegistration("shell.settings.open")).toBeUndefined()
+  })
+})
+
+describe("reordering from the context menus", () => {
+  test("a pinned item moves down, and cannot move past either end", () => {
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    const [first, second] = DEFAULT_SIDEBAR_LAYOUT.pinned
+    fireEvent.contextMenu(screen.getByTestId(`guild-feature-${first}`))
+    expect(screen.getByTestId(`guild-feature-menu-${first}-move-up`)).toHaveAttribute(
+      "data-disabled"
+    )
+    fireEvent.click(screen.getByTestId(`guild-feature-menu-${first}-move-down`))
+    expect(lastSavedLayout().pinned.slice(0, 2)).toEqual([second, first])
+
+    const last = DEFAULT_SIDEBAR_LAYOUT.pinned[DEFAULT_SIDEBAR_LAYOUT.pinned.length - 1]
+    fireEvent.contextMenu(screen.getByTestId(`guild-feature-${last}`))
+    expect(screen.getByTestId(`guild-feature-menu-${last}-move-down`)).toHaveAttribute(
+      "data-disabled"
+    )
+  })
+
+  test("teams move up and down, with both ends disabled", async () => {
+    teamsRef.current = TWO_TEAMS
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    fireEvent.contextMenu(screen.getByTestId("guild-team-t-1"))
+    expect(screen.getByTestId("guild-menu-move-up-t-1")).toHaveAttribute("data-disabled")
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("guild-menu-move-down-t-1"))
+    })
+    const patch = saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0] as {
+      conversationSidebar?: { teamOrder?: string[] }
+    }
+    expect(patch.conversationSidebar?.teamOrder).toEqual(["t-2", "t-1"])
+
+    fireEvent.contextMenu(screen.getByTestId("guild-team-t-2"))
+    expect(screen.getByTestId("guild-menu-move-down-t-2")).toHaveAttribute("data-disabled")
+  })
+
+  test("Canvas can be hidden from its own menu, and stays gone once hidden", () => {
+    const { unmount } = render(
+      withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+    )
+    fireEvent.contextMenu(screen.getByTestId("guild-canvas"))
+    fireEvent.click(screen.getByTestId("guild-canvas-menu-hide"))
+    const saved = saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0] as {
+      sidebarLayout: { modes?: { hidden: string[] } }
+    }
+    expect(saved.sidebarLayout.modes?.hidden).toEqual(["canvas"])
+    unmount()
+
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT, modes: { order: [], hidden: ["canvas"] } },
+        } as never,
+      })
+    })
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    expect(screen.queryByTestId("guild-canvas")).toBeNull()
+  })
+})
+
+describe("team menu additions", () => {
+  test("Edit team deep-links to that team's editor", () => {
+    teamsRef.current = TWO_TEAMS
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    fireEvent.contextMenu(screen.getByTestId("guild-team-t-2"))
+    fireEvent.click(screen.getByTestId("guild-menu-edit-t-2"))
+    expect(routerPush).toHaveBeenCalledWith("/settings?section=teams&team=t-2")
+  })
+
+  test("muting persists the team and swaps its badge for a muted glyph", async () => {
+    teamsRef.current = TWO_TEAMS
+    guildUnread = { dm: 0, teams: new Map([["t-1", 3]]), total: 3 }
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    expect(screen.getByTestId("guild-team-t-1-unread")).toHaveTextContent("3")
+
+    fireEvent.contextMenu(screen.getByTestId("guild-team-t-1"))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("guild-menu-mute-t-1"))
+    })
+    const patch = saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0] as {
+      conversationSidebar?: { mutedTeamIds?: string[] }
+    }
+    expect(patch.conversationSidebar?.mutedTeamIds).toEqual(["t-1"])
+
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT },
+          conversationSidebar: { mutedTeamIds: ["t-1"] },
+        } as never,
+      })
+    })
+    expect(screen.queryByTestId("guild-team-t-1-unread")).toBeNull()
+    expect(screen.getByTestId("guild-team-t-1-muted")).toBeInTheDocument()
+    expect(screen.getByTestId("guild-team-t-1")).toHaveAttribute("aria-label", "teamMuted")
+
+    fireEvent.contextMenu(screen.getByTestId("guild-team-t-1"))
+    expect(screen.getByTestId("guild-menu-mute-t-1")).toHaveTextContent("unmuteTeam")
+  })
+})
+
+describe("accessibility", () => {
+  test("is a labelled navigation landmark with labelled groups", () => {
+    teamsRef.current = TWO_TEAMS
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    const nav = screen.getByRole("navigation", { name: "navigation" })
+    expect(nav.tagName).toBe("NAV")
+    for (const name of ["workspacesGroup", "featuresGroup", "teamsGroup"]) {
+      expect(screen.getByRole("group", { name })).toBeInTheDocument()
+    }
+    expect(screen.getByRole("group", { name: "teamsGroup" })).toContainElement(
+      screen.getByTestId("guild-team-t-1")
+    )
+  })
+
+  test("takes one tab stop and moves between buttons with the arrow keys", () => {
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    const dm = screen.getByTestId("guild-dm")
+    // DM is the active destination on `/`, so it holds the tab stop.
+    expect(dm).toHaveAttribute("tabindex", "0")
+    const canvas = screen.getByTestId("guild-canvas")
+    expect(canvas).toHaveAttribute("tabindex", "-1")
+    dm.focus()
+    fireEvent.keyDown(dm, { key: "ArrowDown" })
+    expect(canvas).toHaveFocus()
+    fireEvent.keyDown(canvas, { key: "End" })
+    expect(screen.getByTestId("guild-open-settings")).toHaveFocus()
+    fireEvent.keyDown(screen.getByTestId("guild-open-settings"), { key: "Home" })
+    expect(dm).toHaveFocus()
+  })
+
+  test("Settings keeps a way to the customizer even when every item is hidden", () => {
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          sidebarLayout: { pinned: [], hidden: SIDEBAR_NAV_META.map((m) => m.id) },
+        } as never,
+      })
+    })
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    expect(screen.queryByTestId("guild-more")).toBeNull()
+    fireEvent.contextMenu(screen.getByTestId("guild-open-settings"))
+    fireEvent.click(screen.getByTestId("guild-settings-menu-customize"))
+    expect(screen.getByTestId("shell-layout-dialog")).toBeInTheDocument()
+  })
 })

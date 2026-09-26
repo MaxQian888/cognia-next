@@ -292,6 +292,14 @@ export interface NotificationPreferences {
   quietHours: NotificationQuietHours
   sound: boolean
   badge: boolean
+  /**
+   * Show the attention count on the app icon — the macOS dock tile, a Linux
+   * launcher entry — and, in a browser tab, in the page title: unread
+   * conversations plus what waits behind the navigation's feature badges
+   * (`hooks/desktop/use-app-badge.ts`). Separate from `badge`, which is the
+   * in-app bell's count.
+   */
+  appBadge: boolean
   /** Retention: prune records older than this (ms). */
   retentionMaxAgeMs: number
   /** Retention: keep at most this many records. */
@@ -312,6 +320,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   quietHours: { enabled: false, start: "22:00", end: "08:00" },
   sound: true,
   badge: true,
+  appBadge: true,
   retentionMaxAgeMs: 30 * DAY_MS,
   retentionMaxItems: 500,
   connectorFocusAware: true,

@@ -14,24 +14,41 @@ jest.mock("@/lib/db/schema", () => ({
 }))
 
 let showUnreadBadges: boolean | undefined = undefined
+let sidebarExtras: Record<string, unknown> = {}
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(selector: (s: { settings: unknown }) => T): T =>
-    selector({ settings: { conversationSidebar: { showUnreadBadges } } }),
+    selector({ settings: { conversationSidebar: { showUnreadBadges, ...sidebarExtras } } }),
+}))
+
+let projectState: { activeProjectId: string | null; loaded: boolean } = {
+  activeProjectId: "p1",
+  loaded: true,
+}
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: <T,>(selector: (s: typeof projectState) => T): T => selector(projectState),
 }))
 
 // `useClientLiveQuery` resolves the query once and hands back its value; the
-// live re-run on table change is Dexie's contract, not this hook's.
+// live re-run on table change is Dexie's contract, not this hook's. The query
+// and deps are captured so a test can see which scope the hook asked for.
 let liveValue: unknown = undefined
+let lastLiveDeps: unknown[] = []
 jest.mock("@/hooks/data", () => ({
-  useClientLiveQuery: () => liveValue,
+  useClientLiveQuery: (_query: unknown, deps: unknown[]) => {
+    lastLiveDeps = deps
+    return liveValue
+  },
 }))
 
-import type { UnreadSession } from "./use-guild-unread"
+import type { GuildUnreadScope, UnreadSession } from "./use-guild-unread"
 import {
+  ALL_WORKSPACES_SCOPE,
   aggregateGuildUnread,
+  isInGuildUnreadScope,
   loadGuildUnread,
   markGuildRead,
   useGuildUnread,
+  useGuildUnreadScope,
 } from "./use-guild-unread"
 
 // Typed: an untyped `over` widened `kind` to `string`, which the hook's own
@@ -47,8 +64,14 @@ beforeEach(() => {
   markSessionRead.mockReset().mockResolvedValue(undefined)
   bulkGet.mockReset()
   showUnreadBadges = undefined
+  sidebarExtras = {}
+  projectState = { activeProjectId: "p1", loaded: true }
   liveValue = undefined
+  lastLiveDeps = []
 })
+
+const ALL = ALL_WORKSPACES_SCOPE
+const P1: GuildUnreadScope = { kind: "workspace", projectId: "p1" }
 
 describe("aggregateGuildUnread", () => {
   it("files each unread conversation under its guild and sums the total", () => {
@@ -102,10 +125,51 @@ describe("aggregateGuildUnread", () => {
   })
 })
 
+describe("isInGuildUnreadScope", () => {
+  it("admits everything across all workspaces", () => {
+    expect(isInGuildUnreadScope({ projectId: "p2" }, ALL)).toBe(true)
+  })
+
+  it("admits the workspace's own and workspace-less conversations, like listWorkspaceSessions", () => {
+    expect(isInGuildUnreadScope({ projectId: "p1" }, P1)).toBe(true)
+    expect(isInGuildUnreadScope({ projectId: undefined }, P1)).toBe(true)
+    expect(isInGuildUnreadScope({ projectId: "p2" }, P1)).toBe(false)
+  })
+
+  it("admits nothing before the active workspace is known", () => {
+    expect(
+      isInGuildUnreadScope({ projectId: undefined }, { kind: "workspace", projectId: null })
+    ).toBe(false)
+  })
+})
+
+describe("aggregateGuildUnread scope", () => {
+  it("counts only conversations the scoped list would show", () => {
+    const unread = new Map([
+      ["here", 1],
+      ["elsewhere", 1],
+      ["nowhere", 1],
+    ])
+    const rows = [
+      session("here", { projectId: "p1" }),
+      session("elsewhere", { projectId: "p2" }),
+      session("nowhere"),
+    ]
+    expect(aggregateGuildUnread(rows, unread, P1).dm).toBe(2)
+    expect(aggregateGuildUnread(rows, unread, ALL).dm).toBe(3)
+  })
+})
+
 describe("loadGuildUnread", () => {
+  it("reads nothing while the active workspace is unknown", async () => {
+    const result = await loadGuildUnread({ kind: "workspace", projectId: null })
+    expect(result.total).toBe(0)
+    expect(listSessionStates).not.toHaveBeenCalled()
+  })
+
   it("returns the empty aggregate without touching sessions when nothing is unread", async () => {
     listSessionStates.mockResolvedValue([{ sessionId: "s", unreadCount: 0, lastReadAt: 1 }])
-    const result = await loadGuildUnread()
+    const result = await loadGuildUnread(ALL)
     expect(result).toEqual({ dm: 0, teams: new Map(), total: 0 })
     expect(bulkGet).not.toHaveBeenCalled()
   })
@@ -117,7 +181,7 @@ describe("loadGuildUnread", () => {
       { sessionId: "d1", unreadCount: 1, lastReadAt: 1 },
     ])
     bulkGet.mockResolvedValue([session("t1", { kind: "team", teamId: "team-b" }), session("d1")])
-    const result = await loadGuildUnread()
+    const result = await loadGuildUnread(ALL)
     expect(bulkGet).toHaveBeenCalledWith(["t1", "d1"])
     expect(result.dm).toBe(1)
     expect(result.teams.get("team-b")).toBe(1)
@@ -145,20 +209,33 @@ describe("markGuildRead", () => {
   it("clears exactly the direct conversations the DM badge counted", async () => {
     listSessionStates.mockResolvedValue(states)
     bulkGet.mockResolvedValue(rows)
-    await expect(markGuildRead({ kind: "dm" })).resolves.toBe(1)
+    await expect(markGuildRead({ kind: "dm" }, ALL)).resolves.toBe(1)
     expect(markSessionRead.mock.calls.map(([id]) => id)).toEqual(["d1"])
   })
 
   it("clears exactly one team's conversations", async () => {
     listSessionStates.mockResolvedValue(states)
     bulkGet.mockResolvedValue(rows)
-    await expect(markGuildRead({ kind: "team", teamId: "team-a" })).resolves.toBe(1)
+    await expect(markGuildRead({ kind: "team", teamId: "team-a" }, ALL)).resolves.toBe(1)
     expect(markSessionRead.mock.calls.map(([id]) => id)).toEqual(["t1"])
+  })
+
+  it("leaves other workspaces' unread state alone", async () => {
+    listSessionStates.mockResolvedValue([
+      { sessionId: "d1", unreadCount: 1, lastReadAt: 1 },
+      { sessionId: "d-other", unreadCount: 1, lastReadAt: 1 },
+    ])
+    bulkGet.mockResolvedValue([
+      session("d1", { projectId: "p1" }),
+      session("d-other", { projectId: "p2" }),
+    ])
+    await expect(markGuildRead({ kind: "dm" }, P1)).resolves.toBe(1)
+    expect(markSessionRead.mock.calls.map(([id]) => id)).toEqual(["d1"])
   })
 
   it("does nothing when nothing is unread", async () => {
     listSessionStates.mockResolvedValue([{ sessionId: "read", unreadCount: 0, lastReadAt: 1 }])
-    await expect(markGuildRead({ kind: "dm" })).resolves.toBe(0)
+    await expect(markGuildRead({ kind: "dm" }, ALL)).resolves.toBe(0)
     expect(bulkGet).not.toHaveBeenCalled()
     expect(markSessionRead).not.toHaveBeenCalled()
   })
@@ -184,6 +261,34 @@ describe("useGuildUnread", () => {
     liveValue = undefined
     render(<Probe />)
     expect(screen.getByTestId("probe")).toHaveTextContent("0/0/0")
+  })
+
+  it("follows the stored grouping, whose default spans every workspace", () => {
+    render(<Probe />)
+    expect(lastLiveDeps).toEqual([ALL])
+  })
+
+  it("asks for the active workspace when the list groups on a single-workspace axis", () => {
+    sidebarExtras = { groupBy: "team" }
+    render(<Probe />)
+    expect(lastLiveDeps).toEqual([P1])
+  })
+
+  it("asks for every workspace when the search reaches all of them", () => {
+    sidebarExtras = { groupBy: "team", search: { workspace: "all" } }
+    render(<Probe />)
+    expect(lastLiveDeps).toEqual([ALL])
+  })
+
+  it("scopes to no workspace until the project store has loaded", () => {
+    sidebarExtras = { groupBy: "team" }
+    projectState = { activeProjectId: "p1", loaded: false }
+    function ScopeProbe() {
+      const scope = useGuildUnreadScope()
+      return <div data-testid="scope">{JSON.stringify(scope)}</div>
+    }
+    render(<ScopeProbe />)
+    expect(screen.getByTestId("scope")).toHaveTextContent('{"kind":"workspace","projectId":null}')
   })
 
   it("goes dark with the unread-badge display setting", () => {

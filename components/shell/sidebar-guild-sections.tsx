@@ -29,9 +29,12 @@ import { useRouter } from "next/navigation"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  BellIcon,
+  BellOffIcon,
   CheckCheckIcon,
   ChevronDownIcon,
   MessagesSquareIcon,
+  PencilIcon,
   PlusIcon,
   SettingsIcon,
 } from "lucide-react"
@@ -49,12 +52,15 @@ import {
 } from "@/components/ui/context-menu"
 import {
   markGuildRead,
-  useGuildUnread,
+  useGuildUnreadScope,
+  type GuildUnreadScope,
   type GuildUnreadTarget,
 } from "@/hooks/shell/use-guild-unread"
+import { useTeamMute, useVisibleGuildUnread } from "@/hooks/shell/use-team-mute"
 import { Button } from "@/components/ui/button"
+import { teamSettingsHref } from "@/lib/settings/deep-link"
 import { cn } from "@/lib/utils"
-import { SidebarRow } from "./sidebar-nav-section"
+import { CountPill, SidebarRow } from "./sidebar-nav-section"
 import { useShellNav } from "./use-shell-nav"
 
 const log = loggers.ui
@@ -88,17 +94,23 @@ export function activeGuildKey(active: ActiveGuildSection): string {
   return active.kind === "dm" ? "dm" : active.teamId
 }
 
+/**
+ * A muted team's glyph, where its unread pill would be. Decorative: the row's
+ * or button's accessible name already says "muted".
+ */
+export function GuildMutedGlyph({ className, testId }: { className?: string; testId?: string }) {
+  return (
+    <BellOffIcon
+      aria-hidden
+      data-testid={testId}
+      className={cn("size-3 shrink-0 text-muted-foreground/70", className)}
+    />
+  )
+}
+
 /** Compact unread pill for an unselected scope — the glyph the session rows use. */
 export function GuildUnreadPill({ count, testId }: { count: number; testId?: string }) {
-  if (count <= 0) return null
-  return (
-    <span
-      className="shrink-0 rounded-pill bg-primary px-1.5 py-0.5 text-[10px] leading-none font-medium text-primary-foreground tabular-nums"
-      data-testid={testId}
-    >
-      {count > 99 ? "99+" : count}
-    </span>
-  )
+  return <CountPill count={count} testId={testId} />
 }
 
 /**
@@ -108,35 +120,75 @@ export function GuildUnreadPill({ count, testId }: { count: number; testId?: str
  * headers in `channel-list.tsx`. One menu, so "new conversation in this
  * scope", "mark all read", and reorder/manage never drift between the two.
  *
+ * The icon rail's guild buttons (`guild-rail.tsx`) serve the same items too,
+ * so "edit this team", "mute it" and "move it" are one implementation in all
+ * three places.
+ *
  * `teamId` of `null` names the Chats scope — the direct-conversation group —
- * which is never reorderable and has no team settings to manage.
+ * which is never reorderable, cannot be muted and has no team settings.
  */
 export function GuildScopeMenuItems({
   teamId,
   unreadCount,
   onNewConversation,
   onMoveTeam,
+  teamPosition,
+  unreadScope,
+  testIdPrefix = "sidebar-guild-menu",
 }: {
   teamId: string | null
   unreadCount: number
   onNewConversation?: (teamId: string | null) => void
   onMoveTeam?: (teamId: string, delta: number) => void
+  /**
+   * Where the team sits in the order `onMoveTeam` moves it through. With it,
+   * "Move up" is disabled on the first team and "Move down" on the last — an
+   * item that would do nothing should say so. Callers that cannot tell leave
+   * it out and both stay enabled (the move is then a silent no-op at an end).
+   */
+  teamPosition?: { index: number; count: number }
+  /**
+   * The workspace reach "mark all read" clears. Defaults to the shared badge
+   * scope; the merged rail passes the reach its own rows were loaded with,
+   * since it groups on the team axis whatever grouping is stored.
+   */
+  unreadScope?: GuildUnreadScope
+  /** `data-testid` prefix — each surface keeps its own stable ids. */
+  testIdPrefix?: string
 }) {
   const t = useTranslations("desktop.channelList")
   const railT = useTranslations("desktop.guildRail")
   const router = useRouter()
+  const sharedScope = useGuildUnreadScope()
+  const { isMuted, setMuted } = useTeamMute()
+  const scope = unreadScope ?? sharedScope
   const key = teamId ?? "dm"
+  const muted = teamId ? isMuted(teamId) : false
+  const atStart = teamPosition ? teamPosition.index <= 0 : false
+  const atEnd = teamPosition ? teamPosition.index >= teamPosition.count - 1 : false
   const markRead = useCallback(() => {
     const target: GuildUnreadTarget = teamId ? { kind: "team", teamId } : { kind: "dm" }
     log.info("guild mark read", target)
-    void markGuildRead(target).catch((error: unknown) => {
+    void markGuildRead(target, scope).catch((error: unknown) => {
       log.warn("guild mark read failed", { error: String(error) })
     })
-  }, [teamId])
+  }, [teamId, scope])
   const manageTeams = useCallback(() => {
     log.info("guild manage teams")
     router.push(TEAM_SETTINGS_ROUTE)
   }, [router])
+  const editTeam = useCallback(() => {
+    if (!teamId) return
+    log.info("guild edit team", { teamId })
+    router.push(teamSettingsHref(teamId))
+  }, [router, teamId])
+  const toggleMute = useCallback(() => {
+    if (!teamId) return
+    log.info("guild team mute", { teamId, muted: !muted })
+    void setMuted(teamId, !muted).catch((error: unknown) => {
+      log.warn("guild team mute failed", { teamId, error: String(error) })
+    })
+  }, [teamId, muted, setMuted])
   return (
     <>
       {onNewConversation ? (
@@ -145,7 +197,7 @@ export function GuildScopeMenuItems({
             log.info("guild new conversation via context menu", { key })
             onNewConversation(teamId)
           }}
-          data-testid={`sidebar-guild-menu-new-${key}`}
+          data-testid={`${testIdPrefix}-new-${key}`}
         >
           <PlusIcon className="size-4" />
           {teamId ? t("newConversation") : t("newChat")}
@@ -154,33 +206,44 @@ export function GuildScopeMenuItems({
       <ContextMenuItem
         disabled={unreadCount === 0}
         onSelect={markRead}
-        data-testid={`sidebar-guild-menu-mark-read-${key}`}
+        data-testid={`${testIdPrefix}-mark-read-${key}`}
       >
         <CheckCheckIcon className="size-4" />
         {railT("markAllRead")}
       </ContextMenuItem>
       {teamId ? (
         <>
+          <ContextMenuItem onSelect={toggleMute} data-testid={`${testIdPrefix}-mute-${key}`}>
+            {muted ? <BellIcon className="size-4" /> : <BellOffIcon className="size-4" />}
+            {muted ? railT("unmuteTeam") : railT("muteTeam")}
+          </ContextMenuItem>
           <ContextMenuSeparator />
           {onMoveTeam ? (
             <>
               <ContextMenuItem
+                disabled={atStart}
                 onSelect={() => onMoveTeam(teamId, -1)}
-                data-testid={`sidebar-guild-menu-move-up-${key}`}
+                data-testid={`${testIdPrefix}-move-up-${key}`}
               >
                 <ArrowUpIcon className="size-4" />
                 {railT("moveTeamUp")}
               </ContextMenuItem>
               <ContextMenuItem
+                disabled={atEnd}
                 onSelect={() => onMoveTeam(teamId, 1)}
-                data-testid={`sidebar-guild-menu-move-down-${key}`}
+                data-testid={`${testIdPrefix}-move-down-${key}`}
               >
                 <ArrowDownIcon className="size-4" />
                 {railT("moveTeamDown")}
               </ContextMenuItem>
+              <ContextMenuSeparator />
             </>
           ) : null}
-          <ContextMenuItem onSelect={manageTeams} data-testid={`sidebar-guild-menu-manage-${key}`}>
+          <ContextMenuItem onSelect={editTeam} data-testid={`${testIdPrefix}-edit-${key}`}>
+            <PencilIcon className="size-4" />
+            {railT("editTeam")}
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={manageTeams} data-testid={`${testIdPrefix}-manage-${key}`}>
             <SettingsIcon className="size-4" />
             {railT("manageTeams")}
           </ContextMenuItem>
@@ -299,8 +362,13 @@ export function SidebarGuildSectionRows({
   onToggleCollapsed,
 }: RowsProps) {
   const t = useTranslations("desktop.channelList")
+  const railT = useTranslations("desktop.guildRail")
   const { switchToDm, switchToTeam } = useShellNav()
-  const unread = useGuildUnread()
+  // Muted teams already left this aggregate, so neither their own pill nor
+  // the folded total below counts them.
+  const unread = useVisibleGuildUnread()
+  const { isMuted } = useTeamMute()
+  const teamKeys = rows.filter((row) => "team" in row).map((row) => row.key)
 
   if (rows.length === 0) return null
   // Which row survives a fold — the active scope, or the first row when the
@@ -332,6 +400,7 @@ export function SidebarGuildSectionRows({
         const team = "team" in row ? row.team : null
         const isDm = !team
         const label = team ? team.name : t("directMessages")
+        const muted = team ? isMuted(team.id) : false
         const count = isDm ? unread.dm : (unread.teams.get(row.key) ?? 0)
         const draggable = sortable && !isDm
         const renderRow = (drag: GuildRowDragBinding = {}) => (
@@ -360,6 +429,7 @@ export function SidebarGuildSectionRows({
                   // Long team names truncate; the native tooltip is what the icon
                   // column's tooltip was — the way to read the whole name.
                   title={label}
+                  aria-label={muted ? railT("teamMuted", { name: label }) : undefined}
                   onClick={isDm ? switchToDm : () => switchToTeam(row.key)}
                   icon={
                     team ? (
@@ -370,7 +440,11 @@ export function SidebarGuildSectionRows({
                   }
                   label={label}
                   trailing={
-                    active ? undefined : (
+                    muted ? (
+                      // Muted: nothing waiting in there is announced, and the
+                      // glyph says why the pill is gone.
+                      <GuildMutedGlyph testId={`sidebar-guild-muted-${row.key}`} />
+                    ) : active ? undefined : (
                       // Not the current scope, so its conversations are not on
                       // screen — the row says how many are waiting in there.
                       <GuildUnreadPill count={count} testId={`sidebar-guild-unread-${row.key}`} />
@@ -414,6 +488,9 @@ export function SidebarGuildSectionRows({
                 unreadCount={count}
                 onNewConversation={onNewConversation}
                 onMoveTeam={onMoveTeam}
+                teamPosition={
+                  isDm ? undefined : { index: teamKeys.indexOf(row.key), count: teamKeys.length }
+                }
               />
             </ContextMenuContent>
           </ContextMenu>

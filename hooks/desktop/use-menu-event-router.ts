@@ -25,6 +25,7 @@ import {
   commandPaletteAction,
   documentationAction,
   goAction,
+  isGoMenuId,
   manageConnectorsAction,
   manageMcpServerAction,
   MENU_ACTION_IDS,
@@ -112,6 +113,14 @@ export function useMenuEventRouter(options: UseMenuEventRouterOptions = {}): voi
       const settings = useSettingsStore.getState().settings
       const reduceMotionCurrent = settings?.reduceMotion ?? false
       try {
+        // Every Go destination routes through `goAction`, ahead of the
+        // switch: the Go ids are derived from the navigation catalog, so a
+        // hand-listed `case` per destination would drift the moment the
+        // catalog grows (it once left `go-logs` on a different path).
+        if (isGoMenuId(id)) {
+          goAction(router, id)
+          return
+        }
         switch (id) {
           case "new-chat":
             newChatAction()
@@ -132,7 +141,6 @@ export function useMenuEventRouter(options: UseMenuEventRouterOptions = {}): voi
             openSettingsAction(router)
             break
           case "open-logs":
-          case "go-logs":
             openLogsAction(router)
             break
           case "quit":
@@ -179,21 +187,6 @@ export function useMenuEventRouter(options: UseMenuEventRouterOptions = {}): voi
             break
           case "toggle-reduce-motion":
             await toggleReduceMotionAction(reduceMotionCurrent, saveSettings)
-            break
-          case "go-inbox":
-          case "go-workflows":
-          case "go-sites":
-          case "go-twin":
-          case "go-skills":
-          case "go-plugins":
-          case "go-squads":
-          case "go-scheduler":
-          case "go-discover":
-          case "go-a2ui":
-          case "go-dms":
-          case "go-canvas":
-          case "go-settings":
-            goAction(router, id)
             break
           case "automation-kill-switch":
             await automationKillSwitchAction()

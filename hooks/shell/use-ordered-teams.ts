@@ -37,34 +37,51 @@ export interface UseOrderedTeams {
 // (`components/shell/use-sidebar-layout.ts`): read the store only when the
 // write reaches the front of the queue.
 //
-// This serializes the team order against itself, the way `saveSidebarSettings`
-// in `channel-list.tsx` serializes the display options against themselves —
-// `conversationSidebar` is replaced whole by each `save()`, so the two writers
-// could still overlap. They cannot in practice: both are driven by the same
-// pointer, and neither starts while the other's gesture is in flight.
-let teamOrderWriteQueue: Promise<void> | null = null
+// This serializes every team preference kept on `conversationSidebar` — the
+// order and the mute set (`hooks/shell/use-team-mute.ts`) — against each
+// other: `conversationSidebar` is replaced whole by each `save()`, so a mute
+// and a drag landing together would otherwise let the second erase the first.
+// `saveSidebarSettings` in `channel-list.tsx` serializes the display options
+// against themselves; the two writers could still overlap, but in practice
+// they do not: both are driven by the same pointer, and neither starts while
+// the other's gesture is in flight.
+let teamPrefsWriteQueue: Promise<void> | null = null
 
-function enqueueTeamOrderWrite(ids: string[]): Promise<void> {
+type ConversationSidebar = NonNullable<
+  NonNullable<ReturnType<typeof useSettingsStore.getState>["settings"]>["conversationSidebar"]
+>
+
+/**
+ * Queue one write to `conversationSidebar`. `patch` receives the stored object
+ * as it is when the write reaches the front of the queue and returns the
+ * fields to change; everything else is carried over.
+ */
+export function enqueueTeamPrefsWrite(
+  patch: (current: ConversationSidebar | undefined) => Partial<ConversationSidebar>
+): Promise<void> {
   const run = async () => {
     const state = useSettingsStore.getState()
-    await state.save({
-      conversationSidebar: { ...state.settings?.conversationSidebar, teamOrder: ids },
-    })
+    const current = state.settings?.conversationSidebar
+    await state.save({ conversationSidebar: { ...current, ...patch(current) } })
   }
-  const task = teamOrderWriteQueue ? teamOrderWriteQueue.then(run, run) : run()
+  const task = teamPrefsWriteQueue ? teamPrefsWriteQueue.then(run, run) : run()
   // A rejected write must not wedge the queue for every later drag, but the
   // initiating caller still sees its own failure.
   const recovered = task.catch(() => undefined)
-  teamOrderWriteQueue = recovered
+  teamPrefsWriteQueue = recovered
   void recovered.then(() => {
-    if (teamOrderWriteQueue === recovered) teamOrderWriteQueue = null
+    if (teamPrefsWriteQueue === recovered) teamPrefsWriteQueue = null
   })
   return task
 }
 
+function enqueueTeamOrderWrite(ids: string[]): Promise<void> {
+  return enqueueTeamPrefsWrite(() => ({ teamOrder: ids }))
+}
+
 /** Exposed for tests — the module-level queue outlives a single render tree. */
 export function __resetTeamOrderQueueForTests(): void {
-  teamOrderWriteQueue = null
+  teamPrefsWriteQueue = null
 }
 
 export function useOrderedTeams(): UseOrderedTeams {

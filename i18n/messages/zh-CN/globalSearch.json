@@ -25,7 +25,18 @@
     "openFolderNeedsHost": "配对一台主机后才能浏览文件夹。本设备没有可打开的文件系统。",
     "newWorkspace": "新建工作区",
     "adoptWorkspaces": "收编已检测到的文件夹",
-    "manageWorkspaceRoots": "管理工作区文件夹"
+    "manageWorkspaceRoots": "管理工作区文件夹",
+    "pinPage": "将「{page}」固定到导航栏",
+    "pinHiddenPageHint": "当前已隐藏，固定后会重新显示",
+    "unpinPage": "取消固定「{page}」",
+    "unpinPageHint": "移至「更多」菜单",
+    "hidePage": "从导航栏隐藏「{page}」",
+    "hidePageHint": "可在「自定义导航」中恢复",
+    "customizeNavigation": "自定义导航…",
+    "showNavRail": "显示导航栏",
+    "hideNavRail": "隐藏导航栏",
+    "moveNavRailLeft": "将导航栏移到左侧",
+    "moveNavRailRight": "将导航栏移到右侧"
   },
   "badges": {
     "archived": "已归档",
@@ -177,7 +188,12 @@
     "upToDate": "已是最新版本。",
     "updateAvailable": "有可用更新：{version}",
     "updateFailed": "检查更新失败：{message}",
-    "updatesDesktopOnly": "仅桌面端支持检查更新。"
+    "updatesDesktopOnly": "仅桌面端支持检查更新。",
+    "pagePinned": "已将「{page}」固定到导航栏。",
+    "pageUnpinned": "已将「{page}」移至「更多」菜单。",
+    "pageHidden": "已从导航栏隐藏「{page}」。",
+    "noNavigationPage": "当前页面不在导航中。",
+    "navigationUpdateFailed": "无法更新导航：{message}"
   },
   "untitledConversation": "未命名会话"
 }

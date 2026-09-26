@@ -33,6 +33,16 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// `?team=<id>` is the navigation's "Edit team" deep link; the rest of the
+// suite runs with no params, as the global mock has it.
+let mockSearch = new URLSearchParams()
+const replaceMock = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: jest.fn(), replace: (...a: unknown[]) => replaceMock(...a) }),
+  usePathname: () => "/settings",
+  useSearchParams: () => mockSearch,
+}))
+
 import { TeamsSection } from "./teams-section"
 import { createTeam, listTeams, seedBuiltInTeams } from "@/lib/db/teams"
 import { seedBuiltInCharacters } from "@/lib/db/characters"
@@ -41,6 +51,7 @@ import { toast } from "sonner"
 
 beforeEach(async () => {
   jest.clearAllMocks()
+  mockSearch = new URLSearchParams()
   await getDb().delete()
   __resetDbForTesting()
   getDb()
@@ -556,5 +567,41 @@ describe("TeamsSection — orchestration fields (ADR-0177 batch 3)", () => {
       })
       expect(created?.members[1]?.handoffTargets).toBeUndefined()
     })
+  })
+})
+
+describe("TeamsSection — ?team= deep link", () => {
+  it("opens the named team's editor and drops the param", async () => {
+    const created = await createTeam({
+      name: "Deep Team",
+      members: [{ characterId: "char_builtin_coding" }],
+    })
+    mockSearch = new URLSearchParams(`section=teams&team=${created.id}`)
+    render(<TeamsSection />)
+    const name = await screen.findByPlaceholderText("settings.teams.editor.namePlaceholder")
+    expect(name).toHaveValue("Deep Team")
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith("?section=teams", { scroll: false })
+    )
+  })
+
+  it("only drops the param for a built-in team, which has no editor", async () => {
+    await seedBuiltInTeams()
+    const builtIn = (await listTeams()).find((row) => row.isBuiltIn)!
+    mockSearch = new URLSearchParams(`section=teams&team=${builtIn.id}`)
+    render(<TeamsSection />)
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith("?section=teams", { scroll: false })
+    )
+    expect(screen.queryByPlaceholderText("settings.teams.editor.namePlaceholder")).toBeNull()
+  })
+
+  it("drops an id that names no team", async () => {
+    mockSearch = new URLSearchParams("section=teams&team=gone")
+    render(<TeamsSection />)
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith("?section=teams", { scroll: false })
+    )
+    expect(screen.queryByPlaceholderText("settings.teams.editor.namePlaceholder")).toBeNull()
   })
 })

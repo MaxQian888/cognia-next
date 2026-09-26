@@ -16,8 +16,6 @@ import {
   CircleDot as CircleDotIcon,
   ClipboardCheckIcon,
   CompassIcon,
-  FolderKanban as FolderKanbanIcon,
-  GaugeIcon,
   GitBranchIcon,
   GlobeIcon,
   InboxIcon,
@@ -42,13 +40,19 @@ import type { LucideIcon } from "lucide-react"
 import { arrayMove } from "@dnd-kit/sortable"
 
 import type { Platform } from "@/hooks/use-platform"
-import { partitionByLayout } from "@/lib/shell/layout-partition"
+import {
+  partitionByLayout,
+  resolveOrderedLayout,
+  type ResolvedOrderedCatalog,
+} from "@/lib/shell/layout-partition"
 import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
 import { getSurfaceContract, shouldShowSurface } from "@/lib/runtime/surface-contract"
 import {
+  CANVAS_MODE_ID,
   LEGACY_SIDEBAR_NAV_IDS,
   SIDEBAR_NAV_META,
   type SidebarLayout,
+  type SidebarModesLayout,
   type SidebarNavMeta,
 } from "@/types/shell/sidebar"
 
@@ -73,7 +77,6 @@ export const SIDEBAR_NAV_ICONS: Record<string, LucideIcon> = {
   sites: PanelsTopLeftIcon,
   a2ui: LayoutGridIcon,
   memory: BrainIcon,
-  observability: GaugeIcon,
   servers: ServerCogIcon,
   integrations: PlugZapIcon,
   devices: SmartphoneIcon,
@@ -169,12 +172,24 @@ export function resolveSidebarLayout(
  * Without this a rename reads as "the item vanished from my rail" — the
  * partition drops unknown ids by design, so a stale `agent-teams` pin would
  * silently become an unpinned Squads entry sitting in More.
+ *
+ * Exported because the write path needs it too: the layout mutators in
+ * `components/shell/use-sidebar-layout.ts` operate on the stored arrays, and a
+ * `hide("squads")` against a stored `"agent-teams"` pin used to filter for an
+ * id that was not there — the stale pin survived, still resolved as pinned,
+ * and the action did nothing. A rename can also collide with a pin the user
+ * already added under the new name, so the mapped arrays are de-duplicated
+ * (first occurrence wins, which keeps the user's order).
  */
-function migrateLegacyIds(layout: SidebarLayout): SidebarLayout {
-  const map = (ids: readonly string[]) => ids.map((id) => LEGACY_SIDEBAR_NAV_IDS[id] ?? id)
+export function migrateLegacyIds(layout: SidebarLayout): SidebarLayout {
+  const map = (ids: readonly string[]) => [
+    ...new Set(ids.map((id) => LEGACY_SIDEBAR_NAV_IDS[id] ?? id)),
+  ]
   const pinned = map(layout.pinned)
   const hidden = map(layout.hidden)
   const changed =
+    pinned.length !== layout.pinned.length ||
+    hidden.length !== layout.hidden.length ||
     pinned.some((id, i) => id !== layout.pinned[i]) ||
     hidden.some((id, i) => id !== layout.hidden[i])
   return changed ? { ...layout, pinned, hidden } : layout
@@ -195,4 +210,96 @@ export function applyDragReorder(
   const newIndex = ids.indexOf(overId)
   if (oldIndex < 0 || newIndex < 0) return null
   return arrayMove(ids, oldIndex, newIndex)
+}
+
+/** What {@link resolveSidebarModes} needs from a workspace-mode entry. */
+export interface SidebarModeEntry {
+  /** {@link CANVAS_MODE_ID}, or a plugin view container's `fullId`. */
+  id: string
+  /**
+   * The contributor's declared sort order (`PluginViewContainerDef.order`).
+   * Ascending; absent reads as `0`, the default that type documents.
+   */
+  order?: number
+}
+
+/**
+ * The mode block's shipped order: Canvas first — it is built in and was the
+ * block's only entry before plugins could add one — then the plugin
+ * containers by their declared `order`, ties keeping registration order
+ * (`Array.prototype.sort` is stable).
+ */
+export function defaultModeOrder<T extends SidebarModeEntry>(entries: readonly T[]): T[] {
+  const rank = (entry: T) =>
+    entry.id === CANVAS_MODE_ID ? Number.NEGATIVE_INFINITY : (entry.order ?? 0)
+  return [...entries].sort((a, b) => rank(a) - rank(b))
+}
+
+/**
+ * Resolve the workspace modes on the rail — Canvas and the plugin view
+ * containers — against the user's `SidebarLayout.modes`.
+ *
+ * The declared order is only the default: a stored `modes.order` wins, and a
+ * mode it never mentioned (a plugin installed after the last reorder) joins
+ * the end in its default position. Hidden modes keep their slot, so showing
+ * one again puts it back where it was. An absent `modes` — every layout saved
+ * before this block was customizable — is the default order, nothing hidden.
+ */
+export function resolveSidebarModes<T extends SidebarModeEntry>(
+  entries: readonly T[],
+  modes: SidebarModesLayout | undefined
+): ResolvedOrderedCatalog<T> {
+  return resolveOrderedLayout(defaultModeOrder(entries), modes ?? { order: [], hidden: [] })
+}
+
+/**
+ * The catalog entry whose page `pathname` is on, or `null` off every catalog
+ * route (`/`, `/settings`, a route the rail does not list). Same prefix rule
+ * the rail's active state uses (`useShellNav().isFeatureActive`): `/inbox/123`
+ * is Inbox. The longest matching route wins, so a future nested entry would
+ * not be shadowed by its parent.
+ */
+export function navItemForPath<T extends { route: string }>(
+  pathname: string,
+  catalog: readonly T[]
+): T | null {
+  let best: T | null = null
+  for (const item of catalog) {
+    const matches = pathname === item.route || pathname.startsWith(item.route + "/")
+    if (matches && (!best || item.route.length > best.route.length)) best = item
+  }
+  return best
+}
+
+/**
+ * The full mode order to store after the *visible* modes were rearranged into
+ * `visibleOrder`. Hidden modes keep the slots they hold in `order`, and the
+ * visible ones fill the remaining slots in their new sequence — so hiding a
+ * mode, dragging its neighbours around and showing it again puts it back
+ * where it was, not at the end.
+ */
+export function mergeVisibleModeOrder(
+  order: readonly string[],
+  hidden: ReadonlySet<string>,
+  visibleOrder: readonly string[]
+): string[] {
+  const queue = [...visibleOrder]
+  return order.map((id) => (hidden.has(id) ? id : (queue.shift() ?? id)))
+}
+
+/**
+ * The stored mode order after moving visible mode `id` by `delta` slots among
+ * the visible modes, or `null` when it has nowhere to go.
+ */
+export function moveVisibleMode(
+  order: readonly string[],
+  hidden: ReadonlySet<string>,
+  id: string,
+  delta: number
+): string[] | null {
+  const visible = order.filter((modeId) => !hidden.has(modeId))
+  const from = visible.indexOf(id)
+  const to = from + delta
+  if (from < 0 || to < 0 || to >= visible.length) return null
+  return mergeVisibleModeOrder(order, hidden, arrayMove(visible, from, to))
 }

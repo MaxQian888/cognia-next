@@ -4,7 +4,11 @@
 
 import { act, renderHook } from "@testing-library/react"
 
-import { __resetTeamOrderQueueForTests, useOrderedTeams } from "./use-ordered-teams"
+import {
+  __resetTeamOrderQueueForTests,
+  enqueueTeamPrefsWrite,
+  useOrderedTeams,
+} from "./use-ordered-teams"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 const listed: { id: string; name: string }[] = []
@@ -102,5 +106,40 @@ describe("useOrderedTeams", () => {
     expect(saveMock.mock.calls[1]?.[0]).toEqual({
       conversationSidebar: { teamOrder: ["c", "b", "a"] },
     })
+  })
+})
+
+describe("enqueueTeamPrefsWrite", () => {
+  it("serializes every team preference, each reading the store as it reaches the front", async () => {
+    let stored: Record<string, unknown> = { showPreview: true }
+    const save = jest.fn(async (patch: { conversationSidebar: Record<string, unknown> }) => {
+      stored = patch.conversationSidebar
+      useSettingsStore.setState({ settings: { conversationSidebar: stored } as never })
+    })
+    useSettingsStore.setState({
+      settings: { conversationSidebar: stored } as never,
+      save: save as never,
+    })
+    await Promise.all([
+      enqueueTeamPrefsWrite(() => ({ teamOrder: ["b", "a"] })),
+      enqueueTeamPrefsWrite((current) => ({
+        mutedTeamIds: [...(current?.mutedTeamIds ?? []), "a"],
+      })),
+    ])
+    // The mute landed on top of the reorder instead of erasing it.
+    expect(stored).toEqual({ showPreview: true, teamOrder: ["b", "a"], mutedTeamIds: ["a"] })
+  })
+
+  it("keeps going after a failed write, while the caller still sees its failure", async () => {
+    const save = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValueOnce(undefined)
+    useSettingsStore.setState({ settings: {} as never, save: save as never })
+    const failed = enqueueTeamPrefsWrite(() => ({ teamOrder: ["a"] }))
+    const next = enqueueTeamPrefsWrite(() => ({ teamOrder: ["b"] }))
+    await expect(failed).rejects.toThrow("disk full")
+    await expect(next).resolves.toBeUndefined()
+    expect(save).toHaveBeenCalledTimes(2)
   })
 })

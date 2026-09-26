@@ -68,6 +68,10 @@ export function teamOrderFrom(teams: readonly OrderableTeam[]): string[] {
  * This is the keyboard path for the same reorder the drag performs — the
  * team rows' context menu offers it, because the rows' Enter/Space already
  * mean "open this section" and cannot also mean "pick this up".
+ *
+ * Nothing in it is team-specific, so the rail's other two ordered lists —
+ * the pinned features and the workspace modes (`use-sidebar-layout.ts`) —
+ * move through it too rather than growing a second copy.
  */
 export function moveTeamInOrder(
   ids: readonly string[],

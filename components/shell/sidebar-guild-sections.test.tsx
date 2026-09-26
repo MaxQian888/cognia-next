@@ -73,10 +73,12 @@ jest.mock("@/lib/plugin/context-keys/context-key-store", () => ({
   evaluateContextWhen: () => true,
 }))
 let guildUnread = { dm: 0, teams: new Map<string, number>(), total: 0 }
-const markGuildRead = jest.fn(async (_target: unknown) => 1)
+const markGuildRead = jest.fn(async (_target: unknown, _scope: unknown) => 1)
 jest.mock("@/hooks/shell/use-guild-unread", () => ({
   useGuildUnread: () => guildUnread,
-  markGuildRead: (target: unknown) => markGuildRead(target as never),
+  useGuildUnreadScope: () => ({ kind: "workspace", projectId: "p-test" }),
+  markGuildRead: (target: unknown, scope: unknown) =>
+    markGuildRead(target as never, scope as never),
 }))
 jest.mock("@/components/desktop/avatar-badge", () => ({
   AvatarBadge: ({ subject }: { subject: { name: string } }) => (
@@ -260,7 +262,11 @@ describe("SidebarGuildSectionRows", () => {
     const markRead = screen.getByTestId("sidebar-guild-menu-mark-read-t-1")
     expect(markRead).not.toHaveAttribute("data-disabled")
     fireEvent.click(markRead)
-    expect(markGuildRead).toHaveBeenCalledWith({ kind: "team", teamId: "t-1" })
+    // Clears within the badge's own workspace reach, never beyond it.
+    expect(markGuildRead).toHaveBeenCalledWith(
+      { kind: "team", teamId: "t-1" },
+      { kind: "workspace", projectId: "p-test" }
+    )
   })
 
   it("renders nothing for an empty run", () => {
@@ -286,6 +292,67 @@ describe("SidebarGuildSectionRows", () => {
     expect(onMoveTeam).toHaveBeenLastCalledWith("t-1", 1)
     // Reordering never selects the scope it moves.
     expect(setSelectedGuild).not.toHaveBeenCalled()
+  })
+
+  it("disables Move up on the first team and Move down on the last", () => {
+    const onMoveTeam = jest.fn()
+    render(
+      <SidebarGuildSectionRows
+        rows={guildSectionRows(teams)}
+        activeKey="dm"
+        onMoveTeam={onMoveTeam}
+      />
+    )
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-1"))
+    expect(screen.getByTestId("sidebar-guild-menu-move-up-t-1")).toHaveAttribute("data-disabled")
+    expect(screen.getByTestId("sidebar-guild-menu-move-down-t-1")).not.toHaveAttribute(
+      "data-disabled"
+    )
+    fireEvent.click(screen.getByTestId("sidebar-guild-menu-move-up-t-1"))
+    expect(onMoveTeam).not.toHaveBeenCalled()
+
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-2"))
+    expect(screen.getByTestId("sidebar-guild-menu-move-down-t-2")).toHaveAttribute("data-disabled")
+  })
+
+  it("right-click: edits a team in Settings", () => {
+    render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="dm" />)
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-2"))
+    fireEvent.click(screen.getByTestId("sidebar-guild-menu-edit-t-2"))
+    expect(routerPush).toHaveBeenCalledWith("/settings?section=teams&team=t-2")
+  })
+
+  it("right-click: mutes a team, and a muted team shows a glyph instead of its count", async () => {
+    const save = jest.fn(async (_patch: unknown) => {})
+    act(() => {
+      useSettingsStore.setState({
+        settings: { sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT } } as never,
+        save: save as never,
+      })
+    })
+    guildUnread = { dm: 0, teams: new Map([["t-1", 4]]), total: 4 }
+    render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="dm" />)
+    expect(screen.getByTestId("sidebar-guild-unread-t-1")).toHaveTextContent("4")
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-1"))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("sidebar-guild-menu-mute-t-1"))
+    })
+    expect(save).toHaveBeenLastCalledWith({ conversationSidebar: { mutedTeamIds: ["t-1"] } })
+
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT },
+          conversationSidebar: { mutedTeamIds: ["t-1"] },
+        } as never,
+      })
+    })
+    expect(screen.queryByTestId("sidebar-guild-unread-t-1")).toBeNull()
+    expect(screen.getByTestId("sidebar-guild-muted-t-1")).toBeInTheDocument()
+    expect(screen.getByTestId("sidebar-guild-team-t-1")).toHaveAttribute("aria-label", "teamMuted")
+    // Chats cannot be muted.
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-dm"))
+    expect(screen.queryByTestId("sidebar-guild-menu-mute-dm")).toBeNull()
   })
 
   it("offers no move items on Chats — it is not one of the teams", () => {

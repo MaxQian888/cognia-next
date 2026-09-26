@@ -62,9 +62,11 @@ export interface SidebarNavMeta {
 }
 
 /**
- * The full customizable catalog, in canonical order. DM/Canvas (chat-guild
- * switchers), the dynamic team list, and the footer Settings button are NOT
- * here — they are fixed and rendered directly by the rail.
+ * The full customizable catalog, in canonical order. The chat guilds (DM,
+ * Canvas, plugin view containers), the dynamic team list, and the footer
+ * Settings button are NOT here. DM and Settings are fixed; Canvas and the
+ * plugin containers are ordered and hidden through `SidebarLayout.modes`; the
+ * teams follow `conversationSidebar.teamOrder`.
  */
 export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   // === Features (pinned by default) ===
@@ -136,9 +138,9 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
     group: "auxiliary",
     category: "agents",
   },
-  // The tracker's low-frequency management surfaces. `issues` is the daily
-  // entry point and is pinned by default; these two live in "More" until the
-  // user pins them, rather than tripling the rail for everyone.
+  // The tracker's low-frequency management surface. `issues` is the daily
+  // entry point and is pinned by default; this one lives in "More" until the
+  // user pins it, rather than doubling the rail for everyone.
   {
     id: "workspace",
     route: "/workspace",
@@ -220,6 +222,26 @@ export function groupSidebarNavByCategory<T extends { category: SidebarNavCatego
 }
 
 /**
+ * The ordered, hideable part of the rail's workspace-mode block: Canvas and
+ * the plugin view containers. Unlike the feature catalog these have no "More"
+ * home — a mode is on the rail or it is not — so they take the ordered
+ * two-bucket shape (`lib/shell/layout-partition.ts:resolveOrderedLayout`)
+ * rather than pinned / overflow / hidden.
+ *
+ * Ids: {@link CANVAS_MODE_ID} for Canvas, a container's `fullId`
+ * (`<pluginId>:<containerId>`) for a plugin view container.
+ */
+export interface SidebarModesLayout {
+  /** Every mode id the user has placed, in render order. */
+  order: string[]
+  /** Mode ids taken off the rail. They keep their slot in `order`. */
+  hidden: string[]
+}
+
+/** The workspace-mode id Canvas persists under in {@link SidebarModesLayout}. */
+export const CANVAS_MODE_ID = "canvas"
+
+/**
  * User customization of the rail. `overflow` is NOT stored — it is derived as
  * `catalog − pinned − hidden` (in catalog order) by `resolveSidebarLayout`, so
  * a future catalog addition auto-lands in "More" with no layout edit.
@@ -229,6 +251,15 @@ export interface SidebarLayout {
   pinned: string[]
   /** Ids hidden everywhere (not on the rail, not in "More"). */
   hidden: string[]
+  /**
+   * Order and visibility of the workspace modes (Canvas, plugin view
+   * containers). Optional and additive: a layout saved before modes were
+   * customizable has no such field and reads as the default — Canvas first,
+   * then the plugin containers by their declared `order`, nothing hidden. The
+   * mutators in `components/shell/use-sidebar-layout.ts` spread the current
+   * layout, so a pin or hide never drops it.
+   */
+  modes?: SidebarModesLayout
 }
 
 /**
@@ -271,18 +302,6 @@ export const DEFAULT_SIDEBAR_SIDE: SidebarSide = "left"
 export const GUILD_RAIL_WIDTH_PX = 56
 
 /**
- * The rail's shipped pins.
- *
- * This used to be "every `feature` item", which put eleven icons on a 64px rail
- * before counting the workspace switcher, DM, Canvas, teams, More and Settings.
- * Ten of the eleven were places you configure once and rarely revisit; these
- * three are the ones work arrives in — an inbox that fills up, workflows you
- * re-run, teams you hand tasks to. The rest are one "More" click away and any
- * of them can be pinned back from the customizer or a rail right-click.
- *
- * Order matters: it is the render order on the rail.
- */
-/**
  * Ids that changed name after a layout was already persisted.
  *
  * The id doubles as the persistence key, so renaming one silently drops it
@@ -293,9 +312,29 @@ export const LEGACY_SIDEBAR_NAV_IDS: Readonly<Record<string, string>> = {
   "agent-teams": "squads",
 }
 
+/**
+ * The rail's shipped pins.
+ *
+ * This used to be "every `feature` item", which put eleven icons on the rail
+ * before counting the workspace switcher, DM, Canvas, teams, More and Settings.
+ * Most of them were places you configure once and rarely revisit; these four
+ * are the ones work arrives in — issues you pick up, an inbox that fills up,
+ * workflows you re-run, squads you hand tasks to. The rest are one "More"
+ * click away and any of them can be pinned back from the customizer or a rail
+ * right-click.
+ *
+ * Order matters: it is the render order on the rail.
+ */
 export const DEFAULT_PINNED_IDS = ["issues", "inbox", "workflows", "squads"] as const
 
-/** Default: the four ids above pinned, everything else in "More", nothing hidden. */
+/**
+ * Default: the four ids above pinned, everything else in "More", nothing
+ * hidden. `modes` is absent on purpose — no stored order means Canvas first,
+ * then the plugin view containers by their declared `order`, all shown. The
+ * two blocks reset separately (`reset` / `resetModes` in
+ * `components/shell/use-sidebar-layout.ts`), so restoring the pins never
+ * undoes a mode arrangement.
+ */
 export const DEFAULT_SIDEBAR_LAYOUT: SidebarLayout = {
   pinned: [...DEFAULT_PINNED_IDS],
   hidden: [],

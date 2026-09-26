@@ -32,16 +32,18 @@ import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layo
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import type { AppLanguage, AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { requestCommandPalette } from "@/lib/shell/command-palette-request"
+import { SIDEBAR_NAV_META } from "@/types/shell/sidebar"
 
 const log = loggers.ui
 
 /**
- * Authoritative list of every menu id the desktop chrome understands. Kept
- * here (rather than spread across components / Rust) so the Tauri menu
- * definition, the in-app Menubar, the router hook and the tests can all
- * iterate the same set.
+ * Every non-navigation menu id the desktop chrome understands, as a literal
+ * tuple so each one stays a distinct member of {@link MenuActionId}. The Go
+ * menu's ids are NOT here — they are derived from the navigation catalog in
+ * {@link GO_MENU_IDS}, so a new rail destination is reachable from the Go
+ * menu without a second hand-kept list.
  */
-export const MENU_ACTION_IDS = [
+export const MENU_COMMAND_IDS = [
   // File
   "new-chat",
   "new-workflow",
@@ -74,21 +76,6 @@ export const MENU_ACTION_IDS = [
   "language-en",
   "language-zh-cn",
   "toggle-reduce-motion",
-  // Go
-  "go-inbox",
-  "go-workflows",
-  "go-sites",
-  "go-twin",
-  "go-skills",
-  "go-plugins",
-  "go-squads",
-  "go-scheduler",
-  "go-discover",
-  "go-a2ui",
-  "go-dms",
-  "go-canvas",
-  "go-logs",
-  "go-settings",
   // Tools
   "automation-kill-switch",
   "manage-connectors",
@@ -102,14 +89,66 @@ export const MENU_ACTION_IDS = [
   "about",
 ] as const
 
-export type MenuActionId = (typeof MENU_ACTION_IDS)[number]
+/**
+ * A Go-menu id: `go-<destination>`. A template-literal type rather than a
+ * literal union because the catalog's ids are plain `string`s — the set of
+ * valid values is {@link GO_MENU_IDS}, checked at runtime by
+ * {@link isGoMenuId}.
+ */
+export type GoMenuId = `go-${string}`
+
+/**
+ * Go-menu destinations that are not in the navigation catalog: the two chat
+ * guilds (they switch the rail's guild rather than open a route) and the
+ * footer Settings button, which the catalog deliberately leaves out.
+ */
+const GO_MENU_EXTRA_IDS = [
+  "go-dms",
+  "go-canvas",
+  "go-settings",
+] as const satisfies readonly GoMenuId[]
+
+/**
+ * Every Go-menu id, in menu order: one `go-<id>` per entry of the navigation
+ * catalog (`SIDEBAR_NAV_META`, which the desktop shell shows in full), then
+ * {@link GO_MENU_EXTRA_IDS}. Rust's `MENU_IDS` and the native Go submenu
+ * (`src-tauri/src/menu.rs`) mirror this list; `menu-actions.test.ts` parses
+ * `commands.rs` and fails when the two drift.
+ */
+export const GO_MENU_IDS: readonly GoMenuId[] = [
+  ...SIDEBAR_NAV_META.map((meta): GoMenuId => `go-${meta.id}`),
+  ...GO_MENU_EXTRA_IDS,
+]
+
+const GO_MENU_ID_SET: ReadonlySet<string> = new Set(GO_MENU_IDS)
+
+/**
+ * True when `id` is one of {@link GO_MENU_IDS}. Membership, not a prefix
+ * test: `go-anything` is not a destination just because it is spelled like
+ * one.
+ */
+export function isGoMenuId(id: string): id is GoMenuId {
+  return GO_MENU_ID_SET.has(id)
+}
+
+export type MenuActionId = (typeof MENU_COMMAND_IDS)[number] | GoMenuId
+
+/**
+ * Authoritative list of every menu id the desktop chrome understands —
+ * {@link MENU_COMMAND_IDS} plus the derived {@link GO_MENU_IDS}. Kept here
+ * (rather than spread across components / Rust) so the Tauri menu
+ * definition, the in-app Menubar, the router hook and the tests can all
+ * iterate the same set.
+ */
+export const MENU_ACTION_IDS: readonly MenuActionId[] = [...MENU_COMMAND_IDS, ...GO_MENU_IDS]
 
 /**
  * Report shape returned by {@link verifyMenuActionParity}. `missingInRust` /
  * `missingInRenderer` are disjoint — an id only appears in one list. An
  * empty report ({ missingInRust: [], missingInRenderer: [] }) means the two
  * sides agree on every id (excluding the renderer-only `quit` / `about` /
- * zoom / fullscreen ids that Rust handles via PredefinedMenuItem).
+ * zoom / fullscreen ids that Rust handles via PredefinedMenuItem, and the
+ * Rust-only `toggle-devtools`).
  */
 export interface MenuActionParityReport {
   missingInRust: string[]
@@ -122,7 +161,7 @@ export interface MenuActionParityReport {
  * via the OS-provided predefined items). Rust's `MENU_IDS` deliberately
  * omits them; the parity check below excludes them too.
  */
-const RENDERER_ONLY_IDS: ReadonlySet<string> = new Set([
+export const RENDERER_ONLY_IDS: ReadonlySet<string> = new Set([
   "quit",
   "about",
   "toggle-fullscreen",
@@ -130,6 +169,14 @@ const RENDERER_ONLY_IDS: ReadonlySet<string> = new Set([
   "zoom-out",
   "zoom-reset",
 ])
+
+/**
+ * Rust-only menu ids — `toggle-devtools` opens the webview inspector, which
+ * only the Rust side can reach, so `src-tauri/src/menu.rs` handles it inline
+ * and never emits `menu://toggle-devtools`. It sits in Rust's `MENU_IDS` but
+ * has no renderer action, and the parity check must not report it as drift.
+ */
+export const RUST_ONLY_IDS: ReadonlySet<string> = new Set(["toggle-devtools"])
 
 /**
  * Compare {@link MENU_ACTION_IDS} against Rust's `menu_action_ids` command
@@ -155,6 +202,7 @@ export async function verifyMenuActionParity(): Promise<MenuActionParityReport |
     }
     const missingInRenderer: string[] = []
     for (const id of rustSet) {
+      if (RUST_ONLY_IDS.has(id)) continue
       if (!rendererSet.has(id)) missingInRenderer.push(id)
     }
     return { missingInRust, missingInRenderer }
@@ -165,19 +213,28 @@ export async function verifyMenuActionParity(): Promise<MenuActionParityReport |
   }
 }
 
-/** Static route map for every `go-*` navigation id. */
-export const GO_ROUTES: Record<string, string> = {
+/**
+ * Go destinations whose menu route differs from the catalog route. `go-inbox`
+ * has always opened the "all" view directly rather than `/inbox`, which lands
+ * on whatever filter the page defaults to.
+ */
+const GO_ROUTE_OVERRIDES: Readonly<Record<string, string>> = {
   "go-inbox": "/inbox/all",
-  "go-workflows": "/workflows",
-  "go-sites": "/sites",
-  "go-twin": "/twin",
-  "go-skills": "/skills",
-  "go-plugins": "/plugins",
-  "go-squads": "/squads",
-  "go-scheduler": "/scheduler",
-  "go-discover": "/discover",
-  "go-a2ui": "/a2ui",
-  "go-logs": "/logs",
+}
+
+/**
+ * Route for every routable `go-*` id: the catalog route (or its
+ * {@link GO_ROUTE_OVERRIDES} entry) plus `go-settings`. `go-dms` / `go-canvas`
+ * are absent on purpose — they switch the rail's chat guild and land on `/`,
+ * see {@link goAction}.
+ */
+export const GO_ROUTES: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(
+    SIDEBAR_NAV_META.map((meta) => {
+      const id = `go-${meta.id}`
+      return [id, GO_ROUTE_OVERRIDES[id] ?? meta.route]
+    })
+  ),
   "go-settings": "/settings",
 }
 
@@ -390,7 +447,13 @@ export async function toggleReduceMotionAction(
 // Go menu
 // --------------------------------------------------------------------------
 
+/**
+ * Navigate for a Go-menu id. Any other id — or a `go-` spelling that is not
+ * in {@link GO_MENU_IDS} — is ignored, so callers can pass a
+ * {@link MenuActionId} without pre-filtering.
+ */
 export function goAction(router: AppRouterInstance, id: MenuActionId): void {
+  if (!isGoMenuId(id)) return
   log.info("menu action go", { id })
   if (id === "go-dms") {
     useUIStore.getState().setSelectedGuild({ kind: "dm" })

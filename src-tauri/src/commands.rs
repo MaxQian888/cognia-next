@@ -94,10 +94,11 @@ pub fn set_window_background_color(webview: Webview, hex: String) -> Result<(), 
 /// `menu_action_ids` Tauri command can be registered uniformly across
 /// desktop and mobile in `tauri::generate_handler!`.
 ///
-/// Mirrors `lib/desktop/menu-actions.ts:MENU_ACTION_IDS`. When you add or
-/// remove an id here, update the renderer side and its tests too. The
-/// renderer uses `menu_action_ids` at boot to fail-fast if the two lists
-/// diverge.
+/// Mirrors `lib/desktop/menu-actions.ts:MENU_ACTION_IDS`, except the
+/// renderer-only ids Rust serves through predefined items (`quit`, `about`,
+/// fullscreen, zoom) and the Rust-only `toggle-devtools`, which `menu.rs`
+/// handles inline. `lib/desktop/menu-actions.test.ts` parses this array and
+/// fails when the two lists diverge, so add or remove an id on both sides.
 pub const MENU_IDS: &[&str] = &[
     // File
     "new-chat",
@@ -123,19 +124,37 @@ pub const MENU_IDS: &[&str] = &[
     "theme-system",
     "language-en",
     "language-zh-cn",
-    // Go
+    // Go — one `go-<id>` per navigation-catalog entry plus DMs / Canvas /
+    // Settings. The native submenu is built from `menu::GO_MENU_SECTIONS`,
+    // whose ids a test pins to exactly this block.
     "go-inbox",
     "go-workflows",
     "go-sites",
     "go-twin",
     "go-skills",
     "go-plugins",
-    "go-agent-teams",
+    "go-squads",
     "go-scheduler",
     "go-discover",
+    "go-issues",
+    "go-templates",
+    "go-goals",
+    "go-pet",
+    "go-browser",
     "go-a2ui",
     "go-dms",
     "go-canvas",
+    "go-source-control",
+    "go-agent-runs",
+    "go-workspace",
+    "go-memory",
+    "go-servers",
+    "go-integrations",
+    "go-devices",
+    "go-bots",
+    "go-eval",
+    "go-performance",
+    "go-me",
     "go-logs",
     "go-settings",
     // Tools
@@ -256,6 +275,7 @@ mod tests {
             "toggle-terminal",
             "go-inbox",
             "go-twin",
+            "go-squads",
             "go-settings",
             "automation-kill-switch",
             "manage-mcp-server",
