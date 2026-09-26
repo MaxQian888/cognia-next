@@ -49,7 +49,7 @@ uuid = { workspace = true, features = ["v4"] }
 tempfile.workspace = true
 tar.workspace = true
 url.workspace = true
-sha2 = "0.10"
+sha2.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "io-util", "process", "fs", "macros", "rt"] }
 
 [dev-dependencies]

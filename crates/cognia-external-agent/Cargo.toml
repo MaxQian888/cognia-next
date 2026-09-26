@@ -38,7 +38,9 @@ tauri = { workspace = true, optional = true }
 url.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-sha2 = "0.10"
+sha2.workspace = true
+# sha2 0.11's digest output does not implement LowerHex; `hex` renders it.
+hex.workspace = true
 tempfile.workspace = true
 # Raw stdout framing (`pi-rpc`) ships undecoded chunks to the renderer as
 # base64 — the same encoding the Node backend's raw mode uses.

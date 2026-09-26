@@ -122,7 +122,7 @@ fn truncate_output(mut text: String) -> String {
 
 fn digest_of(path: &PathBuf) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
-    Some(format!("{:x}", Sha256::digest(bytes)))
+    Some(hex::encode(Sha256::digest(bytes)))
 }
 
 /// Run one runtime's catalogued version probe.
@@ -526,5 +526,19 @@ mod tests {
         } else {
             assert!(probe.executable_path.is_some());
         }
+    }
+
+    /// `runtime-version.ts` compares this string as lowercase hex, so the
+    /// format is part of the contract, not just the hash.
+    #[test]
+    fn the_executable_digest_is_lowercase_sha256_hex() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("runtime");
+        std::fs::write(&file, b"abc").unwrap();
+        assert_eq!(
+            digest_of(&file).as_deref(),
+            Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        );
+        assert_eq!(digest_of(&dir.path().join("missing")), None);
     }
 }

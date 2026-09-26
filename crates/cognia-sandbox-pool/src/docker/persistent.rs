@@ -27,7 +27,14 @@ fn runtime_key(spec: &RunnerSpec, environment: &EnvironmentSpec) -> String {
     stable.env.clear();
     stable.labels.clear();
     let identity = format!("{}\0{stable:?}", environment.spec_digest);
-    format!("{:x}", Sha256::digest(identity.as_bytes()))
+    sha256_hex(identity.as_bytes())
+}
+
+/// Lowercase hex SHA-256. Persistent runtimes are matched by the keys this
+/// produces, so the format must never drift: a changed spelling would orphan
+/// every runtime created under the old one.
+fn sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn exec_spec(container_id: &str, args: &[&str]) -> RunnerExecSpec {
@@ -348,10 +355,7 @@ impl DockerSandboxBackend {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        let session = format!(
-            "{:x}",
-            Sha256::digest(format!("{}:{}", config.id, default_instance_id()).as_bytes())
-        );
+        let session = sha256_hex(format!("{}:{}", config.id, default_instance_id()).as_bytes());
         let mut request = exec_spec(
             &container_id,
             &[
@@ -455,6 +459,15 @@ mod tests {
         changed.labels.clear();
         assert_eq!(runtime_key(&changed, &environment), expected);
         harness.backend.kill_all().await.unwrap();
+    }
+
+    /// The spelling persistent runtimes are matched by (see `sha256_hex`).
+    #[test]
+    fn runtime_keys_are_lowercase_sha256_hex() {
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]
