@@ -154,7 +154,7 @@ fn find_in_managed_dirs(name: &str) -> Option<PathBuf> {
 /// Per-binary env override: `COGNIA_<NAME>_PATH` (name uppercased,
 /// non-alphanumerics → `_`) pins an explicit executable path — the same
 /// convention the sidecar's ripgrep probe honors (`COGNIA_RG_PATH` in
-/// `sidecar/builtin-tools/core/rg.mjs`). Wins over managed dirs and PATH so
+/// `sidecar/src/tools/builtin/core-files/rg.ts`). Wins over managed dirs and PATH so
 /// a plugin-declared binary the host can't find any other way (VS Code's
 /// bundled rg, a nix-store path, a corporate-image location) is still
 /// usable. Only honored when the value points at an existing file.

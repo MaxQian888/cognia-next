@@ -28,3 +28,8 @@ export function findTool(tools: readonly { name: string }[], name: string): Call
   assert.ok(found, `no tool named ${name}`)
   return found as unknown as CallableTool
 }
+
+/** A single tool definition, as a test calls it. */
+export function asCallable(tool: { name: string }): CallableTool {
+  return tool as unknown as CallableTool
+}

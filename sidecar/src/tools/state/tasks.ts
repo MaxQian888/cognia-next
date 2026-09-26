@@ -1,5 +1,5 @@
 // Session-scoped structured task graph behind the TaskCreate / TaskGet /
-// TaskList / TaskUpdate tools (`builtin-tools/core/tasks.mjs`).
+// TaskList / TaskUpdate tools (`src/tools/builtin/core-files/tasks.ts`).
 //
 // Tasks carry stable ids, reciprocal dependency edges (`blocks` /
 // `blockedBy`), an owner and metadata. One store is created per Agent session

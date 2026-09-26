@@ -8,7 +8,7 @@ import path from "node:path"
 import fsp from "node:fs/promises"
 import fastGlob from "fast-glob"
 
-import { loadIgnoreGlobs } from "../../src/platform/fs/gitignore.ts"
+import { loadIgnoreGlobs } from "../../../platform/fs/gitignore.ts"
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024 // skip files >4 MB in the JS engine
 const BINARY_SNIFF_BYTES = 8 * 1024
@@ -84,15 +84,22 @@ const BINARY_EXTENSIONS = new Set([
   "pyc",
 ])
 
+/** One matching line: 1-based, relative to the search root. */
+export interface GrepMatch {
+  file: string
+  line: number
+  text: string
+}
+
 /** True when a relative path's extension is a known-binary type. */
-export function hasBinaryExtension(rel) {
+export function hasBinaryExtension(rel: string): boolean {
   const dot = rel.lastIndexOf(".")
   if (dot < 0) return false
   return BINARY_EXTENSIONS.has(rel.slice(dot + 1).toLowerCase())
 }
 
 /** A buffer is "binary" when its first 8 KB contain a NUL byte. */
-export function looksBinary(buf) {
+export function looksBinary(buf: Uint8Array): boolean {
   const upto = Math.min(buf.length, BINARY_SNIFF_BYTES)
   for (let i = 0; i < upto; i++) {
     if (buf[i] === 0) return true
@@ -103,11 +110,16 @@ export function looksBinary(buf) {
 /**
  * Enumerate files matching a glob pattern. Results are RELATIVE to `cwd`,
  * sorted lexicographically (callers re-sort by mtime when needed).
- *
- * @param {{ pattern: string, cwd: string, cap?: number }} opts
- * @returns {Promise<{ files: string[], truncated: boolean }>}
  */
-export async function jsGlob({ pattern, cwd, cap = 1000 }) {
+export async function jsGlob({
+  pattern,
+  cwd,
+  cap = 1000,
+}: {
+  pattern: string
+  cwd: string
+  cap?: number
+}): Promise<{ files: string[]; truncated: boolean }> {
   const ignore = await loadIgnoreGlobs(cwd)
   const files = await fastGlob(pattern, {
     cwd,
@@ -126,19 +138,24 @@ export async function jsGlob({ pattern, cwd, cap = 1000 }) {
  * Line-based regex search over the files matched by `glob` (default: all
  * files) under `root`.
  *
- * @param {{
- *   pattern: string,
- *   root: string,
- *   glob?: string,
- *   ignoreCase?: boolean,
- *   multiline?: boolean,
- *   cap?: number,
- * }} opts
- * @returns {Promise<{ matches: Array<{ file: string, line: number, text: string }>, truncated: boolean, fileCount: number }>}
- *   `matches` is sorted by (file, line). `line` is 1-based. With `multiline`,
- *   the match is reported at the line where it starts.
+ * `matches` is sorted by (file, line). `line` is 1-based. With `multiline`,
+ * the match is reported at the line where it starts.
  */
-export async function jsGrep({ pattern, root, glob, ignoreCase, multiline, cap = 2000 }) {
+export async function jsGrep({
+  pattern,
+  root,
+  glob,
+  ignoreCase,
+  multiline,
+  cap = 2000,
+}: {
+  pattern: string
+  root: string
+  glob?: string | undefined
+  ignoreCase?: boolean | undefined
+  multiline?: boolean | undefined
+  cap?: number
+}): Promise<{ matches: GrepMatch[]; truncated: boolean; fileCount: number }> {
   const flags = `${ignoreCase ? "i" : ""}${multiline ? "ms" : ""}`
   // Validate the pattern once up front so a bad regex fails loudly.
   const re = new RegExp(pattern, flags)
@@ -146,7 +163,7 @@ export async function jsGrep({ pattern, root, glob, ignoreCase, multiline, cap =
   const { files } = await jsGlob({ pattern: glob ?? "**/*", cwd: root, cap: 50_000 })
   // Drop known-binary files by extension up front so we never read them.
   const candidates = files.filter((rel) => !hasBinaryExtension(rel))
-  const matches = []
+  const matches: GrepMatch[] = []
   let truncated = false
 
   // Read in bounded-concurrency chunks (I/O overlap) while preserving the
@@ -175,7 +192,7 @@ export async function jsGrep({ pattern, root, glob, ignoreCase, multiline, cap =
         truncated = true
         break outer
       }
-      const rel = chunk[ci]
+      const rel = chunk[ci]!
       const buf = bufs[ci]
       if (!buf || looksBinary(buf)) continue
       const content = buf.toString("utf-8")
@@ -190,7 +207,7 @@ export async function jsGrep({ pattern, root, glob, ignoreCase, multiline, cap =
         const fileLines = content.split("\n")
         let scanPos = 0
         let scanLine = 1
-        let m
+        let m: RegExpExecArray | null
         while ((m = g.exec(content)) !== null) {
           while (scanPos < m.index) {
             if (content.charCodeAt(scanPos) === 10 /* \n */) scanLine++
@@ -206,8 +223,8 @@ export async function jsGrep({ pattern, root, glob, ignoreCase, multiline, cap =
       } else {
         const lines = content.split("\n")
         for (let li = 0; li < lines.length; li++) {
-          if (re.test(lines[li])) {
-            matches.push({ file: rel, line: li + 1, text: lines[li] })
+          if (re.test(lines[li]!)) {
+            matches.push({ file: rel, line: li + 1, text: lines[li]! })
             if (matches.length >= cap) {
               truncated = true
               break

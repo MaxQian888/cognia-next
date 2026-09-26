@@ -11,9 +11,9 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { detectRipgrep, runRipgrep } from "./rg.mjs"
-import { jsGrep } from "./js-search.mjs"
-import { decodeText } from "./text-io.mjs"
+import { detectRipgrep, runRipgrep } from "../../src/tools/builtin/core-files/rg.ts"
+import { jsGrep } from "../../src/tools/builtin/core-files/js-search.ts"
+import { decodeText } from "../../src/tools/builtin/core-files/text-io.ts"
 import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 
 export const DEFAULT_HEAD_LIMIT = 250

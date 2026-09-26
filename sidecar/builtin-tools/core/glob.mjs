@@ -9,8 +9,8 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { detectRipgrep, runRipgrep } from "./rg.mjs"
-import { jsGlob } from "./js-search.mjs"
+import { detectRipgrep, runRipgrep } from "../../src/tools/builtin/core-files/rg.ts"
+import { jsGlob } from "../../src/tools/builtin/core-files/js-search.ts"
 import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 
 export const MAX_FILES = 1000

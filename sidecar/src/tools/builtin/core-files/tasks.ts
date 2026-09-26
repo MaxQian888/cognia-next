@@ -10,8 +10,8 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { createSessionTaskStore } from "../../src/tools/state/tasks.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { createSessionTaskStore } from "../../state/tasks.ts"
 
 export const SESSION_TASK_TOOL_NAMES = Object.freeze([
   "TaskCreate",
@@ -21,7 +21,6 @@ export const SESSION_TASK_TOOL_NAMES = Object.freeze([
 ])
 
 const metadataSchema = z.record(z.string(), z.unknown())
-const taskStatusSchema = z.enum(["pending", "in_progress", "completed"])
 
 export const taskCreateShape = {
   subject: z.string().min(1).describe("Short imperative task title."),
@@ -72,7 +71,7 @@ export const taskUpdateShape = {
   metadata: metadataSchema.optional().describe("Replacement structured metadata."),
 }
 
-function jsonResult(value) {
+function jsonResult(value: unknown) {
   return toolText(JSON.stringify(value, null, 2))
 }
 

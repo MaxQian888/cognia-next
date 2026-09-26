@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { decodeText, encodeText, readTextPreserving, withFileLock } from "./text-io.mjs"
+import { decodeText, encodeText, readTextPreserving, withFileLock } from "./text-io.ts"
 
 const BOM = String.fromCharCode(0xfeff)
 
@@ -53,7 +53,7 @@ test("readTextPreserving returns content traits and stat", async () => {
 })
 
 test("withFileLock serializes work per key", async () => {
-  const order = []
+  const order: string[] = []
   const slow = withFileLock("k", async () => {
     await new Promise((r) => setTimeout(r, 30))
     order.push("slow")

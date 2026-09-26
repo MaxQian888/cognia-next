@@ -1,12 +1,12 @@
 // Core `ls` tool — directory listing with optional ignore globs.
 
-import path from "node:path"
 import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { resolveToolPath } from "../../src/platform/fs/paths.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { resolveToolPath } from "../../../platform/fs/paths.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 export const MAX_ENTRIES = 500
 
@@ -24,7 +24,7 @@ export const lsShape = {
 }
 
 /** Convert a simple glob (\*, ?) to a RegExp matching the WHOLE name. */
-export function nameGlobToRegExp(glob) {
+export function nameGlobToRegExp(glob: string): RegExp {
   const escaped = glob
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*/g, ".*")
@@ -32,15 +32,15 @@ export function nameGlobToRegExp(glob) {
   return new RegExp(`^${escaped}$`)
 }
 
-export function createLsTool({ cwd }) {
-  async function execLs(args) {
+export function createLsTool({ cwd }: { cwd: string }) {
+  async function execLs(args: ToolArgs<typeof lsShape>) {
     try {
       const abs = resolveToolPath(cwd, args.path ?? ".")
-      let entries
+      let entries: import("node:fs").Dirent[]
       try {
         entries = await fsp.readdir(abs, { withFileTypes: true })
       } catch (err) {
-        return toolError(`cannot list ${abs}: ${err.message}`)
+        return toolError(`cannot list ${abs}: ${(err as Error).message}`)
       }
       const ignoreRes = (args.ignore ?? []).map(nameGlobToRegExp)
       const kept = entries.filter((e) => !ignoreRes.some((re) => re.test(e.name)))

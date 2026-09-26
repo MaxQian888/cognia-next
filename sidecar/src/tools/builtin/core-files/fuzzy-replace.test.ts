@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { replaceWithFallback, similarity, ReplaceError } from "./fuzzy-replace.mjs"
+import { replaceWithFallback, similarity, ReplaceError } from "./fuzzy-replace.ts"
 
 test("exact match replaces a unique occurrence", () => {
   const r = replaceWithFallback("alpha beta gamma", "beta", "BETA")

@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { detectRipgrep, runRipgrep, __resetRgCache } from "./rg.mjs"
+import { detectRipgrep, runRipgrep, __resetRgCache } from "./rg.ts"
 
 test("detectRipgrep honours COGNIA_RG_PATH when it exists", async () => {
   __resetRgCache()

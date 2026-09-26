@@ -14,7 +14,7 @@ import {
   splitNotebookSource,
   extractPdfText,
   MAX_IMAGE_BYTES,
-} from "./read-media.mjs"
+} from "./read-media.ts"
 
 /** A hand-built minimal single-page PDF carrying the text "Hello PDF World". */
 export const MINIMAL_PDF = `%PDF-1.4
@@ -122,7 +122,7 @@ test("splitNotebookSource keeps trailing newlines per nbformat", () => {
   assert.deepEqual(splitNotebookSource(""), [])
 })
 
-function nb(cells) {
+function nb(cells: unknown[]) {
   return JSON.stringify({ cells, metadata: {}, nbformat: 4, nbformat_minor: 5 }, null, 1)
 }
 

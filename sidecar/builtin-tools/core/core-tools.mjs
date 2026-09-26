@@ -13,7 +13,7 @@
 import { createGrepTool } from "./grep.mjs"
 import { createGlobTool } from "./glob.mjs"
 import { createReadTool } from "./read.mjs"
-import { createLsTool } from "./ls.mjs"
+import { createLsTool } from "../../src/tools/builtin/core-files/ls.ts"
 import { createEditTool, createMultiEditTool } from "./edit.mjs"
 import { createWriteTool } from "./write.mjs"
 import {
@@ -22,8 +22,11 @@ import {
   createKillShellTool,
   createListShellsTool,
 } from "./bash.mjs"
-import { createTodoWriteTool, TODO_WRITE_NAME } from "./todo.mjs"
-import { createSessionTaskTools, SESSION_TASK_TOOL_NAMES } from "./tasks.mjs"
+import { createTodoWriteTool, TODO_WRITE_NAME } from "../../src/tools/builtin/core-files/todo.ts"
+import {
+  createSessionTaskTools,
+  SESSION_TASK_TOOL_NAMES,
+} from "../../src/tools/builtin/core-files/tasks.ts"
 import { createNotebookEditTool, NOTEBOOK_EDIT_NAME } from "./notebook-edit.mjs"
 import { createApplyPatchTool } from "./apply-patch.mjs"
 import { createMonitorTools, MONITOR_TOOL_NAMES } from "./monitor.mjs"

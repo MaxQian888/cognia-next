@@ -162,6 +162,8 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/webclone/*` (+ tests)                                     | `src/tools/builtin/webclone/*`                                     | 8i          |
 | `runGit` (in `src/tools/builtin/git/run.ts`)                             | `src/platform/process/git.ts`                                      | 8j          |
 | `builtin-tools/clonedeps/*` (+ tests)                                    | `src/tools/builtin/dependency-research/*`                          | 8j          |
+| `builtin-tools/core/{text-io,fuzzy-replace,js-search,rg,ls}.mjs`         | `src/tools/builtin/core-files/*.ts`                                | 8k          |
+| `builtin-tools/core/{read-media,todo,tasks}.mjs` (+ tests)               | `src/tools/builtin/core-files/*.ts`                                | 8k          |
 
 ## Scripts (run from repo root)
 

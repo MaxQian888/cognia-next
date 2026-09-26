@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { jsGlob, jsGrep, looksBinary, hasBinaryExtension } from "./js-search.mjs"
+import { jsGlob, jsGrep, looksBinary, hasBinaryExtension } from "./js-search.ts"
 
 async function makeFixture() {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "jss-"))
@@ -84,7 +84,7 @@ test("jsGrep multiline matches across lines and reports the start line", async (
       glob: "multi.txt",
     })
     assert.equal(matches.length, 1)
-    assert.equal(matches[0].line, 2)
+    assert.equal(matches[0]!.line, 2)
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
   }

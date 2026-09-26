@@ -17,10 +17,13 @@ import { applyPatch, parsePatch } from "diff"
 import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
 import { canonicalKey } from "../../src/tools/state/read-tracker.ts"
-import { decodeText, encodeText, withFileLock } from "./text-io.mjs"
+import { decodeText, encodeText, withFileLock } from "../../src/tools/builtin/core-files/text-io.ts"
 import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 import { diagnosticsAfterWrite } from "./write.mjs"
-import { replaceWithFallback, ReplaceError } from "./fuzzy-replace.mjs"
+import {
+  replaceWithFallback,
+  ReplaceError,
+} from "../../src/tools/builtin/core-files/fuzzy-replace.ts"
 
 export const applyPatchShape = {
   patch: z

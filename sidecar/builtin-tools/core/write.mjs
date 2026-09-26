@@ -10,7 +10,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
 import { canonicalKey } from "../../src/tools/state/read-tracker.ts"
-import { decodeText, encodeText, withFileLock } from "./text-io.mjs"
+import { decodeText, encodeText, withFileLock } from "../../src/tools/builtin/core-files/text-io.ts"
 import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 
 export const LSP_DIAG_TIMEOUT_MS = 3_000

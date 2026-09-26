@@ -12,9 +12,9 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
 import { canonicalKey } from "../../src/tools/state/read-tracker.ts"
-import { withFileLock } from "./text-io.mjs"
+import { withFileLock } from "../../src/tools/builtin/core-files/text-io.ts"
 import { resolveToolPath } from "../../src/platform/fs/paths.ts"
-import { editNotebook } from "./read-media.mjs"
+import { editNotebook } from "../../src/tools/builtin/core-files/read-media.ts"
 
 export const NOTEBOOK_EDIT_NAME = "NotebookEdit"
 

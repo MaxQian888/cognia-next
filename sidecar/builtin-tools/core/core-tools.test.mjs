@@ -3,9 +3,13 @@ import assert from "node:assert/strict"
 
 import { createCoreTools, CORE_TOOL_NAMES, CORE_MUTATING_TOOL_NAMES } from "./core-tools.mjs"
 import { createReadTracker } from "../../src/tools/state/read-tracker.ts"
-import { todoWriteShape, TODO_WRITE_NAME, createTodoWriteTool } from "./todo.mjs"
+import {
+  todoWriteShape,
+  TODO_WRITE_NAME,
+  createTodoWriteTool,
+} from "../../src/tools/builtin/core-files/todo.ts"
 import { createSessionTaskStore } from "../../src/tools/state/tasks.ts"
-import { SESSION_TASK_TOOL_NAMES } from "./tasks.mjs"
+import { SESSION_TASK_TOOL_NAMES } from "../../src/tools/builtin/core-files/tasks.ts"
 import { MONITOR_TOOL_NAMES } from "./monitor.mjs"
 import { z } from "zod"
 

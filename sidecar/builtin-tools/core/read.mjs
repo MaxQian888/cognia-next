@@ -11,8 +11,8 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText, toolImage } from "../../src/tools/kernel/result.ts"
-import { looksBinary } from "./js-search.mjs"
-import { decodeText } from "./text-io.mjs"
+import { looksBinary } from "../../src/tools/builtin/core-files/js-search.ts"
+import { decodeText } from "../../src/tools/builtin/core-files/text-io.ts"
 import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 import {
   imageMimeFor,
@@ -20,7 +20,7 @@ import {
   readImageBlock,
   renderNotebook,
   extractPdfText,
-} from "./read-media.mjs"
+} from "../../src/tools/builtin/core-files/read-media.ts"
 
 export const DEFAULT_LIMIT = 2000
 export const MAX_LINE_CHARS = 2000

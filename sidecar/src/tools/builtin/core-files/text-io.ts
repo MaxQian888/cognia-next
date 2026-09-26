@@ -15,12 +15,19 @@ const BOM = String.fromCharCode(0xfeff)
  * @returns {{ content: string, bom: boolean, eol: "\n" | "\r\n" }}
  *   `content` is LF-normalized with the BOM stripped.
  */
-export function decodeText(raw) {
+/** A text file's content with its line endings normalised, plus how to restore them. */
+export interface DecodedText {
+  content: string
+  bom: boolean
+  eol: "\r\n" | "\n"
+}
+
+export function decodeText(raw: string): DecodedText {
   const bom = raw.startsWith(BOM)
   const body = bom ? raw.slice(1) : raw
   const crlf = (body.match(/\r\n/g) ?? []).length
   const lf = (body.match(/(?<!\r)\n/g) ?? []).length
-  const eol = crlf > lf ? "\r\n" : "\n"
+  const eol: DecodedText["eol"] = crlf > lf ? "\r\n" : "\n"
   return { content: body.replace(/\r\n/g, "\n"), bom, eol }
 }
 
@@ -29,7 +36,10 @@ export function decodeText(raw) {
  * @param {{ bom: boolean, eol: "\n" | "\r\n" }} traits
  * @returns {string}
  */
-export function encodeText(content, { bom, eol }) {
+export function encodeText(
+  content: string,
+  { bom, eol }: Pick<DecodedText, "bom" | "eol">
+): string {
   const body = eol === "\r\n" ? content.replace(/\n/g, "\r\n") : content
   return bom ? BOM + body : body
 }
@@ -39,7 +49,7 @@ export function encodeText(content, { bom, eol }) {
  * @param {string} absPath
  * @returns {Promise<{ content: string, bom: boolean, eol: "\n" | "\r\n", stat: import("node:fs").Stats }>}
  */
-export async function readTextPreserving(absPath) {
+export async function readTextPreserving(absPath: string) {
   const [raw, stat] = await Promise.all([fsp.readFile(absPath, "utf-8"), fsp.stat(absPath)])
   return { ...decodeText(raw), stat }
 }
@@ -49,7 +59,7 @@ export async function readTextPreserving(absPath) {
 // mutating the same file never interleave their read-modify-write cycles.
 
 /** @type {Map<string, Promise<unknown>>} */
-const chains = new Map()
+const chains = new Map<string, Promise<unknown>>()
 
 /**
  * Run `fn` exclusively for `key` (a canonical file path). Chained FIFO.
@@ -59,7 +69,7 @@ const chains = new Map()
  * @param {() => Promise<T>} fn
  * @returns {Promise<T>}
  */
-export function withFileLock(key, fn) {
+export function withFileLock<T>(key: string, fn: () => T | Promise<T>): Promise<T> {
   const prev = chains.get(key) ?? Promise.resolve()
   const next = prev.then(fn, fn)
   // Store a failure-swallowed tail so one error never poisons the next

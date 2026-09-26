@@ -53,7 +53,7 @@ export const GENERATED_DIRS = [
  * reason. Each is loaded behind a fallback, so its absence is not a crash.
  */
 export const OPTIONAL_UNDECLARED = {
-  "@vscode/ripgrep": "probed by builtin-tools/core/rg.mjs after the system rg; the import is caught and falls back",
+  "@vscode/ripgrep": "probed by src/tools/builtin/core-files/rg.ts after the system rg; the import is caught and falls back",
 }
 
 const SCRIPT_EXTENSIONS = new Set([".mjs", ".js", ".cjs", ".ts", ".mts", ".cts"])

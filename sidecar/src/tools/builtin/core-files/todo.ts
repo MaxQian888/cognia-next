@@ -13,7 +13,8 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolText } from "../../src/tools/kernel/result.ts"
+import { toolText } from "../../kernel/result.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 export const TODO_WRITE_NAME = "TodoWrite"
 
@@ -34,7 +35,7 @@ export const todoWriteShape = {
 }
 
 export function createTodoWriteTool() {
-  async function execTodoWrite(args) {
+  async function execTodoWrite(args: ToolArgs<typeof todoWriteShape>) {
     const total = args.todos.length
     const done = args.todos.filter((t) => t.status === "completed").length
     const active = args.todos.find((t) => t.status === "in_progress")

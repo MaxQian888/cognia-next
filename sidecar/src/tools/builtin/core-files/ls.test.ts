@@ -4,10 +4,11 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { createLsTool, nameGlobToRegExp } from "./ls.mjs"
+import { createLsTool, nameGlobToRegExp } from "./ls.ts"
+import { asCallable } from "../../../../test-support/tool-result.ts"
 
-function textOf(result) {
-  return result.content.map((b) => b.text).join("\n")
+function textOf(result: { content: readonly unknown[] }) {
+  return result.content.map((b) => (b as { text?: string }).text).join("\n")
 }
 
 test("ls lists dirs first with trailing slash, sorted", async () => {
@@ -16,7 +17,7 @@ test("ls lists dirs first with trailing slash, sorted", async () => {
     await fsp.mkdir(path.join(dir, "zdir"))
     await fsp.mkdir(path.join(dir, "adir"))
     await fsp.writeFile(path.join(dir, "bfile.txt"), "")
-    const tool = createLsTool({ cwd: dir })
+    const tool = asCallable(createLsTool({ cwd: dir }))
     const text = textOf(await tool.handler({}, {}))
     const lines = text.split("\n").slice(1)
     assert.deepEqual(lines, ["adir/", "zdir/", "bfile.txt"])
@@ -30,7 +31,7 @@ test("ls applies ignore globs", async () => {
   try {
     await fsp.writeFile(path.join(dir, "keep.ts"), "")
     await fsp.writeFile(path.join(dir, "drop.log"), "")
-    const tool = createLsTool({ cwd: dir })
+    const tool = asCallable(createLsTool({ cwd: dir }))
     const text = textOf(await tool.handler({ ignore: ["*.log"] }, {}))
     assert.ok(text.includes("keep.ts"))
     assert.ok(!text.includes("drop.log"))
@@ -40,7 +41,7 @@ test("ls applies ignore globs", async () => {
 })
 
 test("ls errors usefully on a missing directory", async () => {
-  const tool = createLsTool({ cwd: os.tmpdir() })
+  const tool = asCallable(createLsTool({ cwd: os.tmpdir() }))
   const res = await tool.handler({ path: "definitely-missing-dir-xyz" }, {})
   assert.equal(res.isError, true)
 })

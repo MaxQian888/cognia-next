@@ -14,37 +14,57 @@
 
 const BLOCK_ANCHOR_THRESHOLD = 0.65
 
+export type ReplaceErrorCode = "not_found" | "not_unique"
+
+/** A character span in the original content. */
+interface Range {
+  start: number
+  end: number
+}
+
+/** What a successful replacement reports. */
+export interface ReplaceResult {
+  content: string
+  matched: string
+  count: number
+  /** Start of the first replacement, or -1. */
+  firstIndex: number
+  /** Each replaced span, in ORIGINAL-content coordinates. */
+  targets: { start: number; oldLen: number }[]
+  newLen: number
+}
+
 export class ReplaceError extends Error {
-  /** @param {"not_found"|"not_unique"} code  @param {string} message */
-  constructor(code, message) {
+  declare code: ReplaceErrorCode
+  constructor(code: ReplaceErrorCode, message: string) {
     super(message)
     this.code = code
   }
 }
 
 /** Levenshtein similarity in [0,1]. Exported for tests. */
-export function similarity(a, b) {
+export function similarity(a: string, b: string): number {
   if (a === b) return 1
   if (a.length === 0 || b.length === 0) return 0
   const m = a.length
   const n = b.length
-  let prev = new Array(n + 1)
-  let curr = new Array(n + 1)
+  let prev: number[] = new Array(n + 1)
+  let curr: number[] = new Array(n + 1)
   for (let j = 0; j <= n; j++) prev[j] = j
   for (let i = 1; i <= m; i++) {
     curr[0] = i
     for (let j = 1; j <= n; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+      curr[j] = Math.min(prev[j]! + 1, curr[j - 1]! + 1, prev[j - 1]! + cost)
     }
     ;[prev, curr] = [curr, prev]
   }
-  return 1 - prev[n] / Math.max(m, n)
+  return 1 - prev[n]! / Math.max(m, n)
 }
 
 /** Find every index where `needle` occurs in `haystack`. */
-function allIndices(haystack, needle) {
-  const out = []
+function allIndices(haystack: string, needle: string): number[] {
+  const out: number[] = []
   let i = haystack.indexOf(needle)
   while (i !== -1) {
     out.push(i)
@@ -57,41 +77,45 @@ function allIndices(haystack, needle) {
  * Match on lines: returns char ranges in `content` whose trimmed lines equal
  * the trimmed lines of `needle` (same line count).
  */
-function lineMatches(content, needle, normalize) {
+function lineMatches(
+  content: string,
+  needle: string,
+  normalize: (line: string) => string
+): Range[] {
   const contentLines = content.split("\n")
   const needleLines = needle.split("\n")
   // Trim trailing blank needle lines that often sneak in.
-  while (needleLines.length > 1 && needleLines[needleLines.length - 1].trim() === "") {
+  while (needleLines.length > 1 && needleLines[needleLines.length - 1]!.trim() === "") {
     needleLines.pop()
   }
   if (needleLines.length === 0) return []
   const normNeedle = needleLines.map(normalize)
-  const ranges = []
+  const ranges: Range[] = []
   // Precompute char offsets per line start.
-  const offsets = new Array(contentLines.length)
+  const offsets: number[] = new Array(contentLines.length)
   let acc = 0
   for (let i = 0; i < contentLines.length; i++) {
     offsets[i] = acc
-    acc += contentLines[i].length + 1
+    acc += contentLines[i]!.length + 1
   }
   outer: for (let i = 0; i + needleLines.length <= contentLines.length; i++) {
     for (let j = 0; j < needleLines.length; j++) {
-      if (normalize(contentLines[i + j]) !== normNeedle[j]) continue outer
+      if (normalize(contentLines[i + j]!) !== normNeedle[j]) continue outer
     }
-    const start = offsets[i]
+    const start = offsets[i]!
     const lastIdx = i + needleLines.length - 1
-    const end = offsets[lastIdx] + contentLines[lastIdx].length
+    const end = offsets[lastIdx]! + contentLines[lastIdx]!.length
     ranges.push({ start, end })
   }
   return ranges
 }
 
 /** Strategy 4 normalizer factory: strip the block's minimum indentation. */
-function stripMinIndent(lines) {
+function stripMinIndent(lines: string[]): string[] {
   let min = Infinity
   for (const l of lines) {
     if (l.trim().length === 0) continue
-    const indent = l.match(/^[ \t]*/)[0].length
+    const indent = l.match(/^[ \t]*/)![0].length
     if (indent < min) min = indent
   }
   if (!Number.isFinite(min) || min === 0) return lines
@@ -99,33 +123,33 @@ function stripMinIndent(lines) {
 }
 
 /** Strategy 5: anchor on first+last needle lines, score the middle. */
-function blockAnchorMatches(content, needle) {
+function blockAnchorMatches(content: string, needle: string): Range[] {
   const needleLines = needle.split("\n").filter((l, i, arr) => !(i === arr.length - 1 && l === ""))
   if (needleLines.length < 3) return []
-  const first = needleLines[0].trim()
-  const last = needleLines[needleLines.length - 1].trim()
+  const first = needleLines[0]!.trim()
+  const last = needleLines[needleLines.length - 1]!.trim()
   const middle = needleLines
     .slice(1, -1)
     .map((l) => l.trim())
     .join("\n")
   const contentLines = content.split("\n")
-  const offsets = new Array(contentLines.length)
+  const offsets: number[] = new Array(contentLines.length)
   let acc = 0
   for (let i = 0; i < contentLines.length; i++) {
     offsets[i] = acc
-    acc += contentLines[i].length + 1
+    acc += contentLines[i]!.length + 1
   }
-  const ranges = []
+  const ranges: Range[] = []
   for (let i = 0; i < contentLines.length; i++) {
-    if (contentLines[i].trim() !== first) continue
+    if (contentLines[i]!.trim() !== first) continue
     for (let k = i + 2; k < Math.min(contentLines.length, i + needleLines.length * 2 + 4); k++) {
-      if (contentLines[k].trim() !== last) continue
+      if (contentLines[k]!.trim() !== last) continue
       const candMiddle = contentLines
         .slice(i + 1, k)
         .map((l) => l.trim())
         .join("\n")
       if (similarity(candMiddle, middle) >= BLOCK_ANCHOR_THRESHOLD) {
-        ranges.push({ start: offsets[i], end: offsets[k] + contentLines[k].length })
+        ranges.push({ start: offsets[i]!, end: offsets[k]! + contentLines[k]!.length })
       }
       break // nearest closing anchor only
     }
@@ -136,15 +160,15 @@ function blockAnchorMatches(content, needle) {
 /**
  * Replace `oldString` with `newString` in `content`.
  *
- * @param {string} content
- * @param {string} oldString
- * @param {string} newString
- * @param {boolean} [replaceAll=false]
- * @returns {{ content: string, matched: string, count: number }}
- * @throws {ReplaceError} `not_found` when no strategy matches; `not_unique`
- *   when multiple matches exist and `replaceAll` is false.
+ * Throws a {@link ReplaceError}: `not_found` when no strategy matches,
+ * `not_unique` when multiple matches exist and `replaceAll` is false.
  */
-export function replaceWithFallback(content, oldString, newString, replaceAll = false) {
+export function replaceWithFallback(
+  content: string,
+  oldString: unknown,
+  newString: string,
+  replaceAll = false
+): ReplaceResult {
   if (typeof oldString !== "string" || oldString.length === 0) {
     throw new ReplaceError("not_found", "old_string must be a non-empty string")
   }
@@ -168,7 +192,7 @@ export function replaceWithFallback(content, oldString, newString, replaceAll = 
 
   // Line-based strategies (2–4). Only a UNIQUE match is trusted; fuzzy
   // replace-all would be reckless.
-  const strategies = [
+  const strategies: [string, (line: string) => string][] = [
     ["line-trimmed", (l) => l.trim()],
     ["whitespace-normalized", (l) => l.replace(/\s+/g, " ").trim()],
   ]
@@ -224,7 +248,14 @@ export function replaceWithFallback(content, oldString, newString, replaceAll = 
   )
 }
 
-function applyAtIndices(content, indices, oldLen, newString, matched, replaceAll) {
+function applyAtIndices(
+  content: string,
+  indices: number[],
+  oldLen: number,
+  newString: string,
+  matched: string,
+  replaceAll: boolean
+): ReplaceResult {
   const idx = replaceAll ? indices : indices.slice(0, 1)
   return applyAtRanges(
     content,
@@ -234,7 +265,12 @@ function applyAtIndices(content, indices, oldLen, newString, matched, replaceAll
   )
 }
 
-function applyAtRanges(content, ranges, newString, matched) {
+function applyAtRanges(
+  content: string,
+  ranges: Range[],
+  newString: string,
+  matched: string
+): ReplaceResult {
   // Ranges from a single strategy never overlap; apply in order.
   let out = ""
   let prev = 0
@@ -252,7 +288,7 @@ function applyAtRanges(content, ranges, newString, matched) {
     content: out,
     matched,
     count: ranges.length,
-    firstIndex: ranges.length > 0 ? ranges[0].start : -1,
+    firstIndex: ranges.length > 0 ? ranges[0]!.start : -1,
     targets,
     newLen: newString.length,
   }

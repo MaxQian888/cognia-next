@@ -9,13 +9,59 @@ import path from "node:path"
 import fsp from "node:fs/promises"
 import crypto from "node:crypto"
 
-import capabilities from "../../../lib/ai/providers/models-dev-capabilities.json" with { type: "json" }
+import capabilities from "../../../../../lib/ai/providers/models-dev-capabilities.json" with { type: "json" }
 
-const SNAPSHOT = /** @type {Record<string, Record<string, { i?: string[] }>>} */ (capabilities)
-const MODEL_BY_ID = new Map()
+type ModelEntry = { i?: string[] }
+const SNAPSHOT = capabilities as unknown as Record<string, Record<string, ModelEntry>>
+const MODEL_BY_ID = new Map<string, ModelEntry>()
 for (const provider of Object.values(SNAPSHOT)) {
   for (const [modelId, model] of Object.entries(provider)) {
     if (!MODEL_BY_ID.has(modelId)) MODEL_BY_ID.set(modelId, model)
+  }
+}
+
+/** One cell of a Jupyter notebook, as far as this module reads it. */
+export interface NotebookCell {
+  cell_type?: string
+  id?: string
+  metadata?: { id?: string; [key: string]: unknown }
+  source?: string | string[]
+  outputs?: unknown[]
+  execution_count?: number | null
+  [key: string]: unknown
+}
+
+interface NotebookJson {
+  cells?: (NotebookCell | null)[]
+  [key: string]: unknown
+}
+
+interface NotebookOutput {
+  output_type?: string
+  text?: string | string[]
+  data?: { "text/plain"?: string | string[] }
+  ename?: string
+  evalue?: string
+}
+
+export interface NotebookEditOptions {
+  cellId?: string | undefined
+  cellNumber?: number | undefined
+  cellType?: "code" | "markdown" | undefined
+  source?: string | undefined
+  mode?: "replace" | "insert" | "delete" | undefined
+}
+
+/** The slice of pdfjs-dist's legacy build this module drives. */
+interface PdfJsView {
+  getDocument(params: { data: Uint8Array; isEvalSupported: boolean; verbosity: number }): {
+    promise: Promise<{
+      numPages: number
+      getPage(n: number): Promise<{
+        getTextContent(): Promise<{ items: { str?: string; hasEOL?: boolean }[] }>
+      }>
+      destroy?: () => Promise<void>
+    }>
   }
 }
 
@@ -39,11 +85,8 @@ export const PDF_MAX_CHARS = 200_000
 /**
  * Look up a model's accepted input modalities from the models.dev snapshot.
  * Mirrors `cli/src/agent/attachments/model-modalities.ts`. Unknown → [].
- * @param {string} provider
- * @param {string} model
- * @returns {string[]}
  */
-export function modelInputModalities(provider, model) {
+export function modelInputModalities(provider: string, model: string): string[] {
   const direct = SNAPSHOT[provider]?.[model]?.i
   if (direct) return direct
   if (typeof model === "string" && model.includes("/")) {
@@ -57,23 +100,26 @@ export function modelInputModalities(provider, model) {
 }
 
 /** Does this model accept image input? */
-export function modelSupportsImageInput(provider, model) {
+export function modelSupportsImageInput(
+  provider: string | null | undefined,
+  model: string | null | undefined
+): boolean {
   if (!provider || !model) return false
   return modelInputModalities(provider, model).includes("image")
 }
 
 /** Is this path an image we know how to encode? */
-export function imageMimeFor(absPath) {
-  return IMAGE_MIME[path.extname(absPath).toLowerCase()] ?? null
+export function imageMimeFor(absPath: string): string | null {
+  return (IMAGE_MIME as Record<string, string>)[path.extname(absPath).toLowerCase()] ?? null
 }
 
-/**
- * Read an image file as a base64 content-block payload.
- * @param {string} absPath
- * @returns {Promise<{ ok: true, data: string, mimeType: string, size: number }
- *   | { ok: false, reason: "unsupported"|"too_large", size?: number }>}
- */
-export async function readImageBlock(absPath) {
+/** Read an image file as a base64 content-block payload. */
+export async function readImageBlock(
+  absPath: string
+): Promise<
+  | { ok: true; data: string; mimeType: string; size: number }
+  | { ok: false; reason: "unsupported" | "too_large"; size?: number }
+> {
   const mimeType = imageMimeFor(absPath)
   if (!mimeType) return { ok: false, reason: "unsupported" }
   const buf = await fsp.readFile(absPath)
@@ -82,7 +128,7 @@ export async function readImageBlock(absPath) {
 }
 
 /** Truncate a cell's source for the rendered transcript. */
-function clampCell(text, max = 4000) {
+function clampCell(text: string, max = 4000): string {
   if (text.length <= max) return text
   return `${text.slice(0, max)}\n… (cell truncated)`
 }
@@ -91,21 +137,19 @@ function clampCell(text, max = 4000) {
  * Render a Jupyter notebook (.ipynb JSON) as readable text: each cell becomes
  * a labelled block (markdown / code), code cells append their text/stream
  * outputs. Throws on malformed JSON (caller surfaces a tool error).
- * @param {string} jsonText
- * @returns {string}
  */
-export function renderNotebook(jsonText) {
-  const nb = JSON.parse(jsonText)
-  const cells = Array.isArray(nb?.cells) ? nb.cells : []
+export function renderNotebook(jsonText: string): string {
+  const nb = JSON.parse(jsonText) as NotebookJson | null
+  const cells: (NotebookCell | null)[] = Array.isArray(nb?.cells) ? nb.cells : []
   if (cells.length === 0) return "(empty notebook — no cells)"
-  const out = []
+  const out: string[] = []
   cells.forEach((cell, i) => {
     const kind =
       cell?.cell_type === "code" ? "code" : cell?.cell_type === "markdown" ? "markdown" : "raw"
     const src = Array.isArray(cell?.source) ? cell.source.join("") : String(cell?.source ?? "")
     out.push(`# Cell ${i + 1} [${kind}]`)
     out.push(clampCell(src.trimEnd()))
-    if (kind === "code" && Array.isArray(cell.outputs) && cell.outputs.length > 0) {
+    if (kind === "code" && Array.isArray(cell?.outputs) && cell.outputs.length > 0) {
       const rendered = cell.outputs
         .map((o) => renderOutput(o))
         .filter((t) => t && t.length > 0)
@@ -120,8 +164,9 @@ export function renderNotebook(jsonText) {
 }
 
 /** Render a single notebook output to text (stream / execute_result / error). */
-function renderOutput(o) {
-  if (!o || typeof o !== "object") return ""
+function renderOutput(output: unknown): string {
+  if (!output || typeof output !== "object") return ""
+  const o = output as NotebookOutput
   if (o.output_type === "stream") {
     return Array.isArray(o.text) ? o.text.join("") : String(o.text ?? "")
   }
@@ -144,23 +189,26 @@ function renderOutput(o) {
  * Lazy-imported like node-pty so a missing/broken install degrades gracefully:
  * on any failure this returns `{ ok: false }` and `read` falls back to the
  * honest @-attachment redirect rather than crashing.
- *
- * @param {string} absPath
- * @param {{ maxPages?: number, maxChars?: number }} [opts]
- * @returns {Promise<{ ok: true, text: string, pages: number, shown: number, truncated: boolean }
- *   | { ok: false, reason?: string }>}
  */
-export async function extractPdfText(absPath, opts = {}) {
+export async function extractPdfText(
+  absPath: string,
+  opts: { maxPages?: number; maxChars?: number } = {}
+): Promise<
+  | { ok: true; text: string; pages: number; shown: number; truncated: boolean }
+  | { ok: false; reason?: string }
+> {
   const maxPages = opts.maxPages ?? PDF_MAX_PAGES
   const maxChars = opts.maxChars ?? PDF_MAX_CHARS
   try {
-    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
+    // pdfjs's published types lag the options and methods this call relies on
+    // (`isEvalSupported`, `destroy`), so it is used through this narrow view.
+    const pdfjs = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as unknown as PdfJsView
     const data = new Uint8Array(await fsp.readFile(absPath))
     // verbosity: 0 (ERRORS only) silences pdfjs's noisy info/warn console output.
     const doc = await pdfjs.getDocument({ data, isEvalSupported: false, verbosity: 0 }).promise
     const pageCount = doc.numPages
     const shown = Math.min(pageCount, maxPages)
-    const out = []
+    const out: string[] = []
     let chars = 0
     let charCapped = false
     for (let i = 1; i <= shown; i++) {
@@ -187,25 +235,23 @@ export async function extractPdfText(absPath, opts = {}) {
       truncated: charCapped || pageCount > shown,
     }
   } catch (err) {
-    return { ok: false, reason: err?.message ?? String(err) }
+    return { ok: false, reason: (err as { message?: string } | null)?.message ?? String(err) }
   }
 }
 
 // ---- Notebook editing -----------------------------------------------------
 
 /** Detect the JSON indent width used by an .ipynb (Jupyter writes 1 space). */
-function detectJsonIndent(jsonText) {
+function detectJsonIndent(jsonText: string): number {
   const m = jsonText.match(/\n( +)"/)
-  return m ? m[1].length : 1
+  return m ? m[1]!.length : 1
 }
 
 /**
  * Split a source string into the nbformat list-of-lines form: each line keeps
  * its trailing "\n" except the last. An empty string → [].
- * @param {string} source
- * @returns {string[]}
  */
-export function splitNotebookSource(source) {
+export function splitNotebookSource(source: unknown): string[] {
   const text = String(source ?? "")
   if (text.length === 0) return []
   const parts = text.split("\n")
@@ -219,7 +265,7 @@ export function splitNotebookSource(source) {
 }
 
 /** Build a fresh notebook cell of the given type. */
-function newNotebookCell(cellType, source) {
+function newNotebookCell(cellType: string, source: string): NotebookCell {
   const id = crypto.randomUUID().slice(0, 8)
   const sourceLines = splitNotebookSource(source)
   if (cellType === "markdown") {
@@ -239,7 +285,10 @@ function newNotebookCell(cellType, source) {
  * Locate a cell index by its nbformat `id` (or legacy `metadata.id`), or by a
  * 1-based cell number. Returns -1 when neither locator is supplied/matches.
  */
-function locateCellIndex(cells, { cellId, cellNumber }) {
+function locateCellIndex(
+  cells: (NotebookCell | null)[],
+  { cellId, cellNumber }: { cellId?: string | undefined; cellNumber?: number | undefined }
+): number {
   if (cellId != null && cellId !== "") {
     return cells.findIndex((c) => c?.id === cellId || c?.metadata?.id === cellId)
   }
@@ -256,18 +305,16 @@ function locateCellIndex(cells, { cellId, cellNumber }) {
  *
  * Throws (caller surfaces a tool error) on malformed JSON, an out-of-range or
  * unresolved locator, or a missing source for replace/insert.
- *
- * @param {string} jsonText
- * @param {{ cellId?: string, cellNumber?: number, cellType?: "code"|"markdown",
- *           source?: string, mode?: "replace"|"insert"|"delete" }} opts
- * @returns {{ json: string, message: string, index: number, totalCells: number }}
  */
-export function editNotebook(jsonText, opts = {}) {
+export function editNotebook(
+  jsonText: string,
+  opts: NotebookEditOptions = {}
+): { json: string; message: string; index: number; totalCells: number } {
   const { cellId, cellNumber, cellType, source, mode = "replace" } = opts
-  const nb = JSON.parse(jsonText)
+  const nb = JSON.parse(jsonText) as NotebookJson | null
   if (!nb || typeof nb !== "object") throw new Error("not a valid notebook (root is not an object)")
   if (!Array.isArray(nb.cells)) nb.cells = []
-  const cells = nb.cells
+  const cells: (NotebookCell | null)[] = nb.cells
   const indent = detectJsonIndent(jsonText)
   const serialise = () => JSON.stringify(nb, null, indent)
 
@@ -307,7 +354,7 @@ export function editNotebook(jsonText, opts = {}) {
 
   // replace
   if (source == null) throw new Error("replace mode requires new_source")
-  const cell = cells[idx]
+  const cell = cells[idx]!
   cell.source = splitNotebookSource(source)
   if (cellType && cell.cell_type !== cellType) {
     cell.cell_type = cellType

@@ -3,11 +3,20 @@ import assert from "node:assert/strict"
 
 import { z } from "zod"
 
-import { createSessionTaskStore } from "../../src/tools/state/tasks.ts"
-import { createSessionTaskTools, taskCreateShape, taskUpdateShape } from "./tasks.mjs"
+import { createSessionTaskStore } from "../../state/tasks.ts"
+import { createSessionTaskTools, taskCreateShape, taskUpdateShape } from "./tasks.ts"
+import { asCallable, firstText } from "../../../../test-support/tool-result.ts"
+import type { CallableTool } from "../../../../test-support/tool-result.ts"
 
-function parseText(result) {
-  return JSON.parse(result.content.map((block) => block.text ?? "").join("\n"))
+interface TaskOutput {
+  task: { id: string; subject?: string; status?: string; description?: string }
+  tasks: { id: string }[]
+}
+
+function parseText(result: { content: readonly unknown[] }): TaskOutput {
+  return JSON.parse(
+    result.content.map((block) => (block as { text?: string }).text ?? "").join("\n")
+  ) as TaskOutput
 }
 
 test("task schemas match the structured Claude Code task contract", () => {
@@ -38,22 +47,27 @@ test("task schemas match the structured Claude Code task contract", () => {
 
 test("TaskCreate, TaskGet, TaskList, and TaskUpdate share one session store", async () => {
   const store = createSessionTaskStore()
-  const tools = Object.fromEntries(createSessionTaskTools(store).map((tool) => [tool.name, tool]))
+  const tools = Object.fromEntries(
+    createSessionTaskTools(store).map((tool) => [tool.name, asCallable(tool)])
+  ) as Record<string, CallableTool>
 
   const created = parseText(
-    await tools.TaskCreate.handler({ subject: "Research", description: "Study current agents" }, {})
+    await tools.TaskCreate!.handler(
+      { subject: "Research", description: "Study current agents" },
+      {}
+    )
   )
   assert.deepEqual(created.task, { id: "1", subject: "Research" })
 
   const updated = parseText(
-    await tools.TaskUpdate.handler({ taskId: "1", status: "in_progress" }, {})
+    await tools.TaskUpdate!.handler({ taskId: "1", status: "in_progress" }, {})
   )
   assert.equal(updated.task.status, "in_progress")
 
-  const fetched = parseText(await tools.TaskGet.handler({ taskId: "1" }, {}))
+  const fetched = parseText(await tools.TaskGet!.handler({ taskId: "1" }, {}))
   assert.equal(fetched.task.description, "Study current agents")
 
-  const listed = parseText(await tools.TaskList.handler({}, {}))
+  const listed = parseText(await tools.TaskList!.handler({}, {}))
   assert.deepEqual(
     listed.tasks.map((task) => task.id),
     ["1"]
@@ -62,9 +76,9 @@ test("TaskCreate, TaskGet, TaskList, and TaskUpdate share one session store", as
 
 test("task tools return structured errors for unknown task ids", async () => {
   const tools = Object.fromEntries(
-    createSessionTaskTools(createSessionTaskStore()).map((tool) => [tool.name, tool])
-  )
-  const result = await tools.TaskGet.handler({ taskId: "missing" }, {})
+    createSessionTaskTools(createSessionTaskStore()).map((tool) => [tool.name, asCallable(tool)])
+  ) as Record<string, CallableTool>
+  const result = await tools.TaskGet!.handler({ taskId: "missing" }, {})
   assert.equal(result.isError, true)
-  assert.match(result.content[0].text, /task missing not found/)
+  assert.match(firstText(result), /task missing not found/)
 })
