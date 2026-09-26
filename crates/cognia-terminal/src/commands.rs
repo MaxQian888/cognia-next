@@ -1,35 +1,24 @@
-//! Tauri commands for the integrated terminal subsystem.
+//! Tauri-facing helpers for the integrated terminal subsystem.
 //!
-//! Renderer flow:
-//!   1. `dispatchTerminalWillSpawn` runs in TS — plugins veto/modify.
-//!   2. Renderer constructs a `Channel<TerminalEvent>` and calls
-//!      `terminal_spawn`. We return the session id + info; bytes start
-//!      streaming through the channel immediately.
-//!   3. `terminal_write` / `terminal_resize` operate on the live session.
-//!   4. `terminal_kill` removes the session from the store and signals
-//!      the child. Drop on the inner `PtySession` handles cleanup.
-//!
-//! All commands are stateless wrappers around `TerminalState` lookups;
-//! every retainable session truth lives in the store.
+//! The PTY lifecycle commands (`terminal_spawn` / `_reattach` / `_write` /
+//! `_resize` / `_kill` / `_list_*`) live in `src-tauri`'s
+//! `terminal_host_bridge`, which forwards them to the durable
+//! `cognia-server desktop-host`. What stays here is what that bridge and the
+//! headless sessions share: the shell-integration script and `cognia` CLI
+//! path resolvers, and the `terminal_kill_port` quick-fix command.
 
-// Without `tauri-host` the commands and the `AppHandle` path resolvers compile
-// out (ADR-0196), leaving imports and helpers only they use; the feature build
-// still lints all of them.
+// Without `tauri-host` the `AppHandle` path resolvers compile out (ADR-0196),
+// leaving imports and helpers only they use; the feature build still lints
+// all of them.
 #![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use serde::Serialize;
 #[cfg(feature = "tauri-host")]
-use tauri::ipc::Channel;
-#[cfg(feature = "tauri-host")]
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime};
 
-use super::session::{
-    cognia_bin_filename, spawn_session, PathInjection, SeqEvent, SpawnRequest, TerminalSessionInfo,
-};
-use super::TerminalState;
+use super::session::{cognia_bin_filename, PathInjection};
 
 #[cfg(feature = "tauri-host")]
 /// Locate the bundled shell-integration script directory. In dev
@@ -144,116 +133,6 @@ pub fn build_cli_path_injection<R: Runtime>(app: &AppHandle<R>) -> PathInjection
         resolve_cli_dir(app),
         app.path().home_dir().ok(),
     )
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SpawnResult {
-    pub session: TerminalSessionInfo,
-}
-
-/// Open a new PTY session and start streaming `{seq, event}` envelopes
-/// through `on_event`. The renderer persists the last seen `seq` so it can
-/// resume via `terminal_reattach` after a reload.
-#[cfg(feature = "tauri-host")]
-#[tauri::command]
-pub fn terminal_spawn<R: Runtime>(
-    app: AppHandle<R>,
-    state: State<'_, TerminalState>,
-    req: SpawnRequest,
-    on_event: Channel<SeqEvent>,
-) -> Result<SpawnResult, String> {
-    let script_dir = resolve_script_dir(&app);
-    let path = build_cli_path_injection(&app);
-    let session = spawn_session(req, &script_dir, &path, on_event)?;
-    let info = session.info();
-    state.insert(std::sync::Arc::new(session));
-    Ok(SpawnResult { session: info })
-}
-
-/// Reattach a fresh Channel to an existing session after a webview reload
-/// (1C). The Rust process — and thus the live PTY — survives a reload; this
-/// rewires the byte stream and replays everything with `seq > resume_from`.
-/// Returns the session info, or an error when the session is gone (e.g. a
-/// full app restart, where sessions are not restored).
-#[cfg(feature = "tauri-host")]
-#[tauri::command]
-pub fn terminal_reattach(
-    state: State<'_, TerminalState>,
-    id: String,
-    on_event: Channel<SeqEvent>,
-    resume_from: u64,
-) -> Result<TerminalSessionInfo, String> {
-    let session = state
-        .get(&id)
-        .ok_or_else(|| format!("unknown session id: {id}"))?;
-    session.reattach(on_event, resume_from);
-    Ok(session.info())
-}
-
-/// Pipe bytes into the PTY stdin. `data` is base64-decoded automatically
-/// by Tauri when typed as `Vec<u8>` on the Rust side.
-#[cfg(feature = "tauri-host")]
-#[tauri::command]
-pub fn terminal_write(
-    state: State<'_, TerminalState>,
-    id: String,
-    data: Vec<u8>,
-) -> Result<(), String> {
-    let session = state
-        .get(&id)
-        .ok_or_else(|| format!("unknown session id: {id}"))?;
-    session
-        .write(&data)
-        .map_err(|e| format!("write failed: {e}"))
-}
-
-#[cfg(feature = "tauri-host")]
-#[tauri::command]
-pub fn terminal_resize(
-    state: State<'_, TerminalState>,
-    id: String,
-    rows: u16,
-    cols: u16,
-) -> Result<(), String> {
-    let session = state
-        .get(&id)
-        .ok_or_else(|| format!("unknown session id: {id}"))?;
-    session
-        .resize(rows, cols)
-        .map_err(|e| format!("resize failed: {e}"))
-}
-
-/// Send SIGTERM (or platform equivalent) to the child and remove the
-/// session from the store. Idempotent — calling on an already-killed or
-/// missing session returns `Ok(())`.
-///
-/// Drop on the removed `Arc<PtySession>` ensures the child is actually
-/// killed even if the explicit `kill()` racied with natural exit.
-#[cfg(feature = "tauri-host")]
-#[tauri::command]
-pub fn terminal_kill(state: State<'_, TerminalState>, id: String) -> Result<(), String> {
-    if let Some(session) = state.remove(&id) {
-        let _ = session.kill();
-    }
-    Ok(())
-}
-
-#[cfg(feature = "tauri-host")]
-#[tauri::command]
-pub fn terminal_list_for_project(
-    state: State<'_, TerminalState>,
-    project_id: String,
-) -> Result<Vec<TerminalSessionInfo>, String> {
-    Ok(state.list_for_project(&project_id))
-}
-
-#[cfg(feature = "tauri-host")]
-#[tauri::command]
-pub fn terminal_list_all(
-    state: State<'_, TerminalState>,
-) -> Result<Vec<TerminalSessionInfo>, String> {
-    Ok(state.list_all())
 }
 
 /// Free a TCP port by killing whatever process is listening on it. Backs the

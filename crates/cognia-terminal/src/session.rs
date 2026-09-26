@@ -383,9 +383,8 @@ pub(super) fn compute_path(existing: Option<&OsStr>, inj: &PathInjection) -> Opt
     std::env::join_paths(dirs).ok()
 }
 
-/// Channel-backed convenience wrapper — mirrors the original public
-/// signature so the existing Tauri command (`terminal_spawn`) keeps
-/// compiling unchanged. The Channel wire format doesn't carry seq, so
+/// Channel-backed convenience wrapper over [`spawn_session_with_sink`] for
+/// an in-process desktop sink. The Channel wire format doesn't carry seq, so
 /// the wrapper drops it.
 pub fn spawn_session(
     req: SpawnRequest,

@@ -1347,9 +1347,9 @@ export function collectInputs() {
   const tauriCommands = new Map()
   for (const file of listRustFiles()) {
     for (const command of parseTauriCommands(read(file), file)) {
-      // Duplicate names exist across crates (two `terminal_spawn`s); the one
-      // that matters is whichever `generate_handler!` registers, and both
-      // shapes are equivalent for our purposes. First wins, deterministically.
+      // Duplicate names can exist across crates; the one that matters is
+      // whichever `generate_handler!` registers, and duplicate shapes are
+      // equivalent for our purposes. First wins, deterministically.
       if (!tauriCommands.has(command.name)) tauriCommands.set(command.name, command)
     }
   }

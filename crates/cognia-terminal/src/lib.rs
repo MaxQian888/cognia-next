@@ -9,8 +9,10 @@
 //!     shell-integration scripts at `src-tauri/resources/terminal/`.
 //!   * `session` — `PtySession` wrapping `portable_pty::PtyPair` and the
 //!     reader / waiter threads. First user of `tauri::ipc::Channel<T>`.
-//!   * `commands` — Tauri commands exported through
-//!     `lib.rs::generate_handler!`.
+//!   * `commands` — the shell-integration / CLI path resolvers shared by
+//!     `src-tauri`'s `terminal_host_bridge` (which owns the PTY lifecycle
+//!     commands, forwarded to `cognia-server desktop-host`) and the
+//!     `terminal_kill_port` command.
 //!
 //! The renderer pre-flights every spawn through
 //! `lib/plugin/messaging/hooks-system.ts::dispatchTerminalWillSpawn` so
@@ -64,7 +66,7 @@ pub use replay::ReplayBuffer;
 pub use session::{PtySession, SessionOrigin, SpawnRequest, TerminalEvent, TerminalSessionInfo};
 
 /// In-process registry of live PTY sessions. Stored as a Tauri-managed
-/// state and looked up by every terminal_* command. Multi-thread safe;
+/// state and read by the app's process registry. Multi-thread safe;
 /// the per-session `Arc<PtySession>` is cloned cheaply for the (rare)
 /// case where a long-running operation needs to outlive the map lock.
 #[derive(Default)]
