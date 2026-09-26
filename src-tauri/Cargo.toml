@@ -137,7 +137,7 @@ cognia-gateway = { path = "../crates/cognia-gateway", features = ["tauri-host"] 
 # `crate::ccswitch`.
 cognia-ccswitch = { path = "../crates/cognia-ccswitch", features = ["tauri-host"] }
 # ADR-0067 follow-up — embedded MCP server. Re-aliased as `crate::mcp_server`.
-cognia-mcp-server = { path = "../crates/cognia-mcp-server" }
+cognia-mcp-server = { path = "../crates/cognia-mcp-server", features = ["tauri-host"] }
 # ADR-0067 follow-up — external agent exec backends (bollard/kube isolated
 # behind the crate's own features; see [features] forwarding below).
 # Re-aliased as `crate::external_agent`.

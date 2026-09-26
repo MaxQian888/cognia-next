@@ -29,9 +29,13 @@
 //! - `types`       — wire-shape types and errors
 //! - `sidecar`     — Node child-process lifecycle
 //! - `http_server` — axum server spawn
-//! - `commands`    — Tauri command entry points
+//! - `commands`    — Tauri command entry points (`tauri-host`) and the
+//!   Tauri-free `*_for_state` twins the companion RPC calls
+//! - `automation_proxy` — native UI automation for MCP clients
+//!   (`desktop-automation`)
 //! - `mod` (here)  — `McpServerState` orchestrator
 
+#[cfg(feature = "desktop-automation")]
 pub mod automation_proxy;
 pub mod commands;
 pub mod http_server;
@@ -46,7 +50,9 @@ use std::sync::Arc;
 use chrono::Utc;
 use parking_lot::Mutex;
 
+#[cfg(feature = "desktop-automation")]
 use automation_proxy::AutomationProxy;
+#[cfg(feature = "desktop-automation")]
 use cognia_automation::automation::dispatcher::Enforcement;
 #[cfg(test)]
 use http_server::spawn_server;
@@ -55,7 +61,25 @@ use orchestration_proxy::{OrchestrationEventSink, OrchestrationProxy, Orchestrat
 use sidecar::SidecarProcess;
 use types::{ExternalBridgeSettings, McpServerError, McpServerStatus};
 
+#[cfg(feature = "desktop-automation")]
 use cognia_automation::automation::worker::AutomationHandle;
+
+/// What [`McpServerState::start`] needs to put the native automation stack
+/// behind the MCP tools: the worker handle and the enforcement it runs under.
+#[cfg(feature = "desktop-automation")]
+pub type AutomationBinding = (AutomationHandle, Enforcement);
+
+/// Built without `desktop-automation` there is no automation stack to bind,
+/// so this type has no values and every caller passes `None`. The sidecar's
+/// `computer_use` tool then answers that it needs the desktop runtime, exactly
+/// as it does under the headless server.
+#[cfg(not(feature = "desktop-automation"))]
+pub enum AutomationBinding {}
+
+#[cfg(feature = "desktop-automation")]
+type AutomationProxyHandle = Arc<AutomationProxy>;
+#[cfg(not(feature = "desktop-automation"))]
+type AutomationProxyHandle = AutomationBinding;
 
 // ---------------------------------------------------------------------------
 // State
@@ -82,7 +106,7 @@ pub struct McpManagedInfo {
 type McpServerRuntime = (
     ServerHandle,
     Arc<SidecarProcess>,
-    Option<Arc<AutomationProxy>>,
+    Option<AutomationProxyHandle>,
     Option<Arc<OrchestrationProxy>>,
 );
 
@@ -152,7 +176,7 @@ impl McpServerState {
         token: String,
         settings_json: String,
         sidecar_path: String,
-        automation: Option<(AutomationHandle, Enforcement)>,
+        automation: Option<AutomationBinding>,
         orchestration_sink: Option<OrchestrationEventSink>,
     ) -> Result<u16, McpServerError> {
         // Guard: reject empty token before attempting any I/O.
@@ -193,7 +217,7 @@ impl McpServerState {
         verifiers: Vec<String>,
         settings_json: String,
         sidecar_path: String,
-        automation: Option<(AutomationHandle, Enforcement)>,
+        automation: Option<AutomationBinding>,
         orchestration_sink: Option<OrchestrationEventSink>,
     ) -> Result<u16, McpServerError> {
         let store = ClientVerifierStore::from_hex(&verifiers)?;
@@ -217,7 +241,7 @@ impl McpServerState {
         clients: Vec<ClientVerifier>,
         settings_json: String,
         sidecar_path: String,
-        automation: Option<(AutomationHandle, Enforcement)>,
+        automation: Option<AutomationBinding>,
         orchestration_sink: Option<OrchestrationEventSink>,
     ) -> Result<u16, McpServerError> {
         let store = ClientVerifierStore::from_clients(&clients)?;
@@ -238,7 +262,7 @@ impl McpServerState {
         verifiers: ClientVerifierStore,
         settings_json: String,
         sidecar_path: String,
-        automation: Option<(AutomationHandle, Enforcement)>,
+        automation: Option<AutomationBinding>,
         orchestration_sink: Option<OrchestrationEventSink>,
     ) -> Result<u16, McpServerError> {
         // Validate settings JSON early — we want a clear error, not a
@@ -258,8 +282,9 @@ impl McpServerState {
         // address + token can be passed through the sidecar's env. The
         // proxy lifetime is tied to McpServerInner — drop releases the
         // port and aborts the listener task.
-        let (proxy, proxy_env): (Option<Arc<AutomationProxy>>, Vec<(String, String)>) =
+        let (proxy, proxy_env): (Option<AutomationProxyHandle>, Vec<(String, String)>) =
             match automation {
+                #[cfg(feature = "desktop-automation")]
                 Some((handle, enforcement)) => {
                     let proxy = AutomationProxy::spawn(handle, enforcement)
                         .await
@@ -280,6 +305,8 @@ impl McpServerState {
                     ];
                     (Some(Arc::new(proxy)), env)
                 }
+                #[cfg(not(feature = "desktop-automation"))]
+                Some(never) => match never {},
                 None => (None, Vec::new()),
             };
 

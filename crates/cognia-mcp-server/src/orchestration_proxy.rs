@@ -38,6 +38,7 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex as ParkingMutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -52,6 +53,7 @@ pub const EXEC_EVENT: &str = "orchestration-proxy:exec";
 
 pub type OrchestrationEventSink = Arc<dyn Fn(ExecEvent) -> Result<(), String> + Send + Sync>;
 
+#[cfg(feature = "tauri-host")]
 pub fn tauri_event_sink(app: AppHandle) -> OrchestrationEventSink {
     let app = Arc::new(app);
     Arc::new(move |event| {
@@ -91,6 +93,7 @@ pub struct OrchestrationProxy {
 
 impl OrchestrationProxy {
     /// Bind a fresh listener on `127.0.0.1` and start accepting connections.
+    #[cfg(feature = "tauri-host")]
     pub async fn spawn(app: AppHandle) -> std::io::Result<Self> {
         Self::spawn_with_sink(tauri_event_sink(app)).await
     }

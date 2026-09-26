@@ -14,10 +14,24 @@ publish.workspace = true
 name = "cognia_mcp_server"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the default build is the transport alone: the streamable-HTTP
+# listener, the Node sidecar sessions and the orchestration proxy, which is
+# all the headless server starts (it passes no automation binding).
+default = []
+# The automation proxy that exposes the native UI-automation stack to MCP
+# clients. It links `cognia-automation` (uiautomation, xcap, enigo), so only a
+# desktop build asks for it.
+desktop-automation = ["dep:cognia-automation"]
+# The `#[tauri::command]` shells and the Tauri event sink. The start/restart
+# commands read the automation state, so this implies `desktop-automation`.
+# Only `src-tauri` enables it.
+tauri-host = ["dep:tauri", "desktop-automation"]
+
 [dependencies]
 cognia-core = { path = "../cognia-core" }
-cognia-automation = { path = "../cognia-automation" }
-tauri = { workspace = true }
+cognia-automation = { path = "../cognia-automation", optional = true }
+tauri = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 axum = { workspace = true, features = ["macros", "ws"] }

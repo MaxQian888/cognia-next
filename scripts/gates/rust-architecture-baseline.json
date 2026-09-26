@@ -3,7 +3,6 @@
   "findings": [
     "direct-only: cognia-subscription depends on keyring",
     "direct-only: cognia-terminal depends on keyring",
-    "tauri-default: cognia-automation",
-    "tauri-default: cognia-mcp-server"
+    "tauri-default: cognia-automation"
   ]
 }

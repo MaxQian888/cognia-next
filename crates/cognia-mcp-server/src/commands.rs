@@ -2,12 +2,20 @@
 //!
 //! Each command mirrors a function in `lib/tauri/mcp-server.ts` 1:1.
 //! The renderer calls these to start, stop, restart, and inspect the server.
+//! The commands compile only with `tauri-host`. The `*_for_state` twins that
+//! the companion RPC calls, and the sidecar candidate picker, are always built.
 
+#[cfg(feature = "tauri-host")]
 use tauri::State;
 
-use super::orchestration_proxy::{tauri_event_sink, OrchestrationEventSink};
-use super::types::{McpServerError, McpServerStatus};
-use super::McpServerState;
+#[cfg(feature = "tauri-host")]
+use super::orchestration_proxy::tauri_event_sink;
+use super::orchestration_proxy::OrchestrationEventSink;
+use super::types::McpServerError;
+#[cfg(feature = "tauri-host")]
+use super::types::McpServerStatus;
+use super::{AutomationBinding, McpServerState};
+#[cfg(feature = "tauri-host")]
 use cognia_automation::automation::commands::AutomationState;
 
 /// Start the MCP HTTP server.
@@ -23,6 +31,7 @@ use cognia_automation::automation::commands::AutomationState;
 /// # Returns
 ///
 /// The port the server is actually listening on (relevant when `port` was `0`).
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn mcp_server_start(
     app: tauri::AppHandle,
@@ -54,10 +63,7 @@ pub async fn mcp_server_start_for_state(
     token: String,
     settings_json: String,
     sidecar_path: String,
-    automation: Option<(
-        cognia_automation::automation::worker::AutomationHandle,
-        cognia_automation::automation::dispatcher::Enforcement,
-    )>,
+    automation: Option<AutomationBinding>,
     orchestration_sink: Option<OrchestrationEventSink>,
 ) -> Result<u16, McpServerError> {
     state
@@ -73,6 +79,7 @@ pub async fn mcp_server_start_for_state(
 }
 
 /// Stop the MCP HTTP server, draining in-flight requests first.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn mcp_server_stop(state: State<'_, McpServerState>) -> Result<(), McpServerError> {
     mcp_server_stop_for_state(&state)
@@ -89,6 +96,7 @@ pub fn mcp_server_stop_for_state(state: &McpServerState) -> Result<(), McpServer
 ///
 /// Equivalent to calling `mcp_server_stop` then `mcp_server_start` in one
 /// atomic command so the renderer doesn't have to race the two calls.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn mcp_server_restart(
     app: tauri::AppHandle,
@@ -122,10 +130,7 @@ pub async fn mcp_server_restart_for_state(
     token: String,
     settings_json: String,
     sidecar_path: String,
-    automation: Option<(
-        cognia_automation::automation::worker::AutomationHandle,
-        cognia_automation::automation::dispatcher::Enforcement,
-    )>,
+    automation: Option<AutomationBinding>,
     orchestration_sink: Option<OrchestrationEventSink>,
 ) -> Result<u16, McpServerError> {
     mcp_server_stop_for_state(state)?;
@@ -148,6 +153,7 @@ pub async fn mcp_server_restart_for_state(
 /// / `team_run` / `plugin_tool_invoke`) and posts the result back here, keyed
 /// by the request `id`. First reply wins; unknown / already-resolved ids are a
 /// no-op (so a second window can't double-resolve).
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub fn orchestration_proxy_response(
     state: State<'_, McpServerState>,
@@ -164,6 +170,7 @@ pub fn orchestration_proxy_response(
 }
 
 /// Return the current status of the MCP HTTP server.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn mcp_server_status(
     state: State<'_, McpServerState>,
@@ -190,6 +197,7 @@ pub fn first_existing_sidecar(candidates: &[std::path::PathBuf]) -> Option<std::
 ///
 /// Single source of truth for the spawn path and the client setup snippet —
 /// they disagreed before, and neither pointed at a real file.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn mcp_server_sidecar_path(
     app: tauri::AppHandle,
@@ -200,6 +208,7 @@ pub async fn mcp_server_sidecar_path(
 /// Candidate order: explicit env override, the bundled resource
 /// (`tauri.conf.json` → `resources`), then the `~/.cognia` user-install
 /// convention that predates the bundling.
+#[cfg(feature = "tauri-host")]
 pub fn resolve_sidecar_path<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Option<std::path::PathBuf> {
