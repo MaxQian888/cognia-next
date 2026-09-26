@@ -16,7 +16,7 @@ import { applyPatch, parsePatch } from "diff"
 
 import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
-import { canonicalKey } from "./read-tracker.mjs"
+import { canonicalKey } from "../../src/tools/state/read-tracker.ts"
 import { decodeText, encodeText, withFileLock } from "./text-io.mjs"
 import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 import { diagnosticsAfterWrite } from "./write.mjs"

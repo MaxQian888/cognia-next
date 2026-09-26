@@ -5,7 +5,7 @@ import os from "node:os"
 import fsp from "node:fs/promises"
 
 import { createReadTool, formatCatN, DEFAULT_LIMIT } from "./read.mjs"
-import { createReadTracker } from "./read-tracker.mjs"
+import { createReadTracker } from "../../src/tools/state/read-tracker.ts"
 
 function textOf(result) {
   return result.content.map((b) => b.text).join("\n")

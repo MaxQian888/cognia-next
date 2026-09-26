@@ -6,7 +6,7 @@ import fsp from "node:fs/promises"
 import { createPatch } from "diff"
 
 import { createApplyPatchTool } from "./apply-patch.mjs"
-import { createReadTracker } from "./read-tracker.mjs"
+import { createReadTracker } from "../../src/tools/state/read-tracker.ts"
 
 const BOM = String.fromCharCode(0xfeff)
 

@@ -33,7 +33,7 @@ import {
 } from "../src/providers/stream-watchdog.ts"
 import { makeLazyLspResolver } from "../src/services/lsp/lazy-resolver.ts"
 import { makeLazyCodeGraphResolver } from "../src/services/code-graph/lazy-resolver.ts"
-import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
+import { createReadTracker } from "../src/tools/state/read-tracker.ts"
 import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { resolveAdapter } from "../src/providers/protocol-adapters/registry.ts"

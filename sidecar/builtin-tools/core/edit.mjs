@@ -10,7 +10,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
-import { canonicalKey } from "./read-tracker.mjs"
+import { canonicalKey } from "../../src/tools/state/read-tracker.ts"
 import { decodeText, encodeText, withFileLock } from "./text-io.mjs"
 import { replaceWithFallback } from "./fuzzy-replace.mjs"
 import { resolveToolPath } from "../../src/platform/fs/paths.ts"

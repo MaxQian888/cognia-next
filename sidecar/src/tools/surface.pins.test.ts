@@ -41,8 +41,8 @@ import {
   collectCogniaToolDefs,
 } from "../../builtin-tools/index.mjs"
 import { wrapDefsWithReadOnlyTimeout } from "./middleware/read-only-timeout.ts"
-import { createReadTracker } from "../../builtin-tools/core/read-tracker.mjs"
-import { createBgShellRegistry } from "../../builtin-tools/core/bash-sessions.mjs"
+import { createReadTracker } from "./state/read-tracker.ts"
+import { createBgShellRegistry } from "./state/background-shells.ts"
 import { createSessionTaskStore } from "../../builtin-tools/core/tasks.mjs"
 import { probeSandbox } from "../../builtin-tools/run-code/supervisor.mjs"
 import { buildAiSdkTools, __testing__ as aiSdkTools } from "../../dispatch/ai-sdk-tools.mjs"

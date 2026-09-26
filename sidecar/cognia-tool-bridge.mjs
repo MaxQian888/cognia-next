@@ -27,8 +27,8 @@ import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js"
 
 import { collectCogniaToolDefs } from "./builtin-tools/index.mjs"
 import { READ_ONLY_TOOL_NAMES } from "./src/policy/tool-catalog/catalog.ts"
-import { createReadTracker } from "./builtin-tools/core/read-tracker.mjs"
-import { createBgShellRegistry } from "./builtin-tools/core/bash-sessions.mjs"
+import { createReadTracker } from "./src/tools/state/read-tracker.ts"
+import { createBgShellRegistry } from "./src/tools/state/background-shells.ts"
 import { createSessionTaskStore } from "./builtin-tools/core/tasks.mjs"
 import { MONITOR_TOOL_NAMES } from "./builtin-tools/core/monitor.mjs"
 import {

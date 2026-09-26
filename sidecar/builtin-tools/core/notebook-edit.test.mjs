@@ -5,7 +5,7 @@ import path from "node:path"
 import fsp from "node:fs/promises"
 
 import { createNotebookEditTool } from "./notebook-edit.mjs"
-import { createReadTracker } from "./read-tracker.mjs"
+import { createReadTracker } from "../../src/tools/state/read-tracker.ts"
 
 const SAMPLE = JSON.stringify(
   {

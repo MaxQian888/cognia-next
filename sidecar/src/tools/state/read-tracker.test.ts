@@ -2,7 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import path from "node:path"
 
-import { createReadTracker, canonicalKey } from "./read-tracker.mjs"
+import { createReadTracker, canonicalKey } from "./read-tracker.ts"
 
 const FILE = path.resolve("/tmp/tracker/sample.txt")
 

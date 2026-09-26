@@ -145,6 +145,8 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/{,__tests__/}plugin-tools.test.mjs` (merged)              | `src/tools/plugin/{server,json-schema-zod}.test.ts`                | 7c          |
 | `dispatch/ai-sdk-tools.mjs` (model-output mapping)                       | `src/tools/adapters/ai-sdk-output.ts`                              | 7d          |
 | `dispatch/ai-sdk-tools.mjs` (`allowedTools` whitelist)                   | `src/tools/adapters/allow-list.ts`                                 | 7d          |
+| `builtin-tools/core/read-tracker.mjs`                                    | `src/tools/state/read-tracker.ts`                                  | 7e          |
+| `builtin-tools/core/bash-sessions.mjs`                                   | `src/tools/state/background-shells.ts`                             | 7e          |
 
 ## Scripts (run from repo root)
 

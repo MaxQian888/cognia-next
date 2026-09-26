@@ -404,7 +404,7 @@ export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) 
  * returns only the output appended since the previous poll plus the shell's
  * current status/exit code. Read-only.
  *
- * @param {{ bgShells?: ReturnType<typeof import("./bash-sessions.mjs").createBgShellRegistry> }} ctx
+ * @param {{ bgShells?: ReturnType<typeof import("../../src/tools/state/background-shells.ts").createBgShellRegistry> }} ctx
  */
 export function createBashOutputTool({ bgShells }) {
   async function execBashOutput(args) {
@@ -475,7 +475,7 @@ export function createListShellsTool({ bgShells }) {
  * `kill_shell` — terminate a background shell started by `bash`. Idempotent;
  * safe to call on an already-exited shell.
  *
- * @param {{ bgShells?: ReturnType<typeof import("./bash-sessions.mjs").createBgShellRegistry> }} ctx
+ * @param {{ bgShells?: ReturnType<typeof import("../../src/tools/state/background-shells.ts").createBgShellRegistry> }} ctx
  */
 export function createKillShellTool({ bgShells }) {
   async function execKillShell(args) {

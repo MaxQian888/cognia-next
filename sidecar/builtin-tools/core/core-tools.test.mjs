@@ -2,7 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import { createCoreTools, CORE_TOOL_NAMES, CORE_MUTATING_TOOL_NAMES } from "./core-tools.mjs"
-import { createReadTracker } from "./read-tracker.mjs"
+import { createReadTracker } from "../../src/tools/state/read-tracker.ts"
 import { todoWriteShape, TODO_WRITE_NAME, createTodoWriteTool } from "./todo.mjs"
 import { SESSION_TASK_TOOL_NAMES, createSessionTaskStore } from "./tasks.mjs"
 import { MONITOR_TOOL_NAMES } from "./monitor.mjs"

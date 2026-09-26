@@ -16,7 +16,7 @@ import {
   MAX_TIMEOUT_MS,
   MAX_OUTPUT_CHARS,
 } from "./bash.mjs"
-import { createBgShellRegistry } from "./bash-sessions.mjs"
+import { createBgShellRegistry } from "../../src/tools/state/background-shells.ts"
 import { resolveShellDescriptor, activeShellDescriptor } from "../../src/platform/process/shell.ts"
 
 // Pin a deterministic shell for command-executing tests: cmd.exe on Windows

@@ -5,7 +5,7 @@ import os from "node:os"
 import fsp from "node:fs/promises"
 
 import { createWriteTool, diagnosticsAfterWrite, LSP_DIAG_TIMEOUT_MS } from "./write.mjs"
-import { createReadTracker } from "./read-tracker.mjs"
+import { createReadTracker } from "../../src/tools/state/read-tracker.ts"
 
 const BOM = String.fromCharCode(0xfeff)
 

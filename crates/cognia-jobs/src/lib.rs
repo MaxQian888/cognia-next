@@ -4,7 +4,8 @@
 //! # Why this crate exists
 //!
 //! Background commands used to live in a plain `Map` inside the chat sidecar
-//! (`sidecar/builtin-tools/core/bash-sessions.mjs`). That location made four
+//! (then `sidecar/builtin-tools/core/bash-sessions.mjs`, now
+//! `sidecar/src/tools/state/background-shells.ts`). That location made four
 //! things impossible and one thing wrong:
 //!
 //! - a scheduled task could not leave work running past its turn,

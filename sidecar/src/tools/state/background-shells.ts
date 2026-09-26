@@ -1,6 +1,6 @@
 // Session-scoped registry of background shells started by `bash` with
 // `run_in_background: true`. Mirrors the tracked-PID discipline in
-// `process.mjs`: the agent can only read/kill shells IT started this session,
+// `builtin-tools/process/`: the agent can only read/kill shells IT started this session,
 // and the dispatch layer calls `killAll()` at session teardown so no
 // background process outlives the chat session (no orphans).
 //
@@ -10,44 +10,88 @@
 // advances a cursor, so repeated polls don't re-show old output.
 
 import { spawn } from "node:child_process"
-
-import { pickStreamDecoder } from "../../src/platform/process/console-decode.ts"
+import type { ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
+
+import { pickStreamDecoder } from "../../platform/process/console-decode.ts"
 
 /** Max bytes of combined stdout+stderr retained per background shell. */
 export const MAX_RING_BYTES = 256 * 1024
 
-/**
- * @typedef {Object} BgShellEntry
- * @property {string} id
- * @property {string} command
- * @property {import("node:child_process").ChildProcess} child
- * @property {string} buffer    Combined stdout+stderr ring buffer.
- * @property {number} cursor    Bytes already returned via read().
- * @property {"running"|"exited"} status
- * @property {number|null} exitCode
- * @property {number} startedAt
- * @property {number|null} endedAt
- * @property {string|undefined} cwd
- * @property {Set<() => void>} waiters
- */
+export type BgShellStatus = "running" | "exited"
 
-/**
- * Create a fresh per-session background-shell registry.
- * @returns {{
- *   spawnBackground: (opts: { command: string, shell: string, shellArgs: string[], cwd?: string, isWin?: boolean, env?: NodeJS.ProcessEnv }) => BgShellEntry,
- *   read: (id: string, opts?: { filter?: string, maxChars?: number }) => ({ ok: true, data: string, status: string, exitCode: number|null } | { ok: false, reason: string }),
- *   waitForOutput: (id: string, opts?: { filter?: string, maxChars?: number, waitMs?: number }) => Promise<{ ok: true, data: string, status: string, exitCode: number|null } | { ok: false, reason: string }>,
- *   kill: (id: string, signal?: string) => ({ ok: true, exitCode: number|null } | { ok: false, reason: string }),
- *   killAll: () => void,
- *   list: () => Array<{ id: string, command: string, status: string, exitCode: number|null }>,
- * }}
- */
-export function createBgShellRegistry() {
-  /** @type {Map<string, BgShellEntry>} */
-  const shells = new Map()
+export interface BgShellEntry {
+  id: string
+  command: string
+  child: ChildProcess
+  pid: number | undefined
+  /** Combined stdout+stderr ring buffer. */
+  buffer: string
+  /** Bytes already returned via read(). */
+  cursor: number
+  status: BgShellStatus
+  exitCode: number | null
+  startedAt: number
+  endedAt: number | null
+  cwd: string | undefined
+  waiters: Set<() => void>
+}
 
-  function spawnBackground({ command, shell, shellArgs, cwd, isWin, env }) {
+export interface SpawnBackgroundOptions {
+  command: string
+  shell: string
+  shellArgs: string[]
+  cwd?: string | undefined
+  isWin?: boolean | undefined
+  env?: NodeJS.ProcessEnv | undefined
+}
+
+export interface ReadOptions {
+  filter?: string | undefined
+  maxChars?: number | undefined
+}
+
+export type ReadResult =
+  | { ok: true; data: string; status: BgShellStatus; exitCode: number | null }
+  | { ok: false; reason: "not_found" }
+
+export type KillResult = { ok: true; exitCode: number | null } | { ok: false; reason: "not_found" }
+
+export type KillByPidResult = { matched: false } | { matched: true; ok: true; jobId: string }
+
+export interface BgShellSummary {
+  id: string
+  command: string
+  status: BgShellStatus
+  exitCode: number | null
+  startedAt: number
+  endedAt: number | null
+  durationMs: number
+  cwd: string | undefined
+}
+
+export interface BgShellRegistry {
+  spawnBackground(opts: SpawnBackgroundOptions): BgShellEntry
+  read(id: string, opts?: ReadOptions): ReadResult
+  waitForOutput(id: string, opts?: ReadOptions & { waitMs?: number }): Promise<ReadResult>
+  kill(id: string, signal?: NodeJS.Signals | number): KillResult
+  killByPid(pid: number): KillByPidResult
+  killAll(): void
+  list(): BgShellSummary[]
+}
+
+/** Create a fresh per-session background-shell registry. */
+export function createBgShellRegistry(): BgShellRegistry {
+  const shells = new Map<string, BgShellEntry>()
+
+  function spawnBackground({
+    command,
+    shell,
+    shellArgs,
+    cwd,
+    isWin,
+    env,
+  }: SpawnBackgroundOptions): BgShellEntry {
     const id = randomUUID()
     const child = spawn(shell, shellArgs, {
       cwd,
@@ -59,8 +103,7 @@ export function createBgShellRegistry() {
       windowsVerbatimArguments: Boolean(isWin),
       stdio: ["ignore", "pipe", "pipe"],
     })
-    /** @type {BgShellEntry} */
-    const entry = {
+    const entry: BgShellEntry = {
       id,
       command,
       child,
@@ -81,9 +124,9 @@ export function createBgShellRegistry() {
     // page on Windows). One streaming decoder per shell, picked from the first
     // chunk, so multibyte chars split across chunks decode intact. Error strings
     // arrive already-decoded and pass straight through.
-    let decoder = null
-    const cap = (chunk) => {
-      let s
+    let decoder: TextDecoder | null = null
+    const cap = (chunk: Buffer | string) => {
+      let s: string
       if (typeof chunk === "string") {
         s = chunk
       } else {
@@ -103,7 +146,7 @@ export function createBgShellRegistry() {
     }
     child.stdout?.on("data", cap)
     child.stderr?.on("data", cap)
-    child.on("error", (err) => {
+    child.on("error", (err: Error) => {
       cap(String(err?.message ?? err))
       if (entry.status !== "exited") {
         entry.status = "exited"
@@ -123,10 +166,13 @@ export function createBgShellRegistry() {
     return entry
   }
 
-  function read(id, { filter, maxChars } = {}) {
+  function read(id: string, { filter, maxChars }: ReadOptions = {}): ReadResult {
     const entry = shells.get(id)
     if (!entry) return { ok: false, reason: "not_found" }
-    const cap = Number.isFinite(maxChars) ? Math.max(1, Math.floor(maxChars)) : undefined
+    const cap =
+      maxChars !== undefined && Number.isFinite(maxChars)
+        ? Math.max(1, Math.floor(maxChars))
+        : undefined
     const end = cap ? Math.min(entry.buffer.length, entry.cursor + cap) : entry.buffer.length
     let delta = entry.buffer.slice(entry.cursor, end)
     entry.cursor = end
@@ -144,7 +190,10 @@ export function createBgShellRegistry() {
     return { ok: true, data: delta, status: entry.status, exitCode: entry.exitCode }
   }
 
-  async function waitForOutput(id, { filter, maxChars, waitMs = 0 } = {}) {
+  async function waitForOutput(
+    id: string,
+    { filter, maxChars, waitMs = 0 }: ReadOptions & { waitMs?: number } = {}
+  ): Promise<ReadResult> {
     const immediate = read(id, { filter, maxChars })
     if (!immediate.ok || immediate.data || immediate.status === "exited" || waitMs <= 0) {
       return immediate
@@ -152,7 +201,7 @@ export function createBgShellRegistry() {
     const entry = shells.get(id)
     if (!entry) return { ok: false, reason: "not_found" }
     const boundedWait = Math.min(Math.max(0, Math.floor(waitMs)), 30_000)
-    return new Promise((resolve) => {
+    return new Promise<ReadResult>((resolve) => {
       let settled = false
       const finish = () => {
         if (settled) return
@@ -169,19 +218,19 @@ export function createBgShellRegistry() {
     })
   }
 
-  function signalEntry(entry, signal = "SIGTERM") {
+  function signalEntry(entry: BgShellEntry, signal: NodeJS.Signals | number = "SIGTERM") {
     if (process.platform !== "win32" && entry.child.pid) process.kill(-entry.child.pid, signal)
     else entry.child.kill(signal)
   }
 
-  function killByPid(pid) {
+  function killByPid(pid: number): KillByPidResult {
     const entry = [...shells.values()].find((candidate) => candidate.pid === pid)
     if (!entry) return { matched: false }
     kill(entry.id)
     return { matched: true, ok: true, jobId: entry.id }
   }
 
-  function kill(id, signal) {
+  function kill(id: string, signal?: NodeJS.Signals | number): KillResult {
     const entry = shells.get(id)
     if (!entry) return { ok: false, reason: "not_found" }
     if (entry.status !== "exited") {
@@ -207,7 +256,7 @@ export function createBgShellRegistry() {
     shells.clear()
   }
 
-  function list() {
+  function list(): BgShellSummary[] {
     return [...shells.values()].map((e) => ({
       id: e.id,
       command: e.command,

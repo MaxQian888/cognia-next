@@ -1,8 +1,9 @@
 // Host-backed background-shell registry.
 //
-// Implements the SAME port interface as `bash-sessions.mjs`'s in-process
-// registry (`spawnBackground` / `read` / `waitForOutput` / `kill` / `killAll` /
-// `list`), so `bash.mjs` and the dispatch modules are unchanged — only the
+// Implements the SAME port interface as the in-process registry in
+// `src/tools/state/background-shells.ts` (`spawnBackground` / `read` /
+// `waitForOutput` / `kill` / `killAll` / `list`), so `bash.mjs` and the
+// dispatch modules are unchanged — only the
 // adapter behind the port swaps. What changes is where the processes actually
 // live: the Rust supervisor (`crates/cognia-jobs`) instead of this Node
 // process.
@@ -19,7 +20,7 @@
 // re-read a range. That is what makes `filter` mean "wait until this matches"
 // instead of "eat everything, then show what matched".
 
-import { createBgShellRegistry } from "./bash-sessions.mjs"
+import { createBgShellRegistry } from "../../src/tools/state/background-shells.ts"
 
 import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../src/platform/host-rpc.ts"
 
