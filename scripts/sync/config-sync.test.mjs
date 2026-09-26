@@ -89,7 +89,7 @@ test("checkConfigs reports a vanished pattern as missing (hard error), not drift
   )
   assert.deepEqual(drifted, [])
   assert.equal(missing.length, 1)
-  assert.match(missing[0].path, /companion-section/)
+  assert.match(missing[0].path, /companion-server-commands/)
 })
 
 test("checkConfigs reports a vanished canonical source and skips its mirrors", () => {

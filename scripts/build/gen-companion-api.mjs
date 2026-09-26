@@ -15,6 +15,11 @@ import {
   renderKnownCommandsRust,
 } from "./lib/companion-known-commands.mjs"
 import { DISPATCH_SOURCES, hasArm } from "../gates/check-command-grammar.mjs"
+import {
+  COMPANION_SOURCES,
+  requireCompanionSources,
+  rpcFamilyFile,
+} from "../gates/lib/companion-source-paths.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const PUBLIC_SPEC_PATH = "docs/api/mobile-companion-api.openapi.yaml"
@@ -34,19 +39,18 @@ const RESPONSE_SCHEMA_CATALOG_PATH = "protocol/companion-response-schemas.json"
 const HEADLESS_DISPOSITIONS_PATH = "protocol/headless-command-dispositions.json"
 const ZOD_REQUEST_SCHEMA_PATH = "scripts/build/companion-request-schema-contracts.mjs"
 const RPC_DISPATCH_SOURCE_PATHS = [
-  "src-tauri/src/companion_api/rpc/chat.rs",
-  "src-tauri/src/companion_api/rpc/codex_app.rs",
-  "src-tauri/src/companion_api/rpc/native_tools.rs",
-  "src-tauri/src/companion_api/rpc/data_sync.rs",
-  "src-tauri/src/companion_api/rpc/service_plane.rs",
-  "src-tauri/src/companion_api/rpc/source_control.rs",
-  "src-tauri/src/companion_api/rpc/filesystem.rs",
-  "src-tauri/src/companion_api/rpc/terminal.rs",
-  "src-tauri/src/sftp_service.rs",
-  "src-tauri/src/companion_api/rpc/plugins.rs",
-  "src-tauri/src/companion_api/rpc/diagnostics.rs",
-  "src-tauri/src/companion_api/rpc/host_admin.rs",
-  "src-tauri/src/companion_api/rpc/environment.rs",
+  ...[
+    "chat",
+    "codex_app",
+    "native_tools",
+    "data_sync",
+    "service_plane",
+    "source_control",
+    "filesystem",
+    "terminal",
+  ].map(rpcFamilyFile),
+  COMPANION_SOURCES.sftpService,
+  ...["plugins", "diagnostics", "host_admin", "environment"].map(rpcFamilyFile),
 ]
 /**
  * Every file that registers a route on the companion listener.
@@ -63,10 +67,10 @@ const RPC_DISPATCH_SOURCE_PATHS = [
  * companion-server copy, which is the one this contract is about.
  */
 const RUNTIME_ROUTE_SOURCES = [
-  { path: "src-tauri/src/companion_api/server.rs" },
-  { path: "src-tauri/src/companion_api/api.rs" },
+  { path: COMPANION_SOURCES.server },
+  { path: COMPANION_SOURCES.api },
   { path: "src-tauri/src/fleet/routes.rs" },
-  { path: "src-tauri/src/companion_api/lark_entry.rs", mount: "/integrations/lark" },
+  { path: COMPANION_SOURCES.larkEntry, mount: "/integrations/lark" },
   { path: "crates/cognia-connectors/src/axum_app.rs", mount: "/connectors" },
   { path: "crates/cognia-connectors/src/ws_server.rs", mount: "/connectors" },
 ]
@@ -3469,7 +3473,7 @@ export function inspectCommittedContract() {
   const publicSpec = parseYaml(publicSource, PUBLIC_SPEC_PATH)
   const runtime = collectRuntimeRoutes(
     RUNTIME_ROUTE_SOURCES.map(({ path, mount }) => [path, readRepo(path), mount]),
-    readRepo("src-tauri/src/companion_api/server.rs"),
+    readRepo(COMPANION_SOURCES.server),
   )
   const runtimeRoutes = runtime.routes
   // What is remote-executable is a fact of the contract, not of a Rust array:
@@ -3478,13 +3482,7 @@ export function inspectCommittedContract() {
   const remoteNames = remoteCommandNames(manifest)
   const byName = new Map(manifest.commands.map((command) => [command.name, command]))
   const dispatchArms = dispatchArmIndex(
-    DISPATCH_SOURCES.map((sourcePath) => {
-      try {
-        return readRepo(sourcePath)
-      } catch {
-        return ""
-      }
-    }),
+    requireCompanionSources(DISPATCH_SOURCES, repoRoot).map((sourcePath) => readRepo(sourcePath)),
   )
   const commandCoverageErrors = validateCommandCoverage(manifest, dispatchArms)
   const inferredArgumentSchemas = new Map(

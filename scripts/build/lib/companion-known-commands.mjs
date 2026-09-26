@@ -12,7 +12,9 @@
  * over `/internal/_rpc` (and, by its transports, `/api/_rpc`).
  */
 
-export const KNOWN_COMMANDS_RUST_PATH = "src-tauri/src/companion_api/generated/known_commands.rs"
+import { COMPANION_SOURCES } from "../../gates/lib/companion-source-paths.mjs"
+
+export const KNOWN_COMMANDS_RUST_PATH = COMPANION_SOURCES.knownCommands
 
 const TARGET = { client: "Client", execution: "Execution", "host-admin": "HostAdmin", service: "Service" }
 const OPERATION = { read: "Read", write: "Write", "side-effect": "SideEffect" }

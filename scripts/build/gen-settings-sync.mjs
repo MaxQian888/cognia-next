@@ -30,9 +30,10 @@ import { Command, CommanderError } from "commander"
 import { transform } from "esbuild"
 import writeFileAtomic from "write-file-atomic"
 import { z } from "zod"
+import { COMPANION_SOURCES } from "../gates/lib/companion-source-paths.mjs"
 
 const TABLE_SOURCE = "packages/agent-config-types/src/settings-sync.ts"
-const RUST_TARGET = "src-tauri/src/companion_api/settings_sync_generated.rs"
+const RUST_TARGET = COMPANION_SOURCES.settingsSyncGenerated
 const REQUEST_SCHEMA_TARGET = "protocol/companion-request-schemas.json"
 
 /**

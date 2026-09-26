@@ -5,11 +5,12 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseRegisteredCommands } from "./lib/generate-handler.mjs"
 import { DISPATCH_SOURCES, hasArm } from "./check-command-grammar.mjs"
+import { COMPANION_SOURCES, requireCompanionSources } from "./lib/companion-source-paths.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 
 /** Where the generator renders the contract into Rust (ADR-0175). */
-export const KNOWN_COMMANDS_RUST_PATH = "src-tauri/src/companion_api/generated/known_commands.rs"
+export const KNOWN_COMMANDS_RUST_PATH = COMPANION_SOURCES.knownCommands
 
 const ENUMS = {
   target: new Set(["client", "execution", "host-admin", "service"]),
@@ -160,13 +161,7 @@ function main() {
   const manifest = JSON.parse(readRepo("protocol/companion-commands.json"))
   const libSource = readRepo("src-tauri/src/lib.rs")
   const dispatchArms = dispatchArmIndex(
-    DISPATCH_SOURCES.map((path) => {
-      try {
-        return readRepo(path)
-      } catch {
-        return ""
-      }
-    })
+    requireCompanionSources(DISPATCH_SOURCES, repoRoot).map((path) => readRepo(path))
   )
   let rustSource = ""
   try {

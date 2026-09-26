@@ -4,6 +4,7 @@ import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 
 import { ACP_V1_CONTRACT, validateAcpV1Coverage } from "./lib/acp-v1-contract.mjs"
+import { COMPANION_SOURCES } from "./lib/companion-source-paths.mjs"
 
 const stableMetaPath = new URL("../../protocol/acp/v1/meta.json", import.meta.url)
 const previewMetaPath = new URL("../../protocol/acp/v1/meta.unstable.json", import.meta.url)
@@ -16,7 +17,7 @@ const jsonRpcPeerSource = readFileSync(
   "utf8"
 )
 const serverHandlerSource = readFileSync(
-  new URL("../../src-tauri/src/companion_api/acp/handler.rs", import.meta.url),
+  new URL(`../../${COMPANION_SOURCES.acpHandler}`, import.meta.url),
   "utf8"
 )
 const packageManifest = JSON.parse(

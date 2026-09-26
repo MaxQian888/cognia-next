@@ -42,6 +42,11 @@ import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { execSync } from "node:child_process"
+import {
+  COMPANION_SOURCES,
+  requireCompanionSources,
+  rpcFamilyFile,
+} from "./lib/companion-source-paths.mjs"
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 
@@ -55,27 +60,29 @@ export const PROTOCOL = {
 
 /** Every file whose `match name { "literal" => ... }` arms answer a command. */
 export const DISPATCH_SOURCES = [
-  "src-tauri/src/companion_api/rpc.rs",
-  "src-tauri/src/companion_api/rpc/chat.rs",
-  "src-tauri/src/companion_api/rpc/codex_app.rs",
-  "src-tauri/src/companion_api/rpc/native_tools.rs",
-  "src-tauri/src/companion_api/rpc/data_sync.rs",
-  "src-tauri/src/companion_api/rpc/service_plane.rs",
-  "src-tauri/src/companion_api/rpc/gateway_plane.rs",
-  "src-tauri/src/companion_api/rpc/source_control.rs",
-  "src-tauri/src/companion_api/rpc/filesystem.rs",
-  "src-tauri/src/companion_api/rpc/terminal.rs",
-  "src-tauri/src/companion_api/rpc/sftp.rs",
-  "src-tauri/src/companion_api/rpc/media.rs",
-  "src-tauri/src/companion_api/rpc/host_state.rs",
-  "src-tauri/src/companion_api/rpc/plugins.rs",
-  "src-tauri/src/companion_api/rpc/diagnostics.rs",
-  "src-tauri/src/companion_api/rpc/host_admin.rs",
-  "src-tauri/src/companion_api/rpc/environment.rs",
+  COMPANION_SOURCES.rpcRouter,
+  ...[
+    "chat",
+    "codex_app",
+    "native_tools",
+    "data_sync",
+    "service_plane",
+    "gateway_plane",
+    "source_control",
+    "filesystem",
+    "terminal",
+    "sftp",
+    "media",
+    "host_state",
+    "plugins",
+    "diagnostics",
+    "host_admin",
+    "environment",
+  ].map(rpcFamilyFile),
   // Two families dispatch outside rpc/: the browser gateway keys its arms on
   // the same literals, and SFTP is served by its own service module.
-  "src-tauri/src/companion_api/browser_gateway.rs",
-  "src-tauri/src/sftp_service.rs",
+  COMPANION_SOURCES.browserGateway,
+  COMPANION_SOURCES.sftpService,
 ]
 
 /** Directories scanned for surviving old-name literals (R7). */
@@ -359,12 +366,10 @@ export function loadAndAudit() {
   const verbs = read(PROTOCOL.verbs)
   const renames = read(PROTOCOL.renames).renames
   const requestSchemas = read(PROTOCOL.requestSchemas).commands
-  const dispatchSources = DISPATCH_SOURCES.filter((p) => existsSync(resolve(REPO_ROOT, p))).map(
-    (p) => ({
-      path: p,
-      source: readFileSync(resolve(REPO_ROOT, p), "utf8"),
-    })
-  )
+  const dispatchSources = requireCompanionSources(DISPATCH_SOURCES, REPO_ROOT).map((p) => ({
+    path: p,
+    source: readFileSync(resolve(REPO_ROOT, p), "utf8"),
+  }))
   const oldNames = new Set(Object.keys(renames).filter((old) => renames[old].to !== old))
   const clientLiteralHits = []
   for (const file of listClientFiles()) {

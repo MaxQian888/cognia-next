@@ -78,6 +78,7 @@ import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import { parseRegisteredCommands } from "./lib/generate-handler.mjs"
+import { isRpcSource } from "./lib/companion-source-paths.mjs"
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
@@ -514,8 +515,7 @@ export function collect(files, io) {
   const rpcModules = files
     .filter(
       (p) =>
-        /^src-tauri\/src\/companion_api\/rpc(\/|\.rs$)/.test(p) &&
-        p.endsWith(".rs") &&
+        isRpcSource(p) &&
         // rpc/tests.rs enumerates command names as fixtures, not dispatch arms.
         !p.endsWith("/tests.rs")
     )

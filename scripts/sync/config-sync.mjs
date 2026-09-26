@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url"
 import { Command, CommanderError } from "commander"
 import writeFileAtomic from "write-file-atomic"
 import { z } from "zod"
+import { COMPANION_SOURCES } from "../gates/lib/companion-source-paths.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, "../..")
@@ -38,7 +39,7 @@ export const CONFIGS = [
   {
     name: "companion default port",
     canonical: {
-      path: "src-tauri/src/companion_api/server.rs",
+      path: COMPANION_SOURCES.server,
       re: /pub const DEFAULT_PORT: u16 = (\d+);/,
     },
     mirrors: [

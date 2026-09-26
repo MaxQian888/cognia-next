@@ -56,6 +56,7 @@ import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import { parseRegisteredCommands } from "./lib/generate-handler.mjs"
+import { COMPANION_SOURCES, requireCompanionSources } from "./lib/companion-source-paths.mjs"
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 export const BASELINE_FILE = join(
@@ -912,7 +913,7 @@ export function collectChannelReferences(files) {
   // `` `claude://message-${kind}` `` and Rust's `format!("menu://{id}")`.
   const templateHead = new RegExp('[`"](' + CHANNEL_SHAPE + ")(?:\\$\\{|\\{)", "g")
   for (const { file, source } of files) {
-    if (file.endsWith("companion_api/event_channels.rs")) continue
+    if (file.endsWith(COMPANION_SOURCES.eventChannels)) continue
     const clean = file.endsWith(".rs") ? stripRustTestModules(stripRustComments(source)) : source
     literal.lastIndex = 0
     let match
@@ -1301,7 +1302,7 @@ const readJson = (p) => JSON.parse(read(p))
  * rather than for the RPC table it happens to serve.
  * `gen-companion-api.mjs:RPC_DISPATCH_SOURCE_PATHS` lists the same file.
  */
-export const DELEGATED_ARM_FILES = ["src-tauri/src/sftp_service.rs"]
+export const DELEGATED_ARM_FILES = [COMPANION_SOURCES.sftpService]
 
 /**
  * The files to scan for dispatch arms: every tracked `companion_api/rpc/*.rs`
@@ -1353,10 +1354,14 @@ export function collectInputs() {
     }
   }
 
-  const rpcSource = read("src-tauri/src/companion_api/rpc.rs")
+  // The family directory has to exist: after a move the glob below matches
+  // nothing, the delegated SFTP file still does, and the scan would report
+  // every other command as a runtime 404.
+  requireCompanionSources([COMPANION_SOURCES.rpcRouter, COMPANION_SOURCES.rpcFamilyDir], REPO_ROOT)
+  const rpcSource = read(COMPANION_SOURCES.rpcRouter)
   const arms = new Map()
   const armFiles = selectArmFiles(
-    execFileSync("git", ["ls-files", "src-tauri/src/companion_api/rpc/*.rs"], {
+    execFileSync("git", ["ls-files", `${COMPANION_SOURCES.rpcFamilyDir}/*.rs`], {
       cwd: REPO_ROOT,
       encoding: "utf8",
     }).split("\n")
@@ -1390,7 +1395,7 @@ export function collectInputs() {
     dispositionNames,
     dispositionGroups: dispositionLedger.groups ?? [],
     browserCommands: extractRustStringArray(
-      read("src-tauri/src/companion_api/browser_gateway.rs"),
+      read(COMPANION_SOURCES.browserGateway),
       "BROWSER_RPC_COMMANDS"
     ),
     publicSpecSchemas: parsePublicSpecRequestSchemas(
@@ -1399,7 +1404,7 @@ export function collectInputs() {
     devicePlaneOverrides: parseDevicePlaneOverrides(
       readJson("crates/cognia-headless-contract/assets/device-plane-overrides.json")
     ),
-    eventCatalog: parseEventChannelCatalog(read("src-tauri/src/companion_api/event_channels.rs")),
+    eventCatalog: parseEventChannelCatalog(read(COMPANION_SOURCES.eventChannels)),
     emittedChannels: collectEmittedChannels(emitSources),
     channelReferences: collectChannelReferences(emitSources),
   }

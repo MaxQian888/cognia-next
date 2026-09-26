@@ -4,6 +4,7 @@ import { createHash } from "node:crypto"
 import { readFile, writeFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
+import { COMPANION_SOURCES } from "./lib/companion-source-paths.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
@@ -63,7 +64,7 @@ export async function collectGovernanceSummary(base = root) {
     readFile(path.join(base, "lib/db/schema.ts"), "utf8"),
     readFile(path.join(base, "lib/data-governance/table-catalog.ts"), "utf8"),
     readFile(path.join(base, "lib/sync/companion-sync.ts"), "utf8"),
-    readFile(path.join(base, "src-tauri/src/companion_api/sync_registry.rs"), "utf8"),
+    readFile(path.join(base, COMPANION_SOURCES.syncRegistry), "utf8"),
   ])
   const schemaTables = sortedUnique(
     [...schema.matchAll(/^  ([A-Za-z_][A-Za-z0-9_]*)!:\s*Table</gm)].map((match) => match[1]),
