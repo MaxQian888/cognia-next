@@ -3,10 +3,12 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { getProcessSnapshot, formatProcess, compareBy } from "./inventory.mjs"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { getProcessSnapshot, formatProcess, compareBy } from "./inventory.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
-const cappedNote = (limit, detail) => `result capped at ${limit} processes - more exist; ${detail}`
+const cappedNote = (limit: number, detail: string): string =>
+  `result capped at ${limit} processes - more exist; ${detail}`
 
 // ---- list_processes -------------------------------------------------------
 
@@ -17,7 +19,7 @@ const listProcessesShape = {
   sortDesc: z.boolean().default(true).describe("Sort descending."),
 }
 
-async function execListProcesses(args) {
+async function execListProcesses(args: ToolArgs<typeof listProcessesShape>) {
   try {
     const all = await getProcessSnapshot()
     const needle = args.name?.toLowerCase()
@@ -55,7 +57,7 @@ const getProcessShape = {
   pid: z.number().int().describe("PID of the target process."),
 }
 
-async function execGetProcess(args) {
+async function execGetProcess(args: ToolArgs<typeof getProcessShape>) {
   try {
     const all = await getProcessSnapshot()
     const proc = all.find((p) => p.pid === args.pid)
@@ -80,7 +82,7 @@ const searchProcessesShape = {
   limit: z.number().int().min(1).max(500).default(50).describe("Cap on rows returned."),
 }
 
-async function execSearchProcesses(args) {
+async function execSearchProcesses(args: ToolArgs<typeof searchProcessesShape>) {
   try {
     const all = await getProcessSnapshot()
     const needle = args.name.toLowerCase()
@@ -112,7 +114,7 @@ const topMemoryProcessesShape = {
   limit: z.number().int().min(1).max(100).default(10).describe("How many top processes to return."),
 }
 
-async function execTopMemoryProcesses(args) {
+async function execTopMemoryProcesses(args: ToolArgs<typeof topMemoryProcessesShape>) {
   try {
     const all = await getProcessSnapshot()
     const sorted = all

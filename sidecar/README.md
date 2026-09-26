@@ -151,6 +151,7 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/core/bash-host-sessions.mjs`                              | `src/tools/state/host-background-shells.ts`                        | 7g          |
 | `builtin-tools/git/*` (+ tests)                                          | `src/tools/builtin/git/*`                                          | 8a          |
 | `builtin-tools/file-ops/*` (+ tests)                                     | `src/tools/builtin/file-extras/*`                                  | 8b          |
+| `builtin-tools/process/*` (+ tests)                                      | `src/tools/builtin/process/*`                                      | 8c          |
 
 ## Scripts (run from repo root)
 

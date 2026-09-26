@@ -45,6 +45,8 @@ export interface HostJobSlice {
 /** A job record, as `jobs.spawn` / `jobs.kill` / `jobs.list` return it. */
 export interface HostJobRecord {
   id: string
+  /** The OS pid, once the job has spawned. */
+  pid?: number | null
   command?: string
   cwd?: string
   status?: string
@@ -112,6 +114,9 @@ export interface HostBgShellRegistry {
   killAll(): Promise<void>
   list(): Promise<HostBgShellRow[]>
 }
+
+/** Either registry a session may hold; callers await every method. */
+export type SessionBgShellRegistry = HostBgShellRegistry | BgShellRegistry
 
 /** The host-RPC surface this adapter uses. */
 export type HostRpcCaller = Pick<HostRpcClient, "call">
@@ -372,7 +377,7 @@ export function createSessionBgShellRegistry({
   hostRpc?: HostRpcCaller | null | undefined
   sessionId: string
   backgroundProcessHost?: string | undefined
-}): HostBgShellRegistry | BgShellRegistry {
+}): SessionBgShellRegistry {
   return hostRpc && backgroundProcessHost !== "sidecar"
     ? createHostBgShellRegistry({ hostRpc, sessionId })
     : createBgShellRegistry()

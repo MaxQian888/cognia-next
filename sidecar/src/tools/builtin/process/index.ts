@@ -12,7 +12,7 @@ import {
   execGetProcess,
   execSearchProcesses,
   execTopMemoryProcesses,
-} from "./query.mjs"
+} from "./query.ts"
 import {
   checkProgramAllowedTool,
   getProcessManagerStatusTool,
@@ -20,7 +20,7 @@ import {
   execCheckProgramAllowed,
   execGetProcessManagerStatus,
   execGetTrackedProcesses,
-} from "./manager.mjs"
+} from "./manager.ts"
 import {
   startProcessTool,
   terminateProcessTool,
@@ -28,7 +28,8 @@ import {
   createTerminateProcessTool,
   execStartProcess,
   execTerminateProcess,
-} from "./lifecycle.mjs"
+} from "./lifecycle.ts"
+import type { ProcessToolContext } from "./lifecycle.ts"
 import {
   parsePosixPs,
   parseWindowsCsv,
@@ -38,7 +39,7 @@ import {
   trackedPids,
   pickField,
   compareBy,
-} from "./inventory.mjs"
+} from "./inventory.ts"
 
 /** Fixed registration order — do not reorder (prompt-cache stability). */
 export const PROCESS_TOOL_NAMES = Object.freeze([
@@ -76,7 +77,7 @@ export const processTools = [
  *
  * Emission order is identical to `processTools` — see PROCESS_TOOL_NAMES.
  */
-export function createProcessTools(ctx = {}) {
+export function createProcessTools(ctx: ProcessToolContext = {}) {
   if (!ctx.bgShells && !ctx.builtinProcessSandbox) return processTools
   return assertOrder([
     listProcessesTool,
@@ -92,11 +93,11 @@ export function createProcessTools(ctx = {}) {
 }
 
 /** Defensive: the emitted order must match the public constant. */
-function assertOrder(tools) {
+function assertOrder<T extends { name: string }>(tools: T[]): T[] {
   for (let i = 0; i < tools.length; i++) {
-    if (tools[i].name !== PROCESS_TOOL_NAMES[i]) {
+    if (tools[i]!.name !== PROCESS_TOOL_NAMES[i]) {
       throw new Error(
-        `process tool order drift: expected ${PROCESS_TOOL_NAMES[i]}, got ${tools[i].name}`
+        `process tool order drift: expected ${PROCESS_TOOL_NAMES[i]}, got ${tools[i]!.name}`
       )
     }
   }

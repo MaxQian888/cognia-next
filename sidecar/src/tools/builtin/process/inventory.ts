@@ -7,26 +7,30 @@
 // here so terminate_process can refuse to kill processes the agent didn't start.
 // Every process tool imports this single Set instance — do not re-declare it.
 
-import { ALLOWED_COMMANDS, BLOCKED_COMMANDS } from "../../src/policy/shell/rules.ts"
-import { execFileAsync } from "../../src/platform/process/exec.ts"
+import { ALLOWED_COMMANDS, BLOCKED_COMMANDS } from "../../../policy/shell/rules.ts"
+import { execFileAsync } from "../../../platform/process/exec.ts"
 
 export const MAX_OUTPUT_BYTES = 1 * 1024 * 1024 // 1 MB — process listings can be sizeable
 export const DEFAULT_TIMEOUT_MS = 15 * 1000
 
-/** Session PID registry — single shared instance. @type {Set<number>} */
-export const trackedPids = new Set()
+/** Session PID registry — single shared instance. */
+export const trackedPids = new Set<number>()
 
-/**
- * @typedef ProcessInfo
- * @property {number} pid
- * @property {string} name
- * @property {number=} memoryBytes  Resident set size in bytes (best-effort).
- * @property {number=} cpuPercent
- * @property {string=} cmdLine      Full command line if available.
- * @property {number=} parentPid
- */
+export interface ProcessInfo {
+  pid: number
+  name: string
+  /** Resident set size in bytes (best-effort). */
+  memoryBytes?: number | undefined
+  cpuPercent?: number | undefined
+  /** Full command line if available. */
+  cmdLine?: string | undefined
+  parentPid?: number | undefined
+}
 
-export async function listAllProcesses() {
+/** The fields a process can be sorted by. */
+export type ProcessSortKey = "pid" | "name" | "cpu" | "memory"
+
+export async function listAllProcesses(): Promise<ProcessInfo[]> {
   if (process.platform === "win32") {
     return listWindows()
   }
@@ -42,19 +46,21 @@ export async function listAllProcesses() {
 
 export const PROCESS_SNAPSHOT_TTL_MS = 1500
 
-/** @type {{ at: number, procs: ProcessInfo[] } | null} */
-let snapshotCache = null
+let snapshotCache: { at: number; procs: ProcessInfo[] } | null = null
 
 /**
  * A process listing no older than `maxAgeMs`, shared across the read-only process
  * tools. `now` / `list` are injectable for tests.
- * @returns {Promise<ProcessInfo[]>}
  */
 export async function getProcessSnapshot({
   maxAgeMs = PROCESS_SNAPSHOT_TTL_MS,
   now = Date.now,
   list = listAllProcesses,
-} = {}) {
+}: {
+  maxAgeMs?: number
+  now?: () => number
+  list?: () => Promise<ProcessInfo[]>
+} = {}): Promise<ProcessInfo[]> {
   const t = now()
   if (snapshotCache && t - snapshotCache.at < maxAgeMs) return snapshotCache.procs
   const procs = await list()
@@ -63,11 +69,11 @@ export async function getProcessSnapshot({
 }
 
 /** Drop the cached snapshot (tests / explicit refresh). */
-export function resetProcessSnapshot() {
+export function resetProcessSnapshot(): void {
   snapshotCache = null
 }
 
-async function listPosix() {
+async function listPosix(): Promise<ProcessInfo[]> {
   // -e: every process; -o: column list; --no-headers omits header line.
   // ww: wide output (don't truncate args).
   const args = ["-eo", "pid=,ppid=,rss=,pcpu=,comm=,args=", "ww"]
@@ -78,7 +84,8 @@ async function listPosix() {
       maxBuffer: MAX_OUTPUT_BYTES,
       windowsHide: true,
     })
-    stdout = r.stdout
+    // No `encoding: "buffer"`, so execFile hands back strings.
+    stdout = r.stdout as string
   } catch {
     // macOS ps doesn't accept "ww" twice; retry without it.
     const r = await execFileAsync("ps", ["-eo", "pid=,ppid=,rss=,pcpu=,comm=,args="], {
@@ -86,20 +93,28 @@ async function listPosix() {
       maxBuffer: MAX_OUTPUT_BYTES,
       windowsHide: true,
     })
-    stdout = r.stdout
+    stdout = r.stdout as string
   }
   return parsePosixPs(stdout)
 }
 
-export function parsePosixPs(stdout) {
-  const out = []
+export function parsePosixPs(stdout: string): ProcessInfo[] {
+  const out: ProcessInfo[] = []
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim()
     if (!trimmed) continue
     // Split first 5 columns by whitespace, leave the rest as args.
     const m = trimmed.match(/^(\d+)\s+(\d+)\s+(\d+)\s+([\d.]+)\s+(\S+)\s*(.*)$/)
     if (!m) continue
-    const [, pid, ppid, rssKb, cpu, comm, args] = m
+    const [, pid, ppid, rssKb, cpu, comm, args] = m as unknown as [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
     out.push({
       pid: Number(pid),
       parentPid: Number(ppid),
@@ -112,7 +127,7 @@ export function parsePosixPs(stdout) {
   return out
 }
 
-async function listWindows() {
+async function listWindows(): Promise<ProcessInfo[]> {
   // Get-Process is the modern replacement for tasklist/wmic. Format-Csv keeps
   // values quoted so paths with spaces don't break parsing.
   const psScript =
@@ -122,17 +137,17 @@ async function listWindows() {
     ["-NoProfile", "-NonInteractive", "-Command", psScript],
     { timeout: DEFAULT_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true }
   )
-  return parseWindowsCsv(stdout)
+  return parseWindowsCsv(stdout as string)
 }
 
-export function parseWindowsCsv(stdout) {
+export function parseWindowsCsv(stdout: string): ProcessInfo[] {
   const lines = stdout.split(/\r?\n/).filter(Boolean)
   if (lines.length <= 1) return []
-  const out = []
+  const out: ProcessInfo[] = []
   for (let i = 1; i < lines.length; i++) {
-    const cells = parseCsvRow(lines[i])
+    const cells = parseCsvRow(lines[i]!)
     if (cells.length < 6) continue
-    const [pid, name, ws, cpu, exe] = cells
+    const [pid, name, ws, cpu, exe] = cells as [string, string, string, string, string]
     out.push({
       pid: Number(pid),
       name,
@@ -144,8 +159,8 @@ export function parseWindowsCsv(stdout) {
   return out
 }
 
-export function parseCsvRow(line) {
-  const out = []
+export function parseCsvRow(line: string): string[] {
+  const out: string[] = []
   let cur = ""
   let inQ = false
   for (let i = 0; i < line.length; i++) {
@@ -180,7 +195,7 @@ export function parseCsvRow(line) {
 // program and leading args.
 export const MAX_CMDLINE_CHARS = 200
 
-export function formatProcess(proc) {
+export function formatProcess(proc: ProcessInfo) {
   const cmdLine =
     typeof proc.cmdLine === "string" && proc.cmdLine.length > MAX_CMDLINE_CHARS
       ? `${proc.cmdLine.slice(0, MAX_CMDLINE_CHARS)}…`
@@ -196,7 +211,12 @@ export function formatProcess(proc) {
   }
 }
 
-export function compareBy(a, b, key, desc) {
+export function compareBy(
+  a: ProcessInfo,
+  b: ProcessInfo,
+  key: ProcessSortKey | string,
+  desc: boolean
+): number {
   const va = pickField(a, key)
   const vb = pickField(b, key)
   const dir = desc ? -1 : 1
@@ -207,7 +227,10 @@ export function compareBy(a, b, key, desc) {
   return String(va).localeCompare(String(vb)) * dir
 }
 
-export function pickField(p, key) {
+export function pickField(
+  p: ProcessInfo,
+  key: ProcessSortKey | string
+): number | string | undefined {
   switch (key) {
     case "pid":
       return p.pid
@@ -221,7 +244,7 @@ export function pickField(p, key) {
   }
 }
 
-export function isProgramAllowed(name) {
+export function isProgramAllowed(name: unknown): boolean {
   const lc = String(name)
     .toLowerCase()
     .replace(/\.exe$/i, "")

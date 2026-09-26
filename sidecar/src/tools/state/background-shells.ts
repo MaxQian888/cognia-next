@@ -1,6 +1,6 @@
 // Session-scoped registry of background shells started by `bash` with
 // `run_in_background: true`. Mirrors the tracked-PID discipline in
-// `builtin-tools/process/`: the agent can only read/kill shells IT started this session,
+// `../builtin/process/`: the agent can only read/kill shells IT started this session,
 // and the dispatch layer calls `killAll()` at session teardown so no
 // background process outlives the chat session (no orphans).
 //

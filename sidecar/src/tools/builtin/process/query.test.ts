@@ -7,13 +7,23 @@ import {
   execGetProcess,
   execSearchProcesses,
   execTopMemoryProcesses,
-} from "./query.mjs"
+} from "./query.ts"
+import { firstText, firstJson } from "../../../../test-support/tool-result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
 
-function decode(r) {
-  return JSON.parse(r.content[0].text)
+interface QueryResult {
+  processes: { pid: number; name: string }[]
+  total: number
+  truncated: boolean
+  note?: string
+  pid?: number
 }
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+function decode(r: ToolResult): QueryResult {
+  return firstJson<QueryResult>(r)
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 test("list_processes returns a non-empty list with our own pid", async () => {
   const r = await execListProcesses({
@@ -53,8 +63,8 @@ test("list_processes explains capped results with an explicit note", async () =>
   const data = decode(r)
   if (data.total > 1) {
     assert.equal(data.truncated, true)
-    assert.match(data.note, /result capped at 1 processes/)
-    assert.match(data.note, /more exist/)
+    assert.match(data.note ?? "", /result capped at 1 processes/)
+    assert.match(data.note ?? "", /more exist/)
   }
 })
 
@@ -63,7 +73,7 @@ test("get_process returns details for our own pid", async () => {
   // On macOS sandboxes the host ps may not surface the test runner; tolerate
   // not-found by ensuring at least the path doesn't throw.
   if (r.isError) {
-    assert.match(r.content[0].text, /no process with pid/)
+    assert.match(firstText(r), /no process with pid/)
   } else {
     const data = decode(r)
     assert.equal(data.pid, process.pid)
@@ -111,8 +121,8 @@ test("search_processes explains capped matches with an explicit note", async () 
     const data = decode(r)
     if (data.total > 1) {
       assert.equal(data.truncated, true)
-      assert.match(data.note, /result capped at 1 processes/)
-      assert.match(data.note, /more exist/)
+      assert.match(data.note ?? "", /result capped at 1 processes/)
+      assert.match(data.note ?? "", /more exist/)
     }
   } finally {
     for (const child of children) child.kill()
@@ -132,7 +142,7 @@ test("top_memory_processes reports total and capped results", async () => {
   assert.equal(typeof data.truncated, "boolean")
   if (data.total > 1) {
     assert.equal(data.truncated, true)
-    assert.match(data.note, /result capped at 1 processes/)
-    assert.match(data.note, /more exist/)
+    assert.match(data.note ?? "", /result capped at 1 processes/)
+    assert.match(data.note ?? "", /more exist/)
   }
 })

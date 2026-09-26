@@ -15,14 +15,34 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
 import {
   execFileAsync,
   sandboxedProcessTarget,
   sandboxedProcessEnv,
-} from "../../src/platform/process/exec.ts"
-import { headTruncate } from "../../src/shared/text/truncate.ts"
-import { isProgramAllowed, trackedPids, MAX_OUTPUT_BYTES } from "./inventory.mjs"
+} from "../../../platform/process/exec.ts"
+import { headTruncate } from "../../../shared/text/truncate.ts"
+import type { ProcessSandboxScope } from "../../../platform/process/exec.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
+import type { SessionBgShellRegistry } from "../../state/host-background-shells.ts"
+import { isProgramAllowed, trackedPids, MAX_OUTPUT_BYTES } from "./inventory.ts"
+
+/** The session state the lifecycle tools use when the host supplies it. */
+export interface ProcessToolContext {
+  /** The session's background-job supervisor. */
+  bgShells?: SessionBgShellRegistry | undefined
+  /** The session working directory, the default `cwd`. */
+  cwd?: string | undefined
+  builtinProcessSandbox?: ProcessSandboxScope | undefined
+}
+
+/** What a failed `execFile` rejects with. */
+type ExecFailure = Error & {
+  code?: unknown
+  stdout?: unknown
+  stderr?: unknown
+  killed?: boolean
+}
 
 // Per-stream display cap for captured output. The 1 MB `maxBuffer` bounds what
 // we read from the child; this bounds what we hand the model so a chatty
@@ -31,7 +51,7 @@ import { isProgramAllowed, trackedPids, MAX_OUTPUT_BYTES } from "./inventory.mjs
 export const OUTPUT_DISPLAY_CHARS = 16_000
 
 /** Head-truncate a captured stream for display. */
-function clipStream(text) {
+function clipStream(text: unknown): string {
   return headTruncate(String(text), OUTPUT_DISPLAY_CHARS).text
 }
 
@@ -51,7 +71,10 @@ const startProcessShape = {
     .describe("Timeout in seconds (only relevant when detached=false)."),
 }
 
-async function execStartProcess(args, ctx = {}) {
+async function execStartProcess(
+  args: ToolArgs<typeof startProcessShape>,
+  ctx: ProcessToolContext = {}
+) {
   const { bgShells } = ctx
   try {
     if (!isProgramAllowed(args.program)) {
@@ -122,7 +145,8 @@ async function execStartProcess(args, ctx = {}) {
         stderr: clipStream(stderr),
         exitCode: 0,
       })
-    } catch (err) {
+    } catch (caught) {
+      const err = caught as ExecFailure | null
       // A non-zero exit is a normal program outcome, not a tool failure: the
       // rejection still carries the captured output and the real exit code.
       // Surfacing them (instead of a bare error) lets the model see WHY the
@@ -146,7 +170,7 @@ async function execStartProcess(args, ctx = {}) {
 
 /** Supervisor-less defaults, kept so the static category and tests still work. */
 export const startProcessTool = createStartProcessTool()
-export function createStartProcessTool(ctx = {}) {
+export function createStartProcessTool(ctx: ProcessToolContext = {}) {
   return tool(
     "start_process",
     "Start a process. Program must be on the allowlist. HIGH-RISK — requires user approval.",
@@ -168,7 +192,10 @@ const terminateProcessShape = {
     ),
 }
 
-async function execTerminateProcess(args, ctx = {}) {
+async function execTerminateProcess(
+  args: ToolArgs<typeof terminateProcessShape>,
+  ctx: ProcessToolContext = {}
+) {
   const { bgShells } = ctx
   try {
     // A supervised job is killed through the supervisor so the WHOLE process
@@ -204,7 +231,7 @@ async function execTerminateProcess(args, ctx = {}) {
 }
 
 export const terminateProcessTool = createTerminateProcessTool()
-export function createTerminateProcessTool(ctx = {}) {
+export function createTerminateProcessTool(ctx: ProcessToolContext = {}) {
   return tool(
     "terminate_process",
     "Terminate a process by PID. HIGH-RISK — requires user approval. Refuses untracked PIDs unless allowUntracked=true.",

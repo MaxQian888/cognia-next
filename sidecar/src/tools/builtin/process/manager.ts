@@ -3,8 +3,9 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { listAllProcesses, formatProcess, isProgramAllowed, trackedPids } from "./inventory.mjs"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { listAllProcesses, formatProcess, isProgramAllowed, trackedPids } from "./inventory.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 // ---- check_program_allowed -----------------------------------------------
 
@@ -12,7 +13,7 @@ const checkProgramAllowedShape = {
   program: z.string().min(1).describe("Program name (path basename)."),
 }
 
-async function execCheckProgramAllowed(args) {
+async function execCheckProgramAllowed(args: ToolArgs<typeof checkProgramAllowedShape>) {
   return toolText({
     program: args.program,
     allowed: isProgramAllowed(args.program),
@@ -52,7 +53,7 @@ const getTrackedProcessesShape = {
   includeDetails: z.boolean().default(true).describe("Include process details for tracked PIDs."),
 }
 
-async function execGetTrackedProcesses(args) {
+async function execGetTrackedProcesses(args: ToolArgs<typeof getTrackedProcessesShape>) {
   if (trackedPids.size === 0 || !args.includeDetails) {
     return toolText({ trackedCount: trackedPids.size, trackedPids: [...trackedPids] })
   }

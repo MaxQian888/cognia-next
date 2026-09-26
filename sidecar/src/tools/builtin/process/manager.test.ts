@@ -5,11 +5,21 @@ import {
   execCheckProgramAllowed,
   execGetProcessManagerStatus,
   execGetTrackedProcesses,
-} from "./manager.mjs"
-import { trackedPids } from "./inventory.mjs"
+} from "./manager.ts"
+import { trackedPids } from "./inventory.ts"
+import { firstJson } from "../../../../test-support/tool-result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
 
-function decode(r) {
-  return JSON.parse(r.content[0].text)
+interface ManagerResult {
+  allowed?: boolean
+  trackedCount?: number
+  platform?: string
+  trackedPids?: number[]
+  processes?: unknown
+}
+
+function decode(r: ToolResult): ManagerResult {
+  return firstJson<ManagerResult>(r)
 }
 
 test("check_program_allowed accepts git", async () => {
@@ -29,7 +39,7 @@ test("check_program_allowed strips .exe", async () => {
 
 test("get_process_manager_status reports tracked count", async () => {
   trackedPids.clear()
-  const r = await execGetProcessManagerStatus({})
+  const r = await execGetProcessManagerStatus()
   const data = decode(r)
   assert.equal(data.trackedCount, 0)
   assert.equal(data.platform, process.platform)

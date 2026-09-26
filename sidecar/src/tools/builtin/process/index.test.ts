@@ -1,8 +1,8 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { processTools, PROCESS_TOOL_NAMES, __testExports } from "./index.mjs"
-import { trackedPids } from "./inventory.mjs"
+import { processTools, PROCESS_TOOL_NAMES, __testExports } from "./index.ts"
+import { trackedPids } from "./inventory.ts"
 
 test("processTools registration order is byte-stable", () => {
   assert.deepEqual(
@@ -38,6 +38,10 @@ test("__testExports exposes every handler + helper", () => {
     "pickField",
     "compareBy",
   ]) {
-    assert.equal(typeof __testExports[key], "function", `missing ${key}`)
+    assert.equal(
+      typeof __testExports[key as keyof typeof __testExports],
+      "function",
+      `missing ${key}`
+    )
   }
 })

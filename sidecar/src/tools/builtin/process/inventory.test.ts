@@ -12,7 +12,7 @@ import {
   getProcessSnapshot,
   resetProcessSnapshot,
   MAX_CMDLINE_CHARS,
-} from "./inventory.mjs"
+} from "./inventory.ts"
 
 test("getProcessSnapshot serves a cached listing within the TTL, refreshing after", async () => {
   resetProcessSnapshot()
@@ -58,8 +58,8 @@ test("formatProcess tolerates missing memory", () => {
 test("formatProcess clips an overlong cmdLine to MAX_CMDLINE_CHARS", () => {
   const long = "x".repeat(MAX_CMDLINE_CHARS + 500)
   const out = formatProcess({ pid: 1, name: "x", cmdLine: long })
-  assert.equal(out.cmdLine.length, MAX_CMDLINE_CHARS + 1) // capped + ellipsis
-  assert.ok(out.cmdLine.endsWith("…"))
+  assert.equal(out.cmdLine!.length, MAX_CMDLINE_CHARS + 1) // capped + ellipsis
+  assert.ok(out.cmdLine!.endsWith("…"))
 })
 
 test("formatProcess leaves a short cmdLine untouched", () => {
@@ -73,19 +73,19 @@ test("parsePosixPs decodes a representative line", () => {
     "  9999     1     0  0.0 init /sbin/init\n"
   const got = parsePosixPs(stdout)
   assert.equal(got.length, 2)
-  assert.equal(got[0].pid, 1234)
-  assert.equal(got[0].parentPid, 5678)
-  assert.equal(got[0].memoryBytes, 4096 * 1024)
-  assert.equal(got[0].cpuPercent, 1.5)
-  assert.equal(got[0].name, "node")
-  assert.match(got[0].cmdLine, /\/tmp\/script\.js/)
+  assert.equal(got[0]!.pid, 1234)
+  assert.equal(got[0]!.parentPid, 5678)
+  assert.equal(got[0]!.memoryBytes, 4096 * 1024)
+  assert.equal(got[0]!.cpuPercent, 1.5)
+  assert.equal(got[0]!.name, "node")
+  assert.match(got[0]!.cmdLine ?? "", /\/tmp\/script\.js/)
 })
 
 test("parsePosixPs ignores malformed lines", () => {
   const stdout = "garbage line that does not match\n  1 0 0 0 init /sbin/init\n"
   const got = parsePosixPs(stdout)
   assert.equal(got.length, 1)
-  assert.equal(got[0].pid, 1)
+  assert.equal(got[0]!.pid, 1)
 })
 
 test("parseWindowsCsv decodes a small CSV", () => {
@@ -95,11 +95,11 @@ test("parseWindowsCsv decodes a small CSV", () => {
     '"456","explorer","2097152","","C:\\Windows\\explorer.exe","Windows Explorer"\r\n'
   const got = parseWindowsCsv(csv)
   assert.equal(got.length, 2)
-  assert.equal(got[0].pid, 123)
-  assert.equal(got[0].name, "node")
-  assert.equal(got[0].memoryBytes, 4194304)
-  assert.equal(got[0].cpuPercent, 0.5)
-  assert.match(got[0].cmdLine, /node\.exe/)
+  assert.equal(got[0]!.pid, 123)
+  assert.equal(got[0]!.name, "node")
+  assert.equal(got[0]!.memoryBytes, 4194304)
+  assert.equal(got[0]!.cpuPercent, 0.5)
+  assert.match(got[0]!.cmdLine ?? "", /node\.exe/)
 })
 
 test("parseCsvRow handles escaped quotes", () => {
