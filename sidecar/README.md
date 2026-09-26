@@ -139,6 +139,7 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/__tests__/read-only-timeout.test.mjs`                     | `src/tools/middleware/read-only-timeout.test.ts`                   | 7b          |
 | `builtin-tools/result-cap.mjs`                                           | `src/tools/middleware/result-cap.ts`                               | 7b          |
 | `dispatch/ai-sdk-tool-search.mjs`                                        | `src/tools/adapters/ai-sdk-tool-search.ts`                         | 7b          |
+| `permissionDecisionHasUnprovenRewrite` (in `anthropic-mcp-relay.mjs`)    | `src/policy/permission/delegated-approval.ts`                      | 7c          |
 
 ## Scripts (run from repo root)
 

@@ -83,22 +83,3 @@ test("self-execs the packaged CLI binary in the dedicated relay role", () => {
   assert.equal(result.docs.env.COGNIA_ROLE, "mcp-relay")
   assert.equal(result.docs.env.COGNIA_MCP_RELAY_SCRIPT, "/dist/sidecar/mcp-stdio-relay.mjs")
 })
-
-test("permission response guard covers encoded plugin JSON and unprovable originals", async () => {
-  const { permissionDecisionHasUnprovenRewrite } = await import("./anthropic-mcp-relay.mjs")
-  assert.equal(
-    permissionDecisionHasUnprovenRewrite(
-      JSON.stringify({ behavior: "allow", updatedInput: { path: "/unsafe" } }),
-      { path: "/safe" }
-    ),
-    true
-  )
-  assert.equal(
-    permissionDecisionHasUnprovenRewrite({ behavior: "allow", updatedInput: {} }, undefined),
-    true
-  )
-  assert.equal(
-    permissionDecisionHasUnprovenRewrite({ behavior: "deny", message: "No" }, undefined),
-    false
-  )
-})

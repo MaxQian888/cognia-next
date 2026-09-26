@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util"
 import { existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
@@ -82,24 +81,3 @@ export function guardAnthropicRemoteMcpServers(
 }
 
 export const __TESTING__ = { RELAY_CONFIG_ENV, encodeRelayConfig }
-
-/** A delegated approval may approve the checked input, never replace it after hooks ran. */
-export function permissionDecisionHasUnprovenRewrite(result, originalInput) {
-  const decisions = [result, result?.structuredContent]
-  const texts = (Array.isArray(result?.content) ? result.content : [])
-    .filter((content) => content?.type === "text")
-    .map((content) => content.text)
-  if (typeof result === "string") texts.push(result)
-  for (const text of [...texts, texts.join("\n"), texts.join("")]) {
-    try {
-      decisions.push(JSON.parse(text))
-    } catch {
-      /* SDK validates non-JSON responses. */
-    }
-  }
-  return decisions.some(
-    (decision) =>
-      decision?.updatedInput !== undefined &&
-      (originalInput === undefined || !isDeepStrictEqual(decision.updatedInput, originalInput))
-  )
-}

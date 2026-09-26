@@ -1,4 +1,4 @@
-import { permissionDecisionHasUnprovenRewrite } from "./dispatch/anthropic-mcp-relay.mjs"
+import { permissionDecisionHasUnprovenRewrite } from "./src/policy/permission/delegated-approval.ts"
 import { createInterface } from "node:readline"
 import { pathToFileURL } from "node:url"
 

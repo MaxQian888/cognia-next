@@ -16,7 +16,7 @@
 // `toolUseId` key.
 
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
-import { permissionDecisionHasUnprovenRewrite } from "../dispatch/anthropic-mcp-relay.mjs"
+import { permissionDecisionHasUnprovenRewrite } from "../src/policy/permission/delegated-approval.ts"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"

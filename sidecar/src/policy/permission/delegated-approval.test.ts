@@ -5,7 +5,10 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { enforceAnthropicPermissionChannel } from "./delegated-approval.ts"
+import {
+  enforceAnthropicPermissionChannel,
+  permissionDecisionHasUnprovenRewrite,
+} from "./delegated-approval.ts"
 import type { DelegatingSdkOptions, HookOutput, PreToolUseHook } from "./delegated-approval.ts"
 
 /** Hook `hook` of PreToolUse matcher `matcher` (negative indexes count from the end). */
@@ -119,4 +122,51 @@ test("delegation cannot escape response guards through an implicitly loaded MCP 
     mcpServers: { mounted: { type: "stdio", command: "node" } },
   })
   assert.equal(mounted.permissionPromptToolName, "mcp__mounted__review")
+})
+
+test("the response guard covers encoded plugin JSON and unprovable originals", () => {
+  assert.equal(
+    permissionDecisionHasUnprovenRewrite(
+      JSON.stringify({ behavior: "allow", updatedInput: { path: "/unsafe" } }),
+      { path: "/safe" }
+    ),
+    true
+  )
+  assert.equal(
+    permissionDecisionHasUnprovenRewrite({ behavior: "allow", updatedInput: {} }, undefined),
+    true
+  )
+  assert.equal(
+    permissionDecisionHasUnprovenRewrite({ behavior: "deny", message: "No" }, undefined),
+    false
+  )
+})
+
+test("the response guard reads text blocks and structured content, and allows an unchanged input", () => {
+  const input = { path: "/safe" }
+  const allow = JSON.stringify({ behavior: "allow", updatedInput: input })
+  // A JSON answer split across text blocks is read joined.
+  const split = {
+    content: [
+      { type: "text", text: allow.slice(0, 9) },
+      { type: "text", text: allow.slice(9) },
+    ],
+  }
+  assert.equal(permissionDecisionHasUnprovenRewrite(split, input), false)
+  assert.equal(permissionDecisionHasUnprovenRewrite(split, { path: "/other" }), true)
+  assert.equal(
+    permissionDecisionHasUnprovenRewrite(
+      { structuredContent: { updatedInput: { path: "/unsafe" } } },
+      input
+    ),
+    true
+  )
+  // Non-JSON text and non-text blocks are ignored.
+  assert.equal(
+    permissionDecisionHasUnprovenRewrite(
+      { content: [{ type: "text", text: "allow" }, null, { type: "image", text: allow }] },
+      { path: "/other" }
+    ),
+    false
+  )
 })

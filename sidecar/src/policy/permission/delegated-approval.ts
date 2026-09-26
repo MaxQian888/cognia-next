@@ -6,6 +6,8 @@
 // re-check any input the hook rewrites, and lose its power to pre-approve;
 // a final hook applies the same checks to calls no other hook matched.
 
+import { isDeepStrictEqual } from "node:util"
+
 import { PLUGIN_TOOLS_SERVER_NAME } from "../tool-catalog/names.ts"
 import { restorePluginToolName } from "../tool-catalog/plugin-aliases.ts"
 import type { PermissionSendOptions } from "./ladder.ts"
@@ -115,4 +117,41 @@ export function enforceAnthropicPermissionChannel(
   }
   delete options.canUseTool
   return options
+}
+
+/** The fields of a delegate's answer this guard reads. */
+interface DelegateAnswer {
+  updatedInput?: unknown
+  structuredContent?: unknown
+  content?: unknown
+}
+
+const asAnswer = (value: unknown): DelegateAnswer | undefined =>
+  value && typeof value === "object" ? (value as DelegateAnswer) : undefined
+
+/** A delegated approval may approve the checked input, never replace it after hooks ran. */
+export function permissionDecisionHasUnprovenRewrite(
+  result: unknown,
+  originalInput: unknown
+): boolean {
+  const answer = asAnswer(result)
+  const decisions: unknown[] = [result, answer?.structuredContent]
+  const texts = (Array.isArray(answer?.content) ? (answer.content as unknown[]) : [])
+    .filter((content) => (content as { type?: unknown } | null | undefined)?.type === "text")
+    .map((content) => (content as { text?: unknown }).text)
+  if (typeof result === "string") texts.push(result)
+  for (const text of [...texts, texts.join("\n"), texts.join("")]) {
+    try {
+      decisions.push(JSON.parse(text as string))
+    } catch {
+      /* SDK validates non-JSON responses. */
+    }
+  }
+  return decisions.some((decision) => {
+    const updatedInput = asAnswer(decision)?.updatedInput
+    return (
+      updatedInput !== undefined &&
+      (originalInput === undefined || !isDeepStrictEqual(updatedInput, originalInput))
+    )
+  })
 }
