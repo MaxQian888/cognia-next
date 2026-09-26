@@ -9,18 +9,57 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { buildJob, resolveRunnerSpawn, runEngine, snapshotSite } from "./run.mjs"
+import { buildJob, resolveRunnerSpawn, runEngine, snapshotSite } from "./run.ts"
+import type { EngineDeps, RunnerEnvelope, WebcloneArgs, WebcloneJob } from "./run.ts"
+
+/** The slice of a child process the runner drives. */
+interface FakeChild extends EventEmitter {
+  stdout: EventEmitter
+  stderr: EventEmitter
+  kill(): void
+}
+
+interface SpawnCall {
+  file: string
+  args: string[]
+  opts: { env: NodeJS.ProcessEnv }
+}
+
+/** What the tests read from a runner envelope. */
+type Envelope = RunnerEnvelope & {
+  result?: { mode?: string }
+  error?: { message?: string; reason?: string }
+}
+
+/** Deliberately incomplete arguments, for the validation tests. */
+const partialArgs = (args: Record<string, unknown>) => args as unknown as WebcloneArgs
+
+/** A job for runner tests, where the engine options do not matter. */
+const bareJob = (options: Record<string, unknown> = {}) =>
+  ({ mode: "snapshot", url: "https://x/", options }) as unknown as WebcloneJob
 
 function realCwd(prefix = "wc-tool-") {
   return mkdtempSync(join(tmpdir(), prefix))
 }
 
 /** A fake spawn whose child emits a scripted stdout envelope + close/error. */
-function fakeSpawn({ stdout = "", stderr = "", code = 0, error = null, hang = false } = {}) {
-  const calls = []
-  const spawn = (file, args, opts) => {
+function fakeSpawn({
+  stdout = "",
+  stderr = "",
+  code = 0,
+  error = null,
+  hang = false,
+}: {
+  stdout?: string
+  stderr?: string
+  code?: number | null
+  error?: Error | null
+  hang?: boolean
+} = {}) {
+  const calls: SpawnCall[] = []
+  const spawn = (file: string, args: string[], opts: SpawnCall["opts"]) => {
     calls.push({ file, args, opts })
-    const child = new EventEmitter()
+    const child = new EventEmitter() as FakeChild
     child.stdout = new EventEmitter()
     child.stderr = new EventEmitter()
     child.kill = () => {
@@ -39,12 +78,15 @@ function fakeSpawn({ stdout = "", stderr = "", code = 0, error = null, hang = fa
     })
     return child
   }
-  return { spawn, calls }
+  return { spawn: spawn as unknown as EngineDeps["spawn"], calls }
 }
 
 const memFs = () => ({ writeFile: async () => {}, unlink: async () => {}, mkdir: async () => {} })
 
-function injected(spawnObj, extra = {}) {
+function injected(
+  spawnObj: { spawn: EngineDeps["spawn"] },
+  extra: Partial<EngineDeps> & { timeoutMs?: number } = {}
+) {
   return {
     spawn: spawnObj.spawn,
     fs: memFs(),
@@ -59,8 +101,14 @@ function injected(spawnObj, extra = {}) {
 // ---- buildJob -------------------------------------------------------------
 
 test("buildJob requires cwd, output, and (for snapshot) url", () => {
-  assert.throws(() => buildJob({ output: "o", url: "https://x" }), /cwd .* is required/)
-  assert.throws(() => buildJob({ cwd: "/w", url: "https://x" }), /output path is required/)
+  assert.throws(
+    () => buildJob(partialArgs({ output: "o", url: "https://x" })),
+    /cwd .* is required/
+  )
+  assert.throws(
+    () => buildJob(partialArgs({ cwd: "/w", url: "https://x" })),
+    /output path is required/
+  )
   assert.throws(() => buildJob({ cwd: "/w", output: "o" }), /url is required/)
 })
 
@@ -157,7 +205,7 @@ test("buildJob consumes the built engine's canonical parsers", () => {
       framework: "REACT",
       frameworkHint: "VUE",
     })
-    assert.equal(job.options.frameworkCodegen.framework, "react")
+    assert.equal(job.options.frameworkCodegen!.framework, "react")
     assert.equal(job.options.frameworkHint, "vue")
   } finally {
     rmSync(cwd, { recursive: true, force: true })
@@ -169,9 +217,9 @@ test("buildJob builds a convert job from convertLocal", () => {
   try {
     const job = buildJob({ cwd, convertLocal: "snap", output: "gen", framework: "vue" })
     assert.equal(job.mode, "convert")
-    assert.ok(job.options.convertLocal.startsWith(realpathSync(cwd)))
+    assert.ok(job.options.convertLocal!.startsWith(realpathSync(cwd)))
     assert.ok(job.options.output.startsWith(realpathSync(cwd)))
-    assert.equal(job.options.frameworkCodegen.framework, "vue")
+    assert.equal(job.options.frameworkCodegen!.framework, "vue")
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -227,61 +275,42 @@ const OK_ENVELOPE = JSON.stringify({
 
 test("runEngine parses the runner's stdout envelope", async () => {
   const spawnObj = fakeSpawn({ stdout: OK_ENVELOPE + "\n", stderr: "chatter\n", code: 0 })
-  const env = await runEngine(
-    { mode: "snapshot", url: "https://x/", options: {} },
-    injected(spawnObj)
-  )
+  const env: Envelope = await runEngine(bareJob(), injected(spawnObj))
   assert.equal(env.ok, true)
-  assert.equal(env.result.mode, "snapshot")
+  assert.equal(env.result!.mode, "snapshot")
   // Spawned node with [runnerPath, jobPath].
   assert.equal(spawnObj.calls.length, 1)
-  assert.equal(spawnObj.calls[0].file, "node")
-  assert.equal(spawnObj.calls[0].args[0], "runner.js")
+  assert.equal(spawnObj.calls[0]!.file, "node")
+  assert.equal(spawnObj.calls[0]!.args[0], "runner.js")
 })
 
 test("runEngine returns a failure envelope even on non-zero exit", async () => {
   const failEnv = JSON.stringify({ ok: false, error: { name: "X", message: "boom" } })
   const spawnObj = fakeSpawn({ stdout: failEnv + "\n", code: 1 })
-  const env = await runEngine(
-    { mode: "snapshot", url: "https://x/", options: {} },
-    injected(spawnObj)
-  )
+  const env: Envelope = await runEngine(bareJob(), injected(spawnObj))
   assert.equal(env.ok, false)
-  assert.equal(env.error.message, "boom")
+  assert.equal(env.error!.message, "boom")
 })
 
 test("runEngine throws when the runner produces no output", async () => {
   const spawnObj = fakeSpawn({ stdout: "", stderr: "died\n", code: 1 })
-  await assert.rejects(
-    () => runEngine({ mode: "snapshot", url: "https://x/", options: {} }, injected(spawnObj)),
-    /produced no result/
-  )
+  await assert.rejects(() => runEngine(bareJob(), injected(spawnObj)), /produced no result/)
 })
 
 test("runEngine throws on unparseable runner output", async () => {
   const spawnObj = fakeSpawn({ stdout: "not json\n", code: 0 })
-  await assert.rejects(
-    () => runEngine({ mode: "snapshot", url: "https://x/", options: {} }, injected(spawnObj)),
-    /unparseable output/
-  )
+  await assert.rejects(() => runEngine(bareJob(), injected(spawnObj)), /unparseable output/)
 })
 
 test("runEngine surfaces a spawn error as a thrown 'no result'", async () => {
   const spawnObj = fakeSpawn({ error: new Error("ENOENT") })
-  await assert.rejects(
-    () => runEngine({ mode: "snapshot", url: "https://x/", options: {} }, injected(spawnObj)),
-    /produced no result/
-  )
+  await assert.rejects(() => runEngine(bareJob(), injected(spawnObj)), /produced no result/)
 })
 
 test("runEngine throws on timeout (killed child)", async () => {
   const spawnObj = fakeSpawn({ hang: true })
   await assert.rejects(
-    () =>
-      runEngine(
-        { mode: "snapshot", url: "https://x/", options: {} },
-        injected(spawnObj, { timeoutMs: 20 })
-      ),
+    () => runEngine(bareJob(), injected(spawnObj, { timeoutMs: 20 })),
     /timed out/
   )
 })
@@ -292,12 +321,12 @@ test("snapshotSite blocks a private target before spawning", async () => {
   const cwd = realCwd()
   const spawnObj = fakeSpawn({ stdout: OK_ENVELOPE + "\n" })
   try {
-    const env = await snapshotSite(
+    const env: Envelope = await snapshotSite(
       { cwd, url: "http://127.0.0.1/", output: "o.html" },
       injected(spawnObj)
     )
     assert.equal(env.ok, false)
-    assert.equal(env.error.reason, "private-host")
+    assert.equal(env.error!.reason, "private-host")
     assert.equal(spawnObj.calls.length, 0, "must not spawn for a blocked target")
   } finally {
     rmSync(cwd, { recursive: true, force: true })
@@ -308,7 +337,7 @@ test("snapshotSite runs the engine for an allowed target", async () => {
   const cwd = realCwd()
   const spawnObj = fakeSpawn({ stdout: OK_ENVELOPE + "\n" })
   try {
-    const env = await snapshotSite(
+    const env: Envelope = await snapshotSite(
       { cwd, url: "https://example.com/", output: "o.html", mode: "single" },
       injected(spawnObj)
     )
@@ -323,7 +352,7 @@ test("snapshotSite allows a private target when allowPrivateHosts is set", async
   const cwd = realCwd()
   const spawnObj = fakeSpawn({ stdout: OK_ENVELOPE + "\n" })
   try {
-    const env = await snapshotSite(
+    const env: Envelope = await snapshotSite(
       { cwd, url: "http://127.0.0.1/", output: "o.html", allowPrivateHosts: true },
       injected(spawnObj)
     )

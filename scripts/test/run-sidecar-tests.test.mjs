@@ -21,7 +21,7 @@ for (const file of [
   "sidecar/dispatch/c.live.test.mjs",
   "sidecar/webclone/d.test.mjs",
   "sidecar/vscode-ext-host/tests/e.test.mjs",
-  "sidecar/builtin-tools/webclone/f.test.mjs",
+  "sidecar/src/tools/builtin/webclone/f.test.ts",
   "sidecar/node_modules/pkg/g.test.mjs",
   "sidecar/builtin-tools/node_modules/h.test.mjs",
   "lib/outside.test.mjs",
@@ -33,7 +33,7 @@ for (const file of [
 test("discovers the sidecar's own unit suites, .mjs and .ts, sorted", () => {
   assert.deepEqual(discoverSidecarSuites({ root }), [
     "sidecar/a.test.mjs",
-    "sidecar/builtin-tools/webclone/f.test.mjs",
+    "sidecar/src/tools/builtin/webclone/f.test.ts",
     "sidecar/x/b.test.ts",
   ])
 })
@@ -47,7 +47,7 @@ test("--live selects only the live suites", () => {
 test("nested packages are excluded only at the sidecar top level; node_modules everywhere", () => {
   assert.equal(isExcludedPath("sidecar/webclone/src/x.test.mjs"), true)
   assert.equal(isExcludedPath("sidecar/codeserver-agent-ext/tests/x.test.mjs"), true)
-  assert.equal(isExcludedPath("sidecar/builtin-tools/webclone/run.test.mjs"), false)
+  assert.equal(isExcludedPath("sidecar/src/tools/builtin/webclone/run.test.ts"), false)
   assert.equal(isExcludedPath("sidecar/dispatch/node_modules/x.test.mjs"), true)
   assert.equal(isLiveSuite("sidecar/dispatch/x.spike.live.test.mjs"), true)
   assert.equal(isLiveSuite("sidecar/dispatch/live-harness.test.mjs"), false)

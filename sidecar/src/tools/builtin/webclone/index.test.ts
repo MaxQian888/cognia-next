@@ -15,15 +15,24 @@ import {
   webcloneTools,
   WEBCLONE_TOOL_NAMES,
   __testExports,
-} from "./index.mjs"
+} from "./index.ts"
+import type { EngineDeps } from "./run.ts"
+import type { ToolResult } from "../../kernel/result.ts"
+
+/** The slice of a child process the runner drives. */
+interface FakeChild extends EventEmitter {
+  stdout: EventEmitter
+  stderr: EventEmitter
+  kill(): void
+}
 
 function realCwd() {
   return mkdtempSync(join(tmpdir(), "wc-idx-"))
 }
 
-function fakeSpawnDeps(envelope) {
+function fakeSpawnDeps(envelope: unknown): Partial<EngineDeps> {
   const spawn = () => {
-    const child = new EventEmitter()
+    const child = new EventEmitter() as FakeChild
     child.stdout = new EventEmitter()
     child.stderr = new EventEmitter()
     child.kill = () => child.emit("close", null)
@@ -34,7 +43,7 @@ function fakeSpawnDeps(envelope) {
     return child
   }
   return {
-    spawn,
+    spawn: spawn as unknown as EngineDeps["spawn"],
     fs: { writeFile: async () => {}, unlink: async () => {}, mkdir: async () => {} },
     tmpDir: tmpdir(),
     randomId: () => "id",
@@ -43,8 +52,8 @@ function fakeSpawnDeps(envelope) {
   }
 }
 
-function textOf(result) {
-  return result.content.map((c) => c.text).join("")
+function textOf(result: ToolResult) {
+  return result.content.map((c) => ("text" in c ? c.text : "")).join("")
 }
 
 test("tool registration order is fixed and matches names", () => {
@@ -130,7 +139,8 @@ test("execWebClone maps a blocked target to an error result (no spawn needed)", 
 
 test("execWebClone maps a thrown validation error to an error result", async () => {
   // Missing url → buildJob throws → toolError.
-  const r = await execWebClone({ cwd: realCwd(), output: "o.html" }, fakeSpawnDeps({ ok: true }))
+  const missingUrl = { cwd: realCwd(), output: "o.html" } as Parameters<typeof execWebClone>[0]
+  const r = await execWebClone(missingUrl, fakeSpawnDeps({ ok: true }))
   assert.equal(r.isError, true)
   assert.match(textOf(r), /web_clone: .*url is required/)
 })

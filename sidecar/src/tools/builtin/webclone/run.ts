@@ -9,23 +9,26 @@
 // runs hermetically without spawning a real Node process.
 
 import { spawn as defaultSpawn } from "node:child_process"
+import type { ChildProcess } from "node:child_process"
 import fsp from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { randomUUID } from "node:crypto"
 
-import { assertPathInside } from "../../src/platform/fs/paths.ts"
+import { assertPathInside } from "../../../platform/fs/paths.ts"
 import {
   DEFAULTS as ENGINE_DEFAULTS,
   evaluateFetchTarget,
   parseCodegenFramework,
   parseFrameworkHint,
   validateOptions,
-} from "../../webclone/dist/index.js"
+} from "../../../../webclone/dist/index.js"
 
 /** Absolute path to the vendored engine's runner (built by `tsc`). */
-export const RUNNER_PATH = fileURLToPath(new URL("../../webclone/dist/runner.js", import.meta.url))
+export const RUNNER_PATH = fileURLToPath(
+  new URL("../../../../webclone/dist/runner.js", import.meta.url)
+)
 
 /** Cap the engine's captured stderr chatter so a runaway page can't balloon memory. */
 const MAX_STDERR_BYTES = 64 * 1024
@@ -36,38 +39,72 @@ export const SNAPSHOT_MODES = Object.freeze(["single", "bundle"])
 export const CODEGEN_FRAMEWORKS = Object.freeze([...ENGINE_DEFAULTS.codegenFrameworks])
 export const FRAMEWORK_HINTS = Object.freeze([...ENGINE_DEFAULTS.frameworkHints])
 
-function clampInt(value, fallback, min, max) {
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const n = typeof value === "number" ? value : Number(value)
   if (!Number.isFinite(n)) return fallback
   return Math.min(max, Math.max(min, Math.trunc(n)))
 }
 
+/** A snapshot or convert request, as the tools pass it. */
+export interface WebcloneArgs {
+  cwd: string
+  url?: string | undefined
+  convertLocal?: string | undefined
+  output: string
+  mode?: string | undefined
+  extractComponents?: boolean | undefined
+  framework?: string | undefined
+  frameworkHint?: string | undefined
+  maxAssets?: number | undefined
+  concurrency?: number | undefined
+  timeout?: number | undefined
+  maxFileSize?: number | undefined
+  allowPrivateHosts?: boolean | undefined
+  pretty?: boolean | undefined
+  codegenTypescript?: boolean | undefined
+  codegenGenerateDrafts?: boolean | undefined
+  codegenExtractShared?: boolean | undefined
+}
+
+/** The engine's `SnapshotOptions`, as far as this module sets them. */
+export interface WebcloneOptions {
+  url: string | undefined
+  output: string
+  mode: string
+  maxAssets: number
+  concurrency: number
+  timeout: number
+  retryCount: number
+  retryInitialDelay: number
+  retryMaxDelay: number
+  inline: boolean
+  pretty: boolean
+  extractComponents: boolean
+  allowPrivateHosts: boolean
+  frameworkHint?: string
+  maxFileSize?: number
+  frameworkCodegen?: {
+    framework: string | null
+    typescript: boolean
+    cssModules: boolean
+    generateDrafts: boolean
+    extractSharedLogic: boolean
+  }
+  convertLocal?: string
+}
+
+export type WebcloneJob =
+  | { mode: "snapshot"; url: string; options: WebcloneOptions }
+  | { mode: "convert"; url?: undefined; options: WebcloneOptions }
+
+/** The runner's result envelope (`webclone/src/runner.ts` `RunnerEnvelope`). */
+export type RunnerEnvelope = Record<string, unknown> & { ok: boolean }
+
 /**
  * Build the full engine `SnapshotOptions` + runner job from tool args, confining
  * the output path under `cwd`. Throws on invalid input (bad path, bad mode).
- *
- * @param {{
- *   cwd: string,
- *   url?: string,
- *   convertLocal?: string,
- *   output: string,
- *   mode?: string,
- *   extractComponents?: boolean,
- *   framework?: string,
- *   frameworkHint?: string,
- *   maxAssets?: number,
- *   concurrency?: number,
- *   timeout?: number,
- *   maxFileSize?: number,
- *   allowPrivateHosts?: boolean,
- *   pretty?: boolean,
- *   codegenTypescript?: boolean,
- *   codegenGenerateDrafts?: boolean,
- *   codegenExtractShared?: boolean,
- * }} args
- * @returns {{ mode: 'snapshot' | 'convert', url?: string, options: object }}
  */
-export function buildJob(args) {
+export function buildJob(args: WebcloneArgs): WebcloneJob {
   if (!args || typeof args.cwd !== "string" || args.cwd.length === 0) {
     throw new Error("cwd (absolute workspace path) is required")
   }
@@ -82,7 +119,7 @@ export function buildJob(args) {
   }
 
   const mode = args.mode ?? ENGINE_DEFAULTS.mode
-  if (!SNAPSHOT_MODES.includes(mode)) {
+  if (!(SNAPSHOT_MODES as readonly string[]).includes(mode)) {
     throw new Error(`mode must be one of ${SNAPSHOT_MODES.join(", ")} (got "${mode}")`)
   }
   const framework = parseCodegenFramework(args.framework)
@@ -104,8 +141,7 @@ export function buildJob(args) {
   const wantsCodegen = framework != null
   const extractComponents = Boolean(args.extractComponents) || wantsCodegen
 
-  /** @type {Record<string, unknown>} */
-  const options = {
+  const options: WebcloneOptions = {
     url: isConvert ? undefined : args.url,
     output,
     mode,
@@ -133,21 +169,43 @@ export function buildJob(args) {
     }
   }
   if (isConvert) {
-    const convertLocal = assertPathInside(args.cwd, args.convertLocal)
+    const convertLocal = assertPathInside(args.cwd, args.convertLocal as string)
     options.convertLocal = convertLocal
     validateOptions(options)
     return { mode: "convert", options }
   }
   validateOptions(options)
-  return { mode: "snapshot", url: args.url, options }
+  return { mode: "snapshot", url: args.url as string, options }
 }
 
-function defaultDeps() {
+/** The runner's side effects; each is injectable for tests. */
+export interface EngineDeps {
+  spawn: (
+    command: string,
+    args: string[],
+    options: { windowsHide: boolean; env: NodeJS.ProcessEnv }
+  ) => Pick<ChildProcess, "stdout" | "stderr" | "kill" | "on">
+  runnerPath: string
+  nodeExec: string
+  standalone: boolean
+  env: NodeJS.ProcessEnv
+  tmpDir: string
+  randomId: () => string
+  fs: {
+    writeFile(path: string, contents: string): Promise<unknown>
+    unlink(path: string): Promise<unknown>
+    mkdir(path: string): Promise<unknown>
+  }
+}
+
+function defaultDeps(): EngineDeps {
   return {
     spawn: defaultSpawn,
     runnerPath: RUNNER_PATH,
     nodeExec: process.execPath,
-    standalone: Boolean(globalThis.Bun?.isStandaloneExecutable),
+    standalone: Boolean(
+      (globalThis as { Bun?: { isStandaloneExecutable?: boolean } }).Bun?.isStandaloneExecutable
+    ),
     env: process.env,
     tmpDir: os.tmpdir(),
     randomId: () => randomUUID(),
@@ -160,7 +218,19 @@ function defaultDeps() {
 }
 
 /** Resolve the child command without assuming `process.execPath` is Node. */
-export function resolveRunnerSpawn({ standalone, execPath, runnerPath, jobPath, env }) {
+export function resolveRunnerSpawn({
+  standalone,
+  execPath,
+  runnerPath,
+  jobPath,
+  env,
+}: {
+  standalone: boolean
+  execPath: string
+  runnerPath: string
+  jobPath: string
+  env: NodeJS.ProcessEnv
+}) {
   return standalone
     ? {
         command: execPath,
@@ -176,22 +246,26 @@ export function resolveRunnerSpawn({ standalone, execPath, runnerPath, jobPath, 
 
 /**
  * Spawn the runner as a child process, feeding it a job file. Resolves with the
- * parsed {@link import('../../webclone/src/runner').RunnerEnvelope}. Never throws
+ * parsed runner envelope (`webclone/src/runner.ts`). Never throws
  * for a snapshot failure — the engine reports failures inside the envelope; only
  * infrastructure faults (spawn error, unparseable output) surface as a thrown
  * error the tool layer maps to `toolError`.
- *
- * @param {{ mode: string, url?: string, options: object }} job
- * @param {Partial<ReturnType<typeof defaultDeps>> & { timeoutMs?: number }} [injected]
  */
-export async function runEngine(job, injected = {}) {
+export async function runEngine(
+  job: WebcloneJob,
+  injected: Partial<EngineDeps> & { timeoutMs?: number } = {}
+): Promise<RunnerEnvelope> {
   const deps = { ...defaultDeps(), ...injected }
   const timeoutMs = injected.timeoutMs ?? DEFAULT_JOB_TIMEOUT_MS
   const jobPath = path.join(deps.tmpDir, `webclone-job-${deps.randomId()}.json`)
   await deps.fs.writeFile(jobPath, JSON.stringify(job))
 
   try {
-    const { code, stdout, stderr } = await new Promise((resolve) => {
+    const { code, stdout, stderr } = await new Promise<{
+      code: number | null
+      stdout: string
+      stderr: string
+    }>((resolve) => {
       const target = resolveRunnerSpawn({
         standalone: deps.standalone,
         execPath: deps.nodeExec,
@@ -214,13 +288,13 @@ export async function runEngine(job, injected = {}) {
           /* already gone */
         }
       }, timeoutMs)
-      child.stdout?.on("data", (d) => {
+      child.stdout?.on("data", (d: Buffer | string) => {
         out += String(d)
       })
-      child.stderr?.on("data", (d) => {
+      child.stderr?.on("data", (d: Buffer | string) => {
         if (err.length < MAX_STDERR_BYTES) err += String(d)
       })
-      child.on("error", (e) => {
+      child.on("error", (e: unknown) => {
         clearTimeout(timer)
         resolve({
           code: -1,
@@ -228,7 +302,7 @@ export async function runEngine(job, injected = {}) {
           stderr: `spawn error: ${e instanceof Error ? e.message : String(e)}`,
         })
       })
-      child.on("close", (c) => {
+      child.on("close", (c: number | null) => {
         clearTimeout(timer)
         resolve({ code: killed ? 124 : c, stdout: out, stderr: err })
       })
@@ -243,9 +317,9 @@ export async function runEngine(job, injected = {}) {
         `web-clone runner produced no result (exit ${code}). ${stderr.slice(-500) || "no stderr"}`
       )
     }
-    let envelope
+    let envelope: RunnerEnvelope
     try {
-      envelope = JSON.parse(line)
+      envelope = JSON.parse(line) as RunnerEnvelope
     } catch {
       throw new Error(`web-clone runner returned unparseable output: ${line.slice(0, 300)}`)
     }
@@ -258,11 +332,11 @@ export async function runEngine(job, injected = {}) {
 /**
  * High-level entry used by the tool handlers: build the job, pre-validate the
  * entry URL (fast, no I/O), and run the engine. Returns the envelope.
- *
- * @param {Parameters<typeof buildJob>[0]} args
- * @param {Partial<ReturnType<typeof defaultDeps>> & { timeoutMs?: number }} [injected]
  */
-export async function snapshotSite(args, injected = {}) {
+export async function snapshotSite(
+  args: WebcloneArgs,
+  injected: Partial<EngineDeps> & { timeoutMs?: number } = {}
+): Promise<RunnerEnvelope> {
   const job = buildJob(args)
   if (job.mode === "snapshot") {
     const decision = evaluateFetchTarget(job.url, {

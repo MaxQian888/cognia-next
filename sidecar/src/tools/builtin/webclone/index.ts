@@ -10,14 +10,36 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { snapshotSite, CODEGEN_FRAMEWORKS, FRAMEWORK_HINTS, SNAPSHOT_MODES } from "./run.mjs"
+import { toolError, toolText } from "../../kernel/result.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { snapshotSite, CODEGEN_FRAMEWORKS, FRAMEWORK_HINTS, SNAPSHOT_MODES } from "./run.ts"
+import type { EngineDeps } from "./run.ts"
+
+/** The fields of a runner envelope this reads. */
+interface EnvelopeView {
+  ok?: boolean
+  error?: { message?: string }
+  result?: {
+    output?: string
+    sourceUrl?: string
+    mode?: string
+    stats?: { fetched?: number; total?: number; failed?: number }
+    assets?: unknown
+  }
+}
+
+/** Test deps when `extra` carries a `spawn`; the SDK tool context otherwise. */
+const injectedDeps = (extra: unknown): Partial<EngineDeps> | undefined =>
+  extra && typeof extra === "object" && typeof (extra as EngineDeps).spawn === "function"
+    ? (extra as Partial<EngineDeps>)
+    : undefined
 
 /** Shape a runner envelope into a compact tool result. */
-function envelopeToResult(envelope, label) {
-  if (!envelope || typeof envelope !== "object") {
+function envelopeToResult(value: unknown, label: string) {
+  if (!value || typeof value !== "object") {
     return toolError(`web-clone returned no result`, label)
   }
+  const envelope = value as EnvelopeView
   if (envelope.ok === false) {
     const e = envelope.error || {}
     return toolError(e.message || "web-clone failed", label)
@@ -109,8 +131,7 @@ export const webCloneShape = {
     .describe("Extract shared logic (api/utils) into shared/. Default false."),
 }
 
-/** @param {z.infer<z.ZodObject<typeof webCloneShape>>} args */
-export async function execWebClone(args, deps) {
+export async function execWebClone(args: ToolArgs<typeof webCloneShape>, deps?: unknown) {
   try {
     const envelope = await snapshotSite(
       {
@@ -130,7 +151,7 @@ export async function execWebClone(args, deps) {
         codegenGenerateDrafts: args.codegenGenerateDrafts,
         codegenExtractShared: args.codegenExtractShared,
       },
-      deps && typeof deps === "object" && typeof deps.spawn === "function" ? deps : undefined
+      injectedDeps(deps)
     )
     return envelopeToResult(envelope, "web_clone")
   } catch (err) {
@@ -189,8 +210,10 @@ export const webCloneConvertShape = {
     .describe("Extract shared logic (api/utils) into shared/. Default false."),
 }
 
-/** @param {z.infer<z.ZodObject<typeof webCloneConvertShape>>} args */
-export async function execWebCloneConvert(args, deps) {
+export async function execWebCloneConvert(
+  args: ToolArgs<typeof webCloneConvertShape>,
+  deps?: unknown
+) {
   try {
     const envelope = await snapshotSite(
       {
@@ -202,7 +225,7 @@ export async function execWebCloneConvert(args, deps) {
         codegenGenerateDrafts: args.codegenGenerateDrafts,
         codegenExtractShared: args.codegenExtractShared,
       },
-      deps && typeof deps === "object" && typeof deps.spawn === "function" ? deps : undefined
+      injectedDeps(deps)
     )
     return envelopeToResult(envelope, "web_clone_convert")
   } catch (err) {
@@ -228,9 +251,9 @@ export const WEBCLONE_TOOL_NAMES = Object.freeze(["web_clone", "web_clone_conver
 export const webcloneTools = [webCloneTool, webCloneConvertTool]
 
 for (let i = 0; i < webcloneTools.length; i++) {
-  if (webcloneTools[i].name !== WEBCLONE_TOOL_NAMES[i]) {
+  if (webcloneTools[i]!.name !== WEBCLONE_TOOL_NAMES[i]) {
     throw new Error(
-      `webclone tool order drift: expected ${WEBCLONE_TOOL_NAMES[i]}, got ${webcloneTools[i].name}`
+      `webclone tool order drift: expected ${WEBCLONE_TOOL_NAMES[i]}, got ${webcloneTools[i]!.name}`
     )
   }
 }

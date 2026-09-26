@@ -25,7 +25,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
 /**
  * Top-level packages nested in sidecar/ that own their test runners (npm/tsc
- * projects run by `sidecars:test`). `builtin-tools/webclone` is the sidecar's
+ * projects run by `sidecars:test`). `src/tools/builtin/webclone` is the sidecar's
  * own tool category and stays in.
  */
 export const NESTED_PACKAGES = ["vscode-ext-host", "webclone", "codeserver-agent-ext"]

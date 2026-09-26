@@ -25,7 +25,7 @@ import {
 } from "../src/tools/builtin/terminal-repl/index.ts"
 import { astGrepTools, createAstGrepTools } from "../src/tools/builtin/ast-grep/index.ts"
 import { clonedepsTools } from "./clonedeps/index.mjs"
-import { webcloneTools } from "./webclone/index.mjs"
+import { webcloneTools } from "../src/tools/builtin/webclone/index.ts"
 import { createLspTools } from "../src/tools/builtin/lsp/index.ts"
 import { createCodeGraphTools } from "../src/tools/builtin/code-graph/tools.ts"
 import { createBashOutputTool, createKillShellTool, createListShellsTool } from "./core/bash.mjs"

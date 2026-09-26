@@ -11,7 +11,7 @@
  *
  * The child owns its own stdout, so we can safely reroute the library's chatter
  * to stderr and reserve stdout for exactly one line: the JSON result envelope.
- * Both the agent tool (`builtin-tools/webclone`) and the workflow node's Tauri
+ * Both the agent tool (`src/tools/builtin/webclone`) and the workflow node's Tauri
  * command spawn the same runner — it is the single reusable seam.
  */
 
