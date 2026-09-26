@@ -26,7 +26,7 @@ import {
   toolBudgetMessage,
 } from "../src/tools/middleware/read-only-timeout.ts"
 
-import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
+import { awaitPluginToolResponse } from "../src/tools/plugin/server.ts"
 import { createToolPermissionGate } from "../src/policy/permission/ai-sdk-gate.ts"
 import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { assertModelSafeToolOutput } from "../src/policy/pii/tool-output.ts"

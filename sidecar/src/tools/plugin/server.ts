@@ -1,3 +1,4 @@
+// @ts-nocheck -- moved from builtin-tools/plugin-tools.mjs; typed in the next commit.
 // Synthetic `cognia-plugin-tools` in-process MCP server (M2).
 //
 // Mirrors the shape of `./index.mjs` (the cognia-tools builtin server) but
@@ -16,13 +17,13 @@
 // `toolUseId` key.
 
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
-import { permissionDecisionHasUnprovenRewrite } from "../src/policy/permission/delegated-approval.ts"
+import { permissionDecisionHasUnprovenRewrite } from "../../policy/permission/delegated-approval.ts"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
-import { toolError, toolText } from "../src/tools/kernel/result.ts"
-import { planPluginToolNames } from "../src/policy/tool-catalog/plugin-aliases.ts"
-import { PLUGIN_TOOLS_SERVER_NAME } from "../src/policy/tool-catalog/names.ts"
+import { toolError, toolText } from "../kernel/result.ts"
+import { planPluginToolNames } from "../../policy/tool-catalog/plugin-aliases.ts"
+import { PLUGIN_TOOLS_SERVER_NAME } from "../../policy/tool-catalog/names.ts"
 
 export const SERVER_NAME = PLUGIN_TOOLS_SERVER_NAME
 export const SERVER_VERSION = "0.1.0"
@@ -43,7 +44,7 @@ const DEFAULT_PLUGIN_TOOL_TIMEOUT_MS = 120_000
  */
 export function isCallToolResult(result) {
   if (!result || typeof result !== "object" || Array.isArray(result)) return false
-  const content = /** @type {{ content?: unknown }} */ (result).content
+  const content = /** @type {{ content?: unknown }} */ result.content
   return (
     Array.isArray(content) &&
     content.length > 0 &&
@@ -272,10 +273,10 @@ export function jsonSchemaPropToZod(prop, required) {
       const literals = p.enum.filter((v) => v !== null && v !== undefined)
       const hasNull = p.enum.includes(null)
       if (!hasNull && literals.length > 0 && literals.every((v) => typeof v === "string")) {
-        zodType = z.enum(/** @type {[string, ...string[]]} */ (literals))
+        zodType = z.enum(/** @type {[string, ...string[]]} */ literals)
       } else {
         const branches = [
-          ...literals.map((v) => z.literal(/** @type {any} */ (v))),
+          ...literals.map((v) => z.literal(/** @type {any} */ v)),
           ...(hasNull ? [z.null()] : []),
         ]
         // A single member is a literal, not a union: `z.union` needs two, and
@@ -284,24 +285,24 @@ export function jsonSchemaPropToZod(prop, required) {
           branches.length === 1
             ? branches[0]
             : branches.length > 1
-              ? z.union(/** @type {any} */ (branches))
+              ? z.union(/** @type {any} */ branches)
               : z.unknown()
       }
     } else if (p.const !== undefined) {
-      zodType = z.literal(/** @type {any} */ (p.const))
+      zodType = z.literal(/** @type {any} */ p.const)
     } else if (Array.isArray(p.oneOf) || Array.isArray(p.anyOf)) {
       // A discriminated union renders as `oneOf`. Without this branch it fell
       // to `z.unknown()` below, and because the model-visible MCP schema is
       // derived from THIS zod shape (not from the manifest JSON Schema), every
       // union-typed argument reached the model as an opaque blob — which is
       // exactly how computer-use's whole action vocabulary went missing.
-      const variants = /** @type {unknown[]} */ (p.oneOf ?? p.anyOf)
+      const variants = /** @type {unknown[]} */ p.oneOf ?? p.anyOf
       const branches = variants.map((v) => jsonSchemaPropToZod(v, true))
       zodType =
         branches.length === 1
           ? branches[0]
           : branches.length > 1
-            ? z.union(/** @type {any} */ (branches))
+            ? z.union(/** @type {any} */ branches)
             : z.unknown()
     } else {
       switch (p.type) {
@@ -377,7 +378,7 @@ export function jsonSchemaPropToZod(prop, required) {
     // `default` implies the field is optional to the caller; apply it last so
     // it wraps whatever constraint was built above.
     if (p.default !== undefined && !required) {
-      return zodType.optional().default(/** @type {any} */ (p.default))
+      return zodType.optional().default(/** @type {any} */ p.default)
     }
   }
   return required ? zodType : zodType.optional()

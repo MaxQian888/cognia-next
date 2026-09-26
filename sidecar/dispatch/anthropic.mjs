@@ -17,7 +17,7 @@ import { buildCogniaToolsServer, namesForDisabledCategories } from "../builtin-t
 import { BUILTIN_SERVER_NAME } from "../src/policy/tool-catalog/catalog.ts"
 import { PLUGIN_TOOLS_SERVER_NAME } from "../src/policy/tool-catalog/names.ts"
 import { buildA2UIBridgeServer, SERVER_NAME as A2UI_SERVER_NAME } from "../a2ui-tools/index.mjs"
-import { buildPluginToolsServer } from "../builtin-tools/plugin-tools.mjs"
+import { buildPluginToolsServer } from "../src/tools/plugin/server.ts"
 import {
   modelPluginToolNameList,
   restorePluginToolNamesInSdkMessage,
@@ -132,7 +132,7 @@ export function drainPendingRoundTrips(
     for (const [id, p] of pendingPluginToolCalls) {
       pendingPluginToolCalls.delete(id)
       try {
-        // The `{ error }` envelope `plugin-tools.mjs` surfaces as a tool error.
+        // The `{ error }` envelope `src/tools/plugin/server.ts` surfaces as a tool error.
         p.resolve({ error: reason })
       } catch {
         /* defensive — a resolver shape we don't own */
@@ -201,7 +201,7 @@ export function dispatchAnthropic(
   /**
    * Plugin tool calls awaiting a `plugin_tool_response` from the renderer.
    * Keyed by `toolUseId`. Drained by `claude-host.mjs` when a response
-   * arrives over stdin. See `sidecar/builtin-tools/plugin-tools.mjs`.
+   * arrives over stdin. See `sidecar/src/tools/plugin/server.ts`.
    * @type {Map<string, { resolve: (r: any) => void }>}
    */
   const pendingPluginToolCalls = new Map()

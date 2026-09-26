@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { awaitPluginToolResponse } from "./plugin-tools.mjs"
+import { awaitPluginToolResponse } from "../src/tools/plugin/server.ts"
 
 test("awaitPluginToolResponse times out to an error envelope when no response arrives", async () => {
   const pending = new Map()
@@ -51,7 +51,7 @@ test("awaitPluginToolResponse treats a negative / non-finite timeout as no timeo
 })
 
 test("real SDK plugin permission delegate allows original input and refuses post-hook rewrites", async () => {
-  const { buildPluginToolsServer } = await import("./plugin-tools.mjs")
+  const { buildPluginToolsServer } = await import("../src/tools/plugin/server.ts")
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js")
   const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js")
   const pending = new Map()

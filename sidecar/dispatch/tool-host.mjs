@@ -18,7 +18,7 @@ import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
 import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
-import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
+import { awaitPluginToolResponse } from "../src/tools/plugin/server.ts"
 
 const SERVERS = ["cognia-tools", "cognia-plugin-tools"]
 const MAX_BODY = 2 * 1024 * 1024

@@ -1,3 +1,4 @@
+// @ts-nocheck -- moved from builtin-tools/plugin-tools.mjs; typed in the next commit.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
@@ -9,7 +10,7 @@ import {
   isCallToolResult,
   jsonSchemaToZodShape,
   jsonSchemaPropToZod,
-} from "../plugin-tools.mjs"
+} from "./server.ts"
 
 test("server name + version are stable", () => {
   assert.equal(SERVER_NAME, "cognia-plugin-tools")
