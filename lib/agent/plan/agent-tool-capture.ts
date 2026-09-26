@@ -4,7 +4,7 @@
  * Capture the agent's own `create_plan` / `update_plan` tool calls into the
  * unified plan pipeline — `PlanSource: "agent_tool"` (ADR-0045 §3.2).
  *
- * The sidecar tools (`sidecar/builtin-tools/plan-tools.mjs`) deliberately do
+ * The sidecar tools (`sidecar/src/tools/builtin/plan/plan-tools.ts`) deliberately do
  * no work: the sidecar cannot import `lib/`, so it cannot touch Dexie or the
  * plan runtime. This module is the renderer half — it reads the tool_use
  * blocks out of the SDK event stream exactly as `captureExitPlanMode` and

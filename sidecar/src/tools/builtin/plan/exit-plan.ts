@@ -14,8 +14,9 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolText } from "../src/tools/kernel/result.ts"
-import { EXIT_PLAN_TOOL_NAME } from "../src/policy/tool-catalog/names.ts"
+import { toolText } from "../../kernel/result.ts"
+import { EXIT_PLAN_TOOL_NAME } from "../../../policy/tool-catalog/names.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 /** Bare tool name (namespaced as `mcp__cognia-tools__exit_plan_mode`). */
 export { EXIT_PLAN_TOOL_NAME }
@@ -29,7 +30,7 @@ const exitPlanShape = {
     ),
 }
 
-async function execExitPlan(args) {
+async function execExitPlan(args: ToolArgs<typeof exitPlanShape>) {
   // No side effects: the surface (CLI plan overlay) consumes the tool input.
   // Acknowledge so the model's turn completes cleanly.
   return toolText({ submitted: true, length: String(args?.plan ?? "").length })

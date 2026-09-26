@@ -21,7 +21,8 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolText } from "../src/tools/kernel/result.ts"
+import { toolText } from "../../kernel/result.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 /** Bare tool names (namespaced as `mcp__cognia-tools__<name>`). */
 export const CREATE_PLAN_TOOL_NAME = "create_plan"
@@ -128,7 +129,7 @@ const updatePlanShape = {
     .describe("Report progress on individual steps without rewriting the list."),
 }
 
-async function execCreatePlan(args) {
+async function execCreatePlan(args: ToolArgs<typeof createPlanShape>) {
   // No side effects here — the renderer's capture owns the write.
   return toolText({
     created: true,
@@ -137,7 +138,7 @@ async function execCreatePlan(args) {
   })
 }
 
-async function execUpdatePlan(args) {
+async function execUpdatePlan(args: ToolArgs<typeof updatePlanShape>) {
   return toolText({
     updated: true,
     ...(Array.isArray(args?.steps) ? { steps: args.steps.length } : {}),

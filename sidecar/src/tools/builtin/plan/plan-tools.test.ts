@@ -14,16 +14,16 @@ import {
   PLAN_STEP_STATUSES,
   TERMINAL_PLAN_STATUSES,
   createPlanTools,
-} from "./plan-tools.mjs"
+} from "./plan-tools.ts"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const planTypes = readFileSync(path.join(here, "../../types/agent/plan.ts"), "utf8")
+const planTypes = readFileSync(path.join(here, "../../../../../types/agent/plan.ts"), "utf8")
 
 /** String literals of one `export type X = | "a" | "b"` union in plan.ts. */
-function unionMembers(typeName) {
+function unionMembers(typeName: string): string[] {
   const match = planTypes.match(new RegExp(`export type ${typeName} =([^;]*?)\\n\\n`, "s"))
   assert.ok(match, `${typeName} not found in types/agent/plan.ts`)
-  return [...match[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1])
+  return [...match[1]!.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!)
 }
 
 test("PLAN_STATUSES mirrors the PlanStatus union, rejected included", () => {
@@ -47,6 +47,7 @@ test("terminal statuses are a subset and include rejected", () => {
 
 test("the tool descriptions tell the model a rejected plan is closed", () => {
   const [create, update] = createPlanTools()
+  assert.ok(create && update)
   assert.match(create.description, /reject/i)
   assert.match(create.description, /create a new plan/i)
   assert.match(update.description, /rejected or cancelled/i)
