@@ -1,0 +1,1271 @@
+//! WebRTC signaling subsystem. ADR-0021.
+//!
+//! Public surface:
+//!
+//! - [`SignalingHub`] — process-wide registry of per-device signaling
+//!   clients. Owned by the Tauri app via `.manage(...)` and shared with
+//!   the companion server.
+//! - [`commands`] — `#[tauri::command]` wrappers the renderer calls at
+//!   boot, after every successful pair, and whenever the user toggles the
+//!   feature or changes ICE/TURN configuration.
+//!
+//! Submodules:
+//!
+//! - [`envelope`] — ECDSA/ECDH/AES-GCM signaling protocol.
+//! - [`peer`] — `webrtc-rs` `RTCPeerConnection` wrapper.
+//! - [`carrier`] — where the dispatcher's frames go: the DataChannel when
+//!   one is open, else the relay's data lane (ADR-0170).
+//! - [`dispatch`] — DataChannel ↔ `remote_execution` + `EventBus` bridge.
+//! - [`client`] — long-lived WSS client (one task per paired device).
+//! - [`pairing`] — one-shot rooms that let a device pair over the relay
+//!   before it has an identity (ADR-0170, `cgnp4`).
+
+pub mod client;
+pub mod dispatch;
+pub mod pairing;
+// The WebRTC leaves live in `cognia-companion-connectivity` (ADR-0196 P4);
+// they are re-exported so `super::peer` and friends still resolve here.
+pub use cognia_companion_connectivity::signaling::{
+    carrier, datachannel_framing, envelope, peer, registration_store,
+};
+pub use cognia_companion_connectivity::signaling::{
+    DeviceRegistration, IceServerSpec, SignalingConfigPatch,
+};
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use parking_lot::Mutex;
+use serde::Serialize;
+use webrtc::peer_connection::RTCIceServer;
+
+use std::time::{Duration, Instant};
+
+use self::client::{spawn as spawn_client, ClientConfig, ClientHandle};
+use self::envelope::now_ms;
+use crate::SharedState;
+
+static INSTALLED_HUB: once_cell::sync::Lazy<
+    parking_lot::RwLock<Option<std::sync::Weak<SignalingHub>>>,
+> = once_cell::sync::Lazy::new(|| parking_lot::RwLock::new(None));
+
+pub fn install_hub(hub: Option<&Arc<SignalingHub>>) {
+    *INSTALLED_HUB.write() = hub.map(Arc::downgrade);
+}
+
+/// The process-wide hub, if one is installed and still alive.
+pub fn installed_hub() -> Option<Arc<SignalingHub>> {
+    INSTALLED_HUB
+        .read()
+        .as_ref()
+        .and_then(std::sync::Weak::upgrade)
+}
+
+/// The signaling endpoint this Host has actually joined, if a hub is installed.
+///
+/// Read by `auth_config_handler` so a client is pointed at the *same*
+/// rendezvous the Host is sitting in. Signaling is a meeting place, not an
+/// ingress: two peers that dial different servers never see each other, so the
+/// Host's own endpoint — env `COGNIA_SIGNALING_URL`, build-time
+/// `NEXT_PUBLIC_SIGNALING_URL`, or a renderer push through
+/// [`SignalingHub::configure`] — is the only value that can be right by
+/// construction.
+pub fn installed_signaling_url() -> Option<String> {
+    INSTALLED_HUB
+        .read()
+        .as_ref()
+        .and_then(std::sync::Weak::upgrade)
+        .map(|hub| hub.signaling_url())
+}
+
+/// Rebuild the hub's device set from the signaling registrations that are
+/// still *active*.
+///
+/// The status filter is what makes suspension take effect on WebRTC without a
+/// new hub API: `sync_devices` cancels whatever disappeared from the list, so a
+/// suspended device's client is torn down here, and a resumed device is
+/// re-created from the registration it kept. A suspended device's registration
+/// row is deliberately left in place — only the hub's view of it changes.
+pub fn refresh_installed_hub() -> Result<(), String> {
+    let Some(store) = registration_store::installed() else {
+        return Ok(());
+    };
+    let registrations = store.load_all().map_err(|error| error.to_string())?;
+    let registrations = filter_active_registrations(registrations);
+    if let Some(hub) = INSTALLED_HUB
+        .read()
+        .as_ref()
+        .and_then(std::sync::Weak::upgrade)
+    {
+        hub.sync_devices(registrations);
+    }
+    Ok(())
+}
+
+/// Keep only registrations whose device is `active` in the security store.
+///
+/// Fails **open** when no store is installed: that is a process which cannot
+/// authenticate anyone anyway, and dropping every registration there would
+/// break the pre-store test and CLI paths that legitimately have registrations
+/// with no security database behind them.
+fn filter_active_registrations(registrations: Vec<DeviceRegistration>) -> Vec<DeviceRegistration> {
+    let Some(security) = crate::security_store::security_store() else {
+        return registrations;
+    };
+    registrations
+        .into_iter()
+        .filter(|registration| {
+            match security.active_device_tenant(&registration.device_id) {
+                Ok(Some(_)) => true,
+                Ok(None) => false,
+                // A lookup failure is not evidence the device is inactive.
+                Err(error) => {
+                    log::warn!(
+                        "signaling: could not resolve device {} state: {error}",
+                        registration.device_id
+                    );
+                    true
+                }
+            }
+        })
+        .collect()
+}
+
+/// Minimum spacing between two `reconnect_device` calls for the same
+/// rendezvous id. Enforces an in-process throttle so a renderer-side XSS
+/// can't churn the WebRTC handshake by spamming the Tauri command. Tuned
+/// to 5s — short enough that a genuine "I clicked twice" user gesture
+/// still works on the second press; long enough that an XSS can't burn
+/// the mobile peer's battery in a tight loop.
+const RECONNECT_DEVICE_MIN_SPACING: Duration = Duration::from_secs(5);
+
+/// Default signaling URL when the renderer hasn't pushed an override yet.
+/// Build-time overridable via `NEXT_PUBLIC_SIGNALING_URL` (the same env var the
+/// frontend reads in `lib/signaling/types.ts`, so a single build var configures
+/// both sides), falling back to the project's hosted endpoint. Runtime
+/// overrides still arrive from the renderer via `AppSettings.signalingUrl`.
+pub const DEFAULT_SIGNALING_URL: &str = match option_env!("NEXT_PUBLIC_SIGNALING_URL") {
+    Some(url) => url,
+    None => "wss://signaling.cognia.cn/signaling",
+};
+
+/// Default STUN servers (Google + Cloudflare public). Mirrored in the
+/// renderer's WebRtcCard component default population.
+fn default_ice_servers() -> Vec<RTCIceServer> {
+    vec![
+        RTCIceServer {
+            urls: vec!["stun:stun.l.google.com:19302".to_string()],
+            ..Default::default()
+        },
+        RTCIceServer {
+            urls: vec!["stun:stun.cloudflare.com:3478".to_string()],
+            ..Default::default()
+        },
+    ]
+}
+
+// ---------------------------------------------------------------------------
+// SignalingHub
+// ---------------------------------------------------------------------------
+
+pub struct SignalingHub {
+    inner: Mutex<HubInner>,
+    /// Per-device tier table. Owned by the hub so [`TierWriter`] clones
+    /// handed to each client task can update it concurrently without
+    /// holding the `HubInner` lock.
+    tiers: Arc<Mutex<HashMap<String, DeviceTierEntry>>>,
+    /// Throttle map for [`Self::reconnect_device`]. Keyed by
+    /// `rendezvous_id`; tracks the most recent successful call so a flood
+    /// of XSS-driven reconnect invocations gets cheaply rejected.
+    reconnect_throttle: Mutex<HashMap<String, Instant>>,
+    /// One-shot pairing rooms (ADR-0170), keyed by room id. Each entry is
+    /// cancelled when its invitation expires. `configure` does not touch
+    /// them (an invitation in flight must survive a settings write).
+    pairing_rooms: Mutex<HashMap<String, ClientHandle>>,
+}
+
+struct HubInner {
+    enabled: bool,
+    signaling_url: String,
+    ice_servers: Vec<RTCIceServer>,
+    /// Map keyed by `rendezvous_id`. One client task per paired device.
+    clients: HashMap<String, ClientHandle>,
+    bound: Option<Binding>,
+    /// Last device set the renderer pushed via `sync_devices`. Cached so a
+    /// `sync_devices → bind` ordering (renderer reaches Dexie before the
+    /// companion server boots) still ends up with the right clients
+    /// spawned once the binding lands.
+    pending_devices: Vec<DeviceRegistration>,
+}
+
+#[derive(Clone)]
+struct Binding {
+    state: SharedState,
+}
+
+impl SignalingHub {
+    pub fn new() -> Arc<Self> {
+        let signaling_url = std::env::var("COGNIA_SIGNALING_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| DEFAULT_SIGNALING_URL.to_string());
+        Arc::new(Self {
+            inner: Mutex::new(HubInner {
+                enabled: true,
+                signaling_url,
+                ice_servers: default_ice_servers(),
+                clients: HashMap::new(),
+                bound: None,
+                pending_devices: Vec::new(),
+            }),
+            tiers: Arc::new(Mutex::new(HashMap::new())),
+            reconnect_throttle: Mutex::new(HashMap::new()),
+            pairing_rooms: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// Open a one-shot pairing room for an invitation that expires at
+    /// `expires_at_ms` (ADR-0170). Returns what the invitation must carry, or
+    /// `None` when this Host cannot sit in a rendezvous right now (the hub is
+    /// disabled or not yet bound to a running companion server), in which
+    /// case the invitation is issued without a relay exactly as before.
+    pub fn open_pairing_room(&self, expires_at_ms: i64) -> Option<pairing::PairingRoomIssue> {
+        let (binding, enabled, signaling_url) = {
+            let inner = self.inner.lock();
+            (
+                inner.bound.clone(),
+                inner.enabled,
+                inner.signaling_url.clone(),
+            )
+        };
+        if !enabled {
+            return None;
+        }
+        let binding = binding?;
+        let now = now_ms();
+        if expires_at_ms <= now {
+            return None;
+        }
+        let (issue, host_identity) =
+            pairing::mint_pairing_room(&signaling_url, now, expires_at_ms - now);
+        let room_id = issue.room.room_id.clone();
+        let device_id = format!("pairing:{room_id}");
+        let config = ClientConfig {
+            signaling_url,
+            rendezvous_id: room_id.clone(),
+            room_descriptor: issue.room.clone(),
+            signaling_key_ref: String::new(),
+            signing_private_key: base64::Engine::encode(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                host_identity.private_bytes(),
+            ),
+            device_id: device_id.clone(),
+            ice_servers: Vec::new(),
+            tier_writer: TierWriter::detached(&room_id, &device_id),
+            pairing: Some(pairing::PairingRoom::new(expires_at_ms)),
+        };
+        let handle = spawn_client(config, binding.state);
+        self.pairing_rooms.lock().insert(room_id.clone(), handle);
+        // Expire with the invitation. The task is cheap to keep until then and
+        // a redeemed invitation cannot be redeemed twice, so there is nothing
+        // to gain from closing earlier.
+        let hub = INSTALLED_HUB.read().as_ref().cloned();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis((expires_at_ms - now).max(0) as u64)).await;
+            if let Some(hub) = hub.and_then(|weak| weak.upgrade()) {
+                hub.close_pairing_room(&room_id);
+            }
+        });
+        Some(issue)
+    }
+
+    /// Cancel a pairing room's signaling client. Idempotent.
+    pub fn close_pairing_room(&self, room_id: &str) {
+        let handle = self.pairing_rooms.lock().remove(room_id);
+        if let Some(handle) = handle {
+            tokio::spawn(async move {
+                handle.shutdown().await;
+            });
+        }
+    }
+
+    /// Room ids of the pairing rooms currently open. Diagnostic only.
+    pub fn open_pairing_room_ids(&self) -> Vec<String> {
+        self.pairing_rooms.lock().keys().cloned().collect()
+    }
+
+    /// Wire the hub to the live companion state. Called once at server start;
+    /// subsequent restarts reuse the same hub instance (via
+    /// `tauri::Manager::state` on desktop, or the process-global handle in
+    /// `cognia-server`). The first bind also reapplies any pending device
+    /// registrations the renderer pushed before the server was up.
+    ///
+    /// The dispatch host is NOT captured here — `signaling::dispatch` resolves
+    /// it per message from `state` (`DispatchHost::from_state`), so the same
+    /// hub drives the desktop, headless, and harness processes.
+    pub fn bind(&self, state: SharedState) {
+        let pending: Vec<DeviceRegistration>;
+        {
+            let mut inner = self.inner.lock();
+            inner.bound = Some(Binding {
+                state: state.clone(),
+            });
+            // Take ownership of any registrations the renderer queued
+            // before the server was up so `sync_devices` runs through the
+            // usual diff path below — re-binding after the server stops
+            // and starts again is also handled because `pending_devices`
+            // is updated on every `sync_devices` call.
+            pending = inner.pending_devices.clone();
+        }
+        if !pending.is_empty() {
+            self.sync_devices(pending);
+        }
+    }
+
+    /// The endpoint this hub's device clients dial.
+    ///
+    /// Cheap enough to read per request: one `parking_lot` lock and a
+    /// `String` clone, on a handler that already does far more work.
+    pub fn signaling_url(&self) -> String {
+        self.inner.lock().signaling_url.clone()
+    }
+
+    /// Diagnostic snapshot: the master switch, the rendezvous, and the rooms
+    /// with a live client. One implementation behind the Tauri command and
+    /// the host-admin RPC arm (ADR-0170).
+    pub fn status(&self) -> SignalingStatus {
+        let inner = self.inner.lock();
+        SignalingStatus {
+            enabled: inner.enabled,
+            signaling_url: inner.signaling_url.clone(),
+            registered_devices: inner.clients.keys().cloned().collect(),
+        }
+    }
+
+    /// Apply a renderer / host-admin patch. Returns whether anything changed.
+    pub fn apply_patch(&self, patch: SignalingConfigPatch) -> bool {
+        let mut servers: Vec<RTCIceServer> =
+            patch.ice_servers.into_iter().map(Into::into).collect();
+        servers.extend(patch.turn_servers.into_iter().map(Into::into));
+        self.configure(patch.enabled, patch.signaling_url, servers)
+    }
+
+    /// Renderer push: replace the configured signaling URL + ICE/TURN
+    /// servers. Any device clients already running are restarted so they
+    /// pick up the new endpoint.
+    ///
+    /// Returns whether the configuration actually changed. An unchanged patch
+    /// is a no-op: the renderer re-pushes this on *every* `AppSettings` write
+    /// (the settings singleton is one Dexie row, so a `liveQuery` over it
+    /// refires for any field, and `saveSettings` bumps `updatedAt` even when
+    /// the value is identical), and restarting means tearing down one WSS per
+    /// paired device and re-running each one's challenge / Ed25519 proof /
+    /// ECDH handshake. Comparing first is what keeps an unrelated settings
+    /// write from turning into a reconnect storm across every paired device.
+    pub fn configure(
+        &self,
+        enabled: bool,
+        signaling_url: String,
+        ice_servers: Vec<RTCIceServer>,
+    ) -> bool {
+        // Snapshot the prior device list so we can restart them after the
+        // configuration mutation. We don't want to hold the parking_lot
+        // mutex across `spawn_client`, which doesn't await but does touch
+        // the global tokio runtime.
+        let devices_to_restart: Vec<DeviceRegistration>;
+        let binding: Option<Binding>;
+        {
+            let mut inner = self.inner.lock();
+            if inner.enabled == enabled
+                && inner.signaling_url == signaling_url
+                && inner.ice_servers == ice_servers
+            {
+                return false;
+            }
+            inner.enabled = enabled;
+            inner.signaling_url = signaling_url;
+            inner.ice_servers = ice_servers;
+            binding = inner.bound.clone();
+            devices_to_restart = inner
+                .clients
+                .values()
+                .map(|h| DeviceRegistration {
+                    device_id: h.config.device_id.clone(),
+                    rendezvous_id: h.config.rendezvous_id.clone(),
+                    room_descriptor: h.config.room_descriptor.clone(),
+                    signaling_key_ref: h.config.signaling_key_ref.clone(),
+                })
+                .collect();
+        }
+        // Tear down all current clients.
+        self.clear_clients();
+        // Restart under the new config (if enabled + bound).
+        if enabled {
+            if let Some(binding) = binding {
+                for registration in devices_to_restart {
+                    self.spawn_device_locked(&binding, registration);
+                }
+            }
+        }
+        true
+    }
+
+    /// Renderer push: declare the complete set of devices that should hold a
+    /// signaling client right now. The hub diffs against its existing clients:
+    /// new devices get a freshly spawned client task, removed devices have
+    /// theirs cancelled.
+    ///
+    /// Note "should hold a client", not "are paired". `selectSignalingDevices`
+    /// on the renderer side drops revoked, paused, unprovisioned, and (since
+    /// the 30-day dormancy rule) long-idle devices, so this list is a subset of
+    /// `pairedDevices` and the socket count follows it exactly. Waking a
+    /// dormant device is therefore just another push through this method.
+    pub fn sync_devices(&self, devices: Vec<DeviceRegistration>) {
+        let binding: Option<Binding>;
+        let enabled: bool;
+        let wanted: HashMap<String, DeviceRegistration>;
+        let to_remove: Vec<String>;
+        let to_add: Vec<DeviceRegistration>;
+        {
+            let mut inner = self.inner.lock();
+            binding = inner.bound.clone();
+            enabled = inner.enabled;
+            wanted = devices
+                .iter()
+                .cloned()
+                .map(|d| (d.rendezvous_id.clone(), d))
+                .collect();
+            // Remember the latest sync so a subsequent `bind()` (server
+            // restart, late-arriving Tauri state) can replay the diff.
+            inner.pending_devices = devices;
+            to_remove = inner
+                .clients
+                .keys()
+                .filter(|rid| !wanted.contains_key(*rid))
+                .cloned()
+                .collect();
+            to_add = wanted
+                .values()
+                .filter(|d| !inner.clients.contains_key(&d.rendezvous_id))
+                .cloned()
+                .collect();
+        }
+        for rid in to_remove {
+            self.cancel_one(&rid);
+        }
+        if !enabled {
+            return;
+        }
+        let Some(binding) = binding else { return };
+        for d in to_add {
+            self.spawn_device_locked(&binding, d);
+        }
+    }
+
+    fn spawn_device_locked(&self, binding: &Binding, registration: DeviceRegistration) {
+        let rendezvous_id = registration.rendezvous_id.clone();
+        let device_id = registration.device_id.clone();
+        let (signaling_url, ice_servers) = {
+            let inner = self.inner.lock();
+            (inner.signaling_url.clone(), inner.ice_servers.clone())
+        };
+        let tier_writer = self.new_tier_writer(&rendezvous_id, &device_id);
+        // Seed the tier table so a snapshot taken immediately after
+        // `sync_devices` already shows the device — clients land in
+        // `Offline` until the WSS task transitions them to `Awaiting`.
+        tier_writer.set(DeviceTier::Offline);
+        let signing_private_key =
+            match self::envelope::load_signaling_key(&registration.signaling_key_ref) {
+                Ok(Some(key)) => key,
+                Ok(None) => {
+                    tier_writer.set_with_error(
+                        DeviceTier::Failed,
+                        "signaling identity is missing from the host keyring",
+                    );
+                    return;
+                }
+                Err(error) => {
+                    tier_writer.set_with_error(
+                        DeviceTier::Failed,
+                        format!("failed to load signaling identity: {error}"),
+                    );
+                    return;
+                }
+            };
+        let config = ClientConfig {
+            signaling_url,
+            rendezvous_id: rendezvous_id.clone(),
+            room_descriptor: registration.room_descriptor,
+            signaling_key_ref: registration.signaling_key_ref,
+            signing_private_key,
+            device_id,
+            ice_servers,
+            tier_writer,
+            pairing: None,
+        };
+        let handle = spawn_client(config, binding.state.clone());
+        let mut inner = self.inner.lock();
+        inner.clients.insert(rendezvous_id, handle);
+    }
+
+    #[cfg(feature = "webrtc-harness")]
+    pub fn sync_harness_device(
+        &self,
+        registration: DeviceRegistration,
+        signing_private_key: String,
+    ) -> Result<(), String> {
+        let binding = self
+            .inner
+            .lock()
+            .bound
+            .clone()
+            .ok_or_else(|| "signaling hub is not bound".to_string())?;
+        self.cancel_one(&registration.rendezvous_id);
+        let (signaling_url, ice_servers) = {
+            let inner = self.inner.lock();
+            (inner.signaling_url.clone(), inner.ice_servers.clone())
+        };
+        let tier_writer =
+            self.new_tier_writer(&registration.rendezvous_id, &registration.device_id);
+        tier_writer.set(DeviceTier::Offline);
+        let config = ClientConfig {
+            signaling_url,
+            rendezvous_id: registration.rendezvous_id.clone(),
+            room_descriptor: registration.room_descriptor,
+            signaling_key_ref: registration.signaling_key_ref,
+            signing_private_key,
+            device_id: registration.device_id,
+            ice_servers,
+            tier_writer,
+            pairing: None,
+        };
+        let handle = spawn_client(config, binding.state);
+        let mut inner = self.inner.lock();
+        inner
+            .pending_devices
+            .retain(|item| item.rendezvous_id != registration.rendezvous_id);
+        inner.clients.insert(registration.rendezvous_id, handle);
+        Ok(())
+    }
+
+    fn cancel_one(&self, rendezvous_id: &str) {
+        let handle = {
+            let mut inner = self.inner.lock();
+            inner.clients.remove(rendezvous_id)
+        };
+        // Drop the tier entry — the renderer reads "device not tracked"
+        // by absence rather than a sentinel value.
+        self.tiers.lock().remove(rendezvous_id);
+        if let Some(h) = handle {
+            // Fire-and-forget the shutdown — the task will observe the
+            // cancel signal on its next poll. We don't await because that
+            // would mean holding back the renderer's RPC for the full
+            // backoff window of the current session.
+            tokio::spawn(async move {
+                h.shutdown().await;
+            });
+        }
+    }
+
+    fn clear_clients(&self) {
+        let drained: Vec<ClientHandle> = {
+            let mut inner = self.inner.lock();
+            inner.clients.drain().map(|(_, h)| h).collect()
+        };
+        self.tiers.lock().clear();
+        for h in drained {
+            tokio::spawn(async move {
+                h.shutdown().await;
+            });
+        }
+    }
+
+    /// Snapshot of currently-registered rendezvous ids — diagnostic only.
+    pub fn registered_rendezvous_ids(&self) -> Vec<String> {
+        self.inner.lock().clients.keys().cloned().collect()
+    }
+
+    pub fn registrations_snapshot(&self) -> Vec<DeviceRegistration> {
+        self.inner.lock().pending_devices.clone()
+    }
+
+    /// Force-restart the signaling client task for one paired device. Used
+    /// by the "Reconnect" button on the desktop WebRTC card. Idempotent —
+    /// returns `Err` only when the device id is unknown or when the
+    /// in-process throttle rejects the call.
+    ///
+    /// Implementation: cancel the existing client (which drops its
+    /// `PeerSession`), then re-spawn against the cached
+    /// `DeviceRegistration` so the WSS subscribe / SDP offer cycle starts
+    /// fresh. The hub's tier entry is replaced; consumers polling
+    /// [`devices_status`](Self::devices_status) will see the row flicker
+    /// through `Offline → Awaiting → …` again.
+    ///
+    /// **Throttle:** at most one successful reconnect per `rendezvous_id`
+    /// every [`RECONNECT_DEVICE_MIN_SPACING`]. Calls that arrive sooner
+    /// return a `"reconnect_throttled"` error so a renderer-side XSS
+    /// can't churn the handshake in a tight loop.
+    ///
+    /// **This restarts, it does not enrol.** The registration is resolved out
+    /// of `pending_devices`, which is verbatim the last list
+    /// [`sync_devices`](Self::sync_devices) was given, so a device the renderer
+    /// deliberately left out is `not found` here. That matters because the
+    /// renderer now drops devices idle for 30 days
+    /// (`lib/signaling/wan-dormancy.ts`), and the owner can wake one from the
+    /// device console. Waking works by re-pushing `sync_devices` with the
+    /// device included, never by calling this. See
+    /// `reconnect_device_cannot_wake_a_device_the_renderer_filtered_out`.
+    pub fn reconnect_device(&self, rendezvous_id: &str) -> Result<(), String> {
+        // Check + update the throttle BEFORE any state mutation so a
+        // rejected call doesn't even cancel the existing client. We
+        // overwrite the timestamp only once we've cleared the throttle.
+        let now = Instant::now();
+        {
+            let throttle = self.reconnect_throttle.lock();
+            if let Some(prev) = throttle.get(rendezvous_id) {
+                let since = now.duration_since(*prev);
+                if since < RECONNECT_DEVICE_MIN_SPACING {
+                    return Err(format!(
+                        "reconnect_throttled: try again in {}s",
+                        (RECONNECT_DEVICE_MIN_SPACING - since).as_secs() + 1
+                    ));
+                }
+            }
+        }
+
+        let (binding, enabled, registration) = {
+            let inner = self.inner.lock();
+            let registration = inner
+                .pending_devices
+                .iter()
+                .find(|d| d.rendezvous_id == rendezvous_id)
+                .cloned();
+            (inner.bound.clone(), inner.enabled, registration)
+        };
+        let Some(registration) = registration else {
+            return Err(format!(
+                "reconnect_device: rendezvous id {rendezvous_id} not found"
+            ));
+        };
+        // Stamp the throttle now — *before* the work — so a slow respawn
+        // doesn't widen the window for a follow-up call.
+        self.reconnect_throttle
+            .lock()
+            .insert(rendezvous_id.to_string(), now);
+
+        // Cancel + drop the existing client. `cancel_one` also evicts the
+        // tier entry so the UI immediately reads "device offline" between
+        // the cancel and the respawn.
+        self.cancel_one(rendezvous_id);
+        if !enabled {
+            // Mirror the `sync_devices` semantics — the user-facing toggle
+            // wins; a reconnect attempt while disabled is silently a no-op
+            // on the spawn side and the caller's tier table will stay
+            // empty until they flip the master switch.
+            return Ok(());
+        }
+        let Some(binding) = binding else {
+            return Err("reconnect_device: hub is not bound yet".to_string());
+        };
+        self.spawn_device_locked(&binding, registration);
+        Ok(())
+    }
+
+    /// **Test-only** — reset the reconnect throttle so the same
+    /// `rendezvous_id` can be re-tested without waiting the full spacing
+    /// window. Not exposed to the renderer.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn reset_reconnect_throttle(&self) {
+        self.reconnect_throttle.lock().clear();
+    }
+
+    /// Build a [`TierWriter`] handle scoped to the given device. The handle
+    /// shares the hub's tier map by `Arc`, so concurrent updates from the
+    /// client task land directly in the snapshot read by
+    /// [`devices_status`](Self::devices_status).
+    pub fn new_tier_writer(&self, rendezvous_id: &str, device_id: &str) -> TierWriter {
+        TierWriter {
+            map: Arc::clone(&self.tiers),
+            rendezvous_id: rendezvous_id.to_string(),
+            device_id: device_id.to_string(),
+        }
+    }
+
+    /// Snapshot of every tracked device's current tier, sorted by
+    /// `device_id` for stable rendering.
+    pub fn devices_status(&self) -> Vec<DeviceTierEntry> {
+        let mut out: Vec<DeviceTierEntry> = self.tiers.lock().values().cloned().collect();
+        out.sort_by(|a, b| a.device_id.cmp(&b.device_id));
+        out
+    }
+}
+
+impl Default for SignalingHub {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(HubInner {
+                enabled: true,
+                signaling_url: DEFAULT_SIGNALING_URL.to_string(),
+                ice_servers: default_ice_servers(),
+                clients: HashMap::new(),
+                bound: None,
+                pending_devices: Vec::new(),
+            }),
+            tiers: Arc::new(Mutex::new(HashMap::new())),
+            reconnect_throttle: Mutex::new(HashMap::new()),
+            pairing_rooms: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+/// Snapshot returned by `companion_signaling_status`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignalingStatus {
+    pub enabled: bool,
+    pub signaling_url: String,
+    pub registered_devices: Vec<String>,
+}
+
+/// Lifecycle tier of one paired device's signaling client. Mirrors the
+/// finite-state machine in [`client::run_with_reconnect`] /
+/// [`client::run_one_session`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DeviceTier {
+    /// Hub is enabled, client task exists, but the WSS connection is not
+    /// yet subscribed (initial state, between reconnects).
+    Offline,
+    /// WSS subscribed, waiting for the mobile peer to join the rendezvous.
+    Awaiting,
+    /// Mobile peer has joined; SDP/ICE exchange in flight.
+    Negotiating,
+    /// The peer is served over the relay's data lane (ADR-0170): RPC and
+    /// events flow, but through the rendezvous rather than a DataChannel.
+    /// ICE may still be negotiating in the background; a DataChannel that
+    /// opens promotes the device to [`Self::Connected`].
+    Relayed,
+    /// DataChannel is open — round-trip RPC available.
+    Connected,
+    /// Last session ended in error; client task is in its reconnect
+    /// backoff window. `last_error` carries the reason.
+    Failed,
+}
+
+/// One row in the [`SignalingHub::devices_status`] snapshot.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceTierEntry {
+    pub device_id: String,
+    pub rendezvous_id: String,
+    pub tier: DeviceTier,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    pub updated_at_ms: i64,
+}
+
+/// Cheap clonable handle a client task uses to push its current tier into
+/// the shared map owned by the hub. Each clone holds an `Arc` to the same
+/// `HashMap`, so updates from any task land in `O(1)`.
+#[derive(Clone)]
+pub struct TierWriter {
+    map: Arc<Mutex<HashMap<String, DeviceTierEntry>>>,
+    rendezvous_id: String,
+    device_id: String,
+}
+
+impl std::fmt::Debug for TierWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TierWriter")
+            .field("rendezvous_id", &self.rendezvous_id)
+            .field("device_id", &self.device_id)
+            .finish()
+    }
+}
+
+impl TierWriter {
+    /// A writer backed by its own private map: for tasks whose lifecycle
+    /// must not show up in the devices snapshot (pairing rooms).
+    pub fn detached(rendezvous_id: &str, device_id: &str) -> Self {
+        Self {
+            map: Arc::new(Mutex::new(HashMap::new())),
+            rendezvous_id: rendezvous_id.to_string(),
+            device_id: device_id.to_string(),
+        }
+    }
+
+    pub fn set(&self, tier: DeviceTier) {
+        self.set_inner(tier, None);
+    }
+
+    pub fn set_with_error(&self, tier: DeviceTier, last_error: impl Into<String>) {
+        self.set_inner(tier, Some(last_error.into()));
+    }
+
+    fn set_inner(&self, tier: DeviceTier, last_error: Option<String>) {
+        let entry = DeviceTierEntry {
+            device_id: self.device_id.clone(),
+            rendezvous_id: self.rendezvous_id.clone(),
+            tier,
+            last_error,
+            updated_at_ms: now_ms(),
+        };
+        self.map.lock().insert(self.rendezvous_id.clone(), entry);
+    }
+
+    /// Reads the most recent tier this writer pushed. Returns `None` if
+    /// the entry has been evicted (device unpaired).
+    #[allow(dead_code)] // exported for unit tests; not yet consumed by production code
+    pub fn current(&self) -> Option<DeviceTier> {
+        self.map
+            .lock()
+            .get(&self.rendezvous_id)
+            .map(|entry| entry.tier)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tauri commands
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "tauri-host")]
+pub mod commands {
+    //! `#[tauri::command]` surface for the renderer. Wired into
+    //! `tauri::Builder::invoke_handler` from `src-tauri/src/lib.rs`.
+
+    use std::sync::Arc;
+
+    use super::{
+        DeviceRegistration, DeviceTierEntry, SignalingConfigPatch, SignalingHub, SignalingStatus,
+    };
+
+    /// Replace the currently-tracked set of paired devices. Idempotent —
+    /// the hub diffs against its existing client map and only spawns /
+    /// cancels what changed.
+    #[tauri::command]
+    pub async fn companion_signaling_sync_devices(
+        hub: tauri::State<'_, Arc<SignalingHub>>,
+        devices: Vec<DeviceRegistration>,
+    ) -> Result<(), String> {
+        if let Some(store) = super::registration_store::installed() {
+            store
+                .replace_all(&devices, super::now_ms())
+                .map_err(|error| error.to_string())?;
+        }
+        hub.sync_devices(devices);
+        Ok(())
+    }
+
+    /// Update signaling URL + ICE/TURN servers, and the master enabled
+    /// toggle. Restarts every active client to pick up the new config.
+    #[tauri::command]
+    pub async fn companion_signaling_configure(
+        hub: tauri::State<'_, Arc<SignalingHub>>,
+        patch: SignalingConfigPatch,
+    ) -> Result<(), String> {
+        // The bool says whether anything was actually restarted; the renderer
+        // has no use for it (it dedupes on its own side too), so it is dropped
+        // here rather than widening the command's response shape.
+        hub.apply_patch(patch);
+        Ok(())
+    }
+
+    /// Diagnostic snapshot — surfaced by the Mobile companion settings
+    /// panel under the WebRTC card.
+    #[tauri::command]
+    pub fn companion_signaling_status(
+        hub: tauri::State<'_, Arc<SignalingHub>>,
+    ) -> Result<SignalingStatus, String> {
+        Ok(hub.status())
+    }
+
+    /// Per-device tier snapshot — drives the device list rendered by the
+    /// desktop WebRTC settings card. Each entry corresponds to one paired
+    /// device with a live signaling client task. Devices that were
+    /// unpaired (or never had a `rendezvousId` minted) are absent.
+    #[tauri::command]
+    pub fn companion_signaling_devices_status(
+        hub: tauri::State<'_, Arc<SignalingHub>>,
+    ) -> Result<Vec<DeviceTierEntry>, String> {
+        Ok(hub.devices_status())
+    }
+
+    /// Force-restart one device's signaling client. Powers the per-row
+    /// "Reconnect" button on the desktop WebRTC settings card. Returns
+    /// `Err` when `rendezvous_id` is unknown — that surfaces in the UI as
+    /// a `toast.error` so a stale row doesn't appear to work silently.
+    #[tauri::command]
+    pub async fn companion_signaling_reconnect_device(
+        hub: tauri::State<'_, Arc<SignalingHub>>,
+        rendezvous_id: String,
+    ) -> Result<(), String> {
+        hub.reconnect_device(&rendezvous_id)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn registration(device_id: &str, rendezvous_id: &str) -> DeviceRegistration {
+        DeviceRegistration {
+            device_id: device_id.into(),
+            rendezvous_id: rendezvous_id.into(),
+            room_descriptor: cognia_signaling_core::proto::RoomDescriptor {
+                v: 2,
+                room_id: rendezvous_id.into(),
+                room_nonce: "nonce".into(),
+                desktop_signing_key: "desktop-key".into(),
+                mobile_signing_key: "mobile-key".into(),
+                not_after: 1_800_000_000_000,
+            },
+            signaling_key_ref: device_id.into(),
+        }
+    }
+
+    #[test]
+    fn default_hub_has_default_url_and_two_stuns() {
+        let hub = SignalingHub::new();
+        let inner = hub.inner.lock();
+        assert_eq!(inner.signaling_url, DEFAULT_SIGNALING_URL);
+        assert_eq!(inner.ice_servers.len(), 2);
+        assert!(inner
+            .ice_servers
+            .iter()
+            .any(|s| s.urls[0].starts_with("stun:stun.l.google.com")));
+    }
+
+    #[test]
+    fn registered_rendezvous_ids_is_empty_on_fresh_hub() {
+        let hub = SignalingHub::new();
+        assert!(hub.registered_rendezvous_ids().is_empty());
+    }
+
+    #[test]
+    fn sync_devices_before_bind_caches_pending() {
+        // A common boot ordering: the renderer hydrates Dexie and pushes
+        // pairedDevices to the hub before `companion_server_start` has had
+        // a chance to call `bind()`. The hub must remember the device set
+        // and apply it once the binding lands; otherwise the device would
+        // never receive an inbound rtc:offer.
+        let hub = SignalingHub::new();
+        hub.sync_devices(vec![registration("d1", "r1")]);
+        // No binding yet — no clients spawned.
+        assert!(hub.registered_rendezvous_ids().is_empty());
+        // Cached for replay.
+        let inner = hub.inner.lock();
+        assert_eq!(inner.pending_devices.len(), 1);
+        assert_eq!(inner.pending_devices[0].rendezvous_id, "r1");
+    }
+
+    #[test]
+    fn configure_with_an_identical_patch_is_a_no_op() {
+        // The renderer re-pushes the same patch on every `AppSettings` write.
+        // Applying it would tear down one WSS per paired device and re-run each
+        // handshake, so an unchanged patch must not reach `clear_clients`.
+        let hub = SignalingHub::new();
+        let (enabled, url, ice) = {
+            let inner = hub.inner.lock();
+            (
+                inner.enabled,
+                inner.signaling_url.clone(),
+                inner.ice_servers.clone(),
+            )
+        };
+        assert!(
+            !hub.configure(enabled, url.clone(), ice.clone()),
+            "an unchanged patch must report no change"
+        );
+        assert!(
+            !hub.configure(enabled, url, ice),
+            "and must stay a no-op however many times it is re-pushed"
+        );
+    }
+
+    #[test]
+    fn configure_applies_a_real_change_and_then_settles() {
+        let hub = SignalingHub::new();
+        let ice = vec![RTCIceServer {
+            urls: vec!["stun:stun.example:3478".into()],
+            ..Default::default()
+        }];
+        assert!(
+            hub.configure(true, "wss://relay.example/signaling".into(), ice.clone()),
+            "a different URL + ICE set is a real change"
+        );
+        {
+            let inner = hub.inner.lock();
+            assert_eq!(inner.signaling_url, "wss://relay.example/signaling");
+            assert_eq!(inner.ice_servers, ice);
+        }
+        // Re-pushing what was just applied is now the no-op case — the dedupe
+        // reads live state, so it cannot go stale after a real change.
+        assert!(!hub.configure(true, "wss://relay.example/signaling".into(), ice.clone()));
+        // Only the enabled flag moving is still a change.
+        assert!(hub.configure(false, "wss://relay.example/signaling".into(), ice));
+    }
+
+    #[test]
+    fn configure_treats_ice_server_order_as_significant() {
+        // The comparison is a plain `Vec` equality, so a reordered list counts
+        // as a change and restarts. That is the safe direction: a missed
+        // restart would leave devices dialing a stale relay.
+        let hub = SignalingHub::new();
+        let a = RTCIceServer {
+            urls: vec!["stun:a.example:3478".into()],
+            ..Default::default()
+        };
+        let b = RTCIceServer {
+            urls: vec!["stun:b.example:3478".into()],
+            ..Default::default()
+        };
+        let url = "wss://relay.example/signaling".to_string();
+        assert!(hub.configure(true, url.clone(), vec![a.clone(), b.clone()]));
+        assert!(hub.configure(true, url, vec![b, a]));
+    }
+
+    #[test]
+    fn sync_devices_with_disabled_flag_skips_spawn() {
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
+        assert!(hub.registered_rendezvous_ids().is_empty());
+        // …but still cached so re-enabling will pick it up.
+        let inner = hub.inner.lock();
+        assert_eq!(inner.pending_devices.len(), 1);
+    }
+
+    #[test]
+    fn sync_devices_diff_removes_missing_ids() {
+        let hub = SignalingHub::new();
+        hub.sync_devices(vec![registration("d1", "r1"), registration("d2", "r2")]);
+        // Reducing to a single device should evict r2 from pending.
+        hub.sync_devices(vec![registration("d1", "r1")]);
+        let inner = hub.inner.lock();
+        assert_eq!(inner.pending_devices.len(), 1);
+        assert_eq!(inner.pending_devices[0].rendezvous_id, "r1");
+    }
+
+    #[test]
+    fn tier_writer_roundtrip_and_overwrite() {
+        let hub = SignalingHub::new();
+        let w = hub.new_tier_writer("r1", "d1");
+        assert!(w.current().is_none());
+        w.set(DeviceTier::Awaiting);
+        assert_eq!(w.current(), Some(DeviceTier::Awaiting));
+        w.set(DeviceTier::Connected);
+        assert_eq!(w.current(), Some(DeviceTier::Connected));
+        // Same hub returns the same shared map — a second writer for the
+        // same rendezvous reads what the first wrote.
+        let w2 = hub.new_tier_writer("r1", "d1");
+        assert_eq!(w2.current(), Some(DeviceTier::Connected));
+    }
+
+    #[test]
+    fn tier_writer_set_with_error_carries_message() {
+        let hub = SignalingHub::new();
+        let w = hub.new_tier_writer("r1", "d1");
+        w.set_with_error(DeviceTier::Failed, "connection refused");
+        let entries = hub.devices_status();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].tier, DeviceTier::Failed);
+        assert_eq!(entries[0].last_error.as_deref(), Some("connection refused"));
+        // A clean `set` after a `Failed` clears the error message so the
+        // UI doesn't keep showing a stale reason next to a healthy tier.
+        w.set(DeviceTier::Connected);
+        let entries = hub.devices_status();
+        assert!(entries[0].last_error.is_none());
+    }
+
+    #[test]
+    fn devices_status_sorted_by_device_id() {
+        let hub = SignalingHub::new();
+        hub.new_tier_writer("rB", "device-banana")
+            .set(DeviceTier::Connected);
+        hub.new_tier_writer("rA", "device-apple")
+            .set(DeviceTier::Awaiting);
+        hub.new_tier_writer("rC", "device-cherry")
+            .set(DeviceTier::Negotiating);
+        let entries = hub.devices_status();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].device_id, "device-apple");
+        assert_eq!(entries[1].device_id, "device-banana");
+        assert_eq!(entries[2].device_id, "device-cherry");
+    }
+
+    #[test]
+    fn cancel_one_evicts_tier_entry() {
+        let hub = SignalingHub::new();
+        hub.new_tier_writer("r1", "d1").set(DeviceTier::Connected);
+        assert_eq!(hub.devices_status().len(), 1);
+        hub.cancel_one("r1");
+        assert!(hub.devices_status().is_empty());
+    }
+
+    #[test]
+    fn reconnect_device_unknown_rendezvous_id_errors() {
+        let hub = SignalingHub::new();
+        let err = hub.reconnect_device("does-not-exist").unwrap_err();
+        assert!(err.contains("not found"));
+    }
+
+    #[test]
+    fn reconnect_device_returns_ok_when_disabled_with_known_id() {
+        // The renderer pushed the device before the master toggle was
+        // re-enabled, or the user just disabled it. Reconnect should
+        // succeed silently — flipping the toggle back on will re-spawn.
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
+        // Pre-condition: no clients spawned because hub is disabled.
+        assert!(hub.registered_rendezvous_ids().is_empty());
+        // The device is still in the pending_devices cache, so a
+        // reconnect call against it is a known id → Ok(()).
+        assert!(hub.reconnect_device("r1").is_ok());
+        // Still no client (hub disabled).
+        assert!(hub.registered_rendezvous_ids().is_empty());
+    }
+
+    #[test]
+    fn reconnect_device_unknown_rendezvous_id_errors_after_some_devices() {
+        let hub = SignalingHub::new();
+        hub.sync_devices(vec![registration("d1", "r1")]);
+        // r1 is in pending_devices but no `bind()` was called, so
+        // reconnect should surface the "hub not bound" condition rather
+        // than the "not found" condition.
+        let err = hub.reconnect_device("r1").unwrap_err();
+        assert!(err.contains("not bound"));
+        // Unknown ids surface "not found" regardless of bind state.
+        let err = hub.reconnect_device("r-nope").unwrap_err();
+        assert!(err.contains("not found"));
+    }
+
+    #[test]
+    fn reconnect_device_cannot_wake_a_device_the_renderer_filtered_out() {
+        // The renderer drops a device idle for 30 days from the list it pushes,
+        // so the hub never learns about it. `reconnect_device` resolves out of
+        // `pending_devices`, which is that same list, so it answers "not found"
+        // rather than dialling a room it has no descriptor for.
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![registration("active", "r-active")]);
+        let err = hub.reconnect_device("r-dormant").unwrap_err();
+        assert!(err.contains("not found"), "unexpected error: {err}");
+
+        // Waking one is a re-push that includes it, which is what makes it
+        // known here as well. This is the contract the console's wake button
+        // depends on, and the reason it does not call reconnect_device.
+        hub.sync_devices(vec![
+            registration("active", "r-active"),
+            registration("dormant", "r-dormant"),
+        ]);
+        assert!(
+            hub.registrations_snapshot()
+                .iter()
+                .any(|d| d.rendezvous_id == "r-dormant"),
+            "the woken device must be in the hub's registration set"
+        );
+        assert!(hub.reconnect_device("r-dormant").is_ok());
+    }
+
+    #[test]
+    fn sync_devices_cancels_a_client_the_renderer_stopped_listing() {
+        // The dormancy rule takes effect through exactly this path: a device
+        // that ages out simply stops appearing, and the diff tears its socket
+        // down. Nothing else has to know the rule exists.
+        let hub = SignalingHub::new();
+        hub.sync_devices(vec![registration("d1", "r1"), registration("d2", "r2")]);
+        assert_eq!(hub.registrations_snapshot().len(), 2);
+        hub.sync_devices(vec![registration("d1", "r1")]);
+        let remaining: Vec<String> = hub
+            .registrations_snapshot()
+            .into_iter()
+            .map(|d| d.rendezvous_id)
+            .collect();
+        assert_eq!(remaining, vec!["r1".to_string()]);
+        assert!(!hub.registered_rendezvous_ids().contains(&"r2".to_string()));
+    }
+
+    #[test]
+    fn reconnect_device_throttle_rejects_immediate_repeat() {
+        // Use a disabled hub so the call short-circuits on the
+        // success-path without needing a Tauri binding; the throttle
+        // map is updated either way.
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
+        // First call: clears the throttle (empty map), succeeds.
+        assert!(hub.reconnect_device("r1").is_ok());
+        // Second call within the spacing window: must be rejected with
+        // a `reconnect_throttled` error so a renderer-side caller can
+        // surface the right toast.
+        let err = hub.reconnect_device("r1").unwrap_err();
+        assert!(
+            err.starts_with("reconnect_throttled"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn reconnect_device_throttle_independent_per_rendezvous_id() {
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![registration("d1", "r1"), registration("d2", "r2")]);
+        assert!(hub.reconnect_device("r1").is_ok());
+        // A different rendezvous id must NOT inherit r1's throttle.
+        assert!(hub.reconnect_device("r2").is_ok());
+        // …but r1's own throttle stays armed.
+        assert!(hub.reconnect_device("r1").is_err());
+    }
+
+    #[test]
+    fn reset_reconnect_throttle_allows_immediate_repeat() {
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
+        assert!(hub.reconnect_device("r1").is_ok());
+        hub.reset_reconnect_throttle();
+        assert!(hub.reconnect_device("r1").is_ok());
+    }
+
+    #[test]
+    fn clear_clients_clears_tier_table() {
+        let hub = SignalingHub::new();
+        hub.new_tier_writer("r1", "d1").set(DeviceTier::Connected);
+        hub.new_tier_writer("r2", "d2").set(DeviceTier::Failed);
+        assert_eq!(hub.devices_status().len(), 2);
+        hub.clear_clients();
+        assert!(hub.devices_status().is_empty());
+    }
+
+    #[test]
+    fn device_tier_serializes_as_kebab_case() {
+        let json = serde_json::to_string(&DeviceTier::Negotiating).unwrap();
+        assert_eq!(json, "\"negotiating\"");
+        let json = serde_json::to_string(&DeviceTier::Awaiting).unwrap();
+        assert_eq!(json, "\"awaiting\"");
+    }
+
+    #[test]
+    fn device_tier_entry_camel_case_field_names() {
+        let entry = DeviceTierEntry {
+            device_id: "d1".into(),
+            rendezvous_id: "r1".into(),
+            tier: DeviceTier::Connected,
+            last_error: None,
+            updated_at_ms: 42,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"deviceId\":\"d1\""));
+        assert!(json.contains("\"rendezvousId\":\"r1\""));
+        assert!(json.contains("\"tier\":\"connected\""));
+        assert!(json.contains("\"updatedAtMs\":42"));
+        // `last_error` is `None` — should be omitted by `skip_serializing_if`.
+        assert!(!json.contains("lastError"));
+    }
+}

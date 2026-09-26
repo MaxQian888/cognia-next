@@ -10,6 +10,7 @@
  *   - src-tauri/Cargo.toml           (Tauri requires this to match tauri.conf)
  *   - crates/cognia-cli/Cargo.toml   (the `cognia` plugin-author CLI)
  *   - crates/cognia-sandbox-runner/Cargo.toml (bundled with the desktop app)
+ *   - crates/cognia-companion/Cargo.toml (reports the app version on the wire)
  *   - cli/package.json               (@cognia/agent-cli — the `cognia-agent` CLI)
  *   - sidecar/package.json           (cognia-claude-sidecar, bundled in resources)
  *   - sidecar/vscode-ext-host/package.json
@@ -47,6 +48,9 @@ export const TARGETS = [
   { path: "src-tauri/Cargo.toml", kind: "cargo" },
   { path: "crates/cognia-cli/Cargo.toml", kind: "cargo" },
   { path: "crates/cognia-sandbox-runner/Cargo.toml", kind: "cargo" },
+  // `/healthz`, `whoami`, the bridge hello and the agent cards report this
+  // crate's `CARGO_PKG_VERSION` (ADR-0196 P7).
+  { path: "crates/cognia-companion/Cargo.toml", kind: "cargo" },
   { path: "cli/package.json", kind: "json" },
   { path: "sidecar/package.json", kind: "json" },
   { path: "sidecar/vscode-ext-host/package.json", kind: "json" },

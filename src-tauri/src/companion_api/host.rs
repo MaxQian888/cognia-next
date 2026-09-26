@@ -1,12 +1,10 @@
-//! What the companion needs from the renderer it runs beside (ADR-0196 P5.1).
+//! The desktop's renderer adapter for the companion (ADR-0196 P7).
 //!
-//! The desktop hosts a WebView; the headless server hosts none. Companion code
-//! that used to hold an `Option<tauri::AppHandle>` holds an
-//! `Option<Arc<dyn RendererPort>>` instead: `None` in tests and on the headless
-//! server, [`TauriRenderer`] on the desktop. Everything the companion does to
-//! the renderer is a method here; the few desktop-only paths that still need
-//! the `AppHandle` itself (managed state, the desktop dispatch arm) reach it
-//! through [`tauri_app`].
+//! The renderer port lives in `cognia_companion::host` and is glob-re-exported
+//! here, so `companion_api::host::…` paths are unchanged. The WebView adapter
+//! stays in the app: it is the one piece that holds an `AppHandle`, and the
+//! only code that recovers one from a state ([`tauri_app`]) is the app's own
+//! dispatch host and command shells.
 
 use std::any::Any;
 use std::path::PathBuf;
@@ -14,25 +12,9 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+pub use cognia_companion::host::*;
+
 use super::bridge_transport::{BridgeTransport, WebViewBridgeTransport};
-
-/// The renderer a companion server runs beside.
-pub trait RendererPort: Send + Sync + 'static {
-    /// Emits `event` to the renderer, best effort: a failed emit is dropped,
-    /// as every caller did with `AppHandle::emit`'s result.
-    fn emit(&self, event: &str, payload: Value);
-
-    /// The transport that carries bridge requests into the renderer's
-    /// canonical store.
-    fn bridge_transport(&self) -> Arc<dyn BridgeTransport>;
-
-    /// The app's resource dir, where the terminal host it may start finds its
-    /// shell-integration scripts.
-    fn resource_dir(&self) -> Option<PathBuf>;
-
-    /// Lets [`tauri_app`] recover the desktop adapter.
-    fn as_any(&self) -> &dyn Any;
-}
 
 /// The desktop renderer: the Tauri app and its WebView.
 pub struct TauriRenderer(pub tauri::AppHandle);
@@ -68,21 +50,15 @@ pub fn tauri_app(renderer: &Option<Arc<dyn RendererPort>>) -> Option<&tauri::App
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parking_lot::Mutex;
 
-    /// Records what the companion emitted, standing in for a WebView.
-    #[derive(Default)]
-    struct RecordingRenderer {
-        emitted: Mutex<Vec<(String, Value)>>,
-    }
+    /// A renderer that is not the desktop's WebView.
+    struct HeadlessRenderer;
 
-    impl RendererPort for RecordingRenderer {
-        fn emit(&self, event: &str, payload: Value) {
-            self.emitted.lock().push((event.to_string(), payload));
-        }
+    impl RendererPort for HeadlessRenderer {
+        fn emit(&self, _event: &str, _payload: Value) {}
 
         fn bridge_transport(&self) -> Arc<dyn BridgeTransport> {
-            unreachable!("RecordingRenderer carries no bridge")
+            unreachable!("HeadlessRenderer carries no bridge")
         }
 
         fn resource_dir(&self) -> Option<PathBuf> {
@@ -101,21 +77,7 @@ mod tests {
 
     #[test]
     fn a_renderer_that_is_not_tauri_has_no_tauri_app() {
-        let renderer: Arc<dyn RendererPort> = Arc::new(RecordingRenderer::default());
+        let renderer: Arc<dyn RendererPort> = Arc::new(HeadlessRenderer);
         assert!(tauri_app(&Some(renderer)).is_none());
-    }
-
-    #[test]
-    fn emit_reaches_the_renderer() {
-        let recording = Arc::new(RecordingRenderer::default());
-        let renderer: Arc<dyn RendererPort> = recording.clone();
-        renderer.emit("companion://device-paired", serde_json::json!({ "id": 1 }));
-        assert_eq!(
-            recording.emitted.lock().as_slice(),
-            &[(
-                "companion://device-paired".to_string(),
-                serde_json::json!({ "id": 1 })
-            )]
-        );
     }
 }

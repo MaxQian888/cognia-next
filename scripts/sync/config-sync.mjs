@@ -16,7 +16,7 @@
  *
  * Currently synced:
  *   - companion default port: canonical in Rust
- *     (`companion_api::server::DEFAULT_PORT`), mirrored in the settings UI
+ *     (`cognia_companion_connectivity::DEFAULT_PORT`), mirrored in the settings UI
  *     and both LAN connectivity modules.
  *
  * Usage:
@@ -39,13 +39,14 @@ export const CONFIGS = [
   {
     name: "companion default port",
     canonical: {
-      path: COMPANION_SOURCES.server,
+      path: COMPANION_SOURCES.defaultPort,
       re: /pub const DEFAULT_PORT: u16 = (\d+);/,
     },
     mirrors: [
       {
-        path: "components/settings/connectivity/blocks/companion-server-commands.ts",
-        re: /const DEFAULT_PORT = (\d+)/,
+        // The settings panel's command block re-exports this constant.
+        path: "lib/connectivity/tunnel-resolver.ts",
+        re: /export const COMPANION_SERVER_DEFAULT_PORT = (\d+)/,
       },
       {
         path: "lib/connectivity/lan-scanner.ts",

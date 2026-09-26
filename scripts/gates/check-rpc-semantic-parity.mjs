@@ -178,7 +178,7 @@ export const HOST_LOCAL_CHANNELS = [
  */
 export const STREAM_COMMAND_REPLACEMENTS = {
   terminal_spawn:
-    "replaced by the GET /ws/terminal binary protocol (src-tauri/src/companion_api/ws_terminal.rs): a paired client redeems a device-bound socket ticket and the PTY stays owned by `cognia-server desktop-host`, so it survives this process disconnecting — which a Channel<T> over IPC cannot do",
+    "replaced by the GET /ws/terminal binary protocol (crates/cognia-companion/src/ws_terminal.rs): a paired client redeems a device-bound socket ticket and the PTY stays owned by `cognia-server desktop-host`, so it survives this process disconnecting — which a Channel<T> over IPC cannot do",
   terminal_reattach:
     "same /ws/terminal route; reattaching is opening the socket against an existing session id, so it needs no separate command",
   ssh_terminal_spawn:

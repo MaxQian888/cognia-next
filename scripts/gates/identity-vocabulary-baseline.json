@@ -828,28 +828,28 @@
     "src-tauri/src/cli_bridge/handlers.rs": {
       "bareAccountIdRust": 4
     },
-    "src-tauri/src/companion_api/a2a/handler.rs": {
+    "crates/cognia-companion/src/a2a/handler.rs": {
       "bareAccountIdRust": 1
     },
-    "src-tauri/src/companion_api/acp/handler.rs": {
+    "crates/cognia-companion/src/acp/handler.rs": {
       "bareAccountIdRust": 26
     },
-    "src-tauri/src/companion_api/acp/registry.rs": {
+    "crates/cognia-companion/src/acp/registry.rs": {
       "bareAccountIdRust": 33
     },
-    "src-tauri/src/companion_api/api.rs": {
+    "crates/cognia-companion/src/api.rs": {
       "bareAccountIdRust": 21
     },
-    "src-tauri/src/companion_api/browser_gateway.rs": {
+    "crates/cognia-companion/src/browser_gateway.rs": {
       "bareAccountIdRust": 34
     },
-    "src-tauri/src/companion_api/lark_entry.rs": {
+    "crates/cognia-companion/src/lark_entry.rs": {
       "bareAccountIdRust": 4
     },
-    "src-tauri/src/companion_api/middleware.rs": {
+    "crates/cognia-companion/src/middleware.rs": {
       "bareAccountIdRust": 23
     },
-    "src-tauri/src/companion_api/remote_execution.rs": {
+    "crates/cognia-companion/src/remote_execution.rs": {
       "bareAccountIdRust": 10
     },
     "src-tauri/src/companion_api/rpc.rs": {
@@ -888,19 +888,19 @@
     "src-tauri/src/companion_api/rpc/tests.rs": {
       "bareAccountIdRust": 1
     },
-    "src-tauri/src/companion_api/signaling/dispatch.rs": {
+    "crates/cognia-companion/src/signaling/dispatch.rs": {
       "bareAccountIdRust": 1
     },
-    "src-tauri/src/companion_api/workflow_api.rs": {
+    "crates/cognia-companion/src/workflow_api.rs": {
       "bareAccountIdRust": 5
     },
-    "src-tauri/src/companion_api/workflow_app_api.rs": {
+    "crates/cognia-companion/src/workflow_app_api.rs": {
       "bareAccountIdRust": 23
     },
-    "src-tauri/src/companion_api/ws_bridge.rs": {
+    "crates/cognia-companion/src/ws_bridge.rs": {
       "bareAccountIdRust": 18
     },
-    "src-tauri/src/companion_api/ws.rs": {
+    "crates/cognia-companion/src/ws.rs": {
       "bareAccountIdRust": 1
     },
     "src-tauri/src/headless/brain.rs": {

@@ -69,6 +69,9 @@ members = [
   # ADR-0196. The reference-counted OS keep-awake assertion the sidecar, the
   # companion worker and the desktop screen-hold command share.
   "crates/cognia-power",
+  # ADR-0196 P7. The companion core: state, listener, auth, canonical remote
+  # execution, WebSocket planes, signaling, A2A and ACP.
+  "crates/cognia-companion",
   # ADR-0196 P6c — the settings-hook runtime (`.claude/settings.json` hooks,
   # built-ins, trust, webhook/command handlers) and the settings readers, out
   # of `app_lib`.

@@ -16,6 +16,8 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 export const COMPANION_API_DIR = "src-tauri/src/companion_api"
+/** `cognia-companion`: the core — listener, auth, remote execution, planes (P7). */
+export const COMPANION_CORE_DIR = "crates/cognia-companion/src"
 /** `cognia-companion-bus`: the event bus, channel catalog, store bridges. */
 export const COMPANION_BUS_DIR = "crates/cognia-companion-bus/src"
 /** `cognia-companion-contract`: the generated command table and settings allowlist. */
@@ -27,12 +29,17 @@ export const COMPANION_SOURCES = Object.freeze({
   /** The per-family dispatch files, `<dir>/<family>.rs`; see {@link rpcFamilyFile}. */
   rpcFamilyDir: `${COMPANION_API_DIR}/rpc`,
   /** Keys its arms on the same command literals as the RPC families. */
-  browserGateway: `${COMPANION_API_DIR}/browser_gateway.rs`,
+  browserGateway: `${COMPANION_CORE_DIR}/browser_gateway.rs`,
   eventChannels: `${COMPANION_BUS_DIR}/event_channels.rs`,
-  /** The listener: route mounts and `DEFAULT_PORT`. */
-  server: `${COMPANION_API_DIR}/server.rs`,
-  api: `${COMPANION_API_DIR}/api.rs`,
-  larkEntry: `${COMPANION_API_DIR}/lark_entry.rs`,
+  /** The listener: route mounts. */
+  server: `${COMPANION_CORE_DIR}/server.rs`,
+  /**
+   * Where `DEFAULT_PORT` is defined: with the other transport leaves
+   * (ADR-0196 P4). `server.rs` only re-exports it.
+   */
+  defaultPort: "crates/cognia-companion-connectivity/src/lib.rs",
+  api: `${COMPANION_CORE_DIR}/api.rs`,
+  larkEntry: `${COMPANION_CORE_DIR}/lark_entry.rs`,
   /**
    * The app's routes on the listener (the Pro IDE relay), handed to the core
    * through `CompanionRuntime` (ADR-0196 P5.4).
@@ -47,7 +54,7 @@ export const COMPANION_SOURCES = Object.freeze({
   settingsSyncGenerated: `${COMPANION_CONTRACT_DIR}/settings_sync_generated.rs`,
   /** Written by `gen-companion-api.mjs`. */
   knownCommands: `${COMPANION_CONTRACT_DIR}/generated/known_commands.rs`,
-  acpHandler: `${COMPANION_API_DIR}/acp/handler.rs`,
+  acpHandler: `${COMPANION_CORE_DIR}/acp/handler.rs`,
   syncRegistry: `${COMPANION_BUS_DIR}/sync_registry.rs`,
   /**
    * Not under `companion_api`: `rpc/sftp.rs` hands off to this service, which

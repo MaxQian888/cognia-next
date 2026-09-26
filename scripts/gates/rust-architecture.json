@@ -52,6 +52,8 @@
     "cognia-sandbox-pool": "domain",
     "cognia-codex-app": "domain",
 
+    "cognia-companion": "companion",
+
     "cognia-cli": "service",
     "cognia-collab-server": "service",
     "cognia-ops-controller": "service",
@@ -112,7 +114,7 @@
   "appShell": {
     "package": "cognia-next",
     "srcDir": "src-tauri/src",
-    "maxLoc": 145317,
+    "maxLoc": 100100,
     "locSlack": 4000,
     "locBlocking": false,
     "modules": [

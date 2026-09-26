@@ -214,15 +214,22 @@ mod tests {
         );
     }
 
+    /// `/healthz`, `whoami`, the bridge hello and the agent cards report the
+    /// companion crate's version; `version-sync` keeps it the app's.
+    #[test]
+    fn the_companion_reports_the_app_version() {
+        assert_eq!(cognia_companion::BUILD_VERSION, env!("CARGO_PKG_VERSION"));
+    }
+
     fn unit_state() -> SharedState {
         use super::super::*;
         Arc::new(CompanionState {
-            secret: RwLock::new(vec![0u8; 32]),
-            deny_list: Arc::new(DenyList::new()),
+            secret: parking_lot::RwLock::new(vec![0u8; 32]),
+            deny_list: Arc::new(deny_list::DenyList::new()),
             renderer: None,
             runtime: runtime(),
-            idempotency: Arc::new(IdempotencyCache::new()),
-            event_bus: EventBus::new(),
+            idempotency: Arc::new(idempotency::IdempotencyCache::new()),
+            event_bus: event_bus::EventBus::new(),
             sync_bridge: sync_bridge::SyncBridge::new(),
             desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge: desktop_writes_bridge::DesktopWritesBridge::new(),

@@ -239,7 +239,7 @@ test("dev:web-headless opens the one port a browser tab can reach the Host on", 
   // The port must agree with the Rust default and the browser-side probe, or
   // discovery looks in a place nothing is listening.
   const rust = await readFile(
-    new URL("../../src-tauri/src/companion_api/browser_access.rs", import.meta.url),
+    new URL("../../crates/cognia-companion/src/browser_access.rs", import.meta.url),
     "utf8"
   )
   assert.match(rust, /pub const DEFAULT_BROWSER_PORT: u16 = 27891;/)

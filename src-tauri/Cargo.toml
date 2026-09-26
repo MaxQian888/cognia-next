@@ -108,6 +108,9 @@ cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["t
 # grants, rate limits and audit trail; `companion_api` re-exports each module at
 # its old path.
 cognia-companion-security = { path = "../crates/cognia-companion-security" }
+# The companion core; `companion_api` re-exports it and keeps the RPC dispatch
+# table, the Tauri command shells and its `CompanionRuntime` (ADR-0196 P7).
+cognia-companion = { path = "../crates/cognia-companion", features = ["tauri-host"] }
 # Keep-awake assertions; `power_assertion.rs` is its facade (ADR-0196).
 cognia-power = { path = "../crates/cognia-power" }
 # ADR-0196 P6c — the settings-hook runtime and the Claude settings readers;
@@ -534,6 +537,9 @@ cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["t
 # The store and audit test guards, the OIDC fake issuer and token minter, the
 # device-token issuer and the rate-limit counters the companion suites read.
 cognia-companion-security = { path = "../crates/cognia-companion-security", features = ["test-support"] }
+# `runtime::unwired`, the headless fake and the global-slot lock for the
+# dispatch-table and wiring tests.
+cognia-companion = { path = "../crates/cognia-companion", features = ["tauri-host", "test-support"] }
 # `ASSERTION_TEST_LOCK` / `active_reasons` for the sidecar and worker tests.
 cognia-power = { path = "../crates/cognia-power", features = ["test-support"] }
 # Fleet's test mode (no recovery file, no `git` capture) and the runtime lock
@@ -562,7 +568,7 @@ system-node-runtime = []
 agent-debug = []
 # ADR-0021 — compiles the `cognia-webrtc-peer` harness binary. Off by default
 # so the extra bin never enters normal builds; enabled only by `pnpm webrtc:pair`.
-webrtc-harness = []
+webrtc-harness = ["cognia-companion/webrtc-harness"]
 # ADR-0073 — native OTLP trace/metric export is deliberately opt-in so the
 # OpenTelemetry dependency graph does not slow normal desktop development.
 otel-export = ["cognia-observability/otel-export"]
@@ -594,7 +600,10 @@ container-exec = [
 # attached stdio, PVC-subPath workspace mounts. In-cluster only; enabled in
 # the headless image alongside `container-exec`.
 k8s-exec = ["cognia-external-agent/k8s-exec"]
-workspace-runtime-exec = ["cognia-external-agent/workspace-runtime-exec"]
+workspace-runtime-exec = [
+  "cognia-external-agent/workspace-runtime-exec",
+  "cognia-companion/workspace-runtime-exec",
+]
 # Native PDF parsing with bounding boxes via `liteparse` (PDFium). Needs
 # network at build time (pdfium-sys downloads a prebuilt PDFium); the
 # PDFium dynamic library must ship next to the executable — see

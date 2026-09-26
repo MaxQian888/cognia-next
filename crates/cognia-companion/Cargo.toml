@@ -1,0 +1,122 @@
+# ADR-0196 P7 — the companion core: `CompanionState`, the axum listener and its
+# routes, device authentication, canonical remote execution, the WebSocket
+# planes (events, bridge, terminal, worker), signaling, A2A and ACP.
+#
+# It names no app module. What a binary adds — the RPC dispatch table and the
+# routes that reach app code — arrives through `runtime::CompanionRuntime`, a
+# field of `CompanionState`; the headless server's extras through the slots in
+# `runtime`. The desktop keeps the dispatch table, the Tauri command shells and
+# its `CompanionRuntime` in `src-tauri/src/companion_api` and re-exports this
+# crate there.
+#
+# `version` is the app's: `/healthz`, `whoami`, the bridge hello, the A2A and
+# ACP agent cards and backup manifests report `CARGO_PKG_VERSION`, so
+# `scripts/sync/version-sync.mjs` keeps this crate in the app-version group.
+[package]
+name = "cognia-companion"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Companion core: state, listener and routes, device auth, canonical remote execution, WebSocket planes, signaling, A2A and ACP."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_companion"
+path = "src/lib.rs"
+
+[features]
+default = []
+# The Tauri command shells that live beside their modules (host consent,
+# signaling, the desktop worker brain). Only `src-tauri` enables it. The
+# WebView renderer adapter stays in the app (`companion_api::host`).
+tauri-host = ["dep:tauri"]
+# Test helpers other crates' tests use (`runtime::unwired`, the headless fake,
+# the global-slot lock, the drain switch). `src-tauri` enables it from
+# dev-dependencies only.
+test-support = [
+  "cognia-companion-bus/test-support",
+  "cognia-companion-security/test-support",
+  "cognia-power/test-support",
+  "cognia-fleet/test-support",
+]
+# Workspace-runtime execution in the browser gateway (ADR-0182).
+workspace-runtime-exec = ["cognia-external-agent/workspace-runtime-exec"]
+# The `cognia-webrtc-peer` harness's hooks into signaling.
+webrtc-harness = []
+
+[dependencies]
+cognia-agent-state = { path = "../cognia-agent-state" }
+cognia-companion-bus = { path = "../cognia-companion-bus" }
+cognia-companion-connectivity = { path = "../cognia-companion-connectivity" }
+cognia-companion-contract = { path = "../cognia-companion-contract" }
+cognia-companion-security = { path = "../cognia-companion-security" }
+cognia-connectors = { path = "../cognia-connectors" }
+cognia-core = { path = "../cognia-core", features = ["rt"] }
+cognia-environment = { path = "../cognia-environment", default-features = false, features = ["store", "registry"] }
+cognia-external-agent = { path = "../cognia-external-agent" }
+cognia-files = { path = "../cognia-files" }
+cognia-fleet = { path = "../cognia-fleet" }
+cognia-headless-contract = { path = "../cognia-headless-contract" }
+cognia-mcp-server = { path = "../cognia-mcp-server" }
+cognia-net = { path = "../cognia-net" }
+# `trace_context`: the inbound W3C traceparent (ADR-0196 E3b).
+cognia-observability = { path = "../cognia-observability", features = ["tracing-host"] }
+cognia-power = { path = "../cognia-power" }
+cognia-problem = { path = "../cognia-problem", features = ["axum"] }
+cognia-sandbox-pool = { path = "../cognia-sandbox-pool" }
+cognia-secrets = { path = "../cognia-secrets" }
+cognia-signaling-core = { path = "../../services/signaling-server/core" }
+cognia-tenant-auth = { path = "../cognia-tenant-auth" }
+cognia-terminal = { path = "../cognia-terminal" }
+tauri = { workspace = true, optional = true }
+
+aes-gcm = { workspace = true, features = ["aes"] }
+async-trait.workspace = true
+axum = { workspace = true, features = ["macros", "multipart", "ws"] }
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+base64.workspace = true
+bytes.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+flate2.workspace = true
+futures-util.workspace = true
+hex.workspace = true
+hmac.workspace = true
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
+log.workspace = true
+once_cell.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"] }
+rusqlite = { workspace = true, features = ["backup", "bundled"] }
+schemars.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_urlencoded = "0.7"
+sha1 = "0.11"
+sha2.workspace = true
+tar.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "net", "signal"] }
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "connect"] }
+tower = { workspace = true, features = ["util", "limit", "timeout"] }
+tower-http = { workspace = true, features = ["limit", "trace", "cors"] }
+tracing.workspace = true
+url.workspace = true
+uuid = { workspace = true, features = ["v4", "v7"] }
+webrtc = "0.20.2"
+
+[dev-dependencies]
+cognia-agents = { path = "../cognia-agents" }
+cognia-companion-bus = { path = "../cognia-companion-bus", features = ["test-support"] }
+cognia-companion-security = { path = "../cognia-companion-security", features = ["test-support"] }
+cognia-fleet = { path = "../cognia-fleet", features = ["test-support"] }
+cognia-power = { path = "../cognia-power", features = ["test-support"] }
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+wiremock.workspace = true
+
+[lints]
+workspace = true

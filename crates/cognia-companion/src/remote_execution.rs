@@ -1,0 +1,1956 @@
+use axum::http::StatusCode;
+use cognia_problem::Problem;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use tracing::Instrument as _;
+use uuid::Uuid;
+
+use super::{
+    command_manifest::{
+        CommandApproval, CommandDescriptor, CommandIdempotency, CommandOperation, CommandTarget,
+        CommandTransport,
+    },
+    middleware::DeviceContext,
+    security_store::{security_store, IdempotencyDecision, SecurityStoreError},
+    SharedState,
+};
+
+// The context registry lives in `remote_context`, so the event bus can register
+// pending requests without depending on this pipeline.
+pub use super::remote_context::{global, RemoteExecutionContext, RemoteExecutionRegistry};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExecutionTransport {
+    Http,
+    WebSocket,
+    WebRtc,
+    Internal,
+}
+
+impl ExecutionTransport {
+    pub(super) fn manifest_transport(self) -> CommandTransport {
+        match self {
+            Self::Http => CommandTransport::Http,
+            Self::WebSocket => CommandTransport::Websocket,
+            Self::WebRtc => CommandTransport::Webrtc,
+            Self::Internal => CommandTransport::Internal,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::WebSocket => "websocket",
+            Self::WebRtc => "webrtc",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+/// Which listener a request arrived on, as opposed to which protocol carried
+/// it (`ExecutionTransport`).
+///
+/// The plaintext companion listener is hard-bound to `127.0.0.1` and never to
+/// `0.0.0.0` — that bind is the entire justification for it having no TLS — so
+/// a request that arrives on it demonstrably came from a process on this
+/// machine. Nothing else about a request proves that: a device token, an
+/// Origin header and a loopback `Host` header are all forgeable or reusable
+/// from off-box.
+///
+/// One command needs to know. `codeserver_status` withholds the workbench's
+/// loopback port from every caller, because a port on the host's loopback is
+/// meaningless to anyone who cannot reach that loopback. A browser running ON
+/// the host can, and telling it the port is the difference between embedding
+/// the workbench and only being able to link to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExecutionPlane {
+    /// Anything that is not provably same-machine. The default, so a path that
+    /// has not thought about this discloses nothing.
+    #[default]
+    Network,
+    /// The loopback-bound plaintext listener.
+    LoopbackPlaintext,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExecutionRequest {
+    pub command: String,
+    pub args: Value,
+    pub principal: DeviceContext,
+    pub transport: ExecutionTransport,
+    pub plane: ExecutionPlane,
+    pub request_id: String,
+    pub policy_id: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub traceparent: Option<String>,
+}
+
+impl ExecutionRequest {
+    pub fn new(
+        command: impl Into<String>,
+        args: Value,
+        principal: DeviceContext,
+        transport: ExecutionTransport,
+        idempotency_key: Option<String>,
+    ) -> Self {
+        let policy_id = args
+            .get("policyId")
+            .or_else(|| args.get("policy_id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        Self {
+            command: command.into(),
+            args,
+            principal,
+            transport,
+            // Opt-in, never inferred. Every constructor that has not proven
+            // the caller is on this machine gets the conservative answer.
+            plane: ExecutionPlane::Network,
+            request_id: Uuid::new_v4().to_string(),
+            policy_id,
+            idempotency_key,
+            traceparent: None,
+        }
+    }
+
+    /// Record that this request arrived on the loopback-bound listener.
+    ///
+    /// A builder rather than a `new` parameter so every other entry point keeps
+    /// the default: adding a plane argument to the constructor would have made
+    /// four callers pick a value for a question they cannot answer, and the
+    /// wrong answer is a disclosure.
+    pub fn with_plane(mut self, plane: ExecutionPlane) -> Self {
+        self.plane = plane;
+        self
+    }
+
+    pub fn with_traceparent(mut self, traceparent: Option<String>) -> Self {
+        self.traceparent = traceparent
+            .as_deref()
+            .and_then(cognia_observability::trace_context::validate_traceparent);
+        self
+    }
+}
+
+/// Derive a stable UUID from an authenticated protocol request identifier.
+/// Adapters use this for durable idempotency when their wire protocol does not
+/// require UUID request ids. Tenant and device attribution prevent two callers
+/// that reuse the same JSON-RPC id from sharing a ledger entry.
+pub(crate) fn derive_protocol_request_uuid(
+    principal: &DeviceContext,
+    protocol: &str,
+    wire_request_id: &Value,
+    purpose: &str,
+) -> String {
+    let wire_request_id = serde_json::to_vec(wire_request_id).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    for part in [
+        principal.account_id.as_bytes(),
+        principal.device_id.as_bytes(),
+        protocol.as_bytes(),
+        purpose.as_bytes(),
+        wire_request_id.as_slice(),
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    // Stamp RFC 9562 variant and a name-based version so diagnostics identify
+    // these as deterministic ids rather than random client-generated UUIDs.
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes).to_string()
+}
+
+pub(crate) fn protocol_idempotency_key(
+    command: &str,
+    principal: &DeviceContext,
+    protocol: &str,
+    wire_request_id: Option<&Value>,
+) -> Option<String> {
+    super::command_manifest::descriptor(command)
+        .filter(|descriptor| descriptor.idempotency == CommandIdempotency::Required)
+        .map(|_| {
+            wire_request_id.map_or_else(
+                || Uuid::new_v4().to_string(),
+                |request_id| derive_protocol_request_uuid(principal, protocol, request_id, command),
+            )
+        })
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExecutionOutcome {
+    Completed {
+        request_id: String,
+        operation_id: Option<String>,
+        result: Value,
+        replayed: bool,
+    },
+    Accepted {
+        request_id: String,
+        operation_id: String,
+    },
+}
+
+/// The failure document for one request (ADR-0175). `retryable` starts as
+/// "a server-side condition" (`status >= 500`), and every producer below that
+/// knows better says so on the value it returns.
+fn problem(
+    request_id: &str,
+    status: StatusCode,
+    code: impl Into<String>,
+    detail: impl Into<String>,
+) -> Problem {
+    Problem::with_status(status, code, detail).with_request_id(request_id)
+}
+
+/// The single remote command authority. Wire adapters authenticate their
+/// protocol, construct an `ExecutionRequest`, and delegate all governance and
+/// dispatch behavior here.
+pub async fn execute(
+    state: &SharedState,
+    request: ExecutionRequest,
+) -> Result<ExecutionOutcome, Problem> {
+    let target = super::command_manifest::descriptor(&request.command)
+        .map(|descriptor| format!("{:?}", descriptor.target).to_ascii_lowercase())
+        .unwrap_or_else(|| "unknown".to_string());
+    let span = tracing::info_span!(
+        "companion.rpc.execute",
+        rpc.command = %request.command,
+        rpc.target = %target,
+        rpc.transport = request.transport.label(),
+        rpc.outcome = tracing::field::Empty,
+        request.id = %request.request_id,
+        operation.id = tracing::field::Empty,
+    );
+    cognia_observability::trace_context::set_parent(&span, request.traceparent.as_deref());
+    let result = execute_inner(state, request).instrument(span.clone()).await;
+    match &result {
+        Ok(ExecutionOutcome::Completed {
+            operation_id,
+            replayed,
+            ..
+        }) => {
+            span.record(
+                "rpc.outcome",
+                if *replayed { "replayed" } else { "completed" },
+            );
+            if let Some(operation_id) = operation_id {
+                span.record("operation.id", operation_id.as_str());
+            }
+        }
+        Ok(ExecutionOutcome::Accepted { operation_id, .. }) => {
+            span.record("rpc.outcome", "accepted");
+            span.record("operation.id", operation_id.as_str());
+        }
+        Err(_) => {
+            span.record("rpc.outcome", "error");
+        }
+    }
+    result
+}
+
+/// The 429 a device gets when it outruns its bucket.
+///
+/// Two things this answer has to carry, and for a long time it carried neither
+/// in a form any client reads.
+///
+/// **`retryable`.** `problem()` derives it from the status class,
+/// which is false for a 429. That default is wrong for exactly this error: we
+/// have just computed how long the caller must wait, so "come back then" is the
+/// whole message. Left false, the client refuses to retry at all
+/// (`transport-companion.ts`: `if (hostSaysRetryable === false) throw lastError`)
+/// and records the table as failed for the rest of the run.
+///
+/// **The wait.** It lived only in `details.retryAfterSeconds`, which no client
+/// parses. [`super::rpc_error::RpcError::rate_limited`] on the sibling RPC path had
+/// already settled the convention, `retry_after_seconds=N` inside the message,
+/// and that is what `retryAfterMsFromErrorMessage` reads. Both paths now answer
+/// the same shape, and `details` keeps the machine-readable copy.
+///
+/// Together these are why a companion's sync bootstrap emptied more than half
+/// its mirror on every boot. The burst drains the read bucket, which is
+/// expected and self-correcting, but every table refused after that gave up
+/// instantly instead of waiting out a refill this host had already quantified.
+fn rate_limited_error(request_id: &str, retry_after: std::time::Duration) -> Problem {
+    let retry_after_secs = retry_after.as_secs();
+    let mut error = problem(
+        request_id,
+        StatusCode::TOO_MANY_REQUESTS,
+        "rate_limited",
+        format!(
+            "device exceeded the remote execution quota; retry_after_seconds={retry_after_secs}"
+        ),
+    );
+    error.retryable = true;
+    error.details = json!({ "retryAfterSeconds": retry_after_secs });
+    error
+}
+
+/// Which rate-limit bucket a command is charged to. Chunk transfer quotas
+/// describe throughput, independently of the command's operation: an upload
+/// chunk is still a write for authorization, ordering and idempotency. Opening,
+/// committing or deleting a resource remains on the ordinary strict bucket.
+pub(super) fn rate_limit_class(descriptor: &CommandDescriptor) -> super::rate_limit::RequestClass {
+    if matches!(
+        descriptor.name.as_str(),
+        "plugin_media_read_chunk"
+            | "plugin_media_close_transfer"
+            | "task_resource_download_read_chunk"
+            | "task_resource_upload_write_chunk"
+    ) {
+        return super::rate_limit::RequestClass::MediaTransfer;
+    }
+    if descriptor.operation == CommandOperation::Read {
+        super::rate_limit::RequestClass::ReadOnly
+    } else {
+        super::rate_limit::RequestClass::Mutating
+    }
+}
+
+/// The answer for a name the contract does not serve. A name the rename
+/// table knows is 410 `command_renamed` with the replacement in
+/// `details.replacement` (ADR-0175). Any other name is 404 `unknown_command`.
+fn missing_command_problem(request_id: &str, command: &str) -> Problem {
+    missing_command_problem_for(
+        request_id,
+        command,
+        super::command_manifest::renamed_to(command),
+    )
+}
+
+fn missing_command_problem_for(
+    request_id: &str,
+    command: &str,
+    replacement: Option<&str>,
+) -> Problem {
+    match replacement {
+        Some(replacement) => problem(
+            request_id,
+            StatusCode::GONE,
+            "command_renamed",
+            format!("the command '{command}' was renamed. Call '{replacement}' instead"),
+        )
+        .with_detail_field("replacement", replacement),
+        None => problem(
+            request_id,
+            StatusCode::NOT_FOUND,
+            "unknown_command",
+            "the requested command is not registered",
+        ),
+    }
+}
+
+async fn execute_inner(
+    state: &SharedState,
+    request: ExecutionRequest,
+) -> Result<ExecutionOutcome, Problem> {
+    let descriptor = super::command_manifest::descriptor(&request.command)
+        .ok_or_else(|| missing_command_problem(&request.request_id, &request.command))?;
+    authorize_transport(&request, descriptor)?;
+    if let Err(error) = authorize_capability(&request, descriptor) {
+        super::audit::record_async(
+            "remote_execution_authorize",
+            &request.principal.device_id,
+            &request.principal.scope,
+            "deny",
+            json!({
+                "command": &request.command,
+                "reason": &error.detail,
+            }),
+        )
+        .await;
+        return Err(error);
+    }
+    authorize_approval(&request, descriptor)?;
+    validate_contract_value(
+        &request.request_id,
+        &request.command,
+        &request.args,
+        cognia_headless_contract::ContractDirection::Input,
+        contract_plane_for(&request.principal.scope),
+    )?;
+
+    if request.principal.scope != "service" {
+        // Which bucket this call is charged to is the same question as whether
+        // it can change anything, and the manifest already answers it. Reads go
+        // to the wide bucket (`RateLimitConfig::read_only_default`), which was
+        // sized for exactly one burst: a freshly paired client's `runSyncDown`,
+        // 25 handlers back to back, each paging while the Host sets `has_more`.
+        //
+        // Charging that burst to the strict 10-token bucket — as this call site
+        // did while it went through the unclassified `check()` — refused every
+        // pull past the tenth. `runSyncDown` records the refusal per table and
+        // moves on, so the tail tables ended up silently EMPTY, and the
+        // `host_feature_manifest` refresh that follows was refused too, leaving
+        // a correctly-paired client stuck on "the Host didn't come online".
+        let class = rate_limit_class(descriptor);
+        if let super::rate_limit::RateLimitDecision::Reject { retry_after } = state
+            .rate_limiter
+            .check_class(&request.principal.device_id, class)
+        {
+            return Err(rate_limited_error(&request.request_id, retry_after));
+        }
+    }
+
+    if descriptor.idempotency != CommandIdempotency::Required {
+        let result = dispatch(state, &request).await?;
+        validate_contract_value(
+            &request.request_id,
+            &request.command,
+            &result,
+            cognia_headless_contract::ContractDirection::Output,
+            contract_plane_for(&request.principal.scope),
+        )?;
+        return Ok(ExecutionOutcome::Completed {
+            request_id: request.request_id,
+            operation_id: None,
+            result,
+            replayed: false,
+        });
+    }
+
+    let idempotency_key = request.idempotency_key.as_deref().ok_or_else(|| {
+        problem(
+            &request.request_id,
+            StatusCode::BAD_REQUEST,
+            "idempotency_key_required",
+            "a UUID Idempotency-Key is required for this command",
+        )
+    })?;
+    if Uuid::parse_str(idempotency_key).is_err() {
+        return Err(problem(
+            &request.request_id,
+            StatusCode::BAD_REQUEST,
+            "idempotency_key_required",
+            "a UUID Idempotency-Key is required for this command",
+        ));
+    }
+
+    let store = security_store().ok_or_else(|| store_unavailable(&request.request_id))?;
+    let payload = serde_json::to_vec(&json!({
+        "command": request.command,
+        "args": request.args,
+    }))
+    .unwrap_or_default();
+    let request_hash = hex::encode(Sha256::digest(payload));
+    let now = unix_time_secs();
+    let operation_id = match store
+        .begin_idempotent_operation(
+            &request.principal.account_id,
+            &request.principal.device_id,
+            &local_host_id(),
+            idempotency_key,
+            &request_hash,
+            now,
+        )
+        .map_err(|error| map_store_error(&request.request_id, error))?
+    {
+        IdempotencyDecision::InProgress { operation_id } => {
+            return Ok(ExecutionOutcome::Accepted {
+                request_id: request.request_id,
+                operation_id,
+            });
+        }
+        IdempotencyDecision::Completed {
+            operation_id,
+            receipt_json,
+        } => return replay_receipt(&request.request_id, operation_id, &receipt_json),
+        IdempotencyDecision::Started { operation_id } => operation_id,
+    };
+    store
+        .mark_operation_running(&request.principal.account_id, &operation_id, now)
+        .map_err(|error| map_store_error(&request.request_id, error))?;
+
+    match dispatch(state, &request).await {
+        Ok(result) => {
+            if let Err(mut error) = validate_contract_value(
+                &request.request_id,
+                &request.command,
+                &result,
+                cognia_headless_contract::ContractDirection::Output,
+                contract_plane_for(&request.principal.scope),
+            ) {
+                let receipt = json!({ "httpStatus": error.status, "error": error });
+                store
+                    .complete_idempotent_operation(
+                        &request.principal.account_id,
+                        &request.principal.device_id,
+                        idempotency_key,
+                        &receipt.to_string(),
+                        false,
+                        unix_time_secs(),
+                    )
+                    .map_err(|store_error| map_store_error(&request.request_id, store_error))?;
+                error.operation_id = Some(operation_id);
+                return Err(error);
+            }
+            let receipt = json!({ "httpStatus": 200, "result": result });
+            store
+                .complete_idempotent_operation(
+                    &request.principal.account_id,
+                    &request.principal.device_id,
+                    idempotency_key,
+                    &receipt.to_string(),
+                    true,
+                    unix_time_secs(),
+                )
+                .map_err(|error| map_store_error(&request.request_id, error))?;
+            Ok(ExecutionOutcome::Completed {
+                request_id: request.request_id,
+                operation_id: Some(operation_id),
+                result,
+                replayed: false,
+            })
+        }
+        Err(mut error) => {
+            let receipt = json!({ "httpStatus": error.status, "error": error });
+            store
+                .complete_idempotent_operation(
+                    &request.principal.account_id,
+                    &request.principal.device_id,
+                    idempotency_key,
+                    &receipt.to_string(),
+                    false,
+                    unix_time_secs(),
+                )
+                .map_err(|store_error| map_store_error(&request.request_id, store_error))?;
+            error.operation_id = Some(operation_id);
+            Err(error)
+        }
+    }
+}
+
+/// Which contract plane a request scope maps to.
+///
+/// `prepare_remote_args` (rpc/source_control.rs) rewrites device-scope
+/// arguments from workspace-relative coordinates into real paths and leaves
+/// service-scope arguments untouched, so the two planes accept different — and
+/// both correct — request shapes. Validating everything against the service
+/// shape rejected every device `git_*` request with 422 before dispatch.
+fn contract_plane_for(scope: &str) -> cognia_headless_contract::ContractPlane {
+    if scope == "service" {
+        cognia_headless_contract::ContractPlane::Service
+    } else {
+        cognia_headless_contract::ContractPlane::Device
+    }
+}
+
+// The `Problem` intentionally carries the complete receipt-ready failure
+// payload used at the remote execution boundary.
+#[allow(clippy::result_large_err)]
+fn validate_contract_value(
+    request_id: &str,
+    command: &str,
+    value: &Value,
+    direction: cognia_headless_contract::ContractDirection,
+    plane: cognia_headless_contract::ContractPlane,
+) -> Result<(), Problem> {
+    if !super::command_manifest::headless_contract_enforced() {
+        return Ok(());
+    }
+    let contract = super::command_manifest::headless_contract().map_err(|_| {
+        let mut error = problem(
+            request_id,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "contract_unavailable",
+            "the Headless contract catalog is unavailable",
+        );
+        error.retryable = false;
+        error
+    })?;
+    let validation = match direction {
+        cognia_headless_contract::ContractDirection::Input => {
+            contract.validate_input_on(plane, command, value)
+        }
+        cognia_headless_contract::ContractDirection::Output => {
+            contract.validate_output(command, value)
+        }
+    };
+    validation.map_err(|violation| {
+        super::metrics::record_contract_violation(direction);
+        let (status, code, message, violations) = match violation {
+            cognia_headless_contract::ContractViolation::UnknownCommand { .. } => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "contract_unavailable",
+                "the Headless command has no generated contract",
+                Vec::new(),
+            ),
+            cognia_headless_contract::ContractViolation::Invalid { violations, .. }
+                if direction == cognia_headless_contract::ContractDirection::Input =>
+            {
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "contract_input_violation",
+                    "the request body violates the Headless command contract",
+                    violations,
+                )
+            }
+            cognia_headless_contract::ContractViolation::Invalid { violations, .. } => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "contract_output_violation",
+                "the command result violates the Headless command contract",
+                violations,
+            ),
+        };
+        let mut error = problem(request_id, status, code, message);
+        error.retryable = false;
+        error.details = json!({ "violations": violations });
+        error
+    })
+}
+
+/// Whether a principal of this kind may reach `descriptor` over `transport`.
+///
+/// The one transport predicate, shared by dispatch (`authorize_transport`) and
+/// by discovery (`catalog.rs`), so the catalog can never advertise a command
+/// the transport gate would refuse. The service principal owns the internal
+/// plane and nothing else. A device owns the device transports the contract
+/// lists for an `execution` or `host-admin` command and nothing else.
+pub(super) fn transport_admits(
+    service_principal: bool,
+    transport: ExecutionTransport,
+    descriptor: &CommandDescriptor,
+) -> bool {
+    if transport == ExecutionTransport::Internal {
+        return service_principal;
+    }
+    !service_principal
+        && matches!(
+            descriptor.target,
+            CommandTarget::Execution | CommandTarget::HostAdmin
+        )
+        && descriptor
+            .transports
+            .contains(&transport.manifest_transport())
+}
+
+/// Whether `principal` holds `capability`: the authorization snapshot when
+/// the authenticating adapter loaded one (including an empty one), otherwise
+/// the durable security store.
+#[allow(clippy::result_large_err)]
+pub(super) fn capability_granted(
+    principal: &DeviceContext,
+    capability: &str,
+    request_id: &str,
+) -> Result<bool, Problem> {
+    match snapshot_capability_decision(principal, capability) {
+        Some(granted) => Ok(granted),
+        None => security_store()
+            .ok_or_else(|| store_unavailable(request_id))?
+            .has_capability(&principal.account_id, &principal.device_id, capability)
+            .map_err(|error| map_store_error(request_id, error)),
+    }
+}
+
+/// Whether `principal` may dispatch `descriptor` over `transport` at all:
+/// the transport predicate, then the descriptor's capability. This is what
+/// `GET /api/catalog` filters by (ADR-0175). It cannot see a request body,
+/// so the per-payload capability `payload_required_capability` adds for a
+/// handful of commands is still checked at dispatch time only.
+#[allow(clippy::result_large_err)]
+pub(super) fn command_admitted(
+    principal: &DeviceContext,
+    transport: ExecutionTransport,
+    descriptor: &CommandDescriptor,
+    request_id: &str,
+) -> Result<bool, Problem> {
+    let service_principal = principal.scope == "service";
+    if !transport_admits(service_principal, transport, descriptor) {
+        return Ok(false);
+    }
+    if service_principal {
+        return Ok(true);
+    }
+    capability_granted(principal, descriptor.capability.as_str(), request_id)
+}
+
+#[allow(clippy::result_large_err)]
+fn authorize_transport(
+    request: &ExecutionRequest,
+    descriptor: &CommandDescriptor,
+) -> Result<(), Problem> {
+    let allowed = transport_admits(
+        request.principal.scope == "service",
+        request.transport,
+        descriptor,
+    );
+    if !allowed {
+        return Err(problem(
+            &request.request_id,
+            StatusCode::FORBIDDEN,
+            "command_transport_forbidden",
+            "the command cannot run through this principal and transport",
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::result_large_err)]
+fn authorize_capability(
+    request: &ExecutionRequest,
+    descriptor: &CommandDescriptor,
+) -> Result<(), Problem> {
+    if request.principal.scope == "service" {
+        return Ok(());
+    }
+    let required = [
+        Some(descriptor.capability.as_str()),
+        super::payload_capability::payload_required_capability(&request.command, &request.args),
+    ];
+    for capability in required.into_iter().flatten() {
+        let granted = capability_granted(&request.principal, capability, &request.request_id)?;
+        if !granted {
+            let mut error = problem(
+                &request.request_id,
+                StatusCode::FORBIDDEN,
+                "missing_capability",
+                "the device is not authorized for this command",
+            );
+            error.details = json!({ "capability": capability });
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+fn snapshot_capability_decision(principal: &DeviceContext, capability: &str) -> Option<bool> {
+    principal
+        .authorization_capabilities
+        .as_ref()
+        .map(|capabilities| capabilities.iter().any(|granted| granted == capability))
+}
+
+#[allow(clippy::result_large_err)]
+fn authorize_approval(
+    request: &ExecutionRequest,
+    descriptor: &CommandDescriptor,
+) -> Result<(), Problem> {
+    // The loopback-only service principal is the policy authority for the
+    // internal Brain plane. Device transports must still present interactive
+    // leases or signed host policies according to the manifest.
+    if request.principal.scope == "service" && request.transport == ExecutionTransport::Internal {
+        return Ok(());
+    }
+    match descriptor.approval {
+        CommandApproval::None => Ok(()),
+        // The command that MINTS a lease cannot be asked to present one. Its
+        // interactive approval is enforced inside the dispatch arm, by
+        // `host_consent` — a human answering on the host. This arm used to
+        // accept `args.confirmed == true` instead, which let the caller assert
+        // its own confirmation; that is the hole `host_consent` closes, and
+        // re-adding an argument check here would reopen it.
+        CommandApproval::Interactive if request.command == "host_admin_lease_issue" => Ok(()),
+        CommandApproval::Interactive => {
+            let lease = request
+                .args
+                .get("adminLease")
+                .or_else(|| request.args.get("admin_lease"))
+                .and_then(Value::as_str);
+            super::admin_lease::validate(&request.principal.device_id, &request.command, lease)
+                .map_err(|_| {
+                    problem(
+                        &request.request_id,
+                        StatusCode::PRECONDITION_REQUIRED,
+                        "interactive_approval_required",
+                        "a current device-bound approval lease is required",
+                    )
+                })
+        }
+        CommandApproval::SignedPolicy => {
+            let policy_id = request.policy_id.as_deref().ok_or_else(|| {
+                problem(
+                    &request.request_id,
+                    StatusCode::PRECONDITION_REQUIRED,
+                    "signed_policy_required",
+                    "an active host policy is required",
+                )
+            })?;
+            let policy = security_store()
+                .ok_or_else(|| store_unavailable(&request.request_id))?
+                .authorize_host_policy(
+                    &request.principal.account_id,
+                    policy_id,
+                    &descriptor.capability,
+                    &request.command,
+                    unix_time_secs(),
+                )
+                .map_err(|error| map_store_error(&request.request_id, error))?;
+            if json_subset_matches(
+                policy.get("constraints").unwrap_or(&Value::Null),
+                &request.args,
+            ) {
+                Ok(())
+            } else {
+                Err(problem(
+                    &request.request_id,
+                    StatusCode::FORBIDDEN,
+                    "policy_constraints_mismatch",
+                    "the request exceeds the active host policy",
+                ))
+            }
+        }
+    }
+}
+
+#[allow(clippy::result_large_err)]
+async fn dispatch(state: &SharedState, request: &ExecutionRequest) -> Result<Value, Problem> {
+    state
+        .runtime
+        .dispatch(
+            &request.command,
+            request.args.clone(),
+            state,
+            &request.principal,
+            request.plane,
+        )
+        .await
+        .map_err(|(status, axum::Json(error))| {
+            // `RpcError` is the arm-internal shape. This is the plane boundary where
+            // it becomes the one document, and the arm's own answer on whether a
+            // retry can succeed must not be replaced by a guess from the status.
+            problem(&request.request_id, status, error.code, error.message)
+                .retryable(error.retryable)
+        })
+}
+
+#[allow(clippy::result_large_err)]
+fn replay_receipt(
+    request_id: &str,
+    operation_id: String,
+    receipt_json: &str,
+) -> Result<ExecutionOutcome, Problem> {
+    let receipt: Value = serde_json::from_str(receipt_json).unwrap_or_else(|_| json!({}));
+    if let Some(result) = receipt.get("result").cloned().or_else(|| {
+        receipt
+            .get("body")
+            .cloned()
+            .filter(|body| body.get("error").is_none())
+    }) {
+        return Ok(ExecutionOutcome::Completed {
+            request_id: request_id.to_string(),
+            operation_id: Some(operation_id),
+            result,
+            replayed: true,
+        });
+    }
+    let status = receipt
+        .get("httpStatus")
+        .and_then(Value::as_u64)
+        .and_then(|value| u16::try_from(value).ok())
+        .unwrap_or(500);
+    let detail = receipt
+        .get("error")
+        .or_else(|| receipt.get("body").and_then(|body| body.get("error")));
+    // Receipts written since ADR-0175 hold the whole problem document. Older
+    // rows hold `{code, message, retryable, details}`, which `parse` also reads.
+    // Either way the replay answers under the id of the request that asked,
+    // exactly like a replayed success does.
+    let error = detail
+        .and_then(|value| Problem::parse(value, status))
+        .unwrap_or_else(|| Problem::new(status, "operation_failed", "the prior operation failed"))
+        .with_request_id(request_id)
+        .with_operation_id(operation_id);
+    Err(error)
+}
+
+pub(super) fn json_subset_matches(expected: &Value, actual: &Value) -> bool {
+    fn matches(expected: &Value, actual: &Value, depth: usize) -> bool {
+        match (expected, actual) {
+            (Value::Object(expected), Value::Object(actual)) => {
+                (depth == 0 || expected.len() == actual.len())
+                    && expected.iter().all(|(key, value)| {
+                        actual
+                            .get(key)
+                            .is_some_and(|actual| matches(value, actual, depth + 1))
+                    })
+            }
+            _ => expected == actual,
+        }
+    }
+    matches(expected, actual, 0)
+}
+
+fn map_store_error(request_id: &str, error: SecurityStoreError) -> Problem {
+    match error {
+        SecurityStoreError::IdempotencyConflict => problem(
+            request_id,
+            StatusCode::CONFLICT,
+            "idempotency_conflict",
+            "the idempotency key was already used with different parameters",
+        ),
+        SecurityStoreError::InvalidPolicy => problem(
+            request_id,
+            StatusCode::FORBIDDEN,
+            "invalid_policy",
+            "the host policy is invalid, inactive, or does not cover this command",
+        ),
+        _ => store_unavailable(request_id),
+    }
+}
+
+fn store_unavailable(request_id: &str) -> Problem {
+    problem(
+        request_id,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "security_store_unavailable",
+        "the security database could not complete the request",
+    )
+}
+
+fn unix_time_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+fn local_host_id() -> String {
+    std::env::var("COGNIA_HOST_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "local-host".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn execution_request(scope: &str, capabilities: Option<Vec<String>>) -> ExecutionRequest {
+        ExecutionRequest::new(
+            "claude_send",
+            json!({}),
+            DeviceContext {
+                device_id: "device-a".to_string(),
+                account_id: "tenant-a".to_string(),
+                scope: scope.to_string(),
+                granted_scopes: Vec::new(),
+                authorization_capabilities: capabilities,
+            },
+            ExecutionTransport::Http,
+            None,
+        )
+    }
+
+    /// The bootstrap burst must land on the wide bucket.
+    ///
+    /// `runSyncDown` walks every companion-sync handler back to back and each
+    /// pages while the Host sets `has_more`. Charged to the strict 10-token
+    /// bucket, everything past the tenth pull is refused and the tail tables
+    /// stay silently empty — the failure this classification exists to prevent.
+    #[test]
+    fn sync_bootstrap_reads_are_charged_to_the_read_only_bucket() {
+        for command in [
+            "sync_pull",
+            "host_feature_manifest",
+            "session_list",
+            "message_get_by_session",
+        ] {
+            let descriptor = super::super::command_manifest::descriptor(command)
+                .unwrap_or_else(|| panic!("{command} must be a registered command"));
+            assert_eq!(
+                rate_limit_class(descriptor),
+                super::super::rate_limit::RequestClass::ReadOnly,
+                "{command} is a read and must not spend the strict bucket"
+            );
+        }
+    }
+
+    /// A quota refusal must be answerable, not terminal.
+    ///
+    /// The client's whole retry decision is `detail.retryable`, and its wait is
+    /// parsed out of the message. Getting either wrong turns "wait 3 seconds"
+    /// into "this table failed", which is how a bootstrap burst used to leave
+    /// half a companion's mirror empty until the next launch.
+    #[test]
+    fn a_quota_refusal_is_retryable_and_says_how_long_to_wait() {
+        let error = rate_limited_error("req-1", std::time::Duration::from_secs(3));
+
+        assert_eq!(error.status_code(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(error.code, "rate_limited");
+        assert!(
+            error.retryable,
+            "a 429 the host itself timed is retryable; `is_server_error()` is the wrong default here"
+        );
+        assert!(
+            error.detail.contains("retry_after_seconds=3"),
+            "the wait must ride in the detail, which is where the client parses it: {}",
+            error.detail
+        );
+        assert_eq!(error.details["retryAfterSeconds"], json!(3));
+    }
+
+    /// The two 429 producers must not drift apart. A client cannot be expected
+    /// to parse one shape from the RPC plane and another from the device plane.
+    #[test]
+    fn both_rate_limit_paths_agree_on_the_wire_shape() {
+        let device_plane = rate_limited_error("req-1", std::time::Duration::from_secs(7));
+        let (status, rpc_plane) = super::super::rpc_error::RpcError::rate_limited(7);
+
+        assert_eq!(device_plane.status_code(), status);
+        assert_eq!(device_plane.code, rpc_plane.0.code);
+        assert!(device_plane.detail.contains("retry_after_seconds=7"));
+        assert!(rpc_plane.0.message.contains("retry_after_seconds=7"));
+        assert_eq!(device_plane.retryable, rpc_plane.0.retryable);
+    }
+
+    #[test]
+    fn writes_and_side_effects_stay_on_the_strict_bucket() {
+        for command in ["claude_send", "app_settings_update"] {
+            let descriptor = super::super::command_manifest::descriptor(command)
+                .unwrap_or_else(|| panic!("{command} must be a registered command"));
+            assert_eq!(
+                rate_limit_class(descriptor),
+                super::super::rate_limit::RequestClass::Mutating,
+                "{command} can change state and must stay strictly limited"
+            );
+        }
+    }
+
+    /// Every command the manifest calls a `read` must use a read budget —
+    /// a guard against the classification silently regressing to `check()`.
+    #[test]
+    fn manifest_read_operations_all_map_to_the_read_only_class() {
+        let mut reads = 0usize;
+        for descriptor in super::super::command_manifest::commands() {
+            let expected = if matches!(
+                descriptor.name.as_str(),
+                "plugin_media_read_chunk"
+                    | "plugin_media_close_transfer"
+                    | "task_resource_download_read_chunk"
+                    | "task_resource_upload_write_chunk"
+            ) {
+                super::super::rate_limit::RequestClass::MediaTransfer
+            } else if descriptor.operation == CommandOperation::Read {
+                reads += 1;
+                super::super::rate_limit::RequestClass::ReadOnly
+            } else {
+                super::super::rate_limit::RequestClass::Mutating
+            };
+            assert_eq!(
+                rate_limit_class(descriptor),
+                expected,
+                "{} classified against its manifest operation",
+                descriptor.name
+            );
+        }
+        assert!(reads > 0, "the manifest must declare read commands");
+    }
+
+    #[test]
+    fn only_bulk_transfer_commands_use_the_transfer_budget() {
+        use super::super::rate_limit::RequestClass;
+        for command in [
+            "plugin_media_read_chunk",
+            "plugin_media_close_transfer",
+            "task_resource_download_read_chunk",
+            "task_resource_upload_write_chunk",
+        ] {
+            assert_eq!(
+                rate_limit_class(super::super::command_manifest::descriptor(command).unwrap()),
+                RequestClass::MediaTransfer
+            );
+        }
+        for command in ["video_get_info", "plugin_media_get_video_frame"] {
+            assert_eq!(
+                rate_limit_class(super::super::command_manifest::descriptor(command).unwrap()),
+                RequestClass::ReadOnly
+            );
+        }
+        for command in [
+            "video_analyze",
+            "video_trim",
+            "plugin_media_export_video",
+            "task_resource_upload_open",
+            "task_resource_upload_commit",
+        ] {
+            assert_eq!(
+                rate_limit_class(super::super::command_manifest::descriptor(command).unwrap()),
+                RequestClass::Mutating
+            );
+        }
+    }
+
+    #[test]
+    fn empty_authorization_snapshot_denies_without_store_fallback() {
+        let request = execution_request("device", Some(Vec::new()));
+        let descriptor = super::super::command_manifest::descriptor("claude_send").unwrap();
+
+        let error = authorize_capability(&request, descriptor).unwrap_err();
+
+        assert_eq!(error.code, "missing_capability");
+    }
+
+    #[test]
+    fn absent_authorization_snapshot_requests_store_fallback() {
+        let request = execution_request("device", None);
+        let descriptor = super::super::command_manifest::descriptor("claude_send").unwrap();
+
+        assert_eq!(
+            snapshot_capability_decision(&request.principal, &descriptor.capability),
+            None
+        );
+    }
+
+    #[test]
+    fn service_principal_bypasses_device_capability_lookup() {
+        let request = execution_request("service", None);
+        let descriptor = super::super::command_manifest::descriptor("claude_send").unwrap();
+
+        assert!(authorize_capability(&request, descriptor).is_ok());
+    }
+
+    #[test]
+    fn agent_schedules_require_scheduler_and_process_capabilities() {
+        let mut request = ExecutionRequest::new(
+            "scheduled_task_create",
+            json!({ "input": { "type": "agent" } }),
+            DeviceContext {
+                device_id: "device-a".to_string(),
+                account_id: "tenant-a".to_string(),
+                scope: "device".to_string(),
+                granted_scopes: Vec::new(),
+                authorization_capabilities: Some(vec!["scheduler.manage".to_string()]),
+            },
+            ExecutionTransport::Http,
+            None,
+        );
+        let descriptor =
+            super::super::command_manifest::descriptor("scheduled_task_create").unwrap();
+
+        assert_eq!(
+            authorize_capability(&request, descriptor).unwrap_err().code,
+            "missing_capability"
+        );
+
+        request
+            .principal
+            .authorization_capabilities
+            .as_mut()
+            .unwrap()
+            .push("process.spawn".to_string());
+        assert!(authorize_capability(&request, descriptor).is_ok());
+    }
+
+    #[test]
+    fn agent_control_grant_authorizes_the_external_agent_process_plane() {
+        for command in [
+            "spawn_external_agent",
+            "send_to_external_agent",
+            "kill_external_agent",
+            "external_agent_delete_gateway_task",
+        ] {
+            let mut request = execution_request("device", Some(vec!["process.spawn".into()]));
+            request.command = command.to_string();
+            let descriptor = super::super::command_manifest::descriptor(command)
+                .unwrap_or_else(|| panic!("{command} must be a registered command"));
+
+            assert!(authorize_capability(&request, descriptor).is_ok());
+            assert!(
+                authorize_approval(&request, descriptor).is_ok(),
+                "{command} must not require a second policy after Agent Control was granted"
+            );
+        }
+    }
+
+    #[test]
+    fn internal_transport_requires_service_principal() {
+        let descriptor = super::super::command_manifest::descriptor("claude_send").unwrap();
+        let mut service = execution_request("service", None);
+        service.transport = ExecutionTransport::Internal;
+        assert!(authorize_transport(&service, descriptor).is_ok());
+
+        let mut device = execution_request("device", Some(vec!["agent.run".into()]));
+        device.transport = ExecutionTransport::Internal;
+        assert_eq!(
+            authorize_transport(&device, descriptor).unwrap_err().code,
+            "command_transport_forbidden"
+        );
+    }
+
+    #[test]
+    fn service_principal_cannot_use_public_transports() {
+        let descriptor = super::super::command_manifest::descriptor("claude_send").unwrap();
+        let service = execution_request("service", None);
+        assert_eq!(
+            authorize_transport(&service, descriptor).unwrap_err().code,
+            "command_transport_forbidden"
+        );
+    }
+
+    #[test]
+    fn execution_request_normalizes_the_optional_policy_id() {
+        let mut camel_case = execution_request("device", Some(vec!["agent.run".into()]));
+        camel_case.args = json!({ "policyId": "policy-a" });
+        let camel_case = ExecutionRequest::new(
+            camel_case.command,
+            camel_case.args,
+            camel_case.principal,
+            camel_case.transport,
+            None,
+        );
+        assert_eq!(camel_case.policy_id.as_deref(), Some("policy-a"));
+
+        let snake_case = ExecutionRequest::new(
+            "claude_send",
+            json!({ "policy_id": "policy-b" }),
+            camel_case.principal,
+            ExecutionTransport::Http,
+            None,
+        );
+        assert_eq!(snake_case.policy_id.as_deref(), Some("policy-b"));
+    }
+
+    #[test]
+    fn execution_request_carries_only_valid_w3c_trace_context() {
+        let valid = format!("00-{}-{}-01", "a".repeat(32), "b".repeat(16));
+        let request = execution_request("service", None).with_traceparent(Some(valid.clone()));
+        assert_eq!(request.traceparent.as_deref(), Some(valid.as_str()));
+
+        let request = execution_request("service", None)
+            .with_traceparent(Some("not-a-traceparent".to_string()));
+        assert_eq!(request.traceparent, None);
+    }
+
+    #[test]
+    fn strict_contract_errors_are_typed_and_do_not_echo_values() {
+        let error = validate_contract_value(
+            "request-a",
+            "browser_session_ensure",
+            &json!({
+                "chatSessionId": "chat-a",
+                "workspaceId": "workspace-a",
+                "userEnabled": true,
+                "unexpected": "do-not-leak-this-value",
+            }),
+            cognia_headless_contract::ContractDirection::Input,
+            cognia_headless_contract::ContractPlane::Device,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(error.code, "contract_input_violation");
+        assert_eq!(error.request_id, "request-a");
+        assert!(!error.retryable);
+        assert!(!error.details.to_string().contains("do-not-leak-this-value"));
+    }
+
+    /// The payloads real companion clients put on the wire must pass the
+    /// enforced input contract.
+    ///
+    /// Every existing contract test asserts a payload the TEST author chose.
+    /// None assert a payload a CLIENT actually sends, and the two had drifted:
+    /// `CompanionTransport.call` does `JSON.stringify(args)` with no casing
+    /// conversion, so whatever `lib/**` passes is exactly what is validated.
+    /// A schema that disagrees with the caller rejects every request with 422
+    /// before dispatch is ever reached — invisible to the dispatch-arm tests,
+    /// which call the arms directly.
+    ///
+    /// Each case below is copied from the real call site named in the comment.
+    /// Update them by re-reading that call site, never by relaxing the schema.
+    #[test]
+    fn real_client_payloads_pass_the_enforced_input_contract() {
+        // lib/claude/ipc.ts:80 — sendPrompt
+        let cases: &[(&str, Value)] = &[
+            (
+                "claude_send",
+                json!({ "sessionId": "session-a", "prompt": "hello", "options": {} }),
+            ),
+            // lib/claude/ipc.ts:672 — approveTool
+            (
+                "claude_approve",
+                json!({
+                    "sessionId": "session-a",
+                    "requestId": "request-a",
+                    "decision": "allow",
+                    "remoteExecutionContext": {
+                        "hostId": "host-a",
+                        "originDeviceId": "device-a",
+                        "sessionId": "session-a",
+                        "generation": 1,
+                        "requestId": "request-a",
+                        "issuedAt": 0,
+                        "expiresAt": 0,
+                    },
+                }),
+            ),
+            // lib/git/commands.ts:62 — prepareGitTransportArgs, remote shape.
+            // `adminLease` is appended at commands.ts:123 because git_clone is
+            // `approval: interactive`.
+            (
+                "git_clone",
+                json!({
+                    "remoteUrl": "https://example.invalid/a.git",
+                    "workspaceId": "workspace-a",
+                    "destinationRelativePath": "a",
+                    "adminLease": "lease-a",
+                }),
+            ),
+            // lib/git/target.ts:46 — gitTargetArgs, the shape every other
+            // git_* command carries on the device plane.
+            (
+                "git_status",
+                json!({ "workspaceId": "workspace-a", "relativePath": "repo" }),
+            ),
+        ];
+
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|(command, payload)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    payload,
+                    cognia_headless_contract::ContractDirection::Input,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .err()
+                .map(|error| format!("{command}: {} {}", error.code, error.details))
+            })
+            .collect();
+
+        assert!(
+            failures.is_empty(),
+            "real client payloads rejected by the enforced contract:\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn workflow_approval_list_output_contract_accepts_the_runtime_envelope() {
+        validate_contract_value(
+            "request-approval-list",
+            "workflow_approval_list",
+            &json!({ "approvals": [] }),
+            cognia_headless_contract::ContractDirection::Output,
+            cognia_headless_contract::ContractPlane::Service,
+        )
+        .expect("workflow approval list uses an object envelope on every host");
+    }
+
+    /// Response schemas are typed from the dispatch arm's return expression,
+    /// not from the `#[tauri::command]` signature — the two differ, and that is
+    /// the whole reason this ratchet is per-command rather than mechanical.
+    ///
+    /// Serializing the REAL Rust value is what makes tightening a schema safe.
+    /// Output validation is enforced at `:293` and `:362`, so a schema that
+    /// disagrees with the struct turns a working command into an error
+    /// response. Because these schemas are closed (`additionalProperties:
+    /// false`), adding a field to one of these structs would break the command
+    /// at runtime with no other signal — this test is that signal, and it goes
+    /// red at compile time for a rename and at assert time for an addition.
+    #[test]
+    fn terminal_responses_match_their_enforced_output_contracts() {
+        use cognia_terminal::complete::PathCandidate;
+        use cognia_terminal::exec::TerminalExecResult;
+        use cognia_terminal::host::{HostReplayBounds, HostSessionInfo, IntegrationCapabilities};
+        use cognia_terminal::session::SessionOrigin;
+
+        let session = HostSessionInfo {
+            id: "session-a".to_string(),
+            host_id: "host-a".to_string(),
+            kind: cognia_terminal::host::SessionKind::LocalPty,
+            profile_id: "profile-a".to_string(),
+            project_id: Some("project-a".to_string()),
+            extension_id: None,
+            origin: SessionOrigin::Remote,
+            shell: "/bin/zsh".to_string(),
+            created_at: 1,
+            last_activity_at: 2,
+            current_controller: Some("device-a".to_string()),
+            attached_clients: 1,
+            participants: Vec::new(),
+            alive: true,
+            sandboxed: false,
+            integration_capabilities: IntegrationCapabilities {
+                osc633: true,
+                command_status: true,
+                cwd_tracking: true,
+                degraded_reason: None,
+            },
+            replay: HostReplayBounds {
+                first_sequence: 0,
+                last_sequence: 9,
+                retained_bytes: 4096,
+                truncated: false,
+            },
+            // Skipped by serde when None, present when Some — both spellings
+            // have to satisfy the same schema, so the list below sends one of
+            // each rather than only the populated shape.
+            ssh_host_key_status: Some("trusted".to_string()),
+            ssh_host_key_fingerprint: Some("SHA256:abc".to_string()),
+        };
+        let mut local_session = session.clone();
+        local_session.kind = cognia_terminal::host::SessionKind::Ssh;
+        local_session.origin = SessionOrigin::Local;
+        local_session.project_id = None;
+        local_session.current_controller = None;
+        local_session.ssh_host_key_status = None;
+        local_session.ssh_host_key_fingerprint = None;
+
+        let exec_ok = TerminalExecResult {
+            stdout: "ok\n".to_string(),
+            stderr: String::new(),
+            exit_code: Some(0),
+            timed_out: false,
+        };
+        // A timeout kill leaves no exit code. `exitCode: null` is a SUCCESSFUL
+        // response, so the schema has to admit it.
+        let exec_timeout = TerminalExecResult {
+            stdout: String::new(),
+            stderr: "timed out".to_string(),
+            exit_code: None,
+            timed_out: true,
+        };
+
+        let cases: Vec<(&str, Value)> = vec![
+            (
+                "terminal_list_all",
+                serde_json::to_value(vec![session.clone(), local_session.clone()]).unwrap(),
+            ),
+            (
+                "terminal_list_for_project",
+                serde_json::to_value(vec![session]).unwrap(),
+            ),
+            // An empty list is the common case on a host with no sessions.
+            (
+                "terminal_list_all",
+                serde_json::to_value(Vec::<HostSessionInfo>::new()).unwrap(),
+            ),
+            ("terminal_exec", serde_json::to_value(exec_ok).unwrap()),
+            // Head-word completion. A page of executable names since ADR-0175
+            // B3 (`{items, nextPageToken}`), including the last page, which
+            // carries no token, and the empty page a host with no match
+            // returns.
+            (
+                "terminal_list_path_executables",
+                json!({ "items": ["git", "git-lfs", "gitk"], "nextPageToken": "bzoz" }),
+            ),
+            (
+                "terminal_list_path_executables",
+                json!({ "items": ["git", "git-lfs", "gitk"] }),
+            ),
+            ("terminal_list_path_executables", json!({ "items": [] })),
+            ("terminal_exec", serde_json::to_value(exec_timeout).unwrap()),
+            (
+                "terminal_complete_paths",
+                serde_json::to_value(vec![
+                    PathCandidate {
+                        name: "src".to_string(),
+                        is_dir: true,
+                    },
+                    PathCandidate {
+                        name: "Cargo.toml".to_string(),
+                        is_dir: false,
+                    },
+                ])
+                .unwrap(),
+            ),
+            // `terminal_kill_port` returns the PIDs it signalled, and returning
+            // none is a success, not an error.
+            (
+                "terminal_kill_port",
+                serde_json::to_value(vec![4242u32]).unwrap(),
+            ),
+            (
+                "terminal_kill_port",
+                serde_json::to_value(Vec::<u32>::new()).unwrap(),
+            ),
+            // The one arm in this submodule that really does return null.
+            ("terminal_kill", Value::Null),
+        ];
+
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .err()
+                .map(|error| format!("{command}: {} {}", error.code, error.details))
+            })
+            .collect();
+
+        assert!(
+            failures.is_empty(),
+            "real terminal responses rejected by the enforced output contract:\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    /// The companion assertion to the one above: the tightened schemas must
+    /// still REJECT a wrong shape. A schema that accepts everything passes the
+    /// test above too, so without this the ratchet could be satisfied by
+    /// writing `properties` that constrain nothing.
+    #[test]
+    fn tightened_terminal_contracts_still_reject_wrong_shapes() {
+        let rejected: Vec<(&str, Value)> = vec![
+            // Was `LegacyList` — any array at all used to pass.
+            ("terminal_list_all", json!([{ "id": "session-a" }])),
+            // Was `LegacyResult` — a bare string used to pass.
+            ("terminal_exec", json!("ok")),
+            // exitCode is an integer or null, never a string.
+            (
+                "terminal_exec",
+                json!({ "stdout": "", "stderr": "", "exitCode": "0", "timedOut": false }),
+            ),
+            ("terminal_complete_paths", json!([{ "name": "src" }])),
+            // Executable names come back inside a page envelope. The bare
+            // array this command answered before ADR-0175 B3, a wrapper under
+            // the wrong key, and a non-string element are the three ways an
+            // arm gets this wrong, and none of them fails locally, only here.
+            ("terminal_list_path_executables", json!(["git"])),
+            (
+                "terminal_list_path_executables",
+                json!({ "names": ["git"] }),
+            ),
+            ("terminal_list_path_executables", json!({ "items": [1, 2] })),
+            ("terminal_kill_port", json!(["4242"])),
+        ];
+
+        let accepted: Vec<&str> = rejected
+            .iter()
+            .filter(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .is_ok()
+            })
+            .map(|(command, _)| *command)
+            .collect();
+
+        assert!(
+            accepted.is_empty(),
+            "these malformed responses still pass — the schema is not actually tightened: {accepted:?}"
+        );
+    }
+
+    /// `secret_store_get` and its `keyring_secret_get` alias were declared
+    /// `LegacyRecord` — `{"type":"object"}`. The arm returns
+    /// `to_json(Option<String>)`, so every SUCCESSFUL read put a bare string
+    /// (or null, for an absent key) on the wire and the enforced output
+    /// contract rejected it with `contract_output_violation`. Reading a secret
+    /// from any remote or mobile client could not succeed.
+    ///
+    /// The bug hid inside the "vacuous response schema" pile because
+    /// `LegacyRecord` reads like a catch-all. It is not one: it constrains the
+    /// root to an object, and these two commands never return an object.
+    #[test]
+    fn secret_reads_put_a_bare_string_or_null_on_the_wire() {
+        for command in ["secret_store_get", "keyring_secret_get"] {
+            for value in [json!("s3cret"), Value::Null] {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    &value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{command} rejected {value}: {} {}",
+                        error.code, error.details
+                    )
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn chat_submodule_responses_match_their_enforced_output_contracts() {
+        use cognia_agents::commands::{AgentReadResult, AgentWriteResult};
+
+        let read_ok = AgentReadResult {
+            path: Some("/home/a/.claude/settings.json".to_string()),
+            exists: true,
+            writable: true,
+            format: "json".to_string(),
+            raw: "{}".to_string(),
+            parsed: json!({ "model": "opus" }),
+            parse_error: None,
+        };
+        // The agent isn't supported on this OS: path is null and raw is empty.
+        let read_absent = AgentReadResult {
+            path: None,
+            exists: false,
+            writable: false,
+            format: "toml".to_string(),
+            raw: String::new(),
+            parsed: Value::Null,
+            parse_error: None,
+        };
+        // The file existed but would not parse — the only shape that carries
+        // `parseError`, which serde omits entirely in the other two.
+        let read_broken = AgentReadResult {
+            path: Some("/home/a/.codex/config.toml".to_string()),
+            exists: true,
+            writable: true,
+            format: "toml".to_string(),
+            raw: "{{{".to_string(),
+            parsed: Value::Null,
+            parse_error: Some("expected a table".to_string()),
+        };
+
+        let cases: Vec<(&str, Value)> = vec![
+            // `claude::commands::SidecarStatus`, whose serialization is pinned
+            // beside it.
+            ("claude_sidecar_status", json!({ "ready": true })),
+            ("read_agent_config", serde_json::to_value(read_ok).unwrap()),
+            (
+                "read_agent_config",
+                serde_json::to_value(read_absent).unwrap(),
+            ),
+            (
+                "read_agent_config",
+                serde_json::to_value(read_broken).unwrap(),
+            ),
+            (
+                "write_agent_config",
+                serde_json::to_value(AgentWriteResult {
+                    path: "/home/a/.claude/settings.json".to_string(),
+                    backup_path: Some("/home/a/.claude/settings.json.bak".to_string()),
+                })
+                .unwrap(),
+            ),
+            (
+                "write_agent_config",
+                serde_json::to_value(AgentWriteResult {
+                    path: "/home/a/.claude/settings.json".to_string(),
+                    backup_path: None,
+                })
+                .unwrap(),
+            ),
+            // Same arm, same `Ok(Value::Null)`, four command names. The two
+            // aliases were declared LegacyResult while their canonical twins
+            // were already NullResult.
+            ("secret_store_set", Value::Null),
+            ("keyring_secret_set", Value::Null),
+            ("secret_store_delete", Value::Null),
+            ("keyring_secret_clear", Value::Null),
+        ];
+
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .err()
+                .map(|error| format!("{command}: {} {}", error.code, error.details))
+            })
+            .collect();
+
+        assert!(
+            failures.is_empty(),
+            "real chat-submodule responses rejected by the enforced output contract:\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn tightened_chat_contracts_still_reject_wrong_shapes() {
+        let rejected: Vec<(&str, Value)> = vec![
+            // AgentReadResult carries no rename_all, so the wire keys are
+            // snake_case. A camelCase payload is a different, wrong shape.
+            (
+                "read_agent_config",
+                json!({
+                    "path": null, "exists": false, "writable": false,
+                    "format": "json", "raw": "", "parsed": null,
+                    "parseError": 42
+                }),
+            ),
+            // `format` is one of exactly three vendor formats.
+            (
+                "read_agent_config",
+                json!({
+                    "path": null, "exists": false, "writable": false,
+                    "format": "yaml", "raw": "", "parsed": null
+                }),
+            ),
+            ("claude_sidecar_status", json!({ "ready": "yes" })),
+            ("write_agent_config", json!({})),
+            // A secret is a string or null — never a wrapper object.
+            ("secret_store_get", json!({ "value": "s3cret" })),
+        ];
+
+        let accepted: Vec<&str> = rejected
+            .iter()
+            .filter(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .is_ok()
+            })
+            .map(|(command, _)| *command)
+            .collect();
+
+        assert!(
+            accepted.is_empty(),
+            "these malformed responses still pass — the schema is not actually tightened: {accepted:?}"
+        );
+    }
+
+    /// `fleet_get_snapshot` was declared `LegacyList` — `{"type":"array"}` —
+    /// while its arm serializes `FleetSnapshot`, a struct, which is always a
+    /// JSON object. Every snapshot request failed enforced output validation,
+    /// so no remote or mobile client could load the Agent Fleet view at all.
+    ///
+    /// The contradiction was already written down beside the arm: the
+    /// `fleet_event_payload` helper immediately above it calls
+    /// `as_object_mut()` and errors with "fleet snapshot must serialize as an
+    /// object". Nothing compared that to the declared response schema.
+    #[test]
+    fn fleet_snapshot_is_an_object_not_an_array() {
+        let snapshot =
+            serde_json::to_value(cognia_fleet::registry::FleetRegistry::new().snapshot(0)).unwrap();
+        assert!(
+            snapshot.is_object(),
+            "FleetSnapshot must serialize as an object: {snapshot}"
+        );
+
+        validate_contract_value(
+            "request-a",
+            "fleet_get_snapshot",
+            &snapshot,
+            cognia_headless_contract::ContractDirection::Output,
+            cognia_headless_contract::ContractPlane::Device,
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "fleet_get_snapshot rejected a real snapshot: {} {}",
+                error.code, error.details
+            )
+        });
+    }
+
+    #[test]
+    fn diagnostics_submodule_responses_match_their_enforced_output_contracts() {
+        let cases: Vec<(&str, Value)> = vec![
+            // An empty log directory still returns the full envelope.
+            (
+                "logs_query",
+                json!({
+                    "entries": [],
+                    "fileSize": 0,
+                    "scannedBytes": 0,
+                    "truncated": false,
+                    "path": "/var/log/cognia/cognia.jsonl"
+                }),
+            ),
+            // A populated entry, plus one where serde skips epochMs and fields.
+            (
+                "logs_query",
+                json!({
+                    "entries": [
+                        {
+                            "timestamp": "2026-08-15T00:00:00Z",
+                            "epochMs": 1_755_216_000_000i64,
+                            "level": "INFO",
+                            "target": "cognia::companion",
+                            "message": "listening",
+                            "fields": { "port": 8765 }
+                        },
+                        {
+                            "timestamp": "2026-08-15T00:00:01Z",
+                            "level": "WARN",
+                            "target": "cognia::fleet",
+                            "message": "slow"
+                        }
+                    ],
+                    "fileSize": 4096,
+                    "scannedBytes": 4096,
+                    "truncated": true,
+                    "path": "/var/log/cognia/cognia.jsonl"
+                }),
+            ),
+            ("logs_list_files", json!([])),
+            (
+                "logs_list_files",
+                json!([
+                    { "name": "cognia.jsonl", "size": 10, "modifiedMs": 1 },
+                    { "name": "cognia.log", "size": 0 }
+                ]),
+            ),
+            (
+                "fleet_worker_enrollment_create",
+                json!({
+                    "enrollment": "enroll-a",
+                    "expiresAtMs": 1_755_216_600_000i64,
+                    "baseUrl": "https://worker.example",
+                    "fingerprint": "sha256:abc",
+                    "tenantId": "tenant-a"
+                }),
+            ),
+            ("fleet_worker_list", json!([])),
+            // serde(flatten): DeviceSummary's fields sit BESIDE hostRef, not
+            // nested under a `device` key.
+            (
+                "fleet_worker_list",
+                json!([{
+                    "deviceId": "device-a",
+                    "displayName": "Worker A",
+                    "role": "worker",
+                    "status": "active",
+                    "createdAt": 1,
+                    "updatedAt": 2,
+                    "capabilities": ["agent.worker"],
+                    "hostRef": "host-a"
+                }]),
+            ),
+            // Every one of these arms returns a bare bool.
+            ("fleet_permission_respond", json!(true)),
+            ("fleet_question_respond", json!(false)),
+            ("fleet_question_reject", json!(true)),
+            // Result<String, _>.
+            ("fleet_opencode_send_message", json!("message-a")),
+            // `.map(|()| Value::Null)` — provably null, but spelled differently
+            // from the `Ok(Value::Null)` the other null arms use.
+            ("fleet_focus_terminal", Value::Null),
+            ("fleet_interrupt_session", Value::Null),
+            // kind=entry carries jti+expiresAt; kind=surface carries neither.
+            (
+                "lark_entry_issue",
+                json!({ "token": "t", "jti": "j", "expiresAt": 1_000 }),
+            ),
+            ("lark_entry_issue", json!({ "token": "t" })),
+            ("lark_result_complete", json!({ "accepted": true })),
+            ("lark_metrics_record", json!({ "ok": true })),
+        ];
+
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .err()
+                .map(|error| format!("{command}: {} {}", error.code, error.details))
+            })
+            .collect();
+
+        assert!(
+            failures.is_empty(),
+            "real diagnostics responses rejected by the enforced output contract:\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn tightened_diagnostics_contracts_still_reject_wrong_shapes() {
+        let rejected: Vec<(&str, Value)> = vec![
+            // The bug this batch fixed, asserted from the other direction.
+            ("fleet_get_snapshot", json!([])),
+            ("logs_query", json!([])),
+            // `entries` is required even when empty.
+            (
+                "logs_query",
+                json!({ "fileSize": 0, "scannedBytes": 0, "truncated": false, "path": "/p" }),
+            ),
+            // The pre-flatten shape, which would nest the device fields.
+            (
+                "fleet_worker_list",
+                json!([{ "device": { "deviceId": "device-a" }, "hostRef": "host-a" }]),
+            ),
+            ("fleet_permission_respond", json!("true")),
+            ("fleet_opencode_send_message", json!({ "id": "message-a" })),
+            // `ok` is literal true — a false here would mean the arm returned
+            // success for an unknown metric, which it never does.
+            ("lark_metrics_record", json!({ "ok": false })),
+            ("lark_entry_issue", json!({ "jti": "j" })),
+        ];
+
+        let accepted: Vec<&str> = rejected
+            .iter()
+            .filter(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .is_ok()
+            })
+            .map(|(command, _)| *command)
+            .collect();
+
+        assert!(
+            accepted.is_empty(),
+            "these malformed responses still pass — the schema is not actually tightened: {accepted:?}"
+        );
+    }
+
+    #[test]
+    fn failed_receipt_replay_preserves_contract_violation_details() {
+        let receipt = json!({
+            "httpStatus": 500,
+            "error": {
+                "code": "contract_output_violation",
+                "message": "response violates the command contract",
+                "retryable": true,
+                "details": {
+                    "violations": [{
+                        "instancePath": "/result",
+                        "schemaPath": "/properties/result/type"
+                    }]
+                }
+            }
+        });
+
+        let error = replay_receipt("request-a", "operation-a".to_string(), &receipt.to_string())
+            .unwrap_err();
+
+        assert_eq!(error.code, "contract_output_violation");
+        assert_eq!(error.operation_id.as_deref(), Some("operation-a"));
+        assert_eq!(error.details, receipt["error"]["details"]);
+    }
+
+    #[test]
+    fn protocol_request_uuid_is_stable_and_principal_scoped() {
+        let principal = execution_request("device", Some(Vec::new())).principal;
+        let first = derive_protocol_request_uuid(&principal, "acp", &json!(42), "claude_send");
+        let retry = derive_protocol_request_uuid(&principal, "acp", &json!(42), "claude_send");
+        let other_request =
+            derive_protocol_request_uuid(&principal, "acp", &json!(43), "claude_send");
+
+        assert_eq!(first, retry);
+        assert_ne!(first, other_request);
+        assert!(Uuid::parse_str(&first).is_ok());
+    }
+
+    #[test]
+    fn protocol_idempotency_is_manifest_driven_and_retry_stable() {
+        let principal = execution_request("device", Some(Vec::new())).principal;
+        let first = protocol_idempotency_key("claude_send", &principal, "a2a", Some(&json!(7)));
+        let retry = protocol_idempotency_key("claude_send", &principal, "a2a", Some(&json!(7)));
+        let read =
+            protocol_idempotency_key("claude_sidecar_status", &principal, "a2a", Some(&json!(7)));
+
+        assert_eq!(first, retry);
+        assert!(first.is_some());
+        assert_eq!(read, None);
+    }
+}

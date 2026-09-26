@@ -12,13 +12,14 @@ import { CONFIGS, extractValue, replaceValue, checkConfigs, parseArgs } from "./
 
 const RUST = `pub const DEFAULT_PORT: u16 = 27890;\n`
 const TSX = `// Mirrors Rust\nconst DEFAULT_PORT = 27890\n`
+const TUNNEL = `export const COMPANION_SERVER_DEFAULT_PORT = 27890\n`
 const SCANNER = `const DEFAULT_PORT = 27890\nexport const PROBE_PORTS: readonly number[] = [27890, 7890, 7891]\n`
 const RESOLVER = `const DEFAULT_PORT = 27890\n`
 
 function fixtureReader(overrides = {}) {
   const files = {
-    "src-tauri/src/companion_api/server.rs": RUST,
-    "components/settings/connectivity/blocks/companion-server-commands.ts": TSX,
+    "crates/cognia-companion-connectivity/src/lib.rs": RUST,
+    "lib/connectivity/tunnel-resolver.ts": TUNNEL,
     "lib/connectivity/lan-scanner.ts": SCANNER,
     "lib/connectivity/lan-resolver.ts": RESOLVER,
     ...overrides,
@@ -84,17 +85,17 @@ test("checkConfigs flags a drifted PROBE_PORTS head as checkOnly", () => {
 test("checkConfigs reports a vanished pattern as missing (hard error), not drift", () => {
   const { drifted, missing } = checkConfigs(
     fixtureReader({
-      "components/settings/connectivity/blocks/companion-server-commands.ts": `// refactored away\n`,
+      "lib/connectivity/tunnel-resolver.ts": `// refactored away\n`,
     })
   )
   assert.deepEqual(drifted, [])
   assert.equal(missing.length, 1)
-  assert.match(missing[0].path, /companion-server-commands/)
+  assert.match(missing[0].path, /tunnel-resolver/)
 })
 
 test("checkConfigs reports a vanished canonical source and skips its mirrors", () => {
   const { missing } = checkConfigs(
-    fixtureReader({ "src-tauri/src/companion_api/server.rs": `// gone\n` })
+    fixtureReader({ "crates/cognia-companion-connectivity/src/lib.rs": `// gone\n` })
   )
   assert.equal(missing.length, 1)
   assert.equal(missing[0].canonical, true)
