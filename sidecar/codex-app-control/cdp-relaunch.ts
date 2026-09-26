@@ -12,14 +12,35 @@ import {
   waitFor,
   workerPath,
   writeJsonAtomic,
-} from "./shared.mjs"
+} from "./shared.ts"
+import type { ControlPaths } from "./shared.ts"
 
-const TERMINAL_STATUSES = new Set([
+const TERMINAL_STATUSES: ReadonlySet<unknown> = new Set([
   "ready",
   "auto-rolled-back",
   "rollback-blocked",
   "restart-cancelled-app-still-normal",
 ])
+
+/** The result file the detached worker keeps up to date (relaunch-worker.ts). */
+export interface CdpRelaunchRecord {
+  status: string
+  attemptId?: string
+  error?: string
+  cdpError?: string
+  [key: string]: unknown
+}
+
+export interface CdpRelaunchOptions {
+  stateDir?: string | undefined
+  appPath?: string
+  realCli?: string
+  cdpPort?: number
+  delaySeconds?: number
+  timeoutMs?: number
+}
+
+export type CdpRelaunchResult = CdpRelaunchRecord & { reused: boolean }
 
 export function buildDetachedCdpRelaunch({
   attemptId,
@@ -28,8 +49,13 @@ export function buildDetachedCdpRelaunch({
   realCli = DEFAULT_REAL_CLI,
   cdpPort = 9229,
   delaySeconds = 0,
-  label = `${CDP_ONLY_RELAUNCH_LABEL_PREFIX}.${process.getuid()}`,
-}) {
+  label = `${CDP_ONLY_RELAUNCH_LABEL_PREFIX}.${process.getuid?.() ?? 0}`,
+}: CdpRelaunchOptions & { attemptId: string; label?: string }): {
+  attemptId: string
+  label: string
+  paths: ControlPaths
+  launchArgs: string[]
+} {
   const paths = relayPaths(stateDir)
   const workerArgs = [
     workerPath("cdp-only-relaunch-worker.mjs"),
@@ -66,8 +92,23 @@ export function buildDetachedCdpRelaunch({
   return { attemptId, label, paths, launchArgs }
 }
 
-export async function scheduleDetachedCdpRelaunch(options = {}, injected = {}) {
-  const dependencies = {
+export interface RelaunchDependencies {
+  commandResult: typeof commandResult
+  ensurePrivateDirectory: typeof ensurePrivateDirectory
+  launchctlJobExists: typeof launchctlJobExists
+  readJson: (path: string) => Promise<unknown>
+  waitFor: typeof waitFor
+  writeJsonAtomic: typeof writeJsonAtomic
+}
+
+const asRecord = (value: unknown): CdpRelaunchRecord | null =>
+  typeof value === "object" && value !== null ? (value as CdpRelaunchRecord) : null
+
+export async function scheduleDetachedCdpRelaunch(
+  options: CdpRelaunchOptions = {},
+  injected: Partial<RelaunchDependencies> = {}
+): Promise<CdpRelaunchResult> {
+  const dependencies: RelaunchDependencies = {
     commandResult,
     ensurePrivateDirectory,
     launchctlJobExists,
@@ -76,13 +117,16 @@ export async function scheduleDetachedCdpRelaunch(options = {}, injected = {}) {
     writeJsonAtomic,
     ...injected,
   }
-  const label = `${CDP_ONLY_RELAUNCH_LABEL_PREFIX}.${process.getuid()}`
+  const label = `${CDP_ONLY_RELAUNCH_LABEL_PREFIX}.${process.getuid?.() ?? 0}`
   const existing = dependencies.launchctlJobExists(label)
-  let attemptId
+  let attemptId: string
   if (existing) {
-    const active = await dependencies.readJson(relayPaths(options.stateDir).cdpOnlyRelaunchResult)
-    attemptId = active?.attemptId
-    if (!attemptId) throw new Error(`A CDP relaunch is active without an attempt id: ${label}`)
+    const active = asRecord(
+      await dependencies.readJson(relayPaths(options.stateDir).cdpOnlyRelaunchResult)
+    )
+    if (!active?.attemptId)
+      throw new Error(`A CDP relaunch is active without an attempt id: ${label}`)
+    attemptId = active.attemptId
   } else {
     attemptId = randomBytes(12).toString("hex")
   }
@@ -106,7 +150,7 @@ export async function scheduleDetachedCdpRelaunch(options = {}, injected = {}) {
 
   const result = await dependencies.waitFor(
     async () => {
-      const current = await dependencies.readJson(submission.paths.cdpOnlyRelaunchResult)
+      const current = asRecord(await dependencies.readJson(submission.paths.cdpOnlyRelaunchResult))
       return current?.attemptId === attemptId && TERMINAL_STATUSES.has(current.status)
         ? current
         : null

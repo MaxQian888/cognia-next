@@ -1,19 +1,71 @@
 import { stat } from "node:fs/promises"
 import { basename, isAbsolute, resolve } from "node:path"
 
-import { commandResult, sleep, waitFor } from "./shared.mjs"
+import { commandResult, sleep, waitFor } from "./shared.ts"
+
+/** A page target from the CDP `/json/list` endpoint. */
+export interface CdpTarget {
+  id?: string
+  type?: string
+  url?: string
+  webSocketDebuggerUrl: string
+}
+
+/** A CDP command response (`Runtime.evaluate` and friends). */
+export interface CdpCommandResult {
+  result?: { value?: unknown }
+  exceptionDetails?: unknown
+  [key: string]: unknown
+}
+
+export interface CdpEventWaitOptions {
+  predicate?: (params: Record<string, unknown>) => boolean
+  timeoutMs?: number
+}
+
+export interface CdpConnection {
+  send(method: string, params?: Record<string, unknown>): Promise<CdpCommandResult>
+  waitForEvent(method: string, options?: CdpEventWaitOptions): Promise<Record<string, unknown>>
+  close(): void
+}
+
+type FetchLike = (
+  input: string,
+  init?: { signal?: AbortSignal }
+) => Promise<{
+  ok: boolean
+  status: number
+  json(): Promise<unknown>
+}>
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
+
+/**
+ * The value an injected renderer script returned, as a record of optional
+ * fields: the script is ours, but the value crossed the CDP wire, so every
+ * field is checked where it is read.
+ */
+function evaluatedValue<T extends object>(evaluated: CdpCommandResult): Partial<T> | null {
+  const value = evaluated.result?.value
+  return isRecord(value) ? (value as Partial<T>) : null
+}
 
 const BOOTSTRAP_MARKER_PREFIX = "COGNIA_BOOTSTRAP:"
 const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const COMPOSER_SUBMIT_PATTERN = /^(send(?: message)?|submit|run|queue|发送|提交|运行|排队)$/i
 
-function requiredString(value, name, { maxLength = 16_000 } = {}) {
+function requiredString(
+  value: unknown,
+  name: string,
+  { maxLength = 16_000 }: { maxLength?: number } = {}
+): string {
   if (typeof value !== "string" || value.trim() === "") throw new Error(`${name} is required`)
   if (value.length > maxLength) throw new Error(`${name} exceeds ${maxLength} characters`)
   return value.trim()
 }
 
-function validBrowserUrl(value) {
+function validBrowserUrl(value: unknown): string {
   const url = new URL(requiredString(value, "browserUrl", { maxLength: 8000 }))
   if (!new Set(["http:", "https:"]).has(url.protocol)) {
     throw new Error("browserUrl must use http or https")
@@ -21,7 +73,19 @@ function validBrowserUrl(value) {
   return url.toString()
 }
 
-export function buildCodexTaskDeepLink({ prompt, browserUrl, workspace, nonce }) {
+export interface CodexTaskDeepLinkInput {
+  prompt: unknown
+  browserUrl?: unknown
+  workspace: unknown
+  nonce: unknown
+}
+
+export function buildCodexTaskDeepLink({
+  prompt,
+  browserUrl,
+  workspace,
+  nonce,
+}: CodexTaskDeepLinkInput): string {
   const cleanPrompt = requiredString(prompt, "prompt")
   const cleanNonce = requiredString(nonce, "nonce", { maxLength: 128 })
   if (!/^[A-Za-z0-9._-]+$/.test(cleanNonce)) {
@@ -39,22 +103,23 @@ export function buildCodexTaskDeepLink({ prompt, browserUrl, workspace, nonce })
   return url.toString()
 }
 
-export function buildCodexThreadDeepLink(threadId) {
+export function buildCodexThreadDeepLink(threadId: unknown): string {
   const value = requiredString(threadId, "threadId", { maxLength: 64 })
   if (!THREAD_ID_PATTERN.test(value)) throw new Error("threadId is invalid")
   return `codex://threads/${value}`
 }
 
-export function isComposerSubmitLabel(value) {
+export function isComposerSubmitLabel(value: unknown): boolean {
   return typeof value === "string" && COMPOSER_SUBMIT_PATTERN.test(value.trim())
 }
 
-export function selectCodexRendererTarget(targets) {
+export function selectCodexRendererTarget(targets: unknown): CdpTarget | null {
   if (!Array.isArray(targets)) return null
   return (
-    targets.find(
-      (target) =>
-        target?.type === "page" &&
+    (targets as unknown[]).find(
+      (target): target is CdpTarget =>
+        isRecord(target) &&
+        target.type === "page" &&
         typeof target.webSocketDebuggerUrl === "string" &&
         (String(target.url ?? "").startsWith("app://") ||
           String(target.url ?? "").startsWith("codex-sandbox://"))
@@ -62,7 +127,10 @@ export function selectCodexRendererTarget(targets) {
   )
 }
 
-export async function discoverCodexRenderer(cdpPort, { fetchImpl = fetch } = {}) {
+export async function discoverCodexRenderer(
+  cdpPort: number,
+  { fetchImpl = fetch as FetchLike }: { fetchImpl?: FetchLike } = {}
+): Promise<CdpTarget | null> {
   const response = await fetchImpl(`http://127.0.0.1:${cdpPort}/json/list`, {
     signal: AbortSignal.timeout(2000),
   })
@@ -70,7 +138,10 @@ export async function discoverCodexRenderer(cdpPort, { fetchImpl = fetch } = {})
   return selectCodexRendererTarget(await response.json())
 }
 
-export async function waitForCodexRenderer(cdpPort, options = {}) {
+export async function waitForCodexRenderer(
+  cdpPort: number,
+  options: { fetchImpl?: FetchLike; timeoutMs?: number; intervalMs?: number } = {}
+): Promise<CdpTarget> {
   return waitFor(() => discoverCodexRenderer(cdpPort, options).catch(() => null), {
     timeoutMs: options.timeoutMs ?? 15_000,
     intervalMs: options.intervalMs ?? 200,
@@ -78,28 +149,52 @@ export async function waitForCodexRenderer(cdpPort, options = {}) {
   })
 }
 
-async function eventDataText(data) {
+async function eventDataText(data: unknown): Promise<string> {
   if (typeof data === "string") return data
   if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8")
   if (ArrayBuffer.isView(data)) {
     return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8")
   }
-  if (typeof data?.text === "function") return data.text()
+  if (isRecord(data) && typeof data.text === "function")
+    return String(await (data.text as () => unknown)())
   return String(data)
 }
 
+/** A pending command or event waiter on the CDP socket. */
+interface Waiter<T> {
+  resolve: (value: T) => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout> | null
+}
+
+/** The parts of the WHATWG WebSocket a CDP connection uses (injectable for tests). */
+export interface WebSocketLike {
+  addEventListener(
+    type: "open" | "error" | "close",
+    listener: () => void,
+    options?: { once?: boolean }
+  ): void
+  addEventListener(type: "message", listener: (event: { data: unknown }) => void): void
+  send(data: string): void
+  close(): void
+}
+export type WebSocketConstructor = new (url: string) => WebSocketLike
+
 export async function connectCdp(
-  webSocketDebuggerUrl,
-  { WebSocketImpl = globalThis.WebSocket, timeoutMs = 5000 } = {}
-) {
+  webSocketDebuggerUrl: string,
+  {
+    WebSocketImpl = globalThis.WebSocket as unknown as WebSocketConstructor | undefined,
+    timeoutMs = 5000,
+  }: { WebSocketImpl?: WebSocketConstructor | undefined; timeoutMs?: number } = {}
+): Promise<CdpConnection> {
   if (typeof WebSocketImpl !== "function")
     throw new Error("WebSocket is unavailable in this Node runtime")
   const socket = new WebSocketImpl(webSocketDebuggerUrl)
-  const pending = new Map()
-  const eventWaiters = new Map()
+  const pending = new Map<number, Waiter<CdpCommandResult>>()
+  const eventWaiters = new Map<string, Set<Waiter<Record<string, unknown>> & CdpEventWaitOptions>>()
   let nextId = 0
 
-  await new Promise((resolveOpen, rejectOpen) => {
+  await new Promise<void>((resolveOpen, rejectOpen) => {
     const timer = setTimeout(() => rejectOpen(new Error("Timed out connecting to CDP")), timeoutMs)
     socket.addEventListener(
       "open",
@@ -120,42 +215,47 @@ export async function connectCdp(
   })
 
   socket.addEventListener("message", async (event) => {
-    let message
+    let message: Record<string, unknown>
     try {
-      message = JSON.parse(await eventDataText(event.data))
+      const parsed: unknown = JSON.parse(await eventDataText(event.data))
+      if (!isRecord(parsed)) return
+      message = parsed
     } catch {
       return
     }
     if (message.id != null) {
-      const entry = pending.get(message.id)
+      const id = message.id as number
+      const entry = pending.get(id)
       if (!entry) return
-      pending.delete(message.id)
-      clearTimeout(entry.timer)
-      if (message.error) entry.reject(new Error(`${message.error.code}: ${message.error.message}`))
-      else entry.resolve(message.result ?? {})
+      pending.delete(id)
+      if (entry.timer) clearTimeout(entry.timer)
+      const error = isRecord(message.error) ? message.error : null
+      if (error) entry.reject(new Error(`${String(error.code)}: ${String(error.message)}`))
+      else entry.resolve((isRecord(message.result) ? message.result : {}) as CdpCommandResult)
       return
     }
-    if (!message.method) return
+    if (typeof message.method !== "string" || !message.method) return
     const waiters = eventWaiters.get(message.method)
     if (!waiters) return
+    const params = isRecord(message.params) ? message.params : {}
     for (const entry of [...waiters]) {
-      if (entry.predicate && !entry.predicate(message.params ?? {})) continue
+      if (entry.predicate && !entry.predicate(params)) continue
       waiters.delete(entry)
-      clearTimeout(entry.timer)
-      entry.resolve(message.params ?? {})
+      if (entry.timer) clearTimeout(entry.timer)
+      entry.resolve(params)
     }
     if (waiters.size === 0) eventWaiters.delete(message.method)
   })
 
   socket.addEventListener("close", () => {
     for (const entry of pending.values()) {
-      clearTimeout(entry.timer)
+      if (entry.timer) clearTimeout(entry.timer)
       entry.reject(new Error("CDP connection closed"))
     }
     pending.clear()
     for (const waiters of eventWaiters.values()) {
       for (const entry of waiters) {
-        clearTimeout(entry.timer)
+        if (entry.timer) clearTimeout(entry.timer)
         entry.reject(new Error("CDP connection closed"))
       }
     }
@@ -165,7 +265,7 @@ export async function connectCdp(
   return {
     send(method, params = {}) {
       const id = ++nextId
-      return new Promise((resolveCommand, rejectCommand) => {
+      return new Promise<CdpCommandResult>((resolveCommand, rejectCommand) => {
         const timer = setTimeout(() => {
           pending.delete(id)
           rejectCommand(new Error(`Timed out waiting for CDP ${method}`))
@@ -175,9 +275,9 @@ export async function connectCdp(
       })
     },
     waitForEvent(method, options = {}) {
-      return new Promise((resolveEvent, rejectEvent) => {
+      return new Promise<Record<string, unknown>>((resolveEvent, rejectEvent) => {
         const waiters = eventWaiters.get(method) ?? new Set()
-        const entry = {
+        const entry: Waiter<Record<string, unknown>> & CdpEventWaitOptions = {
           predicate: options.predicate,
           resolve: resolveEvent,
           reject: rejectEvent,
@@ -198,10 +298,10 @@ export async function connectCdp(
   }
 }
 
-function checkedFilePaths(values) {
+function checkedFilePaths(values: unknown): string[] {
   if (!Array.isArray(values) || values.length === 0) throw new Error("filePaths is required")
   if (values.length > 20) throw new Error("at most 20 files can be attached")
-  return [...new Set(values)].map((value) => {
+  return [...new Set(values as unknown[])].map((value) => {
     if (typeof value !== "string" || !isAbsolute(value)) {
       throw new Error("attachment paths must be absolute")
     }
@@ -209,7 +309,7 @@ function checkedFilePaths(values) {
   })
 }
 
-function selectedConversationExpression(threadId) {
+function selectedConversationExpression(threadId: string): string {
   return `(() => {
     const expected = ${JSON.stringify(threadId)};
     const rendered = [...new Set([...document.querySelectorAll('[data-response-annotation-conversation]')]
@@ -219,7 +319,7 @@ function selectedConversationExpression(threadId) {
   })()`
 }
 
-function composerSubmitExpression(nonce, threadId = null) {
+function composerSubmitExpression(nonce: string, threadId: string | null = null): string {
   const marker = `[${BOOTSTRAP_MARKER_PREFIX}${nonce}]`
   return `(() => {
     const marker = ${JSON.stringify(marker)};
@@ -250,7 +350,7 @@ function composerSubmitExpression(nonce, threadId = null) {
   })()`
 }
 
-function focusComposerExpression(threadId) {
+function focusComposerExpression(threadId: string): string {
   return `(() => {
     const expectedThreadId = ${JSON.stringify(threadId)};
     const rendered = [...document.querySelectorAll('[data-response-annotation-conversation]')]
@@ -282,7 +382,10 @@ function focusComposerExpression(threadId) {
   })()`
 }
 
-function attachmentInjectionExpression(threadId, descriptors) {
+function attachmentInjectionExpression(
+  threadId: string | null,
+  descriptors: readonly AttachmentDescriptor[]
+): string {
   return `(() => {
     const expectedThreadId = ${JSON.stringify(threadId)};
     if (expectedThreadId) {
@@ -298,7 +401,11 @@ function attachmentInjectionExpression(threadId, descriptors) {
   })()`
 }
 
-function attachmentVerificationExpression(threadId, names, baselineLabels = []) {
+function attachmentVerificationExpression(
+  threadId: string | null,
+  names: readonly string[],
+  baselineLabels: readonly unknown[] = []
+): string {
   return `(() => {
     const expectedThreadId = ${JSON.stringify(threadId)};
     if (expectedThreadId) {
@@ -322,7 +429,18 @@ function attachmentVerificationExpression(threadId, names, baselineLabels = []) 
   })()`
 }
 
-async function attachmentDescriptors(filePaths, statImpl = stat) {
+interface AttachmentDescriptor {
+  fsPath: string
+  label: string
+  path: string
+}
+
+type StatLike = (path: string) => Promise<{ isDirectory(): boolean }>
+
+async function attachmentDescriptors(
+  filePaths: readonly string[],
+  statImpl: StatLike = stat
+): Promise<AttachmentDescriptor[]> {
   return Promise.all(
     filePaths.map(async (fsPath) => {
       const metadata = await statImpl(fsPath)
@@ -335,7 +453,24 @@ async function attachmentDescriptors(filePaths, statImpl = stat) {
   )
 }
 
-export async function attachFilesToComposer(connection, filePaths, options = {}) {
+export interface AttachFilesOptions {
+  threadId?: string | null
+  timeoutMs?: number | undefined
+  statImpl?: StatLike
+}
+
+export interface AttachFilesResult {
+  files: string[]
+  method: "renderer-host-message"
+}
+
+export type AttachFiles = (
+  connection: CdpConnection,
+  filePaths: unknown,
+  options?: AttachFilesOptions
+) => Promise<AttachFilesResult>
+
+export const attachFilesToComposer: AttachFiles = async (connection, filePaths, options = {}) => {
   const files = checkedFilePaths(filePaths)
   const names = files.map((path) => basename(path))
   const descriptors = await attachmentDescriptors(files, options.statImpl)
@@ -343,24 +478,24 @@ export async function attachFilesToComposer(connection, filePaths, options = {})
     expression: attachmentVerificationExpression(options.threadId ?? null, []),
     returnByValue: true,
   })
-  const baselineLabels = before.result?.value?.labels ?? []
+  const baselineLabels = evaluatedValue<{ labels: unknown[] }>(before)?.labels ?? []
   const injected = await connection.send("Runtime.evaluate", {
     expression: attachmentInjectionExpression(options.threadId ?? null, descriptors),
     returnByValue: true,
   })
-  const injectionResult = injected.result?.value ?? null
+  const injectionResult = evaluatedValue<{ injected: boolean; reason: string }>(injected)
   if (!injectionResult?.injected) {
     throw new Error(injectionResult?.reason ?? "Codex attachment injection failed")
   }
 
   const deadline = Date.now() + (options.timeoutMs ?? 15_000)
-  let verification = null
+  let verification: Partial<{ ready: boolean }> | null = null
   while (Date.now() < deadline) {
     const evaluated = await connection.send("Runtime.evaluate", {
       expression: attachmentVerificationExpression(options.threadId ?? null, names, baselineLabels),
       returnByValue: true,
     })
-    verification = evaluated.result?.value ?? null
+    verification = evaluatedValue<{ ready: boolean }>(evaluated)
     if (verification?.ready) break
     await sleep(200)
   }
@@ -373,9 +508,23 @@ export async function attachFilesToComposer(connection, filePaths, options = {})
   }
 }
 
-async function submitComposer(connection, nonce, { timeoutMs = 15_000, threadId = null } = {}) {
+/** What the composer-submit script reports. */
+interface ComposerSubmitState {
+  composerFound: boolean
+  promptMatched: boolean
+  submitted: boolean
+  reason: string
+  method: string
+  buttonLabel: string
+}
+
+async function submitComposer(
+  connection: CdpConnection,
+  nonce: string,
+  { timeoutMs = 15_000, threadId = null }: { timeoutMs?: number; threadId?: string | null } = {}
+): Promise<Partial<ComposerSubmitState>> {
   const deadline = Date.now() + timeoutMs
-  let last = null
+  let last: Partial<ComposerSubmitState> | null = null
   while (Date.now() < deadline) {
     const evaluated = await connection.send("Runtime.evaluate", {
       expression: composerSubmitExpression(nonce, threadId),
@@ -384,7 +533,7 @@ async function submitComposer(connection, nonce, { timeoutMs = 15_000, threadId 
       userGesture: true,
     })
     if (evaluated.exceptionDetails) throw new Error("Codex composer inspection failed")
-    last = evaluated.result?.value ?? null
+    last = evaluatedValue<ComposerSubmitState>(evaluated)
     if (last?.submitted) return last
     if (last?.composerFound) {
       await connection.send("Input.dispatchKeyEvent", {
@@ -408,20 +557,30 @@ async function submitComposer(connection, nonce, { timeoutMs = 15_000, threadId 
   throw new Error(last?.reason ?? "Codex composer did not become ready")
 }
 
-function openCodexDeepLink(value) {
+function openCodexDeepLink(value: string): void {
   const opened = commandResult("/usr/bin/open", [value], { timeout: 5000 })
   if (!opened.ok) throw new Error(opened.stderr || opened.error || "Unable to open Codex deep link")
 }
 
-async function waitForSelectedConversation(connection, threadId, timeoutMs = 15_000) {
+interface SelectedConversation {
+  expected: string
+  rendered: string[]
+  selected: boolean
+}
+
+async function waitForSelectedConversation(
+  connection: CdpConnection,
+  threadId: string,
+  timeoutMs = 15_000
+): Promise<Partial<SelectedConversation>> {
   const deadline = Date.now() + timeoutMs
-  let last = null
+  let last: Partial<SelectedConversation> | null = null
   while (Date.now() < deadline) {
     const evaluated = await connection.send("Runtime.evaluate", {
       expression: selectedConversationExpression(threadId),
       returnByValue: true,
     })
-    last = evaluated.result?.value ?? null
+    last = evaluatedValue<SelectedConversation>(evaluated)
     if (last?.selected) return last
     await sleep(200)
   }
@@ -430,7 +589,25 @@ async function waitForSelectedConversation(connection, threadId, timeoutMs = 15_
   )
 }
 
-export async function bootstrapCodexTask(input, dependencies = {}) {
+/** Injectable collaborators; production uses the real `open`, CDP discovery and socket. */
+export interface CdpDependencies {
+  cdpPort?: number
+  timeoutMs?: number
+  openDeepLink?: (deepLink: string) => void | Promise<void>
+  openThread?: (deepLink: string) => void | Promise<void>
+  waitForRenderer?: () => Promise<CdpTarget>
+  connect?: (webSocketDebuggerUrl: string) => Promise<CdpConnection>
+  attachFiles?: AttachFiles
+}
+
+export interface BootstrapTaskInput extends CodexTaskDeepLinkInput {
+  filePaths?: string[]
+}
+
+export async function bootstrapCodexTask(
+  input: BootstrapTaskInput,
+  dependencies: CdpDependencies = {}
+) {
   const deepLink = buildCodexTaskDeepLink(input)
   const cdpPort = dependencies.cdpPort ?? Number(process.env.CODEX_RELAY_CDP_PORT)
   if (dependencies.waitForRenderer == null && !Number.isSafeInteger(cdpPort)) {
@@ -450,7 +627,7 @@ export async function bootstrapCodexTask(input, dependencies = {}) {
           timeoutMs: dependencies.timeoutMs,
         })
       : null
-    const submission = await submitComposer(connection, input.nonce)
+    const submission = await submitComposer(connection, input.nonce as string)
     return {
       deepLink,
       rendererId: renderer.id,
@@ -463,7 +640,17 @@ export async function bootstrapCodexTask(input, dependencies = {}) {
   }
 }
 
-export async function submitCodexComposerPrompt(input, dependencies = {}) {
+export interface ComposerPromptInput {
+  threadId: string
+  prompt: unknown
+  nonce: unknown
+  filePaths?: string[]
+}
+
+export async function submitCodexComposerPrompt(
+  input: ComposerPromptInput,
+  dependencies: CdpDependencies = {}
+) {
   const prompt = requiredString(input.prompt, "prompt")
   const nonce = requiredString(input.nonce, "nonce", { maxLength: 128 })
   const threadDeepLink = buildCodexThreadDeepLink(input.threadId)
@@ -484,14 +671,14 @@ export async function submitCodexComposerPrompt(input, dependencies = {}) {
       dependencies.timeoutMs ?? 15_000
     )
     const deadline = Date.now() + (dependencies.timeoutMs ?? 15_000)
-    let focused = null
+    let focused: Partial<{ empty: boolean }> | null = null
     while (Date.now() < deadline) {
       const evaluated = await connection.send("Runtime.evaluate", {
         expression: focusComposerExpression(threadId),
         returnByValue: true,
         userGesture: true,
       })
-      focused = evaluated.result?.value ?? null
+      focused = evaluatedValue<{ empty: boolean }>(evaluated)
       if (focused?.empty) break
       await sleep(200)
     }
@@ -508,7 +695,7 @@ export async function submitCodexComposerPrompt(input, dependencies = {}) {
         returnByValue: true,
         userGesture: true,
       })
-      if (!refocused.result?.value?.empty) {
+      if (!evaluatedValue<{ empty: boolean }>(refocused)?.empty) {
         throw new Error("Codex composer lost its safe draft state after attaching files")
       }
     }
@@ -530,7 +717,11 @@ export async function submitCodexComposerPrompt(input, dependencies = {}) {
   }
 }
 
-async function withSelectedThread(input, dependencies, action) {
+async function withSelectedThread<T extends object>(
+  input: { threadId: string },
+  dependencies: CdpDependencies,
+  action: (connection: CdpConnection, threadId: string) => Promise<T>
+) {
   const threadId = input.threadId
   const threadDeepLink = buildCodexThreadDeepLink(threadId)
   const cdpPort = dependencies.cdpPort ?? Number(process.env.CODEX_RELAY_CDP_PORT)
@@ -561,21 +752,17 @@ async function withSelectedThread(input, dependencies, action) {
   }
 }
 
-export async function openCodexTask(input, dependencies = {}) {
+export async function openCodexTask(
+  input: { threadId: string },
+  dependencies: CdpDependencies = {}
+) {
   return withSelectedThread(input, dependencies, async () => ({ opened: true }))
 }
 
-export async function attachCodexTaskFiles(input, dependencies = {}) {
-  return withSelectedThread(input, dependencies, async (connection, threadId) => ({
-    attachments: await (dependencies.attachFiles ?? attachFilesToComposer)(
-      connection,
-      input.filePaths,
-      { threadId, timeoutMs: dependencies.timeoutMs }
-    ),
-  }))
-}
-
-export async function interruptCodexTask(input, dependencies = {}) {
+export async function interruptCodexTask(
+  input: { threadId: string },
+  dependencies: CdpDependencies = {}
+) {
   return withSelectedThread(input, dependencies, async (connection, threadId) => {
     const evaluated = await connection.send("Runtime.evaluate", {
       expression: `(() => {
@@ -592,7 +779,7 @@ export async function interruptCodexTask(input, dependencies = {}) {
       returnByValue: true,
       userGesture: true,
     })
-    const interruption = evaluated.result?.value ?? null
+    const interruption = evaluatedValue<{ interrupted: boolean; reason: string }>(evaluated)
     if (!interruption?.interrupted && interruption?.reason !== "not_running") {
       throw new Error(interruption?.reason ?? "unable to interrupt task")
     }
@@ -600,7 +787,7 @@ export async function interruptCodexTask(input, dependencies = {}) {
   })
 }
 
-function composerContextExpression(threadId, actionLabel = null) {
+function composerContextExpression(threadId: string, actionLabel: string | null = null): string {
   return `(async () => {
     const expected = ${JSON.stringify(threadId)};
     const action = ${JSON.stringify(actionLabel)};
@@ -642,7 +829,16 @@ function composerContextExpression(threadId, actionLabel = null) {
   })()`
 }
 
-export async function listCodexComposerContexts(input, dependencies = {}) {
+/** A "+" composer context entry (Files and folders, installed plugin contexts, …). */
+export interface ComposerContextItem {
+  label: string
+  description: string | null
+}
+
+export async function listCodexComposerContexts(
+  input: { threadId: string },
+  dependencies: CdpDependencies = {}
+) {
   return withSelectedThread(input, dependencies, async (connection, threadId) => {
     const evaluated = await connection.send("Runtime.evaluate", {
       expression: composerContextExpression(threadId),
@@ -650,13 +846,20 @@ export async function listCodexComposerContexts(input, dependencies = {}) {
       returnByValue: true,
       userGesture: true,
     })
-    const contexts = evaluated.result?.value ?? null
+    const contexts = evaluatedValue<{
+      ready: boolean
+      reason: string
+      items: ComposerContextItem[]
+    }>(evaluated)
     if (!contexts?.ready) throw new Error(contexts?.reason ?? "unable to list composer contexts")
     return { contexts: contexts.items }
   })
 }
 
-export async function invokeCodexComposerContext(input, dependencies = {}) {
+export async function invokeCodexComposerContext(
+  input: { threadId: string; label: unknown },
+  dependencies: CdpDependencies = {}
+) {
   const label = requiredString(input.label, "label", { maxLength: 160 })
   return withSelectedThread(input, dependencies, async (connection, threadId) => {
     const evaluated = await connection.send("Runtime.evaluate", {
@@ -665,7 +868,12 @@ export async function invokeCodexComposerContext(input, dependencies = {}) {
       returnByValue: true,
       userGesture: true,
     })
-    const context = evaluated.result?.value ?? null
+    const context = evaluatedValue<{
+      ready: boolean
+      reason: string
+      invoked: string
+      items: ComposerContextItem[]
+    }>(evaluated)
     if (!context?.ready) throw new Error(context?.reason ?? "unable to invoke composer context")
     return { context: { invoked: context.invoked, available: context.items } }
   })

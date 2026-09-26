@@ -51,18 +51,22 @@ types. See `docs/content/docs/en/adr/0197-the-sidecar-runs-its-typescript-unbuil
 
 Each migration batch appends its moves here (old → new).
 
-| Old path                                                                 | New path                                                 | Batch       |
-| ------------------------------------------------------------------------ | -------------------------------------------------------- | ----------- |
-| `dispatch/a2ui-mcp-protocol.test.mjs`                                    | `a2ui-tools/protocol-version.test.mjs`                   | test runner |
-| `dispatch/input-stream.mjs`                                              | `src/shared/input-stream.ts`                             | 1           |
-| `builtin-tools/shared/truncate.mjs`                                      | `src/shared/text/truncate.ts`                            | 1           |
-| `builtin-tools/shared/mime.mjs`                                          | `src/shared/mime.ts`                                     | 1           |
-| `dispatch/protocol-adapters/provider-protocol.mjs` (+ `.d.mts`, deleted) | `src/providers/provider-protocol.ts`                     | 1           |
-| `dispatch/protocol-adapters/reasoning-effort-tables.mjs`                 | `src/providers/reasoning-effort-tables.ts`               | 1           |
-| `dispatch/live-harness.mjs`                                              | `test-support/live-harness.ts`                           | 1           |
-| `builtin-tools/git/_fixtures.mjs`                                        | `test-support/git-repo.ts`                               | 1           |
-| `dispatch/agent-event-envelope.fixture.json`                             | `test-support/fixtures/agent-event-envelope.json`        | 1           |
-| `dispatch/fixtures/gpt-oss-raw-analysis-stream.json`                     | `test-support/fixtures/gpt-oss-raw-analysis-stream.json` | 1           |
+| Old path                                                                 | New path                                                           | Batch       |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------ | ----------- |
+| `dispatch/a2ui-mcp-protocol.test.mjs`                                    | `a2ui-tools/protocol-version.test.mjs`                             | test runner |
+| `dispatch/input-stream.mjs`                                              | `src/shared/input-stream.ts`                                       | 1           |
+| `builtin-tools/shared/truncate.mjs`                                      | `src/shared/text/truncate.ts`                                      | 1           |
+| `builtin-tools/shared/mime.mjs`                                          | `src/shared/mime.ts`                                               | 1           |
+| `dispatch/protocol-adapters/provider-protocol.mjs` (+ `.d.mts`, deleted) | `src/providers/provider-protocol.ts`                               | 1           |
+| `dispatch/protocol-adapters/reasoning-effort-tables.mjs`                 | `src/providers/reasoning-effort-tables.ts`                         | 1           |
+| `dispatch/live-harness.mjs`                                              | `test-support/live-harness.ts`                                     | 1           |
+| `builtin-tools/git/_fixtures.mjs`                                        | `test-support/git-repo.ts`                                         | 1           |
+| `dispatch/agent-event-envelope.fixture.json`                             | `test-support/fixtures/agent-event-envelope.json`                  | 1           |
+| `dispatch/fixtures/gpt-oss-raw-analysis-stream.json`                     | `test-support/fixtures/gpt-oss-raw-analysis-stream.json`           | 1           |
+| `codex-app-control/*.mjs` modules                                        | `codex-app-control/*.ts` (same names)                              | 2           |
+| `codex-app-control/control-cli.mjs` (implementation)                     | `codex-app-control/cli.ts`; `control-cli.mjs` is now its launcher  | 2           |
+| `codex-app-control/cdp-only-relaunch-worker.mjs` (implementation)        | `codex-app-control/relaunch-worker.ts`; the `.mjs` is its launcher | 2           |
+| `codex-app-control/one-shot-launcher.mjs` (implementation)               | `codex-app-control/one-shot.ts`; the `.mjs` is its launcher        | 2           |
 
 ## Scripts (run from repo root)
 

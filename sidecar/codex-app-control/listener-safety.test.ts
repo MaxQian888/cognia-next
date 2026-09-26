@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { assessListenerOutput } from "./listener-safety.mjs"
+import { assessListenerOutput } from "./listener-safety.ts"
 
 test("assessListenerOutput accepts loopback-only CDP listeners", () => {
   assert.deepEqual(

@@ -1,69 +1,72 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { ensureCodexCdpRuntime } from "./cdp-runtime.mjs"
+import { ensureCodexCdpRuntime } from "./cdp-runtime.ts"
+import type { RuntimeDependencies } from "./cdp-runtime.ts"
+import type { WaitForOptions } from "./shared.ts"
 
-function readyFixture({ initiallyReady = false } = {}) {
+function readyFixture({ initiallyReady = false }: { initiallyReady?: boolean } = {}) {
   let running = true
   let cdpReady = initiallyReady
-  const commands = []
-  const statuses = []
+  const commands: string[][] = []
+  const statuses: string[] = []
+
+  const dependencies: RuntimeDependencies = {
+    appProcessIds: () => (running ? [101] : []),
+    commandResult: (command, args) => {
+      commands.push([command, ...args])
+      if (command === "/usr/bin/osascript") running = false
+      if (command === "/usr/bin/open") {
+        running = true
+        cdpReady = args.some((argument) => argument === "--remote-debugging-port=9229")
+      }
+      return { ok: true, status: 0, signal: null, stdout: "", stderr: "", error: null }
+    },
+    discoverCodexRenderer: async () =>
+      cdpReady
+        ? {
+            id: "codex-renderer",
+            url: "app://-/",
+            webSocketDebuggerUrl: "ws://127.0.0.1:9229/devtools/page/codex",
+          }
+        : null,
+    inspectTcpListener: () => ({
+      listening: cdpReady,
+      loopbackOnly: cdpReady,
+      addresses: cdpReady ? ["127.0.0.1:9229"] : [],
+    }),
+    normalAppServerChildren: () =>
+      cdpReady ? [{ pid: 202, ppid: 101, command: "codex app-server" }] : [],
+    relaunchCdpApp: async () => {
+      commands.push(["/usr/bin/osascript", "-e", 'tell application id "com.openai.codex" to quit'])
+      running = false
+      commands.push([
+        "/usr/bin/open",
+        "--new",
+        "/Applications/ChatGPT.app",
+        "--args",
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=9229",
+      ])
+      running = true
+      cdpReady = true
+      return { status: "ready", attemptId: "test-attempt", reused: false }
+    },
+    waitFor: async <T>(
+      predicate: () => T | null | undefined | false | Promise<T | null | undefined | false>,
+      options: WaitForOptions
+    ): Promise<T> => {
+      const value = await predicate()
+      if (!value) throw new Error(`${options.description} timed out in test`)
+      return value
+    },
+  }
 
   return {
     commands,
     statuses,
-    dependencies: {
-      appProcessIds: () => (running ? [101] : []),
-      commandResult: (command, args) => {
-        commands.push([command, ...args])
-        if (command === "/usr/bin/osascript") running = false
-        if (command === "/usr/bin/open") {
-          running = true
-          cdpReady = args.some((argument) => argument === "--remote-debugging-port=9229")
-        }
-        return { ok: true, stdout: "", stderr: "", error: null }
-      },
-      discoverCodexRenderer: async () =>
-        cdpReady
-          ? {
-              id: "codex-renderer",
-              url: "app://-/",
-              webSocketDebuggerUrl: "ws://127.0.0.1:9229/devtools/page/codex",
-            }
-          : null,
-      inspectTcpListener: () => ({
-        listening: cdpReady,
-        loopbackOnly: cdpReady,
-        addresses: cdpReady ? ["127.0.0.1:9229"] : [],
-      }),
-      normalAppServerChildren: () =>
-        cdpReady ? [{ pid: 202, ppid: 101, command: "codex app-server" }] : [],
-      relaunchCdpApp: async () => {
-        commands.push([
-          "/usr/bin/osascript",
-          "-e",
-          'tell application id "com.openai.codex" to quit',
-        ])
-        running = false
-        commands.push([
-          "/usr/bin/open",
-          "--new",
-          "/Applications/ChatGPT.app",
-          "--args",
-          "--remote-debugging-address=127.0.0.1",
-          "--remote-debugging-port=9229",
-        ])
-        running = true
-        cdpReady = true
-        return { status: "ready", attemptId: "test-attempt" }
-      },
-      waitFor: async (predicate, options) => {
-        const value = await predicate()
-        if (!value) throw new Error(`${options.description} timed out in test`)
-        return value
-      },
-    },
-    onStatus: (status) => statuses.push(status),
+    dependencies,
+    onStatus: (status: string) => statuses.push(status),
   }
 }
 
@@ -82,7 +85,7 @@ test("missing CDP automatically restarts the App and gates on the real renderer"
 
   assert.equal(result.ready, true)
   assert.equal(result.restarted, true)
-  assert.equal(result.renderer.id, "codex-renderer")
+  assert.equal(result.renderer?.id, "codex-renderer")
   assert.equal(result.appServerChildren.length, 1)
   assert.deepEqual(fixture.statuses, [
     "checking",
@@ -91,7 +94,7 @@ test("missing CDP automatically restarts the App and gates on the real renderer"
     "waiting-for-runtime",
     "ready",
   ])
-  assert.deepEqual(fixture.commands[0].slice(0, 2), ["/usr/bin/osascript", "-e"])
+  assert.deepEqual(fixture.commands[0]?.slice(0, 2), ["/usr/bin/osascript", "-e"])
   assert.deepEqual(fixture.commands[1], [
     "/usr/bin/open",
     "--new",

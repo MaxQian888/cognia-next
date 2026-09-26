@@ -1,69 +1,95 @@
-import { discoverCodexRenderer } from "./cdp-bootstrap.mjs"
-import { scheduleDetachedCdpRelaunch } from "./cdp-relaunch.mjs"
-import { inspectTcpListener } from "./listener-safety.mjs"
-import { APP_PATH, DEFAULT_REAL_CLI, appProcessIds, commandResult, waitFor } from "./shared.mjs"
+import { discoverCodexRenderer } from "./cdp-bootstrap.ts"
+import type { CdpTarget } from "./cdp-bootstrap.ts"
+import { scheduleDetachedCdpRelaunch } from "./cdp-relaunch.ts"
+import type { CdpRelaunchOptions, CdpRelaunchResult } from "./cdp-relaunch.ts"
+import { inspectTcpListener } from "./listener-safety.ts"
+import type { ListenerAssessment } from "./listener-safety.ts"
+import {
+  APP_PATH,
+  DEFAULT_REAL_CLI,
+  appProcessIds,
+  appServerChildren,
+  commandResult,
+  waitFor,
+} from "./shared.ts"
+import type { AppServerChild } from "./shared.ts"
 
-function defaultAppServerChildren({ appPids, realCli }) {
-  const owners = new Set(appPids)
-  const listed = commandResult("/bin/ps", ["-axo", "pid=,ppid=,command="])
-  if (!listed.ok) throw new Error(listed.stderr || listed.error || "Unable to inspect App children")
-  return listed.stdout
-    .split("\n")
-    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/))
-    .filter((match) => {
-      const command = match?.[3] ?? ""
-      return (
-        owners.has(Number(match?.[2])) &&
-        command.startsWith(
-          `${realCli} -c features.code_mode_host=true app-server --analytics-default-enabled`
-        ) &&
-        !command.includes("--listen") &&
-        !command.includes("relay-shim")
-      )
-    })
-    .map((match) => ({ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] }))
+export interface RuntimeInspection {
+  ready: boolean
+  pids: number[]
+  listener: ListenerAssessment
+  renderer: CdpTarget | null
+  rendererError: string | null
+  appServerChildren: AppServerChild[]
 }
 
-async function inspectRuntime(cdpPort, realCli, dependencies) {
+export interface RuntimeDependencies {
+  appProcessIds: () => number[]
+  commandResult: typeof commandResult
+  discoverCodexRenderer: (cdpPort: number) => Promise<CdpTarget | null>
+  inspectTcpListener: (port: number) => ListenerAssessment
+  normalAppServerChildren: (args: {
+    appPids: readonly number[]
+    realCli: string
+  }) => AppServerChild[]
+  relaunchCdpApp: (options: CdpRelaunchOptions) => Promise<CdpRelaunchResult>
+  waitFor: typeof waitFor
+}
+
+export interface EnsureRuntimeOptions {
+  cdpPort?: number
+  appPath?: string
+  realCli?: string
+  stateDir?: string
+  timeoutMs?: number
+  autoRestart?: boolean
+  onStatus?: (status: string, details: Record<string, unknown>) => unknown
+}
+
+async function inspectRuntime(
+  cdpPort: number,
+  realCli: string,
+  dependencies: RuntimeDependencies
+): Promise<RuntimeInspection> {
   const pids = dependencies.appProcessIds()
   const listener = dependencies.inspectTcpListener(cdpPort)
-  let renderer = null
-  let rendererError = null
+  let renderer: CdpTarget | null = null
+  let rendererError: string | null = null
   try {
     renderer = await dependencies.discoverCodexRenderer(cdpPort)
   } catch (error) {
     rendererError = error instanceof Error ? error.message : String(error)
   }
-  const appServerChildren =
+  const children =
     pids.length === 1 ? dependencies.normalAppServerChildren({ appPids: pids, realCli }) : []
   return {
-    ready:
-      pids.length === 1 &&
-      listener.loopbackOnly &&
-      Boolean(renderer) &&
-      appServerChildren.length === 1,
+    ready: pids.length === 1 && listener.loopbackOnly && Boolean(renderer) && children.length === 1,
     pids,
     listener,
     renderer,
     rendererError,
-    appServerChildren,
+    appServerChildren: children,
   }
 }
 
-export async function ensureCodexCdpRuntime(options = {}, injected = {}) {
+export async function ensureCodexCdpRuntime(
+  options: EnsureRuntimeOptions = {},
+  injected: Partial<RuntimeDependencies> = {}
+) {
   const cdpPort = options.cdpPort ?? 9229
   const appPath = options.appPath ?? APP_PATH
   const realCli = options.realCli ?? DEFAULT_REAL_CLI
   const stateDir = options.stateDir
   const timeoutMs = options.timeoutMs ?? 60_000
   const autoRestart = options.autoRestart !== false
-  const onStatus = async (status, details = {}) => options.onStatus?.(status, details)
-  const dependencies = {
+  const onStatus = async (status: string, details: Record<string, unknown> = {}) =>
+    options.onStatus?.(status, details)
+  const dependencies: RuntimeDependencies = {
     appProcessIds,
     commandResult,
-    discoverCodexRenderer,
+    discoverCodexRenderer: (port) => discoverCodexRenderer(port),
     inspectTcpListener,
-    normalAppServerChildren: defaultAppServerChildren,
+    normalAppServerChildren: appServerChildren,
     relaunchCdpApp: scheduleDetachedCdpRelaunch,
     waitFor,
     ...injected,

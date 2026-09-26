@@ -9,33 +9,59 @@ import {
   isComposerSubmitLabel,
   selectCodexRendererTarget,
   submitCodexComposerPrompt,
-} from "./cdp-bootstrap.mjs"
+} from "./cdp-bootstrap.ts"
+import type { CdpCommandResult, CdpConnection } from "./cdp-bootstrap.ts"
+
+/** What a fake connection records per command. */
+interface CommandParams {
+  expression: string
+  text?: string
+  value?: string
+}
+interface SentCommand {
+  method: string
+  params: CommandParams
+}
+
+const asParams = (params: Record<string, unknown> | undefined): CommandParams => ({
+  expression: "",
+  ...(params as Partial<CommandParams> | undefined),
+})
+
+/** A CDP connection whose `send` is the test's; the rest are inert. */
+function fakeConnection(
+  send: (method: string, params: CommandParams) => CdpCommandResult | Promise<CdpCommandResult>
+): CdpConnection {
+  return {
+    send: async (method, params) => send(method, asParams(params)),
+    waitForEvent: async () => ({}),
+    close() {},
+  }
+}
 
 test("attachments use Codex renderer host messages without Accessibility", async () => {
-  const commands = []
-  const connection = {
-    async send(method, params) {
-      commands.push({ method, params })
-      if (method === "Runtime.evaluate" && params.expression.includes("window.postMessage")) {
-        return { result: { value: { injected: true, count: 2 } } }
+  const commands: SentCommand[] = []
+  const connection = fakeConnection(async (method, params) => {
+    commands.push({ method, params })
+    if (method === "Runtime.evaluate" && params.expression.includes("window.postMessage")) {
+      return { result: { value: { injected: true, count: 2 } } }
+    }
+    if (method === "Runtime.evaluate" && params.expression.includes("requiredCounts")) {
+      if (params.expression.includes("const expected = [];")) {
+        return { result: { value: { ready: true, labels: ["existing.txt"] } } }
       }
-      if (method === "Runtime.evaluate" && params.expression.includes("requiredCounts")) {
-        if (params.expression.includes("const expected = [];")) {
-          return { result: { value: { ready: true, labels: ["existing.txt"] } } }
-        }
-        return {
-          result: {
-            value: {
-              ready: true,
-              expected: ["proof.txt", "evidence.pdf"],
-              attached: ["proof.txt", "evidence.pdf"],
-            },
+      return {
+        result: {
+          value: {
+            ready: true,
+            expected: ["proof.txt", "evidence.pdf"],
+            attached: ["proof.txt", "evidence.pdf"],
           },
-        }
+        },
       }
-      return {}
-    },
-  }
+    }
+    return {}
+  })
 
   const result = await attachFilesToComposer(
     connection,
@@ -52,32 +78,30 @@ test("attachments use Codex renderer host messages without Accessibility", async
     commands.map(({ method }) => method),
     ["Runtime.evaluate", "Runtime.evaluate", "Runtime.evaluate"]
   )
-  assert.match(commands[1].params.expression, /type: 'add-context-file'/)
-  assert.match(commands[1].params.expression, /"fsPath":"\/private\/tmp\/proof.txt"/)
-  assert.match(commands[2].params.expression, /const baseline = \["existing.txt"\]/)
+  assert.match(commands[1]?.params.expression ?? "", /type: 'add-context-file'/)
+  assert.match(commands[1]?.params.expression ?? "", /"fsPath":"\/private\/tmp\/proof.txt"/)
+  assert.match(commands[2]?.params.expression ?? "", /const baseline = \["existing.txt"\]/)
 })
 
 test("directory attachments preserve Codex trailing-slash semantics", async () => {
-  const commands = []
-  const connection = {
-    async send(method, params) {
-      commands.push({ method, params })
-      if (params.expression.includes("window.postMessage")) {
-        return { result: { value: { injected: true, count: 1 } } }
-      }
-      return {
-        result: {
-          value: { ready: true, expected: ["project"], attached: ["project"] },
-        },
-      }
-    },
-  }
+  const commands: SentCommand[] = []
+  const connection = fakeConnection(async (method, params) => {
+    commands.push({ method, params })
+    if (params.expression.includes("window.postMessage")) {
+      return { result: { value: { injected: true, count: 1 } } }
+    }
+    return {
+      result: {
+        value: { ready: true, expected: ["project"], attached: ["project"] },
+      },
+    }
+  })
 
   await attachFilesToComposer(connection, ["/private/tmp/project"], {
     statImpl: async () => ({ isDirectory: () => true }),
   })
 
-  assert.match(commands[1].params.expression, /"path":"\/private\/tmp\/project\/"/)
+  assert.match(commands[1]?.params.expression ?? "", /"path":"\/private\/tmp\/project\/"/)
 })
 
 test("buildCodexTaskDeepLink prepares an App-owned task with Browser context", () => {
@@ -104,34 +128,31 @@ test("buildCodexTaskDeepLink prepares an App-owned task with Browser context", (
 })
 
 test("submitCodexComposerPrompt writes a marked follow-up into the App composer", async () => {
-  const commands = []
-  const connection = {
-    async send(method, params) {
-      commands.push({ method, params })
-      if (method === "Runtime.evaluate" && params.expression.includes("candidates.at(-1)")) {
-        return { result: { value: { composerFound: true, empty: true } } }
-      }
-      if (
-        method === "Runtime.evaluate" &&
-        params.expression.includes("return { expected, rendered, selected")
-      ) {
-        return {
-          result: {
-            value: {
-              expected: "019ff223-2480-7c01-bdb2-6e6305ca8f1c",
-              rendered: ["019ff223-2480-7c01-bdb2-6e6305ca8f1c"],
-              selected: true,
-            },
+  const commands: SentCommand[] = []
+  const connection = fakeConnection(async (method, params) => {
+    commands.push({ method, params })
+    if (method === "Runtime.evaluate" && params.expression.includes("candidates.at(-1)")) {
+      return { result: { value: { composerFound: true, empty: true } } }
+    }
+    if (
+      method === "Runtime.evaluate" &&
+      params.expression.includes("return { expected, rendered, selected")
+    ) {
+      return {
+        result: {
+          value: {
+            expected: "019ff223-2480-7c01-bdb2-6e6305ca8f1c",
+            rendered: ["019ff223-2480-7c01-bdb2-6e6305ca8f1c"],
+            selected: true,
           },
-        }
+        },
       }
-      if (method === "Runtime.evaluate") {
-        return { result: { value: { composerFound: true, submitted: true, method: "button" } } }
-      }
-      return {}
-    },
-    close() {},
-  }
+    }
+    if (method === "Runtime.evaluate") {
+      return { result: { value: { composerFound: true, submitted: true, method: "button" } } }
+    }
+    return {}
+  })
 
   const result = await submitCodexComposerPrompt(
     {
@@ -140,7 +161,9 @@ test("submitCodexComposerPrompt writes a marked follow-up into the App composer"
       threadId: "019ff223-2480-7c01-bdb2-6e6305ca8f1c",
     },
     {
-      openThread: async (value) => commands.push({ method: "openThread", params: { value } }),
+      openThread: async (value) => {
+        commands.push({ method: "openThread", params: { expression: "", value } })
+      },
       waitForRenderer: async () => ({
         id: "codex-renderer",
         webSocketDebuggerUrl: "ws://127.0.0.1/codex-renderer",
@@ -162,30 +185,27 @@ test("submitCodexComposerPrompt writes a marked follow-up into the App composer"
 })
 
 test("follow-up preserves plugin mentions and refocuses after native attachments", async () => {
-  const order = []
+  const order: string[] = []
   let focusCount = 0
-  const connection = {
-    async send(method, params) {
-      if (method === "Runtime.evaluate" && params.expression.includes("candidates.at(-1)")) {
-        focusCount += 1
-        assert.match(params.expression, /plugin-mention-name/)
-        order.push(`focus:${focusCount}`)
-        return { result: { value: { composerFound: true, empty: true, hasPluginMention: true } } }
-      }
-      if (
-        method === "Runtime.evaluate" &&
-        params.expression.includes("return { expected, rendered, selected")
-      ) {
-        return { result: { value: { selected: true } } }
-      }
-      if (method === "Input.insertText") order.push("insert")
-      if (method === "Runtime.evaluate") {
-        return { result: { value: { composerFound: true, submitted: true } } }
-      }
-      return {}
-    },
-    close() {},
-  }
+  const connection = fakeConnection(async (method, params) => {
+    if (method === "Runtime.evaluate" && params.expression.includes("candidates.at(-1)")) {
+      focusCount += 1
+      assert.match(params.expression, /plugin-mention-name/)
+      order.push(`focus:${focusCount}`)
+      return { result: { value: { composerFound: true, empty: true, hasPluginMention: true } } }
+    }
+    if (
+      method === "Runtime.evaluate" &&
+      params.expression.includes("return { expected, rendered, selected")
+    ) {
+      return { result: { value: { selected: true } } }
+    }
+    if (method === "Input.insertText") order.push("insert")
+    if (method === "Runtime.evaluate") {
+      return { result: { value: { composerFound: true, submitted: true } } }
+    }
+    return {}
+  })
 
   await submitCodexComposerPrompt(
     {
@@ -200,7 +220,7 @@ test("follow-up preserves plugin mentions and refocuses after native attachments
       connect: async () => connection,
       attachFiles: async () => {
         order.push("attach")
-        return { files: ["proof.txt"] }
+        return { files: ["proof.txt"], method: "renderer-host-message" as const }
       },
     }
   )
@@ -252,27 +272,24 @@ test("selectCodexRendererTarget ignores Browser pages and DevTools targets", () 
 })
 
 test("bootstrapCodexTask opens the native route and submits the focused composer", async () => {
-  const opened = []
-  const commands = []
-  const connection = {
-    async send(method, params) {
-      commands.push({ method, params })
-      if (method === "Runtime.evaluate") {
-        return {
-          result: {
-            value: {
-              composerFound: true,
-              promptMatched: true,
-              submitted: true,
-              method: "button",
-            },
+  const opened: string[] = []
+  const commands: SentCommand[] = []
+  const connection = fakeConnection(async (method, params) => {
+    commands.push({ method, params })
+    if (method === "Runtime.evaluate") {
+      return {
+        result: {
+          value: {
+            composerFound: true,
+            promptMatched: true,
+            submitted: true,
+            method: "button",
           },
-        }
+        },
       }
-      return {}
-    },
-    close() {},
-  }
+    }
+    return {}
+  })
 
   const result = await bootstrapCodexTask(
     {
@@ -282,7 +299,9 @@ test("bootstrapCodexTask opens the native route and submits the focused composer
       nonce: "bootstrap-456",
     },
     {
-      openDeepLink: async (value) => opened.push(value),
+      openDeepLink: async (value) => {
+        opened.push(value)
+      },
       waitForRenderer: async () => ({
         id: "codex-renderer",
         webSocketDebuggerUrl: "ws://127.0.0.1/codex-renderer",
@@ -292,7 +311,7 @@ test("bootstrapCodexTask opens the native route and submits the focused composer
   )
 
   assert.equal(opened.length, 1)
-  assert.match(opened[0], /^codex:\/\/new\?/)
+  assert.match(opened[0] ?? "", /^codex:\/\/new\?/)
   assert.deepEqual(
     commands.map((entry) => entry.method),
     ["Runtime.enable", "Runtime.evaluate"]

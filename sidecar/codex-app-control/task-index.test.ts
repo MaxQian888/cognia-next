@@ -5,9 +5,9 @@ import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
 
-import { listCodexTasks } from "./task-index.mjs"
+import { listCodexTasks } from "./task-index.ts"
 
-function seedDatabase(path) {
+function seedDatabase(path: string): void {
   const database = new DatabaseSync(path)
   database.exec(`CREATE TABLE threads (
     id TEXT PRIMARY KEY, title TEXT NOT NULL, name TEXT, preview TEXT NOT NULL,
@@ -113,10 +113,12 @@ test("task index returns UUID/title metadata with workspace, archive, and subage
     result.tasks.map((task) => task.id),
     ["019ff111-1111-7111-8111-111111111111", "019ff222-2222-7222-8222-222222222222"]
   )
-  assert.equal(result.tasks[0].title, "Renamed task")
-  assert.equal(result.tasks[0].generatedTitle, "Generated title")
-  assert.equal(result.tasks[0].pinned, true)
-  assert.equal("rolloutPath" in result.tasks[0], false)
+  const [first] = result.tasks
+  assert.ok(first)
+  assert.equal(first.title, "Renamed task")
+  assert.equal(first.generatedTitle, "Generated title")
+  assert.equal(first.pinned, true)
+  assert.equal("rolloutPath" in first, false)
 
   const archived = await listCodexTasks(
     { workspace: "/repo", scope: "workspace", archived: "archived" },
@@ -131,7 +133,7 @@ test("task index returns UUID/title metadata with workspace, archive, and subage
     { workspace: "/repo", scope: "workspace", includeSubagents: true, query: "Guardian" },
     { databasePath }
   )
-  assert.equal(subagents.tasks[0].title, "Guardian")
+  assert.equal(subagents.tasks[0]?.title, "Guardian")
 })
 
 test("task index paginates deterministically and searches UUIDs", async () => {
@@ -149,7 +151,7 @@ test("task index paginates deterministically and searches UUIDs", async () => {
     { workspace: "/repo", scope: "workspace", limit: 1, cursor: first.nextCursor },
     { databasePath }
   )
-  assert.equal(second.tasks[0].title, "Second task")
+  assert.equal(second.tasks[0]?.title, "Second task")
 
   const searched = await listCodexTasks(
     { workspace: "/repo", scope: "workspace", query: "019ff222" },
@@ -179,5 +181,5 @@ test("task index falls back to session_index.jsonl", async () => {
   )
   assert.equal(result.source, "session-index")
   assert.equal(result.degraded, true)
-  assert.equal(result.tasks[0].title, "Fallback title")
+  assert.equal(result.tasks[0]?.title, "Fallback title")
 })

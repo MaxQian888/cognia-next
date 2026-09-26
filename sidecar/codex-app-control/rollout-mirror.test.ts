@@ -4,7 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-import { findNewTurnId, findRolloutByThreadId, projectRolloutRecord } from "./rollout-mirror.mjs"
+import { findNewTurnId, findRolloutByThreadId, projectRolloutRecord } from "./rollout-mirror.ts"
+import type { RolloutEvent } from "./rollout-mirror.ts"
 
 test("projectRolloutRecord keeps user and assistant messages", () => {
   assert.deepEqual(
@@ -20,14 +21,12 @@ test("projectRolloutRecord keeps user and assistant messages", () => {
       text: "hello",
     }
   )
-  assert.equal(
-    projectRolloutRecord({
-      timestamp: "2026-08-12T00:00:01.000Z",
-      type: "event_msg",
-      payload: { type: "agent_message", message: "world", phase: "final" },
-    })?.role,
-    "assistant"
-  )
+  const assistant = projectRolloutRecord({
+    timestamp: "2026-08-12T00:00:01.000Z",
+    type: "event_msg",
+    payload: { type: "agent_message", message: "world", phase: "final" },
+  })
+  assert.equal(assistant?.kind === "message" ? assistant.role : undefined, "assistant")
 })
 
 test("projectRolloutRecord exposes tool lifecycle without raw internal records", () => {
@@ -50,10 +49,10 @@ test("projectRolloutRecord exposes tool lifecycle without raw internal records",
 })
 
 test("findNewTurnId identifies only a turn created after submission", () => {
-  const events = [
-    { kind: "turn", status: "started", turnId: "turn-existing" },
-    { kind: "turn", status: "started", turnId: "turn-new" },
-    { kind: "message", role: "user", text: "submitted after task_started" },
+  const events: RolloutEvent[] = [
+    { kind: "turn", at: null, status: "started", turnId: "turn-existing" },
+    { kind: "turn", at: null, status: "started", turnId: "turn-new" },
+    { kind: "message", at: null, role: "user", text: "submitted after task_started" },
   ]
 
   assert.equal(findNewTurnId(events, new Set(["turn-existing"])), "turn-new")
