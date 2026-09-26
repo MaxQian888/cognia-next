@@ -1,4 +1,3 @@
-// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // AI SDK tool bridge for the non-Anthropic dispatch path.
 //
 // The Anthropic dispatcher hands built-in tools + plugin tools to the Claude
@@ -13,6 +12,7 @@
 // shell/process tools.
 
 import { tool, jsonSchema } from "ai"
+import type { Tool } from "ai"
 import { z } from "zod"
 import { randomUUID } from "node:crypto"
 
@@ -34,11 +34,52 @@ import { assertModelSafeToolOutput } from "../../policy/pii/tool-output.ts"
 import { markAiSdkToolSource } from "./ai-sdk-tool-search.ts"
 import { builtinToModelOutput, callToolResultToText, hasRichContentBlock } from "./ai-sdk-output.ts"
 import { CLAUDE_TOOL_NAME_BY_COGNIA_BARE, passesAllowList } from "./allow-list.ts"
+import type { ToolDefinition } from "../kernel/define.ts"
+import type { ReadTracker } from "../state/read-tracker.ts"
+import type { SessionTaskStore } from "../state/tasks.ts"
+import type { HostRpcCaller, SessionBgShellRegistry } from "../state/host-background-shells.ts"
+import type { PendingPluginToolCalls, PluginToolManifestEntry } from "../plugin/server.ts"
+import type { ToolPermissionGate } from "../../policy/permission/ai-sdk-gate.ts"
+import type { PendingApproval } from "../../policy/permission/approval.ts"
+import type { PermissionSendOptions } from "../../policy/permission/ladder.ts"
+import type { DoomLoopGuard } from "../../policy/doom-loop.ts"
+import type { ProcessSandboxScope } from "../../platform/process/exec.ts"
+import type { LazyLspResolver } from "../../services/lsp/lazy-resolver.ts"
+import type { CodeGraphIndex } from "../../services/code-graph/index-service.ts"
+
+/** An AI SDK tool as this adapter builds it. */
+type AiSdkTool = Tool
+
+/** The PostToolUse review: the updated output, or undefined/null to pass it through. */
+export type ToolOutputReview = (
+  namespaced: string,
+  toolCallId: string | undefined,
+  output: unknown,
+  isError: boolean
+) => unknown
+
+/** The send-spec fields the adapter reads, beyond what the permission gate reads. */
+export interface AiSdkToolSendOptions extends PermissionSendOptions {
+  toolSurface?: unknown
+  allowedTools?: unknown
+  disallowedTools?: unknown
+  toolExecutionTimeoutMs?: unknown
+  builtinTools?: Readonly<Record<string, boolean | undefined>> | null
+  model?: string
+  provider?: string
+  planTools?: unknown
+  sandboxRuntimeRef?: unknown
+  turnId?: string
+  execution?: {
+    composition?: { toolPresentation?: string }
+    identity?: { attemptId?: string }
+  }
+}
 
 // Per-tool execution deadline for READ-ONLY built-ins on the ai-sdk path. The
 // constant, the read-only gate, and the recoverable message all live in
-// `../src/tools/middleware/read-only-timeout.ts` so this channel and the Anthropic
-// channel (`src/tools/builtin/registry.ts`) never drift. Here we bound the handler at
+// `../middleware/read-only-timeout.ts` so this channel and the Anthropic
+// channel (`sdk-mcp.ts`) never drift. Here we bound the handler at
 // EXECUTE time and REJECT on timeout so the AI SDK surfaces a `tool-error`; the
 // Anthropic side wraps at registration time and returns an `isError` result.
 // Exec tools (bash / shell / process / git-run) self-bound and are excluded.
@@ -52,21 +93,24 @@ import { CLAUDE_TOOL_NAME_BY_COGNIA_BARE, passesAllowList } from "./allow-list.t
  * GC'd (read-only tools have no side effects to unwind). The gate runs BEFORE
  * this, so a slow human approval is never counted against the budget.
  *
- * @param {{ name: string, handler: Function }} def
- * @param {Record<string, unknown>} effective  gated/validated args
- * @param {number} timeoutMs                    0 / non-finite ⇒ no net
- * @param {AbortSignal} [signal]  The step's abort signal. Forwarded as
- *   `extra.signal` so a handler can actually stop work on a user interrupt —
- *   `core/rg.mjs` and `ast-grep/run.mjs` both accept one and, until now, no
- *   caller ever supplied it, so an interrupt abandoned the promise while the
- *   child process kept running.
+ * `effective` is the gated/validated args; a `timeoutMs` of 0 / non-finite means
+ * no net. `signal` is the step's abort signal, forwarded as `extra.signal` so a
+ * handler can actually stop work on a user interrupt — `core-files/rg.ts` and
+ * `ast-grep/run.ts` both accept one and, until now, no caller ever supplied
+ * it, so an interrupt abandoned the promise while the child process kept
+ * running.
  */
-function runBuiltinHandler(def, effective, timeoutMs, signal) {
+function runBuiltinHandler(
+  def: Pick<ToolDefinition, "name" | "handler">,
+  effective: unknown,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<unknown> {
   const net = READ_ONLY_TOOL_NAMES.has(def.name) ? timeoutMs : 0
-  const call = () => def.handler(effective, { signal })
+  const call = () => Promise.resolve(def.handler(effective, { signal }))
   if (!Number.isFinite(net) || net <= 0) return call()
-  let timer = null
-  const deadline = new Promise((_, reject) => {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const deadline = new Promise<never>((_, reject) => {
     // Keep the timer REF'd: while a read-only handler is in flight we owe the AI
     // SDK a result, so the deadline must hold the event loop open until it fires
     // (or `call()` settles and we clearTimeout). An unref'd timer let the loop
@@ -90,7 +134,13 @@ function runBuiltinHandler(def, effective, timeoutMs, signal) {
  * applied later (e.g. on the fullStream tool-result event) is display-only.
  * `review` returns the updated output, or undefined/null to pass through.
  */
-async function applyOutputReview(review, namespaced, toolCallId, output, isError) {
+async function applyOutputReview(
+  review: ToolOutputReview | undefined,
+  namespaced: string,
+  toolCallId: string | undefined,
+  output: unknown,
+  isError: boolean
+): Promise<unknown> {
   if (typeof review !== "function") return output
   try {
     const updated = await review(namespaced, toolCallId, output, isError)
@@ -106,16 +156,21 @@ async function applyOutputReview(review, namespaced, toolCallId, output, isError
  * `isError` so the AI SDK surfaces a `tool-error` (which the model can recover
  * from across steps). Execution is gated through `gate` when supplied.
  */
-function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
+function builtinDefToAiSdkTool(
+  def: ToolDefinition,
+  gate: ToolPermissionGate | null | undefined,
+  timeoutMs: number,
+  reviewToolOutput?: ToolOutputReview
+): AiSdkTool {
   const namespaced = `mcp__${SERVER_NAME}__${def.name}`
   return tool({
     description: def.description ?? "",
-    inputSchema: z.object(def.inputSchema ?? {}),
-    execute: async (args, options) => {
+    inputSchema: z.object((def.inputSchema ?? {}) as z.ZodRawShape),
+    execute: async (args: unknown, options) => {
       const effective = gate
         ? await gate(namespaced, args ?? {}, options?.abortSignal)
         : (args ?? {})
-      let result
+      let result: unknown
       try {
         result = await runBuiltinHandler(def, effective, timeoutMs, options?.abortSignal)
       } catch (err) {
@@ -130,7 +185,7 @@ function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
         const safe = String(assertModelSafeToolOutput(reviewed))
         throw reviewed === msg && safe === msg ? err : new Error(safe)
       }
-      if (result && result.isError) {
+      if (result && (result as { isError?: unknown }).isError) {
         const msg = callToolResultToText(result) || `${def.name} failed`
         const reviewed = await applyOutputReview(
           reviewToolOutput,
@@ -165,7 +220,7 @@ function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
  * same Map claude-host populates for the Anthropic path). Execution is gated.
  */
 function pluginToolToAiSdkTool(
-  manifest,
+  manifest: PluginToolManifestEntry,
   {
     emit,
     sessionId,
@@ -176,13 +231,27 @@ function pluginToolToAiSdkTool(
     sandboxRuntimeRef,
     turnId,
     attemptId,
+  }: {
+    emit: (frame: Record<string, unknown>) => void
+    sessionId: string
+    pendingPluginToolCalls: PendingPluginToolCalls
+    gate: ToolPermissionGate | null | undefined
+    reviewToolOutput?: ToolOutputReview | undefined
+    remoteExecutionContext?: unknown
+    sandboxRuntimeRef?: unknown
+    turnId?: string | undefined
+    attemptId?: string | undefined
   }
-) {
+): AiSdkTool {
   const namespaced = `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${manifest.name}`
   return tool({
     description: manifest.description ?? "",
-    inputSchema: jsonSchema(manifest.jsonSchema ?? { type: "object", properties: {} }),
-    execute: async (args, options) => {
+    inputSchema: jsonSchema(
+      (manifest.jsonSchema ?? { type: "object", properties: {} }) as Parameters<
+        typeof jsonSchema
+      >[0]
+    ),
+    execute: async (args: unknown, options) => {
       const effective = gate
         ? await gate(namespaced, args ?? {}, options?.abortSignal)
         : (args ?? {})
@@ -250,19 +319,6 @@ function pluginToolToAiSdkTool(
  * categories (`sendOptions.builtinTools`) plus any renderer-proxied plugin
  * tools (`sendOptions.pluginTools`). Returns `{}` when nothing is available, so
  * the dispatcher can omit the `tools` option entirely.
- *
- * @param {{
- *   sendOptions: Record<string, any>,
- *   emit: (msg: any) => void,
- *   sessionId: string,
- *   pendingApprovals?: Map<string, { resolve: (r: any) => void }>,
- *   pendingPluginToolCalls?: Map<string, { resolve: (r: any) => void }>,
- *   lspResolver?: unknown,
- *   codeGraphResolver?: unknown,
- *   readTracker?: unknown,
- *   taskStore?: unknown,
- * }} params
- * @returns {Record<string, ReturnType<typeof tool>>}
  */
 export function buildAiSdkTools({
   sendOptions,
@@ -278,14 +334,28 @@ export function buildAiSdkTools({
   taskStore,
   doomGuard: providedDoomGuard,
   reviewToolOutput,
-}) {
+}: {
+  sendOptions: AiSdkToolSendOptions
+  emit: (frame: Record<string, unknown>) => void
+  sessionId: string
+  pendingApprovals?: Map<string, PendingApproval> | undefined
+  pendingPluginToolCalls?: PendingPluginToolCalls | undefined
+  lspResolver?: LazyLspResolver | null | undefined
+  codeGraphResolver?: CodeGraphIndex | null | undefined
+  readTracker?: ReadTracker | null | undefined
+  bgShells?: SessionBgShellRegistry | null | undefined
+  hostRpc?: HostRpcCaller | null | undefined
+  taskStore?: SessionTaskStore | undefined
+  /** A caller-owned guard, so the session can reset it per turn. */
+  doomGuard?: DoomLoopGuard | undefined
+  reviewToolOutput?: ToolOutputReview | undefined
+}): Record<string, AiSdkTool> {
   // An empty `allowedTools` array means "no filtering" on this path. Honor the
   // explicit runtime-wide deny-all contract before collecting any built-in or
   // plugin definitions so Support sessions cannot inherit a tool accidentally.
   if (sendOptions.toolSurface === "none") return {}
 
-  /** @type {Record<string, ReturnType<typeof tool>>} */
-  const tools = {}
+  const tools: Record<string, AiSdkTool> = {}
   // Accept a caller-owned guard so the session can `reset()` it per turn (the
   // guard counts identical-call repetition WITHIN a turn — matching the
   // Anthropic path, which gets a fresh guard per `query()`). Falls back to an
@@ -304,10 +374,10 @@ export function buildAiSdkTools({
   // bridge must honour `disallowedTools` itself — restricted mode (untrusted
   // workspace) and the IM-channel blacklist both arrive through it. Entries
   // may be bare (`bash`) or namespaced (`mcp__cognia-tools__bash`).
-  const disallowed = new Set(
+  const disallowed = new Set<unknown>(
     Array.isArray(sendOptions.disallowedTools) ? sendOptions.disallowedTools : []
   )
-  const isDisallowed = (bareName) =>
+  const isDisallowed = (bareName: string) =>
     disallowed.has(bareName) || disallowed.has(`mcp__${SERVER_NAME}__${bareName}`)
 
   // Allow-list enforcement (parity with the Anthropic path, where the agent
@@ -318,7 +388,7 @@ export function buildAiSdkTools({
   // providers. Deny (`disallowedTools`, checked separately) still wins.
   const allowSet =
     Array.isArray(sendOptions.allowedTools) && sendOptions.allowedTools.length > 0
-      ? new Set(sendOptions.allowedTools)
+      ? new Set<string>(sendOptions.allowedTools as string[])
       : null
 
   // Per-tool execution deadline for read-only built-ins (see
@@ -331,7 +401,9 @@ export function buildAiSdkTools({
 
   for (const def of collectCogniaToolDefs({
     enabled: sendOptions.builtinTools,
-    builtinProcessSandbox: sendOptions.builtinProcessSandbox,
+    // The send spec carries the whole launch policy, a ProcessSandboxScope.
+    builtinProcessSandbox: (sendOptions.builtinProcessSandbox ?? undefined) as
+      ProcessSandboxScope | undefined,
     lspResolver,
     codeGraphResolver,
     readTracker,
@@ -359,13 +431,13 @@ export function buildAiSdkTools({
       builtinDefToAiSdkTool(def, gate, builtinToolTimeoutMs, reviewToolOutput),
       {
         serverName: SERVER_NAME,
-        alwaysLoad: def?._meta?.["anthropic/alwaysLoad"] === true,
+        alwaysLoad: def._meta?.["anthropic/alwaysLoad"] === true,
       }
     )
   }
 
   if (Array.isArray(sendOptions.pluginTools) && pendingPluginToolCalls) {
-    for (const manifest of sendOptions.pluginTools) {
+    for (const manifest of sendOptions.pluginTools as (PluginToolManifestEntry | null)[]) {
       if (!manifest || !manifest.name) continue
       if (
         disallowed.has(manifest.name) ||
@@ -402,9 +474,8 @@ export function buildAiSdkTools({
   // across turns/sessions — built-in registry and pluginTools arrive in
   // registration order, and an unstable order silently breaks provider
   // prompt-cache prefix matching.
-  /** @type {Record<string, ReturnType<typeof tool>>} */
-  const sorted = {}
-  for (const name of Object.keys(tools).sort()) sorted[name] = tools[name]
+  const sorted: Record<string, AiSdkTool> = {}
+  for (const name of Object.keys(tools).sort()) sorted[name] = tools[name]!
   return sorted
 }
 

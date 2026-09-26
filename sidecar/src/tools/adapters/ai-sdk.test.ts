@@ -1,4 +1,3 @@
-// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // Tests for the AI SDK tool bridge: converts built-in tool defs + plugin tool
 // manifests into native AI SDK tools for the non-Anthropic dispatch path.
 
@@ -6,9 +5,35 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { buildAiSdkTools, __testing__ } from "./ai-sdk.ts"
 import { createSessionTaskStore } from "../state/tasks.ts"
+import type { ReadTracker } from "../state/read-tracker.ts"
+
+/** An AI SDK tool as these tests call it: execute without options, toModelOutput with the output alone. */
+interface TestAiTool {
+  description?: string
+  execute(args: unknown, options?: unknown): Promise<unknown>
+  toModelOutput(options: { output: unknown }): { type: string; value: unknown }
+  [field: string]: unknown
+}
+
+/** A captured outbound frame. */
+type Frame = Record<string, unknown>
+
+function build(params: Parameters<typeof buildAiSdkTools>[0]): Record<string, TestAiTool> {
+  return buildAiSdkTools(params) as unknown as Record<string, TestAiTool>
+}
+
+/** `builtinDefToAiSdkTool`, as a test calls the tool it returns. */
+function convert(...args: Parameters<typeof __testing__.builtinDefToAiSdkTool>): TestAiTool {
+  return __testing__.builtinDefToAiSdkTool(...args) as unknown as TestAiTool
+}
+
+/** The MCP result shape the resource tests read back. */
+interface ResourceResult {
+  content: { resource: { text: string; blob: string } }[]
+}
 
 test("buildAiSdkTools registers built-in tools for enabled categories only", () => {
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: { builtinTools: { git: true, process: false } },
     emit: () => {},
     sessionId: "s1",
@@ -20,12 +45,12 @@ test("buildAiSdkTools registers built-in tools for enabled categories only", () 
 })
 
 test("buildAiSdkTools returns no built-in tools when builtinTools is absent", () => {
-  const tools = buildAiSdkTools({ sendOptions: {}, emit: () => {}, sessionId: "s1" })
+  const tools = build({ sendOptions: {}, emit: () => {}, sessionId: "s1" })
   assert.equal(Object.keys(tools).length, 0)
 })
 
 test("buildAiSdkTools exposes no tools when the runtime tool surface is disabled", () => {
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       toolSurface: "none",
       builtinTools: { git: true },
@@ -41,9 +66,9 @@ test("buildAiSdkTools exposes no tools when the runtime tool surface is disabled
 })
 
 test("buildAiSdkTools wires plugin tools that round-trip through the renderer", async () => {
-  const emitted = []
+  const emitted: Frame[] = []
   const pendingPluginToolCalls = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     // This test exercises the plugin round-trip, not the permission gate; the
     // gate is covered separately. bypassPermissions lets execute() proceed
     // without wiring a `pendingApprovals` channel.
@@ -68,7 +93,7 @@ test("buildAiSdkTools wires plugin tools that round-trip through the renderer", 
   assert.ok(tools.my_plugin_tool, "plugin tool registered")
 
   // Kick off execute; it should emit a plugin_tool_exec and await a response.
-  const execPromise = tools.my_plugin_tool.execute({ q: "hi" })
+  const execPromise = tools.my_plugin_tool!.execute({ q: "hi" })
   // Let the microtask register the pending call.
   await Promise.resolve()
   const event = emitted.find((m) => m.type === "plugin_tool_exec")
@@ -89,7 +114,7 @@ test("buildAiSdkTools wires plugin tools that round-trip through the renderer", 
 
 test("AI SDK plugin tools honor the manifest timeout instead of the 120s default", async () => {
   const pendingPluginToolCalls = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       permissionMode: "bypassPermissions",
       pluginTools: [
@@ -108,21 +133,21 @@ test("AI SDK plugin tools honor the manifest timeout instead of the 120s default
   })
 
   const outcome = await Promise.race([
-    tools.short_deadline.execute({}).then(
-      (value) => ({ value }),
-      (error) => ({ error })
+    tools.short_deadline!.execute({}).then(
+      (value: unknown) => ({ value }),
+      (error: unknown) => ({ error })
     ),
     new Promise((resolve) => setTimeout(() => resolve({ stalled: true }), 40)),
   ])
 
-  assert.equal("stalled" in outcome, false, "manifest timeout was ignored")
-  assert.match(String(outcome.error), /timed out after 5ms/)
+  assert.equal("stalled" in (outcome as object), false, "manifest timeout was ignored")
+  assert.match(String((outcome as { error?: unknown }).error), /timed out after 5ms/)
   assert.equal(pendingPluginToolCalls.size, 0)
 })
 
 test("plugin tool image results pass through as content blocks the model can see", async () => {
   const pendingPluginToolCalls = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       permissionMode: "bypassPermissions",
       pluginTools: [
@@ -133,9 +158,9 @@ test("plugin tool image results pass through as content blocks the model can see
     sessionId: "s1",
     pendingPluginToolCalls,
   })
-  const execPromise = tools.take_screenshot.execute({})
+  const execPromise = tools.take_screenshot!.execute({})
   await Promise.resolve()
-  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]!
   const callToolResult = {
     content: [
       { type: "text", text: "shot.png (12 bytes)" },
@@ -147,7 +172,7 @@ test("plugin tool image results pass through as content blocks the model can see
   assert.deepEqual(await execPromise, callToolResult)
 
   // …and toModelOutput maps it to a multimodal part, not a base64 string.
-  const modelOutput = tools.take_screenshot.toModelOutput({ output: callToolResult })
+  const modelOutput = tools.take_screenshot!.toModelOutput({ output: callToolResult })
   assert.equal(modelOutput.type, "content")
   assert.deepEqual(modelOutput.value, [
     { type: "text", text: "shot.png (12 bytes)" },
@@ -157,7 +182,7 @@ test("plugin tool image results pass through as content blocks the model can see
 
 test("plugin tool audio-only results pass through as file content the model can see", async () => {
   const pendingPluginToolCalls = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       permissionMode: "bypassPermissions",
       pluginTools: [
@@ -168,16 +193,16 @@ test("plugin tool audio-only results pass through as file content the model can 
     sessionId: "s1",
     pendingPluginToolCalls,
   })
-  const execPromise = tools.record_audio.execute({})
+  const execPromise = tools.record_audio!.execute({})
   await Promise.resolve()
-  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]!
   const callToolResult = {
     content: [{ type: "audio", data: "UklGRg==", mimeType: "audio/wav" }],
   }
   pending.resolve({ result: callToolResult })
 
   assert.deepEqual(await execPromise, callToolResult)
-  assert.deepEqual(tools.record_audio.toModelOutput({ output: callToolResult }), {
+  assert.deepEqual(tools.record_audio!.toModelOutput({ output: callToolResult }), {
     type: "content",
     value: [{ type: "file", mediaType: "audio/wav", data: { type: "data", data: "UklGRg==" } }],
   })
@@ -185,7 +210,7 @@ test("plugin tool audio-only results pass through as file content the model can 
 
 test("plugin tool resource-only results pass through with embedded text and blob content", async () => {
   const pendingPluginToolCalls = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       permissionMode: "bypassPermissions",
       pluginTools: [
@@ -196,9 +221,9 @@ test("plugin tool resource-only results pass through with embedded text and blob
     sessionId: "s1",
     pendingPluginToolCalls,
   })
-  const execPromise = tools.read_resource.execute({})
+  const execPromise = tools.read_resource!.execute({})
   await Promise.resolve()
-  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]!
   const callToolResult = {
     content: [
       {
@@ -219,7 +244,7 @@ test("plugin tool resource-only results pass through with embedded text and blob
   pending.resolve({ result: callToolResult })
 
   assert.deepEqual(await execPromise, callToolResult)
-  assert.deepEqual(tools.read_resource.toModelOutput({ output: callToolResult }), {
+  assert.deepEqual(tools.read_resource!.toModelOutput({ output: callToolResult }), {
     type: "content",
     value: [
       { type: "text", text: "resource text" },
@@ -235,7 +260,7 @@ test("plugin tool resource-only results pass through with embedded text and blob
 
 test("plugin rich results are redacted before model output when they contain PII", async () => {
   const pendingPluginToolCalls = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       permissionMode: "bypassPermissions",
       pluginTools: [
@@ -246,9 +271,9 @@ test("plugin rich results are redacted before model output when they contain PII
     sessionId: "s1",
     pendingPluginToolCalls,
   })
-  const execPromise = tools.read_resource.execute({})
+  const execPromise = tools.read_resource!.execute({})
   await Promise.resolve()
-  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]!
   pending.resolve({
     result: {
       content: [
@@ -264,14 +289,14 @@ test("plugin rich results are redacted before model output when they contain PII
     },
   })
 
-  const result = await execPromise
-  assert.equal(result.content[0].resource.text, "Contact <EMAIL_001>")
+  const result = (await execPromise) as ResourceResult
+  assert.equal(result.content[0]!.resource.text, "Contact <EMAIL_001>")
   assert.doesNotMatch(JSON.stringify(result), /alice@example\.com/)
 })
 
 test("textual resource blobs are decoded and redacted before model output", async () => {
   const pendingPluginToolCalls = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       permissionMode: "bypassPermissions",
       pluginTools: [
@@ -282,9 +307,9 @@ test("textual resource blobs are decoded and redacted before model output", asyn
     sessionId: "s1",
     pendingPluginToolCalls,
   })
-  const execPromise = tools.read_resource.execute({})
+  const execPromise = tools.read_resource!.execute({})
   await Promise.resolve()
-  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]!
   pending.resolve({
     result: {
       content: [
@@ -300,15 +325,15 @@ test("textual resource blobs are decoded and redacted before model output", asyn
     },
   })
 
-  const result = await execPromise
-  const decoded = Buffer.from(result.content[0].resource.blob, "base64").toString("utf8")
+  const result = (await execPromise) as ResourceResult
+  const decoded = Buffer.from(result.content[0]!.resource.blob, "base64").toString("utf8")
   assert.equal(decoded, "Contact <EMAIL_001>")
   assert.doesNotMatch(decoded, /alice@example\.com/)
 })
 
 test("plugin tool results with no image still flatten to JSON text", async () => {
   const pendingPluginToolCalls = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       permissionMode: "bypassPermissions",
       pluginTools: [
@@ -319,16 +344,16 @@ test("plugin tool results with no image still flatten to JSON text", async () =>
     sessionId: "s1",
     pendingPluginToolCalls,
   })
-  const execPromise = tools.plain.execute({})
+  const execPromise = tools.plain!.execute({})
   await Promise.resolve()
-  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]!
   pending.resolve({ result: { ok: true, count: 2 } })
   assert.equal(await execPromise, '{"ok":true,"count":2}')
 })
 
 test("plugin tool execute throws on an error response", async () => {
   const pendingPluginToolCalls = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       permissionMode: "bypassPermissions",
       pluginTools: [
@@ -339,16 +364,16 @@ test("plugin tool execute throws on an error response", async () => {
     sessionId: "s1",
     pendingPluginToolCalls,
   })
-  const execPromise = tools.boom.execute({})
+  const execPromise = tools.boom!.execute({})
   await Promise.resolve()
-  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]!
   pending.resolve({ error: "plugin failed" })
   await assert.rejects(execPromise, /plugin failed/)
 })
 
 test("plugin tool errors are redacted before they reach the model", async () => {
   const pendingPluginToolCalls = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       permissionMode: "bypassPermissions",
       pluginTools: [
@@ -359,12 +384,12 @@ test("plugin tool errors are redacted before they reach the model", async () => 
     sessionId: "s1",
     pendingPluginToolCalls,
   })
-  const execPromise = tools.boom.execute({})
+  const execPromise = tools.boom!.execute({})
   await Promise.resolve()
-  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]!
   pending.resolve({ error: "Contact alice@example.com" })
 
-  await assert.rejects(execPromise, (error) => {
+  await assert.rejects(execPromise, (error: Error) => {
     assert.match(error.message, /Contact <EMAIL_001>/)
     assert.doesNotMatch(error.message, /alice@example\.com/)
     return true
@@ -372,7 +397,7 @@ test("plugin tool errors are redacted before they reach the model", async () => 
 })
 
 test("buildAiSdkTools returns keys in sorted order regardless of registration order", () => {
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       builtinTools: { git: true },
       pluginTools: [
@@ -395,15 +420,15 @@ test("buildAiSdkTools threads a caller-provided doomGuard into the gate (so the 
   // session owns the doom-loop guard and resets it per turn. This verifies the
   // provided guard is the one the gate actually consults (the reset hook is
   // pointless if buildAiSdkTools silently makes its own).
-  const checked = []
+  const checked: Frame[] = []
   const spyGuard = {
-    check: (name, input) => {
+    check: (name: string, input: unknown) => {
       checked.push({ name, input })
       return null // no doom — let the call proceed
     },
     reset: () => {},
   }
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       builtinTools: { git: true },
       permissionRuleset: { "*": "allow" },
@@ -414,7 +439,7 @@ test("buildAiSdkTools threads a caller-provided doomGuard into the gate (so the 
     doomGuard: spyGuard,
   })
   try {
-    await tools.git_status.execute({ cwd: "/tmp" })
+    await tools.git_status!.execute({ cwd: "/tmp" })
   } catch {
     // The handler may fail to shell out in CI; the doom guard is consulted
     // by the gate BEFORE execution, which is all this test asserts.
@@ -427,7 +452,7 @@ test("buildAiSdkTools threads a caller-provided doomGuard into the gate (so the 
 
 test("buildAiSdkTools gates a built-in tool through the permission gate (deny blocks handler)", async () => {
   const pendingApprovals = new Map()
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       builtinTools: { git: true },
       permissionRuleset: { "*": "deny" },
@@ -437,11 +462,11 @@ test("buildAiSdkTools gates a built-in tool through the permission gate (deny bl
     pendingApprovals,
   })
   // git_status execute should be blocked by the deny ruleset before running.
-  await assert.rejects(tools.git_status.execute({ cwd: "/tmp" }), /denied/)
+  await assert.rejects(tools.git_status!.execute({ cwd: "/tmp" }), /denied/)
 })
 
 test("coreFiles tools are registered on the ai-sdk path when enabled + tracked", () => {
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: { builtinTools: { coreFiles: true }, cwd: "." },
     emit: () => {},
     sessionId: "s1",
@@ -471,20 +496,20 @@ test("coreFiles tools are registered on the ai-sdk path when enabled + tracked",
 })
 
 test("AI-SDK monitor tools reach host_rpc with the active session owner", async () => {
-  const calls = []
-  const tools = buildAiSdkTools({
+  const calls: Frame[] = []
+  const tools = build({
     sendOptions: { builtinTools: { coreFiles: true }, cwd: "." },
     emit: () => {},
     sessionId: "session-monitor",
     hostRpc: {
-      async call(method, params) {
+      async call(method: string, params: unknown) {
         calls.push({ method, params })
         return { monitors: [{ id: "monitor-1", status: "waiting" }] }
       },
     },
   })
 
-  const result = JSON.parse(await tools.monitor_list.execute({}))
+  const result = JSON.parse((await tools.monitor_list!.execute({})) as string)
 
   assert.deepEqual(result.monitors, [{ id: "monitor-1", status: "waiting" }])
   assert.deepEqual(calls, [
@@ -504,39 +529,43 @@ test("structured tasks persist when the ai-sdk tool map is rebuilt between turns
     readTracker: { record() {}, hasRead: () => false, assertReadBefore() {}, clear() {} },
     taskStore,
   }
-  const firstTurn = buildAiSdkTools(shared)
+  const firstTurn = build(shared)
   const created = JSON.parse(
-    await firstTurn.TaskCreate.execute({ subject: "Research", description: "Map gaps" })
+    (await firstTurn.TaskCreate!.execute({
+      subject: "Research",
+      description: "Map gaps",
+    })) as string
   )
   assert.equal(created.task.id, "1")
 
-  const secondTurn = buildAiSdkTools(shared)
-  const listed = JSON.parse(await secondTurn.TaskList.execute({}))
+  const secondTurn = build(shared)
+  const listed = JSON.parse((await secondTurn.TaskList!.execute({})) as string)
   assert.deepEqual(
-    listed.tasks.map((task) => task.subject),
+    listed.tasks.map((task: { subject: string }) => task.subject),
     ["Research"]
   )
 })
 
 test("coreFiles tools are absent without a readTracker or when category disabled", () => {
-  const noTracker = buildAiSdkTools({
+  const noTracker = build({
     sendOptions: { builtinTools: { coreFiles: true }, cwd: "." },
     emit: () => {},
     sessionId: "s1",
   })
   assert.equal(noTracker.grep, undefined)
-  const disabled = buildAiSdkTools({
+  const disabled = build({
     sendOptions: { builtinTools: { coreFiles: false }, cwd: "." },
     emit: () => {},
     sessionId: "s1",
-    readTracker: { record() {} },
+    // Deliberately partial: the category is off, so the tracker is never read.
+    readTracker: { record() {} } as unknown as ReadTracker,
   })
   assert.equal(disabled.grep, undefined)
 })
 
 test("disallowedTools filters built-in tools by bare and namespaced names", () => {
   const tracker = { record() {}, hasRead: () => false, assertReadBefore() {}, clear() {} }
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       builtinTools: { coreFiles: true, git: true },
       cwd: ".",
@@ -554,7 +583,7 @@ test("disallowedTools filters built-in tools by bare and namespaced names", () =
 })
 
 test("disallowedTools filters plugin tools too", () => {
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       pluginTools: [
         { name: "keep_me", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
@@ -571,7 +600,7 @@ test("disallowedTools filters plugin tools too", () => {
 })
 
 test("allowedTools whitelist: only listed tools are exposed (bare + namespaced match)", () => {
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       builtinTools: { git: true },
       allowedTools: ["git_status", "mcp__cognia-tools__git_diff"],
@@ -586,7 +615,7 @@ test("allowedTools whitelist: only listed tools are exposed (bare + namespaced m
 
 test("allowedTools whitelist: Claude-Code core names map to cognia coreFiles names", () => {
   const tracker = { record() {}, hasRead: () => false, assertReadBefore() {}, clear() {} }
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       builtinTools: { coreFiles: true },
       cwd: ".",
@@ -605,7 +634,7 @@ test("allowedTools whitelist: Claude-Code core names map to cognia coreFiles nam
 })
 
 test("allowedTools whitelist: filters plugin tools by bare and namespaced name", () => {
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       pluginTools: [
         { name: "keep_me", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
@@ -622,13 +651,13 @@ test("allowedTools whitelist: filters plugin tools by bare and namespaced name",
 })
 
 test("allowedTools whitelist: absent or empty → no filtering (every enabled tool exposed)", () => {
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: { builtinTools: { git: true } }, // no allowedTools
     emit: () => {},
     sessionId: "s1",
   })
   assert.ok(tools.git_status && tools.git_diff && tools.git_log, "all git tools present")
-  const empty = buildAiSdkTools({
+  const empty = build({
     sendOptions: { builtinTools: { git: true }, allowedTools: [] },
     emit: () => {},
     sessionId: "s1",
@@ -637,7 +666,7 @@ test("allowedTools whitelist: absent or empty → no filtering (every enabled to
 })
 
 test("allowedTools + disallowedTools: deny still wins over an allow entry", () => {
-  const tools = buildAiSdkTools({
+  const tools = build({
     sendOptions: {
       builtinTools: { git: true },
       allowedTools: ["git_status", "git_diff"],
@@ -651,21 +680,28 @@ test("allowedTools + disallowedTools: deny still wins over an allow entry", () =
 })
 
 test("builtinDefToAiSdkTool returns joined text and throws on isError", async () => {
-  const { builtinDefToAiSdkTool } = __testing__
-  const okTool = builtinDefToAiSdkTool({
-    name: "ok",
-    description: "",
-    inputSchema: {},
-    handler: async () => ({ content: [{ type: "text", text: "done" }] }),
-  })
+  const okTool = convert(
+    {
+      name: "ok",
+      description: "",
+      inputSchema: {},
+      handler: async () => ({ content: [{ type: "text", text: "done" }] }),
+    },
+    null,
+    0
+  )
   assert.equal(await okTool.execute({}), "done")
 
-  const errTool = builtinDefToAiSdkTool({
-    name: "err",
-    description: "",
-    inputSchema: {},
-    handler: async () => ({ content: [{ type: "text", text: "nope" }], isError: true }),
-  })
+  const errTool = convert(
+    {
+      name: "err",
+      description: "",
+      inputSchema: {},
+      handler: async () => ({ content: [{ type: "text", text: "nope" }], isError: true }),
+    },
+    null,
+    0
+  )
   await assert.rejects(errTool.execute({}), /nope/)
 })
 
@@ -706,8 +742,7 @@ test("runBuiltinHandler with a 0 / non-finite budget disables the net", async ()
 })
 
 test("builtinDefToAiSdkTool surfaces a read-only timeout as a thrown execute (→ tool-error)", async () => {
-  const { builtinDefToAiSdkTool } = __testing__
-  const t = builtinDefToAiSdkTool(
+  const t = convert(
     {
       name: "content_search",
       description: "",
@@ -731,13 +766,18 @@ test("execute-layer review rewrites the output the MODEL receives", async () => 
     inputSchema: {},
     handler: async () => ({ content: [{ type: "text", text: "original" }] }),
   }
-  const review = async (toolName, _toolCallId, output, isError) => {
+  const review = async (
+    toolName: string,
+    _toolCallId: string | undefined,
+    output: unknown,
+    isError: boolean
+  ) => {
     assert.equal(toolName, "mcp__cognia-tools__echo_x")
     assert.equal(output, "original")
     assert.equal(isError, false)
     return "REWRITTEN"
   }
-  const t = __testing__.builtinDefToAiSdkTool(def, null, 0, review)
+  const t = convert(def, null, 0, review)
   const out = await t.execute({}, { toolCallId: "tc1" })
   assert.equal(out, "REWRITTEN")
 })
@@ -749,7 +789,7 @@ test("execute-layer review can rewrite an error message; undefined passes throug
     inputSchema: {},
     handler: async () => ({ isError: true, content: [{ type: "text", text: "raw failure" }] }),
   }
-  const t1 = __testing__.builtinDefToAiSdkTool(failing, null, 0, async () => "cleaned failure")
+  const t1 = convert(failing, null, 0, async () => "cleaned failure")
   await assert.rejects(() => t1.execute({}, {}), /cleaned failure/)
   const ok = {
     name: "fine",
@@ -757,7 +797,7 @@ test("execute-layer review can rewrite an error message; undefined passes throug
     inputSchema: {},
     handler: async () => ({ content: [{ type: "text", text: "kept" }] }),
   }
-  const t2 = __testing__.builtinDefToAiSdkTool(ok, null, 0, async () => undefined)
+  const t2 = convert(ok, null, 0, async () => undefined)
   assert.equal(await t2.execute({}, {}), "kept")
 })
 
@@ -781,10 +821,10 @@ test("built-in thrown and isError failures are redacted before they reach the mo
   }
 
   for (const definition of [thrown, errorResult]) {
-    const subject = __testing__.builtinDefToAiSdkTool(definition, null, 0)
+    const subject = convert(definition, null, 0)
     await assert.rejects(
       () => subject.execute({}, {}),
-      (error) => {
+      (error: Error) => {
         assert.match(error.message, /Contact <EMAIL_001>/)
         assert.doesNotMatch(error.message, /@(example\.com)/)
         return true
@@ -807,11 +847,11 @@ test("JSON-string tool results remain valid while nested PII is redacted", async
       ],
     }),
   }
-  const subject = __testing__.builtinDefToAiSdkTool(definition, null, 0)
+  const subject = convert(definition, null, 0)
 
   const output = await subject.execute({}, {})
 
-  assert.deepEqual(JSON.parse(output), {
+  assert.deepEqual(JSON.parse(output as string), {
     createdAt: 1_754_000_000_000,
     contact: "<EMAIL_001>",
   })
