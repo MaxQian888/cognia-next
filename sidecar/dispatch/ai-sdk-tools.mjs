@@ -24,17 +24,17 @@ import { PLUGIN_TOOLS_SERVER_NAME } from "../src/policy/tool-catalog/names.ts"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   toolBudgetMessage,
-} from "../builtin-tools/read-only-timeout.mjs"
+} from "../src/tools/middleware/read-only-timeout.ts"
 
 import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { createToolPermissionGate } from "../src/policy/permission/ai-sdk-gate.ts"
 import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { assertModelSafeToolOutput } from "../src/policy/pii/tool-output.ts"
-import { markAiSdkToolSource } from "./ai-sdk-tool-search.mjs"
+import { markAiSdkToolSource } from "../src/tools/adapters/ai-sdk-tool-search.ts"
 
 // Per-tool execution deadline for READ-ONLY built-ins on the ai-sdk path. The
 // constant, the read-only gate, and the recoverable message all live in
-// `../builtin-tools/read-only-timeout.mjs` so this channel and the Anthropic
+// `../src/tools/middleware/read-only-timeout.ts` so this channel and the Anthropic
 // channel (`builtin-tools/index.mjs`) never drift. Here we bound the handler at
 // EXECUTE time and REJECT on timeout so the AI SDK surfaces a `tool-error`; the
 // Anthropic side wraps at registration time and returns an `isError` result.

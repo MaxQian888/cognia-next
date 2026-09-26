@@ -30,6 +30,7 @@ import path from "node:path"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { asSchema } from "ai"
+import type { ToolSet } from "ai"
 
 import data from "../../../lib/settings/builtin-tools-data.json" with { type: "json" }
 import { stableStringify } from "../shared/stable-stringify.ts"
@@ -39,13 +40,13 @@ import {
   buildCogniaToolsServer,
   collectCogniaToolDefs,
 } from "../../builtin-tools/index.mjs"
-import { wrapDefsWithReadOnlyTimeout } from "../../builtin-tools/read-only-timeout.mjs"
+import { wrapDefsWithReadOnlyTimeout } from "./middleware/read-only-timeout.ts"
 import { createReadTracker } from "../../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../../builtin-tools/core/bash-sessions.mjs"
 import { createSessionTaskStore } from "../../builtin-tools/core/tasks.mjs"
 import { probeSandbox } from "../../builtin-tools/run-code/supervisor.mjs"
 import { buildAiSdkTools, __testing__ as aiSdkTools } from "../../dispatch/ai-sdk-tools.mjs"
-import { createAiSdkToolSearchController } from "../../dispatch/ai-sdk-tool-search.mjs"
+import { createAiSdkToolSearchController } from "./adapters/ai-sdk-tool-search.ts"
 import { buildToolSurface } from "../../cognia-tool-bridge.mjs"
 
 // ---- the rails under test -----------------------------------------------------
@@ -92,9 +93,7 @@ const rails = {
     timeoutMs: number,
     readOnly: ReadonlySet<string>
   ) => ToolDef[],
-  buildAiSdk: buildAiSdkTools as unknown as (
-    params: Record<string, unknown>
-  ) => Record<string, ExecutableTool>,
+  buildAiSdk: buildAiSdkTools as unknown as (params: Record<string, unknown>) => ToolSet,
   toAiSdkTool: aiSdkTools.builtinDefToAiSdkTool as unknown as (
     def: ToolDef,
     gate: null,
@@ -236,7 +235,7 @@ type PendingApprovals = Map<string, { input?: unknown; resolve(answer: unknown):
 /** Approvals the renderer was asked for, answered "allow" as the host would. */
 const approvalsAsked: string[] = []
 
-function buildAiSdk(sendOptions: Record<string, unknown>): Record<string, ExecutableTool> {
+function buildAiSdk(sendOptions: Record<string, unknown>): ToolSet {
   const pendingApprovals: PendingApprovals = new Map()
   const emit = (frame: { type?: string; toolName?: string }) => {
     if (frame.type !== "permission_request") return
@@ -262,11 +261,11 @@ async function aiSdkSurface(label: string, sendOptions: Record<string, unknown>)
   const tools = buildAiSdk(sendOptions)
   const lines = [`## ai-sdk · ${label}`]
   for (const [name, tool] of Object.entries(tools)) {
-    const schema = await asSchema(tool.inputSchema as Parameters<typeof asSchema>[0]).jsonSchema
+    const schema = await asSchema(tool.inputSchema).jsonSchema
+    // Every rail tool carries a plain string description.
+    const description = typeof tool.description === "string" ? tool.description : ""
     lines.push(
-      [name, `desc=${sha(tool.description ?? "")}`, `schema=${sha(stableStringify(schema))}`].join(
-        " "
-      )
+      [name, `desc=${sha(description)}`, `schema=${sha(stableStringify(schema))}`].join(" ")
     )
   }
   // Which tools stay resident when ToolSearch defers the rest: the `alwaysLoad`
@@ -356,11 +355,13 @@ async function aiSdkCall(
   args: Record<string, unknown>
 ): Promise<string[]> {
   const tool = buildAiSdk({ builtinTools: { coreFiles: true }, ...sendOptions })[name]
-  assert.ok(tool, `ai-sdk rail has no ${name}`)
+  assert.ok(tool?.execute, `ai-sdk rail has no executable ${name}`)
+  // The rail's tools read only the call id and the abort signal.
+  const execute = tool.execute as (args: unknown, options: unknown) => Promise<unknown>
   approvalsAsked.length = 0
   let outcome: string
   try {
-    const output = await tool.execute(args, {
+    const output = await execute(args, {
       toolCallId: "pins-call",
       messages: [],
       abortSignal: new AbortController().signal,

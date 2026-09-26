@@ -40,12 +40,12 @@ import { assertToolCallWithinRoots } from "../src/policy/confinement/enforce.ts"
 import { assertModelSafeToolOutput } from "../src/policy/pii/tool-output.ts"
 import { toolError } from "../src/tools/kernel/result.ts"
 import { withProcessSandbox } from "../src/platform/process/exec.ts"
-import { parseToolArgs, toolInputJsonSchema } from "./tool-args.mjs"
+import { parseToolArgs, toolInputJsonSchema } from "../src/tools/kernel/args.ts"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   wrapDefsWithReadOnlyTimeout,
-} from "./read-only-timeout.mjs"
-import { wrapDefsWithResultCap } from "./result-cap.mjs"
+} from "../src/tools/middleware/read-only-timeout.ts"
+import { wrapDefsWithResultCap } from "../src/tools/middleware/result-cap.ts"
 
 /** @type {Record<string, ReadonlyArray<unknown>>} */
 const TOOLS_BY_CATEGORY = {
@@ -358,7 +358,7 @@ export function buildCogniaToolsServer({
   })
   if (tools.length === 0) return null
   // Per-tool execution deadline for READ-ONLY built-ins (see
-  // `read-only-timeout.mjs`). The Anthropic SDK calls each tool's handler
+  // `src/tools/middleware/read-only-timeout.ts`). The Anthropic SDK calls each tool's handler
   // itself, so we wrap the handler at registration time — mirroring the
   // execute-time net the ai-sdk bridge applies (`dispatch/ai-sdk-tools.mjs`).
   // Honour an explicit override (incl. `0` to disable); default the safety net

@@ -1332,7 +1332,8 @@ export function dispatchAiSdk({
           // owns. The controller persists for this sidecar session, retaining
           // discovered tools across manual-loop legs and user turns.
           if (agentScopedSendOptions.toolSearchEnabled === true) {
-            const { createAiSdkToolSearchController } = await import("./ai-sdk-tool-search.mjs")
+            const { createAiSdkToolSearchController } =
+              await import("../src/tools/adapters/ai-sdk-tool-search.ts")
             toolSearchController = createAiSdkToolSearchController({
               tools: toolsCache,
               sendOptions: agentScopedSendOptions,

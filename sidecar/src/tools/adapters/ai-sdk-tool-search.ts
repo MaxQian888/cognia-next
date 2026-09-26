@@ -8,33 +8,58 @@
 // permission-gated tool map, so discovery cannot reintroduce denied tools.
 
 import { tool } from "ai"
+import type { ToolSet } from "ai"
 import { z } from "zod"
-import { modelToolName, restoreToolName } from "../src/policy/tool-catalog/model-names.ts"
+import { modelToolName, restoreToolName } from "../../policy/tool-catalog/model-names.ts"
 
 export const AI_SDK_TOOL_SEARCH_NAME = "ToolSearch"
 
-/** @type {WeakMap<object, { serverName?: string, alwaysLoad?: boolean }>} */
-const TOOL_SOURCE = new WeakMap()
+/** Where one AI SDK tool came from, for deciding whether it stays resident. */
+export interface AiSdkToolSource {
+  serverName?: string | undefined
+  alwaysLoad?: boolean | undefined
+}
+
+/** The send options the controller reads. */
+export interface ToolSearchSendOptions {
+  toolSearchEnabled?: unknown
+  alwaysLoadServers?: unknown
+  alwaysLoadTools?: unknown
+}
+
+export interface AiSdkToolSearchController {
+  /** Every tool plus ToolSearch, in sorted-key order. */
+  tools: ToolSet
+  /** ToolSearch, the resident tools, and every tool it has activated so far. */
+  activeToolNames(): string[]
+  prepareStep(): { activeTools: string[] }
+}
+
+const TOOL_SOURCE = new WeakMap<object, AiSdkToolSource>()
 
 /** Attach non-serializing discovery metadata to one AI SDK tool object. */
-export function markAiSdkToolSource(aiTool, source) {
+export function markAiSdkToolSource<T>(aiTool: T, source: AiSdkToolSource): T {
   if (aiTool && (typeof aiTool === "object" || typeof aiTool === "function")) {
     TOOL_SOURCE.set(aiTool, { ...source })
   }
   return aiTool
 }
 
-function inferredServerName(toolName) {
+function inferredServerName(toolName: string): string | undefined {
   const match = /^mcp__(.+?)__/.exec(toolName)
   return match?.[1]
 }
 
-function configuredToolMatches(configured, name, source) {
+function configuredToolMatches(
+  configured: ReadonlySet<string>,
+  name: string,
+  source: AiSdkToolSource | undefined
+): boolean {
   if (configured.has(name)) return true
   return source?.serverName ? configured.has(`mcp__${source.serverName}__${name}`) : false
 }
 
-function scoreCandidate(name, description, query) {
+function scoreCandidate(name: string, description: unknown, query: string): number {
   const normalized = query.trim().toLowerCase()
   if (!normalized) return 0
   const lowerName = name.toLowerCase()
@@ -49,7 +74,11 @@ function scoreCandidate(name, description, query) {
   return hits.length * 20 + nameHits * 10 + (hits.length === terms.length ? 100 : 0)
 }
 
-function searchCandidates(tools, query, limit) {
+function searchCandidates(
+  tools: ToolSet,
+  query: string,
+  limit: number
+): { name: string; description: string; score: number }[] {
   return Object.entries(tools)
     .filter(([name]) => name !== AI_SDK_TOOL_SEARCH_NAME)
     .map(([name, value]) => ({
@@ -63,41 +92,41 @@ function searchCandidates(tools, query, limit) {
 }
 
 /**
- * Build one session-scoped ToolSearch controller.
- *
- * @param {{ tools: Record<string, any>, sendOptions?: Record<string, any> }} options
- * @returns {null | {
- *   tools: Record<string, any>,
- *   prepareStep: () => { activeTools: string[] },
- *   activeToolNames: () => string[],
- * }}
+ * Build one session-scoped ToolSearch controller, or null when the send has
+ * not enabled deferred tool loading.
  */
 export function createAiSdkToolSearchController({
   tools,
   sendOptions = {},
   toolNameAliases = undefined,
-}) {
+}: {
+  tools?: ToolSet | null | undefined
+  sendOptions?: ToolSearchSendOptions
+  /** Model-facing name → cognia name, for tools renamed for the provider. */
+  toolNameAliases?: ReadonlyMap<string, string> | null | undefined
+}): AiSdkToolSearchController | null {
   if (sendOptions.toolSearchEnabled !== true) return null
   // Map keys are the provider-safe names the model will call; `alwaysLoadTools`
   // and `select:` requests may still use the cognia name they were written with.
-  const aliases = toolNameAliases instanceof Map ? toolNameAliases : new Map()
+  const aliases: ReadonlyMap<string, string> =
+    toolNameAliases instanceof Map ? toolNameAliases : new Map()
 
-  const available = { ...(tools ?? {}) }
+  const available: ToolSet = { ...(tools ?? {}) }
   // ToolSearch is bridge infrastructure and intentionally replaces a same-name
   // contributed tool. The name is reserved by the Agent runtime when deferred
   // loading is enabled, matching Claude Code's canonical discovery surface.
   delete available[AI_SDK_TOOL_SEARCH_NAME]
   const availableNames = Object.keys(available).sort()
-  const alwaysLoadServers = new Set(
+  const alwaysLoadServers = new Set<string>(
     Array.isArray(sendOptions.alwaysLoadServers) ? sendOptions.alwaysLoadServers : []
   )
-  const alwaysLoadTools = new Set(
+  const alwaysLoadTools = new Set<string>(
     Array.isArray(sendOptions.alwaysLoadTools) ? sendOptions.alwaysLoadTools : []
   )
   const active = new Set([AI_SDK_TOOL_SEARCH_NAME])
 
   for (const name of availableNames) {
-    const value = available[name]
+    const value = available[name]!
     const source = TOOL_SOURCE.get(value) ?? { serverName: inferredServerName(name) }
     if (
       source.alwaysLoad === true ||
@@ -127,8 +156,8 @@ export function createAiSdkToolSearchController({
     }),
     execute: async ({ query, limit = 5 }) => {
       const exact = /^select\s*:/i.test(query)
-      let matches
-      let missing = []
+      let matches: { name: string; description: string }[]
+      let missing: string[] = []
       if (exact) {
         const requested = [
           ...new Set(

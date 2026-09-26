@@ -1,12 +1,19 @@
 import { z } from "zod"
 
+/** A JSON Schema object, as MCP `tools/list` carries it. */
+export type JsonSchemaObject = Record<string, unknown> & { type: "object" }
+
+export type ParsedToolArgs = { ok: true; value: unknown } | { ok: false; message: string }
+
+type ZodInput = { safeParse?: unknown }
+
 /**
  * The one place a builtin tool's zod raw shape is turned into JSON Schema, and
  * the one place raw caller arguments are validated against it.
  *
- * Lives under `builtin-tools/` rather than beside its first caller because it
- * has three of them now — the MCP bridge (`cognia-tool-bridge.mjs`), the
- * `run_code` broker (`builtin-tools/index.mjs`) — and each rail that grew its
+ * Lives in the tool kernel rather than beside its first caller because it
+ * has several — the MCP bridge (`cognia-tool-bridge.mjs`), the `run_code`
+ * broker (`applyToolPresentation`) — and each rail that grew its
  * own copy of "just call the handler" reintroduced the same defect: every
  * `.default()`, `.min()`, `.max()` and `.enum()` silently inert. Keeping the
  * conversion and the parse together also keeps the schema the model is SHOWN
@@ -19,16 +26,20 @@ import { z } from "zod"
  * external agent sees is derived from the SAME definition the built-in backend
  * validates against rather than a hand-maintained copy.
  */
-export function toolInputJsonSchema(inputSchema) {
+export function toolInputJsonSchema(inputSchema: unknown): JsonSchemaObject {
   if (!inputSchema || typeof inputSchema !== "object") {
     return { type: "object", properties: {} }
   }
   try {
-    const object = typeof inputSchema.safeParse === "function" ? inputSchema : z.object(inputSchema)
-    const schema = z.toJSONSchema(object, { io: "input", unrepresentable: "any" })
+    const object =
+      typeof (inputSchema as ZodInput).safeParse === "function"
+        ? (inputSchema as z.ZodType)
+        : z.object(inputSchema as z.ZodRawShape)
+    const schema = z.toJSONSchema(object, { io: "input", unrepresentable: "any" }) as
+      Record<string, unknown> | null | undefined
     // MCP requires an object schema at the top level.
     if (!schema || schema.type !== "object") return { type: "object", properties: {} }
-    return schema
+    return schema as JsonSchemaObject
   } catch {
     return { type: "object", properties: {} }
   }
@@ -48,15 +59,16 @@ export function toolInputJsonSchema(inputSchema) {
  *
  * Fails OPEN on an unrepresentable schema (same posture as
  * `toolInputJsonSchema`) so a conversion quirk cannot brick a working tool.
- *
- * @returns {{ ok: true, value: unknown } | { ok: false, message: string }}
  */
-export function parseToolArgs(inputSchema, args) {
+export function parseToolArgs(inputSchema: unknown, args: unknown): ParsedToolArgs {
   const input = args ?? {}
   if (!inputSchema || typeof inputSchema !== "object") return { ok: true, value: input }
-  let object
+  let object: z.ZodType
   try {
-    object = typeof inputSchema.safeParse === "function" ? inputSchema : z.object(inputSchema)
+    object =
+      typeof (inputSchema as ZodInput).safeParse === "function"
+        ? (inputSchema as z.ZodType)
+        : z.object(inputSchema as z.ZodRawShape)
   } catch {
     return { ok: true, value: input }
   }

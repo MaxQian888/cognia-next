@@ -34,9 +34,9 @@ import { MONITOR_TOOL_NAMES } from "./builtin-tools/core/monitor.mjs"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   wrapDefsWithReadOnlyTimeout,
-} from "./builtin-tools/read-only-timeout.mjs"
-import { wrapDefsWithResultCap } from "./builtin-tools/result-cap.mjs"
-import { parseToolArgs, toolInputJsonSchema } from "./builtin-tools/tool-args.mjs"
+} from "./src/tools/middleware/read-only-timeout.ts"
+import { wrapDefsWithResultCap } from "./src/tools/middleware/result-cap.ts"
+import { parseToolArgs, toolInputJsonSchema } from "./src/tools/kernel/args.ts"
 import { makeLazyLspResolver } from "./src/services/lsp/lazy-resolver.ts"
 import { makeLazyCodeGraphResolver } from "./src/services/code-graph/lazy-resolver.ts"
 

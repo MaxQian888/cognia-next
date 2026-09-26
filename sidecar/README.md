@@ -134,6 +134,11 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/code/*` (engine, `schema.sql`, `grammars/`, `languages/`) | `src/services/code-graph/*`                                        | 6b          |
 | `dispatch/codegraph-resolver-factory.mjs`                                | `src/services/code-graph/lazy-resolver.ts`                         | 6b          |
 | `dispatch/ai-sdk-tools.mjs` (`assertModelSafeToolOutput`)                | `src/policy/pii/tool-output.ts`                                    | 7a          |
+| `builtin-tools/tool-args.mjs`                                            | `src/tools/kernel/args.ts`                                         | 7b          |
+| `builtin-tools/read-only-timeout.mjs`                                    | `src/tools/middleware/read-only-timeout.ts`                        | 7b          |
+| `builtin-tools/__tests__/read-only-timeout.test.mjs`                     | `src/tools/middleware/read-only-timeout.test.ts`                   | 7b          |
+| `builtin-tools/result-cap.mjs`                                           | `src/tools/middleware/result-cap.ts`                               | 7b          |
+| `dispatch/ai-sdk-tool-search.mjs`                                        | `src/tools/adapters/ai-sdk-tool-search.ts`                         | 7b          |
 
 ## Scripts (run from repo root)
 

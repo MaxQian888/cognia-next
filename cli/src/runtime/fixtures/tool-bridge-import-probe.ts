@@ -24,8 +24,9 @@ const harmless = path.join(
   "..",
   "..",
   "sidecar",
-  "builtin-tools",
-  "read-only-timeout.mjs"
+  "src",
+  "shared",
+  "stable-stringify.ts"
 )
 
 try {

@@ -6,7 +6,14 @@ import {
   toolBudgetMessage,
   wrapHandlerWithReadOnlyTimeout,
   wrapDefsWithReadOnlyTimeout,
-} from "../read-only-timeout.mjs"
+} from "./read-only-timeout.ts"
+
+/** The CallToolResult shape these tests build and read back. */
+interface TextResult {
+  isError?: boolean
+  content: { type: string; text: string }[]
+}
+const asResult = (value: unknown) => value as TextResult
 
 const READ_ONLY = new Set(["grep", "read"])
 
@@ -26,16 +33,16 @@ test("a hung read-only tool resolves to an isError result after the budget", asy
     handler: () => new Promise(() => {}), // never settles
   }
   const wrapped = wrapHandlerWithReadOnlyTimeout(def, 20, READ_ONLY)
-  const res = await wrapped.handler({}, {})
+  const res = asResult(await wrapped.handler({}, {}))
   assert.equal(res.isError, true)
-  assert.match(res.content[0].text, /grep.*execution budget/)
+  assert.match(res.content[0]!.text, /grep.*execution budget/)
 })
 
 test("a read-only tool that finishes in time passes its result through", async () => {
   const def = { name: "read", handler: async () => ({ content: [{ type: "text", text: "ok" }] }) }
   const wrapped = wrapHandlerWithReadOnlyTimeout(def, 1000, READ_ONLY)
-  const res = await wrapped.handler({}, {})
-  assert.equal(res.content[0].text, "ok")
+  const res = asResult(await wrapped.handler({}, {}))
+  assert.equal(res.content[0]!.text, "ok")
   assert.equal(res.isError, undefined)
 })
 
@@ -47,7 +54,7 @@ test("a read-only handler that rejects before the deadline rethrows its own erro
     },
   }
   const wrapped = wrapHandlerWithReadOnlyTimeout(def, 1000, READ_ONLY)
-  await assert.rejects(wrapped.handler({}, {}), /boom from handler/)
+  await assert.rejects(wrapped.handler({}, {}) as Promise<unknown>, /boom from handler/)
 })
 
 test("exec / non-read-only tools are NEVER bounded (returned untouched)", () => {
@@ -75,6 +82,6 @@ test("wrapDefsWithReadOnlyTimeout returns the same array when disabled, wraps wh
   assert.notEqual(guarded, defs)
   assert.notEqual(guarded[0], defs[0]) // grep wrapped
   assert.equal(guarded[1], defs[1]) // bash untouched
-  const res = await guarded[0].handler({}, {})
+  const res = asResult(await guarded[0]!.handler({}, {}))
   assert.equal(res.isError, true)
 })

@@ -8,30 +8,30 @@
 // (the "session … did not end within 300000ms" users hit). Now that the
 // interactive TUI turn disables that wall-clock, this net is the real backstop
 // against a hung read-only tool — and it must cover BOTH dispatch channels:
-//   • ai-sdk path — `dispatch/ai-sdk-tools.mjs` bounds the handler at execute
-//     time and surfaces a thrown `tool-error`;
-//   • Anthropic path — `builtin-tools/index.mjs` wraps the def handler at
-//     registration time and surfaces an `isError` CallToolResult.
+//   • ai-sdk path — the ai-sdk adapter bounds the handler at execute time and
+//     surfaces a thrown `tool-error`;
+//   • Anthropic path and the MCP tool bridge — wrap the def handler at
+//     registration time and surface an `isError` CallToolResult.
 // Both react the same way: the model gets a recoverable error and the orphaned
 // read-only handler (no side effects to unwind) is left to settle and be GC'd.
 // Exec tools (bash / shell / process / git-run) self-bound with their own
 // timeout, so they are NEVER bounded here — only `READ_ONLY_TOOL_NAMES`.
 
+import type { ToolDefinition, ToolHandlerExtra, WrappedToolDefinition } from "../kernel/define.ts"
+import { toolError } from "../kernel/result.ts"
+
 /**
  * Default per-tool execution budget in ms. Single source of truth shared by
  * both dispatch channels so they never drift. `0` / non-finite disables the net.
  */
-import { toolError } from "../src/tools/kernel/result.ts"
-
 export const DEFAULT_BUILTIN_TOOL_TIMEOUT_MS = 120_000
 
 /**
- * The recoverable error text shown to the model when a read-only tool blows its
- * budget. Kept here so both channels emit byte-identical wording.
- * @param {string} name  bare tool name
- * @param {number} ms    the budget that was exceeded
+ * The recoverable error text shown to the model when a read-only tool (named
+ * bare) blows its budget of `ms`. Kept here so both channels emit
+ * byte-identical wording.
  */
-export function toolBudgetMessage(name, ms) {
+export function toolBudgetMessage(name: string, ms: number): string {
   return (
     `tool "${name}" exceeded its ${ms}ms execution budget and was abandoned — ` +
     "the target is likely too large to scan; narrow the directory/pattern or raise " +
@@ -52,22 +52,22 @@ const TIMEOUT = Symbol("read-only-tool-timeout")
  * `builtinDefToAiSdkTool` already converts an `isError` result into a thrown
  * `execute` (→ AI SDK `tool-error`), so both channels stay consistent. A handler
  * that resolves or rejects BEFORE the deadline passes through unchanged.
- *
- * @param {{ name: string, handler: Function }} def
- * @param {number} timeoutMs
- * @param {ReadonlySet<string>} readOnly
  */
-export function wrapHandlerWithReadOnlyTimeout(def, timeoutMs, readOnly) {
+export function wrapHandlerWithReadOnlyTimeout<D extends ToolDefinition>(
+  def: D,
+  timeoutMs: number,
+  readOnly: ReadonlySet<string>
+): WrappedToolDefinition<D> {
   if (!def || typeof def.handler !== "function") return def
   if (!readOnly || !readOnly.has(def.name)) return def
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return def
 
   const handler = def.handler
-  const wrapped = (args, extra) => {
+  const wrapped = (args: unknown, extra?: ToolHandlerExtra): Promise<unknown> => {
     // Normalise sync/throwing handlers into a promise so the race is uniform.
     const work = Promise.resolve().then(() => handler(args, extra))
-    let timer = null
-    const deadline = new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const deadline = new Promise<typeof TIMEOUT>((resolve) => {
       // Keep the timer REF'd: while a read-only handler is in flight we owe the
       // model a response, so the deadline must hold the event loop open until it
       // fires (or `work` settles and we clearTimeout). An unref'd timer let the
@@ -96,7 +96,7 @@ export function wrapHandlerWithReadOnlyTimeout(def, timeoutMs, readOnly) {
         }
         return winner
       },
-      (err) => {
+      (err: unknown) => {
         // Handler rejected before the deadline — pass its error through.
         if (timer) clearTimeout(timer)
         throw err
@@ -110,12 +110,12 @@ export function wrapHandlerWithReadOnlyTimeout(def, timeoutMs, readOnly) {
  * Map a list of tool defs through {@link wrapHandlerWithReadOnlyTimeout}. Returns
  * the same array reference when the net is disabled (`0` / non-finite) so the
  * common "no budget" path allocates nothing.
- *
- * @param {Array<{ name: string, handler: Function }>} defs
- * @param {number} timeoutMs
- * @param {ReadonlySet<string>} readOnly
  */
-export function wrapDefsWithReadOnlyTimeout(defs, timeoutMs, readOnly) {
+export function wrapDefsWithReadOnlyTimeout<D extends ToolDefinition>(
+  defs: readonly D[],
+  timeoutMs: number,
+  readOnly: ReadonlySet<string>
+): readonly WrappedToolDefinition<D>[] {
   if (!Array.isArray(defs)) return defs
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return defs
   return defs.map((def) => wrapHandlerWithReadOnlyTimeout(def, timeoutMs, readOnly))

@@ -316,7 +316,7 @@ export function dispatchAnthropic(
     // `0` disables.
     toolExecutionTimeoutMs: sendOptions.toolExecutionTimeoutMs,
     // Cap oversized built-in tool-result bodies (parity with the ai-sdk
-    // compaction cap). Undefined ⇒ no cap. See builtin-tools/result-cap.mjs.
+    // compaction cap). Undefined ⇒ no cap. See src/tools/middleware/result-cap.ts.
     maxToolResultTokens: sendOptions.compaction?.maxToolResultTokens,
   })
   // Stamp `alwaysLoad` onto user-configured MCP servers per the tool-search

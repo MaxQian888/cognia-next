@@ -1,14 +1,36 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
+import type { Tool } from "ai"
+
 import {
   AI_SDK_TOOL_SEARCH_NAME,
   createAiSdkToolSearchController,
   markAiSdkToolSource,
-} from "./ai-sdk-tool-search.mjs"
+  type AiSdkToolSearchController,
+} from "./ai-sdk-tool-search.ts"
 
-function fakeTool(description) {
-  return { description, execute: async () => "ok" }
+/** A stand-in AI SDK tool: the controller reads only its description. */
+function fakeTool(description: string): Tool {
+  return { description, execute: async () => "ok" } as unknown as Tool
+}
+
+interface SearchOutput {
+  query: string
+  matches: { name: string; description: string }[]
+  activated: string[]
+  missing?: string[]
+}
+
+/** Call the controller's ToolSearch the way the model does, and parse its reply. */
+async function search(
+  controller: AiSdkToolSearchController | null,
+  input: { query: string; limit?: number }
+): Promise<SearchOutput> {
+  const execute = controller!.tools[AI_SDK_TOOL_SEARCH_NAME]!.execute as (
+    input: unknown
+  ) => Promise<string>
+  return JSON.parse(await execute(input)) as SearchOutput
 }
 
 test("tool search stays disabled unless the resolved runtime policy enables it", () => {
@@ -26,10 +48,8 @@ test("an enabled empty catalog still exposes ToolSearch safely", async () => {
     sendOptions: { toolSearchEnabled: true },
   })
 
-  assert.deepEqual(controller.prepareStep().activeTools, [AI_SDK_TOOL_SEARCH_NAME])
-  const output = JSON.parse(
-    await controller.tools[AI_SDK_TOOL_SEARCH_NAME].execute({ query: "anything" })
-  )
+  assert.deepEqual(controller!.prepareStep().activeTools, [AI_SDK_TOOL_SEARCH_NAME])
+  const output = await search(controller, { query: "anything" })
   assert.deepEqual(output.matches, [])
 })
 
@@ -44,8 +64,8 @@ test("initial active tools contain only ToolSearch and always-load tools", () =>
     sendOptions: { toolSearchEnabled: true },
   })
 
-  assert.deepEqual(Object.keys(controller.tools), [AI_SDK_TOOL_SEARCH_NAME, "read", "write"])
-  assert.deepEqual(controller.prepareStep().activeTools, [AI_SDK_TOOL_SEARCH_NAME, "read"])
+  assert.deepEqual(Object.keys(controller!.tools), [AI_SDK_TOOL_SEARCH_NAME, "read", "write"])
+  assert.deepEqual(controller!.prepareStep().activeTools, [AI_SDK_TOOL_SEARCH_NAME, "read"])
 })
 
 test("a ToolSearch call discovers and activates matching tools for the next step", async () => {
@@ -60,13 +80,15 @@ test("a ToolSearch call discovers and activates matching tools for the next step
     tools,
     sendOptions: { toolSearchEnabled: true },
   })
-  const output = JSON.parse(
-    await controller.tools[AI_SDK_TOOL_SEARCH_NAME].execute({ query: "write file", limit: 1 })
-  )
+  const output = await search(controller, { query: "write file", limit: 1 })
 
   assert.deepEqual(output.activated, ["write"])
-  assert.equal(output.matches[0].name, "write")
-  assert.deepEqual(controller.prepareStep().activeTools, [AI_SDK_TOOL_SEARCH_NAME, "read", "write"])
+  assert.equal(output.matches[0]!.name, "write")
+  assert.deepEqual(controller!.prepareStep().activeTools, [
+    AI_SDK_TOOL_SEARCH_NAME,
+    "read",
+    "write",
+  ])
 })
 
 test("select: activates exact permitted names and never invents absent tools", async () => {
@@ -77,15 +99,13 @@ test("select: activates exact permitted names and never invents absent tools", a
     },
     sendOptions: { toolSearchEnabled: true },
   })
-  const output = JSON.parse(
-    await controller.tools[AI_SDK_TOOL_SEARCH_NAME].execute({
-      query: "select:bash,denied_tool,edit",
-    })
-  )
+  const output = await search(controller, {
+    query: "select:bash,denied_tool,edit",
+  })
 
   assert.deepEqual(output.activated, ["bash", "edit"])
   assert.deepEqual(output.missing, ["denied_tool"])
-  assert.deepEqual(controller.prepareStep().activeTools, [AI_SDK_TOOL_SEARCH_NAME, "bash", "edit"])
+  assert.deepEqual(controller!.prepareStep().activeTools, [AI_SDK_TOOL_SEARCH_NAME, "bash", "edit"])
 })
 
 test("configured always-load servers and namespaced tools map onto AI SDK keys", () => {
@@ -108,7 +128,7 @@ test("configured always-load servers and namespaced tools map onto AI SDK keys",
     },
   })
 
-  assert.deepEqual(controller.prepareStep().activeTools, [
+  assert.deepEqual(controller!.prepareStep().activeTools, [
     AI_SDK_TOOL_SEARCH_NAME,
     "mcp__remote__lookup",
     "plugin_action",
@@ -125,9 +145,7 @@ test("free-text discovery respects the per-call result limit", async () => {
     },
     sendOptions: { toolSearchEnabled: true },
   })
-  const output = JSON.parse(
-    await controller.tools[AI_SDK_TOOL_SEARCH_NAME].execute({ query: "file", limit: 2 })
-  )
+  const output = await search(controller, { query: "file", limit: 2 })
 
   assert.equal(output.matches.length, 2)
   assert.equal(output.activated.length, 2)
@@ -141,16 +159,12 @@ test("free-text ranking prioritizes an exact name over a name substring", async 
     },
     sendOptions: { toolSearchEnabled: true, alwaysLoadTools: ["status"] },
   })
-  const exact = JSON.parse(
-    await controller.tools[AI_SDK_TOOL_SEARCH_NAME].execute({ query: "status", limit: 1 })
-  )
-  const substring = JSON.parse(
-    await controller.tools[AI_SDK_TOOL_SEARCH_NAME].execute({ query: "git_stat", limit: 1 })
-  )
+  const exact = await search(controller, { query: "status", limit: 1 })
+  const substring = await search(controller, { query: "git_stat", limit: 1 })
 
-  assert.equal(exact.matches[0].name, "status")
-  assert.equal(substring.matches[0].name, "git_status")
-  assert.ok(controller.prepareStep().activeTools.includes("status"))
+  assert.equal(exact.matches[0]!.name, "status")
+  assert.equal(substring.matches[0]!.name, "git_status")
+  assert.ok(controller!.prepareStep().activeTools.includes("status"))
 })
 
 test("exact selection also respects the per-call activation limit", async () => {
@@ -162,15 +176,13 @@ test("exact selection also respects the per-call activation limit", async () => 
     },
     sendOptions: { toolSearchEnabled: true },
   })
-  const output = JSON.parse(
-    await controller.tools[AI_SDK_TOOL_SEARCH_NAME].execute({
-      query: "select:c,b,a",
-      limit: 2,
-    })
-  )
+  const output = await search(controller, {
+    query: "select:c,b,a",
+    limit: 2,
+  })
 
   assert.deepEqual(output.activated, ["a", "b"])
-  assert.ok(!controller.prepareStep().activeTools.includes("c"))
+  assert.ok(!controller!.prepareStep().activeTools.includes("c"))
 })
 
 test("select: and alwaysLoadTools accept the cognia name of a tool renamed for the provider", async () => {
@@ -187,12 +199,10 @@ test("select: and alwaysLoadTools accept the cognia name of a tool renamed for t
     ]),
   })
   // The always-load rule was written with the cognia name and still applies.
-  assert.deepEqual(controller.prepareStep().activeTools, [AI_SDK_TOOL_SEARCH_NAME, "diagram_draw"])
-  const output = JSON.parse(
-    await controller.tools[AI_SDK_TOOL_SEARCH_NAME].execute({ query: "select:ocr.extract" })
-  )
+  assert.deepEqual(controller!.prepareStep().activeTools, [AI_SDK_TOOL_SEARCH_NAME, "diagram_draw"])
+  const output = await search(controller, { query: "select:ocr.extract" })
   // The model is told the name it can actually call.
   assert.deepEqual(output.activated, ["ocr_extract"])
   assert.deepEqual(output.missing, undefined)
-  assert.ok(controller.prepareStep().activeTools.includes("ocr_extract"))
+  assert.ok(controller!.prepareStep().activeTools.includes("ocr_extract"))
 })
