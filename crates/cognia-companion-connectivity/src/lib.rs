@@ -12,6 +12,7 @@
 //!   listener and relay settings.
 //! - [`signaling`] — the WebRTC peer, envelope crypto, DataChannel framing,
 //!   relay carrier and the registration store (ADR-0021, ADR-0170).
+//! - [`wake_on_lan`] — the magic packet the ladder sends a sleeping host.
 
 pub mod mdns;
 pub mod mesh;
@@ -21,6 +22,7 @@ pub mod signaling_config;
 pub mod tls;
 pub mod tunnel;
 pub mod tunnel_config;
+pub mod wake_on_lan;
 
 /// The WebRTC stack these modules are written against, so callers name the
 /// same version.

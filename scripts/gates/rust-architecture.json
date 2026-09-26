@@ -13,6 +13,7 @@
     "cognia-tenant-auth": "foundation",
     "cognia-deployment": "foundation",
     "cognia-companion-contract": "foundation",
+    "cognia-power": "foundation",
 
     "cognia-jobs": "platform",
     "cognia-environment": "platform",

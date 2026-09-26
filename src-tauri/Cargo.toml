@@ -108,6 +108,8 @@ cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["t
 # grants, rate limits and audit trail; `companion_api` re-exports each module at
 # its old path.
 cognia-companion-security = { path = "../crates/cognia-companion-security" }
+# Keep-awake assertions; `power_assertion.rs` is its facade (ADR-0196).
+cognia-power = { path = "../crates/cognia-power" }
 # ADR-0196 P6c — the settings-hook runtime and the Claude settings readers;
 # `hooks` and `settings` re-export it at their old paths. `tauri-host` adds the
 # command attributes and the three writers that emit through the `AppHandle`.
@@ -469,7 +471,7 @@ block2 = "0.6"
 keyring = { version = "4", features = ["apple-native-keyring-store"] }
 # ADR-0067 Phase 5 — `enigo` and the skill-recorder CGEventTap hook moved to
 # `crates/cognia-automation`. `core-graphics` / `core-foundation` stay: the pet
-# overlay (`pet_window/surfaces.rs`) and `power_assertion.rs` use them directly.
+# overlay (`pet_window/surfaces.rs`) uses them directly.
 # `core-graphics-types` was named only for the moved event-tap FFI.
 core-graphics = "0.25"
 core-foundation = "0.10"
@@ -532,6 +534,8 @@ cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["t
 # The store and audit test guards, the OIDC fake issuer and token minter, the
 # device-token issuer and the rate-limit counters the companion suites read.
 cognia-companion-security = { path = "../crates/cognia-companion-security", features = ["test-support"] }
+# `ASSERTION_TEST_LOCK` / `active_reasons` for the sidecar and worker tests.
+cognia-power = { path = "../crates/cognia-power", features = ["test-support"] }
 # Fleet's test mode (no recovery file, no `git` capture) and the runtime lock
 # the companion RPC tests hold.
 cognia-fleet = { path = "../crates/cognia-fleet", features = ["test-support"] }

@@ -1,0 +1,41 @@
+# ADR-0196 — keep the host awake while it owes someone work: the reference-
+# counted, process-global OS power assertion (IOKit on macOS, systemd-inhibit
+# on Linux, SetThreadExecutionState on Windows). The agent sidecar, the
+# companion's attached execution worker and the desktop's screen-hold command
+# all hold it, so it sits below every one of them. The desktop keeps only the
+# `power_screen_holds_set` command shell (`src-tauri/src/power_assertion.rs`).
+[package]
+name = "cognia-power"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Reference-counted OS keep-awake assertions (system and display level) shared by every subsystem that holds the host awake."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_power"
+path = "src/lib.rs"
+
+[features]
+default = []
+# `ASSERTION_TEST_LOCK`, `active_reasons` and `active_level` for the app's
+# tests, which drive holds through the sidecar and the companion worker.
+# `src-tauri` enables it from dev-dependencies only.
+test-support = []
+
+[dependencies]
+once_cell.workspace = true
+parking_lot.workspace = true
+log.workspace = true
+
+[target."cfg(target_os = \"macos\")".dependencies]
+# CFString names for IOPMAssertionCreateWithName.
+core-foundation = "0.10"
+
+[target."cfg(target_os = \"windows\")".dependencies]
+# Same version as the app's and uiautomation's, so the tree keeps one copy.
+windows = { version = "0.62.2", features = ["Win32_System_Power"] }
+
+[lints]
+workspace = true

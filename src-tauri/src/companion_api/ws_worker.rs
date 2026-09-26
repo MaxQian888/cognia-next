@@ -783,13 +783,13 @@ fn publish_fleet_update(state: &super::SharedState, tenant_id: &str) {
 /// accepted it must stay awake. Sleeping here drops the socket, expires the
 /// run lease, and shows the team a host that was online seconds ago.
 fn hold_host_awake(host_ref: &str) {
-    crate::power_assertion::acquire(crate::power_assertion::WakeReason::AttachedWorker(
+    cognia_power::acquire(cognia_power::WakeReason::AttachedWorker(
         host_ref.to_string(),
     ));
 }
 
 fn release_host_awake(host_ref: &str) {
-    crate::power_assertion::release(&crate::power_assertion::WakeReason::AttachedWorker(
+    cognia_power::release(&cognia_power::WakeReason::AttachedWorker(
         host_ref.to_string(),
     ));
 }
@@ -936,7 +936,7 @@ pub async fn companion_wake_worker(tenant_id: String, host_ref: String) -> Resul
     }
     let mut woke = false;
     for mac in macs {
-        match crate::wake_on_lan::wake(mac, broadcast) {
+        match cognia_companion_connectivity::wake_on_lan::wake(mac, broadcast) {
             Ok(()) => woke = true,
             Err(error) => log::debug!("companion-api ws-worker: wake failed for {mac}: {error}"),
         }
@@ -1098,7 +1098,7 @@ mod tests {
         // `install_worker` / `remove_worker` take and drop a power-assertion
         // hold as a side effect, and that state is process-global. Without this
         // lock the assertion suite intermittently observes this test's holder.
-        let _guard = crate::power_assertion::ASSERTION_TEST_LOCK.lock();
+        let _guard = cognia_power::ASSERTION_TEST_LOCK.lock();
         let tenant_id = "tenant-placement-projection";
         let connection_id = "connection-placement-projection";
         let host_ref = "device:placement-projection";

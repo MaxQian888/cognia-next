@@ -2589,6 +2589,7 @@ dependencies = [
  "cognia-observability",
  "cognia-ocr",
  "cognia-plugin-runtime",
+ "cognia-power",
  "cognia-problem",
  "cognia-provider-diagnostics",
  "cognia-sandbox-pool",
@@ -2844,6 +2845,17 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "zip 8.6.0",
+]
+
+[[package]]
+name = "cognia-power"
+version = "0.1.0"
+dependencies = [
+ "core-foundation 0.10.1",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "windows 0.62.2",
 ]
 
 [[package]]
