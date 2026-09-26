@@ -49,6 +49,8 @@ import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace
 import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { GuildRail } from "@/components/shell/guild-rail"
+import { PluginViewContainerPanel } from "@/components/shell/plugin-view-container-panel"
+import { CanvasShell } from "@/components/canvas/canvas-shell"
 import { TeamMembersPanel } from "@/components/context-workbench/panels/team-members-panel"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { BackgroundRunsChip } from "@/components/chat/background-runs-chip"
@@ -92,6 +94,7 @@ import { turnMetadataSendOptions } from "@/lib/chat/turn-metadata"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
+import { useSessionRunStatusMap } from "@/hooks/chat/use-session-run-status-map"
 import { useChatRuntimeGate } from "@/hooks/chat/use-chat-runtime-gate"
 import { useClientLiveQuery, useDexieFirstQuery } from "@/hooks/data"
 import { useChatStore } from "@/stores/chat"
@@ -158,6 +161,7 @@ const NAV_DRAWER_GESTURE_SURFACE = '[data-mobile-nav-sheet], [data-slot="sheet-o
 export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
   const tShell = useTranslations("mobile.shell")
+  const tRail = useTranslations("desktop.guildRail")
   const router = useRouter()
   // Same reach contract as the desktop sidebar: grouping by workspace, or a
   // search told to reach every workspace, loads the cross-workspace list.
@@ -180,6 +184,8 @@ export function AppShellMobile() {
   } = useSessions({
     crossWorkspace: needsCrossWorkspaceSessions(sidebarGroupBy, sidebarSearch),
   })
+  // The drawer rows' turn glyphs and its `running` filter, as on desktop.
+  const runStatusById = useSessionRunStatusMap()
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
@@ -203,6 +209,23 @@ export function AppShellMobile() {
   const chatRuntime = useChatRuntimeGate()
 
   const [navOpen, setNavOpen] = useState(false)
+  // The drawer's rail offers the same guilds as the desktop column: DM, the
+  // teams, Canvas and plugin view containers. The last two replace a surface
+  // rather than scoping the list — Canvas takes the main pane (the shell's
+  // `CanvasShell` has its own phone layout), a plugin container takes the
+  // drawer's list slot the way it takes the desktop sidebar column.
+  const canvasGuild = selectedGuild.kind === "canvas"
+  const pluginViewContainerId =
+    selectedGuild.kind === "plugin-view" ? selectedGuild.containerId : null
+  // Picking Canvas in the drawer means "show me the canvas", which the drawer
+  // covers — close it on the switch, as picking a conversation does. Adjusted
+  // during render (the previous kind is state) rather than in an effect, so
+  // the drawer never paints one frame over the surface it just opened.
+  const [prevGuildKind, setPrevGuildKind] = useState(selectedGuild.kind)
+  if (prevGuildKind !== selectedGuild.kind) {
+    setPrevGuildKind(selectedGuild.kind)
+    if (selectedGuild.kind === "canvas" && navOpen) setNavOpen(false)
+  }
   const [memberSheetOpen, setMemberSheetOpen] = useState(false)
   const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false)
   // Which section the sheet should land on: the missing-key warning opens it
@@ -304,9 +327,28 @@ export function AppShellMobile() {
     setSelectedGuild,
   ])
 
-  // No error toast here: the chat pane is always mounted on this shell and
-  // renders the active session's failure as an inline card with its actions,
-  // so a toast only announced the same failure twice (surface-router rule 1).
+  // The chat pane renders the active session's failure as an inline card with
+  // its actions, so while it is mounted a toast would announce the same failure
+  // twice (surface-router rule 1). The Canvas guild unmounts that pane — only
+  // then is a toast the one place the failure can show up. Same rule as
+  // `DesktopChatWorkspace`.
+  const chatErrorMessage = useChatStore((s) => s.errorMessage)
+  // The last message seen, toasted or not: a failure that arrived while the
+  // chat pane was on screen was already shown inline, and switching to Canvas
+  // afterwards must not announce it again.
+  const seenChatErrorRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!chatErrorMessage) {
+      seenChatErrorRef.current = null
+      return
+    }
+    if (seenChatErrorRef.current === chatErrorMessage) return
+    seenChatErrorRef.current = chatErrorMessage
+    if (canvasGuild) {
+      log.warn("chat error surfaced over canvas", { message: chatErrorMessage })
+      toast.error(chatErrorMessage)
+    }
+  }, [chatErrorMessage, canvasGuild])
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
   const [exportOpen, setExportOpen] = useState(false)
@@ -613,23 +655,28 @@ export function AppShellMobile() {
                 >
                   {/* The list surfaces its own failures; the writers are
                     handed over un-voided so it can await them. */}
-                  <MobileChannelList
-                    sessions={sessions}
-                    isLoadingSessions={isLoadingSessions}
-                    activeSessionId={activeSessionId}
-                    onSelect={handleSwitchToSession}
-                    onNewDirect={() => {
-                      setNavOpen(false)
-                      handleNewDirect()
-                    }}
-                    onDelete={remove}
-                    onRename={rename}
-                    onArchive={archive}
-                    onUnarchive={unarchive}
-                    onSetPinned={bulkSetPinned}
-                    onAssignToFolder={assignToFolder}
-                    folders={folders}
-                  />
+                  {pluginViewContainerId ? (
+                    <PluginViewContainerPanel containerId={pluginViewContainerId} />
+                  ) : (
+                    <MobileChannelList
+                      sessions={sessions}
+                      isLoadingSessions={isLoadingSessions}
+                      activeSessionId={activeSessionId}
+                      onSelect={handleSwitchToSession}
+                      onNewDirect={() => {
+                        setNavOpen(false)
+                        handleNewDirect()
+                      }}
+                      onDelete={remove}
+                      onRename={rename}
+                      onArchive={archive}
+                      onUnarchive={unarchive}
+                      onSetPinned={bulkSetPinned}
+                      onAssignToFolder={assignToFolder}
+                      folders={folders}
+                      runStatusById={runStatusById}
+                    />
+                  )}
                 </div>
               </div>
               {/* Joining someone else's conversation is a once-in-a-while
@@ -642,8 +689,8 @@ export function AppShellMobile() {
         </MobileChannelListSourceProvider>
 
         <CharacterHeader
-          subject={headerSubject}
-          fallbackTitle={headerTitle}
+          subject={canvasGuild ? null : headerSubject}
+          fallbackTitle={canvasGuild ? tRail("canvas") : headerTitle}
           streaming={chatStatus === "streaming"}
         />
 
@@ -917,7 +964,9 @@ export function AppShellMobile() {
         className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
         data-bg-target="chat"
       >
-        {!mounted ? null : (
+        {!mounted ? null : canvasGuild ? (
+          <CanvasShell />
+        ) : (
           // gap11 — wrap the chat in the artifact dock (mirrors the desktop
           // workspace + /inbox/c). On mobile the dock renders an `ArtifactPanel`
           // bottom Sheet that opens automatically when an artifact is created;

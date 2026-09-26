@@ -81,13 +81,14 @@ import {
 } from "@/lib/chat/conversation-list-model"
 import { resolveConversationSearchOptions } from "@/lib/chat/conversation-search-scope"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
-import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
+import { inFlightIdSet } from "@/lib/chat/aggregate-run-state"
+import { useSessionWrite } from "@/hooks/chat/use-session-write"
 import { markSessionRead } from "@/lib/db/session-state"
 import { cn } from "@/lib/utils"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore, type ChannelListView } from "@/stores/ui"
-import { loggers } from "@cognia/logging"
+import type { ChatStatus } from "@/stores/chat/chat-store"
 import type {
   Character,
   ChatSession,
@@ -117,7 +118,6 @@ import { MobileChannelRowActions } from "./mobile-channel-row-actions"
 import { MobileChannelDeleteConfirm } from "./mobile-channel-delete-confirm"
 import { MobileChannelSearchField } from "./mobile-channel-search-field"
 
-const log = loggers.ui
 
 export interface MobileChannelListProps {
   sessions: readonly ChatSession[]
@@ -139,6 +139,12 @@ export interface MobileChannelListProps {
   onAssignToFolder: (sessionId: string, folderId: string | null) => void | Promise<void>
   /** Conversation folders (display, collapse, and "Move to folder"). */
   folders?: readonly SessionFolder[]
+  /**
+   * Live turn state per conversation (`useSessionRunStatusMap`): the row
+   * glyphs and the `running` quick filter both read it, as on the desktop
+   * sidebar. Absent → no conversation is shown as running.
+   */
+  runStatusById?: ReadonlyMap<string, ChatStatus>
 }
 
 /** Maps a date bucket to its `mobile.home` label key. */
@@ -150,21 +156,8 @@ const BUCKET_LABEL_KEY: Record<DateBucket, string> = {
   older: "bucketOlder",
 }
 
-type ActionFailure =
-  "rename" | "pin" | "unpin" | "archive" | "unarchive" | "delete" | "move" | "markRead"
-
 const NO_FOLDERS: readonly SessionFolder[] = []
 const SKELETON_ROWS = 6
-
-/** Refused by the session write guard because the row is mid-handoff. */
-export function isSessionHandoffLocked(error: unknown): boolean {
-  if (error instanceof SessionHandoffLockedError) return true
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: unknown }).code === "session_handoff_locked"
-  )
-}
 
 export function MobileChannelList(props: MobileChannelListProps) {
   // The shell provides the source from outside the drawer so it survives the
@@ -192,6 +185,7 @@ function MobileChannelListBody({
   onSetPinned,
   onAssignToFolder,
   folders = NO_FOLDERS,
+  runStatusById,
 }: MobileChannelListProps) {
   const t = useTranslations("mobile.home")
   const tShell = useTranslations("mobile.shell")
@@ -286,6 +280,7 @@ function MobileChannelListBody({
     () => new Set(unreadCountById.keys()),
     [unreadCountById]
   )
+  const runningIds = useMemo(() => inFlightIdSet(runStatusById), [runStatusById])
 
   // Group axes the pure model can't resolve on its own.
   const projects = useProjectStore((s) => s.projects)
@@ -316,6 +311,7 @@ function MobileChannelListBody({
     contentSearch.moreOlderHistory ||
     contentSearch.indexIncomplete ||
     contentSearch.error !== null
+  const contentFailed = searchOptions.content && contentSearch.error !== null
 
   // Sort, quick filters and saved presets are shared with the desktop sidebar —
   // one controller over the same settings blob and UI-store slice — so a phone
@@ -365,6 +361,7 @@ function MobileChannelListBody({
     sortBy,
     filters,
     unreadIds,
+    runningIds: filters.running ? runningIds : undefined,
     filterContext,
     workspaces: workspaceGroups,
     agents: agentGroups,
@@ -431,10 +428,19 @@ function MobileChannelListBody({
         sections,
         narrowed: searching || activeFilterCount > 0,
         truncated: contentTruncated && searching,
+        contentFailed: contentFailed && searching,
         pending: filteredCount === 0 && contentPending,
         empty: filteredCount === 0 && !contentPending,
       }),
-    [sections, searching, activeFilterCount, contentTruncated, filteredCount, contentPending]
+    [
+      sections,
+      searching,
+      activeFilterCount,
+      contentTruncated,
+      contentFailed,
+      filteredCount,
+      contentPending,
+    ]
   )
 
   // ---- Row state and actions ---------------------------------------------
@@ -449,42 +455,11 @@ function MobileChannelListBody({
   const renaming = renamingId && sessionsById.has(renamingId) ? renamingId : null
 
   /**
-   * Run one row write and surface its failure. Every one of these used to be
-   * fire-and-forget: a refused write (a handed-off conversation, a failed
-   * Dexie transaction) became an unhandled rejection and the row simply did
-   * not change.
+   * Run one row write and surface its failure — shared with the desktop list
+   * (`hooks/chat/use-session-write.ts`), so both refuse a handed-off
+   * conversation and word a failed write the same way.
    */
-  const runWrite = useCallback(
-    async (
-      op: ActionFailure,
-      session: ChatSession,
-      write: () => void | Promise<void>
-    ): Promise<boolean> => {
-      if (session.handoffLock && op !== "markRead") {
-        toast.error(t("actionLocked"))
-        return false
-      }
-      try {
-        await write()
-        return true
-      } catch (error) {
-        const locked = isSessionHandoffLocked(error)
-        log.warn("mobile channel action failed", {
-          op,
-          sessionId: session.id,
-          locked,
-          error: error instanceof Error ? error.message : String(error),
-        })
-        if (locked) toast.error(t("actionLocked"))
-        else
-          toast.error(t(`actionFailed.${op}`), {
-            description: error instanceof Error ? error.message : String(error),
-          })
-        return false
-      }
-    },
-    [t]
-  )
+  const runWrite = useSessionWrite()
 
   const togglePin = useCallback(
     async (session: ChatSession) => {
@@ -609,6 +584,17 @@ function MobileChannelListBody({
     (item: MobileChannelListItem): ReactNode => {
       switch (item.kind) {
         case "notice":
+          if (item.notice === "contentFailed") {
+            return (
+              <p
+                className="px-4 pt-2 pb-1 text-center text-[11px] text-destructive"
+                role="status"
+                data-testid="mobile-channel-search-content-failed"
+              >
+                {t("searchContentFailed")}
+              </p>
+            )
+          }
           if (item.notice === "truncated") {
             return (
               <p
@@ -686,6 +672,7 @@ function MobileChannelListBody({
               active={session.id === activeSessionId}
               unread={showUnreadBadges ? (unreadCountById.get(session.id) ?? 0) : 0}
               contentMatch={contentOnlyIds.has(session.id)}
+              runStatus={runStatusById?.get(session.id)}
               character={session.characterId ? characterById.get(session.characterId) : undefined}
               team={session.teamId ? teamById.get(session.teamId) : undefined}
               workspaceName={session.projectId ? workspaceNameById.get(session.projectId) : undefined}
@@ -717,6 +704,7 @@ function MobileChannelListBody({
       showUnreadBadges,
       unreadCountById,
       contentOnlyIds,
+      runStatusById,
       characterById,
       teamById,
       workspaceNameById,
@@ -1049,7 +1037,7 @@ function ChannelListSkeleton({ density }: { density: ConversationSidebarDensity 
 function estimateItemSize(item: MobileChannelListItem, settings: MobileChannelRowSettings): number {
   switch (item.kind) {
     case "notice":
-      return item.notice === "truncated" ? 32 : 96
+      return item.notice === "truncated" || item.notice === "contentFailed" ? 32 : 96
     case "folder-empty":
       return 32
     case "header":

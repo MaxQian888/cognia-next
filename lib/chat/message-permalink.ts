@@ -14,6 +14,8 @@
  * `output: "export"`.
  */
 
+import { buildSessionDeeplink } from "@/lib/navigation/cognia-deeplink"
+
 export const PERMALINK_SESSION_PARAM = "session"
 export const PERMALINK_MESSAGE_PARAM = "message"
 
@@ -99,4 +101,31 @@ export function parseMessagePermalink(
   const messageId = params.get(PERMALINK_MESSAGE_PARAM)
   if (!sessionId || !messageId) return null
   return { sessionId, messageId }
+}
+
+/**
+ * A link to copy that opens one conversation — the conversation list's
+ * "Copy link to conversation". Private navigation like every link here, never
+ * a share link.
+ *
+ * Which form depends on who will open it. The desktop app answers the OS's
+ * `cognia://` scheme (`desktop-deeplink-dispatch.ts`), and its own webview
+ * origin (`tauri://localhost`) means nothing outside the window, so it copies
+ * the scheme link. A browser session copies an address on its own origin,
+ * which lands on the chat route with the conversation selected.
+ */
+export function buildConversationLink(
+  sessionId: string,
+  opts: { desktop: boolean; origin?: string | null }
+): string {
+  if (opts.desktop) return buildSessionDeeplink(sessionId)
+  const origin =
+    opts.origin !== undefined
+      ? opts.origin
+      : typeof window !== "undefined"
+        ? window.location.origin
+        : null
+  const href = buildSessionHref(sessionId)
+  if (!origin) return `/${href}`
+  return `${origin.replace(/\/+$/, "")}/${href}`
 }

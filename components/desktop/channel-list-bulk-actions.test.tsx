@@ -162,3 +162,60 @@ it("leaves every folder open when the selection shares its workspace", async () 
   expect(screen.getByTestId("channel-list-bulk-folder-f-p1")).not.toHaveAttribute("data-disabled")
   expect(screen.queryByTestId("channel-list-bulk-folder-blocked-note")).toBeNull()
 })
+
+it("keeps the selection when the list refuses or fails the write", async () => {
+  const user = userEvent.setup()
+  // The action boundary resolves `false` after it has told the user why.
+  const onArchive = jest.fn(async () => false)
+  const onClear = jest.fn()
+  render(
+    <ChannelListBulkActions
+      visible
+      selected={new Set(["a", "b"])}
+      orderedIds={["a", "b"]}
+      sessions={[]}
+      archived={false}
+      onArchive={onArchive}
+      onClear={onClear}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "archive" }))
+  expect(onArchive).toHaveBeenCalledWith(["a", "b"])
+  expect(onClear).not.toHaveBeenCalled()
+})
+
+it("marks the selection read and lets it go", async () => {
+  const user = userEvent.setup()
+  const onMarkRead = jest.fn(async () => true)
+  const onClear = jest.fn()
+  render(
+    <ChannelListBulkActions
+      visible
+      selected={new Set(["a"])}
+      orderedIds={["a"]}
+      sessions={[]}
+      archived={false}
+      onMarkRead={onMarkRead}
+      onClear={onClear}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "markRead" }))
+  expect(onMarkRead).toHaveBeenCalledWith(["a"])
+  expect(onClear).toHaveBeenCalledTimes(1)
+})
+
+it("offers no action whose writer is missing", () => {
+  render(
+    <ChannelListBulkActions
+      visible
+      selected={new Set(["a"])}
+      orderedIds={["a"]}
+      sessions={[]}
+      archived={false}
+      onClear={jest.fn()}
+    />
+  )
+  for (const name of ["pin", "unpin", "archive", "delete", "markRead"]) {
+    expect(screen.queryByRole("button", { name })).toBeNull()
+  }
+})

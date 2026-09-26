@@ -1,187 +1,407 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
-import type { SessionFolder } from "@cognia/agent-config-types"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useTranslations } from "next-intl"
+import { toast } from "sonner"
+import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
+import type { SessionRowExtraActions } from "@/components/desktop/session-row"
+import { useSessionWrite, type SessionWriteAction } from "@/hooks/chat/use-session-write"
+import { buildConversationLink } from "@/lib/chat/message-permalink"
+import { markSessionRead, markSessionUnread } from "@/lib/db/session-state"
+import { isTauri } from "@/lib/tauri"
+import { writeClipboardText } from "@/lib/tauri/clipboard"
 import {
   trackConversationCreated,
   trackConversationRowAction,
 } from "@/lib/telemetry/conversation-list-events"
+import { nextAfterRemoval } from "./next-after-removal"
 
 const log = loggers.ui
+
+type Write<A extends unknown[]> = (...args: A) => void | Promise<unknown>
 
 interface ChannelListActionCallbacks {
   onNewDirect: () => void
   onNewTeamConversation: (teamId: string) => void
-  onDelete: (id: string) => void | Promise<void>
-  onRename: (id: string, title: string) => void | Promise<void>
-  onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
-  onArchive?: (id: string) => void | Promise<void>
-  onUnarchive?: (id: string) => void | Promise<void>
-  onBulkDelete?: (ids: string[]) => void | Promise<void>
-  onBulkSetPinned?: (ids: string[], pinned: boolean) => void | Promise<void>
-  onBulkArchive?: (ids: string[]) => void | Promise<void>
-  onBulkUnarchive?: (ids: string[]) => void | Promise<void>
+  onDelete: Write<[id: string]>
+  onRename: Write<[id: string, title: string]>
+  onTogglePinned?: Write<[id: string, pinned: boolean]>
+  onArchive?: Write<[id: string]>
+  onUnarchive?: Write<[id: string]>
+  onBulkDelete?: Write<[ids: string[]]>
+  onBulkSetPinned?: Write<[ids: string[], pinned: boolean]>
+  onBulkArchive?: Write<[ids: string[]]>
+  onBulkUnarchive?: Write<[ids: string[]]>
   onCreateFolder?: (name: string) => void | Promise<SessionFolder | unknown>
-  onReorderFolders?: (ids: string[]) => void | Promise<void>
-  onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
+  onRenameFolder?: Write<[id: string, name: string]>
+  onDeleteFolder?: Write<[id: string]>
+  onReorderFolders?: Write<[ids: string[]]>
+  onAssignToFolder?: Write<[sessionId: string, folderId: string | null]>
   /** Batched folder assignment for a multi-selection (one write for all of it). */
-  onBulkAssignToFolder?: (ids: string[], folderId: string | null) => void | Promise<void>
+  onBulkAssignToFolder?: Write<[ids: string[], folderId: string | null]>
+  /** A folder was deleted — forget any view state kept for it. */
+  onFolderDeleted?: (id: string) => void
+  /** Persist one section's manual order (drag reorder). */
+  onReorderSessions?: Write<[ids: string[], sectionKey: string]>
+  /**
+   * Branch a whole conversation and resolve with the new row, or `null` when
+   * there is nothing to branch yet. The list opens it and says so; absent, the
+   * row menus offer no Branch.
+   */
+  onBranch?: (id: string) => Promise<ChatSession | null>
 }
 
 interface UseChannelListActionsOptions extends ChannelListActionCallbacks {
   folders: readonly SessionFolder[]
   newFolderName: string
+  /**
+   * The list's rows by id, read at call time — what the write gate checks a
+   * handoff lock on, and where an undo or a toast finds a title. Omitted,
+   * writes run unchecked by the gate (the write guard still refuses them).
+   */
+  resolveSessions?: (ids: readonly string[]) => ChatSession[]
+  /** The rendered order, read at call time — picks what opens after a removal. */
+  getRenderedOrder?: () => readonly string[]
+  /** The conversation on screen. */
+  activeSessionId?: string | null
+  /** Open a conversation — used to land on the next row, or on a branch. */
+  onSelect?: (id: string) => void
 }
 
 /**
- * Owns the channel list's user actions and their telemetry/persistence policy.
- * Rendering and list-model derivation stay in ChannelListBody; this hook keeps
- * row, bulk, creation, and folder actions consistent at one boundary.
+ * Owns the channel list's user actions and their telemetry, persistence and
+ * feedback policy. Rendering and list-model derivation stay in
+ * ChannelListBody; this hook keeps row, bulk, creation, and folder actions
+ * consistent at one boundary:
+ *
+ * - every write goes through `useSessionWrite` — a handed-off conversation is
+ *   refused up front, a failed write is toasted instead of becoming an
+ *   unhandled rejection, and the returned promise resolves `true` / `false`
+ *   (never rejects), so a caller can keep a selection when a bulk write fails;
+ * - the confirmations live here too (the owner's writers are plain writes), so
+ *   single and bulk actions word their outcome the same way, and archive
+ *   offers its own undo — the row leaves the view it was archived from;
+ * - deleting or archiving the open conversation opens the row that takes its
+ *   place instead of dropping to the welcome screen.
+ *
+ * Every returned handler is stable across renders while the set of available
+ * owner callbacks stays the same: the rows are memoized on them.
  */
-export function useChannelListActions({
-  folders,
-  newFolderName,
-  onNewDirect,
-  onNewTeamConversation,
-  onDelete,
-  onRename,
-  onTogglePinned,
-  onArchive,
-  onUnarchive,
-  onBulkDelete,
-  onBulkSetPinned,
-  onBulkArchive,
-  onBulkUnarchive,
-  onCreateFolder,
-  onReorderFolders,
-  onAssignToFolder,
-  onBulkAssignToFolder,
-}: UseChannelListActionsOptions) {
+export function useChannelListActions(options: UseChannelListActionsOptions) {
+  const { folders } = options
+  const tBulk = useTranslations("desktop.channelList.bulk")
+  const tRow = useTranslations("desktop.channelList.rowToast")
+  const runWrite = useSessionWrite()
+
+  // Everything the handlers read at call time. Refreshed after every commit,
+  // so a handler created once still sees the latest owner callbacks, rows,
+  // order and translations.
+  const latest = useRef({ options, tBulk, tRow })
+  useEffect(() => {
+    latest.current = { options, tBulk, tRow }
+  })
+
   const handleNewDirect = useCallback(() => {
     log.info("channel-list new-direct")
     void trackConversationCreated("direct")
-    onNewDirect()
-  }, [onNewDirect])
+    latest.current.options.onNewDirect()
+  }, [])
 
-  const handleNewTeamConversation = useCallback(
-    (teamId: string) => {
-      log.info("channel-list new-team-conversation", { teamId })
-      void trackConversationCreated("team")
-      onNewTeamConversation(teamId)
-    },
-    [onNewTeamConversation]
+  const handleNewTeamConversation = useCallback((teamId: string) => {
+    log.info("channel-list new-team-conversation", { teamId })
+    void trackConversationCreated("team")
+    latest.current.options.onNewTeamConversation(teamId)
+  }, [])
+
+  const rowsFor = useCallback(
+    (ids: readonly string[]) => latest.current.options.resolveSessions?.(ids) ?? [],
+    []
   )
 
-  const rowActions = useMemo(
-    () => ({
+  /**
+   * Run a write that may take the open conversation out of the list, then open
+   * whatever took its slot. The neighbour is chosen from the order *before*
+   * the write, while the removed rows are still in it.
+   */
+  const runRemoval = useCallback(
+    async (
+      action: SessionWriteAction,
+      ids: readonly string[],
+      write: () => unknown,
+      feedback?: Parameters<typeof runWrite>[3]
+    ): Promise<boolean> => {
+      const { options: current } = latest.current
+      const next = nextAfterRemoval(
+        current.getRenderedOrder?.() ?? [],
+        new Set(ids),
+        current.activeSessionId ?? null
+      )
+      const ok = await runWrite(action, rowsFor(ids), write, feedback)
+      if (ok && next) {
+        log.info("channel-list open next after removal", { action })
+        latest.current.options.onSelect?.(next)
+      }
+      return ok
+    },
+    [runWrite, rowsFor]
+  )
+
+  const has = {
+    togglePinned: Boolean(options.onTogglePinned),
+    archive: Boolean(options.onArchive),
+    unarchive: Boolean(options.onUnarchive),
+    assign: Boolean(options.onAssignToFolder),
+    bulkDelete: Boolean(options.onBulkDelete),
+    bulkSetPinned: Boolean(options.onBulkSetPinned),
+    bulkArchive: Boolean(options.onBulkArchive),
+    bulkUnarchive: Boolean(options.onBulkUnarchive),
+    bulkAssign: Boolean(options.onBulkAssignToFolder || options.onAssignToFolder),
+    renameFolder: Boolean(options.onRenameFolder),
+    deleteFolder: Boolean(options.onDeleteFolder),
+    reorderSessions: Boolean(options.onReorderSessions),
+  }
+
+  const rowActions = useMemo(() => {
+    const cb = () => latest.current.options
+    const bulkT = () => latest.current.tBulk
+    const unarchiveIds = (ids: string[]) =>
+      runWrite("unarchive", rowsFor(ids), () =>
+        ids.length === 1 ? cb().onUnarchive?.(ids[0]!) : cb().onBulkUnarchive?.(ids)
+      )
+    return {
       onDelete: (id: string) => {
         void trackConversationRowAction("delete")
-        return onDelete(id)
+        return runRemoval("delete", [id], () => cb().onDelete(id))
       },
       onRename: (id: string, title: string) => {
         void trackConversationRowAction("rename")
-        return onRename(id, title)
+        return runWrite("rename", rowsFor([id]), () => cb().onRename(id, title))
       },
-      onTogglePinned: onTogglePinned
+      onTogglePinned: has.togglePinned
         ? (id: string, pinned: boolean) => {
             void trackConversationRowAction(pinned ? "pin" : "unpin")
-            return onTogglePinned(id, pinned)
+            return runWrite(
+              pinned ? "pin" : "unpin",
+              rowsFor([id]),
+              () => cb().onTogglePinned!(id, pinned),
+              { success: bulkT()(pinned ? "pinSuccess" : "unpinSuccess", { count: 1 }) }
+            )
           }
         : undefined,
-      onArchive: onArchive
+      onArchive: has.archive
         ? (id: string) => {
             void trackConversationRowAction("archive")
-            return onArchive(id)
+            return runRemoval("archive", [id], () => cb().onArchive!(id), {
+              success: bulkT()("archiveSuccess", { count: 1 }),
+              undo: has.unarchive
+                ? {
+                    label: latest.current.tRow("undo"),
+                    run: () => cb().onUnarchive?.(id),
+                  }
+                : undefined,
+            })
           }
         : undefined,
-      onUnarchive: onUnarchive
+      onUnarchive: has.unarchive
         ? (id: string) => {
             void trackConversationRowAction("unarchive")
-            return onUnarchive(id)
+            return runWrite("unarchive", rowsFor([id]), () => cb().onUnarchive!(id), {
+              success: bulkT()("unarchiveSuccess", { count: 1 }),
+            })
           }
         : undefined,
-      onAssignToFolder: onAssignToFolder
+      onAssignToFolder: has.assign
         ? (sessionId: string, folderId: string | null) => {
             void trackConversationRowAction(folderId ? "assign-folder" : "unassign-folder")
-            return onAssignToFolder(sessionId, folderId)
+            return runWrite("move", rowsFor([sessionId]), () =>
+              cb().onAssignToFolder!(sessionId, folderId)
+            )
           }
         : undefined,
-      onBulkDelete: onBulkDelete
+      onBulkDelete: has.bulkDelete
         ? (ids: string[]) => {
             void trackConversationRowAction("delete", ids.length)
-            return onBulkDelete(ids)
+            return runRemoval("delete", ids, () => cb().onBulkDelete!(ids), {
+              success: bulkT()("deleteSuccess", { count: ids.length }),
+            })
           }
         : undefined,
-      onBulkSetPinned: onBulkSetPinned
+      onBulkSetPinned: has.bulkSetPinned
         ? (ids: string[], pinned: boolean) => {
             void trackConversationRowAction(pinned ? "pin" : "unpin", ids.length)
-            return onBulkSetPinned(ids, pinned)
+            return runWrite(
+              pinned ? "pin" : "unpin",
+              rowsFor(ids),
+              () => cb().onBulkSetPinned!(ids, pinned),
+              { success: bulkT()(pinned ? "pinSuccess" : "unpinSuccess", { count: ids.length }) }
+            )
           }
         : undefined,
-      onBulkArchive: onBulkArchive
+      onBulkArchive: has.bulkArchive
         ? (ids: string[]) => {
             void trackConversationRowAction("archive", ids.length)
-            return onBulkArchive(ids)
+            return runRemoval("archive", ids, () => cb().onBulkArchive!(ids), {
+              success: bulkT()("archiveSuccess", { count: ids.length }),
+              undo:
+                has.bulkUnarchive || (ids.length === 1 && has.unarchive)
+                  ? { label: latest.current.tRow("undo"), run: () => unarchiveIds(ids) }
+                  : undefined,
+            })
           }
         : undefined,
-      onBulkUnarchive: onBulkUnarchive
+      onBulkUnarchive: has.bulkUnarchive
         ? (ids: string[]) => {
             void trackConversationRowAction("unarchive", ids.length)
-            return onBulkUnarchive(ids)
+            return runWrite("unarchive", rowsFor(ids), () => cb().onBulkUnarchive!(ids), {
+              success: bulkT()("unarchiveSuccess", { count: ids.length }),
+            })
           }
         : undefined,
-      onBulkAssignToFolder:
-        onBulkAssignToFolder || onAssignToFolder
-          ? async (ids: string[], folderId: string | null) => {
-              void trackConversationRowAction(
-                folderId ? "assign-folder" : "unassign-folder",
-                ids.length
-              )
-              // The batch writer files the whole selection in one transaction
-              // (one live-query emit, all-or-nothing). An owner that only has
-              // the per-row writer still works — one write per row, in order,
-              // so a failure stops the move where it happened.
-              if (onBulkAssignToFolder) return onBulkAssignToFolder(ids, folderId)
-              for (const id of ids) await onAssignToFolder!(id, folderId)
-            }
-          : undefined,
+      onBulkAssignToFolder: has.bulkAssign
+        ? (ids: string[], folderId: string | null) => {
+            void trackConversationRowAction(
+              folderId ? "assign-folder" : "unassign-folder",
+              ids.length
+            )
+            // The batch writer files the whole selection in one transaction
+            // (one live-query emit, all-or-nothing). An owner that only has
+            // the per-row writer still works — one write per row, in order,
+            // so a failure stops the move where it happened.
+            return runWrite(
+              "move",
+              rowsFor(ids),
+              async () => {
+                const { onBulkAssignToFolder, onAssignToFolder } = cb()
+                if (onBulkAssignToFolder) return onBulkAssignToFolder(ids, folderId)
+                for (const id of ids) await onAssignToFolder!(id, folderId)
+              },
+              {
+                success: bulkT()(folderId ? "moveSuccess" : "removeFromFolderSuccess", {
+                  count: ids.length,
+                }),
+              }
+            )
+          }
+        : undefined,
+      // Read state is the reader's own and needs no owner writer.
+      onBulkMarkRead: (ids: string[]) => {
+        void trackConversationRowAction("mark-read", ids.length)
+        return runWrite("markRead", rowsFor(ids), () =>
+          Promise.all(ids.map((id) => markSessionRead(id)))
+        )
+      },
+      onRenameFolder: has.renameFolder
+        ? (id: string, name: string) =>
+            runWrite("folderRename", [], () => cb().onRenameFolder!(id, name))
+        : undefined,
+      onDeleteFolder: has.deleteFolder
+        ? async (id: string) => {
+            const ok = await runWrite("folderDelete", [], () => cb().onDeleteFolder!(id))
+            // A deleted folder's persisted collapse flag would otherwise sit in
+            // the UI store for good.
+            if (ok) cb().onFolderDeleted?.(id)
+            return ok
+          }
+        : undefined,
+      onReorderSessions: has.reorderSessions
+        ? (ids: string[], sectionKey: string) =>
+            runWrite("reorder", rowsFor(ids), () => cb().onReorderSessions!(ids, sectionKey))
+        : undefined,
+    }
+    // Rebuilt only when an owner callback appears or disappears — the handlers
+    // read the callbacks themselves through `latest`.
+  }, [
+    runWrite,
+    runRemoval,
+    rowsFor,
+    has.togglePinned,
+    has.archive,
+    has.unarchive,
+    has.assign,
+    has.bulkDelete,
+    has.bulkSetPinned,
+    has.bulkArchive,
+    has.bulkUnarchive,
+    has.bulkAssign,
+    has.renameFolder,
+    has.deleteFolder,
+    has.reorderSessions,
+  ])
+
+  // The single-conversation export / share-link dialog, hosted once by the
+  // list rather than once per row.
+  const [exportSessionId, setExportSessionId] = useState<string | null>(null)
+  const closeExport = useCallback(() => setExportSessionId(null), [])
+
+  const hasBranch = Boolean(options.onBranch)
+  const extraActions = useMemo<SessionRowExtraActions>(
+    () => ({
+      onMarkRead: (id: string) => {
+        void trackConversationRowAction("mark-read")
+        void runWrite("markRead", rowsFor([id]), () => markSessionRead(id))
+      },
+      onMarkUnread: (id: string) => {
+        void trackConversationRowAction("mark-unread")
+        void runWrite("markUnread", rowsFor([id]), () => markSessionUnread(id))
+      },
+      onBranch: hasBranch
+        ? (id: string) => {
+            void trackConversationRowAction("branch")
+            let created: ChatSession | null = null
+            void runWrite("branch", rowsFor([id]), async () => {
+              created = await latest.current.options.onBranch!(id)
+            }).then((ok) => {
+              if (!ok) return
+              const branch = created as ChatSession | null
+              if (!branch) {
+                toast.info(latest.current.tRow("nothingToBranch"))
+                return
+              }
+              toast.success(latest.current.tRow("branched"))
+              latest.current.options.onSelect?.(branch.id)
+            })
+          }
+        : undefined,
+      onCopyLink: (id: string) => {
+        void trackConversationRowAction("copy-link")
+        const link = buildConversationLink(id, { desktop: isTauri() })
+        void writeClipboardText(link)
+          .then(() => toast.success(latest.current.tRow("linkCopied")))
+          .catch((error: unknown) => {
+            log.warn("channel-list copy link failed", { error: String(error) })
+            toast.error(latest.current.tRow("linkCopyFailed"))
+          })
+      },
+      onExportShare: (id: string) => {
+        void trackConversationRowAction("export")
+        setExportSessionId(id)
+      },
     }),
-    [
-      onDelete,
-      onRename,
-      onTogglePinned,
-      onArchive,
-      onUnarchive,
-      onAssignToFolder,
-      onBulkDelete,
-      onBulkSetPinned,
-      onBulkArchive,
-      onBulkUnarchive,
-      onBulkAssignToFolder,
-    ]
+    [runWrite, rowsFor, hasBranch]
   )
 
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
   const handleNewFolder = useCallback(() => {
+    const { onCreateFolder } = latest.current.options
     if (!onCreateFolder) return
-    void Promise.resolve(onCreateFolder(newFolderName))
-      .then((created) => {
-        const id = (created as SessionFolder | undefined)?.id
-        if (id) setRenamingFolderId(id)
-      })
-      .catch((error: unknown) => {
-        log.warn("channel-list create folder failed", { error: String(error) })
-      })
-  }, [newFolderName, onCreateFolder])
+    let created: unknown
+    void runWrite("folderCreate", [], async () => {
+      created = await onCreateFolder(latest.current.options.newFolderName)
+    }).then((ok) => {
+      const id = ok ? (created as SessionFolder | undefined)?.id : undefined
+      if (id) setRenamingFolderId(id)
+    })
+  }, [runWrite])
   const handleFolderRenameSettled = useCallback((id: string) => {
     setRenamingFolderId((current) => (current === id ? null : current))
   }, [])
 
   const orderedFolderIds = useMemo(() => folders.map((folder) => folder.id), [folders])
+  const hasReorderFolders = Boolean(options.onReorderFolders)
   const handleMoveFolder = useMemo(
     () =>
-      onReorderFolders && orderedFolderIds.length > 1
+      hasReorderFolders && orderedFolderIds.length > 1
         ? (id: string, delta: -1 | 1) => {
             const index = orderedFolderIds.indexOf(id)
             const target = index + delta
@@ -189,18 +409,19 @@ export function useChannelListActions({
             const next = [...orderedFolderIds]
             next.splice(target, 0, ...next.splice(index, 1))
             log.info("channel-list move folder", { delta })
-            void Promise.resolve(onReorderFolders(next)).catch((error: unknown) => {
-              log.warn("channel-list folder reorder failed", { error: String(error) })
-            })
+            void runWrite("reorder", [], () => latest.current.options.onReorderFolders!(next))
           }
         : undefined,
-    [onReorderFolders, orderedFolderIds]
+    [hasReorderFolders, orderedFolderIds, runWrite]
   )
 
   return {
     handleNewDirect,
     handleNewTeamConversation,
     rowActions,
+    extraActions,
+    exportSessionId,
+    closeExport,
     renamingFolderId,
     handleNewFolder,
     handleFolderRenameSettled,

@@ -69,6 +69,22 @@ function isInFlight(status: AggregateChatStatus): boolean {
   return status === "streaming" || status === "awaiting_approval"
 }
 
+/**
+ * The conversations with a turn in flight, from a per-session status map
+ * (`useSessionRunStatusMap`). Both conversation lists feed it to the `running`
+ * quick filter from the same map their row glyphs read, so the filter and the
+ * glyphs can never disagree.
+ */
+export function inFlightIdSet(
+  statusById: ReadonlyMap<string, AggregateChatStatus> | undefined
+): ReadonlySet<string> {
+  const ids = new Set<string>()
+  for (const [id, status] of statusById ?? []) {
+    if (isInFlight(status)) ids.add(id)
+  }
+  return ids
+}
+
 export interface AggregateRunStateInput {
   sessions: Record<string, { status?: AggregateChatStatus } | undefined>
   activeSessionId?: string | null

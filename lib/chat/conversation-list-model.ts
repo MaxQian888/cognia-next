@@ -189,6 +189,11 @@ export interface BuildSectionsOptions {
    */
   unreadIds?: ReadonlySet<string>
   /**
+   * Conversations with a turn in flight — the `running` filter. Injected for
+   * the same reason as `unreadIds`: live state, not a session field.
+   */
+  runningIds?: ReadonlySet<string>
+  /**
    * Model / provider fallback chain for the model + provider facets — the
    * effective value falls back through the bound character to the profile
    * defaults, none of which live on the session row. `now` is taken from the
@@ -764,6 +769,7 @@ export function buildConversationSections(
     sortBy = "recent",
     filters,
     unreadIds,
+    runningIds,
     filterContext,
     scoreTitle,
   } = opts
@@ -804,6 +810,7 @@ export function buildConversationSections(
           timeBasis,
           modelOf: filterContext?.modelOf,
           providerOf: filterContext?.providerOf,
+          runningIds,
         })
       )
     : pool

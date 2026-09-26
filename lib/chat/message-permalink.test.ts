@@ -1,6 +1,7 @@
 import {
   PERMALINK_MESSAGE_PARAM,
   PERMALINK_SESSION_PARAM,
+  buildConversationLink,
   buildMessagePermalink,
   buildSessionHref,
   messagePermalinkQuery,
@@ -90,5 +91,23 @@ describe("buildSessionHref", () => {
 
   it("escapes both halves", () => {
     expect(buildSessionHref("s 1", "m&2")).toBe("?session=s+1&message=m%262")
+  })
+})
+
+describe("buildConversationLink", () => {
+  it("copies the cognia:// scheme link on the desktop", () => {
+    expect(buildConversationLink("ses_1", { desktop: true, origin: "tauri://localhost" })).toBe(
+      "cognia://session/ses_1"
+    )
+  })
+
+  it("copies an address on the browser's own origin", () => {
+    expect(buildConversationLink("ses_1", { desktop: false, origin: "https://app.example/" })).toBe(
+      "https://app.example/?session=ses_1"
+    )
+  })
+
+  it("falls back to a relative link without an origin", () => {
+    expect(buildConversationLink("ses_1", { desktop: false, origin: null })).toBe("/?session=ses_1")
   })
 })

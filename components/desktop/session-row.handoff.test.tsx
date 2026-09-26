@@ -110,7 +110,10 @@ test("Open in terminal presence-checks, exports, and launches the resume command
   expect(mockLaunchCogniaAgent).toHaveBeenCalledWith(
     expect.objectContaining({ handoffSessionId: "s-1", cwd: "/home/u" })
   )
-  expect(mockToastSuccess).toHaveBeenCalledWith(expect.stringContaining("openedInTerminal"))
+  // The message names the command it ran — `{command}` used to go unfilled.
+  expect(mockToastSuccess).toHaveBeenCalledWith(
+    'openedInTerminal:{"command":"cognia-agent resume s-1"}'
+  )
 })
 
 test("Open in terminal stays disabled when cognia-agent is absent", async () => {

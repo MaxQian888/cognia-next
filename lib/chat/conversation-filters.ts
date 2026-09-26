@@ -84,7 +84,13 @@ export const CONVERSATION_ACTIVITY_FILTER_OPTIONS: readonly ConversationActivity
 ] as const
 
 /** The boolean quick filters, in the order the toolbar renders them. */
-export const CONVERSATION_FILTER_TOGGLES = ["unread", "pinned", "branched", "im"] as const
+export const CONVERSATION_FILTER_TOGGLES = [
+  "unread",
+  "running",
+  "pinned",
+  "branched",
+  "im",
+] as const
 
 export type ConversationFilterToggle = (typeof CONVERSATION_FILTER_TOGGLES)[number]
 
@@ -116,6 +122,7 @@ const EMPTY_LIST: readonly string[] = Object.freeze([])
  */
 export const EMPTY_CONVERSATION_FILTERS: Readonly<Required<ConversationFilters>> = Object.freeze({
   unread: false,
+  running: false,
   pinned: false,
   branched: false,
   im: false,
@@ -174,6 +181,7 @@ export function resolveConversationFilters(
   if (!filters) return EMPTY_CONVERSATION_FILTERS
   return {
     unread: filters.unread === true,
+    running: filters.running === true,
     pinned: filters.pinned === true,
     branched: filters.branched === true,
     im: filters.im === true,
@@ -305,6 +313,13 @@ export interface ConversationFilterContext {
   modelOf?: (session: ChatSession) => string | undefined
   /** Effective provider id for a session; `undefined` = unknown. */
   providerOf?: (session: ChatSession) => string | undefined
+  /**
+   * Conversations with a turn in flight (streaming or awaiting approval) —
+   * the `running` facet. Live chat-store state, injected like `unreadIds`; a
+   * surface that supplies none admits nothing under the facet rather than
+   * everything, so the facet can never silently mean "no filter".
+   */
+  runningIds?: ReadonlySet<string>
 }
 
 /** True when the list facet is inactive or admits `value` (with the unassigned sentinel). */
@@ -357,6 +372,7 @@ export function matchesConversationFilters(
   context?: ConversationFilterContext
 ): boolean {
   if (filters.unread && !(unreadIds?.has(session.id) ?? false)) return false
+  if (filters.running && !(context?.runningIds?.has(session.id) ?? false)) return false
   if (filters.pinned && !session.pinned) return false
   if (filters.branched && !session.parentSessionId) return false
   if (filters.im && !session.platformBinding) return false

@@ -97,6 +97,15 @@ export interface TelemetryEventCatalog {
       // toolbar. Reported when the dialog is requested, not when a link is
       // minted — the share subsystem owns that half (ADR-0037).
       | "share"
+      // One row's own read state, flipped from its menu.
+      | "mark-read"
+      | "mark-unread"
+      // The whole conversation branched into a new one (`branchWholeConversation`).
+      | "branch"
+      // "Copy link to conversation" — private navigation, not a share link.
+      | "copy-link"
+      // The single-conversation export / share-link dialog was opened.
+      | "export"
     /** Rows affected — 1 for a row action, the selection size for a bulk one. */
     count: number
     bulk: boolean

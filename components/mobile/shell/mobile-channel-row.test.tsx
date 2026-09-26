@@ -73,6 +73,24 @@ describe("<MobileChannelRow />", () => {
     )
   })
 
+  it("shows a streaming turn beside the title, named for a screen reader", () => {
+    renderRow({ runStatus: "streaming" })
+    expect(screen.getByTestId("mobile-channel-run-s1-streaming")).toHaveAttribute(
+      "aria-label",
+      "streaming"
+    )
+  })
+
+  it("marks a turn waiting on the user's approval", () => {
+    renderRow({ runStatus: "awaiting_approval" })
+    expect(screen.getByTestId("mobile-channel-run-s1-awaiting")).toBeInTheDocument()
+  })
+
+  it("draws no turn state while idle or when the list passes none", () => {
+    renderRow()
+    expect(screen.queryByTestId(/mobile-channel-run-/)).toBeNull()
+  })
+
   it("opens the conversation on tap and is described by the shared actions hint", async () => {
     const user = userEvent.setup()
     const { props } = renderRow()
@@ -92,6 +110,11 @@ describe("<MobileChannelRow />", () => {
   it("falls back to the untitled label for an empty title", () => {
     renderRow({ session: { ...baseSession, title: "" } })
     expect(screen.getByTestId("mobile-channel-row-s1")).toHaveTextContent("untitled")
+  })
+
+  it("prints a stored machine placeholder in the reader's words", () => {
+    renderRow({ session: { ...baseSession, title: "New chat" } })
+    expect(screen.getByTestId("mobile-channel-row-s1")).toHaveTextContent("placeholderTitle")
   })
 
   it("opens the action sheet on a long-press without also opening the conversation", () => {

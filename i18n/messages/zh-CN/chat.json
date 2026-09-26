@@ -2444,6 +2444,32 @@
       }
     }
   },
+  "sessionRun": {
+    "awaitingApproval": "等待你的批准",
+    "error": "上一轮执行失败",
+    "streaming": "正在回复"
+  },
+  "sessionWrite": {
+    "actionFailed": {
+      "archive": "无法归档该会话。",
+      "delete": "无法删除该会话。",
+      "branch": "无法分支该对话。",
+      "folderCreate": "无法创建文件夹。",
+      "folderDelete": "无法删除该文件夹。",
+      "folderRename": "无法重命名该文件夹。",
+      "markRead": "无法将该会话标为已读。",
+      "markUnread": "无法将该会话标为未读。",
+      "move": "无法移动该会话。",
+      "moveWorkspace": "无法将该会话移动到该工作区。",
+      "pin": "无法置顶该会话。",
+      "rename": "无法重命名该会话。",
+      "reorder": "无法保存新的排序。",
+      "unarchive": "无法恢复该会话。",
+      "unpin": "无法取消置顶该会话。"
+    },
+    "actionLocked": "该会话正在交接到另一台设备，期间为只读。",
+    "undoFailed": "无法撤销该操作。"
+  },
   "slashCommand": {
     "ranSlashCommand": "执行了斜杠命令"
   },

@@ -395,6 +395,18 @@ describe("WorkspaceManageDialog", () => {
     expect(trustMock).toHaveBeenCalledWith("/trust/me")
   })
 
+  it("says so when the host refuses to trust a root, leaving it untrusted", async () => {
+    trustMock.mockRejectedValueOnce(new Error("no host") as never)
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    addManualRoot("/trust/me")
+    await act(async () => {
+      fireEvent.click(screen.getByText("trustRoot"))
+    })
+    expect(toastError).toHaveBeenCalledWith("trustFailed", { description: "no host" })
+    expect(screen.getByText("trustRoot")).toBeInTheDocument()
+  })
+
   it("removes a workspace after a confirm click, keeping its conversations", async () => {
     const removals: unknown[][] = []
     const original = useProjectStore.getState().deleteProject

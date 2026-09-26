@@ -97,6 +97,7 @@ jest.mock("next-intl", () => ({
       viewTabArchived: "Archived",
       emptyArchived: "No archived",
       searchTruncated: "Some results hidden",
+      searchContentFailed: "Content search failed",
       unreadCount: `${vars?.count ?? 0} unread`,
       archiveSuccess: "Archived",
       unarchiveSuccess: "Restored",
@@ -486,6 +487,33 @@ describe("<MobileChannelList />", () => {
     })
   })
 
+  describe("running", () => {
+    const runStatusById = new Map([
+      ["s1", "streaming"],
+      ["s2", "error"],
+    ] as const)
+
+    it("draws each row's live turn state", () => {
+      renderList({ runStatusById })
+      expect(screen.getByTestId("mobile-channel-run-s1-streaming")).toBeInTheDocument()
+      expect(screen.getByTestId("mobile-channel-run-s2-error")).toBeInTheDocument()
+    })
+
+    it("keeps only the conversations with a turn in flight under the running filter", () => {
+      conversationFilters = { unread: false, running: true, pinned: false, branched: false, kind: "all" }
+      renderList({ runStatusById })
+      expect(screen.getByTestId("mobile-channel-row-s1")).toBeInTheDocument()
+      // A failed last turn is not running.
+      expect(screen.queryByTestId("mobile-channel-row-s2")).toBeNull()
+    })
+
+    it("shows nothing as running when the shell passes no run state", () => {
+      conversationFilters = { unread: false, running: true, pinned: false, branched: false, kind: "all" }
+      renderList()
+      expect(screen.queryByTestId("mobile-channel-row-s1")).toBeNull()
+    })
+  })
+
   describe("rows", () => {
     it("marks the active session", () => {
       renderList({ activeSessionId: "s2" })
@@ -688,6 +716,20 @@ describe("<MobileChannelList />", () => {
         expect(screen.getByTestId("mobile-channel-search-pending")).toBeInTheDocument()
       )
       expect(screen.queryByTestId("mobile-channel-empty")).toBeNull()
+    })
+
+    it("says a failed content search failed, instead of asking to refine the query", async () => {
+      conversationSidebar = { search: { content: true } }
+      historySearchState = { ...historySearchState, error: new Error("index gone") }
+      const user = userEvent.setup()
+      renderList()
+      await user.type(screen.getByTestId("mobile-channel-search"), "standup")
+      await waitFor(() =>
+        expect(screen.getByTestId("mobile-channel-search-content-failed")).toHaveTextContent(
+          "Content search failed"
+        )
+      )
+      expect(screen.queryByTestId("mobile-channel-search-truncated")).toBeNull()
     })
 
     it("lets a search reach archived conversations without switching the view", async () => {

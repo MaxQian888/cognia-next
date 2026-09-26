@@ -8510,6 +8510,32 @@
         }
       }
     },
+    "sessionRun": {
+      "awaitingApproval": "等待你的批准",
+      "error": "上一轮执行失败",
+      "streaming": "正在回复"
+    },
+    "sessionWrite": {
+      "actionFailed": {
+        "archive": "无法归档该会话。",
+        "branch": "无法分支该对话。",
+        "delete": "无法删除该会话。",
+        "folderCreate": "无法创建文件夹。",
+        "folderDelete": "无法删除该文件夹。",
+        "folderRename": "无法重命名该文件夹。",
+        "markRead": "无法将该会话标为已读。",
+        "markUnread": "无法将该会话标为未读。",
+        "move": "无法移动该会话。",
+        "moveWorkspace": "无法将该会话移动到该工作区。",
+        "pin": "无法置顶该会话。",
+        "rename": "无法重命名该会话。",
+        "reorder": "无法保存新的排序。",
+        "unarchive": "无法恢复该会话。",
+        "unpin": "无法取消置顶该会话。"
+      },
+      "actionLocked": "该会话正在交接到另一台设备，期间为只读。",
+      "undoFailed": "无法撤销该操作。"
+    },
     "slashCommand": {
       "ranSlashCommand": "执行了斜杠命令"
     },
@@ -10977,6 +11003,7 @@
         "branched": "分支会话",
         "im": "IM 对话",
         "pinned": "已置顶",
+        "running": "运行中",
         "unread": "未读"
       }
     },
@@ -11420,6 +11447,7 @@
         "deleteConfirmTitle": "删除 {count} 个会话？",
         "deleteSuccess": "已删除 {count} 个会话",
         "folderOtherWorkspace": "灰显的文件夹与部分所选会话不在同一工作区。",
+        "markRead": "标为已读",
         "moveSuccess": "已移动 {count} 个会话",
         "moveToFolder": "移动到文件夹",
         "pin": "置顶",
@@ -11441,7 +11469,7 @@
       "compactDensity": "紧凑行距",
       "conversationsTitle": "会话",
       "deleteFolder": "删除文件夹",
-      "deleteFolderConfirmBody": "仅删除文件夹；其中的会话会保留并回到日期列表。此操作不可撤销。",
+      "deleteFolderConfirmBody": "仅删除文件夹；其中的会话会保留，并回到放入文件夹之前所在的列表位置。此操作不可撤销。",
       "deleteFolderConfirmTitle": "删除文件夹「{name}」？",
       "directMessages": "对话",
       "displayOptions": "显示选项",
@@ -11464,7 +11492,8 @@
           "none": "不分组",
           "team": "对话 / 团队",
           "workspace": "工作区"
-        }
+        },
+        "scopeTreeNote": "展开的侧栏始终按团队分组。此选项作用于收起侧栏时浮出的列表和窄窗口下的抽屉。"
       },
       "groupEmpty": "还没有会话",
       "groupShowAll": "显示全部 {count} 条",
@@ -11487,10 +11516,19 @@
       "newFolder": "新建文件夹",
       "newFolderName": "新建文件夹",
       "openSessions": "打开会话列表",
+      "pinDropZone": "拖到这里置顶",
       "pinSidebar": "固定",
       "renameFolder": "重命名文件夹",
       "resizeHandle": "调整侧边栏宽度",
+      "rowToast": {
+        "branched": "已分支，已打开新对话。",
+        "linkCopied": "已复制链接",
+        "linkCopyFailed": "无法复制链接。",
+        "nothingToBranch": "还没有可分支的内容 —— 这个对话还没有消息。",
+        "undo": "撤销"
+      },
       "searchAria": "搜索对话",
+      "searchContentFailed": "消息内容搜索失败，仅显示标题匹配结果。",
       "searchContentMinQuery": "输入 {count} 个字符以搜索消息内容",
       "searchMessageContent": "搜索消息正文",
       "searchPlaceholder": "搜索对话…",
@@ -11957,6 +11995,7 @@
     "sessionRow": {
       "actionsMenu": "会话操作",
       "archive": "归档",
+      "branch": "分支对话",
       "branchedFrom": "分支会话——打开父会话",
       "cancel": "取消",
       "codexHandoffPending": "Codex 导入结果尚未确认。请先检查 Codex App，再重试；原任务仍保留。",
@@ -11967,15 +12006,21 @@
       "cogniaAgentNotInstalled": "未安装 Cognia 代理 CLI",
       "contentMatch": "匹配到消息内容",
       "continueOnDevice": "在其他设备上继续",
+      "copyLink": "复制会话链接",
       "delete": "删除",
       "deleteConfirmAction": "删除会话",
       "deleteConfirmBody": "将永久删除此会话及其全部消息，且无法撤销。",
       "deleteConfirmBranches": "{count, plural, other {它的 # 个分支将作为独立会话保留。}}",
       "deleteConfirmTitle": "删除「{title}」？",
+      "deleteShortcut": "Del",
       "deselect": "取消选择",
       "dragHandle": "拖拽以重新排序或移动到文件夹",
+      "exportShare": "导出或分享…",
       "handoffReadonly": "设备接力后只读",
       "handoffStatus": "设备接力状态",
+      "lockedMenuNote": "已交接到另一台设备，期间为只读",
+      "markRead": "标为已读",
+      "markUnread": "标为未读",
       "moveToFolder": "移动到文件夹",
       "moveToWorkspace": "移动到工作区",
       "openInCodexApp": "在 Codex App 中打开",
@@ -11986,12 +12031,15 @@
       "openedInTerminal": "在终端运行：{command}",
       "pin": "置顶",
       "pinned": "已置顶",
+      "placeholderTitle": "新对话",
       "removeFromFolder": "移出文件夹",
       "rename": "重命名",
+      "renameInput": "重命名“{title}”",
       "returnFromCodexApp": "从 Codex App 接回",
       "returnFromCodexAppFailed": "无法导入关联的 Codex 任务。",
       "returnedFromCodexApp": "已将 Codex 最新快照导入为关联对话。",
       "select": "选择",
+      "selectedState": "已选中",
       "unarchive": "取消归档",
       "unpin": "取消置顶",
       "untitled": "（无标题）"
@@ -21019,16 +21067,6 @@
       "workspaceReady": "工作区就绪"
     },
     "home": {
-      "actionFailed": {
-        "archive": "无法归档该会话。",
-        "delete": "无法删除该会话。",
-        "markRead": "无法将该会话标为已读。",
-        "move": "无法移动该会话。",
-        "pin": "无法置顶该会话。",
-        "rename": "无法重命名该会话。",
-        "unarchive": "无法恢复该会话。",
-        "unpin": "无法取消置顶该会话。"
-      },
       "actionLocked": "该会话正在交接到另一台设备，期间为只读。",
       "actions": {
         "devices": "设备",
@@ -21086,6 +21124,7 @@
       "rowActionsHint": "长按或滑动可查看更多操作",
       "search": "搜索聊天…",
       "searchAria": "搜索聊天",
+      "searchContentFailed": "消息内容搜索失败，仅显示标题匹配结果。",
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
       "searchingMessages": "正在搜索消息内容…",
       "sectionCount": "{count, plural, =1 {1 个会话} other {# 个会话}}",
@@ -56169,10 +56208,16 @@
         "compare": "比较引用",
         "delete": "删除"
       },
+      "alreadyCurrent": "已是当前分支",
       "cancel": "取消",
+      "checkedOut": "已检出 {name}",
+      "checkoutFailed": "无法检出 {name}",
       "confirmDelete": "删除分支",
+      "current": "当前",
       "deleteDescription": "将强制删除 {name}，即使其提交从未被合并。运行结束后，这个分支是它所做工作的唯一记录。",
+      "deleteFailed": "无法删除 {name}",
       "deleteTitle": "删除此 agent 分支？",
+      "deleted": "已删除 {name}",
       "description": "隔离运行回收工作树后留下的分支。",
       "empty": "该仓库里没有 agent 分支。",
       "loading": "正在加载 agent 分支",
@@ -56406,6 +56451,8 @@
         "pastedDefaultName": "粘贴的笔记",
         "reindex": "重新索引文件",
         "reindexAll": "全部重新索引",
+        "reindexAllFailed": "无法重新索引知识库。",
+        "reindexFileFailed": "无法重新索引 {name}。",
         "removeFile": "移除文件",
         "removeFileDescription": "“{name}”及其所有已索引的片段将从该工作区的知识库中移除。粘贴的笔记没有其他副本。",
         "removeFileTitle": "移除此文件？",
@@ -56451,6 +56498,7 @@
       "removeRoot": "移除文件夹",
       "removeTag": "移除标签 {tag}",
       "revokeRoot": "撤销信任",
+      "revokeTrustFailed": "无法撤销对该文件夹的信任。",
       "rootLabelPlaceholder": "文件夹名称（可选）",
       "rootsEmpty": "尚未添加文件夹。可浏览文件夹，或在下方输入绝对路径。",
       "rootsHint": "挂载一个或多个文件夹。主文件夹即工作目录；其余文件夹可一并读取与编辑。",
@@ -56464,6 +56512,7 @@
       "tagsLabel": "标签",
       "tagsPlaceholder": "输入标签后按回车添加",
       "title": "工作区",
+      "trustFailed": "无法信任该文件夹。",
       "trustRoot": "信任",
       "trustedBadge": "已信任",
       "unarchive": "恢复",

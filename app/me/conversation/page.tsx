@@ -31,6 +31,7 @@ import {
   CONVERSATION_GROUP_BY_OPTIONS,
   resolveConversationGroupBy,
 } from "@/lib/chat/conversation-grouping"
+import { resolveConversationSearchOptions } from "@/lib/chat/conversation-search-scope"
 import type {
   AppSettings,
   ConversationGroupBy,
@@ -63,6 +64,7 @@ export default function MobileConversationPage() {
     update({ composerBehavior: { ...composer, ...patch } })
 
   const sidebar: ConversationSidebar = settings?.conversationSidebar ?? {}
+  const searchOptions = resolveConversationSearchOptions(sidebar)
   const setSidebar = (patch: Partial<ConversationSidebar>) =>
     update({ conversationSidebar: { ...sidebar, ...patch } })
 
@@ -210,8 +212,18 @@ export default function MobileConversationPage() {
           <BiometricRow
             label={t("sidebarContentSearch")}
             help={t("sidebarContentSearchHelp")}
-            checked={sidebar.searchScope === "titleAndContent"}
-            onChange={(v) => void setSidebar({ searchScope: v ? "titleAndContent" : "title" })}
+            checked={searchOptions.content}
+            onChange={(v) =>
+              void setSidebar({
+                // The resolved object is what every list reads; the desktop
+                // writes it whole, so a toggle that only moved the deprecated
+                // enum stopped doing anything after the first desktop change.
+                // The enum is kept in step for older clients on the same
+                // (synced) settings.
+                search: { ...searchOptions, content: v },
+                searchScope: v ? "titleAndContent" : "title",
+              })
+            }
             testid="conversation-sidebar-content-search"
           />
         </MeSection>

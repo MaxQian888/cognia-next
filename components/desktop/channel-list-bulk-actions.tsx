@@ -30,17 +30,24 @@ export interface ChannelListBulkActionsProps {
   orderedIds: readonly string[]
   sessions: readonly ChatSession[]
   archived: boolean
-  onDelete?: (ids: string[]) => void | Promise<void>
-  onSetPinned?: (ids: string[], pinned: boolean) => void | Promise<void>
-  onArchive?: (ids: string[]) => void | Promise<void>
-  onUnarchive?: (ids: string[]) => void | Promise<void>
+  /*
+   * Writers resolve `false` when the list's action boundary refused or failed
+   * the write (it has already said so); the selection is kept then, so the
+   * user can retry or narrow it instead of rebuilding it.
+   */
+  onDelete?: (ids: string[]) => void | Promise<unknown>
+  onSetPinned?: (ids: string[], pinned: boolean) => void | Promise<unknown>
+  onArchive?: (ids: string[]) => void | Promise<unknown>
+  onUnarchive?: (ids: string[]) => void | Promise<unknown>
+  /** Clear the unread state of the selected conversations. */
+  onMarkRead?: (ids: string[]) => void | Promise<unknown>
   /**
    * The workspace's folders. Offered to the selection only where the folder
    * can hold *every* selected conversation (a folder is workspace-scoped; see
    * `folderAcceptsSession`) — the others are shown disabled.
    */
   folders?: readonly SessionFolder[]
-  onMoveToFolder?: (ids: string[], folderId: string | null) => void | Promise<void>
+  onMoveToFolder?: (ids: string[], folderId: string | null) => void | Promise<unknown>
   onClear: () => void
 }
 
@@ -54,6 +61,7 @@ export function ChannelListBulkActions({
   onSetPinned,
   onArchive,
   onUnarchive,
+  onMarkRead,
   folders,
   onMoveToFolder,
   onClear,
@@ -85,10 +93,11 @@ export function ChannelListBulkActions({
   }, [folders, selected, sessions])
 
   const runAndClear = useCallback(
-    async (action: (() => void | Promise<void>) | undefined) => {
-      if (!action || selectedIds.length === 0) return
-      await action()
-      onClear()
+    async (action: () => void | Promise<unknown>) => {
+      if (selectedIds.length === 0) return
+      const outcome = await action()
+      // `false` = refused or failed; keep the selection for a retry.
+      if (outcome !== false) onClear()
     },
     [onClear, selectedIds.length]
   )
@@ -117,17 +126,18 @@ export function ChannelListBulkActions({
             <ChannelListBulkToolbar
               count={selected.size}
               archived={archived}
-              onDelete={() => runAndClear(onDelete ? () => onDelete(selectedIds) : undefined)}
-              onPin={() =>
-                runAndClear(onSetPinned ? () => onSetPinned(selectedIds, true) : undefined)
+              onDelete={onDelete ? () => runAndClear(() => onDelete(selectedIds)) : undefined}
+              onPin={
+                onSetPinned ? () => runAndClear(() => onSetPinned(selectedIds, true)) : undefined
               }
-              onUnpin={() =>
-                runAndClear(onSetPinned ? () => onSetPinned(selectedIds, false) : undefined)
+              onUnpin={
+                onSetPinned ? () => runAndClear(() => onSetPinned(selectedIds, false)) : undefined
               }
-              onArchive={() => runAndClear(onArchive ? () => onArchive(selectedIds) : undefined)}
-              onUnarchive={() =>
-                runAndClear(onUnarchive ? () => onUnarchive(selectedIds) : undefined)
+              onArchive={onArchive ? () => runAndClear(() => onArchive(selectedIds)) : undefined}
+              onUnarchive={
+                onUnarchive ? () => runAndClear(() => onUnarchive(selectedIds)) : undefined
               }
+              onMarkRead={onMarkRead ? () => runAndClear(() => onMarkRead(selectedIds)) : undefined}
               folders={folders}
               blockedFolderIds={blockedFolderIds}
               onMoveToFolder={

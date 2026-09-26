@@ -31,6 +31,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { GitBranchIcon, RefreshCwIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { ConsoleSection } from "@/components/surface/console-section"
 import {
@@ -111,16 +112,22 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
     void refresh()
   }, [refresh])
 
+  // Both writes say how they went: a checkout or delete that failed used to
+  // reach only the log, so the button simply appeared to do nothing. The list
+  // re-reads after either, so the current-branch marker follows a checkout.
   const doCheckout = useCallback(
     async (name: string) => {
       if (!rootDir) return
       try {
         await runGitUserAction("git_checkout_branch", () => gitCheckoutBranch(rootDir, name))
+        toast.success(t("checkedOut", { name }))
       } catch (err) {
         log.warn("checkout_failed", { name, err: String(err) })
+        toast.error(t("checkoutFailed", { name }), { description: errorText(err) })
       }
+      await refresh()
     },
-    [rootDir]
+    [rootDir, refresh, t]
   )
 
   const doDelete = useCallback(
@@ -128,12 +135,14 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
       if (!rootDir) return
       try {
         await runGitUserAction("git_delete_branch", () => gitDeleteBranch(rootDir, name, true))
-        await refresh()
+        toast.success(t("deleted", { name }))
       } catch (err) {
         log.warn("delete_failed", { name, err: String(err) })
+        toast.error(t("deleteFailed", { name }), { description: errorText(err) })
       }
+      await refresh()
     },
-    [rootDir, refresh]
+    [rootDir, refresh, t]
   )
 
   // Nothing to read and nothing to say. The section is about a repository, and
@@ -208,16 +217,28 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
                 <span className="min-w-0 flex-1 truncate font-mono text-xs" title={branch.name}>
                   {branch.name}
                 </span>
+                {branch.isCurrent ? (
+                  <span
+                    className="shrink-0 rounded-pill bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                    data-testid={`workspace-agent-branch-current-${branch.name}`}
+                  >
+                    {t("current")}
+                  </span>
+                ) : null}
               </span>
               <span className="flex shrink-0 items-center gap-1">
                 <Button
                   size="sm"
                   variant="outline"
                   className="h-7"
-                  disabled={!checkoutGate.available}
-                  title={checkoutGate.reason ?? undefined}
+                  // Already checked out: nothing to switch to.
+                  disabled={!checkoutGate.available || branch.isCurrent}
+                  title={
+                    branch.isCurrent ? t("alreadyCurrent") : (checkoutGate.reason ?? undefined)
+                  }
                   data-unavailable={checkoutGate.available ? undefined : "true"}
                   onClick={() => void doCheckout(branch.name)}
+                  data-testid={`workspace-agent-branch-checkout-${branch.name}`}
                 >
                   {t("actions.checkout")}
                 </Button>
@@ -287,4 +308,8 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
       </AlertDialog>
     </ConsoleSection>
   )
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }

@@ -8,6 +8,7 @@ import {
   FolderIcon,
   FolderInputIcon,
   Link2Icon,
+  MailOpenIcon,
   PinIcon,
   PinOffIcon,
   Trash2Icon,
@@ -38,11 +39,18 @@ export interface ChannelListBulkToolbarProps {
   count: number
   /** When true the selection lives in the Archived view → show Unarchive only. */
   archived?: boolean
-  onDelete: () => void | Promise<void>
-  onPin: () => void | Promise<void>
-  onUnpin: () => void | Promise<void>
-  onArchive: () => void | Promise<void>
-  onUnarchive: () => void | Promise<void>
+  /*
+   * Each action is optional and its button is drawn only when it is handed
+   * one: a toolbar that shows Delete to an owner with no delete writer would
+   * be a button that silently does nothing.
+   */
+  onDelete?: () => void | Promise<unknown>
+  onPin?: () => void | Promise<unknown>
+  onUnpin?: () => void | Promise<unknown>
+  onArchive?: () => void | Promise<unknown>
+  onUnarchive?: () => void | Promise<unknown>
+  /** Clear the unread state of every selected conversation. */
+  onMarkRead?: () => void | Promise<unknown>
   onShare: () => void
   /**
    * Folders the selection can be moved into. Empty (or absent `onMoveToFolder`)
@@ -56,7 +64,7 @@ export interface ChannelListBulkToolbarProps {
    * leave the user hunting for a folder they know exists.
    */
   blockedFolderIds?: ReadonlySet<string>
-  onMoveToFolder?: (folderId: string | null) => void | Promise<void>
+  onMoveToFolder?: (folderId: string | null) => void | Promise<unknown>
   onClear: () => void
 }
 
@@ -76,6 +84,7 @@ export function ChannelListBulkToolbar({
   onUnpin,
   onArchive,
   onUnarchive,
+  onMarkRead,
   onShare,
   folders = [],
   blockedFolderIds = NO_BLOCKED_FOLDERS,
@@ -156,61 +165,84 @@ export function ChannelListBulkToolbar({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        {archived ? (
+        {onMarkRead ? (
           <Button
             size="icon"
             variant="ghost"
             className="size-6"
-            onClick={() => void onUnarchive()}
-            aria-label={t("unarchive")}
-            title={t("unarchive")}
+            onClick={() => void onMarkRead()}
+            aria-label={t("markRead")}
+            title={t("markRead")}
+            data-testid="channel-list-bulk-mark-read"
           >
-            <ArchiveRestoreIcon className="size-3.5" />
+            <MailOpenIcon className="size-3.5" />
           </Button>
+        ) : null}
+        {archived ? (
+          onUnarchive ? (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-6"
+              onClick={() => void onUnarchive()}
+              aria-label={t("unarchive")}
+              title={t("unarchive")}
+            >
+              <ArchiveRestoreIcon className="size-3.5" />
+            </Button>
+          ) : null
         ) : (
           <>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-6"
-              onClick={() => void onPin()}
-              aria-label={t("pin")}
-              title={t("pin")}
-            >
-              <PinIcon className="size-3.5" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-6"
-              onClick={() => void onUnpin()}
-              aria-label={t("unpin")}
-              title={t("unpin")}
-            >
-              <PinOffIcon className="size-3.5" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-6"
-              onClick={() => void onArchive()}
-              aria-label={t("archive")}
-              title={t("archive")}
-            >
-              <ArchiveIcon className="size-3.5" />
-            </Button>
+            {onPin ? (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6"
+                onClick={() => void onPin()}
+                aria-label={t("pin")}
+                title={t("pin")}
+              >
+                <PinIcon className="size-3.5" />
+              </Button>
+            ) : null}
+            {onUnpin ? (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6"
+                onClick={() => void onUnpin()}
+                aria-label={t("unpin")}
+                title={t("unpin")}
+              >
+                <PinOffIcon className="size-3.5" />
+              </Button>
+            ) : null}
+            {onArchive ? (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6"
+                onClick={() => void onArchive()}
+                aria-label={t("archive")}
+                title={t("archive")}
+              >
+                <ArchiveIcon className="size-3.5" />
+              </Button>
+            ) : null}
           </>
         )}
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-6 text-destructive hover:text-destructive"
-          onClick={() => setConfirmOpen(true)}
-          aria-label={t("delete")}
-          title={t("delete")}
-        >
-          <Trash2Icon className="size-3.5" />
-        </Button>
+        {onDelete ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-6 text-destructive hover:text-destructive"
+            onClick={() => setConfirmOpen(true)}
+            aria-label={t("delete")}
+            title={t("delete")}
+          >
+            <Trash2Icon className="size-3.5" />
+          </Button>
+        ) : null}
         <Button
           size="icon"
           variant="ghost"
@@ -238,7 +270,7 @@ export function ChannelListBulkToolbar({
               })}
               onClick={() => {
                 setConfirmOpen(false)
-                void onDelete()
+                void onDelete?.()
               }}
             >
               {t("delete")}

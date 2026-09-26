@@ -18,38 +18,9 @@ import { buildAgentRoleLlmClient } from "@/lib/ai/generation/agent-role-client"
 import { generateConversationTitle } from "@/lib/ai/generation/title"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
-/**
- * Placeholder titles a brand-new session/run carries before it gets a real one.
- * Includes common i18n defaults so `isPlaceholderTitle` works regardless of
- * the user's locale. Adding to this set requires no Dexie schema change.
- */
-const PLACEHOLDER_TITLES = new Set([
-  "New chat",
-  "New conversation",
-  // zh-CN / zh-TW common defaults
-  "新对话",
-  "新聊天",
-  "新建会话",
-  "新建聊天",
-  // ja
-  "新しい会話",
-  // fr
-  "Nouvelle conversation",
-  // de
-  "Neue Unterhaltung",
-  // es
-  "Nueva conversación",
-])
-
-/**
- * True when `title` is empty or one of the known machine placeholders — i.e.
- * the instant first-message preview is allowed to claim it. A user rename
- * replaces the placeholder, so this also doubles as the "not yet renamed"
- * gate for the instant-preview write in the chat hooks.
- */
-export function isPlaceholderTitle(title: string | undefined | null): boolean {
-  return !title || PLACEHOLDER_TITLES.has(title)
-}
+// The placeholder vocabulary lives in a dependency-free module so the
+// conversation lists can localize it without importing this pipeline.
+export { isPlaceholderTitle } from "@/lib/chat/placeholder-title"
 
 /**
  * True when `title` looks like the instant first-message truncation of

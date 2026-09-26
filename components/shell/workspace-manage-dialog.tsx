@@ -396,13 +396,27 @@ export function WorkspaceManageDialog({ open, onOpenChange, initialId }: Props) 
   }
   const removeTag = (tag: string) => setTags((prev) => prev.filter((t) => t !== tag))
 
+  // Trust changes reach the host; a refusal (no host, a denied grant) used to
+  // surface as an unhandled rejection with the badge unchanged and no word.
   const handleTrust = async (path: string) => {
-    await trustWorkspace(path)
-    setTrustMap((prev) => ({ ...prev, [path]: true }))
+    try {
+      await trustWorkspace(path)
+      setTrustMap((prev) => ({ ...prev, [path]: true }))
+    } catch (error) {
+      toast.error(t("trustFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
   const handleRevoke = async (path: string) => {
-    await revokeWorkspaceTrust(path)
-    setTrustMap((prev) => ({ ...prev, [path]: false }))
+    try {
+      await revokeWorkspaceTrust(path)
+      setTrustMap((prev) => ({ ...prev, [path]: false }))
+    } catch (error) {
+      toast.error(t("revokeTrustFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   const handleSave = () => {

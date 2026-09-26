@@ -50,7 +50,8 @@ import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { useUIStore } from "@/stores/ui"
 import { openSessionForReading } from "@/lib/chat/unread-marker"
-import { setSessionOrder } from "@/lib/db/sessions"
+import { branchWholeConversation } from "@/lib/chat/branch-whole-conversation"
+import { useSessionRunStatusMap } from "@/hooks/chat/use-session-run-status-map"
 import { guildFromSession } from "@/lib/claude/guild"
 import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
 import {
@@ -74,9 +75,9 @@ export function DesktopChatWorkspace() {
   const runtimeT = useTranslations("desktop.chatRuntime")
   const tMembers = useTranslations("desktop.memberList")
   const tChat = useTranslations("chat")
-  // Held in a ref for the same reason as `bulkT` below: `useTranslations`
-  // returns a fresh function each render, and `handleSwitchToSession` must not
-  // change identity on every render because of it.
+  // Held in a ref: `useTranslations` returns a fresh function each render, and
+  // `handleSwitchToSession` must not change identity on every render because
+  // of it.
   const workspaceT = useTranslations("workspace.switcher")
   const workspaceTRef = useRef(workspaceT)
   useEffect(() => {
@@ -128,6 +129,7 @@ export function DesktopChatWorkspace() {
     reorderFolders,
     assignToFolder,
     bulkAssignToFolder,
+    reorderSessions,
   } = useSessions({
     crossWorkspace: needsCrossWorkspaceSessions(sidebarGroupBy, sidebarSearch),
   })
@@ -309,8 +311,9 @@ export function DesktopChatWorkspace() {
   const handleNewTeamConversation = useCallback(
     async (teamId: string) => {
       log.info("new-team-conversation", { teamId })
+      // No title: the row is stamped with the machine placeholder, which the
+      // lists print in the reader's language and the first message replaces.
       const s = await create({
-        title: "New conversation",
         kind: "team",
         teamId,
         executionLocation: newChatExecution.location,
@@ -476,96 +479,80 @@ export function DesktopChatWorkspace() {
     [handleNewTeamConversation]
   )
 
-  const handleChannelDelete = useCallback(
-    (id: string) => {
-      void remove(id)
-    },
-    [remove]
-  )
+  // The sidebar's writers are plain writes that resolve or reject: the list's
+  // action boundary (`channel-list/use-channel-list-actions.ts`) owns the
+  // handoff-lock gate, the failure toasts and the confirmations, so a single
+  // row and a bulk selection word their outcome the same way. Returned, never
+  // `void`ed, so a failure reaches that boundary instead of vanishing.
+  const handleChannelDelete = useCallback((id: string) => remove(id), [remove])
 
   const handleChannelRename = useCallback(
-    (id: string, title: string) => {
-      void rename(id, title)
-    },
+    (id: string, title: string) => rename(id, title),
     [rename]
   )
 
-  // Returned (not `void`ed) so the sidebar can drop its optimistic projection
-  // of the new order if the write fails.
+  // Returned so the sidebar can drop its optimistic projection of the new
+  // order if the write fails. Through `useSessions` so a paired client hands
+  // the order to its Host.
   const handleReorderSessions = useCallback(
-    (ids: string[], sectionKey: string) => setSessionOrder(ids, sectionKey),
-    []
+    (ids: string[], sectionKey: string) => reorderSessions(ids, sectionKey),
+    [reorderSessions]
   )
 
-  // `useTranslations` returns a fresh function reference on each render. Hold
-  // it in a ref so the bulk callbacks (consumed by ChannelList) stay
-  // referentially stable across renders and don't churn React Memo / effects.
-  const bulkT = useTranslations("desktop.channelList.bulk")
-  const bulkTRef = useRef(bulkT)
-  useEffect(() => {
-    bulkTRef.current = bulkT
-  }, [bulkT])
-
   const handleChannelTogglePinned = useCallback(
-    (id: string, pinned: boolean) => {
-      void bulkSetPinned([id], pinned).then(() => {
-        toast.success(bulkTRef.current(pinned ? "pinSuccess" : "unpinSuccess", { count: 1 }))
-      })
-    },
+    (id: string, pinned: boolean) => bulkSetPinned([id], pinned),
     [bulkSetPinned]
   )
 
   const handleChannelBulkDelete = useCallback(
-    async (ids: string[]) => {
-      const count = ids.length
-      log.info("channel bulk-delete", { count })
-      await bulkRemove(ids)
-      toast.success(bulkTRef.current("deleteSuccess", { count }))
+    (ids: string[]) => {
+      log.info("channel bulk-delete", { count: ids.length })
+      return bulkRemove(ids)
     },
     [bulkRemove]
   )
 
   const handleChannelBulkSetPinned = useCallback(
-    async (ids: string[], pinned: boolean) => {
-      const count = ids.length
-      log.info("channel bulk-set-pinned", { count, pinned })
-      await bulkSetPinned(ids, pinned)
-      toast.success(bulkTRef.current(pinned ? "pinSuccess" : "unpinSuccess", { count }))
+    (ids: string[], pinned: boolean) => {
+      log.info("channel bulk-set-pinned", { count: ids.length, pinned })
+      return bulkSetPinned(ids, pinned)
     },
     [bulkSetPinned]
   )
 
   const handleChannelBulkArchive = useCallback(
-    async (ids: string[]) => {
-      const count = ids.length
-      log.info("channel bulk-archive", { count })
-      await bulkArchive(ids)
-      toast.success(bulkTRef.current("archiveSuccess", { count }))
+    (ids: string[]) => {
+      log.info("channel bulk-archive", { count: ids.length })
+      return bulkArchive(ids)
     },
     [bulkArchive]
   )
 
   const handleChannelBulkUnarchive = useCallback(
-    async (ids: string[]) => {
-      const count = ids.length
-      log.info("channel bulk-unarchive", { count })
-      await bulkUnarchive(ids)
-      toast.success(bulkTRef.current("unarchiveSuccess", { count }))
+    (ids: string[]) => {
+      log.info("channel bulk-unarchive", { count: ids.length })
+      return bulkUnarchive(ids)
     },
     [bulkUnarchive]
   )
 
   const handleChannelBulkAssignToFolder = useCallback(
-    async (ids: string[], folderId: string | null) => {
-      const count = ids.length
-      log.info("channel bulk-assign-folder", { count, filed: folderId !== null })
-      await bulkAssignToFolder(ids, folderId)
-      toast.success(
-        bulkTRef.current(folderId ? "moveSuccess" : "removeFromFolderSuccess", { count })
-      )
+    (ids: string[], folderId: string | null) => {
+      log.info("channel bulk-assign-folder", { count: ids.length, filed: folderId !== null })
+      return bulkAssignToFolder(ids, folderId)
     },
     [bulkAssignToFolder]
   )
+
+  // The row menus' "Branch conversation": the whole visible thread into a new,
+  // linked conversation — the same helper the session settings sheet uses.
+  const handleChannelBranch = useCallback((id: string) => {
+    log.info("channel branch conversation")
+    return branchWholeConversation(id)
+  }, [])
+
+  // Live turn state for the sidebar rows and its `running` filter.
+  const runStatusById = useSessionRunStatusMap()
 
   // Starter cards / follow-up chips. On the welcome page there is no session
   // yet, so this has to start one before sending: `send` drops the prompt when
@@ -710,6 +697,8 @@ export function DesktopChatWorkspace() {
       onBulkAssignToFolder={handleChannelBulkAssignToFolder}
       onReorderSessions={handleReorderSessions}
       onEffectiveGroupByChange={setListGroupBy}
+      onBranch={handleChannelBranch}
+      runStatusById={runStatusById}
     />
   )
 

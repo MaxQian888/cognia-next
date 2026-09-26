@@ -99,6 +99,13 @@ describe("buildMobileChannelListItems", () => {
     expect(kinds({ empty: true })).toEqual(["notice:empty"])
   })
 
+  it("names a failed content search in place of the truncation hint", () => {
+    expect(kinds({ truncated: true, contentFailed: true, empty: true })).toEqual([
+      "notice:contentFailed",
+      "notice:empty",
+    ])
+  })
+
   it("drops a section the model emitted with no rows unless it is a folder", () => {
     const sections: ConversationSection[] = [{ kind: "recent", sessions: [] }]
     expect(kinds({ sections })).toEqual([])

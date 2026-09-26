@@ -139,12 +139,23 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
 
   // Disabled while it runs: a second click queued a second full re-ingest of
   // every file behind the first.
+  // A failed re-index is said out loud: the spinner stopping was the only
+  // sign before, which reads exactly like success.
   const reindexAll = async () => {
     setReindexingAll(true)
     try {
       await controller.reindexProject(project)
+    } catch (error) {
+      toast.error(t("reindexAllFailed"), { description: errorText(error) })
     } finally {
       setReindexingAll(false)
+    }
+  }
+  const reindexFile = async (file: KnowledgeFile) => {
+    try {
+      await controller.reindexFile(project.id, file)
+    } catch (error) {
+      toast.error(t("reindexFileFailed", { name: file.name }), { description: errorText(error) })
     }
   }
 
@@ -228,7 +239,7 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
                   type="button"
                   aria-label={t("reindex")}
                   title={t("reindex")}
-                  onClick={() => void controller.reindexFile(project.id, file)}
+                  onClick={() => void reindexFile(file)}
                   className="shrink-0 rounded-control p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <RefreshCwIcon aria-hidden className="size-3.5" />
@@ -365,3 +376,7 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
 }
 
 export default WorkspaceKnowledgeSection
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}

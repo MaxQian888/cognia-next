@@ -23,7 +23,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import { conversationSectionKey, type ConversationSection } from "@/lib/chat/conversation-list-model"
 
 /** Status lines that sit above the rows, inside the same scroll container. */
-export type MobileChannelNotice = "truncated" | "pending" | "empty"
+export type MobileChannelNotice = "contentFailed" | "truncated" | "pending" | "empty"
 
 export type MobileChannelListItem =
   | { kind: "notice"; key: string; notice: MobileChannelNotice }
@@ -45,6 +45,12 @@ export interface BuildMobileChannelListItemsInput {
   narrowed: boolean
   /** The message-content search capped or could not finish. */
   truncated: boolean
+  /**
+   * The message-content search failed outright. Said as a failure, not as the
+   * "refine your search" hint — narrowing a query cannot fix a broken index.
+   * Takes the place of the `truncated` line.
+   */
+  contentFailed?: boolean
   /** Nothing to show yet, but the message index is still answering. */
   pending: boolean
   /** Nothing to show, and nothing is still coming. */
@@ -59,11 +65,16 @@ export function buildMobileChannelListItems({
   sections,
   narrowed,
   truncated,
+  contentFailed = false,
   pending,
   empty,
 }: BuildMobileChannelListItemsInput): MobileChannelListItem[] {
   const items: MobileChannelListItem[] = []
-  if (truncated) items.push({ kind: "notice", key: "notice:truncated", notice: "truncated" })
+  if (contentFailed) {
+    items.push({ kind: "notice", key: "notice:contentFailed", notice: "contentFailed" })
+  } else if (truncated) {
+    items.push({ kind: "notice", key: "notice:truncated", notice: "truncated" })
+  }
   if (pending) items.push({ kind: "notice", key: "notice:pending", notice: "pending" })
   else if (empty) items.push({ kind: "notice", key: "notice:empty", notice: "empty" })
 

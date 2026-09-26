@@ -80,6 +80,12 @@ export interface UseConversationListModelParams {
   filters?: ConversationFilters
   /** Session ids with unread messages — feeds the unread filter and sort. */
   unreadIds?: ReadonlySet<string>
+  /**
+   * Session ids with a turn in flight — feeds the `running` filter. Pass it
+   * only while that filter is on: run state changes every turn, and handing a
+   * fresh set over when nothing reads it would rebuild the list for nothing.
+   */
+  runningIds?: ReadonlySet<string>
   /** Model / provider fallback chain for the model + provider facets. */
   filterContext?: Pick<ConversationFilterContext, "modelOf" | "providerOf">
   /**
@@ -124,6 +130,7 @@ export function useConversationListModel({
   sortBy = "recent",
   filters,
   unreadIds,
+  runningIds,
   filterContext,
   now,
   timeZone,
@@ -149,6 +156,7 @@ export function useConversationListModel({
         sortBy,
         filters,
         unreadIds,
+        runningIds,
         filterContext,
         scoreTitle: scoreTitle ?? undefined,
       }),
@@ -170,6 +178,7 @@ export function useConversationListModel({
       sortBy,
       filters,
       unreadIds,
+      runningIds,
       filterContext,
       now,
       timeZone,

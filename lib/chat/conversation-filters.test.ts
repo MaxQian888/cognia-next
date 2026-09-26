@@ -89,6 +89,11 @@ describe("resolveConversationFilters", () => {
     })
   })
 
+  it("reads the running facet, off unless it is literally on", () => {
+    expect(resolveConversationFilters({ running: true }).running).toBe(true)
+    expect(resolveConversationFilters({}).running).toBe(false)
+  })
+
   it("coerces non-boolean values to off rather than on", () => {
     const raw = { unread: 1, pinned: "yes" } as unknown as Parameters<
       typeof resolveConversationFilters
@@ -175,6 +180,19 @@ describe("matchesConversationFilters", () => {
     expect(matchesConversationFilters(session({ id: "s-read" }), filters, unread)).toBe(false)
     // No set injected at all → nothing is unread, rather than everything.
     expect(matchesConversationFilters(session({ id: "s-unread" }), filters, undefined)).toBe(false)
+  })
+
+  it("filters by a turn in flight against the injected running set", () => {
+    const filters = resolveConversationFilters({ running: true })
+    const context = { runningIds: new Set(["s-live"]) }
+    expect(matchesConversationFilters(session({ id: "s-live" }), filters, undefined, context)).toBe(
+      true
+    )
+    expect(matchesConversationFilters(session({ id: "s-done" }), filters, undefined, context)).toBe(
+      false
+    )
+    // No run state injected → nothing is running, rather than everything.
+    expect(matchesConversationFilters(session({ id: "s-live" }), filters, undefined)).toBe(false)
   })
 
   it("filters by pinned", () => {

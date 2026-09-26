@@ -2,6 +2,15 @@
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...a: unknown[]) => toastSuccess(...a),
+    error: (...a: unknown[]) => toastError(...a),
+  },
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${Object.values(values).join(",")}` : key,
@@ -170,5 +179,54 @@ describe("AgentBranchesSection", () => {
     fireEvent.click(await screen.findByRole("button", { name: "cancel" }))
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
     expect(gitDeleteBranch).not.toHaveBeenCalled()
+  })
+
+  it("checks out a branch, says so, and re-reads so the current marker follows", async () => {
+    gitCheckoutBranch.mockResolvedValue(undefined)
+    render(<AgentBranchesSection rootDir="/repo" />)
+    const name = "agent/run-1/ada/task-9"
+    await screen.findByTestId(`workspace-agent-branch-${name}`)
+    gitBranches.mockResolvedValueOnce([{ name, isCurrent: true }])
+    fireEvent.click(screen.getByTestId(`workspace-agent-branch-checkout-${name}`))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith(`checkedOut:${name}`))
+    expect(gitCheckoutBranch).toHaveBeenCalledWith("/repo", name)
+    expect(await screen.findByTestId(`workspace-agent-branch-current-${name}`)).toHaveTextContent(
+      "current"
+    )
+    // Already checked out: the button says so instead of offering a no-op.
+    const checkout = screen.getByTestId(`workspace-agent-branch-checkout-${name}`)
+    expect(checkout).toBeDisabled()
+    expect(checkout).toHaveAttribute("title", "alreadyCurrent")
+  })
+
+  it("reports a failed checkout instead of only logging it", async () => {
+    gitCheckoutBranch.mockRejectedValue(new Error("worktree holds it"))
+    render(<AgentBranchesSection rootDir="/repo" />)
+    const name = "agent/run-2/cleo/task-3"
+    await screen.findByTestId(`workspace-agent-branch-${name}`)
+    fireEvent.click(screen.getByTestId(`workspace-agent-branch-checkout-${name}`))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(`checkoutFailed:${name}`, {
+        description: "worktree holds it",
+      })
+    )
+  })
+
+  it("reports a delete either way", async () => {
+    const name = "agent/run-1/ada/task-9"
+    gitDeleteBranch.mockRejectedValueOnce(new Error("locked ref"))
+    render(<AgentBranchesSection rootDir="/repo" />)
+    await screen.findByTestId(`workspace-agent-branch-${name}`)
+    fireEvent.click(screen.getByTestId(`workspace-agent-branch-delete-${name}`))
+    fireEvent.click(screen.getByTestId("workspace-agent-branch-delete-confirm"))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(`deleteFailed:${name}`, {
+        description: "locked ref",
+      })
+    )
+    gitDeleteBranch.mockResolvedValueOnce(undefined)
+    fireEvent.click(screen.getByTestId(`workspace-agent-branch-delete-${name}`))
+    fireEvent.click(screen.getByTestId("workspace-agent-branch-delete-confirm"))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith(`deleted:${name}`))
   })
 })

@@ -1035,3 +1035,127 @@ describe("move to workspace", () => {
     expect(screen.queryByTestId("session-row-move-workspace-s-1")).not.toBeInTheDocument()
   })
 })
+
+describe("row actions, keys and state", () => {
+  const LOCK = { ticketId: "tk", lockedAt: 1 } as unknown as ChatSession["handoffLock"]
+
+  test("Enter while an IME is composing does not commit a rename", () => {
+    const { onRename } = setup()
+    fireEvent.doubleClick(screen.getByRole("button", { name: /Hello/ }))
+    const input = screen.getByLabelText('renameInput:{"title":"Hello"}')
+    fireEvent.change(input, { target: { value: "你好" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    expect(onRename).not.toHaveBeenCalled()
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(onRename).toHaveBeenCalledWith("s-1", "你好")
+  })
+
+  test("F2 renames and Delete asks to delete, from the row's own button", () => {
+    setup({ session: { ...baseSession, title: "" } })
+    const button = screen.getByRole("button", { name: /untitled/ })
+    fireEvent.keyDown(button, { key: "Delete" })
+    // An untitled row is named as the list prints it, not `Delete ""?`.
+    expect(screen.getByText('deleteConfirmTitle:{"title":"untitled"}')).toBeInTheDocument()
+    fireEvent.click(screen.getByText("cancel"))
+    fireEvent.keyDown(button, { key: "F2" })
+    expect(screen.getByLabelText('renameInput:{"title":"untitled"}')).toBeInTheDocument()
+  })
+
+  test("Space toggles the row in the multi-selection instead of opening it", () => {
+    const onToggleSelection = jest.fn()
+    const { onSelect } = setup({ onToggleSelection })
+    fireEvent.keyDown(screen.getByRole("button", { name: /Hello/ }), { key: " " })
+    expect(onToggleSelection).toHaveBeenCalledWith("s-1")
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  test("a handed-off conversation cannot start a rename or a delete", () => {
+    setup({ session: { ...baseSession, handoffLock: LOCK } })
+    const button = screen.getByRole("button", { name: /Hello/ })
+    fireEvent.doubleClick(button)
+    fireEvent.keyDown(button, { key: "F2" })
+    fireEvent.keyDown(button, { key: "Delete" })
+    expect(screen.queryByRole("textbox")).toBeNull()
+    expect(screen.queryByText(/deleteConfirmTitle/)).toBeNull()
+  })
+
+  test("a handed-off conversation keeps its read-only items and disables the writes", async () => {
+    const user = userEvent.setup()
+    const onMarkUnread = jest.fn()
+    setup({
+      session: { ...baseSession, handoffLock: LOCK },
+      onTogglePinned: jest.fn(),
+      onArchive: jest.fn(),
+      extraActions: { onMarkUnread, onCopyLink: jest.fn(), onBranch: jest.fn() },
+    })
+    await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+    expect(screen.getByText("lockedMenuNote")).toBeInTheDocument()
+    for (const id of ["rename", "pin", "archive", "branch", "delete"]) {
+      expect(screen.getByTestId(`session-row-dropdown-${id}-s-1`)).toHaveAttribute("data-disabled")
+    }
+    await user.click(screen.getByTestId("session-row-dropdown-mark-unread-s-1"))
+    expect(onMarkUnread).toHaveBeenCalledWith("s-1")
+  })
+
+  test("the read-state item follows the row's unread state, badges on or off", async () => {
+    const user = userEvent.setup()
+    const onMarkRead = jest.fn()
+    setup({ isUnread: true, extraActions: { onMarkRead, onMarkUnread: jest.fn() } })
+    await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+    await user.click(screen.getByTestId("session-row-dropdown-mark-read-s-1"))
+    expect(onMarkRead).toHaveBeenCalledWith("s-1")
+  })
+
+  test("right-click opens the same actions as the ⋯ menu", async () => {
+    const onBranch = jest.fn()
+    const onExportShare = jest.fn()
+    setup({ extraActions: { onBranch, onExportShare, onCopyLink: jest.fn() } })
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Hello/ }))
+    const menu = await screen.findByTestId("session-row-context-menu-s-1")
+    expect(within(menu).getByTestId("session-row-context-rename-s-1")).toBeInTheDocument()
+    expect(within(menu).getByTestId("session-row-context-copy-link-s-1")).toBeInTheDocument()
+    fireEvent.click(within(menu).getByTestId("session-row-context-branch-s-1"))
+    expect(onBranch).toHaveBeenCalledWith("s-1")
+  })
+
+  test.each([
+    ["streaming", "session-row-run-streaming", "streaming"],
+    ["awaiting_approval", "session-row-run-awaiting", "awaitingApproval"],
+    ["error", "session-row-run-error", "error"],
+  ] as const)("shows the %s turn state", (runStatus, testId, label) => {
+    setup({ runStatus })
+    expect(screen.getByTestId(testId)).toHaveAttribute("aria-label", label)
+  })
+
+  test("draws no turn state while idle", () => {
+    setup({ runStatus: "idle" })
+    expect(screen.queryByTestId(/session-row-run-/)).toBeNull()
+  })
+
+  test("prints a stored machine placeholder in the reader's words", () => {
+    setup({ session: { ...baseSession, title: "New chat" } })
+    expect(screen.getByRole("button", { name: /placeholderTitle/ })).toBeInTheDocument()
+  })
+
+  test("marks the open conversation and announces the selection", () => {
+    setup({ active: true, selected: true })
+    const button = screen.getByRole("button", { name: /Hello/ })
+    expect(button).toHaveAttribute("aria-current", "page")
+    expect(within(button).getByText("selectedState")).toHaveClass("sr-only")
+  })
+
+  test("leaves the Tab order when the list gives its tab stop to another row", () => {
+    setup({ tabbable: false })
+    expect(screen.getByRole("button", { name: /Hello/ })).toHaveAttribute("tabindex", "-1")
+    expect(screen.getByRole("button", { name: "actionsMenu" })).toHaveAttribute("tabindex", "-1")
+  })
+
+  test("reports keyboard focus so the list can move its ring", async () => {
+    const user = userEvent.setup()
+    const onRowFocus = jest.fn()
+    setup({ onRowFocus })
+    await user.tab()
+    expect(screen.getByRole("button", { name: /Hello/ })).toHaveFocus()
+    expect(onRowFocus).toHaveBeenCalledWith("s-1")
+  })
+})

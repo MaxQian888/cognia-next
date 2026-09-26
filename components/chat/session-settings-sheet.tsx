@@ -101,8 +101,7 @@ import { ClearConversationTrigger } from "@/components/chat/dialogs/clear-conver
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 import { closeSession } from "@/lib/claude/ipc"
-import { branchSessionAtMessage } from "@/lib/chat/branch-session"
-import { selectVisibleMessages } from "@/stores/chat/chat-store"
+import { branchWholeConversation } from "@/lib/chat/branch-whole-conversation"
 import { useChatStore, useComposerEphemeralSkillIds } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { resolveSessionWorkspace } from "@/lib/workspace/session-workspace"
@@ -428,7 +427,8 @@ export function SessionSettingsSheet({
   /**
    * Branch the whole conversation — the session-level entry to the same
    * operation the per-message branch button performs, with the last visible
-   * message as the cut-off.
+   * message as the cut-off (`branchWholeConversation`, shared with the
+   * conversation list's row menu).
    *
    * This used to call `forkSessionFromParent`, a strictly weaker duplicate:
    * `branchSessionAtMessage` already reuses the cheap SDK fork when the cut-off
@@ -441,24 +441,11 @@ export function SessionSettingsSheet({
    */
   const handleBranch = async () => {
     try {
-      const state = useChatStore.getState()
-      const slice = state.sessions[session.id]
-      const visible = slice
-        ? selectVisibleMessages(slice.messages, slice.activeBranchByGroup)
-        : session.id === state.activeSessionId
-          ? selectVisibleMessages(state.messages, state.activeBranchByGroup)
-          : []
-      const cutoff = visible.at(-1)
-      if (!cutoff) {
+      const child = await branchWholeConversation(session.id)
+      if (!child) {
         toast.error(t("branchEmpty"))
         return
       }
-      const child = await branchSessionAtMessage({
-        sourceId: session.id,
-        visibleMessages: visible,
-        messageId: cutoff.id,
-        mode: "direct",
-      })
       useChatStore.getState().setActiveSession(child.id)
       toast.success(t("branchSuccess"))
       loggers.chat.info("session.branched", {

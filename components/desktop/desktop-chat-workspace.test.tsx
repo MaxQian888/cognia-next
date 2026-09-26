@@ -93,6 +93,7 @@ const renameFolder = jest.fn().mockResolvedValue(undefined)
 const deleteFolder = jest.fn().mockResolvedValue(undefined)
 const assignToFolder = jest.fn().mockResolvedValue(undefined)
 const bulkAssignToFolder = jest.fn().mockResolvedValue(undefined)
+const reorderSessions = jest.fn().mockResolvedValue(undefined)
 // Every `crossWorkspace` the workspace asked `useSessions` for, in order.
 const useSessionsCrossWorkspace: boolean[] = []
 let activeSessionId: string | null = null
@@ -134,6 +135,7 @@ jest.mock("@/hooks/chat", () => ({
       deleteFolder,
       assignToFolder,
       bulkAssignToFolder,
+      reorderSessions,
     }
   },
   useClaudeChat: () => directChatMock,
@@ -162,8 +164,15 @@ const teamChatMock = {
 }
 
 const errorMessageRef: { current: string | null } = { current: null }
+// Per-session slices the sidebar's run-state map is read from.
+const sessionSlicesRef: { current: Record<string, { status: string }> } = { current: {} }
 const closeSessionStoreMock = jest.fn()
 const clearActiveSession = jest.fn()
+const branchWholeConversation = jest.fn(async (_id: string) => ({ id: "branch-1" }))
+jest.mock("@/lib/chat/branch-whole-conversation", () => ({
+  branchWholeConversation: (id: string) => branchWholeConversation(id),
+}))
+
 jest.mock("@/stores/chat", () => ({
   useChatStore: Object.assign(
     <T,>(
@@ -172,6 +181,7 @@ jest.mock("@/stores/chat", () => ({
         pendingApprovals: unknown[]
         activeSessionEpoch: number
         clearActiveSession: typeof clearActiveSession
+        sessions: Record<string, { status: string }>
       }) => T
     ): T =>
       selector({
@@ -179,6 +189,7 @@ jest.mock("@/stores/chat", () => ({
         pendingApprovals: [],
         activeSessionEpoch,
         clearActiveSession,
+        sessions: sessionSlicesRef.current,
       }),
     {
       getState: () => ({
@@ -361,6 +372,8 @@ beforeEach(() => {
     connectionState: "offline",
   }
   channelListPropsLog.length = 0
+  sessionSlicesRef.current = {}
+  branchWholeConversation.mockClear()
   paneGroupPropsLog.length = 0
   closeSessionStoreMock.mockClear()
   clearActiveSession.mockClear()
@@ -1198,7 +1211,7 @@ test("the sidebar's New chat lands on the welcome instead of opening the picker"
   expect(create).not.toHaveBeenCalled()
 })
 
-test("onBulkDelete delegates to bulkRemove and surfaces the i18n'd success toast", async () => {
+test("onBulkDelete delegates to bulkRemove and leaves the confirmation to the list", async () => {
   render(<DesktopChatWorkspace />)
   const props = channelListPropsLog[channelListPropsLog.length - 1]
   const onBulkDelete = props.onBulkDelete as (ids: string[]) => Promise<void>
@@ -1206,11 +1219,13 @@ test("onBulkDelete delegates to bulkRemove and surfaces the i18n'd success toast
     await onBulkDelete(["s-1", "s-2"])
   })
   expect(bulkRemove).toHaveBeenCalledWith(["s-1", "s-2"])
+  // Confirmations live at the list's action boundary now; the owner's
+  // writer is a plain write and says nothing itself.
   const { toast } = await import("sonner")
-  expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("deleteSuccess")
+  expect(toast.success).not.toHaveBeenCalled()
 })
 
-test("onBulkSetPinned(true) delegates to bulkSetPinned and toasts pinSuccess", async () => {
+test("onBulkSetPinned(true) delegates to bulkSetPinned", async () => {
   render(<DesktopChatWorkspace />)
   const props = channelListPropsLog[channelListPropsLog.length - 1]
   const onBulkSetPinned = props.onBulkSetPinned as (ids: string[], pinned: boolean) => Promise<void>
@@ -1218,11 +1233,13 @@ test("onBulkSetPinned(true) delegates to bulkSetPinned and toasts pinSuccess", a
     await onBulkSetPinned(["s-1"], true)
   })
   expect(bulkSetPinned).toHaveBeenCalledWith(["s-1"], true)
+  // Confirmations live at the list's action boundary now; the owner's
+  // writer is a plain write and says nothing itself.
   const { toast } = await import("sonner")
-  expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("pinSuccess")
+  expect(toast.success).not.toHaveBeenCalled()
 })
 
-test("onBulkSetPinned(false) routes to unpinSuccess toast", async () => {
+test("onBulkSetPinned(false) delegates to bulkSetPinned", async () => {
   render(<DesktopChatWorkspace />)
   const props = channelListPropsLog[channelListPropsLog.length - 1]
   const onBulkSetPinned = props.onBulkSetPinned as (ids: string[], pinned: boolean) => Promise<void>
@@ -1230,11 +1247,13 @@ test("onBulkSetPinned(false) routes to unpinSuccess toast", async () => {
     await onBulkSetPinned(["s-1", "s-2", "s-3"], false)
   })
   expect(bulkSetPinned).toHaveBeenCalledWith(["s-1", "s-2", "s-3"], false)
+  // Confirmations live at the list's action boundary now; the owner's
+  // writer is a plain write and says nothing itself.
   const { toast } = await import("sonner")
-  expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("unpinSuccess")
+  expect(toast.success).not.toHaveBeenCalled()
 })
 
-test("onBulkArchive delegates to bulkArchive and toasts archiveSuccess", async () => {
+test("onBulkArchive delegates to bulkArchive", async () => {
   render(<DesktopChatWorkspace />)
   const props = channelListPropsLog[channelListPropsLog.length - 1]
   const onBulkArchive = props.onBulkArchive as (ids: string[]) => Promise<void>
@@ -1242,11 +1261,13 @@ test("onBulkArchive delegates to bulkArchive and toasts archiveSuccess", async (
     await onBulkArchive(["s-1", "s-2"])
   })
   expect(bulkArchive).toHaveBeenCalledWith(["s-1", "s-2"])
+  // Confirmations live at the list's action boundary now; the owner's
+  // writer is a plain write and says nothing itself.
   const { toast } = await import("sonner")
-  expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("archiveSuccess")
+  expect(toast.success).not.toHaveBeenCalled()
 })
 
-test("onBulkUnarchive delegates to the transactional bulkUnarchive and toasts unarchiveSuccess", async () => {
+test("onBulkUnarchive delegates to the transactional bulkUnarchive", async () => {
   render(<DesktopChatWorkspace />)
   const props = channelListPropsLog[channelListPropsLog.length - 1]
   const onBulkUnarchive = props.onBulkUnarchive as (ids: string[]) => Promise<void>
@@ -1254,8 +1275,10 @@ test("onBulkUnarchive delegates to the transactional bulkUnarchive and toasts un
     await onBulkUnarchive(["s-1", "s-2"])
   })
   expect(bulkUnarchive).toHaveBeenCalledWith(["s-1", "s-2"])
+  // Confirmations live at the list's action boundary now; the owner's
+  // writer is a plain write and says nothing itself.
   const { toast } = await import("sonner")
-  expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("unarchiveSuccess")
+  expect(toast.success).not.toHaveBeenCalled()
 })
 
 test("per-row onTogglePinned routes through bulkSetPinned with a single-id list", async () => {
@@ -1382,22 +1405,57 @@ describe("sidebar wiring", () => {
     expect(setSelectedGuild).toHaveBeenLastCalledWith({ kind: "team", teamId: "t-1" })
   })
 
-  test("files a selection through the batch writer and says how many moved", async () => {
+  test("files a selection through the batch writer and lets a failure reach the list", async () => {
     render(<DesktopChatWorkspace />)
     const move = latestListProps().onBulkAssignToFolder as (
       ids: string[],
       folderId: string | null
     ) => Promise<void>
-    const { toast } = await import("sonner")
     await act(async () => {
       await move(["s-1", "s-2"], "f-1")
     })
     expect(bulkAssignToFolder).toHaveBeenCalledWith(["s-1", "s-2"], "f-1")
-    expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("moveSuccess")
     await act(async () => {
       await move(["s-1"], null)
     })
     expect(bulkAssignToFolder).toHaveBeenLastCalledWith(["s-1"], null)
-    expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("removeFromFolderSuccess")
+    // Rejections propagate so the list's action boundary can report them.
+    bulkAssignToFolder.mockRejectedValueOnce(new Error("locked"))
+    await expect(move(["s-1"], "f-1")).rejects.toThrow("locked")
   })
+})
+
+test("hands the sidebar the live turn state of every non-idle conversation", () => {
+  sessionSlicesRef.current = {
+    "s-idle": { status: "idle" },
+    "s-run": { status: "streaming" },
+    "s-ask": { status: "awaiting_approval" },
+    "s-err": { status: "error" },
+  }
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  const map = props.runStatusById as ReadonlyMap<string, string>
+  expect(Object.fromEntries(map)).toEqual({
+    "s-run": "streaming",
+    "s-ask": "awaiting_approval",
+    "s-err": "error",
+  })
+})
+
+test("branches a row's whole conversation through the shared helper", async () => {
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  const onBranch = props.onBranch as (id: string) => Promise<{ id: string } | null>
+  await expect(onBranch("s-1")).resolves.toEqual({ id: "branch-1" })
+  expect(branchWholeConversation).toHaveBeenCalledWith("s-1")
+})
+
+test("routes a manual reorder through useSessions so a paired client reaches its Host", async () => {
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  const onReorderSessions = props.onReorderSessions as (ids: string[], key: string) => Promise<void>
+  await act(async () => {
+    await onReorderSessions(["s-2", "s-1"], "recent")
+  })
+  expect(reorderSessions).toHaveBeenCalledWith(["s-2", "s-1"], "recent")
 })

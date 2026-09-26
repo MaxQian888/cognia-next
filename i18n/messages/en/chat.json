@@ -2444,6 +2444,32 @@
       }
     }
   },
+  "sessionRun": {
+    "awaitingApproval": "Waiting for your approval",
+    "error": "The last turn failed",
+    "streaming": "Replying"
+  },
+  "sessionWrite": {
+    "actionFailed": {
+      "archive": "Couldn't archive the conversation.",
+      "delete": "Couldn't delete the conversation.",
+      "branch": "Couldn't branch the conversation.",
+      "folderCreate": "Couldn't create the folder.",
+      "folderDelete": "Couldn't delete the folder.",
+      "folderRename": "Couldn't rename the folder.",
+      "markRead": "Couldn't mark the conversation as read.",
+      "markUnread": "Couldn't mark the conversation as unread.",
+      "move": "Couldn't move the conversation.",
+      "moveWorkspace": "Couldn't move the conversation to that workspace.",
+      "pin": "Couldn't pin the conversation.",
+      "rename": "Couldn't rename the conversation.",
+      "reorder": "Couldn't save the new order.",
+      "unarchive": "Couldn't restore the conversation.",
+      "unpin": "Couldn't unpin the conversation."
+    },
+    "actionLocked": "This conversation is read-only while it is handed off to another device.",
+    "undoFailed": "Couldn't undo that change."
+  },
   "slashCommand": {
     "ranSlashCommand": "ran slash command"
   },

@@ -2,9 +2,11 @@
  * Pure drag-drop resolution for the conversation sidebar (ChannelList). Keeps
  * the @dnd-kit wiring in the component thin and the decision logic testable.
  *
- * Two gestures are supported:
+ * Three gestures are supported:
  *  - Drop a conversation onto a folder header → assign it to that folder
  *    (rejected when the folder belongs to another workspace).
+ *  - Drop an unpinned conversation onto the Pinned section's header (or the
+ *    "drop here to pin" zone the list shows while nothing is pinned) → pin it.
  *  - Drop a conversation onto another conversation in the same section →
  *    reorder that section (Pinned, a date bucket, a folder, or the flat
  *    "recent" list). Both rows must belong to the same section; dropping across
@@ -17,8 +19,11 @@ import { conversationSectionKey, type ConversationSection } from "./conversation
 export interface DndNode {
   id: string
   data?: {
-    /** "session" for a conversation row, "folder" for a folder drop target. */
-    type?: "session" | "folder"
+    /**
+     * "session" for a conversation row, "folder" for a folder drop target,
+     * "pin" for the Pinned section's drop target.
+     */
+    type?: "session" | "folder" | "pin"
     /** Folder id (for `type: "folder"`) or the session's current folder. */
     folderId?: string | null
     /**
@@ -27,12 +32,15 @@ export interface DndNode {
      * assignment to be allowed (see {@link resolveConversationDrop}).
      */
     projectId?: string | null
+    /** Whether the dragged row is already pinned (a pin drop is then a no-op). */
+    pinned?: boolean
   }
 }
 
 export type ConversationDropAction =
   | { type: "assign"; sessionId: string; folderId: string | null }
   | { type: "reorder"; ids: string[] }
+  | { type: "pin"; sessionId: string }
 
 export interface ConversationDropPreview {
   targetId: string
@@ -74,6 +82,12 @@ export function resolveConversationDrop(
   siblingIds: readonly string[]
 ): ConversationDropAction | null {
   if (!active || !over || active.id === over.id) return null
+
+  // Dropped onto the Pinned target → pin. Already pinned → nothing to do (its
+  // place among the pins is a reorder, done by dropping onto a pinned row).
+  if (over.data?.type === "pin") {
+    return active.data?.pinned ? null : { type: "pin", sessionId: active.id }
+  }
 
   // Dropped onto a folder header → (re)assign membership.
   if (over.data?.type === "folder") {

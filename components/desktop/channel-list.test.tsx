@@ -314,6 +314,7 @@ jest.mock("@/components/shell/sidebar-guild-sections", () => {
     activeGuildKey: unknown
     GuildScopeMenuItems: unknown
     GuildUnreadPill: unknown
+    GuildMutedGlyph: unknown
     TEAM_SETTINGS_ROUTE: unknown
   }
   return {
@@ -325,6 +326,7 @@ jest.mock("@/components/shell/sidebar-guild-sections", () => {
     // different component than the one that ships.
     GuildScopeMenuItems: actual.GuildScopeMenuItems,
     GuildUnreadPill: actual.GuildUnreadPill,
+    GuildMutedGlyph: actual.GuildMutedGlyph,
     SidebarGuildSectionRows: ({
       rows,
       activeKey,
@@ -554,6 +556,80 @@ test("persists a drag-end reorder for the section that contains both conversatio
   })
 
   expect(onReorderSessions).toHaveBeenCalledWith(["second", "first"], "date:today")
+})
+
+test("dropping an unpinned conversation on the Pinned header pins it", async () => {
+  conversationSidebar = { groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+  const now = Date.now()
+  const onTogglePinned = jest.fn().mockResolvedValue(undefined)
+  render(
+    <ChannelList
+      sessions={[
+        baseSession("kept", { title: "Kept", pinned: true, updatedAt: now }),
+        baseSession("loose", { title: "Loose", updatedAt: now - 1 }),
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onTogglePinned={onTogglePinned}
+      onReorderSessions={jest.fn()}
+    />
+  )
+  // The Pinned header is the drop target.
+  expect(mockDroppableNodes.get("pin-drop:pinned")).toBe(
+    screen.getByTestId("channel-list-pin-drop-heading")
+  )
+  act(() => {
+    mockDragEnd?.({
+      active: { id: "loose", data: { current: { type: "session", pinned: false } } },
+      over: { id: "pin-drop:pinned", data: { current: { type: "pin" } } },
+    })
+  })
+  await waitFor(() => expect(onTogglePinned).toHaveBeenCalledWith("loose", true))
+  // A row already pinned dropped there again writes nothing.
+  onTogglePinned.mockClear()
+  act(() => {
+    mockDragEnd?.({
+      active: { id: "kept", data: { current: { type: "session", pinned: true } } },
+      over: { id: "pin-drop:pinned", data: { current: { type: "pin" } } },
+    })
+  })
+  expect(onTogglePinned).not.toHaveBeenCalled()
+})
+
+test("offers a pin drop zone for the length of a drag while nothing is pinned", () => {
+  conversationSidebar = { groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+  const now = Date.now()
+  render(
+    <ChannelList
+      sessions={[
+        baseSession("first", { updatedAt: now }),
+        baseSession("second", { updatedAt: now - 1 }),
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onTogglePinned={jest.fn()}
+      onReorderSessions={jest.fn()}
+    />
+  )
+  expect(screen.queryByTestId("channel-list-pin-drop-zone")).toBeNull()
+  act(() => {
+    mockDragStart?.({ active: { id: "second", data: { current: { type: "session" } } } })
+  })
+  const zone = screen.getByTestId("channel-list-pin-drop-zone")
+  expect(zone).toHaveTextContent("pinDropZone")
+  expect(mockDroppableNodes.get("pin-drop:pinned")).toBe(zone)
+  act(() => mockDragCancel?.())
+  expect(screen.queryByTestId("channel-list-pin-drop-zone")).toBeNull()
 })
 
 test("previews the pending insertion edge and clears it when the drag is cancelled", () => {
@@ -1844,7 +1920,8 @@ describe("revealing a freshly created conversation", () => {
     )
     // Nothing was hiding it, so no narrowing is undone — the common case must
     // not cost the user their view, their search or their filters.
-    expect(await screen.findByText("New chat")).toBeInTheDocument()
+    // A fresh row keeps the machine placeholder, printed in the reader's words.
+    expect(await screen.findByText("placeholderTitle")).toBeInTheDocument()
     expect(resetConversationFilters).not.toHaveBeenCalled()
     expect(channelListView).toBe("active")
   })
@@ -1888,7 +1965,8 @@ describe("revealing a freshly created conversation", () => {
         onUnarchive={jest.fn()}
       />
     )
-    expect(await screen.findByText("New chat")).toBeInTheDocument()
+    // A fresh row keeps the machine placeholder, printed in the reader's words.
+    expect(await screen.findByText("placeholderTitle")).toBeInTheDocument()
     expect(channelListView).toBe("active")
   })
 
@@ -1912,7 +1990,8 @@ describe("revealing a freshly created conversation", () => {
     await screen.findByText(/emptySearch/)
     pendingConversationReveal = "new"
     act(() => emitUiChange())
-    expect(await screen.findByText("New chat")).toBeInTheDocument()
+    // A fresh row keeps the machine placeholder, printed in the reader's words.
+    expect(await screen.findByText("placeholderTitle")).toBeInTheDocument()
     // The field itself is cleared too, not just the debounced query.
     expect(screen.getByPlaceholderText("searchPlaceholder")).toHaveValue("")
   })
@@ -2387,7 +2466,7 @@ describe("interaction upgrades", () => {
         onRename={jest.fn()}
       />
     )
-    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    const list = screen.getByTestId("channel-list-keyboard-root")
     list.focus()
     await user.keyboard("{ArrowDown}")
     expect(container.querySelector("li[data-focused]")).toBeInTheDocument()
@@ -2398,7 +2477,7 @@ describe("interaction upgrades", () => {
   test("the slash key focuses the search box", async () => {
     callQueue.push(characters, [], undefined)
     const user = userEvent.setup()
-    const { container } = render(
+    render(
       <ChannelList
         sessions={[dmA]}
         activeSessionId={null}
@@ -2409,7 +2488,7 @@ describe("interaction upgrades", () => {
         onRename={jest.fn()}
       />
     )
-    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    const list = screen.getByTestId("channel-list-keyboard-root")
     list.focus()
     await user.keyboard("/")
     expect(screen.getByLabelText("searchAria")).toHaveFocus()
@@ -2931,7 +3010,9 @@ describe("virtualized flat lists", () => {
     HTMLElement.prototype.scrollTo = scrollTo
     try {
       renderWith(many(400, "Chat"))
-      const list = screen.getByTestId("channel-list-virtual-rows")
+      expect(screen.getByTestId("channel-list-virtual-rows")).toBeInTheDocument()
+      // Keys act where the list holds focus: its root (or a row's button).
+      const list = screen.getByTestId("channel-list-keyboard-root")
       scrollTo.mockClear()
       fireEvent.keyDown(list, { key: "End" })
       expect(scrollTo).toHaveBeenCalled()
@@ -3167,7 +3248,7 @@ describe("channel-list branch coverage top-ups", () => {
   it("Escape drops the keyboard focus ring once nothing is selected", async () => {
     const user = userEvent.setup()
     const { container } = renderList([dmSession])
-    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    const list = screen.getByTestId("channel-list-keyboard-root")
     list.focus()
     await user.keyboard("{ArrowDown}")
     await waitFor(() => expect(container.querySelector("li[data-focused]")).not.toBeNull())
@@ -3183,6 +3264,18 @@ describe("channel-list branch coverage top-ups", () => {
     await user.type(screen.getByLabelText("searchAria"), "alice")
     // Silently truncated results read as "that conversation is gone".
     expect(await screen.findByText("searchTruncated")).toBeInTheDocument()
+  })
+
+  it("says a failed content search failed, rather than asking to refine it", async () => {
+    conversationSidebar = { searchScope: "titleAndContent" }
+    historySearchState = { ...historySearchState, error: new Error("index gone") }
+    const user = userEvent.setup()
+    renderList([dmSession])
+    await user.type(screen.getByLabelText("searchAria"), "alice")
+    expect(await screen.findByTestId("channel-list-search-content-failed")).toHaveTextContent(
+      "searchContentFailed"
+    )
+    expect(screen.queryByText("searchTruncated")).toBeNull()
   })
 
   it("starts a team conversation from the header CTA inside a team guild", async () => {
@@ -3296,7 +3389,7 @@ describe("unread badges and identity rendering", () => {
         onRename={jest.fn()}
       />
     )
-    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    const list = screen.getByTestId("channel-list-keyboard-root")
     list.focus()
     await user.keyboard("{Control>}a{/Control}")
     await waitFor(() => expect(container.querySelectorAll("li[data-selected]")).toHaveLength(2))
@@ -3399,6 +3492,23 @@ describe("title-bar projection", () => {
     expect(setSidebarWidth).toHaveBeenLastCalledWith(272)
     fireEvent.keyDown(handle, { key: "ArrowLeft" })
     expect(setSidebarWidth).toHaveBeenLastCalledWith(240)
+  })
+
+  it("previews a drag locally and writes the store once, at release", () => {
+    renderProjected()
+    const handle = screen.getByRole("separator", { name: "resizeHandle" })
+    const rail = document.getElementById("conversation-sidebar")!
+    setSidebarWidth.mockClear()
+    fireEvent.pointerDown(handle, { button: 0, clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(handle, { clientX: 130, pointerId: 1 })
+    fireEvent.pointerMove(handle, { clientX: 150, pointerId: 1 })
+    // The column follows the pointer without a store write per frame.
+    expect(rail).toHaveStyle({ width: "306px" })
+    expect(handle).toHaveAttribute("aria-valuenow", "306")
+    expect(setSidebarWidth).not.toHaveBeenCalled()
+    fireEvent.pointerUp(handle, { clientX: 150, pointerId: 1 })
+    expect(setSidebarWidth).toHaveBeenCalledTimes(1)
+    expect(setSidebarWidth).toHaveBeenCalledWith(306)
   })
 
   it("heads the bar's start outlet with the workspace switcher and hosts the shell navigation", () => {
@@ -4328,6 +4438,67 @@ describe("scope tree (merged rail)", () => {
     )
   })
 
+  it("gives the Chats label the same scope menu the squad headers carry", async () => {
+    const onNewDirect = jest.fn()
+    renderMerged([dmSession], { onNewDirect })
+    fireEvent.contextMenu(screen.getByTestId("sidebar-scope-label-chats"))
+    const menu = await screen.findByTestId("sidebar-scope-menu-chats")
+    expect(within(menu).getByTestId("sidebar-guild-menu-mark-read-dm")).toBeInTheDocument()
+    // Chats is not one of the squads: nothing to reorder or manage.
+    expect(within(menu).queryByTestId("sidebar-guild-menu-move-up-dm")).toBeNull()
+    fireEvent.click(within(menu).getByTestId("sidebar-guild-menu-new-dm"))
+    expect(onNewDirect).toHaveBeenCalledTimes(1)
+  })
+
+  it("greys out Move up on the first squad header and Move down on the last", async () => {
+    renderMerged([dmSession])
+    fireEvent.contextMenu(screen.getByTestId("sidebar-scope-toggle-t-1"))
+    const first = await screen.findByTestId("sidebar-scope-menu-t-1")
+    expect(within(first).getByTestId("sidebar-guild-menu-move-up-t-1")).toHaveAttribute(
+      "data-disabled"
+    )
+    expect(within(first).getByTestId("sidebar-guild-menu-move-down-t-1")).not.toHaveAttribute(
+      "data-disabled"
+    )
+    fireEvent.keyDown(first, { key: "Escape" })
+    fireEvent.contextMenu(screen.getByTestId("sidebar-scope-toggle-t-2"))
+    const last = await screen.findByTestId("sidebar-scope-menu-t-2")
+    expect(within(last).getByTestId("sidebar-guild-menu-move-down-t-2")).toHaveAttribute(
+      "data-disabled"
+    )
+  })
+
+  it("swaps a muted squad's unread pill for the muted glyph and says so", () => {
+    act(() => {
+      teamOrderSettingsStore.setState({
+        settings: { conversationSidebar: { mutedTeamIds: ["t-1"] } } as never,
+      })
+    })
+    renderMerged([baseSession("s-a", { kind: "team", teamId: "t-1", title: "A work" })])
+    expect(screen.getByTestId("sidebar-scope-muted-t-1")).toBeInTheDocument()
+    expect(screen.queryByTestId("sidebar-scope-unread-t-1")).toBeNull()
+    expect(screen.getByTestId("sidebar-scope-toggle-t-1")).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("teamMuted")
+    )
+    // Unmuted squads keep their pill slot.
+    expect(screen.queryByTestId("sidebar-scope-muted-t-2")).toBeNull()
+    act(() => {
+      teamOrderSettingsStore.setState({ settings: {} as never })
+    })
+  })
+
+  it("keeps the group-by choice reachable and says where it applies", async () => {
+    const user = userEvent.setup()
+    renderMerged([dmSession])
+    await user.click(screen.getByRole("button", { name: "listActions" }))
+    await openMenuSection("group")
+    expect(await screen.findByTestId("channel-list-group-compact-note")).toHaveTextContent(
+      "groupBy.scopeTreeNote"
+    )
+    expect(screen.getByTestId("channel-list-group-date")).toBeInTheDocument()
+  })
+
   it("shows the tail instead of an expander when only a row or two would hide", () => {
     // Squad cap is two + a two-row tolerance → four rows just render.
     const rows = Array.from({ length: 4 }, (_, i) =>
@@ -4542,10 +4713,13 @@ describe("drop animation, settle mark and list telemetry", () => {
     dropSecondOnFirst()
     expect(rowTitles(container)).toEqual(["Second", "First"])
     await waitFor(() => expect(rowTitles(container)).toEqual(["First", "Second"]))
+    // The action boundary reports the failure (and toasts it); the list then
+    // lets go of its projection.
     expect(logWarn).toHaveBeenCalledWith(
-      "channel-list reorder persist failed",
-      expect.objectContaining({ error: expect.stringContaining("quota") })
+      "session write failed",
+      expect.objectContaining({ action: "reorder", error: expect.stringContaining("quota") })
     )
+    expect(logWarn).toHaveBeenCalledWith("channel-list reorder persist failed")
   })
 
   test("a pointer-following clone of the dragged row is shown while a drag is active", () => {
@@ -4577,7 +4751,7 @@ describe("drop animation, settle mark and list telemetry", () => {
   test("opening a conversation is tracked by how it was opened", async () => {
     callQueue.push(characters, [], undefined)
     const user = userEvent.setup()
-    const { container } = render(
+    render(
       <ChannelList
         {...listProps}
         sessions={[baseSession("s-a", { title: "Alpha", updatedAt: 30 })]}
@@ -4585,7 +4759,7 @@ describe("drop animation, settle mark and list telemetry", () => {
     )
     await user.click(screen.getByText("Alpha"))
     expect(listTelemetry.trackConversationOpened).toHaveBeenCalledWith("s-a", "click")
-    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    const list = screen.getByTestId("channel-list-keyboard-root")
     list.focus()
     await user.keyboard("{ArrowDown}{Enter}")
     expect(listTelemetry.trackConversationOpened).toHaveBeenCalledWith("s-a", "keyboard")

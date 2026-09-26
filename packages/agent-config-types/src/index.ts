@@ -3005,6 +3005,12 @@ export interface ConversationFilters {
   pinned?: boolean
   /** Only conversations branched off another (`parentSessionId` set). */
   branched?: boolean
+  /**
+   * Only conversations with a turn in flight — a reply streaming, or a turn
+   * stopped on the user's approval. Live state, not a session field: the
+   * lists inject it (`ConversationFilterContext.runningIds`).
+   */
+  running?: boolean
   /** Restrict to one conversation kind. Defaults to `"all"`. */
   kind?: ConversationKindFilter
   /**

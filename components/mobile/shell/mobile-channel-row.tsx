@@ -49,7 +49,9 @@ import { Input } from "@/components/ui/input"
 import { LongPress } from "@/components/interactions/long-press"
 import { SwipeRow, type SwipeAction } from "@/components/interactions/swipe-row"
 import { PlatformBadge } from "@/components/inbox/platform-badge"
+import { SessionRunIndicator } from "@/components/chat/session-run-indicator"
 import { getModelDisplayName, getProviderDisplayName } from "@/lib/ai/icons"
+import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import {
   CONVERSATION_TIMESTAMP_FORMATS,
@@ -58,6 +60,7 @@ import {
 import type { ConversationGroupAxis } from "@/lib/chat/conversation-list-model"
 import { avatarColor, avatarGlyph, type AvatarSubject } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
+import type { ChatStatus } from "@/stores/chat/chat-store"
 import type {
   Character,
   ChatSession,
@@ -95,6 +98,8 @@ export interface MobileChannelRowProps {
   unread: number
   /** Surfaced only because the query hit its message content. */
   contentMatch: boolean
+  /** The conversation's live turn state (`useSessionRunStatusMap`); idle draws nothing. */
+  runStatus?: ChatStatus
   character?: Character
   team?: Team
   workspaceName?: string
@@ -182,6 +187,7 @@ function MobileChannelRowImpl({
   active,
   unread,
   contentMatch,
+  runStatus = "idle",
   character,
   team,
   workspaceName,
@@ -211,7 +217,10 @@ function MobileChannelRowImpl({
 
   const archived = session.archivedAt != null
   const locked = session.handoffLock != null
-  const displayTitle = session.title || tRow("untitled")
+  const displayTitle = sessionDisplayTitle(session.title, {
+    untitled: tRow("untitled"),
+    placeholder: tRow("placeholderTitle"),
+  })
   const compact = settings.density === "compact"
 
   const leftActions = useMemo<SwipeAction[]>(() => {
@@ -355,6 +364,10 @@ function MobileChannelRowImpl({
                   aria-label={tRow("pinned")}
                 />
               ) : null}
+              <SessionRunIndicator
+                status={runStatus}
+                testIdPrefix={`mobile-channel-run-${session.id}`}
+              />
               {locked ? (
                 <LockKeyholeIcon
                   role="img"

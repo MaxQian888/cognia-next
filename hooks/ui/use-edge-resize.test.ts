@@ -240,6 +240,49 @@ describe("resize gesture lifecycle", () => {
     expect(result.current.dragging).toBe(false)
   })
 
+  it("settles a drag once at release through onCommit, previewing through onChange", () => {
+    const onChange = jest.fn()
+    const onCommit = jest.fn()
+    const { result } = renderHook(() =>
+      useEdgeResize({ width: 256, min: 220, max: 420, onChange, onCommit })
+    )
+    act(() => result.current.onPointerDown(pointer(100)))
+    act(() => result.current.onPointerMove(pointer(120)))
+    act(() => result.current.onPointerMove(pointer(140)))
+    expect(onChange).toHaveBeenLastCalledWith(296)
+    expect(onCommit).not.toHaveBeenCalled()
+    act(() => result.current.onPointerUp(pointer(140)))
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCommit).toHaveBeenCalledWith(296)
+  })
+
+  it("commits nothing for a press without a move, and the start size on Escape", () => {
+    const onCommit = jest.fn()
+    const { result } = renderHook(() =>
+      useEdgeResize({ width: 256, min: 220, max: 420, onChange: jest.fn(), onCommit })
+    )
+    act(() => result.current.onPointerDown(pointer(100)))
+    act(() => result.current.onPointerUp(pointer(100)))
+    expect(onCommit).not.toHaveBeenCalled()
+    act(() => result.current.onPointerDown(pointer(100)))
+    act(() => result.current.onPointerMove(pointer(180)))
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })))
+    expect(onCommit).toHaveBeenCalledWith(256)
+  })
+
+  it("commits every keyboard nudge as its own gesture", () => {
+    const onChange = jest.fn()
+    const onCommit = jest.fn()
+    const { result } = renderHook(() =>
+      useEdgeResize({ width: 256, min: 220, max: 420, onChange, onCommit })
+    )
+    act(() => result.current.onKeyDown(key("ArrowRight")))
+    expect(onChange).toHaveBeenCalledWith(272)
+    expect(onCommit).toHaveBeenCalledWith(272)
+    act(() => result.current.onKeyDown(key("End")))
+    expect(onCommit).toHaveBeenLastCalledWith(420)
+  })
+
   it("cleans up on blur and unmount without losing existing body state", () => {
     document.body.setAttribute("data-edge-resizing", "existing")
     const { result, unmount } = renderHook(() =>

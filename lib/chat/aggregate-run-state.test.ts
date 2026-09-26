@@ -1,6 +1,7 @@
 import {
   aggregateRunState,
   backgroundActiveSessionIds,
+  inFlightIdSet,
   inFlightSessionIds,
 } from "./aggregate-run-state"
 
@@ -181,5 +182,23 @@ describe("backgroundActiveSessionIds", () => {
     expect(
       backgroundActiveSessionIds({ sessions: sessions({ a: "streaming" }), activeSessionId: "a" })
     ).toEqual([])
+  })
+})
+
+describe("inFlightIdSet", () => {
+  it("keeps the streaming and approval-waiting rows of a status map", () => {
+    const ids = inFlightIdSet(
+      new Map([
+        ["a", "streaming"],
+        ["b", "awaiting_approval"],
+        ["c", "error"],
+        ["d", "idle"],
+      ] as const)
+    )
+    expect([...ids].sort()).toEqual(["a", "b"])
+  })
+
+  it("is empty without a map", () => {
+    expect(inFlightIdSet(undefined).size).toBe(0)
   })
 })

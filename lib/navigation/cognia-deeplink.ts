@@ -156,3 +156,20 @@ function firstSegment(path: string): string {
     return segment
   }
 }
+
+/** Session ids the path form can carry verbatim (what `newId` mints). */
+const PATH_SAFE_ID = /^[A-Za-z0-9._~-]+$/
+
+/**
+ * The `cognia://` link that opens one conversation — the inverse of the
+ * `open_session` branch above, which is how the OS hands it back.
+ *
+ * The parser reads the path undecoded, so only an id that needs no escaping
+ * goes in the path (`cognia://session/<id>`, the form the CLI's `open` prints
+ * and the Browser Companion mints); anything else rides the `id` query
+ * parameter, which `URLSearchParams` does decode.
+ */
+export function buildSessionDeeplink(sessionId: string): string {
+  if (PATH_SAFE_ID.test(sessionId)) return `cognia://session/${sessionId}`
+  return `cognia://session?id=${encodeURIComponent(sessionId)}`
+}

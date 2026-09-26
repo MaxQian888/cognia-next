@@ -1331,6 +1331,16 @@ describe("quick filters", () => {
   const run = (filters: BuildSectionsOptions["filters"]) =>
     buildConversationSections(sessions, [], opts({ groupBy: "none", filters, unreadIds }))
 
+  it("narrows to the injected running set under the running filter", () => {
+    const model = buildConversationSections(
+      sessions,
+      [],
+      opts({ groupBy: "none", filters: { running: true }, runningIds: new Set(["branch-dm"]) })
+    )
+    expect(model.filteredCount).toBe(1)
+    expect(model.activeFilterCount).toBe(1)
+  })
+
   it("passes everything through when unfiltered", () => {
     const model = run(undefined)
     expect(model.filteredCount).toBe(4)

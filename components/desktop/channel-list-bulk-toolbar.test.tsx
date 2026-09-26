@@ -166,3 +166,20 @@ test("Delete dialog cancel closes the dialog without firing onDelete", async () 
   await user.click(cancel)
   expect(onDelete).not.toHaveBeenCalled()
 })
+
+test("draws only the actions it was handed a writer for", () => {
+  render(<ChannelListBulkToolbar count={2} onShare={jest.fn()} onClear={jest.fn()} />)
+  for (const name of ["pin", "unpin", "archive", "delete", "markRead"]) {
+    expect(screen.queryByRole("button", { name })).toBeNull()
+  }
+  expect(screen.getByRole("button", { name: "share" })).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "cancel" })).toBeInTheDocument()
+})
+
+test("marks the selection read", async () => {
+  const onMarkRead = jest.fn()
+  const user = userEvent.setup()
+  setup({ onMarkRead })
+  await user.click(screen.getByTestId("channel-list-bulk-mark-read"))
+  expect(onMarkRead).toHaveBeenCalledTimes(1)
+})

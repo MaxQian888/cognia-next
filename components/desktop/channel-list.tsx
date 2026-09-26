@@ -1,5 +1,6 @@
 "use client"
 
+import dynamic from "next/dynamic"
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,6 +15,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -93,10 +95,12 @@ import { useSidebarPeek } from "@/hooks/shell/use-sidebar-peek"
 import { SidebarPeekEdge, SidebarPeekFrame } from "@/components/shell/sidebar-peek-panel"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
 import { useSidebarNavHost } from "@/hooks/shell/use-sidebar-nav-host"
+import { useMutedTeamIds } from "@/hooks/shell/use-team-mute"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { SidebarNavSection, SidebarRow } from "@/components/shell/sidebar-nav-section"
 import { SidebarRowsScope } from "@/components/shell/sidebar-row-roving"
 import {
+  GuildMutedGlyph,
   GuildScopeMenuItems,
   GuildUnreadPill,
   SidebarCreateTeamRow,
@@ -105,7 +109,11 @@ import {
   activeGuildKey,
   guildSectionRows,
 } from "@/components/shell/sidebar-guild-sections"
-import { aggregateGuildUnread } from "@/hooks/shell/use-guild-unread"
+import {
+  aggregateGuildUnread,
+  ALL_WORKSPACES_SCOPE,
+  type GuildUnreadScope,
+} from "@/hooks/shell/use-guild-unread"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { SidebarFooter } from "@/components/shell/sidebar-footer"
 import { WorkspaceContextBar } from "@/components/workspace/workspace-context-bar"
@@ -214,6 +222,7 @@ import {
   MessagesSquareIcon,
   MoreHorizontalIcon,
   PencilIcon,
+  PinIcon,
   PlusIcon,
   SearchIcon,
   SlidersHorizontalIcon,
@@ -242,7 +251,25 @@ import {
 import { ChannelListBulkActions } from "./channel-list-bulk-actions"
 import { useChannelListActions } from "./channel-list/use-channel-list-actions"
 import { createRowDecorations } from "./channel-list/row-decorations"
-import { SessionRow, sessionRowPropsEqual, type SessionRowMetadataItem } from "./session-row"
+import {
+  SessionRow,
+  sessionRowPropsEqual,
+  type SessionRowExtraActions,
+  type SessionRowMetadataItem,
+} from "./session-row"
+import type { ChatStatus } from "@/stores/chat/chat-store"
+import { inFlightIdSet } from "@/lib/chat/aggregate-run-state"
+
+// The single-conversation export / share-link dialog: loaded on first use —
+// it pulls in the HTML exporters and theme gallery, which the list itself
+// never needs.
+const SingleExportDialog = dynamic(
+  () =>
+    import("@/components/data/export/single-export-dialog").then(
+      (module) => module.SingleExportDialog
+    ),
+  { ssr: false }
+)
 import { isImeComposing } from "@/lib/ui/ime"
 
 const log = loggers.ui
@@ -593,15 +620,15 @@ interface Props {
   onSelect: (id: string) => void
   onNewDirect: () => void
   onNewTeamConversation: (teamId: string) => void
-  onDelete: (id: string) => void | Promise<void>
-  onRename: (id: string, title: string) => void | Promise<void>
-  onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
-  onArchive?: (id: string) => void | Promise<void>
-  onUnarchive?: (id: string) => void | Promise<void>
-  onBulkDelete?: (ids: string[]) => void | Promise<void>
-  onBulkSetPinned?: (ids: string[], pinned: boolean) => void | Promise<void>
-  onBulkArchive?: (ids: string[]) => void | Promise<void>
-  onBulkUnarchive?: (ids: string[]) => void | Promise<void>
+  onDelete: (id: string) => void | Promise<unknown>
+  onRename: (id: string, title: string) => void | Promise<unknown>
+  onTogglePinned?: (id: string, pinned: boolean) => void | Promise<unknown>
+  onArchive?: (id: string) => void | Promise<unknown>
+  onUnarchive?: (id: string) => void | Promise<unknown>
+  onBulkDelete?: (ids: string[]) => void | Promise<unknown>
+  onBulkSetPinned?: (ids: string[], pinned: boolean) => void | Promise<unknown>
+  onBulkArchive?: (ids: string[]) => void | Promise<unknown>
+  onBulkUnarchive?: (ids: string[]) => void | Promise<unknown>
   /** Conversation folders for this workspace (conversation-list overhaul). */
   folders?: SessionFolder[]
   /**
@@ -610,25 +637,25 @@ interface Props {
    * the placeholder name.
    */
   onCreateFolder?: (name: string) => void | Promise<SessionFolder | unknown>
-  onRenameFolder?: (id: string, name: string) => void | Promise<void>
-  onDeleteFolder?: (id: string) => void | Promise<void>
+  onRenameFolder?: (id: string, name: string) => void | Promise<unknown>
+  onDeleteFolder?: (id: string) => void | Promise<unknown>
   /**
    * Persist a manual folder order. Without it the folder header's move
    * up / down items are hidden — `SessionFolder.order` is the field they
    * write, and it is the axis the list model sorts sections by.
    */
-  onReorderFolders?: (ids: string[]) => void | Promise<void>
-  onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
+  onReorderFolders?: (ids: string[]) => void | Promise<unknown>
+  onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<unknown>
   /**
    * File a whole multi-selection into a folder (or out of one, `null`) in one
    * write. Without it the bulk bar falls back to `onAssignToFolder` per row.
    */
-  onBulkAssignToFolder?: (ids: string[], folderId: string | null) => void | Promise<void>
+  onBulkAssignToFolder?: (ids: string[], folderId: string | null) => void | Promise<unknown>
   /**
    * Persist a manual ordering of one conversation section (drag-reorder).
    * `sectionKey` is the `conversationSectionKey` of the section dragged in.
    */
-  onReorderSessions?: (ids: string[], sectionKey: string) => void | Promise<void>
+  onReorderSessions?: (ids: string[], sectionKey: string) => void | Promise<unknown>
   /**
    * Reports the grouping the list is actually drawn with — the merged rail is
    * always the team axis (the scope tree), whatever the stored preference says
@@ -638,6 +665,19 @@ interface Props {
    * that never groups by workspace.
    */
   onEffectiveGroupByChange?: (groupBy: ConversationGroupBy | null) => void
+  /**
+   * Branch a whole conversation into a new, linked one and resolve with it
+   * (`null` when there is nothing to branch). The row menus' "Branch
+   * conversation"; the list opens the branch and confirms it. Absent, the item
+   * is not offered.
+   */
+  onBranch?: (id: string) => Promise<ChatSession | null>
+  /**
+   * Live turn state per conversation, non-idle entries only — read once by the
+   * owner from the chat store, so the rows can show a reply streaming, a turn
+   * waiting on an approval, or a failed last turn without a selector each.
+   */
+  runStatusById?: ReadonlyMap<string, ChatStatus>
 }
 
 /**
@@ -649,9 +689,22 @@ export function ChannelList(props: Props) {
   const t = useTranslations("desktop.channelList")
   const isNarrow = useIsNarrow()
   const [openMobile, setOpenMobile] = useState(false)
-  const width = useUIStore((s) => s.sidebarWidth)
+  const storedWidth = useUIStore((s) => s.sidebarWidth)
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
   const resetWidth = useCallback(() => setSidebarWidth(SIDEBAR_WIDTH_DEFAULT), [setSidebarWidth])
+  // The width a drag is previewing, local until the pointer lets go. Writing
+  // the store on every pointer move persisted the whole UI slice to storage
+  // each frame; now the store (and storage) take one write per gesture, and
+  // the memoized list body sits out the frames in between.
+  const [draftWidth, setDraftWidth] = useState<number | null>(null)
+  const width = draftWidth ?? storedWidth
+  const commitWidth = useCallback(
+    (next: number) => {
+      setSidebarWidth(next)
+      setDraftWidth(null)
+    },
+    [setSidebarWidth]
+  )
 
   // Conversation-sidebar collapse. Single source of truth in the ui-store,
   // shared with the title bar's sidebar toggle, the status bar, the View menu,
@@ -867,7 +920,8 @@ export function ChannelList(props: Props) {
       {!sidebarCollapsed && (
         <SidebarResizeHandle
           width={width}
-          onChange={setSidebarWidth}
+          onChange={setDraftWidth}
+          onCommit={commitWidth}
           onReset={resetWidth}
           // The handle lives on the inboard edge — the one facing the chat
           // pane — so dragging it always widens toward the content.
@@ -882,15 +936,18 @@ export function ChannelList(props: Props) {
  * Draggable divider on the right edge of the conversation sidebar. Controlled
  * width lives in `useUIStore`; a11y mirrors `ResizableHandle` (focusable
  * `role="separator"` with value + orientation). Double-click / Enter resets.
+ * `onChange` previews a drag, `onCommit` settles it (see `useEdgeResize`).
  */
 function SidebarResizeHandle({
   width,
   onChange,
+  onCommit,
   onReset,
   side = "left",
 }: {
   width: number
   onChange: (width: number) => void
+  onCommit: (width: number) => void
   onReset: () => void
   /** Which edge of the window the sidebar occupies. */
   side?: SidebarSide
@@ -911,6 +968,7 @@ function SidebarResizeHandle({
     min: SIDEBAR_WIDTH_MIN,
     max: SIDEBAR_WIDTH_MAX,
     onChange,
+    onCommit,
     onReset,
     // A right-docked sidebar grows as the pointer moves *left*, so the hook
     // has to invert the delta — that is exactly what its `edge` option is.
@@ -946,7 +1004,14 @@ function SidebarResizeHandle({
   )
 }
 
-function ChannelListBody({
+/**
+ * Memoized so a sidebar drag-resize — which re-renders `ChannelList` with a
+ * new draft width every frame — leaves the list itself alone: every prop it
+ * takes is stable across those renders.
+ */
+const ChannelListBody = memo(ChannelListBodyImpl)
+
+function ChannelListBodyImpl({
   headerOutlet = null,
   merged = false,
   collapsed = false,
@@ -975,6 +1040,8 @@ function ChannelListBody({
   onBulkAssignToFolder,
   onReorderSessions,
   onEffectiveGroupByChange,
+  onBranch,
+  runStatusById,
 }: Props & {
   /**
    * Title-bar outlet for the header, or `null` to draw it inline. Only the
@@ -1187,6 +1254,15 @@ function ChannelListBody({
     () => new Set(persistedCollapsed),
     [persistedCollapsed]
   )
+  // Drops a deleted folder's collapse flag. Only on an explicit delete: the
+  // folder list here is one workspace's, so pruning "ids not in the list" would
+  // forget every other workspace's folded folders.
+  const forgetFolderCollapse = useCallback(
+    (id: string) => {
+      if (collapsedFolderIds.has(id)) toggleCollapsedFolder(id)
+    },
+    [collapsedFolderIds, toggleCollapsedFolder]
+  )
   const toggleFolderCollapsed = useCallback(
     (id: string) => {
       // Read the outcome before the write: telemetry is a side effect and the
@@ -1208,8 +1284,8 @@ function ChannelListBody({
   // collapsible group per squad — so it always groups on the team axis
   // (`applyTeamGroupPreviewCaps` caps each one). The `groupBy` preference stays
   // meaningful on the compact surfaces, whose scoped list keeps its own
-  // grouping; the ⋯ menu's Group-by submenu hides itself in the compact layout
-  // for the same reason.
+  // grouping; the merged rail's ⋯ menu still offers it, with a note saying
+  // that is where it applies.
   const effectiveGroupBy: ConversationGroupBy = merged ? "team" : groupBy
   // Tell the session query's owner which grouping is on screen (see the prop).
   // A layout effect, so a switch to or from the merged rail re-scopes the
@@ -1222,9 +1298,17 @@ function ChannelListBody({
   // Which workspaces the *content* index is asked about — the same reach the
   // session list is loaded with, so title hits and message hits never disagree
   // about which conversations exist.
-  const scopeProjectId = needsCrossWorkspaceSessions(effectiveGroupBy, searchOptions)
-    ? undefined
-    : (activeProjectId ?? undefined)
+  const crossWorkspaceReach = needsCrossWorkspaceSessions(effectiveGroupBy, searchOptions)
+  const scopeProjectId = crossWorkspaceReach ? undefined : (activeProjectId ?? undefined)
+  // The same reach as a guild-unread scope, for the scope headers' "mark all
+  // read" — it clears exactly what these rows could show.
+  const listUnreadScope = useMemo<GuildUnreadScope>(
+    () =>
+      crossWorkspaceReach
+        ? ALL_WORKSPACES_SCOPE
+        : { kind: "workspace", projectId: activeProjectId ?? null },
+    [crossWorkspaceReach, activeProjectId]
+  )
   const contentSearch = useChatHistorySearch(query, {
     enabled: searchOptions.content,
     projectId: scopeProjectId,
@@ -1250,6 +1334,9 @@ function ChannelListBody({
   const contentPending = searchOptions.content && contentSearch.loading && query.trim().length > 0
   const contentTruncated =
     contentSearch.moreOlderHistory || contentSearch.indexIncomplete || contentSearch.error !== null
+  // A failed content query is its own line: "refine your search" would send
+  // the reader after a query that was never the problem.
+  const contentFailed = searchOptions.content && contentSearch.error !== null
   const workspaceGroups = useMemo(
     () => projects.map((p) => ({ id: p.id, name: p.name })),
     [projects]
@@ -1305,6 +1392,9 @@ function ChannelListBody({
     scopeOwnsKind: !merged,
   })
   const { filters, activeFilters, filterContext } = filterController
+  // Conversations with a turn in flight, for the `running` quick filter. The
+  // row indicator reads the same map, so the filter and the glyphs agree.
+  const runningIds = useMemo(() => inFlightIdSet(runStatusById), [runStatusById])
   const resetConversationFilters = filterController.actions.reset
 
   // One clock for the whole list, in the zone the rows print their times in:
@@ -1328,6 +1418,7 @@ function ChannelListBody({
       sortBy,
       filters,
       unreadIds,
+      runningIds: filters.running ? runningIds : undefined,
       filterContext,
       workspaces: workspaceGroups,
       agents: agentGroups,
@@ -1547,10 +1638,33 @@ function ChannelListBody({
     setFocusedId(null)
   }, [chatGuild, view, clear])
 
+  // What the action boundary reads at call time: the rows (a handoff lock is
+  // checked before a write runs, and a toast or an undo names the row) and the
+  // rendered order (the open conversation's neighbour takes over when it is
+  // deleted or archived). Refs, so the handlers built on them stay stable.
+  const sessionsByIdRef = useRef<ReadonlyMap<string, ChatSession>>(new Map())
+  const renderedOrderRef = useRef<readonly string[]>(renderedOrderedIds)
+  useEffect(() => {
+    sessionsByIdRef.current = new Map(sessions.map((session) => [session.id, session]))
+    renderedOrderRef.current = renderedOrderedIds
+  }, [sessions, renderedOrderedIds])
+  const resolveSessions = useCallback(
+    (ids: readonly string[]) =>
+      ids.flatMap((id) => {
+        const session = sessionsByIdRef.current.get(id)
+        return session ? [session] : []
+      }),
+    []
+  )
+  const getRenderedOrder = useCallback(() => renderedOrderRef.current, [])
+
   const {
     handleNewDirect,
     handleNewTeamConversation,
     rowActions,
+    extraActions,
+    exportSessionId,
+    closeExport,
     renamingFolderId,
     handleNewFolder,
     handleFolderRenameSettled,
@@ -1558,6 +1672,10 @@ function ChannelListBody({
   } = useChannelListActions({
     folders: folders ?? EMPTY_FOLDERS,
     newFolderName: t("newFolderName"),
+    resolveSessions,
+    getRenderedOrder,
+    activeSessionId,
+    onSelect,
     onNewDirect,
     onNewTeamConversation,
     onDelete,
@@ -1570,10 +1688,19 @@ function ChannelListBody({
     onBulkArchive,
     onBulkUnarchive,
     onCreateFolder,
+    onRenameFolder,
+    onDeleteFolder,
     onReorderFolders,
     onAssignToFolder,
     onBulkAssignToFolder,
+    onReorderSessions,
+    onBranch,
+    onFolderDeleted: forgetFolderCollapse,
   })
+  // The export / share-link dialog's row, resolved while it is open.
+  const exportSession = exportSessionId
+    ? (sessions.find((session) => session.id === exportSessionId) ?? null)
+    : null
 
   const handleSessionSelect = useCallback(
     (id: string, e: ReactMouseEvent) => {
@@ -1650,42 +1777,86 @@ function ChannelListBody({
         }
         return
       }
+      // Row navigation is disabled while typing in the search box / inside a
+      // menu or dialog (mirrors the log-panel shortcut guards). Select-all
+      // included: ⌘A in the search field or a rename box selects its text.
+      if (typing) return
+
+      // The rest acts only where the list itself holds focus — the container
+      // or a row's own button. Any other control inside it (a row's ⋯ trigger,
+      // a folder or group header, "Show more", a drag handle mid keyboard-drag)
+      // keeps its own Enter / arrow behaviour instead of having it spent on a
+      // stale focus ring.
+      const rowButton = target.closest<HTMLElement>("[data-session-row-select]")
+      const onList = target === e.currentTarget || (rowButton !== null && rowButton === target)
+      if (!onList) return
+
       const isCtrlA = (e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")
       if (isCtrlA && renderedOrderedIds.length > 0) {
         e.preventDefault()
         selectAll()
         return
       }
-      // Row navigation is disabled while typing in the search box / inside a
-      // menu or dialog (mirrors the log-panel shortcut guards).
-      if (typing) return
-
       if (e.key === "/") {
         e.preventDefault()
         openSearch()
         return
       }
       if (renderedOrderedIds.length === 0) return
-      const current = focusedId ? renderedOrderedIds.indexOf(focusedId) : -1
+      // A row's button knows which row it is even before the ring caught up.
+      const fromId = rowButton?.dataset.sessionRowSelect ?? focusedId
+      const current = fromId ? renderedOrderedIds.indexOf(fromId) : -1
       const focusAt = (index: number) => {
         e.preventDefault()
-        setFocusedId(
-          renderedOrderedIds[Math.min(renderedOrderedIds.length - 1, Math.max(0, index))]
-        )
+        const next =
+          renderedOrderedIds[Math.min(renderedOrderedIds.length - 1, Math.max(0, index))]!
+        // Shift+arrow grows the selection from its anchor, file-manager style.
+        // With nothing selected yet the row being left is the anchor.
+        if (e.shiftKey) {
+          if (selected.size === 0 && fromId) {
+            handleClick(fromId, { ctrlKey: true, metaKey: false, shiftKey: false })
+          }
+          handleClick(next, { ctrlKey: false, metaKey: false, shiftKey: true })
+        }
+        setFocusedId(next)
       }
       if (e.key === "ArrowDown" || e.key === "j") focusAt(current < 0 ? 0 : current + 1)
       else if (e.key === "ArrowUp" || e.key === "k")
         focusAt(current < 0 ? renderedOrderedIds.length - 1 : current - 1)
       else if (e.key === "Home") focusAt(0)
       else if (e.key === "End") focusAt(renderedOrderedIds.length - 1)
-      else if (e.key === "Enter" && focusedId) {
+      else if (e.key === "Enter" && !rowButton && focusedId) {
+        // On a row's button Enter is the button's own click, which opens the
+        // row through `handleSessionSelect`; only the bare container needs it.
         e.preventDefault()
         void trackConversationOpened(focusedId, "keyboard")
         onSelect(focusedId)
       }
     },
-    [clear, renderedOrderedIds, selectAll, selected.size, focusedId, onSelect, openSearch]
+    [
+      clear,
+      renderedOrderedIds,
+      selectAll,
+      selected.size,
+      focusedId,
+      onSelect,
+      openSearch,
+      handleClick,
+    ]
   )
+
+  // A row's button took keyboard focus (Tab, or the ring moving onto it): the
+  // ring follows, so the arrows continue from where focus actually is.
+  const handleRowFocus = useCallback((id: string) => setFocusedId(id), [])
+  // The single tab stop among the rows: where the ring is, else the open
+  // conversation, else the first row — so tabbing in lands on something
+  // meaningful and the rest of the list is one arrow key away.
+  const tabStopId =
+    focusedId && renderedOrderedIds.includes(focusedId)
+      ? focusedId
+      : activeSessionId && renderedOrderedIds.includes(activeSessionId)
+        ? activeSessionId
+        : (renderedOrderedIds[0] ?? null)
 
   // App-wide shortcuts for the list, live while it is mounted (`useAppShortcut`
   // is mount-scoped, so `/settings` and the other routes never see them):
@@ -1899,7 +2070,13 @@ function ChannelListBody({
         void rowActions.onAssignToFolder?.(action.sessionId, action.folderId)
         return
       }
-      if (!overSection || !onReorderSessions) return
+      if (action.type === "pin") {
+        // The same pin writer as the row menu: lock refusal, failure toast and
+        // the "Pinned" confirmation all come from the action boundary.
+        void rowActions.onTogglePinned?.(action.sessionId, true)
+        return
+      }
+      if (!overSection || !rowActions.onReorderSessions) return
       void trackConversationReordered({
         sectionKey: overSection.key,
         before: overSection.ids,
@@ -1913,25 +2090,19 @@ function ChannelListBody({
       const stored = cappedSections.find((s) => conversationSectionKey(s) === overSection.key)
       const baseIds = stored ? stored.sessions.map((s) => s.id) : overSection.ids
       const pending: PendingReorder = { sectionKey: overSection.key, baseIds, ids: action.ids }
-      const persisted = onReorderSessions(action.ids, overSection.key)
+      const persisted = rowActions.onReorderSessions(action.ids, overSection.key)
       setPendingReorder(pending)
       flashSettled(String(e.active.id))
-      // A rejected write means the store will never catch up — let go rather
-      // than keep showing an order that does not exist.
-      Promise.resolve(persisted).catch((error: unknown) => {
-        log.warn("channel-list reorder persist failed", { error: String(error) })
+      // A refused or failed write (already toasted by the action boundary)
+      // means the store will never catch up — let go rather than keep showing
+      // an order that does not exist.
+      void persisted.then((ok) => {
+        if (ok) return
+        log.warn("channel-list reorder persist failed")
         setPendingReorder((current) => (current === pending ? null : current))
       })
     },
-    [
-      sectionIdsBySession,
-      cappedSections,
-      rowActions,
-      onReorderSessions,
-      flashSettled,
-      teamIds,
-      reorderTeams,
-    ]
+    [sectionIdsBySession, cappedSections, rowActions, flashSettled, teamIds, reorderTeams]
   )
 
   // Toolbar visibility: show when ≥2 are selected OR when a single row was
@@ -1940,6 +2111,14 @@ function ChannelListBody({
   // single click — the normal "open this conversation" gesture — never
   // pops the toolbar so it stays out of the way.
   const toolbarVisible = selected.size >= 2 || (selected.size === 1 && lastInteractionWasModified)
+  // The rows wear the selection ring only while a selection is actually in
+  // play — the same predicate as the toolbar. A plain click also records the
+  // row as the range anchor (`useRangeSelection`), and ringing it then put a
+  // second highlight on the open conversation.
+  const isSelectionShown = useCallback(
+    (id: string) => toolbarVisible && isSelected(id),
+    [toolbarVisible, isSelected]
+  )
   // While the search field is expanded (focused or holding text — see
   // `ChannelListSearch`) it owns its row: the scope and filter controls
   // beside it fold under its right edge until it lets go. Sheet and merged
@@ -1980,6 +2159,7 @@ function ChannelListBody({
     () => (merged ? aggregateGuildUnread(filtered, unreadById) : null),
     [merged, filtered, unreadById]
   )
+  const mutedTeamIds = useMutedTeamIds()
   // One object per change, not per render — it is a prop of the memoized list.
   const scopeTree = useMemo<ScopeTreeConfig | undefined>(
     () =>
@@ -1989,17 +2169,20 @@ function ChannelListBody({
             teamById,
             unreadDm: scopeUnread.dm,
             unreadTeams: scopeUnread.teams,
+            mutedTeamIds,
             teamOrderIds: teamIds,
             squadCount: teamById.size,
             previewExpanded: expandedGroupPreviews,
             onTogglePreview: toggleGroupPreview,
             onNewConversation: handleGuildNewConversation,
             onMoveTeam: moveTeam,
+            unreadScope: listUnreadScope,
           }
         : undefined,
     [
       merged,
       scopeUnread,
+      mutedTeamIds,
       view,
       teamById,
       teamIds,
@@ -2007,6 +2190,7 @@ function ChannelListBody({
       toggleGroupPreview,
       handleGuildNewConversation,
       moveTeam,
+      listUnreadScope,
     ]
   )
   // Rows are placed at this height before they measure themselves (windowed
@@ -2202,6 +2386,7 @@ function ChannelListBody({
         onSetPinned={rowActions.onBulkSetPinned}
         onArchive={rowActions.onBulkArchive}
         onUnarchive={rowActions.onBulkUnarchive}
+        onMarkRead={rowActions.onBulkMarkRead}
         folders={modelFolders}
         onMoveToFolder={view === "active" ? rowActions.onBulkAssignToFolder : undefined}
         onClear={clear}
@@ -2209,6 +2394,14 @@ function ChannelListBody({
       {contentBelowMinQuery ? (
         <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
           {t("searchContentMinQuery", { count: CONTENT_SEARCH_MIN_QUERY })}
+        </p>
+      ) : contentFailed && query.trim() ? (
+        <p
+          className="px-3 pb-1 text-[11px] text-destructive"
+          role="status"
+          data-testid="channel-list-search-content-failed"
+        >
+          {t("searchContentFailed")}
         </p>
       ) : contentTruncated && query.trim() ? (
         <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
@@ -2248,7 +2441,10 @@ function ChannelListBody({
         // edges clip anything drawn outside it.
         className="flex h-full flex-col bg-background/70 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
         data-tonality="translucent"
-        tabIndex={0}
+        // With rows on screen the tab stop is a row (`tabStopId`); the bare
+        // container only takes one when there is no row to land on.
+        tabIndex={renderedOrderedIds.length > 0 ? -1 : 0}
+        data-testid="channel-list-keyboard-root"
         onKeyDown={handleContainerKeyDown}
         {...densitySurfaceProps("sidebar", appearanceDensity)}
       >
@@ -2406,7 +2602,7 @@ function ChannelListBody({
                 metadataFor={decorations.metadataFor}
                 titleMotion={titleMotion}
                 unreadById={unreadById}
-                isSelected={isSelected}
+                isSelected={isSelectionShown}
                 onToggleSelection={handleToggleSelection}
                 accentFor={decorations.accentFor}
                 iconFor={decorations.iconFor}
@@ -2420,12 +2616,17 @@ function ChannelListBody({
                 onAssignToFolder={rowActions.onAssignToFolder}
                 onToggleFolder={toggleFolderCollapsed}
                 onToggleGroup={setGroupCollapsed}
-                onRenameFolder={onRenameFolder}
-                onDeleteFolder={onDeleteFolder}
+                onRenameFolder={rowActions.onRenameFolder}
+                onDeleteFolder={rowActions.onDeleteFolder}
                 onMoveFolder={handleMoveFolder}
                 renamingFolderId={renamingFolderId}
                 onFolderRenameSettled={handleFolderRenameSettled}
                 onJumpToParent={handleJumpToParent}
+                extraActions={extraActions}
+                runStatusById={runStatusById}
+                unreadIds={unreadIds}
+                tabStopId={tabStopId}
+                onRowFocus={handleRowFocus}
               />
             </DndContext>
           )}
@@ -2476,6 +2677,15 @@ function ChannelListBody({
           </DndContext>
         ) : null}
         {merged ? <SidebarFooter /> : null}
+        {exportSession ? (
+          <SingleExportDialog
+            session={exportSession}
+            open
+            onOpenChange={(open) => {
+              if (!open) closeExport()
+            }}
+          />
+        ) : null}
       </div>
     </PerfBoundary>
   )
@@ -3084,38 +3294,44 @@ function HeaderActions({
             ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        {/* Not offered in the compact (merged rail) menu: there the grouping
-            is not a preference — it is the scope tree itself, always the team
-            axis. The choice stays live in the Sheet's row layout. */}
-        {!compact ? (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="gap-2" data-testid="channel-list-menu-group">
-              <ListTreeIcon className="size-4 text-muted-foreground" aria-hidden />
-              <span className="flex-1 truncate">{t("groupBy.label")}</span>
-              <span className="max-w-24 truncate text-xs text-muted-foreground">
-                {t(`groupBy.options.${groupBy}`)}
-              </span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-56">
-              <DropdownMenuRadioGroup
-                value={groupBy}
-                onValueChange={(value) =>
-                  onUpdateDisplay({ groupBy: value as ConversationGroupBy })
-                }
+        {/* The merged rail's own grouping is not a preference — it is the scope
+            tree itself, always the team axis. The choice is still live on the
+            surfaces that draw a scoped list (the collapsed rail's peek, the
+            narrow-window drawer), so it stays reachable here and says where it
+            applies instead of disappearing without a word. */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="gap-2" data-testid="channel-list-menu-group">
+            <ListTreeIcon className="size-4 text-muted-foreground" aria-hidden />
+            <span className="flex-1 truncate">{t("groupBy.label")}</span>
+            <span className="max-w-24 truncate text-xs text-muted-foreground">
+              {t(`groupBy.options.${groupBy}`)}
+            </span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-56">
+            {compact ? (
+              <DropdownMenuLabel
+                className="text-[11px] font-normal text-muted-foreground"
+                data-testid="channel-list-group-compact-note"
               >
-                {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
-                  <DropdownMenuRadioItem
-                    key={option}
-                    value={option}
-                    data-testid={`channel-list-group-${option}`}
-                  >
-                    {t(`groupBy.options.${option}`)}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        ) : null}
+                {t("groupBy.scopeTreeNote")}
+              </DropdownMenuLabel>
+            ) : null}
+            <DropdownMenuRadioGroup
+              value={groupBy}
+              onValueChange={(value) => onUpdateDisplay({ groupBy: value as ConversationGroupBy })}
+            >
+              {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
+                <DropdownMenuRadioItem
+                  key={option}
+                  value={option}
+                  data-testid={`channel-list-group-${option}`}
+                >
+                  {t(`groupBy.options.${option}`)}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
         {/* Sort sits beside grouping, the setting it pairs with — the filter
             menu carries the same radio group, because that is where a narrowed
             list is being shaped. Both write `conversationSidebar.sortBy`. */}
@@ -3219,6 +3435,11 @@ interface ScopeTreeConfig {
   unreadDm: number
   /** Unread conversations per squad id. */
   unreadTeams: ReadonlyMap<string, number>
+  /**
+   * Muted squads (`useMutedTeamIds`): their header shows the muted glyph in
+   * place of the unread pill, as the rail and the guild band do.
+   */
+  mutedTeamIds: ReadonlySet<string>
   /** Squad ids in the user's drag order — the headers' sortable items. */
   teamOrderIds: readonly string[]
   /** How many squads the label counts. */
@@ -3230,6 +3451,11 @@ interface ScopeTreeConfig {
   onNewConversation: (teamId: string | null) => void
   /** Keyboard reorder for squad headers — the headers spend Enter on folding. */
   onMoveTeam: (teamId: string, delta: number) => void
+  /**
+   * The workspace reach the rows were loaded with — what a header's "mark all
+   * read" clears, so it never touches a workspace the tree is not showing.
+   */
+  unreadScope: GuildUnreadScope
 }
 
 function ConversationSectionsImpl({
@@ -3271,6 +3497,11 @@ function ConversationSectionsImpl({
   renamingFolderId,
   onFolderRenameSettled,
   onJumpToParent,
+  extraActions,
+  runStatusById,
+  unreadIds,
+  tabStopId,
+  onRowFocus,
 }: {
   sections: readonly import("@/lib/chat/conversation-list-model").ConversationSection[]
   /**
@@ -3308,16 +3539,16 @@ function ConversationSectionsImpl({
   iconFor: (session: ChatSession) => AvatarSubject | undefined
   folders: SessionFolder[]
   onSelect: (id: string, e: ReactMouseEvent) => void
-  onDelete: (id: string) => void | Promise<void>
-  onRename: (id: string, title: string) => void | Promise<void>
-  onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
-  onArchive?: (id: string) => void | Promise<void>
-  onUnarchive?: (id: string) => void | Promise<void>
-  onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
+  onDelete: (id: string) => void | Promise<unknown>
+  onRename: (id: string, title: string) => void | Promise<unknown>
+  onTogglePinned?: (id: string, pinned: boolean) => void | Promise<unknown>
+  onArchive?: (id: string) => void | Promise<unknown>
+  onUnarchive?: (id: string) => void | Promise<unknown>
+  onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<unknown>
   onToggleFolder: (id: string) => void
   onToggleGroup: (key: string, collapsed: boolean) => void
-  onRenameFolder?: (id: string, name: string) => void | Promise<void>
-  onDeleteFolder?: (id: string) => void | Promise<void>
+  onRenameFolder?: (id: string, name: string) => void | Promise<unknown>
+  onDeleteFolder?: (id: string) => void | Promise<unknown>
   /** Move a folder one place up or down the manual order; absent = not offered. */
   onMoveFolder?: (id: string, delta: -1 | 1) => void
   /** Folder whose name opens for editing on mount — the one just created. */
@@ -3325,6 +3556,20 @@ function ConversationSectionsImpl({
   /** Fired once that folder's inline editor has been committed or dismissed. */
   onFolderRenameSettled?: (id: string) => void
   onJumpToParent?: (parentSessionId: string) => void
+  /** Read state, duplicate, copy link, export — one stable object for every row. */
+  extraActions?: SessionRowExtraActions
+  /** Non-idle turn state per conversation. */
+  runStatusById?: ReadonlyMap<string, ChatStatus>
+  /** Conversations with unread messages, badges on or off. */
+  unreadIds: ReadonlySet<string>
+  /**
+   * The row that owns the list's single tab stop (the focused row, else the
+   * open one, else the first). Every other row's controls leave the Tab order;
+   * the arrow keys move between rows.
+   */
+  tabStopId: string | null
+  /** A row's button took focus — the list moves its focus ring there. */
+  onRowFocus?: (id: string) => void
 }) {
   const t = useTranslations("desktop.channelList")
 
@@ -3375,6 +3620,11 @@ function ConversationSectionsImpl({
     onUnarchive,
     onAssignToFolder,
     onJumpToParent,
+    extraActions,
+    runStatus: runStatusById?.get(s.id),
+    isUnread: unreadIds.has(s.id),
+    tabbable: s.id === tabStopId,
+    onRowFocus,
   })
   const renderSortableRow = (s: ChatSession) =>
     reorderable ? (
@@ -3430,8 +3680,18 @@ function ConversationSectionsImpl({
   const teamOrderIds = scopeTree?.teamOrderIds
   const teamOrderItems = useMemo(() => (teamOrderIds ? [...teamOrderIds] : []), [teamOrderIds])
 
+  // Dragging an unpinned row while nothing is pinned: there is no Pinned
+  // header to drop on yet, so the list offers one for the length of the drag.
+  const pinDropEnabled = Boolean(onTogglePinned) && !searching && !scopeTree?.archived
+  const showPinDropZone =
+    pinDropEnabled &&
+    activeDragSession !== null &&
+    activeDragSession.pinned !== true &&
+    !sections.some((section) => section.kind === "pinned")
+
   const body = (
     <>
+      {showPinDropZone ? <PinDropZone /> : null}
       {sections.map((section, index) => {
         if (section.kind === "folder") {
           const { folder, collapsed } = section
@@ -3494,6 +3754,11 @@ function ConversationSectionsImpl({
                 onTogglePreview={() => scopeTree.onTogglePreview(key)}
                 onNewConversation={scopeTree.onNewConversation}
                 onMoveTeam={scopeTree.onMoveTeam}
+                teamPosition={
+                  chatsGroup ? undefined : teamPositionOf(scopeTree.teamOrderIds, section.group.id)
+                }
+                muted={!chatsGroup && scopeTree.mutedTeamIds.has(section.group.id)}
+                unreadScope={scopeTree.unreadScope}
                 sortable={reorderable}
                 renderRow={renderSortableRow}
                 rowsProps={rowsProps}
@@ -3548,7 +3813,11 @@ function ConversationSectionsImpl({
         const searchSection = section.kind === "search"
         return (
           <section key={key} aria-label={searchSection ? t("searchAria") : label}>
-            <SectionHeading label={label} count={section.sessions.length} />
+            {section.kind === "pinned" && pinDropEnabled ? (
+              <PinDropHeading label={label} count={section.sessions.length} />
+            ) : (
+              <SectionHeading label={label} count={section.sessions.length} />
+            )}
             <SectionRows
               sectionKey={key}
               sessions={section.sessions}
@@ -3666,6 +3935,71 @@ function SectionHeading({ label, count }: { label: string; count: number }) {
   )
 }
 
+/** A squad's slot in the team order, or `undefined` when it is not in it. */
+function teamPositionOf(
+  order: readonly string[],
+  teamId: string
+): { index: number; count: number } | undefined {
+  const index = order.indexOf(teamId)
+  return index === -1 ? undefined : { index, count: order.length }
+}
+
+/** The Pinned section's drop target — shared by its header and the empty zone. */
+const PIN_DROP_ID = "pin-drop:pinned"
+
+/**
+ * A sticky header's drop cue, as an opaque tint of the sticky ground — a
+ * translucent wash would let the rows scrolling under the stuck header show.
+ */
+const HEADER_DROP_CUE =
+  "bg-[color-mix(in_oklab,var(--primary)_10%,var(--background))] ring-1 ring-primary/40 ring-inset"
+
+/**
+ * The Pinned section's header as a drop target: dropping an unpinned row on it
+ * pins the row (`resolveConversationDrop`'s `pin` action).
+ */
+function PinDropHeading({ label, count }: { label: string; count: number }) {
+  const { setNodeRef, isOver } = useDroppable({ id: PIN_DROP_ID, data: { type: "pin" } })
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "flex h-7 items-center gap-1.5 rounded-md px-2.5 pb-0.5 text-muted-foreground",
+        STICKY_SECTION_HEADER,
+        isOver && HEADER_DROP_CUE
+      )}
+      data-testid="channel-list-pin-drop-heading"
+      data-drop-active={isOver || undefined}
+    >
+      <span className={SECTION_LABEL_CLASS}>{label}</span>
+      {count > 0 ? <span className={SECTION_COUNT_CLASS}>{count}</span> : null}
+    </div>
+  )
+}
+
+/**
+ * Stands in for the Pinned header while an unpinned row is dragged and nothing
+ * is pinned yet — otherwise the first pin could never be made by drag.
+ */
+function PinDropZone() {
+  const t = useTranslations("desktop.channelList")
+  const { setNodeRef, isOver } = useDroppable({ id: PIN_DROP_ID, data: { type: "pin" } })
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "flex h-9 items-center justify-center gap-1.5 rounded-md border border-dashed text-[11px] text-muted-foreground",
+        isOver ? HEADER_DROP_CUE : "border-border"
+      )}
+      data-testid="channel-list-pin-drop-zone"
+      data-drop-active={isOver || undefined}
+    >
+      <PinIcon className="size-3" aria-hidden />
+      {t("pinDropZone")}
+    </div>
+  )
+}
+
 /** The props every section component hands its rows through. */
 type SectionRowsProps = Pick<
   ComponentProps<typeof SectionRows>,
@@ -3701,6 +4035,8 @@ function SortableSessionRowImpl(props: ComponentProps<typeof SessionRow>) {
       type: "session",
       folderId: props.session.folderId ?? null,
       projectId: props.session.projectId ?? null,
+      // A drop onto the Pinned target is a no-op for a row already pinned.
+      pinned: props.session.pinned === true,
     },
   })
   const transformCss = CSS.Transform.toString(transform)
@@ -3855,6 +4191,9 @@ function ScopeTreeGroupSection({
   onTogglePreview,
   onNewConversation,
   onMoveTeam,
+  teamPosition,
+  muted = false,
+  unreadScope,
   sortable,
   renderRow,
   rowsProps,
@@ -3876,11 +4215,17 @@ function ScopeTreeGroupSection({
   onTogglePreview: () => void
   onNewConversation: (teamId: string | null) => void
   onMoveTeam: (teamId: string, delta: number) => void
+  /** Where the squad sits in the order — Move up / down grey out at the ends. */
+  teamPosition?: { index: number; count: number }
+  /** The squad is muted: its unread pill gives way to the muted glyph. */
+  muted?: boolean
+  unreadScope: GuildUnreadScope
   sortable: boolean
   renderRow: (s: ChatSession) => ReactNode
   rowsProps: SectionRowsProps
 }) {
   const t = useTranslations("desktop.channelList")
+  const railT = useTranslations("desktop.guildRail")
   const scopeKey = scopeTeamId ?? "chats"
   const {
     setNodeRef: setScopeNodeRef,
@@ -3955,9 +4300,11 @@ function ScopeTreeGroupSection({
       </Button>
     ) : null
 
-  // The Chats bucket is the tree's fixed first section: a plain label, not a
-  // group header — there is nothing to fold into (the rail's own chrome is
-  // the fold) and no scope menu a label could serve.
+  // The Chats bucket is the tree's fixed first section: a label, not a group
+  // header — there is nothing to fold into (the rail's own chrome is the
+  // fold). It still carries the scope menu the squad headers do: "New chat"
+  // and "Mark all read" act on the direct conversations just as they act on a
+  // squad's (`GuildScopeMenuItems` with a `null` team).
   //
   // It still sticks, like every other section label: "Show all" opens the
   // whole direct-message history under it, and a few screens into that the
@@ -3968,28 +4315,40 @@ function ScopeTreeGroupSection({
   if (!nested) {
     return (
       <section aria-label={name} data-testid={`sidebar-scope-${scopeKey}`}>
-        <div
-          className={cn(
-            "flex h-7 items-center gap-1.5 px-2.5 pt-1 text-muted-foreground",
-            STICKY_SECTION_HEADER
-          )}
-          data-testid={`sidebar-scope-label-${scopeKey}`}
-        >
-          <span className={SECTION_LABEL_CLASS}>{name}</span>
-          {total > 0 ? <span className={SECTION_COUNT_CLASS}>{total}</span> : null}
-          {previewExpanded ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={onTogglePreview}
-              data-testid={`sidebar-scope-more-${scopeKey}`}
-              className="ms-auto h-6 px-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div
+              className={cn(
+                "flex h-7 items-center gap-1.5 px-2.5 pt-1 text-muted-foreground",
+                STICKY_SECTION_HEADER
+              )}
+              data-testid={`sidebar-scope-label-${scopeKey}`}
             >
-              {t("groupShowLess")}
-            </Button>
-          ) : null}
-        </div>
+              <span className={SECTION_LABEL_CLASS}>{name}</span>
+              {total > 0 ? <span className={SECTION_COUNT_CLASS}>{total}</span> : null}
+              {previewExpanded ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={onTogglePreview}
+                  data-testid={`sidebar-scope-more-${scopeKey}`}
+                  className="ms-auto h-6 px-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                >
+                  {t("groupShowLess")}
+                </Button>
+              ) : null}
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent data-testid={`sidebar-scope-menu-${scopeKey}`}>
+            <GuildScopeMenuItems
+              teamId={null}
+              unreadCount={unreadCount}
+              onNewConversation={onNewConversation}
+              unreadScope={unreadScope}
+            />
+          </ContextMenuContent>
+        </ContextMenu>
         {rowsList}
         {previewExpanded ? null : moreRow}
       </section>
@@ -4027,7 +4386,7 @@ function ScopeTreeGroupSection({
                   variant="ghost"
                   size="xs"
                   className="min-w-0 flex-1 justify-start gap-1.5 px-1"
-                  aria-label={name}
+                  aria-label={muted ? railT("teamMuted", { name }) : name}
                   data-testid={`sidebar-scope-toggle-${scopeKey}`}
                 >
                   {team ? (
@@ -4062,7 +4421,11 @@ function ScopeTreeGroupSection({
               >
                 <PlusIcon className="size-3.5" />
               </Button>
-              <GuildUnreadPill count={unreadCount} testId={`sidebar-scope-unread-${scopeKey}`} />
+              {muted ? (
+                <GuildMutedGlyph testId={`sidebar-scope-muted-${scopeKey}`} />
+              ) : (
+                <GuildUnreadPill count={unreadCount} testId={`sidebar-scope-unread-${scopeKey}`} />
+              )}
               {/* The fold affordance sits at the row's end (Codex-style), a
                   second trigger on the same disclosure — pointer-only: the
                   main header button already owns Enter/Space, so this one
@@ -4091,6 +4454,8 @@ function ScopeTreeGroupSection({
               unreadCount={unreadCount}
               onNewConversation={onNewConversation}
               onMoveTeam={onMoveTeam}
+              teamPosition={teamPosition}
+              unreadScope={unreadScope}
             />
           </ContextMenuContent>
         </ContextMenu>
@@ -4127,8 +4492,8 @@ function FolderSection({
   collapsed: boolean
   sessions: ChatSession[]
   onToggle: () => void
-  onRename?: (id: string, name: string) => void | Promise<void>
-  onDelete?: (id: string) => void | Promise<void>
+  onRename?: (id: string, name: string) => void | Promise<unknown>
+  onDelete?: (id: string) => void | Promise<unknown>
   /** Move this folder one place up / down the manual order. */
   onMove?: (id: string, delta: -1 | 1) => void
   first?: boolean
@@ -4207,8 +4572,8 @@ function FolderSectionHeader({
   folder: SessionFolder
   collapsed: boolean
   count: number
-  onRename?: (id: string, name: string) => void | Promise<void>
-  onDelete?: (id: string) => void | Promise<void>
+  onRename?: (id: string, name: string) => void | Promise<unknown>
+  onDelete?: (id: string) => void | Promise<unknown>
   onMove?: (id: string, delta: -1 | 1) => void
   first?: boolean
   last?: boolean
@@ -4238,10 +4603,7 @@ function FolderSectionHeader({
       className={cn(
         "group/folder flex h-7 items-center gap-0.5 rounded-md px-1 pb-0.5",
         STICKY_SECTION_HEADER,
-        // The drop cue as an opaque tint of the sticky ground — a translucent
-        // wash would let the rows scrolling under the stuck header show.
-        dropActive &&
-          "bg-[color-mix(in_oklab,var(--primary)_10%,var(--background))] ring-1 ring-primary/40 ring-inset"
+        dropActive && HEADER_DROP_CUE
       )}
       data-drop-active={dropActive || undefined}
     >

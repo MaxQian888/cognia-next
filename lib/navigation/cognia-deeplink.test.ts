@@ -1,4 +1,4 @@
-import { parseCogniaDeeplink } from "./cognia-deeplink"
+import { buildSessionDeeplink, parseCogniaDeeplink } from "./cognia-deeplink"
 
 describe("parseCogniaDeeplink", () => {
   it("parses routes shared by the desktop and mobile shells", () => {
@@ -178,5 +178,27 @@ describe("parseCogniaDeeplink", () => {
   it("returns unknown for malformed and foreign URLs", () => {
     expect(parseCogniaDeeplink("not a url").kind).toBe("unknown")
     expect(parseCogniaDeeplink("https://example.com").kind).toBe("unknown")
+  })
+})
+
+describe("buildSessionDeeplink", () => {
+  it("puts a path-safe id in the path, the form the CLI and companion mint", () => {
+    expect(buildSessionDeeplink("s_lx2abc_9f3k2d")).toBe("cognia://session/s_lx2abc_9f3k2d")
+  })
+
+  it("moves an id that needs escaping to the query, which the parser decodes", () => {
+    const link = buildSessionDeeplink("odd id/with#chars")
+    expect(link).toBe("cognia://session?id=odd%20id%2Fwith%23chars")
+    expect(parseCogniaDeeplink(link)).toMatchObject({
+      kind: "open_session",
+      sessionId: "odd id/with#chars",
+    })
+  })
+
+  it("round-trips through the parser", () => {
+    expect(parseCogniaDeeplink(buildSessionDeeplink("s_1"))).toMatchObject({
+      kind: "open_session",
+      sessionId: "s_1",
+    })
   })
 })

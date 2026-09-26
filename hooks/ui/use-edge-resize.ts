@@ -28,6 +28,15 @@ export interface UseEdgeResizeOptions {
   max: number
   /** Called with the next clamped size during a drag or arrow-key nudge. */
   onChange: (width: number) => void
+  /**
+   * Called once with the settled size when a gesture ends: a pointer drag
+   * releasing (or cancelling — then with the starting size), and every
+   * keyboard nudge. Give it when `onChange` is only a live preview — a
+   * component-local width — and the store write belongs here, so a drag writes
+   * (and persists) once rather than on every pointer move. Omitted, `onChange`
+   * is the only write, as before.
+   */
+  onCommit?: (width: number) => void
   /** Called on double-click of the handle — typically resets to a default. */
   onReset?: () => void
   /** Arrow-key step, same unit as `width`. Defaults to 16. */
@@ -70,6 +79,7 @@ export function useEdgeResize({
   min,
   max,
   onChange,
+  onCommit,
   onReset,
   step = 16,
   edge = "right",
@@ -87,6 +97,8 @@ export function useEdgeResize({
     target: Element
   } | null>(null)
   const [dragging, setDragging] = useState(false)
+  // The size the drag last reported — what `onCommit` settles on at release.
+  const lastRef = useRef<number | null>(null)
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
@@ -101,6 +113,7 @@ export function useEdgeResize({
         }
       }
       startRef.current = { x: e.clientX, y: e.clientY, width, pointerId: e.pointerId, target }
+      lastRef.current = null
       setDragging(true)
     },
     [width]
@@ -112,7 +125,9 @@ export function useEdgeResize({
       if (!start || e.pointerId !== start.pointerId) return
       const delta = (vertical ? e.clientY - start.y : e.clientX - start.x) * scale
       const raw = inverted ? start.width - delta : start.width + delta
-      onChange(clamp(raw, min, max))
+      const next = clamp(raw, min, max)
+      lastRef.current = next
+      onChange(next)
     },
     [vertical, inverted, scale, min, max, onChange]
   )
@@ -122,12 +137,16 @@ export function useEdgeResize({
     if (!start) return
     startRef.current = null
     setDragging(false)
+    // A press without a move changed nothing and has nothing to settle.
+    const last = lastRef.current
+    lastRef.current = null
+    if (last !== null) onCommit?.(last)
     try {
       start.target.releasePointerCapture?.(start.pointerId)
     } catch {
       // Capture may already be lost after cancellation or window blur.
     }
-  }, [])
+  }, [onCommit])
 
   const endDrag = useCallback(
     (e: ReactPointerEvent) => {
@@ -143,7 +162,9 @@ export function useEdgeResize({
     const cancel = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || !startRef.current) return
       event.preventDefault()
-      onChange(clamp(startRef.current.width, min, max))
+      const restored = clamp(startRef.current.width, min, max)
+      lastRef.current = restored
+      onChange(restored)
       finishDrag()
     }
     // Native listeners also protect consumers that only bind down/move/up.
@@ -188,21 +209,26 @@ export function useEdgeResize({
           ? (["ArrowLeft", "ArrowRight"] as const)
           : (["ArrowRight", "ArrowLeft"] as const)
       const nudge = e.shiftKey ? step / 4 : step
+      // A key press is a whole gesture: preview and settle in one go.
+      const settle = (next: number) => {
+        onChange(next)
+        onCommit?.(next)
+      }
       if (e.key === grow) {
         e.preventDefault()
-        onChange(clamp(width + nudge, min, max))
+        settle(clamp(width + nudge, min, max))
       } else if (e.key === shrink) {
         e.preventDefault()
-        onChange(clamp(width - nudge, min, max))
+        settle(clamp(width - nudge, min, max))
       } else if (e.key === "Home" || e.key === "End") {
         e.preventDefault()
-        onChange(e.key === "Home" ? min : max)
+        settle(e.key === "Home" ? min : max)
       } else if ((e.key === "Enter" || e.key === " ") && onReset) {
         e.preventDefault()
         onReset()
       }
     },
-    [vertical, inverted, width, step, min, max, onChange, onReset]
+    [vertical, inverted, width, step, min, max, onChange, onCommit, onReset]
   )
 
   const onDoubleClick = useCallback(() => onReset?.(), [onReset])

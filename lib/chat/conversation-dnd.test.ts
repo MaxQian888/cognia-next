@@ -25,6 +25,15 @@ describe("resolveConversationDrop", () => {
     expect(resolveConversationDrop(sess("a"), sess("a"), ["a"])).toBeNull()
   })
 
+  it("pins an unpinned conversation dropped on the Pinned target", () => {
+    const pin: DndNode = { id: "pin-drop", data: { type: "pin" } }
+    expect(resolveConversationDrop(sess("a"), pin, [])).toEqual({ type: "pin", sessionId: "a" })
+    // Already pinned → a no-op, not a second write.
+    expect(
+      resolveConversationDrop({ id: "a", data: { type: "session", pinned: true } }, pin, [])
+    ).toBeNull()
+  })
+
   it("assigns a conversation to the folder it was dropped on", () => {
     expect(resolveConversationDrop(sess("a", null), folder("f1"), [])).toEqual({
       type: "assign",

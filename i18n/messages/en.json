@@ -8510,6 +8510,32 @@
         }
       }
     },
+    "sessionRun": {
+      "awaitingApproval": "Waiting for your approval",
+      "error": "The last turn failed",
+      "streaming": "Replying"
+    },
+    "sessionWrite": {
+      "actionFailed": {
+        "archive": "Couldn't archive the conversation.",
+        "branch": "Couldn't branch the conversation.",
+        "delete": "Couldn't delete the conversation.",
+        "folderCreate": "Couldn't create the folder.",
+        "folderDelete": "Couldn't delete the folder.",
+        "folderRename": "Couldn't rename the folder.",
+        "markRead": "Couldn't mark the conversation as read.",
+        "markUnread": "Couldn't mark the conversation as unread.",
+        "move": "Couldn't move the conversation.",
+        "moveWorkspace": "Couldn't move the conversation to that workspace.",
+        "pin": "Couldn't pin the conversation.",
+        "rename": "Couldn't rename the conversation.",
+        "reorder": "Couldn't save the new order.",
+        "unarchive": "Couldn't restore the conversation.",
+        "unpin": "Couldn't unpin the conversation."
+      },
+      "actionLocked": "This conversation is read-only while it is handed off to another device.",
+      "undoFailed": "Couldn't undo that change."
+    },
     "slashCommand": {
       "ranSlashCommand": "ran slash command"
     },
@@ -10977,6 +11003,7 @@
         "branched": "Branched",
         "im": "IM conversations",
         "pinned": "Pinned",
+        "running": "Running",
         "unread": "Unread"
       }
     },
@@ -11420,6 +11447,7 @@
         "deleteConfirmTitle": "{count, plural, one {Delete # conversation?} other {Delete # conversations?}}",
         "deleteSuccess": "{count, plural, one {Deleted # conversation} other {Deleted # conversations}}",
         "folderOtherWorkspace": "Dimmed folders are in a different workspace from some of the selected conversations.",
+        "markRead": "Mark as read",
         "moveSuccess": "{count, plural, one {Moved # conversation} other {Moved # conversations}}",
         "moveToFolder": "Move to folder",
         "pin": "Pin",
@@ -11441,7 +11469,7 @@
       "compactDensity": "Compact rows",
       "conversationsTitle": "Conversations",
       "deleteFolder": "Delete folder",
-      "deleteFolderConfirmBody": "The folder is removed; its conversations stay and return to the date list. This cannot be undone.",
+      "deleteFolderConfirmBody": "The folder is removed; its conversations stay and move back into the list, where they were before you filed them. This cannot be undone.",
       "deleteFolderConfirmTitle": "Delete the folder “{name}”?",
       "directMessages": "Chats",
       "displayOptions": "Display options",
@@ -11464,7 +11492,8 @@
           "none": "No grouping",
           "team": "Chats / Team",
           "workspace": "Workspace"
-        }
+        },
+        "scopeTreeNote": "The expanded sidebar always groups by team. This choice applies to the list in the collapsed sidebar and the narrow-window drawer."
       },
       "groupEmpty": "No conversations yet",
       "groupShowAll": "Show all {count}",
@@ -11487,10 +11516,19 @@
       "newFolder": "New folder",
       "newFolderName": "New folder",
       "openSessions": "Open sessions",
+      "pinDropZone": "Drop here to pin",
       "pinSidebar": "Keep open",
       "renameFolder": "Rename folder",
       "resizeHandle": "Resize sidebar",
+      "rowToast": {
+        "branched": "Branched. The new conversation is now open.",
+        "linkCopied": "Link copied",
+        "linkCopyFailed": "Couldn't copy the link.",
+        "nothingToBranch": "Nothing to branch yet — this conversation has no messages.",
+        "undo": "Undo"
+      },
       "searchAria": "Search conversations",
+      "searchContentFailed": "Couldn't search message content. Showing title matches only.",
       "searchContentMinQuery": "Type {count} characters to search message content",
       "searchMessageContent": "Search message content",
       "searchPlaceholder": "Search chats…",
@@ -11957,6 +11995,7 @@
     "sessionRow": {
       "actionsMenu": "Session actions",
       "archive": "Archive",
+      "branch": "Branch conversation",
       "branchedFrom": "Branched conversation — open parent",
       "cancel": "Cancel",
       "codexHandoffPending": "The Codex import outcome is pending. Check Codex App before retrying; your source task is preserved.",
@@ -11967,15 +12006,21 @@
       "cogniaAgentNotInstalled": "The Cognia agent CLI isn't installed",
       "contentMatch": "Matched inside messages",
       "continueOnDevice": "Continue on another device",
+      "copyLink": "Copy link to conversation",
       "delete": "Delete",
       "deleteConfirmAction": "Delete conversation",
       "deleteConfirmBody": "This permanently removes the conversation and all its messages. This cannot be undone.",
       "deleteConfirmBranches": "{count, plural, =1 {Its 1 branch will be kept as a conversation of its own.} other {Its # branches will be kept as conversations of their own.}}",
       "deleteConfirmTitle": "Delete “{title}”?",
+      "deleteShortcut": "Del",
       "deselect": "Deselect",
       "dragHandle": "Drag to reorder or move to a folder",
+      "exportShare": "Export or share…",
       "handoffReadonly": "Read-only after device handoff",
       "handoffStatus": "Device handoff status",
+      "lockedMenuNote": "Read-only while handed off to another device",
+      "markRead": "Mark as read",
+      "markUnread": "Mark as unread",
       "moveToFolder": "Move to folder",
       "moveToWorkspace": "Move to workspace",
       "openInCodexApp": "Open in Codex app",
@@ -11986,12 +12031,15 @@
       "openedInTerminal": "Run in your terminal: {command}",
       "pin": "Pin",
       "pinned": "Pinned",
+      "placeholderTitle": "New chat",
       "removeFromFolder": "Remove from folder",
       "rename": "Rename",
+      "renameInput": "Rename “{title}”",
       "returnFromCodexApp": "Bring back from Codex App",
       "returnFromCodexAppFailed": "Could not import the linked Codex task.",
       "returnedFromCodexApp": "Imported the latest Codex snapshot as a linked conversation.",
       "select": "Select",
+      "selectedState": "Selected",
       "unarchive": "Unarchive",
       "unpin": "Unpin",
       "untitled": "(untitled)"
@@ -21019,16 +21067,6 @@
       "workspaceReady": "Workspace ready"
     },
     "home": {
-      "actionFailed": {
-        "archive": "Couldn't archive the conversation.",
-        "delete": "Couldn't delete the conversation.",
-        "markRead": "Couldn't mark the conversation as read.",
-        "move": "Couldn't move the conversation.",
-        "pin": "Couldn't pin the conversation.",
-        "rename": "Couldn't rename the conversation.",
-        "unarchive": "Couldn't restore the conversation.",
-        "unpin": "Couldn't unpin the conversation."
-      },
       "actionLocked": "This conversation is read-only while it is handed off to another device.",
       "actions": {
         "devices": "Devices",
@@ -21086,6 +21124,7 @@
       "rowActionsHint": "Long-press or swipe for more actions",
       "search": "Search chats…",
       "searchAria": "Search chats",
+      "searchContentFailed": "Couldn't search message content. Showing title matches only.",
       "searchTruncated": "Some results may be hidden — refine your search.",
       "searchingMessages": "Searching messages…",
       "sectionCount": "{count, plural, =1 {1 conversation} other {# conversations}}",
@@ -56169,10 +56208,16 @@
         "compare": "Compare refs",
         "delete": "Delete"
       },
+      "alreadyCurrent": "Already checked out",
       "cancel": "Cancel",
+      "checkedOut": "Checked out {name}",
+      "checkoutFailed": "Couldn't check out {name}",
       "confirmDelete": "Delete branch",
+      "current": "Current",
       "deleteDescription": "{name} will be force-deleted, even if its commits were never merged. After a run has settled, this branch is the only record of what it did.",
+      "deleteFailed": "Couldn't delete {name}",
       "deleteTitle": "Delete this agent branch?",
+      "deleted": "Deleted {name}",
       "description": "Branches an isolated run left behind, once its worktree was reclaimed.",
       "empty": "No agent branches in this repository.",
       "loading": "Loading agent branches",
@@ -56406,6 +56451,8 @@
         "pastedDefaultName": "Pasted note",
         "reindex": "Reindex file",
         "reindexAll": "Reindex all",
+        "reindexAllFailed": "Couldn't re-index the knowledge base.",
+        "reindexFileFailed": "Couldn't re-index {name}.",
         "removeFile": "Remove file",
         "removeFileDescription": "“{name}” and every chunk indexed from it will be removed from this workspace's knowledge base. A pasted note has no other copy.",
         "removeFileTitle": "Remove this file?",
@@ -56451,6 +56498,7 @@
       "removeRoot": "Remove folder",
       "removeTag": "Remove tag {tag}",
       "revokeRoot": "Revoke trust",
+      "revokeTrustFailed": "Couldn't revoke trust for this folder.",
       "rootLabelPlaceholder": "Folder name (optional)",
       "rootsEmpty": "No folders added yet. Browse for a folder or enter an absolute path below.",
       "rootsHint": "Mount one or more folders. The primary folder is the working directory; the rest are readable and editable alongside it.",
@@ -56464,6 +56512,7 @@
       "tagsLabel": "Tags",
       "tagsPlaceholder": "Add a tag and press Enter",
       "title": "Workspaces",
+      "trustFailed": "Couldn't trust this folder.",
       "trustRoot": "Trust",
       "trustedBadge": "Trusted",
       "unarchive": "Restore",

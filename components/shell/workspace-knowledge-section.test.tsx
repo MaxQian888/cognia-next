@@ -140,6 +140,32 @@ describe("WorkspaceKnowledgeSection", () => {
     expect(removeKnowledgeFile).not.toHaveBeenCalled()
   })
 
+  it("reports a failed per-file reindex", async () => {
+    liveQueryMock.mockReturnValue(new Map([["f1", { count: 1, contentHash: "hash" }]]))
+    reindexFile.mockRejectedValueOnce(new Error("embedder offline"))
+    const user = userEvent.setup()
+    render(<WorkspaceKnowledgeSection project={project()} />)
+    await user.click(screen.getByRole("button", { name: "reindex" }))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("reindexFileFailed:guide.md", {
+        description: "embedder offline",
+      })
+    )
+  })
+
+  it("reports a failed reindex-all and stops spinning", async () => {
+    liveQueryMock.mockReturnValue(new Map())
+    reindexProject.mockRejectedValueOnce(new Error("quota"))
+    const user = userEvent.setup()
+    render(<WorkspaceKnowledgeSection project={project()} />)
+    const button = screen.getByRole("button", { name: "reindexAll" })
+    await user.click(button)
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("reindexAllFailed", { description: "quota" })
+    )
+    expect(button).toBeEnabled()
+  })
+
   it("reindex-all triggers a project reindex", async () => {
     liveQueryMock.mockReturnValue(new Map())
     const user = userEvent.setup()

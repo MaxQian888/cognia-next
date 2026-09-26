@@ -412,6 +412,11 @@ jest.mock("@/hooks/chat/use-credential-status", () => ({
   useCredentialStatus: () => credentialStatusRef.current,
 }))
 
+const runStatusMap: ReadonlyMap<string, string> = new Map([["s-running", "streaming"]])
+jest.mock("@/hooks/chat/use-session-run-status-map", () => ({
+  useSessionRunStatusMap: () => runStatusMap,
+}))
+
 const channelListPropsRef: { current: Record<string, unknown> | null } = { current: null }
 jest.mock("@/components/mobile/shell/mobile-channel-list", () => ({
   MobileChannelList: (props: { onSelect: (id: string) => void; onNewDirect: () => void }) => {
@@ -426,6 +431,15 @@ jest.mock("@/components/mobile/shell/mobile-channel-list", () => ({
       </div>
     )
   },
+}))
+
+jest.mock("@/components/canvas/canvas-shell", () => ({
+  CanvasShell: () => <div data-testid="canvas-shell-stub" />,
+}))
+jest.mock("@/components/shell/plugin-view-container-panel", () => ({
+  PluginViewContainerPanel: ({ containerId }: { containerId: string }) => (
+    <div data-testid="plugin-view-panel-stub" data-container-id={containerId} />
+  ),
 }))
 
 jest.mock("@/components/mobile/shell/character-header", () => ({
@@ -573,6 +587,57 @@ describe("<AppShellMobile />", () => {
     } finally {
       errorMessageRef.current = null
     }
+  })
+
+  describe("non-chat guilds picked in the drawer's rail", () => {
+    it("renders the canvas in place of the chat pane, titled Canvas", () => {
+      selectedGuild = { kind: "canvas" }
+      render(<AppShellMobile />)
+      expect(screen.getByTestId("canvas-shell-stub")).toBeInTheDocument()
+      expect(screen.queryByTestId("chat-pane")).toBeNull()
+      expect(screen.getByTestId("mobile-active-title")).toHaveTextContent("canvas")
+    })
+
+    it("toasts a chat failure while the canvas hides the pane that would show it", () => {
+      selectedGuild = { kind: "canvas" }
+      errorMessageRef.current = "Provider down"
+      render(<AppShellMobile />)
+      expect(toastError).toHaveBeenCalledWith("Provider down")
+    })
+
+    it("does not re-announce a failure the chat pane already showed", () => {
+      errorMessageRef.current = "Provider down"
+      const { rerender } = render(<AppShellMobile />)
+      selectedGuild = { kind: "canvas" }
+      rerender(<AppShellMobile />)
+      expect(toastError).not.toHaveBeenCalled()
+    })
+
+    it("closes the drawer when Canvas is picked from it", async () => {
+      const user = userEvent.setup()
+      const { rerender } = render(<AppShellMobile />)
+      await user.click(screen.getByTestId("mobile-nav-trigger"))
+      expect(screen.getByTestId("mobile-nav-list-slot")).toBeInTheDocument()
+      // The rail writes the store; the shell re-renders on the new guild.
+      selectedGuild = { kind: "canvas" }
+      rerender(<AppShellMobile />)
+      await waitFor(() => expect(screen.queryByTestId("mobile-nav-list-slot")).toBeNull())
+    })
+
+    it("renders a plugin view container in the drawer's list slot", async () => {
+      const user = userEvent.setup()
+      selectedGuild = { kind: "plugin-view", containerId: "acme.plugin:board" }
+      render(<AppShellMobile />)
+      await user.click(screen.getByTestId("mobile-nav-trigger"))
+      const slot = screen.getByTestId("mobile-nav-list-slot")
+      expect(within(slot).getByTestId("plugin-view-panel-stub")).toHaveAttribute(
+        "data-container-id",
+        "acme.plugin:board"
+      )
+      expect(within(slot).queryByTestId("channel-body-stub")).toBeNull()
+      // The chat stays in the main pane: the container replaces the list only.
+      expect(screen.getByTestId("chat-pane")).toBeInTheDocument()
+    })
   })
 
   it("wraps the chat pane in the artifact workspace dock (gap11)", () => {
@@ -920,6 +985,8 @@ describe("<AppShellMobile />", () => {
       expect(props.onUnarchive).toBe(unarchive)
       expect(props.onSetPinned).toBe(bulkSetPinned)
       expect(props.onAssignToFolder).toBe(assignToFolder)
+      // The live turn state that drives the row glyphs and the running filter.
+      expect(props.runStatusById).toBe(runStatusMap)
     })
 
     it("keeps the list's source outside the drawer, fed by the shell's character read", () => {

@@ -233,6 +233,8 @@ describe("ConversationFilterMenu (desktop)", () => {
     ).toHaveAttribute("aria-checked", "true")
     pick(screen.getByRole("menuitemcheckbox", { name: "filters.options.unread" }))
     expect(actions.toggle).toHaveBeenCalledWith("unread", true)
+    pick(screen.getByRole("menuitemcheckbox", { name: "filters.options.running" }))
+    expect(actions.toggle).toHaveBeenCalledWith("running", true)
     pick(screen.getByRole("menuitemcheckbox", { name: "filters.options.pinned" }))
     expect(actions.toggle).toHaveBeenCalledWith("pinned", false)
     pick(screen.getByRole("menuitemradio", { name: "kind.options.team" }))

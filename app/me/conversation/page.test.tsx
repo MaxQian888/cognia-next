@@ -152,13 +152,39 @@ describe("MobileConversationPage", () => {
     })
   })
 
-  it("enabling content search writes searchScope=titleAndContent", async () => {
+  it("enabling content search writes the resolved search object and the legacy enum", async () => {
     render(<Page />)
     fireEvent.click(screen.getByTestId("conversation-sidebar-content-search"))
     await Promise.resolve()
     await Promise.resolve()
     expect(saveMock).toHaveBeenCalledWith({
-      conversationSidebar: { searchScope: "titleAndContent" },
+      conversationSidebar: {
+        search: { workspace: "current", includeArchived: false, content: true },
+        searchScope: "titleAndContent",
+      },
+    })
+  })
+
+  it("reads and toggles the content axis a desktop list wrote, keeping its other axes", async () => {
+    // The desktop always writes a fully resolved `search`; the stale legacy
+    // enum must neither decide the switch nor survive the toggle.
+    settingsRef.current = {
+      conversationSidebar: {
+        searchScope: "title",
+        search: { workspace: "all", includeArchived: true, content: true },
+      },
+    }
+    render(<Page />)
+    const toggle = screen.getByTestId("conversation-sidebar-content-search")
+    expect(toggle).toBeChecked()
+    fireEvent.click(toggle)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledWith({
+      conversationSidebar: {
+        searchScope: "title",
+        search: { workspace: "all", includeArchived: true, content: false },
+      },
     })
   })
 })

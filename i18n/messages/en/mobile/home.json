@@ -1,14 +1,4 @@
 {
-  "actionFailed": {
-    "archive": "Couldn't archive the conversation.",
-    "delete": "Couldn't delete the conversation.",
-    "markRead": "Couldn't mark the conversation as read.",
-    "move": "Couldn't move the conversation.",
-    "pin": "Couldn't pin the conversation.",
-    "rename": "Couldn't rename the conversation.",
-    "unarchive": "Couldn't restore the conversation.",
-    "unpin": "Couldn't unpin the conversation."
-  },
   "actionLocked": "This conversation is read-only while it is handed off to another device.",
   "actions": {
     "discover": "Discover",
@@ -66,6 +56,7 @@
   "rowActionsHint": "Long-press or swipe for more actions",
   "search": "Search chats…",
   "searchAria": "Search chats",
+  "searchContentFailed": "Couldn't search message content. Showing title matches only.",
   "searchTruncated": "Some results may be hidden — refine your search.",
   "searchingMessages": "Searching messages…",
   "sectionCount": "{count, plural, =1 {1 conversation} other {# conversations}}",

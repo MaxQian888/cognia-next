@@ -1,14 +1,4 @@
 {
-  "actionFailed": {
-    "archive": "无法归档该会话。",
-    "delete": "无法删除该会话。",
-    "markRead": "无法将该会话标为已读。",
-    "move": "无法移动该会话。",
-    "pin": "无法置顶该会话。",
-    "rename": "无法重命名该会话。",
-    "unarchive": "无法恢复该会话。",
-    "unpin": "无法取消置顶该会话。"
-  },
   "actionLocked": "该会话正在交接到另一台设备，期间为只读。",
   "actions": {
     "discover": "发现",
@@ -66,6 +56,7 @@
   "rowActionsHint": "长按或滑动可查看更多操作",
   "search": "搜索聊天…",
   "searchAria": "搜索聊天",
+  "searchContentFailed": "消息内容搜索失败，仅显示标题匹配结果。",
   "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
   "searchingMessages": "正在搜索消息内容…",
   "sectionCount": "{count, plural, =1 {1 个会话} other {# 个会话}}",
