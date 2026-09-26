@@ -159,8 +159,52 @@ describe("IntegrationsHub", () => {
     expect(screen.queryByText("Events")).not.toBeInTheDocument()
   })
 
+  // A browser or a phone with nothing recorded gets one statement of where
+  // integrations live, not four empty sections under an install card whose
+  // plugins cannot be installed here either.
+  it("says where integrations live instead of an empty console where they cannot run", () => {
+    mockPlatform = "web"
+    mockHasEntries = false
+    render(<IntegrationsHub />)
+    expect(screen.getByTestId("integrations-unsupported")).toHaveTextContent(
+      "Integration management requires the desktop app."
+    )
+    expect(screen.queryByRole("link", { name: "Browse plugins" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { level: 2 })).not.toBeInTheDocument()
+  })
+
+  it("keeps anything already recorded reachable, without the install card", () => {
+    mockPlatform = "web"
+    mockHasEntries = false
+    mockAccounts = [
+      {
+        id: "acc1",
+        pluginId: "demo-delivery",
+        integrationId: "demo",
+        label: "Work",
+        enabled: true,
+        health: "healthy",
+      },
+    ]
+    render(<IntegrationsHub />)
+    expect(screen.queryByTestId("integrations-unsupported")).not.toBeInTheDocument()
+    expect(screen.getByText("Integration management requires the desktop app.")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Browse plugins" })).not.toBeInTheDocument()
+  })
+
   it("makes the whole account form inert where it cannot be submitted", () => {
     mockPlatform = "web"
+    // Something is recorded, so the console renders; its forms stay inert.
+    mockAccounts = [
+      {
+        id: "acc1",
+        pluginId: "demo-delivery",
+        integrationId: "demo",
+        label: "Work",
+        enabled: true,
+        health: "healthy",
+      },
+    ]
     render(<IntegrationsHub />)
     expect(screen.getByText("Integration management requires the desktop app.")).toBeInTheDocument()
     expect(screen.getByLabelText("Integration")).toBeDisabled()

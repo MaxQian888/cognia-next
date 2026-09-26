@@ -142,5 +142,6 @@
     "title": "订阅"
   },
   "title": "Integrations",
-  "unsupportedWeb": "集成管理需要桌面应用。"
+  "unsupportedWeb": "集成管理需要桌面应用。",
+  "unsupportedWebDescription": "账号、事件订阅、审批与审计记录都在运行它们的 Cognia 桌面应用里。请在那里打开“集成”。"
 }

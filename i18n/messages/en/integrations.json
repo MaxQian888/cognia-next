@@ -142,5 +142,6 @@
     "title": "Subscriptions"
   },
   "title": "Integrations",
-  "unsupportedWeb": "Integration management requires the desktop app."
+  "unsupportedWeb": "Integration management requires the desktop app.",
+  "unsupportedWebDescription": "Accounts, event subscriptions, approvals and the audit trail live in the Cognia desktop app, which runs them. Open Integrations there."
 }

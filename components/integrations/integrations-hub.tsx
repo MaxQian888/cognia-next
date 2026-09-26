@@ -8,6 +8,7 @@ import { ActivityIcon, PlugZapIcon, RefreshCwIcon, ShieldCheckIcon } from "lucid
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
@@ -354,6 +355,39 @@ export function IntegrationsHub() {
       )
     : []
 
+  // Where integrations cannot run (a browser, a phone) and nothing has been
+  // recorded here, the console is four empty sections under an "install a
+  // plugin to begin" card whose plugins cannot be installed here either. The
+  // page says where integrations live instead. Anything already recorded
+  // still renders below the notice, so no row becomes unreachable.
+  const nothingRecorded =
+    accounts.length === 0 && subscriptions.length === 0 && jobs.length === 0 && audit.length === 0
+  if (!platformSupported && snapshot !== undefined && nothingRecorded) {
+    return (
+      <div
+        className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
+        data-bg-target="chat"
+      >
+        <FeaturePageHeader
+          icon={<PlugZapIcon />}
+          title={t("title")}
+          description={t("description")}
+        />
+        <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col p-3 sm:p-6">
+          <Empty className="border" data-testid="integrations-unsupported">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <PlugZapIcon aria-hidden />
+              </EmptyMedia>
+              <EmptyTitle>{t("unsupportedWeb")}</EmptyTitle>
+              <EmptyDescription>{t("unsupportedWebDescription")}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        </main>
+      </div>
+    )
+  }
+
   return (
     // The page identity is the shared header band every other feature route
     // wears, not a hand-rolled `<h1>` in the scroll body. Two of the three
@@ -411,7 +445,9 @@ export function IntegrationsHub() {
                 </CardContent>
               </Card>
             ))}
-            {entries.length === 0 && (
+            {/* Not where plugins cannot be installed: the button led to a
+                Discover page whose installs are desktop-only too. */}
+            {entries.length === 0 && platformSupported && (
               // Spans the grid. As a plain grid child it was a box one third of
               // the page wide holding a single sentence, which read as a card that
               // had failed to load rather than as "nothing installed".
