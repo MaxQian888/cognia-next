@@ -12,7 +12,7 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { GRAPH_TRAVERSAL_MAX } from "./graph.mjs"
 
 // Output bounds — mirror the file-ops/process tools' `{total, truncated, note}`

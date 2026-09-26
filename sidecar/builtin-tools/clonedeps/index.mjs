@@ -7,7 +7,7 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { cloneDependencySource, listClonedDeps } from "./clone.mjs"
 
 // ---- clone_dep_source -----------------------------------------------------

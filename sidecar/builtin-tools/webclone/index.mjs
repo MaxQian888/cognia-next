@@ -10,7 +10,7 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { snapshotSite, CODEGEN_FRAMEWORKS, FRAMEWORK_HINTS, SNAPSHOT_MODES } from "./run.mjs"
 
 /** Shape a runner envelope into a compact tool result. */

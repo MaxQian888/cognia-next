@@ -7,11 +7,11 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../safety.mjs"
-import { assertNotSecretEscape } from "../confinement.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
+import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
 import { canonicalKey } from "./read-tracker.mjs"
 import { decodeText, encodeText, withFileLock } from "./text-io.mjs"
-import { resolveToolPath } from "./read.mjs"
+import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 
 export const LSP_DIAG_TIMEOUT_MS = 3_000
 export const LSP_DIAG_MAX_CHARS = 4_000

@@ -7,10 +7,18 @@ import {
   classifyToolFailure,
   failureMessage,
   renderFailureForModel,
-} from "./tool-failure.mjs"
-import { toolError, toolText } from "./safety.mjs"
+} from "./failure.ts"
+import type { ToolFailureKind } from "./failure.ts"
+import { toolError, toolText } from "./result.ts"
+import type { ToolResult } from "./result.ts"
 
-const errno = (code, message = "boom") => Object.assign(new Error(message), { code })
+/** The text of a result's first block. */
+function textOf(result: ToolResult): string {
+  const block = result.content[0]
+  return block?.type === "text" ? block.text : ""
+}
+
+const errno = (code: string, message = "boom"): Error => Object.assign(new Error(message), { code })
 
 test("every kind has a policy, and every policy names a kind", () => {
   assert.deepEqual(Object.keys(TOOL_FAILURE_POLICY).sort(), [...TOOL_FAILURE_KINDS].sort())
@@ -81,7 +89,13 @@ test("an unrecognised failure stays retryable rather than pretending to know", (
 })
 
 test("the four kinds a model most needs to stop retrying are non-retryable", () => {
-  for (const kind of ["invalid-args", "permission-denied", "user-rejected", "resource-exhausted"]) {
+  const kinds: ToolFailureKind[] = [
+    "invalid-args",
+    "permission-denied",
+    "user-rejected",
+    "resource-exhausted",
+  ]
+  for (const kind of kinds) {
     assert.equal(TOOL_FAILURE_POLICY[kind].retryable, false, kind)
   }
 })
@@ -104,10 +118,10 @@ test("toolError carries the classification in both channels", () => {
   const result = toolError(errno("ENOSPC", "disk full"), "write")
   assert.equal(result.isError, true)
   // Model channel: prose that says not to retry.
-  assert.match(result.content[0].text, /\[resource-exhausted\]/)
-  assert.match(result.content[0].text, /retrying will fail the same way/i)
+  assert.match(textOf(result), /\[resource-exhausted\]/)
+  assert.match(textOf(result), /retrying will fail the same way/i)
   // Structured channel: typed, for the UI and telemetry.
-  assert.deepEqual(result._meta["cognia/failure"], {
+  assert.deepEqual(result._meta?.["cognia/failure"], {
     kind: "resource-exhausted",
     retryable: false,
   })
@@ -116,11 +130,11 @@ test("toolError carries the classification in both channels", () => {
 test("toolError still accepts a bare string and a caller-known kind", () => {
   const plain = toolError("something broke")
   assert.equal(plain.isError, true)
-  assert.equal(plain._meta["cognia/failure"].kind, "execution-failed")
+  assert.equal(plain._meta?.["cognia/failure"].kind, "execution-failed")
 
   const known = toolError(new Error("nope"), "tool", { kind: "user-rejected" })
-  assert.equal(known._meta["cognia/failure"].kind, "user-rejected")
-  assert.equal(known._meta["cognia/failure"].retryable, false)
+  assert.equal(known._meta?.["cognia/failure"].kind, "user-rejected")
+  assert.equal(known._meta?.["cognia/failure"].retryable, false)
 })
 
 test("a successful toolText carries no failure metadata", () => {

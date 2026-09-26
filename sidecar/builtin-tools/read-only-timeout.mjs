@@ -21,7 +21,7 @@
  * Default per-tool execution budget in ms. Single source of truth shared by
  * both dispatch channels so they never drift. `0` / non-finite disables the net.
  */
-import { toolError } from "./safety.mjs"
+import { toolError } from "../src/tools/kernel/result.ts"
 
 export const DEFAULT_BUILTIN_TOOL_TIMEOUT_MS = 120_000
 

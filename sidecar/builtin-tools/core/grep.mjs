@@ -10,11 +10,11 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { detectRipgrep, runRipgrep } from "./rg.mjs"
 import { jsGrep } from "./js-search.mjs"
 import { decodeText } from "./text-io.mjs"
-import { resolveToolPath } from "./read.mjs"
+import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 
 export const DEFAULT_HEAD_LIMIT = 250
 export const MAX_LINE_CHARS = 1000

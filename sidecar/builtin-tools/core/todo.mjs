@@ -13,7 +13,7 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolText } from "../safety.mjs"
+import { toolText } from "../../src/tools/kernel/result.ts"
 
 export const TODO_WRITE_NAME = "TodoWrite"
 

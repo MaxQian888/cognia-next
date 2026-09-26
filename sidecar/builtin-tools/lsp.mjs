@@ -15,7 +15,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod"
 import { fileURLToPath } from "node:url"
 import { formatDiagnostics } from "../lsp/report.mjs"
-import { toolError, toolText } from "./safety.mjs"
+import { toolError, toolText } from "../src/tools/kernel/result.ts"
 
 /** Render an LSP Location / Location[] / LocationLink[] into concise text. */
 export function formatLocations(result) {

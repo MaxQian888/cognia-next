@@ -5,7 +5,7 @@
 // tools resolve absolute paths verbatim and run unconfined. This module is the
 // always-on, cross-platform (incl. native Windows) middle layer that confines
 // those tools to the workspace roots, reusing the tested path-canonicalisation
-// from `safety.mjs`.
+// from `src/platform/fs/paths.ts`.
 //
 // Two enforcement surfaces:
 //   1. PERMISSION LAYER (`classifyToolCallConfinement`): consulted by the
@@ -21,115 +21,31 @@
 //      mutator tools make even when no confinement policy is configured, so a
 //      write can never land in a credential directory regardless of the gate.
 //
-// Pure: no I/O beyond path canonicalisation (mirrors `safety.mjs`).
+// Pure: no I/O beyond path canonicalisation (mirrors `src/platform/fs/paths.ts`).
 
-import path from "node:path"
+import { assertPathInside, canonicalisePartial, resolveToolPath } from "../../platform/fs/paths.ts"
+import { isSecretPath } from "./secret-paths.ts"
 
-import { assertPathInside, canonicalisePartial } from "./safety.mjs"
+export type ConfinementVerdict = "allow" | "ask" | "deny"
 
-// --- Protected credential paths (mirror of Rust `sandbox/protected.rs`
-// `is_secret_protected`). Neither readable nor writable inside the sandbox; here
-// they are the hard-deny set for every tool. `.env` is deliberately NOT listed —
-// it is a normal project file the agent legitimately reads/writes.
-
-/**
- * Directory segments that mark a credential store.
- *
- * Kept in union with `cli/src/agent/tool-host/policy.ts`. The two enforcement
- * points stay separate on purpose (Cognia must not trust a check running inside
- * the process it confines), but the DATA must not drift — and it had: `.cognia`
- * existed only CLI-side, while `.gpg` / `.config/gcloud` existed only here.
- */
-const SECRET_DIR_SEGMENTS = new Set([
-  ".ssh",
-  ".aws",
-  ".gnupg",
-  ".gpg",
-  ".kube",
-  ".docker",
-  ".npmrc",
-  ".cognia",
-  ".config/gcloud",
-  ".config/cognia",
-])
-
-/** Basenames that are themselves credential files anywhere on disk. */
-const SECRET_FILE_NAMES = new Set([
-  ".git-credentials",
-  ".npmrc",
-  ".netrc",
-  "_netrc",
-  ".pypirc",
-  ".pgpass",
-  "credentials",
-  "id_rsa",
-  "id_ed25519",
-  "known_hosts",
-])
-
-/**
- * Two-segment secret paths (`<dir>/<child>`), e.g. `~/.config/gh`. The last
- * two segments of Rust's multi-segment rels ride this list too
- * (`.local/share/cognia` → `share/cognia`, `AppData/Roaming/cognia` →
- * `roaming/cognia`, `Library/Application Support/cognia` →
- * `application support/cognia`) — over-deny on an unrelated `share/cognia`
- * is the safe direction.
- */
-const SECRET_SEGMENT_PAIRS = [
-  [".config", "gh"],
-  [".cargo", "credentials.toml"],
-  ["share", "cognia"],
-  ["local", "cognia"],
-  ["roaming", "cognia"],
-  ["application support", "cognia"],
-]
-
-/**
- * Case-fold on the platforms with case-insensitive filesystems. macOS was
- * missing, so a first write to `~/.AWS/credentials` on a machine with no
- * existing `~/.aws` slipped past (an existing path is normally saved by
- * `realpathSync.native` returning the true on-disk case).
- */
-function foldCase(s) {
-  return process.platform === "win32" || process.platform === "darwin" ? s.toLowerCase() : s
+/** A plugin tool's declared filesystem class and path-valued params. */
+export interface PluginToolAccess {
+  access: "read" | "write"
+  pathKeys: string[]
 }
 
-/** Split an absolute path into normalized, case-folded segments. */
-function segmentsOf(abs) {
-  return foldCase(path.normalize(abs))
-    .split(/[\\/]+/)
-    .filter(Boolean)
-}
+/** Bare plugin tool name → access, as a Map or a plain object. */
+export type PluginAccessMap =
+  ReadonlyMap<string, PluginToolAccess> | Readonly<Record<string, PluginToolAccess>>
 
-/**
- * True when `abs` is, sits under, or names a protected credential path.
- * Segment-based so it is drive/UNC/`~`-agnostic and case-correct per platform.
- */
-export function isSecretPath(abs) {
-  if (typeof abs !== "string" || abs.length === 0) return false
-  const segs = segmentsOf(abs)
-  const base = segs[segs.length - 1]
-  if (base && SECRET_FILE_NAMES.has(base)) return true
-  for (let i = 0; i < segs.length; i++) {
-    if (SECRET_DIR_SEGMENTS.has(segs[i])) return true
-    // Multi-segment dir markers ("config/gcloud").
-    if (i + 1 < segs.length && SECRET_DIR_SEGMENTS.has(`${segs[i]}/${segs[i + 1]}`)) return true
-    for (const [a, b] of SECRET_SEGMENT_PAIRS) {
-      if (segs[i] === a && segs[i + 1] === b) return true
-    }
-  }
-  return false
-}
-
-/** Resolve a possibly-relative tool path against the session cwd. */
-function resolveAbs(cwd, target) {
-  return path.isAbsolute(target)
-    ? path.normalize(target)
-    : path.resolve(cwd ?? process.cwd(), target)
+/** The session's confinement settings; `roots` arrives from the renderer unchecked. */
+export interface ConfinementPolicy {
+  enabled?: boolean
+  roots?: unknown
 }
 
 /** True when the (symlink-resolved) target lives inside `root`. */
-function isInsideRoot(target, root) {
+function isInsideRoot(target: string, root: string): boolean {
   try {
     assertPathInside(root, target)
     return true
@@ -139,16 +55,16 @@ function isInsideRoot(target, root) {
 }
 
 /**
- * Classify one path for a given operation class.
- *
- * @param {string|undefined} cwd
- * @param {string[]} roots       Absolute workspace roots.
- * @param {string} target        Absolute or cwd-relative path.
- * @param {"read"|"write"} op
- * @returns {"allow"|"ask"|"deny"}
+ * Classify one path (absolute or cwd-relative) for a given operation class,
+ * against the absolute workspace `roots`.
  */
-export function classifyPathForConfinement(cwd, roots, target, op) {
-  const abs = resolveAbs(cwd, target)
+export function classifyPathForConfinement(
+  cwd: string | undefined,
+  roots: readonly string[],
+  target: string,
+  op: "read" | "write"
+): ConfinementVerdict {
+  const abs = resolveToolPath(cwd, target)
   const real = canonicalisePartial(abs)
   // Credential paths are hard-denied for both reads and writes — including a
   // symlink escape that resolves into one from a lexically-innocent path.
@@ -170,7 +86,7 @@ export function classifyPathForConfinement(cwd, roots, target, op) {
 // guard treats as permission. Any tool that writes, deletes, or executes must
 // therefore be listed, or it silently bypasses both the out-of-root "ask" and
 // the credential hard-deny (including under `acceptEdits`/`bypassPermissions`).
-const WRITE_TOOLS = new Set([
+export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   // core file suite (ai-sdk bare + SDK PascalCase spellings)
   "write",
   "edit",
@@ -206,7 +122,7 @@ const WRITE_TOOLS = new Set([
   // recurring shell predicate with an arbitrary cwd
   "Monitor",
 ])
-const READ_TOOLS = new Set([
+export const READ_TOOLS: ReadonlySet<string> = new Set([
   "read",
   "ls",
   "grep",
@@ -235,7 +151,7 @@ const READ_TOOLS = new Set([
   "git_repo_inspect",
   "git_changes",
 ])
-const BASH_TOOLS = new Set(["bash", "Bash"])
+export const BASH_TOOLS: ReadonlySet<string> = new Set(["bash", "Bash"])
 
 /**
  * Every input key that can carry a filesystem path across the built-in tools.
@@ -243,7 +159,7 @@ const BASH_TOOLS = new Set(["bash", "Bash"])
  * `file_path` and `path`, or both `source` and `destination`, must have every
  * one of them judged, not just the first that matches.
  */
-const PATH_KEYS = [
+const PATH_KEYS: readonly string[] = [
   "file_path",
   "filePath",
   "target",
@@ -268,10 +184,10 @@ const PATH_KEYS = [
 ]
 
 /** Keys holding an array of paths (e.g. `ast_grep_replace.paths`). */
-const PATH_ARRAY_KEYS = ["paths"]
+const PATH_ARRAY_KEYS: readonly string[] = ["paths"]
 
 /** Reduce a namespaced tool name (`mcp__server__name`) to its bare `name`. */
-export function bareToolName(toolName) {
+export function bareToolName(toolName: unknown): string {
   const parts = String(toolName).split("__")
   return parts.length >= 3 && parts[0] === "mcp" && parts[1] === "cognia-tools"
     ? parts.slice(2).join("__")
@@ -286,7 +202,7 @@ export function bareToolName(toolName) {
 const PLUGIN_TOOLS_PREFIX = "mcp__cognia-plugin-tools__"
 
 /** Bare plugin tool name behind a `cognia-plugin-tools` name, else null. */
-export function barePluginToolName(toolName) {
+export function barePluginToolName(toolName: unknown): string | null {
   const s = String(toolName)
   return s.startsWith(PLUGIN_TOOLS_PREFIX) ? s.slice(PLUGIN_TOOLS_PREFIX.length) : null
 }
@@ -296,7 +212,7 @@ export function barePluginToolName(toolName) {
  * server. Their class is hardcoded in `sandboxAliases` below — a manifest
  * `access` declaration must not re-classify (let alone downgrade) them.
  */
-const RESERVED_PLUGIN_TOOL_NAMES = new Set([
+const RESERVED_PLUGIN_TOOL_NAMES: ReadonlySet<string> = new Set([
   "sandbox_write",
   "sandbox_edit",
   "sandbox_text_editor",
@@ -312,19 +228,21 @@ const RESERVED_PLUGIN_TOOL_NAMES = new Set([
  * confinement targets. Anything malformed is skipped — a tool that fails to
  * declare stays opaque, the historical default.
  *
- * @param {unknown} pluginTools `sendOptions.pluginTools` — tolerates
- *   non-arrays (older/foreign senders) by returning an empty map.
- * @returns {Map<string, {access:"read"|"write", pathKeys:string[]}>}
+ * `pluginTools` is `sendOptions.pluginTools`; non-arrays (older/foreign
+ * senders) yield an empty map.
  */
-export function buildPluginAccessMap(pluginTools) {
-  const map = new Map()
+export function buildPluginAccessMap(pluginTools: unknown): Map<string, PluginToolAccess> {
+  const map = new Map<string, PluginToolAccess>()
   if (!Array.isArray(pluginTools)) return map
-  for (const t of pluginTools) {
+  for (const entry of pluginTools as unknown[]) {
+    const t = entry as { name?: unknown; access?: unknown; pathParams?: unknown } | null
     if (!t || typeof t.name !== "string") continue
     if (t.access !== "read" && t.access !== "write") continue
     if (RESERVED_PLUGIN_TOOL_NAMES.has(t.name)) continue
     const pathKeys = Array.isArray(t.pathParams)
-      ? t.pathParams.filter((k) => typeof k === "string" && k.trim())
+      ? (t.pathParams as unknown[]).filter(
+          (k): k is string => typeof k === "string" && Boolean(k.trim())
+        )
       : []
     map.set(t.name, { access: t.access, pathKeys })
   }
@@ -337,15 +255,24 @@ export function buildPluginAccessMap(pluginTools) {
  * `buildPluginAccessMap`. Tools that declared no class stay unclassified —
  * opaque to confinement, the historical default.
  */
-function pluginAccessFor(toolName, pluginAccess) {
+export function pluginAccessFor(
+  toolName: string,
+  pluginAccess: PluginAccessMap | null | undefined
+): PluginToolAccess | undefined {
   const bare = barePluginToolName(toolName)
   if (bare == null || pluginAccess == null) return undefined
-  return typeof pluginAccess.get === "function" ? pluginAccess.get(bare) : pluginAccess[bare]
+  return typeof (pluginAccess as { get?: unknown }).get === "function"
+    ? (pluginAccess as ReadonlyMap<string, PluginToolAccess>).get(bare)
+    : (pluginAccess as Readonly<Record<string, PluginToolAccess>>)[bare]
 }
 
 /** Pull the file/dir path targets from a tool-call input. `extraKeys` lets a
  * plugin tool's manifest-declared path params join the built-in PATH_KEYS. */
-function collectPathTargets(bare, obj, extraKeys) {
+export function collectPathTargets(
+  bare: string,
+  obj: Record<string, unknown>,
+  extraKeys?: readonly string[]
+): string[] {
   if (BASH_TOOLS.has(bare)) {
     // Default workdir is the cwd (inside the root) — only an explicit,
     // out-of-tree workdir is a target worth checking. The command string is
@@ -354,7 +281,7 @@ function collectPathTargets(bare, obj, extraKeys) {
     const wd = typeof directory === "string" && directory.trim() ? directory : null
     return wd ? [wd] : []
   }
-  const out = []
+  const out: string[] = []
   const keys = extraKeys?.length ? [...PATH_KEYS, ...extraKeys] : PATH_KEYS
   for (const key of keys) {
     const v = obj[key]
@@ -363,69 +290,31 @@ function collectPathTargets(bare, obj, extraKeys) {
   for (const key of PATH_ARRAY_KEYS) {
     const arr = obj[key]
     if (!Array.isArray(arr)) continue
-    for (const v of arr) if (typeof v === "string" && v.trim()) out.push(v)
+    for (const v of arr as unknown[]) if (typeof v === "string" && v.trim()) out.push(v)
   }
   for (const key of ["edits", "files", "operations"]) {
-    if (Array.isArray(obj[key])) {
-      for (const entry of obj[key]) {
+    const list = obj[key]
+    if (Array.isArray(list)) {
+      for (const entry of list as unknown[]) {
         if (entry && typeof entry === "object")
-          out.push(...collectPathTargets(bare, entry, extraKeys))
+          out.push(...collectPathTargets(bare, entry as Record<string, unknown>, extraKeys))
       }
     }
   }
   return out
 }
 
-/** Enforce the host-owned scope immediately before a native tool body runs. */
-export function assertToolCallWithinRoots(policy, toolName, input, cwd, pluginAccess) {
-  if (!policy) return
-  const sandboxAliases = {
-    "mcp__cognia-plugin-tools__sandbox_write": "write",
-    "mcp__cognia-plugin-tools__sandbox_edit": "edit",
-    "mcp__cognia-plugin-tools__sandbox_text_editor": input?.command === "view" ? "read" : "edit",
-    "mcp__cognia-plugin-tools__sandbox_bash": "bash",
-  }
-  const bare = sandboxAliases[toolName] ?? bareToolName(toolName)
-  let isWrite = WRITE_TOOLS.has(bare)
-  let isRead = READ_TOOLS.has(bare)
-  let isBash = BASH_TOOLS.has(bare)
-  let pluginPathKeys
-  if (!isWrite && !isRead && !isBash) {
-    // Plugin tools opt into scope enforcement via manifest `access`; the
-    // four sandbox_* aliases above keep their hardcoded class.
-    const entry = pluginAccessFor(toolName, pluginAccess)
-    isWrite = entry?.access === "write"
-    isRead = entry?.access === "read"
-    pluginPathKeys = entry?.pathKeys
-  }
-  if (!isWrite && !isRead && !isBash) return
-  const write = isWrite || isBash
-  for (const target of collectPathTargets(
-    bare,
-    input && typeof input === "object" ? input : {},
-    pluginPathKeys
-  )) {
-    const verdict = classifyPathForConfinement(
-      cwd,
-      policy.writableRoots ?? [],
-      target,
-      write ? "write" : "read"
-    )
-    if (verdict !== "allow")
-      throw new Error(
-        `workspace sandbox refused ${toolName}: ${target} is outside sandbox.policy.writableRoots or is protected. Add the required directory to sandbox.policy.writableRoots and retry; approval cannot widen this fixed scope.`
-      )
-  }
-}
-
 /** Verdict rank for composing confinement + ruleset decisions. */
-const RANK = { allow: 0, ask: 1, deny: 2 }
+const RANK: Record<ConfinementVerdict, number> = { allow: 0, ask: 1, deny: 2 }
 
 /**
  * Compose two verdicts (either may be null) into the more-restrictive one.
  * deny > ask > allow. Returns null only when both are null.
  */
-export function combineVerdict(a, b) {
+export function combineVerdict(
+  a: ConfinementVerdict | null | undefined,
+  b: ConfinementVerdict | null | undefined
+): ConfinementVerdict | null {
   if (a == null) return b ?? null
   if (b == null) return a
   return RANK[b] > RANK[a] ? b : a
@@ -435,24 +324,27 @@ export function combineVerdict(a, b) {
  * Confinement verdict for a whole tool call, or `null` when confinement does
  * not apply (policy disabled/rootless, or the tool carries no path target).
  *
- * @param {{ enabled?: boolean, roots?: string[] } | null | undefined} policy
- * @param {string} toolName
- * @param {any} input
- * @param {string|undefined} cwd
- * @param {Map<string, {access:"read"|"write", pathKeys:string[]}>|Record<string, {access:"read"|"write", pathKeys:string[]}>|undefined} [pluginAccess]
- *   Bare plugin tool name → declared access class + path params, built from
- *   `sendOptions.pluginTools` by `buildPluginAccessMap`. Lets a plugin tool
- *   opt into the same read/write classification the built-in sets get.
- * @returns {"allow"|"ask"|"deny"|null}
+ * `pluginAccess` maps a bare plugin tool name to its declared access class
+ * and path params (built from `sendOptions.pluginTools` by
+ * `buildPluginAccessMap`), letting a plugin tool opt into the same read/write
+ * classification the built-in sets get.
  */
-export function classifyToolCallConfinement(policy, toolName, input, cwd, pluginAccess) {
+export function classifyToolCallConfinement(
+  policy: ConfinementPolicy | null | undefined,
+  toolName: string,
+  input: unknown,
+  cwd: string | undefined,
+  pluginAccess?: PluginAccessMap | null
+): ConfinementVerdict | null {
   if (!policy || !policy.enabled) return null
-  const roots = Array.isArray(policy.roots) ? policy.roots.filter(Boolean) : []
+  const roots: string[] = Array.isArray(policy.roots)
+    ? (policy.roots as unknown[]).filter((root): root is string => Boolean(root))
+    : []
   if (roots.length === 0) return null
   const bare = bareToolName(toolName)
   let isWrite = WRITE_TOOLS.has(bare) || BASH_TOOLS.has(bare)
   let isRead = READ_TOOLS.has(bare)
-  let pluginPathKeys
+  let pluginPathKeys: string[] | undefined
   if (!isWrite && !isRead) {
     const entry = pluginAccessFor(toolName, pluginAccess)
     isWrite = entry?.access === "write"
@@ -460,35 +352,18 @@ export function classifyToolCallConfinement(policy, toolName, input, cwd, plugin
     pluginPathKeys = entry?.pathKeys
   }
   if (!isWrite && !isRead) return null
-  const obj = input && typeof input === "object" ? input : {}
+  const obj = input && typeof input === "object" ? (input as Record<string, unknown>) : {}
   const targets = collectPathTargets(bare, obj, pluginPathKeys)
   if (targets.length === 0) return null
   const op = isWrite ? "write" : "read"
   // Confinement only ever ADDS restriction — it must never upgrade a no-rule
   // ("null") verdict into an auto-approval. So an in-root "allow" contributes
   // nothing (null); only "ask" / "deny" are surfaced to compose with the ruleset.
-  let worst = null
+  let worst: ConfinementVerdict | null = null
   for (const t of targets) {
     const v = classifyPathForConfinement(cwd, roots, t, op)
     if (v === "deny") return "deny"
     if (v === "ask") worst = "ask"
   }
   return worst
-}
-
-/**
- * Tool-body defence-in-depth: throw if a write target resolves into a protected
- * credential path (directly or via a symlink escape). Called by the mutator
- * tools regardless of whether a confinement policy is configured, so a write
- * can never backdoor `~/.ssh`, `~/.aws`, `.git-credentials`, etc.
- *
- * @param {string|undefined} cwd
- * @param {string} target  Absolute or cwd-relative write path.
- */
-export function assertNotSecretEscape(cwd, target) {
-  const abs = resolveAbs(cwd, target)
-  const real = canonicalisePartial(abs)
-  if (isSecretPath(abs) || isSecretPath(real)) {
-    throw new Error(`refusing to write into a protected credential path: ${real}`)
-  }
 }

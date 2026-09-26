@@ -5,7 +5,7 @@ import crypto from "node:crypto"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { ensureExists } from "../../src/platform/fs/stat.ts"
 
 const MAX_READ_BYTES = 100 * 1024 * 1024 // 100 MB hard cap (matches Cognia)

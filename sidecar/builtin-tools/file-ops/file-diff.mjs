@@ -5,7 +5,7 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { createPatch } from "diff"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { ensureExists } from "../../src/platform/fs/stat.ts"
 import { headTruncate } from "../../src/shared/text/truncate.ts"
 

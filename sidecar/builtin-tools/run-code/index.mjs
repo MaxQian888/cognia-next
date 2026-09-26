@@ -11,7 +11,7 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { SandboxUnavailableError, probeSandbox, runCodeProgram } from "./supervisor.mjs"
 import { generateSdkDeclaration } from "./sdk-declaration.mjs"
 

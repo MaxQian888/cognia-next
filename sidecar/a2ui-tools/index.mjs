@@ -10,7 +10,7 @@
 
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
-import { toolText, toolError } from "../builtin-tools/safety.mjs"
+import { toolText, toolError } from "../src/tools/kernel/result.ts"
 import {
   SERVER_NAME as DEFS_SERVER_NAME,
   SERVER_VERSION as DEFS_SERVER_VERSION,

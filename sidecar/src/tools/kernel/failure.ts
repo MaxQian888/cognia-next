@@ -22,14 +22,31 @@
 /**
  * Every failure a built-in tool can report. Closed on purpose: a new kind is
  * a deliberate edit here, not an ad-hoc string at a throw site.
- *
- * @typedef {"invalid-args"|"not-found"|"permission-denied"|"timeout"|"aborted"
- *   |"user-rejected"|"resource-exhausted"|"environment"|"backend-unavailable"
- *   |"execution-failed"} ToolFailureKind
  */
+export type ToolFailureKind =
+  | "invalid-args"
+  | "not-found"
+  | "permission-denied"
+  | "timeout"
+  | "aborted"
+  | "user-rejected"
+  | "resource-exhausted"
+  | "environment"
+  | "backend-unavailable"
+  | "execution-failed"
 
-/** @type {readonly ToolFailureKind[]} */
-export const TOOL_FAILURE_KINDS = Object.freeze([
+export interface ToolFailurePolicy {
+  retryable: boolean
+  guidance: string
+}
+
+/** One classified failure: its kind, retry policy, and the thrown message. */
+export interface ToolFailure extends ToolFailurePolicy {
+  kind: ToolFailureKind
+  message: string
+}
+
+export const TOOL_FAILURE_KINDS: readonly ToolFailureKind[] = Object.freeze([
   "invalid-args",
   "not-found",
   "permission-denied",
@@ -48,60 +65,59 @@ export const TOOL_FAILURE_KINDS = Object.freeze([
  *
  * `retryable: false` is the load-bearing half. It is set only where a repeat
  * of the identical call cannot help — not merely where it is unlikely to.
- *
- * @type {Record<ToolFailureKind, { retryable: boolean, guidance: string }>}
  */
-export const TOOL_FAILURE_POLICY = Object.freeze({
-  "invalid-args": {
-    retryable: false,
-    guidance: "Do not repeat this call unchanged — fix the arguments first.",
-  },
-  "not-found": {
-    retryable: false,
-    guidance:
-      "Do not repeat this call unchanged — the target does not exist. Locate it first, or work from what does exist.",
-  },
-  "permission-denied": {
-    retryable: false,
-    guidance:
-      "Do not retry and do not look for a way around it. Only the user can grant this; continue with the rest of the task and say what you could not do.",
-  },
-  timeout: {
-    retryable: true,
-    guidance:
-      "Retrying may work, but narrow the request first — the same scope will likely time out again.",
-  },
-  aborted: {
-    retryable: false,
-    guidance: "The call was cancelled. Do not restart it on your own.",
-  },
-  "user-rejected": {
-    retryable: false,
-    guidance:
-      "The user declined this. Do not ask again for the same action and do not route around it; continue with the rest of the task.",
-  },
-  "resource-exhausted": {
-    retryable: false,
-    guidance:
-      "This is a machine limit, not a mistake in your call — retrying will fail the same way. Tell the user what ran out.",
-  },
-  environment: {
-    retryable: false,
-    guidance:
-      "The environment is missing something this tool needs. Retrying will not install it; report what is missing.",
-  },
-  "backend-unavailable": {
-    retryable: true,
-    guidance: "The backend is unreachable. One retry is reasonable; a second is not.",
-  },
-  "execution-failed": {
-    retryable: true,
-    guidance: "Read the error before deciding whether repeating the call could help.",
-  },
-})
+export const TOOL_FAILURE_POLICY: Readonly<Record<ToolFailureKind, ToolFailurePolicy>> =
+  Object.freeze({
+    "invalid-args": {
+      retryable: false,
+      guidance: "Do not repeat this call unchanged — fix the arguments first.",
+    },
+    "not-found": {
+      retryable: false,
+      guidance:
+        "Do not repeat this call unchanged — the target does not exist. Locate it first, or work from what does exist.",
+    },
+    "permission-denied": {
+      retryable: false,
+      guidance:
+        "Do not retry and do not look for a way around it. Only the user can grant this; continue with the rest of the task and say what you could not do.",
+    },
+    timeout: {
+      retryable: true,
+      guidance:
+        "Retrying may work, but narrow the request first — the same scope will likely time out again.",
+    },
+    aborted: {
+      retryable: false,
+      guidance: "The call was cancelled. Do not restart it on your own.",
+    },
+    "user-rejected": {
+      retryable: false,
+      guidance:
+        "The user declined this. Do not ask again for the same action and do not route around it; continue with the rest of the task.",
+    },
+    "resource-exhausted": {
+      retryable: false,
+      guidance:
+        "This is a machine limit, not a mistake in your call — retrying will fail the same way. Tell the user what ran out.",
+    },
+    environment: {
+      retryable: false,
+      guidance:
+        "The environment is missing something this tool needs. Retrying will not install it; report what is missing.",
+    },
+    "backend-unavailable": {
+      retryable: true,
+      guidance: "The backend is unreachable. One retry is reasonable; a second is not.",
+    },
+    "execution-failed": {
+      retryable: true,
+      guidance: "Read the error before deciding whether repeating the call could help.",
+    },
+  })
 
 /** errno → kind. Covers the ones that are routinely misread as tool bugs. */
-const ERRNO_KINDS = Object.freeze({
+const ERRNO_KINDS: Readonly<Record<string, ToolFailureKind>> = Object.freeze({
   ENOENT: "not-found",
   ENOTDIR: "not-found",
   EISDIR: "invalid-args",
@@ -122,7 +138,7 @@ const ERRNO_KINDS = Object.freeze({
 })
 
 /** Message shapes that carry a kind when no errno does. Order matters. */
-const MESSAGE_KINDS = Object.freeze([
+const MESSAGE_KINDS: readonly (readonly [RegExp, ToolFailureKind])[] = Object.freeze([
   [/\b(aborted|abortarror|abort ?error|cancell?ed)\b/i, "aborted"],
   // Deliberately narrow: a bare "denied" is almost always the OS refusing,
   // not the human. Only an explicit reference to the user lands here.
@@ -140,16 +156,15 @@ const MESSAGE_KINDS = Object.freeze([
 ])
 
 /** Pull a `code`/`errno` string off an unknown thrown value. */
-function errnoOf(err) {
+function errnoOf(err: unknown): string | undefined {
   if (!err || typeof err !== "object") return undefined
-  const code = /** @type {{ code?: unknown, errno?: unknown }} */ (err).code
+  const { code, cause } = err as { code?: unknown; cause?: unknown }
   if (typeof code === "string" && code) return code
-  const cause = /** @type {{ cause?: unknown }} */ (err).cause
   return cause ? errnoOf(cause) : undefined
 }
 
 /** Human-readable message for an unknown thrown value, stack stripped. */
-export function failureMessage(err) {
+export function failureMessage(err: unknown): string {
   if (err instanceof Error) return err.message
   if (typeof err === "string") return err
   return String(err)
@@ -160,21 +175,22 @@ export function failureMessage(err) {
  *
  * `kindHint` wins when the caller already knows (a timeout wrapper, a
  * permission gate); otherwise errno wins over message shape, because errno is
- * fact and a message is prose.
- *
- * @param {unknown} err
- * @param {{ kind?: ToolFailureKind }} [opts]
- * @returns {{ kind: ToolFailureKind, retryable: boolean, guidance: string, message: string }}
+ * fact and a message is prose. An unknown `kind` hint is ignored.
  */
-export function classifyToolFailure(err, opts = {}) {
+export function classifyToolFailure(err: unknown, opts: { kind?: unknown } = {}): ToolFailure {
   const message = failureMessage(err)
-  let kind = opts.kind && TOOL_FAILURE_KINDS.includes(opts.kind) ? opts.kind : undefined
+  let kind: ToolFailureKind | undefined = TOOL_FAILURE_KINDS.find((known) => known === opts.kind)
 
   if (!kind) {
     const errno = errnoOf(err)
     if (errno && ERRNO_KINDS[errno]) kind = ERRNO_KINDS[errno]
   }
-  if (!kind && err && typeof err === "object" && /** @type {Error} */ (err).name === "AbortError") {
+  if (
+    !kind &&
+    err &&
+    typeof err === "object" &&
+    (err as { name?: unknown }).name === "AbortError"
+  ) {
     kind = "aborted"
   }
   if (!kind) {
@@ -194,11 +210,11 @@ export function classifyToolFailure(err, opts = {}) {
 /**
  * The text the MODEL sees: what failed, what kind of failure it was, and
  * whether repeating the call could help.
- *
- * @param {{ kind: ToolFailureKind, guidance: string, message: string }} failure
- * @param {string} [contextLabel]
  */
-export function renderFailureForModel(failure, contextLabel) {
+export function renderFailureForModel(
+  failure: Pick<ToolFailure, "kind" | "guidance" | "message">,
+  contextLabel?: string
+): string {
   const head = contextLabel ? `${contextLabel}: ${failure.message}` : failure.message
   return `${head}\n[${failure.kind}] ${failure.guidance}`
 }

@@ -20,7 +20,7 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import metadata from "../../lib/settings/builtin-tools-data.json" with { type: "json" }
-import { toolError, toolText } from "./safety.mjs"
+import { toolError, toolText } from "../src/tools/kernel/result.ts"
 import { runCapped } from "../src/platform/process/exec.ts"
 
 const TOOLS_STARTED_AT = new Date().toISOString()

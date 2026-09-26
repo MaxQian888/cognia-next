@@ -95,6 +95,16 @@ Each migration batch appends its moves here (old → new).
 | `dispatch/permission-resolver.mjs`                                       | `src/policy/permission/resolver.ts`                                | 4a          |
 | `builtin-tools/shared/interactive-detect.mjs`                            | `src/policy/shell/interactive.ts`                                  | 4a          |
 | Shell segmenter (copied in the two files above)                          | `src/policy/shell/segments.ts`                                     | 4a          |
+| `builtin-tools/safety.mjs` (path containment)                            | `src/platform/fs/paths.ts`                                         | 4b          |
+| `resolveToolPath` (`core/read.mjs`), `resolveAbs` (`confinement.mjs`)    | `src/platform/fs/paths.ts` (`resolveToolPath`)                     | 4b          |
+| `builtin-tools/safety.mjs` (command sets, `DANGEROUS_PATTERNS`)          | `src/policy/shell/rules.ts`                                        | 4b          |
+| `builtin-tools/safety.mjs` (`validateShellCommand`)                      | `src/policy/shell/validate.ts`                                     | 4b          |
+| `builtin-tools/safety.mjs` (`findDangerousShellFragment`)                | `src/policy/shell/ast-scan.ts`                                     | 4b          |
+| `builtin-tools/safety.mjs` (`toolText`, `toolError`, `toolImage`)        | `src/tools/kernel/result.ts`                                       | 4b          |
+| `builtin-tools/tool-failure.mjs`                                         | `src/tools/kernel/failure.ts`                                      | 4b          |
+| `builtin-tools/confinement.mjs` (credential paths)                       | `src/policy/confinement/secret-paths.ts`                           | 4b          |
+| `builtin-tools/confinement.mjs` (verdicts, tool classes)                 | `src/policy/confinement/classify.ts`                               | 4b          |
+| `builtin-tools/confinement.mjs` (tool-body guards)                       | `src/policy/confinement/enforce.ts`                                | 4b          |
 
 ## Scripts (run from repo root)
 

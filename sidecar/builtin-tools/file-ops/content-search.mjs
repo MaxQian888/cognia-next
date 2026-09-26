@@ -6,7 +6,7 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 import fastGlob from "fast-glob"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { statOrNull } from "../../src/platform/fs/stat.ts"
 import { loadIgnoreGlobs } from "../../src/platform/fs/gitignore.ts"
 

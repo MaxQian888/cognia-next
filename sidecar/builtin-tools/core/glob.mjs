@@ -8,10 +8,10 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { detectRipgrep, runRipgrep } from "./rg.mjs"
 import { jsGlob } from "./js-search.mjs"
-import { resolveToolPath } from "./read.mjs"
+import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 
 export const MAX_FILES = 1000
 

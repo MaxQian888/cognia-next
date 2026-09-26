@@ -10,9 +10,10 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText, toolImage } from "../safety.mjs"
+import { toolError, toolText, toolImage } from "../../src/tools/kernel/result.ts"
 import { looksBinary } from "./js-search.mjs"
 import { decodeText } from "./text-io.mjs"
+import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 import {
   imageMimeFor,
   modelSupportsImageInput,
@@ -49,10 +50,6 @@ export const readShape = {
 }
 
 /** Resolve a possibly-relative tool path against the session cwd. */
-export function resolveToolPath(cwd, p) {
-  return path.isAbsolute(p) ? path.normalize(p) : path.resolve(cwd ?? process.cwd(), p)
-}
-
 export function formatCatN(lines, startLine) {
   return lines
     .map((line, i) => {

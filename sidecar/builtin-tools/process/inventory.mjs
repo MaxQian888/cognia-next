@@ -7,7 +7,7 @@
 // here so terminate_process can refuse to kill processes the agent didn't start.
 // Every process tool imports this single Set instance — do not re-declare it.
 
-import { ALLOWED_COMMANDS, BLOCKED_COMMANDS } from "../safety.mjs"
+import { ALLOWED_COMMANDS, BLOCKED_COMMANDS } from "../../src/policy/shell/rules.ts"
 import { execFileAsync } from "../../src/platform/process/exec.ts"
 
 export const MAX_OUTPUT_BYTES = 1 * 1024 * 1024 // 1 MB — process listings can be sizeable

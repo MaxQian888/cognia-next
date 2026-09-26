@@ -14,7 +14,8 @@ import fs from "node:fs"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText, validateShellCommand } from "./safety.mjs"
+import { toolError, toolText } from "../src/tools/kernel/result.ts"
+import { validateShellCommand } from "../src/policy/shell/validate.ts"
 import {
   execFileAsync,
   sandboxedProcessTarget,

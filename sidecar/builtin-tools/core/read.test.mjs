@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { createReadTool, formatCatN, resolveToolPath, DEFAULT_LIMIT } from "./read.mjs"
+import { createReadTool, formatCatN, DEFAULT_LIMIT } from "./read.mjs"
 import { createReadTracker } from "./read-tracker.mjs"
 
 function textOf(result) {
@@ -113,12 +113,6 @@ test("formatCatN truncates very long lines", () => {
   const out = formatCatN(["x".repeat(5000)], 1)
   assert.ok(out.length < 5000)
   assert.match(out, /line truncated/)
-})
-
-test("resolveToolPath resolves relative against cwd and passes absolutes through", () => {
-  const abs = path.resolve("/tmp/abs.txt")
-  assert.equal(resolveToolPath("/base", abs), path.normalize(abs))
-  assert.equal(resolveToolPath(os.tmpdir(), "rel.txt"), path.join(os.tmpdir(), "rel.txt"))
 })
 
 test("read tool metadata: name + default limit sanity", async () => {

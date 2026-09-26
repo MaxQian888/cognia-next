@@ -4,9 +4,9 @@
 // single-program): this tool accepts an arbitrary shell command line, and the
 // safety story is the permission round-trip (requiresApproval: true → the
 // user approves each call unless a ruleset rule allows it), the restricted-
-// mode denylist, and the doom-loop guard. The DANGEROUS_PATTERNS scan from
-// safety.mjs still hard-rejects obvious destructive chaining as
-// defence-in-depth.
+// mode denylist, and the doom-loop guard. The structural scan from
+// src/policy/shell/ast-scan.ts still hard-rejects obvious destructive chaining
+// as defence-in-depth.
 
 import os from "node:os"
 import { spawn } from "node:child_process"
@@ -15,13 +15,15 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText, DANGEROUS_PATTERNS, findDangerousShellFragment } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
+import { DANGEROUS_PATTERNS } from "../../src/policy/shell/rules.ts"
+import { findDangerousShellFragment } from "../../src/policy/shell/ast-scan.ts"
 import { tailTruncate } from "../../src/shared/text/truncate.ts"
 import { pickStreamDecoder } from "../../src/platform/process/console-decode.ts"
 import { sandboxedProcessTarget, sandboxedProcessEnv } from "../../src/platform/process/exec.ts"
 import { activeShellDescriptor, applyNonInteractiveEnv } from "../../src/platform/process/shell.ts"
 import { detectInteractiveCommand } from "../../src/policy/shell/interactive.ts"
-import { resolveToolPath } from "./read.mjs"
+import { resolveToolPath } from "../../src/platform/fs/paths.ts"
 
 // Re-exported for back-compat: the canonical implementation now lives in
 // src/shared/text/truncate.ts (shared with future tail-keeping tools). bash.test.mjs

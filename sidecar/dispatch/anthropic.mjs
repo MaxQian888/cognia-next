@@ -41,9 +41,9 @@ import { resolveForToolCall } from "../src/policy/permission/resolver.ts"
 import {
   classifyToolCallConfinement,
   combineVerdict,
-  assertToolCallWithinRoots,
   buildPluginAccessMap,
-} from "../builtin-tools/confinement.mjs"
+} from "../src/policy/confinement/classify.ts"
+import { assertToolCallWithinRoots } from "../src/policy/confinement/enforce.ts"
 import {
   makeServerAlwaysLoad,
   alwaysLoadToolSet,

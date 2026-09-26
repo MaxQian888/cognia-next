@@ -3,7 +3,7 @@
  * Auto-mode (`auto-mode.ts`). Given a command line it returns an
  * allow / ask / deny verdict purely from static rules, mirroring the
  * allowlist/blocklist/dangerous-pattern model the sidecar already ships for
- * `shell_execute_advanced` (`sidecar/builtin-tools/safety.mjs`) but richer:
+ * `shell_execute_advanced` (`sidecar/src/policy/shell/`) but richer:
  *
  *  - compound-command aware (via `splitCommandSegments`) — the worst verdict
  *    across the chain wins, and destructive commands hidden inside

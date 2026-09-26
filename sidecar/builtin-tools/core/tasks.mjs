@@ -9,7 +9,7 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 
 export const SESSION_TASK_TOOL_NAMES = Object.freeze([
   "TaskCreate",

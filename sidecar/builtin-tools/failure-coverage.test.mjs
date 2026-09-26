@@ -19,7 +19,6 @@ const ROOT = path.resolve(import.meta.dirname)
  * Anything not on this list must go through `toolError` or pass `failure`.
  */
 const WAIVERS = new Map([
-  ["safety.mjs", "defines toolText/toolError — this is where the classification is attached"],
   [
     "core/bash.mjs",
     "a non-zero exit is not a tool failure: the command ran and its output IS the answer. Classifying it would tell the model the tool broke when the truth is the command returned 1, which is often the useful result (grep, test runners, diff).",

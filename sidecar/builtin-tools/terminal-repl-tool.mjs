@@ -35,7 +35,7 @@ import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "./safety.mjs"
+import { toolError, toolText } from "../src/tools/kernel/result.ts"
 
 const OUTPUT_RING_BYTES = 256 * 1024
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000

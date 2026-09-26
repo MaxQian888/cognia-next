@@ -13,7 +13,7 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolText } from "./safety.mjs"
+import { toolText } from "../src/tools/kernel/result.ts"
 
 /** Bare tool name (namespaced as `mcp__cognia-tools__exit_plan_mode`). */
 export const EXIT_PLAN_TOOL_NAME = "exit_plan_mode"

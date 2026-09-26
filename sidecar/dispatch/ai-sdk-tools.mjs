@@ -38,9 +38,9 @@ import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { resolveForToolCall } from "../src/policy/permission/resolver.ts"
 import {
   classifyToolCallConfinement,
-  assertToolCallWithinRoots,
   buildPluginAccessMap,
-} from "../builtin-tools/confinement.mjs"
+} from "../src/policy/confinement/classify.ts"
+import { assertToolCallWithinRoots } from "../src/policy/confinement/enforce.ts"
 import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { markAiSdkToolSource } from "./ai-sdk-tool-search.mjs"
 

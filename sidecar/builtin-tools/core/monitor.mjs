@@ -15,7 +15,7 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText } from "../../src/tools/kernel/result.ts"
 import { resolveShellInvocation } from "./bash.mjs"
 import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../src/platform/host-rpc.ts"
 

@@ -20,7 +20,7 @@ import { permissionDecisionHasUnprovenRewrite } from "../dispatch/anthropic-mcp-
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
-import { toolError, toolText } from "./safety.mjs"
+import { toolError, toolText } from "../src/tools/kernel/result.ts"
 import { planPluginToolNames } from "../src/policy/tool-catalog/plugin-aliases.ts"
 
 export const SERVER_NAME = "cognia-plugin-tools"
@@ -34,7 +34,7 @@ const DEFAULT_PLUGIN_TOOL_TIMEOUT_MS = 120_000
  * text block, which makes it *structurally impossible* for a plugin tool to
  * return an image / audio / embedded resource — the model would only ever see
  * base64 text, and the chat would only ever render a wall of it. Built-in tools
- * already return this shape (see `safety.mjs:toolImage`), so the check is the
+ * already return this shape (see `toolImage` in src/tools/kernel/result.ts), so the check is the
  * same one the built-in path relies on.
  *
  * @param {unknown} result

@@ -15,7 +15,7 @@
  *   2. `authorizeToolCall` — whether one concrete call may run: still visible,
  *      inside the workspace, and either pre-approved or approved by the user.
  *
- * The confinement check MIRRORS `sidecar/builtin-tools/confinement.mjs`. It is
+ * The confinement check MIRRORS `sidecar/src/policy/confinement/`. It is
  * re-derived here rather than imported because that module is part of the
  * sidecar bundle (a separate Node project outside the CLI's TS graph); the
  * duplication is intentional and narrow — Cognia must not trust a check that
@@ -120,7 +120,7 @@ export function visibleHostTools(options: SendOptions): string[] {
   return out
 }
 
-// ── Workspace confinement (mirror of sidecar/builtin-tools/confinement.mjs) ───
+// ── Workspace confinement (mirror of sidecar/src/policy/confinement/) ─────────
 
 /**
  * Argument keys that carry a filesystem path on the built-in tool surface.
@@ -159,7 +159,7 @@ const PATH_ARRAY_KEYS = ["paths"]
 /**
  * Directory names whose contents are credentials, never workspace material.
  *
- * Kept in union with `sidecar/builtin-tools/confinement.mjs`. The two
+ * Kept in union with `sidecar/src/policy/confinement/secret-paths.ts`. The two
  * enforcement points stay separate on purpose — Cognia must not trust a check
  * running inside the process it confines — but the DATA must not drift, and it
  * had: `.gpg`, `.config/gcloud` and `.config/gh` existed only sidecar-side,

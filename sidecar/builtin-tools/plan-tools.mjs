@@ -21,7 +21,7 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolText } from "./safety.mjs"
+import { toolText } from "../src/tools/kernel/result.ts"
 
 /** Bare tool names (namespaced as `mcp__cognia-tools__<name>`). */
 export const CREATE_PLAN_TOOL_NAME = "create_plan"

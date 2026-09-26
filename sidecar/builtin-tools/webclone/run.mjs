@@ -15,7 +15,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { randomUUID } from "node:crypto"
 
-import { assertPathInside } from "../safety.mjs"
+import { assertPathInside } from "../../src/platform/fs/paths.ts"
 import {
   DEFAULTS as ENGINE_DEFAULTS,
   evaluateFetchTarget,
