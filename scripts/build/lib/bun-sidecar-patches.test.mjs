@@ -36,11 +36,11 @@ test("the codegraph patch inlines the sibling schema and drops the file read", (
 })
 
 test("patchFilter matches the module under either path separator and nothing else", () => {
-  const filter = patchFilter({ file: "sidecar/lsp/service-loader.mjs" })
-  assert.ok(filter.test("/repo/sidecar/lsp/service-loader.mjs"))
-  assert.ok(filter.test("C:\\repo\\sidecar\\lsp\\service-loader.mjs"))
-  assert.ok(!filter.test("/repo/sidecar/lsp/service-loader.mjs.bak"))
-  assert.ok(!filter.test("/repo/other/lsp/service-loader.mjs"))
+  const filter = patchFilter({ file: "sidecar/src/services/lsp/service-loader.ts" })
+  assert.ok(filter.test("/repo/sidecar/src/services/lsp/service-loader.ts"))
+  assert.ok(filter.test("C:\\repo\\sidecar\\src\\services\\lsp\\service-loader.ts"))
+  assert.ok(!filter.test("/repo/sidecar/src/services/lsp/service-loader.ts.bak"))
+  assert.ok(!filter.test("/repo/other/src/services/lsp/service-loader.ts"))
 })
 
 test("replaceExactly refuses zero and multiple matches", () => {

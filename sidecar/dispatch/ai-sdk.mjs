@@ -31,7 +31,7 @@ import {
   StreamIdleTimeoutError,
   withIdleTimeout,
 } from "../src/providers/stream-watchdog.ts"
-import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
+import { makeLazyLspResolver } from "../src/services/lsp/lazy-resolver.ts"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"

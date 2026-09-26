@@ -2,7 +2,7 @@
  * Builtin Language Server defaults.
  *
  * These four servers were previously hard-coded inside the agent runtime at
- * `sidecar/lsp/servers.mjs`. They now live here as declarative
+ * `sidecar/src/services/lsp/servers.ts`. They now live here as declarative
  * {@link LspServerConfig} entries so the resolver
  * (`lib/lsp/resolve-config.ts`) can layer user + project overrides on top of
  * them by `id`, and the SAME resolved list drives both the agent sidecar and
@@ -73,7 +73,7 @@ export const BUILTIN_LSP_SERVERS: readonly LspServerConfig[] = [
     // go-install rung is a follow-up; detection-only for now.
   },
   // ── npm-provisioned generic servers ──────────────────────────────────────
-  // No rootMarkers: `buildServers` (sidecar/lsp/servers.mjs) anchors a
+  // No rootMarkers: `buildServers` (sidecar/src/services/lsp/servers.ts) anchors a
   // marker-less server at the agent cwd, which is right for file-scoped
   // servers like json/css/html/yaml/bash.
   {

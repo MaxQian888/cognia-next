@@ -39,7 +39,7 @@ import { buildLspHooks } from "./lsp-hooks.mjs"
 import { buildAgentHooks, mergeHookMaps } from "./agent-hooks.mjs"
 import { buildLedgerToolHooks, createCallLedgerGate } from "./call-ledger-gate.mjs"
 import { createNativeHookExecutor } from "./hook-native-executor.mjs"
-import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
+import { makeLazyLspResolver } from "../src/services/lsp/lazy-resolver.ts"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
@@ -265,7 +265,7 @@ export function dispatchAnthropic(
   // `builtinTools.lsp` category directly — `sendOptions.lsp.enabled` already
   // folds it in (`lib/claude/build-options.ts`). `installDir`/`autoInstall`
   // feed the npm-first install ladder (vscode-ext-host lsp-installer).
-  // (Construction shared with the ai-sdk path — see lsp-resolver-factory.mjs.)
+  // (Construction shared with the ai-sdk path — see src/services/lsp/lazy-resolver.ts.)
   const lsp = makeLazyLspResolver({ sendOptions, log })
   const { lspEnabled, lspResolver } = lsp
   // Per-session code-graph index (resolver-bound like LSP — see

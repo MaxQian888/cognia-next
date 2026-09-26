@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Format LSP diagnostics into a compact text block for the agent.
 //
 // The renderer's `lsp-protocol-adapter.ts` converts diagnostics into

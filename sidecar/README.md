@@ -127,6 +127,10 @@ Each migration batch appends its moves here (old → new).
 | `dispatch/bedrock.mjs`                                                   | `src/providers/bedrock.ts`                                         | 5c          |
 | `dispatch/protocol-adapters/*.mjs`                                       | `src/providers/protocol-adapters/*.ts`                             | 5d          |
 | `dispatch/protocol-adapters/dispatch-declarative.test.mjs`               | `dispatch/ai-sdk-declarative.test.mjs`                             | 5d          |
+| `lsp/{report,resolver,servers,service-loader}.mjs`                       | `src/services/lsp/*.ts`                                            | 6a          |
+| `dispatch/lsp-resolver-factory.mjs`                                      | `src/services/lsp/lazy-resolver.ts`                                | 6a          |
+| `lsp/detect.mjs` (dead code)                                             | deleted                                                            | 6a          |
+| Root-relative lookups (`../vscode-ext-host`, …)                          | `src/platform/sidecar-paths.ts`                                    | 6a          |
 
 ## Scripts (run from repo root)
 

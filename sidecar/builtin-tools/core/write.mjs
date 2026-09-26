@@ -38,7 +38,7 @@ export async function diagnosticsAfterWrite(lspResolver, absPath) {
       new Promise((resolve) => setTimeout(() => resolve(null), LSP_DIAG_TIMEOUT_MS)),
     ])
     if (!Array.isArray(diags) || diags.length === 0) return ""
-    const { formatDiagnostics } = await import("../../lsp/report.mjs")
+    const { formatDiagnostics } = await import("../../src/services/lsp/report.ts")
     const block = formatDiagnostics(absPath, diags, { minSeverity: 2 })
     if (!block) return ""
     const clipped =

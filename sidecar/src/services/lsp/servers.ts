@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Agent-side LSP server registry helpers.
 //
 // The server LIST is no longer hard-coded here. The renderer resolves the

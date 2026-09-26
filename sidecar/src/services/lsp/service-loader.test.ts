@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
@@ -6,7 +7,7 @@ import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { build } from "esbuild"
 
-const entry = fileURLToPath(new URL("./service-loader.mjs", import.meta.url))
+const entry = fileURLToPath(new URL("./service-loader.ts", import.meta.url))
 const service = `
 exports.LspService = class {
   constructor(sink) { this.sink = sink; sink("lsp:state", {}); sink("lsp:publishDiagnostics", {}) }
@@ -35,7 +36,7 @@ async function fixture(
   const sidecar = path.join(root, "sidecar")
   const output = path.join(
     sidecar,
-    bundled ? "claude-host.mjs" : flat ? "service-loader.mjs" : "lsp/service-loader.mjs"
+    bundled ? "claude-host.mjs" : flat ? "service-loader.ts" : "src/services/lsp/service-loader.ts"
   )
   await fs.mkdir(path.dirname(output), { recursive: true })
   if (bundled) {
@@ -48,13 +49,34 @@ async function fixture(
     })
     await fs.writeFile(output, result.outputFiles[0].text)
   } else {
-    const source = (await fs.readFile(entry, "utf8"))
-      .replace('"./resolver.mjs"', JSON.stringify(new URL("./resolver.mjs", import.meta.url).href))
-      .replace(
-        '"../src/platform/process/exec.ts"',
-        JSON.stringify(new URL("../src/platform/process/exec.ts", import.meta.url).href)
-      )
+    const real = (specifier) => JSON.stringify(new URL(specifier, import.meta.url).href)
+    const rewrite = (text, from, to) => {
+      assert.ok(text.includes(from), `fixture: ${from} is not imported by service-loader.ts`)
+      return text.replace(from, to)
+    }
+    // The loader finds the extension host through sidecar-paths, so the copy
+    // gets its own sidecar-paths at the depth that layout implies.
+    const pathsCopy = flat
+      ? path.join(sidecar, "sidecar-paths.ts")
+      : path.join(sidecar, "src/platform/sidecar-paths.ts")
+    let source = await fs.readFile(entry, "utf8")
+    source = rewrite(source, '"./resolver.ts"', real("./resolver.ts"))
+    source = rewrite(
+      source,
+      '"../../platform/process/exec.ts"',
+      real("../../platform/process/exec.ts")
+    )
+    source = rewrite(
+      source,
+      '"../../platform/sidecar-paths.ts"',
+      JSON.stringify(flat ? "./sidecar-paths.ts" : "../../platform/sidecar-paths.ts")
+    )
     await fs.writeFile(output, source)
+    await fs.mkdir(path.dirname(pathsCopy), { recursive: true })
+    await fs.copyFile(
+      fileURLToPath(new URL("../../platform/sidecar-paths.ts", import.meta.url)),
+      pathsCopy
+    )
   }
   const dist = path.join(sidecar, "vscode-ext-host/dist")
   await fs.mkdir(dist, { recursive: true })

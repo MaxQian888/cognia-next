@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { formatDiagnostics, countDiagnostics } from "./report.mjs"
+import { formatDiagnostics, countDiagnostics } from "./report.ts"
 
 const ERR = {
   range: { start: { line: 11, character: 4 } },

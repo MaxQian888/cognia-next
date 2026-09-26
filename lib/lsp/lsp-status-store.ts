@@ -15,7 +15,7 @@
  * checks host availability and resolves to an empty state.
  *
  * Agent-owned runtime entries use composite serverIds (`<id>#<rootHash>`,
- * see sidecar/lsp/resolver.mjs) — health rolls up by the prefix before `#`.
+ * see sidecar/src/services/lsp/resolver.ts) — health rolls up by the prefix before `#`.
  */
 
 import { create } from "zustand"

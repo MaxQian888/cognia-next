@@ -1,6 +1,6 @@
 // Shared lazy code-graph resolver construction for both dispatch paths.
 //
-// Mirrors `lsp-resolver-factory.mjs`: the index service (and thus the
+// Mirrors `src/services/lsp/lazy-resolver.ts`: the index service (and thus the
 // better-sqlite3 / web-tree-sitter loads) is constructed only on first tool
 // use, scoped to the session cwd, and degrades cleanly when unavailable.
 // Callers MUST invoke `dispose()` at session end to close the store + watcher.
@@ -9,7 +9,7 @@ import path from "node:path"
 import fs from "node:fs"
 
 import { createIndexService } from "../builtin-tools/code/index-service.mjs"
-import { nearestRoot } from "../lsp/servers.mjs"
+import { nearestRoot } from "../src/services/lsp/servers.ts"
 
 const ROOT_MARKERS = [".git", "package.json", "Cargo.toml", "pyproject.toml", "go.mod"]
 

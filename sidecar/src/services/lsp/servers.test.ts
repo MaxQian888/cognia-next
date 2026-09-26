@@ -1,9 +1,10 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { nearestRoot, buildServers, serversForFile } from "./servers.mjs"
+import { nearestRoot, buildServers, serversForFile } from "./servers.ts"
 
 function mkProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "cognia-lsp-servers-"))

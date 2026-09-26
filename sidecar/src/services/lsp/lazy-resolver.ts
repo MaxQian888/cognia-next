@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Shared lazy LSP resolver construction for both dispatch paths.
 //
 // Lifted from anthropic.mjs so the ai-sdk path gets the identical lazy-proxy
@@ -6,7 +7,7 @@
 // (mobile / dist not built). Callers MUST invoke `dispose()` at session end
 // to tear down any servers the resolver started.
 
-import { createSessionLspResolver } from "../lsp/service-loader.mjs"
+import { createSessionLspResolver } from "./service-loader.ts"
 
 /**
  * @param {{ sendOptions: Record<string, any>, log: (level: string, msg: string) => void }} params

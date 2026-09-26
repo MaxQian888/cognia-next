@@ -1,4 +1,5 @@
-import { sandboxedProcessTarget, sandboxedProcessEnv } from "../src/platform/process/exec.ts"
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
+import { sandboxedProcessTarget, sandboxedProcessEnv } from "../../platform/process/exec.ts"
 // Agent-side LSP resolver.
 //
 // This is the thin layer that turns "the agent touched a file" into the
@@ -19,7 +20,7 @@ import { sandboxedProcessTarget, sandboxedProcessEnv } from "../src/platform/pro
 import fs from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import { buildServers, serversForFile } from "./servers.mjs"
+import { buildServers, serversForFile } from "./servers.ts"
 
 const OWNER = "agent"
 const DEFAULT_DIAGNOSTICS_WAIT_MS = 800

@@ -2,7 +2,7 @@
 //
 // Maps file extensions to a language id, exposes the supported-language set,
 // and routes a language id to its tree-sitter query bundle. The extension →
-// language idea mirrors `serversForFile` in `sidecar/lsp/servers.mjs` (we reuse
+// language idea mirrors `serversForFile` in `src/services/lsp/servers.ts` (we reuse
 // the *idea*, not the LSP server list — code-graph supports a fixed set of
 // grammars, not arbitrary user-configured servers).
 //

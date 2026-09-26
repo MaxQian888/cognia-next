@@ -10,7 +10,7 @@
 // nothing.
 
 import path from "node:path"
-import { formatDiagnostics } from "../lsp/report.mjs"
+import { formatDiagnostics } from "../src/services/lsp/report.ts"
 
 /** Edit-like tools whose output should be followed by a diagnostics pass. */
 export const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"])

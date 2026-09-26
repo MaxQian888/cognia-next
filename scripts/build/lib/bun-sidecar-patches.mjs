@@ -79,18 +79,18 @@ export const BUN_SIDECAR_PATCHES = [
     ],
   },
   {
-    file: "sidecar/lsp/service-loader.mjs",
-    loader: "js",
+    file: "sidecar/src/services/lsp/service-loader.ts",
+    loader: "ts",
     edits: [
       {
         label: "LSP service static import",
         search: "import(pathToImportUrl(LSP_SERVICE_PATH))",
-        replace: () => 'import("../vscode-ext-host/dist/lsp-service.js")',
+        replace: () => 'import("../../../vscode-ext-host/dist/lsp-service.js")',
       },
       {
         label: "LSP installer static import",
         search: "import(pathToImportUrl(LSP_INSTALLER_PATH))",
-        replace: () => 'import("../vscode-ext-host/dist/lsp-installer.js")',
+        replace: () => 'import("../../../vscode-ext-host/dist/lsp-installer.js")',
       },
     ],
   },

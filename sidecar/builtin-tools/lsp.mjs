@@ -2,7 +2,7 @@
 //
 // Exposed as the `lsp` category of the cognia-tools MCP server. Unlike
 // the stateless git/file-extras tools, these are bound to a per-session
-// LSP *resolver* (see `sidecar/lsp/resolver.mjs`) which reuses the
+// LSP *resolver* (see `src/services/lsp/resolver.ts`) which reuses the
 // vscode-ext-host `LspService` for the actual provider requests. The
 // resolver is injected by the dispatch layer, so the agent can only
 // introspect files inside its own session cwd.
@@ -14,7 +14,7 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod"
 import { fileURLToPath } from "node:url"
-import { formatDiagnostics } from "../lsp/report.mjs"
+import { formatDiagnostics } from "../src/services/lsp/report.ts"
 import { toolError, toolText } from "../src/tools/kernel/result.ts"
 
 /** Render an LSP Location / Location[] / LocationLink[] into concise text. */

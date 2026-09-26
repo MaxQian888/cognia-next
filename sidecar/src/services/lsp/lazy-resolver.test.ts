@@ -1,6 +1,7 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
-import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
+import { makeLazyLspResolver } from "./lazy-resolver.ts"
 
 const sendOptions = { cwd: process.cwd(), lsp: { enabled: true, servers: [] } }
 

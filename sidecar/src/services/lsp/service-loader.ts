@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Lazily import the COMPILED LspService from the vscode-ext-host sidecar
 // and wire a per-agent-session resolver to it.
 //
@@ -11,22 +12,18 @@
 // and a build-missing dist degrades to "LSP unavailable" instead of a
 // hard crash.
 
-import { fileURLToPath } from "node:url"
-import { existsSync } from "node:fs"
 import path from "node:path"
-import { createLspResolver } from "./resolver.mjs"
+import { createLspResolver } from "./resolver.ts"
 import {
   execFileAsync,
   sandboxedProcessTarget,
   sandboxedProcessEnv,
-} from "../src/platform/process/exec.ts"
+} from "../../platform/process/exec.ts"
+import { sidecarPath } from "../../platform/sidecar-paths.ts"
 
-const HERE = path.dirname(fileURLToPath(import.meta.url))
-// Bundling moves this module from lsp/ into the sidecar root. The packaged
-// extension host sits beside that bundle; source runs retain the sibling tree.
-const LSP_HOST_DIR = existsSync(path.join(HERE, "vscode-ext-host"))
-  ? path.join(HERE, "vscode-ext-host")
-  : path.resolve(HERE, "../vscode-ext-host")
+// The extension host sits beside the sidecar root in the source tree, and
+// beside the bundle when a bundler flattened this module into it.
+const LSP_HOST_DIR = sidecarPath("vscode-ext-host")
 const LSP_SERVICE_PATH = path.join(LSP_HOST_DIR, "dist/lsp-service.js")
 const LSP_INSTALLER_PATH = path.join(LSP_HOST_DIR, "dist/lsp-installer.js")
 

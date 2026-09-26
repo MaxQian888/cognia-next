@@ -1,10 +1,11 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import { createLspResolver } from "./resolver.mjs"
+import { createLspResolver } from "./resolver.ts"
 
 // The resolved config list the renderer hands the sidecar via
 // `sendOptions.lsp.servers`. The resolver no longer owns a hard-coded
