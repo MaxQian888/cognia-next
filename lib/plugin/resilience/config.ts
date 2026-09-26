@@ -37,7 +37,7 @@ export const DEFAULT_PLUGIN_RESILIENCE: ResolvedResilienceConfig = {
 
 /**
  * The sidecar wraps each plugin tool IPC round-trip in a 120s ceiling
- * (`sidecar/dispatch/ai-sdk-tools.mjs`). The renderer-side budget must stay
+ * (`sidecar/src/tools/adapters/ai-sdk.ts`). The renderer-side budget must stay
  * under it or the IPC layer times out first.
  */
 export const SIDECAR_IPC_TIMEOUT_MS = 120_000

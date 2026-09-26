@@ -1,3 +1,4 @@
+// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // AI SDK tool bridge for the non-Anthropic dispatch path.
 //
 // The Anthropic dispatcher hands built-in tools + plugin tools to the Claude
@@ -15,31 +16,24 @@ import { tool, jsonSchema } from "ai"
 import { z } from "zod"
 import { randomUUID } from "node:crypto"
 
-import { collectCogniaToolDefs } from "../src/tools/builtin/registry.ts"
+import { collectCogniaToolDefs } from "../builtin/registry.ts"
 import {
   BUILTIN_SERVER_NAME as SERVER_NAME,
   READ_ONLY_TOOL_NAMES,
-} from "../src/policy/tool-catalog/catalog.ts"
-import { PLUGIN_TOOLS_SERVER_NAME } from "../src/policy/tool-catalog/names.ts"
+} from "../../policy/tool-catalog/catalog.ts"
+import { PLUGIN_TOOLS_SERVER_NAME } from "../../policy/tool-catalog/names.ts"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   toolBudgetMessage,
-} from "../src/tools/middleware/read-only-timeout.ts"
+} from "../middleware/read-only-timeout.ts"
 
-import { awaitPluginToolResponse } from "../src/tools/plugin/server.ts"
-import { createToolPermissionGate } from "../src/policy/permission/ai-sdk-gate.ts"
-import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
-import { assertModelSafeToolOutput } from "../src/policy/pii/tool-output.ts"
-import { markAiSdkToolSource } from "../src/tools/adapters/ai-sdk-tool-search.ts"
-import {
-  builtinToModelOutput,
-  callToolResultToText,
-  hasRichContentBlock,
-} from "../src/tools/adapters/ai-sdk-output.ts"
-import {
-  CLAUDE_TOOL_NAME_BY_COGNIA_BARE,
-  passesAllowList,
-} from "../src/tools/adapters/allow-list.ts"
+import { awaitPluginToolResponse } from "../plugin/server.ts"
+import { createToolPermissionGate } from "../../policy/permission/ai-sdk-gate.ts"
+import { createDoomLoopGuard } from "../../policy/doom-loop.ts"
+import { assertModelSafeToolOutput } from "../../policy/pii/tool-output.ts"
+import { markAiSdkToolSource } from "./ai-sdk-tool-search.ts"
+import { builtinToModelOutput, callToolResultToText, hasRichContentBlock } from "./ai-sdk-output.ts"
+import { CLAUDE_TOOL_NAME_BY_COGNIA_BARE, passesAllowList } from "./allow-list.ts"
 
 // Per-tool execution deadline for READ-ONLY built-ins on the ai-sdk path. The
 // constant, the read-only gate, and the recoverable message all live in

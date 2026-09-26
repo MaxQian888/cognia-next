@@ -217,7 +217,7 @@
     "protection": "Sees just the already-permission-filtered tool registry (names + descriptions) and the model's own query; no locally-derived user content crosses this import."
   },
   {
-    "file": "sidecar/dispatch/ai-sdk-tools.mjs",
+    "file": "sidecar/src/tools/adapters/ai-sdk.ts",
     "boundaries": ["ai"],
     "reason": "Converts tool definitions for the sidecar protocol.",
     "protection": "No outbound model payload is emitted here."

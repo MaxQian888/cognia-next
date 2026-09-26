@@ -49,7 +49,7 @@ export function buildCogniaToolsServer(options: BuildToolsServerOptions) {
   // `src/tools/middleware/read-only-timeout.ts`). The Anthropic SDK calls each
   // tool's handler itself, so we wrap the handler at registration time —
   // mirroring the execute-time net the ai-sdk bridge applies
-  // (`dispatch/ai-sdk-tools.mjs`). Honour an explicit override (incl. `0` to
+  // (`adapters/ai-sdk.ts`). Honour an explicit override (incl. `0` to
   // disable); default the safety net otherwise so a hung read-only tool can't
   // wedge the whole turn.
   const net =

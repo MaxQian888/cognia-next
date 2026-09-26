@@ -118,7 +118,7 @@ const TOOLS_BY_CATEGORY: Readonly<Record<string, readonly ToolDefinition[]>> = {
  * Collect the raw tool definitions for the enabled categories (+ the
  * resolver-bound LSP and code-graph tools). The Claude Agent SDK rail wraps
  * them into an in-process MCP server (`adapters/sdk-mcp.ts`); the AI SDK rail
- * (`dispatch/ai-sdk-tools.mjs`) converts them into native AI SDK `tool()`
+ * (`adapters/ai-sdk.ts`) converts them into native AI SDK `tool()`
  * objects (ADR-0043). Each def is `{ name, description, inputSchema: <zod raw
  * shape>, handler }`.
  */

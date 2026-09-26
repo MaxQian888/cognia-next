@@ -179,6 +179,7 @@ Each migration batch appends its moves here (old → new).
 | `applyToolPresentation` (in the registry)                                | `src/tools/middleware/presentation.ts`                             | 8m          |
 | the confinement wrapper (in `collectCogniaToolDefs`)                     | `src/tools/middleware/confinement.ts`                              | 8m          |
 | `namesForDisabledCategories`, `namespacedName` (in the registry)         | `src/policy/tool-catalog/catalog.ts`                               | 8m          |
+| `dispatch/ai-sdk-tools.mjs` (+ test)                                     | `src/tools/adapters/ai-sdk.ts` (+ test)                            | 8n          |
 
 ## Scripts (run from repo root)
 

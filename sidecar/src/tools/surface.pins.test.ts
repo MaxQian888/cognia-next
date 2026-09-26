@@ -43,7 +43,7 @@ import { createReadTracker } from "./state/read-tracker.ts"
 import { createBgShellRegistry } from "./state/background-shells.ts"
 import { createSessionTaskStore } from "./state/tasks.ts"
 import { probeSandbox } from "./builtin/run-code/supervisor.ts"
-import { buildAiSdkTools, __testing__ as aiSdkTools } from "../../dispatch/ai-sdk-tools.mjs"
+import { buildAiSdkTools, __testing__ as aiSdkTools } from "./adapters/ai-sdk.ts"
 import { createAiSdkToolSearchController } from "./adapters/ai-sdk-tool-search.ts"
 import { buildToolSurface } from "../../cognia-tool-bridge.mjs"
 

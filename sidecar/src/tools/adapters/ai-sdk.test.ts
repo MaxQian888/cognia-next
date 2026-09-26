@@ -1,10 +1,11 @@
+// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // Tests for the AI SDK tool bridge: converts built-in tool defs + plugin tool
 // manifests into native AI SDK tools for the non-Anthropic dispatch path.
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { buildAiSdkTools, __testing__ } from "./ai-sdk-tools.mjs"
-import { createSessionTaskStore } from "../src/tools/state/tasks.ts"
+import { buildAiSdkTools, __testing__ } from "./ai-sdk.ts"
+import { createSessionTaskStore } from "../state/tasks.ts"
 
 test("buildAiSdkTools registers built-in tools for enabled categories only", () => {
   const tools = buildAiSdkTools({

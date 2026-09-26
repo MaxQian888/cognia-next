@@ -1219,7 +1219,7 @@ export function dispatchAiSdk({
           // even when stale/global MCP or ToolSearch settings survive upstream.
           toolsCache = {}
         } else {
-          const { buildAiSdkTools } = await import("./ai-sdk-tools.mjs")
+          const { buildAiSdkTools } = await import("../src/tools/adapters/ai-sdk.ts")
           const { createDoomLoopGuard } = await import("../src/policy/doom-loop.ts")
           // Own the tool gate's guard here so it can be reset per turn (F1).
           const toolDoomGuard = createDoomLoopGuard()
