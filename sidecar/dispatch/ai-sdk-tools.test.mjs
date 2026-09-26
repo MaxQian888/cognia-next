@@ -305,25 +305,6 @@ test("textual resource blobs are decoded and redacted before model output", asyn
   assert.doesNotMatch(decoded, /alice@example\.com/)
 })
 
-test("resource links remain visible text without authorizing provider-side fetches", () => {
-  const output = __testing__.builtinToModelOutput({
-    output: {
-      content: [
-        {
-          type: "resource_link",
-          uri: "https://example.test/manual.pdf",
-          name: "Manual",
-        },
-      ],
-    },
-  })
-
-  assert.deepEqual(output, {
-    type: "content",
-    value: [{ type: "text", text: "Manual: https://example.test/manual.pdf" }],
-  })
-})
-
 test("plugin tool results with no image still flatten to JSON text", async () => {
   const pendingPluginToolCalls = new Map()
   const tools = buildAiSdkTools({
@@ -669,16 +650,7 @@ test("allowedTools + disallowedTools: deny still wins over an allow entry", () =
 })
 
 test("builtinDefToAiSdkTool returns joined text and throws on isError", async () => {
-  const { builtinDefToAiSdkTool, callToolResultToText } = __testing__
-  assert.equal(
-    callToolResultToText({
-      content: [
-        { type: "text", text: "a" },
-        { type: "text", text: "b" },
-      ],
-    }),
-    "a\nb"
-  )
+  const { builtinDefToAiSdkTool } = __testing__
   const okTool = builtinDefToAiSdkTool({
     name: "ok",
     description: "",
@@ -749,47 +721,6 @@ test("builtinDefToAiSdkTool surfaces a read-only timeout as a thrown execute (â†
 
 test("the default built-in tool budget is the 120s plugin-tool-parity safety net", () => {
   assert.equal(__testing__.DEFAULT_BUILTIN_TOOL_TIMEOUT_MS, 120_000)
-})
-
-test("builtinToModelOutput maps a plain string result to a text output", () => {
-  const { builtinToModelOutput } = __testing__
-  assert.deepEqual(builtinToModelOutput({ output: "hello" }), { type: "text", value: "hello" })
-})
-
-test("builtinToModelOutput maps an MCP image block to a canonical file content part", () => {
-  const { builtinToModelOutput } = __testing__
-  const out = builtinToModelOutput({
-    output: {
-      content: [
-        { type: "text", text: "screenshot.png (12 bytes)" },
-        { type: "image", data: "QUJD", mimeType: "image/png" },
-      ],
-    },
-  })
-  assert.equal(out.type, "content")
-  assert.deepEqual(out.value, [
-    { type: "text", text: "screenshot.png (12 bytes)" },
-    // AI SDK 7 canonical shape: one `file` part with a tagged data union.
-    // The `media` and `image-data` variants are both gone.
-    { type: "file", mediaType: "image/png", data: { type: "data", data: "QUJD" } },
-  ])
-})
-
-test("builtinToModelOutput routes non-image media to a canonical file part", () => {
-  const { builtinToModelOutput } = __testing__
-  const out = builtinToModelOutput({
-    output: { content: [{ type: "image", data: "QQ==", mimeType: "audio/wav" }] },
-  })
-  assert.deepEqual(out.value, [
-    { type: "file", mediaType: "audio/wav", data: { type: "data", data: "QQ==" } },
-  ])
-})
-
-test("hasImageBlock detects an MCP image block and ignores text-only results", () => {
-  const { hasImageBlock } = __testing__
-  assert.equal(hasImageBlock({ content: [{ type: "image", data: "x" }] }), true)
-  assert.equal(hasImageBlock({ content: [{ type: "text", text: "x" }] }), false)
-  assert.equal(hasImageBlock("plain"), false)
 })
 
 test("execute-layer review rewrites the output the MODEL receives", async () => {

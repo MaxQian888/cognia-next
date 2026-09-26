@@ -143,6 +143,8 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/plugin-tools.mjs` (server, response waiter)               | `src/tools/plugin/server.ts`                                       | 7c          |
 | `jsonSchemaToZodShape`, `jsonSchemaPropToZod` (in `plugin-tools.mjs`)    | `src/tools/plugin/json-schema-zod.ts`                              | 7c          |
 | `builtin-tools/{,__tests__/}plugin-tools.test.mjs` (merged)              | `src/tools/plugin/{server,json-schema-zod}.test.ts`                | 7c          |
+| `dispatch/ai-sdk-tools.mjs` (model-output mapping)                       | `src/tools/adapters/ai-sdk-output.ts`                              | 7d          |
+| `dispatch/ai-sdk-tools.mjs` (`allowedTools` whitelist)                   | `src/tools/adapters/allow-list.ts`                                 | 7d          |
 
 ## Scripts (run from repo root)
 

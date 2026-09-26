@@ -31,6 +31,15 @@ import { createToolPermissionGate } from "../src/policy/permission/ai-sdk-gate.t
 import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { assertModelSafeToolOutput } from "../src/policy/pii/tool-output.ts"
 import { markAiSdkToolSource } from "../src/tools/adapters/ai-sdk-tool-search.ts"
+import {
+  builtinToModelOutput,
+  callToolResultToText,
+  hasRichContentBlock,
+} from "../src/tools/adapters/ai-sdk-output.ts"
+import {
+  CLAUDE_TOOL_NAME_BY_COGNIA_BARE,
+  passesAllowList,
+} from "../src/tools/adapters/allow-list.ts"
 
 // Per-tool execution deadline for READ-ONLY built-ins on the ai-sdk path. The
 // constant, the read-only gate, and the recoverable message all live in
@@ -80,150 +89,6 @@ function runBuiltinHandler(def, effective, timeoutMs, signal) {
   })
 }
 
-// Claude-Code canonical name → cognia AI-SDK bare name, for the core file
-// tools whose name diverges across the two dispatch paths. `allowedTools` (a
-// character/skill/mode tool whitelist) is authored in Claude-Code naming
-// (`Read`, `Grep`, `Bash`, …) because it targets the native Anthropic path; on
-// the AI-SDK path the equivalent built-in tools carry cognia bare names
-// (`read`, `grep`, `bash`, …). Without this bridge an allow list like
-// `["Read"]` would match nothing and filter every tool out — the opposite of
-// the intended "scope the palette to Read" semantics. Tools that share a name
-// across both paths (plugin tools, TodoWrite, git_*, …) need no entry.
-const CLAUDE_TOOL_NAME_BY_COGNIA_BARE = Object.freeze({
-  read: "Read",
-  write: "Write",
-  edit: "Edit",
-  multi_edit: "MultiEdit",
-  bash: "Bash",
-  grep: "Grep",
-  glob: "Glob",
-  ls: "LS",
-  web_search: "WebSearch",
-  web_fetch: "WebFetch",
-})
-
-/**
- * Decide whether a tool with the given candidate allow-names passes the
- * `allowedTools` whitelist. An absent/empty whitelist means "no restriction"
- * (every enabled tool is exposed). A non-empty whitelist exposes a tool only
- * when at least one of its candidate names appears in the list.
- *
- * @param {Set<string>|null} allowSet
- * @param {string[]} candidateNames  bare, namespaced, and (for core tools) the
- *   Claude-Code alias — any match admits the tool.
- */
-function passesAllowList(allowSet, candidateNames) {
-  if (!allowSet || allowSet.size === 0) return true
-  return candidateNames.some((n) => allowSet.has(n))
-}
-
-/** Flatten an MCP `CallToolResult` to a plain string for the model. */
-function callToolResultToText(result) {
-  if (result == null) return ""
-  if (typeof result === "string") return result
-  if (Array.isArray(result.content)) {
-    return result.content
-      .filter((b) => b && b.type === "text" && typeof b.text === "string")
-      .map((b) => b.text)
-      .join("\n")
-  }
-  return JSON.stringify(result)
-}
-
-/**
- * Convert one built-in `SdkMcpToolDefinition` into an AI SDK tool. The built-in
- * handler returns an MCP `CallToolResult`; we flatten it to text and re-throw on
- * `isError` so the AI SDK surfaces a `tool-error` (which the model can recover
- * from across steps). Execution is gated through `gate` when supplied.
- */
-/** Does an MCP CallToolResult carry an image block (multimodal read)? */
-function hasImageBlock(result) {
-  return Array.isArray(result?.content) && result.content.some((b) => b && b.type === "image")
-}
-
-/**
- * Does an MCP CallToolResult carry content that must remain structured for the
- * model-output mapper? Text-only results keep their legacy flattened behavior.
- */
-function hasRichContentBlock(result) {
-  return (
-    Array.isArray(result?.content) &&
-    result.content.some(
-      (b) =>
-        b &&
-        (b.type === "image" ||
-          b.type === "audio" ||
-          b.type === "resource" ||
-          b.type === "resource_link")
-    )
-  )
-}
-
-/**
- * AI SDK 7 collapsed the `image-*` / `file-*` tool-result content variants into
- * one canonical `file` part carrying a TAGGED data union — images are just files
- * with an image media type, so the image/non-image split is gone. `{ type:
- * 'data', data }` is the inline-bytes/base64 arm; `url`, `reference` and `text`
- * are the others. v7 still auto-migrates the legacy shapes at runtime, but only
- * until the next major.
- */
-function binaryModelPart(data, mediaType, filename) {
-  return {
-    type: "file",
-    mediaType,
-    data: { type: "data", data },
-    ...(filename ? { filename } : {}),
-  }
-}
-
-/**
- * Map a tool's execute output to an AI SDK v6 model output. Text results stay
- * plain text (unchanged behavior); image, audio, and embedded-resource results
- * become content parts so models receive the actual payload.
- *
- * Image blocks are emitted as the current `image-data` part (a base64 image),
- * NOT the legacy `media` part — `media` is `@deprecated` in AI SDK v6 and only
- * survives via a runtime up-conversion. Emitting `image-data` directly keeps the
- * tool-result output on the supported, forward-compatible shape.
- */
-function builtinToModelOutput({ output }) {
-  if (typeof output === "string") return { type: "text", value: output }
-  const blocks = Array.isArray(output?.content) ? output.content : []
-  const value = []
-  for (const b of blocks) {
-    if (b.type === "text" && typeof b.text === "string") {
-      value.push({ type: "text", text: b.text })
-    } else if (b.type === "image" && b.data) {
-      const mediaType = b.mimeType ?? "image/png"
-      value.push(binaryModelPart(b.data, mediaType))
-    } else if (b.type === "audio" && b.data) {
-      value.push(binaryModelPart(b.data, b.mimeType ?? "audio/mpeg"))
-    } else if (b.type === "resource" && b.resource) {
-      const resource = b.resource
-      if (typeof resource.text === "string") {
-        value.push({ type: "text", text: resource.text })
-      } else if (typeof resource.blob === "string") {
-        value.push(
-          binaryModelPart(
-            resource.blob,
-            resource.mimeType ?? "application/octet-stream",
-            resource.name ?? resource.title
-          )
-        )
-      }
-    } else if (b.type === "resource_link" && typeof b.uri === "string") {
-      const label =
-        typeof b.name === "string" && b.name.length > 0
-          ? `${b.name}: `
-          : typeof b.title === "string" && b.title.length > 0
-            ? `${b.title}: `
-            : ""
-      value.push({ type: "text", text: `${label}${b.uri}` })
-    }
-  }
-  return { type: "content", value }
-}
-
 /**
  * Apply the PostToolUse review (renderer round-trip) to a tool's EXECUTE-layer
  * output — this is the only layer where a rewrite actually reaches the model:
@@ -241,6 +106,12 @@ async function applyOutputReview(review, namespaced, toolCallId, output, isError
   }
 }
 
+/**
+ * Convert one built-in `SdkMcpToolDefinition` into an AI SDK tool. The built-in
+ * handler returns an MCP `CallToolResult`; we flatten it to text and re-throw on
+ * `isError` so the AI SDK surfaces a `tool-error` (which the model can recover
+ * from across steps). Execution is gated through `gate` when supplied.
+ */
 function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
   const namespaced = `mcp__${SERVER_NAME}__${def.name}`
   return tool({
@@ -547,11 +418,7 @@ export const __testing__ = {
   builtinDefToAiSdkTool,
   pluginToolToAiSdkTool,
   applyOutputReview,
-  callToolResultToText,
   runBuiltinHandler,
-  builtinToModelOutput,
-  hasImageBlock,
-  hasRichContentBlock,
   assertModelSafeToolOutput,
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
 }
