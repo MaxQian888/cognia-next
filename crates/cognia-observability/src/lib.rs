@@ -16,6 +16,9 @@ pub mod crash;
 pub mod logging;
 #[cfg(feature = "desktop-host")]
 pub mod telemetry;
+// ADR-0196 E3b — inbound W3C trace context, without the desktop host.
+#[cfg(feature = "tracing-host")]
+pub mod trace_context;
 
 pub mod diagnostic_package;
 pub mod diagnostic_submit;

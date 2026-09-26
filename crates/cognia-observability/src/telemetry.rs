@@ -75,30 +75,9 @@ fn parse_otlp_headers(value: &str) -> Result<HashMap<String, String>, String> {
     Ok(headers)
 }
 
-/// `pub` across the crate boundary (ADR-0067 Tier C): `companion_api`'s
-/// remote-execution path validates inbound traceparents and stayed app-side.
-pub fn validate_traceparent(value: &str) -> Option<String> {
-    let value = value.trim();
-    let mut parts = value.split('-');
-    let version = parts.next()?;
-    let trace_id = parts.next()?;
-    let parent_id = parts.next()?;
-    let flags = parts.next()?;
-    if parts.next().is_some()
-        || version != "00"
-        || trace_id.len() != 32
-        || parent_id.len() != 16
-        || flags.len() != 2
-        || ![version, trace_id, parent_id, flags]
-            .iter()
-            .all(|part| part.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        || trace_id.bytes().all(|byte| byte == b'0')
-        || parent_id.bytes().all(|byte| byte == b'0')
-    {
-        return None;
-    }
-    Some(value.to_ascii_lowercase())
-}
+// ADR-0196: the traceparent helpers the companion's remote-execution path uses
+// live in the tauri-free `trace_context` module; re-exported at their old path.
+pub use crate::trace_context::{set_parent, validate_traceparent};
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(
@@ -448,7 +427,6 @@ mod native_otel {
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::propagation::TraceContextPropagator;
     use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider};
-    use tracing_opentelemetry::OpenTelemetrySpanExt;
 
     struct NativeMetrics {
         histogram: Histogram<f64>,
@@ -536,15 +514,6 @@ mod native_otel {
         crate::logging::tracing_setup::configure_otel_tracer(None)
     }
 
-    pub fn set_parent(span: &tracing::Span, traceparent: Option<&str>) {
-        let Some(traceparent) = traceparent.filter(|value| !value.is_empty()) else {
-            return;
-        };
-        let carrier = HashMap::from([("traceparent".to_string(), traceparent.to_string())]);
-        let parent = global::get_text_map_propagator(|propagator| propagator.extract(&carrier));
-        let _ = span.set_parent(parent);
-    }
-
     fn observe_metric(name: &'static str, elapsed: Duration, ok: bool) {
         let Ok(metrics) = METRICS.read() else {
             return;
@@ -563,10 +532,7 @@ mod native_otel {
 }
 
 #[cfg(feature = "otel-export")]
-pub use native_otel::{configure_exporter, disable_exporter, init_tracer, set_parent};
-
-#[cfg(not(feature = "otel-export"))]
-pub fn set_parent(_span: &tracing::Span, _traceparent: Option<&str>) {}
+pub use native_otel::{configure_exporter, disable_exporter, init_tracer};
 
 // The argument list is the IPC contract: the renderer invokes this command
 // with these exact named keys, so collapsing them into a struct would change

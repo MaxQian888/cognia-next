@@ -23,6 +23,7 @@ ocr-paddle = []
 # for `diagnostic_package` / `diagnostic_submit`, and it is a deliberately lean
 # binary (ureq over reqwest, no tokio, no tracing). `src-tauri` turns it on.
 desktop-host = [
+  "tracing-host",
   "dep:tauri",
   "dep:tauri-plugin-log",
   "dep:tauri-plugin-opener",
@@ -46,6 +47,10 @@ desktop-host = [
   "dep:libsystemd",
   "dep:syslog",
 ]
+# ADR-0196 E3b — the tauri-free slice of the host the companion core and the
+# headless server need on their own: W3C trace-context propagation
+# (`trace_context`). `desktop-host` implies it.
+tracing-host = ["dep:tracing"]
 # ADR-0073 — native OTLP trace/metric export stays opt-in so the OpenTelemetry
 # graph does not slow normal desktop development. `src-tauri` forwards its own
 # `otel-export` here. Implies `desktop-host`: the only consumer is `telemetry`.
