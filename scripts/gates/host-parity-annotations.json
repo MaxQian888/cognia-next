@@ -341,7 +341,7 @@
     },
     "lib/native/codex-app-dispatch.ts": {
       "classification": "physically-impossible",
-      "note": "Drives the installed Codex DESKTOP app, not a service. `codex_app_dispatch.rs` resolves `~/.codex/app-server-control/app-server-control.sock` (`codex_home()`), and when that socket is absent `connect_or_launch` recovers by opening `codex://threads/new` through the OS URL-scheme handler \u2014 a container has neither the app nor a handler to register the scheme. Same footing as AX/UIA: the SUBJECT is missing, not the plumbing. Note the plumbing is in fact host-neutral (`run_cdp_control` shells a Node sidecar), so do not 'fix' this by making the sidecar host-agnostic \u2014 the socket still never appears. Reclassified 2026-08-16; the 2026-08-15 audit's \"no physical reason found\" was wrong."
+      "note": "Drives the installed Codex DESKTOP app, not a service. `cognia-codex-app` resolves `~/.codex/app-server-control/app-server-control.sock` (`codex_home()`), and when that socket is absent `connect_or_launch` recovers by opening `codex://threads/new` through the OS URL-scheme handler \u2014 a container has neither the app nor a handler to register the scheme. Same footing as AX/UIA: the SUBJECT is missing, not the plumbing. Note the plumbing is in fact host-neutral (`run_cdp_control` shells a Node sidecar), so do not 'fix' this by making the sidecar host-agnostic \u2014 the socket still never appears. Reclassified 2026-08-16; the 2026-08-15 audit's \"no physical reason found\" was wrong."
     },
     "lib/network": {
       "classification": "unmigrated"

@@ -2002,6 +2002,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-codex-app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-io",
+ "async-trait",
+ "base64 0.23.1",
+ "chrono",
+ "cognia-core",
+ "dirs 6.0.0",
+ "futures-util",
+ "hex",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "uds_windows",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "cognia-collab-server"
 version = "0.1.0"
 dependencies = [
@@ -2445,7 +2471,6 @@ dependencies = [
  "aes-gcm 0.11.0",
  "anyhow",
  "argon2 0.5.3",
- "async-io",
  "async-trait",
  "axum",
  "axum-server",
@@ -2459,6 +2484,7 @@ dependencies = [
  "cognia-automation",
  "cognia-browser-cookies",
  "cognia-ccswitch",
+ "cognia-codex-app",
  "cognia-companion-bus",
  "cognia-companion-connectivity",
  "cognia-connectors",
@@ -2559,12 +2585,10 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tokio-tungstenite",
- "tokio-util",
  "toml_edit 0.25.13+spec-1.1.0",
  "tower",
  "tower-http 0.7.0",
  "tracing",
- "uds_windows",
  "url",
  "uuid",
  "wait-timeout",

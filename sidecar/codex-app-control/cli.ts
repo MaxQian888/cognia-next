@@ -1,6 +1,6 @@
 // Codex App control operations, one per process: `control-cli.mjs <op>` with a
 // JSON request on stdin and one `{ ok, result | error }` JSON line on stdout.
-// Spawned by src-tauri/src/codex_app_dispatch.rs (`run_cdp_control`).
+// Spawned by `run_cdp_control` in crates/cognia-codex-app/src/lib.rs.
 
 import { randomBytes } from "node:crypto"
 import { readdir, readFile } from "node:fs/promises"

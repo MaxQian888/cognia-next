@@ -104,6 +104,9 @@ cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["t
 # ADR-0196 P6g — Chromium cookie import; `browser/cookie_import` keeps the
 # command shells, the macOS keychain adapter and the WebKit sink.
 cognia-browser-cookies = { path = "../crates/cognia-browser-cookies" }
+# ADR-0196 P6b — Codex App dispatch; `codex_app_dispatch.rs` keeps the command
+# shells and the `AppHandle`-backed `CodexAppHost`.
+cognia-codex-app = { path = "../crates/cognia-codex-app" }
 # Native local-video metadata, frame extraction, trimming, and analysis.
 cognia-media = { path = "../crates/cognia-media", features = ["tauri-host"] }
 # ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased
@@ -356,8 +359,7 @@ notify.workspace = true
 flate2.workspace = true
 tar.workspace = true
 # Auto-cleanup temp dirs at runtime (`companion_api/rpc/media.rs`,
-# `cli_bridge`, `codex_app_dispatch.rs`, `codeserver`, browser cookie import);
-# most other uses are unit tests.
+# `cli_bridge`, `codeserver`); most other uses are unit tests.
 tempfile.workspace = true
 # Zip archives in `cli_bridge` (plugin bundles the `cognia plugin build` CLI
 # emits) and `codeserver`. Pure-Rust, no system zlib dep.
@@ -419,12 +421,6 @@ tauri-plugin-cli = "2"
 # Real OS credential store (Windows Credential Manager) — see the keyring
 # note in [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "4", features = ["windows-native-keyring-store"] }
-# Codex App exposes its app-server control plane over a Unix-domain socket on
-# every desktop platform. Windows needs the same compatibility stack Codex
-# itself uses for that socket transport.
-async-io = "2.6.0"
-tokio-util = { version = "0.7.19", features = ["compat"] }
-uds_windows = "1.2.1"
 # ADR-0067 Phase 5 — `uiautomation` moved to `crates/cognia-automation`.
 # Direct windows-rs dep for SendInput/MOUSEEVENTF_WHEEL/GetSystemMetrics calls
 # that aren't exposed publicly through `uiautomation::inputs`. Version pinned

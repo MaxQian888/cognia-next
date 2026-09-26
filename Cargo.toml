@@ -63,6 +63,9 @@ members = [
   # ADR-0196 P6g — Chromium cookie import (profile discovery, Safe Storage
   # decryption), out of `app_lib`.
   "crates/cognia-browser-cookies",
+  # ADR-0196 P6b — Codex App dispatch over the app-server control socket, out of
+  # `app_lib`.
+  "crates/cognia-codex-app",
   # ADR-0182 — runtime environments: EnvironmentSpec, the two-level image
   # catalog, admission policy and the tenant environment store.
   "crates/cognia-environment",

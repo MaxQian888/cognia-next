@@ -22,7 +22,7 @@ fn authorize_cwd(
 }
 
 async fn authorized_thread_cwd(
-    app: &tauri::AppHandle,
+    app: &dyn crate::codex_app_dispatch::CodexAppHost,
     host: &super::super::dispatch_host::DispatchHost,
     thread_id: &str,
 ) -> Result<String, (StatusCode, Json<RpcError>)> {
@@ -119,7 +119,7 @@ pub(super) async fn dispatch(
     _account_id: Option<&str>,
     _scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let app = host.tauri_app(name)?;
+    let app = &crate::codex_app_dispatch::TauriCodexAppHost(host.tauri_app(name)?);
     match name {
         "codex_app_runtime_status" => crate::codex_app_dispatch::codex_app_runtime_status_impl(app)
             .await

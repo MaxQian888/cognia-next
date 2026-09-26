@@ -1,0 +1,56 @@
+# ADR-0196 P6b — Codex App dispatch: hand a Cognia conversation to the Codex
+# desktop app and drive its tasks over the app-server control socket. What it
+# needs from the running app (app data dir, sidecar dir, URL opener) is the
+# `CodexAppHost` trait; the desktop implements it over its `AppHandle` in
+# `src-tauri/src/codex_app_dispatch.rs`, next to the command shells, so this
+# crate links no Tauri.
+[package]
+name = "cognia-codex-app"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Codex App dispatch and task control over the Codex app-server control socket, behind a host trait."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_codex_app"
+path = "src/lib.rs"
+
+[dependencies]
+# `node_runtime::node_executable` runs the sidecar's CDP control script.
+cognia-core = { path = "../cognia-core" }
+anyhow.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
+hex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "net", "process", "rt", "sync", "time"] }
+# The control socket speaks JSON-RPC over a WebSocket upgraded on the socket.
+tokio-tungstenite = { workspace = true, features = ["handshake"] }
+url.workspace = true
+uuid.workspace = true
+
+# The control socket's owner and peer are checked against the current user.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+# Codex App exposes its app-server control plane over a Unix-domain socket on
+# every desktop platform. Windows needs the same compatibility stack Codex
+# itself uses for that socket transport.
+[target.'cfg(windows)'.dependencies]
+async-io = "2.6.0"
+tokio-util = { version = "0.7.19", features = ["compat"] }
+uds_windows = "1.2.1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
