@@ -125,6 +125,9 @@ describe("sync stages", () => {
       // The tab bar draws its unread badge before any conversation is opened,
       // so the pointers it counts belong to the first screen too.
       "sessionState",
+      // Folders are sections of that same list: a conversation filed into one
+      // that has not arrived renders loose, then jumps.
+      "sessionFolders",
     ])
     // `messages` and `memories` are the two largest applies in the pipeline —
     // the transcript tail and the row-by-row DEK decrypt. Neither may gate

@@ -36,7 +36,7 @@ import {
 } from "@/lib/db/mobile-outbound-queue"
 import { acknowledgeMobileStepResultChunk } from "@/lib/db/mobile-step-receipts"
 import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
-import { isHostStateSubmitResponse } from "@cognia/agent-config-types/host-state"
+import { isHostStateAction, isHostStateSubmitResponse } from "@cognia/agent-config-types/host-state"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import type { RuntimeTargetScope } from "@/lib/runtime/runtime-target-context"
@@ -180,6 +180,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
         const receipt = hostStateReceipt(result, row.actionId)
         if (!receipt) throw new Error("host_state_malformed_response")
         await markHostStateResult(row.id, receipt)
+        await settleRefusedHostStateRow(row, receipt.outcome, receipt.rejection?.code)
         await reconcileTerminalHostState(receipt.outcome)
       } else if (row.command === "workflow_step_result") {
         const response = result as { ok?: unknown; reason?: unknown } | null
@@ -214,6 +215,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
             outcome: "rejected",
             rejection: { code: rejectionCode },
           })
+          await settleRefusedHostStateRow(row, "rejected", rejectionCode)
           await reconcileTerminalHostState("rejected")
           return
         }
@@ -275,6 +277,25 @@ function isCollabConflict(
   )
 }
 
+/**
+ * Give a refused list intent its client-side consequence — a local fallback
+ * against a Host too old to know it, or discarding an optimistic folder — see
+ * `lib/sync/host-state-intent-settlement.ts`. Runs after the receipt is
+ * recorded, so it can never turn a settled row back into a retry.
+ */
+async function settleRefusedHostStateRow(
+  row: MobileOutboundJobRow,
+  outcome: "applied" | "duplicate" | "rejected" | "conflicted",
+  rejectionCode: string | undefined
+): Promise<void> {
+  if (outcome !== "rejected" && outcome !== "conflicted") return
+  const actions = (row.payload as { actions?: unknown }).actions
+  const action = Array.isArray(actions) && actions.length === 1 ? actions[0] : undefined
+  if (!isHostStateAction(action)) return
+  const { settleRejectedHostStateIntent } = await import("@/lib/sync/host-state-intent-settlement")
+  await settleRejectedHostStateIntent(action, rejectionCode)
+}
+
 async function reconcileTerminalHostState(
   outcome: "applied" | "duplicate" | "rejected" | "conflicted"
 ): Promise<void> {
@@ -297,6 +318,9 @@ function terminalHostStateErrorCode(error: unknown): string | null {
       "host_state_scope_mismatch",
       "host_state_not_authoritative",
       "host_state_action_too_large",
+      // A Host that predates an intent kind refuses the whole submit. Retrying
+      // cannot change that answer, and holding the row would block its channel.
+      "host_state_invalid_submit_request",
     ].find((code) => candidate.includes(code)) ?? null
   )
 }

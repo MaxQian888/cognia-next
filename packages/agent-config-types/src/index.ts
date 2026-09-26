@@ -2775,8 +2775,9 @@ export interface ChatSession {
   /**
    * Lightweight folder membership (conversation-list overhaul). References a
    * {@link SessionFolder} id within the same workspace, or undefined = loose
-   * (shown under date buckets). Non-indexed; the table lives in Dexie v90
-   * (`sessionFolders`). Written by `assignSessionToFolder` (lib/db/sessions.ts).
+   * (shown under date buckets). Indexed since Dexie v230 (folder membership
+   * reads through it); the folders themselves live in `sessionFolders`.
+   * Written by `assignSessionToFolder` (lib/db/sessions.ts).
    */
   folderId?: string
   createdAt: number

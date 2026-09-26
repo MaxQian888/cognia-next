@@ -110,6 +110,7 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   platformIdentities: "platformIdentities",
   connectorCallbackBindings: "connectorCallbackBindings",
   workflowDeployments: "workflowDeployments",
+  sessionFolders: "sessionFolders",
   executionRunBindings: "executionRunBindings",
 })
 

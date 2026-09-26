@@ -11,6 +11,9 @@ import {
   hostStateIntentCapability,
   hostStateIntentKindCapability,
   hostStateIntentRequiresLiveControl,
+  hostStateIntentTargetsSessionIndex,
+  MAX_FOLDER_NAME_LENGTH,
+  MAX_FOLDER_REORDER_IDS,
   intentRequiresRuntimeDispatch,
   isHostStateAction,
   isHostStateAppliedAction,
@@ -169,6 +172,10 @@ describe("an intent may ask, never assert", () => {
       { kind: "session.folder", folderId: "f1" },
       { kind: "session.order", manualOrder: 2, sectionKey: "pinned" },
       { kind: "session.delete" },
+      { kind: "folder.create", folderId: "f1", projectId: "p1", name: "Work" },
+      { kind: "folder.rename", folderId: "f1", name: "Home" },
+      { kind: "folder.reorder", projectId: "p1", orderedIds: ["f1"] },
+      { kind: "folder.delete", folderId: "f1" },
     ] satisfies AllowedHostStateIntent[]) {
       expect(reduceHostStateIntent(running, action(intent))).toBe(running)
     }
@@ -233,6 +240,10 @@ describe("operations", () => {
       "session.folder",
       "session.order",
       "session.delete",
+      "folder.create",
+      "folder.rename",
+      "folder.reorder",
+      "folder.delete",
       "draft.replace",
       "transcript.edit",
       "transcript.truncate",
@@ -876,6 +887,11 @@ describe("wire guards", () => {
     { kind: "session.folder", folderId: null },
     { kind: "session.order", manualOrder: 0, sectionKey: "folder:f1" },
     { kind: "session.delete" },
+    { kind: "folder.create", folderId: "f1", projectId: "p1", name: "Work" },
+    { kind: "folder.rename", folderId: "f1", name: "  Home  " },
+    { kind: "folder.reorder", projectId: "p1", orderedIds: [] },
+    { kind: "folder.reorder", projectId: "p1", orderedIds: ["f2", "f1"] },
+    { kind: "folder.delete", folderId: "f1" },
     { kind: "draft.replace", text: "t", attachments: [] },
     { kind: "message.enqueue", messageId: "m", text: "t", attachments: [] },
     { kind: "turn.steer", text: "t" },
@@ -935,7 +951,13 @@ describe("wire guards", () => {
   })
 
   it("accepts the closed action shape and rejects any unknown wire field", () => {
-    for (const intent of EVERY_INTENT) expect(isHostStateAction(action(intent))).toBe(true)
+    for (const intent of EVERY_INTENT) {
+      // Folder intents live on the session index and name no session.
+      const addressed = hostStateIntentTargetsSessionIndex(intent.kind)
+        ? action(intent, { channel: INDEX, sessionId: undefined })
+        : action(intent)
+      expect(isHostStateAction(addressed)).toBe(true)
+    }
     // A device-local field must not be able to hitch a ride.
     expect(isHostStateAction({ ...action({ kind: "turn.abort" }), deviceToken: "x" })).toBe(false)
     // The version marker is gone; sending one is now an unknown field.
@@ -958,6 +980,27 @@ describe("wire guards", () => {
       { kind: "session.order", manualOrder: 0, sectionKey: "" },
       { kind: "session.order", manualOrder: 0 },
       { kind: "session.delete", cascade: false },
+      { kind: "folder.create", folderId: "", projectId: "p", name: "n" },
+      { kind: "folder.create", folderId: "f", name: "n" },
+      { kind: "folder.create", folderId: "f", projectId: "p", name: "   " },
+      {
+        kind: "folder.create",
+        folderId: "f",
+        projectId: "p",
+        name: "x".repeat(MAX_FOLDER_NAME_LENGTH + 1),
+      },
+      { kind: "folder.rename", folderId: "f" },
+      { kind: "folder.rename", folderId: "f", name: 1 },
+      { kind: "folder.reorder", projectId: "p", orderedIds: ["a", "a"] },
+      { kind: "folder.reorder", projectId: "p", orderedIds: [""] },
+      { kind: "folder.reorder", projectId: "p", orderedIds: "a" },
+      {
+        kind: "folder.reorder",
+        projectId: "p",
+        orderedIds: Array.from({ length: MAX_FOLDER_REORDER_IDS + 1 }, (_, i) => `f${i}`),
+      },
+      { kind: "folder.delete" },
+      { kind: "folder.delete", folderId: "f", sessionId: "s" },
       { kind: "draft.replace", text: "t", attachments: [{ name: "n" }] },
       { kind: "message.enqueue", messageId: "", text: "t", attachments: [] },
       { kind: "turn.steer", text: 1 },
@@ -1399,6 +1442,10 @@ describe("hostStateIntentCapability", () => {
     "session.folder": "workspace.write",
     "session.order": "workspace.write",
     "session.delete": "host.admin",
+    "folder.create": "workspace.write",
+    "folder.rename": "workspace.write",
+    "folder.reorder": "workspace.write",
+    "folder.delete": "workspace.write",
     "draft.replace": "workspace.write",
     "message.enqueue": "workspace.write",
     "turn.steer": "workspace.write",
@@ -1419,6 +1466,10 @@ describe("hostStateIntentCapability", () => {
     { kind: "session.folder", folderId: null },
     { kind: "session.order", manualOrder: 3, sectionKey: "recent" },
     { kind: "session.delete" },
+    { kind: "folder.create", folderId: "f1", projectId: "p1", name: "Work" },
+    { kind: "folder.rename", folderId: "f1", name: "Home" },
+    { kind: "folder.reorder", projectId: "p1", orderedIds: ["f1"] },
+    { kind: "folder.delete", folderId: "f1" },
     { kind: "draft.replace", text: "t", attachments: [] },
     { kind: "message.enqueue", messageId: "m", text: "t", attachments: [] },
     { kind: "turn.steer", text: "t" },
@@ -1469,6 +1520,10 @@ describe("hostStateIntentCapability", () => {
         "approval.respond",
         "draft.replace",
         "elicitation.respond",
+        "folder.create",
+        "folder.delete",
+        "folder.rename",
+        "folder.reorder",
         "message.enqueue",
         "session.archive",
         "session.folder",
@@ -1557,5 +1612,34 @@ describe("hostStateIntentCapability", () => {
         expect(typeof hostStateIntentRequiresLiveControl(kind)).toBe("boolean")
       }
     })
+  })
+})
+
+describe("hostStateIntentTargetsSessionIndex", () => {
+  it("sends exactly the folder intents to the session index", () => {
+    expect(HOST_STATE_INTENT_KINDS.filter(hostStateIntentTargetsSessionIndex)).toEqual([
+      "folder.create",
+      "folder.rename",
+      "folder.reorder",
+      "folder.delete",
+    ])
+  })
+
+  it("refuses a folder intent that names a session, and accepts it on the index", () => {
+    const create = { kind: "folder.create", folderId: "f1", projectId: "p1", name: "Work" } as const
+    expect(isHostStateAction(action(create))).toBe(false)
+    expect(isHostStateAction(action(create, { channel: INDEX, sessionId: undefined }))).toBe(true)
+  })
+
+  it("never tracks a folder intent as runtime work or live control", () => {
+    for (const kind of [
+      "folder.create",
+      "folder.rename",
+      "folder.reorder",
+      "folder.delete",
+    ] as const) {
+      expect(intentRequiresRuntimeDispatch(kind)).toBe(false)
+      expect(hostStateIntentRequiresLiveControl(kind)).toBe(false)
+    }
   })
 })

@@ -19,7 +19,6 @@ import {
 import {
   createFolder as createFolderDb,
   deleteFolder as deleteFolderDb,
-  listFolderMemberIds,
   listFolders,
   renameFolder as renameFolderDb,
   reorderFolders as reorderFoldersDb,
@@ -469,27 +468,15 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     if (legacyIds.length > 0) await bulkUnarchiveSessions(legacyIds)
   }, [])
 
-  // Folders themselves are device-local: `sessionFolders` is not a synced
-  // table, so creating, renaming and ordering them has no Host to forward to.
-  // What IS synced is a conversation's `folderId` on its `sessions` row — every
-  // write of that goes through the Host below.
+  // Folder writes route themselves (`lib/db/session-folders.ts`): on a paired
+  // client each becomes a `folder.*` HostState intent — a create also shows its
+  // row at once, under the id the Host adopts — and the Host's folders come
+  // back through `sessionFolders` table sync. A folder delete unfiles its
+  // members in the Host's own transaction, so nothing here routes them.
+  // Standalone, all four write locally.
   const createFolder = useCallback((name: string) => createFolderDb(name), [])
   const renameFolder = useCallback((id: string, name: string) => renameFolderDb(id, name), [])
-  const deleteFolder = useCallback(async (id: string) => {
-    // Deleting a folder unfiles its members, and each unfile is a `sessions`
-    // row write the Host owns on a paired client. Hand those over first, then
-    // drop the folder and unfile only the members no Host took.
-    const memberIds = await listFolderMemberIds(id)
-    const queued = await Promise.all(
-      memberIds.map((sessionId) =>
-        enqueueHostStateIntentIfAvailable({
-          sessionId,
-          action: { kind: "session.folder", folderId: null },
-        })
-      )
-    )
-    await deleteFolderDb(id, { leaveSessionIds: memberIds.filter((_, index) => queued[index]) })
-  }, [])
+  const deleteFolder = useCallback((id: string) => deleteFolderDb(id), [])
   const reorderFolders = useCallback((ids: string[]) => reorderFoldersDb(ids), [])
   const assignToFolder = useCallback(async (sessionId: string, folderId: string | null) => {
     const queued = await enqueueHostStateIntentIfAvailable({

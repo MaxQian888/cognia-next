@@ -29,6 +29,7 @@ import {
 import { setActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import {
   createEmptyHostStateSession,
+  sessionIndexChannel,
   sessionStateChannel,
 } from "@cognia/agent-config-types/host-state"
 
@@ -368,6 +369,59 @@ describe("mobile outbound queue target isolation", () => {
         action: { kind: "message.enqueue", messageId: "m1", text: "hello", attachments: [] },
       })
     ).resolves.toBeNull()
+    await expect(getDb().mobileOutboundQueue.count()).resolves.toBe(0)
+  })
+
+  it("addresses a folder intent to the session index, with no session id", async () => {
+    const indexChannel = sessionIndexChannel(scope.targetId)
+    await getDb().hostStateChannels.put({
+      channel: indexChannel,
+      hostId: "host-authority",
+      hostGeneration: 7,
+      hostSeq: 11,
+      revision: 4,
+      digest: "digest",
+      state: { kind: "session-index", channel: indexChannel, revision: 4, sessions: [] },
+      updatedAt: 100,
+    })
+    setRuntimeSnapshot({
+      target: { id: scope.targetId, kind: "companion", platform: "web", hostKind: "desktop" },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: { compatible: true, operations: ["host_state_submit"], grants: [] },
+    })
+
+    const row = await enqueueHostStateIntentIfAvailable({
+      actionId: "folder-create",
+      clientId: "client-a",
+      nowMs: 300,
+      action: { kind: "folder.create", folderId: "f1", projectId: "p1", name: "Work" },
+    })
+
+    expect(row?.channel).toBe(indexChannel)
+    const [action] = (row?.payload as { actions: Array<Record<string, unknown>> }).actions
+    expect(action).toMatchObject({ channel: indexChannel, hostId: "host-authority" })
+    expect(action).not.toHaveProperty("sessionId")
+    // Folder intents are last-writer-wins: no base revision rides along.
+    expect(action).not.toHaveProperty("baseRevision")
+  })
+
+  it("refuses to address a folder intent to a session, or a session intent to nothing", async () => {
+    setRuntimeSnapshot({
+      target: { id: scope.targetId, kind: "companion", platform: "web", hostKind: "desktop" },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: { compatible: true, operations: ["host_state_submit"], grants: [] },
+    })
+    await expect(
+      enqueueHostStateIntentIfAvailable({
+        sessionId: "s1",
+        action: { kind: "folder.delete", folderId: "f1" },
+      })
+    ).rejects.toThrow("host_state_index_intent_names_session")
+    await expect(
+      enqueueHostStateIntentIfAvailable({ action: { kind: "session.pin", pinned: true } })
+    ).rejects.toThrow("host_state_session_id_required")
     await expect(getDb().mobileOutboundQueue.count()).resolves.toBe(0)
   })
 

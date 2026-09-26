@@ -347,6 +347,13 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Run-to-conversation delivery bindings behind the Inbox delegation chips (cursored on updatedAt; controls travel back as run RPCs)".to_string(),
             has_tombstones: false,
         },
+        // Conversation folders: the sections the sidebar files conversations
+        // into. Writes travel back as `folder.*` HostState intents.
+        SyncTableDescriptor {
+            name: "sessionFolders".to_string(),
+            description: "Conversation folders (cursored on updatedAt; a deleted folder tombstones; writes travel back as folder.* HostState intents)".to_string(),
+            has_tombstones: true,
+        },
         // The Bot control plane. No `bot_*` read command exists, so sync is the
         // only way `/bots` renders anything at all on a paired device.
         SyncTableDescriptor {
@@ -400,6 +407,7 @@ mod tests {
         assert!(r.contains("connectorCallbackBindings"));
         assert!(r.contains("workflowDeployments"));
         assert!(r.contains("executionRunBindings"));
+        assert!(r.contains("sessionFolders"));
         assert!(r.contains("botDefinitions"));
         assert!(r.contains("botInstallations"));
         assert!(r.contains("botEventDeliveries"));

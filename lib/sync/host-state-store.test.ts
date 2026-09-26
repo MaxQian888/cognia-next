@@ -4,7 +4,12 @@ import "fake-indexeddb/auto"
 import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
-import { sessionStateChannel, type HostStateAction } from "@cognia/agent-config-types/host-state"
+import {
+  sessionIndexChannel,
+  sessionStateChannel,
+  type AllowedHostStateIntent,
+  type HostStateAction,
+} from "@cognia/agent-config-types/host-state"
 import { activateAccountDatabase, __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import {
@@ -594,6 +599,158 @@ describe("HostState durable store", () => {
     })
     await expect(getHostStateAction(1, "delete-1")).resolves.toMatchObject({
       summaryState: "pending",
+    })
+  })
+
+  describe("folder intents", () => {
+    const indexChannel = sessionIndexChannel(scope.targetId)
+    const folderAction = (
+      intent: AllowedHostStateIntent,
+      overrides: Partial<HostStateAction> = {}
+    ): HostStateAction =>
+      draftAction({
+        channel: indexChannel,
+        sessionId: undefined,
+        baseRevision: undefined,
+        action: intent,
+        ...overrides,
+      })
+
+    it("creates, renames, reorders and deletes on the index channel with no mutation", async () => {
+      await acquireWritableLease()
+      const created = await commitHostStateAction({
+        action: folderAction({
+          kind: "folder.create",
+          folderId: "f1",
+          projectId: "p1",
+          name: " Work ",
+        }),
+        now: 10,
+      })
+      await commitHostStateAction({
+        action: folderAction(
+          { kind: "folder.create", folderId: "f2", projectId: "p1", name: "Home" },
+          { actionId: "a2", clientSeq: 2 }
+        ),
+        now: 11,
+      })
+      await commitHostStateAction({
+        action: folderAction(
+          { kind: "folder.rename", folderId: "f1", name: "Office" },
+          { actionId: "a3", clientSeq: 3 }
+        ),
+        now: 12,
+      })
+      await commitHostStateAction({
+        action: folderAction(
+          { kind: "folder.reorder", projectId: "p1", orderedIds: ["f2", "f1"] },
+          { actionId: "a4", clientSeq: 4 }
+        ),
+        now: 13,
+      })
+
+      expect(created.event).toMatchObject({ channel: indexChannel, outcome: "applied" })
+      expect(created.event.mutation).toBeUndefined()
+      // The index summary is not re-projected for a folder: nothing it carries moved.
+      await expect(getHostStateAction(1, "action-1")).resolves.toMatchObject({
+        summaryState: "not-required",
+      })
+      expect(await getDb().sessionFolders.get("f1")).toMatchObject({
+        name: "Office",
+        projectId: "p1",
+        order: 1,
+        updatedAt: 13,
+      })
+      expect(await getDb().sessionFolders.get("f2")).toMatchObject({ order: 0 })
+
+      await getDb().sessions.update("session-1", { folderId: "f1" })
+      await commitHostStateAction({
+        action: folderAction(
+          { kind: "folder.delete", folderId: "f1" },
+          { actionId: "a5", clientSeq: 5 }
+        ),
+        now: 20,
+      })
+      expect(await getDb().sessionFolders.get("f1")).toBeUndefined()
+      const member = await getDb().sessions.get("session-1")
+      expect(member).not.toHaveProperty("folderId")
+      // Unfiled as a sync-visible write, without moving the row.
+      expect(member).toMatchObject({ updatedAt: 20, lastMessageAt: 1 })
+      expect(
+        await getDb()
+          .syncTombstones.filter((row) => row.table === "sessionFolders")
+          .toArray()
+      ).toEqual([expect.objectContaining({ id: "f1", deletedAt: 20 })])
+    })
+
+    it("validates what each folder intent needs, and refuses one that names a session", async () => {
+      await getDb().sessionFolders.put({
+        id: "f1",
+        projectId: "p1",
+        name: "Work",
+        order: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await expect(
+        validateHostStateBusinessAction(
+          folderAction({ kind: "folder.create", folderId: "f1", projectId: "p1", name: "Again" })
+        )
+      ).resolves.toMatchObject({ code: "host_state_folder_exists" })
+      await expect(
+        validateHostStateBusinessAction(
+          folderAction({ kind: "folder.rename", folderId: "gone", name: "x" })
+        )
+      ).resolves.toMatchObject({ code: "host_state_folder_not_found" })
+      await expect(
+        validateHostStateBusinessAction(folderAction({ kind: "folder.delete", folderId: "gone" }))
+      ).resolves.toMatchObject({ code: "host_state_folder_not_found" })
+      await expect(
+        validateHostStateBusinessAction(
+          folderAction({ kind: "folder.reorder", projectId: "p1", orderedIds: ["unknown"] })
+        )
+      ).resolves.toBeUndefined()
+      await expect(
+        validateHostStateBusinessAction(
+          folderAction(
+            { kind: "folder.rename", folderId: "f1", name: "x" },
+            { sessionId: "session-1" }
+          )
+        )
+      ).resolves.toMatchObject({ code: "host_state_session_id_forbidden" })
+
+      // A member frozen for a handoff refuses the unfile, so the delete is refused.
+      await getDb().sessions.update("session-1", {
+        folderId: "f1",
+        handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+      })
+      await expect(
+        validateHostStateBusinessAction(folderAction({ kind: "folder.delete", folderId: "f1" }))
+      ).resolves.toMatchObject({ code: "session_handoff_locked" })
+    })
+
+    it("rolls the ledger back when a member is locked between validation and commit", async () => {
+      await acquireWritableLease()
+      await getDb().sessionFolders.put({
+        id: "f1",
+        projectId: "p1",
+        name: "Work",
+        order: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await getDb().sessions.update("session-1", {
+        folderId: "f1",
+        handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+      })
+      await expect(
+        commitHostStateAction({
+          action: folderAction({ kind: "folder.delete", folderId: "f1" }),
+          now: 5,
+        })
+      ).rejects.toBeInstanceOf(SessionHandoffLockedError)
+      await expect(getDb().hostStateActions.count()).resolves.toBe(0)
+      expect(await getDb().sessionFolders.get("f1")).toBeDefined()
     })
   })
 

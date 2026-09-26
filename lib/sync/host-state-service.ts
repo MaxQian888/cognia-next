@@ -1705,6 +1705,13 @@ function mutationForAction(
     case "session.folder":
     case "session.order":
       return {}
+    // Folder intents address the session index, which returns above before
+    // this switch; listed so a new intent cannot fall through unpriced.
+    case "folder.create":
+    case "folder.rename":
+    case "folder.reorder":
+    case "folder.delete":
+      return {}
     case "session.delete":
       return {
         mutation: {

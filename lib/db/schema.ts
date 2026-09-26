@@ -417,7 +417,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 229
+export const CURRENT_SCHEMA_VERSION = 230
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -445,8 +445,11 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   storageLayout: "id",
   // v225 — encrypted, device-local shared execution recovery; never exported.
   sharedRunJournals: "&id",
+  // v230 — `folderId` indexed: folder membership (`listFolderMemberIds`, the
+  // unfile cascade of a folder delete) is read through it instead of a scan of
+  // every session.
   sessions:
-    "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt], [projectId+createdAt+id], surfaceBindingKey, squadId",
+    "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt], [projectId+createdAt+id], surfaceBindingKey, squadId, folderId",
   messages:
     "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id], projectId, [projectId+createdAt], turnKey, [sessionId+turnKey], [syncRevision+id]",
   messageSyncClock: "id",

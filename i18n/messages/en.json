@@ -20661,6 +20661,7 @@
           "platformIdentities": "Contacts",
           "plugins": "Plugins",
           "projects": "Projects",
+          "sessionFolders": "Conversation folders",
           "sessionState": "Session state",
           "sessions": "Sessions",
           "settings": "App settings",

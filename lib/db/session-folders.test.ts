@@ -3,10 +3,15 @@ import Dexie from "dexie"
 import {
   createFolder,
   deleteFolder,
+  discardLocalFolder,
   listFolderMemberIds,
   listFolders,
   renameFolder,
   reorderFolders,
+  writeFolderCreate,
+  writeFolderDelete,
+  writeFolderRename,
+  writeFolderReorder,
 } from "./session-folders"
 import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import { createSession, getSession, assignSessionToFolder } from "./sessions"
@@ -21,12 +26,21 @@ jest.mock("@/lib/scheduler/task-scheduler", () => ({
   getTaskScheduler: () => schedulerMock,
 }))
 
+// Folder writes ask the outbound queue whether a Host takes them. `null` is
+// "no Host" (standalone), which is what every test sees unless it says so.
+const enqueueHostStateIntentMock = jest.fn(async (..._args: unknown[]) => null as unknown)
+jest.mock("./mobile-outbound-queue", () => ({
+  ...jest.requireActual("./mobile-outbound-queue"),
+  enqueueHostStateIntentIfAvailable: (...args: unknown[]) => enqueueHostStateIntentMock(...args),
+}))
+
 const dbFixture = createDbTestFixture()
 
 beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   await dbFixture.restore()
   await saveSettings({ activeProjectId: "proj-A" })
+  enqueueHostStateIntentMock.mockReset().mockResolvedValue(null)
 })
 afterAll(dbFixture.dispose)
 
@@ -180,22 +194,133 @@ describe("folder membership", () => {
     expect((await getSession(locked.id))?.folderId).toBe(folder.id)
   })
 
-  it("leaves members whose unfile was handed to the Host to the Host", async () => {
-    const folder = await createFolder("Shared")
-    const local = await createSession({ title: "local" })
-    const hostOwned = await createSession({ title: "host-owned" })
-    await assignSessionToFolder(local.id, folder.id)
-    await assignSessionToFolder(hostOwned.id, folder.id)
-    // Even a lock on a row the Host is writing does not block the local delete:
-    // the Host applies its own gate to its own row.
-    await getDb().sessions.update(hostOwned.id, {
-      handoffLock: { ticketId: "ticket-2", state: "frozen", at: 1 },
+  it("unfiles members through the folderId index, stamped so they sync in place", async () => {
+    const folder = await createFolder("Indexed")
+    const member = await createSession({ title: "member" })
+    await assignSessionToFolder(member.id, folder.id)
+    const before = (await getSession(member.id))!
+
+    await writeFolderDelete(folder.id, before.updatedAt + 1_000)
+
+    const after = (await getSession(member.id))!
+    expect(after).not.toHaveProperty("folderId")
+    // The unfile is a sync-visible write that does not move the row.
+    expect(after.updatedAt).toBe(before.updatedAt + 1_000)
+    expect(after.lastMessageAt ?? after.updatedAt).toBe(before.lastMessageAt ?? before.updatedAt)
+    expect(await listFolderMemberIds(folder.id)).toEqual([])
+  })
+
+  it("tombstones a deleted folder so a paired device drops it, and ignores a second delete", async () => {
+    const folder = await createFolder("Doomed")
+    await writeFolderDelete(folder.id, 500)
+    await writeFolderDelete(folder.id, 600)
+    const tombstones = await getDb()
+      .syncTombstones.filter((row) => row.table === "sessionFolders")
+      .toArray()
+    expect(tombstones).toEqual([
+      expect.objectContaining({ table: "sessionFolders", id: folder.id, deletedAt: 500 }),
+    ])
+  })
+})
+
+describe("folder writes on a paired client", () => {
+  function queued() {
+    enqueueHostStateIntentMock.mockImplementation(async () => ({ id: "queued" }))
+  }
+
+  it("creates the folder optimistically under the id it hands the Host", async () => {
+    queued()
+    const folder = await createFolder("  Shared  ")
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      action: { kind: "folder.create", folderId: folder.id, projectId: "proj-A", name: "Shared" },
     })
+    // The row is visible now, so a conversation can be filed into it at once.
+    expect(await getDb().sessionFolders.get(folder.id)).toMatchObject({ name: "Shared" })
+  })
 
-    await deleteFolder(folder.id, { leaveSessionIds: [hostOwned.id] })
+  it("drops the optimistic row when the outbox refuses the create", async () => {
+    enqueueHostStateIntentMock.mockRejectedValueOnce(new Error("host_state_outbox_full"))
+    await expect(createFolder("Lost")).rejects.toThrow("host_state_outbox_full")
+    expect(await listFolders("proj-A")).toEqual([])
+  })
 
-    expect(await getDb().sessionFolders.get(folder.id)).toBeUndefined()
-    expect(await getSession(local.id)).not.toHaveProperty("folderId")
-    expect((await getSession(hostOwned.id))?.folderId).toBe(folder.id)
+  it("hands rename, reorder and delete to the Host without writing locally", async () => {
+    const a = await createFolder("A")
+    const b = await createFolder("B")
+    const member = await createSession({ title: "member" })
+    await assignSessionToFolder(member.id, a.id)
+    enqueueHostStateIntentMock.mockClear()
+    queued()
+
+    await renameFolder(a.id, "  Renamed  ")
+    await reorderFolders([b.id, a.id, b.id])
+    await deleteFolder(a.id)
+
+    expect(enqueueHostStateIntentMock.mock.calls.map(([input]) => input)).toEqual([
+      { action: { kind: "folder.rename", folderId: a.id, name: "Renamed" } },
+      { action: { kind: "folder.reorder", projectId: "proj-A", orderedIds: [b.id, a.id] } },
+      { action: { kind: "folder.delete", folderId: a.id } },
+    ])
+    // The Host's rows come back through `sessionFolders` table sync.
+    expect(await getDb().sessionFolders.get(a.id)).toMatchObject({ name: "A", order: 0 })
+    expect((await getSession(member.id))?.folderId).toBe(a.id)
+  })
+
+  it("writes locally when no Host takes the write", async () => {
+    const a = await createFolder("A")
+    await renameFolder(a.id, "Local")
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      action: { kind: "folder.rename", folderId: a.id, name: "Local" },
+    })
+    expect((await getDb().sessionFolders.get(a.id))?.name).toBe("Local")
+  })
+})
+
+describe("raw folder repository", () => {
+  it("creates under an explicit id and workspace, appended after the existing folders", async () => {
+    await createFolder("First")
+    const created = await writeFolderCreate({
+      id: "f-host",
+      projectId: "proj-A",
+      name: " Two ",
+      now: 7,
+    })
+    expect(created).toEqual({
+      id: "f-host",
+      projectId: "proj-A",
+      name: "Two",
+      order: 1,
+      createdAt: 7,
+      updatedAt: 7,
+    })
+  })
+
+  it("reports a rename of a folder that is not there", async () => {
+    await expect(writeFolderRename("missing", "x", 1)).resolves.toBe(false)
+  })
+
+  it("rewrites only the folders whose position moved", async () => {
+    const a = await writeFolderCreate({ id: "a", projectId: "proj-A", name: "a", now: 1 })
+    const b = await writeFolderCreate({ id: "b", projectId: "proj-A", name: "b", now: 1 })
+    const c = await writeFolderCreate({ id: "c", projectId: "proj-A", name: "c", now: 1 })
+    await writeFolderReorder("proj-A", [b.id, a.id], 50)
+    const rows = await listFolders("proj-A")
+    expect(rows.map((row) => [row.id, row.order, row.updatedAt])).toEqual([
+      ["b", 0, 50],
+      ["a", 1, 50],
+      ["c", 2, 1],
+    ])
+    expect(c.order).toBe(2)
+  })
+
+  it("discards a local-only folder without a tombstone", async () => {
+    await writeFolderCreate({ id: "ghost", projectId: "proj-A", name: "ghost", now: 1 })
+    await discardLocalFolder("ghost")
+    expect(await getDb().sessionFolders.get("ghost")).toBeUndefined()
+    expect(
+      await getDb()
+        .syncTombstones.filter((row) => row.id === "ghost")
+        .count()
+    ).toBe(0)
   })
 })

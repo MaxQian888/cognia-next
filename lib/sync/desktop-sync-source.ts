@@ -22,6 +22,7 @@ import type {
   ChatSession,
   Character,
   McpServerSummary,
+  SessionFolder,
 } from "@cognia/agent-config-types"
 import { CROSS_PLATFORM_SETTING_KEYS } from "@cognia/agent-config-types/settings-sync"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
@@ -267,6 +268,8 @@ export async function readDexieDelta(
       return readWorkflowDeploymentsDelta(since)
     case "executionRunBindings":
       return readExecutionRunBindingsDelta(since)
+    case "sessionFolders":
+      return readSessionFoldersDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -1111,6 +1114,17 @@ async function readConnectorCallbackBindingsDelta(
     )
     .toArray()
   return finalizeDelta("connectorCallbackBindings", rows, since, false, bindingActivityAt)
+}
+
+/**
+ * Conversation folders. Every writer in `lib/db/session-folders.ts` stamps the
+ * indexed `updatedAt` (create, rename, a reorder's moved rows), and a delete
+ * leaves a `sessionFolders` tombstone, so this is a plain range read plus the
+ * tombstones `finalizeDelta` folds in.
+ */
+async function readSessionFoldersDelta(since: number): Promise<SyncDelta<SessionFolder>> {
+  const rows = await getDb().sessionFolders.where("updatedAt").above(since).toArray()
+  return finalizeDelta("sessionFolders", rows, since)
 }
 
 /**

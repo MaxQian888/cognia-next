@@ -43,6 +43,7 @@ import { syncCharacters } from "./handlers/characters"
 import { syncChatTemplates } from "./handlers/chat-templates"
 import { syncConversationOverrides } from "./handlers/conversation-overrides"
 import { syncSessionState } from "./handlers/session-state"
+import { syncSessionFolders } from "./handlers/session-folders"
 import { syncExecutionRuns } from "./handlers/execution-runs"
 import { syncGoals } from "./handlers/goals"
 import { syncPlans } from "./handlers/plans"
@@ -167,6 +168,9 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // Unread pointers are first-screen: the tab bar draws its badge before any
   // conversation is opened, and a wrong zero there is the whole bug.
   { table: "sessionState", stage: "critical", run: syncSessionState },
+  // Folders are sections of the same first-screen list: a conversation filed
+  // into a folder that has not arrived renders loose, then jumps.
+  { table: "sessionFolders", stage: "critical", run: syncSessionFolders },
 
   // ── interactive ───────────────────────────────────────────────────────
   // The transcript tail. Paged, and the largest payload in the pipeline —
@@ -424,6 +428,9 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   // Deletion rides the `sessions` tombstone rather than one of its own, so an
   // orphan row is possible and harmless, see readSessionStateDelta.
   sessionState: syncDomain("append-only", "internal"),
+  // `internal`: a name, an order and a workspace id. A deleted folder leaves a
+  // tombstone so the phone drops the section too.
+  sessionFolders: syncDomain("tombstone", "internal"),
   // Heartbeats are appended on `at`, pruned by the host after 48 h without
   // tombstones and aged out client-side on the same window.
   connectorHeartbeats: syncDomain("ttl", "internal", "opaque"),

@@ -19,6 +19,7 @@ import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import { assertSessionWritable, type SessionWriteOperation } from "@/lib/chat/session-write-guard"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { stampOrganizationalWrite } from "./session-row-stamps"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -658,30 +659,13 @@ export async function bulkUnarchiveSessions(ids: readonly string[]): Promise<voi
 }
 
 /**
- * Stamp an organizational write (folder, rank) so it syncs without moving the
- * row in the recency order.
- *
- * `updatedAt` is the `sessions` sync cursor (`readSessionsDelta` pulls rows
- * whose `updatedAt` passed the client's watermark), so a write that leaves it
- * alone never reaches a paired device. But the conversation list sorts by
- * `lastMessageAt ?? updatedAt` (`conversation-list-model.ts:activityAt`), so a
- * bare bump would float a message-less row to the top. Pinning the row's
- * current display recency into `lastMessageAt` first — the same move
- * `bulkSetSessionsPinned` makes, and the Host applier in
- * `lib/sync/host-state-store.ts` mirrors — keeps the order exactly where it was.
- */
-function stampOrganizationalWrite(session: ChatSession, now: number): void {
-  session.lastMessageAt ??= session.updatedAt
-  session.updatedAt = now
-}
-
-/**
  * Move a session into a folder, or back to loose (`folderId = null`).
  *
  * Folder membership is organizational: the row keeps its place in the recency
  * order (see {@link stampOrganizationalWrite}) while `updatedAt` moves so the
  * change syncs. Re-filing a row into the folder it is already in writes
- * nothing. `folderId` is non-indexed; clearing it deletes the property (an
+ * nothing. Clearing `folderId` deletes the property — which also drops the
+ * row from the `folderId` index — rather than writing `undefined` (an
  * `update()` with `undefined` would leave it intact — see
  * {@link clearSessionSdkLink}). The handoff gate and the write share one
  * transaction, which joins the caller's when there is one.

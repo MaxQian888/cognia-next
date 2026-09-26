@@ -45621,7 +45621,8 @@
               "executionRunBindings",
               "botDefinitions",
               "botInstallations",
-              "botEventDeliveries"
+              "botEventDeliveries",
+              "sessionFolders"
             ],
             "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
           },
@@ -64463,5 +64464,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "86bdf7305e914af999d600fc7fc2a7bb578f7cd0ca6d8f19fe49d519e6eab24a"
+  "catalogHash": "fa6e58fc8577ddcb5a2f8d178156c77ef0b769077ba69b9353f39599381885d0"
 }

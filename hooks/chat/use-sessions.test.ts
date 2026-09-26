@@ -51,13 +51,11 @@ const listFoldersMock = jest.fn()
 const createFolderDbMock = jest.fn()
 const renameFolderDbMock = jest.fn()
 const deleteFolderDbMock = jest.fn()
-const listFolderMemberIdsMock = jest.fn()
 jest.mock("@/lib/db/session-folders", () => ({
   listFolders: (projectId?: string) => listFoldersMock(projectId),
   createFolder: (name: string) => createFolderDbMock(name),
   renameFolder: (id: string, name: string) => renameFolderDbMock(id, name),
-  deleteFolder: (id: string, opts?: unknown) => deleteFolderDbMock(id, opts),
-  listFolderMemberIds: (id: string) => listFolderMemberIdsMock(id),
+  deleteFolder: (id: string) => deleteFolderDbMock(id),
 }))
 
 const resolveCharacterByIdMock = jest.fn()
@@ -191,7 +189,6 @@ beforeEach(() => {
   bulkSetSessionsPinnedMock.mockReset().mockResolvedValue(undefined)
   assignSessionToFolderMock.mockReset().mockResolvedValue(undefined)
   setSessionRanksMock.mockReset().mockResolvedValue(undefined)
-  listFolderMemberIdsMock.mockReset().mockResolvedValue([])
   listFoldersMock.mockReset().mockResolvedValue([])
   createFolderDbMock.mockReset().mockResolvedValue({ id: "f-new" })
   renameFolderDbMock.mockReset().mockResolvedValue(undefined)
@@ -929,20 +926,15 @@ describe("useSessions", () => {
     expect(assignSessionToFolderMock).not.toHaveBeenCalled()
   })
 
-  it("hands a folder's unfiles to the Host before deleting the folder", async () => {
-    listFolderMemberIdsMock.mockResolvedValue(["s1", "s2"])
-    enqueueHostStateIntentMock.mockImplementation(async ({ sessionId }: { sessionId: string }) =>
-      sessionId === "s1" ? { id: "q-s1" } : null
-    )
+  it("leaves a folder delete's routing, member unfiles included, to the folder repository", async () => {
+    // The Host unfiles members inside its own folder.delete, so the hook no
+    // longer forwards per-member intents of its own.
     const { result } = renderHook(() => useSessions())
     await act(async () => {
       await result.current.deleteFolder("f1")
     })
-    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
-      sessionId: "s1",
-      action: { kind: "session.folder", folderId: null },
-    })
-    expect(deleteFolderDbMock).toHaveBeenCalledWith("f1", { leaveSessionIds: ["s1"] })
+    expect(deleteFolderDbMock).toHaveBeenCalledWith("f1")
+    expect(enqueueHostStateIntentMock).not.toHaveBeenCalled()
   })
 
   it("forwards a reorder with each row's rank in the full arrangement", async () => {
@@ -1120,7 +1112,7 @@ describe("useSessions", () => {
     })
     expect(createFolderDbMock).toHaveBeenCalledWith("Work")
     expect(renameFolderDbMock).toHaveBeenCalledWith("f1", "Renamed")
-    expect(deleteFolderDbMock).toHaveBeenCalledWith("f1", { leaveSessionIds: [] })
+    expect(deleteFolderDbMock).toHaveBeenCalledWith("f1")
     expect(assignSessionToFolderMock).toHaveBeenCalledWith("s1", "f1")
     expect(assignSessionToFolderMock).toHaveBeenCalledWith("s1", null)
   })

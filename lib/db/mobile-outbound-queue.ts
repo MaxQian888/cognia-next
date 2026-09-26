@@ -7,7 +7,9 @@
 import { nanoid } from "nanoid"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import {
+  hostStateIntentTargetsSessionIndex,
   isHostStateAction,
+  sessionIndexChannel,
   sessionStateChannel,
   type AllowedHostStateIntent,
   type HostStateActionOutcome,
@@ -66,7 +68,13 @@ export const MAX_PENDING_HOST_STATE_ACTIONS = 1000
 export const HOST_STATE_CLIENT_ID_STORAGE_KEY = "cognia-host-state-client-id"
 
 export interface EnqueueHostStateIntentInput {
-  sessionId: string
+  /**
+   * The conversation the intent names. Required for every session intent and
+   * forbidden for the folder intents, which address the session index (see
+   * `hostStateIntentTargetsSessionIndex`); a mismatch throws rather than
+   * queueing an action the Host would refuse.
+   */
+  sessionId?: string
   action: AllowedHostStateIntent
   /** Required only for revision-checked intents; defaults to the confirmed channel revision. */
   baseRevision?: number
@@ -98,7 +106,14 @@ export async function enqueueHostStateIntentIfAvailable(
     accountId: local.accountId,
     targetId: local.targetId,
   }
-  const channel = sessionStateChannel(scope.targetId, input.sessionId)
+  const targetsIndex = hostStateIntentTargetsSessionIndex(input.action.kind)
+  if (targetsIndex && input.sessionId !== undefined) {
+    throw new Error("host_state_index_intent_names_session")
+  }
+  if (!targetsIndex && !input.sessionId) throw new Error("host_state_session_id_required")
+  const channel = targetsIndex
+    ? sessionIndexChannel(scope.targetId)
+    : sessionStateChannel(scope.targetId, input.sessionId!)
   const db = getDb()
   const preferredClientId = input.clientId ?? loadOrCreateHostStateClientId()
   const now = input.nowMs ?? Date.now()
@@ -137,7 +152,7 @@ export async function enqueueHostStateIntentIfAvailable(
       runtimeTargetId: scope.targetId,
       hostId: confirmed.hostId,
       hostGeneration: confirmed.hostGeneration,
-      sessionId: input.sessionId,
+      ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
       clientId,
       clientSeq,
       actionId,

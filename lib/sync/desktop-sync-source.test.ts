@@ -73,6 +73,7 @@ describe("readDexieDelta", () => {
     await db.connectorCallbackBindings.clear()
     await db.workflowDeployments.clear()
     await db.executionRunBindings.clear()
+    await db.sessionFolders.clear()
     ;(tauriListen as jest.Mock).mockReset()
     ;(tauriInvoke as jest.Mock).mockReset()
   })
@@ -1084,6 +1085,23 @@ describe("readDexieDelta", () => {
       const delta = await readDexieDelta("workflowDeployments", 5)
       expect(delta.rows.map((r) => (r as { id: string }).id)).toEqual(["d-new"])
       expect(delta.next_since).toBe(15)
+    })
+
+    it("reads sessionFolders past the cursor and folds in their tombstones", async () => {
+      const row = (id: string, updatedAt: number) => ({
+        id,
+        projectId: "p1",
+        name: id,
+        order: 0,
+        createdAt: 1,
+        updatedAt,
+      })
+      await getDb().sessionFolders.bulkPut([row("f-old", 5), row("f-new", 15)])
+      await getDb().syncTombstones.put({ table: "sessionFolders", id: "f-gone", deletedAt: 20 })
+      const delta = await readDexieDelta("sessionFolders", 5)
+      expect(delta.rows.map((r) => (r as { id: string }).id)).toEqual(["f-new"])
+      expect(delta.deleted_ids).toEqual(["f-gone"])
+      expect(delta.next_since).toBe(20)
     })
 
     it("reads executionRunBindings past the cursor on updatedAt", async () => {

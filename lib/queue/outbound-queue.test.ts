@@ -30,6 +30,11 @@ jest.mock("@/lib/capacitor/_shared", () => ({
   detectNativePlatform: () => "mobile",
 }))
 
+const settleRejectedHostStateIntentMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/sync/host-state-intent-settlement", () => ({
+  settleRejectedHostStateIntent: (...args: unknown[]) => settleRejectedHostStateIntentMock(...args),
+}))
+
 describe("createOutboundRunner", () => {
   beforeEach(async () => {
     setActiveRuntimeTargetContext(scope.accountId, scope.targetId)
@@ -286,6 +291,78 @@ describe("createOutboundRunner", () => {
     ])
     expect(call).toHaveBeenCalledTimes(1)
     await runner.stop()
+  })
+
+  describe("refused list intents", () => {
+    const folderAction = (actionId: string) => ({
+      channel: "cognia://target/desktop-studio/sessions",
+      accountId: scope.accountId,
+      runtimeTargetId: scope.targetId,
+      hostId: scope.targetId,
+      hostGeneration: 1,
+      clientId: "client-a",
+      clientSeq: 1,
+      actionId,
+      createdAt: Date.now(),
+      action: { kind: "folder.create" as const, folderId: "f1", projectId: "p1", name: "Work" },
+    })
+
+    beforeEach(() => settleRejectedHostStateIntentMock.mockClear())
+
+    it("settles an intent a Host too old to know it refused, without retrying", async () => {
+      const call = jest.fn().mockRejectedValue(new Error("host_state_invalid_submit_request"))
+      const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+      await enqueueHostStateAction(folderAction("old-host"))
+
+      await runner.kick()
+
+      expect(await listByStatus("rejected")).toEqual([
+        expect.objectContaining({
+          actionId: "old-host",
+          rejectionCode: "host_state_invalid_submit_request",
+        }),
+      ])
+      expect(call).toHaveBeenCalledTimes(1)
+      expect(settleRejectedHostStateIntentMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actionId: "old-host",
+          action: expect.objectContaining({ kind: "folder.create" }),
+        }),
+        "host_state_invalid_submit_request"
+      )
+      await runner.stop()
+    })
+
+    it("settles a receipt the Host refused, and leaves an applied one alone", async () => {
+      const call = jest
+        .fn()
+        .mockResolvedValueOnce({
+          results: [
+            {
+              actionId: "refused",
+              outcome: "rejected",
+              hostGeneration: 1,
+              hostSeq: 1,
+              rejection: { code: "host_state_forbidden", message: "no" },
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          results: [{ actionId: "applied", outcome: "applied", hostGeneration: 1, hostSeq: 2 }],
+        })
+      const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+      await enqueueHostStateAction(folderAction("refused"))
+      await enqueueHostStateAction({ ...folderAction("applied"), clientSeq: 2 })
+
+      await runner.kick()
+
+      expect(settleRejectedHostStateIntentMock).toHaveBeenCalledTimes(1)
+      expect(settleRejectedHostStateIntentMock).toHaveBeenCalledWith(
+        expect.objectContaining({ actionId: "refused" }),
+        "host_state_forbidden"
+      )
+      await runner.stop()
+    })
   })
 
   it("schedules retry on retryable failure", async () => {

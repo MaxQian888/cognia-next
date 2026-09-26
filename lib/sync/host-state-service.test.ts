@@ -903,6 +903,86 @@ describe("HostStateService", () => {
       for (const event of broadcast) expect(event.mutation).toBeUndefined()
     })
 
+    it("applies folder intents from Remote Control on the session index", async () => {
+      const { service, publish } = listService()
+      await service.start({ now: 0, heartbeat: false })
+      const indexChannel = sessionIndexChannel(scope.runtimeTargetId)
+      const onIndex = { channel: indexChannel, sessionId: undefined, baseRevision: undefined }
+
+      const response = await service.submit(
+        {
+          ...scope,
+          actions: [
+            action(
+              { kind: "folder.create", folderId: "f1", projectId: "project-1", name: "Work" },
+              { ...onIndex, actionId: "create", clientSeq: 1 }
+            ),
+            action(
+              { kind: "folder.rename", folderId: "f1", name: "Office" },
+              { ...onIndex, actionId: "rename", clientSeq: 2 }
+            ),
+            // A second create under the same id is a collision, not a retry.
+            action(
+              { kind: "folder.create", folderId: "f1", projectId: "project-1", name: "Dup" },
+              { ...onIndex, actionId: "dup", clientSeq: 3 }
+            ),
+          ],
+        },
+        controller
+      )
+
+      expect(response.results.map((result) => [result.actionId, result.outcome])).toEqual([
+        ["create", "applied"],
+        ["rename", "applied"],
+        ["dup", "rejected"],
+      ])
+      expect(response.results[2]).toMatchObject({
+        rejection: expect.objectContaining({ code: "host_state_folder_exists" }),
+      })
+      expect(await getDb().sessionFolders.get("f1")).toMatchObject({
+        name: "Office",
+        projectId: "project-1",
+      })
+      const broadcast = publish.mock.calls.map(([, event]) => event)
+      expect(broadcast.every((event) => event.channel === indexChannel)).toBe(true)
+      expect(broadcast.every((event) => event.mutation === undefined)).toBe(true)
+    })
+
+    it("deletes a folder and unfiles its members in the Host's transaction", async () => {
+      await getDb().sessionFolders.put({
+        id: "f1",
+        projectId: "project-1",
+        name: "Work",
+        order: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await getDb().sessions.update("session-1", { folderId: "f1" })
+      const { service } = listService()
+      await service.start({ now: 0, heartbeat: false })
+
+      const response = await service.submit(
+        {
+          ...scope,
+          actions: [
+            action(
+              { kind: "folder.delete", folderId: "f1" },
+              {
+                channel: sessionIndexChannel(scope.runtimeTargetId),
+                sessionId: undefined,
+                baseRevision: undefined,
+              }
+            ),
+          ],
+        },
+        controller
+      )
+
+      expect(response.results).toEqual([expect.objectContaining({ outcome: "applied" })])
+      expect(await getDb().sessionFolders.get("f1")).toBeUndefined()
+      expect(await getDb().sessions.get("session-1")).not.toHaveProperty("folderId")
+    })
+
     it("refuses to rename or archive a conversation frozen for a handoff", async () => {
       await getDb().sessions.update("session-1", {
         handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },

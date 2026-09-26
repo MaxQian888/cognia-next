@@ -91,8 +91,11 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 47 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(47)
+  it("maps all 48 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(48)
+    // Conversation folders, so a paired device files its list into the Host's
+    // sections. Writes travel back as `folder.*` HostState intents.
+    expect(policyForTable("sessionFolders")?.syncPolicy.mode).toBe("companion-readonly")
     // Saved chat templates. The mobile composer's `/` menu reads the local
     // Dexie, so before this the phone offered nothing there.
     expect(COMPANION_SYNC_TABLES.has("chatTemplates")).toBe(true)

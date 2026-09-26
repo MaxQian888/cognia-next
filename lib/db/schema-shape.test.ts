@@ -92,7 +92,9 @@ it("preserves the compound indexes hot paths depend on", () => {
   const indexesOf = (name: string) => db.table(name).schema.indexes.map((index) => index.name)
 
   expect(indexesOf("messages")).toEqual(expect.arrayContaining(["[sessionId+createdAt]"]))
-  expect(indexesOf("sessions")).toEqual(expect.arrayContaining(["[projectId+updatedAt]"]))
+  expect(indexesOf("sessions")).toEqual(
+    expect.arrayContaining(["[projectId+updatedAt]", "folderId"])
+  )
   expect(indexesOf("mobileOutboundQueue")).toEqual(
     expect.arrayContaining(["[status+nextAttemptAt]"])
   )

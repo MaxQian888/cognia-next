@@ -3,6 +3,7 @@ import { canonicalTurnToHandoffMessage } from "@/lib/chat/import-handoff-session
 import {
   canonicalHostStateJson,
   createEmptyHostStateSession,
+  hostStateIntentTargetsSessionIndex,
   hostStateDigest,
   isHostStateAction,
   isHostStateMutation,
@@ -26,6 +27,14 @@ import {
 import { isPlaceholderTitle } from "@/lib/ai/generation/run-title-task"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
+import { stampOrganizationalWrite } from "@/lib/db/session-row-stamps"
+import {
+  folderWriteTables,
+  writeFolderCreate,
+  writeFolderDelete,
+  writeFolderRename,
+  writeFolderReorder,
+} from "@/lib/db/session-folders"
 import {
   assertSessionWritable,
   SessionHandoffLockedError,
@@ -87,6 +96,7 @@ export type HostStateStoreErrorCode =
   | "host_state_lease_expired"
   | "host_state_session_not_found"
   | "host_state_message_not_found"
+  | "host_state_folder_not_found"
   | "stale_host_generation"
 
 export class HostStateStoreError extends Error {
@@ -298,6 +308,9 @@ export async function commitHostStateAction(
       db.messageMediaRefs,
       db.agentCanonicalSessions,
       db.threadHandoffTickets,
+      // The folder intents write `sessionFolders`, unfile member sessions and
+      // tombstone a deleted folder, all inside this ledger transaction.
+      ...folderWriteTables(db),
     ],
     async () => {
       const meta = await db.hostStateMeta.get(HOST_STATE_META_ID)
@@ -509,6 +522,9 @@ export async function getHostStateAction(
 export async function validateHostStateBusinessAction(
   action: HostStateAction
 ): Promise<{ code: string; message: string } | undefined> {
+  if (hostStateIntentTargetsSessionIndex(action.action.kind)) {
+    return validateFolderAction(action)
+  }
   if (!action.sessionId) {
     return { code: "host_state_session_id_required", message: "The action requires a session id." }
   }
@@ -560,6 +576,66 @@ export async function validateHostStateBusinessAction(
       : undefined
   }
   return undefined
+}
+
+/**
+ * Preconditions of the folder intents, which name no session.
+ *
+ * A `folder.create` must mint a new id (a second create under the same id is a
+ * different folder colliding, not a retry — a retry is the same action id and
+ * the ledger answers it before this runs). A rename or delete must name a
+ * folder the Host holds. A delete also passes every member through the same
+ * handoff gate the desktop's `deleteFolder` does: unfiling a conversation
+ * frozen for a handoff is a write to it. A reorder has none — ids the Host
+ * does not hold are ignored by the writer.
+ */
+async function validateFolderAction(
+  action: HostStateAction
+): Promise<{ code: string; message: string } | undefined> {
+  if (action.sessionId !== undefined) {
+    return {
+      code: "host_state_session_id_forbidden",
+      message: "A folder action names no session.",
+    }
+  }
+  const db = getDb()
+  const intent = action.action
+  switch (intent.kind) {
+    case "folder.create":
+      return (await db.sessionFolders.get(intent.folderId))
+        ? { code: "host_state_folder_exists", message: "The folder id already exists." }
+        : undefined
+    case "folder.rename":
+      return (await db.sessionFolders.get(intent.folderId))
+        ? undefined
+        : {
+            code: "host_state_folder_not_found",
+            message: "The folder does not exist on this Host.",
+          }
+    case "folder.delete": {
+      if (!(await db.sessionFolders.get(intent.folderId))) {
+        return {
+          code: "host_state_folder_not_found",
+          message: "The folder does not exist on this Host.",
+        }
+      }
+      const members = await db.sessions.where("folderId").equals(intent.folderId).toArray()
+      try {
+        for (const member of members) assertSessionWritable(member, "metadata")
+      } catch (error) {
+        if (error instanceof SessionHandoffLockedError) {
+          return {
+            code: error.code,
+            message: "A conversation in the folder is read-only during a handoff.",
+          }
+        }
+        throw error
+      }
+      return undefined
+    }
+    default:
+      return undefined
+  }
 }
 
 /**
@@ -669,13 +745,51 @@ async function materializeInitialState(
   }
 }
 
+/**
+ * Apply a folder intent through the same repository the desktop writes with
+ * (`lib/db/session-folders.ts`), inside the ledger transaction — its tables
+ * are part of it (`folderWriteTables`). A lock or a vanished folder that lands
+ * between validation and commit throws here and rolls the ledger back.
+ */
+async function persistFolderProjection(action: HostStateAction, now: number): Promise<void> {
+  const intent = action.action
+  switch (intent.kind) {
+    case "folder.create":
+      await writeFolderCreate({
+        id: intent.folderId,
+        projectId: intent.projectId,
+        name: intent.name,
+        now,
+      })
+      return
+    case "folder.rename":
+      if (!(await writeFolderRename(intent.folderId, intent.name, now))) {
+        throw new HostStateStoreError("host_state_folder_not_found")
+      }
+      return
+    case "folder.reorder":
+      await writeFolderReorder(intent.projectId, intent.orderedIds, now)
+      return
+    case "folder.delete":
+      await writeFolderDelete(intent.folderId, now)
+      return
+    default:
+      return
+  }
+}
+
 async function persistBusinessProjection(
   db: ReturnType<typeof getDb>,
   action: HostStateAction,
   event: HostStateAppliedAction,
   now: number
 ): Promise<void> {
-  if (event.outcome !== "applied" || !action.sessionId) return
+  if (event.outcome !== "applied") return
+  if (hostStateIntentTargetsSessionIndex(action.action.kind)) {
+    await persistFolderProjection(action, now)
+    return
+  }
+  if (!action.sessionId) return
   // A delete is carried out BEFORE its ledger row is committed (see
   // `createHostStateService().submit`): the cascade spans tables and external
   // teardown no single ledger transaction can hold, and the row being gone is
@@ -801,7 +915,8 @@ async function persistBusinessProjection(
       return
     // The three list-organization writes below mirror their desktop
     // repositories in `lib/db/sessions.ts` field for field
-    // (`bulkSetSessionsPinned`, `assignSessionToFolder`, `setSessionOrder`).
+    // (`bulkSetSessionsPinned`, `assignSessionToFolder`, `setSessionOrder`),
+    // and stamp the row through the same `stampOrganizationalWrite`.
     // They cannot call them: those open their own transactions and this one
     // already holds the ledger. The handoff gate is re-applied here so a lock
     // taken between validation and commit still refuses the write.
@@ -812,29 +927,21 @@ async function persistBusinessProjection(
         .where("id")
         .equals(action.sessionId)
         .modify((row) => {
-          // `updatedAt` is the sync cursor, so it must move for the pin to
-          // reach replicas; `lastMessageAt` keeps the row's display recency
-          // from jumping to "now" as a side effect.
-          row.lastMessageAt ??= row.updatedAt
           row.pinned = pinned
-          row.updatedAt = now
+          stampOrganizationalWrite(row, now)
         })
       return
     }
     case "session.folder": {
       assertSessionWritable(session, "metadata")
       const folderId = action.action.folderId
-      // Unlike the desktop writer, `updatedAt` moves: it is the sync cursor,
-      // and a Host write that no replica can see is the divergence this intent
-      // exists to close.
       await db.sessions
         .where("id")
         .equals(action.sessionId)
         .modify((row) => {
           if (folderId === null) delete row.folderId
           else row.folderId = folderId
-          row.lastMessageAt ??= row.updatedAt
-          row.updatedAt = now
+          stampOrganizationalWrite(row, now)
         })
       return
     }
@@ -847,8 +954,7 @@ async function persistBusinessProjection(
         .modify((row) => {
           row.manualOrder = manualOrder
           row.manualOrderSection = sectionKey
-          row.lastMessageAt ??= row.updatedAt
-          row.updatedAt = now
+          stampOrganizationalWrite(row, now)
         })
       return
     }

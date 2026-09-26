@@ -1538,6 +1538,29 @@ describe("getDb", () => {
     expect(onSquad.every((session) => session.squadId !== undefined)).toBe(true)
   })
 
+  it("v230 indexes folder membership so a folder's conversations are not a scan", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(230)
+    expect(db.sessions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["folderId"])
+    )
+
+    const now = Date.now()
+    await db.sessions.bulkAdd([
+      { id: "s-filed", title: "Filed", createdAt: now, updatedAt: now, folderId: "folder-1" },
+      { id: "s-other", title: "Elsewhere", createdAt: now, updatedAt: now, folderId: "folder-2" },
+      { id: "s-loose", title: "Loose", createdAt: now, updatedAt: now },
+    ])
+
+    const filed = await db.sessions.where("folderId").equals("folder-1").primaryKeys()
+    expect(filed).toEqual(["s-filed"])
+    // A loose conversation carries no key, so it is absent from the index —
+    // no backfill is needed for rows that existed before this version.
+    expect(await db.sessions.where("folderId").anyOf(["folder-1", "folder-2"]).count()).toBe(2)
+  })
+
   it("v172 indexes agentTraces by run identity and lifecycle status", async () => {
     const db = getDb()
     await db.open()

@@ -167,6 +167,32 @@ export type AllowedHostStateIntent =
    * desktop delete runs. Confirmed as `session.tombstoned`.
    */
   | { kind: "session.delete" }
+  /**
+   * Conversation folders. A folder is not a session, so these four are the
+   * only intents addressed to the session-INDEX channel and carrying no
+   * `sessionId` (see {@link hostStateIntentTargetsSessionIndex}). Like the
+   * list-organization intents above they commit with no channel mutation: the
+   * Host writes its `sessionFolders` table, and every replica learns the row
+   * through `sessionFolders` table sync.
+   *
+   * `folderId` on `folder.create` is minted by the CLIENT, so the optimistic
+   * row it shows and a `session.folder` it queues right behind the create name
+   * the same folder the Host ends up holding. `projectId` is the workspace the
+   * folder belongs to (folders are workspace-scoped).
+   */
+  | { kind: "folder.create"; folderId: string; projectId: string; name: string }
+  | { kind: "folder.rename"; folderId: string; name: string }
+  /**
+   * The workspace's folders in their new order. Ids the Host does not hold are
+   * ignored and folders the list does not name keep their relative place after
+   * it — the same contract as `reorderFolders` in `lib/db/session-folders.ts`.
+   */
+  | { kind: "folder.reorder"; projectId: string; orderedIds: string[] }
+  /**
+   * Delete a folder. Its member conversations are unfiled in the same Host
+   * transaction and are never deleted.
+   */
+  | { kind: "folder.delete"; folderId: string }
   | { kind: "draft.replace"; text: string; attachments: HostStateAttachmentRef[] }
   | {
       kind: "message.enqueue"
@@ -211,6 +237,10 @@ const INTENT_KINDS: readonly HostStateIntentKind[] = [
   "session.folder",
   "session.order",
   "session.delete",
+  "folder.create",
+  "folder.rename",
+  "folder.reorder",
+  "folder.delete",
   "draft.replace",
   "message.enqueue",
   "turn.steer",
@@ -248,7 +278,53 @@ export function intentRequiresRuntimeDispatch(kind: HostStateIntentKind): boolea
     case "session.folder":
     case "session.order":
     case "session.delete":
+    case "folder.create":
+    case "folder.rename":
+    case "folder.reorder":
+    case "folder.delete":
     case "draft.replace":
+    case "transcript.edit":
+    case "transcript.truncate":
+    case "session.import":
+      return false
+    default: {
+      const exhaustive: never = kind
+      throw new Error(`host_state_unknown_intent:${JSON.stringify(exhaustive)}`)
+    }
+  }
+}
+
+/**
+ * Whether an intent is addressed to the session-index channel rather than to
+ * one session's channel.
+ *
+ * The folder intents name no conversation: a folder is a list-level object, so
+ * they travel on `cognia://target/{t}/sessions` with no `sessionId`, and every
+ * other intent names exactly one session. Exported so the client that addresses
+ * an action and the Host that validates it read the same table — an action on
+ * the wrong channel is refused rather than applied to the wrong state.
+ */
+export function hostStateIntentTargetsSessionIndex(kind: HostStateIntentKind): boolean {
+  switch (kind) {
+    case "folder.create":
+    case "folder.rename":
+    case "folder.reorder":
+    case "folder.delete":
+      return true
+    case "session.create":
+    case "session.rename":
+    case "session.archive":
+    case "session.pin":
+    case "session.folder":
+    case "session.order":
+    case "session.delete":
+    case "draft.replace":
+    case "message.enqueue":
+    case "turn.steer":
+    case "turn.followup":
+    case "turn.abort":
+    case "approval.respond":
+    case "elicitation.respond":
     case "transcript.edit":
     case "transcript.truncate":
     case "session.import":
@@ -320,6 +396,12 @@ export function hostStateIntentKindCapability(
     case "session.pin":
     case "session.folder":
     case "session.order":
+    // Folders are the same organization one level up. Deleting one unfiles its
+    // conversations and deletes none of them, so it stays Remote Control too.
+    case "folder.create":
+    case "folder.rename":
+    case "folder.reorder":
+    case "folder.delete":
     case "draft.replace":
     case "message.enqueue":
     case "turn.steer":
@@ -385,6 +467,10 @@ export function hostStateIntentRequiresLiveControl(kind: HostStateIntentKind): b
     case "session.folder":
     case "session.order":
     case "session.delete":
+    case "folder.create":
+    case "folder.rename":
+    case "folder.reorder":
+    case "folder.delete":
     case "draft.replace":
     case "message.enqueue":
     case "turn.followup":
@@ -1315,6 +1401,12 @@ export function reduceHostStateIntent<TState extends HostStateChannelState>(
     case "session.folder":
     case "session.order":
     case "session.delete":
+    // Folder intents address the session index, which this reducer leaves to
+    // the Host (see the early return above); listed for exhaustiveness.
+    case "folder.create":
+    case "folder.rename":
+    case "folder.reorder":
+    case "folder.delete":
       return state
   }
 }
@@ -1392,7 +1484,10 @@ export function isHostStateAction(value: unknown): value is HostStateAction {
   ) {
     return false
   }
-  return isAllowedIntent(value.action)
+  if (!isAllowedIntent(value.action)) return false
+  // A folder intent names no conversation. Carrying a `sessionId` would put it
+  // on a session channel, where the Host has no folder to write.
+  return !(hostStateIntentTargetsSessionIndex(value.action.kind) && value.sessionId !== undefined)
 }
 
 export function isHostStateAppliedAction(value: unknown): value is HostStateAppliedAction {
@@ -1726,6 +1821,30 @@ function isAllowedIntent(value: unknown): value is AllowedHostStateIntent {
       )
     case "session.delete":
       return hasOnlyKeys(value, ["kind"])
+    case "folder.create":
+      return (
+        hasOnlyKeys(value, ["kind", "folderId", "projectId", "name"]) &&
+        nonEmptyString(value.folderId) &&
+        nonEmptyString(value.projectId) &&
+        isFolderName(value.name)
+      )
+    case "folder.rename":
+      return (
+        hasOnlyKeys(value, ["kind", "folderId", "name"]) &&
+        nonEmptyString(value.folderId) &&
+        isFolderName(value.name)
+      )
+    case "folder.reorder":
+      return (
+        hasOnlyKeys(value, ["kind", "projectId", "orderedIds"]) &&
+        nonEmptyString(value.projectId) &&
+        Array.isArray(value.orderedIds) &&
+        value.orderedIds.length <= MAX_FOLDER_REORDER_IDS &&
+        value.orderedIds.every(nonEmptyString) &&
+        new Set(value.orderedIds).size === value.orderedIds.length
+      )
+    case "folder.delete":
+      return hasOnlyKeys(value, ["kind", "folderId"]) && nonEmptyString(value.folderId)
     case "draft.replace":
       return (
         hasOnlyKeys(value, ["kind", "text", "attachments"]) &&
@@ -2018,6 +2137,27 @@ function isAttachment(value: unknown): value is HostStateAttachmentRef {
     (value.hash === undefined || nonEmptyString(value.hash)) &&
     (value.ref === undefined || nonEmptyString(value.ref))
   )
+}
+
+/**
+ * Upper bound on one `folder.reorder`. A workspace's folders are a sidebar
+ * list, not a data set; the cap keeps a malformed client from shipping an
+ * arbitrarily large array through every replica's ledger.
+ */
+export const MAX_FOLDER_REORDER_IDS = 500
+
+/** Longest folder name the wire accepts, after trimming. */
+export const MAX_FOLDER_NAME_LENGTH = 200
+
+/**
+ * A folder name as the wire accepts it: a string that is non-empty and within
+ * {@link MAX_FOLDER_NAME_LENGTH} once trimmed. The Host stores the trimmed
+ * form, exactly as the local writers in `lib/db/session-folders.ts` do.
+ */
+function isFolderName(value: unknown): value is string {
+  if (typeof value !== "string") return false
+  const trimmed = value.trim()
+  return trimmed.length > 0 && trimmed.length <= MAX_FOLDER_NAME_LENGTH
 }
 
 function isOptionalString(value: unknown): boolean {

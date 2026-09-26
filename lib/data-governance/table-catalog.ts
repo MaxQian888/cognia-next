@@ -580,6 +580,12 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "connectorCallbackBindings",
   "workflowDeployments",
   "executionRunBindings",
+  // Conversation folders. The sidebar files every conversation into one, and
+  // a folder that existed only on the device that made it split the list in
+  // two: the Host filed rows into folders the phone could not see, and a phone
+  // filed rows into folders the Host did not have. Writes travel back as
+  // `folder.*` HostState intents, never as sync writes.
+  "sessionFolders",
 ])
 
 /**
@@ -634,6 +640,7 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "connectorCallbackBindings",
   "workflowDeployments",
   "executionRunBindings",
+  "sessionFolders",
 ] as const
 
 export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TABLE_NAMES)[number]
