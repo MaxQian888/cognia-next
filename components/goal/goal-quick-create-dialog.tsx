@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { PlusIcon, Loader2Icon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -89,11 +90,15 @@ export function GoalQuickCreateDialog({ className }: GoalQuickCreateDialogProps)
       setOpen(false)
       reset()
       router.push("/")
-    } catch {
-      // Surface failure by simply re-enabling the form; the session may have
-      // been created but the goal failed (e.g. IM guardrail — impossible for a
-      // fresh local session, but defensive). The user can retry or cancel.
+    } catch (err) {
+      // Re-enable the form so the user can retry or cancel, and say what went
+      // wrong: re-enabling alone looked like a click that did nothing. The
+      // session may exist already with no goal on it (e.g. the PII gate
+      // refused the objective).
       setBusy(false)
+      toast.error(t("failed"), {
+        description: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 

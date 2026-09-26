@@ -16020,6 +16020,7 @@
       "cancel": "取消",
       "create": "创建目标",
       "description": "在一个全新会话中开始一个目标，智能体会自动朝它推进。",
+      "failed": "无法启动目标",
       "objectiveLabel": "目标",
       "objectivePlaceholder": "描述你希望智能体完成什么…",
       "templateLabel": "模板",

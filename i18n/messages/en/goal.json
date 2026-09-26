@@ -272,6 +272,7 @@
     "cancel": "Cancel",
     "create": "Create goal",
     "description": "Start a new goal in a fresh chat. The agent will work toward it automatically.",
+    "failed": "Couldn't start the goal",
     "objectiveLabel": "Objective",
     "objectivePlaceholder": "Describe what you want the agent to achieve…",
     "templateLabel": "Template",

@@ -20,6 +20,11 @@ jest.mock("@/lib/goal/templates", () => ({
   createGoalFromTemplate: (...a: unknown[]) => createFromTemplateMock(...a),
 }))
 
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: { error: (...a: unknown[]) => mockToastError(...a) },
+}))
+
 let templatesValue: { id: string; title: string }[] = []
 jest.mock("@/lib/db/goal-templates", () => ({
   listGoalTemplates: () => Promise.resolve(templatesValue),
@@ -66,6 +71,24 @@ describe("GoalQuickCreateDialog", () => {
       expect.objectContaining({ sessionId: "ses_new", rawObjective: "ship the feature" })
     )
     expect(pushMock).toHaveBeenCalledWith("/")
+  })
+
+  it("says why the goal did not start, and keeps the form for a retry", async () => {
+    createGoalMock.mockRejectedValueOnce(new Error("objective blocked by the PII gate"))
+    render(<GoalQuickCreateDialog />)
+    fireEvent.click(screen.getByTestId("goal-quick-create-trigger"))
+    fireEvent.change(await screen.findByTestId("goal-quick-create-objective"), {
+      target: { value: "ship the feature" },
+    })
+    fireEvent.click(screen.getByTestId("goal-quick-create-submit"))
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(expect.any(String), {
+        description: "objective blocked by the PII gate",
+      })
+    )
+    expect(pushMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId("goal-quick-create-submit")).toBeEnabled()
+    expect(screen.getByTestId("goal-quick-create-objective")).toHaveValue("ship the feature")
   })
 
   it("shows the template picker when templates exist", async () => {
