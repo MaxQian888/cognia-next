@@ -95,14 +95,15 @@ import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { useSessionRunStatusMap } from "@/hooks/chat/use-session-run-status-map"
+import { branchWholeConversation } from "@/lib/chat/branch-whole-conversation"
 import { useChatRuntimeGate } from "@/hooks/chat/use-chat-runtime-gate"
 import { useClientLiveQuery, useDexieFirstQuery } from "@/hooks/data"
+import { useMobileUnread } from "@/hooks/shell/use-unread-sessions"
 import { useChatStore } from "@/stores/chat"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { whenSeeded } from "@/lib/db/schema"
-import { loadMobileUnread } from "@/lib/inbox/unread-count"
 import { openSessionForReading } from "@/lib/chat/unread-marker"
 import { listCharacters } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
@@ -386,11 +387,7 @@ export function AppShellMobile() {
   // paired device. `sessionState` does sync, and restricting it to
   // IM/integration-bound conversations keeps this dot about the Inbox rather
   // than about all chat (the Chat tab badge is the all-chat number).
-  const inboxUnread = useClientLiveQuery(
-    () => loadMobileUnread().then((counts) => counts.inbox),
-    [],
-    0
-  )
+  const inboxUnread = useMobileUnread().inbox
 
   // Attention carried by whichever controls the current width folded into ⋮.
   // Computed from the same two signals their in-bar dots read, so folding a
@@ -675,6 +672,7 @@ export function AppShellMobile() {
                       onAssignToFolder={assignToFolder}
                       folders={folders}
                       runStatusById={runStatusById}
+                      onBranch={branchWholeConversation}
                     />
                   )}
                 </div>

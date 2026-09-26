@@ -1,27 +1,38 @@
-import { act, render, waitFor } from "@testing-library/react"
+import { act, render } from "@testing-library/react"
 
-const liveQuerySubscribers: Array<{
-  next: (v: unknown) => void
-  error: (e: unknown) => void
-}> = []
+// A hand-driven stand-in for the window's shared unread store: `emit` plays a
+// fresh read landing, `listeners` shows who is subscribed.
+type Snapshot = { sessions: Array<{ id: string }>; unreadBySession: Map<string, number> } | null
+const store: { snapshot: Snapshot; listeners: Set<() => void> } = {
+  snapshot: null,
+  listeners: new Set(),
+}
 const unsubscribeMock = jest.fn()
-jest.mock("dexie", () => ({
-  __esModule: true,
-  default: {
-    liveQuery: (query: () => Promise<unknown>) => ({
-      subscribe: (handlers: { next: (v: unknown) => void; error: (e: unknown) => void }) => {
-        liveQuerySubscribers.push(handlers)
-        void query().then(handlers.next)
-        return { unsubscribe: unsubscribeMock }
-      },
-    }),
+jest.mock("@/lib/chat/unread-sessions", () => ({
+  subscribeUnreadSessions: (listener: () => void) => {
+    store.listeners.add(listener)
+    return () => {
+      store.listeners.delete(listener)
+      unsubscribeMock()
+    }
   },
+  getUnreadSessionsSnapshot: () => store.snapshot,
+}))
+// Counting is pinned in `lib/inbox/unread-count.test.ts`; here one unread row
+// is one unread chat.
+jest.mock("@/lib/inbox/unread-count", () => ({
+  countMobileUnread: (sessions: unknown[]) => ({ chat: sessions.length, inbox: 0 }),
 }))
 
-const loadUnreadMock = jest.fn(async () => ({ chat: 0, inbox: 0 }))
-jest.mock("@/lib/inbox/unread-count", () => ({
-  loadMobileUnread: () => loadUnreadMock(),
-}))
+function read(chat: number): Snapshot {
+  const sessions = Array.from({ length: chat }, (_, i) => ({ id: `s${i}` }))
+  return { sessions, unreadBySession: new Map(sessions.map((row) => [row.id, 1])) }
+}
+
+function emit(next: Snapshot): void {
+  store.snapshot = next
+  for (const listener of [...store.listeners]) listener()
+}
 
 const applyBadgeMock = jest.fn<boolean, [number]>(() => true)
 jest.mock("@/lib/pwa/app-badge", () => ({
@@ -77,60 +88,67 @@ function stubMatchMedia(): void {
 
 beforeEach(() => {
   standalone = true
-  liveQuerySubscribers.length = 0
+  store.snapshot = null
+  store.listeners.clear()
   unsubscribeMock.mockClear()
-  loadUnreadMock.mockClear().mockResolvedValue({ chat: 0, inbox: 0 })
   applyBadgeMock.mockClear()
   detectPlatformMock.mockReturnValue("web")
   stubMatchMedia()
 })
 
 describe("<PwaBadgeInitializer />", () => {
-  it("subscribes to unread counts and paints the badge", async () => {
-    loadUnreadMock.mockResolvedValue({ chat: 4, inbox: 1 })
+  it("paints the shared unread read once it lands", () => {
     render(<PwaBadgeInitializer />)
-    await waitFor(() => expect(applyBadgeMock).toHaveBeenCalledWith(4))
+    expect(store.listeners.size).toBe(1)
+    // Nothing read yet: the icon is left alone rather than cleared.
+    expect(applyBadgeMock).not.toHaveBeenCalled()
+    act(() => emit(read(4)))
+    expect(applyBadgeMock).toHaveBeenLastCalledWith(4)
   })
 
-  it("repaints when the live query emits a new count", async () => {
+  it("paints at once when the store is already warm", () => {
+    store.snapshot = read(2)
     render(<PwaBadgeInitializer />)
-    await waitFor(() => expect(liveQuerySubscribers.length).toBe(1))
-    act(() => {
-      liveQuerySubscribers[0].next({ chat: 7, inbox: 0 })
-    })
-    await waitFor(() => expect(applyBadgeMock).toHaveBeenCalledWith(7))
+    expect(applyBadgeMock).toHaveBeenCalledWith(2)
   })
 
-  it("does not subscribe outside standalone windows", async () => {
+  it("repaints when a new read lands, and clears at zero", () => {
+    render(<PwaBadgeInitializer />)
+    act(() => emit(read(7)))
+    expect(applyBadgeMock).toHaveBeenLastCalledWith(7)
+    act(() => emit(read(0)))
+    expect(applyBadgeMock).toHaveBeenLastCalledWith(0)
+  })
+
+  it("does not subscribe outside standalone windows", () => {
     standalone = false
     render(<PwaBadgeInitializer />)
-    await Promise.resolve()
-    expect(liveQuerySubscribers.length).toBe(0)
+    expect(store.listeners.size).toBe(0)
     expect(applyBadgeMock).not.toHaveBeenCalled()
   })
 
-  it("starts when the window flips into standalone mid-session", async () => {
+  it("starts when the window flips into standalone mid-session", () => {
     standalone = false
     render(<PwaBadgeInitializer />)
-    await Promise.resolve()
-    expect(liveQuerySubscribers.length).toBe(0)
+    expect(store.listeners.size).toBe(0)
     standalone = true
     act(() => {
       for (const cb of mediaHandlers.get("(display-mode: standalone)") ?? []) cb()
     })
-    await waitFor(() => expect(liveQuerySubscribers.length).toBe(1))
+    expect(store.listeners.size).toBe(1)
   })
 
   it("is a no-op off the web shell", () => {
     detectPlatformMock.mockReturnValue("tauri")
     render(<PwaBadgeInitializer />)
-    expect(liveQuerySubscribers.length).toBe(0)
+    expect(store.listeners.size).toBe(0)
   })
 
-  it("unsubscribes on unmount", async () => {
+  it("unsubscribes on unmount", () => {
     const { unmount } = render(<PwaBadgeInitializer />)
-    await waitFor(() => expect(liveQuerySubscribers.length).toBe(1))
+    expect(store.listeners.size).toBe(1)
     unmount()
     expect(unsubscribeMock).toHaveBeenCalledTimes(1)
+    expect(store.listeners.size).toBe(0)
   })
 })

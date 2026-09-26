@@ -38,12 +38,15 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { usePlatform } from "@/hooks/use-platform"
 import { toggleGuildRailAction } from "@/lib/desktop/menu-actions"
-import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
-import { mergeVisibleModeOrder } from "@/lib/shell/sidebar-nav"
 import { SIDEBAR_WIDTH_DEFAULT, useUIStore } from "@/stores/ui"
 import { CustomizerLists, type CustomizerItem } from "./customizer-list"
 import { ResolvedRailIcon } from "./plugin-view-container-panel"
-import { useShellModes, type ShellMode } from "./use-shell-nav"
+import {
+  useShellModeLabel,
+  useShellModeOrdering,
+  useShellModes,
+  type ShellMode,
+} from "./use-shell-nav"
 import { useSidebarLayout } from "./use-sidebar-layout"
 import { DEFAULT_SIDEBAR_LAYOUT, type SidebarSide } from "@/types/shell/sidebar"
 
@@ -91,29 +94,21 @@ function modeIcon(mode: ShellMode): CustomizerItem["Icon"] {
  */
 function ModesCustomizer() {
   const t = useTranslations("desktop.guildRail")
-  const pluginT = useTranslations()
   const { modes: stored, hideMode, showMode, reorderModes, resetModes } = useSidebarLayout()
   const { modes } = useShellModes(stored)
+  // Named and reordered exactly as the rail and the hosted rows do it.
+  const modeLabel = useShellModeLabel()
+  const { reorderVisibleModes } = useShellModeOrdering(modes, reorderModes)
   const toItem = React.useCallback(
     (mode: ShellMode): CustomizerItem => ({
       id: mode.id,
       Icon: modeIcon(mode),
-      label:
-        mode.kind === "canvas"
-          ? t("canvas")
-          : resolvePluginLabel(
-              pluginT as never,
-              mode.container.pluginId,
-              mode.container.def.titleKey,
-              mode.container.def.title
-            ),
+      label: modeLabel(mode),
     }),
-    [t, pluginT]
+    [modeLabel]
   )
   const visible = React.useMemo(() => modes.visible.map(toItem), [modes.visible, toItem])
   const hidden = React.useMemo(() => modes.hidden.map(toItem), [modes.hidden, toItem])
-  const orderIds = modes.order.map((mode) => mode.id)
-  const hiddenIds = new Set(modes.hidden.map((mode) => mode.id))
   return (
     <div className="space-y-2">
       <div>
@@ -136,9 +131,7 @@ function ModesCustomizer() {
           hideItem: t("customize.hideItem"),
           showItem: t("customize.showItem"),
         }}
-        onReorderPinned={(ids) =>
-          void reorderModes(mergeVisibleModeOrder(orderIds, hiddenIds, ids))
-        }
+        onReorderPinned={reorderVisibleModes}
         onHide={(id) => void hideMode(id)}
         onShow={(id) => void showMode(id)}
         onReset={() => void resetModes()}

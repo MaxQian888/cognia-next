@@ -10,6 +10,7 @@
 import {
   canRasterize,
   chooseEncodeFormat,
+  createSurface,
   decodeUrlToPixelBuffer,
   encodePixelBuffer,
   fromImageData,
@@ -324,5 +325,17 @@ describe("pixelBufferToDataUrlSync, with a document", () => {
     }
     const { pixelBufferToDataUrlSync } = await import("./codec")
     expect(() => pixelBufferToDataUrlSync(opaque(1, 1))).toThrow(ImageDecodeError)
+  })
+})
+
+describe("createSurface", () => {
+  it("hands out a 2D context over an OffscreenCanvas when there is one", () => {
+    const surface = createSurface(4, 4)
+    expect(surface.context).toBeInstanceOf(FakeContext)
+  })
+
+  it("says unsupported when the runtime has no canvas at all", () => {
+    delete globalRef.OffscreenCanvas
+    expect(() => createSurface(4, 4)).toThrow(ImageDecodeError)
   })
 })

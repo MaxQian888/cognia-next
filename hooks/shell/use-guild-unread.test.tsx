@@ -28,14 +28,16 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: <T,>(selector: (s: typeof projectState) => T): T => selector(projectState),
 }))
 
-// `useClientLiveQuery` resolves the query once and hands back its value; the
-// live re-run on table change is Dexie's contract, not this hook's. The query
-// and deps are captured so a test can see which scope the hook asked for.
-let liveValue: unknown = undefined
-let lastLiveDeps: unknown[] = []
-jest.mock("@/hooks/data", () => ({
-  useClientLiveQuery: (_query: unknown, deps: unknown[]) => {
-    lastLiveDeps = deps
+// The window's shared unread read (its store is pinned in
+// `lib/chat/unread-sessions.test.ts`); `null` is "not read yet".
+let liveValue: {
+  sessions: UnreadSession[]
+  unreadBySession: Map<string, number>
+} | null = null
+const subscribeCount = { current: 0 }
+jest.mock("@/hooks/shell/use-unread-sessions", () => ({
+  useUnreadSessions: () => {
+    subscribeCount.current += 1
     return liveValue
   },
 }))
@@ -66,8 +68,8 @@ beforeEach(() => {
   showUnreadBadges = undefined
   sidebarExtras = {}
   projectState = { activeProjectId: "p1", loaded: true }
-  liveValue = undefined
-  lastLiveDeps = []
+  liveValue = null
+  subscribeCount.current = 0
 })
 
 const ALL = ALL_WORKSPACES_SCOPE
@@ -250,34 +252,53 @@ function Probe() {
   )
 }
 
+/** A read with one DM in p1, one in p2, one with no workspace and two team-a rows. */
+function seedRead(): void {
+  const sessions: UnreadSession[] = [
+    session("d-p1", { projectId: "p1" }),
+    session("d-p2", { projectId: "p2" }),
+    session("d-none"),
+    session("t1", { kind: "team", teamId: "team-a", projectId: "p1" }),
+    session("t2", { kind: "team", teamId: "team-a", projectId: "p2" }),
+  ]
+  liveValue = { sessions, unreadBySession: new Map(sessions.map((row) => [row.id, 1])) }
+}
+
 describe("useGuildUnread", () => {
-  it("exposes the live aggregate", () => {
-    liveValue = { dm: 2, teams: new Map([["team-a", 3]]), total: 5 }
+  it("aggregates the shared read", () => {
+    seedRead()
     render(<Probe />)
-    expect(screen.getByTestId("probe")).toHaveTextContent("2/3/5")
+    // Default grouping spans every workspace.
+    expect(screen.getByTestId("probe")).toHaveTextContent("3/2/5")
   })
 
   it("is empty before the first read lands", () => {
-    liveValue = undefined
+    liveValue = null
     render(<Probe />)
     expect(screen.getByTestId("probe")).toHaveTextContent("0/0/0")
   })
 
-  it("follows the stored grouping, whose default spans every workspace", () => {
-    render(<Probe />)
-    expect(lastLiveDeps).toEqual([ALL])
-  })
-
-  it("asks for the active workspace when the list groups on a single-workspace axis", () => {
+  it("scopes to the active workspace when the list groups on a single-workspace axis", () => {
+    seedRead()
     sidebarExtras = { groupBy: "team" }
     render(<Probe />)
-    expect(lastLiveDeps).toEqual([P1])
+    // p1's own DM plus the workspace-less one; p1's team row.
+    expect(screen.getByTestId("probe")).toHaveTextContent("2/1/3")
   })
 
-  it("asks for every workspace when the search reaches all of them", () => {
+  it("spans every workspace when the search reaches all of them", () => {
+    seedRead()
     sidebarExtras = { groupBy: "team", search: { workspace: "all" } }
     render(<Probe />)
-    expect(lastLiveDeps).toEqual([ALL])
+    expect(screen.getByTestId("probe")).toHaveTextContent("3/2/5")
+  })
+
+  it("counts nothing until the project store has loaded", () => {
+    seedRead()
+    sidebarExtras = { groupBy: "team" }
+    projectState = { activeProjectId: "p1", loaded: false }
+    render(<Probe />)
+    expect(screen.getByTestId("probe")).toHaveTextContent("0/0/0")
   })
 
   it("scopes to no workspace until the project store has loaded", () => {
@@ -292,9 +313,22 @@ describe("useGuildUnread", () => {
   })
 
   it("goes dark with the unread-badge display setting", () => {
-    liveValue = { dm: 2, teams: new Map([["team-a", 3]]), total: 5 }
+    seedRead()
     showUnreadBadges = false
     render(<Probe />)
     expect(screen.getByTestId("probe")).toHaveTextContent("0/0/0")
+  })
+
+  it("draws from the shared read and never runs a Dexie read of its own", () => {
+    seedRead()
+    render(
+      <>
+        <Probe />
+        <Probe />
+      </>
+    )
+    expect(subscribeCount.current).toBeGreaterThanOrEqual(2)
+    expect(listSessionStates).not.toHaveBeenCalled()
+    expect(bulkGet).not.toHaveBeenCalled()
   })
 })

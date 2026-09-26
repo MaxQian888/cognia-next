@@ -8,18 +8,18 @@
  * badge and the Inbox dot were both permanently 0 on every paired device.
  *
  * The honest source is `sessionState`, which is what the desktop's own unread
- * badges read (`hooks/shell/use-guild-unread.ts`) and which now syncs. Sharing
- * the table is the point: two shells that agree by construction beat two
- * implementations of "unread" that drift.
+ * badges read (`hooks/shell/use-guild-unread.ts`) and which now syncs. Both
+ * shells go through one read and one filter (`lib/chat/unread-sessions.ts`):
+ * two shells that agree by construction beat two implementations of "unread"
+ * that drift. Components read the live counts through `useMobileUnread`
+ * (`hooks/shell/use-unread-sessions.ts`), one observer per window.
  *
  * Deliberately NOT derived from `messages.createdAt > lastReadAt`. That counts
  * the user's own turns, assistant replies and system messages, and it counts
  * them in conversations that have nothing to do with the Inbox.
  */
 
-import { isSessionExposed } from "@/lib/chat/session-exposure"
-import { getDb } from "@/lib/db/schema"
-import { listSessionStates } from "@/lib/db/session-state"
+import { isBadgeableUnread } from "@/lib/chat/unread-sessions"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 /**
@@ -59,9 +59,10 @@ function isInboxConversation(session: UnreadCountSession): boolean {
 /**
  * Pure aggregation: one unread conversation counts once.
  *
- * Same exclusions as the desktop guild badge, for the same reason. An archived
- * conversation and a transcript the main list never shows must not contribute
- * to a badge that promises something tappable.
+ * Same filter as the desktop guild badge (`isBadgeableUnread`), for the same
+ * reason: an archived conversation and a transcript the main list never shows
+ * must not contribute to a badge that promises something tappable. No
+ * workspace scope: the phone's Chat tab lists every workspace.
  */
 export function countMobileUnread(
   sessions: ReadonlyArray<UnreadCountSession | undefined>,
@@ -70,32 +71,10 @@ export function countMobileUnread(
   let chat = 0
   let inbox = 0
   for (const session of sessions) {
-    if (!session) continue
-    if (!unreadBySession.has(session.id)) continue
-    if (session.archivedAt != null) continue
-    if (!isSessionExposed(session, "main-list")) continue
+    if (!session || !unreadBySession.has(session.id)) continue
+    if (!isBadgeableUnread(session)) continue
     chat += 1
     if (isInboxConversation(session)) inbox += 1
   }
   return { chat, inbox }
-}
-
-/**
- * Resolve both counts from Dexie.
- *
- * Reads the unread pointers first and then resolves only the sessions they
- * name, so a long history costs nothing beyond the handful of rows that
- * actually have unread. A pointer whose session is gone resolves to
- * `undefined` and is skipped, which is why `sessionState` needs no tombstones
- * of its own.
- */
-export async function loadMobileUnread(): Promise<MobileUnreadCounts> {
-  const states = await listSessionStates()
-  const unreadBySession = new Map<string, number>()
-  for (const state of states) {
-    if (state.unreadCount > 0) unreadBySession.set(state.sessionId, state.unreadCount)
-  }
-  if (unreadBySession.size === 0) return EMPTY_UNREAD_COUNTS
-  const sessions = await getDb().sessions.bulkGet([...unreadBySession.keys()])
-  return countMobileUnread(sessions as (UnreadCountSession | undefined)[], unreadBySession)
 }

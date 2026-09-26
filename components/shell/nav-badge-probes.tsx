@@ -71,17 +71,30 @@ function AgentRunsBadgeProbe() {
 }
 
 function SchedulerBadgeProbe() {
-  // The store the scheduler page reads, already hydrated at desktop boot by
-  // `SchedulerInitializer`; switching the managed host re-points it, so the
-  // count follows the same host the page shows. Before it loads it is empty
-  // and the badge says nothing rather than guessing.
+  // The store the scheduler page reads. `SchedulerInitializer` hydrates it
+  // when the workflow-automation capability boots, and from then on keeps it
+  // current and re-points it when the managed host switches, so the count
+  // follows the same host the page shows. Until then it is empty and the badge
+  // says nothing rather than guessing.
   const tasks = useSchedulerStore((s) => s.tasks)
   const maxTasksPerSource = useSchedulerStore((s) => s.permissionPolicy.maxTasksPerSource)
+  const isInitialized = useSchedulerStore((s) => s.isInitialized)
+  const refreshAll = useSchedulerStore((s) => s.refreshAll)
   const hostTarget = useSyncExternalStore(
     subscribeSchedulerHostTarget,
     getEffectiveSchedulerHostTarget,
     () => "local" as const
   )
+  // Where nothing has initialized the store yet (a shell or boot profile that
+  // defers the scheduler capability until its page is opened), load it the way
+  // `initialize()` does — `refreshAll()`, deduplicated against a concurrent
+  // one — without booting the scheduler runtime from a badge. Once an owner
+  // initializes the store this steps aside; re-run per host so the count
+  // follows a host switch the uninitialized store would not hear about.
+  useEffect(() => {
+    if (isInitialized) return
+    void refreshAll()
+  }, [isInitialized, refreshAll, hostTarget])
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const count = useMemo(() => {
     if (tasks.length === 0) return 0

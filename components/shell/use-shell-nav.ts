@@ -3,6 +3,13 @@
 /**
  * The shell's top-level navigation model — one hook behind two renderings.
  *
+ * Two layers: `useShellNav` is the routing model (what is active, where a
+ * click goes), and `useShellNavModel` adds everything a *rendering* of it
+ * needs on top — labels, live counts, ⌥N chords, the reorder / hide / pin
+ * handlers each item's context menu offers, and the "More" / customizer
+ * open state. `GuildRail` and `SidebarNavSection` both render from
+ * `useShellNavModel`, so neither re-derives any of it.
+ *
  * `GuildRail` (the 56px icon column) and the expanded sidebar's nav section
  * (`sidebar-nav-section.tsx`, rows with labels) show the same destinations:
  * the chat guilds (DM · Canvas · plugin view containers · teams), the pinned
@@ -21,8 +28,16 @@
 
 import { useCallback, useMemo, useState, useSyncExternalStore, useTransition } from "react"
 import { usePathname, useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { loggers } from "@cognia/logging"
 import { useUIStore } from "@/stores/ui"
+import { useNavBadges } from "@/hooks/shell/use-nav-badges"
+import {
+  usePinnedNavShortcutLabels,
+  type AppShortcutLabel,
+} from "@/hooks/shortcuts/use-app-shortcut-label"
+import { sumNavBadges, type NavBadgeCounts } from "@/lib/shell/nav-badges"
+import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 import {
   getViewContainerSnapshot,
   subscribeViewContainers,
@@ -33,7 +48,13 @@ import {
   getContextKeyRevision,
   subscribeContextKeys,
 } from "@/lib/plugin/context-keys/context-key-store"
-import { defaultModeOrder, resolveSidebarModes } from "@/lib/shell/sidebar-nav"
+import {
+  defaultModeOrder,
+  mergeVisibleModeOrder,
+  moveVisibleMode,
+  resolveSidebarModes,
+  type SidebarCatalogItem,
+} from "@/lib/shell/sidebar-nav"
 import type { ResolvedOrderedCatalog } from "@/lib/shell/layout-partition"
 import { CANVAS_MODE_ID, type SidebarModesLayout } from "@/types/shell/sidebar"
 import { useSidebarLayout, type UseSidebarLayout } from "./use-sidebar-layout"
@@ -216,5 +237,246 @@ export function useShellNav(): ShellNav {
     switchToTeam,
     switchToViewContainer,
     goToFeature,
+  }
+}
+
+/**
+ * A workspace mode's display name: Canvas from the rail's own strings, a
+ * plugin view container from its plugin's locale (falling back to the
+ * container's declared title). The rail, the hosted rows and the customizer
+ * all name a mode this one way.
+ */
+export function useShellModeLabel(): (mode: ShellMode) => string {
+  const t = useTranslations("desktop.guildRail")
+  const pluginT = useTranslations()
+  return useCallback(
+    (mode: ShellMode) =>
+      mode.kind === "canvas"
+        ? t("canvas")
+        : resolvePluginLabel(
+            pluginT as never,
+            mode.container.pluginId,
+            mode.container.def.titleKey,
+            mode.container.def.title
+          ),
+    [t, pluginT]
+  )
+}
+
+export interface ShellModeOrdering {
+  /** Persist a drag of the *visible* modes. */
+  reorderVisibleModes: (visibleOrder: string[]) => void
+  /** Move one visible mode by `delta` (`-1` up, `1` down); a no-op at the ends. */
+  moveMode: (id: string, delta: number) => void
+}
+
+/**
+ * Reordering the workspace modes. Both writes carry the whole stored order,
+ * hidden modes included, so a hidden mode keeps its slot instead of being
+ * pushed to the end when it comes back.
+ */
+export function useShellModeOrdering(
+  modes: ResolvedOrderedCatalog<ShellMode>,
+  reorderModes: (ids: string[]) => Promise<void>
+): ShellModeOrdering {
+  const orderIds = useMemo(() => modes.order.map((mode) => mode.id), [modes.order])
+  const hiddenIds = useMemo(() => new Set(modes.hidden.map((mode) => mode.id)), [modes.hidden])
+  const reorderVisibleModes = useCallback(
+    (visibleOrder: string[]) =>
+      void reorderModes(mergeVisibleModeOrder(orderIds, hiddenIds, visibleOrder)),
+    [orderIds, hiddenIds, reorderModes]
+  )
+  const moveMode = useCallback(
+    (id: string, delta: number) => {
+      const next = moveVisibleMode(orderIds, hiddenIds, id, delta)
+      if (next) void reorderModes(next)
+    },
+    [orderIds, hiddenIds, reorderModes]
+  )
+  return { reorderVisibleModes, moveMode }
+}
+
+/**
+ * What one nav item's right-click menu offers (`nav-item-menu.tsx`), already
+ * bound to that item. `onMoveToMore` is only present for a pinned feature —
+ * a workspace mode has no "More" to fall back to.
+ */
+export interface ShellNavItemMenu {
+  canMoveUp: boolean
+  canMoveDown: boolean
+  /** `-1` up, `1` down. */
+  onMove: (delta: number) => void
+  onMoveToMore?: () => void
+  onHide: () => void
+  onCustomize: () => void
+}
+
+export interface ShellNavModel extends ShellNav, ShellModeOrdering {
+  /** Live counts by catalog id (`lib/shell/nav-badges.ts`). */
+  badges: NavBadgeCounts
+  /** Everything waiting behind "More", summed. */
+  overflowBadge: number
+  /** A route folded into "More" is loading. */
+  overflowPending: boolean
+  /** ⌥1…⌥9 by pinned slot; entries past the ninth are absent. */
+  pinnedShortcuts: AppShortcutLabel[]
+  modeLabel: (mode: ShellMode) => string
+  /** For dnd-kit's announcements, which only know ids. */
+  modeLabelById: (id: string) => string
+  pinnedLabel: (item: SidebarCatalogItem) => string
+  pinnedLabelById: (id: string) => string
+  visibleModeIds: string[]
+  pinnedIds: string[]
+  isModeActive: (mode: ShellMode) => boolean
+  /** The mode's switch is waiting on the route home to commit. */
+  isModePending: (mode: ShellMode) => boolean
+  selectMode: (mode: ShellMode) => void
+  reorderPinnedIds: (ids: string[]) => void
+  /** The bound context-menu actions for the visible mode at `index`. */
+  modeMenu: (mode: ShellMode, index: number) => ShellNavItemMenu
+  /** The bound context-menu actions for the pinned feature at `index`. */
+  pinnedMenu: (item: SidebarCatalogItem, index: number) => ShellNavItemMenu
+  moreOpen: boolean
+  setMoreOpen: (open: boolean) => void
+  customizeOpen: boolean
+  setCustomizeOpen: (open: boolean) => void
+  /** Open an overflow entry: close "More", then navigate. */
+  openOverflowItem: (route: string) => void
+  /** "Customize" from inside "More": close it, then open the customizer. */
+  openCustomize: () => void
+  /** Pin an overflow entry from "More" without navigating. */
+  pinItem: (id: string) => void
+  /** Hide a feature everywhere. */
+  hideItem: (id: string) => void
+}
+
+/**
+ * `useShellNav` plus everything a rendering of it needs. Each surface calls
+ * it once and owns only its markup; the `moreOpen` / `customizeOpen` state is
+ * per surface (each mounts its own popover and dialog), not shared.
+ */
+export function useShellNavModel(): ShellNavModel {
+  const t = useTranslations("desktop.guildRail")
+  const nav = useShellNav()
+  const {
+    pendingRoute,
+    selected,
+    isCanvasActive,
+    isViewContainerActive,
+    modes,
+    layout: { resolved, pin, unpin, hide, reorderPinned, movePinned, hideMode, reorderModes },
+    switchToCanvas,
+    switchToViewContainer,
+    goToFeature,
+  } = nav
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [customizeOpen, setCustomizeOpen] = useState(false)
+  const badges = useNavBadges()
+  const overflowIds = useMemo(() => resolved.overflow.map((item) => item.id), [resolved.overflow])
+  const overflowBadge = sumNavBadges(badges, overflowIds)
+  const overflowPending = resolved.overflow.some((item) => item.route === pendingRoute)
+  const pinnedShortcuts = usePinnedNavShortcutLabels()
+
+  const modeLabel = useShellModeLabel()
+  const { reorderVisibleModes, moveMode } = useShellModeOrdering(modes, reorderModes)
+  const visibleModeIds = useMemo(() => modes.visible.map((mode) => mode.id), [modes.visible])
+  const modeLabelById = useCallback(
+    (id: string) => {
+      const mode = modes.visible.find((entry) => entry.id === id)
+      return mode ? modeLabel(mode) : id
+    },
+    [modes.visible, modeLabel]
+  )
+  const pinnedLabel = useCallback((item: SidebarCatalogItem) => t(item.i18nKey), [t])
+  const pinnedIds = useMemo(() => resolved.pinned.map((item) => item.id), [resolved.pinned])
+  const pinnedLabelById = useCallback(
+    (id: string) => {
+      const item = resolved.pinned.find((entry) => entry.id === id)
+      return item ? pinnedLabel(item) : id
+    },
+    [resolved.pinned, pinnedLabel]
+  )
+
+  const isModeActive = useCallback(
+    (mode: ShellMode) => (mode.kind === "canvas" ? isCanvasActive : isViewContainerActive(mode.id)),
+    [isCanvasActive, isViewContainerActive]
+  )
+  const isModePending = useCallback(
+    (mode: ShellMode) =>
+      pendingRoute === "/" &&
+      (mode.kind === "canvas"
+        ? selected.kind === "canvas"
+        : selected.kind === "plugin-view" && selected.containerId === mode.id),
+    [pendingRoute, selected]
+  )
+  const selectMode = useCallback(
+    (mode: ShellMode) =>
+      mode.kind === "canvas" ? switchToCanvas() : switchToViewContainer(mode.id),
+    [switchToCanvas, switchToViewContainer]
+  )
+
+  const openCustomizer = useCallback(() => setCustomizeOpen(true), [])
+  const modeMenu = useCallback(
+    (mode: ShellMode, index: number): ShellNavItemMenu => ({
+      canMoveUp: index > 0,
+      canMoveDown: index < modes.visible.length - 1,
+      onMove: (delta) => moveMode(mode.id, delta),
+      onHide: () => void hideMode(mode.id),
+      onCustomize: openCustomizer,
+    }),
+    [modes.visible.length, moveMode, hideMode, openCustomizer]
+  )
+  const pinnedMenu = useCallback(
+    (item: SidebarCatalogItem, index: number): ShellNavItemMenu => ({
+      canMoveUp: index > 0,
+      canMoveDown: index < resolved.pinned.length - 1,
+      onMove: (delta) => void movePinned(item.id, delta),
+      onMoveToMore: () => void unpin(item.id),
+      onHide: () => void hide(item.id),
+      onCustomize: openCustomizer,
+    }),
+    [resolved.pinned.length, movePinned, unpin, hide, openCustomizer]
+  )
+
+  const openOverflowItem = useCallback(
+    (route: string) => {
+      setMoreOpen(false)
+      goToFeature(route)
+    },
+    [goToFeature]
+  )
+  const openCustomize = useCallback(() => {
+    setMoreOpen(false)
+    setCustomizeOpen(true)
+  }, [])
+
+  return {
+    ...nav,
+    badges,
+    overflowBadge,
+    overflowPending,
+    pinnedShortcuts,
+    modeLabel,
+    modeLabelById,
+    pinnedLabel,
+    pinnedLabelById,
+    visibleModeIds,
+    pinnedIds,
+    isModeActive,
+    isModePending,
+    selectMode,
+    reorderVisibleModes,
+    moveMode,
+    reorderPinnedIds: (ids) => void reorderPinned(ids),
+    modeMenu,
+    pinnedMenu,
+    moreOpen,
+    setMoreOpen,
+    customizeOpen,
+    setCustomizeOpen,
+    openOverflowItem,
+    openCustomize,
+    pinItem: (id) => void pin(id),
+    hideItem: (id) => void hide(id),
   }
 }

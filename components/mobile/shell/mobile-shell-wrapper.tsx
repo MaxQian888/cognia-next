@@ -28,7 +28,6 @@
 
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 
 import { MobileConsentSheet } from "@/components/mobile/automation/mobile-consent-sheet"
 import { FileViewerDialog } from "@/components/file-viewer/file-viewer-dialog"
@@ -40,7 +39,7 @@ import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { usePlatform } from "@/hooks/use-platform"
 import { usesCompactShell } from "@/lib/shell/compact-shell"
 import { needsFullViewport } from "@/lib/shell/full-viewport-routes"
-import { EMPTY_UNREAD_COUNTS, loadMobileUnread } from "@/lib/inbox/unread-count"
+import { useMobileUnread } from "@/hooks/shell/use-unread-sessions"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 
@@ -100,7 +99,7 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     }
   }, [nativeMobile, settingsHydrated, resolvedTabs.defaultLanding, router])
 
-  const unreadCounts = useLiveQuery(loadMobileUnread, [], EMPTY_UNREAD_COUNTS)
+  const unreadCounts = useMobileUnread()
 
   const showTabBar = useMemo(() => {
     if (!compactShell) return false

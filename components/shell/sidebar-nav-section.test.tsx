@@ -77,6 +77,8 @@ jest.mock("@/lib/plugin/context-keys/context-key-store", () => ({
   subscribeContextKeys: () => () => {},
   getContextKeyRevision: () => 0,
   evaluateContextWhen: () => true,
+  useContextKeyStore: (select: (state: { keys: Record<string, unknown> }) => unknown) =>
+    select({ keys: {} }),
 }))
 jest.mock("@/components/shell/plugin-view-container-panel", () => ({
   ResolvedRailIcon: ({ name }: { name: string }) => <span data-testid={`icon-${name}`} />,
@@ -295,9 +297,17 @@ describe("SidebarNavSection", () => {
     expect(screen.getByTestId("shell-layout-dialog")).toBeInTheDocument()
   })
 
-  it("right-click on a pinned row offers Move to More and Hide", async () => {
+  // What each menu action does is `useShellNavModel`'s (`use-shell-nav.test.tsx`)
+  // and the menu's own (`nav-item-menu.test.tsx`); these only prove the rows
+  // mount that menu bound to the right item.
+  it("right-click on a pinned row opens the shared menu, bound to that row", async () => {
     const user = userEvent.setup()
     render(<SidebarNavSection />)
+    const [first, second] = DEFAULT_SIDEBAR_LAYOUT.pinned
+    fireEvent.contextMenu(screen.getByTestId(`sidebar-nav-feature-${first}`))
+    fireEvent.click(screen.getByTestId(`sidebar-nav-feature-${first}-menu-move-down`))
+    expect(lastSavedLayout().pinned.slice(0, 2)).toEqual([second, first])
+
     await user.pointer({
       keys: "[MouseRight]",
       target: screen.getByTestId("sidebar-nav-feature-inbox"),
@@ -311,28 +321,6 @@ describe("SidebarNavSection", () => {
     })
     await user.click(screen.getByText("customize.hideItem"))
     expect(lastSavedLayout().hidden).toContain("workflows")
-  })
-
-  it("orders plugin containers by their declared order, after Canvas", () => {
-    containers.push(
-      { fullId: "p:late", pluginId: "p", def: { id: "late", title: "Late", icon: "a", order: 9 } },
-      {
-        fullId: "p:early",
-        pluginId: "p",
-        def: { id: "early", title: "Early", icon: "b", order: 1 },
-      }
-    )
-    render(<SidebarNavSection />)
-    const ids = Array.from(
-      screen
-        .getByRole("group", { name: "workspacesGroup" })
-        .querySelectorAll("[data-testid^='sidebar-nav-']")
-    ).map((node) => node.getAttribute("data-testid"))
-    expect(ids).toEqual([
-      "sidebar-nav-canvas",
-      "sidebar-nav-view-container-p:early",
-      "sidebar-nav-view-container-p:late",
-    ])
   })
 
   it("follows the stored mode order and leaves hidden modes out", () => {
@@ -352,11 +340,10 @@ describe("SidebarNavSection", () => {
     expect(screen.getByTestId("sidebar-nav-view-container-p:v")).toBeInTheDocument()
   })
 
-  it("a mode row's menu hides it or moves it, with the ends disabled", () => {
+  it("right-click on a mode row opens the shared menu, bound to that mode", () => {
     containers.push({ fullId: "p:v", pluginId: "p", def: { id: "v", title: "Vault", icon: "x" } })
     render(<SidebarNavSection />)
     fireEvent.contextMenu(screen.getByTestId("sidebar-nav-canvas"))
-    expect(screen.getByTestId("sidebar-nav-canvas-menu-move-up")).toHaveAttribute("data-disabled")
     // A mode has no "More" to move to.
     expect(screen.queryByTestId("sidebar-nav-canvas-menu-unpin")).toBeNull()
     fireEvent.click(screen.getByTestId("sidebar-nav-canvas-menu-move-down"))
@@ -364,17 +351,6 @@ describe("SidebarNavSection", () => {
       sidebarLayout: { modes?: { order: string[]; hidden: string[] } }
     }
     expect(saved.sidebarLayout.modes).toEqual({ order: ["p:v", "canvas"], hidden: [] })
-  })
-
-  it("a pinned row moves down from its menu and cannot move past the ends", () => {
-    render(<SidebarNavSection />)
-    const [first, second] = DEFAULT_SIDEBAR_LAYOUT.pinned
-    fireEvent.contextMenu(screen.getByTestId(`sidebar-nav-feature-${first}`))
-    expect(screen.getByTestId(`sidebar-nav-feature-${first}-menu-move-up`)).toHaveAttribute(
-      "data-disabled"
-    )
-    fireEvent.click(screen.getByTestId(`sidebar-nav-feature-${first}-menu-move-down`))
-    expect(lastSavedLayout().pinned.slice(0, 2)).toEqual([second, first])
   })
 
   it("a pinned row carries its live count and its ⌥N chord", () => {

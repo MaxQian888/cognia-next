@@ -9,14 +9,26 @@ jest.mock("@/components/shell/use-bar-layout", () => ({
       zones: {
         start: [{ id: "connectivity" }],
         center: [{ id: "runStatus" }],
-        end: [],
+        end: [{ id: "notifications" }],
       },
     },
   }),
 }))
+// Segments are real buttons with arrow-key handlers of their own (a dropdown
+// trigger opens on ArrowDown), which is what the rail's roving has to beat.
+const mockSegmentKeyDown = jest.fn()
 jest.mock("@/components/desktop/status-bar-zone", () => ({
   StatusBarZone: ({ items }: { items: { id: string }[] }) =>
-    items.map(({ id }) => <span key={id} data-testid={`segment-${id}`} />),
+    items.map(({ id }) => (
+      <button
+        key={id}
+        type="button"
+        data-testid={`segment-${id}`}
+        onKeyDown={(event) => mockSegmentKeyDown(event.key)}
+      >
+        {id}
+      </button>
+    )),
 }))
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -308,6 +320,9 @@ test("opening Customize from the More popover mounts the customizer dialog", asy
   expect(screen.getByTestId("sidebar-customizer")).toBeInTheDocument()
 })
 
+// What each menu action does is `useShellNavModel`'s (`use-shell-nav.test.tsx`)
+// and the menu's own (`nav-item-menu.test.tsx`); the rail's tests only prove
+// each button mounts that menu bound to the right item.
 test("right-click context menu can hide a pinned item", () => {
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
   fireEvent.contextMenu(screen.getByLabelText("workflows"))
@@ -802,8 +817,11 @@ test("mounts global status above Settings outside the squads scroll area", () =>
   const settings = screen.getByTestId("guild-open-settings")
   expect(status).toContainElement(screen.getByTestId("segment-runStatus"))
   // Settings sits in its context-menu trigger (the "Customize navigation"
-  // menu), which is the status rail's sibling in the column.
-  expect(status.parentElement).toBe(settings.parentElement?.parentElement)
+  // menu), which is the status rail's sibling in the column — the status
+  // rail inside the roving group that enrols its segments.
+  expect(status.closest("[data-sidebar-roving-group]")?.parentElement).toBe(
+    settings.parentElement?.parentElement
+  )
   expect(status.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(status.closest('[data-slot="scroll-area"]')).toBeNull()
   rerender(
@@ -915,21 +933,12 @@ describe("pinned shortcuts", () => {
 })
 
 describe("reordering from the context menus", () => {
-  test("a pinned item moves down, and cannot move past either end", () => {
+  test("a pinned item moves down from its own menu", () => {
     render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
     const [first, second] = DEFAULT_SIDEBAR_LAYOUT.pinned
     fireEvent.contextMenu(screen.getByTestId(`guild-feature-${first}`))
-    expect(screen.getByTestId(`guild-feature-menu-${first}-move-up`)).toHaveAttribute(
-      "data-disabled"
-    )
     fireEvent.click(screen.getByTestId(`guild-feature-menu-${first}-move-down`))
     expect(lastSavedLayout().pinned.slice(0, 2)).toEqual([second, first])
-
-    const last = DEFAULT_SIDEBAR_LAYOUT.pinned[DEFAULT_SIDEBAR_LAYOUT.pinned.length - 1]
-    fireEvent.contextMenu(screen.getByTestId(`guild-feature-${last}`))
-    expect(screen.getByTestId(`guild-feature-menu-${last}-move-down`)).toHaveAttribute(
-      "data-disabled"
-    )
   })
 
   test("teams move up and down, with both ends disabled", async () => {
@@ -1042,6 +1051,40 @@ describe("accessibility", () => {
     expect(screen.getByTestId("guild-open-settings")).toHaveFocus()
     fireEvent.keyDown(screen.getByTestId("guild-open-settings"), { key: "Home" })
     expect(dm).toHaveFocus()
+  })
+
+  test("the web shell's status segments join the rail's arrow-key order", () => {
+    mockSegmentKeyDown.mockClear()
+    render(
+      withTooltipProvider(
+        <WebStatusProvider enabled>
+          <GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
+        </WebStatusProvider>
+      )
+    )
+    const runStatus = screen.getByTestId("segment-runStatus")
+    const notifications = screen.getByTestId("segment-notifications")
+    const settings = screen.getByTestId("guild-open-settings")
+    // Rows of the rail, but not tab stops: DM still holds the only one.
+    expect(runStatus).toHaveAttribute("tabindex", "-1")
+    expect(notifications).toHaveAttribute("tabindex", "-1")
+    expect(screen.getByTestId("guild-dm")).toHaveAttribute("tabindex", "0")
+
+    act(() => settings.focus())
+    fireEvent.keyDown(settings, { key: "ArrowUp" })
+    expect(notifications).toHaveFocus()
+    // Arrowing onto a segment hands it the tab stop.
+    expect(notifications).toHaveAttribute("tabindex", "0")
+    expect(screen.getByTestId("guild-dm")).toHaveAttribute("tabindex", "-1")
+    fireEvent.keyDown(notifications, { key: "ArrowUp" })
+    expect(runStatus).toHaveFocus()
+    // The rail takes the arrow before the segment's own handler sees it.
+    expect(mockSegmentKeyDown).not.toHaveBeenCalled()
+    fireEvent.keyDown(runStatus, { key: "End" })
+    expect(settings).toHaveFocus()
+    // Other keys stay the segment's.
+    fireEvent.keyDown(runStatus, { key: "Enter" })
+    expect(mockSegmentKeyDown).toHaveBeenCalledWith("Enter")
   })
 
   test("Settings keeps a way to the customizer even when every item is hidden", () => {

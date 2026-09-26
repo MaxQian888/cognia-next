@@ -87,12 +87,18 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
   // these never fire in (typing ⌥1 on a Mac keyboard produces "¡"), and the
   // rail's handler stands down on a keystroke the dialog already consumed.
   // Registered by the desktop rail only, so the mobile drawer never binds them.
+  //
+  // Not in a browser on Linux: there Alt+1…Alt+9 switch browser tabs before
+  // the page sees the key, so the chord would be advertised in tooltips and
+  // `aria-keyshortcuts` yet never arrive. The desktop app (every OS) and the
+  // web build on macOS / Windows keep them.
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((slot): ShortcutDescriptor => ({
     id: `shell.nav.pinned${slot}`,
     scope: "app",
     labelKey: `settings.shortcuts.catalog.navPinned${slot}`,
     category: "app.navigation",
     defaultChord: `alt+${slot}`,
+    when: "platform.tauri || !platform.linux",
   })),
   // Move the active conversation up / down the sidebar's visible order (what
   // the list shows after grouping, filters and search). ⌘⌥[ / ⌘⌥] — bracket

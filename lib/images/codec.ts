@@ -51,7 +51,8 @@ export class ImageDecodeError extends Error {
   }
 }
 
-interface Surface {
+/** A 2D drawing surface of a fixed size, whichever canvas backs it. */
+export interface Surface {
   context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
   toBlob: (type: string, quality?: number) => Promise<Blob>
 }
@@ -61,7 +62,14 @@ export function canRasterize(): boolean {
   return typeof OffscreenCanvas !== "undefined" || typeof document !== "undefined"
 }
 
-function createSurface(width: number, height: number): Surface {
+/**
+ * A `width` × `height` 2D surface: `OffscreenCanvas` first, a DOM canvas as the
+ * fallback. Exported for the few other rasterizers in the app (the Windows
+ * taskbar badge), so the canvas choice and its failure mode stay here.
+ *
+ * @throws {ImageDecodeError} `unsupported` when this runtime has no 2D canvas.
+ */
+export function createSurface(width: number, height: number): Surface {
   if (typeof OffscreenCanvas !== "undefined") {
     const canvas = new OffscreenCanvas(width, height)
     const context = canvas.getContext("2d", { willReadFrequently: true })

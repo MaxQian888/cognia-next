@@ -8,7 +8,12 @@ import {
   useAppShortcutChord,
   useAppShortcutLabel,
   useAppShortcutLabels,
+  usePinnedNavShortcutLabels,
 } from "./use-app-shortcut-label"
+import {
+  __resetContextKeysForTesting,
+  setContextKeys,
+} from "@/lib/plugin/context-keys/context-key-store"
 import { PINNED_NAV_SHORTCUT_IDS } from "@/lib/shortcuts/app-catalog"
 import { formatKeybinding, toAriaKeyShortcuts } from "@/lib/shortcuts/utils"
 import {
@@ -16,7 +21,10 @@ import {
   useAppKeybindingStore,
 } from "@/stores/shortcuts/app-keybinding-store"
 
-beforeEach(() => __resetAppKeybindingStoreForTesting())
+beforeEach(() => {
+  __resetAppKeybindingStoreForTesting()
+  __resetContextKeysForTesting()
+})
 
 describe("useAppShortcutChord", () => {
   it("is the catalog default until the user rebinds it", () => {
@@ -68,5 +76,29 @@ describe("useAppShortcutLabels", () => {
     const first = result.current
     rerender()
     expect(result.current).toBe(first)
+  })
+})
+
+describe("usePinnedNavShortcutLabels", () => {
+  it("prints the slots in the desktop app and in a browser off Linux", () => {
+    setContextKeys({ "platform.tauri": true, "platform.linux": true })
+    const { result } = renderHook(() => usePinnedNavShortcutLabels())
+    expect(result.current[0].aria).toBe("Alt+1")
+    act(() => setContextKeys({ "platform.tauri": false, "platform.linux": false }))
+    expect(result.current[8].aria).toBe("Alt+9")
+  })
+
+  it("prints nothing in a browser on Linux, where the browser takes Alt+digit", () => {
+    setContextKeys({ "platform.tauri": false, "platform.web": true, "platform.linux": true })
+    const { result } = renderHook(() => usePinnedNavShortcutLabels())
+    expect(result.current.every((entry) => entry.label === "" && entry.aria === undefined)).toBe(
+      true
+    )
+  })
+
+  it("leaves the ungated list untouched by the context", () => {
+    setContextKeys({ "platform.tauri": false, "platform.linux": true })
+    const { result } = renderHook(() => useAppShortcutLabels(PINNED_NAV_SHORTCUT_IDS))
+    expect(result.current[0].aria).toBe("Alt+1")
   })
 })

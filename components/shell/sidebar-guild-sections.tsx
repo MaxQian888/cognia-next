@@ -60,7 +60,8 @@ import { useTeamMute, useVisibleGuildUnread } from "@/hooks/shell/use-team-mute"
 import { Button } from "@/components/ui/button"
 import { teamSettingsHref } from "@/lib/settings/deep-link"
 import { cn } from "@/lib/utils"
-import { CountPill, SidebarRow } from "./sidebar-nav-section"
+import { SidebarRow } from "./sidebar-nav-section"
+import { CountPill } from "@/components/shared/count-pill"
 import { useShellNav } from "./use-shell-nav"
 
 const log = loggers.ui
@@ -106,11 +107,6 @@ export function GuildMutedGlyph({ className, testId }: { className?: string; tes
       className={cn("size-3 shrink-0 text-muted-foreground/70", className)}
     />
   )
-}
-
-/** Compact unread pill for an unselected scope — the glyph the session rows use. */
-export function GuildUnreadPill({ count, testId }: { count: number; testId?: string }) {
-  return <CountPill count={count} testId={testId} />
 }
 
 /**
@@ -447,7 +443,7 @@ export function SidebarGuildSectionRows({
                     ) : active ? undefined : (
                       // Not the current scope, so its conversations are not on
                       // screen — the row says how many are waiting in there.
-                      <GuildUnreadPill count={count} testId={`sidebar-guild-unread-${row.key}`} />
+                      <CountPill count={count} testId={`sidebar-guild-unread-${row.key}`} />
                     )
                   }
                   testId={isDm ? "sidebar-guild-dm" : `sidebar-guild-team-${row.key}`}
@@ -456,7 +452,7 @@ export function SidebarGuildSectionRows({
                 {foldable && row.key === foldKey ? (
                   <>
                     {/* What the fold is hiding, so it is not silent. */}
-                    <GuildUnreadPill count={hiddenUnread} testId="sidebar-guild-folded-unread" />
+                    <CountPill count={hiddenUnread} testId="sidebar-guild-folded-unread" />
                     <Button
                       type="button"
                       variant="ghost"

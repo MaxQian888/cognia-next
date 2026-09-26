@@ -1,5 +1,7 @@
 /** @jest-environment jsdom */
 
+jest.mock("@/lib/db/schema", () => ({ getDb: () => ({}) }))
+
 import { countMobileUnread, type UnreadCountSession } from "./unread-count"
 
 const session = (over: Partial<UnreadCountSession> & { id: string }): UnreadCountSession =>

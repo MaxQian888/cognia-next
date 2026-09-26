@@ -14,6 +14,7 @@ import {
   WorkspacePickerList,
 } from "@/components/workspace/workspace-picker-list"
 import { useOverlaySide } from "./rail-overlay-side"
+import { useSidebarRowRoving } from "./sidebar-row-roving"
 
 /**
  * Rail entry point for the active workspace. The trigger shows the active
@@ -23,6 +24,11 @@ import { useOverlaySide } from "./rail-overlay-side"
  *
  * Switching drives `setActiveProject`, which re-binds the Git panel and
  * terminal scope and feeds the cwd chain.
+ *
+ * On the rail the trigger is one of the column's buttons, so it takes its
+ * place in the rail's roving order (`sidebar-row-roving.tsx`): no tab stop of
+ * its own, reached with the arrow keys like its neighbours. The wide trigger
+ * sits in the title bar, outside any roving scope, and keeps its tab stop.
  */
 interface WorkspaceSwitcherProps {
   /**
@@ -56,6 +62,9 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
   const initial = active?.name.trim().charAt(0).toUpperCase()
   const wide = variant === "wide"
   const overlaySide = useOverlaySide()
+  // Never the selected destination, so it holds the tab stop only when the
+  // scope hands it one (nothing else claimed it, or the user arrowed here).
+  const roving = useSidebarRowRoving(wide ? undefined : "workspace-switcher", false)
 
   return (
     <>
@@ -92,6 +101,10 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
                 <Button
                   variant="ghost"
                   size="icon"
+                  {...roving.rowProps}
+                  tabIndex={roving.tabIndex}
+                  onKeyDown={roving.onKeyDown}
+                  onFocus={roving.onFocus}
                   aria-label={triggerLabel}
                   data-testid="workspace-switcher"
                   className={cn(

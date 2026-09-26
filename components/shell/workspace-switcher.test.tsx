@@ -122,6 +122,22 @@ beforeEach(() => {
 })
 
 import { OverlaySideContext } from "./rail-overlay-side"
+import { SidebarRowsScope, useSidebarRowRoving } from "./sidebar-row-roving"
+
+/** A rail neighbour: one roving row, as the rail's own buttons are. */
+function Neighbour({ id, active = false }: { id: string; active?: boolean }) {
+  const roving = useSidebarRowRoving(id, active)
+  return (
+    <button
+      type="button"
+      data-testid={id}
+      {...roving.rowProps}
+      tabIndex={roving.tabIndex}
+      onKeyDown={roving.onKeyDown}
+      onFocus={roving.onFocus}
+    />
+  )
+}
 
 function renderSwitcher() {
   return render(
@@ -454,5 +470,56 @@ describe("WorkspaceSwitcher — overlay side", () => {
     fireEvent.click(screen.getByTestId("workspace-switcher"))
     const content = document.querySelector("[data-radix-popper-content-wrapper] > [data-side]")
     expect(content).toHaveAttribute("data-side", "right")
+  })
+})
+
+describe("WorkspaceSwitcher — rail keyboard order", () => {
+  it("joins the rail's roving order instead of keeping a tab stop of its own", () => {
+    render(
+      <TooltipProvider>
+        <SidebarRowsScope>
+          <WorkspaceSwitcher />
+          <Neighbour id="guild-dm" active />
+        </SidebarRowsScope>
+      </TooltipProvider>
+    )
+    const trigger = screen.getByTestId("workspace-switcher")
+    const dm = screen.getByTestId("guild-dm")
+    expect(trigger).toHaveAttribute("data-sidebar-row", "workspace-switcher")
+    // The active destination holds the rail's only tab stop.
+    expect(trigger).toHaveAttribute("tabindex", "-1")
+    expect(dm).toHaveAttribute("tabindex", "0")
+    dm.focus()
+    fireEvent.keyDown(dm, { key: "ArrowUp" })
+    expect(trigger).toHaveFocus()
+    expect(trigger).toHaveAttribute("tabindex", "0")
+    fireEvent.keyDown(trigger, { key: "End" })
+    expect(dm).toHaveFocus()
+  })
+
+  it("is the rail's tab stop when nothing else claims it", () => {
+    render(
+      <TooltipProvider>
+        <SidebarRowsScope>
+          <WorkspaceSwitcher />
+          <Neighbour id="guild-dm" />
+        </SidebarRowsScope>
+      </TooltipProvider>
+    )
+    expect(screen.getByTestId("workspace-switcher")).toHaveAttribute("tabindex", "0")
+  })
+
+  it("keeps the wide title-bar trigger out of any roving order", () => {
+    render(
+      <TooltipProvider>
+        <SidebarRowsScope>
+          <WorkspaceSwitcher variant="wide" />
+          <Neighbour id="guild-dm" active />
+        </SidebarRowsScope>
+      </TooltipProvider>
+    )
+    const trigger = screen.getByTestId("workspace-switcher")
+    expect(trigger).not.toHaveAttribute("data-sidebar-row")
+    expect(trigger).not.toHaveAttribute("tabindex")
   })
 })

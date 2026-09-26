@@ -208,9 +208,13 @@ const inboxUnreadRef = { current: 0 }
 const shellCharacters = [{ id: "c1", name: "Octo" }]
 const useDexieFirstQuery = jest.fn((_opts: { table?: string }) => ({ data: shellCharacters }))
 jest.mock("@/hooks/data", () => ({
-  useClientLiveQuery: <T,>(query: () => Promise<T>, _deps: unknown, fallback: T): T =>
-    query.toString().includes("loadMobileUnread") ? (inboxUnreadRef.current as T) : fallback,
+  useClientLiveQuery: <T,>(_query: () => Promise<T>, _deps: unknown, fallback: T): T => fallback,
   useDexieFirstQuery: (opts: { table?: string }) => useDexieFirstQuery(opts),
+}))
+// The Inbox dot reads the window's shared unread read; the counting itself is
+// pinned in `lib/inbox/unread-count.test.ts`.
+jest.mock("@/hooks/shell/use-unread-sessions", () => ({
+  useMobileUnread: () => ({ chat: 0, inbox: inboxUnreadRef.current }),
 }))
 
 // The drawer list's long-lived source. A passthrough: the shell test pins that
@@ -413,6 +417,9 @@ jest.mock("@/hooks/chat/use-credential-status", () => ({
 }))
 
 const runStatusMap: ReadonlyMap<string, string> = new Map([["s-running", "streaming"]])
+jest.mock("@/lib/chat/branch-whole-conversation", () => ({
+  branchWholeConversation: jest.fn(),
+}))
 jest.mock("@/hooks/chat/use-session-run-status-map", () => ({
   useSessionRunStatusMap: () => runStatusMap,
 }))
@@ -515,6 +522,7 @@ jest.mock("@/stores/artifact/artifact-dock-layout-store", () => ({
   useArtifactDockLayoutStore: (selector: (s: unknown) => unknown) => selector(artifactDockState),
 }))
 
+import { branchWholeConversation } from "@/lib/chat/branch-whole-conversation"
 import { AppShellMobile } from "./app-shell-mobile"
 
 beforeEach(() => {
@@ -987,6 +995,8 @@ describe("<AppShellMobile />", () => {
       expect(props.onAssignToFolder).toBe(assignToFolder)
       // The live turn state that drives the row glyphs and the running filter.
       expect(props.runStatusById).toBe(runStatusMap)
+      // Branch is offered on the phone too, through the shared branch writer.
+      expect(props.onBranch).toBe(branchWholeConversation)
     })
 
     it("keeps the list's source outside the drawer, fed by the shell's character read", () => {

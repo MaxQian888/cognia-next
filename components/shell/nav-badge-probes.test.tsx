@@ -33,6 +33,8 @@ import {
 } from "@/lib/connectors/hitl/approval-registry"
 import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
 
+const refreshAll = jest.fn(async () => {})
+
 function setLayout(pinned: string[], hidden: string[]) {
   useSettingsStore.setState({ settings: { sidebarLayout: { pinned, hidden } } as never })
 }
@@ -58,7 +60,10 @@ beforeEach(() => {
   botsNeedingAttention = 0
   useBotInstallations.mockClear()
   setLayout(DEFAULT_SIDEBAR_LAYOUT.pinned, [])
-  useSchedulerStore.setState({ tasks: [] })
+  refreshAll.mockClear()
+  // The store's own loader reaches Dexie / a paired host; the probe's job is
+  // only to ask for it.
+  useSchedulerStore.setState({ tasks: [], isInitialized: true, refreshAll })
 })
 
 describe("NavBadgeProbes", () => {
@@ -106,5 +111,29 @@ describe("NavBadgeProbes", () => {
     const { unmount } = render(<NavBadgeProbes />)
     unmount()
     expect(getNavBadgeSnapshot()).toEqual({})
+  })
+
+  it("loads the scheduler store when nothing has initialized it", () => {
+    useSchedulerStore.setState({ isInitialized: false })
+    render(<NavBadgeProbes />)
+    expect(refreshAll).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves an initialized store to its owner", () => {
+    render(<NavBadgeProbes />)
+    expect(refreshAll).not.toHaveBeenCalled()
+  })
+
+  it("loads again when the owner stops the scheduler", () => {
+    render(<NavBadgeProbes />)
+    act(() => useSchedulerStore.setState({ isInitialized: false }))
+    expect(refreshAll).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not load the scheduler store while its destination is hidden", () => {
+    useSchedulerStore.setState({ isInitialized: false })
+    setLayout(DEFAULT_SIDEBAR_LAYOUT.pinned, ["scheduler"])
+    render(<NavBadgeProbes />)
+    expect(refreshAll).not.toHaveBeenCalled()
   })
 })

@@ -11,9 +11,10 @@
  * surfaces read the same aggregate: how many unread conversations each guild
  * holds, counting only what the main list would show (exposed, not archived).
  *
- * Reads the unread table first and resolves *only* the sessions it names, so
- * a large history costs nothing beyond the handful of rows with unread. Live:
- * Dexie re-runs the query when either table changes.
+ * The read and the "may this count?" filter are shared with the mobile badges
+ * (`lib/chat/unread-sessions.ts`): unread pointers first, then *only* the
+ * sessions they name, observed by one Dexie live query per window however
+ * many badges draw from it.
  *
  * Honours `conversationSidebar.showUnreadBadges` — hiding a badge is a display
  * choice, and this is a badge, so it goes dark with the rest.
@@ -28,15 +29,22 @@
 
 import { useMemo } from "react"
 import type { ChatSession } from "@cognia/agent-config-types"
-import { useClientLiveQuery } from "@/hooks/data"
-import { getDb } from "@/lib/db/schema"
-import { listSessionStates, markSessionRead } from "@/lib/db/session-state"
+import { useUnreadSessions } from "@/hooks/shell/use-unread-sessions"
+import { markSessionRead } from "@/lib/db/session-state"
 import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
 import {
   needsCrossWorkspaceSessions,
   resolveConversationSearchOptions,
 } from "@/lib/chat/conversation-search-scope"
-import { isSessionExposed } from "@/lib/chat/session-exposure"
+import {
+  ALL_WORKSPACES_UNREAD_SCOPE,
+  isBadgeableUnread,
+  isInUnreadScope,
+  isUnreadScopeOpen,
+  loadUnreadSessions,
+  unreadGuildTeamId,
+  type UnreadScope,
+} from "@/lib/chat/unread-sessions"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 
@@ -60,34 +68,22 @@ export type UnreadSession = Pick<
 
 /**
  * Which conversations the badges may count — the reach of the list they sit
- * beside. `workspace` with a null `projectId` is the list before the project
- * store has loaded, which shows nothing, so the badges show nothing either.
+ * beside. The definition lives with the shared filter in
+ * `lib/chat/unread-sessions.ts`; these names are the shell's vocabulary for it.
  */
-export type GuildUnreadScope =
-  { kind: "all-workspaces" } | { kind: "workspace"; projectId: string | null }
+export type GuildUnreadScope = UnreadScope
 
 /** Every workspace — the reach of a list grouped by, or searching across, workspaces. */
-export const ALL_WORKSPACES_SCOPE: GuildUnreadScope = { kind: "all-workspaces" }
+export const ALL_WORKSPACES_SCOPE: GuildUnreadScope = ALL_WORKSPACES_UNREAD_SCOPE
 
-/**
- * Whether `session` is in the list `scope` describes. Mirrors
- * `listWorkspaceSessions`: the workspace's own conversations plus those of no
- * workspace (a paired client's host-synced history, pre-workspace chats).
- */
-export function isInGuildUnreadScope(
-  session: Pick<ChatSession, "projectId">,
-  scope: GuildUnreadScope
-): boolean {
-  if (scope.kind === "all-workspaces") return true
-  if (scope.projectId == null) return false
-  return !session.projectId || session.projectId === scope.projectId
-}
+/** Whether `session` is in the list `scope` describes (see `isInUnreadScope`). */
+export const isInGuildUnreadScope = isInUnreadScope
 
 /**
  * Pure aggregation: one unread conversation counts once, under the guild the
- * main list files it in. Archived conversations and sessions the main list
- * never shows (embedded / subagent transcripts) are excluded — the badge must
- * never promise something the open section cannot show.
+ * main list files it in. What may count at all is the shared
+ * `isBadgeableUnread` filter — the badge must never promise something the open
+ * section cannot show.
  */
 export function aggregateGuildUnread(
   sessions: ReadonlyArray<UnreadSession | undefined>,
@@ -97,13 +93,11 @@ export function aggregateGuildUnread(
   let dm = 0
   const teams = new Map<string, number>()
   for (const session of sessions) {
-    if (!session) continue
-    if (!unreadBySession.has(session.id)) continue
-    if (session.archivedAt != null) continue
-    if (!isSessionExposed(session, "main-list")) continue
-    if (!isInGuildUnreadScope(session, scope)) continue
-    if (session.kind === "team" && session.teamId) {
-      teams.set(session.teamId, (teams.get(session.teamId) ?? 0) + 1)
+    if (!session || !unreadBySession.has(session.id)) continue
+    if (!isBadgeableUnread(session, scope)) continue
+    const teamId = unreadGuildTeamId(session)
+    if (teamId) {
+      teams.set(teamId, (teams.get(teamId) ?? 0) + 1)
     } else {
       dm += 1
     }
@@ -113,16 +107,11 @@ export function aggregateGuildUnread(
   return { dm, teams, total }
 }
 
-/** Resolves the aggregate from Dexie: unread rows first, then just their sessions. */
+/** Resolves the aggregate from Dexie through the shared unread read. */
 export async function loadGuildUnread(scope: GuildUnreadScope): Promise<GuildUnread> {
-  if (scope.kind === "workspace" && scope.projectId == null) return EMPTY_GUILD_UNREAD
-  const states = await listSessionStates()
-  const unreadBySession = new Map<string, number>()
-  for (const state of states) {
-    if (state.unreadCount > 0) unreadBySession.set(state.sessionId, state.unreadCount)
-  }
+  if (!isUnreadScopeOpen(scope)) return EMPTY_GUILD_UNREAD
+  const { sessions, unreadBySession } = await loadUnreadSessions()
   if (unreadBySession.size === 0) return EMPTY_GUILD_UNREAD
-  const sessions = await getDb().sessions.bulkGet([...unreadBySession.keys()])
   return aggregateGuildUnread(sessions, unreadBySession, scope)
 }
 
@@ -137,18 +126,14 @@ export async function markGuildRead(
   target: GuildUnreadTarget,
   scope: GuildUnreadScope
 ): Promise<number> {
-  if (scope.kind === "workspace" && scope.projectId == null) return 0
-  const states = await listSessionStates()
-  const unreadIds = states.filter((s) => s.unreadCount > 0).map((s) => s.sessionId)
-  if (unreadIds.length === 0) return 0
-  const sessions = await getDb().sessions.bulkGet(unreadIds)
-  const targets = sessions.filter((session): session is ChatSession => {
-    if (!session) return false
-    if (session.archivedAt != null) return false
-    if (!isSessionExposed(session, "main-list")) return false
-    if (!isInGuildUnreadScope(session, scope)) return false
-    const inTeam = session.kind === "team" && Boolean(session.teamId)
-    return target.kind === "team" ? inTeam && session.teamId === target.teamId : !inTeam
+  if (!isUnreadScopeOpen(scope)) return 0
+  const { sessions, unreadBySession } = await loadUnreadSessions()
+  if (unreadBySession.size === 0) return 0
+  const targets = sessions.filter((session) => {
+    if (!unreadBySession.has(session.id)) return false
+    if (!isBadgeableUnread(session, scope)) return false
+    const teamId = unreadGuildTeamId(session)
+    return target.kind === "team" ? teamId === target.teamId : teamId === null
   })
   await Promise.all(targets.map((session) => markSessionRead(session.id)))
   return targets.length
@@ -181,18 +166,21 @@ export function useGuildUnreadScope(): GuildUnreadScope {
   )
 }
 
+/**
+ * The guild aggregate for the shared scope. Reads the window's one unread
+ * observer (`useUnreadSessions`), so the rail, the compact guild band and the
+ * app badge cost one Dexie live query between them; the scope and the
+ * display setting are applied here, reader-side.
+ */
 export function useGuildUnread(): GuildUnread {
   const showUnreadBadges = useSettingsStore(
     (s) => s.settings?.conversationSidebar?.showUnreadBadges ?? true
   )
   const scope = useGuildUnreadScope()
-  const live = useClientLiveQuery<GuildUnread>(
-    () => loadGuildUnread(scope),
-    [scope],
-    EMPTY_GUILD_UNREAD
-  )
-  return useMemo(
-    () => (showUnreadBadges ? (live ?? EMPTY_GUILD_UNREAD) : EMPTY_GUILD_UNREAD),
-    [showUnreadBadges, live]
-  )
+  const unread = useUnreadSessions()
+  return useMemo(() => {
+    if (!showUnreadBadges || !unread || !isUnreadScopeOpen(scope)) return EMPTY_GUILD_UNREAD
+    if (unread.unreadBySession.size === 0) return EMPTY_GUILD_UNREAD
+    return aggregateGuildUnread(unread.sessions, unread.unreadBySession, scope)
+  }, [showUnreadBadges, unread, scope])
 }

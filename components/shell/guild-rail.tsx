@@ -1,7 +1,7 @@
 "use client"
 
 import { WebGlobalStatusRail } from "@/components/shell/web-status"
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
@@ -13,34 +13,28 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
+import { CountPill } from "@/components/shared/count-pill"
 import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { avatarColor } from "@/lib/ui/avatar"
 import { loggers } from "@cognia/logging"
 import { useOrderedTeams } from "@/hooks/shell/use-ordered-teams"
 import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
-import { useNavBadges } from "@/hooks/shell/use-nav-badges"
 import { useTeamMute, useVisibleGuildUnread } from "@/hooks/shell/use-team-mute"
 import {
   useAppShortcutLabels,
   type AppShortcutLabel,
 } from "@/hooks/shortcuts/use-app-shortcut-label"
-import { PINNED_NAV_SHORTCUT_IDS } from "@/lib/shortcuts/app-catalog"
-import { navBadgeCount, sumNavBadges } from "@/lib/shell/nav-badges"
+import { navBadgeCount } from "@/lib/shell/nav-badges"
 import type { Team } from "@cognia/agent-config-types"
 import {
-  ArrowDownIcon,
-  ArrowUpIcon,
   BellOffIcon,
   EllipsisIcon,
-  EyeOffIcon,
   MessagesSquareIcon,
   PencilRulerIcon,
-  PinOffIcon,
   PlusIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
@@ -49,24 +43,19 @@ import { useTranslations } from "next-intl"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { MotionSelectionIndicator } from "@/components/chat/motion/motion-reveal"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
-import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 import { ResolvedRailIcon } from "@/components/shell/plugin-view-container-panel"
 import { useRouter } from "next/navigation"
-import { useShellNav, type ShellMode } from "./use-shell-nav"
+import { useShellNavModel } from "./use-shell-nav"
 import { MoreMenuContent } from "./more-menu"
-import { NavSortableItem, NavSortableList, type NavDragBinding } from "./nav-sortable"
+import { NavItemContextMenu } from "./nav-item-menu"
+import { NavSortableItem, NavSortableList } from "./nav-sortable"
 import { OverlaySideContext, overlaySideFor, useOverlaySide } from "./rail-overlay-side"
 import { ShellLayoutDialog } from "./shell-layout-dialog"
 import { GuildScopeMenuItems } from "./sidebar-guild-sections"
-import { SidebarRowsScope, useSidebarRowRoving } from "./sidebar-row-roving"
+import { SidebarRovingGroup, SidebarRowsScope, useSidebarRowRoving } from "./sidebar-row-roving"
 import { useShellNavShortcuts } from "./use-shell-nav-shortcuts"
 import { startGuildConversation } from "@/lib/shell/start-guild-conversation"
 import { WorkspaceSwitcher } from "./workspace-switcher"
-import {
-  mergeVisibleModeOrder,
-  moveVisibleMode,
-  type SidebarCatalogItem,
-} from "@/lib/shell/sidebar-nav"
 import { GUILD_RAIL_WIDTH_PX, type SidebarSide } from "@/types/shell/sidebar"
 
 const log = loggers.ui
@@ -137,7 +126,9 @@ interface Props {
  * conversation rail is expanded on `/` it hosts these same destinations as
  * labelled rows (`sidebar-nav-section.tsx`) and the shell hides this column
  * (`sidebarHostsNav`); collapse the sidebar, or leave `/`, and the icon
- * column is back. Both read `useShellNav`, so they cannot drift.
+ * column is back. Both render from `useShellNavModel` — labels, counts,
+ * chords, every reorder / hide / pin handler — and share each item's
+ * right-click menu (`nav-item-menu.tsx`), so they cannot drift.
  *
  *   ┌── Workspace switcher ──┐
  *   ├─ DM · Canvas · plugins ┤ ← chat guilds; Canvas + plugin modes are
@@ -156,7 +147,9 @@ interface Props {
  *
  * It is a `<nav>` landmark with one tab stop: arrow keys / Home / End move
  * between its buttons (`sidebar-row-roving.tsx`, the same roving the expanded
- * sidebar's rows use), and each block is a labelled `role="group"`.
+ * sidebar's rows use) — the workspace switcher, the web shell's status
+ * segments and plugin contributions included — and each block is a labelled
+ * `role="group"`.
  *
  * Which edge it occupies is `settings.sidebarSide`. Everything that opens
  * sideways — tooltips, the "More" popover, the workspace switcher — has to
@@ -171,7 +164,6 @@ export function GuildRail({
 }: Props) {
   const t = useTranslations("desktop.guildRail")
   const listT = useTranslations("desktop.channelList")
-  const pluginT = useTranslations()
   const commonT = useTranslations("common")
   // Same order the expanded sidebar's accordion shows — the rail is that
   // sidebar folded up, so a team dragged there is in the same slot here.
@@ -181,36 +173,46 @@ export function GuildRail({
     pendingRoute,
     selected,
     isDmActive,
-    isCanvasActive,
     isTeamActive,
-    isViewContainerActive,
     isFeatureActive,
     overflowActive,
     modes,
-    layout: { resolved, pin, unpin, hide, side, reorderPinned, movePinned, hideMode, reorderModes },
+    layout: { resolved, side },
     switchToDm,
-    switchToCanvas,
     switchToTeam,
-    switchToViewContainer,
     goToFeature,
-  } = useShellNav()
-  const [moreOpen, setMoreOpen] = useState(false)
-  const [customizeOpen, setCustomizeOpen] = useState(false)
-  const overflowPending = resolved.overflow.some((item) => item.route === pendingRoute)
+    badges,
+    overflowBadge,
+    overflowPending,
+    pinnedShortcuts,
+    modeLabel,
+    modeLabelById,
+    pinnedLabel,
+    pinnedLabelById,
+    visibleModeIds,
+    pinnedIds,
+    isModeActive,
+    isModePending,
+    selectMode,
+    reorderVisibleModes,
+    reorderPinnedIds,
+    modeMenu,
+    pinnedMenu,
+    moreOpen,
+    setMoreOpen,
+    customizeOpen,
+    setCustomizeOpen,
+    openOverflowItem,
+    openCustomize,
+    pinItem,
+    hideItem,
+  } = useShellNavModel()
   // An icon column has no room for the conversation rows, so each guild button
   // carries the count its section holds — the same aggregate the expanded
   // sidebar's closed rows show (`hooks/shell/use-guild-unread.ts`), minus the
   // teams the user muted.
   const unread = useVisibleGuildUnread()
   const { isMuted } = useTeamMute()
-  // Feature counts (`lib/shell/nav-badges.ts`): what is waiting behind each
-  // destination, sampled once per window by `NavBadgeProbes`.
-  const badges = useNavBadges()
-  const overflowBadge = sumNavBadges(
-    badges,
-    resolved.overflow.map((item) => item.id)
-  )
-  const pinnedShortcuts = useAppShortcutLabels(PINNED_NAV_SHORTCUT_IDS)
   const router = useRouter()
   /** "3 unread" — folded into each guild button's accessible name. */
   const unreadLabel = (count: number) => t("unreadCount", { count })
@@ -257,14 +259,6 @@ export function GuildRail({
   /** Where tooltips and the "More" popover open: inward, away from the edge. */
   const overlaySide = overlaySideFor(effectiveSide)
 
-  const openOverflowItem = (route: string) => {
-    setMoreOpen(false)
-    goToFeature(route)
-  }
-  const openCustomize = () => {
-    setMoreOpen(false)
-    setCustomizeOpen(true)
-  }
   const handleCreateTeam = () => {
     log.info("guild create team click")
     onCreateTeam()
@@ -283,48 +277,10 @@ export function GuildRail({
     openSettings: handleOpenSettings,
   })
 
-  const modeLabel = useCallback(
-    (mode: ShellMode) =>
-      mode.kind === "canvas"
-        ? t("canvas")
-        : resolvePluginLabel(
-            pluginT as never,
-            mode.container.pluginId,
-            mode.container.def.titleKey,
-            mode.container.def.title
-          ),
-    [t, pluginT]
-  )
-  const visibleModeIds = useMemo(() => modes.visible.map((mode) => mode.id), [modes.visible])
-  const modeLabelById = useCallback(
-    (id: string) => {
-      const mode = modes.visible.find((entry) => entry.id === id)
-      return mode ? modeLabel(mode) : id
-    },
-    [modes.visible, modeLabel]
-  )
-  const pinnedIds = useMemo(() => resolved.pinned.map((item) => item.id), [resolved.pinned])
-  const pinnedLabelById = useCallback(
-    (id: string) => {
-      const item = resolved.pinned.find((entry) => entry.id === id)
-      return item ? t(item.i18nKey) : id
-    },
-    [resolved.pinned, t]
-  )
   const teamLabelById = useCallback(
     (id: string) => teams?.find((team) => team.id === id)?.name ?? id,
     [teams]
   )
-  // Both write the whole stored order, hidden modes included, so a hidden
-  // mode keeps its slot instead of being pushed to the end.
-  const modeOrderIds = useMemo(() => modes.order.map((mode) => mode.id), [modes.order])
-  const hiddenModeIds = useMemo(() => new Set(modes.hidden.map((mode) => mode.id)), [modes.hidden])
-  const reorderVisibleModes = (visibleOrder: string[]) =>
-    void reorderModes(mergeVisibleModeOrder(modeOrderIds, hiddenModeIds, visibleOrder))
-  const moveMode = (id: string, delta: number) => {
-    const next = moveVisibleMode(modeOrderIds, hiddenModeIds, id, delta)
-    if (next) void reorderModes(next)
-  }
 
   return (
     <OverlaySideContext.Provider value={overlaySide}>
@@ -376,10 +332,14 @@ export function GuildRail({
         <SidebarRowsScope className="flex min-h-0 w-14 flex-1 flex-col items-center py-2.5">
           <ScrollArea className="w-full flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden">
             <div className="flex flex-col items-center gap-1.5 px-2">
-              <PluginExtensionSlot
-                point="sidebar.left.top"
-                className="flex flex-col items-center gap-2 empty:hidden"
-              />
+              {/* Controls the rail hosts but does not render join its arrow-key
+                  order through a roving group; see `SidebarRovingGroup`. */}
+              <SidebarRovingGroup groupKey="rail-plugins-top" className="contents">
+                <PluginExtensionSlot
+                  point="sidebar.left.top"
+                  className="flex flex-col items-center gap-2 empty:hidden"
+                />
+              </SidebarRovingGroup>
               <WorkspaceSwitcher className="size-9 rounded-panel bg-foreground/[0.06] text-foreground hover:bg-foreground/[0.09]" />
               <Separator className="my-1.5 w-4" />
               <div
@@ -411,36 +371,40 @@ export function GuildRail({
                   onReorder={reorderVisibleModes}
                   labelOf={modeLabelById}
                 >
-                  {modes.visible.map((mode, index) => (
-                    <NavSortableItem key={mode.id} id={mode.id}>
-                      {(drag) => (
-                        <ModeRailButton
-                          mode={mode}
-                          label={modeLabel(mode)}
-                          active={
-                            mode.kind === "canvas" ? isCanvasActive : isViewContainerActive(mode.id)
-                          }
-                          pending={
-                            pendingRoute === "/" &&
-                            (mode.kind === "canvas"
-                              ? selected.kind === "canvas"
-                              : selected.kind === "plugin-view" && selected.containerId === mode.id)
-                          }
-                          onSelect={() =>
-                            mode.kind === "canvas"
-                              ? switchToCanvas()
-                              : switchToViewContainer(mode.id)
-                          }
-                          canMoveUp={index > 0}
-                          canMoveDown={index < modes.visible.length - 1}
-                          onMove={(delta) => moveMode(mode.id, delta)}
-                          onHide={() => void hideMode(mode.id)}
-                          onCustomize={() => setCustomizeOpen(true)}
-                          drag={drag}
-                        />
-                      )}
-                    </NavSortableItem>
-                  ))}
+                  {modes.visible.map((mode, index) => {
+                    const testId =
+                      mode.kind === "canvas" ? "guild-canvas" : `guild-view-container-${mode.id}`
+                    const label = modeLabel(mode)
+                    return (
+                      <NavSortableItem key={mode.id} id={mode.id}>
+                        {(drag) => (
+                          <NavItemContextMenu
+                            drag={drag}
+                            menuTestId={`${testId}-menu`}
+                            {...modeMenu(mode, index)}
+                          >
+                            <RailButton
+                              active={isModeActive(mode)}
+                              pending={isModePending(mode)}
+                              ariaLabel={label}
+                              tooltip={label}
+                              onClick={() => selectMode(mode)}
+                              testId={testId}
+                            >
+                              {mode.kind === "canvas" ? (
+                                <PencilRulerIcon className={RAIL_ICON_CLASS} />
+                              ) : (
+                                <ResolvedRailIcon
+                                  name={mode.container.def.icon}
+                                  className={RAIL_ICON_CLASS}
+                                />
+                              )}
+                            </RailButton>
+                          </NavItemContextMenu>
+                        )}
+                      </NavSortableItem>
+                    )
+                  })}
                 </NavSortableList>
               </div>
 
@@ -453,32 +417,37 @@ export function GuildRail({
               >
                 <NavSortableList
                   ids={pinnedIds}
-                  onReorder={(ids) => void reorderPinned(ids)}
+                  onReorder={reorderPinnedIds}
                   labelOf={pinnedLabelById}
                 >
-                  {resolved.pinned.map((item, index) => (
-                    <NavSortableItem key={item.id} id={item.id}>
-                      {(drag) => (
-                        <NavRailButton
-                          item={item}
-                          active={isFeatureActive(item.route)}
-                          pending={pendingRoute === item.route}
-                          label={t(item.i18nKey)}
-                          badge={navBadgeCount(badges, item.id)}
-                          badgeLabel={badgeLabel}
-                          shortcut={pinnedShortcuts[index]}
-                          canMoveUp={index > 0}
-                          canMoveDown={index < resolved.pinned.length - 1}
-                          onNavigate={() => goToFeature(item.route)}
-                          onMove={(delta) => void movePinned(item.id, delta)}
-                          onMoveToMore={() => void unpin(item.id)}
-                          onHide={() => void hide(item.id)}
-                          onCustomize={() => setCustomizeOpen(true)}
-                          drag={drag}
-                        />
-                      )}
-                    </NavSortableItem>
-                  ))}
+                  {resolved.pinned.map((item, index) => {
+                    const label = pinnedLabel(item)
+                    return (
+                      <NavSortableItem key={item.id} id={item.id}>
+                        {(drag) => (
+                          <NavItemContextMenu
+                            drag={drag}
+                            menuTestId={`guild-feature-menu-${item.id}`}
+                            {...pinnedMenu(item, index)}
+                          >
+                            <RailButton
+                              active={isFeatureActive(item.route)}
+                              pending={pendingRoute === item.route}
+                              ariaLabel={label}
+                              tooltip={label}
+                              onClick={() => goToFeature(item.route)}
+                              badge={navBadgeCount(badges, item.id)}
+                              badgeLabel={badgeLabel}
+                              shortcut={pinnedShortcuts[index]}
+                              testId={`guild-feature-${item.id}`}
+                            >
+                              <item.Icon className={RAIL_ICON_CLASS} />
+                            </RailButton>
+                          </NavItemContextMenu>
+                        )}
+                      </NavSortableItem>
+                    )
+                  })}
                 </NavSortableList>
 
                 {resolved.overflow.length > 0 && (
@@ -506,8 +475,8 @@ export function GuildRail({
                         isActive={isFeatureActive}
                         badges={badges}
                         onOpen={openOverflowItem}
-                        onPin={(id) => void pin(id)}
-                        onHide={(id) => void hide(id)}
+                        onPin={pinItem}
+                        onHide={hideItem}
                         onCustomize={openCustomize}
                         testIdPrefix="guild-more"
                       />
@@ -576,7 +545,9 @@ export function GuildRail({
 
           <Separator className="my-2 w-4" />
 
-          <WebGlobalStatusRail collapsed={collapsed} />
+          <SidebarRovingGroup groupKey="rail-status" className="contents">
+            <WebGlobalStatusRail collapsed={collapsed} />
+          </SidebarRovingGroup>
 
           {/* The Settings gear also carries "Customize navigation": it is the
               one control on the rail that can never be hidden, so the way back
@@ -607,222 +578,17 @@ export function GuildRail({
             </ContextMenuContent>
           </ContextMenu>
 
-          <PluginExtensionSlot
-            point="sidebar.left.bottom"
-            className="mt-2 flex flex-col items-center gap-2 empty:hidden"
-          />
+          <SidebarRovingGroup groupKey="rail-plugins-bottom" className="contents">
+            <PluginExtensionSlot
+              point="sidebar.left.bottom"
+              className="mt-2 flex flex-col items-center gap-2 empty:hidden"
+            />
+          </SidebarRovingGroup>
         </SidebarRowsScope>
 
         <ShellLayoutDialog open={customizeOpen} onOpenChange={setCustomizeOpen} surface="sidebar" />
       </nav>
     </OverlaySideContext.Provider>
-  )
-}
-
-interface ReorderMenuProps {
-  canMoveUp: boolean
-  canMoveDown: boolean
-  /** `-1` up, `1` down. */
-  onMove: (delta: number) => void
-}
-
-/**
- * "Move up / Move down" — the keyboard path for a rail drag, disabled at the
- * ends of the list rather than offered as a silent no-op.
- */
-function ReorderMenuItems({
-  canMoveUp,
-  canMoveDown,
-  onMove,
-  testIdPrefix,
-}: ReorderMenuProps & { testIdPrefix: string }) {
-  const t = useTranslations("desktop.guildRail")
-  return (
-    <>
-      <ContextMenuItem
-        disabled={!canMoveUp}
-        onSelect={() => onMove(-1)}
-        data-testid={`${testIdPrefix}-move-up`}
-      >
-        <ArrowUpIcon className="size-4" />
-        {t("moveTeamUp")}
-      </ContextMenuItem>
-      <ContextMenuItem
-        disabled={!canMoveDown}
-        onSelect={() => onMove(1)}
-        data-testid={`${testIdPrefix}-move-down`}
-      >
-        <ArrowDownIcon className="size-4" />
-        {t("moveTeamDown")}
-      </ContextMenuItem>
-    </>
-  )
-}
-
-interface NavRailButtonProps extends ReorderMenuProps {
-  item: SidebarCatalogItem
-  active: boolean
-  pending: boolean
-  label: string
-  badge: number
-  badgeLabel: (count: number) => string
-  /** ⌥N for pinned slots 1–9; absent past the ninth. */
-  shortcut?: AppShortcutLabel
-  onNavigate: () => void
-  onMoveToMore: () => void
-  onHide: () => void
-  onCustomize: () => void
-  drag: NavDragBinding
-}
-
-/**
- * A pinned rail button with a right-click context menu offering quick
- * customization (move up / down, move to "More", hide, open the full
- * customizer). The `div` is both the `ContextMenuTrigger`'s single
- * ref-forwarding child and the drag handle.
- */
-function NavRailButton({
-  item,
-  active,
-  pending,
-  label,
-  badge,
-  badgeLabel,
-  shortcut,
-  canMoveUp,
-  canMoveDown,
-  onNavigate,
-  onMove,
-  onMoveToMore,
-  onHide,
-  onCustomize,
-  drag: { setNodeRef, style: dragStyle, dragging, handleProps },
-}: NavRailButtonProps) {
-  const t = useTranslations("desktop.guildRail")
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          ref={setNodeRef}
-          style={dragStyle}
-          {...handleProps}
-          className={cn(dragging && "z-10 opacity-50")}
-        >
-          <RailButton
-            active={active}
-            pending={pending}
-            ariaLabel={label}
-            tooltip={label}
-            onClick={onNavigate}
-            badge={badge}
-            badgeLabel={badgeLabel}
-            shortcut={shortcut}
-            testId={`guild-feature-${item.id}`}
-          >
-            <item.Icon className={RAIL_ICON_CLASS} />
-          </RailButton>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent data-testid={`guild-feature-menu-${item.id}`}>
-        <ReorderMenuItems
-          canMoveUp={canMoveUp}
-          canMoveDown={canMoveDown}
-          onMove={onMove}
-          testIdPrefix={`guild-feature-menu-${item.id}`}
-        />
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={onMoveToMore}>
-          <PinOffIcon className="size-4" />
-          {t("customize.moveToMore")}
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={onHide}>
-          <EyeOffIcon className="size-4" />
-          {t("customize.hideItem")}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={onCustomize}>
-          <SlidersHorizontalIcon className="size-4" />
-          {t("customize.title")}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  )
-}
-
-interface ModeRailButtonProps extends ReorderMenuProps {
-  mode: ShellMode
-  label: string
-  active: boolean
-  pending: boolean
-  onSelect: () => void
-  onHide: () => void
-  onCustomize: () => void
-  drag: NavDragBinding
-}
-
-/**
- * Canvas or a plugin view container: a chat guild, so it switches the middle
- * column rather than the route, but ordered and hideable like a pin.
- */
-function ModeRailButton({
-  mode,
-  label,
-  active,
-  pending,
-  onSelect,
-  canMoveUp,
-  canMoveDown,
-  onMove,
-  onHide,
-  onCustomize,
-  drag: { setNodeRef, style: dragStyle, dragging, handleProps },
-}: ModeRailButtonProps) {
-  const t = useTranslations("desktop.guildRail")
-  const testId = mode.kind === "canvas" ? "guild-canvas" : `guild-view-container-${mode.id}`
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          ref={setNodeRef}
-          style={dragStyle}
-          {...handleProps}
-          className={cn(dragging && "z-10 opacity-50")}
-        >
-          <RailButton
-            active={active}
-            pending={pending}
-            ariaLabel={label}
-            tooltip={label}
-            onClick={onSelect}
-            testId={testId}
-          >
-            {mode.kind === "canvas" ? (
-              <PencilRulerIcon className={RAIL_ICON_CLASS} />
-            ) : (
-              <ResolvedRailIcon name={mode.container.def.icon} className={RAIL_ICON_CLASS} />
-            )}
-          </RailButton>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent data-testid={`${testId}-menu`}>
-        <ReorderMenuItems
-          canMoveUp={canMoveUp}
-          canMoveDown={canMoveDown}
-          onMove={onMove}
-          testIdPrefix={`${testId}-menu`}
-        />
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={onHide} data-testid={`${testId}-menu-hide`}>
-          <EyeOffIcon className="size-4" />
-          {t("customize.hideItem")}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={onCustomize}>
-          <SlidersHorizontalIcon className="size-4" />
-          {t("customize.title")}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
   )
 }
 
@@ -1003,13 +769,7 @@ function RailButtonBase({
             // Corner pill, outside the icon's optical square so it never sits
             // over the avatar's initial. `aria-hidden`: the count is already
             // in the button's accessible name above.
-            <span
-              aria-hidden
-              data-testid={`${testId}-unread`}
-              className="absolute -top-0.5 -right-0.5 min-w-4 rounded-pill bg-primary px-1 py-px text-[9px] leading-[14px] font-medium text-primary-foreground tabular-nums"
-            >
-              {badge > 99 ? "99+" : badge}
-            </span>
+            <CountPill count={badge} placement="corner" decorative testId={`${testId}-unread`} />
           ) : null}
           {muted ? (
             <span

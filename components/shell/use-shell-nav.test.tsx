@@ -31,6 +31,11 @@ jest.mock("@cognia/logging", () => {
   }
 })
 
+// Keys come back verbatim.
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}))
+
 const routerPush = jest.fn()
 let pathname = "/"
 jest.mock("next/navigation", () => ({
@@ -74,11 +79,32 @@ jest.mock("@/lib/plugin/context-keys/context-key-store", () => ({
   subscribeContextKeys: () => () => {},
   getContextKeyRevision: () => 0,
   evaluateContextWhen: (when?: string) => when !== "never",
+  useContextKeyStore: (select: (state: { keys: Record<string, unknown> }) => unknown) =>
+    select({ keys: {} }),
 }))
 
-import { useShellNav } from "./use-shell-nav"
+import { useShellNav, useShellNavModel } from "./use-shell-nav"
+import { __resetNavBadgesForTests, setNavBadgeSourceCount } from "@/lib/shell/nav-badges"
+
+const saveMock = jest.fn(
+  async (_patch?: {
+    sidebarLayout?: {
+      pinned: string[]
+      hidden: string[]
+      modes?: { order: string[]; hidden: string[] }
+    }
+  }) => {}
+)
+const lastSavedLayout = () =>
+  saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0]?.sidebarLayout as {
+    pinned: string[]
+    hidden: string[]
+    modes?: { order: string[]; hidden: string[] }
+  }
 
 beforeEach(() => {
+  __resetNavBadgesForTests()
+  saveMock.mockClear()
   logInfo.mockReset()
   routerPush.mockReset()
   setSelectedGuild.mockClear()
@@ -88,7 +114,7 @@ beforeEach(() => {
   act(() => {
     useSettingsStore.setState({
       settings: { sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT } } as never,
-      save: jest.fn(async () => {}) as never,
+      save: saveMock as never,
     })
   })
 })
@@ -230,5 +256,165 @@ describe("useShellNav", () => {
     expect(stored.current.modes.hidden.map((m) => m.id)).toEqual(["a:early"])
     // The declared order is still what `railContainers` reports.
     expect(stored.current.railContainers.map((c) => c.fullId)).toEqual(["a:early", "a:late"])
+  })
+})
+
+/**
+ * `useShellNavModel` is everything the icon rail and the sidebar's hosted rows
+ * derive from the routing model. Each surface's own suite only proves it
+ * renders the model; what the model computes is pinned here, once.
+ */
+describe("useShellNavModel", () => {
+  const vault = {
+    fullId: "p:vault",
+    pluginId: "p",
+    def: { id: "vault", title: "Vault", icon: "box", order: 1 },
+  }
+  const notes = {
+    fullId: "p:notes",
+    pluginId: "p",
+    def: { id: "notes", title: "Notes", icon: "box", order: 2 },
+  }
+
+  it("names modes and pins, and falls back to the id for anything it cannot see", () => {
+    containers.push(vault)
+    const { result } = renderHook(() => useShellNavModel())
+    const [canvas, plugin] = result.current.modes.visible
+    expect(result.current.modeLabel(canvas!)).toBe("canvas")
+    // A plugin container without a locale key keeps its declared title.
+    expect(result.current.modeLabel(plugin!)).toBe("Vault")
+    expect(result.current.visibleModeIds).toEqual(["canvas", "p:vault"])
+    expect(result.current.modeLabelById("p:vault")).toBe("Vault")
+    expect(result.current.modeLabelById("p:gone")).toBe("p:gone")
+
+    const inbox = result.current.layout.resolved.pinned.find((item) => item.id === "inbox")!
+    expect(result.current.pinnedLabel(inbox)).toBe(inbox.i18nKey)
+    expect(result.current.pinnedLabelById("inbox")).toBe(inbox.i18nKey)
+    expect(result.current.pinnedLabelById("skills")).toBe("skills")
+    expect(result.current.pinnedIds).toEqual([...DEFAULT_SIDEBAR_LAYOUT.pinned])
+  })
+
+  it("sums only the overflow's counts for More", () => {
+    const { result } = renderHook(() => useShellNavModel())
+    expect(result.current.overflowBadge).toBe(0)
+    // Inbox is pinned: its count is its own, not More's.
+    act(() => setNavBadgeSourceCount("inbox.drafts", 5))
+    expect(result.current.overflowBadge).toBe(0)
+    expect(result.current.badges.inbox).toBe(5)
+    act(() => setNavBadgeSourceCount("agent-runs.attention", 3))
+    expect(result.current.overflowBadge).toBe(3)
+  })
+
+  it("carries the ⌥N chords for the pinned slots", () => {
+    const { result } = renderHook(() => useShellNavModel())
+    expect(result.current.pinnedShortcuts).toHaveLength(9)
+    expect(result.current.pinnedShortcuts[0]?.aria).toBe("Alt+1")
+  })
+
+  it("answers active, pending and select for a mode of either kind", () => {
+    containers.push(vault)
+    selectedGuild = { kind: "plugin-view", containerId: "p:vault" }
+    const { result } = renderHook(() => useShellNavModel())
+    const [canvas, plugin] = result.current.modes.visible
+    expect(result.current.isModeActive(plugin!)).toBe(true)
+    expect(result.current.isModeActive(canvas!)).toBe(false)
+    // Nothing is loading, so nothing is pending.
+    expect(result.current.isModePending(plugin!)).toBe(false)
+    act(() => result.current.selectMode(canvas!))
+    expect(setSelectedGuild).toHaveBeenLastCalledWith({ kind: "canvas" })
+    act(() => result.current.selectMode(plugin!))
+    expect(setSelectedGuild).toHaveBeenLastCalledWith({
+      kind: "plugin-view",
+      containerId: "p:vault",
+    })
+  })
+
+  it("a mode's menu disables the ends, moves it, hides it and opens the customizer", async () => {
+    containers.push(vault)
+    const { result } = renderHook(() => useShellNavModel())
+    const [canvas, plugin] = result.current.modes.visible
+    const first = result.current.modeMenu(canvas!, 0)
+    const last = result.current.modeMenu(plugin!, 1)
+    expect([first.canMoveUp, first.canMoveDown]).toEqual([false, true])
+    expect([last.canMoveUp, last.canMoveDown]).toEqual([true, false])
+    // A mode has no "More" to fall back to.
+    expect(first.onMoveToMore).toBeUndefined()
+
+    await act(async () => first.onMove(1))
+    expect(lastSavedLayout().modes).toEqual({ order: ["p:vault", "canvas"], hidden: [] })
+    await act(async () => last.onHide())
+    expect(lastSavedLayout().modes?.hidden).toContain("p:vault")
+
+    expect(result.current.customizeOpen).toBe(false)
+    act(() => first.onCustomize())
+    expect(result.current.customizeOpen).toBe(true)
+  })
+
+  it("reorders the visible modes without losing a hidden mode's slot", async () => {
+    containers.push(vault, notes)
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          sidebarLayout: {
+            ...DEFAULT_SIDEBAR_LAYOUT,
+            modes: { order: ["canvas", "p:vault", "p:notes"], hidden: ["p:vault"] },
+          },
+        } as never,
+      })
+    })
+    const { result } = renderHook(() => useShellNavModel())
+    expect(result.current.visibleModeIds).toEqual(["canvas", "p:notes"])
+    await act(async () => result.current.reorderVisibleModes(["p:notes", "canvas"]))
+    expect(lastSavedLayout().modes).toEqual({
+      order: ["p:notes", "p:vault", "canvas"],
+      hidden: ["p:vault"],
+    })
+    // Moving past an end writes nothing.
+    saveMock.mockClear()
+    await act(async () => result.current.moveMode("canvas", -1))
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it("a pinned feature's menu moves it, sends it to More, hides it", async () => {
+    const { result } = renderHook(() => useShellNavModel())
+    const pinned = result.current.layout.resolved.pinned
+    const [firstId, secondId] = DEFAULT_SIDEBAR_LAYOUT.pinned
+    const first = result.current.pinnedMenu(pinned[0]!, 0)
+    const last = result.current.pinnedMenu(pinned[pinned.length - 1]!, pinned.length - 1)
+    expect([first.canMoveUp, first.canMoveDown]).toEqual([false, true])
+    expect([last.canMoveUp, last.canMoveDown]).toEqual([true, false])
+
+    await act(async () => first.onMove(1))
+    expect(lastSavedLayout().pinned.slice(0, 2)).toEqual([secondId, firstId])
+    await act(async () => result.current.pinnedMenu(pinned[0]!, 0).onMoveToMore?.())
+    expect(lastSavedLayout().pinned).not.toContain(firstId)
+    expect(lastSavedLayout().hidden).not.toContain(firstId)
+    await act(async () => last.onHide())
+    expect(lastSavedLayout().hidden).toContain(pinned[pinned.length - 1]!.id)
+  })
+
+  it("drives More: open an entry, pin or hide one, or go on to the customizer", async () => {
+    const { result } = renderHook(() => useShellNavModel())
+    act(() => result.current.setMoreOpen(true))
+    act(() => result.current.openOverflowItem("/logs"))
+    expect(result.current.moreOpen).toBe(false)
+    expect(routerPush).toHaveBeenCalledWith("/logs")
+
+    await act(async () => result.current.pinItem("skills"))
+    expect(lastSavedLayout().pinned).toEqual([...DEFAULT_SIDEBAR_LAYOUT.pinned, "skills"])
+    await act(async () => result.current.hideItem("logs"))
+    expect(lastSavedLayout().hidden).toContain("logs")
+
+    act(() => result.current.setMoreOpen(true))
+    act(() => result.current.openCustomize())
+    expect(result.current.moreOpen).toBe(false)
+    expect(result.current.customizeOpen).toBe(true)
+  })
+
+  it("reorders the pinned features by id", async () => {
+    const { result } = renderHook(() => useShellNavModel())
+    const reversed = [...DEFAULT_SIDEBAR_LAYOUT.pinned].reverse()
+    await act(async () => result.current.reorderPinnedIds(reversed))
+    expect(lastSavedLayout().pinned).toEqual(reversed)
   })
 })

@@ -75,8 +75,8 @@ jest.mock("./mobile-global-search-host", () => ({
 }))
 
 const unreadRef = { value: { chat: 0, inbox: 0 } }
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => unreadRef.value,
+jest.mock("@/hooks/shell/use-unread-sessions", () => ({
+  useMobileUnread: () => unreadRef.value,
 }))
 
 const keyboardRef = { value: { keyboardHeight: 0, isVisible: false } }
@@ -84,8 +84,8 @@ jest.mock("@/hooks/ui/use-keyboard-insets", () => ({
   useKeyboardInsets: () => keyboardRef.value,
 }))
 
-// `loadMobileUnread` reaches Dexie, and `useLiveQuery` is stubbed above so it
-// never actually runs. The stub only stops the real schema module loading.
+// The shared unread read reaches Dexie, and `useMobileUnread` is stubbed above
+// so it never actually runs. The stub only stops the real schema module loading.
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({}) }))
 
 const wrapperStoreState: {

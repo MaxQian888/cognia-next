@@ -112,6 +112,8 @@ describe("navigation rail shortcuts", () => {
         scope: "app",
         category: "app.navigation",
         labelKey: `settings.shortcuts.catalog.navPinned${index + 1}`,
+        // A browser on Linux switches tabs on Alt+digit before the page sees it.
+        when: "platform.tauri || !platform.linux",
       })
       expect(getDefaultAcceptedChords(id)).toEqual([`alt+${index + 1}`])
     })

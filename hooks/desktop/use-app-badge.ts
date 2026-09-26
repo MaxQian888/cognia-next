@@ -23,17 +23,25 @@
  *
  * Tauri 2 exposes `Window.setBadgeCount` (permission
  * `core:window:allow-set-badge-count`, granted to the main window in
- * `src-tauri/capabilities/default.json`). Windows has no count badge — the API
- * rejects there, which is logged once and not retried, so the title bar and
- * the rail stay the carriers of the number on that platform.
+ * `src-tauri/capabilities/default.json`) for macOS and Linux. Windows has no
+ * count badge, so there the number is drawn as the taskbar button's overlay
+ * icon instead (`Window.setOverlayIcon` with an `Image` built from the pixels
+ * `lib/shell/taskbar-badge.ts` renders; permission
+ * `core:window:allow-set-overlay-icon`, and `core:image:allow-new` through
+ * `core:default`). The overlay's colours are read from the theme tokens at
+ * each write. A platform where neither works is logged once and not retried;
+ * the title bar and the rail keep the number there.
  */
 
 import { useEffect, useMemo, useRef } from "react"
 import { loggers } from "@cognia/logging"
+import type { Window as TauriWindow } from "@tauri-apps/api/window"
 
 import { useNavBadges } from "@/hooks/shell/use-nav-badges"
 import { useVisibleGuildUnread } from "@/hooks/shell/use-team-mute"
 import { resolvePreferences } from "@/lib/notifications/preferences"
+import { detectDesktopOsFamily } from "@/lib/platform/os"
+import { badgeIconSize, readBadgeColors, renderTaskbarBadge } from "@/lib/shell/taskbar-badge"
 import type { NavBadgeCounts } from "@/lib/shell/nav-badges"
 import { isTauri } from "@/lib/tauri"
 import { isMainAppWindow } from "@/lib/pet/window-role"
@@ -74,9 +82,35 @@ export function useAppAttentionCount(): number {
 
 type BadgeWriter = (count: number | undefined) => Promise<void>
 
+/**
+ * Windows: paint the count as the taskbar overlay icon. The `Image` is a
+ * resource handle on the Rust side; it is released once the overlay holds
+ * its own copy.
+ */
+function overlayBadgeWriter(win: TauriWindow): BadgeWriter {
+  return async (count) => {
+    if (count === undefined) {
+      await win.setOverlayIcon(undefined)
+      return
+    }
+    const { Image } = await import("@tauri-apps/api/image")
+    const pixels = renderTaskbarBadge(count, {
+      size: badgeIconSize(typeof window === "undefined" ? 1 : window.devicePixelRatio),
+      colors: readBadgeColors(),
+    })
+    const image = await Image.new(pixels.rgba, pixels.width, pixels.height)
+    try {
+      await win.setOverlayIcon(image)
+    } finally {
+      await image.close().catch(() => undefined)
+    }
+  }
+}
+
 async function tauriBadgeWriter(): Promise<BadgeWriter> {
   const { getCurrentWindow } = await import("@tauri-apps/api/window")
   const win = getCurrentWindow()
+  if (detectDesktopOsFamily() === "windows") return overlayBadgeWriter(win)
   // `undefined` clears the badge; `0` would draw a literal zero on some
   // launchers.
   return (count) => win.setBadgeCount(count)
@@ -103,8 +137,9 @@ export function useAppBadge(count: number): void {
         if (cancelled) return
         await write(count > 0 ? count : undefined)
       } catch (err) {
-        // Windows (no count badge) and any platform without the capability
-        // land here. Once is enough to know; the rail keeps the counts.
+        // A platform with neither a count badge nor an overlay icon, or a
+        // window without the capability, lands here. Once is enough to know;
+        // the rail keeps the counts.
         unsupportedRef.current = true
         log.warn("app badge unsupported", {
           error: err instanceof Error ? err.message : String(err),

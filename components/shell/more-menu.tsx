@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
+import { CountPill } from "@/components/shared/count-pill"
 import { navBadgeCount, type NavBadgeCounts } from "@/lib/shell/nav-badges"
 import type { SidebarCatalogItem } from "@/lib/shell/sidebar-nav"
 import { groupSidebarNavByCategory } from "@/types/shell/sidebar"
@@ -179,15 +180,11 @@ export function MoreMenuContent({
                     >
                       <item.Icon className="size-4 shrink-0 text-muted-foreground" />
                       <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-                      {count > 0 ? (
-                        <span
-                          aria-hidden
-                          data-testid={`${testIdPrefix}-badge-${item.id}`}
-                          className="shrink-0 rounded-pill bg-primary px-1.5 py-0.5 text-[10px] leading-none font-medium text-primary-foreground tabular-nums"
-                        >
-                          {count > 99 ? "99+" : count}
-                        </span>
-                      ) : null}
+                      <CountPill
+                        count={count}
+                        decorative
+                        testId={`${testIdPrefix}-badge-${item.id}`}
+                      />
                     </Button>
                     <Button
                       type="button"
