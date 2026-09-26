@@ -276,8 +276,20 @@ export function AgentRunsPanel({
         >
           <ul className="min-h-0 flex-1 overflow-y-auto" aria-label={t("title")}>
             {!isLoading && rows.length === 0 && (
-              <li className="p-4 text-center text-xs text-muted-foreground">
-                {canWiden ? t("emptyFiltered") : t("empty")}
+              <li
+                className="p-4 text-center text-xs text-muted-foreground"
+                data-testid="agent-runs-empty"
+              >
+                {/* On a phone there is no detail pane beside the list to say
+                    what fills it, so the list says it: "No runs yet." alone
+                    left the reader guessing what a run even is. */}
+                {compact
+                  ? canWiden
+                    ? t("detail.filteredPrompt")
+                    : t("detail.emptyPrompt")
+                  : canWiden
+                    ? t("emptyFiltered")
+                    : t("empty")}
               </li>
             )}
             {rows.map((row) => (

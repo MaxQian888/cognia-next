@@ -340,6 +340,19 @@ describe("AgentRunsPanel", () => {
     expect(screen.getByText("empty")).toBeInTheDocument()
   })
 
+  it("explains an empty journal in the list itself on a narrow screen", () => {
+    // No detail pane sits beside the list there to say what fills it.
+    compact = true
+    cockpit = state({ rows: [], allRows: [] })
+    const { rerender } = render(<AgentRunsPanel onSelect={jest.fn()} />)
+    expect(screen.getByTestId("agent-runs-empty")).toHaveTextContent("detail.emptyPrompt")
+    expect(screen.queryByTestId("agent-runs-detail-prompt")).toBeNull()
+
+    cockpit = state({ rows: [], allRows: [row()] })
+    rerender(<AgentRunsPanel onSelect={jest.fn()} statusGroup="failed" onStatusGroup={jest.fn()} />)
+    expect(screen.getByTestId("agent-runs-empty")).toHaveTextContent("detail.filteredPrompt")
+  })
+
   it("keeps the two-pane split when there is room for it", () => {
     cockpit = state({ selectedRow: row() })
     render(<AgentRunsPanel selectedId="run-1" onSelect={jest.fn()} />)

@@ -15,7 +15,7 @@
       "missing-grant": "This browser has not been granted the required device permission.",
       "offline-cache": "Cached data remains available while the host is offline.",
       "offline-queue": "This low-risk idempotent action will remain in the visible target queue.",
-      "operation-unavailable": "The active target does not advertise a healthy implementation for this operation.",
+      "operation-unavailable": "The current host doesn't offer this feature yet.",
       "requires-companion": "This capability needs a paired desktop or cloud host.",
       "service-only": "This operation can only run inside a trusted service.",
       "unknown-command": "This operation is not present in the shared command manifest.",
