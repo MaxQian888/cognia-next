@@ -7,10 +7,9 @@
 // name. This is what lets local / OpenAI / Gemini models actually call tools in
 // the main chat — previously the ai-sdk path was text-only.
 //
-// Tool execution runs through a permission gate that mirrors the Anthropic
-// path's `canUseTool` (ADR-0043 Phase A): suppress-list + static ruleset
-// short-circuit, otherwise a `permission_request` round-trip resolved via
-// `pendingApprovals` — so a local model can't silently run shell/process tools.
+// Tool execution runs through the rail's permission gate
+// (src/policy/permission/ai-sdk-gate.ts), so a local model can't silently run
+// shell/process tools.
 
 import { tool, jsonSchema } from "ai"
 import { z } from "zod"
@@ -22,64 +21,18 @@ import {
   BUILTIN_SERVER_NAME as SERVER_NAME,
   READ_ONLY_TOOL_NAMES,
 } from "../src/policy/tool-catalog/catalog.ts"
-import {
-  ASK_USER_TOOL_NAME,
-  EXIT_PLAN_TOOL_NAME,
-  PLUGIN_TOOLS_SERVER_NAME,
-} from "../src/policy/tool-catalog/names.ts"
-import { PLAN_ALLOWED_PLUGIN_TOOLS } from "../src/policy/plan-mode.ts"
+import { PLUGIN_TOOLS_SERVER_NAME } from "../src/policy/tool-catalog/names.ts"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   toolBudgetMessage,
 } from "../builtin-tools/read-only-timeout.mjs"
 
 import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
-import { resolveForToolCall } from "../src/policy/permission/resolver.ts"
-import {
-  classifyToolCallConfinement,
-  buildPluginAccessMap,
-} from "../src/policy/confinement/classify.ts"
-import { assertToolCallWithinRoots } from "../src/policy/confinement/enforce.ts"
+import { createToolPermissionGate } from "../src/policy/permission/ai-sdk-gate.ts"
 import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
 import { markAiSdkToolSource } from "./ai-sdk-tool-search.mjs"
 
 const TOOL_RESULT_PII_ERROR = "Tool result blocked by the PII redaction gate"
-
-/**
- * Plugin tools that MUST remain callable in plan mode: subagent dispatch
- * (`dispatch_agent` / its `Task` alias) and `load_skill`. Plan mode's
- * `PLAN_MODE_PROMPT_SECTION` explicitly tells the model to dispatch the
- * read-only `Explore` / `Plan` subagents, so blocking these would break the
- * explore→plan flow on every non-Anthropic provider.
- *
- * The set itself now lives in `src/policy/plan-mode.ts` (imported at the top of
- * this file) — the Anthropic rail applies the SAME set to the cognia-owned MCP
- * servers, and the hand-maintained copies had already drifted from the CLI's
- * `PLAN_ALLOWED_HOST_TOOLS`.
- */
-
-/**
- * Built-in file-edit-class tools auto-approved in `acceptEdits` mode — the
- * write/edit family a user who "accepted edits" implicitly trusts. Mirrors the
- * Anthropic SDK's native `acceptEdits` and the ACP client's edit auto-approval
- * (`lib/ai/agent/external/runtimes/acp/acp-client.ts`) so the AI-SDK path stops prompting for
- * every edit. DELIBERATELY excludes exec/process/git-mutation tools (bash,
- * shell, start_process, git_commit, …) — those
- * still route through the normal approval policy. Read-only tools are already
- * auto-approved upstream, so they aren't listed here. */
-const ACCEPT_EDITS_TOOL_NAMES = new Set([
-  "write",
-  "edit",
-  "multi_edit",
-  "apply_patch",
-  "NotebookEdit",
-  "file_append",
-  "file_binary_write",
-  "directory_create",
-  "file_copy",
-  "file_move",
-  "file_rename",
-])
 
 // Per-tool execution deadline for READ-ONLY built-ins on the ai-sdk path. The
 // constant, the read-only gate, and the recoverable message all live in
@@ -177,266 +130,6 @@ function callToolResultToText(result) {
       .join("\n")
   }
   return JSON.stringify(result)
-}
-
-/**
- * Build a permission gate for tool execution. Returns `async (toolName, input)
- * => effectiveInput` that resolves with the (possibly updated) input when
- * allowed and THROWS when denied. Mirrors `anthropic.mjs:canUseTool`.
- *
- * `toolName` should be the namespaced form (`mcp__<server>__<name>`) so it
- * matches the user's suppress list / ruleset globs / always-allow conventions.
- */
-export function createToolPermissionGate({
-  emit,
-  sessionId,
-  pendingApprovals,
-  sendOptions,
-  doomGuard,
-}) {
-  const ruleset = sendOptions?.permissionRuleset
-  const suppress = Array.isArray(sendOptions?.suppressApprovalForTools)
-    ? sendOptions.suppressApprovalForTools
-    : null
-  const alwaysAllow = Array.isArray(sendOptions?.alwaysAllowTools)
-    ? sendOptions.alwaysAllowTools
-    : null
-  const canPrompt = typeof emit === "function" && pendingApprovals instanceof Map
-  // Plugin-declared filesystem access classes + path params (full tool name
-  // → {access, pathKeys}) — lets a cliTool/`registerTool` entry opt into the
-  // same workspace-confinement classification the built-in read/write sets
-  // get. Non-array pluginTools degrades to an empty map (opaque tools).
-  const pluginAccess = buildPluginAccessMap(sendOptions?.pluginTools)
-
-  /**
-   * @param {string} toolName   namespaced tool name
-   * @param {any} input         tool args
-   * @param {AbortSignal} [signal]  the step's abort signal (AI SDK execute
-   *   options) — settles a pending approval as denied on interrupt so the tool
-   *   execute (and the whole streamText leg) can't hang on a renderer that
-   *   never answers.
-   */
-  return async function gate(toolName, input, signal) {
-    if (signal?.aborted) throw new Error(`denied: tool call interrupted: ${toolName}`)
-    // Explicit policy decisions precede every mode and remembered grant.
-    const ruleVerdict = resolveForToolCall(ruleset, toolName, input)
-    if (ruleVerdict === "deny") throw new Error(`denied by permission ruleset: ${toolName}`)
-
-    assertToolCallWithinRoots(
-      sendOptions?.builtinProcessSandbox,
-      toolName,
-      input,
-      sendOptions?.cwd,
-      pluginAccess
-    )
-
-    // The `ask_user` elicitation tool is the user interaction itself: the
-    // renderer's AskUserDialog blocks until the user answers, so it must never
-    // be routed through the generic tool-approval modal — in ANY mode. Each
-    // call is inherently human-gated (no runaway loop without a human answer),
-    // so allow it unconditionally, ahead of the doom-loop guard. The plan-mode
-    // branch below also permits it; this generalises that to every mode.
-    if (toolName === `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${ASK_USER_TOOL_NAME}`) return input
-
-    // Read the permission mode LIVE (not closed-over): a `claude_set_mode`
-    // control message mutates `sendOptions.permissionMode` on the running
-    // session, and the next tool gate must honour it without a respawn.
-    const mode = sendOptions?.permissionMode
-
-    // Doom-loop guard: the Nth identical call must round-trip through the
-    // user even when a suppress-list / ruleset (or bypass mode) would allow it
-    // silently. Computed FIRST so even bypassPermissions can't disarm the
-    // runaway-loop protection.
-    const doomed = doomGuard ? doomGuard.check(toolName, input) === "ask" : false
-
-    // Workspace confinement (ADR-0028 lite): resolve once and reuse across the
-    // mode branches. A "deny" (write into / symlink-escape toward a credential
-    // path) is a hard security invariant enforced in EVERY mode, including
-    // bypassPermissions — mirroring how deny rules survive bypass. An "ask"
-    // (mutator escaping the workspace roots) suppresses the auto-approvals below
-    // so the call round-trips through the user instead of being auto-allowed.
-    let confVerdict = null
-    try {
-      confVerdict = classifyToolCallConfinement(
-        sendOptions?.confinement,
-        toolName,
-        input,
-        sendOptions?.cwd,
-        pluginAccess
-      )
-    } catch {
-      confVerdict = null
-    }
-    if (confVerdict === "deny") {
-      throw new Error(
-        `denied: "${toolName}" resolves into a protected credential path (workspace confinement)`
-      )
-    }
-
-    // Plan mode: enforce read-only here on the AI-SDK path (the Anthropic path
-    // gets this from the SDK). Only read-only built-in tools — plus the
-    // `exit_plan_mode` signal tool the model uses to submit its final plan, the
-    // read-only-safe subagent-dispatch / `load_skill` plugin tools the plan
-    // prompt instructs the model to use (see PLAN_ALLOWED_PLUGIN_TOOLS), and the
-    // side-effect-free `ask_user` elicitation tool — may run; every
-    // mutating/exec built-in, other plugin tool, or unknown tool is denied, so a
-    // non-Anthropic provider in plan mode can't write/edit/bash.
-    if (mode === "plan") {
-      const parts = String(toolName).split("__")
-      const server = parts.length >= 3 ? parts[1] : null
-      const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
-      const allowed =
-        (server === SERVER_NAME &&
-          (READ_ONLY_TOOL_NAMES.has(bare) || bare === EXIT_PLAN_TOOL_NAME)) ||
-        (server === PLUGIN_TOOLS_SERVER_NAME && PLAN_ALLOWED_PLUGIN_TOOLS.has(bare)) ||
-        toolName === `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${ASK_USER_TOOL_NAME}`
-      if (!allowed) {
-        throw new Error(`plan mode: tool "${toolName}" is not permitted (read-only tools only)`)
-      }
-      return input
-    }
-
-    // dontAsk: never prompt. Only pre-approved tools run — read-only built-ins
-    // (auto-allowed in every mode), suppress/alwaysAllow entries, and ruleset
-    // `allow` verdicts. Everything else is DENIED without prompting, surfaced
-    // as a recoverable tool-error the model can react to (same mechanism as the
-    // plan gate above). The Anthropic path gets these semantics natively from
-    // the Agent SDK. `ask_user` stays allowed — it is short-circuited before
-    // the mode read (it IS the user interaction, not an escalation). A doomed
-    // Nth identical call is denied outright: we cannot prompt in dontAsk.
-    if (mode === "dontAsk") {
-      if (!doomed) {
-        const parts = String(toolName).split("__")
-        const server = parts.length >= 3 ? parts[1] : null
-        const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
-        if (server === SERVER_NAME && READ_ONLY_TOOL_NAMES.has(bare)) return input
-        if (confVerdict !== "ask" && suppress && suppress.includes(toolName)) return input
-        if (confVerdict !== "ask" && alwaysAllow && alwaysAllow.includes(toolName)) return input
-        if (ruleset) {
-          let verdict
-          try {
-            verdict = resolveForToolCall(ruleset, toolName, input)
-          } catch {
-            verdict = undefined
-          }
-          // A confinement "ask" cannot be honoured in dontAsk (no prompt), so an
-          // out-of-workspace mutator stays denied even with an allow rule.
-          if (verdict === "allow" && confVerdict !== "ask") return input
-        }
-      }
-      throw new Error(
-        `dontAsk mode: tool "${toolName}" is not pre-approved (no allow rule), so it was denied without prompting. Proceed without it, or ask the user to add an allow rule or switch permission modes.`
-      )
-    }
-
-    // "auto" mode is deliberately NOT special-cased here: it falls through to
-    // suppress/alwaysAllow/ruleset and then emits a `permission_request`, which
-    // the RENDERER answers via the Layer-B auto-mode runner (command judge /
-    // safety classifier) instead of a human prompt (ADR-0041).
-
-    // bypassPermissions skips approvals — but NOT the doom guard above.
-    if (mode === "bypassPermissions" && !doomed) return input
-
-    // acceptEdits: auto-approve the file-edit-class built-ins (see
-    // ACCEPT_EDITS_TOOL_NAMES) so the AI-SDK path matches the Anthropic SDK's
-    // native acceptEdits — a user who accepted edits isn't re-prompted per
-    // write/edit. Also what lets `/agents run` in acceptEdits actually write
-    // (its headless gate has no interactive prompt). Exec/process/git/unknown
-    // tools fall through to the normal policy; the doom guard still fires.
-    if (mode === "acceptEdits" && !doomed) {
-      const parts = String(toolName).split("__")
-      const server = parts.length >= 3 ? parts[1] : null
-      const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
-      // A confinement "ask" (edit escaping the workspace roots) overrides the
-      // acceptEdits auto-approval and falls through to the prompt.
-      const editable =
-        (server === SERVER_NAME && ACCEPT_EDITS_TOOL_NAMES.has(bare)) ||
-        (server === PLUGIN_TOOLS_SERVER_NAME &&
-          ["sandbox_write", "sandbox_edit", "sandbox_text_editor"].includes(bare))
-      if (editable && confVerdict !== "ask") {
-        return input
-      }
-    }
-
-    if (!doomed) {
-      if (confVerdict !== "ask" && suppress && suppress.includes(toolName)) return input
-      if (confVerdict !== "ask" && alwaysAllow && alwaysAllow.includes(toolName)) return input
-    }
-
-    if (ruleset && !doomed) {
-      let verdict
-      try {
-        verdict = resolveForToolCall(ruleset, toolName, input)
-      } catch {
-        verdict = undefined // resolver error → fall through to the prompt
-      }
-      // A confinement "ask" (out-of-workspace mutator) overrides a ruleset
-      // allow and falls through to the approval round-trip below.
-      if (verdict === "allow" && confVerdict !== "ask") return input
-      if (verdict === "deny") throw new Error(`denied by permission ruleset: ${toolName}`)
-    }
-
-    // No channel to prompt the user (headless / no responder). We CANNOT
-    // obtain consent, so we must NOT silently run arbitrary tools — the prior
-    // fail-OPEN here let a local model run shell/process/edit tools unprompted
-    // (it directly contradicted this module's stated goal). Allow only
-    // read-only built-ins, which cannot mutate the host; deny every
-    // mutating/exec, plugin, or unknown tool. A headless caller that genuinely
-    // needs those opts in explicitly via `bypassPermissions`, a suppress entry,
-    // an `alwaysAllow` entry, or an `allow` ruleset — all handled above, so by
-    // here none applied.
-    if (!canPrompt) {
-      const parts = String(toolName).split("__")
-      const isReadOnlyBuiltin =
-        parts.length >= 3 &&
-        parts[1] === SERVER_NAME &&
-        READ_ONLY_TOOL_NAMES.has(parts.slice(2).join("__"))
-      if (isReadOnlyBuiltin) return input
-      throw new Error(
-        `denied: no approval channel to authorize "${toolName}" — set bypassPermissions or an allow rule to run tools in a headless context`
-      )
-    }
-
-    const requestId = randomUUID()
-    emit({
-      type: "permission_request",
-      sessionId,
-      requestId,
-      toolName,
-      displayName: toolName,
-      input,
-      ...(sendOptions.remoteExecutionContext
-        ? { remoteExecutionContext: sendOptions.remoteExecutionContext }
-        : {}),
-    })
-    const decision = await new Promise((resolve) => {
-      let onAbort = null
-      const settle = (result) => {
-        if (onAbort && signal && typeof signal.removeEventListener === "function") {
-          signal.removeEventListener("abort", onAbort)
-        }
-        resolve(result)
-      }
-      // Stash the original input so an approved-unmodified call resolves with a
-      // concrete `updatedInput` (parity with the Agent-SDK path's host handler).
-      pendingApprovals.set(requestId, { resolve: settle, input })
-      if (signal) {
-        onAbort = () => {
-          if (pendingApprovals.delete(requestId)) {
-            settle({ behavior: "deny", message: "aborted" })
-          }
-        }
-        if (signal.aborted) onAbort()
-        else if (typeof signal.addEventListener === "function") {
-          signal.addEventListener("abort", onAbort, { once: true })
-        }
-      }
-    })
-    if (decision && decision.behavior === "deny") {
-      throw new Error(decision.message ?? `denied: ${toolName}`)
-    }
-    return decision && decision.updatedInput !== undefined ? decision.updatedInput : input
-  }
 }
 
 /**

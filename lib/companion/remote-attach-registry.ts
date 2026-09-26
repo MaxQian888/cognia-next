@@ -24,8 +24,8 @@
  * local to approvals: the mode decision, and the backstop timers.
  *
  * Because the sidecar's `canUseTool` has no timeout of its own (see
- * `sidecar/dispatch/anthropic.mjs`), an un-answered approval would hang the
- * turn forever. `armApprovalBackstop` schedules a renderer-side deny that
+ * `sidecar/src/policy/permission/approval.ts`), an un-answered approval would
+ * hang the turn forever. `armApprovalBackstop` schedules a renderer-side deny that
  * fires only if the remote never responds; `clearApprovalBackstops` cancels it
  * the moment the turn proceeds (next SDK event) or ends.
  */

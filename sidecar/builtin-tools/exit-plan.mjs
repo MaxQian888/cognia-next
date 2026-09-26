@@ -6,9 +6,10 @@
 // lightweight signal the model calls with `{ plan }` when its plan is ready
 // for the user's approval. It performs no work — the renderer/CLI reads the
 // tool *input* (the plan body) to open its plan-approval overlay; the result
-// is irrelevant. The plan-mode gate (ai-sdk-tools.mjs) whitelists this tool so
-// it can run while every mutating tool is blocked, and the CLI suppresses its
-// generic approval prompt so only the plan overlay decides.
+// is irrelevant. The ai-sdk rail's emulated plan mode
+// (src/policy/permission/ladder.ts) lets this tool through while every mutating
+// tool is blocked, and the CLI suppresses its generic approval prompt so only
+// the plan overlay decides.
 
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"

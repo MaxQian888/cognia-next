@@ -1251,7 +1251,8 @@ export function dispatchAiSdk({
             try {
               const buildAiSdkMcpTools =
                 buildMcpToolsOverride ?? (await import("./ai-sdk-mcp.mjs")).buildAiSdkMcpTools
-              const { createToolPermissionGate } = await import("./ai-sdk-tools.mjs")
+              const { createToolPermissionGate } =
+                await import("../src/policy/permission/ai-sdk-gate.ts")
               // Own the MCP gate's guard here too so it resets per turn (F1).
               const mcpDoomGuard = createDoomLoopGuard()
               doomGuards.push(mcpDoomGuard)

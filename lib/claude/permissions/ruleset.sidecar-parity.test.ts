@@ -4,8 +4,9 @@
  * There are TWO matchers, and only one of them is the gate that actually runs.
  * `resolveBashPermission` (here, renderer-side) backs Auto-mode and the
  * approval UI. `resolveForToolCall` (`sidecar/src/policy/permission/resolver.ts`)
- * is what `canUseTool` in `anthropic.mjs` consults to hard-reject a call before
- * it executes. The sidecar cannot import `lib/`, so it hand-mirrors this
+ * is what the sidecar's permission ladder
+ * (`sidecar/src/policy/permission/ladder.ts`) consults to hard-reject a call
+ * before it executes. The sidecar cannot import `lib/`, so it hand-mirrors this
  * module — and a mirror drifts silently.
  *
  * That drift is not academic: callers author a deny ruleset, test it against

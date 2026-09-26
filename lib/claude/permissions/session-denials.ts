@@ -10,10 +10,10 @@
  *
  * A refusal here is remembered for the SESSION and projected into the
  * serialized `permissionRuleset` as an explicit `deny`. That placement is what
- * makes it outrank a later widening: `canUseTool` in
- * `sidecar/dispatch/anthropic.mjs` returns on an explicit deny BEFORE it
- * consults `alwaysAllowTools`, so a remembered refusal cannot be undone by a
- * name-level grant.
+ * makes it outrank a later widening: the sidecar's permission ladder
+ * (`sidecar/src/policy/permission/ladder.ts`) returns on an explicit deny
+ * BEFORE it consults `alwaysAllowTools`, so a remembered refusal cannot be
+ * undone by a name-level grant.
  *
  * Refusals are scoped exactly the way grants are — through
  * `deriveAllowRuleFromApproval`, so `Deny` on `git push --force` refuses that

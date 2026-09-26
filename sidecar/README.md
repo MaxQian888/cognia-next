@@ -107,6 +107,11 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/confinement.mjs` (tool-body guards)                       | `src/policy/confinement/enforce.ts`                                | 4b          |
 | `builtin-tools/index.mjs` (`SERVER_NAME`, `READ_ONLY_TOOL_NAMES`, …)     | `src/policy/tool-catalog/catalog.ts` (`BUILTIN_SERVER_NAME`, …)    | 4c          |
 | `ask_user`, `exit_plan_mode`, plugin-tools server name constants         | `src/policy/tool-catalog/names.ts`                                 | 4c          |
+| Both permission ladders (shared decision steps)                          | `src/policy/permission/ladder.ts`                                  | 4d          |
+| Approval round-trip (`pendingApprovals` waiter)                          | `src/policy/permission/approval.ts`                                | 4d          |
+| `dispatch/ai-sdk-tools.mjs` (`createToolPermissionGate`)                 | `src/policy/permission/ai-sdk-gate.ts`                             | 4d          |
+| `dispatch/anthropic.mjs` (`createAnthropicCanUseTool`, …)                | `src/policy/permission/sdk-can-use-tool.ts`                        | 4d          |
+| `dispatch/anthropic.mjs` (`enforceAnthropicPermissionChannel`)           | `src/policy/permission/delegated-approval.ts`                      | 4d          |
 
 ## Scripts (run from repo root)
 

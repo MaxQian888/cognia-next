@@ -1,4 +1,4 @@
-// Dispatch-level coverage for the anthropic rail's plugin-access wiring:
+// The Agent SDK rail's plugin-access wiring:
 // `createAnthropicCanUseTool` must build the plugin-access map from
 // `sendOptions.pluginTools` itself — if that construction regresses, a
 // declared-read plugin tool (e.g. ripgrep_search) silently loses the
@@ -10,14 +10,25 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { createAnthropicCanUseTool } from "./anthropic.mjs"
-import { createDoomLoopGuard } from "../src/policy/doom-loop.ts"
+import { createDoomLoopGuard } from "../doom-loop.ts"
+import type { PendingApproval } from "./approval.ts"
+import { createAnthropicCanUseTool } from "./sdk-can-use-tool.ts"
+import type { PermissionSendOptions } from "./ladder.ts"
 
 function mkRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "cognia-canusetool-"))
 }
 
-function mkGate(sendOptions, { emit = () => {}, pendingApprovals = new Map() } = {}) {
+function mkGate(
+  sendOptions: PermissionSendOptions,
+  {
+    emit = () => {},
+    pendingApprovals = new Map(),
+  }: {
+    emit?: (frame: Record<string, unknown>) => void
+    pendingApprovals?: Map<string, PendingApproval>
+  } = {}
+) {
   return createAnthropicCanUseTool({
     sendOptions,
     sessionId: "s1",
@@ -52,7 +63,7 @@ test("anthropic canUseTool denies a declared-read plugin tool on a credential pa
   })
   const res = await canUseTool(RG_TOOL, { path: secret }, {})
   assert.equal(res.behavior, "deny")
-  assert.match(res.message, /credential|protected|denied/)
+  assert.match(String(res.message), /credential|protected|denied/)
 })
 
 test("anthropic canUseTool keeps undeclared plugin tools opaque to confinement", async () => {
@@ -97,8 +108,8 @@ test("anthropic canUseTool escalates a declared-write plugin tool escaping the r
   const root = mkRoot()
   const outside = path.join(mkRoot(), "out.txt")
   const tool = "mcp__cognia-plugin-tools__my-plugin:file_writer"
-  const emitted = []
-  const pending = new Map()
+  const emitted: Record<string, unknown>[] = []
+  const pending = new Map<string, PendingApproval>()
   const canUseTool = mkGate(
     {
       confinement: { enabled: true, roots: [root] },
@@ -119,7 +130,9 @@ test("anthropic canUseTool escalates a declared-write plugin tool escaping the r
         emitted.push(ev)
         // Auto-approve so the round-trip resolves.
         queueMicrotask(() =>
-          pending.get(ev.requestId)?.resolve({ behavior: "allow", updatedInput: { ok: 1 } })
+          pending
+            .get(ev.requestId as string)
+            ?.resolve({ behavior: "allow", updatedInput: { ok: 1 } })
         )
       },
       pendingApprovals: pending,
@@ -128,8 +141,8 @@ test("anthropic canUseTool escalates a declared-write plugin tool escaping the r
   const res = await canUseTool(tool, { path: outside }, {})
   // Confinement "ask" falls through to the approval round-trip.
   assert.equal(emitted.length, 1)
-  assert.equal(emitted[0].type, "permission_request")
-  assert.equal(emitted[0].toolName, tool)
+  assert.equal(emitted[0]?.type, "permission_request")
+  assert.equal(emitted[0]?.toolName, tool)
   assert.equal(res.behavior, "allow")
   assert.deepEqual(res.updatedInput, { ok: 1 })
 })
@@ -150,7 +163,7 @@ test("anthropic canUseTool survives non-array pluginTools", async () => {
 })
 
 test("approval input rewrites are checked against the same hard authority", async () => {
-  const pendingApprovals = new Map()
+  const pendingApprovals = new Map<string, PendingApproval>()
   const gate = mkGate({}, { pendingApprovals })
   const pending = gate("Read", { path: "/workspace/safe" }, {})
   const entry = [...pendingApprovals.values()][0]

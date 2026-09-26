@@ -10,7 +10,8 @@
  * paths outside the workspace → ask).
  *
  * The resolved ruleset is serialized into `SendOptions` and consulted by
- * the sidecar `canUseTool` callback (`sidecar/dispatch/anthropic.mjs`):
+ * the sidecar's permission ladder (`sidecar/src/policy/permission/ladder.ts`),
+ * which both dispatch rails' gates climb:
  *   - "allow" → run without prompting,
  *   - "ask"   → emit the existing `permission_request` round-trip,
  *   - "deny"  → reject the tool call.

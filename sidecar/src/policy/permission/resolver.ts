@@ -1,6 +1,6 @@
 // Sidecar-side glob permission resolver — the JS mirror of
-// `lib/claude/permissions/ruleset.ts`, consulted by `canUseTool`
-// (`anthropic.mjs`) to short-circuit the `permission_request` round-trip when
+// `lib/claude/permissions/ruleset.ts`, consulted by the permission ladder
+// (`./ladder.ts`) to short-circuit the `permission_request` round-trip when
 // the renderer pre-resolved an *explicit* allow/deny rule for a tool call.
 //
 // Deliberately narrow: it only acts on EXPLICIT matches in the serialized

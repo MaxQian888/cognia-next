@@ -20,12 +20,11 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { createToolPermissionGate } from "../../../dispatch/ai-sdk-tools.mjs"
-import {
-  createAnthropicCanUseTool,
-  enforceAnthropicPermissionChannel,
-} from "../../../dispatch/anthropic.mjs"
 import { createDoomLoopGuard } from "../doom-loop.ts"
+import { createToolPermissionGate } from "./ai-sdk-gate.ts"
+import type { PendingApproval } from "./approval.ts"
+import { enforceAnthropicPermissionChannel } from "./delegated-approval.ts"
+import { createAnthropicCanUseTool } from "./sdk-can-use-tool.ts"
 
 const GOLDEN = new URL(
   "../../../test-support/fixtures/permission-ladder.golden.txt",
@@ -186,7 +185,7 @@ const MISSING = Symbol("missing")
 
 async function observe(call: Call): Promise<Observation> {
   const frames: Json[] = []
-  const pending = new Map<string, Json & { resolve: (answer: unknown) => void }>()
+  const pending = new Map<string, PendingApproval>()
   let doomCalls = 0
   const stubGuard = {
     check: () => {
@@ -677,7 +676,7 @@ async function caseLines(): Promise<string[]> {
       { permissionPromptToolName: "mcp__permission__review" },
       { ...sendOptions, cwd: ROOT }
     )
-    const guard = options.hooks.PreToolUse.at(-1).hooks[0]
+    const guard = options.hooks!.PreToolUse!.at(-1)!.hooks[0]!
     const out = await guard({ tool_name: toolName, tool_input: toolInput }, "id", {
       signal: new AbortController().signal,
     })

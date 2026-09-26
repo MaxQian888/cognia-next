@@ -9,8 +9,8 @@
 //
 // Two enforcement surfaces:
 //   1. PERMISSION LAYER (`classifyToolCallConfinement`): consulted by the
-//      `canUseTool` gates in `anthropic.mjs` / `ai-sdk-tools.mjs`. It returns a
-//      verdict that composes with the ruleset verdict:
+//      permission ladder both rails climb (`../permission/ladder.ts`). It
+//      returns a verdict that composes with the ruleset verdict:
 //        - mutator (write/edit/bash) whose target escapes every root → "ask"
 //          (escalate to the existing permission_request round-trip);
 //        - any op resolving into a protected credential path (.ssh/.aws/…) or
