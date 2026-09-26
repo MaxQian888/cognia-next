@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 import MobileAgentPage from "./page"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
@@ -65,12 +65,114 @@ describe("MobileAgentPage", () => {
     expect(updateMock).toHaveBeenCalledWith({ briefMode: true })
   })
 
-  it("persists the system prompt on blur (trimmed, undefined when empty)", () => {
+  it("persists the system prompt once, on blur, trimmed", async () => {
     render(<MobileAgentPage />)
     const ta = screen.getByTestId("agent-system-prompt")
+    fireEvent.change(ta, { target: { value: "  speak" } })
     fireEvent.change(ta, { target: { value: "  speak plainly  " } })
-    fireEvent.blur(ta)
+    expect(updateMock).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.blur(ta)
+    })
+    expect(updateMock).toHaveBeenCalledTimes(1)
     expect(updateMock).toHaveBeenCalledWith({ defaultSystemPrompt: "speak plainly" })
+  })
+
+  it("clears the system prompt to undefined when emptied", async () => {
+    mockSettings({
+      permissionMode: "default",
+      biometricRequiredFor: DEFAULT_BIOMETRIC_GUARD,
+      defaultSystemPrompt: "be terse",
+    })
+    render(<MobileAgentPage />)
+    const ta = screen.getByTestId("agent-system-prompt")
+    fireEvent.change(ta, { target: { value: "   " } })
+    await act(async () => {
+      fireEvent.blur(ta)
+    })
+    expect(updateMock).toHaveBeenCalledWith({ defaultSystemPrompt: undefined })
+  })
+
+  it("does not save the system prompt on a blur that changed nothing", async () => {
+    mockSettings({
+      permissionMode: "default",
+      biometricRequiredFor: DEFAULT_BIOMETRIC_GUARD,
+      defaultSystemPrompt: "be terse",
+    })
+    render(<MobileAgentPage />)
+    const ta = screen.getByTestId("agent-system-prompt")
+    // Tapping in and out used to queue a desktop update carrying the same text.
+    fireEvent.focus(ta)
+    await act(async () => {
+      fireEvent.blur(ta)
+    })
+    // Edited and put back (modulo surrounding whitespace): still no change.
+    fireEvent.change(ta, { target: { value: "be terse!" } })
+    fireEvent.change(ta, { target: { value: " be terse " } })
+    await act(async () => {
+      fireEvent.blur(ta)
+    })
+    expect(updateMock).not.toHaveBeenCalled()
+    expect(ta).toHaveValue("be terse")
+  })
+
+  it("does not save the thinking budget on a blur that changed nothing", async () => {
+    mockSettings({
+      permissionMode: "default",
+      biometricRequiredFor: DEFAULT_BIOMETRIC_GUARD,
+      defaultMaxThinkingTokens: 8192,
+    })
+    render(<MobileAgentPage />)
+    const input = screen.getByTestId("agent-thinking-input")
+    fireEvent.focus(input)
+    await act(async () => {
+      fireEvent.blur(input)
+    })
+    fireEvent.change(input, { target: { value: "8000" } })
+    fireEvent.change(input, { target: { value: "8192" } })
+    await act(async () => {
+      fireEvent.blur(input)
+    })
+    expect(updateMock).not.toHaveBeenCalled()
+  })
+
+  it("saves a typed thinking budget once, clamped, on blur or Enter", async () => {
+    render(<MobileAgentPage />)
+    const input = screen.getByTestId("agent-thinking-input")
+    fireEvent.change(input, { target: { value: "9" } })
+    fireEvent.change(input, { target: { value: "9000" } })
+    expect(updateMock).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.blur(input)
+    })
+    expect(updateMock).toHaveBeenCalledTimes(1)
+    expect(updateMock).toHaveBeenLastCalledWith({ defaultMaxThinkingTokens: 9000 })
+
+    fireEvent.change(input, { target: { value: "999999" } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" })
+    })
+    expect(updateMock).toHaveBeenLastCalledWith({ defaultMaxThinkingTokens: 64000 })
+  })
+
+  it("commits a thinking-slider keyboard step and resets the budget to off", async () => {
+    mockSettings({
+      permissionMode: "default",
+      biometricRequiredFor: DEFAULT_BIOMETRIC_GUARD,
+      defaultMaxThinkingTokens: 2048,
+    })
+    render(<MobileAgentPage />)
+    const thumb = screen.getAllByRole("slider")[0]
+    await act(async () => {
+      fireEvent.keyDown(thumb, { key: "ArrowRight" })
+    })
+    expect(updateMock).toHaveBeenCalledTimes(1)
+    expect(updateMock).toHaveBeenLastCalledWith({ defaultMaxThinkingTokens: 3072 })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-thinking-reset"))
+    })
+    expect(updateMock).toHaveBeenLastCalledWith({ defaultMaxThinkingTokens: undefined })
   })
 
   it("biometric-gates a permission-mode escalation before writing", async () => {

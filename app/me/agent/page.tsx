@@ -13,7 +13,6 @@
  * `isPermissionModeEscalation`.
  */
 
-import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { BiometricRow } from "@/components/mobile/me/biometric-row"
@@ -33,6 +32,7 @@ import {
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
@@ -64,6 +64,10 @@ const THINKING_MIN = 0
 const THINKING_MAX = 64000
 const THINKING_STEP = 1024
 
+/** Whole tokens within the budget's range; a non-number reads as 0 (off). */
+const clampThinking = (raw: number): number =>
+  Math.max(THINKING_MIN, Math.min(THINKING_MAX, Number.isFinite(raw) ? Math.round(raw) : 0))
+
 function MobileAgentBody() {
   const t = useTranslations("mobile.agent")
   const settings = useSettingsStore((s) => s.settings)
@@ -81,17 +85,21 @@ function MobileAgentBody() {
   // Surface-skill auto-injection defaults ON (only explicit false disables).
   const surfaceSkillsEnabled = settings?.surfaceSkillsEnabled !== false
 
-  const [systemPrompt, setSystemPrompt] = useState(settings?.defaultSystemPrompt ?? "")
-  const [thinking, setThinking] = useState<number>(settings?.defaultMaxThinkingTokens ?? 0)
-
-  // Mirror external settings changes (first load / desktop sync-down) into the
-  // local input state so blur-persist works without flicker.
-  useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
-    setSystemPrompt(settings?.defaultSystemPrompt ?? "")
-    setThinking(settings?.defaultMaxThinkingTokens ?? 0)
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [settings?.defaultSystemPrompt, settings?.defaultMaxThinkingTokens])
+  // Both fields are drafts written once per edit, and only when the value
+  // actually changed. They used to save on every blur, so tapping into the
+  // prompt and out again queued a desktop update carrying the same text. A
+  // sync-down from the desktop shows whenever no edit is in progress, and no
+  // longer overwrites one that is.
+  const systemPrompt = useSettingDraft(
+    settings?.defaultSystemPrompt ?? "",
+    (next) => update({ defaultSystemPrompt: next || undefined }),
+    { normalize: (draft) => draft.trim() }
+  )
+  const thinking = useSettingDraft(
+    settings?.defaultMaxThinkingTokens ?? 0,
+    (next) => update({ defaultMaxThinkingTokens: next > 0 ? next : undefined }),
+    { normalize: clampThinking }
+  )
 
   const onPermissionMode = async (next: string) => {
     if (!PERMISSION_MODES.includes(next as PermissionMode)) return
@@ -107,20 +115,6 @@ function MobileAgentBody() {
       return
     }
     await update({ permissionMode: target })
-  }
-
-  const persistSystemPrompt = () => {
-    const trimmed = systemPrompt.trim()
-    void update({ defaultSystemPrompt: trimmed || undefined })
-  }
-
-  const persistThinking = (raw: number) => {
-    const clamped = Math.max(
-      THINKING_MIN,
-      Math.min(THINKING_MAX, Number.isFinite(raw) ? Math.round(raw) : 0)
-    )
-    setThinking(clamped)
-    void update({ defaultMaxThinkingTokens: clamped > 0 ? clamped : undefined })
   }
 
   return (
@@ -174,9 +168,9 @@ function MobileAgentBody() {
             </Label>
             <Textarea
               id="agent-system-prompt"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              onBlur={persistSystemPrompt}
+              value={systemPrompt.value}
+              onChange={(e) => systemPrompt.set(e.target.value)}
+              onBlur={systemPrompt.commit}
               rows={4}
               placeholder={t("promptPlaceholder")}
               data-testid="agent-system-prompt"
@@ -196,12 +190,12 @@ function MobileAgentBody() {
             <div className="flex items-center gap-2">
               <Slider
                 className="flex-1"
-                value={[thinking]}
+                value={[thinking.value]}
                 min={THINKING_MIN}
                 max={THINKING_MAX}
                 step={THINKING_STEP}
-                onValueChange={(v) => setThinking(v[0] ?? 0)}
-                onValueCommit={(v) => persistThinking(v[0] ?? 0)}
+                onValueChange={(v) => thinking.set(v[0] ?? 0)}
+                onValueCommit={(v) => thinking.commitValue(v[0] ?? 0)}
                 aria-label={t("thinkingSection")}
                 data-testid="agent-thinking-slider"
               />
@@ -212,9 +206,10 @@ function MobileAgentBody() {
                 max={THINKING_MAX}
                 step={THINKING_STEP}
                 className="w-24"
-                value={thinking}
-                onChange={(e) => setThinking(Number(e.target.value) || 0)}
-                onBlur={() => persistThinking(thinking)}
+                value={thinking.value}
+                onChange={(e) => thinking.set(Number(e.target.value) || 0)}
+                onBlur={thinking.commit}
+                onKeyDown={thinking.commitOnEnter}
                 aria-label={t("thinkingNumberLabel")}
                 data-testid="agent-thinking-input"
               />
@@ -222,16 +217,16 @@ function MobileAgentBody() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => persistThinking(0)}
-                disabled={thinking === 0}
+                onClick={() => thinking.commitValue(0)}
+                disabled={thinking.value === 0}
                 data-testid="agent-thinking-reset"
               >
                 {t("thinkingReset")}
               </Button>
             </div>
             <ItemDescription className="mt-1 text-[11px]">
-              {thinking > 0
-                ? t("thinkingActiveHint", { budget: thinking })
+              {thinking.value > 0
+                ? t("thinkingActiveHint", { budget: thinking.value })
                 : t("thinkingDisabledHint")}
             </ItemDescription>
           </ItemContent>
