@@ -27,7 +27,6 @@ use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tauri::ipc::Channel;
 use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{interval, Instant};
 
@@ -250,16 +249,21 @@ enum BrainDelivery {
     Failed(String),
 }
 
+/// Hands one envelope to the attached desktop brain. On the desktop it wraps
+/// the renderer's IPC channel (`companion_worker_attach_channel`); an `Err` is
+/// the channel refusing the send.
+pub type BrainEnvelopeSender = Box<dyn Fn(WorkerBrainEnvelope) -> Result<(), String> + Send + Sync>;
+
 struct DesktopWorkerSink {
     tenant_id: String,
-    channel: Channel<WorkerBrainEnvelope>,
+    channel: BrainEnvelopeSender,
     seq: AtomicU64,
     budget: Arc<Semaphore>,
     outstanding: Mutex<VecDeque<(u64, OwnedSemaphorePermit)>>,
 }
 
 impl DesktopWorkerSink {
-    fn new(tenant_id: String, channel: Channel<WorkerBrainEnvelope>) -> Self {
+    fn new(tenant_id: String, channel: BrainEnvelopeSender) -> Self {
         Self {
             tenant_id,
             channel,
@@ -281,8 +285,7 @@ impl DesktopWorkerSink {
         let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
         // The permit is only retained once the send succeeded; a failed send
         // drops it here and returns the bytes rather than leaking the budget.
-        self.channel
-            .send(WorkerBrainEnvelope { seq, event })
+        (self.channel)(WorkerBrainEnvelope { seq, event })
             .map_err(|error| format!("desktop brain channel is unavailable: {error}"))?;
         outstanding.push_back((seq, permit));
         Ok(())
@@ -856,14 +859,23 @@ fn remove_worker(connection_id: &str) -> bool {
 #[tauri::command]
 pub async fn companion_worker_attach_channel(
     tenant_id: String,
-    on_event: Channel<WorkerBrainEnvelope>,
+    on_event: tauri::ipc::Channel<WorkerBrainEnvelope>,
 ) -> Result<(), String> {
+    attach_desktop_brain(
+        tenant_id,
+        Box::new(move |envelope| on_event.send(envelope).map_err(|error| error.to_string())),
+    )
+}
+
+/// The body of [`companion_worker_attach_channel`]: install `send` as the
+/// tenant's in-process brain and replay the live worker roster onto it.
+pub fn attach_desktop_brain(tenant_id: String, send: BrainEnvelopeSender) -> Result<(), String> {
     if tenant_id.is_empty() {
         return Err("tenant id is required".to_string());
     }
     let previous = DESKTOP_SINK
         .write()
-        .replace(Arc::new(DesktopWorkerSink::new(tenant_id, on_event)));
+        .replace(Arc::new(DesktopWorkerSink::new(tenant_id, send)));
     if previous.is_some() {
         log::info!("companion-api ws-worker: replacing the attached desktop brain channel");
     }
@@ -1181,18 +1193,11 @@ mod tests {
         assert_eq!(value["deviceId"], "worker-a");
     }
 
-    fn test_sink(
-        tenant_id: &str,
-    ) -> (
-        Arc<DesktopWorkerSink>,
-        tauri::ipc::Channel<WorkerBrainEnvelope>,
-    ) {
-        let channel = Channel::new(|_| Ok(()));
-        let sink = Arc::new(DesktopWorkerSink::new(
+    fn test_sink(tenant_id: &str) -> Arc<DesktopWorkerSink> {
+        Arc::new(DesktopWorkerSink::new(
             tenant_id.to_string(),
-            channel.clone(),
-        ));
-        (sink, channel)
+            Box::new(|_| Ok(())),
+        ))
     }
 
     #[test]
@@ -1241,7 +1246,7 @@ mod tests {
     fn desktop_brain_queue_is_bounded_and_released_by_renderer_acks() {
         // `Channel::send` is fire-and-forget, so without this budget a fast
         // worker would grow the WebView's backlog without bound.
-        let (sink, _channel) = test_sink("tenant-budget");
+        let sink = test_sink("tenant-budget");
         let frame = "x".repeat(MAX_BRAIN_QUEUE_BYTES / 2);
 
         assert!(sink
@@ -1275,7 +1280,7 @@ mod tests {
 
     #[test]
     fn an_ack_below_the_watermark_releases_nothing() {
-        let (sink, _channel) = test_sink("tenant-partial-ack");
+        let sink = test_sink("tenant-partial-ack");
         let frame = "x".repeat(MAX_BRAIN_QUEUE_BYTES / 2);
         sink.try_send(WorkerBrainEvent::WorkerFrame {
             connection_id: "connection-1".to_string(),
@@ -1303,7 +1308,7 @@ mod tests {
         // The two brains are mutually exclusive by design — delivering to both
         // would give one worker connection two Agent RPC clients.
         let tenant_id = "tenant-routing";
-        let (sink, _channel) = test_sink(tenant_id);
+        let sink = test_sink(tenant_id);
         DESKTOP_SINK.write().replace(Arc::clone(&sink));
 
         assert!(desktop_sink_for(tenant_id).is_some());
