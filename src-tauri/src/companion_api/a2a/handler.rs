@@ -23,9 +23,9 @@ use tokio::time::{timeout, Duration, Instant};
 use super::super::acp::types::{self, rpc_error_code};
 use super::super::event_bus::{EventFrame, SubscribeResult};
 use super::super::{
-    dispatch_host::DispatchHost,
     middleware::DeviceContext,
     remote_execution::{self, ExecutionOutcome, ExecutionRequest, ExecutionTransport},
+    runtime::DispatchReady,
     SharedState,
 };
 use super::store;
@@ -106,7 +106,7 @@ pub async fn a2a_rpc_handler(
 /// Run one companion RPC through the shared dispatch surface.
 async fn dispatch(
     state: &SharedState,
-    _host: &DispatchHost,
+    _host: &DispatchReady,
     ctx: &DeviceContext,
     name: &str,
     args: Value,
@@ -144,7 +144,7 @@ async fn handle_message_send(
         .map_err(|reason| (rpc_error_code::INVALID_PARAMS, reason))?;
     let idempotency_seed = a2a_request_seed(message, request_id);
 
-    let Some(host) = DispatchHost::from_state(state) else {
+    let Some(host) = DispatchReady::check(state) else {
         return Err((
             rpc_error_code::INTERNAL_ERROR,
             "no dispatch host available".to_string(),
@@ -244,7 +244,7 @@ fn a2a_request_seed<'a>(message: &'a Value, json_rpc_id: &'a Value) -> &'a Value
 /// (a `None` host skips the deny/interrupt dispatches).
 async fn drive_turn(
     state: &SharedState,
-    host: Option<&DispatchHost>,
+    host: Option<&DispatchReady>,
     ctx: &DeviceContext,
     mut receiver: Receiver<EventFrame>,
     context_id: &str,
@@ -311,7 +311,7 @@ async fn drive_turn(
 
 async fn interrupt(
     state: &SharedState,
-    host: Option<&DispatchHost>,
+    host: Option<&DispatchReady>,
     ctx: &DeviceContext,
     context_id: &str,
 ) {
@@ -371,7 +371,7 @@ async fn handle_tasks_cancel(
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    if let Some(host) = DispatchHost::from_state(state) {
+    if let Some(host) = DispatchReady::check(state) {
         let _ = dispatch(
             state,
             &host,

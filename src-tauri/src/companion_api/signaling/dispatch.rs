@@ -286,9 +286,10 @@ async fn run(
     state: SharedState,
     device_id: String,
 ) {
-    // Resolve the host the same way the HTTP RPC path does (ADR-0059 R5):
-    // the desktop `AppHandle` when the WebView shell is up, else the headless
-    // services registry `cognia-server` installs at boot. This used to be
+    // Ask the runtime whether there is a host, which it answers the way the
+    // HTTP RPC path resolves one (ADR-0059 R5): the desktop `AppHandle` when
+    // the WebView shell is up, else the headless services registry
+    // `cognia-server` installs at boot. This used to be
     // hard-wired to `DispatchHost::Tauri(app)`, which made the whole WebRTC
     // tier unreachable from a headless install even though every other
     // companion transport already supported it.
@@ -297,8 +298,7 @@ async fn run(
     // the `cognia-webrtc-peer` harness) is NOT a reason to drop frames: the
     // event-forwarding half below needs no host at all, and inbound RPCs get
     // the same structured `service_unavailable` the HTTP path returns.
-    let host = crate::companion_api::dispatch_host::DispatchHost::from_state(&state);
-    if host.is_none() {
+    if !state.runtime.can_dispatch(&state) {
         log::warn!(
             "signaling::dispatch: no dispatch host for device {device_id}; \
              events still forward, inbound RPCs answer service_unavailable"

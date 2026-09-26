@@ -21,28 +21,85 @@
 
 use std::sync::Arc;
 
-use axum::Router;
+use axum::{http::StatusCode, Json, Router};
 use cognia_core::installed::Replaceable;
 use serde_json::Value;
 
 use super::event_bus::EventBus;
+use super::middleware::DeviceContext;
+use super::remote_execution::ExecutionPlane;
+use super::rpc_error::RpcError;
 use super::SharedState;
 
+/// The result of one command dispatch: the arm's value, or its RPC error.
+pub type DispatchResult = Result<Value, (StatusCode, Json<RpcError>)>;
+
 /// What the app adds to every companion server it runs.
+#[async_trait::async_trait]
 pub trait CompanionRuntime: Send + Sync + 'static {
     /// The remote Pro IDE relay (`/ide/relay/{relay_id}[/{*tail}]`), mounted
     /// behind device access.
     fn ide_relay_routes(&self) -> Router<SharedState>;
+
+    /// Whether this process has a host to run commands on: the desktop
+    /// WebView, or the headless services `cognia-server` installs at boot.
+    fn can_dispatch(&self, state: &SharedState) -> bool;
+
+    /// Run one command through the app's dispatch table.
+    ///
+    /// Only [`super::remote_execution`] calls this, after it has completed
+    /// authentication, capability, approval, transport and durable-idempotency
+    /// checks; protocol adapters go through `remote_execution::execute`.
+    async fn dispatch(
+        &self,
+        name: &str,
+        args: Value,
+        state: &SharedState,
+        principal: &DeviceContext,
+        plane: ExecutionPlane,
+    ) -> DispatchResult;
+}
+
+/// Proof that a state's runtime can dispatch, for protocol handlers that skip
+/// the dispatches of a turn (a deny, an interrupt) when there is no host to
+/// run them on.
+#[derive(Debug, Clone, Copy)]
+pub struct DispatchReady(());
+
+impl DispatchReady {
+    /// `Some` when [`CompanionRuntime::can_dispatch`] says so for `state`.
+    pub fn check(state: &SharedState) -> Option<Self> {
+        state.runtime.can_dispatch(state).then_some(Self(()))
+    }
 }
 
 /// A runtime that adds nothing, for unit-test states that never reach the
-/// app's routes.
+/// app: no routes, and every dispatch answers the 503 a state with no host
+/// always has.
 #[cfg(test)]
 pub fn unwired() -> Arc<dyn CompanionRuntime> {
     struct Unwired;
+    #[async_trait::async_trait]
     impl CompanionRuntime for Unwired {
         fn ide_relay_routes(&self) -> Router<SharedState> {
             Router::new()
+        }
+
+        fn can_dispatch(&self, _state: &SharedState) -> bool {
+            false
+        }
+
+        async fn dispatch(
+            &self,
+            _name: &str,
+            _args: Value,
+            _state: &SharedState,
+            _principal: &DeviceContext,
+            _plane: ExecutionPlane,
+        ) -> DispatchResult {
+            Err(RpcError::service_unavailable(
+                "app_handle not available (test mode)".to_string(),
+            ))
         }
     }
     Arc::new(Unwired)

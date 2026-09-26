@@ -75,8 +75,8 @@ fn strip_private_headers(headers: &mut HeaderMap, request: bool) {
 }
 
 async fn authorized(context: &DeviceContext, project: &str) -> bool {
-    super::rpc::device_can_control(&context.device_id)
-        && super::rpc::environment::require_approval_authority(
+    super::workspace_access::device_can_control(&context.device_id)
+        && super::workspace_access::require_approval_authority(
             "environment_port_access",
             project,
             Some(&context.account_id),

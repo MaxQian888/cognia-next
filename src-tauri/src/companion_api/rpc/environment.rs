@@ -12,20 +12,21 @@
 //! this tenant's workspaces mounted, so the authority question is not "can
 //! this device reach the plane" but "is this person a maintainer of this
 //! workspace". [`crate::companion_api::workspace_access`] asks the
-//! collaboration server; [`host_owner`] covers the case it cannot see — a
+//! collaboration server; its `host_owner` covers the case it cannot see — a
 //! single-tenant deployment whose one person is the owner principal.
 //!
 //! The Host stamps the approver and the timestamp itself. An approval record
 //! that took the caller's word for who approved would be an audit trail of
 //! claims rather than of decisions.
 
-use cognia_environment::approval::{ApprovalAuthority, ApprovalRequest, EgressGrantRequest};
+use cognia_environment::approval::{ApprovalRequest, EgressGrantRequest};
 use cognia_environment::catalog::CatalogEntry;
 
 use super::*;
-use crate::companion_api::deployment::{deployment_mode, DeploymentMode};
 use crate::companion_api::environment_pool::{self as pool, EnvironmentServiceError, PoolServices};
-use crate::companion_api::workspace_access::{may_approve_environment, workspace_access};
+use crate::companion_api::workspace_access::{
+    acting_person, require_approval_authority, require_environment_authority,
+};
 
 pub(super) const COMMANDS: &[&str] = &[
     "environment_catalog_list",
@@ -87,47 +88,6 @@ fn served(name: &str, error: EnvironmentServiceError) -> (StatusCode, Json<RpcEr
     (status, Json(body))
 }
 
-/// The Host's own owner principal.
-///
-/// A single-tenant deployment has exactly one person behind it: pairing is
-/// owner-driven and the write arms here additionally require the
-/// remote-control capability, so an authenticated caller on such a Host *is*
-/// the owner. A multi-tenant Host has no owner principal — several tenants
-/// share it, and only the collaboration plane can tell them apart.
-fn host_owner() -> bool {
-    deployment_mode() != DeploymentMode::MultiTenant
-}
-
-/// Who the caller is, as the collaboration plane knows them.
-fn acting_person(
-    name: &str,
-    account_id: Option<&str>,
-) -> Result<crate::companion_api::host_identity::HostPerson, (StatusCode, Json<RpcError>)> {
-    let unknown = |detail: String| {
-        (
-            StatusCode::FORBIDDEN,
-            Json(RpcError::new(
-                "approval_authority_unknown_person",
-                format!("{name}: {detail}"),
-            )),
-        )
-    };
-    let namespace = match account_id {
-        Some(id) if !id.trim().is_empty() => id.trim().to_string(),
-        _ => {
-            crate::companion_api::host_identity::current()
-                .map_err(|error| {
-                    unknown(format!(
-                        "this host has no account binding to act as: {error}"
-                    ))
-                })?
-                .local_account_namespace
-        }
-    };
-    crate::companion_api::host_identity::person(&namespace)
-        .map_err(|error| unknown(format!("no person is recorded for this account: {error}")))
-}
-
 /// The user id to stamp on a record. Falls back to the device that asked so
 /// an audit row is never anonymous.
 fn stamped_actor(name: &str, account_id: Option<&str>, device_id: &str) -> String {
@@ -135,73 +95,6 @@ fn stamped_actor(name: &str, account_id: Option<&str>, device_id: &str) -> Strin
         .ok()
         .and_then(|person| person.canonical_user_id.or(person.user_id))
         .unwrap_or_else(|| format!("device:{device_id}"))
-}
-
-/// Refuse unless the caller may approve for `workspace_id`.
-///
-/// On a multi-tenant Host this is a round trip to the collaboration plane, and
-/// every way it can fail is a refusal — never an assumption of access. The
-/// codes come from [`crate::companion_api::workspace_access`] so a UI can tell
-/// "you are not a maintainer" from "the plane is down".
-pub(crate) async fn require_approval_authority(
-    name: &str,
-    workspace_id: &str,
-    account_id: Option<&str>,
-) -> Result<ApprovalAuthority, (StatusCode, Json<RpcError>)> {
-    require_environment_authority(name, workspace_id, account_id, true).await
-}
-
-async fn require_environment_authority(
-    name: &str,
-    workspace_id: &str,
-    account_id: Option<&str>,
-    manage: bool,
-) -> Result<ApprovalAuthority, (StatusCode, Json<RpcError>)> {
-    if host_owner() {
-        return Ok(ApprovalAuthority::HostOwner);
-    }
-    let person = acting_person(name, account_id)?;
-    let (org_id, user_id) = match (
-        person.canonical_org_id.or(person.org_id),
-        person.canonical_user_id.or(person.user_id),
-    ) {
-        (Some(org), Some(user)) => (org, user),
-        _ => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(RpcError::new(
-                    "approval_authority_unknown_person",
-                    format!(
-                        "{name}: this account is not signed in to a collaboration \
-                         organization, so no approval authority can be established"
-                    ),
-                )),
-            ))
-        }
-    };
-    let access = workspace_access(&org_id, workspace_id, &user_id)
-        .await
-        .map_err(|error| {
-            (
-                StatusCode::FORBIDDEN,
-                Json(RpcError::new(error.code(), format!("{name}: {error}"))),
-            )
-        })?;
-    if !(may_approve_environment(access.as_ref(), false)
-        || (!manage
-            && access.as_ref().is_some_and(|access| {
-                access.allows(cognia_tenant_auth::WorkspaceCapability::Read)
-            })))
-    {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(RpcError::new(
-                "approval_authority_insufficient",
-                format!("{name}: approving a runtime environment needs workspace management"),
-            )),
-        ));
-    }
-    Ok(ApprovalAuthority::WorkspaceMaintainer)
 }
 
 /// The canonical form of the remote an approval is keyed on.

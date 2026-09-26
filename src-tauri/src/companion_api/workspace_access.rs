@@ -30,9 +30,14 @@
 
 use std::time::Duration;
 
+use axum::{http::StatusCode, Json};
+use cognia_environment::approval::ApprovalAuthority;
 use cognia_tenant_auth::membership::{allows_capability, EffectiveWorkspaceAccess};
 use cognia_tenant_auth::{OrgId, UserId, WorkspaceCapability};
 use serde::Deserialize;
+
+use super::deployment::{deployment_mode, DeploymentMode};
+use super::rpc_error::RpcError;
 
 /// The clear credential this Host presents. The collaboration server stores
 /// only its SHA-256 (`COLLAB_INTERNAL_SERVICE_CREDENTIAL_SHA256`).
@@ -241,6 +246,133 @@ pub fn may_approve_environment(
     host_owner: bool,
 ) -> bool {
     host_owner || allows_capability(access, WorkspaceCapability::Manage)
+}
+
+// ---------------------------------------------------------------------------
+// Authority checks the companion's arms and relays share
+// ---------------------------------------------------------------------------
+
+/// Revalidate the paired-device control grant on non-RPC streams such as the
+/// managed IDE relay. Revocation therefore closes authority immediately rather
+/// than only when a new code-server session is requested.
+pub(crate) fn device_can_control(device_id: &str) -> bool {
+    let Some(store) = super::security_store::security_store() else {
+        return false;
+    };
+    let Ok(Some(tenant_id)) = store.active_device_tenant(device_id) else {
+        return false;
+    };
+    store
+        .has_capability(&tenant_id, device_id, "workspace.write")
+        .unwrap_or(false)
+}
+
+/// The Host's own owner principal.
+///
+/// A single-tenant deployment has exactly one person behind it: pairing is
+/// owner-driven and the environment write arms additionally require the
+/// remote-control capability, so an authenticated caller on such a Host *is*
+/// the owner. A multi-tenant Host has no owner principal — several tenants
+/// share it, and only the collaboration plane can tell them apart.
+pub(crate) fn host_owner() -> bool {
+    deployment_mode() != DeploymentMode::MultiTenant
+}
+
+/// Who the caller is, as the collaboration plane knows them.
+pub(crate) fn acting_person(
+    name: &str,
+    local_account_id: Option<&str>,
+) -> Result<crate::companion_api::host_identity::HostPerson, (StatusCode, Json<RpcError>)> {
+    let unknown = |detail: String| {
+        (
+            StatusCode::FORBIDDEN,
+            Json(RpcError::new(
+                "approval_authority_unknown_person",
+                format!("{name}: {detail}"),
+            )),
+        )
+    };
+    let namespace = match local_account_id {
+        Some(id) if !id.trim().is_empty() => id.trim().to_string(),
+        _ => {
+            crate::companion_api::host_identity::current()
+                .map_err(|error| {
+                    unknown(format!(
+                        "this host has no account binding to act as: {error}"
+                    ))
+                })?
+                .local_account_namespace
+        }
+    };
+    crate::companion_api::host_identity::person(&namespace)
+        .map_err(|error| unknown(format!("no person is recorded for this account: {error}")))
+}
+
+/// Refuse unless the caller may approve for `workspace_id`.
+///
+/// On a multi-tenant Host this is a round trip to the collaboration plane, and
+/// every way it can fail is a refusal — never an assumption of access. The
+/// codes come from this module so a UI can tell
+/// "you are not a maintainer" from "the plane is down".
+pub(crate) async fn require_approval_authority(
+    name: &str,
+    workspace_id: &str,
+    local_account_id: Option<&str>,
+) -> Result<ApprovalAuthority, (StatusCode, Json<RpcError>)> {
+    require_environment_authority(name, workspace_id, local_account_id, true).await
+}
+
+pub(crate) async fn require_environment_authority(
+    name: &str,
+    workspace_id: &str,
+    local_account_id: Option<&str>,
+    manage: bool,
+) -> Result<ApprovalAuthority, (StatusCode, Json<RpcError>)> {
+    if host_owner() {
+        return Ok(ApprovalAuthority::HostOwner);
+    }
+    let person = acting_person(name, local_account_id)?;
+    let (org_id, user_id) = match (
+        person.canonical_org_id.or(person.org_id),
+        person.canonical_user_id.or(person.user_id),
+    ) {
+        (Some(org), Some(user)) => (org, user),
+        _ => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(RpcError::new(
+                    "approval_authority_unknown_person",
+                    format!(
+                        "{name}: this account is not signed in to a collaboration \
+                         organization, so no approval authority can be established"
+                    ),
+                )),
+            ))
+        }
+    };
+    let access = workspace_access(&org_id, workspace_id, &user_id)
+        .await
+        .map_err(|error| {
+            (
+                StatusCode::FORBIDDEN,
+                Json(RpcError::new(error.code(), format!("{name}: {error}"))),
+            )
+        })?;
+    if !(may_approve_environment(access.as_ref(), false)
+        || (!manage
+            && access.as_ref().is_some_and(|access| {
+                access.allows(cognia_tenant_auth::WorkspaceCapability::Read)
+            })))
+    {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(RpcError::new(
+                "approval_authority_insufficient",
+                format!("{name}: approving a runtime environment needs workspace management"),
+            )),
+        ));
+    }
+    Ok(ApprovalAuthority::WorkspaceMaintainer)
 }
 
 #[cfg(test)]

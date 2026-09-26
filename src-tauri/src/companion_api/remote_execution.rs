@@ -265,7 +265,7 @@ pub async fn execute(
 /// and records the table as failed for the rest of the run.
 ///
 /// **The wait.** It lived only in `details.retryAfterSeconds`, which no client
-/// parses. [`super::rpc::RpcError::rate_limited`] on the sibling RPC path had
+/// parses. [`super::rpc_error::RpcError::rate_limited`] on the sibling RPC path had
 /// already settled the convention, `retry_after_seconds=N` inside the message,
 /// and that is what `retryAfterMsFromErrorMessage` reads. Both paths now answer
 /// the same shape, and `details` keeps the machine-readable copy.
@@ -698,7 +698,7 @@ fn authorize_capability(
     }
     let required = [
         Some(descriptor.capability.as_str()),
-        super::rpc::payload_required_capability(&request.command, &request.args),
+        super::payload_capability::payload_required_capability(&request.command, &request.args),
     ];
     for capability in required.into_iter().flatten() {
         let granted = capability_granted(&request.principal, capability, &request.request_id)?;
@@ -797,20 +797,23 @@ fn authorize_approval(
 
 #[allow(clippy::result_large_err)]
 async fn dispatch(state: &SharedState, request: &ExecutionRequest) -> Result<Value, Problem> {
-    super::rpc::dispatch_canonical(
-        &request.command,
-        request.args.clone(),
-        state,
-        &request.principal,
-        request.plane,
-    )
-    .await
-    .map_err(|(status, axum::Json(error))| {
-        // `RpcError` is the arm-internal shape. This is the plane boundary where
-        // it becomes the one document, and the arm's own answer on whether a
-        // retry can succeed must not be replaced by a guess from the status.
-        problem(&request.request_id, status, error.code, error.message).retryable(error.retryable)
-    })
+    state
+        .runtime
+        .dispatch(
+            &request.command,
+            request.args.clone(),
+            state,
+            &request.principal,
+            request.plane,
+        )
+        .await
+        .map_err(|(status, axum::Json(error))| {
+            // `RpcError` is the arm-internal shape. This is the plane boundary where
+            // it becomes the one document, and the arm's own answer on whether a
+            // retry can succeed must not be replaced by a guess from the status.
+            problem(&request.request_id, status, error.code, error.message)
+                .retryable(error.retryable)
+        })
 }
 
 #[allow(clippy::result_large_err)]
@@ -984,7 +987,7 @@ mod tests {
     #[test]
     fn both_rate_limit_paths_agree_on_the_wire_shape() {
         let device_plane = rate_limited_error("req-1", std::time::Duration::from_secs(7));
-        let (status, rpc_plane) = super::super::rpc::RpcError::rate_limited(7);
+        let (status, rpc_plane) = super::super::rpc_error::RpcError::rate_limited(7);
 
         assert_eq!(device_plane.status_code(), status);
         assert_eq!(device_plane.code, rpc_plane.0.code);

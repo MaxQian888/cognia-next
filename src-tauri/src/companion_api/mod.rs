@@ -77,6 +77,7 @@ pub use cognia_companion_connectivity::mdns;
 pub use cognia_companion_connectivity::mesh;
 pub mod metrics;
 pub mod middleware;
+pub mod payload_capability;
 pub use cognia_companion_security::oidc;
 /// The one long-running operation document (ADR-0175 B3).
 pub use cognia_companion_security::operations;
@@ -93,6 +94,7 @@ pub use cognia_companion_security::rate_limit;
 pub mod remote_execution;
 pub use cognia_companion_security::replay_cache;
 pub mod rpc;
+pub mod rpc_error;
 pub mod runtime;
 pub use cognia_companion_security::secret;
 pub use cognia_companion_security::security_store;

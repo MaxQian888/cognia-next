@@ -14,13 +14,33 @@ use std::sync::Arc;
 use axum::routing::any;
 use axum::Router;
 
-use super::runtime::CompanionRuntime;
+use serde_json::Value;
+
+use super::middleware::DeviceContext;
+use super::remote_execution::ExecutionPlane;
+use super::runtime::{CompanionRuntime, DispatchResult};
 use super::SharedState;
 
 /// The app's routes and hooks for a companion server.
 struct AppCompanionRuntime;
 
+#[async_trait::async_trait]
 impl CompanionRuntime for AppCompanionRuntime {
+    fn can_dispatch(&self, state: &SharedState) -> bool {
+        super::dispatch_host::DispatchHost::from_state(state).is_some()
+    }
+
+    async fn dispatch(
+        &self,
+        name: &str,
+        args: Value,
+        state: &SharedState,
+        principal: &DeviceContext,
+        plane: ExecutionPlane,
+    ) -> DispatchResult {
+        super::rpc::dispatch_canonical(name, args, state, principal, plane).await
+    }
+
     fn ide_relay_routes(&self) -> Router<SharedState> {
         Router::new()
             .route(
@@ -109,6 +129,29 @@ mod tests {
                 "{path} is not routed"
             );
         }
+    }
+
+    /// `remote_execution` and the WebRTC dispatcher ask the runtime whether
+    /// there is a host; the app runtime must answer the way the dispatch
+    /// table resolves one, or a headless server would refuse every RPC.
+    #[tokio::test]
+    async fn the_app_runtime_can_dispatch_exactly_when_the_table_has_a_host() {
+        let _slot = super::super::ws_bridge::test_support::lock_slot().await;
+        let state = unit_state();
+
+        crate::headless::install_headless_services(None);
+        assert!(!state.runtime.can_dispatch(&state));
+        assert!(super::super::dispatch_host::DispatchHost::from_state(&state).is_none());
+
+        crate::headless::install_headless_services(Some(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        ));
+        let with_host = state.runtime.can_dispatch(&state);
+        let table_has_host =
+            super::super::dispatch_host::DispatchHost::from_state(&state).is_some();
+        crate::headless::install_headless_services(None);
+        assert!(with_host);
+        assert!(table_has_host);
     }
 
     fn unit_state() -> SharedState {
