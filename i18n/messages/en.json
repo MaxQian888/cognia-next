@@ -20093,6 +20093,7 @@
         "haltForbidden": "This device can watch the host but cannot control it. Grant it remote control from the host to stop automation from here.",
         "halted": "Halted",
         "loading": "Reading the host…",
+        "pairAction": "Pair a desktop",
         "readFailed": "Could not read the host automation state",
         "recentEmpty": "The host has not decided on any automation call yet.",
         "recentTitle": "Recent decisions",

@@ -23,6 +23,7 @@
     "haltForbidden": "此设备可以查看主机，但没有控制权限。请在主机上授予远程控制后，才能从这里停止自动化。",
     "halted": "已急停",
     "loading": "正在读取主机…",
+    "pairAction": "配对桌面端",
     "readFailed": "无法读取主机的自动化状态",
     "recentEmpty": "主机还没有对任何自动化调用做出决策。",
     "recentTitle": "最近的决策",

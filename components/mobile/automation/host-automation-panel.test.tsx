@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
@@ -135,6 +135,20 @@ describe("HostAutomationPanel", () => {
       )
     )
     expect(screen.queryByTestId("host-halt-button")).toBeNull()
+  })
+
+  it("offers a retry and the pairing wizard when no host answers", async () => {
+    readAutomationSupervision.mockRejectedValueOnce(new Error("no transport"))
+    renderPanel()
+    await waitFor(() => expect(screen.getByTestId("host-automation-unreachable")).toBeInTheDocument())
+    expect(screen.getByTestId("host-automation-pair")).toHaveAttribute("href", "/pair")
+    expect(screen.getByTestId("host-automation-pair")).toHaveTextContent(copy.pairAction)
+
+    // A desktop that was only asleep answers the retry.
+    readAutomationSupervision.mockResolvedValueOnce(snapshot())
+    fireEvent.click(screen.getByTestId("host-automation-retry"))
+    await waitFor(() => expect(screen.getByTestId("host-automation-panel")).toBeInTheDocument())
+    expect(readAutomationSupervision).toHaveBeenCalledTimes(2)
   })
 
   it("halts the host and re-reads its state", async () => {

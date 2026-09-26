@@ -20,8 +20,9 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, OctagonXIcon, RefreshCwIcon } from "lucide-react"
+import { AlertTriangleIcon, OctagonXIcon, QrCodeIcon, RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -131,7 +132,31 @@ export function HostAutomationPanel() {
       <Alert data-testid="host-automation-unreachable">
         <AlertTriangleIcon className="size-4" aria-hidden="true" />
         <AlertTitle>{t("unreachableTitle")}</AlertTitle>
-        <AlertDescription>{t("unreachableDescription")}</AlertDescription>
+        <AlertDescription>
+          <p>{t("unreachableDescription")}</p>
+          {/* Both ways out, because a failed read cannot say which applies:
+              a desktop that is paired but asleep answers a retry, and a phone
+              that was never paired needs the wizard. The text named the fix
+              and offered no way to reach it. */}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={refresh}
+              disabled={loading}
+              data-testid="host-automation-retry"
+            >
+              <RefreshCwIcon className={cn("size-3.5", loading && "animate-spin")} aria-hidden />
+              {t("refresh")}
+            </Button>
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/pair" data-testid="host-automation-pair">
+                <QrCodeIcon className="size-3.5" aria-hidden />
+                {t("pairAction")}
+              </Link>
+            </Button>
+          </div>
+        </AlertDescription>
       </Alert>
     )
   }
