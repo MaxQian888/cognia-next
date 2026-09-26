@@ -865,7 +865,7 @@ function noteQuotaRefusal(failure: SyncFailure): void {
  * backwards on both sides:
  *
  *   • Nothing downstream was being protected. `SyncBridge::pull`
- *     (`src-tauri/src/companion_api/sync_bridge.rs`) keys pending requests by
+ *     (`crates/cognia-companion-bus/src/sync_bridge.rs`) keys pending requests by
  *     id in a map and admits up to 128 in flight, and the Host answers each
  *     one in its own fire-and-forget task (`desktop-sync-source.ts` responds
  *     from the event listener without a queue). The serialisation was entirely
