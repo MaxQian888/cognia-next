@@ -237,6 +237,21 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     },
     [comparisonKeys, setComparisonKeys]
   )
+  // The selected provider. Same optimistic shape again: the selection write
+  // queues behind other provider mutations, so reading it straight through
+  // left the previous provider on screen for a beat after every pick. On a
+  // phone that beat was the whole detail page showing the wrong provider.
+  const [selectionOverride, setSelectionOverride] = useState<string | null>(null)
+  const persistSelectedProviderId = s.setSelectedProviderId
+  const selectProvider = useCallback(
+    (id: string) => {
+      setSelectionOverride(id)
+      void Promise.resolve(persistSelectedProviderId(id)).finally(() =>
+        setSelectionOverride((current) => (current === id ? null : current))
+      )
+    },
+    [persistSelectedProviderId]
+  )
   const [testingConnection, setTestingConnection] = useState<Record<string, boolean>>({})
   // Deleting a custom provider drops its saved credentials and cannot be
   // undone, so it gets a confirmation step instead of firing on first click.
@@ -281,7 +296,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedProviderId, settingsLoaded])
 
-  const selectedId = s.selectedProviderId
+  const selectedId = selectionOverride ?? s.selectedProviderId
   const selectedBuiltIn = selectedId
     ? s.filteredProviders.find(([id]) => id === selectedId)?.[1]
     : undefined
@@ -648,7 +663,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
       providers={sidebarProviders}
       selectedId={selectedId}
       onSelect={(id) => {
-        void s.setSelectedProviderId(id)
+        selectProvider(id)
         selectWorkspace("providers")
         setStackedView("detail")
       }}
@@ -778,7 +793,12 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
           // scroll, and select it so the detail panel opens too.
           setSearch("")
           setCategoryFilter("all")
-          void s.setSelectedProviderId(id)
+          selectWorkspace("providers")
+          // On the stacked (phone) layout the detail is its own page: without
+          // this the chip only highlighted a row in the list and nothing
+          // opened, unlike tapping the row itself.
+          setStackedView("detail")
+          selectProvider(id)
         }}
       />
 
@@ -979,7 +999,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
             setStatusFilter("all")
             selectWorkspace("providers")
             setStackedView("detail")
-            void s.setSelectedProviderId(providerId)
+            selectProvider(providerId)
             toast.success(t("quickAdd.addedToast", { name }))
           }}
         />

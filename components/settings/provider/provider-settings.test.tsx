@@ -11,7 +11,7 @@
  * (`provider-config-tab.test.tsx`, `provider-cost-tab.test.tsx`, etc.).
  */
 import React from "react"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { ProviderSettings } from "./provider-settings"
 
 const mockRouterReplace = jest.fn()
@@ -512,6 +512,13 @@ jest.mock("./provider-empty-state", () => ({
     </div>
   ),
 }))
+// jsdom never measures a width, so the list-detail frame always reports
+// "split". Tests that need the phone layout flip this.
+let mockListDensity: "split" | "stacked" = "split"
+jest.mock("@/components/settings/common/settings-master-detail", () => ({
+  ...jest.requireActual("@/components/settings/common/settings-master-detail"),
+  useSettingsListDensity: () => mockListDensity,
+}))
 jest.mock("./provider-onboarding-banner", () => ({
   ProviderOnboardingBanner: ({
     onScrollToProvider,
@@ -713,6 +720,7 @@ jest.mock("./provider-diagnostics-tab", () => ({
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockListDensity = "split"
   mockHookState = makeHookState()
   mockDiscoverySnapshot.mockReturnValue({ models: [] })
   mockOpenRouterRow = { models: [{ id: "or-1", name: "OR Model" }] }
@@ -833,6 +841,38 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     fireEvent.click(verifyButton)
 
     await waitFor(() => expect(mockHookState.testProvider).toHaveBeenCalledWith("openai"))
+  })
+
+  it("shows a picked provider at once, before the selection write lands", async () => {
+    mockHookState = makeHookState({
+      filteredProviders: [
+        ["openai", { name: "OpenAI", defaultModel: "gpt-4o" }],
+        ["anthropic", { name: "Anthropic", defaultModel: "claude-sonnet-4-5" }],
+      ],
+      selectedProviderId: "openai",
+    })
+    let finishWrite: () => void = () => {}
+    mockSetSelectedProviderId.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishWrite = resolve))
+    )
+    render(<ProviderSettings />)
+    expect(screen.getByTestId("provider-detail-panel")).toHaveAttribute(
+      "data-provider-id",
+      "openai"
+    )
+    fireEvent.click(screen.getByTestId("provider-sidebar-item-anthropic"))
+    // The write is still pending, and the detail already follows the click.
+    expect(screen.getByTestId("provider-detail-panel")).toHaveAttribute(
+      "data-provider-id",
+      "anthropic"
+    )
+    // Once it lands the store is the source again, and it agrees.
+    mockHookState.selectedProviderId = "anthropic"
+    await act(async () => finishWrite())
+    expect(screen.getByTestId("provider-detail-panel")).toHaveAttribute(
+      "data-provider-id",
+      "anthropic"
+    )
   })
 
   it("auto-selects the first sidebar provider on mount", () => {
@@ -1598,6 +1638,19 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     render(<ProviderSettings />)
     const addButton = screen.getByTestId("provider-sidebar-add").querySelector("button")
     expect(addButton).toHaveAttribute("data-size", "icon")
+  })
+
+  it("opens the provider detail from a Quick Setup chip on the stacked layout", () => {
+    mockListDensity = "stacked"
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "deepseek",
+    })
+    render(<ProviderSettings />)
+    expect(screen.getByTestId("provider-rail")).toHaveAttribute("data-stacked-view", "list")
+    fireEvent.click(screen.getByTestId("provider-onboarding-banner"))
+    expect(mockSetSelectedProviderId).toHaveBeenCalledWith("openai")
+    expect(screen.getByTestId("provider-rail-bar")).toHaveAttribute("data-stacked-view", "detail")
   })
 
   it("routes the onboarding banner scroll action and swaps the detail column into the compare pane", async () => {
