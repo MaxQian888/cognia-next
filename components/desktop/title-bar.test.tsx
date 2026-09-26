@@ -371,6 +371,7 @@ import {
 } from "@/components/shell/title-bar-outlets"
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { COMMAND_PALETTE_REQUEST_EVENT } from "@/lib/shell/command-palette-request"
+import { GO_MENU_IDS } from "@/lib/desktop/go-menu"
 
 beforeEach(() => {
   resetNavHistory()
@@ -827,7 +828,7 @@ test("Go > Twin routes to /twin", async () => {
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByText("desktop.menu.go.label")).toBeInTheDocument())
   await user.click(screen.getByText("desktop.menu.go.label"))
-  await user.click(await screen.findByText("desktop.menu.go.twin"))
+  await user.click(await screen.findByText("desktop.guildRail.twin"))
   expect(routerPush).toHaveBeenCalledWith("/twin")
 })
 
@@ -838,7 +839,7 @@ test("Go > Canvas sets the canvas guild", async () => {
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByText("desktop.menu.go.label")).toBeInTheDocument())
   await user.click(screen.getByText("desktop.menu.go.label"))
-  await user.click(await screen.findByText("desktop.menu.go.canvas"))
+  await user.click(await screen.findByText("desktop.guildRail.canvas"))
   expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "canvas" })
 })
 
@@ -1296,23 +1297,24 @@ test("releases a resize listener whose registration resolves after unmount", asy
   expect(unlisten).toHaveBeenCalledTimes(1)
 })
 
-test.each([["dms"], ["logs"], ["settings"]])(
-  "Go > %s routes/dispatches as expected",
-  async (target) => {
-    isTauriMock.mockReturnValue(true)
-    setPlatform("Win32")
-    const user = userEvent.setup()
-    render(<TitleBar />)
-    await user.click(await screen.findByText("desktop.menu.go.label"))
-    await user.click(await screen.findByText(`desktop.menu.go.${target}`))
-    // dms hits setSelectedGuild + push("/"), the other two just push.
-    if (target === "dms") {
-      expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
-    } else {
-      expect(routerPush).toHaveBeenCalledWith(`/${target}`)
-    }
+test.each([
+  ["dms", "directMessages"],
+  ["logs", "logs"],
+  ["settings", "settings"],
+])("Go > %s routes/dispatches as expected", async (target, labelKey) => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.go.label"))
+  await user.click(await screen.findByText(`desktop.guildRail.${labelKey}`))
+  // dms hits setSelectedGuild + push("/"), the other two just push.
+  if (target === "dms") {
+    expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+  } else {
+    expect(routerPush).toHaveBeenCalledWith(`/${target}`)
   }
-)
+})
 
 test("Window > Minimize via menubar minimizes the window", async () => {
   isTauriMock.mockReturnValue(true)
@@ -1365,7 +1367,7 @@ test("hamburger menu: every section is reachable", async () => {
   expect(await screen.findByText("desktop.menu.file.newChat")).toBeInTheDocument()
   expect(screen.getByText("desktop.menu.edit.copy")).toBeInTheDocument()
   expect(screen.getByText("desktop.menu.view.toggleSidebar")).toBeInTheDocument()
-  expect(screen.getByText("desktop.menu.go.canvas")).toBeInTheDocument()
+  expect(screen.getByText("desktop.guildRail.canvas")).toBeInTheDocument()
   expect(screen.getByText("desktop.menu.window.maximize")).toBeInTheDocument()
   expect(screen.getByText("desktop.menu.help.about")).toBeInTheDocument()
 })
@@ -1389,11 +1391,11 @@ test.each([
   ["view.zoomIn"],
   ["view.zoomOut"],
   ["view.zoomReset"],
-  ["go.dms"],
-  ["go.canvas"],
-  ["go.twin"],
-  ["go.logs"],
-  ["go.settings"],
+  ["guildRail.directMessages"],
+  ["guildRail.canvas"],
+  ["guildRail.twin"],
+  ["guildRail.logs"],
+  ["guildRail.settings"],
   ["window.alwaysOnTop"],
   ["window.minimize"],
   ["window.maximize"],
@@ -1407,7 +1409,9 @@ test.each([
   const user = userEvent.setup()
   render(<TitleBar />)
   await user.click(await screen.findByTestId("title-bar-hamburger"))
-  await user.click(await screen.findByText(`desktop.menu.${key}`))
+  await user.click(
+    await screen.findByText(key.startsWith("guildRail.") ? `desktop.${key}` : `desktop.menu.${key}`)
+  )
   // Each item's success path differs, so we just assert the closure ran by
   // checking no error was thrown synchronously.
   expect(true).toBe(true)
@@ -1631,22 +1635,26 @@ test("View > Reduce Motion flips the persisted boolean", async () => {
 // ---------------------------------------------------------------------------
 
 test.each([
-  ["go.inbox", "/inbox/all"],
-  ["go.workflows", "/workflows"],
-  ["go.sites", "/sites"],
-  ["go.skills", "/skills"],
-  ["go.plugins", "/plugins"],
-  ["go.squads", "/squads"],
-  ["go.scheduler", "/scheduler"],
-  ["go.discover", "/discover"],
-  ["go.a2ui", "/a2ui"],
+  ["inbox", "/inbox/all"],
+  ["workflows", "/workflows"],
+  ["sites", "/sites"],
+  ["skills", "/skills"],
+  ["plugins", "/plugins"],
+  ["squads", "/squads"],
+  ["scheduler", "/scheduler"],
+  ["discover", "/discover"],
+  ["a2ui", "/a2ui"],
+  // Destinations the old hand-written list left out.
+  ["issues", "/issues"],
+  ["memory", "/memory"],
+  ["bots", "/bots"],
 ])("Go > %s routes to %s", async (key, route) => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
   const user = userEvent.setup()
   render(<TitleBar />)
   await user.click(await screen.findByText("desktop.menu.go.label"))
-  await user.click(await screen.findByText(`desktop.menu.${key}`))
+  await user.click(await screen.findByTestId(`go-menu-menubar-go-${key}`))
   await waitFor(() => expect(routerPush).toHaveBeenCalledWith(route))
 })
 
@@ -1793,6 +1801,53 @@ test("Help > Keyboard Shortcuts opens the shortcuts dialog", async () => {
   await waitFor(() => expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument())
   // Spot-check one shortcut row.
   expect(screen.getByText("desktop.menu.shortcut.cmdOrCtrlShiftP")).toBeInTheDocument()
+})
+
+test("the shortcuts dialog no longer claims ⌘1–⌘8 for the Go menu", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.help.label"))
+  await user.click(await screen.findByText("desktop.menu.help.keyboardShortcuts"))
+  const dialog = await screen.findByTestId("keyboard-shortcuts-dialog")
+  expect(dialog.textContent).not.toMatch(/shortcut\.cmdOrCtrl[1-8]\b/)
+  expect(dialog.textContent).not.toContain("desktop.menu.go.")
+})
+
+// ---------------------------------------------------------------------------
+// Go menu — one catalog-driven table for the Menubar and the hamburger
+// ---------------------------------------------------------------------------
+
+test("Menubar Go lists every Go-menu destination, in table order, with no shortcut hints", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.go.label"))
+  await screen.findByTestId(`go-menu-menubar-${GO_MENU_IDS[0]}`)
+  const rendered = screen
+    .getAllByTestId(/^go-menu-menubar-go-/)
+    .map((el) => el.getAttribute("data-testid")?.replace("go-menu-menubar-", ""))
+  expect(rendered).toEqual([...GO_MENU_IDS])
+  for (const id of GO_MENU_IDS) {
+    expect(screen.getByTestId(`go-menu-menubar-${id}`).textContent).not.toMatch(/shortcut/)
+  }
+})
+
+test("hamburger Go lists every Go-menu destination", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  narrowState.matches = true
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByTestId("title-bar-hamburger"))
+  await screen.findByTestId(`go-menu-dropdown-${GO_MENU_IDS[0]}`)
+  expect(
+    screen
+      .getAllByTestId(/^go-menu-dropdown-go-/)
+      .map((el) => el.getAttribute("data-testid")?.replace("go-menu-dropdown-", ""))
+  ).toEqual([...GO_MENU_IDS])
 })
 
 // ---------------------------------------------------------------------------

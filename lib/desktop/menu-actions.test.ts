@@ -106,6 +106,7 @@ import { join } from "path"
 
 import { SIDEBAR_NAV_META } from "@/types/shell/sidebar"
 
+import { GO_MENU_SECTIONS } from "./go-menu"
 import {
   MENU_ACTION_IDS,
   MENU_COMMAND_IDS,
@@ -179,12 +180,18 @@ test("MENU_ACTION_IDS is a stable list — every id is unique", () => {
 })
 
 test("GO_MENU_IDS is one go-<id> per catalog entry plus DMs / Canvas / Settings", () => {
-  expect(GO_MENU_IDS).toEqual([
-    ...SIDEBAR_NAV_META.map((meta) => `go-${meta.id}`),
-    "go-dms",
-    "go-canvas",
-    "go-settings",
-  ])
+  expect([...GO_MENU_IDS].sort()).toEqual(
+    [
+      ...SIDEBAR_NAV_META.map((meta) => `go-${meta.id}`),
+      "go-dms",
+      "go-canvas",
+      "go-settings",
+    ].sort()
+  )
+})
+
+test("GO_MENU_IDS is the Go-menu table's ids, in menu order", () => {
+  expect(GO_MENU_IDS).toEqual(GO_MENU_SECTIONS.flatMap((section) => section.map((item) => item.id)))
 })
 
 test("GO_MENU_IDS keeps every id the menus and accelerators already use", () => {
@@ -644,12 +651,21 @@ describe("Rust menu parity (source-parsed)", () => {
     return quotedIdsIn(match[1])
   }
 
-  function rustGoMenuTableIds(): string[] {
+  /** `GO_MENU_SECTIONS` out of `menu.rs`, as sections of `[id, English label]`. */
+  function rustGoMenuSections(): [string, string][][] {
     const source = readFileSync(join(tauriSrc, "menu.rs"), "utf8")
     const match = source.match(/const GO_MENU_SECTIONS: [^=]+= &\[([\s\S]*?)\n\];/)
     if (!match) throw new Error("GO_MENU_SECTIONS table not found in src-tauri/src/menu.rs")
-    // Each entry is `("go-…", "Label", accelerator)`; the id is its first string.
-    return [...match[1].matchAll(/\(\s*"([^"]+)"\s*,/g)].map((m) => m[1])
+    // Each section is `&[ ... ]`; each entry is `("go-…", "Label")`.
+    return [...match[1].matchAll(/&\[([\s\S]*?)\]/g)].map((section) =>
+      [...section[1].matchAll(/\(\s*"([^"]+)"\s*,\s*"([^"]*)"\s*\)/g)].map(
+        (entry): [string, string] => [entry[1], entry[2]]
+      )
+    )
+  }
+
+  function rustGoMenuTableIds(): string[] {
+    return rustGoMenuSections().flatMap((section) => section.map(([id]) => id))
   }
 
   test("Rust MENU_IDS has no duplicates", () => {
@@ -665,6 +681,39 @@ describe("Rust menu parity (source-parsed)", () => {
 
   test("the native Go submenu builds exactly the renderer's go ids", () => {
     expect([...rustGoMenuTableIds()].sort()).toEqual([...GO_MENU_IDS].sort())
+  })
+
+  test("the native Go submenu has the renderer's ids in the same order and sections", () => {
+    expect(rustGoMenuSections().map((section) => section.map(([id]) => id))).toEqual(
+      GO_MENU_SECTIONS.map((section) => section.map((item) => item.id))
+    )
+  })
+
+  test("the native Go submenu's labels are the rail's English labels", () => {
+    const en = JSON.parse(
+      readFileSync(join(__dirname, "..", "..", "i18n", "messages", "en", "desktop.json"), "utf8")
+    ) as { guildRail: Record<string, unknown> }
+    const labelKeyById = new Map<string, string>(
+      GO_MENU_SECTIONS.flatMap((section) =>
+        section.map((item): [string, string] => [item.id, item.labelKey])
+      )
+    )
+    for (const [id, label] of rustGoMenuSections().flat()) {
+      const labelKey = labelKeyById.get(id)
+      expect(labelKey).toBeDefined()
+      expect([id, label]).toEqual([id, en.guildRail[labelKey as string]])
+    }
+  })
+
+  test("no native Go item binds an accelerator", () => {
+    const source = readFileSync(join(tauriSrc, "menu.rs"), "utf8")
+    const goBuilder = source.slice(
+      source.indexOf("// -------------------- Go --------------------"),
+      source.indexOf("// -------------------- Tools --------------------")
+    )
+    expect(goBuilder).toContain("GO_MENU_SECTIONS")
+    expect(goBuilder).not.toContain(".accelerator(")
+    expect(source).not.toMatch(/"go-[a-z0-9-]+"\s*,\s*"[^"]*"\s*,/)
   })
 
   test("the whole Rust list matches the renderer, minus each side's documented exclusives", () => {

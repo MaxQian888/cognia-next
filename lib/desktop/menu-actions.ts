@@ -33,15 +33,17 @@ import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import type { AppLanguage, AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { requestCommandPalette } from "@/lib/shell/command-palette-request"
 import { SIDEBAR_NAV_META } from "@/types/shell/sidebar"
+import { GO_MENU_IDS, isGoMenuId, type GoMenuId } from "@/lib/desktop/go-menu"
 
 const log = loggers.ui
 
 /**
  * Every non-navigation menu id the desktop chrome understands, as a literal
  * tuple so each one stays a distinct member of {@link MenuActionId}. The Go
- * menu's ids are NOT here — they are derived from the navigation catalog in
- * {@link GO_MENU_IDS}, so a new rail destination is reachable from the Go
- * menu without a second hand-kept list.
+ * menu's ids are NOT here — they come from the Go-menu table
+ * (`lib/desktop/go-menu.ts`, derived from the navigation catalog), so a new
+ * rail destination is reachable from the Go menu without a second hand-kept
+ * list.
  */
 export const MENU_COMMAND_IDS = [
   // File
@@ -89,47 +91,9 @@ export const MENU_COMMAND_IDS = [
   "about",
 ] as const
 
-/**
- * A Go-menu id: `go-<destination>`. A template-literal type rather than a
- * literal union because the catalog's ids are plain `string`s — the set of
- * valid values is {@link GO_MENU_IDS}, checked at runtime by
- * {@link isGoMenuId}.
- */
-export type GoMenuId = `go-${string}`
-
-/**
- * Go-menu destinations that are not in the navigation catalog: the two chat
- * guilds (they switch the rail's guild rather than open a route) and the
- * footer Settings button, which the catalog deliberately leaves out.
- */
-const GO_MENU_EXTRA_IDS = [
-  "go-dms",
-  "go-canvas",
-  "go-settings",
-] as const satisfies readonly GoMenuId[]
-
-/**
- * Every Go-menu id, in menu order: one `go-<id>` per entry of the navigation
- * catalog (`SIDEBAR_NAV_META`, which the desktop shell shows in full), then
- * {@link GO_MENU_EXTRA_IDS}. Rust's `MENU_IDS` and the native Go submenu
- * (`src-tauri/src/menu.rs`) mirror this list; `menu-actions.test.ts` parses
- * `commands.rs` and fails when the two drift.
- */
-export const GO_MENU_IDS: readonly GoMenuId[] = [
-  ...SIDEBAR_NAV_META.map((meta): GoMenuId => `go-${meta.id}`),
-  ...GO_MENU_EXTRA_IDS,
-]
-
-const GO_MENU_ID_SET: ReadonlySet<string> = new Set(GO_MENU_IDS)
-
-/**
- * True when `id` is one of {@link GO_MENU_IDS}. Membership, not a prefix
- * test: `go-anything` is not a destination just because it is spelled like
- * one.
- */
-export function isGoMenuId(id: string): id is GoMenuId {
-  return GO_MENU_ID_SET.has(id)
-}
+// Re-exported so the router hook and the title bar read every menu id from
+// one module; the Go table itself lives in `go-menu.ts`.
+export { GO_MENU_IDS, isGoMenuId, type GoMenuId } from "@/lib/desktop/go-menu"
 
 export type MenuActionId = (typeof MENU_COMMAND_IDS)[number] | GoMenuId
 

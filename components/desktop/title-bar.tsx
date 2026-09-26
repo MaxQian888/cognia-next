@@ -88,6 +88,8 @@ import { usePathname, useRouter } from "next/navigation"
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { TitleBarZone, type TitleBarItemContext } from "@/components/desktop/title-bar-zone"
+import { GoMenuItems } from "@/components/desktop/go-menu-items"
+import { DROPDOWN_MENU_KIT, MENUBAR_MENU_KIT } from "@/components/shared/menu-kit"
 import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
 import { useBarLayout } from "@/components/shell/use-bar-layout"
 import { recordNavigation } from "@/hooks/desktop/use-nav-history"
@@ -926,57 +928,12 @@ export function TitleBar() {
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {/* Go */}
-                  <DropdownMenuLabel>{tMenu("go.label")}</DropdownMenuLabel>
-                  <DropdownMenuItem onSelect={handleGo("go-inbox")}>
-                    {tMenu("go.inbox")}
-                    <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl1")}</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-workflows")}>
-                    {tMenu("go.workflows")}
-                    <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl2")}</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-sites")}>
-                    {tMenu("go.sites")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-twin")}>
-                    {tMenu("go.twin")}
-                    <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl3")}</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-skills")}>
-                    {tMenu("go.skills")}
-                    <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl4")}</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-plugins")}>
-                    {tMenu("go.plugins")}
-                    <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl5")}</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-squads")}>
-                    {tMenu("go.squads")}
-                    <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl6")}</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-scheduler")}>
-                    {tMenu("go.scheduler")}
-                    <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl7")}</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-discover")}>
-                    {tMenu("go.discover")}
-                    <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl8")}</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-a2ui")}>
-                    {tMenu("go.a2ui")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-dms")}>
-                    {tMenu("go.dms")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-canvas")}>
-                    {tMenu("go.canvas")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-logs")}>
-                    {tMenu("go.logs")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-settings")}>
-                    {tMenu("go.settings")}
-                  </DropdownMenuItem>
+                  <GoMenuItems
+                    kit={DROPDOWN_MENU_KIT}
+                    surface="dropdown"
+                    handlerFor={handleGo}
+                    withLabel
+                  />
                   <DropdownMenuSeparator />
                   {/* Run */}
                   <DropdownMenuLabel>{tMenu("run.label")}</DropdownMenuLabel>
@@ -1243,48 +1200,7 @@ export function TitleBar() {
                     {tMenu("go.label")}
                   </MenubarTrigger>
                   <MenubarContent className={MENU_CONTENT_PERF}>
-                    <MenubarItem onSelect={handleGo("go-inbox")}>
-                      {tMenu("go.inbox")}
-                      <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl1")}</MenubarShortcut>
-                    </MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-workflows")}>
-                      {tMenu("go.workflows")}
-                      <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl2")}</MenubarShortcut>
-                    </MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-sites")}>{tMenu("go.sites")}</MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-twin")}>
-                      {tMenu("go.twin")}
-                      <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl3")}</MenubarShortcut>
-                    </MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-skills")}>
-                      {tMenu("go.skills")}
-                      <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl4")}</MenubarShortcut>
-                    </MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-plugins")}>
-                      {tMenu("go.plugins")}
-                      <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl5")}</MenubarShortcut>
-                    </MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-squads")}>
-                      {tMenu("go.squads")}
-                      <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl6")}</MenubarShortcut>
-                    </MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-scheduler")}>
-                      {tMenu("go.scheduler")}
-                      <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl7")}</MenubarShortcut>
-                    </MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-discover")}>
-                      {tMenu("go.discover")}
-                      <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl8")}</MenubarShortcut>
-                    </MenubarItem>
-                    <MenubarSeparator />
-                    <MenubarItem onSelect={handleGo("go-a2ui")}>{tMenu("go.a2ui")}</MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-dms")}>{tMenu("go.dms")}</MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-canvas")}>{tMenu("go.canvas")}</MenubarItem>
-                    <MenubarSeparator />
-                    <MenubarItem onSelect={handleGo("go-logs")}>{tMenu("go.logs")}</MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-settings")}>
-                      {tMenu("go.settings")}
-                    </MenubarItem>
+                    <GoMenuItems kit={MENUBAR_MENU_KIT} surface="menubar" handlerFor={handleGo} />
                   </MenubarContent>
                 </MenubarMenu>
                 <MenubarMenu>
@@ -1620,14 +1536,6 @@ const SHORTCUT_ROWS: Array<{ labelKey: string; shortcutKey: string }> = [
   { labelKey: "view.zoomIn", shortcutKey: "shortcut.cmdOrCtrlPlus" },
   { labelKey: "view.zoomOut", shortcutKey: "shortcut.cmdOrCtrlMinus" },
   { labelKey: "view.zoomReset", shortcutKey: "shortcut.cmdOrCtrl0" },
-  { labelKey: "go.inbox", shortcutKey: "shortcut.cmdOrCtrl1" },
-  { labelKey: "go.workflows", shortcutKey: "shortcut.cmdOrCtrl2" },
-  { labelKey: "go.twin", shortcutKey: "shortcut.cmdOrCtrl3" },
-  { labelKey: "go.skills", shortcutKey: "shortcut.cmdOrCtrl4" },
-  { labelKey: "go.plugins", shortcutKey: "shortcut.cmdOrCtrl5" },
-  { labelKey: "go.squads", shortcutKey: "shortcut.cmdOrCtrl6" },
-  { labelKey: "go.scheduler", shortcutKey: "shortcut.cmdOrCtrl7" },
-  { labelKey: "go.discover", shortcutKey: "shortcut.cmdOrCtrl8" },
   { labelKey: "tools.automationKillSwitch", shortcutKey: "shortcut.ctrlAltK" },
 ]
 

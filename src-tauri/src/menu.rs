@@ -12,57 +12,65 @@ const TOGGLE_TERMINAL_MENU_ID: &str = "toggle-terminal";
 // command can be registered on every platform — see
 // `commands::MENU_IDS` and `commands::menu_action_ids`.
 
-/// One native Go-menu entry: `(menu id, English label, accelerator)`.
-type GoMenuItem = (&'static str, &'static str, Option<&'static str>);
+/// One native Go-menu entry: `(menu id, English label)`.
+///
+/// There is deliberately no accelerator column. A native
+/// `CmdOrCtrl+<digit>` accelerator is taken by the OS menu before the
+/// webview sees the key, so the Go menu's old ⌘1–⌘8 shadowed the workbench
+/// activity shortcuts (`lib/shortcuts/app-catalog.ts`, ⌘1–⌘7). Pinned rail
+/// destinations have ⌥1–⌥9 in the renderer instead.
+type GoMenuItem = (&'static str, &'static str);
 
 /// The native Go submenu, section by section — a separator goes between
-/// sections. Mirrors `lib/desktop/menu-actions.ts:GO_MENU_IDS`, which derives
-/// one `go-<id>` per entry of the navigation catalog
-/// (`types/shell/sidebar.ts:SIDEBAR_NAV_META`) plus `go-dms`, `go-canvas`
-/// and `go-settings`. Labels for catalog entries follow the rail's
-/// `desktop.guildRail.*` English strings.
+/// sections. Mirrors `lib/desktop/go-menu.ts:GO_MENU_SECTIONS` id for id and
+/// section for section: that table derives one `go-<id>` per entry of the
+/// navigation catalog (`types/shell/sidebar.ts:SIDEBAR_NAV_META`) plus
+/// `go-dms`, `go-canvas` and `go-settings`, and the in-app Menubar and
+/// hamburger render it. Labels are the rail's `desktop.guildRail.*` English
+/// strings. `lib/desktop/menu-actions.test.ts` parses this table and fails
+/// when an id, the order, a section break or an English label drifts.
 ///
 /// Every id here must be in `commands::MENU_IDS` and vice versa: the tests
 /// below pin that, and `lib/desktop/menu-actions.test.ts` pins `MENU_IDS`
 /// against the renderer's list.
 const GO_MENU_SECTIONS: &[&[GoMenuItem]] = &[
     &[
-        ("go-inbox", "Inbox", Some("CmdOrCtrl+1")),
-        ("go-workflows", "Workflows", Some("CmdOrCtrl+2")),
-        ("go-sites", "Sites", None),
-        ("go-twin", "Twin Workbench", Some("CmdOrCtrl+3")),
-        ("go-skills", "Skills", Some("CmdOrCtrl+4")),
-        ("go-plugins", "Plugins", Some("CmdOrCtrl+5")),
-        ("go-squads", "Squads", Some("CmdOrCtrl+6")),
-        ("go-scheduler", "Scheduler", Some("CmdOrCtrl+7")),
-        ("go-discover", "Discover", Some("CmdOrCtrl+8")),
+        ("go-inbox", "Inbox"),
+        ("go-workflows", "Workflows"),
+        ("go-sites", "Sites"),
+        ("go-twin", "Digital twin"),
+        ("go-skills", "Skills"),
+        ("go-plugins", "Plugins"),
+        ("go-squads", "Squads"),
+        ("go-scheduler", "Scheduler"),
+        ("go-discover", "Discover"),
     ],
     &[
-        ("go-issues", "Issues", None),
-        ("go-templates", "Templates", None),
-        ("go-goals", "Goals", None),
-        ("go-pet", "Pet", None),
-        ("go-browser", "Browser", None),
+        ("go-issues", "Issues"),
+        ("go-templates", "Templates"),
+        ("go-goals", "Goals"),
+        ("go-pet", "Pet"),
+        ("go-browser", "Browser"),
     ],
     &[
-        ("go-a2ui", "Mini-Apps", None),
-        ("go-dms", "Direct Messages", None),
-        ("go-canvas", "Canvas", None),
+        ("go-a2ui", "Mini-Apps"),
+        ("go-dms", "Chats"),
+        ("go-canvas", "Canvas"),
     ],
     &[
-        ("go-source-control", "Source Control", None),
-        ("go-agent-runs", "Agent runs", None),
-        ("go-workspace", "Workspace", None),
-        ("go-memory", "Memory", None),
-        ("go-servers", "Servers", None),
-        ("go-integrations", "Integrations", None),
-        ("go-devices", "Devices", None),
-        ("go-bots", "Bots", None),
-        ("go-eval", "Evaluation", None),
-        ("go-performance", "Performance", None),
-        ("go-me", "Me", None),
+        ("go-source-control", "Source Control"),
+        ("go-agent-runs", "Agent runs"),
+        ("go-workspace", "Workspace"),
+        ("go-memory", "Memory"),
+        ("go-servers", "Servers"),
+        ("go-integrations", "Integrations"),
+        ("go-devices", "Devices"),
+        ("go-bots", "Bots"),
+        ("go-eval", "Evaluation"),
+        ("go-performance", "Performance"),
+        ("go-me", "Me"),
     ],
-    &[("go-logs", "Logs", None), ("go-settings", "Settings", None)],
+    &[("go-logs", "Logs"), ("go-settings", "Settings")],
 ];
 
 /// Build the application menu (File / Edit / View / Go / Tools / Window /
@@ -208,12 +216,8 @@ pub fn install(app: &App) -> tauri::Result<()> {
         if index > 0 {
             go = go.separator();
         }
-        for &(id, label, accelerator) in section.iter() {
-            let mut item = MenuItemBuilder::new(label).id(id);
-            if let Some(accelerator) = accelerator {
-                item = item.accelerator(accelerator);
-            }
-            go = go.item(&item.build(handle)?);
+        for &(id, label) in section.iter() {
+            go = go.item(&MenuItemBuilder::new(label).id(id).build(handle)?);
         }
     }
     let go = go.build()?;
@@ -327,7 +331,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{GO_MENU_SECTIONS, TOGGLE_RIGHT_SIDEBAR_MENU_ID, TOGGLE_TERMINAL_MENU_ID};
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeSet;
 
     fn go_menu_items() -> impl Iterator<Item = &'static super::GoMenuItem> {
         GO_MENU_SECTIONS.iter().flat_map(|section| section.iter())
@@ -336,7 +340,7 @@ mod tests {
     #[test]
     fn go_menu_ids_are_exactly_the_registered_go_ids() {
         let mut table_ids = BTreeSet::new();
-        for (id, _, _) in go_menu_items() {
+        for (id, _) in go_menu_items() {
             assert!(table_ids.insert(*id), "duplicate Go menu id: {id}");
         }
         let registered: BTreeSet<&str> = crate::commands::MENU_IDS
@@ -347,24 +351,26 @@ mod tests {
         assert_eq!(table_ids, registered);
     }
 
+    /// No Go item may carry an accelerator: a native `CmdOrCtrl+<digit>`
+    /// swallows the key before the webview, which is how the old ⌘1–⌘8
+    /// shadowed the workbench's ⌘1–⌘7. The only place a Go item could get
+    /// one is this module's Go builder, so pin that the builder never calls
+    /// `.accelerator(` between the Go header and the Tools header.
     #[test]
-    fn go_menu_keeps_its_accelerators_on_the_same_items() {
-        let accelerators: BTreeMap<&str, &str> = go_menu_items()
-            .filter_map(|(id, _, accelerator)| accelerator.map(|a| (*id, a)))
-            .collect();
-        let expected: BTreeMap<&str, &str> = [
-            ("go-inbox", "CmdOrCtrl+1"),
-            ("go-workflows", "CmdOrCtrl+2"),
-            ("go-twin", "CmdOrCtrl+3"),
-            ("go-skills", "CmdOrCtrl+4"),
-            ("go-plugins", "CmdOrCtrl+5"),
-            ("go-squads", "CmdOrCtrl+6"),
-            ("go-scheduler", "CmdOrCtrl+7"),
-            ("go-discover", "CmdOrCtrl+8"),
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(accelerators, expected);
+    fn go_menu_items_carry_no_accelerator() {
+        let source = include_str!("menu.rs");
+        let go_start = source
+            .find("// -------------------- Go --------------------")
+            .expect("Go builder header");
+        let tools_start = source
+            .find("// -------------------- Tools --------------------")
+            .expect("Tools builder header");
+        assert!(go_start < tools_start);
+        let go_builder = &source[go_start..tools_start];
+        assert!(
+            !go_builder.contains(".accelerator("),
+            "the Go menu must not bind accelerators"
+        );
     }
 
     #[test]
@@ -372,7 +378,7 @@ mod tests {
         for section in GO_MENU_SECTIONS {
             assert!(!section.is_empty(), "empty Go menu section");
         }
-        for (id, label, _) in go_menu_items() {
+        for (id, label) in go_menu_items() {
             assert!(!label.trim().is_empty(), "Go menu item {id} has no label");
         }
     }

@@ -11877,21 +11877,7 @@
         "recentSessionsEmpty": "暂无最近会话"
       },
       "go": {
-        "a2ui": "迷你应用",
-        "canvas": "Canvas",
-        "discover": "发现",
-        "dms": "对话",
-        "inbox": "收件箱",
-        "label": "前往",
-        "logs": "日志",
-        "plugins": "插件",
-        "scheduler": "调度器",
-        "settings": "设置",
-        "sites": "站点",
-        "skills": "技能",
-        "squads": "小队",
-        "twin": "Twin 工作台",
-        "workflows": "工作流"
+        "label": "前往"
       },
       "help": {
         "about": "关于 Cognia",
@@ -11911,14 +11897,6 @@
       },
       "shortcut": {
         "cmdOrCtrl0": "Ctrl+0",
-        "cmdOrCtrl1": "Ctrl+1",
-        "cmdOrCtrl2": "Ctrl+2",
-        "cmdOrCtrl3": "Ctrl+3",
-        "cmdOrCtrl4": "Ctrl+4",
-        "cmdOrCtrl5": "Ctrl+5",
-        "cmdOrCtrl6": "Ctrl+6",
-        "cmdOrCtrl7": "Ctrl+7",
-        "cmdOrCtrl8": "Ctrl+8",
         "cmdOrCtrlAltI": "Ctrl+Alt+I",
         "cmdOrCtrlB": "Ctrl+B",
         "cmdOrCtrlComma": "Ctrl+,",

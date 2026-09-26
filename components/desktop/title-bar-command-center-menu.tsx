@@ -18,20 +18,7 @@
  * store subscriptions of its own.
  */
 
-import {
-  CalendarClockIcon,
-  ChevronDownIcon,
-  CompassIcon,
-  Globe2Icon,
-  InboxIcon,
-  MessageSquareIcon,
-  PuzzleIcon,
-  SearchIcon,
-  SettingsIcon,
-  UsersIcon,
-  WorkflowIcon,
-  type LucideIcon,
-} from "lucide-react"
+import { ChevronDownIcon, MessageSquareIcon, SearchIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
@@ -44,6 +31,7 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { getGoMenuItem, type GoMenuItem } from "@/lib/desktop/go-menu"
 import type { MenuActionId } from "@/lib/desktop/menu-actions"
 import { cn } from "@/lib/utils"
 
@@ -51,18 +39,23 @@ import { cn } from "@/lib/utils"
 const MENU_CONTENT_PERF =
   "data-[state=open]:!animate-none data-[state=closed]:!animate-none shadow-sm"
 
-// Curated "Go to View" targets — a subset of the Go menu surfaced inline, each
-// paired with the icon used for that destination elsewhere in the shell.
-const GO_TARGETS: Array<{ id: MenuActionId; key: string; icon: LucideIcon }> = [
-  { id: "go-inbox", key: "inbox", icon: InboxIcon },
-  { id: "go-workflows", key: "workflows", icon: WorkflowIcon },
-  { id: "go-sites", key: "sites", icon: Globe2Icon },
-  { id: "go-squads", key: "squads", icon: UsersIcon },
-  { id: "go-scheduler", key: "scheduler", icon: CalendarClockIcon },
-  { id: "go-discover", key: "discover", icon: CompassIcon },
-  { id: "go-plugins", key: "plugins", icon: PuzzleIcon },
-  { id: "go-settings", key: "settings", icon: SettingsIcon },
-]
+// Curated "Go to View" targets — a subset of the Go menu surfaced inline. The
+// label and icon of each come from the Go-menu table (`lib/desktop/go-menu.ts`),
+// i.e. the rail's, so this list cannot drift from the Go menu's vocabulary.
+const GO_TARGET_IDS = [
+  "go-inbox",
+  "go-workflows",
+  "go-sites",
+  "go-squads",
+  "go-scheduler",
+  "go-discover",
+  "go-plugins",
+  "go-settings",
+] as const
+
+const GO_TARGETS: readonly GoMenuItem[] = GO_TARGET_IDS.map(getGoMenuItem).filter(
+  (item): item is GoMenuItem => item !== undefined
+)
 
 // Cap the inline recent list so the flat menu stays a sane height.
 const MAX_RECENT = 6
@@ -88,6 +81,7 @@ export function TitleBarCommandCenterMenu({
 }) {
   const t = useTranslations("desktop.titleBar.commandCenter")
   const tMenu = useTranslations("desktop.menu")
+  const tRail = useTranslations("desktop.guildRail")
   const recent = recentSessions.slice(0, MAX_RECENT)
 
   return (
@@ -141,15 +135,12 @@ export function TitleBarCommandCenterMenu({
         <DropdownMenuLabel className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
           {t("goToView")}
         </DropdownMenuLabel>
-        {GO_TARGETS.map((g) => {
-          const Icon = g.icon
-          return (
-            <DropdownMenuItem key={g.id} data-testid={`cc-go-${g.id}`} onSelect={() => onGo(g.id)}>
-              <Icon aria-hidden />
-              <span className="min-w-0 flex-1 truncate">{tMenu(`go.${g.key}`)}</span>
-            </DropdownMenuItem>
-          )
-        })}
+        {GO_TARGETS.map(({ id, labelKey, Icon }) => (
+          <DropdownMenuItem key={id} data-testid={`cc-go-${id}`} onSelect={() => onGo(id)}>
+            <Icon aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{tRail(labelKey)}</span>
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   )

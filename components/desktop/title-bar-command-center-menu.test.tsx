@@ -102,6 +102,9 @@ describe("TitleBarCommandCenterMenu", () => {
     ]) {
       expect(screen.getByTestId(`cc-go-${id}`)).toBeInTheDocument()
     }
+    // Labels are the Go menu's (the rail's), not a second vocabulary.
+    expect(screen.getByTestId("cc-go-go-inbox")).toHaveTextContent("desktop.guildRail.inbox")
+    expect(screen.getByTestId("cc-go-go-settings")).toHaveTextContent("desktop.guildRail.settings")
     fireEvent.click(screen.getByTestId("cc-go-go-scheduler"))
     expect(props.onGo).toHaveBeenCalledWith("go-scheduler")
   })
