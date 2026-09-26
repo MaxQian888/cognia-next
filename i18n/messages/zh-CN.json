@@ -21450,7 +21450,11 @@
       "workspaceRow": "工作区"
     },
     "memory": {
+      "clearSearch": "清空搜索",
       "empty": "暂无记忆",
+      "emptyDescription": "聊天时值得保留的关于你的事实会保存在这里。也可以在对话中输入 /remember。",
+      "noMatches": "没有匹配的记忆",
+      "noMatchesDescription": "换个词试试，或清空搜索。",
       "queueForgetLabel": "遗忘记忆",
       "queueUpdateLabel": "更新记忆",
       "searchAria": "搜索记忆",

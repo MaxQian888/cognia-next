@@ -21450,7 +21450,11 @@
       "workspaceRow": "Workspace"
     },
     "memory": {
+      "clearSearch": "Clear search",
       "empty": "No memories yet",
+      "emptyDescription": "As you chat, facts worth keeping about you are saved here. You can also type /remember in a chat.",
+      "noMatches": "No memories match",
+      "noMatchesDescription": "Try other words, or clear the search.",
       "queueForgetLabel": "Forget memory",
       "queueUpdateLabel": "Update memory",
       "searchAria": "Search memories",

@@ -21,6 +21,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
 
 import { Input } from "@/components/ui/input"
+import { ListSkeleton } from "@/components/mobile/discover/list-skeleton"
 import { EmptyState } from "@/components/mobile/empty-state"
 import { MobileBackButton } from "@/components/mobile/shell/mobile-back-button"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
@@ -146,8 +147,25 @@ export function MemoryMobileBody({ initialSelectedId }: MemoryMobileBodyProps = 
 
       <PullToRefresh onRefresh={handleRefresh} onScrollElChange={setScrollEl}>
         <section className="px-4 pb-4">
-          {visible.length === 0 ? (
-            <EmptyState spotIcon="memory" title={t("empty")} />
+          {/* Three different nothings. `undefined` is "not read yet", which
+              used to flash "No memories yet" on a phone full of them; an empty
+              store says how memories arrive; a search that matched none says
+              that, and offers the way back. */}
+          {memories === undefined ? (
+            <ListSkeleton rows={4} testId="mobile-memory-loading" />
+          ) : memories.length === 0 ? (
+            <EmptyState spotIcon="memory" title={t("empty")} description={t("emptyDescription")} />
+          ) : visible.length === 0 ? (
+            <EmptyState
+              spotIcon="memory"
+              title={t("noMatches")}
+              description={t("noMatchesDescription")}
+              cta={{
+                label: t("clearSearch"),
+                onSelect: () => setQuery(""),
+                testId: "mobile-memory-clear-search",
+              }}
+            />
           ) : (
             <div
               className="relative w-full"

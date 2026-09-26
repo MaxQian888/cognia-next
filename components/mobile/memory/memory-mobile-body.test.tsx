@@ -125,11 +125,35 @@ describe("<MemoryMobileBody />", () => {
     expect(screen.getByTestId("mobile-back-button")).toBeInTheDocument()
   })
 
-  it("shows the empty state when there are no memories", () => {
+  it("shows the empty state when there are no memories, and how they arrive", () => {
     liveQuery.mockReturnValue([])
     render(<MemoryMobileBody />)
-    expect(screen.getByTestId("empty-state")).toBeInTheDocument()
+    expect(screen.getByTestId("empty-state")).toHaveTextContent("No memories yet")
+    expect(screen.getByTestId("empty-state")).toHaveTextContent("/remember")
     expect(screen.getByTestId("mobile-spot-icon-memory")).toBeInTheDocument()
+  })
+
+  // `undefined` is "not read yet". Rendering it as the empty store told a
+  // phone full of memories that it had none, for a frame or a slow read.
+  it("shows a skeleton, not the empty state, before the first read", () => {
+    liveQuery.mockReturnValue(undefined)
+    render(<MemoryMobileBody />)
+    expect(screen.getByTestId("mobile-memory-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("empty-state")).not.toBeInTheDocument()
+  })
+
+  // "No memories yet" is a claim about the store; a search that matched none
+  // is a claim about the search, and gets the way back.
+  it("tells a search with no hits apart from an empty store", async () => {
+    liveQuery.mockReturnValue([mem({ id: "m1", text: "remember milk" })])
+    const user = userEvent.setup()
+    render(<MemoryMobileBody />)
+    const search = screen.getByTestId("mobile-memory-search")
+    await user.type(search, "zzz")
+    expect(screen.getByTestId("empty-state")).toHaveTextContent("No memories match")
+    await user.click(screen.getByTestId("mobile-memory-clear-search"))
+    expect(search).toHaveValue("")
+    expect(screen.getByTestId("memory-row-m1")).toBeInTheDocument()
   })
 
   it("queues desktop-authoritative edits before updating the local mirror", async () => {
