@@ -133,6 +133,7 @@ Each migration batch appends its moves here (old → new).
 | Root-relative lookups (`../vscode-ext-host`, …)                          | `src/platform/sidecar-paths.ts`                                    | 6a          |
 | `builtin-tools/code/*` (engine, `schema.sql`, `grammars/`, `languages/`) | `src/services/code-graph/*`                                        | 6b          |
 | `dispatch/codegraph-resolver-factory.mjs`                                | `src/services/code-graph/lazy-resolver.ts`                         | 6b          |
+| `dispatch/ai-sdk-tools.mjs` (`assertModelSafeToolOutput`)                | `src/policy/pii/tool-output.ts`                                    | 7a          |
 
 ## Scripts (run from repo root)
 

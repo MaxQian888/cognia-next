@@ -37,6 +37,7 @@ import {
   TOOL_NAMES_BY_CATEGORY,
 } from "../src/policy/tool-catalog/catalog.ts"
 import { assertToolCallWithinRoots } from "../src/policy/confinement/enforce.ts"
+import { assertModelSafeToolOutput } from "../src/policy/pii/tool-output.ts"
 import { toolError } from "../src/tools/kernel/result.ts"
 import { withProcessSandbox } from "../src/platform/process/exec.ts"
 import { parseToolArgs, toolInputJsonSchema } from "./tool-args.mjs"
@@ -379,15 +380,11 @@ export function buildCogniaToolsServer({
   })
 }
 
-/** Native MCP results cross the same PII gate as AI SDK results. The lazy
- * import reuses the existing implementation without an initialization cycle. */
+/** Native MCP results cross the same PII gate as AI SDK results. */
 export function wrapNativeToolResults(definitions) {
   return definitions.map((definition) => ({
     ...definition,
-    handler: async (...args) => {
-      const { assertModelSafeToolOutput } = await import("../dispatch/ai-sdk-tools.mjs")
-      return assertModelSafeToolOutput(await definition.handler(...args))
-    },
+    handler: async (...args) => assertModelSafeToolOutput(await definition.handler(...args)),
   }))
 }
 

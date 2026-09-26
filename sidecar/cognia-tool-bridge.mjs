@@ -20,7 +20,7 @@
 // definitions and handlers already are. Reimplementing them CLI-side would have
 // meant a second schema source and a second set of handlers.
 
-import { assertModelSafeToolOutput } from "./dispatch/ai-sdk-tools.mjs"
+import { assertModelSafeToolOutput } from "./src/policy/pii/tool-output.ts"
 import net from "node:net"
 import { pathToFileURL } from "node:url"
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js"
