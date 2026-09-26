@@ -185,7 +185,7 @@ services:
       COGNIA_SMOKE_AGENT: ${COGNIA_SMOKE_AGENT:-}
       # ── OIDC / Logto (ADR-0059 cloud multi-user) — OFF unless BOTH issuer
       # and audience are set. When present, the companion gateway
-      # (src-tauri/src/companion_api/oidc.rs) accepts Logto-issued JWT access
+      # (crates/cognia-companion-security/src/oidc.rs) accepts Logto-issued JWT access
       # tokens (validated via JWKS) for OIDC device registration. Steady-state
       # device calls use short-lived P-256 DPoP-bound tokens. CRITICAL:
       # COGNIA_LOGTO_ISSUER must equal the token `iss` claim,

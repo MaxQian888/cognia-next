@@ -261,7 +261,7 @@ pub struct JwksCache {
 /// HS256 fall-through), so an issuer that connects but never responds must not
 /// stall every companion request for the OS TCP timeout.
 fn jwks_client_builder() -> reqwest::ClientBuilder {
-    crate::ensure_crypto_provider();
+    cognia_net::proxy_config::ensure_crypto_provider();
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))
@@ -312,7 +312,7 @@ impl JwksCache {
         // document and the JWKS may live on different hosts, so each gets its
         // own policy decision; the bypass list is per-host.
         let discovery_client =
-            crate::proxy_config::managed_client(jwks_client_builder(), &discovery_url)
+            cognia_net::proxy_config::managed_client(jwks_client_builder(), &discovery_url)
                 .map_err(|error| OidcError::Discovery(format!("proxy policy: {error}")))?;
         let discovery: DiscoveryDoc = discovery_client
             .get(&discovery_url)
@@ -325,7 +325,7 @@ impl JwksCache {
             .map_err(|e| OidcError::Discovery(format!("parse discovery document: {e}")))?;
 
         let jwks_client =
-            crate::proxy_config::managed_client(jwks_client_builder(), &discovery.jwks_uri)
+            cognia_net::proxy_config::managed_client(jwks_client_builder(), &discovery.jwks_uri)
                 .map_err(|error| OidcError::Discovery(format!("proxy policy: {error}")))?;
         let jwks: JwkSet = jwks_client
             .get(&discovery.jwks_uri)
@@ -433,12 +433,13 @@ impl OidcAuthenticator {
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
-pub(crate) mod test_support {
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
     //! Shared OIDC test fixtures — a deterministic P-384 (ES384) keypair, a
     //! matching JWKS, a token minter, and a wiremock discovery+JWKS mounter.
-    //! `pub(crate)` so sibling suites (e.g. `middleware`) can mint Logto
-    //! tokens and stand up a fake issuer without duplicating key material.
+    //! Public behind `test-support` so the desktop's suites (e.g.
+    //! `middleware`) can mint Logto tokens and stand up a fake issuer without
+    //! duplicating key material.
     use super::*;
     use jsonwebtoken::{encode, EncodingKey, Header};
     use serde_json::json;
@@ -447,21 +448,19 @@ pub(crate) mod test_support {
 
     // Deterministic P-384 test keypair (generated with openssl, ES384). The
     // private key signs test tokens; the JWKS below exposes the public half.
-    pub(crate) const TEST_PRIVATE_PEM: &str = "-----BEGIN PRIVATE KEY-----\n\
+    pub const TEST_PRIVATE_PEM: &str = "-----BEGIN PRIVATE KEY-----\n\
 MIG2AgEAMBAGByqGSM49AgEGBSuBBAAiBIGeMIGbAgEBBDDcIjauh48CSp0lEVYP\n\
 w4XTC5uWLIO7cIPKlbqQr22ufRVVNuYohxpppzoVsRicCW+hZANiAAQh5CBI9kKF\n\
 gCdPz9JXKjnpR3r6P7SkjxqjsNVkRPOm1Wm+20enwYU0m5zWGfA3kojy6ejQg4Ub\n\
 NMXGupxmTMhli7JOJL8zEc93nWvBSpvoVwfTUwBHaYvIFdINrBF5wQg=\n\
 -----END PRIVATE KEY-----\n";
-    pub(crate) const TEST_X: &str =
-        "IeQgSPZChYAnT8_SVyo56Ud6-j-0pI8ao7DVZETzptVpvttHp8GFNJuc1hnwN5KI";
-    pub(crate) const TEST_Y: &str =
-        "8uno0IOFGzTFxrqcZkzIZYuyTiS_MxHPd51rwUqb6FcH01MAR2mLyBXSDawRecEI";
-    pub(crate) const TEST_KID: &str = "test-key-1";
+    pub const TEST_X: &str = "IeQgSPZChYAnT8_SVyo56Ud6-j-0pI8ao7DVZETzptVpvttHp8GFNJuc1hnwN5KI";
+    pub const TEST_Y: &str = "8uno0IOFGzTFxrqcZkzIZYuyTiS_MxHPd51rwUqb6FcH01MAR2mLyBXSDawRecEI";
+    pub const TEST_KID: &str = "test-key-1";
 
     /// The single-key JWKS as raw JSON — used both as a parsed key set and as
     /// a wiremock response body.
-    pub(crate) fn jwks_value() -> serde_json::Value {
+    pub fn jwks_value() -> serde_json::Value {
         json!({
             "keys": [{
                 "kty": "EC",
@@ -476,11 +475,11 @@ NMXGupxmTMhli7JOJL8zEc93nWvBSpvoVwfTUwBHaYvIFdINrBF5wQg=\n\
     }
 
     /// The test JWKS parsed into a [`JwkSet`].
-    pub(crate) fn jwks() -> JwkSet {
+    pub fn jwks() -> JwkSet {
         serde_json::from_value(jwks_value()).expect("parse test JWKS")
     }
 
-    pub(crate) fn now() -> i64 {
+    pub fn now() -> i64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -488,7 +487,7 @@ NMXGupxmTMhli7JOJL8zEc93nWvBSpvoVwfTUwBHaYvIFdINrBF5wQg=\n\
     }
 
     /// Mint a token from arbitrary claims with a chosen header kid + alg.
-    pub(crate) fn mint(claims: serde_json::Value, kid: Option<&str>, alg: Algorithm) -> String {
+    pub fn mint(claims: serde_json::Value, kid: Option<&str>, alg: Algorithm) -> String {
         let mut header = Header::new(alg);
         header.kid = kid.map(str::to_owned);
         let key = EncodingKey::from_ec_pem(TEST_PRIVATE_PEM.as_bytes()).expect("load ec pem");
@@ -496,7 +495,7 @@ NMXGupxmTMhli7JOJL8zEc93nWvBSpvoVwfTUwBHaYvIFdINrBF5wQg=\n\
     }
 
     /// A valid claim set (fresh `exp`) for the given issuer + audience.
-    pub(crate) fn claims(issuer: &str, audience: &str) -> serde_json::Value {
+    pub fn claims(issuer: &str, audience: &str) -> serde_json::Value {
         json!({
             "sub": "user_abc",
             "iss": issuer,
@@ -510,7 +509,7 @@ NMXGupxmTMhli7JOJL8zEc93nWvBSpvoVwfTUwBHaYvIFdINrBF5wQg=\n\
 
     /// Mount OIDC discovery + JWKS on `server`, asserting each endpoint is hit
     /// exactly `disc_calls` / `jwks_calls` times (verified on server drop).
-    pub(crate) async fn mount(server: &MockServer, disc_calls: u64, jwks_calls: u64) {
+    pub async fn mount(server: &MockServer, disc_calls: u64, jwks_calls: u64) {
         Mock::given(method("GET"))
             .and(path("/.well-known/openid-configuration"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -530,7 +529,7 @@ NMXGupxmTMhli7JOJL8zEc93nWvBSpvoVwfTUwBHaYvIFdINrBF5wQg=\n\
 
     /// Like [`mount`] but without asserting call counts — for suites where the
     /// number of JWKS fetches depends on auth fall-through behavior.
-    pub(crate) async fn mount_lenient(server: &MockServer) {
+    pub async fn mount_lenient(server: &MockServer) {
         Mock::given(method("GET"))
             .and(path("/.well-known/openid-configuration"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -724,7 +723,7 @@ mod tests {
     /// hydration window, so the tests opt in explicitly instead of the module
     /// weakening its own guarantee.
     fn install_direct_proxy_policy() {
-        crate::proxy_config::apply_current(crate::proxy_config::ProxyConfig::default())
+        cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default())
             .expect("a default (off) policy always validates");
     }
 

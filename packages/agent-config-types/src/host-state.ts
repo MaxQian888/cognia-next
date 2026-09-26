@@ -348,7 +348,7 @@ export function hostStateIntentTargetsSessionIndex(kind: HostStateIntentKind): b
  * the Host applies it action by action.
  *
  * The four capability names are the ones the SecurityStore actually issues —
- * see `GrantKind::capabilities` in `src-tauri/src/companion_api/device_grants.rs`:
+ * see `GrantKind::capabilities` in `crates/cognia-companion-security/src/device_grants.rs`:
  * - `host.observe` — held by every paired device; read-only.
  * - `workspace.write` — the **Remote Control** grant (desktop paired-devices
  *   toggle / `cognia-server devices grant --control`).

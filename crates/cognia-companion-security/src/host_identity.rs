@@ -360,7 +360,7 @@ pub fn event_namespace_for_tenant(tenant_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::companion_api::security_store::{install_security_store, test_guard, SecurityStore};
+    use crate::security_store::{install_security_store, test_guard, SecurityStore};
 
     /// Holds the store lock and leaves the process-global store empty again.
     ///
@@ -493,7 +493,7 @@ mod tests {
         let _scope = store_scope();
         install();
         let bound = bind_local_account("acct_deadbeef", "digest-a").unwrap();
-        let store = crate::companion_api::security_store::security_store().unwrap();
+        let store = crate::security_store::security_store().unwrap();
 
         // A device enrolled before anybody signed in.
         let challenge = store
@@ -550,7 +550,7 @@ mod tests {
         let _scope = store_scope();
         install();
         let bound = bind_local_account("acct_deadbeef", "digest-a").unwrap();
-        let store = crate::companion_api::security_store::security_store().unwrap();
+        let store = crate::security_store::security_store().unwrap();
         let challenge = store
             .issue_challenge(&bound.remote_tenant_id, 100, 60)
             .unwrap();

@@ -3,7 +3,7 @@
  *
  * Resolves the authorization + token endpoints from the issuer's
  * `/.well-known/openid-configuration` document — the same document the Rust
- * gateway's JWKS cache reads (`src-tauri/src/companion_api/oidc.rs`). Keeping
+ * gateway's JWKS cache reads (`crates/cognia-companion-security/src/oidc.rs`). Keeping
  * the client and resource server on OIDC discovery means neither hard-codes
  * Logto's URL layout.
  */

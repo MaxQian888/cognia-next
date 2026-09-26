@@ -2130,6 +2130,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-companion-security"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "cognia-companion-contract",
+ "cognia-net",
+ "cognia-problem",
+ "cognia-secrets",
+ "cognia-tenant-auth",
+ "hex",
+ "jsonwebtoken",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "rand 0.10.2",
+ "reqwest 0.13.4",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "cognia-connectors"
 version = "0.1.0"
 dependencies = [
@@ -2499,6 +2528,7 @@ dependencies = [
  "cognia-companion-bus",
  "cognia-companion-connectivity",
  "cognia-companion-contract",
+ "cognia-companion-security",
  "cognia-connectors",
  "cognia-core",
  "cognia-environment",

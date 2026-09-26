@@ -1,0 +1,71 @@
+# ADR-0196 P4 — who may call the companion and what they may do: the SQLite
+# security ledger (devices, grants, tokens, executions), identity resolution,
+# the deny list and elevated grants, HS256 service tokens and OIDC validation,
+# step-up leases, rate limits, replay and idempotency caches, the audit trail,
+# the operation documents and the deployment-mode boundary. None of it reads
+# companion state, so it sits below the companion core.
+#
+# `src-tauri/src/companion_api` re-exports every module at its old path.
+[package]
+name = "cognia-companion-security"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Companion security ledger, identity resolution, tokens, grants, rate limits and audit."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_companion_security"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Test-only fixtures and accessors the desktop's own tests read across the
+# crate boundary (`cfg(test)` does not reach a dependent crate): the store and
+# audit test guards, the OIDC key and fake issuer, the device-token minter and
+# the rate-limit bucket counters. `src-tauri` turns it on from its
+# dev-dependencies.
+test-support = ["dep:wiremock"]
+
+[dependencies]
+# `managed_client` and `ensure_crypto_provider`: the OIDC discovery and JWKS
+# fetches honour the proxy policy.
+cognia-net = { path = "../cognia-net" }
+# The HS256 signing secret lives in the OS credential store.
+cognia-secrets = { path = "../cognia-secrets" }
+# Operation documents carry the same problem document a refusal would.
+cognia-problem = { path = "../cognia-problem" }
+# Tenant principals behind the resolved identity.
+cognia-tenant-auth = { path = "../cognia-tenant-auth" }
+# The OIDC test issuer (`oidc::test_support`), only with `test-support`.
+wiremock = { workspace = true, optional = true }
+
+reqwest = { workspace = true, features = ["json"] }
+jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
+rusqlite = { workspace = true, features = ["bundled"] }
+tokio = { workspace = true, features = ["rt"] }
+base64.workspace = true
+hex.workspace = true
+sha2.workspace = true
+rand.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+parking_lot.workspace = true
+once_cell.workspace = true
+log.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+# The manifest-coverage tests walk every companion command.
+cognia-companion-contract = { path = "../cognia-companion-contract" }
+# Keep the signing-secret tests off the real OS keyring.
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

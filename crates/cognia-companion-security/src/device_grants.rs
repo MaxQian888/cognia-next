@@ -7,7 +7,7 @@
 //! paired device can hold, and [`GrantKind::capabilities`] is the **single**
 //! mapping from a grant to the canonical SecurityStore capabilities that the
 //! request-path gates actually check. Three call sites consume it — the desktop
-//! toggles ([`super::commands::companion_set_remote_terminal`] and its two
+//! toggles (`companion_api::commands::companion_set_remote_terminal` and its two
 //! siblings), the `cognia-server devices grant/revoke` CLI, and the one-time
 //! import in [`super::security_store::SecurityStore::migrate_legacy_device_grants`]
 //! — so a capability added to a grant lands on every host type at once.
@@ -18,8 +18,8 @@
 //! headless host, projected at boot onto a set of process-global in-memory
 //! allow lists. That design is retired: authorization is now the SecurityStore's
 //! `capability_grants` table, checked on the request path by
-//! [`super::remote_execution::authorize_capability`] and by the two direct
-//! `has_capability` gates in [`super::rpc`] and [`super::ws_terminal`].
+//! `companion_api::remote_execution::authorize_capability` and by the two direct
+//! `has_capability` gates in `companion_api::rpc` and `companion_api::ws_terminal`.
 //!
 //! What remains is the reader. `cognia-server` loads the file once at boot and
 //! hands it to `migrate_legacy_device_grants`, which imports it behind a

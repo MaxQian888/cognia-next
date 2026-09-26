@@ -5,7 +5,7 @@
  * Reading it locally is legitimate for routing and display — "which org is this
  * token for", "what is its jti" — and illegitimate for authorization. Every
  * signature check in this product happens where the token is consumed:
- * `src-tauri/src/companion_api/oidc.rs` for Logto, the Rust gateway for device
+ * `crates/cognia-companion-security/src/oidc.rs` for Logto, the Rust gateway for device
  * tokens. Nothing here proves anything.
  *
  * This module exists because the same fifteen lines had already been written

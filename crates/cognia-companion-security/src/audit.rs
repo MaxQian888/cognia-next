@@ -67,8 +67,8 @@ pub fn install(data_dir: &std::path::Path) {
 }
 
 /// Test-only: point the audit log somewhere explicit / clear it.
-#[cfg(test)]
-pub(crate) fn install_at_for_testing(path: Option<PathBuf>) {
+#[cfg(any(test, feature = "test-support"))]
+pub fn install_at_for_testing(path: Option<PathBuf>) {
     *AUDIT.lock() = path.map(|path| AuditLog { path });
 }
 
@@ -81,8 +81,8 @@ pub(crate) fn install_at_for_testing(path: Option<PathBuf>) {
 /// passes because it asserted absence.
 ///
 /// Hold it for the whole test body.
-#[cfg(test)]
-pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     static AUDIT_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
     // Poisoning only means an earlier test panicked while holding the guard;
     // every test installs its own path on entry, so the state is still usable

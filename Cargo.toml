@@ -56,13 +56,16 @@ members = [
   "crates/cognia-provider-diagnostics",
   # ADR-0196 P4 — the companion's transport leaves (TLS identity, mDNS/mesh,
   # tunnel, WebRTC peer/envelope/framing), out of `companion_api`.
+  "crates/cognia-companion-connectivity",
   # ADR-0196 P4 — the companion's wire contract (generated command descriptors,
   # settings-sync allowlist, paging), out of `companion_api`.
   "crates/cognia-companion-contract",
-  "crates/cognia-companion-connectivity",
   # ADR-0196 P4 — the companion's event bus, push delivery, store bridges and
   # remote execution contexts, out of `companion_api`.
   "crates/cognia-companion-bus",
+  # ADR-0196 P4 — the companion's security ledger, identity resolution, tokens,
+  # grants, rate limits and audit trail, out of `companion_api`.
+  "crates/cognia-companion-security",
   # ADR-0196 P6g — Chromium cookie import (profile discovery, Safe Storage
   # decryption), out of `app_lib`.
   "crates/cognia-browser-cookies",

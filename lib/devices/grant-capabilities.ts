@@ -1,7 +1,7 @@
 /**
  * The grant → SecurityStore capability mapping, mirrored on the client.
  *
- * `src-tauri/src/companion_api/device_grants.rs` owns the canonical table and
+ * `crates/cognia-companion-security/src/device_grants.rs` owns the canonical table and
  * says so: it is "the only place the mapping exists". This module is a read
  * mirror, and it exists for one reason — `companion_list_device_grants`
  * answers each grant with an **all-of** test, so a device holding `agent.run`
@@ -158,7 +158,7 @@ export interface GrantEvidence {
 
 /**
  * The client twin of `OWNER_PREDICATE_SQL` in
- * `src-tauri/src/companion_api/security_store.rs`.
+ * `crates/cognia-companion-security/src/security_store.rs`.
  *
  * The host is the authority — it re-evaluates this per request in SQL — and
  * this copy exists only so the console can SAY why a switch that looks on is

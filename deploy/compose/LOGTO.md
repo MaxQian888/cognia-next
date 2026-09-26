@@ -208,7 +208,7 @@ curl -fsS https://<gateway>/api/auth/config
 
 The gateway's own unit tests cover the validation matrix (signature, `iss`,
 `aud`, `exp`, scope, org mapping) in
-`src-tauri/src/companion_api/oidc.rs`; the client + refresh + persistence are
+`crates/cognia-companion-security/src/oidc.rs`; the client + refresh + persistence are
 covered under `lib/logto/`.
 
 `node scripts/smoke/compose-smoke.mjs --tier cloud` checks the whole account

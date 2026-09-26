@@ -104,6 +104,10 @@ cognia-companion-connectivity = { path = "../crates/cognia-companion-connectivit
 # (`register_tauri_event`, `WebViewBridgeTransport`); `companion_api`
 # re-exports each module at its old path.
 cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["tauri-host"] }
+# ADR-0196 P4 — the companion's security ledger, identity resolution, tokens,
+# grants, rate limits and audit trail; `companion_api` re-exports each module at
+# its old path.
+cognia-companion-security = { path = "../crates/cognia-companion-security" }
 # ADR-0196 P6g — Chromium cookie import; `browser/cookie_import` keeps the
 # command shells, the macOS keychain adapter and the WebKit sink.
 cognia-browser-cookies = { path = "../crates/cognia-browser-cookies" }
@@ -515,6 +519,9 @@ cognia-secrets = { path = "../crates/cognia-secrets", features = ["test-inmemory
 # `sync_bridge::pending_count`, which `ws_bridge`'s tests read across the crate
 # boundary.
 cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["test-support"] }
+# The store and audit test guards, the OIDC fake issuer and token minter, the
+# device-token issuer and the rate-limit counters the companion suites read.
+cognia-companion-security = { path = "../crates/cognia-companion-security", features = ["test-support"] }
 # HTTP mock server for connectors::http_client and attachments tests.
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)

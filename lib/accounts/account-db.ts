@@ -47,7 +47,7 @@ export interface EncryptedPerformanceBudgetProfileRow {
  * This lives in the REGISTRY, not in a per-profile database, because it is a
  * fact about profiles: which person does this password-protected database
  * belong to. It is the renderer's half of the widened `host_bindings` triple
- * `(localProfile, user, org)` that `src-tauri/src/companion_api/host_identity.rs`
+ * `(localProfile, user, org)` that `crates/cognia-companion-security/src/host_identity.rs`
  * keeps on the host side.
  *
  * `localAccountId` is the primary key, so a profile binds to exactly one person.

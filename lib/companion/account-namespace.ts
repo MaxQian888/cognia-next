@@ -5,7 +5,7 @@
  * neither should pull the other's graph in: `credential-book/types` re-exports
  * it for the client book, and `event-bridge` compares inbound Rust events
  * against it. The Rust half is `LOCAL_NAMESPACE_UNBOUND` in
- * `src-tauri/src/companion_api/security_store.rs`; the three must agree, which
+ * `crates/cognia-companion-security/src/security_store.rs`; the three must agree, which
  * is what the co-located test pins.
  */
 

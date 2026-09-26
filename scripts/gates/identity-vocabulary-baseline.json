@@ -186,6 +186,12 @@
     "crates/cognia-companion-bus/src/sync_bridge.rs": {
       "bareAccountIdRust": 8
     },
+    "crates/cognia-companion-security/src/host_identity.rs": {
+      "bareAccountIdRust": 1
+    },
+    "crates/cognia-companion-security/src/jwt.rs": {
+      "bareAccountIdRust": 17
+    },
     "crates/cognia-files/src/files.rs": {
       "bareAccountIdRust": 10
     },
@@ -836,12 +842,6 @@
     },
     "src-tauri/src/companion_api/browser_gateway.rs": {
       "bareAccountIdRust": 34
-    },
-    "src-tauri/src/companion_api/host_identity.rs": {
-      "bareAccountIdRust": 1
-    },
-    "src-tauri/src/companion_api/jwt.rs": {
-      "bareAccountIdRust": 17
     },
     "src-tauri/src/companion_api/lark_entry.rs": {
       "bareAccountIdRust": 4

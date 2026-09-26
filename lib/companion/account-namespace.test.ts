@@ -18,7 +18,7 @@ describe("DEFAULT_ACCOUNT_NAMESPACE", () => {
     // rejected as an account mismatch — which is exactly the class of bug this
     // sentinel was introduced to fix.
     const store = readFileSync(
-      join(__dirname, "../../src-tauri/src/companion_api/security_store.rs"),
+      join(__dirname, "../../crates/cognia-companion-security/src/security_store.rs"),
       "utf8"
     )
     expect(store).toContain(

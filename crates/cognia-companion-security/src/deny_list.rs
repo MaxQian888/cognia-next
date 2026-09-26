@@ -7,7 +7,7 @@
 //! legacy bearer-JWT middleware and the WebRTC DataChannel dispatcher — do not
 //! take a `Mutex<Connection>` round-trip per request.
 //!
-//! [`super::device_lifecycle::apply`] is the **only** writer. Nothing else may
+//! `companion_api::device_lifecycle::apply` is the **only** writer. Nothing else may
 //! call [`DenyList::revoke`] or [`DenyList::unrevoke`]: a cache with two
 //! writers is how this drifted from the store in the first place.
 //!

@@ -77,7 +77,10 @@ describe("mergeGroupIds — must stay byte-identical to oidc.rs", () => {
     // A parity guard, not a style check: if oidc.rs changes which claims feed
     // the group set, or stops deduping, this mirror is wrong and the renderer
     // will disagree with the host about someone's groups.
-    const rust = readFileSync(join(process.cwd(), "src-tauri/src/companion_api/oidc.rs"), "utf8")
+    const rust = readFileSync(
+      join(process.cwd(), "crates/cognia-companion-security/src/oidc.rs"),
+      "utf8"
+    )
     expect(rust).toMatch(
       /\.groups\s*\n?\s*\.into_iter\(\)\s*\n?\s*\.chain\(raw\.organization_roles\)/
     )

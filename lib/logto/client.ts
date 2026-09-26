@@ -10,7 +10,7 @@
  * `organization_id` indicators so the issued access token is a JWT whose
  * `aud` = the API resource (and, for org logins, carries an `organization_id`
  * claim). Those are exactly what the Rust gateway validates
- * (`src-tauri/src/companion_api/oidc.rs`).
+ * (`crates/cognia-companion-security/src/oidc.rs`).
  */
 
 import { runPkceAuthFlow } from "@/lib/plugin/auth/auth-pkce-flow"

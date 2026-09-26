@@ -1,7 +1,7 @@
 //! The tenant environment store, `<data>/environment.sqlite` (ADR-0182).
 //!
 //! Authorization state lives in transactional SQLite owned by Rust, the same
-//! rule `companion_api/security_store.rs` follows: UI databases may cache what
+//! rule `cognia-companion-security`'s `security_store.rs` follows: UI databases may cache what
 //! is here, but admission never consults them. The store is separate from
 //! every other Cognia database on purpose — nothing in it is migrated with, or
 //! can break, the brain's Dexie schema.

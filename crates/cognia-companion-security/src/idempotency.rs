@@ -261,8 +261,10 @@ impl IdempotencyCache {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn len(&self) -> usize {
+    // A test accessor for the entry count; nothing asks for emptiness.
+    #[cfg(any(test, feature = "test-support"))]
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
         let inner = self.inner.lock();
         if let Some(database) = inner.database.as_ref() {
             return database

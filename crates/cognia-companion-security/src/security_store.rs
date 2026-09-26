@@ -296,8 +296,8 @@ pub fn security_store() -> Option<Arc<SecurityStore>> {
 /// class of bug the caller is usually testing for.
 ///
 /// Hold it for the whole test body.
-#[cfg(test)]
-pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     static STORE_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
     // Poisoning only means an earlier test panicked while holding the guard;
     // every test installs its own store on entry, so the state is still usable
@@ -2368,7 +2368,7 @@ impl SecurityStore {
     }
 }
 
-pub(crate) fn unix_time_secs() -> i64 {
+pub fn unix_time_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -2587,10 +2587,10 @@ fn insert_default_grants(
 
 /// Whether `capability` is one the store will accept as a per-device grant.
 ///
-/// `pub(crate)` so [`super::device_grants`] can pin its grant→capability
+/// Public so [`super::device_grants`] can pin its grant→capability
 /// mapping against it: a toggle that writes a capability this rejects would be
 /// a switch whose grant no gate can ever match.
-pub(crate) fn is_assignable_device_capability(capability: &str) -> bool {
+pub fn is_assignable_device_capability(capability: &str) -> bool {
     matches!(
         capability,
         "host.observe"
@@ -5934,7 +5934,7 @@ CREATE TABLE devices (
         const NOT_A_DEVICE_CAPABILITY: &[&str] = &["service.internal", "client.local"];
         let browser_only = super::BROWSER_ENROLLMENT.capabilities;
 
-        let mut unreachable: Vec<&str> = super::super::command_manifest::commands()
+        let mut unreachable: Vec<&str> = cognia_companion_contract::command_manifest::commands()
             .iter()
             .map(|descriptor| descriptor.capability.as_str())
             .filter(|capability| !NOT_A_DEVICE_CAPABILITY.contains(capability))
@@ -5978,10 +5978,11 @@ CREATE TABLE devices (
             ),
         ];
 
-        let required: std::collections::HashSet<&str> = super::super::command_manifest::commands()
-            .iter()
-            .map(|descriptor| descriptor.capability.as_str())
-            .collect();
+        let required: std::collections::HashSet<&str> =
+            cognia_companion_contract::command_manifest::commands()
+                .iter()
+                .map(|descriptor| descriptor.capability.as_str())
+                .collect();
         let exempt: std::collections::HashSet<&str> = NO_COMMAND_REQUIRES_IT
             .iter()
             .map(|(name, _)| *name)
@@ -6053,7 +6054,7 @@ CREATE TABLE devices (
     /// reached the capability check and failed it.
     #[test]
     fn owner_default_grants_cover_every_device_reachable_command() {
-        use super::super::command_manifest::{CommandTarget, CommandTransport};
+        use cognia_companion_contract::command_manifest::{CommandTarget, CommandTransport};
 
         let store = SecurityStore::in_memory().unwrap();
         register(&store, "tenant-a", "owner-a", 100);
@@ -6062,7 +6063,7 @@ CREATE TABLE devices (
             .unwrap()
             .expect("the freshly registered owner must be active");
 
-        let mut missing: Vec<&str> = super::super::command_manifest::commands()
+        let mut missing: Vec<&str> = cognia_companion_contract::command_manifest::commands()
             .iter()
             .filter(|descriptor| {
                 matches!(

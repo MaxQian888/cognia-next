@@ -5,7 +5,7 @@
  *
  * Everything here is UNVERIFIED extraction from a base64url payload. The
  * signature check lives where the token is consumed:
- * `src-tauri/src/companion_api/oidc.rs` validates `iss`, `aud`, `exp` and the
+ * `crates/cognia-companion-security/src/oidc.rs` validates `iss`, `aud`, `exp` and the
  * required scopes against the JWKS before anything is authorized. The renderer
  * reads the same claims only to answer "who am I and which org am I in" for the
  * UI and for the local binding. A caller that treats these values as an

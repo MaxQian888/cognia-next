@@ -1065,7 +1065,7 @@ const OPERATION_STATUSES = [
 
 /**
  * The one long-running operation document (ADR-0175 B3, after AIP-151).
- * Mirrors `src-tauri/src/companion_api/operations.rs`. A `longRunning`
+ * Mirrors `crates/cognia-companion-security/src/operations.rs`. A `longRunning`
  * command answers 202 with it, and both operation routes answer the same
  * shape, so a client branches on `done`, `error` and `result` and never on
  * which route it asked.

@@ -32,12 +32,12 @@ const ACCOUNT: &str = "signing-key";
 ///
 /// Propagates keyring errors as human-readable strings.
 pub fn load_or_generate() -> Result<Vec<u8>, String> {
-    match crate::secret_store::get(SERVICE, ACCOUNT)? {
+    match cognia_secrets::secret_store::get(SERVICE, ACCOUNT)? {
         Some(encoded) => decode_secret(&encoded),
         None => {
             let secret = generate_secret();
             let encoded = B64.encode(&secret);
-            crate::secret_store::set(SERVICE, ACCOUNT, &encoded)?;
+            cognia_secrets::secret_store::set(SERVICE, ACCOUNT, &encoded)?;
             Ok(secret)
         }
     }
@@ -48,7 +48,7 @@ pub fn load_or_generate() -> Result<Vec<u8>, String> {
 #[allow(dead_code)]
 pub fn store(new_secret: &[u8]) -> Result<(), String> {
     let encoded = B64.encode(new_secret);
-    crate::secret_store::set(SERVICE, ACCOUNT, &encoded)
+    cognia_secrets::secret_store::set(SERVICE, ACCOUNT, &encoded)
 }
 
 /// Remove the stored secret.  Next `load_or_generate` call will produce a new
@@ -56,7 +56,7 @@ pub fn store(new_secret: &[u8]) -> Result<(), String> {
 /// access tokens use the process-ephemeral DPoP authority instead.
 #[allow(dead_code)]
 pub fn clear() -> Result<(), String> {
-    crate::secret_store::delete(SERVICE, ACCOUNT)
+    cognia_secrets::secret_store::delete(SERVICE, ACCOUNT)
 }
 
 // ---------------------------------------------------------------------------

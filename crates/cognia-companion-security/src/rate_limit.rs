@@ -208,13 +208,13 @@ impl RateLimiter {
     }
 
     /// Test-only — count of distinct devices currently holding a bucket.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn bucket_count(&self) -> usize {
         self.buckets.lock().len()
     }
 
     /// Test-only — the same count for the read-only bucket.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn read_bucket_count(&self) -> usize {
         self.read_buckets.lock().len()
     }

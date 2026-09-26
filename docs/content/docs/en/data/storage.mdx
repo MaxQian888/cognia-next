@@ -69,9 +69,9 @@ The ledger path in `cli/src/serve/persistence/` has its own snapshot/journal and
 | Task workspace registry, bundles and blob files | `crates/cognia-task-workspace/src/store.rs`                                |
 | Per-plugin SQL and managed IDE state            | `crates/cognia-plugin-runtime/src/api_bridge.rs`                           |
 | Companion messages and sessions                 | `crates/cognia-companion-bus/src/store.rs`                                 |
-| Companion security state                        | `src-tauri/src/companion_api/security_store.rs`                            |
+| Companion security state                        | `crates/cognia-companion-security/src/security_store.rs`                   |
 | Signaling registrations                         | `crates/cognia-companion-connectivity/src/signaling/registration_store.rs` |
-| RPC idempotency receipts                        | `src-tauri/src/companion_api/idempotency.rs`                               |
+| RPC idempotency receipts                        | `crates/cognia-companion-security/src/idempotency.rs`                      |
 
 The integration spool shares the workflow mirror database path. Companion AppStore and SecurityStore can also share a file. Count owners and files separately; changing connection settings can affect another owner. WAL does not make operations parallel when callers still share one connection mutex.
 

@@ -1,6 +1,6 @@
 //! HS256 JWT helpers retained for loopback service principals and transitional
 //! internal device callers. Public Companion pairing uses ES256 device keys,
-//! one-time Owner invitations, and short-lived access tokens from [`super::api`].
+//! one-time Owner invitations, and short-lived access tokens from `companion_api::api`.
 //!
 //! # Error handling
 //!
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// 90 days in seconds.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 const DEVICE_TTL_SECS: i64 = 90 * 24 * 3600;
 /// 24 hours in seconds — the headless brain's service token (ADR-0059 W4).
 /// Short-lived and re-minted on every brain spawn + on a 12h refresh timer,
@@ -71,7 +71,7 @@ pub enum JwtError {
 /// Mint the retired device-token shape for legacy middleware regression tests.
 /// Production device authentication is cgnp3 + P-256 DPoP and has no issuer
 /// for this credential type.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn issue_device_jwt(
     secret: &[u8],
     device_id: &str,
