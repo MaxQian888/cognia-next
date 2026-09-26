@@ -97,6 +97,14 @@ describe("CogniaCliLauncher", () => {
     expect(screen.queryByTestId("cognia-cli-run-build")).not.toBeInTheDocument()
   })
 
+  it("drops Card's own padding so the body's p-4 is the only inset", () => {
+    mockStatus.mockReturnValue(status({ supported: false }))
+    renderLauncher()
+    const card = screen.getByTestId("cognia-cli-launcher")
+    expect(card).toHaveClass("py-0")
+    expect(card).not.toHaveClass("py-6")
+  })
+
   it("disables commands and shows a hint when the CLI is missing", () => {
     mockStatus.mockReturnValue(status({ installed: false }))
     renderLauncher()

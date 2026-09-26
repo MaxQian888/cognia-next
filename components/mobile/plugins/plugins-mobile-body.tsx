@@ -23,6 +23,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { RefreshCwIcon } from "lucide-react"
 
 import { PluginBatchActionsBar } from "@/components/plugins/plugin-batch-actions-bar"
@@ -56,6 +57,7 @@ import { usePluginsUrlSync } from "@/hooks/plugins/use-plugins-url-sync"
 import { isMirroredPluginClient } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import { isTauri } from "@/lib/platform/detect"
 import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
+import { cn } from "@/lib/utils"
 import { usePluginsStore, type PluginNavSection } from "@/stores/plugins"
 
 export interface PluginsMobileBodyProps {
@@ -189,7 +191,15 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
             type="single"
             value={visibleSection}
             onValueChange={(value) => {
-              if (value) setActiveSection(value as PluginNavSection)
+              if (!value) return
+              // A desktop-only chip stays tappable so it can say why it will
+              // not open. Disabled, a tap did nothing, and the reason lived
+              // in a `title` a phone never shows.
+              if (sections.find((item) => item.section === value)?.disabled) {
+                toast.info(tSections("desktopOnlyHint"))
+                return
+              }
+              setActiveSection(value as PluginNavSection)
             }}
             variant="outline"
             size="sm"
@@ -201,9 +211,12 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
               <ToggleGroupItem
                 key={section}
                 value={section}
-                disabled={disabled}
+                aria-disabled={disabled || undefined}
                 title={disabled ? tSections("desktopOnlyHint") : undefined}
-                className="h-8 gap-1.5 px-2.5 text-xs pointer-coarse:h-9"
+                className={cn(
+                  "h-8 gap-1.5 px-2.5 text-xs pointer-coarse:h-9",
+                  disabled && "opacity-50"
+                )}
                 data-testid={`plugins-mobile-section-${section}`}
                 data-disabled-reason={disabled ? "desktop" : undefined}
               >

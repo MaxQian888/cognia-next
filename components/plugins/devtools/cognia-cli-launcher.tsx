@@ -27,6 +27,7 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { cn } from "@/lib/utils"
 import { InstalledMarker } from "@/components/plugins/_shared/installed-marker"
 import { useCogniaCliStatus } from "@/hooks/plugins/use-cognia-cli-status"
 import { useDevProjectStore } from "@/stores/plugins/dev-project-store"
@@ -153,7 +154,9 @@ export function CogniaCliLauncher({ className }: { className?: string }) {
   }
 
   return (
-    <Card className={className} data-testid="cognia-cli-launcher">
+    // `gap-0 py-0`: the body brings its own `p-4`, so Card's default `py-6`
+    // stacked a blank band above the title, unlike the status card beside it.
+    <Card className={cn("gap-0 py-0", className)} data-testid="cognia-cli-launcher">
       <div className="p-4 space-y-3">
         <div className="space-y-0.5">
           <h3 className="text-sm font-semibold">{t("title")}</h3>

@@ -8,6 +8,11 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+const mockToastInfo = jest.fn()
+jest.mock("sonner", () => ({
+  toast: { info: (...args: unknown[]) => mockToastInfo(...args) },
+}))
+
 // Every dialog host and section pane is exercised by its own suite. Stubbing
 // them here keeps this file about the one thing the body owns: which section
 // shows, and when the detail drawer opens.
@@ -142,8 +147,19 @@ describe("PluginsMobileBody", () => {
       "data-disabled-reason",
       "desktop"
     )
-    expect(screen.getByTestId("plugins-mobile-section-agent-packages")).toBeDisabled()
+    expect(screen.getByTestId("plugins-mobile-section-agent-packages")).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
     expect(screen.queryByTestId("plugins-mobile-section-devtools")).toBeNull()
+  })
+
+  it("says why a desktop-only chip will not open instead of ignoring the tap", () => {
+    render(<PluginsMobileBody />)
+    const before = usePluginsStore.getState().activeSection
+    fireEvent.click(screen.getByTestId("plugins-mobile-section-agent-packages"))
+    expect(mockToastInfo).toHaveBeenCalledWith("desktopOnlyHint")
+    expect(usePluginsStore.getState().activeSection).toBe(before)
   })
 
   it("switches sections from the chip row", () => {
