@@ -1,11 +1,10 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Built-in protocol adapter: wraps the historical `@ai-sdk/*` execution path
 // behind the ProtocolAdapter seam. Behavior is intentionally byte-identical
 // to the pre-seam `ai-sdk.mjs` inline code — `ai-sdk.test.mjs` is the canary
 // and must pass without edits.
 
 // Endpoint-family knowledge (provider→protocol map + Responses-vs-Chat decision)
-// lives in the single-source-of-truth `provider-protocol.mjs`. Re-export the two
+// lives in the single-source-of-truth `provider-protocol.ts`. Re-export the two
 // host helpers so existing importers (and the canary test) keep their public
 // surface; `decideOpenAiEndpointFlavor` is the one decision both the sidecar and
 // the renderer now share.
@@ -21,11 +20,43 @@ import { buildBedrockProviderOptions } from "../bedrock.ts"
 import { partitionPrompt } from "../prompt-partition.ts"
 import { aiSdkTelemetry, withTraceparent } from "../../platform/telemetry/index.ts"
 import { EFFORT_TO_BUDGET, OPENAI_EFFORT_VALUES } from "../reasoning-effort-tables.ts"
+import type { LanguageModelMiddleware, ProviderMetadata } from "ai"
+import type {
+  AdapterResult,
+  NormalizedRequest,
+  ProtocolAdapter,
+  ReasoningControls,
+} from "./types.ts"
+
+/** A model `wrapLanguageModel` accepts: what every provider factory returns. */
+type ProviderModel = Parameters<(typeof import("ai"))["wrapLanguageModel"]>[0]["model"]
+
+/** Per-provider `providerOptions`: provider key → its option block. */
+export type ProviderOptionsMap = Record<string, Record<string, unknown>>
+
+/** Everything `buildModel` needs to construct one provider model. */
+export interface ModelSettings {
+  protocol: string | null
+  model: string
+  apiKey?: string | undefined
+  baseURL?: string | undefined
+  headers?: Record<string, string> | undefined
+  apiFlavor?: string | undefined
+  providerId?: string | undefined
+  bedrockAuthMode?: string | undefined
+  region?: string | undefined
+  accessKeyId?: string | undefined
+  secretAccessKey?: string | undefined
+  sessionToken?: string | undefined
+  profile?: string | undefined
+  roleArn?: string | undefined
+  roleSessionName?: string | undefined
+}
 
 export { isGenuineOpenAiEndpoint, isResponsesOnlyEndpoint }
 
 // The budget tiers (anthropic/google) and the OpenAI-accepted effort values now
-// live in the dependency-free `reasoning-effort-tables.mjs`, so the renderer can
+// live in the dependency-free `reasoning-effort-tables.ts`, so the renderer can
 // read the SAME constants to decide which tiers to OFFER without importing this
 // module (which drags in the whole AI SDK). Re-exported for existing importers.
 export { EFFORT_TO_BUDGET, OPENAI_EFFORT_VALUES }
@@ -36,9 +67,9 @@ export { EFFORT_TO_BUDGET, OPENAI_EFFORT_VALUES }
  * `high` tier rather than `undefined`, so a reasoning level never silently
  * leaves thinking OFF. Returns null only when no effort is given.
  */
-function effortToBudget(effort) {
+function effortToBudget(effort: string | null): number | null {
   if (!effort) return null
-  return EFFORT_TO_BUDGET[effort] ?? EFFORT_TO_BUDGET.high
+  return (EFFORT_TO_BUDGET as Readonly<Record<string, number>>)[effort] ?? EFFORT_TO_BUDGET.high
 }
 
 /**
@@ -46,7 +77,7 @@ function effortToBudget(effort) {
  * accepts: fold "max" down to the nearest valid ceiling "xhigh", and clamp
  * anything unexpected to "high" so an out-of-range level never 400s the call.
  */
-function normalizeOpenAiEffort(effort) {
+function normalizeOpenAiEffort(effort: string): string {
   if (effort === "max") return "xhigh"
   return OPENAI_EFFORT_VALUES.has(effort) ? effort : "high"
 }
@@ -58,14 +89,14 @@ function normalizeOpenAiEffort(effort) {
  * reasoning on — `maxThinkingTokens`/`effort` were built by resolveSendOptions
  * but dropped here, so a non-Anthropic reasoning model ran with thinking off
  * (the Anthropic path defaults it on). Returns `null` when nothing applies.
- *
- * @param {string} protocol  openai | anthropic | google | mistral | cohere
- * @param {string|undefined} baseURL  the provider base URL (gates openai)
- * @param {{ effort?: string, maxThinkingTokens?: number }|undefined} reasoning
- * @param {{ providerId?: string }} [opts]  provider id (gates openai; see below)
- * @returns {Record<string, Record<string, unknown>>|null}
+ * `baseURL` and `opts.providerId` gate the openai branch (see below).
  */
-export function buildReasoningProviderOptions(protocol, baseURL, reasoning, opts = {}) {
+export function buildReasoningProviderOptions(
+  protocol: string | null,
+  baseURL: string | undefined,
+  reasoning: ReasoningControls | null | undefined,
+  opts: { providerId?: string | undefined } = {}
+): ProviderOptionsMap | null {
   if (!reasoning) return null
   const effort = typeof reasoning.effort === "string" && reasoning.effort ? reasoning.effort : null
   const budget =
@@ -127,10 +158,16 @@ export function buildReasoningProviderOptions(protocol, baseURL, reasoning, opts
  * Scoped to the responses-only provider ids (codex) and the responses flavor:
  * the general-purpose `openai` provider keeps the server's storage default,
  * which existing users may rely on.
- *
- * @returns {Record<string, Record<string, unknown>>|null}
  */
-export function buildCodexResponsesProviderOptions({ providerId, flavor, hasReasoning }) {
+export function buildCodexResponsesProviderOptions({
+  providerId,
+  flavor,
+  hasReasoning,
+}: {
+  providerId?: string | undefined
+  flavor: string
+  hasReasoning: boolean
+}): ProviderOptionsMap | null {
   if (!providerId || !RESPONSES_ONLY_PROVIDERS.has(providerId)) return null
   if (flavor !== "responses") return null
   return {
@@ -142,9 +179,12 @@ export function buildCodexResponsesProviderOptions({ providerId, flavor, hasReas
 }
 
 /** Deep-merge two `providerOptions` maps one level into each provider key. */
-function mergeProviderOptions(base, extra) {
+function mergeProviderOptions(
+  base: ProviderOptionsMap | null | undefined,
+  extra: ProviderOptionsMap | null | undefined
+): ProviderOptionsMap | undefined {
   if (!extra) return base ?? undefined
-  const out = { ...(base ?? {}) }
+  const out: ProviderOptionsMap = { ...(base ?? {}) }
   for (const [provider, opts] of Object.entries(extra)) {
     out[provider] = { ...(out[provider] ?? {}), ...opts }
   }
@@ -162,8 +202,8 @@ function mergeProviderOptions(base, extra) {
  * pass-through for models that already stream reasoning natively or never emit
  * the tag — nothing is extracted, the text flows unchanged.
  */
-export function rawAnalysisProvenanceMiddleware() {
-  const mark = (part) => ({
+export function rawAnalysisProvenanceMiddleware(): LanguageModelMiddleware {
+  const mark = <P extends { providerMetadata?: ProviderMetadata | undefined }>(part: P): P => ({
     ...part,
     providerMetadata: {
       ...(part.providerMetadata ?? {}),
@@ -205,7 +245,10 @@ export function rawAnalysisProvenanceMiddleware() {
   }
 }
 
-export async function withReasoningExtraction(model, modelId = model.modelId) {
+export async function withReasoningExtraction(
+  model: ProviderModel,
+  modelId: string | undefined = model.modelId
+): Promise<ProviderModel> {
   const { wrapLanguageModel, extractReasoningMiddleware } = await import("ai")
   const extracted = wrapLanguageModel({
     model,
@@ -240,7 +283,7 @@ export async function buildModel({
   profile,
   roleArn,
   roleSessionName,
-}) {
+}: ModelSettings): Promise<ProviderModel> {
   const base = await buildRawModel({
     protocol: providerId === "commandcode" ? resolveProviderProtocol(providerId, model) : protocol,
     model,
@@ -278,7 +321,7 @@ async function buildRawModel({
   profile,
   roleArn,
   roleSessionName,
-}) {
+}: ModelSettings): Promise<ProviderModel> {
   switch (protocol) {
     case "openai": {
       // The resolver intentionally keeps DeepSeek in the openai wire-protocol
@@ -370,14 +413,22 @@ async function buildRawModel({
   }
 }
 
-/**
- * @param {string} protocol  One of openai|anthropic|google|mistral|cohere.
- * @returns {import("./types.mjs").ProtocolAdapter}
- */
-export function makeAiSdkAdapter(protocol) {
+/** The `streamText` result members this adapter reads (lazy promise getters). */
+interface StreamTextResultLike {
+  stream?: AsyncIterable<unknown>
+  /** The pre-v7 name of `stream`, still a deprecated alias. */
+  fullStream?: AsyncIterable<unknown>
+  responseMessages?: unknown
+  response?: PromiseLike<{ messages?: unknown[] }>
+  usage?: PromiseLike<unknown>
+  steps?: unknown
+}
+
+/** The adapter for one of the built-in AI SDK protocols. */
+export function makeAiSdkAdapter(protocol: string): ProtocolAdapter {
   return {
     id: `ai-sdk:${protocol}`,
-    async start(req) {
+    async start(req: NormalizedRequest): Promise<AdapterResult> {
       const creds = req.credentials ?? {}
       const providerId = req.providerId
       const modelProtocol =
@@ -399,13 +450,17 @@ export function makeAiSdkAdapter(protocol) {
         roleArn: creds.roleArn,
         roleSessionName: creds.roleSessionName,
       })
-      const streamTextFn = req.streamTextFn ?? (await import("ai")).streamText
+      // `streamArgs` is assembled from renderer-provided `modelParams`, so it is
+      // a plain record here and the SDK validates it.
+      const streamTextFn: (args: Record<string, unknown>) => unknown =
+        req.streamTextFn ??
+        ((await import("ai")).streamText as unknown as (args: Record<string, unknown>) => unknown)
       // System content must travel in the top-level instructions option — AI SDK
       // 7 rejects `{ role: "system" }` inside `messages` by default. Splitting
       // here (rather than in `dispatch/ai-sdk.mjs`, which builds the flat
       // conversation) keeps compaction and tool-pairing operating on the combined
       // array. Anthropic cacheControl breakpoints ride along per-message.
-      const streamArgs = {
+      const streamArgs: Record<string, unknown> = {
         model: modelInstance,
         ...partitionPrompt(req.messages),
         ...(req.modelParams ?? {}),
@@ -415,7 +470,7 @@ export function makeAiSdkAdapter(protocol) {
       // Use the provider id so the contract survives a configured gateway relay.
       if (providerId === "opencode" || providerId === "opencode-go") {
         streamArgs.headers = {
-          ...(streamArgs.headers ?? {}),
+          ...((streamArgs.headers as Record<string, string> | undefined) ?? {}),
           "User-Agent": "cognia-coding-agent/1.0",
           ...(req.sessionId ? { "x-opencode-session": req.sessionId } : {}),
         }
@@ -470,7 +525,10 @@ export function makeAiSdkAdapter(protocol) {
             })
           : null
       const mergedProviderOptions = mergeProviderOptions(
-        mergeProviderOptions(streamArgs.providerOptions, reasoningOptions),
+        mergeProviderOptions(
+          streamArgs.providerOptions as ProviderOptionsMap | undefined,
+          reasoningOptions
+        ),
         codexOptions
       )
       if (mergedProviderOptions) streamArgs.providerOptions = mergedProviderOptions
@@ -492,7 +550,7 @@ export function makeAiSdkAdapter(protocol) {
         // returns an image, so the dispatcher can re-project that image as a
         // universally-supported user message before the model continues — most
         // non-Anthropic provider APIs can't carry an image inside a tool result).
-        streamArgs.stopWhen = ({ steps }) =>
+        streamArgs.stopWhen = ({ steps }: { steps?: unknown[] }) =>
           (steps?.length ?? 0) >= (req.maxSteps ?? 16) ||
           (typeof req.stopWhenExtra === "function" ? req.stopWhenExtra(steps) === true : false)
       }
@@ -500,16 +558,18 @@ export function makeAiSdkAdapter(protocol) {
       // `fullStream` still exists as a deprecated alias, so returning the result
       // untouched would keep working — but only until the next major. Map it
       // explicitly instead, and keep `fullStream` as the name of OUR contract:
-      // `types.mjs` AdapterResult, `code-adapter.mjs` and
-      // `openai-compatible-variant-adapter.mjs` all produce that field, and
+      // `types.ts` AdapterResult, `code-adapter.ts` and
+      // `openai-compatible-variant-adapter.ts` all produce that field, and
       // `event-adapter.mjs` consumes it. This is the one place the SDK's name
       // and the internal name have to meet.
-      const result = await withTraceparent(req.traceparent, () => streamTextFn(streamArgs))
+      const result = (await withTraceparent(req.traceparent, () =>
+        streamTextFn(streamArgs)
+      )) as StreamTextResultLike
       // SDK results expose lazy promise getters on their prototype. Spreading
       // the instance drops history/usage; eager reads create unhandled rejected
       // promises on interrupted streams. Preserve the adapter contract lazily.
       return {
-        fullStream: result.stream ?? result.fullStream,
+        fullStream: (result.stream ?? result.fullStream)!,
         get responseMessages() {
           return result.responseMessages
         },

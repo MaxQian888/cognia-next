@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Code-level protocol adapter (P2-E): for upstreams the declarative
 // `openai-compatible-variant` spec can't express, the plugin ships REAL code
 // that runs in the RENDERER (where plugin code legitimately executes — same
@@ -18,30 +17,52 @@
 
 import { randomUUID } from "node:crypto"
 import { makeInputStream } from "../../shared/input-stream.ts"
+import type { CodeAdapterSpec, ProtocolAdapter } from "./types.ts"
+
+/** One code adapter execution; the host's `protocol_adapter_*` handlers drive it. */
+export interface ProtocolExecChannel {
+  fullStream: AsyncIterable<unknown>
+  /** Resolves with the reported usage, or null when the run did not finish. */
+  usage: Promise<unknown>
+  push(chunk: unknown): boolean
+  finish(usage?: unknown): void
+  fail(message: unknown): void
+  cancel(reason?: string): void
+}
+
+/** Runtime deps a `kind: "code"` adapter needs for its renderer round-trip. */
+export interface CodeAdapterBridge {
+  emit: (frame: Record<string, unknown>) => void
+  sessionId: string
+  pendingProtocolExecs: Map<string, ProtocolExecChannel>
+  makeExecId?: () => string
+  onCancel?: (execId: string, reason?: string) => void
+  remoteExecutionContext?: unknown
+}
 
 /**
  * Register a pending execution channel for an execId. The host's
  * `protocol_adapter_*` handlers drive it via the returned controls; the
  * adapter consumes `fullStream` / `usage`.
- *
- * @param {Map<string, any>} pending
- * @param {string} execId
- * @param {{ onCancel?: (execId: string, reason?: string) => void }} [options]
  */
-export function registerProtocolExec(pending, execId, options = {}) {
-  const input = makeInputStream()
-  let resolveUsage
-  const usage = new Promise((resolve) => {
+export function registerProtocolExec(
+  pending: Map<string, ProtocolExecChannel>,
+  execId: string,
+  options: { onCancel?: ((execId: string, reason?: string) => void) | undefined } = {}
+): ProtocolExecChannel {
+  const input = makeInputStream<unknown>()
+  let resolveUsage!: (value: unknown) => void
+  const usage = new Promise<unknown>((resolve) => {
     resolveUsage = resolve
   })
   let settledUsage = false
-  const settleUsage = (value) => {
+  const settleUsage = (value: unknown) => {
     if (settledUsage) return
     settledUsage = true
     resolveUsage(value ?? null)
   }
 
-  const channel = {
+  const channel: ProtocolExecChannel = {
     fullStream: input.iterable,
     usage,
     // Host-driven controls:
@@ -67,17 +88,7 @@ export function registerProtocolExec(pending, execId, options = {}) {
   return channel
 }
 
-/**
- * @param {{ kind: "code", pluginId: string, adapterId: string }} spec
- * @param {{
- *   emit: (msg: any) => void,
- *   sessionId: string,
- *   pendingProtocolExecs: Map<string, any>,
- *   makeExecId?: () => string,
- * }} bridge
- * @returns {import("./types.mjs").ProtocolAdapter}
- */
-export function makeCodeAdapter(spec, bridge) {
+export function makeCodeAdapter(spec: CodeAdapterSpec, bridge: CodeAdapterBridge): ProtocolAdapter {
   return {
     id: `code:${spec.pluginId}:${spec.adapterId}`,
     async start(req) {

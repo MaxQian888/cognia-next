@@ -12,14 +12,24 @@ export interface BedrockSettings {
   baseURL?: string
 }
 
+/** An AWS credential provider, as `@aws-sdk/credential-providers` builds them. */
+export type AwsCredentialProvider = () => PromiseLike<{
+  accessKeyId: string
+  secretAccessKey: string
+  sessionToken?: string
+}>
+
 /** The `@aws-sdk/credential-providers` factories this module calls. */
 export interface CredentialProviderFactories {
-  fromNodeProviderChain(init: { profile?: string; clientConfig: { region: string } }): unknown
+  fromNodeProviderChain(init: {
+    profile?: string
+    clientConfig: { region: string }
+  }): AwsCredentialProvider
   fromTemporaryCredentials(init: {
-    masterCredentials: unknown
+    masterCredentials: AwsCredentialProvider
     clientConfig: { region: string }
     params: { RoleArn: string; RoleSessionName: string }
-  }): unknown
+  }): AwsCredentialProvider
 }
 
 /** The `@aws-sdk/client-bedrock` surface model discovery uses. */
@@ -38,7 +48,7 @@ export interface BedrockProviderOptions {
   accessKeyId?: string
   secretAccessKey?: string
   sessionToken?: string
-  credentialProvider?: unknown
+  credentialProvider?: AwsCredentialProvider
   baseURL?: string
 }
 
@@ -79,7 +89,7 @@ function required(
 export async function createBedrockCredentialProvider(
   settings: BedrockSettings | null | undefined,
   injected?: CredentialProviderFactories
-): Promise<unknown> {
+): Promise<AwsCredentialProvider> {
   if (settings?.authMode !== "default-chain") {
     throw new Error("Amazon Bedrock default credential chain was not selected")
   }

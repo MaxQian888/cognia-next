@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Protocol-adapter registry (one-api `GetAdaptor` analog). Resolution order:
 // the five built-in AI SDK protocols win unconditionally; anything else needs
 // a declarative spec forwarded by the renderer (`sendOptions.
@@ -7,8 +6,10 @@
 
 import { makeAiSdkAdapter } from "./ai-sdk-adapter.ts"
 import { makeCodeAdapter } from "./code-adapter.ts"
+import type { CodeAdapterBridge } from "./code-adapter.ts"
 import { makeOpenAiCompatVariantAdapter } from "./openai-compatible-variant-adapter.ts"
 import { BUILTIN_PROTOCOL_NAMES } from "../provider-protocol.ts"
+import type { CodeAdapterSpec, OpenAiCompatibleVariantSpec, ProtocolAdapter } from "./types.ts"
 
 /**
  * Protocols the built-in `@ai-sdk/*` adapter handles, derived from the single
@@ -18,30 +19,33 @@ import { BUILTIN_PROTOCOL_NAMES } from "../provider-protocol.ts"
  * normalize — a raw `gemini` is rejected because it has no `buildRawModel` case
  * (it only reaches the registry already normalized to `google`).
  */
-export const BUILTIN_PROTOCOLS = new Set(BUILTIN_PROTOCOL_NAMES)
+export const BUILTIN_PROTOCOLS: ReadonlySet<string> = new Set(BUILTIN_PROTOCOL_NAMES)
 
-/** @param {string|null|undefined} protocol */
-export function isBuiltinProtocol(protocol) {
+export function isBuiltinProtocol(protocol: unknown): protocol is string {
   return typeof protocol === "string" && BUILTIN_PROTOCOLS.has(protocol)
 }
 
 /**
- * @param {string|null|undefined} protocol  Resolved protocol id.
- * @param {any} [spec]  Adapter spec from sendOptions, if any.
- * @param {{ emit: Function, sessionId: string, pendingProtocolExecs: Map<string, any>, onCancel?: Function }} [codeBridge]
- *   Runtime deps required to execute a `kind: "code"` adapter (renderer
- *   round-trip). Absent for builtin / declarative resolution.
- * @returns {import("./types.mjs").ProtocolAdapter | null}
+ * The adapter for a resolved protocol id. `spec` is the adapter spec from
+ * sendOptions, if any (unvalidated). `codeBridge` carries the runtime deps a
+ * `kind: "code"` adapter needs for its renderer round-trip; absent for
+ * builtin / declarative resolution.
  */
-export function resolveAdapter(protocol, spec, codeBridge) {
+export function resolveAdapter(
+  protocol: unknown,
+  spec?: unknown,
+  codeBridge?: CodeAdapterBridge
+): ProtocolAdapter | null {
   if (isBuiltinProtocol(protocol)) return makeAiSdkAdapter(protocol)
-  if (spec && spec.kind === "openai-compatible-variant") {
-    return makeOpenAiCompatVariantAdapter(spec)
+  const kind = (spec as { kind?: unknown } | null | undefined)?.kind
+  if (spec && kind === "openai-compatible-variant") {
+    // Validated when the adapter starts.
+    return makeOpenAiCompatVariantAdapter(spec as OpenAiCompatibleVariantSpec)
   }
   // Code-level adapters need the renderer round-trip bridge; without it (e.g.
   // a /v1/models-style probe) they're unresolvable.
-  if (spec && spec.kind === "code" && codeBridge) {
-    return makeCodeAdapter(spec, codeBridge)
+  if (spec && kind === "code" && codeBridge) {
+    return makeCodeAdapter(spec as CodeAdapterSpec, codeBridge)
   }
   return null
 }

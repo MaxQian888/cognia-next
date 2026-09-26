@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Declarative "openai-compatible-variant" protocol adapter (one-api channel
 // analog). A plugin describes an upstream as pure JSON — URL template, header
 // rules, request field renames/injections, response JSON paths — and this
@@ -11,40 +10,54 @@
 
 import { getPath } from "./json-path-lite.ts"
 import { GENERIC_REASONING_EFFORT } from "../reasoning-effort-tables.ts"
+import type {
+  AdapterUsage,
+  FetchLike,
+  OpenAiCompatibleVariantSpec,
+  ProtocolAdapter,
+} from "./types.ts"
 
 /** Keys a well-formed spec must carry (parity-tested against the renderer). */
-export const SPEC_REQUIRED_KEYS = ["kind", "urlTemplate", "responsePaths"]
+export const SPEC_REQUIRED_KEYS: readonly string[] = ["kind", "urlTemplate", "responsePaths"]
 
-/** @param {any} spec */
-export function validateSpec(spec) {
+/** Why a spec is unusable, or null when it is well-formed. */
+export function validateSpec(spec: unknown): string | null {
   if (!spec || typeof spec !== "object") return "spec must be an object"
-  if (spec.kind !== "openai-compatible-variant") return `unknown spec kind: ${spec?.kind}`
-  if (typeof spec.urlTemplate !== "string" || spec.urlTemplate.length === 0) {
+  const s = spec as {
+    kind?: unknown
+    urlTemplate?: unknown
+    responsePaths?: { textDelta?: unknown } | null
+  }
+  if (s.kind !== "openai-compatible-variant") return `unknown spec kind: ${String(s?.kind)}`
+  if (typeof s.urlTemplate !== "string" || s.urlTemplate.length === 0) {
     return "spec.urlTemplate is required"
   }
-  if (!spec.responsePaths || typeof spec.responsePaths.textDelta !== "string") {
+  if (!s.responsePaths || typeof s.responsePaths.textDelta !== "string") {
     return "spec.responsePaths.textDelta is required"
   }
   return null
 }
 
 /** Interpolate `{apiKey}` / `{model}` / `{baseURL}` placeholders. */
-function interpolate(template, vars) {
-  return template.replace(/\{(apiKey|model|baseURL)\}/g, (_, key) => vars[key] ?? "")
+function interpolate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(apiKey|model|baseURL)\}/g, (_, key: string) => vars[key] ?? "")
 }
 
 /** Resolve the wire reasoning-effort value, honoring a per-channel override map.
  * The default map lives in `reasoning-effort-tables.mjs`, shared with the
  * renderer so it never offers tiers this channel folds together. */
-function resolveVariantEffort(effort, map) {
+function resolveVariantEffort(effort: string, map: Record<string, string> | undefined): string {
   if (map && typeof map[effort] === "string") return map[effort]
-  return GENERIC_REASONING_EFFORT[effort] ?? "medium"
+  return (GENERIC_REASONING_EFFORT as Readonly<Record<string, string>>)[effort] ?? "medium"
 }
 
 /** Apply `requestRenames` to modelParams keys (e.g. maxOutputTokens → max_tokens). */
-function renameParams(params, renames) {
+function renameParams(
+  params: Record<string, unknown>,
+  renames: Record<string, string> | undefined
+): Record<string, unknown> {
   if (!renames) return { ...params }
-  const out = {}
+  const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(params)) {
     out[renames[key] ?? key] = value
   }
@@ -52,12 +65,12 @@ function renameParams(params, renames) {
 }
 
 /** Split an SSE byte stream into `data:` payload strings. */
-async function* sseDataLines(body) {
+async function* sseDataLines(body: AsyncIterable<Uint8Array>): AsyncGenerator<string> {
   const decoder = new TextDecoder()
   let buf = ""
   for await (const chunk of body) {
     buf += decoder.decode(chunk, { stream: true })
-    let idx
+    let idx: number
     while ((idx = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, idx).replace(/\r$/, "")
       buf = buf.slice(idx + 1)
@@ -68,7 +81,7 @@ async function* sseDataLines(body) {
   if (tail.startsWith("data:")) yield tail.slice(5).trim()
 }
 
-function mayBeIncompleteJson(payload) {
+function mayBeIncompleteJson(payload: string): boolean {
   const trimmed = payload.trim()
   return trimmed.startsWith("{") || (trimmed.startsWith("[") && trimmed !== "[DONE]")
 }
@@ -80,24 +93,21 @@ function mayBeIncompleteJson(payload) {
  */
 const MAX_PENDING_SSE_BYTES = 1024 * 1024
 
-/**
- * @param {any} spec  Validated openai-compatible-variant spec.
- * @returns {import("./types.mjs").ProtocolAdapter}
- */
-export function makeOpenAiCompatVariantAdapter(spec) {
+/** An adapter for one spec; `start` validates it first. */
+export function makeOpenAiCompatVariantAdapter(spec: OpenAiCompatibleVariantSpec): ProtocolAdapter {
   return {
     id: `declarative:${spec.kind}`,
     async start(req) {
       const invalid = validateSpec(spec)
       if (invalid) throw new Error(`invalid protocol adapter spec: ${invalid}`)
       const creds = req.credentials ?? {}
-      const vars = {
+      const vars: Record<string, string> = {
         apiKey: creds.apiKey ?? "",
         model: req.model,
         baseURL: (creds.baseURL ?? "").replace(/\/+$/, ""),
       }
       const url = interpolate(spec.urlTemplate, vars)
-      const headers = { "content-type": "application/json" }
+      const headers: Record<string, string> = { "content-type": "application/json" }
       for (const [name, value] of Object.entries(spec.headers ?? {})) {
         headers[name.toLowerCase()] = interpolate(value, vars)
       }
@@ -124,7 +134,7 @@ export function makeOpenAiCompatVariantAdapter(spec) {
         ...(spec.requestInject ?? {}),
       }
 
-      const fetchFn = req.fetchFn ?? globalThis.fetch
+      const fetchFn: FetchLike = req.fetchFn ?? globalThis.fetch
       const res = await fetchFn(url, {
         method: "POST",
         headers,
@@ -136,9 +146,10 @@ export function makeOpenAiCompatVariantAdapter(spec) {
         // pick up the class and any Retry-After hint embedded in the payload.
         const retryAfter = res.headers?.get?.("retry-after")
         const text = await res.text().catch(() => "")
-        const err = new Error(
-          `HTTP ${res.status}${retryAfter ? ` retry-after: ${retryAfter}` : ""}: ${text.slice(0, 500)}`
-        )
+        const err: Error & { statusCode?: number; responseHeaders?: Record<string, string> } =
+          new Error(
+            `HTTP ${res.status}${retryAfter ? ` retry-after: ${retryAfter}` : ""}: ${text.slice(0, 500)}`
+          )
         // Structured fields so extractHttpErrorMeta can read the status and
         // Retry-After header instead of falling back to message parsing.
         err.statusCode = res.status
@@ -146,26 +157,27 @@ export function makeOpenAiCompatVariantAdapter(spec) {
         throw err
       }
       if (!res.body) throw new Error("upstream response has no body")
+      const responseBody: AsyncIterable<Uint8Array> = res.body
 
       const paths = spec.responsePaths
-      let resolveUsage
-      const usage = new Promise((resolve) => {
+      let resolveUsage!: (value: AdapterUsage | null) => void
+      const usage = new Promise<AdapterUsage | null>((resolve) => {
         resolveUsage = resolve
       })
 
-      async function* fullStream() {
-        let finishReason = null
-        let promptTokens
-        let completionTokens
-        let cachedInputTokens
-        let cacheCreationInputTokens
-        let reasoningTokens
-        let pendingData = null
+      async function* fullStream(): AsyncGenerator<Record<string, unknown>> {
+        let finishReason: string | null = null
+        let promptTokens: number | undefined
+        let completionTokens: number | undefined
+        let cachedInputTokens: number | undefined
+        let cacheCreationInputTokens: number | undefined
+        let reasoningTokens: number | undefined
+        let pendingData: string | null = null
         try {
-          for await (const data of sseDataLines(res.body)) {
+          for await (const data of sseDataLines(responseBody)) {
             if (data === "[DONE]") break
-            const payload = pendingData ? `${pendingData}${data}` : data
-            let parsed
+            const payload: string = pendingData ? `${pendingData}${data}` : data
+            let parsed: unknown
             let hasParsed = false
             try {
               parsed = JSON.parse(payload)
@@ -186,7 +198,7 @@ export function makeOpenAiCompatVariantAdapter(spec) {
                 }
               }
               if (!hasParsed) {
-                const stash = mayBeIncompleteJson(payload) ? payload : null
+                const stash: string | null = mayBeIncompleteJson(payload) ? payload : null
                 pendingData = stash !== null && stash.length <= MAX_PENDING_SSE_BYTES ? stash : null
                 continue // tolerate keep-alive/comment payloads
               }
@@ -224,7 +236,7 @@ export function makeOpenAiCompatVariantAdapter(spec) {
               if (typeof reasoning === "number") reasoningTokens = reasoning
             }
           }
-          const finalUsage = {
+          const finalUsage: AdapterUsage = {
             ...(promptTokens !== undefined ? { promptTokens } : {}),
             ...(completionTokens !== undefined ? { completionTokens } : {}),
             ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),

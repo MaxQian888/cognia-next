@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
@@ -11,14 +10,35 @@ import {
   buildCodexResponsesProviderOptions,
   withReasoningExtraction,
 } from "./ai-sdk-adapter.ts"
+import type { ProviderOptionsMap } from "./ai-sdk-adapter.ts"
+import { getPath } from "./json-path-lite.ts"
 import { createEventAdapter } from "../../../dispatch/event-adapter.mjs"
+
+/** The `streamText` arguments the adapter builds, as a fake records them. */
+interface StreamArgs {
+  model: { provider?: string }
+  instructions?: unknown
+  messages?: { role: string; content: unknown }[]
+  allowSystemInMessages?: boolean
+  providerOptions?: ProviderOptionsMap
+  headers?: Record<string, string>
+  tools?: unknown
+  stopWhen?: (options: { steps?: unknown[] }) => boolean
+  prepareStep?: unknown
+  abortSignal?: AbortSignal
+  temperature?: number
+  [key: string]: unknown
+}
+
+/** A numeric leaf of a provider-options block, 0 when absent. */
+const numberAt = (obj: unknown, path: string) => Number(getPath(obj, path) ?? 0)
 
 test("CommandCode selects the model protocol for chat and auxiliary requests", async () => {
   for (const [model, expected] of [
     ["claude-sonnet-5", "anthropic.messages"],
     ["anthropic/claude-sonnet-5", "anthropic.messages"],
     ["deepseek/deepseek-v4-flash", "openai.chat"],
-  ]) {
+  ] as const) {
     const built = await buildModel({
       protocol: "openai",
       providerId: "commandcode",
@@ -28,20 +48,20 @@ test("CommandCode selects the model protocol for chat and auxiliary requests", a
     })
     assert.equal(built.provider, expected)
   }
-  let captured
+  let captured: StreamArgs | undefined
   await makeAiSdkAdapter("openai").start({
     providerId: "commandcode",
     model: "claude-sonnet-5",
     messages: [],
     credentials: { apiKey: "test-key", baseURL: "https://api.commandcode.ai/provider/v1" },
     reasoning: { maxThinkingTokens: 6000 },
-    streamTextFn: (args) => {
-      captured = args
+    streamTextFn: (args: Record<string, unknown>) => {
+      captured = args as StreamArgs
       return { stream: (async function* () {})(), usage: Promise.resolve({}) }
     },
   })
-  assert.equal(captured.model.provider, "anthropic.messages")
-  assert.equal(captured.providerOptions.anthropic.thinking.budgetTokens, 6000)
+  assert.equal(captured!.model.provider, "anthropic.messages")
+  assert.equal(getPath(captured, "providerOptions.anthropic.thinking.budgetTokens"), 6000)
 })
 
 test("buildModel throws on unsupported protocols", async () => {
@@ -316,9 +336,9 @@ test("buildCodexResponsesProviderOptions: store:false, encrypted reasoning only 
 })
 
 test("start merges the Codex responses fields with reasoning into one openai block", async () => {
-  let captured = null
-  const fakeStreamText = (args) => {
-    captured = args
+  let captured: StreamArgs | undefined
+  const fakeStreamText = (args: Record<string, unknown>) => {
+    captured = args as StreamArgs
     return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   await makeAiSdkAdapter("openai").start({
@@ -329,7 +349,7 @@ test("start merges the Codex responses fields with reasoning into one openai blo
     reasoning: { effort: "high" },
     streamTextFn: fakeStreamText,
   })
-  assert.deepEqual(captured.providerOptions, {
+  assert.deepEqual(captured!.providerOptions, {
     openai: {
       reasoningEffort: "high",
       reasoningSummary: "auto",
@@ -340,7 +360,7 @@ test("start merges the Codex responses fields with reasoning into one openai blo
 })
 
 test("OpenCode requests identify Cognia and keep a stable conversation header across turns", async () => {
-  const calls = []
+  const calls: StreamArgs[] = []
   const adapter = makeAiSdkAdapter("openai")
   for (const sessionId of ["conversation-a", "conversation-a", "conversation-b"]) {
     await adapter.start({
@@ -349,22 +369,22 @@ test("OpenCode requests identify Cognia and keep a stable conversation header ac
       providerId: "opencode-go",
       sessionId,
       credentials: { apiKey: "synthetic", baseURL: "https://relay.example/v1" },
-      streamTextFn: (args) => {
-        calls.push(args)
+      streamTextFn: (args: Record<string, unknown>) => {
+        calls.push(args as StreamArgs)
         return { stream: (async function* () {})(), usage: Promise.resolve({}) }
       },
     })
   }
-  assert.equal(calls[0].headers?.["User-Agent"], "cognia-coding-agent/1.0")
-  assert.equal(calls[0].headers?.["x-opencode-session"], "conversation-a")
-  assert.equal(calls[1].headers?.["x-opencode-session"], "conversation-a")
-  assert.equal(calls[2].headers?.["x-opencode-session"], "conversation-b")
+  assert.equal(calls[0]?.headers?.["User-Agent"], "cognia-coding-agent/1.0")
+  assert.equal(calls[0]?.headers?.["x-opencode-session"], "conversation-a")
+  assert.equal(calls[1]?.headers?.["x-opencode-session"], "conversation-a")
+  assert.equal(calls[2]?.headers?.["x-opencode-session"], "conversation-b")
 })
 
 test("start passes model/messages/params through to streamText verbatim", async () => {
-  let captured = null
-  const fakeStreamText = (args) => {
-    captured = args
+  let captured: StreamArgs | undefined
+  const fakeStreamText = (args: Record<string, unknown>) => {
+    captured = args as StreamArgs
     return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   const adapter = makeAiSdkAdapter("openai")
@@ -377,10 +397,10 @@ test("start passes model/messages/params through to streamText verbatim", async 
     streamTextFn: fakeStreamText,
   })
   assert.ok(result.fullStream)
-  assert.equal(captured.messages[0].content, "hi")
-  assert.equal(captured.temperature, 0.1)
-  assert.equal(captured.tools, undefined) // no tools → no stopWhen
-  assert.equal(captured.stopWhen, undefined)
+  assert.equal(captured!.messages?.[0]?.content, "hi")
+  assert.equal(captured!.temperature, 0.1)
+  assert.equal(captured!.tools, undefined) // no tools → no stopWhen
+  assert.equal(captured!.stopWhen, undefined)
 })
 
 test("start hoists leading system messages out of messages, cacheControl intact", async () => {
@@ -388,9 +408,9 @@ test("start hoists leading system messages out of messages, cacheControl intact"
   // plants up to three Anthropic cache breakpoints on separate leading system
   // messages; each must arrive with its own providerOptions.
   const cacheControl = { anthropic: { cacheControl: { type: "ephemeral" } } }
-  let captured = null
-  const fakeStreamText = (args) => {
-    captured = args
+  let captured: StreamArgs | undefined
+  const fakeStreamText = (args: Record<string, unknown>) => {
+    captured = args as StreamArgs
     return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   await makeAiSdkAdapter("anthropic").start({
@@ -405,19 +425,19 @@ test("start hoists leading system messages out of messages, cacheControl intact"
     streamTextFn: fakeStreamText,
   })
 
-  assert.deepEqual(captured.instructions, [
+  assert.deepEqual(captured!.instructions, [
     { role: "system", content: "base", providerOptions: cacheControl },
     { role: "system", content: "append", providerOptions: cacheControl },
     { role: "system", content: "per-turn tail" },
   ])
-  assert.deepEqual(captured.messages, [{ role: "user", content: "hi" }])
-  assert.equal(captured.allowSystemInMessages, undefined)
+  assert.deepEqual(captured!.messages, [{ role: "user", content: "hi" }])
+  assert.equal(captured!.allowSystemInMessages, undefined)
 })
 
 test("start opts a mid-history system message back in instead of reordering it", async () => {
-  let captured = null
-  const fakeStreamText = (args) => {
-    captured = args
+  let captured: StreamArgs | undefined
+  const fakeStreamText = (args: Record<string, unknown>) => {
+    captured = args as StreamArgs
     return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   await makeAiSdkAdapter("openai").start({
@@ -431,18 +451,18 @@ test("start opts a mid-history system message back in instead of reordering it",
     streamTextFn: fakeStreamText,
   })
 
-  assert.deepEqual(captured.instructions, [{ role: "system", content: "base" }])
-  assert.deepEqual(captured.messages, [
+  assert.deepEqual(captured!.instructions, [{ role: "system", content: "base" }])
+  assert.deepEqual(captured!.messages, [
     { role: "user", content: "hi" },
     { role: "system", content: "mid" },
   ])
-  assert.equal(captured.allowSystemInMessages, true)
+  assert.equal(captured!.allowSystemInMessages, true)
 })
 
 test("start wires tools + the maxSteps stop condition when tools exist", async () => {
-  let captured = null
-  const fakeStreamText = (args) => {
-    captured = args
+  let captured: StreamArgs | undefined
+  const fakeStreamText = (args: Record<string, unknown>) => {
+    captured = args as StreamArgs
     return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   const tools = { my_tool: { execute: async () => "ok" } }
@@ -454,17 +474,17 @@ test("start wires tools + the maxSteps stop condition when tools exist", async (
     credentials: { apiKey: "k" },
     streamTextFn: fakeStreamText,
   })
-  assert.equal(captured.tools, tools)
-  assert.equal(typeof captured.stopWhen, "function")
-  assert.equal(captured.stopWhen({ steps: [1, 2, 3] }), false)
-  assert.equal(captured.stopWhen({ steps: [1, 2, 3, 4] }), true)
-  assert.equal(captured.stopWhen({}), false)
+  assert.equal(captured!.tools, tools)
+  assert.equal(typeof captured!.stopWhen, "function")
+  assert.equal(captured!.stopWhen!({ steps: [1, 2, 3] }), false)
+  assert.equal(captured!.stopWhen!({ steps: [1, 2, 3, 4] }), true)
+  assert.equal(captured!.stopWhen!({}), false)
 })
 
 test("start forwards prepareStep so callers can change active tools between steps", async () => {
-  let captured = null
-  const fakeStreamText = (args) => {
-    captured = args
+  let captured: StreamArgs | undefined
+  const fakeStreamText = (args: Record<string, unknown>) => {
+    captured = args as StreamArgs
     return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   const prepareStep = () => ({ activeTools: ["read"] })
@@ -478,7 +498,7 @@ test("start forwards prepareStep so callers can change active tools between step
     streamTextFn: fakeStreamText,
   })
 
-  assert.equal(captured.prepareStep, prepareStep)
+  assert.equal(captured!.prepareStep, prepareStep)
 })
 
 test("buildReasoningProviderOptions(anthropic): a thinking budget enables extended thinking", () => {
@@ -492,8 +512,11 @@ test("buildReasoningProviderOptions(anthropic): a thinking budget enables extend
 
 test("buildReasoningProviderOptions(anthropic): effort-only falls back to a budget tier", () => {
   const out = buildReasoningProviderOptions("anthropic", undefined, { effort: "high" })
-  assert.equal(out.anthropic.thinking.type, "enabled")
-  assert.ok(out.anthropic.thinking.budgetTokens > 0, "effort mapped to a positive budget")
+  assert.equal(getPath(out, "anthropic.thinking.type"), "enabled")
+  assert.ok(
+    numberAt(out, "anthropic.thinking.budgetTokens") > 0,
+    "effort mapped to a positive budget"
+  )
 })
 
 test("buildReasoningProviderOptions(google): maps budget to thinkingConfig with thoughts", () => {
@@ -527,17 +550,23 @@ test("buildReasoningProviderOptions: top effort tiers (xhigh/max) still enable t
   // what they promise. Every level must yield a positive budget.
   for (const effort of ["low", "medium", "high", "xhigh", "max"]) {
     const a = buildReasoningProviderOptions("anthropic", undefined, { effort })
-    assert.ok(a.anthropic.thinking.budgetTokens > 0, `anthropic effort=${effort} → positive budget`)
+    assert.ok(
+      numberAt(a, "anthropic.thinking.budgetTokens") > 0,
+      `anthropic effort=${effort} → positive budget`
+    )
     const g = buildReasoningProviderOptions("google", undefined, { effort })
     assert.ok(
-      g.google.thinkingConfig.thinkingBudget > 0,
+      numberAt(g, "google.thinkingConfig.thinkingBudget") > 0,
       `google effort=${effort} → positive budget`
     )
   }
   // Higher tiers grant strictly larger budgets.
   const high = buildReasoningProviderOptions("anthropic", undefined, { effort: "high" })
   const max = buildReasoningProviderOptions("anthropic", undefined, { effort: "max" })
-  assert.ok(max.anthropic.thinking.budgetTokens > high.anthropic.thinking.budgetTokens)
+  assert.ok(
+    numberAt(max, "anthropic.thinking.budgetTokens") >
+      numberAt(high, "anthropic.thinking.budgetTokens")
+  )
 })
 
 test("buildReasoningProviderOptions(openai): 'max' is folded to OpenAI's valid 'xhigh'", () => {
@@ -589,7 +618,11 @@ test("gpt-oss streaming fixture marks raw analysis and prevents display or persi
       }),
     }),
   }
-  const model = await withReasoningExtraction(rawModel, fixture.model)
+  // A minimal LanguageModelV3 fixture; the SDK's own type is far wider.
+  const model = await withReasoningExtraction(
+    rawModel as unknown as Parameters<typeof withReasoningExtraction>[0],
+    fixture.model
+  )
   const result = await model.doStream({ prompt: [] })
   const parts = []
   for await (const part of result.stream) parts.push(part)
@@ -597,7 +630,9 @@ test("gpt-oss streaming fixture marks raw analysis and prevents display or persi
   const reasoning = parts.filter((part) => part.type.startsWith("reasoning"))
   assert.ok(reasoning.length > 0, "fixture exercises an extracted reasoning stream")
   assert.ok(
-    reasoning.every((part) => part.providerMetadata?.cognia?.reasoningSource === "raw-analysis"),
+    reasoning.every(
+      (part) => getPath(part, "providerMetadata.cognia.reasoningSource") === "raw-analysis"
+    ),
     "every raw-analysis chunk carries explicit provenance"
   )
 
@@ -623,9 +658,9 @@ test("buildReasoningProviderOptions: no reasoning config → null", () => {
 })
 
 test("start threads abortSignal into streamText", async () => {
-  let captured = null
-  const fakeStreamText = (args) => {
-    captured = args
+  let captured: StreamArgs | undefined
+  const fakeStreamText = (args: Record<string, unknown>) => {
+    captured = args as StreamArgs
     return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   const ac = new AbortController()
@@ -637,16 +672,16 @@ test("start threads abortSignal into streamText", async () => {
     streamTextFn: fakeStreamText,
   })
   assert.equal(
-    captured.abortSignal,
+    captured!.abortSignal,
     ac.signal,
     "abortSignal forwarded so the HTTP request can cancel"
   )
 })
 
 test("start threads reasoning providerOptions, deep-merged with modelParams.providerOptions", async () => {
-  let captured = null
-  const fakeStreamText = (args) => {
-    captured = args
+  let captured: StreamArgs | undefined
+  const fakeStreamText = (args: Record<string, unknown>) => {
+    captured = args as StreamArgs
     return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   await makeAiSdkAdapter("anthropic").start({
@@ -658,16 +693,16 @@ test("start threads reasoning providerOptions, deep-merged with modelParams.prov
     reasoning: { maxThinkingTokens: 6000 },
     streamTextFn: fakeStreamText,
   })
-  assert.deepEqual(captured.providerOptions.anthropic, {
+  assert.deepEqual(captured!.providerOptions?.anthropic, {
     cacheControl: { type: "ephemeral" },
     thinking: { type: "enabled", budgetTokens: 6000 },
   })
 })
 
 test("empty tools object behaves like no tools (historical hasTools check)", async () => {
-  let captured = null
-  const fakeStreamText = (args) => {
-    captured = args
+  let captured: StreamArgs | undefined
+  const fakeStreamText = (args: Record<string, unknown>) => {
+    captured = args as StreamArgs
     return { stream: (async function* () {})(), usage: Promise.resolve({}) }
   }
   await makeAiSdkAdapter("openai").start({
@@ -677,7 +712,7 @@ test("empty tools object behaves like no tools (historical hasTools check)", asy
     credentials: { apiKey: "k" },
     streamTextFn: fakeStreamText,
   })
-  assert.equal(captured.tools, undefined)
+  assert.equal(captured!.tools, undefined)
 })
 
 test("start preserves SDK prototype getters without eagerly reading rejecting promises", async () => {
@@ -711,5 +746,5 @@ test("start preserves SDK prototype getters without eagerly reading rejecting pr
   assert.deepEqual(await result.responseMessages, messages)
   assert.equal(reads, 1)
   assert.deepEqual(await result.usage, { inputTokens: 12 })
-  assert.equal((await result.steps).length, 1)
+  assert.equal(((await result.steps) as unknown[]).length, 1)
 })

@@ -1,10 +1,9 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { makeCodeAdapter, registerProtocolExec } from "./code-adapter.ts"
 
-async function collect(iterable) {
-  const out = []
+async function collect(iterable: AsyncIterable<unknown>): Promise<unknown[]> {
+  const out: unknown[] = []
   for await (const e of iterable) out.push(e)
   return out
 }
@@ -34,7 +33,7 @@ test("fail() emits an error event and closes the stream", async () => {
 })
 
 test("cancel() closes the stream, settles usage, and notifies the renderer", async () => {
-  const emitted = []
+  const emitted: Record<string, unknown>[] = []
   const channel = registerProtocolExec(new Map(), "ex-cancel", {
     onCancel: (execId, reason) => emitted.push({ execId, reason }),
   })
@@ -57,7 +56,7 @@ test("finish after cancel is ignored", async () => {
 })
 
 test("makeCodeAdapter emits protocol_adapter_exec and returns the channel stream", async () => {
-  const emitted = []
+  const emitted: Record<string, unknown>[] = []
   const pending = new Map()
   const adapter = makeCodeAdapter(
     { kind: "code", pluginId: "acme", adapterId: "acme:wire" },
@@ -84,8 +83,9 @@ test("makeCodeAdapter emits protocol_adapter_exec and returns the channel stream
   assert.equal(exec.execId, "fixed-exec")
   assert.equal(exec.pluginId, "acme")
   assert.equal(exec.adapterId, "acme:wire")
-  assert.equal(exec.request.model, "acme-1")
-  assert.deepEqual(exec.request.modelParams, { temperature: 0.2 })
+  const request = exec.request as { model?: unknown; modelParams?: unknown }
+  assert.equal(request.model, "acme-1")
+  assert.deepEqual(request.modelParams, { temperature: 0.2 })
 
   // The host drives the registered channel; the adapter's fullStream sees it.
   const channel = pending.get("fixed-exec")
@@ -97,7 +97,7 @@ test("makeCodeAdapter emits protocol_adapter_exec and returns the channel stream
 })
 
 test("makeCodeAdapter forwards IPC-safe turn options to renderer code adapters", async () => {
-  const emitted = []
+  const emitted: Record<string, unknown>[] = []
   const adapter = makeCodeAdapter(
     { kind: "code", pluginId: "acme", adapterId: "acme:wire" },
     {

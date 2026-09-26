@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
@@ -6,8 +5,9 @@ import {
   SPEC_REQUIRED_KEYS,
   validateSpec,
 } from "./openai-compatible-variant-adapter.ts"
+import type { FetchLike, NormalizedRequest, OpenAiCompatibleVariantSpec } from "./types.ts"
 
-const SPEC = {
+const SPEC: OpenAiCompatibleVariantSpec = {
   kind: "openai-compatible-variant",
   urlTemplate: "{baseURL}/v2/chat",
   headers: { Authorization: "Bearer {apiKey}", "X-Custom": "static" },
@@ -28,15 +28,18 @@ const SPEC = {
 }
 
 /** Build a fake fetch returning the given SSE payload lines. */
-function fakeFetch(lines, { status = 200, headers = new Map() } = {}) {
-  const calls = []
-  const fn = async (url, init) => {
+function fakeFetch(
+  lines: string[],
+  { status = 200, headers = new Map<string, string>() } = {}
+): FetchLike & { calls: { url: string; init: Parameters<FetchLike>[1] }[] } {
+  const calls: { url: string; init: Parameters<FetchLike>[1] }[] = []
+  const fn = async (url: string, init: Parameters<FetchLike>[1]) => {
     calls.push({ url, init })
     const encoder = new TextEncoder()
     return {
       ok: status >= 200 && status < 300,
       status,
-      headers: { get: (k) => headers.get(k) ?? null },
+      headers: { get: (k: string) => headers.get(k) ?? null },
       text: async () => lines.join("\n"),
       body: (async function* () {
         for (const line of lines) yield encoder.encode(`${line}\n`)
@@ -47,7 +50,7 @@ function fakeFetch(lines, { status = 200, headers = new Map() } = {}) {
   return fn
 }
 
-const REQ = (fetchFn) => ({
+const REQ = (fetchFn: FetchLike): NormalizedRequest => ({
   model: "my-model",
   messages: [{ role: "user", content: "hi" }],
   modelParams: { temperature: 0.2, maxOutputTokens: 256 },
@@ -55,9 +58,9 @@ const REQ = (fetchFn) => ({
   fetchFn,
 })
 
-async function collect(iterable) {
-  const out = []
-  for await (const e of iterable) out.push(e)
+async function collect(iterable: AsyncIterable<unknown>): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = []
+  for await (const e of iterable) out.push(e as Record<string, unknown>)
   return out
 }
 
@@ -82,7 +85,7 @@ test("interpolates url + headers, renames params, injects extras", async () => {
   const result = await adapter.start(REQ(fetchFn))
   await collect(result.fullStream)
 
-  const { url, init } = fetchFn.calls[0]
+  const { url, init } = fetchFn.calls[0]!
   assert.equal(url, "https://api.acme.dev/v2/chat") // trailing slash trimmed
   assert.equal(init.headers["authorization"], "Bearer sk-secret")
   assert.equal(init.headers["x-custom"], "static")
@@ -103,7 +106,7 @@ test("threads abortSignal into fetch so declarative provider calls can be cancel
   const result = await adapter.start({ ...REQ(fetchFn), abortSignal: abortController.signal })
   await collect(result.fullStream)
 
-  assert.equal(fetchFn.calls[0].init.signal, abortController.signal)
+  assert.equal(fetchFn.calls[0]?.init.signal, abortController.signal)
 })
 
 test("maps SSE chunks to fullStream-shaped events matching the builtin path", async () => {
@@ -205,9 +208,9 @@ test("tolerates unparseable data payloads and missing finish reason", async () =
   const adapter = makeOpenAiCompatVariantAdapter(SPEC)
   const result = await adapter.start(REQ(fetchFn))
   const events = await collect(result.fullStream)
-  assert.equal(events[0].text, "ok")
-  assert.equal(events.at(-1).type, "finish")
-  assert.equal(events.at(-1).finishReason, "stop") // default
+  assert.equal(events[0]?.text, "ok")
+  assert.equal(events.at(-1)?.type, "finish")
+  assert.equal(events.at(-1)?.finishReason, "stop") // default
 })
 
 test("non-2xx responses throw with status + retry-after + body excerpt", async () => {
@@ -218,7 +221,8 @@ test("non-2xx responses throw with status + retry-after + body excerpt", async (
   const adapter = makeOpenAiCompatVariantAdapter(SPEC)
   await assert.rejects(
     () => adapter.start(REQ(fetchFn)),
-    (err) => {
+    (err: unknown) => {
+      assert.ok(err instanceof Error)
       assert.match(err.message, /HTTP 429/)
       assert.match(err.message, /retry-after: 30/)
       assert.match(err.message, /rate limited/)
@@ -228,12 +232,14 @@ test("non-2xx responses throw with status + retry-after + body excerpt", async (
 })
 
 test("invalid specs throw at start", async () => {
-  const adapter = makeOpenAiCompatVariantAdapter({ kind: "openai-compatible-variant" })
+  const adapter = makeOpenAiCompatVariantAdapter({
+    kind: "openai-compatible-variant",
+  } as OpenAiCompatibleVariantSpec)
   await assert.rejects(() => adapter.start(REQ(fakeFetch([]))), /invalid protocol adapter spec/)
 })
 
 test("works without optional spec fields (minimal spec)", async () => {
-  const minimal = {
+  const minimal: OpenAiCompatibleVariantSpec = {
     kind: "openai-compatible-variant",
     urlTemplate: "{baseURL}/chat",
     responsePaths: { textDelta: "choices[0].delta.content" },
@@ -245,7 +251,7 @@ test("works without optional spec fields (minimal spec)", async () => {
   const adapter = makeOpenAiCompatVariantAdapter(minimal)
   const result = await adapter.start(REQ(fetchFn))
   const events = await collect(result.fullStream)
-  assert.equal(events[0].text, "min")
+  assert.equal(events[0]?.text, "min")
   assert.deepEqual(await result.usage, {}) // no usage paths configured
 })
 
@@ -261,7 +267,7 @@ test("usage promise settles when fullStream is closed early (interrupt)", async 
   // dispatcher does (break → .return()).
   const it = run.fullStream[Symbol.asyncIterator]()
   await it.next()
-  await it.return()
+  await it.return!()
   // Previously this hung forever: the generator's resolveUsage only ran on the
   // success/catch paths, never on early close.
   const usage = await Promise.race([
@@ -279,21 +285,26 @@ test("non-2xx throws a structured error extractHttpErrorMeta can read", async ()
   const adapter = makeOpenAiCompatVariantAdapter(SPEC)
   await assert.rejects(
     () => adapter.start(REQ(fetchFn)),
-    (err) => {
-      assert.match(err.message, /HTTP 429/)
-      assert.equal(err.statusCode, 429)
-      assert.equal(err.responseHeaders["retry-after"], "7")
+    (err: unknown) => {
+      assert.ok(err instanceof Error)
+      const e = err as Error & { statusCode?: number; responseHeaders?: Record<string, string> }
+      assert.match(e.message, /HTTP 429/)
+      assert.equal(e.statusCode, 429)
+      assert.equal(e.responseHeaders?.["retry-after"], "7")
       return true
     }
   )
 })
 
 /** Run the adapter and return the parsed JSON request body sent upstream. */
-async function capturedBody(spec, reqOverrides = {}) {
+async function capturedBody(
+  spec: OpenAiCompatibleVariantSpec,
+  reqOverrides: Partial<NormalizedRequest> = {}
+): Promise<Record<string, unknown>> {
   const fetchFn = fakeFetch(["[DONE]"])
   const adapter = makeOpenAiCompatVariantAdapter(spec)
   await adapter.start({ ...REQ(fetchFn), ...reqOverrides })
-  return JSON.parse(fetchFn.calls[0].init.body)
+  return JSON.parse(fetchFn.calls[0]!.init.body) as Record<string, unknown>
 }
 
 test("injects reasoning effort when the spec declares the field (generic clamp)", async () => {
