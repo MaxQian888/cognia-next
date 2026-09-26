@@ -170,6 +170,11 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/core/core-tools.mjs` (+ test)                             | `src/tools/builtin/core-files/index.ts`                            | 8k          |
 | `builtin-tools/run-code/*` (+ tests)                                     | `src/tools/builtin/run-code/*`                                     | 8l          |
 | `builtin-tools/run-code/presentation.test.mjs`                           | `builtin-tools/presentation.test.mjs` (tests the registry)         | 8l          |
+| `builtin-tools/index.mjs` (+ `index.test.mjs`)                           | `src/tools/builtin/registry.ts` (+ test)                           | 8m          |
+| `builtin-tools/__tests__/index.test.mjs`                                 | `src/tools/adapters/sdk-mcp.test.ts`                               | 8m          |
+| `builtin-tools/presentation.test.mjs`                                    | `src/tools/middleware/presentation.test.ts`                        | 8m          |
+| `builtin-tools/__tests__/metadata-parity.test.mjs`                       | `src/tools/builtin/metadata-parity.test.ts`                        | 8m          |
+| `builtin-tools/failure-coverage.test.mjs`                                | `src/tools/failure-coverage.test.ts`                               | 8m          |
 
 ## Scripts (run from repo root)
 

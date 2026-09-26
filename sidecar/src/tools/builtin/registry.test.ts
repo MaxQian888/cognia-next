@@ -1,7 +1,8 @@
+// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { collectCogniaToolDefs, buildCogniaToolsServer } from "./index.mjs"
+import { collectCogniaToolDefs, buildCogniaToolsServer } from "./registry.ts"
 
 test("collectCogniaToolDefs returns [] for missing / empty enabled", () => {
   assert.deepEqual(collectCogniaToolDefs(), [])
@@ -156,7 +157,7 @@ test("collected native process tools all fail closed when the launcher is missin
 })
 
 test("native MCP tool output uses the provider PII gate", async () => {
-  const { wrapNativeToolResults } = await import("./index.mjs")
+  const { wrapNativeToolResults } = await import("./registry.ts")
   const [tool] = wrapNativeToolResults([
     {
       name: "read",

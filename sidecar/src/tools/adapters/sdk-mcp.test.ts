@@ -1,12 +1,17 @@
+// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { buildCogniaToolsServer, namesForDisabledCategories, namespacedName } from "../index.mjs"
+import {
+  buildCogniaToolsServer,
+  namesForDisabledCategories,
+  namespacedName,
+} from "../builtin/registry.ts"
 import {
   BUILTIN_SERVER_NAME as SERVER_NAME,
   BUILTIN_SERVER_VERSION as SERVER_VERSION,
   TOOL_NAMES_BY_CATEGORY,
-} from "../../src/policy/tool-catalog/catalog.ts"
+} from "../../policy/tool-catalog/catalog.ts"
 
 test("server name + version match the shared JSON", () => {
   assert.equal(SERVER_NAME, "cognia-tools")

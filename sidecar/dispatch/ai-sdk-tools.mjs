@@ -15,7 +15,7 @@ import { tool, jsonSchema } from "ai"
 import { z } from "zod"
 import { randomUUID } from "node:crypto"
 
-import { collectCogniaToolDefs } from "../builtin-tools/index.mjs"
+import { collectCogniaToolDefs } from "../src/tools/builtin/registry.ts"
 import {
   BUILTIN_SERVER_NAME as SERVER_NAME,
   READ_ONLY_TOOL_NAMES,
@@ -44,7 +44,7 @@ import {
 // Per-tool execution deadline for READ-ONLY built-ins on the ai-sdk path. The
 // constant, the read-only gate, and the recoverable message all live in
 // `../src/tools/middleware/read-only-timeout.ts` so this channel and the Anthropic
-// channel (`builtin-tools/index.mjs`) never drift. Here we bound the handler at
+// channel (`src/tools/builtin/registry.ts`) never drift. Here we bound the handler at
 // EXECUTE time and REJECT on timeout so the AI SDK surfaces a `tool-error`; the
 // Anthropic side wraps at registration time and returns an `isError` result.
 // Exec tools (bash / shell / process / git-run) self-bound and are excluded.

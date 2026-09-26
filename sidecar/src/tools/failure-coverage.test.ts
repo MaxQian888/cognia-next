@@ -1,3 +1,4 @@
+// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // Sweep: no built-in tool may report a failure without saying what kind it is.
 //
 // The whole value of the taxonomy is that it is exhaustive. One tool that
@@ -12,10 +13,10 @@ import fs from "node:fs"
 import path from "node:path"
 import test from "node:test"
 
-// The tool tree spans the legacy `builtin-tools/` and its new home under
-// `src/tools/` while the categories move (ADR-0197); scan both.
-const SIDECAR = path.resolve(import.meta.dirname, "..")
-const ROOTS = [path.join(SIDECAR, "builtin-tools"), path.join(SIDECAR, "src", "tools")]
+// Every built-in tool lives under `src/tools/` (ADR-0197). Waiver paths are
+// relative to the sidecar root.
+const SIDECAR = path.resolve(import.meta.dirname, "../..")
+const ROOTS = [path.join(SIDECAR, "src", "tools")]
 
 /**
  * Files allowed to write `isError: true` without a classification, and why.

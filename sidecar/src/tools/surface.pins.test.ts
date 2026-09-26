@@ -39,7 +39,7 @@ import {
   applyToolPresentation,
   buildCogniaToolsServer,
   collectCogniaToolDefs,
-} from "../../builtin-tools/index.mjs"
+} from "./builtin/registry.ts"
 import { wrapDefsWithReadOnlyTimeout } from "./middleware/read-only-timeout.ts"
 import { createReadTracker } from "./state/read-tracker.ts"
 import { createBgShellRegistry } from "./state/background-shells.ts"

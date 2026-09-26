@@ -56,7 +56,6 @@
       "../sidecar/node_modules/**/*",
       "../sidecar/src/**/*",
       "../sidecar/dispatch/**/*",
-      "../sidecar/builtin-tools/**/*",
       "../sidecar/a2ui-tools/**/*",
       "../sidecar/vscode-ext-host/package.json",
       "../sidecar/vscode-ext-host/dist/**/*",

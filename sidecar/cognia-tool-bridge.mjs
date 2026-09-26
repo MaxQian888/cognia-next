@@ -25,7 +25,7 @@ import net from "node:net"
 import { pathToFileURL } from "node:url"
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js"
 
-import { collectCogniaToolDefs } from "./builtin-tools/index.mjs"
+import { collectCogniaToolDefs } from "./src/tools/builtin/registry.ts"
 import { READ_ONLY_TOOL_NAMES } from "./src/policy/tool-catalog/catalog.ts"
 import { createReadTracker } from "./src/tools/state/read-tracker.ts"
 import { createBgShellRegistry } from "./src/tools/state/background-shells.ts"
@@ -107,7 +107,7 @@ export function connectBroker(socketPath, { connect = net.connect } = {}) {
 }
 
 // Schema conversion + argument validation are shared with the `run_code` broker
-// in `builtin-tools/index.mjs`, which reaches the same defs by a different
+// in `src/tools/builtin/registry.ts`, which reaches the same defs by a different
 // route. Re-exported here so this module stays the bridge's whole surface.
 export { parseToolArgs, toolInputJsonSchema }
 

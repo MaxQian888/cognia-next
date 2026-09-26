@@ -1,3 +1,4 @@
+// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // Guard: the shared metadata (lib/settings/builtin-tools-data.json) and the
 // actual sidecar tool implementations must never drift. This single test locks
 // down the whole class of parity bugs the two explore passes flagged:
@@ -10,14 +11,11 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import data from "../../../lib/settings/builtin-tools-data.json" with { type: "json" }
-import { collectCogniaToolDefs } from "../index.mjs"
-import {
-  READ_ONLY_TOOL_NAMES,
-  TOOL_NAMES_BY_CATEGORY,
-} from "../../src/policy/tool-catalog/catalog.ts"
-import { CORE_TOOL_NAMES } from "../../src/tools/builtin/core-files/index.ts"
-import { CODE_GRAPH_TOOL_NAMES } from "../../src/tools/builtin/code-graph/names.ts"
+import data from "../../../../lib/settings/builtin-tools-data.json" with { type: "json" }
+import { collectCogniaToolDefs } from "./registry.ts"
+import { READ_ONLY_TOOL_NAMES, TOOL_NAMES_BY_CATEGORY } from "../../policy/tool-catalog/catalog.ts"
+import { CORE_TOOL_NAMES } from "./core-files/index.ts"
+import { CODE_GRAPH_TOOL_NAMES } from "./code-graph/names.ts"
 
 /** Every category enabled, so collectCogniaToolDefs emits the full set. */
 const ALL_ENABLED = Object.fromEntries(data.categories.map((c) => [c.id, true]))

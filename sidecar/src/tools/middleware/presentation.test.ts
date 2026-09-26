@@ -1,3 +1,4 @@
+// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // Wiring test for the Code presentation: the sidecar decides which tool defs
 // exist from `execution.composition.toolPresentation`, and the code broker
 // dispatches back into exactly the defs this session assembled.
@@ -9,7 +10,7 @@ import { z } from "zod"
 // without requiring bwrap/sandbox-exec on the test machine.
 const LAUNCHER = JSON.stringify(["/usr/bin/env"])
 
-import { applyToolPresentation } from "./index.mjs"
+import { applyToolPresentation } from "../builtin/registry.ts"
 
 const CALLS = []
 

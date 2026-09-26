@@ -1,3 +1,4 @@
+// @ts-nocheck — typed in the follow-up commit (ADR-0197 rename/typing pair).
 // Compose the cognia-tools SDK MCP server.
 //
 // Server name, version, and category-tool associations come from
@@ -11,51 +12,74 @@
 
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk"
 
-import { fileExtrasTools } from "../src/tools/builtin/file-extras/index.ts"
-import { gitTools } from "../src/tools/builtin/git/index.ts"
-import { processTools, createProcessTools } from "../src/tools/builtin/process/index.ts"
-import { environmentTools } from "../src/tools/builtin/environment/index.ts"
-import {
-  shellAdvancedTools,
-  createShellAdvancedTools,
-} from "../src/tools/builtin/shell-advanced/index.ts"
-import {
-  terminalReplTools,
-  createTerminalReplTools,
-} from "../src/tools/builtin/terminal-repl/index.ts"
-import { astGrepTools, createAstGrepTools } from "../src/tools/builtin/ast-grep/index.ts"
-import { clonedepsTools } from "../src/tools/builtin/dependency-research/index.ts"
-import { webcloneTools } from "../src/tools/builtin/webclone/index.ts"
-import { createLspTools } from "../src/tools/builtin/lsp/index.ts"
-import { createCodeGraphTools } from "../src/tools/builtin/code-graph/tools.ts"
+import { fileExtrasTools } from "./file-extras/index.ts"
+import { gitTools } from "./git/index.ts"
+import { processTools, createProcessTools } from "./process/index.ts"
+import { environmentTools } from "./environment/index.ts"
+import { shellAdvancedTools, createShellAdvancedTools } from "./shell-advanced/index.ts"
+import { terminalReplTools, createTerminalReplTools } from "./terminal-repl/index.ts"
+import { astGrepTools, createAstGrepTools } from "./ast-grep/index.ts"
+import { clonedepsTools } from "./dependency-research/index.ts"
+import { webcloneTools } from "./webclone/index.ts"
+import { createLspTools } from "./lsp/index.ts"
+import { createCodeGraphTools } from "./code-graph/tools.ts"
 import {
   createBashOutputTool,
   createKillShellTool,
   createListShellsTool,
-} from "../src/tools/builtin/core-files/bash.ts"
-import { createCoreTools } from "../src/tools/builtin/core-files/index.ts"
-import { createMonitorTools } from "../src/tools/builtin/core-files/monitor.ts"
-import { createExitPlanTool } from "../src/tools/builtin/plan/exit-plan.ts"
-import { createPlanTools } from "../src/tools/builtin/plan/plan-tools.ts"
-import { codeModeToolDefs } from "../src/tools/builtin/run-code/index.ts"
-import { isProgrammaticReadOnly } from "../src/tools/builtin/run-code/eligibility.ts"
-import { bareToolName } from "../src/policy/confinement/classify.ts"
+} from "./core-files/bash.ts"
+import { createCoreTools } from "./core-files/index.ts"
+import { createMonitorTools } from "./core-files/monitor.ts"
+import { createExitPlanTool } from "./plan/exit-plan.ts"
+import { createPlanTools } from "./plan/plan-tools.ts"
+import { codeModeToolDefs } from "./run-code/index.ts"
+import { isProgrammaticReadOnly } from "./run-code/eligibility.ts"
+import { bareToolName } from "../../policy/confinement/classify.ts"
 import {
   BUILTIN_SERVER_NAME,
   BUILTIN_SERVER_VERSION,
   READ_ONLY_TOOL_NAMES,
   TOOL_NAMES_BY_CATEGORY,
-} from "../src/policy/tool-catalog/catalog.ts"
-import { assertToolCallWithinRoots } from "../src/policy/confinement/enforce.ts"
-import { assertModelSafeToolOutput } from "../src/policy/pii/tool-output.ts"
-import { toolError } from "../src/tools/kernel/result.ts"
-import { withProcessSandbox } from "../src/platform/process/exec.ts"
-import { parseToolArgs, toolInputJsonSchema } from "../src/tools/kernel/args.ts"
+} from "../../policy/tool-catalog/catalog.ts"
+import { assertToolCallWithinRoots } from "../../policy/confinement/enforce.ts"
+import { assertModelSafeToolOutput } from "../../policy/pii/tool-output.ts"
+import { toolError } from "../kernel/result.ts"
+import { withProcessSandbox } from "../../platform/process/exec.ts"
+import { parseToolArgs, toolInputJsonSchema } from "../kernel/args.ts"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   wrapDefsWithReadOnlyTimeout,
-} from "../src/tools/middleware/read-only-timeout.ts"
-import { wrapDefsWithResultCap } from "../src/tools/middleware/result-cap.ts"
+} from "../middleware/read-only-timeout.ts"
+import { wrapDefsWithResultCap } from "../middleware/result-cap.ts"
+import type { ToolDefinition } from "../kernel/define.ts"
+import type { ReadTracker } from "../state/read-tracker.ts"
+import type { SessionTaskStore } from "../state/tasks.ts"
+import type { HostRpcCaller, SessionBgShellRegistry } from "../state/host-background-shells.ts"
+import type { ProcessSandboxScope } from "../../platform/process/exec.ts"
+import type { LazyLspResolver } from "../../services/lsp/lazy-resolver.ts"
+import type { CodeGraphIndex } from "../../services/code-graph/index-service.ts"
+
+/** What `collectCogniaToolDefs` assembles a session's built-in surface from. */
+export interface CollectToolDefsOptions {
+  /** Category toggles by id (`git`, `coreFiles`, …). */
+  enabled?: Readonly<Record<string, boolean | undefined>> | null | undefined
+  lspResolver?: LazyLspResolver | null | undefined
+  codeGraphResolver?: CodeGraphIndex | null | undefined
+  readTracker?: ReadTracker | null | undefined
+  taskStore?: SessionTaskStore | undefined
+  cwd?: string | undefined
+  dispatchPath?: "anthropic" | "ai-sdk" | undefined
+  bgShells?: SessionBgShellRegistry | null | undefined
+  builtinProcessSandbox?: ProcessSandboxScope | undefined
+  hostRpc?: HostRpcCaller | null | undefined
+  sessionId?: string | undefined
+  model?: string | undefined
+  provider?: string | undefined
+  /** `execution.composition.toolPresentation` from the send spec (ADR-0117). */
+  toolPresentation?: string | undefined
+  /** Register the ADR-0045 plan-authoring tools. */
+  planTools?: boolean | undefined
+}
 
 /** @type {Record<string, ReadonlyArray<unknown>>} */
 const TOOLS_BY_CATEGORY = {
@@ -163,7 +187,7 @@ export function collectCogniaToolDefs({
    * Off unless the caller asks — the dispatch layer opts in per send.
    */
   planTools = false,
-} = {}) {
+}: CollectToolDefsOptions = {}): ToolDefinition[] {
   if (!enabled || typeof enabled !== "object") return []
   const tools = []
   for (const [category, toolList] of Object.entries(TOOLS_BY_CATEGORY)) {

@@ -4,7 +4,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import { createExitPlanTool, EXIT_PLAN_TOOL_NAME } from "./exit-plan.ts"
-import { collectCogniaToolDefs } from "../../../../builtin-tools/index.mjs"
+import { collectCogniaToolDefs } from "../registry.ts"
 
 test("createExitPlanTool exposes the exit_plan_mode name and accepts a plan", async () => {
   const t = createExitPlanTool()

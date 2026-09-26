@@ -561,7 +561,6 @@ const REQUIRED_SIDECAR_ENTRIES: &[&str] = &[
     "package.json",
     "src",
     "dispatch",
-    "builtin-tools",
     "node_modules",
 ];
 
