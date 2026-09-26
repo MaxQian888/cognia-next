@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Composite context builder — the engine behind `codegraph_context` /
 // `codegraph_explore`.
 //
@@ -14,16 +13,34 @@
 import { randomWalkWithRestart } from "./graph.ts"
 import { computeBudget, packSnippets } from "./budget.ts"
 import { splitIdentifier } from "./store-memory.ts"
+import type { CodeGraphStore, GraphNode } from "./store-memory.ts"
+import type { Dropped } from "./budget.ts"
+
+/** A packed snippet of one related symbol. */
+export interface ContextSnippet {
+  id: string
+  file: string
+  qualified_name: string
+  text: string
+}
+
+export interface CodeContext {
+  query: string
+  entryPoints: GraphNode[]
+  related: { node: GraphNode; score: number }[]
+  snippets: ContextSnippet[]
+  relatedFiles: string[]
+  dropped: Dropped[]
+  summary: string
+}
 
 /**
  * Pull candidate symbol names out of a natural-language query: identifier-ish
  * tokens plus their camelCase/snake_case constituents, de-duplicated.
- * @param {string} query
- * @returns {string[]}
  */
-export function extractSymbolsFromQuery(query) {
+export function extractSymbolsFromQuery(query: unknown): string[] {
   if (typeof query !== "string") return []
-  const out = new Set()
+  const out = new Set<string>()
   for (const raw of query.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []) {
     if (STOPWORDS.has(raw.toLowerCase())) continue
     out.add(raw)
@@ -70,36 +87,26 @@ const STOPWORDS = new Set([
   "code",
 ])
 
-/**
- * @param {object} store
- * @param {string} query
- * @param {{
- *   getSnippet?: (node: object) => string,
- *   fileCount?: number,
- *   maxNodes?: number,
- *   namedSeeds?: string[],
- * }} [opts]
- * @returns {{
- *   query: string,
- *   entryPoints: object[],
- *   related: { node: object, score: number }[],
- *   snippets: { id: string, file: string, qualified_name: string, text: string }[],
- *   relatedFiles: string[],
- *   dropped: object[],
- *   summary: string,
- * }}
- */
-export function buildContext(store, query, opts = {}) {
+export function buildContext(
+  store: CodeGraphStore,
+  query: string,
+  opts: {
+    getSnippet?: ((node: GraphNode) => string) | undefined
+    fileCount?: number | undefined
+    maxNodes?: number
+    namedSeeds?: readonly string[]
+  } = {}
+): CodeContext {
   const { getSnippet, fileCount, maxNodes = 12, namedSeeds = [] } = opts
   const terms = extractSymbolsFromQuery(query)
 
   // 1. Exact-name seeds (highest confidence) + explicitly named seeds.
-  /** @type {Map<string, number>} nodeId → base score */
-  const base = new Map()
-  const seedIds = new Set()
-  const fileTermHits = new Map() // file → Set(term) for co-location boosting
+  // nodeId → base score
+  const base = new Map<string, number>()
+  const seedIds = new Set<string>()
+  const fileTermHits = new Map<string, Set<string>>() // file → Set(term) for co-location boosting
 
-  const addSeed = (node, score) => {
+  const addSeed = (node: GraphNode | null | undefined, score: number) => {
     if (!node || node.kind === "file") return
     base.set(node.id, Math.max(base.get(node.id) ?? 0, score))
     seedIds.add(node.id)
@@ -129,7 +136,7 @@ export function buildContext(store, query, opts = {}) {
   // architecturally central to the query.
   for (const [id, score] of base) {
     const node = store.getNode(id)
-    const hits = fileTermHits.get(node?.file_path)?.size ?? 0
+    const hits = (node ? fileTermHits.get(node.file_path)?.size : undefined) ?? 0
     if (hits >= 2) base.set(id, score + 15 * (hits - 1))
   }
 
@@ -138,7 +145,7 @@ export function buildContext(store, query, opts = {}) {
   const rwrMax = Math.max(1e-9, ...rwr.values())
 
   // 5. Combine and rank.
-  const combined = new Map()
+  const combined = new Map<string, number>()
   for (const [id, score] of base) combined.set(id, score)
   for (const [id, score] of rwr) {
     const node = store.getNode(id)
@@ -149,7 +156,9 @@ export function buildContext(store, query, opts = {}) {
 
   const ranked = [...combined.entries()]
     .map(([id, score]) => ({ node: store.getNode(id), score }))
-    .filter((r) => r.node && r.node.kind !== "file")
+    .filter(
+      (r): r is { node: GraphNode; score: number } => r.node !== null && r.node.kind !== "file"
+    )
     .sort((a, b) => b.score - a.score || a.node.qualified_name.localeCompare(b.node.qualified_name))
 
   const related = ranked.slice(0, maxNodes)
@@ -174,7 +183,7 @@ export function buildContext(store, query, opts = {}) {
   return { query, entryPoints, related, snippets: kept, relatedFiles, dropped, summary }
 }
 
-function track(map, file, term) {
+function track(map: Map<string, Set<string>>, file: string, term: string): void {
   if (!file) return
   let set = map.get(file)
   if (!set) {
@@ -184,12 +193,17 @@ function track(map, file, term) {
   set.add(term)
 }
 
-function matchesTerm(node, term) {
+function matchesTerm(node: GraphNode, term: string): boolean {
   const t = term.toLowerCase()
   return node.name.toLowerCase().includes(t) || node.qualified_name.toLowerCase().includes(t)
 }
 
-function buildSummary(query, entryPoints, related, relatedFiles) {
+function buildSummary(
+  query: string,
+  entryPoints: readonly GraphNode[],
+  related: readonly unknown[],
+  relatedFiles: readonly string[]
+): string {
   if (related.length === 0) return `No indexed symbols matched "${query}".`
   const eps = entryPoints
     .map((n) => n.qualified_name)

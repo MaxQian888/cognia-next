@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 import os from "node:os"
@@ -16,7 +15,7 @@ import {
 
 test("grammarSearchDirs puts the co-located grammars/ dir first", () => {
   const dirs = grammarSearchDirs("/base")
-  assert.ok(dirs[0].endsWith(path.join("grammars")))
+  assert.ok(dirs[0]!.endsWith(path.join("grammars")))
 })
 
 test("grammarSearchDirs surfaces the tree-sitter-wasms dev dir from the real base", () => {
@@ -34,7 +33,7 @@ test("standalone Bun resolves the runtime and grammars beside the executable", (
     path.join(resourceDir, "grammars")
   )
   assert.equal(
-    treeSitterInitOptions(resourceDir).locateFile("tree-sitter.wasm"),
+    treeSitterInitOptions(resourceDir)!.locateFile("tree-sitter.wasm"),
     path.join(resourceDir, "tree-sitter.wasm")
   )
 })
@@ -78,7 +77,7 @@ test("getParser rejects unknown grammar keys", async () => {
 })
 
 test("getParser parses real source for every supported grammar", async () => {
-  const cases = [
+  const cases: [string, string][] = [
     ["typescript", "function f(): void {}"],
     ["tsx", "const A = () => <div/>;"],
     ["rust", "fn main() {}"],

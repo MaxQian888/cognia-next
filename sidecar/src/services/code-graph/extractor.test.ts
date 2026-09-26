@@ -1,15 +1,22 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 
 import { extractFile, nodeId, fileNodeId } from "./extractor.ts"
+import type { GraphNode, UnresolvedRef } from "./store-memory.ts"
 
-function byQname(nodes) {
-  const m = new Map()
+/** qualified name → node; a missing name fails the lookup. */
+function byQname(nodes: readonly GraphNode[]): { get(qname: string): GraphNode } {
+  const m = new Map<string, GraphNode>()
   for (const n of nodes) m.set(n.qualified_name, n)
-  return m
+  return {
+    get(qname) {
+      const node = m.get(qname)
+      assert.ok(node, `no node named ${qname}`)
+      return node
+    },
+  }
 }
-function refs(unresolved) {
+function refs(unresolved: readonly UnresolvedRef[]): string[] {
   return unresolved.map((u) => `${u.reference_kind}:${u.reference_name}`)
 }
 
@@ -51,7 +58,7 @@ import { format } from "./fmt";
   const contains = r.edges.filter((e) => e.kind === "contains")
   assert.equal(contains.length, r.nodes.length - 1)
   const runContains = contains.find((e) => e.target === m.get("Service.run").id)
-  assert.equal(runContains.source, m.get("Service").id)
+  assert.equal(runContains!.source, m.get("Service").id)
 
   const rk = refs(r.unresolved)
   assert.ok(rk.includes("calls:format"))
@@ -122,6 +129,6 @@ pub fn build() -> Widget { Widget { x: 0 } }
 
 test("parse of malformed source still returns the file node, no throw", async () => {
   const r = await extractFile("bad.ts", "function (((")
-  assert.equal(r.nodes[0].kind, "file")
+  assert.equal(r.nodes[0]!.kind, "file")
   assert.ok(Array.isArray(r.errors))
 })

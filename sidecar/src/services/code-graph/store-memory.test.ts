@@ -1,10 +1,10 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 
 import { createMemoryStore, splitIdentifier } from "./store-memory.ts"
+import type { FileRecord, GraphEdge, GraphNode, UnresolvedRef } from "./store-memory.ts"
 
-function node(over = {}) {
+function node(over: Partial<GraphNode> = {}): GraphNode {
   return {
     id: over.id ?? "f.ts::foo::1",
     kind: over.kind ?? "function",
@@ -28,7 +28,7 @@ function node(over = {}) {
   }
 }
 
-function fileRec(path, over = {}) {
+function fileRec(path: string, over: Partial<FileRecord> = {}): FileRecord {
   return {
     path,
     content_hash: over.content_hash ?? "h",
@@ -39,6 +39,21 @@ function fileRec(path, over = {}) {
     node_count: over.node_count ?? 1,
     errors: null,
   }
+}
+
+/** A fixture edge; the nullable columns default to null, as extracted rows carry them. */
+function edge(e: Pick<GraphEdge, "source" | "target" | "kind" | "provenance">): GraphEdge {
+  return { metadata: null, line: null, col: null, ...e }
+}
+
+/** A fixture reference; position and candidates default to null. */
+function ref(
+  r: Pick<
+    UnresolvedRef,
+    "from_node_id" | "reference_name" | "reference_kind" | "file_path" | "language"
+  >
+): UnresolvedRef {
+  return { line: null, col: null, candidates: null, ...r }
 }
 
 test("splitIdentifier breaks camelCase and snake_case", () => {
@@ -52,7 +67,7 @@ test("splitIdentifier breaks camelCase and snake_case", () => {
 test("upsertFile / getFile / allFiles / deleteFile", () => {
   const s = createMemoryStore()
   s.upsertFile(fileRec("a.ts"))
-  assert.equal(s.getFile("a.ts").path, "a.ts")
+  assert.equal(s.getFile("a.ts")!.path, "a.ts")
   assert.equal(s.allFiles().length, 1)
   s.deleteFile("a.ts")
   assert.equal(s.getFile("a.ts"), null)
@@ -62,15 +77,17 @@ test("replaceFileGraph inserts and is idempotent per file", () => {
   const s = createMemoryStore()
   s.replaceFileGraph("a.ts", {
     nodes: [node({ id: "a.ts::foo::1", name: "foo", file_path: "a.ts" })],
-    edges: [{ source: "a.ts::foo::1", target: "a.ts::bar::9", kind: "calls", provenance: "ts" }],
+    edges: [
+      edge({ source: "a.ts::foo::1", target: "a.ts::bar::9", kind: "calls", provenance: "ts" }),
+    ],
     unresolved: [
-      {
+      ref({
         from_node_id: "a.ts::foo::1",
         reference_name: "bar",
         reference_kind: "calls",
         file_path: "a.ts",
         language: "typescript",
-      },
+      }),
     ],
     file: fileRec("a.ts"),
   })
@@ -93,8 +110,8 @@ test("replaceFileGraph inserts and is idempotent per file", () => {
 test("getNode by id and by qualified_name; nodesByName", () => {
   const s = createMemoryStore()
   s.insertNodes([node({ id: "id1", name: "foo", qualified_name: "ns.foo" })])
-  assert.equal(s.getNode("id1").name, "foo")
-  assert.equal(s.getNode("ns.foo").id, "id1")
+  assert.equal(s.getNode("id1")!.name, "foo")
+  assert.equal(s.getNode("ns.foo")!.id, "id1")
   assert.equal(s.getNode("missing"), null)
   assert.equal(s.nodesByName("foo").length, 1)
   assert.equal(s.nodesByName("ns.foo").length, 1)
@@ -108,7 +125,7 @@ test("searchNodes ranks exact name match highest and honours kind+limit", () => 
     node({ id: "3", name: "ConfigParser", qualified_name: "ConfigParser", kind: "class" }),
   ])
   const hits = s.searchNodes("parse", { limit: 2 })
-  assert.equal(hits[0].name, "parse") // exact match wins
+  assert.equal(hits[0]!.name, "parse") // exact match wins
   assert.ok(hits.length <= 2)
   const onlyClass = s.searchNodes("config", { kind: "class" })
   assert.ok(onlyClass.every((n) => n.kind === "class"))
@@ -124,8 +141,8 @@ test("searchNodes returns [] for empty query", () => {
 test("edgesFrom / edgesTo filter by kind", () => {
   const s = createMemoryStore()
   s.insertEdges([
-    { source: "a", target: "b", kind: "calls", provenance: "x" },
-    { source: "a", target: "c", kind: "imports", provenance: "x" },
+    edge({ source: "a", target: "b", kind: "calls", provenance: "x" }),
+    edge({ source: "a", target: "c", kind: "imports", provenance: "x" }),
   ])
   assert.equal(s.edgesFrom("a").length, 2)
   assert.equal(s.edgesFrom("a", "calls").length, 1)
@@ -136,25 +153,25 @@ test("edgesFrom / edgesTo filter by kind", () => {
 test("unresolvedAll / deleteUnresolved by id", () => {
   const s = createMemoryStore()
   s.insertUnresolved([
-    {
+    ref({
       from_node_id: "a",
       reference_name: "x",
       reference_kind: "calls",
       file_path: "a.ts",
       language: "ts",
-    },
-    {
+    }),
+    ref({
       from_node_id: "a",
       reference_name: "y",
       reference_kind: "calls",
       file_path: "a.ts",
       language: "ts",
-    },
+    }),
   ])
   const all = s.unresolvedAll()
   assert.equal(all.length, 2)
   assert.ok(all.every((u) => typeof u.id === "number"))
-  s.deleteUnresolved([all[0].id])
+  s.deleteUnresolved([all[0]!.id])
   assert.equal(s.unresolvedAll().length, 1)
 })
 
@@ -162,15 +179,15 @@ test("deleteFile drops the file's nodes, edges and unresolved", () => {
   const s = createMemoryStore()
   s.replaceFileGraph("a.ts", {
     nodes: [node({ id: "a.ts::foo::1", file_path: "a.ts" })],
-    edges: [{ source: "a.ts::foo::1", target: "x", kind: "calls", provenance: "ts" }],
+    edges: [edge({ source: "a.ts::foo::1", target: "x", kind: "calls", provenance: "ts" })],
     unresolved: [
-      {
+      ref({
         from_node_id: "a.ts::foo::1",
         reference_name: "x",
         reference_kind: "calls",
         file_path: "a.ts",
         language: "ts",
-      },
+      }),
     ],
     file: fileRec("a.ts"),
   })

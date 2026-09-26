@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Reference resolution pass.
 //
 // The extractor can only see one file, so cross-file calls/imports/inheritance
@@ -14,14 +13,22 @@
 
 import path from "node:path"
 
+import type { CodeGraphStore, GraphEdge, GraphNode, UnresolvedRef } from "./store-memory.ts"
+
+/** What one resolution pass achieved. */
+export interface ResolveSummary {
+  resolved: number
+  edgesAdded: number
+  remaining: number
+}
+
+/** The two fields an import ref needs to be resolved. */
+export type ImportRef = Pick<UnresolvedRef, "reference_name" | "file_path">
+
 const JS_IMPORT_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]
 const JS_INDEX_FILES = JS_IMPORT_EXTS.map((e) => `index${e}`)
 
-/**
- * @param {object} store
- * @returns {{ resolved: number, edgesAdded: number, remaining: number }}
- */
-export function resolveAll(store) {
+export function resolveAll(store: CodeGraphStore): ResolveSummary {
   const unresolved = store.unresolvedAll()
   if (unresolved.length === 0) {
     return { resolved: 0, edgesAdded: 0, remaining: 0 }
@@ -30,11 +37,11 @@ export function resolveAll(store) {
   const filePaths = store.allFiles().map((f) => f.path)
   const filePathSet = new Set(filePaths)
 
-  const edges = []
-  const resolvedIds = []
+  const edges: GraphEdge[] = []
+  const resolvedIds: (number | undefined)[] = []
 
   for (const ref of unresolved) {
-    let edge = null
+    let edge: GraphEdge | null = null
     if (ref.reference_kind === "imports") {
       edge = resolveImport(store, ref, filePathSet)
     } else {
@@ -57,7 +64,7 @@ export function resolveAll(store) {
 }
 
 /** Link a calls/extends/implements/references ref by symbol name. */
-function resolveSymbolRef(store, ref) {
+function resolveSymbolRef(store: CodeGraphStore, ref: UnresolvedRef): GraphEdge | null {
   const candidates = store.nodesByName(ref.reference_name).filter((n) => n.kind !== "file")
   if (candidates.length === 0) return null
   const fromNode = store.getNode(ref.from_node_id)
@@ -84,10 +91,14 @@ function resolveSymbolRef(store, ref) {
  *   3. prefer exported symbols
  *   4. else the lexically-first qualified name (stable tiebreak)
  */
-function pickBest(candidates, fromNode, kind) {
+function pickBest(
+  candidates: readonly GraphNode[],
+  fromNode: GraphNode | null,
+  kind: string
+): GraphNode | undefined {
   const fromFile = fromNode?.file_path
   const callKindPref = kind === "calls" || kind === "references"
-  const score = (c) => {
+  const score = (c: GraphNode): number => {
     let s = 0
     if (fromFile && c.file_path === fromFile) s += 100
     if (callKindPref && (c.kind === "function" || c.kind === "method")) s += 20
@@ -110,7 +121,11 @@ function pickBest(candidates, fromNode, kind) {
  * other specifiers (bare packages, python dotted, rust crate paths) are matched
  * by trailing-path heuristics against the known file set.
  */
-function resolveImport(store, ref, filePathSet) {
+function resolveImport(
+  store: CodeGraphStore,
+  ref: UnresolvedRef,
+  filePathSet: ReadonlySet<string>
+): GraphEdge | null {
   const target = resolveImportTarget(ref, filePathSet)
   if (!target) return null
   return {
@@ -125,7 +140,10 @@ function resolveImport(store, ref, filePathSet) {
 }
 
 /** Returns the matched file path (= file node id) or null. */
-export function resolveImportTarget(ref, filePathSet) {
+export function resolveImportTarget(
+  ref: ImportRef,
+  filePathSet: ReadonlySet<string>
+): string | null {
   const spec = ref.reference_name
   const fromDir = posixDir(ref.file_path)
 
@@ -159,13 +177,13 @@ export function resolveImportTarget(ref, filePathSet) {
   return null
 }
 
-function posixDir(p) {
+function posixDir(p: string): string {
   return path.posix.dirname(p.split(path.sep).join("/"))
 }
-function posixJoin(a, b) {
+function posixJoin(a: string, b: string): string {
   return path.posix.normalize(path.posix.join(a, b)).replace(/^\.\//, "")
 }
-function stripKnownExt(p) {
+function stripKnownExt(p: string): string {
   const norm = p.split(path.sep).join("/")
   const ext = path.posix.extname(norm)
   return ext ? norm.slice(0, -ext.length) : norm

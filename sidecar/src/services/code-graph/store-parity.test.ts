@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Parity suite: the same assertions run against both store backends. The
 // sqlite arm skips when better-sqlite3 is unavailable (mirrors node-pty gating).
 
@@ -8,11 +7,18 @@ import assert from "node:assert/strict"
 import { createMemoryStore } from "./store-memory.ts"
 import { createStore, loadSqliteBinding } from "./store.ts"
 import { createSqliteStore, toFtsQuery } from "./store-sqlite.ts"
+import type {
+  CodeGraphStore,
+  FileRecord,
+  GraphEdge,
+  GraphNode,
+  UnresolvedRef,
+} from "./store-memory.ts"
 
 const Database = loadSqliteBinding()
 
 test("Bun runtimes prefer the built-in SQLite binding over better-sqlite3", () => {
-  const calls = []
+  const calls: string[] = []
   class BunDatabase {}
   const binding = loadSqliteBinding({
     bunRuntime: true,
@@ -22,11 +28,11 @@ test("Bun runtimes prefer the built-in SQLite binding over better-sqlite3", () =
       throw new Error(`unexpected module: ${specifier}`)
     },
   })
-  assert.ok(new binding(":memory:") instanceof BunDatabase)
+  assert.ok(new binding!(":memory:") instanceof BunDatabase)
   assert.deepEqual(calls, ["bun:sqlite"])
 })
 
-function node(over = {}) {
+function node(over: Partial<GraphNode> = {}): GraphNode {
   return {
     id: over.id ?? "a.ts::foo::1",
     kind: over.kind ?? "function",
@@ -49,7 +55,7 @@ function node(over = {}) {
     ...over,
   }
 }
-function fileRec(path, over = {}) {
+function fileRec(path: string, over: Partial<FileRecord> = {}): FileRecord {
   return {
     path,
     content_hash: "h",
@@ -62,8 +68,23 @@ function fileRec(path, over = {}) {
   }
 }
 
+/** A fixture edge; the nullable columns default to null, as extracted rows carry them. */
+function edge(e: Pick<GraphEdge, "source" | "target" | "kind" | "provenance">): GraphEdge {
+  return { metadata: null, line: null, col: null, ...e }
+}
+
+/** A fixture reference; position and candidates default to null. */
+function ref(
+  r: Pick<
+    UnresolvedRef,
+    "from_node_id" | "reference_name" | "reference_kind" | "file_path" | "language"
+  >
+): UnresolvedRef {
+  return { line: null, col: null, candidates: null, ...r }
+}
+
 /** Run a behavioral contract against a freshly-built store. */
-function contract(makeStore) {
+function contract(makeStore: () => CodeGraphStore) {
   return () => {
     const s = makeStore()
     try {
@@ -79,21 +100,21 @@ function contract(makeStore) {
           }),
         ],
         edges: [
-          {
+          edge({
             source: "a.ts::parseConfig::1",
             target: "a.ts::Helper::9",
             kind: "calls",
             provenance: "resolved",
-          },
+          }),
         ],
         unresolved: [
-          {
+          ref({
             from_node_id: "a.ts::parseConfig::1",
             reference_name: "missing",
             reference_kind: "calls",
             file_path: "a.ts",
             language: "typescript",
-          },
+          }),
         ],
         file: fileRec("a.ts", { node_count: 2 }),
       })
@@ -107,8 +128,8 @@ function contract(makeStore) {
       assert.equal(st.languages.typescript, 1)
 
       // getNode by id + qname
-      assert.equal(s.getNode("a.ts::parseConfig::1").name, "parseConfig")
-      assert.equal(s.getNode("Helper").kind, "class")
+      assert.equal(s.getNode("a.ts::parseConfig::1")!.name, "parseConfig")
+      assert.equal(s.getNode("Helper")!.kind, "class")
       assert.equal(s.getNode("nope"), null)
 
       // nodesByName
@@ -117,7 +138,7 @@ function contract(makeStore) {
       // search ranks exact-ish first, excludes the file node
       const hits = s.searchNodes("parse", { limit: 5 })
       assert.ok(hits.length >= 1)
-      assert.equal(hits[0].name, "parseConfig")
+      assert.equal(hits[0]!.name, "parseConfig")
       assert.ok(hits.every((h) => h.kind !== "file"))
       assert.equal(s.searchNodes("", {}).length, 0)
       const onlyClass = s.searchNodes("Helper", { kind: "class" })
@@ -133,7 +154,7 @@ function contract(makeStore) {
       // unresolved + delete
       const refs = s.unresolvedAll()
       assert.equal(refs.length, 1)
-      s.deleteUnresolved([refs[0].id])
+      s.deleteUnresolved([refs[0]!.id])
       assert.equal(s.unresolvedAll().length, 0)
 
       // re-extract same file replaces, not duplicates
@@ -166,7 +187,7 @@ test(
 test(
   "sqlite store satisfies the contract",
   { skip: !Database },
-  contract(() => createSqliteStore(":memory:", Database))
+  contract(() => createSqliteStore(":memory:", Database!))
 )
 
 test("createStore falls back to memory without dbPath or binding", () => {

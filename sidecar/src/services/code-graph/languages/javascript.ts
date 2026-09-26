@@ -21,4 +21,4 @@ export {
 } from "./typescript.ts"
 
 /** JavaScript is parsed with the JSX-capable `tsx` grammar. */
-export const grammarKeys = ["tsx"]
+export const grammarKeys: readonly string[] = ["tsx"]

@@ -1,8 +1,7 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { computeBudget, packSnippets } from "./budget.ts"
+import { computeBudget, packSnippets, type Snippet } from "./budget.ts"
 
 test("computeBudget scales down as file count grows", () => {
   const small = computeBudget(50)
@@ -40,7 +39,7 @@ test("packSnippets keeps whole snippets within total budget", () => {
   )
   assert.equal(usedChars, 200)
   assert.equal(dropped.length, 1)
-  assert.equal(dropped[0].reason, "budget")
+  assert.equal(dropped[0]!.reason, "budget")
 })
 
 test("packSnippets drops oversized snippets whole (never truncates)", () => {
@@ -56,8 +55,8 @@ test("packSnippets drops oversized snippets whole (never truncates)", () => {
     kept.map((k) => k.id),
     ["ok"]
   )
-  assert.equal(dropped[0].id, "big")
-  assert.equal(dropped[0].reason, "too-large")
+  assert.equal(dropped[0]!.id, "big")
+  assert.equal(dropped[0]!.reason, "too-large")
 })
 
 test("packSnippets keeps scanning for smaller snippets after a budget drop", () => {
@@ -75,6 +74,10 @@ test("packSnippets keeps scanning for smaller snippets after a budget drop", () 
 
 test("packSnippets tolerates non-array and missing text", () => {
   assert.deepEqual(packSnippets(null, { maxOutputChars: 10, maxCharsPerFile: 10 }).kept, [])
-  const { kept } = packSnippets([{ id: "x" }], { maxOutputChars: 10, maxCharsPerFile: 10 })
+  // An untyped caller can hand over a snippet without text.
+  const { kept } = packSnippets([{ id: "x" } as Snippet], {
+    maxOutputChars: 10,
+    maxCharsPerFile: 10,
+  })
   assert.equal(kept.length, 1) // empty text, length 0, fits
 })

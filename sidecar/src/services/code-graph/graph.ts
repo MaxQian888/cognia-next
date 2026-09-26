@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Graph traversals over a code-graph store.
 //
 // Pure over the store interface (works against store-memory or store-sqlite):
@@ -10,8 +9,19 @@
 //
 // All BFS traversals carry a visited-set so cycles terminate, and a depth cap.
 
-const CALL_KINDS = new Set(["calls", "references"])
-const IMPACT_KINDS = new Set(["calls", "references", "imports", "extends", "implements"])
+import type { CodeGraphStore, GraphNode } from "./store-memory.ts"
+
+/** The store reads a traversal needs. */
+export type GraphReader = Pick<CodeGraphStore, "edgesFrom" | "edgesTo" | "getNode" | "allEdges">
+
+const CALL_KINDS: ReadonlySet<string> = new Set(["calls", "references"])
+const IMPACT_KINDS: ReadonlySet<string> = new Set([
+  "calls",
+  "references",
+  "imports",
+  "extends",
+  "implements",
+])
 
 const DEFAULT_DEPTH = 3
 
@@ -23,24 +33,30 @@ const DEFAULT_DEPTH = 3
 export const GRAPH_TRAVERSAL_MAX = 500
 const MAX_RESULTS = GRAPH_TRAVERSAL_MAX
 
-/**
- * @typedef {{ id: string, distance: number, node: object|null }} Reached
- */
+/** A node a traversal reached, at its hop distance from the start. */
+export interface Reached {
+  id: string
+  distance: number
+  node: GraphNode | null
+}
 
-/**
- * Breadth-first closure from `startId` following edges in `direction`.
- * @param {object} store
- * @param {string} startId
- * @param {{ direction: "in"|"out", kinds: Set<string>, depth?: number, max?: number }} opts
- * @returns {Reached[]}
- */
-function bfs(store, startId, { direction, kinds, depth = DEFAULT_DEPTH, max = MAX_RESULTS }) {
+/** Breadth-first closure from `startId` following edges in `direction`. */
+function bfs(
+  store: GraphReader,
+  startId: string,
+  {
+    direction,
+    kinds,
+    depth = DEFAULT_DEPTH,
+    max = MAX_RESULTS,
+  }: { direction: "in" | "out"; kinds: ReadonlySet<string>; depth?: number; max?: number }
+): Reached[] {
   const visited = new Set([startId])
-  const out = []
+  const out: Reached[] = []
   let frontier = [startId]
   const cap = Math.max(0, depth)
   for (let dist = 1; dist <= cap && frontier.length > 0; dist++) {
-    const next = []
+    const next: string[] = []
     for (const id of frontier) {
       const edges = direction === "in" ? store.edgesTo(id) : store.edgesFrom(id)
       for (const e of edges) {
@@ -59,17 +75,17 @@ function bfs(store, startId, { direction, kinds, depth = DEFAULT_DEPTH, max = MA
 }
 
 /** Who calls / references `id` (transitively). */
-export function callers(store, id, depth = DEFAULT_DEPTH) {
+export function callers(store: GraphReader, id: string, depth = DEFAULT_DEPTH): Reached[] {
   return bfs(store, id, { direction: "in", kinds: CALL_KINDS, depth })
 }
 
 /** What `id` calls / references (transitively). */
-export function callees(store, id, depth = DEFAULT_DEPTH) {
+export function callees(store: GraphReader, id: string, depth = DEFAULT_DEPTH): Reached[] {
   return bfs(store, id, { direction: "out", kinds: CALL_KINDS, depth })
 }
 
 /** Blast radius: everything that transitively depends on `id`. */
-export function impact(store, id, depth = DEFAULT_DEPTH) {
+export function impact(store: GraphReader, id: string, depth = DEFAULT_DEPTH): Reached[] {
   return bfs(store, id, { direction: "in", kinds: IMPACT_KINDS, depth })
 }
 
@@ -77,28 +93,27 @@ export function impact(store, id, depth = DEFAULT_DEPTH) {
  * Random-Walk-with-Restart relevance scores from `seeds` over the call/
  * reference graph. Connectivity-based ranking: symbols structurally close to
  * the seeds score high. Treats edges as undirected for relevance (a callee is
- * as relevant as a caller).
- *
- * @param {object} store
- * @param {string[]} seeds
- * @param {{ restart?: number, iterations?: number, kinds?: Set<string> }} [opts]
- * @returns {Map<string, number>}  nodeId → score (sums to ~1 over reached nodes)
+ * as relevant as a caller). Returns nodeId → score (sums to ~1 over reached
+ * nodes).
  */
-export function randomWalkWithRestart(store, seeds, opts = {}) {
+export function randomWalkWithRestart(
+  store: GraphReader,
+  seeds: readonly string[] | null | undefined,
+  opts: { restart?: number; iterations?: number; kinds?: ReadonlySet<string> } = {}
+): Map<string, number> {
   const restart = clamp(opts.restart ?? 0.15, 0.01, 0.99)
   const iterations = Math.max(1, opts.iterations ?? 25)
   const kinds = opts.kinds ?? IMPACT_KINDS
   const seedSet = (seeds ?? []).filter((s) => store.getNode(s))
-  const scores = new Map()
+  const scores = new Map<string, number>()
   if (seedSet.length === 0) return scores
 
   // Build an undirected adjacency over the relevant edge kinds.
-  /** @type {Map<string, Set<string>>} */
-  const adj = new Map()
-  const addEdge = (a, b) => {
+  const adj = new Map<string, Set<string>>()
+  const addEdge = (a: string, b: string) => {
     if (!a || !b) return
     if (!adj.has(a)) adj.set(a, new Set())
-    adj.get(a).add(b)
+    adj.get(a)!.add(b)
   }
   for (const e of store.allEdges()) {
     if (!kinds.has(e.kind)) continue
@@ -107,12 +122,10 @@ export function randomWalkWithRestart(store, seeds, opts = {}) {
   }
 
   const seedMass = 1 / seedSet.length
-  /** @type {Map<string, number>} */
-  let p = new Map(seedSet.map((s) => [s, seedMass]))
+  let p = new Map<string, number>(seedSet.map((s) => [s, seedMass]))
 
   for (let i = 0; i < iterations; i++) {
-    /** @type {Map<string, number>} */
-    const next = new Map()
+    const next = new Map<string, number>()
     // Restart mass back to seeds.
     for (const s of seedSet) next.set(s, (next.get(s) ?? 0) + restart * seedMass)
     // Spread (1-restart) along edges.
@@ -132,7 +145,7 @@ export function randomWalkWithRestart(store, seeds, opts = {}) {
   return scores
 }
 
-function clamp(v, lo, hi) {
+function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v))
 }
 

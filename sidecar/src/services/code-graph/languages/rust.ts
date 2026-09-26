@@ -1,15 +1,15 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Rust extraction descriptor (tree-sitter-rust).
 
+import type { SymbolModifiers, TreeNode } from "./index.ts"
+
 /** grammar keys these rules are valid for. */
-export const grammarKeys = ["rust"]
+export const grammarKeys: readonly string[] = ["rust"]
 
 /**
  * AST node type → graph symbol kind. `function_item` is refined to `method`
  * when it lives inside an `impl_item`/`trait_item` (see `refineKind`).
- * @type {Readonly<Record<string, string>>}
  */
-export const SYMBOL_TYPES = Object.freeze({
+export const SYMBOL_TYPES: Readonly<Record<string, string>> = Object.freeze({
   function_item: "function",
   struct_item: "struct",
   enum_item: "enum",
@@ -22,13 +22,15 @@ export const SYMBOL_TYPES = Object.freeze({
 })
 
 /** Call-site node types → an unresolved `calls` edge. */
-export const CALL_TYPES = Object.freeze(new Set(["call_expression", "macro_invocation"]))
+export const CALL_TYPES: ReadonlySet<string> = Object.freeze(
+  new Set(["call_expression", "macro_invocation"])
+)
 
 /** Import node types → an unresolved `imports` edge. */
-export const IMPORT_TYPES = Object.freeze(new Set(["use_declaration"]))
+export const IMPORT_TYPES: ReadonlySet<string> = Object.freeze(new Set(["use_declaration"]))
 
 /** Symbol name — Rust declarations use the `name` field. */
-export function nodeName(node) {
+export function nodeName(node: TreeNode): string | null {
   const named = node.childForFieldName?.("name")
   if (named) return named.text
   for (const child of node.namedChildren ?? []) {
@@ -38,7 +40,7 @@ export function nodeName(node) {
 }
 
 /** A `function_item` inside an impl/trait body is a method. */
-export function refineKind(node, baseKind) {
+export function refineKind(node: TreeNode, baseKind: string): string {
   if (node.type !== "function_item") return baseKind
   let p = node.parent
   while (p) {
@@ -49,12 +51,12 @@ export function refineKind(node, baseKind) {
   return baseKind
 }
 
-export function shouldSkip(node) {
+export function shouldSkip(node: TreeNode): boolean {
   return nodeName(node) == null
 }
 
 /** Callee name from a call or macro invocation. */
-export function calleeName(callNode) {
+export function calleeName(callNode: TreeNode): string | null {
   if (callNode.type === "macro_invocation") {
     const macro = callNode.childForFieldName?.("macro")
     return macro ? lastSegment(macro) : null
@@ -64,7 +66,7 @@ export function calleeName(callNode) {
 }
 
 /** Right-most path/field segment: `a::b::c` / `obj.method` → `c` / `method`. */
-function lastSegment(node) {
+function lastSegment(node: TreeNode | null | undefined): string | null {
   if (!node) return null
   if (node.type === "identifier" || node.type === "type_identifier") return node.text
   if (node.type === "scoped_identifier") {
@@ -84,7 +86,7 @@ function lastSegment(node) {
 }
 
 /** Import path text for a `use` declaration: `use a::b::C;` → `a::b::C`. */
-export function importSource(node) {
+export function importSource(node: TreeNode): string | null {
   for (const child of node.namedChildren ?? []) {
     if (
       child.type === "scoped_identifier" ||
@@ -103,11 +105,9 @@ export function importSource(node) {
  * Inheritance / trait-impl base names. For a `trait_item` with supertraits
  * (`trait A: B`), returns the bounds. `impl X for Y` edges are emitted by the
  * extractor's Rust impl hook, not here.
- * @param {any} node
- * @returns {string[]}
  */
-export function baseNames(node) {
-  const out = []
+export function baseNames(node: TreeNode): string[] {
+  const out: string[] = []
   const bounds = node.childForFieldName?.("bounds")
   if (bounds) {
     for (const child of bounds.namedChildren ?? []) {
@@ -118,7 +118,7 @@ export function baseNames(node) {
 }
 
 /** Modifiers + signature for a Rust symbol node. */
-export function modifiers(node, source) {
+export function modifiers(node: TreeNode, source: string): SymbolModifiers {
   let isExported = false
   let isAsync = false
   for (const child of node.children ?? []) {
@@ -139,7 +139,7 @@ export function modifiers(node, source) {
   }
 }
 
-export function buildSignature(node, source) {
+export function buildSignature(node: TreeNode, source: string): string {
   const body = node.childForFieldName?.("body")
   const end = body ? body.startIndex : node.endIndex
   return collapse(source.slice(node.startIndex, end))
@@ -149,12 +149,10 @@ export function buildSignature(node, source) {
  * Rust-specific structural edges the generic extractor can't infer: for each
  * `impl Trait for Type` block emit an `implements` reference from `Type` to
  * `Trait`. Returns `{ from, to }[]` of bare type names.
- * @param {any} root  the tree root node
- * @returns {{ from: string, to: string }[]}
  */
-export function implEdges(root) {
-  const out = []
-  const visit = (node) => {
+export function implEdges(root: TreeNode): { from: string; to: string }[] {
+  const out: { from: string; to: string }[] = []
+  const visit = (node: TreeNode) => {
     if (node.type === "impl_item") {
       const traitNode = node.childForFieldName?.("trait")
       const typeNode = node.childForFieldName?.("type")
@@ -170,10 +168,10 @@ export function implEdges(root) {
   return out
 }
 
-function sliceHead(node, source) {
+function sliceHead(node: TreeNode, source: string): string {
   return source.slice(node.startIndex, Math.min(node.endIndex, node.startIndex + 64))
 }
 
-function collapse(text) {
+function collapse(text: unknown): string {
   return String(text).replace(/\s+/g, " ").trim().slice(0, 400)
 }

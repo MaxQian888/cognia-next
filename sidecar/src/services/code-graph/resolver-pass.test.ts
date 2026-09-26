@@ -1,11 +1,11 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 
 import { createMemoryStore } from "./store-memory.ts"
+import type { GraphNode, UnresolvedRef } from "./store-memory.ts"
 import { resolveAll, resolveImportTarget } from "./resolver-pass.ts"
 
-function n(over) {
+function n(over: Pick<GraphNode, "id" | "name" | "file_path"> & Partial<GraphNode>): GraphNode {
   return {
     id: over.id,
     kind: over.kind ?? "function",
@@ -26,6 +26,16 @@ function n(over) {
     return_type: null,
     updated_at: 0,
   }
+}
+
+/** A fixture reference; position and candidates default to null. */
+function ref(
+  r: Pick<
+    UnresolvedRef,
+    "from_node_id" | "reference_name" | "reference_kind" | "file_path" | "language"
+  >
+): UnresolvedRef {
+  return { line: null, col: null, candidates: null, ...r }
 }
 
 test("resolveAll is a no-op on an empty store", () => {
@@ -60,18 +70,18 @@ test("resolves a cross-file call by name and deletes the ref", () => {
     errors: null,
   })
   s.insertUnresolved([
-    {
+    ref({
       from_node_id: "caller.ts::useFmt::1",
       reference_name: "format",
       reference_kind: "calls",
       file_path: "caller.ts",
       language: "typescript",
-    },
+    }),
   ])
   const res = resolveAll(s)
   assert.equal(res.resolved, 1)
   assert.equal(res.remaining, 0)
-  const edge = s.edgesFrom("caller.ts::useFmt::1", "calls")[0]
+  const edge = s.edgesFrom("caller.ts::useFmt::1", "calls")[0]!
   assert.equal(edge.target, "fmt.ts::format::1")
   assert.equal(edge.provenance, "resolved")
   assert.equal(s.unresolvedAll().length, 0)
@@ -81,13 +91,13 @@ test("unknown reference stays unresolved for a later pass", () => {
   const s = createMemoryStore()
   s.insertNodes([n({ id: "a.ts::x::1", name: "x", file_path: "a.ts" })])
   s.insertUnresolved([
-    {
+    ref({
       from_node_id: "a.ts::x::1",
       reference_name: "thirdPartyThing",
       reference_kind: "calls",
       file_path: "a.ts",
       language: "typescript",
-    },
+    }),
   ])
   const res = resolveAll(s)
   assert.equal(res.resolved, 0)
@@ -103,32 +113,32 @@ test("ambiguous targets pick a best candidate and record the alternatives", () =
     n({ id: "caller.ts::run::5", name: "run", file_path: "caller.ts", start_line: 5 }), // same-file → preferred
   ])
   s.insertUnresolved([
-    {
+    ref({
       from_node_id: "caller.ts::c::1",
       reference_name: "run",
       reference_kind: "calls",
       file_path: "caller.ts",
       language: "typescript",
-    },
+    }),
   ])
   resolveAll(s)
-  const edge = s.edgesFrom("caller.ts::c::1", "calls")[0]
+  const edge = s.edgesFrom("caller.ts::c::1", "calls")[0]!
   assert.equal(edge.target, "caller.ts::run::5") // same file wins
   assert.equal(edge.provenance, "resolved-ambiguous")
-  assert.match(edge.metadata, /a\.ts::run::1/)
+  assert.match(edge.metadata ?? "", /a\.ts::run::1/)
 })
 
 test("self-referential calls are not linked", () => {
   const s = createMemoryStore()
   s.insertNodes([n({ id: "a.ts::recur::1", name: "recur", file_path: "a.ts" })])
   s.insertUnresolved([
-    {
+    ref({
       from_node_id: "a.ts::recur::1",
       reference_name: "recur",
       reference_kind: "calls",
       file_path: "a.ts",
       language: "typescript",
-    },
+    }),
   ])
   const res = resolveAll(s)
   assert.equal(res.resolved, 0)
@@ -147,16 +157,16 @@ test("resolves an inheritance ref to a class node", () => {
     }),
   ])
   s.insertUnresolved([
-    {
+    ref({
       from_node_id: "a.ts::Child::1",
       reference_name: "Base",
       reference_kind: "extends",
       file_path: "a.ts",
       language: "typescript",
-    },
+    }),
   ])
   resolveAll(s)
-  const edge = s.edgesFrom("a.ts::Child::1", "extends")[0]
+  const edge = s.edgesFrom("a.ts::Child::1", "extends")[0]!
   assert.equal(edge.target, "base.ts::Base::1")
 })
 
@@ -254,15 +264,15 @@ test("resolveAll links a resolvable import edge between file nodes", () => {
     errors: null,
   })
   s.insertUnresolved([
-    {
+    ref({
       from_node_id: "app.ts",
       reference_name: "./fmt",
       reference_kind: "imports",
       file_path: "app.ts",
       language: "typescript",
-    },
+    }),
   ])
   resolveAll(s)
-  const edge = s.edgesFrom("app.ts", "imports")[0]
+  const edge = s.edgesFrom("app.ts", "imports")[0]!
   assert.equal(edge.target, "fmt.ts")
 })

@@ -1,11 +1,11 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 
 import { createMemoryStore } from "./store-memory.ts"
+import type { GraphEdge, GraphNode } from "./store-memory.ts"
 import { buildContext, extractSymbolsFromQuery } from "./context-builder.ts"
 
-function n(over) {
+function n(over: Pick<GraphNode, "id" | "name" | "file_path"> & Partial<GraphNode>): GraphNode {
   return {
     id: over.id,
     kind: over.kind ?? "function",
@@ -26,6 +26,11 @@ function n(over) {
     return_type: null,
     updated_at: 0,
   }
+}
+
+/** A fixture edge; the nullable columns default to null, as extracted rows carry them. */
+function edge(e: Pick<GraphEdge, "source" | "target" | "kind" | "provenance">): GraphEdge {
+  return { metadata: null, line: null, col: null, ...e }
 }
 
 test("extractSymbolsFromQuery pulls identifiers + camel parts, drops stopwords", () => {
@@ -83,18 +88,18 @@ function sampleStore() {
     n({ id: "util.ts::unrelated::1", name: "unrelated", file_path: "util.ts" }),
   ])
   s.insertEdges([
-    {
+    edge({
       source: "config.ts::parseConfig::1",
       target: "loader.ts::load::1",
       kind: "calls",
       provenance: "resolved",
-    },
-    {
+    }),
+    edge({
       source: "config.ts::parseConfig::1",
       target: "config.ts::Config::9",
       kind: "references",
       provenance: "resolved",
-    },
+    }),
   ])
   return s
 }
@@ -136,5 +141,5 @@ test("buildContext drops oversized snippets and reports them", () => {
   })
   assert.equal(ctx.snippets.length, 0)
   assert.ok(ctx.dropped.length >= 1)
-  assert.equal(ctx.dropped[0].reason, "too-large")
+  assert.equal(ctx.dropped[0]!.reason, "too-large")
 })

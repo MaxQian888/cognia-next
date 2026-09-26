@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 import os from "node:os"
@@ -41,8 +40,8 @@ test("enabled with codeGraph + cwd, resolver exposes the query surface", () => {
     "files",
     "status",
     "stalenessBanner",
-  ]) {
-    assert.equal(typeof r.codeGraphResolver[m], "function", m)
+  ] as const) {
+    assert.equal(typeof r.codeGraphResolver![m], "function", m)
   }
   r.dispose()
 })
@@ -59,8 +58,8 @@ test("the index service is built lazily (no .cognia until a query runs)", async 
     // Constructing the factory must not have indexed anything yet.
     assert.equal(fs.existsSync(path.join(root, ".cognia")), false)
     // First query builds the index.
-    await r.codeGraphResolver.syncStale()
-    assert.ok(r.codeGraphResolver.status().fileCount >= 1)
+    await r.codeGraphResolver!.syncStale()
+    assert.ok(r.codeGraphResolver!.status().fileCount >= 1)
   } finally {
     r.dispose()
   }
@@ -100,8 +99,8 @@ test("sandboxed graph indexing keeps its database inside a nested authorized wor
     log,
   })
   try {
-    await resolver.codeGraphResolver.syncStale()
-    assert.equal(resolver.codeGraphResolver.status().root, cwd)
+    await resolver.codeGraphResolver!.syncStale()
+    assert.equal(resolver.codeGraphResolver!.status().root, cwd)
     assert.equal(fs.existsSync(path.join(parent, ".cognia")), false)
   } finally {
     resolver.dispose()
@@ -126,7 +125,10 @@ test("sandboxed graph indexing rejects a cache symlink outside writable roots", 
     log,
   })
   try {
-    assert.throws(() => resolver.codeGraphResolver.syncStale(), /outside authorized writable roots/)
+    assert.throws(
+      () => resolver.codeGraphResolver!.syncStale(),
+      /outside authorized writable roots/
+    )
     assert.deepEqual(await fsp.readdir(outside), [])
   } finally {
     resolver.dispose()

@@ -1,19 +1,46 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // SQLite-backed code-graph store (better-sqlite3 + FTS5).
 //
-// Public interface is identical to store-memory.mjs (the parity test suite runs
+// Public interface is identical to store-memory.ts (the parity test suite runs
 // the same assertions against both); this arm adds real FTS5 ranking and
-// on-disk persistence. The caller (store.mjs) only constructs this when the
+// on-disk persistence. The caller (store.ts) only constructs this when the
 // better-sqlite3 binding loaded successfully.
 
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import type {
+  CodeGraphStore,
+  FileGraph,
+  FileRecord,
+  GraphEdge,
+  GraphNode,
+  UnresolvedRef,
+} from "./store-memory.ts"
+
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SCHEMA_SQL = fs.readFileSync(path.join(HERE, "schema.sql"), "utf-8")
 
-const NODE_COLUMNS = [
+/** The statement surface both better-sqlite3 and bun:sqlite provide. */
+export interface SqliteStatement {
+  run(...params: unknown[]): unknown
+  get(...params: unknown[]): unknown
+  all(...params: unknown[]): unknown[]
+}
+
+export interface SqliteDatabase {
+  exec(sql: string): unknown
+  prepare(sql: string): SqliteStatement
+  transaction<A extends unknown[]>(fn: (...args: A) => void): (...args: A) => void
+  close(): unknown
+}
+
+/** The better-sqlite3 constructor, or a bun:sqlite class adapted to it. */
+export type SqliteDatabaseCtor = new (dbPath: string) => SqliteDatabase
+
+type CountRow = { c: number }
+
+const NODE_COLUMNS: readonly (keyof GraphNode)[] = [
   "id",
   "kind",
   "name",
@@ -34,11 +61,8 @@ const NODE_COLUMNS = [
   "updated_at",
 ]
 
-/**
- * @param {string} dbPath  ":memory:" or a filesystem path
- * @param {(...a:any[]) => any} Database  the better-sqlite3 constructor
- */
-export function createSqliteStore(dbPath, Database) {
+/** A store over `dbPath` (":memory:" or a filesystem path). */
+export function createSqliteStore(dbPath: string, Database: SqliteDatabaseCtor): CodeGraphStore {
   const db = new Database(dbPath)
   db.exec(SCHEMA_SQL)
 
@@ -93,23 +117,23 @@ export function createSqliteStore(dbPath, Database) {
     `),
   }
 
-  const insertNodesTx = db.transaction((list) => {
+  const insertNodesTx = db.transaction((list: readonly GraphNode[]) => {
     for (const n of list) stmt.insertNode.run(normaliseNode(n))
   })
-  const insertEdgesTx = db.transaction((list) => {
+  const insertEdgesTx = db.transaction((list: readonly GraphEdge[]) => {
     for (const e of list) stmt.insertEdge.run(normaliseEdge(e))
   })
-  const insertUnresolvedTx = db.transaction((list) => {
+  const insertUnresolvedTx = db.transaction((list: readonly UnresolvedRef[]) => {
     for (const u of list) stmt.insertUnresolved.run(normaliseUnresolved(u))
   })
 
-  const removeFileGraph = (filePath) => {
+  const removeFileGraph = (filePath: string) => {
     stmt.deleteEdgesForFile.run(filePath)
     stmt.deleteUnresolvedForFile.run(filePath)
     stmt.deleteNodesForFile.run(filePath)
   }
 
-  const replaceFileGraphTx = db.transaction((filePath, payload) => {
+  const replaceFileGraphTx = db.transaction((filePath: string, payload: FileGraph) => {
     removeFileGraph(filePath)
     insertNodesTx(payload.nodes ?? [])
     insertEdgesTx(payload.edges ?? [])
@@ -124,10 +148,10 @@ export function createSqliteStore(dbPath, Database) {
       stmt.upsertFile.run(normaliseFile(rec))
     },
     getFile(p) {
-      return stmt.getFile.get(p) ?? null
+      return (stmt.getFile.get(p) as FileRecord | undefined) ?? null
     },
     allFiles() {
-      return stmt.allFiles.all()
+      return stmt.allFiles.all() as FileRecord[]
     },
     deleteFile(p) {
       removeFileGraph(p)
@@ -148,19 +172,23 @@ export function createSqliteStore(dbPath, Database) {
     },
 
     getNode(idOrQname) {
-      return stmt.getNodeById.get(idOrQname) ?? stmt.getNodeByQname.get(idOrQname) ?? null
+      return (
+        (stmt.getNodeById.get(idOrQname) as GraphNode | undefined) ??
+        (stmt.getNodeByQname.get(idOrQname) as GraphNode | undefined) ??
+        null
+      )
     },
     nodesByName(name) {
-      return stmt.nodesByName.all(name, name)
+      return stmt.nodesByName.all(name, name) as GraphNode[]
     },
     allNodes() {
-      return stmt.allNodes.all()
+      return stmt.allNodes.all() as GraphNode[]
     },
 
     searchNodes(query, { kind, limit = 20 } = {}) {
       const match = toFtsQuery(query)
       if (!match) return []
-      let rows
+      let rows: GraphNode[]
       try {
         // External-content FTS5: join back to nodes via rowid, rank by bm25.
         const sql = kind
@@ -168,31 +196,32 @@ export function createSqliteStore(dbPath, Database) {
              WHERE nodes_fts MATCH @m AND n.kind = @kind ORDER BY bm25(nodes_fts) LIMIT @limit`
           : `SELECT n.* FROM nodes_fts f JOIN nodes n ON n.rowid = f.rowid
              WHERE nodes_fts MATCH @m ORDER BY bm25(nodes_fts) LIMIT @limit`
-        rows = db.prepare(sql).all({ m: match, kind, limit })
+        rows = db.prepare(sql).all({ m: match, kind, limit }) as GraphNode[]
       } catch {
         // FTS parse failure → LIKE fallback.
-        rows = stmt.searchLike
-          .all({ like: `%${String(query)}%`, limit })
-          .filter((n) => !kind || n.kind === kind)
+        rows = (stmt.searchLike.all({ like: `%${String(query)}%`, limit }) as GraphNode[]).filter(
+          (n) => !kind || n.kind === kind
+        )
       }
       return rows.filter((n) => n.kind !== "file")
     },
 
     edgesFrom(id, kind) {
-      return kind ? stmt.edgesFromKind.all(id, kind) : stmt.edgesFrom.all(id)
+      return (kind ? stmt.edgesFromKind.all(id, kind) : stmt.edgesFrom.all(id)) as GraphEdge[]
     },
     edgesTo(id, kind) {
-      return kind ? stmt.edgesToKind.all(id, kind) : stmt.edgesTo.all(id)
+      return (kind ? stmt.edgesToKind.all(id, kind) : stmt.edgesTo.all(id)) as GraphEdge[]
     },
     allEdges() {
-      return stmt.allEdges.all()
+      return stmt.allEdges.all() as GraphEdge[]
     },
 
     unresolvedAll() {
-      return stmt.unresolvedAll.all()
+      return stmt.unresolvedAll.all() as UnresolvedRef[]
     },
-    deleteUnresolved(ids) {
-      if (!ids || ids.length === 0) return
+    deleteUnresolved(idList) {
+      const ids = idList ? [...idList] : []
+      if (ids.length === 0) return
       const del = db.prepare(
         `DELETE FROM unresolved_refs WHERE id IN (${ids.map(() => "?").join(",")})`
       )
@@ -200,13 +229,14 @@ export function createSqliteStore(dbPath, Database) {
     },
 
     stats() {
-      const languages = {}
-      for (const row of stmt.langHistogram.all()) languages[row.language] = row.c
+      const languages: Record<string, number> = {}
+      for (const row of stmt.langHistogram.all() as { language: string | null; c: number }[])
+        languages[String(row.language)] = row.c
       return {
-        fileCount: stmt.countFiles.get().c,
-        nodeCount: stmt.countNodes.get().c,
-        edgeCount: stmt.countEdges.get().c,
-        unresolvedCount: stmt.countUnresolved.get().c,
+        fileCount: (stmt.countFiles.get() as CountRow).c,
+        nodeCount: (stmt.countNodes.get() as CountRow).c,
+        edgeCount: (stmt.countEdges.get() as CountRow).c,
+        unresolvedCount: (stmt.countUnresolved.get() as CountRow).c,
         languages,
         binding: "sqlite",
       }
@@ -224,7 +254,7 @@ export function createSqliteStore(dbPath, Database) {
  * Build a safe FTS5 MATCH expression from a free-text query: split into tokens,
  * quote each, OR them with a prefix wildcard. Returns null for empty input.
  */
-export function toFtsQuery(query) {
+export function toFtsQuery(query: unknown): string | null {
   if (typeof query !== "string") return null
   const tokens = query.match(/[A-Za-z0-9]+/g)
   if (!tokens || tokens.length === 0) return null
@@ -233,19 +263,19 @@ export function toFtsQuery(query) {
 
 // ---- normalisation (fill missing columns so prepared stmts don't throw) ---
 
-function normaliseNode(n) {
-  const out = {}
+function normaliseNode(n: Partial<GraphNode>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
   for (const col of NODE_COLUMNS) out[col] = n[col] ?? defaultFor(col)
   return out
 }
-function defaultFor(col) {
+function defaultFor(col: string): number | null {
   if (col === "is_exported" || col === "is_async" || col === "is_static") return 0
   if (col === "start_line" || col === "start_col" || col === "end_line" || col === "end_col")
     return 0
   if (col === "updated_at") return 0
   return null
 }
-function normaliseEdge(e) {
+function normaliseEdge(e: GraphEdge): Record<string, unknown> {
   return {
     source: e.source,
     target: e.target,
@@ -256,7 +286,7 @@ function normaliseEdge(e) {
     provenance: e.provenance ?? null,
   }
 }
-function normaliseUnresolved(u) {
+function normaliseUnresolved(u: UnresolvedRef): Record<string, unknown> {
   return {
     from_node_id: u.from_node_id,
     reference_name: u.reference_name,
@@ -268,7 +298,7 @@ function normaliseUnresolved(u) {
     language: u.language ?? null,
   }
 }
-function normaliseFile(f) {
+function normaliseFile(f: Partial<FileRecord> & { path: string }): Record<string, unknown> {
   return {
     path: f.path,
     content_hash: f.content_hash ?? null,

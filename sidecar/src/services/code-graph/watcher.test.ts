@@ -1,8 +1,9 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { startWatcher, resolveDebounceMs } from "./watcher.ts"
+import { startWatcher, resolveDebounceMs, type WatchFs } from "./watcher.ts"
+
+type Listener = Parameters<WatchFs["watch"]>[2]
 
 test("resolveDebounceMs defaults to 2000 and clamps to [100, 60000]", () => {
   assert.equal(resolveDebounceMs({}), 2000)
@@ -13,14 +14,14 @@ test("resolveDebounceMs defaults to 2000 and clamps to [100, 60000]", () => {
 })
 
 test("startWatcher debounces a burst into one onChange and filters via accept", async () => {
-  let cb = null
+  let cb = null as Listener | null
   const fakeFs = {
-    watch(_root, _opts, handler) {
+    watch(_root: string, _opts: unknown, handler: Listener) {
       cb = handler
       return { close() {} }
     },
   }
-  const batches = []
+  const batches: string[][] = []
   const w = startWatcher("/root", {
     fsImpl: fakeFs,
     debounceMs: 20,
@@ -28,13 +29,13 @@ test("startWatcher debounces a burst into one onChange and filters via accept", 
     onChange: (paths) => batches.push(paths),
   })
   assert.equal(w.supported, true)
-  cb("change", "a.ts")
-  cb("change", "b.ts")
-  cb("change", "ignore.md") // filtered out by accept
-  cb("change", "a.ts") // dedup
+  cb!("change", "a.ts")
+  cb!("change", "b.ts")
+  cb!("change", "ignore.md") // filtered out by accept
+  cb!("change", "a.ts") // dedup
   await new Promise((r) => setTimeout(r, 40))
   assert.equal(batches.length, 1)
-  assert.deepEqual([...batches[0]].map((p) => p.replace(/\\/g, "/")).sort(), [
+  assert.deepEqual([...batches[0]!].map((p) => p.replace(/\\/g, "/")).sort(), [
     "/root/a.ts",
     "/root/b.ts",
   ])
@@ -53,9 +54,9 @@ test("startWatcher returns a no-op when recursive watch is unsupported", () => {
 })
 
 test("startWatcher swallows errors thrown by onChange", async () => {
-  let cb = null
+  let cb = null as Listener | null
   const fakeFs = {
-    watch(_r, _o, handler) {
+    watch(_r: string, _o: unknown, handler: Listener) {
       cb = handler
       return { close() {} }
     },
@@ -67,7 +68,7 @@ test("startWatcher swallows errors thrown by onChange", async () => {
       throw new Error("boom")
     },
   })
-  cb("change", "a.ts")
+  cb!("change", "a.ts")
   await new Promise((r) => setTimeout(r, 25))
   // No throw escapes; watcher still disposes cleanly.
   assert.doesNotThrow(() => w.dispose())

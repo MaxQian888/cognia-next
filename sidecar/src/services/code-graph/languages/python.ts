@@ -1,29 +1,31 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Python extraction descriptor (tree-sitter-python).
 
+import type { SymbolModifiers, TreeNode } from "./index.ts"
+
 /** grammar keys these rules are valid for. */
-export const grammarKeys = ["python"]
+export const grammarKeys: readonly string[] = ["python"]
 
 /**
  * AST node type → graph symbol kind. `function_definition` is refined to
  * `method` inside a class body; module/class-level `assignment` becomes
  * constant/variable (see `refineKind`).
- * @type {Readonly<Record<string, string>>}
  */
-export const SYMBOL_TYPES = Object.freeze({
+export const SYMBOL_TYPES: Readonly<Record<string, string>> = Object.freeze({
   function_definition: "function",
   class_definition: "class",
   assignment: "variable",
 })
 
 /** Call-site node types → an unresolved `calls` edge. */
-export const CALL_TYPES = Object.freeze(new Set(["call"]))
+export const CALL_TYPES: ReadonlySet<string> = Object.freeze(new Set(["call"]))
 
 /** Import node types → an unresolved `imports` edge. */
-export const IMPORT_TYPES = Object.freeze(new Set(["import_statement", "import_from_statement"]))
+export const IMPORT_TYPES: ReadonlySet<string> = Object.freeze(
+  new Set(["import_statement", "import_from_statement"])
+)
 
 /** Symbol name. Assignments use the left-hand identifier. */
-export function nodeName(node) {
+export function nodeName(node: TreeNode): string | null {
   if (node.type === "assignment") {
     const left = node.childForFieldName?.("left")
     if (left && left.type === "identifier") return left.text
@@ -43,7 +45,7 @@ export function nodeName(node) {
  * Only module- and class-level assignments are kept (the extractor skips those
  * nested inside function bodies).
  */
-export function refineKind(node, baseKind) {
+export function refineKind(node: TreeNode, baseKind: string): string {
   if (node.type === "function_definition") {
     let p = node.parent
     // function_definition → block → class_definition
@@ -66,7 +68,7 @@ export function refineKind(node, baseKind) {
  * (locals are noise for a symbol graph). Module- and class-level assignments
  * are kept.
  */
-export function shouldSkip(node) {
+export function shouldSkip(node: TreeNode): boolean {
   if (nodeName(node) == null) return true
   if (node.type === "assignment") {
     let p = node.parent
@@ -80,13 +82,13 @@ export function shouldSkip(node) {
 }
 
 /** Callee name from a `call` node. */
-export function calleeName(callNode) {
+export function calleeName(callNode: TreeNode): string | null {
   const fn = callNode.childForFieldName?.("function")
   return fn ? lastAttr(fn) : null
 }
 
 /** `a.b.c(…)` → `c`; `f(…)` → `f`. */
-function lastAttr(node) {
+function lastAttr(node: TreeNode | null | undefined): string | null {
   if (!node) return null
   if (node.type === "identifier") return node.text
   if (node.type === "attribute") {
@@ -102,7 +104,7 @@ function lastAttr(node) {
 }
 
 /** Import module name(s). Returns the dotted module path. */
-export function importSource(node) {
+export function importSource(node: TreeNode): string | null {
   if (node.type === "import_from_statement") {
     const mod = node.childForFieldName?.("module_name")
     if (mod) return collapse(mod.text)
@@ -117,8 +119,8 @@ export function importSource(node) {
 }
 
 /** Base classes of a `class_definition`. */
-export function baseNames(node) {
-  const out = []
+export function baseNames(node: TreeNode): string[] {
+  const out: string[] = []
   const supers = node.childForFieldName?.("superclasses")
   if (supers) {
     for (const child of supers.namedChildren ?? []) {
@@ -133,10 +135,10 @@ export function baseNames(node) {
 }
 
 /** Modifiers + signature for a Python symbol node. */
-export function modifiers(node, source) {
+export function modifiers(node: TreeNode, source: string): SymbolModifiers {
   const name = nodeName(node)
   // Convention: leading underscore → "private"-ish; dunder stays public.
-  let visibility = null
+  let visibility: string | null = null
   if (name && name.startsWith("_") && !name.startsWith("__")) visibility = "private"
   let isAsync = false
   for (const child of node.children ?? []) {
@@ -156,23 +158,23 @@ export function modifiers(node, source) {
   }
 }
 
-function returnTypeOf(node) {
+function returnTypeOf(node: TreeNode): string | null {
   if (node.type !== "function_definition") return null
   const rt = node.childForFieldName?.("return_type")
   return rt ? collapse(rt.text) : null
 }
 
-export function buildSignature(node, source) {
+export function buildSignature(node: TreeNode, source: string): string {
   if (node.type === "assignment") return collapse(source.slice(node.startIndex, node.endIndex))
   const body = node.childForFieldName?.("body")
   const end = body ? body.startIndex : node.endIndex
   return collapse(source.slice(node.startIndex, end)).replace(/:\s*$/, "")
 }
 
-function sliceHead(node, source) {
+function sliceHead(node: TreeNode, source: string): string {
   return source.slice(node.startIndex, Math.min(node.endIndex, node.startIndex + 64))
 }
 
-function collapse(text) {
+function collapse(text: unknown): string {
   return String(text).replace(/\s+/g, " ").trim().slice(0, 400)
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Shared lazy code-graph resolver construction for both dispatch paths.
 //
 // Mirrors `src/services/lsp/lazy-resolver.ts`: the index service (and thus the
@@ -9,37 +8,48 @@
 import path from "node:path"
 import fs from "node:fs"
 
+import type { ProcessSandboxScope } from "../../platform/process/exec.ts"
 import { createIndexService } from "./index-service.ts"
+import type { CodeGraphIndex, IndexService } from "./index-service.ts"
 import { nearestRoot } from "../lsp/servers.ts"
 
 const ROOT_MARKERS = [".git", "package.json", "Cargo.toml", "pyproject.toml", "go.mod"]
 
+/** The send options the code-graph resolver reads. */
+export interface CodeGraphSendOptions {
+  cwd?: string
+  builtinTools?: { codeGraph?: boolean } | null
+  /** The renderer turns the watcher off with `watch: false`. */
+  codeGraph?: { watch?: boolean } | null
+  builtinProcessSandbox?: (ProcessSandboxScope & { writableRoots: readonly string[] }) | null
+}
+
 /** Resolve the index root: the nearest VCS/manifest ancestor of cwd, else cwd. */
-export function resolveCodeGraphRoot(cwd) {
+export function resolveCodeGraphRoot(cwd: string): string {
   const finder = nearestRoot(ROOT_MARKERS)
   const found = finder(path.join(cwd, "__codegraph_anchor__"), {})
   return found ?? cwd
 }
 
-/**
- * @param {{ sendOptions: Record<string, any>, log: (level: string, msg: string) => void }} params
- * @returns {{
- *   codeGraphEnabled: boolean,
- *   codeGraphResolver: object | null,
- *   dispose: () => void,
- * }}
- */
-export function makeLazyCodeGraphResolver({ sendOptions, log }) {
+export function makeLazyCodeGraphResolver({
+  sendOptions,
+  log,
+}: {
+  sendOptions: CodeGraphSendOptions
+  log?: (level: "info" | "warn" | "error", message: string) => void
+}): { codeGraphEnabled: boolean; codeGraphResolver: CodeGraphIndex | null; dispose(): void } {
   const codeGraphEnabled = !!(sendOptions.builtinTools?.codeGraph && sendOptions.cwd)
-  let service = null
+  let service: IndexService | null = null
 
-  const ensureService = () => {
+  const ensureService = (): IndexService => {
     if (!service) {
-      let root = resolveCodeGraphRoot(sendOptions.cwd)
+      // The proxy below exists only when cwd is set.
+      const cwd = sendOptions.cwd as string
+      let root = resolveCodeGraphRoot(cwd)
       const scope = sendOptions.builtinProcessSandbox
       if (scope) {
         const roots = scope.writableRoots.map((entry) => fs.realpathSync(entry))
-        const cacheAllowed = (candidate) => {
+        const cacheAllowed = (candidate: string): boolean => {
           const database = path.join(candidate, ".cognia", "codegraph.db")
           const target = fs.realpathSync(
             fs.existsSync(database)
@@ -59,7 +69,7 @@ export function makeLazyCodeGraphResolver({ sendOptions, log }) {
           })
         }
         // A nested workspace must not create an index in its parent repository.
-        if (!cacheAllowed(root)) root = sendOptions.cwd
+        if (!cacheAllowed(root)) root = cwd
         if (!cacheAllowed(root))
           throw new Error("CodeGraph cache is outside authorized writable roots")
       }
@@ -74,7 +84,7 @@ export function makeLazyCodeGraphResolver({ sendOptions, log }) {
   // A proxy that lazily builds the service on the first call. Every tool calls
   // `syncStale()` (async) before any sync query, so the service always exists
   // by the time a sync method runs — but ensureService() is cheap regardless.
-  const codeGraphResolver = codeGraphEnabled
+  const codeGraphResolver: CodeGraphIndex | null = codeGraphEnabled
     ? {
         ensureIndexed: () => ensureService().ensureIndexed(),
         syncStale: () => ensureService().syncStale(),

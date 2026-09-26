@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 import os from "node:os"
@@ -8,7 +7,7 @@ import path from "node:path"
 
 import { createIndexService } from "./index-service.ts"
 
-async function tmpRepo(files) {
+async function tmpRepo(files: Record<string, string>): Promise<string> {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "cg-svc-"))
   for (const [rel, content] of Object.entries(files)) {
     const abs = path.join(root, rel)
@@ -62,23 +61,23 @@ test("Bun.file and Bun.CryptoHasher drive source hashing when available", async 
   const root = await tmpRepo({
     "native.ts": `export function nativeHash() { return true; }\n`,
   })
-  const calls = []
+  const calls: [string, string | number][] = []
   class CryptoHasher {
-    constructor(algorithm) {
+    constructor(algorithm: string) {
       calls.push(["hasher", algorithm])
     }
-    update(bytes) {
+    update(bytes: Uint8Array) {
       calls.push(["update", bytes.byteLength])
       return this
     }
-    digest(encoding) {
+    digest(encoding: string) {
       calls.push(["digest", encoding])
       return "bun-native-sha1"
     }
   }
   const bunRuntime = {
     CryptoHasher,
-    file(abs) {
+    file(abs: string) {
       calls.push(["file", path.basename(abs)])
       return {
         bytes: async () => new TextEncoder().encode(await fsp.readFile(abs, "utf8")),

@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Session code-graph index handle.
 //
 // Owns the store + parser lifecycle for one agent session rooted at `root`.
@@ -19,47 +18,104 @@ import { isSupportedFile, languageFor } from "./languages/index.ts"
 import { extractFile } from "./extractor.ts"
 import { resolveAll } from "./resolver-pass.ts"
 import { createStore } from "./store.ts"
-import { startWatcher } from "./watcher.ts"
+import { startWatcher, type Watcher } from "./watcher.ts"
 import * as graph from "./graph.ts"
-import { buildContext } from "./context-builder.ts"
+import type { Reached } from "./graph.ts"
+import { buildContext, type CodeContext } from "./context-builder.ts"
+import type { CodeGraphStore, FileRecord, GraphNode, StoreStats } from "./store-memory.ts"
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 const SYNC_THROTTLE_MS = 1500
 const SNIPPET_CACHE_MAX = 64
 
-/**
- * @param {{
- *   root: string,
- *   dbPath?: string,
- *   watch?: boolean,
- *   forceMemory?: boolean,
- *   now?: () => number,
- *   bunRuntime?: { file(path: string): { bytes(): Promise<Uint8Array> }, CryptoHasher: new (algorithm: string) => { update(bytes: Uint8Array): unknown, digest(encoding: string): string } } | null,
- * }} opts
- */
-export function createIndexService(opts) {
+interface BunCryptoHasher {
+  update(bytes: Uint8Array): BunCryptoHasher
+  digest(encoding: "hex"): string
+}
+
+/** Bun's file and hashing primitives, preferred over node:fs/crypto when whole. */
+export interface BunHashRuntime {
+  file(path: string): { bytes(): Promise<Uint8Array> }
+  CryptoHasher: new (algorithm: string) => BunCryptoHasher
+}
+
+export interface IndexServiceOptions {
+  root: string
+  dbPath?: string
+  watch?: boolean
+  forceMemory?: boolean
+  now?: () => number
+  /** Omitted: `globalThis.Bun`. Null: always node:fs/crypto. */
+  bunRuntime?: Partial<BunHashRuntime> | null
+}
+
+export interface IndexStatus extends Omit<StoreStats, "binding"> {
+  /** "sqlite?" before the first query opens a configured on-disk store. */
+  binding: string
+  indexed: boolean
+  root: string
+  watching: boolean
+  pending: number
+}
+
+/** The query surface the code-graph tools call. */
+export interface CodeGraphIndex {
+  ensureIndexed(): Promise<void>
+  /** Re-index what changed since the last sync; resolves to the changed-file count. */
+  syncStale(): Promise<number>
+  search(query: unknown, opts?: { kind?: string; limit?: number }): GraphNode[]
+  getNode(idOrQname: string): GraphNode | null
+  snippetFor(node: GraphNode | null | undefined): string
+  callers(id: string, depth?: number): Reached[]
+  callees(id: string, depth?: number): Reached[]
+  impact(id: string, depth?: number): Reached[]
+  context(query: string, opts?: { maxNodes?: number; namedSeeds?: readonly string[] }): CodeContext
+  files(): FileRecord[]
+  status(): IndexStatus
+  /** ⚠️ banner text for files pending re-index, or "" when current. */
+  stalenessBanner(): string
+}
+
+export interface IndexService extends CodeGraphIndex {
+  root: string
+  readonly binding: string
+  dispose(): void
+}
+
+function isBunHashRuntime(
+  candidate: Partial<BunHashRuntime> | null | undefined
+): candidate is BunHashRuntime {
+  return typeof candidate?.file === "function" && typeof candidate?.CryptoHasher === "function"
+}
+
+export function createIndexService(opts: IndexServiceOptions): IndexService {
   const root = path.resolve(opts.root)
   const now = opts.now ?? Date.now
-  const runtimeCandidate = opts.bunRuntime === undefined ? globalThis.Bun : opts.bunRuntime
-  const bunRuntime =
-    typeof runtimeCandidate?.file === "function" &&
-    typeof runtimeCandidate?.CryptoHasher === "function"
-      ? runtimeCandidate
-      : null
+  const runtimeCandidate =
+    opts.bunRuntime === undefined
+      ? (globalThis as { Bun?: Partial<BunHashRuntime> }).Bun
+      : opts.bunRuntime
+  const bunRuntime = isBunHashRuntime(runtimeCandidate) ? runtimeCandidate : null
   const dbPath = opts.forceMemory
     ? undefined
     : (opts.dbPath ?? path.join(root, ".cognia", "codegraph.db"))
 
-  let store = null
-  let initPromise = null
-  let watcher = null
+  let store: CodeGraphStore | null = null
+  let initPromise: Promise<void> | null = null
+  let watcher: Watcher | null = null
   let lastSyncAt = 0
   /** files known-changed (from the watcher) awaiting re-index → drives the banner */
-  const pendingPaths = new Set()
+  const pendingPaths = new Set<string>()
   /** snippet LRU: relPath → { hash, lines } */
-  const snippetCache = new Map()
+  const snippetCache = new Map<string, { hash: string | null; lines: string[] }>()
 
-  function ensureStore() {
+  /** The open store; the query methods run only after `ensureIndexed()`. */
+  function openStore(): CodeGraphStore {
+    if (!store) throw new Error("code graph is not indexed; await ensureIndexed() first")
+    return store
+  }
+
+  function ensureStore(): CodeGraphStore {
     if (!store) {
       if (dbPath) {
         try {
@@ -74,7 +130,7 @@ export function createIndexService(opts) {
   }
 
   /** Walk the tree → repo-relative source paths we can extract. */
-  async function listSourceFiles() {
+  async function listSourceFiles(): Promise<string[]> {
     const ignore = await loadIgnoreGlobs(root)
     const all = await fastGlob("**/*", {
       cwd: root,
@@ -87,7 +143,7 @@ export function createIndexService(opts) {
     return all.filter((rel) => isSupportedFile(rel))
   }
 
-  async function hashFile(abs) {
+  async function hashFile(abs: string): Promise<{ hash: string; size: number; buf: Uint8Array }> {
     if (bunRuntime) {
       const buf = await bunRuntime.file(abs).bytes()
       const hash = new bunRuntime.CryptoHasher("sha1").update(buf).digest("hex")
@@ -98,9 +154,9 @@ export function createIndexService(opts) {
   }
 
   /** Re-extract a single file into the store (or delete it when gone). */
-  async function indexOne(rel) {
+  async function indexOne(rel: string): Promise<{ changed: boolean }> {
     const abs = path.join(root, rel)
-    let stat
+    let stat: fs.Stats
     try {
       stat = await fsp.stat(abs)
     } catch {
@@ -132,7 +188,7 @@ export function createIndexService(opts) {
   }
 
   /** Full build (or warm delta): index every changed/new file, drop the gone. */
-  async function buildAll() {
+  async function buildAll(): Promise<void> {
     ensureStore()
     const onDisk = await listSourceFiles()
     const onDiskSet = new Set(onDisk)
@@ -142,17 +198,18 @@ export function createIndexService(opts) {
       if (r.changed) changed++
     }
     // Drop files removed from disk since the last index.
-    for (const f of store.allFiles()) {
+    const current = openStore()
+    for (const f of current.allFiles()) {
       if (!onDiskSet.has(f.path)) {
-        store.deleteFile(f.path)
+        current.deleteFile(f.path)
         changed++
       }
     }
-    if (changed > 0) resolveAll(store)
+    if (changed > 0) resolveAll(current)
     lastSyncAt = now()
   }
 
-  function maybeStartWatcher() {
+  function maybeStartWatcher(): void {
     if (!opts.watch || watcher) return
     watcher = startWatcher(root, {
       accept: (abs) => isSupportedFile(abs),
@@ -165,11 +222,11 @@ export function createIndexService(opts) {
     })
   }
 
-  async function ensureIndexed() {
+  async function ensureIndexed(): Promise<void> {
     if (!initPromise) {
       initPromise = buildAll()
         .then(() => maybeStartWatcher())
-        .catch((err) => {
+        .catch((err: unknown) => {
           initPromise = null
           throw err
         })
@@ -182,7 +239,7 @@ export function createIndexService(opts) {
    * is active this processes only its pending set; otherwise it throttled-walks
    * for content-hash deltas.
    */
-  async function syncStale() {
+  async function syncStale(): Promise<number> {
     await ensureIndexed()
     let changed = 0
     if (pendingPaths.size > 0) {
@@ -206,20 +263,21 @@ export function createIndexService(opts) {
           snippetCache.delete(rel)
         }
       }
-      for (const f of store.allFiles()) {
+      const current = openStore()
+      for (const f of current.allFiles()) {
         if (!onDiskSet.has(f.path)) {
-          store.deleteFile(f.path)
+          current.deleteFile(f.path)
           changed++
         }
       }
       lastSyncAt = now()
     }
-    if (changed > 0) resolveAll(store)
+    if (changed > 0) resolveAll(openStore())
     return changed
   }
 
   /** Verbatim source for a node's line range, cached per file+hash. */
-  function getSnippet(node) {
+  function getSnippet(node: GraphNode | null | undefined): string {
     if (!node || node.kind === "file") return ""
     const rel = node.file_path
     const lines = readLines(rel)
@@ -229,7 +287,7 @@ export function createIndexService(opts) {
     return lines.slice(start - 1, end).join("\n")
   }
 
-  function readLines(rel) {
+  function readLines(rel: string): string[] | null {
     const fileRec = store?.getFile(rel)
     const cached = snippetCache.get(rel)
     if (cached && fileRec && cached.hash === fileRec.content_hash) return cached.lines
@@ -240,7 +298,8 @@ export function createIndexService(opts) {
       snippetCache.delete(rel)
       snippetCache.set(rel, { hash: fileRec?.content_hash ?? null, lines })
       if (snippetCache.size > SNIPPET_CACHE_MAX) {
-        snippetCache.delete(snippetCache.keys().next().value)
+        const oldest = snippetCache.keys().next()
+        if (!oldest.done) snippetCache.delete(oldest.value)
       }
       return lines
     } catch {
@@ -248,13 +307,13 @@ export function createIndexService(opts) {
     }
   }
 
-  function toRel(abs) {
+  function toRel(abs: string): string | null {
     const rel = path.relative(root, abs)
     if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null
     return rel.split(path.sep).join("/")
   }
 
-  // ---- query surface (consumed by tools.mjs) ----
+  // ---- query surface (consumed by the code-graph tools) ----
 
   return {
     root,
@@ -266,37 +325,38 @@ export function createIndexService(opts) {
     syncStale,
 
     search(query, { kind, limit } = {}) {
-      return store.searchNodes(query, { kind, limit })
+      return openStore().searchNodes(query, { kind, limit })
     },
     getNode(idOrQname) {
-      return store.getNode(idOrQname)
+      return openStore().getNode(idOrQname)
     },
     snippetFor(node) {
       return getSnippet(node)
     },
     callers(id, depth) {
-      return graph.callers(store, id, depth)
+      return graph.callers(openStore(), id, depth)
     },
     callees(id, depth) {
-      return graph.callees(store, id, depth)
+      return graph.callees(openStore(), id, depth)
     },
     impact(id, depth) {
-      return graph.impact(store, id, depth)
+      return graph.impact(openStore(), id, depth)
     },
     context(query, { maxNodes, namedSeeds } = {}) {
-      return buildContext(store, query, {
+      const current = openStore()
+      return buildContext(current, query, {
         getSnippet,
-        fileCount: store.stats().fileCount,
+        fileCount: current.stats().fileCount,
         maxNodes,
         namedSeeds,
       })
     },
     files() {
-      return store.allFiles()
+      return openStore().allFiles()
     },
 
     status() {
-      const s = store
+      const s: Omit<IndexStatus, "indexed" | "root" | "watching" | "pending"> = store
         ? store.stats()
         : {
             fileCount: 0,
@@ -315,7 +375,6 @@ export function createIndexService(opts) {
       }
     },
 
-    /** ⚠️ banner text for files pending re-index, or "" when current. */
     stalenessBanner() {
       if (pendingPaths.size === 0) return ""
       const sample = [...pendingPaths].slice(0, 5).join(", ")

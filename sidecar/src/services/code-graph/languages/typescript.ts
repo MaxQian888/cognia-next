@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // TypeScript / TSX / JavaScript extraction descriptor.
 //
 // The generic extractor (`../extractor.mjs`) walks the tree-sitter AST and
@@ -11,15 +10,16 @@
 // grammar) parses — JSX is irrelevant to symbol/import extraction, and the
 // node types below exist in all three grammars.
 
+import type { SymbolModifiers, TreeNode } from "./index.ts"
+
 /** grammar keys these rules are valid for. */
-export const grammarKeys = ["typescript", "tsx"]
+export const grammarKeys: readonly string[] = ["typescript", "tsx"]
 
 /**
  * AST node type → graph symbol kind. A `variable_declarator` is refined later
  * (`refineKind`) into function/constant/variable based on its initializer.
- * @type {Readonly<Record<string, string>>}
  */
-export const SYMBOL_TYPES = Object.freeze({
+export const SYMBOL_TYPES: Readonly<Record<string, string>> = Object.freeze({
   function_declaration: "function",
   generator_function_declaration: "function",
   function_signature: "function",
@@ -34,10 +34,14 @@ export const SYMBOL_TYPES = Object.freeze({
 })
 
 /** Call-site node types → an unresolved `calls` edge. */
-export const CALL_TYPES = Object.freeze(new Set(["call_expression", "new_expression"]))
+export const CALL_TYPES: ReadonlySet<string> = Object.freeze(
+  new Set(["call_expression", "new_expression"])
+)
 
 /** Import node types → an unresolved `imports` edge. */
-export const IMPORT_TYPES = Object.freeze(new Set(["import_statement", "export_statement"]))
+export const IMPORT_TYPES: ReadonlySet<string> = Object.freeze(
+  new Set(["import_statement", "export_statement"])
+)
 
 const IDENTIFIER_TYPES = new Set([
   "identifier",
@@ -49,10 +53,8 @@ const IDENTIFIER_TYPES = new Set([
 /**
  * Symbol name for a definition node. Defaults to the `name` field; for
  * `variable_declarator` the name is also the `name` field.
- * @param {any} node
- * @returns {string | null}
  */
-export function nodeName(node) {
+export function nodeName(node: TreeNode): string | null {
   const named = node.childForFieldName?.("name")
   if (named) return named.text
   for (const child of node.namedChildren ?? []) {
@@ -64,11 +66,8 @@ export function nodeName(node) {
 /**
  * Refine a `variable_declarator`'s kind: `const f = () => …` / `= function` →
  * `function`; a `const` binding → `constant`; otherwise `variable`.
- * @param {any} node  the variable_declarator
- * @param {string} baseKind
- * @returns {string}
  */
-export function refineKind(node, baseKind) {
+export function refineKind(node: TreeNode, baseKind: string): string {
   if (baseKind !== "variable") return baseKind
   const value = node.childForFieldName?.("value")
   if (value && (value.type === "arrow_function" || value.type === "function_expression"))
@@ -87,12 +86,12 @@ export function refineKind(node, baseKind) {
  * graph node (e.g. a loop index). We keep all top-level/class members; skip
  * un-named declarators.
  */
-export function shouldSkip(node) {
+export function shouldSkip(node: TreeNode): boolean {
   return nodeName(node) == null
 }
 
 /** Callee name from a call/new expression. */
-export function calleeName(callNode) {
+export function calleeName(callNode: TreeNode): string | null {
   const fn = callNode.childForFieldName?.("function") ?? callNode.childForFieldName?.("constructor")
   if (!fn) {
     // new_expression uses `constructor` field in some grammar versions; fall
@@ -104,7 +103,7 @@ export function calleeName(callNode) {
 }
 
 /** For `a.b.c(…)` return `c`; for `f(…)` return `f`. */
-function lastIdentifier(node) {
+function lastIdentifier(node: TreeNode | null | undefined): string | null {
   if (!node) return null
   if (IDENTIFIER_TYPES.has(node.type)) return node.text
   if (node.type === "member_expression") {
@@ -124,7 +123,7 @@ function lastIdentifier(node) {
  * Import module specifier (the quoted source) for an import/export statement.
  * Returns null for statements with no `from "…"` clause (e.g. `export const x`).
  */
-export function importSource(importNode) {
+export function importSource(importNode: TreeNode): string | null {
   const src = importNode.childForFieldName?.("source")
   if (src) return stripQuotes(src.text)
   for (const child of importNode.namedChildren ?? []) {
@@ -133,7 +132,7 @@ export function importSource(importNode) {
   return null
 }
 
-function stripQuotes(text) {
+function stripQuotes(text: string): string {
   if (typeof text !== "string") return text
   return text.replace(/^['"`]|['"`]$/g, "")
 }
@@ -141,12 +140,10 @@ function stripQuotes(text) {
 /**
  * Base type names a class/interface extends or implements. Reads the
  * `class_heritage` (classes) or `extends_type_clause` (interfaces).
- * @param {any} node
- * @returns {string[]}
  */
-export function baseNames(node) {
-  const out = []
-  const collectFrom = (n) => {
+export function baseNames(node: TreeNode): string[] {
+  const out: string[] = []
+  const collectFrom = (n: TreeNode | null | undefined) => {
     if (!n) return
     for (const child of n.namedChildren ?? []) {
       if (child.type === "type_identifier" || child.type === "identifier") {
@@ -178,16 +175,13 @@ export function baseNames(node) {
 
 /**
  * Language-specific modifiers + signature bits for a symbol node.
- * @param {any} node
- * @param {string} source  full file source (for slicing the signature)
- * @returns {{ isExported: boolean, isAsync: boolean, isStatic: boolean, isAbstract: boolean, visibility: string|null, returnType: string|null, signature: string }}
  */
-export function modifiers(node, source) {
+export function modifiers(node: TreeNode, source: string): SymbolModifiers {
   let isExported = false
   let isAsync = false
   let isStatic = false
   let isAbstract = false
-  let visibility = null
+  let visibility: string | null = null
 
   // `export`/`export default` wraps the declaration in an export_statement.
   let p = node.parent
@@ -227,17 +221,17 @@ export function modifiers(node, source) {
 }
 
 /** The header text (declaration up to the body), single-lined & trimmed. */
-export function buildSignature(node, source) {
+export function buildSignature(node: TreeNode, source: string): string {
   const body = node.childForFieldName?.("body")
   const end = body ? body.startIndex : node.endIndex
   const text = source.slice(node.startIndex, end)
   return collapse(text)
 }
 
-function sliceHead(node, source) {
+function sliceHead(node: TreeNode, source: string): string {
   return source.slice(node.startIndex, Math.min(node.endIndex, node.startIndex + 64))
 }
 
-function collapse(text) {
+function collapse(text: unknown): string {
   return String(text).replace(/\s+/g, " ").trim().slice(0, 400)
 }

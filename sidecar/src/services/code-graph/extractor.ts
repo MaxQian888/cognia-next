@@ -1,8 +1,7 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // AST → graph extraction.
 //
 // `extractFile(filePath, source, lang)` parses the file with the right grammar
-// and walks the tree, consulting the per-language descriptor (languages/*.mjs)
+// and walks the tree, consulting the per-language descriptor (languages/*.ts)
 // to produce `{ nodes, edges, unresolved }`:
 //   - a `file` node is the root container
 //   - symbol nodes (function/class/method/interface/struct/enum/…) with a
@@ -13,36 +12,58 @@
 //   - inheritance becomes `unresolved_refs` (kind "extends"/"implements")
 //
 // Cross-file links can't be resolved here (we only see one file), so anything
-// that isn't trivially local is deferred to `resolver-pass.mjs`.
+// that isn't trivially local is deferred to `resolver-pass.ts`.
 
 import path from "node:path"
 
-import { languageFor, grammarKeyFor, queriesFor } from "./languages/index.ts"
-import { getParser } from "./parser.ts"
+import {
+  languageFor,
+  grammarKeyFor,
+  queriesFor,
+  type LanguageDescriptor,
+  type SymbolModifiers,
+  type TreeNode,
+} from "./languages/index.ts"
+import { getParser, type ParsedTree } from "./parser.ts"
+import type { GraphEdge, GraphNode, UnresolvedRef } from "./store-memory.ts"
+
+/** A graph node as extracted; the file node also carries its symbol count. */
+export type ExtractedNode = GraphNode & { node_count?: number }
+
+/** One file's extraction: the graph pieces plus what went wrong. */
+export interface ExtractResult {
+  nodes: ExtractedNode[]
+  edges: GraphEdge[]
+  unresolved: UnresolvedRef[]
+  language: string | null
+  errors: string[]
+}
 
 /** Build the deterministic node id for a symbol. */
-export function nodeId(filePath, qualifiedName, startLine) {
+export function nodeId(filePath: string, qualifiedName: string, startLine: number): string {
   return `${filePath}::${qualifiedName}::${startLine}`
 }
 
 /** The file node id is just its path. */
-export function fileNodeId(filePath) {
+export function fileNodeId(filePath: string): string {
   return filePath
 }
 
 /**
- * @param {string} filePath  path used as-is for ids (caller normalises to repo-relative)
- * @param {string} source
- * @param {string} [langHint]  optional language id override
- * @returns {Promise<{ nodes: object[], edges: object[], unresolved: object[], language: string|null, errors: string[] }>}
+ * `filePath` is used as-is for ids (the caller normalises it to
+ * repo-relative); `langHint` overrides the language the extension implies.
  */
-export async function extractFile(filePath, source, langHint) {
+export async function extractFile(
+  filePath: string,
+  source: string,
+  langHint?: string
+): Promise<ExtractResult> {
   const language = langHint ?? languageFor(filePath)
   const grammarKey = grammarKeyFor(filePath)
-  const errors = []
-  const nodes = []
-  const edges = []
-  const unresolved = []
+  const errors: string[] = []
+  const nodes: ExtractedNode[] = []
+  const edges: GraphEdge[] = []
+  const unresolved: UnresolvedRef[] = []
 
   if (!language || !grammarKey) {
     return { nodes, edges, unresolved, language: null, errors: ["unsupported language"] }
@@ -51,7 +72,7 @@ export async function extractFile(filePath, source, langHint) {
   const now = Date.now()
   const fileId = fileNodeId(filePath)
   // The root container node for the file.
-  nodes.push({
+  const fileNode: ExtractedNode = {
     id: fileId,
     kind: "file",
     name: path.basename(filePath),
@@ -70,14 +91,15 @@ export async function extractFile(filePath, source, langHint) {
     is_static: 0,
     return_type: null,
     updated_at: now,
-  })
+  }
+  nodes.push(fileNode)
 
-  let tree
+  let tree: ParsedTree
   try {
     const parser = await getParser(grammarKey)
     tree = parser.parse(source)
   } catch (err) {
-    errors.push(`parse: ${err?.message ?? err}`)
+    errors.push(`parse: ${(err as Error | null)?.message ?? err}`)
     return { nodes, edges, unresolved, language, errors }
   }
 
@@ -85,14 +107,14 @@ export async function extractFile(filePath, source, langHint) {
   const symbolTypes = bundle.SYMBOL_TYPES
   const callTypes = bundle.CALL_TYPES
   const importTypes = bundle.IMPORT_TYPES
-  /** @type {Map<string, object>} bare name → first local node (for impl edges) */
-  const localByName = new Map()
+  /** bare name → first local node (for impl edges) */
+  const localByName = new Map<string, GraphNode>()
 
   /**
    * Recursive visitor. `container` is the nearest enclosing symbol node (graph
    * node), `qnamePrefix` the qualified-name prefix from that container chain.
    */
-  const visit = (tsNode, container, qnamePrefix) => {
+  const visit = (tsNode: TreeNode, container: GraphNode | null, qnamePrefix: string): void => {
     let nextContainer = container
     let nextPrefix = qnamePrefix
 
@@ -105,7 +127,7 @@ export async function extractFile(filePath, source, langHint) {
         const startLine = tsNode.startPosition.row + 1
         const mods = safeModifiers(bundle, tsNode, source)
         const id = nodeId(filePath, qualified, startLine)
-        const graphNode = {
+        const graphNode: GraphNode = {
           id,
           kind,
           name,
@@ -215,7 +237,7 @@ export async function extractFile(filePath, source, langHint) {
   }
 
   // Record the symbol count on the file node for stats.
-  nodes[0].node_count = nodes.length - 1
+  fileNode.node_count = nodes.length - 1
   try {
     tree.delete?.()
   } catch {
@@ -225,7 +247,11 @@ export async function extractFile(filePath, source, langHint) {
   return { nodes, edges, unresolved, language, errors }
 }
 
-function safeModifiers(bundle, node, source) {
+function safeModifiers(
+  bundle: LanguageDescriptor,
+  node: TreeNode,
+  source: string
+): SymbolModifiers {
   try {
     return bundle.modifiers(node, source) ?? {}
   } catch {
@@ -233,7 +259,7 @@ function safeModifiers(bundle, node, source) {
   }
 }
 
-function safeBaseNames(bundle, node) {
+function safeBaseNames(bundle: LanguageDescriptor, node: TreeNode): string[] {
   try {
     return bundle.baseNames?.(node) ?? []
   } catch {
@@ -245,7 +271,7 @@ function safeBaseNames(bundle, node) {
  * Docstring heuristic: a preceding `comment` sibling for C-family languages, or
  * the first string literal in a Python function/class body.
  */
-function docstringFor(node, language, source) {
+function docstringFor(node: TreeNode, language: string, source: string): string | null {
   if (language === "python") {
     const body = node.childForFieldName?.("body")
     const first = body?.namedChildren?.[0]
@@ -273,7 +299,7 @@ function docstringFor(node, language, source) {
   return null
 }
 
-function cleanDoc(text) {
+function cleanDoc(text: string): string {
   return String(text)
     .replace(/^\/\*\*?|\*\/$/g, "")
     .replace(/^\/\/+/gm, "")
@@ -284,7 +310,7 @@ function cleanDoc(text) {
     .slice(0, 500)
 }
 
-function lineCount(source) {
+function lineCount(source: string): number {
   if (typeof source !== "string" || source.length === 0) return 1
   let n = 1
   for (let i = 0; i < source.length; i++) if (source[i] === "\n") n++

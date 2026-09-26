@@ -1,11 +1,11 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 
 import { createMemoryStore } from "./store-memory.ts"
+import type { GraphEdge, GraphNode } from "./store-memory.ts"
 import { callers, callees, impact, randomWalkWithRestart } from "./graph.ts"
 
-function n(id) {
+function n(id: string): GraphNode {
   return {
     id,
     kind: "function",
@@ -28,15 +28,20 @@ function n(id) {
   }
 }
 
+/** A fixture edge; the nullable columns default to null, as extracted rows carry them. */
+function edge(e: Pick<GraphEdge, "source" | "target" | "kind" | "provenance">): GraphEdge {
+  return { metadata: null, line: null, col: null, ...e }
+}
+
 /** a → b → c → a  (cycle); plus d → b */
 function cyclicStore() {
   const s = createMemoryStore()
   s.insertNodes(["a", "b", "c", "d"].map(n))
   s.insertEdges([
-    { source: "a", target: "b", kind: "calls", provenance: "t" },
-    { source: "b", target: "c", kind: "calls", provenance: "t" },
-    { source: "c", target: "a", kind: "calls", provenance: "t" },
-    { source: "d", target: "b", kind: "calls", provenance: "t" },
+    edge({ source: "a", target: "b", kind: "calls", provenance: "t" }),
+    edge({ source: "b", target: "c", kind: "calls", provenance: "t" }),
+    edge({ source: "c", target: "a", kind: "calls", provenance: "t" }),
+    edge({ source: "d", target: "b", kind: "calls", provenance: "t" }),
   ])
   return s
 }
@@ -69,8 +74,8 @@ test("impact closes over multiple dependency kinds", () => {
   const s = createMemoryStore()
   s.insertNodes(["base", "child", "user"].map(n))
   s.insertEdges([
-    { source: "child", target: "base", kind: "extends", provenance: "t" },
-    { source: "user", target: "child", kind: "imports", provenance: "t" },
+    edge({ source: "child", target: "base", kind: "extends", provenance: "t" }),
+    edge({ source: "user", target: "child", kind: "imports", provenance: "t" }),
   ])
   const blast = impact(s, "base")
     .map((r) => r.id)
@@ -81,9 +86,9 @@ test("impact closes over multiple dependency kinds", () => {
 test("randomWalkWithRestart concentrates mass near seeds", () => {
   const s = cyclicStore()
   const scores = randomWalkWithRestart(s, ["a"])
-  assert.ok(scores.get("a") > 0)
+  assert.ok((scores.get("a") ?? 0) > 0)
   // b is adjacent to a (both directions) → should score above the far node.
-  assert.ok(scores.get("b") > 0)
+  assert.ok((scores.get("b") ?? 0) > 0)
   // every reached score is finite and positive
   for (const v of scores.values()) assert.ok(v > 0 && Number.isFinite(v))
 })
@@ -98,5 +103,5 @@ test("randomWalkWithRestart handles a dangling seed (no edges)", () => {
   const s = createMemoryStore()
   s.insertNodes([n("lonely")])
   const scores = randomWalkWithRestart(s, ["lonely"])
-  assert.ok(scores.get("lonely") > 0)
+  assert.ok((scores.get("lonely") ?? 0) > 0)
 })

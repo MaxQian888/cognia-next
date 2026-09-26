@@ -1,79 +1,124 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // In-memory code-graph store — the reference implementation and the graceful
 // fallback when `better-sqlite3` is unavailable. It mirrors the SQLite store's
 // public interface exactly (the parity test suite runs the same assertions
 // against both), trading FTS5 ranking for a tokenized inverted index.
 
-/**
- * @typedef {Object} GraphNode
- * @property {string} id
- * @property {string} kind
- * @property {string} name
- * @property {string} qualified_name
- * @property {string} file_path
- * @property {string} language
- * @property {number} start_line
- * @property {number} start_col
- * @property {number} end_line
- * @property {number} end_col
- * @property {string|null} docstring
- * @property {string|null} signature
- * @property {string|null} visibility
- * @property {number} is_exported
- * @property {number} is_async
- * @property {number} is_static
- * @property {string|null} return_type
- * @property {number} updated_at
- *
- * @typedef {Object} GraphEdge
- * @property {string} source
- * @property {string} target
- * @property {string} kind
- * @property {string|null} metadata
- * @property {number|null} line
- * @property {number|null} col
- * @property {string} provenance
- *
- * @typedef {Object} UnresolvedRef
- * @property {string} from_node_id
- * @property {string} reference_name
- * @property {string} reference_kind
- * @property {number|null} line
- * @property {number|null} col
- * @property {string|null} candidates
- * @property {string} file_path
- * @property {string} language
- *
- * @typedef {Object} FileRecord
- * @property {string} path
- * @property {string} content_hash
- * @property {string} language
- * @property {number} size
- * @property {number} modified_at
- * @property {number} indexed_at
- * @property {number} node_count
- * @property {string|null} errors
- */
+// The graph model both stores persist (the columns of ./schema.sql).
 
-export function createMemoryStore() {
-  /** @type {Map<string, FileRecord>} */
-  const files = new Map()
-  /** @type {Map<string, GraphNode>} */
-  const nodes = new Map()
-  /** @type {GraphEdge[]} */
-  let edges = []
-  /** @type {UnresolvedRef[]} */
-  let unresolved = []
+export interface GraphNode {
+  id: string
+  kind: string
+  name: string
+  qualified_name: string
+  file_path: string
+  language: string
+  start_line: number
+  start_col: number
+  end_line: number
+  end_col: number
+  docstring: string | null
+  signature: string | null
+  visibility: string | null
+  is_exported: number
+  is_async: number
+  is_static: number
+  return_type: string | null
+  updated_at: number
+}
+
+export interface GraphEdge {
+  source: string
+  target: string
+  kind: string
+  metadata: string | null
+  line: number | null
+  col: number | null
+  provenance: string
+}
+
+export interface UnresolvedRef {
+  /** Assigned by the store on insert. */
+  id?: number
+  from_node_id: string
+  reference_name: string
+  reference_kind: string
+  line: number | null
+  col: number | null
+  candidates: string | null
+  file_path: string
+  language: string
+}
+
+export interface FileRecord {
+  path: string
+  content_hash: string
+  /** Null only for a file no extractor claims (the column is nullable). */
+  language: string | null
+  size: number
+  modified_at: number
+  indexed_at: number
+  node_count: number
+  errors: string | null
+}
+
+/** One file's extracted graph, replaced as a unit. */
+export interface FileGraph {
+  nodes?: GraphNode[]
+  edges?: GraphEdge[]
+  unresolved?: UnresolvedRef[]
+  file?: FileRecord
+}
+
+export interface StoreStats {
+  fileCount: number
+  nodeCount: number
+  edgeCount: number
+  unresolvedCount: number
+  languages: Record<string, number>
+  binding: "sqlite" | "memory"
+}
+
+/** The contract both backends implement; the parity suite runs it against each. */
+export interface CodeGraphStore {
+  binding: "sqlite" | "memory"
+  upsertFile(rec: FileRecord): void
+  getFile(path: string): FileRecord | null
+  allFiles(): FileRecord[]
+  deleteFile(path: string): void
+  insertNodes(list: readonly GraphNode[] | null | undefined): void
+  insertEdges(list: readonly GraphEdge[] | null | undefined): void
+  insertUnresolved(list: readonly UnresolvedRef[] | null | undefined): void
+  /**
+   * Transactional per-file replace: drop the file's existing graph, then
+   * insert the new nodes/edges/unresolved and upsert the file record.
+   */
+  replaceFileGraph(filePath: string, graph?: FileGraph): void
+  getNode(idOrQname: string): GraphNode | null
+  nodesByName(name: string): GraphNode[]
+  allNodes(): GraphNode[]
+  searchNodes(query: unknown, opts?: { kind?: string | undefined; limit?: number }): GraphNode[]
+  edgesFrom(id: string, kind?: string): GraphEdge[]
+  edgesTo(id: string, kind?: string): GraphEdge[]
+  allEdges(): GraphEdge[]
+  unresolvedAll(): UnresolvedRef[]
+  deleteUnresolved(ids: Iterable<number | undefined>): void
+  stats(): StoreStats
+  close(): void
+}
+
+export function createMemoryStore(): CodeGraphStore {
+  const files = new Map<string, FileRecord>()
+  const nodes = new Map<string, GraphNode>()
+  let edges: GraphEdge[] = []
+  let unresolved: UnresolvedRef[] = []
   // file_path → Set(nodeId) for fast per-file deletion.
-  /** @type {Map<string, Set<string>>} */
-  const nodesByFile = new Map()
+  const nodesByFile = new Map<string, Set<string>>()
   // tokenized inverted index: token → Set(nodeId)
-  /** @type {Map<string, Set<string>>} */
-  const invIndex = new Map()
+  const invIndex = new Map<string, Set<string>>()
 
   let nextUnresolvedId = 1
 
-  function indexNode(node) {
+  function indexNode(node: GraphNode): void {
     let set = nodesByFile.get(node.file_path)
     if (!set) {
       set = new Set()
@@ -90,7 +135,7 @@ export function createMemoryStore() {
     }
   }
 
-  function deindexNode(node) {
+  function deindexNode(node: GraphNode): void {
     const set = nodesByFile.get(node.file_path)
     if (set) set.delete(node.id)
     for (const tok of tokenize(node)) {
@@ -102,11 +147,11 @@ export function createMemoryStore() {
     }
   }
 
-  function removeFileGraph(filePath) {
+  function removeFileGraph(filePath: string): void {
     // Capture the file's node ids BEFORE deleting them, so edges keyed on those
     // sources can still be matched (a post-delete lookup would miss them).
     const ids = nodesByFile.get(filePath)
-    const owned = ids ? new Set(ids) : new Set()
+    const owned = ids ? new Set(ids) : new Set<string>()
     if (ids) {
       for (const id of ids) {
         const node = nodes.get(id)
@@ -152,10 +197,6 @@ export function createMemoryStore() {
       for (const u of list ?? []) unresolved.push({ ...u, id: nextUnresolvedId++ })
     },
 
-    /**
-     * Transactional per-file replace: drop the file's existing graph, then
-     * insert the new nodes/edges/unresolved and upsert the file record.
-     */
     replaceFileGraph(filePath, { nodes: ns = [], edges: es = [], unresolved: us = [], file } = {}) {
       removeFileGraph(filePath)
       for (const node of ns) {
@@ -168,14 +209,14 @@ export function createMemoryStore() {
     },
 
     getNode(idOrQname) {
-      if (nodes.has(idOrQname)) return nodes.get(idOrQname)
+      if (nodes.has(idOrQname)) return nodes.get(idOrQname)!
       for (const node of nodes.values()) {
         if (node.qualified_name === idOrQname) return node
       }
       return null
     },
     nodesByName(name) {
-      const out = []
+      const out: GraphNode[] = []
       for (const node of nodes.values()) {
         if (node.name === name || node.qualified_name === name) out.push(node)
       }
@@ -188,7 +229,7 @@ export function createMemoryStore() {
     searchNodes(query, { kind, limit = 20 } = {}) {
       const terms = tokenizeQuery(query)
       if (terms.length === 0) return []
-      const scored = []
+      const scored: { node: GraphNode; score: number }[] = []
       for (const node of nodes.values()) {
         if (node.kind === "file") continue // mirror the sqlite store (file nodes excluded)
         if (kind && node.kind !== kind) continue
@@ -220,9 +261,11 @@ export function createMemoryStore() {
     },
 
     stats() {
-      const languages = {}
+      const languages: Record<string, number> = {}
       for (const f of files.values()) {
-        languages[f.language] = (languages[f.language] ?? 0) + 1
+        // A null language counts under "null", as the SQLite GROUP BY key does.
+        const key = String(f.language)
+        languages[key] = (languages[key] ?? 0) + 1
       }
       return {
         fileCount: files.size,
@@ -252,9 +295,9 @@ export function createMemoryStore() {
 const SPLIT = /[^A-Za-z0-9]+/
 
 /** Tokens for a node: split identifiers on case/separator boundaries. */
-function tokenize(node) {
+function tokenize(node: GraphNode): Set<string> {
   const fields = [node.name, node.qualified_name, node.docstring, node.signature]
-  const toks = new Set()
+  const toks = new Set<string>()
   for (const f of fields) {
     if (!f) continue
     for (const piece of splitIdentifier(String(f))) toks.add(piece.toLowerCase())
@@ -262,16 +305,16 @@ function tokenize(node) {
   return toks
 }
 
-function tokenizeQuery(query) {
+function tokenizeQuery(query: unknown): string[] {
   if (typeof query !== "string") return []
-  const out = new Set()
+  const out = new Set<string>()
   for (const piece of splitIdentifier(query)) out.add(piece.toLowerCase())
   return [...out]
 }
 
 /** camelCase / snake_case / dotted → constituent words + the whole token. */
-export function splitIdentifier(text) {
-  const out = []
+export function splitIdentifier(text: unknown): string[] {
+  const out: string[] = []
   for (const raw of String(text).split(SPLIT)) {
     if (!raw) continue
     out.push(raw)
@@ -282,7 +325,7 @@ export function splitIdentifier(text) {
   return out
 }
 
-function scoreNode(node, terms, rawQuery) {
+function scoreNode(node: GraphNode, terms: readonly string[], rawQuery: unknown): number {
   const nameLower = node.name.toLowerCase()
   const qnameLower = node.qualified_name.toLowerCase()
   const q = String(rawQuery).toLowerCase()
