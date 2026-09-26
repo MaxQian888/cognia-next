@@ -546,6 +546,15 @@ export async function dispatchCommand(
       await markSessionReadOnHost(sessionId, readThrough as number)
       return null
     }
+    case "session_mark_unread": {
+      const sessionId = payload.sessionId
+      if (typeof sessionId !== "string" || !sessionId) {
+        throw new Error("Invalid session_mark_unread payload")
+      }
+      const { markSessionUnreadOnHost } = await import("@/lib/db/session-state")
+      await markSessionUnreadOnHost(sessionId)
+      return null
+    }
     case "session_attach":
       return sessionAttach(payload)
     case "session_detach":

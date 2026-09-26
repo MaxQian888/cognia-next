@@ -163,6 +163,12 @@ describe("an intent may ask, never assert", () => {
       { kind: "transcript.edit", messageId: "m", text: "x" },
       { kind: "transcript.truncate" },
       { kind: "session.import", envelope: null },
+      // List organization lands on the `sessions` row, not the channel; a
+      // delete is not done until the Host confirms the tombstone.
+      { kind: "session.pin", pinned: true },
+      { kind: "session.folder", folderId: "f1" },
+      { kind: "session.order", manualOrder: 2, sectionKey: "pinned" },
+      { kind: "session.delete" },
     ] satisfies AllowedHostStateIntent[]) {
       expect(reduceHostStateIntent(running, action(intent))).toBe(running)
     }
@@ -223,6 +229,10 @@ describe("operations", () => {
       "session.create",
       "session.rename",
       "session.archive",
+      "session.pin",
+      "session.folder",
+      "session.order",
+      "session.delete",
       "draft.replace",
       "transcript.edit",
       "transcript.truncate",
@@ -861,6 +871,11 @@ describe("wire guards", () => {
     { kind: "session.create", title: "t" },
     { kind: "session.rename", title: "t" },
     { kind: "session.archive", archived: true },
+    { kind: "session.pin", pinned: false },
+    { kind: "session.folder", folderId: "f1" },
+    { kind: "session.folder", folderId: null },
+    { kind: "session.order", manualOrder: 0, sectionKey: "folder:f1" },
+    { kind: "session.delete" },
     { kind: "draft.replace", text: "t", attachments: [] },
     { kind: "message.enqueue", messageId: "m", text: "t", attachments: [] },
     { kind: "turn.steer", text: "t" },
@@ -932,6 +947,17 @@ describe("wire guards", () => {
       { kind: "session.create", title: 1 },
       { kind: "session.rename" },
       { kind: "session.archive", archived: "yes" },
+      { kind: "session.pin" },
+      { kind: "session.pin", pinned: 1 },
+      // Absent is not "unfile": the field is required and explicit.
+      { kind: "session.folder" },
+      { kind: "session.folder", folderId: "" },
+      { kind: "session.folder", folderId: 7 },
+      { kind: "session.order", manualOrder: -1, sectionKey: "s" },
+      { kind: "session.order", manualOrder: 1.5, sectionKey: "s" },
+      { kind: "session.order", manualOrder: 0, sectionKey: "" },
+      { kind: "session.order", manualOrder: 0 },
+      { kind: "session.delete", cascade: false },
       { kind: "draft.replace", text: "t", attachments: [{ name: "n" }] },
       { kind: "message.enqueue", messageId: "", text: "t", attachments: [] },
       { kind: "turn.steer", text: 1 },
@@ -1369,6 +1395,10 @@ describe("hostStateIntentCapability", () => {
     "session.create": "process.spawn",
     "session.rename": "workspace.write",
     "session.archive": "workspace.write",
+    "session.pin": "workspace.write",
+    "session.folder": "workspace.write",
+    "session.order": "workspace.write",
+    "session.delete": "host.admin",
     "draft.replace": "workspace.write",
     "message.enqueue": "workspace.write",
     "turn.steer": "workspace.write",
@@ -1385,6 +1415,10 @@ describe("hostStateIntentCapability", () => {
     { kind: "session.create", title: "t" },
     { kind: "session.rename", title: "t" },
     { kind: "session.archive", archived: true },
+    { kind: "session.pin", pinned: true },
+    { kind: "session.folder", folderId: null },
+    { kind: "session.order", manualOrder: 3, sectionKey: "recent" },
+    { kind: "session.delete" },
     { kind: "draft.replace", text: "t", attachments: [] },
     { kind: "message.enqueue", messageId: "m", text: "t", attachments: [] },
     { kind: "turn.steer", text: "t" },
@@ -1437,11 +1471,24 @@ describe("hostStateIntentCapability", () => {
         "elicitation.respond",
         "message.enqueue",
         "session.archive",
+        "session.folder",
+        "session.order",
+        "session.pin",
         "session.rename",
         "turn.abort",
         "turn.followup",
         "turn.steer",
       ].sort()
+    )
+  })
+
+  it("keeps deleting a conversation owner-only, while Remote Control may organize it", () => {
+    const controller = { deviceId: "device-control", grants: ["host.observe", "workspace.write"] }
+    const owner = { deviceId: "device-owner", grants: ["workspace.write", "host.admin"] }
+    expect(callerMaySubmitHostStateIntent(controller, { kind: "session.delete" })).toBe(false)
+    expect(callerMaySubmitHostStateIntent(owner, { kind: "session.delete" })).toBe(true)
+    expect(callerMaySubmitHostStateIntent(controller, { kind: "session.pin", pinned: true })).toBe(
+      true
     )
   })
 

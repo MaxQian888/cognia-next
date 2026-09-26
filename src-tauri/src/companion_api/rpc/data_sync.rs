@@ -63,6 +63,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "bot_delivery_replay",
     "device_capabilities_report",
     "session_mark_read",
+    "session_mark_unread",
     "session_attach",
     "session_detach",
     "room_send",
@@ -772,6 +773,7 @@ pub(super) async fn dispatch(
         // host goal loops. Same generic bridge; TS-side dispatch arms live in
         // `lib/companion/desktop-write-source.ts`. Gated by CONTROL_COMMANDS.
         | "session_mark_read"
+        | "session_mark_unread"
         | "session_attach"
         | "session_detach"
         // ADR-0177 team rooms — a companion hands a room turn to this host's

@@ -45,23 +45,56 @@ export function syncSessionState(transport: Transport, cursor: SyncCursor): Prom
             .anyOf(["pending", "sending"])
             .filter(
               (job) =>
-                job.command === "session_mark_read" &&
+                (job.command === "session_mark_read" || job.command === "session_mark_unread") &&
                 job.accountId === scope?.accountId &&
                 job.targetId === scope?.targetId
             )
             .toArray()
           assertCurrent()
+          // The user's most recent read/unread choice per session. Both relay
+          // on one ordered channel, so the latest one is what the Host will end
+          // on once the queue drains — and what the row must show until then.
+          const latestChoice = new Map<string, (typeof pending)[number]>()
+          for (const job of pending) {
+            const sessionId = job.payload.sessionId
+            if (typeof sessionId !== "string") continue
+            const previous = latestChoice.get(sessionId)
+            if (
+              !previous ||
+              job.createdAt > previous.createdAt ||
+              (job.createdAt === previous.createdAt &&
+                (job.clientSeq ?? 0) > (previous.clientSeq ?? 0))
+            ) {
+              latestChoice.set(sessionId, job)
+            }
+          }
           await db.sessionState.bulkPut(
             rows.map(({ id: _id, ...row }) => {
+              if (latestChoice.get(row.sessionId)?.command === "session_mark_unread") {
+                // A pending "mark unread" is not undone by a Host row that has
+                // not applied it yet.
+                return { ...row, unreadCount: Math.max(1, row.unreadCount) } as SessionStateRow
+              }
               const readThrough = pending.reduce(
                 (latest, job) =>
+                  job.command === "session_mark_read" &&
                   job.payload.sessionId === row.sessionId &&
                   typeof job.payload.readThrough === "number"
                     ? Math.max(latest, job.payload.readThrough)
                     : latest,
                 -1
               )
-              return readThrough >= (row.updatedAt ?? row.lastReadAt)
+              const watermark = row.updatedAt ?? row.lastReadAt
+              // Same rule the Host applies (`markSessionReadOnHost`): a read
+              // covers everything up to its snapshot, and also a manual unread
+              // taken over that snapshot — the user changed their mind again.
+              const covered =
+                readThrough >= watermark ||
+                (readThrough >= 0 &&
+                  row.manualUnread !== undefined &&
+                  row.manualUnread.at === watermark &&
+                  row.manualUnread.from <= readThrough)
+              return covered
                 ? { ...row, unreadCount: 0, lastReadAt: Math.max(row.lastReadAt, readThrough) }
                 : (row as SessionStateRow)
             })

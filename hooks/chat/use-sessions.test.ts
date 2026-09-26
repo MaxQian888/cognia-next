@@ -28,6 +28,7 @@ const bulkArchiveSessionsMock = jest.fn()
 const bulkUnarchiveSessionsMock = jest.fn()
 const bulkSetSessionsPinnedMock = jest.fn()
 const assignSessionToFolderMock = jest.fn()
+const setSessionRanksMock = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
   createSession: (p: unknown) => createSessionMock(p),
   deleteSession: (id: string) => deleteSessionMock(id),
@@ -43,17 +44,20 @@ jest.mock("@/lib/db/sessions", () => ({
   bulkSetSessionsPinned: (ids: readonly string[], pinned: boolean) =>
     bulkSetSessionsPinnedMock(ids, pinned),
   assignSessionToFolder: (sid: string, fid: string | null) => assignSessionToFolderMock(sid, fid),
+  setSessionRanks: (ranks: unknown, sectionKey: string) => setSessionRanksMock(ranks, sectionKey),
 }))
 
 const listFoldersMock = jest.fn()
 const createFolderDbMock = jest.fn()
 const renameFolderDbMock = jest.fn()
 const deleteFolderDbMock = jest.fn()
+const listFolderMemberIdsMock = jest.fn()
 jest.mock("@/lib/db/session-folders", () => ({
   listFolders: (projectId?: string) => listFoldersMock(projectId),
   createFolder: (name: string) => createFolderDbMock(name),
   renameFolder: (id: string, name: string) => renameFolderDbMock(id, name),
-  deleteFolder: (id: string) => deleteFolderDbMock(id),
+  deleteFolder: (id: string, opts?: unknown) => deleteFolderDbMock(id, opts),
+  listFolderMemberIds: (id: string) => listFolderMemberIdsMock(id),
 }))
 
 const resolveCharacterByIdMock = jest.fn()
@@ -186,6 +190,8 @@ beforeEach(() => {
   bulkUnarchiveSessionsMock.mockReset().mockResolvedValue(undefined)
   bulkSetSessionsPinnedMock.mockReset().mockResolvedValue(undefined)
   assignSessionToFolderMock.mockReset().mockResolvedValue(undefined)
+  setSessionRanksMock.mockReset().mockResolvedValue(undefined)
+  listFolderMemberIdsMock.mockReset().mockResolvedValue([])
   listFoldersMock.mockReset().mockResolvedValue([])
   createFolderDbMock.mockReset().mockResolvedValue({ id: "f-new" })
   renameFolderDbMock.mockReset().mockResolvedValue(undefined)
@@ -711,7 +717,8 @@ describe("useSessions", () => {
       await result.current.remove("s1")
     })
     expect(closeSessionIpcMock).toHaveBeenCalledWith("s1")
-    expect(deleteSessionMock).toHaveBeenCalledWith("s1")
+    // The shared teardown (`deleteSessionsWithTeardown`) runs the one cascade.
+    expect(bulkDeleteSessionsMock).toHaveBeenCalledWith(["s1"])
     expect(chatStoreState.setActiveSession).toHaveBeenCalledWith(null)
   })
 
@@ -721,7 +728,7 @@ describe("useSessions", () => {
     await act(async () => {
       await result.current.remove("s1")
     })
-    expect(deleteSessionMock).toHaveBeenCalledWith("s1")
+    expect(bulkDeleteSessionsMock).toHaveBeenCalledWith(["s1"])
   })
 
   it("remove disarms the session's IM notify entry", async () => {
@@ -824,6 +831,160 @@ describe("useSessions", () => {
     })
     expect(bulkDeleteSessionsMock).not.toHaveBeenCalled()
     expect(closeSessionIpcMock).not.toHaveBeenCalled()
+  })
+
+  it("hands a delete to the Host and leaves the doomed conversation", async () => {
+    enqueueHostStateIntentMock.mockResolvedValue({ id: "queued", status: "pending" })
+    chatStoreState.activeSessionId = "s1"
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.remove("s1")
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "s1",
+      action: { kind: "session.delete" },
+    })
+    // The Host runs the cascade and the sidecar teardown; nothing local does.
+    expect(bulkDeleteSessionsMock).not.toHaveBeenCalled()
+    expect(closeSessionIpcMock).not.toHaveBeenCalled()
+    expect(mockedEmit).not.toHaveBeenCalledWith(SystemEvents.SESSION_DELETED, expect.anything())
+    expect(chatStoreState.setActiveSession).toHaveBeenCalledWith(null)
+  })
+
+  it("splits a bulk delete between the Host and the local cascade", async () => {
+    // s2 has no confirmed Host channel on this client, so it is deleted here.
+    enqueueHostStateIntentMock.mockImplementation(async ({ sessionId }: { sessionId: string }) =>
+      sessionId === "s2" ? null : { id: `q-${sessionId}` }
+    )
+    chatStoreState.activeSessionId = "s1"
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkRemove(["s1", "s2", "s1", "s3"])
+    })
+    expect(enqueueHostStateIntentMock.mock.calls.map(([input]) => input)).toEqual([
+      { sessionId: "s1", action: { kind: "session.delete" } },
+      { sessionId: "s2", action: { kind: "session.delete" } },
+      { sessionId: "s3", action: { kind: "session.delete" } },
+    ])
+    expect(bulkDeleteSessionsMock).toHaveBeenCalledWith(["s2"])
+    expect(chatStoreState.setActiveSession).toHaveBeenCalledWith(null)
+  })
+
+  it("forwards pins to the Host and pins only the remainder locally", async () => {
+    enqueueHostStateIntentMock.mockImplementation(async ({ sessionId }: { sessionId: string }) =>
+      sessionId === "s1" ? { id: "q-s1" } : null
+    )
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkSetPinned(["s1", "s2", "s2"], true)
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "s1",
+      action: { kind: "session.pin", pinned: true },
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledTimes(2)
+    expect(bulkSetSessionsPinnedMock).toHaveBeenCalledWith(["s2"], true)
+  })
+
+  it("does not touch Dexie for a pin every row of which the Host took", async () => {
+    enqueueHostStateIntentMock.mockResolvedValue({ id: "queued" })
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkSetPinned(["s1"], false)
+    })
+    expect(bulkSetSessionsPinnedMock).not.toHaveBeenCalled()
+  })
+
+  it("routes folder filing through the Host, one intent per row", async () => {
+    enqueueHostStateIntentMock.mockImplementation(async ({ sessionId }: { sessionId: string }) =>
+      sessionId === "s1" ? { id: "q-s1" } : null
+    )
+    dbTransactionMock.mockClear()
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.assignToFolder("s1", "f1")
+      await result.current.bulkAssignToFolder(["s1", "s2"], null)
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "s1",
+      action: { kind: "session.folder", folderId: "f1" },
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "s2",
+      action: { kind: "session.folder", folderId: null },
+    })
+    // Only the row no Host took is filed locally, still in one transaction.
+    expect(assignSessionToFolderMock.mock.calls).toEqual([["s2", null]])
+    expect(dbTransactionMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("skips the local transaction when the Host took the whole filing", async () => {
+    enqueueHostStateIntentMock.mockResolvedValue({ id: "queued" })
+    dbTransactionMock.mockClear()
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkAssignToFolder(["s1", "s2"], "f1")
+    })
+    expect(dbTransactionMock).not.toHaveBeenCalled()
+    expect(assignSessionToFolderMock).not.toHaveBeenCalled()
+  })
+
+  it("hands a folder's unfiles to the Host before deleting the folder", async () => {
+    listFolderMemberIdsMock.mockResolvedValue(["s1", "s2"])
+    enqueueHostStateIntentMock.mockImplementation(async ({ sessionId }: { sessionId: string }) =>
+      sessionId === "s1" ? { id: "q-s1" } : null
+    )
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.deleteFolder("f1")
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "s1",
+      action: { kind: "session.folder", folderId: null },
+    })
+    expect(deleteFolderDbMock).toHaveBeenCalledWith("f1", { leaveSessionIds: ["s1"] })
+  })
+
+  it("forwards a reorder with each row's rank in the full arrangement", async () => {
+    enqueueHostStateIntentMock.mockImplementation(async ({ sessionId }: { sessionId: string }) =>
+      sessionId === "b" ? null : { id: `q-${sessionId}` }
+    )
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.reorderSessions(["c", "b", "a"], "date:today")
+    })
+    expect(enqueueHostStateIntentMock.mock.calls.map(([input]) => input)).toEqual([
+      {
+        sessionId: "c",
+        action: { kind: "session.order", manualOrder: 0, sectionKey: "date:today" },
+      },
+      {
+        sessionId: "b",
+        action: { kind: "session.order", manualOrder: 1, sectionKey: "date:today" },
+      },
+      {
+        sessionId: "a",
+        action: { kind: "session.order", manualOrder: 2, sectionKey: "date:today" },
+      },
+    ])
+    // The local row keeps rank 1 — not renumbered from zero.
+    expect(setSessionRanksMock).toHaveBeenCalledWith([{ id: "b", manualOrder: 1 }], "date:today")
+  })
+
+  it("reorders locally when no Host takes the write, and ignores an empty section", async () => {
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.reorderSessions([], "pinned")
+      await result.current.reorderSessions(["a", "b"], "pinned")
+    })
+    expect(setSessionRanksMock).toHaveBeenCalledTimes(1)
+    expect(setSessionRanksMock).toHaveBeenCalledWith(
+      [
+        { id: "a", manualOrder: 0 },
+        { id: "b", manualOrder: 1 },
+      ],
+      "pinned"
+    )
   })
 
   it("bulkSetPinned delegates the whole selection to the atomic database operation", async () => {
@@ -959,7 +1120,7 @@ describe("useSessions", () => {
     })
     expect(createFolderDbMock).toHaveBeenCalledWith("Work")
     expect(renameFolderDbMock).toHaveBeenCalledWith("f1", "Renamed")
-    expect(deleteFolderDbMock).toHaveBeenCalledWith("f1")
+    expect(deleteFolderDbMock).toHaveBeenCalledWith("f1", { leaveSessionIds: [] })
     expect(assignSessionToFolderMock).toHaveBeenCalledWith("s1", "f1")
     expect(assignSessionToFolderMock).toHaveBeenCalledWith("s1", null)
   })

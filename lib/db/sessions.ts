@@ -407,9 +407,8 @@ export async function bulkSetSessionsPinned(
         .where("id")
         .anyOf(uniqueIds)
         .modify((session) => {
-          session.lastMessageAt ??= session.updatedAt
           session.pinned = pinned
-          session.updatedAt = now
+          stampOrganizationalWrite(session, now)
         })
     })
   })
@@ -659,29 +658,53 @@ export async function bulkUnarchiveSessions(ids: readonly string[]): Promise<voi
 }
 
 /**
- * Move a session into a folder, or back to loose (`folderId = null`). Folder
- * membership is organizational, so `updatedAt` is intentionally left untouched
- * — the session keeps its real recency for the date-bucket fallback on removal.
- * `folderId` is non-indexed; clearing it requires `modify` + `delete` (passing
- * `undefined` through `update()` would leave it intact — see
- * {@link clearSessionSdkLink}).
+ * Stamp an organizational write (folder, rank) so it syncs without moving the
+ * row in the recency order.
+ *
+ * `updatedAt` is the `sessions` sync cursor (`readSessionsDelta` pulls rows
+ * whose `updatedAt` passed the client's watermark), so a write that leaves it
+ * alone never reaches a paired device. But the conversation list sorts by
+ * `lastMessageAt ?? updatedAt` (`conversation-list-model.ts:activityAt`), so a
+ * bare bump would float a message-less row to the top. Pinning the row's
+ * current display recency into `lastMessageAt` first — the same move
+ * `bulkSetSessionsPinned` makes, and the Host applier in
+ * `lib/sync/host-state-store.ts` mirrors — keeps the order exactly where it was.
+ */
+function stampOrganizationalWrite(session: ChatSession, now: number): void {
+  session.lastMessageAt ??= session.updatedAt
+  session.updatedAt = now
+}
+
+/**
+ * Move a session into a folder, or back to loose (`folderId = null`).
+ *
+ * Folder membership is organizational: the row keeps its place in the recency
+ * order (see {@link stampOrganizationalWrite}) while `updatedAt` moves so the
+ * change syncs. Re-filing a row into the folder it is already in writes
+ * nothing. `folderId` is non-indexed; clearing it deletes the property (an
+ * `update()` with `undefined` would leave it intact — see
+ * {@link clearSessionSdkLink}). The handoff gate and the write share one
+ * transaction, which joins the caller's when there is one.
  */
 export async function assignSessionToFolder(
   sessionId: string,
   folderId: string | null
 ): Promise<void> {
   const db = getDb()
-  assertSessionWritable(await db.sessions.get(sessionId), "metadata")
-  if (folderId === null) {
+  const now = Date.now()
+  await db.transaction("rw", db.sessions, async () => {
+    const session = await db.sessions.get(sessionId)
+    assertSessionWritable(session, "metadata")
+    if (!session || (session.folderId ?? null) === folderId) return
     await db.sessions
       .where("id")
       .equals(sessionId)
-      .modify((s) => {
-        delete s.folderId
+      .modify((row) => {
+        if (folderId === null) delete row.folderId
+        else row.folderId = folderId
+        stampOrganizationalWrite(row, now)
       })
-  } else {
-    await db.sessions.update(sessionId, { folderId })
-  }
+  })
 }
 
 /**
@@ -692,17 +715,53 @@ export async function assignSessionToFolder(
  * (`conversationSectionKey` of the section the drag happened in) so the order
  * only applies inside that section — otherwise a rank set in one date bucket
  * would follow the session into every bucket it later migrates to. Ordering is
- * organizational, so `updatedAt` is left untouched (like folder assignment).
- * Runs in one `rw` transaction so a mid-batch failure rolls back atomically;
- * missing ids are skipped (Dexie `update` is a no-op on a stale id).
+ * organizational: rows keep their recency position and sync like a folder
+ * move (see {@link stampOrganizationalWrite}). Runs in one `rw` transaction so
+ * a mid-batch failure rolls back atomically; missing ids are skipped.
  */
 export async function setSessionOrder(ids: readonly string[], sectionKey: string): Promise<void> {
-  if (ids.length === 0) return
+  await setSessionRanks(
+    ids.map((id, manualOrder) => ({ id, manualOrder })),
+    sectionKey
+  )
+}
+
+/**
+ * {@link setSessionOrder} with each row's rank given explicitly rather than
+ * implied by its array position.
+ *
+ * For the case where only part of a section is written here: when a paired
+ * client forwards most of a reorder to its Host (`session.order` intents) and
+ * applies the rest locally, the local rows must keep the rank they had in the
+ * full arrangement — renumbering the remainder from zero would collide with the
+ * ranks the Host is writing. Same guarantees: one `rw` transaction, handoff
+ * lock checked for every row before any write, missing ids skipped. A row whose
+ * rank and section are already what is asked is not rewritten — a drag
+ * renumbers the whole section, and re-stamping every untouched row would send
+ * all of them over sync for a one-row move.
+ */
+export async function setSessionRanks(
+  ranks: ReadonlyArray<{ id: string; manualOrder: number }>,
+  sectionKey: string
+): Promise<void> {
+  if (ranks.length === 0) return
   const db = getDb()
+  const now = Date.now()
   await db.transaction("rw", db.sessions, async () => {
-    await assertSessionsWritable(db, ids, "metadata")
-    for (let i = 0; i < ids.length; i++) {
-      await db.sessions.update(ids[i], { manualOrder: i, manualOrderSection: sectionKey })
+    const rows = await db.sessions.bulkGet(ranks.map((rank) => rank.id))
+    for (const row of rows) assertSessionWritable(row, "metadata")
+    for (const [index, { id, manualOrder }] of ranks.entries()) {
+      const row = rows[index]
+      if (!row) continue
+      if (row.manualOrder === manualOrder && row.manualOrderSection === sectionKey) continue
+      await db.sessions
+        .where("id")
+        .equals(id)
+        .modify((session) => {
+          session.manualOrder = manualOrder
+          session.manualOrderSection = sectionKey
+          stampOrganizationalWrite(session, now)
+        })
     }
   })
 }

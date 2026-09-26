@@ -145,6 +145,28 @@ export type AllowedHostStateIntent =
   | { kind: "session.create"; title?: string }
   | { kind: "session.rename"; title: string }
   | { kind: "session.archive"; archived: boolean }
+  /**
+   * Conversation-list organization. These write the Host's `sessions` row only
+   * (`pinned`, `folderId`, `manualOrder` / `manualOrderSection`), which reaches
+   * every replica through ordinary `sessions` table sync — the session channel
+   * carries none of those fields, so the Host commits them with no channel
+   * mutation. Each names ONE session: a bulk selection is one intent per row,
+   * exactly like a bulk archive.
+   */
+  | { kind: "session.pin"; pinned: boolean }
+  /** `null` files the conversation back to loose. */
+  | { kind: "session.folder"; folderId: string | null }
+  /**
+   * The row's rank inside one conversation-list section — see
+   * `setSessionOrder` in `lib/db/sessions.ts` for why the rank is tagged with
+   * the section it was set in.
+   */
+  | { kind: "session.order"; manualOrder: number; sectionKey: string }
+  /**
+   * Delete the conversation on the Host, with the same cascade and teardown a
+   * desktop delete runs. Confirmed as `session.tombstoned`.
+   */
+  | { kind: "session.delete" }
   | { kind: "draft.replace"; text: string; attachments: HostStateAttachmentRef[] }
   | {
       kind: "message.enqueue"
@@ -185,6 +207,10 @@ const INTENT_KINDS: readonly HostStateIntentKind[] = [
   "session.create",
   "session.rename",
   "session.archive",
+  "session.pin",
+  "session.folder",
+  "session.order",
+  "session.delete",
   "draft.replace",
   "message.enqueue",
   "turn.steer",
@@ -218,6 +244,10 @@ export function intentRequiresRuntimeDispatch(kind: HostStateIntentKind): boolea
     case "session.create":
     case "session.rename":
     case "session.archive":
+    case "session.pin":
+    case "session.folder":
+    case "session.order":
+    case "session.delete":
     case "draft.replace":
     case "transcript.edit":
     case "transcript.truncate":
@@ -284,6 +314,12 @@ export function hostStateIntentKindCapability(
     // and draft that ride alongside it. The Remote Control grant.
     case "session.rename":
     case "session.archive":
+    // Filing, pinning and ranking a conversation are the same class of session
+    // metadata as renaming or archiving it: nothing is lost, and the owner can
+    // undo any of them in one click.
+    case "session.pin":
+    case "session.folder":
+    case "session.order":
     case "draft.replace":
     case "message.enqueue":
     case "turn.steer":
@@ -299,9 +335,15 @@ export function hostStateIntentKindCapability(
     // Destructive rewrites of durable user data: an edit or truncate discards
     // transcript the owner may never be able to recover, and an import writes a
     // whole conversation the Host never observed.
+    //
+    // Deleting a conversation is the widest of these: the whole transcript,
+    // its drafts, goals and loops go in one cascade with no undo. Remote
+    // Control may archive a conversation out of sight; only the owner may make
+    // it unrecoverable.
     case "transcript.edit":
     case "transcript.truncate":
     case "session.import":
+    case "session.delete":
       return "host.admin"
     default: {
       const exhaustive: never = kind
@@ -339,6 +381,10 @@ export function hostStateIntentRequiresLiveControl(kind: HostStateIntentKind): b
     case "session.create":
     case "session.rename":
     case "session.archive":
+    case "session.pin":
+    case "session.folder":
+    case "session.order":
+    case "session.delete":
     case "draft.replace":
     case "message.enqueue":
     case "turn.followup":
@@ -1262,6 +1308,13 @@ export function reduceHostStateIntent<TState extends HostStateChannelState>(
     case "transcript.edit":
     case "transcript.truncate":
     case "session.import":
+    // The list-organization intents change nothing the channel carries (their
+    // effect lands on the `sessions` row), and a delete is not done until the
+    // Host has run the cascade and confirmed `session.tombstoned`.
+    case "session.pin":
+    case "session.folder":
+    case "session.order":
+    case "session.delete":
       return state
   }
 }
@@ -1656,6 +1709,23 @@ function isAllowedIntent(value: unknown): value is AllowedHostStateIntent {
       return hasOnlyKeys(value, ["kind", "title"]) && typeof value.title === "string"
     case "session.archive":
       return hasOnlyKeys(value, ["kind", "archived"]) && typeof value.archived === "boolean"
+    case "session.pin":
+      return hasOnlyKeys(value, ["kind", "pinned"]) && typeof value.pinned === "boolean"
+    case "session.folder":
+      // `folderId` is required and explicit: absent would be ambiguous between
+      // "unfile" and "a client that forgot the field".
+      return (
+        hasOnlyKeys(value, ["kind", "folderId"]) &&
+        (value.folderId === null || nonEmptyString(value.folderId))
+      )
+    case "session.order":
+      return (
+        hasOnlyKeys(value, ["kind", "manualOrder", "sectionKey"]) &&
+        nonNegativeInteger(value.manualOrder) &&
+        nonEmptyString(value.sectionKey)
+      )
+    case "session.delete":
+      return hasOnlyKeys(value, ["kind"])
     case "draft.replace":
       return (
         hasOnlyKeys(value, ["kind", "text", "attachments"]) &&

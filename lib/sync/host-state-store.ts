@@ -26,6 +26,11 @@ import {
 import { isPlaceholderTitle } from "@/lib/ai/generation/run-title-task"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
+import {
+  assertSessionWritable,
+  SessionHandoffLockedError,
+  type SessionWriteOperation,
+} from "@/lib/chat/session-write-guard"
 
 export const HOST_STATE_META_ID = "singleton" as const
 export const HOST_STATE_LEASE_TTL_MS = 30_000
@@ -315,6 +320,13 @@ export async function commitHostStateAction(
       }
       const current = await getOrCreateChannel(input.action.channel, meta, db, now)
       const hostSeq = meta.hostSeq + 1
+      // A tombstone records the ledger position it was written at, and only
+      // this transaction knows it: the caller built the mutation from a
+      // snapshot, and a runtime projection may have landed in between.
+      const mutation =
+        input.mutation?.kind === "session.tombstoned"
+          ? { ...input.mutation, hostSeq }
+          : input.mutation
       const conflict =
         requiresMatchingRevision(input.action) && input.action.baseRevision !== current.revision
       const event: HostStateAppliedAction = input.rejection
@@ -348,12 +360,12 @@ export async function commitHostStateAction(
               hostSeq,
               origin: actionOrigin(input.action),
               outcome: "applied",
-              ...(input.mutation ? { mutation: input.mutation } : {}),
+              ...(mutation ? { mutation } : {}),
             }
       const state =
-        input.rejection || conflict || !input.mutation
+        input.rejection || conflict || !mutation
           ? current.state
-          : reduceHostStateMutation(current.state, input.mutation)
+          : reduceHostStateMutation(current.state, mutation)
       const nextChannel: HostStateChannelRow = {
         channel: current.channel,
         hostId: meta.hostId,
@@ -379,8 +391,12 @@ export async function commitHostStateAction(
             ? "not-required"
             : "pending",
         broadcastState: "pending",
+        // Only a change to the channel can change its index summary. The
+        // list-organization intents commit with no mutation (their effect is
+        // the `sessions` row, which table sync carries), and re-broadcasting an
+        // identical summary for each of them would fan one pin out as N writes.
         summaryState:
-          event.outcome === "applied" && isSessionStateChannel(input.action.channel)
+          event.outcome === "applied" && mutation && isSessionStateChannel(input.action.channel)
             ? "pending"
             : "not-required",
         createdAt: now,
@@ -509,6 +525,20 @@ export async function validateHostStateBusinessAction(
   if (!session) {
     return { code: "session_not_found", message: "The session does not exist on this Host." }
   }
+  const writeOperation = sessionWriteOperationFor(action.action.kind)
+  if (writeOperation) {
+    // The same gate every desktop writer passes (`assertSessionsWritable` in
+    // `lib/db/sessions.ts`): a conversation frozen for a cross-host handoff is
+    // read-only, and a remote device must not be the way around that.
+    try {
+      assertSessionWritable(session, writeOperation)
+    } catch (error) {
+      if (error instanceof SessionHandoffLockedError) {
+        return { code: error.code, message: "The session is read-only during a handoff." }
+      }
+      throw error
+    }
+  }
   if (action.action.kind === "message.enqueue") {
     const existing = await db.messages.get(action.action.messageId)
     const existingActionId = (existing?.metadata?.hostState as { actionId?: unknown } | undefined)
@@ -530,6 +560,28 @@ export async function validateHostStateBusinessAction(
       : undefined
   }
   return undefined
+}
+
+/**
+ * The handoff-lock operation an intent performs on its session row, or null
+ * for intents that do not write it through the product write gate.
+ */
+function sessionWriteOperationFor(
+  kind: HostStateAction["action"]["kind"]
+): SessionWriteOperation | null {
+  switch (kind) {
+    case "session.rename":
+      return "title"
+    case "session.archive":
+    case "session.pin":
+    case "session.folder":
+    case "session.order":
+      return "metadata"
+    case "session.delete":
+      return "delete"
+    default:
+      return null
+  }
 }
 
 export async function markHostStateDispatch(
@@ -624,6 +676,11 @@ async function persistBusinessProjection(
   now: number
 ): Promise<void> {
   if (event.outcome !== "applied" || !action.sessionId) return
+  // A delete is carried out BEFORE its ledger row is committed (see
+  // `createHostStateService().submit`): the cascade spans tables and external
+  // teardown no single ledger transaction can hold, and the row being gone is
+  // the fact the tombstone then records.
+  if (action.action.kind === "session.delete") return
   const session = await db.sessions.get(action.sessionId)
   if (
     !session &&
@@ -728,15 +785,73 @@ async function persistBusinessProjection(
       })
       return
     }
+    // Rename and archive re-apply the handoff gate here as well as in
+    // validation, like the list-organization writes below: a lock taken
+    // between the two must still refuse the write (and roll the ledger back).
     case "session.rename":
+      assertSessionWritable(session, "title")
       await db.sessions.update(action.sessionId, { title: action.action.title, updatedAt: now })
       return
     case "session.archive":
+      assertSessionWritable(session, "metadata")
       await db.sessions.update(action.sessionId, {
         archivedAt: action.action.archived ? now : undefined,
         updatedAt: now,
       })
       return
+    // The three list-organization writes below mirror their desktop
+    // repositories in `lib/db/sessions.ts` field for field
+    // (`bulkSetSessionsPinned`, `assignSessionToFolder`, `setSessionOrder`).
+    // They cannot call them: those open their own transactions and this one
+    // already holds the ledger. The handoff gate is re-applied here so a lock
+    // taken between validation and commit still refuses the write.
+    case "session.pin": {
+      assertSessionWritable(session, "metadata")
+      const pinned = action.action.pinned
+      await db.sessions
+        .where("id")
+        .equals(action.sessionId)
+        .modify((row) => {
+          // `updatedAt` is the sync cursor, so it must move for the pin to
+          // reach replicas; `lastMessageAt` keeps the row's display recency
+          // from jumping to "now" as a side effect.
+          row.lastMessageAt ??= row.updatedAt
+          row.pinned = pinned
+          row.updatedAt = now
+        })
+      return
+    }
+    case "session.folder": {
+      assertSessionWritable(session, "metadata")
+      const folderId = action.action.folderId
+      // Unlike the desktop writer, `updatedAt` moves: it is the sync cursor,
+      // and a Host write that no replica can see is the divergence this intent
+      // exists to close.
+      await db.sessions
+        .where("id")
+        .equals(action.sessionId)
+        .modify((row) => {
+          if (folderId === null) delete row.folderId
+          else row.folderId = folderId
+          row.lastMessageAt ??= row.updatedAt
+          row.updatedAt = now
+        })
+      return
+    }
+    case "session.order": {
+      assertSessionWritable(session, "metadata")
+      const { manualOrder, sectionKey } = action.action
+      await db.sessions
+        .where("id")
+        .equals(action.sessionId)
+        .modify((row) => {
+          row.manualOrder = manualOrder
+          row.manualOrderSection = sectionKey
+          row.lastMessageAt ??= row.updatedAt
+          row.updatedAt = now
+        })
+      return
+    }
     case "draft.replace": {
       // `put` replaces the whole row and the wire format carries text and
       // attachments only, so the `{{parameter}}` values held on this device

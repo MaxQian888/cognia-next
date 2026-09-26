@@ -32,6 +32,7 @@ import {
   bulkUnarchiveSessions,
   bulkSetSessionsPinned,
   setSessionOrder,
+  setSessionRanks,
   forkSessionFromParent,
 } from "./sessions"
 import { saveSettings } from "./settings"
@@ -480,20 +481,52 @@ describe("forkSessionFromParent", () => {
 })
 
 describe("setSessionOrder", () => {
-  it("writes each id's index into manualOrder without bumping updatedAt", async () => {
+  it("writes each id's index into manualOrder and syncs it without moving recency", async () => {
     const a = await createSession({ title: "A" })
     const b = await createSession({ title: "B" })
     const c = await createSession({ title: "C" })
-    const beforeA = (await getSession(a.id))!.updatedAt
-    await setSessionOrder([c.id, a.id, b.id], "date:today")
+    const beforeA = (await getSession(a.id))!
+    const now = jest.spyOn(Date, "now").mockReturnValue(beforeA.updatedAt + 1_000)
+    try {
+      await setSessionOrder([c.id, a.id, b.id], "date:today")
+    } finally {
+      now.mockRestore()
+    }
     expect((await getSession(c.id))?.manualOrder).toBe(0)
     expect((await getSession(a.id))?.manualOrder).toBe(1)
     expect((await getSession(b.id))?.manualOrder).toBe(2)
     // The order is tagged with the section it was dragged in, so it doesn't
     // leak into other sections the session later migrates to.
     expect((await getSession(c.id))?.manualOrderSection).toBe("date:today")
-    // Ordering is organizational — recency is intentionally left untouched.
-    expect((await getSession(a.id))?.updatedAt).toBe(beforeA)
+    // `updatedAt` is the sync cursor, so it moves; the display recency the
+    // list sorts by (`lastMessageAt ?? updatedAt`) is pinned where it was.
+    const afterA = (await getSession(a.id))!
+    expect(afterA.updatedAt).toBe(beforeA.updatedAt + 1_000)
+    expect(afterA.lastMessageAt ?? afterA.updatedAt).toBe(
+      beforeA.lastMessageAt ?? beforeA.updatedAt
+    )
+  })
+
+  it("does not rewrite rows whose rank is already the one asked for", async () => {
+    const a = await createSession({ title: "A" })
+    const b = await createSession({ title: "B" })
+    await setSessionOrder([a.id, b.id], "pinned")
+    const settled = (await getSession(a.id))!.updatedAt
+    const now = jest.spyOn(Date, "now").mockReturnValue(settled + 5_000)
+    try {
+      // Only b moves; a keeps rank 0 in the same section.
+      await setSessionRanks(
+        [
+          { id: a.id, manualOrder: 0 },
+          { id: b.id, manualOrder: 2 },
+        ],
+        "pinned"
+      )
+    } finally {
+      now.mockRestore()
+    }
+    expect((await getSession(a.id))?.updatedAt).toBe(settled)
+    expect(await getSession(b.id)).toMatchObject({ manualOrder: 2, updatedAt: settled + 5_000 })
   })
 
   it("is a no-op for an empty id list", async () => {
@@ -527,6 +560,99 @@ describe("setSessionOrder", () => {
     expect(last.get(c.id)).toBe(0)
     expect(last.get(a.id)).toBe(1)
     expect(last.get(b.id)).toBe(2)
+  })
+})
+
+describe("assignSessionToFolder", () => {
+  it("files and unfiles a row so it syncs, without moving it in the recency order", async () => {
+    const s = await createSession({ title: "S" })
+    const before = (await getSession(s.id))!
+    const now = jest.spyOn(Date, "now").mockReturnValue(before.updatedAt + 1_000)
+    try {
+      await assignSessionToFolder(s.id, "f1")
+    } finally {
+      now.mockRestore()
+    }
+    const filed = (await getSession(s.id))!
+    expect(filed.folderId).toBe("f1")
+    expect(filed.updatedAt).toBe(before.updatedAt + 1_000)
+    expect(filed.lastMessageAt ?? filed.updatedAt).toBe(before.lastMessageAt ?? before.updatedAt)
+
+    await assignSessionToFolder(s.id, null)
+    const loose = (await getSession(s.id))!
+    expect(loose).not.toHaveProperty("folderId")
+    expect(loose.lastMessageAt ?? loose.updatedAt).toBe(before.lastMessageAt ?? before.updatedAt)
+  })
+
+  it("keeps an existing message timestamp as the recency key", async () => {
+    const s = await createSession({ title: "S" })
+    await getDb().sessions.update(s.id, { lastMessageAt: 42 })
+    await assignSessionToFolder(s.id, "f1")
+    expect((await getSession(s.id))?.lastMessageAt).toBe(42)
+  })
+
+  it("writes nothing when the row is already in that folder", async () => {
+    const s = await createSession({ title: "S" })
+    await assignSessionToFolder(s.id, "f1")
+    const settled = (await getSession(s.id))!.updatedAt
+    const now = jest.spyOn(Date, "now").mockReturnValue(settled + 9_000)
+    try {
+      await assignSessionToFolder(s.id, "f1")
+    } finally {
+      now.mockRestore()
+    }
+    expect((await getSession(s.id))?.updatedAt).toBe(settled)
+  })
+
+  it("refuses a handoff-locked row", async () => {
+    const s = await createSession({ title: "S" })
+    await getDb().sessions.update(s.id, {
+      handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+    })
+    await expect(assignSessionToFolder(s.id, "f1")).rejects.toMatchObject({
+      code: "session_handoff_locked",
+    })
+    expect((await getSession(s.id))?.folderId).toBeUndefined()
+  })
+})
+
+describe("setSessionRanks", () => {
+  it("writes the rank it is given, not the array position", async () => {
+    const a = await createSession({ title: "A" })
+    const b = await createSession({ title: "B" })
+    // The rest of the arrangement (ranks 0 and 2) went to the Host; these two
+    // keep the slots they hold in the full order.
+    await setSessionRanks(
+      [
+        { id: a.id, manualOrder: 1 },
+        { id: b.id, manualOrder: 3 },
+      ],
+      "pinned"
+    )
+    expect(await getSession(a.id)).toMatchObject({ manualOrder: 1, manualOrderSection: "pinned" })
+    expect(await getSession(b.id)).toMatchObject({ manualOrder: 3, manualOrderSection: "pinned" })
+  })
+
+  it("refuses the whole batch when one row is handoff-locked", async () => {
+    const a = await createSession({ title: "A" })
+    const b = await createSession({ title: "B" })
+    await getDb().sessions.update(b.id, {
+      handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+    })
+    await expect(
+      setSessionRanks(
+        [
+          { id: a.id, manualOrder: 0 },
+          { id: b.id, manualOrder: 1 },
+        ],
+        "recent"
+      )
+    ).rejects.toMatchObject({ code: "session_handoff_locked" })
+    expect((await getSession(a.id))?.manualOrder).toBeUndefined()
+  })
+
+  it("is a no-op for an empty rank list", async () => {
+    await expect(setSessionRanks([], "pinned")).resolves.toBeUndefined()
   })
 })
 

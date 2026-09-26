@@ -419,6 +419,7 @@ export function buildLocalHostFeatureManifest({
         "host_state_submit",
         "host_state_status",
         "session_mark_read",
+        "session_mark_unread",
       ],
     }
     // Advertised on both hosts that can actually spawn a process. The

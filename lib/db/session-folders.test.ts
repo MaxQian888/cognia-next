@@ -3,10 +3,12 @@ import Dexie from "dexie"
 import {
   createFolder,
   deleteFolder,
+  listFolderMemberIds,
   listFolders,
   renameFolder,
   reorderFolders,
 } from "./session-folders"
+import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import { createSession, getSession, assignSessionToFolder } from "./sessions"
 import { saveSettings } from "./settings"
 import { getDb } from "./schema"
@@ -142,5 +144,58 @@ describe("folder membership", () => {
     expect(member?.folderId).toBeUndefined()
     // The unrelated session is untouched.
     expect(await getSession(outside.id)).toBeDefined()
+  })
+
+  it("lists a folder's members, including a conversation of no workspace", async () => {
+    const folder = await createFolder("Mixed")
+    const scoped = await createSession({ title: "scoped" })
+    await assignSessionToFolder(scoped.id, folder.id)
+    // A paired client's host-synced row carries no `projectId`, so it is
+    // absent from that index — which is why membership is not read through it.
+    await getDb().sessions.put({
+      id: "s-unscoped",
+      title: "unscoped",
+      folderId: folder.id,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect((await listFolderMemberIds(folder.id)).sort()).toEqual([scoped.id, "s-unscoped"].sort())
+  })
+
+  it("refuses to delete a folder whose member is handoff-locked, and writes nothing", async () => {
+    const folder = await createFolder("Frozen")
+    const free = await createSession({ title: "free" })
+    const locked = await createSession({ title: "locked" })
+    await assignSessionToFolder(free.id, folder.id)
+    await assignSessionToFolder(locked.id, folder.id)
+    await getDb().sessions.update(locked.id, {
+      handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+    })
+
+    await expect(deleteFolder(folder.id)).rejects.toBeInstanceOf(SessionHandoffLockedError)
+
+    // One transaction: neither the folder nor the unlocked member moved.
+    expect(await getDb().sessionFolders.get(folder.id)).toBeDefined()
+    expect((await getSession(free.id))?.folderId).toBe(folder.id)
+    expect((await getSession(locked.id))?.folderId).toBe(folder.id)
+  })
+
+  it("leaves members whose unfile was handed to the Host to the Host", async () => {
+    const folder = await createFolder("Shared")
+    const local = await createSession({ title: "local" })
+    const hostOwned = await createSession({ title: "host-owned" })
+    await assignSessionToFolder(local.id, folder.id)
+    await assignSessionToFolder(hostOwned.id, folder.id)
+    // Even a lock on a row the Host is writing does not block the local delete:
+    // the Host applies its own gate to its own row.
+    await getDb().sessions.update(hostOwned.id, {
+      handoffLock: { ticketId: "ticket-2", state: "frozen", at: 1 },
+    })
+
+    await deleteFolder(folder.id, { leaveSessionIds: [hostOwned.id] })
+
+    expect(await getDb().sessionFolders.get(folder.id)).toBeUndefined()
+    expect(await getSession(local.id)).not.toHaveProperty("folderId")
+    expect((await getSession(hostOwned.id))?.folderId).toBe(folder.id)
   })
 })

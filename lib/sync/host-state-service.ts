@@ -60,6 +60,7 @@ import {
   type HostStateActionRow,
 } from "./host-state-store"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
+import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import { pickReferenceMetadata } from "@/lib/chat/mentions/read"
 
 export const HOST_STATE_ACTION_TOPIC = "host-state://action"
@@ -373,6 +374,13 @@ export interface HostStateServiceOptions {
   publish?: (topic: typeof HOST_STATE_ACTION_TOPIC, event: HostStateAppliedAction) => Promise<void>
   maxSnapshotBytes?: number
   maxActionBatch?: number
+  /**
+   * Carries out an accepted `session.delete` on this Host. Defaults to
+   * `deleteSessionsWithTeardown` — the same cascade and teardown a desktop
+   * delete runs. Injectable so the ledger ordering can be tested without the
+   * sidecar and store side effects.
+   */
+  deleteSessions?: (sessionIds: readonly string[]) => Promise<void>
 }
 
 export interface HostStateService {
@@ -754,6 +762,23 @@ async function persistConfirmedState(
     return state
   }
   assertCurrent()
+  if (state.tombstone) {
+    // The Host deleted this conversation (`session.tombstoned`). Mirror the
+    // index branch above — drop the local rows — and stop here: the draft
+    // `put` below would otherwise re-create a draft for a conversation that no
+    // longer exists anywhere.
+    await Promise.all([
+      db.sessions.delete(state.sessionId),
+      db.messages.where("sessionId").equals(state.sessionId).delete(),
+      db.chatDrafts.delete(state.sessionId),
+    ])
+    const { useChatStore } = await import("@/stores/chat/chat-store")
+    assertCurrent()
+    const chat = useChatStore.getState()
+    chat.setSessionStatus(state.sessionId, "idle")
+    if (chat.activeSessionId === state.sessionId) chat.setActiveSession(null)
+    return state
+  }
   const optimisticState = await projectPendingHostStateActions(state, db)
   const existingDraft = await db.chatDrafts.get(state.sessionId)
   assertCurrent()
@@ -1003,7 +1028,7 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
         }
         const snapshot = await getHostStateSnapshot(action.channel)
         const precondition = await validateHostStateBusinessAction(action)
-        const decision = precondition
+        let decision: ReturnType<typeof mutationForAction> = precondition
           ? {
               rejection: {
                 ...precondition,
@@ -1011,6 +1036,9 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
               },
             }
           : mutationForAction(snapshot.state, action, now())
+        if (action.action.kind === "session.delete" && decision.mutation) {
+          decision = await carryOutSessionDelete(action, snapshot.revision, decision)
+        }
         const committed = await commitHostStateAction({
           action,
           mutation: decision.mutation,
@@ -1075,6 +1103,56 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
       await processRow(row)
       return committed.event
     },
+  }
+
+  /**
+   * Run an accepted delete BEFORE its ledger row exists.
+   *
+   * The cascade touches a dozen tables plus the sidecar, the scheduler and the
+   * sandbox, so it cannot share the ledger's transaction. Of the two orders
+   * left, only this one keeps the Host honest: were the tombstone committed
+   * first, a cascade that then failed would leave every replica deleting a
+   * conversation the Host still holds. Here the worst case is the reverse — the
+   * rows are gone and the ledger commit fails — which the client's retry turns
+   * into a `session_not_found` receipt while `sessions` table sync already
+   * carries the deletion's tombstones.
+   *
+   * A redelivered action id that already has a ledger row is never re-run:
+   * that row is the answer, even when it recorded a refusal.
+   */
+  async function carryOutSessionDelete(
+    action: HostStateAction,
+    currentRevision: number,
+    accepted: ReturnType<typeof mutationForAction>
+  ): Promise<ReturnType<typeof mutationForAction>> {
+    if (await getHostStateAction(action.hostGeneration, action.actionId)) return accepted
+    const deleteSessions =
+      options.deleteSessions ??
+      (async (ids: readonly string[]) => {
+        const { deleteSessionsWithTeardown } = await import("@/lib/chat/session-deletion")
+        await deleteSessionsWithTeardown(ids)
+      })
+    try {
+      await deleteSessions([action.sessionId!])
+      return accepted
+    } catch (error) {
+      // A lock taken after validation, or a teardown the cascade refused. The
+      // rows are intact (the cascade is one transaction), so say so.
+      const locked = error instanceof SessionHandoffLockedError
+      loggers.sync.warn("[host-state] session delete refused", {
+        sessionId: action.sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return {
+        rejection: {
+          code: locked ? error.code : "host_state_session_delete_failed",
+          message: locked
+            ? "The session is read-only during a handoff."
+            : "The Host could not delete the session.",
+          currentRevision,
+        },
+      }
+    }
   }
 
   async function processRow(row: HostStateActionRow): Promise<void> {
@@ -1620,6 +1698,23 @@ function mutationForAction(
   switch (action.action.kind) {
     case "session.rename":
       return { mutation: { kind: "session.renamed", title: action.action.title, revision } }
+    // Pure `sessions`-row bookkeeping: nothing the channel carries changes, so
+    // the action is applied with no mutation and replicas learn the new row
+    // through `sessions` table sync.
+    case "session.pin":
+    case "session.folder":
+    case "session.order":
+      return {}
+    case "session.delete":
+      return {
+        mutation: {
+          kind: "session.tombstoned",
+          deletedAt: now,
+          // Stamped with the real ledger position inside the commit.
+          hostSeq: 0,
+          revision,
+        },
+      }
     case "session.archive":
       return {
         mutation: {

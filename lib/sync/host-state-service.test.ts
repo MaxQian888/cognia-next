@@ -20,6 +20,7 @@ import {
   installHostStateSyncForTarget,
 } from "./host-state-service"
 import { useChatStore } from "@/stores/chat/chat-store"
+import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
@@ -843,6 +844,244 @@ describe("HostStateService", () => {
     await expect(getDb().chatDrafts.get("session-1")).resolves.toMatchObject({ text: "allowed" })
   })
 
+  describe("conversation-list intents", () => {
+    const controller = { deviceId: "device-control", grants: ["host.observe", "workspace.write"] }
+
+    function listService(deleteSessions?: (ids: readonly string[]) => Promise<void>) {
+      const publish = jest.fn(async (_topic: string, _event: HostStateAppliedAction) => undefined)
+      const service = createHostStateService({
+        ...scope,
+        hostId,
+        ownerId: "brain-a",
+        now: () => 100,
+        publish,
+        ...(deleteSessions ? { deleteSessions } : {}),
+      })
+      return { service, publish }
+    }
+
+    it("applies pin, filing and rank to the Host's row without moving the channel", async () => {
+      const { service, publish } = listService()
+      await service.start({ now: 0, heartbeat: false })
+
+      const response = await service.submit(
+        {
+          ...scope,
+          actions: [
+            action({ kind: "session.pin", pinned: true }, { actionId: "pin", clientSeq: 1 }),
+            action({ kind: "session.folder", folderId: "f1" }, { actionId: "file", clientSeq: 2 }),
+            action(
+              { kind: "session.order", manualOrder: 2, sectionKey: "pinned" },
+              { actionId: "rank", clientSeq: 3 }
+            ),
+          ],
+        },
+        // Remote Control is enough to organize a conversation.
+        controller
+      )
+
+      expect(response.results.map((result) => result.outcome)).toEqual([
+        "applied",
+        "applied",
+        "applied",
+      ])
+      expect(await getDb().sessions.get("session-1")).toMatchObject({
+        pinned: true,
+        folderId: "f1",
+        manualOrder: 2,
+        manualOrderSection: "pinned",
+        // `sessions` table sync keys on this — the write must be visible to it.
+        updatedAt: 100,
+      })
+      // The channel carries none of these fields, so nothing reduced into it and
+      // no index summary was re-broadcast for them.
+      await expect(service.snapshot({ ...scope, channel })).resolves.toMatchObject({
+        state: { revision: 0 },
+      })
+      const broadcast = publish.mock.calls.map(([, event]) => event)
+      expect(broadcast).toHaveLength(3)
+      for (const event of broadcast) expect(event.mutation).toBeUndefined()
+    })
+
+    it("refuses to rename or archive a conversation frozen for a handoff", async () => {
+      await getDb().sessions.update("session-1", {
+        handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+      })
+      const { service } = listService()
+      await service.start({ now: 0, heartbeat: false })
+
+      const response = await service.submit(
+        {
+          ...scope,
+          actions: [
+            action({ kind: "session.rename", title: "Renamed" }, { actionId: "rename" }),
+            action(
+              { kind: "session.archive", archived: true },
+              { actionId: "archive", clientSeq: 2 }
+            ),
+          ],
+        },
+        owner
+      )
+
+      expect(response.results).toEqual([
+        expect.objectContaining({
+          actionId: "rename",
+          outcome: "rejected",
+          rejection: expect.objectContaining({ code: "session_handoff_locked" }),
+        }),
+        expect.objectContaining({
+          actionId: "archive",
+          outcome: "rejected",
+          rejection: expect.objectContaining({ code: "session_handoff_locked" }),
+        }),
+      ])
+      expect(await getDb().sessions.get("session-1")).toMatchObject({ title: "Before" })
+      expect((await getDb().sessions.get("session-1"))?.archivedAt).toBeUndefined()
+    })
+
+    it("refuses to organize a conversation frozen for a handoff", async () => {
+      await getDb().sessions.update("session-1", {
+        handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+      })
+      const { service } = listService()
+      await service.start({ now: 0, heartbeat: false })
+
+      const response = await service.submit(
+        { ...scope, actions: [action({ kind: "session.pin", pinned: true })] },
+        owner
+      )
+
+      expect(response.results).toEqual([
+        expect.objectContaining({
+          outcome: "rejected",
+          rejection: expect.objectContaining({ code: "session_handoff_locked" }),
+        }),
+      ])
+      expect((await getDb().sessions.get("session-1"))?.pinned).toBeUndefined()
+    })
+
+    it("deletes the conversation before committing its tombstone", async () => {
+      const ledgerRowsAtDelete: number[] = []
+      const deleteSessions = jest.fn(async (ids: readonly string[]) => {
+        ledgerRowsAtDelete.push(await getDb().hostStateActions.count())
+        await getDb().sessions.bulkDelete([...ids])
+      })
+      const { service, publish } = listService(deleteSessions)
+      await service.start({ now: 0, heartbeat: false })
+
+      const response = await service.submit(
+        { ...scope, actions: [action({ kind: "session.delete" }, { actionId: "delete-1" })] },
+        owner
+      )
+
+      expect(response.results).toEqual([
+        expect.objectContaining({ actionId: "delete-1", outcome: "applied", hostSeq: 1 }),
+      ])
+      expect(deleteSessions).toHaveBeenCalledWith(["session-1"])
+      // Nothing was in the ledger yet when the cascade ran.
+      expect(ledgerRowsAtDelete).toEqual([0])
+      await expect(service.snapshot({ ...scope, channel })).resolves.toMatchObject({
+        state: { conversation: "tombstoned", tombstone: { deletedAt: 100, hostSeq: 1 } },
+      })
+      // Replicas drop the row from the index summary the tombstone projects.
+      await expect(
+        service.snapshot({ ...scope, channel: sessionIndexChannel(scope.runtimeTargetId) })
+      ).resolves.toMatchObject({
+        state: {
+          sessions: [
+            expect.objectContaining({ sessionId: "session-1", conversation: "tombstoned" }),
+          ],
+        },
+      })
+      expect(publish).toHaveBeenCalledWith(
+        "host-state://action",
+        expect.objectContaining({
+          mutation: expect.objectContaining({ kind: "session.tombstoned", hostSeq: 1 }),
+        })
+      )
+    })
+
+    it("answers a delete the cascade refused with a rejection, and keeps the row", async () => {
+      const deleteSessions = jest
+        .fn()
+        .mockRejectedValueOnce(new SessionHandoffLockedError("session-1", "ticket-1", "delete"))
+        .mockRejectedValueOnce(new Error("sandbox release exploded"))
+      const { service } = listService(deleteSessions)
+      await service.start({ now: 0, heartbeat: false })
+
+      const response = await service.submit(
+        {
+          ...scope,
+          actions: [
+            action({ kind: "session.delete" }, { actionId: "delete-1", clientSeq: 1 }),
+            action({ kind: "session.delete" }, { actionId: "delete-2", clientSeq: 2 }),
+          ],
+        },
+        owner
+      )
+
+      expect(response.results).toEqual([
+        expect.objectContaining({
+          outcome: "rejected",
+          rejection: expect.objectContaining({ code: "session_handoff_locked" }),
+        }),
+        expect.objectContaining({
+          outcome: "rejected",
+          rejection: expect.objectContaining({ code: "host_state_session_delete_failed" }),
+        }),
+      ])
+      await expect(getDb().sessions.get("session-1")).resolves.toBeDefined()
+      await expect(service.snapshot({ ...scope, channel })).resolves.toMatchObject({
+        state: { conversation: "present" },
+      })
+    })
+
+    it("never re-runs a delete whose action id the ledger already answered", async () => {
+      const deleteSessions = jest
+        .fn()
+        .mockRejectedValueOnce(new Error("teardown failed"))
+        .mockResolvedValue(undefined)
+      const { service } = listService(deleteSessions)
+      await service.start({ now: 0, heartbeat: false })
+      const request = {
+        ...scope,
+        actions: [action({ kind: "session.delete" }, { actionId: "delete-1" })],
+      }
+
+      await service.submit(request, owner)
+      const redelivered = await service.submit(request, owner)
+
+      // The recorded refusal is the answer; the conversation is not deleted
+      // behind a receipt that says it was not.
+      expect(redelivered.results).toEqual([
+        expect.objectContaining({ actionId: "delete-1", outcome: "duplicate" }),
+      ])
+      expect(deleteSessions).toHaveBeenCalledTimes(1)
+      await expect(getDb().sessions.get("session-1")).resolves.toBeDefined()
+    })
+
+    it("keeps delete owner-only: Remote Control is refused before any cascade", async () => {
+      const deleteSessions = jest.fn(async () => undefined)
+      const { service } = listService(deleteSessions)
+      await service.start({ now: 0, heartbeat: false })
+
+      const response = await service.submit(
+        { ...scope, actions: [action({ kind: "session.delete" })] },
+        controller
+      )
+
+      expect(response.results).toEqual([
+        expect.objectContaining({
+          outcome: "rejected",
+          rejection: expect.objectContaining({ code: "host_state_forbidden" }),
+        }),
+      ])
+      expect(deleteSessions).not.toHaveBeenCalled()
+      await expect(getDb().hostStateActions.count()).resolves.toBe(0)
+    })
+  })
+
   it("fails the whole batch when the request reached the Host with no bound caller", async () => {
     const service = createHostStateService({ ...scope, hostId, ownerId: "brain-a", now: () => 100 })
     await service.start({ now: 0, heartbeat: false })
@@ -1198,6 +1437,62 @@ describe("HostStateService", () => {
       hostSeq: 9,
       state: { title: "After cut", revision: 1 },
     })
+    sync.stop()
+  })
+
+  it("drops a conversation the Host tombstoned instead of re-creating its draft", async () => {
+    await getDb().messages.put({
+      id: "m-1",
+      sessionId: "session-1",
+      role: "user",
+      parts: [{ type: "text", text: "hi" }],
+      createdAt: 2,
+    })
+    await getDb().chatDrafts.put({ sessionId: "session-1", text: "unsent", updatedAt: 2 })
+    useChatStore.setState({ activeSessionId: "session-1" })
+    const live = createEmptyHostStateSession(channel, "session-1")
+    const snapshot: HostStateSnapshot = {
+      channel,
+      hostId,
+      hostGeneration: 4,
+      cutHostSeq: 8,
+      revision: 0,
+      digest: hostStateDigest(live),
+      state: live,
+    }
+    const tombstoned: HostStateAppliedAction = {
+      channel,
+      hostId,
+      hostGeneration: 4,
+      hostSeq: 9,
+      outcome: "applied",
+      mutation: { kind: "session.tombstoned", deletedAt: 50, hostSeq: 9, revision: 1 },
+    }
+    let handler: ((event: HostStateAppliedAction) => void) | null = null
+    const transport: Transport = {
+      subscribe: (_topic, next) => {
+        handler = next as (event: HostStateAppliedAction) => void
+        return () => undefined
+      },
+      call: async (command) =>
+        (command === "host_state_status" ? writableStatus : snapshot) as never,
+    }
+
+    const sync = await installHostStateSync({
+      transport,
+      ...scope,
+      channels: async () => [channel],
+    })
+    handler!(tombstoned)
+    await flush()
+
+    await expect(getDb().hostStateChannels.get(channel)).resolves.toMatchObject({
+      state: { conversation: "tombstoned" },
+    })
+    await expect(getDb().sessions.get("session-1")).resolves.toBeUndefined()
+    await expect(getDb().messages.get("m-1")).resolves.toBeUndefined()
+    await expect(getDb().chatDrafts.get("session-1")).resolves.toBeUndefined()
+    expect(useChatStore.getState().activeSessionId).toBeNull()
     sync.stop()
   })
 

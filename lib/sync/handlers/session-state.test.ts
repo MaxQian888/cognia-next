@@ -15,6 +15,7 @@ type WireRow = {
   lastReadAt: number
   unreadCount: number
   updatedAt?: number
+  manualUnread?: { at: number; from: number }
 }
 
 function makeTransport(rows: WireRow[], deleted_ids: string[] = [], next_since = 1): Transport {
@@ -135,4 +136,81 @@ it("ignores foreign or unrelated pending reads and accepts legacy Host rows", as
   } finally {
     await db.mobileOutboundQueue.bulkDelete(["foreign-read", "unrelated-read"])
   }
+})
+
+describe("pending read/unread relay", () => {
+  const job = (
+    id: string,
+    command: "session_mark_read" | "session_mark_unread",
+    payload: Record<string, unknown>,
+    createdAt: number
+  ) => ({
+    id,
+    accountId: "acct_read",
+    targetId: "host_read",
+    command,
+    status: "pending" as const,
+    attempts: 0,
+    nextAttemptAt: 0,
+    createdAt,
+    idempotencyKey: id,
+    payload,
+    channel: `session-state:${String(payload.sessionId)}`,
+    clientId: "session-state-relay",
+    clientSeq: createdAt,
+  })
+
+  beforeEach(async () => {
+    const { setActiveRuntimeTargetContext } = await import("@/lib/runtime/runtime-target-context")
+    setActiveRuntimeTargetContext("acct_read", "host_read")
+  })
+  afterEach(async () => {
+    await getDb().mobileOutboundQueue.clear()
+  })
+
+  it("keeps a pending unread visible over a Host row that has not applied it", async () => {
+    await getDb().mobileOutboundQueue.put(job("u", "session_mark_unread", { sessionId: "u1" }, 1))
+    await syncSessionState(makeTransport([wire("u1", 0)]), { since: 0 })
+    expect(await getDb().sessionState.get("u1")).toMatchObject({ unreadCount: 1, lastReadAt: 10 })
+  })
+
+  it("lets the later choice win when both a read and an unread are pending", async () => {
+    await getDb().mobileOutboundQueue.bulkPut([
+      job("u", "session_mark_unread", { sessionId: "u2" }, 1),
+      job("r", "session_mark_read", { sessionId: "u2", readThrough: 20 }, 2),
+    ])
+    await syncSessionState(makeTransport([wire("u2", 3)]), { since: 0 })
+    expect(await getDb().sessionState.get("u2")).toMatchObject({ unreadCount: 0 })
+
+    await getDb().mobileOutboundQueue.put(
+      job("u-later", "session_mark_unread", { sessionId: "u2" }, 3)
+    )
+    await syncSessionState(makeTransport([wire("u2", 0)]), { since: 0 })
+    expect(await getDb().sessionState.get("u2")).toMatchObject({ unreadCount: 1 })
+  })
+
+  it("treats a pending read as covering the manual unread it was taken over", async () => {
+    // The Host already applied this device's unread (watermark 25, taken over
+    // 20); the read the device queued afterwards reports 20 and supersedes it.
+    await getDb().mobileOutboundQueue.put(
+      job("r", "session_mark_read", { sessionId: "u3", readThrough: 20 }, 2)
+    )
+    await syncSessionState(
+      makeTransport([{ ...wire("u3", 1), updatedAt: 25, manualUnread: { at: 25, from: 20 } }]),
+      { since: 0 }
+    )
+    expect(await getDb().sessionState.get("u3")).toMatchObject({ unreadCount: 0 })
+  })
+
+  it("does not let that read hide a message that arrived after the unread", async () => {
+    await getDb().mobileOutboundQueue.put(
+      job("r", "session_mark_read", { sessionId: "u4", readThrough: 20 }, 2)
+    )
+    // A real message replaced the row, so the manual unread is no longer live.
+    await syncSessionState(
+      makeTransport([{ ...wire("u4", 2), updatedAt: 26, manualUnread: { at: 25, from: 20 } }]),
+      { since: 0 }
+    )
+    expect(await getDb().sessionState.get("u4")).toMatchObject({ unreadCount: 2 })
+  })
 })

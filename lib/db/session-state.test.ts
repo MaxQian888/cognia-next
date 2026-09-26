@@ -11,6 +11,10 @@ import {
   listSessionStates,
   markSessionRead,
   markSessionReadOnHost,
+  markSessionUnread,
+  markSessionUnreadOnHost,
+  sessionStateRelayChannel,
+  SESSION_STATE_RELAY_CLIENT_ID,
 } from "./session-state"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
@@ -43,6 +47,7 @@ afterAll(dbFixture.dispose)
 describe.each([
   { name: "markSessionRead", write: markSessionRead },
   { name: "bumpUnread", write: bumpUnread },
+  { name: "markSessionUnread", write: markSessionUnread },
 ])("$name lifecycle", ({ write }) => {
   it("does not create state for a missing parent", async () => {
     await write("missing")
@@ -281,6 +286,199 @@ describe("read relay scope and legacy boundaries", () => {
       "Outbound queue requires an active account and runtime target"
     )
     expect(await getDb().mobileOutboundQueue.count()).toBe(0)
+    expect(await getSessionState("s1")).toBeUndefined()
+  })
+})
+
+describe("markSessionUnread", () => {
+  it("raises a read conversation to one unread without moving the read pointer", async () => {
+    await getDb().sessionState.put({
+      sessionId: "s1",
+      lastReadAt: 10,
+      unreadCount: 0,
+      updatedAt: 30,
+    })
+    await markSessionUnread("s1")
+    const row = await getSessionState("s1")
+    expect(row).toMatchObject({ lastReadAt: 10, unreadCount: 1 })
+    // Stamped past the old watermark so the change syncs.
+    expect(row!.updatedAt).toBeGreaterThan(30)
+    expect(row!.manualUnread).toEqual({ at: row!.updatedAt, from: 30 })
+  })
+
+  it("never lowers an existing unread count", async () => {
+    await getDb().sessionState.put({
+      sessionId: "s1",
+      lastReadAt: 10,
+      unreadCount: 4,
+      updatedAt: 30,
+    })
+    await markSessionUnread("s1")
+    expect(await getSessionState("s1")).toMatchObject({ unreadCount: 4, lastReadAt: 10 })
+  })
+
+  it("creates the row for a conversation that was never opened", async () => {
+    await markSessionUnread("s1")
+    expect(await getSessionState("s1")).toMatchObject({ lastReadAt: 0, unreadCount: 1 })
+  })
+
+  it("is idempotent and keeps the watermark the first unread was taken over", async () => {
+    const now = jest.spyOn(Date, "now").mockReturnValue(100)
+    try {
+      await getDb().sessionState.put({
+        sessionId: "s1",
+        lastReadAt: 10,
+        unreadCount: 0,
+        updatedAt: 30,
+      })
+      await markSessionUnreadOnHost("s1")
+      await markSessionUnreadOnHost("s1")
+      expect(await getSessionState("s1")).toMatchObject({
+        unreadCount: 1,
+        updatedAt: 101,
+        manualUnread: { at: 101, from: 30 },
+      })
+    } finally {
+      now.mockRestore()
+    }
+  })
+})
+
+describe("read after a manual unread", () => {
+  it("lets a device read taken over the unread's snapshot clear it", async () => {
+    await getDb().sessionState.put({
+      sessionId: "s1",
+      lastReadAt: 10,
+      unreadCount: 0,
+      updatedAt: 30,
+    })
+    await markSessionUnreadOnHost("s1")
+    // The phone marked it unread at watermark 30, then opened it: its read
+    // still reports 30, and must win over its own earlier choice.
+    await markSessionReadOnHost("s1", 30)
+    const row = await getSessionState("s1")
+    expect(row).toMatchObject({ unreadCount: 0 })
+    expect(row).not.toHaveProperty("manualUnread")
+  })
+
+  it("still refuses a stale read once a real message followed the unread", async () => {
+    await getDb().sessionState.put({
+      sessionId: "s1",
+      lastReadAt: 10,
+      unreadCount: 0,
+      updatedAt: 30,
+    })
+    await markSessionUnreadOnHost("s1")
+    await bumpUnread("s1")
+    await markSessionReadOnHost("s1", 30)
+    expect(await getSessionState("s1")).toMatchObject({ unreadCount: 2 })
+  })
+
+  it("refuses a read older than the snapshot the unread was taken over", async () => {
+    await getDb().sessionState.put({
+      sessionId: "s1",
+      lastReadAt: 10,
+      unreadCount: 2,
+      updatedAt: 30,
+    })
+    await markSessionUnreadOnHost("s1")
+    await markSessionReadOnHost("s1", 20)
+    expect(await getSessionState("s1")).toMatchObject({ unreadCount: 2 })
+  })
+})
+
+describe("paired read/unread relay", () => {
+  async function remoteTarget() {
+    const context = await import("@/lib/runtime/runtime-target-context")
+    context.setActiveRuntimeTargetContext("acct_read", "host_read")
+    jest
+      .requireMock("@/lib/runtime/runtime-snapshot-store")
+      .getRuntimeSnapshot.mockReturnValue({ target: { kind: "companion" } })
+    return context
+  }
+
+  it("relays an unread with optimism and leaves the Host watermark alone", async () => {
+    await remoteTarget()
+    await getDb().sessionState.put({
+      sessionId: "s1",
+      lastReadAt: 10,
+      unreadCount: 0,
+      updatedAt: 30,
+    })
+    await markSessionUnread("s1")
+    expect(await getDb().mobileOutboundQueue.toArray()).toEqual([
+      expect.objectContaining({
+        accountId: "acct_read",
+        targetId: "host_read",
+        command: "session_mark_unread",
+        status: "pending",
+        payload: { sessionId: "s1" },
+        channel: sessionStateRelayChannel("s1"),
+        clientId: SESSION_STATE_RELAY_CLIENT_ID,
+        clientSeq: 1,
+      }),
+    ])
+    expect(await getSessionState("s1")).toEqual({
+      sessionId: "s1",
+      lastReadAt: 10,
+      unreadCount: 1,
+      updatedAt: 30,
+    })
+  })
+
+  it("orders a later read behind the unread on the session's channel", async () => {
+    await remoteTarget()
+    await getDb().sessionState.put({
+      sessionId: "s1",
+      lastReadAt: 10,
+      unreadCount: 0,
+      updatedAt: 30,
+    })
+    await markSessionUnread("s1")
+    await markSessionRead("s1")
+    await markSessionRead("s2")
+    const rows = await getDb().mobileOutboundQueue.orderBy("createdAt").toArray()
+    const byCommand = rows.map((row) => [row.command, row.channel, row.clientSeq])
+    expect(byCommand).toEqual(
+      expect.arrayContaining([
+        ["session_mark_unread", sessionStateRelayChannel("s1"), 1],
+        ["session_mark_read", sessionStateRelayChannel("s1"), 2],
+        // Another conversation is its own channel.
+        ["session_mark_read", sessionStateRelayChannel("s2"), 1],
+      ])
+    )
+    // The read reports the snapshot the unread was taken over, which is what
+    // lets the Host treat it as superseding that unread.
+    expect(
+      rows.find((row) => row.command === "session_mark_read" && row.payload.sessionId === "s1")
+        ?.payload
+    ).toEqual({
+      sessionId: "s1",
+      readThrough: 30,
+    })
+    expect(await getSessionState("s1")).toMatchObject({ unreadCount: 0 })
+  })
+
+  it("keeps a browser-owned conversation's unread local while paired", async () => {
+    await remoteTarget()
+    jest.requireMock("@/lib/sync/session-history").getSessionHistoryMode.mockReturnValue("local")
+    await markSessionUnread("s1")
+    expect(await getDb().mobileOutboundQueue.count()).toBe(0)
+    expect(await getSessionState("s1")).toMatchObject({ unreadCount: 1 })
+  })
+
+  it("does not relay an unread for a missing conversation", async () => {
+    await remoteTarget()
+    await markSessionUnread("missing")
+    expect(await getDb().mobileOutboundQueue.count()).toBe(0)
+  })
+
+  it("rolls back the optimistic unread when no delivery scope is available", async () => {
+    const context = await remoteTarget()
+    context.clearActiveRuntimeTargetContext()
+    await expect(markSessionUnread("s1")).rejects.toThrow(
+      "Outbound queue requires an active account and runtime target"
+    )
     expect(await getSessionState("s1")).toBeUndefined()
   })
 })

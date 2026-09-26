@@ -4,6 +4,7 @@ import type { SessionFolder } from "@cognia/agent-config-types"
 
 import { getDb } from "./schema"
 import { resolveScopeProjectId } from "./project-scope"
+import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 
 /**
  * Conversation folders (conversation-list overhaul, Dexie v90). A lightweight,
@@ -95,18 +96,54 @@ export async function reorderFolders(
 }
 
 /**
+ * Ids of the conversations filed in `folderId`.
+ *
+ * A table scan: `ChatSession.folderId` is not indexed, and the folder's
+ * `projectId` cannot narrow it either — a conversation of NO workspace (a
+ * paired client's host-synced history) can be filed into a workspace folder,
+ * and such a row is absent from the `projectId` index.
+ */
+export async function listFolderMemberIds(folderId: string): Promise<string[]> {
+  return (await getDb()
+    .sessions.filter((session) => session.folderId === folderId)
+    .primaryKeys()) as string[]
+}
+
+/**
  * Delete a folder. Member sessions are reverted to loose (their `folderId`
  * cleared) in the SAME transaction — the conversations themselves are never
- * deleted. `folderId` is non-indexed, so members are found by a table scan.
+ * deleted.
+ *
+ * Every member passes the handoff write gate before anything is written: a
+ * conversation frozen for a cross-host handoff refuses the unfile with
+ * `SessionHandoffLockedError`, and the whole delete rolls back rather than
+ * leaving the folder half-emptied.
+ *
+ * `leaveSessionIds` names members whose unfile has already been handed to the
+ * Host (`session.folder` intents on a paired client). Their rows are the Host's
+ * to write — table sync brings the cleared `folderId` back — so they are
+ * neither checked nor touched here; until then they point at a folder that no
+ * longer exists, which the list model renders as loose.
  */
-export async function deleteFolder(id: string): Promise<void> {
+export async function deleteFolder(
+  id: string,
+  opts?: { leaveSessionIds?: readonly string[] }
+): Promise<void> {
+  const leave = new Set(opts?.leaveSessionIds ?? [])
   const db = getDb()
   await db.transaction("rw", db.sessionFolders, db.sessions, async () => {
-    await db.sessions
-      .filter((s) => s.folderId === id)
-      .modify((s) => {
-        delete s.folderId
-      })
+    const members = await db.sessions
+      .filter((session) => session.folderId === id && !leave.has(session.id))
+      .toArray()
+    for (const session of members) assertSessionWritable(session, "metadata")
+    if (members.length > 0) {
+      await db.sessions
+        .where("id")
+        .anyOf(members.map((session) => session.id))
+        .modify((session) => {
+          delete session.folderId
+        })
+    }
     await db.sessionFolders.delete(id)
   })
 }

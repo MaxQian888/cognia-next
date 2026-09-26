@@ -781,6 +781,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     // remote-control capability (see CONTROL_COMMANDS).
     "session_attach",
     "session_detach",
+    // The durable read/unread relay (`lib/db/session-state.ts`). Observe-level:
+    // a device's own read pointer is not remote control.
+    "session_mark_read",
+    "session_mark_unread",
     // ADR-0177 team rooms: a companion hands a room turn to the host runner.
     "room_send",
     "room_stop",

@@ -7,30 +7,29 @@ import {
   archiveSession,
   assignSessionToFolder,
   bulkArchiveSessions,
-  bulkDeleteSessions,
   bulkSetSessionsPinned,
   bulkUnarchiveSessions,
-  deleteSession,
   getSession,
   listWorkspaceSessions,
   listSessions,
+  setSessionRanks,
   unarchiveSession,
   updateSession,
 } from "@/lib/db/sessions"
 import {
   createFolder as createFolderDb,
   deleteFolder as deleteFolderDb,
+  listFolderMemberIds,
   listFolders,
   renameFolder as renameFolderDb,
   reorderFolders as reorderFoldersDb,
 } from "@/lib/db/session-folders"
+import { deleteSessionsWithTeardown } from "@/lib/chat/session-deletion"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { buildOpeningMessage } from "@/lib/chat/opening-message"
 import { startNewSession, type NewSessionInput } from "@/lib/chat/start-session"
 import { getDb } from "@/lib/db/schema"
-import { closeSession } from "@/lib/claude/ipc"
 import { useChatStore } from "@/stores/chat"
-import { useImNotifyStore } from "@/stores/chat/im-notify-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
@@ -354,23 +353,20 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
 
   const remove = useCallback(
     async (id: string) => {
-      // Tear down the live session in the sidecar if any.
-      if (isTauri()) {
-        try {
-          await closeSession(id)
-        } catch (err) {
-          // Non-fatal — the sidecar may not have a session for this id.
-          console.warn("closeSession failed", err)
-        }
+      // A paired client hands the delete to its Host, which runs the cascade
+      // and the sidecar teardown there and confirms a tombstone every replica
+      // applies. Only when no Host takes the write is it carried out here.
+      const queued = await enqueueHostStateIntentIfAvailable({
+        sessionId: id,
+        action: { kind: "session.delete" },
+      })
+      if (!queued) {
+        await deleteSessionsWithTeardown([id])
+        return
       }
-      await deleteSession(id)
-      // A deleted session can never settle — drop its armed entry rather than
-      // waiting for the registry's age cap to evict it.
-      useImNotifyStore.getState().disarmSession(id)
-      emitSystemBusEvent(SystemEvents.SESSION_DELETED, { sessionId: id })
-      if (useChatStore.getState().activeSessionId === id) {
-        setActiveSession(null)
-      }
+      // Leave the doomed conversation, as archive does, rather than keep a
+      // composer open against a row about to disappear.
+      if (useChatStore.getState().activeSessionId === id) setActiveSession(null)
     },
     [setActiveSession]
   )
@@ -391,33 +387,32 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
   const bulkRemove = useCallback(
     async (ids: readonly string[]) => {
       if (ids.length === 0) return
-      // Tear down each live sidecar session first; tolerate per-id failures
-      // (the sidecar may not be tracking some of these ids).
-      if (isTauri()) {
-        await Promise.all(
-          ids.map(async (id) => {
-            try {
-              await closeSession(id)
-            } catch (err) {
-              console.warn("closeSession failed", err)
-            }
-          })
+      const uniqueIds = [...new Set(ids)]
+      const queued = await Promise.all(
+        uniqueIds.map((sessionId) =>
+          enqueueHostStateIntentIfAvailable({ sessionId, action: { kind: "session.delete" } })
         )
-      }
-      await bulkDeleteSessions(ids)
-      for (const id of ids) useImNotifyStore.getState().disarmSession(id)
-      for (const id of ids) emitSystemBusEvent(SystemEvents.SESSION_DELETED, { sessionId: id })
+      )
+      const legacyIds = uniqueIds.filter((_, index) => !queued[index])
+      // The local cascade deselects what it deleted; the Host-owned ones are
+      // left the same way `remove` leaves them.
+      if (legacyIds.length > 0) await deleteSessionsWithTeardown(legacyIds)
       const current = useChatStore.getState().activeSessionId
-      if (current && ids.includes(current)) {
-        setActiveSession(null)
-      }
+      if (current && uniqueIds.includes(current)) setActiveSession(null)
     },
     [setActiveSession]
   )
 
   const bulkSetPinned = useCallback(async (ids: readonly string[], pinned: boolean) => {
     if (ids.length === 0) return
-    await bulkSetSessionsPinned(ids, pinned)
+    const uniqueIds = [...new Set(ids)]
+    const queued = await Promise.all(
+      uniqueIds.map((sessionId) =>
+        enqueueHostStateIntentIfAvailable({ sessionId, action: { kind: "session.pin", pinned } })
+      )
+    )
+    const legacyIds = uniqueIds.filter((_, index) => !queued[index])
+    if (legacyIds.length > 0) await bulkSetSessionsPinned(legacyIds, pinned)
   }, [])
 
   const archive = useCallback(
@@ -474,30 +469,84 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     if (legacyIds.length > 0) await bulkUnarchiveSessions(legacyIds)
   }, [])
 
+  // Folders themselves are device-local: `sessionFolders` is not a synced
+  // table, so creating, renaming and ordering them has no Host to forward to.
+  // What IS synced is a conversation's `folderId` on its `sessions` row — every
+  // write of that goes through the Host below.
   const createFolder = useCallback((name: string) => createFolderDb(name), [])
   const renameFolder = useCallback((id: string, name: string) => renameFolderDb(id, name), [])
-  const deleteFolder = useCallback((id: string) => deleteFolderDb(id), [])
+  const deleteFolder = useCallback(async (id: string) => {
+    // Deleting a folder unfiles its members, and each unfile is a `sessions`
+    // row write the Host owns on a paired client. Hand those over first, then
+    // drop the folder and unfile only the members no Host took.
+    const memberIds = await listFolderMemberIds(id)
+    const queued = await Promise.all(
+      memberIds.map((sessionId) =>
+        enqueueHostStateIntentIfAvailable({
+          sessionId,
+          action: { kind: "session.folder", folderId: null },
+        })
+      )
+    )
+    await deleteFolderDb(id, { leaveSessionIds: memberIds.filter((_, index) => queued[index]) })
+  }, [])
   const reorderFolders = useCallback((ids: string[]) => reorderFoldersDb(ids), [])
-  const assignToFolder = useCallback(
-    (sessionId: string, folderId: string | null) => assignSessionToFolder(sessionId, folderId),
-    []
-  )
-  // File a whole selection at once. One transaction, so the list's live query
-  // re-emits once for the batch rather than once per row, and a row that
-  // refuses the write (a handoff-locked conversation) rolls the whole move
-  // back instead of leaving the selection half-filed. The single-row writer
-  // joins the ambient transaction — it reads and writes through the same db.
+  const assignToFolder = useCallback(async (sessionId: string, folderId: string | null) => {
+    const queued = await enqueueHostStateIntentIfAvailable({
+      sessionId,
+      action: { kind: "session.folder", folderId },
+    })
+    if (!queued) await assignSessionToFolder(sessionId, folderId)
+  }, [])
+  // File a whole selection at once. The rows a Host takes are forwarded one
+  // intent each; the rest are filed locally in one transaction, so the list's
+  // live query re-emits once for the batch rather than once per row, and a row
+  // that refuses the write (a handoff-locked conversation) rolls the whole
+  // local move back instead of leaving the selection half-filed. The
+  // single-row writer joins the ambient transaction — it reads and writes
+  // through the same db.
   const bulkAssignToFolder = useCallback(
     async (ids: readonly string[], folderId: string | null) => {
       if (ids.length === 0) return
       const uniqueIds = [...new Set(ids)]
+      const queued = await Promise.all(
+        uniqueIds.map((sessionId) =>
+          enqueueHostStateIntentIfAvailable({
+            sessionId,
+            action: { kind: "session.folder", folderId },
+          })
+        )
+      )
+      const legacyIds = uniqueIds.filter((_, index) => !queued[index])
+      if (legacyIds.length === 0) return
       const db = getDb()
       await db.transaction("rw", db.sessions, () =>
-        Promise.all(uniqueIds.map((id) => assignSessionToFolder(id, folderId)))
+        Promise.all(legacyIds.map((id) => assignSessionToFolder(id, folderId)))
       )
     },
     []
   )
+  /**
+   * Persist a drag-reorder of one conversation-list section. `ids` are the
+   * section's rows in their new order; `sectionKey` is the section's
+   * `conversationSectionKey` (see `setSessionOrder`). Each row a Host takes is
+   * forwarded with its rank in the FULL arrangement; the rest keep that same
+   * rank locally, so a mixed batch cannot collide.
+   */
+  const reorderSessions = useCallback(async (ids: readonly string[], sectionKey: string) => {
+    if (ids.length === 0) return
+    const ranks = ids.map((id, manualOrder) => ({ id, manualOrder }))
+    const queued = await Promise.all(
+      ranks.map(({ id, manualOrder }) =>
+        enqueueHostStateIntentIfAvailable({
+          sessionId: id,
+          action: { kind: "session.order", manualOrder, sectionKey },
+        })
+      )
+    )
+    const legacyRanks = ranks.filter((_, index) => !queued[index])
+    if (legacyRanks.length > 0) await setSessionRanks(legacyRanks, sectionKey)
+  }, [])
 
   return {
     /**
@@ -536,6 +585,7 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     reorderFolders,
     assignToFolder,
     bulkAssignToFolder,
+    reorderSessions,
     db: typeof window === "undefined" ? null : getDb(),
   }
 }

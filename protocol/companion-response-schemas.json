@@ -11471,6 +11471,9 @@
     "session_mark_read": {
       "type": "null"
     },
+    "session_mark_unread": {
+      "type": "null"
+    },
     "session_attach": {
       "$ref": "#/$defs/LegacyResult"
     },

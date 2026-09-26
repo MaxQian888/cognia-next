@@ -10,9 +10,12 @@ import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import {
   acquireHostStateLease,
   commitHostStateAction,
+  getHostStateAction,
   getHostStateSnapshot,
   renewHostStateLease,
+  validateHostStateBusinessAction,
 } from "./host-state-store"
+import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 
 const scope = { accountId: "acct-host-state", targetId: "desktop-a", hostId: "host-opaque-a" }
 const channel = sessionStateChannel(scope.targetId, "session-1")
@@ -410,6 +413,188 @@ describe("HostState durable store", () => {
     const session = await getDb().sessions.get("session-1")
     expect(session?.lastMessagePreview).toBe("compare these")
     expect(session?.lastMessagePreview).not.toContain("SNAPSHOT")
+  })
+
+  it("applies pin, filing and rank to the sessions row with no channel mutation", async () => {
+    await acquireWritableLease()
+    await getDb().sessions.update("session-1", { folderId: "f-old" })
+
+    const pin = await commitHostStateAction({
+      action: draftAction({
+        baseRevision: undefined,
+        action: { kind: "session.pin", pinned: true },
+      }),
+      now: 500,
+    })
+    await commitHostStateAction({
+      action: draftAction({
+        actionId: "action-2",
+        clientSeq: 2,
+        baseRevision: undefined,
+        action: { kind: "session.order", manualOrder: 4, sectionKey: "pinned" },
+      }),
+      now: 600,
+    })
+
+    // Applied, but nothing the channel carries changed — replicas learn the
+    // row through `sessions` table sync, which keys on `updatedAt`.
+    expect(pin.event).toMatchObject({ outcome: "applied", hostSeq: 1 })
+    expect(pin.event.mutation).toBeUndefined()
+    await expect(getHostStateSnapshot(channel)).resolves.toMatchObject({ state: { revision: 0 } })
+    await expect(getHostStateAction(1, "action-1")).resolves.toMatchObject({
+      summaryState: "not-required",
+      dispatchState: "not-required",
+    })
+    expect(await getDb().sessions.get("session-1")).toMatchObject({
+      pinned: true,
+      manualOrder: 4,
+      manualOrderSection: "pinned",
+      folderId: "f-old",
+      updatedAt: 600,
+      // Display recency is pinned to what it was, not to the write.
+      lastMessageAt: 1,
+    })
+
+    await commitHostStateAction({
+      action: draftAction({
+        actionId: "action-3",
+        clientSeq: 3,
+        baseRevision: undefined,
+        action: { kind: "session.folder", folderId: null },
+      }),
+      now: 700,
+    })
+    const unfiled = await getDb().sessions.get("session-1")
+    expect(unfiled).not.toHaveProperty("folderId")
+    expect(unfiled?.updatedAt).toBe(700)
+
+    await commitHostStateAction({
+      action: draftAction({
+        actionId: "action-4",
+        clientSeq: 4,
+        baseRevision: undefined,
+        action: { kind: "session.folder", folderId: "f-new" },
+      }),
+      now: 800,
+    })
+    expect((await getDb().sessions.get("session-1"))?.folderId).toBe("f-new")
+  })
+
+  it("refuses organize and delete intents on a handoff-locked session", async () => {
+    await getDb().sessions.update("session-1", {
+      handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+    })
+    for (const intent of [
+      { kind: "session.rename", title: "Renamed" },
+      { kind: "session.archive", archived: true },
+      { kind: "session.pin", pinned: true },
+      { kind: "session.folder", folderId: "f1" },
+      { kind: "session.order", manualOrder: 0, sectionKey: "recent" },
+      { kind: "session.delete" },
+    ] as const) {
+      await expect(
+        validateHostStateBusinessAction(draftAction({ baseRevision: undefined, action: intent }))
+      ).resolves.toEqual({
+        code: "session_handoff_locked",
+        message: "The session is read-only during a handoff.",
+      })
+    }
+    await expect(
+      validateHostStateBusinessAction(
+        draftAction({ sessionId: "missing", action: { kind: "session.delete" } })
+      )
+    ).resolves.toMatchObject({ code: "session_not_found" })
+  })
+
+  it("rolls a rename or archive back when a lock lands between validation and commit", async () => {
+    await acquireWritableLease()
+    await getDb().sessions.update("session-1", {
+      handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+    })
+    await expect(
+      commitHostStateAction({
+        action: draftAction({ action: { kind: "session.rename", title: "Renamed" } }),
+        mutation: { kind: "session.renamed", title: "Renamed", revision: 1 },
+        now: 10,
+      })
+    ).rejects.toBeInstanceOf(SessionHandoffLockedError)
+    await expect(
+      commitHostStateAction({
+        action: draftAction({
+          actionId: "action-2",
+          clientSeq: 2,
+          action: { kind: "session.archive", archived: true },
+        }),
+        mutation: { kind: "conversation.changed", conversation: "archived", revision: 1 },
+        now: 11,
+      })
+    ).rejects.toBeInstanceOf(SessionHandoffLockedError)
+    await expect(getDb().hostStateActions.count()).resolves.toBe(0)
+    expect(await getDb().sessions.get("session-1")).toMatchObject({ title: "Session" })
+    expect((await getDb().sessions.get("session-1"))?.archivedAt).toBeUndefined()
+    await expect(getHostStateSnapshot(channel)).resolves.toMatchObject({
+      state: { revision: 0, conversation: "present" },
+    })
+  })
+
+  it("rolls the ledger back when a lock lands between validation and commit", async () => {
+    await acquireWritableLease()
+    await getDb().sessions.update("session-1", {
+      handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+    })
+    await expect(
+      commitHostStateAction({
+        action: draftAction({
+          baseRevision: undefined,
+          action: { kind: "session.pin", pinned: true },
+        }),
+        now: 10,
+      })
+    ).rejects.toBeInstanceOf(SessionHandoffLockedError)
+    await expect(getDb().hostStateActions.count()).resolves.toBe(0)
+    expect((await getDb().sessions.get("session-1"))?.pinned).toBeUndefined()
+  })
+
+  it("records a delete's tombstone at the ledger position it was committed at", async () => {
+    await acquireWritableLease()
+    // An earlier action moves the ledger, so a snapshot-derived position would
+    // be stale by the time the delete commits.
+    await commitHostStateAction({
+      action: draftAction(),
+      mutation: {
+        kind: "draft.replaced",
+        text: "x",
+        attachments: [],
+        draftRevision: 1,
+        revision: 1,
+      },
+      now: 5,
+    })
+    // The cascade has already run by the time the ledger commits.
+    await getDb().sessions.delete("session-1")
+
+    const deleted = await commitHostStateAction({
+      action: draftAction({
+        actionId: "delete-1",
+        clientSeq: 2,
+        baseRevision: undefined,
+        action: { kind: "session.delete" },
+      }),
+      mutation: { kind: "session.tombstoned", deletedAt: 9, hostSeq: 0, revision: 2 },
+      now: 9,
+    })
+
+    expect(deleted.event).toMatchObject({
+      outcome: "applied",
+      hostSeq: 2,
+      mutation: { kind: "session.tombstoned", deletedAt: 9, hostSeq: 2, revision: 2 },
+    })
+    await expect(getHostStateSnapshot(channel)).resolves.toMatchObject({
+      state: { conversation: "tombstoned", tombstone: { deletedAt: 9, hostSeq: 2 } },
+    })
+    await expect(getHostStateAction(1, "delete-1")).resolves.toMatchObject({
+      summaryState: "pending",
+    })
   })
 
   it("commits a client action on the strength of the lease alone", async () => {

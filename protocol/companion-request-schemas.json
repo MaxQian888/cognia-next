@@ -11238,6 +11238,19 @@
       },
       "additionalProperties": false
     },
+    "session_mark_unread": {
+      "type": "object",
+      "required": [
+        "sessionId"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
     "session_timeline": {
       "type": "object",
       "required": [

@@ -32,6 +32,9 @@
 // trigger, RPC dispatch arm, and handler.
 export const MOBILE_OUTBOUND_COMMANDS = [
   "session_mark_read",
+  // The explicit "mark as unread" row action; relayed on the same per-session
+  // channel as `session_mark_read` so the Host applies the two in order.
+  "session_mark_unread",
   // Connector subsystem (share-target + draft approval panel).
   "connector_send",
   "connector_approve_draft",

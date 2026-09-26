@@ -16833,6 +16833,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "session_mark_unread",
+      "resource": "session",
+      "verb": "mark_unread",
+      "arm": "session_mark_unread",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "session_attach",
       "resource": "session",
       "verb": "attach",

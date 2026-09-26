@@ -1,7 +1,10 @@
 /**
  * @jest-environment jsdom
  */
-jest.mock("@/lib/db/session-state", () => ({ markSessionReadOnHost: jest.fn() }))
+jest.mock("@/lib/db/session-state", () => ({
+  markSessionReadOnHost: jest.fn(),
+  markSessionUnreadOnHost: jest.fn(),
+}))
 
 import "fake-indexeddb/auto"
 
@@ -1221,6 +1224,9 @@ describe("dispatchCommand: session_attach / session_detach", () => {
     expect(controller.supportedActions).toEqual([
       "session.rename",
       "session.archive",
+      "session.pin",
+      "session.folder",
+      "session.order",
       "draft.replace",
       "message.enqueue",
       "turn.steer",
@@ -1233,6 +1239,8 @@ describe("dispatchCommand: session_attach / session_detach", () => {
     // and rewriting a transcript stay out.
     expect(controller.supportedActions).not.toContain("session.create")
     expect(controller.supportedActions).not.toContain("transcript.truncate")
+    // Deleting a conversation is owner-only; Remote Control may only organize it.
+    expect(controller.supportedActions).not.toContain("session.delete")
 
     const observer = (await dispatchCommand("session_attach", {
       sessionId: "s-actions",
@@ -2468,6 +2476,26 @@ describe("dispatchCommand: session_mark_read", () => {
       await expect(
         dispatchCommand("session_mark_read", { sessionId: "", readThrough: 20 })
       ).rejects.toThrow("Invalid session_mark_read payload")
+    } finally {
+      mark.mockReset()
+    }
+  })
+})
+
+describe("dispatchCommand: session_mark_unread", () => {
+  it("validates the session id and delegates to Host authority", async () => {
+    const state = await import("@/lib/db/session-state")
+    const mark = (state.markSessionUnreadOnHost as jest.Mock).mockResolvedValue(undefined)
+    try {
+      await expect(dispatchCommand("session_mark_unread", { sessionId: "s1" })).resolves.toBeNull()
+      expect(mark).toHaveBeenCalledWith("s1")
+      await expect(dispatchCommand("session_mark_unread", { sessionId: "" })).rejects.toThrow(
+        "Invalid session_mark_unread payload"
+      )
+      await expect(dispatchCommand("session_mark_unread", {})).rejects.toThrow(
+        "Invalid session_mark_unread payload"
+      )
+      expect(mark).toHaveBeenCalledTimes(1)
     } finally {
       mark.mockReset()
     }

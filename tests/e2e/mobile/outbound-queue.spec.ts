@@ -43,6 +43,9 @@ interface QueueRowView {
 }
 
 const COMMAND_KINDS = [
+  // Per-session read/unread relay (`lib/db/session-state.ts`)
+  "session_mark_read",
+  "session_mark_unread",
   // Connector subsystem
   "connector_send",
   "connector_approve_draft",
