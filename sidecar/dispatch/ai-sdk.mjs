@@ -15,7 +15,7 @@ import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
 import { randomUUID } from "node:crypto"
 import { createEventAdapter } from "./event-adapter.mjs"
 import { makeInputStream } from "../src/shared/input-stream.ts"
-import { extractHttpErrorMeta } from "./http-error-meta.mjs"
+import { extractHttpErrorMeta } from "../src/providers/http-error-meta.ts"
 import {
   classifyCallError,
   createCallLedgerGate,
@@ -30,7 +30,7 @@ import {
   STREAM_IDLE_TIMEOUT_MS,
   StreamIdleTimeoutError,
   withIdleTimeout,
-} from "./stream-watchdog.mjs"
+} from "../src/providers/stream-watchdog.ts"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"

@@ -3,8 +3,6 @@
   "findings": [
     "cycle: sidecar/builtin-tools -> sidecar/dispatch",
     "cycle: sidecar/dispatch -> sidecar/builtin-tools",
-    "cycle: sidecar/dispatch -> sidecar/dispatch/protocol-adapters",
-    "cycle: sidecar/dispatch/protocol-adapters -> sidecar/dispatch",
     "launcher-import: sidecar/claude-host.mjs imports the process entry sidecar/agent-host.mjs"
   ]
 }

@@ -1,7 +1,7 @@
 /**
  * Provider-usage alias normalization — the renderer-side mirror.
  *
- * Hand-mirrors `sidecar/dispatch/usage-normalize.mjs` because the sidecar
+ * Hand-mirrors `sidecar/src/providers/usage-normalize.ts` because the sidecar
  * cannot import from `lib/`. `usage-normalize.parity.test.ts` imports both and
  * asserts they agree across a provider matrix, so editing one without the other
  * goes red.

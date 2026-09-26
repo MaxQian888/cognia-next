@@ -26,35 +26,50 @@
  */
 export const EMITTED_INSTRUCTIONS_KEY = "instructions"
 
-/**
- * @typedef {{ role: string, content: any, providerOptions?: any }} AnyMessage
- * @typedef {{ role: "system", content: string, providerOptions?: any }} SystemMessage
- */
+export interface AnyMessage {
+  role: string
+  content: unknown
+  providerOptions?: unknown
+}
 
-/**
- * @param {AnyMessage} message
- * @returns {boolean}
- */
-function isSystemMessage(message) {
-  return Boolean(message) && message.role === "system"
+export interface SystemMessage {
+  role: "system"
+  content: string
+  providerOptions?: unknown
+}
+
+export type LeadingInstructions =
+  string | SystemMessage | readonly SystemMessage[] | null | undefined
+
+/** Spreadable straight into `streamText` options. */
+export interface PartitionedPrompt<M extends AnyMessage> {
+  instructions?: SystemMessage[]
+  messages: M[]
+  allowSystemInMessages?: true
+}
+
+function isSystemMessage(message: AnyMessage | null | undefined): boolean {
+  return !!message && message.role === "system"
 }
 
 /**
  * Normalize free-form leading instructions into an array of system messages.
  * Empty / whitespace-only entries are dropped so an unset system prompt never
  * turns into an empty system turn.
- *
- * @param {string|SystemMessage|ReadonlyArray<SystemMessage>|null|undefined} instructions
- * @returns {SystemMessage[]}
  */
-function toSystemMessages(instructions) {
+function toSystemMessages(
+  instructions: LeadingInstructions | readonly AnyMessage[]
+): SystemMessage[] {
   if (instructions === null || instructions === undefined) return []
   if (typeof instructions === "string") {
     return instructions.trim().length > 0 ? [{ role: "system", content: instructions }] : []
   }
-  const list = Array.isArray(instructions) ? instructions : [instructions]
+  const list: readonly (AnyMessage | null | undefined)[] = Array.isArray(instructions)
+    ? instructions
+    : [instructions as SystemMessage]
   return list.filter(
-    (message) => typeof message?.content === "string" && message.content.trim().length > 0
+    (message): message is SystemMessage =>
+      typeof message?.content === "string" && message.content.trim().length > 0
   )
 }
 
@@ -70,13 +85,12 @@ function toSystemMessages(instructions) {
  *   this to user-authored message arrays.
  *
  * The result is spreadable straight into `streamText` options.
- *
- * @param {ReadonlyArray<AnyMessage>} messages
- * @param {string|SystemMessage|ReadonlyArray<SystemMessage>} [leadingInstructions]
- * @returns {{ instructions?: SystemMessage[], messages: AnyMessage[], allowSystemInMessages?: true }}
  */
-export function partitionPrompt(messages, leadingInstructions) {
-  const list = Array.isArray(messages) ? messages : []
+export function partitionPrompt<M extends AnyMessage>(
+  messages: readonly M[] | null | undefined,
+  leadingInstructions?: LeadingInstructions
+): PartitionedPrompt<M> {
+  const list: readonly M[] = Array.isArray(messages) ? messages : []
   let firstNonSystem = 0
   while (firstNonSystem < list.length && isSystemMessage(list[firstNonSystem])) {
     firstNonSystem += 1

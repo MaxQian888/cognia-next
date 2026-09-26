@@ -28,7 +28,7 @@
  * `providerOptions` intact.
  *
  * The sidecar cannot import `@/` paths, so it carries a behaviour-identical
- * `.mjs` port at `sidecar/dispatch/prompt-partition.mjs`. Both are pinned by the
+ * port at `sidecar/src/providers/prompt-partition.ts`. Both are pinned by the
  * same table of cases — keep them in lockstep.
  */
 

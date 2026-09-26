@@ -8,7 +8,7 @@
 // Wired at `createFeatureProviderModel` — the single seam every webview-side
 // provider call passes through (standalone BYOK chat, plugin/provider
 // operations). The sidecar dispatch path enforces the same idle bound in its
-// own event loop (`sidecar/dispatch/stream-watchdog.mjs`); it cannot import
+// own event loop (`sidecar/src/providers/stream-watchdog.ts`); it cannot import
 // this module because `sidecar/` is a separate Node project.
 
 export const PROVIDER_HEADERS_TIMEOUT_MS = 5 * 60_000

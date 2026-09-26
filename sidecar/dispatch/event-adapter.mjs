@@ -19,7 +19,7 @@
 //   { type: "result", subtype, session_id, usage, total_cost_usd, duration_ms, num_turns }
 
 import { randomUUID } from "node:crypto"
-import { normalizeUsageBlock } from "./usage-normalize.mjs"
+import { normalizeUsageBlock } from "../src/providers/usage-normalize.ts"
 import { restoreToolName } from "../src/policy/tool-catalog/model-names.ts"
 
 /**

@@ -19,20 +19,31 @@
 // renderer log), NOT the COGNIA_SIDECAR_VERBOSE stderr channel, so a post-mortem
 // doesn't depend on the stall having been reproduced with a special env var.
 
-/**
- * @param {{
- *   sessionId: string,
- *   turnId?: string,
- *   log: (level: "info"|"warn"|"error", message: string) => void,
- *   now?: () => number,
- * }} params
- */
-export function createProviderStreamLogger({ sessionId, turnId, log, now = Date.now }) {
+export interface ProviderStreamLogger {
+  /** Call for every event pulled off the provider stream. */
+  onEvent(): void
+  /** Call when the stream completes normally. */
+  onEnd(): void
+  /** Call when the stream throws. */
+  onError(err: unknown): void
+}
+
+export function createProviderStreamLogger({
+  sessionId,
+  turnId,
+  log,
+  now = Date.now,
+}: {
+  sessionId: string
+  turnId?: string | undefined
+  log: (level: "info" | "warn" | "error", message: string) => void
+  now?: () => number
+}): ProviderStreamLogger {
   // `turnId` correlates these lines with the renderer's agent-trace span for the
   // same turn; absent when the parent didn't stamp one.
   const tag = turnId ? ` turn ${turnId}` : ""
   const startedAt = now()
-  let firstEventAt = null
+  let firstEventAt: number | null = null
   let eventCount = 0
 
   return {
@@ -61,7 +72,7 @@ export function createProviderStreamLogger({ sessionId, turnId, log, now = Date.
       log(
         "error",
         `session ${sessionId}${tag}: provider stream failed after ${now() - startedAt}ms ` +
-          `(${eventCount} events, first event ${firstEvent}): ${err?.message ?? String(err)}`
+          `(${eventCount} events, first event ${firstEvent}): ${(err as Error | null | undefined)?.message ?? String(err)}`
       )
     },
   }

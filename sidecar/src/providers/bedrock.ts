@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 function required(settings, field, label) {
   const value = settings?.[field]
   if (typeof value !== "string" || value.trim().length === 0) {

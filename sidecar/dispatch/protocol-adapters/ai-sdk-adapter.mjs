@@ -16,8 +16,8 @@ import {
   RESPONSES_ONLY_PROVIDERS,
   resolveProviderProtocol,
 } from "../../src/providers/provider-protocol.ts"
-import { buildBedrockProviderOptions } from "../bedrock.mjs"
-import { partitionPrompt } from "../prompt-partition.mjs"
+import { buildBedrockProviderOptions } from "../../src/providers/bedrock.ts"
+import { partitionPrompt } from "../../src/providers/prompt-partition.ts"
 import { aiSdkTelemetry, withTraceparent } from "../../src/platform/telemetry/index.ts"
 import {
   EFFORT_TO_BUDGET,

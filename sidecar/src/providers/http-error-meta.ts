@@ -9,14 +9,22 @@
 // Returns `{}` when neither shape is present — the renderer's message-text
 // extraction (`error-classifier.extractRetryAfterMs`) remains the fallback.
 
+/** Structured status / retry hints for the renderer's classifier. */
+export interface HttpErrorMeta {
+  httpStatus?: number
+  retryAfterMs?: number
+}
+
 /** Read a header case-insensitively from a Headers instance or plain object. */
-function readHeader(headers, name) {
+function readHeader(headers: unknown, name: string): string | undefined {
   if (!headers) return undefined
   const lower = name.toLowerCase()
   // Headers / Map-like (has a `.get`).
-  if (typeof headers.get === "function") {
+  const getter = (headers as { get?: unknown }).get
+  if (typeof getter === "function") {
     try {
-      const v = headers.get(name) ?? headers.get(lower)
+      const get = (key: string): unknown => getter.call(headers, key)
+      const v = get(name) ?? get(lower)
       if (typeof v === "string") return v
     } catch {
       // fall through to plain-object scan
@@ -25,7 +33,7 @@ function readHeader(headers, name) {
   if (typeof headers === "object") {
     for (const key of Object.keys(headers)) {
       if (key.toLowerCase() === lower) {
-        const v = headers[key]
+        const v = (headers as Record<string, unknown>)[key]
         if (typeof v === "string" || typeof v === "number") return String(v)
       }
     }
@@ -38,7 +46,10 @@ function readHeader(headers, name) {
  * delta-seconds form ("30") and the HTTP-date form. Returns undefined for
  * absent / garbage / past values.
  */
-export function parseRetryAfterMs(value, now = Date.now) {
+export function parseRetryAfterMs(
+  value: unknown,
+  now: () => number = Date.now
+): number | undefined {
   if (value === undefined || value === null) return undefined
   const text = String(value).trim()
   if (text === "") return undefined
@@ -61,17 +72,23 @@ export function parseRetryAfterMs(value, now = Date.now) {
  * fields are simply omitted so the result spreads cleanly into a
  * `session_ended` event.
  */
-export function extractHttpErrorMeta(err, now = Date.now) {
-  const meta = {}
+export function extractHttpErrorMeta(err: unknown, now: () => number = Date.now): HttpErrorMeta {
+  const meta: HttpErrorMeta = {}
   if (!err || typeof err !== "object") return meta
+  const e = err as {
+    status?: unknown
+    statusCode?: unknown
+    responseHeaders?: unknown
+    headers?: unknown
+  }
   const status =
-    typeof err.status === "number"
-      ? err.status
-      : typeof err.statusCode === "number"
-        ? err.statusCode
+    typeof e.status === "number"
+      ? e.status
+      : typeof e.statusCode === "number"
+        ? e.statusCode
         : undefined
   if (typeof status === "number" && Number.isFinite(status)) meta.httpStatus = status
-  const headers = err.responseHeaders ?? err.headers
+  const headers = e.responseHeaders ?? e.headers
   const retryAfterMs = parseRetryAfterMs(readHeader(headers, "retry-after"), now)
   if (retryAfterMs !== undefined) meta.retryAfterMs = retryAfterMs
   return meta

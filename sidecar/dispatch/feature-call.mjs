@@ -1,8 +1,8 @@
 import { buildModel as defaultBuildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
 import { resolveAdapter as defaultResolveProtocolAdapter } from "./protocol-adapters/registry.mjs"
-import { buildBedrockProviderOptions, discoverBedrockModels } from "./bedrock.mjs"
+import { buildBedrockProviderOptions, discoverBedrockModels } from "../src/providers/bedrock.ts"
 import { discoverMcpServer as defaultDiscoverMcpServer } from "./mcp-runtime-gateway.mjs"
-import { toLanguageModelUsage } from "./usage-normalize.mjs"
+import { toLanguageModelUsage } from "../src/providers/usage-normalize.ts"
 import { createToolHostManager } from "./tool-host.mjs"
 
 function modelInput(message) {
@@ -115,9 +115,10 @@ function scrubError(error, credentials = {}) {
   return message
 }
 
-// The alias table this used to carry inline now lives in `usage-normalize.mjs`
-// alongside the snake_case normalizer, so a new provider spelling is understood
-// by both dispatch paths instead of only one.
+// The alias table this used to carry inline now lives in
+// `../src/providers/usage-normalize.ts` alongside the snake_case normalizer, so
+// a new provider spelling is understood by both dispatch paths instead of only
+// one.
 const adapterUsageToLanguageModelUsage = toLanguageModelUsage
 
 function languageModelFinishReason(value) {

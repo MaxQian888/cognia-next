@@ -1,9 +1,9 @@
 /**
  * Cross-boundary parity guard.
  *
- * The sidecar cannot import `lib/`, so `sidecar/dispatch/usage-normalize.mjs`
+ * The sidecar cannot import `lib/`, so `sidecar/src/providers/usage-normalize.ts`
  * hand-mirrors `lib/ai/chat/usage-normalize.ts`. This test imports BOTH (it
- * lives under `lib/`, so Jest runs it; the `.mjs` has zero imports so it
+ * lives under `lib/`, so Jest runs it; the sidecar module has zero imports so it
  * transforms cleanly) and asserts they agree across a provider matrix. Edit one
  * alias list without the other and this goes red.
  *
@@ -22,7 +22,7 @@ import {
   normalizeCacheCreation as sidecarNormalizeCacheCreation,
   normalizeServerToolUse as sidecarNormalizeServerToolUse,
   toLanguageModelUsage as sidecarToLanguageModelUsage,
-} from "../../../sidecar/dispatch/usage-normalize.mjs"
+} from "../../../sidecar/src/providers/usage-normalize.ts"
 
 const USAGE_MATRIX: Array<[string, Record<string, unknown>]> = [
   ["empty", {}],

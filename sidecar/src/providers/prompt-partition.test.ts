@@ -1,11 +1,12 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { EMITTED_INSTRUCTIONS_KEY, partitionPrompt } from "./prompt-partition.mjs"
+import { EMITTED_INSTRUCTIONS_KEY, partitionPrompt } from "./prompt-partition.ts"
+import type { SystemMessage } from "./prompt-partition.ts"
 
 const CACHE_CONTROL = { anthropic: { cacheControl: { type: "ephemeral" } } }
 
-const sys = (content, providerOptions) => ({
+const sys = (content: string, providerOptions?: unknown): SystemMessage => ({
   role: "system",
   content,
   ...(providerOptions ? { providerOptions } : {}),

@@ -16,7 +16,9 @@
 export const STREAM_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 
 export class StreamIdleTimeoutError extends Error {
-  constructor(timeoutMs) {
+  readonly idleMs: number
+
+  constructor(timeoutMs: number) {
     super(`provider stream produced no events for ${timeoutMs}ms`)
     this.name = "StreamIdleTimeoutError"
     this.idleMs = timeoutMs
@@ -27,13 +29,13 @@ export class StreamIdleTimeoutError extends Error {
  * Async-iterate `stream` (an AsyncIterable) with an idle bound: every pending
  * `next()` is raced against `timeoutMs`. Normal completion (`done`) is not a
  * timeout — only a gap between events is.
- *
- * @param {AsyncIterable<unknown>} stream
- * @param {number} timeoutMs
  */
-export async function* withIdleTimeout(stream, timeoutMs = STREAM_IDLE_TIMEOUT_MS) {
+export async function* withIdleTimeout<T>(
+  stream: AsyncIterable<T>,
+  timeoutMs: number = STREAM_IDLE_TIMEOUT_MS
+): AsyncGenerator<T, void, undefined> {
   const iterator = stream[Symbol.asyncIterator]()
-  let timer
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
     for (;;) {
       const next = iterator.next()
@@ -42,7 +44,7 @@ export async function* withIdleTimeout(stream, timeoutMs = STREAM_IDLE_TIMEOUT_M
       next.catch(() => {})
       const result = await Promise.race([
         next,
-        new Promise((_, reject) => {
+        new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new StreamIdleTimeoutError(timeoutMs)), timeoutMs)
           // A watchdog must never keep the process alive on its own.
           timer.unref?.()

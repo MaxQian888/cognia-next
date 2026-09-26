@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { extractHttpErrorMeta, parseRetryAfterMs } from "./http-error-meta.mjs"
+import { extractHttpErrorMeta, parseRetryAfterMs } from "./http-error-meta.ts"
 
 test("parseRetryAfterMs: integer delta-seconds → ms", () => {
   assert.equal(parseRetryAfterMs("30"), 30_000)

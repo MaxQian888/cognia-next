@@ -24,9 +24,9 @@ import {
 } from "../src/policy/tool-catalog/plugin-aliases.ts"
 import { makeInputStream } from "../src/shared/input-stream.ts"
 import { buildSubprocessEnv } from "./subprocess-env.mjs"
-import { extractHttpErrorMeta } from "./http-error-meta.mjs"
+import { extractHttpErrorMeta } from "../src/providers/http-error-meta.ts"
 import { sessionEndedFromResult } from "./result-terminal.mjs"
-import { createProviderStreamLogger } from "./provider-stream-log.mjs"
+import { createProviderStreamLogger } from "../src/providers/stream-log.ts"
 import { foldSystemPrompt, thinkingFromBudget } from "./system-prompt.mjs"
 import { createAnthropicCanUseTool } from "../src/policy/permission/sdk-can-use-tool.ts"
 import { enforceAnthropicPermissionChannel } from "../src/policy/permission/delegated-approval.ts"
@@ -794,7 +794,7 @@ export function dispatchAnthropic(
   // first event that carries one (powers resume continuity).
   let sdkSessionIdSeen = false
   // Separates "the provider never answered" from "the stream broke mid-flight"
-  // when a turn stalls — see `./provider-stream-log.mjs`.
+  // when a turn stalls — see `../src/providers/stream-log.ts`.
   const streamLog = createProviderStreamLogger({ sessionId, turnId: sendOptions.turnId, log })
   // `session_ended` is emitted exactly once per turn, from whichever of the
   // three exits below is reached first (the `result` frame, the iterator

@@ -5,9 +5,12 @@ import {
   STREAM_IDLE_TIMEOUT_MS,
   StreamIdleTimeoutError,
   withIdleTimeout,
-} from "./stream-watchdog.mjs"
+} from "./stream-watchdog.ts"
 
-async function* streamOf(items, { hangAfter = Infinity, delayMs = 0 } = {}) {
+async function* streamOf<T>(
+  items: readonly T[],
+  { hangAfter = Infinity, delayMs = 0 }: { hangAfter?: number; delayMs?: number } = {}
+) {
   let i = 0
   for (const item of items) {
     i += 1
@@ -34,7 +37,8 @@ test("times out when the source never yields again", async () => {
         void evt
       }
     },
-    (err) => {
+    (err: unknown) => {
+      assert.ok(err instanceof StreamIdleTimeoutError)
       assert.equal(err.name, "StreamIdleTimeoutError")
       assert.equal(err.idleMs, 30)
       return true
@@ -51,13 +55,13 @@ test("slower-than-timeout gaps still pass through", async () => {
 
 test("cancels the source iterator on timeout", async () => {
   let returned = false
-  const source = {
+  const source: AsyncIterable<never> = {
     [Symbol.asyncIterator]() {
       return {
-        next: () => new Promise(() => {}), // never settles
+        next: () => new Promise<IteratorResult<never>>(() => {}), // never settles
         return: async () => {
           returned = true
-          return { done: true }
+          return { done: true as const, value: undefined }
         },
       }
     },

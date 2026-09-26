@@ -119,6 +119,12 @@ Each migration batch appends its moves here (old → new).
 | `dispatch/tool-result-cap.mjs`                                           | `src/context/tool-result-cap.ts`                                   | 5a          |
 | `dispatch/tool-message-pairing.mjs`                                      | `src/context/tool-message-pairing.ts`                              | 5a          |
 | `dispatch/optical/*.mjs`                                                 | `src/context/optical/*.ts`                                         | 5b          |
+| `dispatch/usage-normalize.mjs`                                           | `src/providers/usage-normalize.ts`                                 | 5c          |
+| `dispatch/prompt-partition.mjs`                                          | `src/providers/prompt-partition.ts`                                | 5c          |
+| `dispatch/http-error-meta.mjs`                                           | `src/providers/http-error-meta.ts`                                 | 5c          |
+| `dispatch/stream-watchdog.mjs`                                           | `src/providers/stream-watchdog.ts`                                 | 5c          |
+| `dispatch/provider-stream-log.mjs`                                       | `src/providers/stream-log.ts`                                      | 5c          |
+| `dispatch/bedrock.mjs`                                                   | `src/providers/bedrock.ts`                                         | 5c          |
 
 ## Scripts (run from repo root)
 

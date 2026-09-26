@@ -867,7 +867,7 @@ export function createSdkEventMapper(ctx: SdkEventMapperContext): SdkEventMapper
         duration_api_ms: Date.now() - startedAt,
         num_turns: 1,
         total_cost_usd: info?.totalCostUsd ?? 0,
-        // Shared with the sidecar's `usage-normalize.mjs` mirror (pinned by
+        // Shared with the sidecar's `usage-normalize.ts` mirror (pinned by
         // `usage-normalize.parity.test.ts`) so both dispatch paths surface the
         // same fields — including the cache-TTL split and server-tool counters.
         usage: normalizeUsageBlock(usage),

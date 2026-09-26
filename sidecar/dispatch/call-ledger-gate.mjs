@@ -25,7 +25,7 @@
 
 import { randomUUID } from "node:crypto"
 
-import { extractHttpErrorMeta } from "./http-error-meta.mjs"
+import { extractHttpErrorMeta } from "../src/providers/http-error-meta.ts"
 
 export const CALL_RESERVE_TIMEOUT_MS = 30_000
 

@@ -17,8 +17,26 @@
  * two together. Keep both in step. Zero imports so Jest can transform it.
  */
 
+/** A provider usage block, in any provider's spelling; values are unvalidated. */
+type UsageRecord = Record<string, unknown>
+
+/**
+ * `value[key]` when `value` is an object, else undefined — what `value?.[key]`
+ * gives for the primitives a nested usage field may hold instead.
+ */
+function field(value: unknown, key: string): unknown {
+  return value != null && typeof value === "object" ? (value as UsageRecord)[key] : undefined
+}
+
+/** Cache-creation tokens split by TTL. */
+export interface CacheCreation {
+  total: number
+  ephemeral5m: number
+  ephemeral1h: number
+}
+
 /** First defined, finite, non-negative number among the candidates, else 0. */
-function firstNumber(...candidates) {
+function firstNumber(...candidates: unknown[]): number {
   for (const c of candidates) {
     if (typeof c === "number" && Number.isFinite(c) && c >= 0) return c
   }
@@ -34,17 +52,21 @@ function firstNumber(...candidates) {
  * vs 2× base input), so collapsing them under-bills 1-hour writes. When only
  * the flat total is reported, it is left un-split and priced at the 5-minute
  * rate (Anthropic's default TTL) by the pricing layer.
- *
- * @returns {{ total: number, ephemeral5m: number, ephemeral1h: number }}
  */
-export function normalizeCacheCreation(usage) {
-  const detail = usage?.cache_creation ?? usage?.cacheCreation ?? undefined
-  const ephemeral5m = firstNumber(detail?.ephemeral_5m_input_tokens, detail?.ephemeral5mInputTokens)
-  const ephemeral1h = firstNumber(detail?.ephemeral_1h_input_tokens, detail?.ephemeral1hInputTokens)
+export function normalizeCacheCreation(usage: unknown): CacheCreation {
+  const detail = field(usage, "cache_creation") ?? field(usage, "cacheCreation") ?? undefined
+  const ephemeral5m = firstNumber(
+    field(detail, "ephemeral_5m_input_tokens"),
+    field(detail, "ephemeral5mInputTokens")
+  )
+  const ephemeral1h = firstNumber(
+    field(detail, "ephemeral_1h_input_tokens"),
+    field(detail, "ephemeral1hInputTokens")
+  )
   const flat = firstNumber(
-    usage?.cacheCreationInputTokens,
-    usage?.cache_creation_input_tokens,
-    usage?.inputTokenDetails?.cacheWriteTokens
+    field(usage, "cacheCreationInputTokens"),
+    field(usage, "cache_creation_input_tokens"),
+    field(field(usage, "inputTokenDetails"), "cacheWriteTokens")
   )
   // Prefer the provider's own total when it reports one; otherwise derive it
   // from the split so the total is never smaller than its parts.
@@ -55,14 +77,13 @@ export function normalizeCacheCreation(usage) {
 /**
  * Server-side tool invocation counters (`usage.server_tool_use`). These are
  * billed per call independently of tokens — web search is $10/1,000 requests —
- * so dropping them made that spend structurally invisible.
- *
- * @returns {Record<string, number> | undefined} undefined when none reported.
+ * so dropping them made that spend structurally invisible. Undefined when
+ * none were reported.
  */
-export function normalizeServerToolUse(usage) {
-  const raw = usage?.server_tool_use ?? usage?.serverToolUse
+export function normalizeServerToolUse(usage: unknown): Record<string, number> | undefined {
+  const raw = field(usage, "server_tool_use") ?? field(usage, "serverToolUse")
   if (!raw || typeof raw !== "object") return undefined
-  const out = {}
+  const out: Record<string, number> = {}
   for (const [key, value] of Object.entries(raw)) {
     if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) continue
     // `web_search_requests` → `web_search`; the unit is already "requests".
@@ -74,12 +95,10 @@ export function normalizeServerToolUse(usage) {
 /**
  * Normalize any provider usage block into the snake_case shape the renderer
  * consumes off a `result` message.
- *
- * @param {any} usage
- * @returns {Record<string, unknown>}
  */
-export function normalizeUsageBlock(usage) {
-  const u = usage ?? {}
+export function normalizeUsageBlock(usage: unknown): Record<string, unknown> {
+  // A primitive here reads every field as undefined, exactly like `?.` did.
+  const u = (usage ?? {}) as UsageRecord
   const cacheCreation = normalizeCacheCreation(u)
   const serverToolUse = normalizeServerToolUse(u)
   return {
@@ -112,7 +131,7 @@ export function normalizeUsageBlock(usage) {
       u.cacheReadInputTokens,
       u.cache_read_input_tokens,
       u.cachedInputTokens,
-      u.inputTokenDetails?.cacheReadTokens,
+      field(u.inputTokenDetails, "cacheReadTokens"),
       u.prompt_cache_hit_tokens,
       u.promptCacheHitTokens
     ),
@@ -123,7 +142,7 @@ export function normalizeUsageBlock(usage) {
     reasoning_tokens: firstNumber(
       u.reasoningTokens,
       u.reasoning_tokens,
-      u.outputTokenDetails?.reasoningTokens
+      field(u.outputTokenDetails, "reasoningTokens")
     ),
     ...(serverToolUse ? { server_tool_use: serverToolUse } : {}),
   }
@@ -136,7 +155,7 @@ export function normalizeUsageBlock(usage) {
  * below must preserve "not reported" as `undefined` rather than collapsing it
  * to 0, because 0 there means "the provider reported zero".
  */
-function firstNumberOrUndefined(...candidates) {
+function firstNumberOrUndefined(...candidates: unknown[]): number | undefined {
   for (const c of candidates) {
     if (typeof c === "number" && Number.isFinite(c)) return c
   }
@@ -157,27 +176,46 @@ function firstNumberOrUndefined(...candidates) {
  * the canonical `*TokenDetails` objects (populated since v6) and then the
  * repo's own nested shape.
  */
-export function toLanguageModelUsage(usage = {}) {
-  const u = usage ?? {}
-  const input = firstNumberOrUndefined(u.promptTokens, u.inputTokens?.total, u.inputTokens)
-  const output = firstNumberOrUndefined(u.completionTokens, u.outputTokens?.total, u.outputTokens)
+/** The AI SDK v7 nested `LanguageModelUsage`; undefined means "not reported". */
+export interface NestedLanguageModelUsage {
+  inputTokens: {
+    total: number | undefined
+    noCache: number | undefined
+    cacheRead: number | undefined
+    cacheWrite: number | undefined
+  }
+  outputTokens: {
+    total: number | undefined
+    text: number | undefined
+    reasoning: number | undefined
+  }
+}
+
+export function toLanguageModelUsage(usage: unknown = {}): NestedLanguageModelUsage {
+  const u = (usage ?? {}) as UsageRecord
+  const input = firstNumberOrUndefined(u.promptTokens, field(u.inputTokens, "total"), u.inputTokens)
+  const output = firstNumberOrUndefined(
+    u.completionTokens,
+    field(u.outputTokens, "total"),
+    u.outputTokens
+  )
   const cacheRead = firstNumberOrUndefined(
     u.cachedInputTokens,
-    u.inputTokenDetails?.cacheReadTokens,
-    u.inputTokens?.cacheRead,
+    field(u.inputTokenDetails, "cacheReadTokens"),
+    field(u.inputTokens, "cacheRead"),
     u.cacheReadInputTokens,
     u.prompt_cache_hit_tokens,
     u.promptCacheHitTokens
   )
   const cacheWrite = firstNumberOrUndefined(
     u.cacheCreationInputTokens,
-    u.inputTokenDetails?.cacheWriteTokens,
-    u.inputTokens?.cacheWrite
+    field(u.inputTokenDetails, "cacheWriteTokens"),
+    field(u.inputTokens, "cacheWrite")
   )
   const reasoning = firstNumberOrUndefined(
     u.reasoningTokens,
-    u.outputTokenDetails?.reasoningTokens,
-    u.outputTokens?.reasoning
+    field(u.outputTokenDetails, "reasoningTokens"),
+    field(u.outputTokens, "reasoning")
   )
   return {
     inputTokens: {
