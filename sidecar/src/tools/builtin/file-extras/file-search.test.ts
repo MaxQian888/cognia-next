@@ -4,9 +4,11 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 
-import { execFileSearch } from "./file-search.mjs"
+import { execFileSearch } from "./file-search.ts"
+import { firstJson } from "../../../../test-support/tool-result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
 
-let TMP
+let TMP: string
 before(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-fe-search-"))
 })
@@ -14,8 +16,15 @@ after(() => {
   fs.rmSync(TMP, { recursive: true, force: true })
 })
 
-function decode(result) {
-  return JSON.parse(result.content[0].text)
+interface SearchResult {
+  results: string[]
+  total: number
+  truncated: boolean
+  note?: string
+}
+
+function decode(result: ToolResult): SearchResult {
+  return firstJson<SearchResult>(result)
 }
 
 test("file_search finds matching files with extension filter", async () => {
@@ -25,6 +34,7 @@ test("file_search finds matching files with extension filter", async () => {
   fs.writeFileSync(path.join(dir, "b.tsx"), "x")
   fs.writeFileSync(path.join(dir, "c.txt"), "x")
   const r = await execFileSearch({
+    respectGitignore: true,
     directory: dir,
     extensions: ["ts", "tsx"],
     recursive: true,
@@ -75,6 +85,7 @@ test("file_search explains capped results with an explicit note", async () => {
   fs.writeFileSync(path.join(dir, "a.ts"), "x")
   fs.writeFileSync(path.join(dir, "b.ts"), "x")
   const r = await execFileSearch({
+    respectGitignore: true,
     directory: dir,
     extensions: ["ts"],
     recursive: true,
@@ -84,13 +95,18 @@ test("file_search explains capped results with an explicit note", async () => {
   assert.equal(data.total, 2)
   assert.equal(data.truncated, true)
   assert.equal(data.results.length, 1)
-  assert.match(data.note, /result capped at 1 files/)
-  assert.match(data.note, /more exist/)
+  assert.match(data.note ?? "", /result capped at 1 files/)
+  assert.match(data.note ?? "", /more exist/)
 })
 
 test("file_search rejects non-directory roots", async () => {
   const f = path.join(TMP, "f.txt")
   fs.writeFileSync(f, "x")
-  const r = await execFileSearch({ directory: f, recursive: true, maxResults: 10 })
+  const r = await execFileSearch({
+    respectGitignore: true,
+    directory: f,
+    recursive: true,
+    maxResults: 10,
+  })
   assert.equal(r.isError, true)
 })

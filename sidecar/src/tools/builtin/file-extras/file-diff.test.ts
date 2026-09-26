@@ -4,9 +4,10 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 
-import { execFileDiff } from "./file-diff.mjs"
+import { execFileDiff } from "./file-diff.ts"
+import { firstText } from "../../../../test-support/tool-result.ts"
 
-let TMP
+let TMP: string
 before(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-fe-diff-"))
 })
@@ -21,7 +22,7 @@ test("file_diff produces a unified diff", async () => {
   fs.writeFileSync(b, "line1\nLINE2\nline3\n")
   const r = await execFileDiff({ pathA: a, pathB: b, context: 3 })
   assert.equal(r.isError, undefined)
-  const text = r.content[0].text
+  const text = firstText(r)
   assert.match(text, /^---/m)
   assert.match(text, /^\+\+\+/m)
   assert.match(text, /-line2/)
@@ -38,7 +39,7 @@ test("file_diff caps an oversized patch and appends guidance", async () => {
   fs.writeFileSync(b, Array.from({ length: 2000 }, (_, i) => `new-${i}-${pad}`).join("\n") + "\n")
   const r = await execFileDiff({ pathA: a, pathB: b, context: 3 })
   assert.equal(r.isError, undefined)
-  const text = r.content[0].text
+  const text = firstText(r)
   assert.match(text, /truncated/)
   assert.ok(text.length < 300 * 1024, "patch text should be capped near 256 KB")
 })

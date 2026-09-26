@@ -5,9 +5,10 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 import fastGlob from "fast-glob"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { statOrNull } from "../../src/platform/fs/stat.ts"
-import { loadIgnoreGlobs } from "../../src/platform/fs/gitignore.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { statOrNull } from "../../../platform/fs/stat.ts"
+import { loadIgnoreGlobs } from "../../../platform/fs/gitignore.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 const MAX_LIST_ITEMS = 5000
 
@@ -37,7 +38,7 @@ const fileSearchShape = {
     .describe("Hard cap on returned entries."),
 }
 
-async function execFileSearch(args) {
+async function execFileSearch(args: ToolArgs<typeof fileSearchShape>) {
   try {
     const root = path.resolve(args.directory)
     const st = await statOrNull(root)
@@ -56,7 +57,7 @@ async function execFileSearch(args) {
     const filtered = args.extensions?.length
       ? entries.filter((p) => {
           const ext = path.extname(p).replace(/^\./, "").toLowerCase()
-          return args.extensions.some((e) => e.toLowerCase() === ext)
+          return args.extensions!.some((e) => e.toLowerCase() === ext)
         })
       : entries
     const sliced = filtered.slice(0, args.maxResults)

@@ -5,9 +5,11 @@ import fs from "node:fs"
 import os from "node:os"
 import crypto from "node:crypto"
 
-import { digestFile, execFileHash } from "./file-hash.mjs"
+import { digestFile, execFileHash } from "./file-hash.ts"
+import { firstText, firstJson } from "../../../../test-support/tool-result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
 
-let TMP
+let TMP: string
 before(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-fe-hash-"))
 })
@@ -15,8 +17,14 @@ after(() => {
   fs.rmSync(TMP, { recursive: true, force: true })
 })
 
-function decode(result) {
-  return JSON.parse(result.content[0].text)
+interface HashResult {
+  algorithm: string
+  digest: string
+  size: number
+}
+
+function decode(result: ToolResult): HashResult {
+  return firstJson<HashResult>(result)
 }
 
 test("file_hash returns sha256 by default", async () => {
@@ -34,7 +42,7 @@ test("file_hash returns sha256 by default", async () => {
 test("file_hash supports md5 / sha1 / sha512", async () => {
   const target = path.join(TMP, "hash-multi.txt")
   fs.writeFileSync(target, "x")
-  for (const algo of ["md5", "sha1", "sha512"]) {
+  for (const algo of ["md5", "sha1", "sha512"] as const) {
     const r = await execFileHash({ path: target, algorithm: algo })
     assert.equal(r.isError, undefined)
     const got = decode(r).digest
@@ -64,5 +72,5 @@ test("file_hash errors on missing file", async () => {
 test("file_hash rejects directories", async () => {
   const r = await execFileHash({ path: TMP, algorithm: "sha256" })
   assert.equal(r.isError, true)
-  assert.match(r.content[0].text, /not a regular file/)
+  assert.match(firstText(r), /not a regular file/)
 })

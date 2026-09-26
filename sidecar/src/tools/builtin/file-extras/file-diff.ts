@@ -5,9 +5,10 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { createPatch } from "diff"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { ensureExists } from "../../src/platform/fs/stat.ts"
-import { headTruncate } from "../../src/shared/text/truncate.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { ensureExists } from "../../../platform/fs/stat.ts"
+import { headTruncate } from "../../../shared/text/truncate.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 const MAX_DIFF_BYTES = 5 * 1024 * 1024 // 5 MB per side; bigger files refuse the diff
 // Two near-5 MB files can produce a multi-MB patch; cap the model-facing text
@@ -26,7 +27,7 @@ const fileDiffShape = {
     .describe("Number of context lines around each hunk."),
 }
 
-async function execFileDiff(args) {
+async function execFileDiff(args: ToolArgs<typeof fileDiffShape>) {
   try {
     const [stA, stB] = await Promise.all([ensureExists(args.pathA), ensureExists(args.pathB)])
     if (!stA.isFile() || !stB.isFile()) {

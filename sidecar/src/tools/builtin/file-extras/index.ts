@@ -5,19 +5,19 @@
 // tool list feeds provider prompt-cache prefix matching, so registration order
 // must stay byte-stable across turns and sessions. New tools are APPENDED.
 
-import { mimeForPath } from "../../src/shared/mime.ts"
+import { mimeForPath } from "../../../shared/mime.ts"
 
-import { fileHashTool, execFileHash } from "./file-hash.mjs"
-import { fileDiffTool, execFileDiff } from "./file-diff.mjs"
-import { fileInfoTool, fileExistsTool, execFileInfo, execFileExists } from "./file-stat.mjs"
-import { fileSearchTool, execFileSearch } from "./file-search.mjs"
-import { contentSearchTool, execContentSearch } from "./content-search.mjs"
+import { fileHashTool, execFileHash } from "./file-hash.ts"
+import { fileDiffTool, execFileDiff } from "./file-diff.ts"
+import { fileInfoTool, fileExistsTool, execFileInfo, execFileExists } from "./file-stat.ts"
+import { fileSearchTool, execFileSearch } from "./file-search.ts"
+import { contentSearchTool, execContentSearch } from "./content-search.ts"
 import {
   fileAppendTool,
   fileBinaryWriteTool,
   execFileAppend,
   execFileBinaryWrite,
-} from "./file-write.mjs"
+} from "./file-write.ts"
 import {
   fileCopyTool,
   fileRenameTool,
@@ -25,13 +25,13 @@ import {
   execFileCopy,
   execFileRename,
   execFileMove,
-} from "./file-transfer.mjs"
+} from "./file-transfer.ts"
 import {
   directoryCreateTool,
   directoryDeleteTool,
   execDirectoryCreate,
   execDirectoryDelete,
-} from "./directory-ops.mjs"
+} from "./directory-ops.ts"
 
 /** Fixed registration order — do not reorder (prompt-cache stability). */
 export const FILE_EXTRAS_TOOL_NAMES = Object.freeze([
@@ -69,9 +69,9 @@ export const fileExtrasTools = [
 
 // Defensive: the emitted order must match the public constant.
 for (let i = 0; i < fileExtrasTools.length; i++) {
-  if (fileExtrasTools[i].name !== FILE_EXTRAS_TOOL_NAMES[i]) {
+  if (fileExtrasTools[i]!.name !== FILE_EXTRAS_TOOL_NAMES[i]) {
     throw new Error(
-      `file-extras tool order drift: expected ${FILE_EXTRAS_TOOL_NAMES[i]}, got ${fileExtrasTools[i].name}`
+      `file-extras tool order drift: expected ${FILE_EXTRAS_TOOL_NAMES[i]}, got ${fileExtrasTools[i]!.name}`
     )
   }
 }

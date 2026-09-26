@@ -6,9 +6,10 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 import fastGlob from "fast-glob"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { statOrNull } from "../../src/platform/fs/stat.ts"
-import { loadIgnoreGlobs } from "../../src/platform/fs/gitignore.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { statOrNull } from "../../../platform/fs/stat.ts"
+import { loadIgnoreGlobs } from "../../../platform/fs/gitignore.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 const MAX_CONTENT_MATCH_RESULTS = 500
 const MAX_FILE_READ_BYTES = 5 * 1024 * 1024 // skip files larger than 5 MB
@@ -20,20 +21,27 @@ const MAX_FILE_READ_BYTES = 5 * 1024 * 1024 // skip files larger than 5 MB
 const READ_CONCURRENCY = 16
 
 /** Scan one file, returning its match rows in line order (empty on skip/error). */
-async function scanFile(root, rel, matcher) {
+interface MatchRow {
+  file: string
+  line: number
+  text: string
+}
+
+async function scanFile(root: string, rel: string, matcher: RegExp): Promise<MatchRow[]> {
   const abs = path.join(root, rel)
   const stat = await statOrNull(abs)
   if (!stat || stat.size > MAX_FILE_READ_BYTES) return []
-  let content
+  let content: string
   try {
     content = await fsp.readFile(abs, "utf-8")
   } catch {
     return []
   }
-  const out = []
+  const out: MatchRow[] = []
   const lines = content.split(/\r?\n/)
   for (let i = 0; i < lines.length; i++) {
-    if (matcher.test(lines[i])) out.push({ file: rel, line: i + 1, text: lines[i].slice(0, 400) })
+    const line = lines[i]!
+    if (matcher.test(line)) out.push({ file: rel, line: i + 1, text: line.slice(0, 400) })
   }
   return out
 }
@@ -58,7 +66,7 @@ const contentSearchShape = {
     .describe("Cap on the number of match rows returned."),
 }
 
-async function execContentSearch(args) {
+async function execContentSearch(args: ToolArgs<typeof contentSearchShape>) {
   try {
     const root = path.resolve(args.directory)
     const rootStat = await statOrNull(root)

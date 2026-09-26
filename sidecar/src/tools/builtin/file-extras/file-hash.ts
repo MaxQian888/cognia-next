@@ -5,8 +5,9 @@ import crypto from "node:crypto"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { ensureExists } from "../../src/platform/fs/stat.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { ensureExists } from "../../../platform/fs/stat.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 const MAX_READ_BYTES = 100 * 1024 * 1024 // 100 MB hard cap (matches Cognia)
 
@@ -18,8 +19,21 @@ const fileHashShape = {
     .describe("Hash algorithm. Defaults to sha256."),
 }
 
-async function digestFile(filePath, algorithm, bun = globalThis.Bun) {
-  if (typeof bun?.CryptoHasher === "function" && typeof bun.file === "function") {
+/** The slice of Bun's API the fast path uses, when running under Bun. */
+interface BunHashing {
+  CryptoHasher?: new (algorithm: string) => {
+    update(chunk: Uint8Array): void
+    digest(encoding: "hex"): string
+  }
+  file?: (path: string) => { stream(): AsyncIterable<Uint8Array> }
+}
+
+async function digestFile(
+  filePath: string,
+  algorithm: string,
+  bun: BunHashing | undefined = (globalThis as { Bun?: BunHashing }).Bun
+): Promise<string> {
+  if (bun && typeof bun.CryptoHasher === "function" && typeof bun.file === "function") {
     const hash = new bun.CryptoHasher(algorithm)
     for await (const chunk of bun.file(filePath).stream()) hash.update(chunk)
     return hash.digest("hex")
@@ -35,7 +49,7 @@ async function digestFile(filePath, algorithm, bun = globalThis.Bun) {
   return hash.digest("hex")
 }
 
-async function execFileHash(args) {
+async function execFileHash(args: ToolArgs<typeof fileHashShape>) {
   try {
     const st = await ensureExists(args.path)
     if (!st.isFile()) return toolError(`not a regular file: ${args.path}`)

@@ -3,9 +3,10 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { statOrNull } from "../../src/platform/fs/stat.ts"
-import { mimeForPath } from "../../src/shared/mime.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { statOrNull } from "../../../platform/fs/stat.ts"
+import { mimeForPath } from "../../../shared/mime.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 // ---- file_info ------------------------------------------------------------
 
@@ -13,7 +14,7 @@ const fileInfoShape = {
   path: z.string().min(1).describe("Absolute path to inspect."),
 }
 
-async function execFileInfo(args) {
+async function execFileInfo(args: ToolArgs<typeof fileInfoShape>) {
   try {
     const st = await statOrNull(args.path)
     if (!st) return toolText({ path: args.path, exists: false })
@@ -48,7 +49,7 @@ const fileExistsShape = {
   path: z.string().min(1).describe("Absolute path to test."),
 }
 
-async function execFileExists(args) {
+async function execFileExists(args: ToolArgs<typeof fileExistsShape>) {
   try {
     const st = await statOrNull(args.path)
     return toolText({ path: args.path, exists: st !== null })

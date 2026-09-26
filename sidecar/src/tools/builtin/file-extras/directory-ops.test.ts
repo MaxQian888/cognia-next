@@ -4,9 +4,9 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 
-import { execDirectoryCreate, execDirectoryDelete } from "./directory-ops.mjs"
+import { execDirectoryCreate, execDirectoryDelete } from "./directory-ops.ts"
 
-let TMP
+let TMP: string
 before(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-fe-dir-"))
 })

@@ -4,9 +4,9 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 
-import { execFileCopy, execFileRename, execFileMove } from "./file-transfer.mjs"
+import { execFileCopy, execFileRename, execFileMove } from "./file-transfer.ts"
 
-let TMP
+let TMP: string
 before(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-fe-transfer-"))
 })
@@ -37,7 +37,7 @@ test("file_rename moves the file", async () => {
   const a = path.join(TMP, "ren-a.txt")
   const b = path.join(TMP, "ren-b.txt")
   fs.writeFileSync(a, "x")
-  const r = await execFileRename({ oldPath: a, newPath: b })
+  const r = await execFileRename({ overwrite: false, oldPath: a, newPath: b })
   assert.equal(r.isError, undefined)
   assert.equal(fs.existsSync(a), false)
   assert.equal(fs.existsSync(b), true)
@@ -48,7 +48,7 @@ test("file_move falls back to copy-then-delete on EXDEV", async () => {
   const a = path.join(TMP, "mv-a.txt")
   const b = path.join(TMP, "mv-b.txt")
   fs.writeFileSync(a, "z")
-  const r = await execFileMove({ source: a, destination: b })
+  const r = await execFileMove({ overwrite: false, source: a, destination: b })
   assert.equal(r.isError, undefined)
   assert.equal(fs.readFileSync(b, "utf-8"), "z")
 })
@@ -58,7 +58,7 @@ test("file_rename refuses to clobber an existing destination by default", async 
   const b = path.join(TMP, "rc-b.txt")
   fs.writeFileSync(a, "keep")
   fs.writeFileSync(b, "precious")
-  const r = await execFileRename({ oldPath: a, newPath: b })
+  const r = await execFileRename({ overwrite: false, oldPath: a, newPath: b })
   assert.equal(r.isError, true)
   // The destination and source are both untouched.
   assert.equal(fs.readFileSync(b, "utf-8"), "precious")
@@ -74,7 +74,7 @@ test("file_move refuses to clobber an existing destination by default", async ()
   const b = path.join(TMP, "mc-b.txt")
   fs.writeFileSync(a, "keep")
   fs.writeFileSync(b, "precious")
-  const r = await execFileMove({ source: a, destination: b })
+  const r = await execFileMove({ overwrite: false, source: a, destination: b })
   assert.equal(r.isError, true)
   assert.equal(fs.readFileSync(b, "utf-8"), "precious")
   const r2 = await execFileMove({ source: a, destination: b, overwrite: true })
@@ -84,6 +84,7 @@ test("file_move refuses to clobber an existing destination by default", async ()
 
 test("file_move surfaces non-EXDEV errors", async () => {
   const r = await execFileMove({
+    overwrite: false,
     source: path.join(TMP, "nope-src"),
     destination: path.join(TMP, "nope-dst"),
   })

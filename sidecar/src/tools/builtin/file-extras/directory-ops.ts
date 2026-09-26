@@ -4,9 +4,10 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { statOrNull } from "../../src/platform/fs/stat.ts"
+import { assertNotSecretEscape } from "../../../policy/confinement/enforce.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { statOrNull } from "../../../platform/fs/stat.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 // ---- directory_create -----------------------------------------------------
 
@@ -15,7 +16,7 @@ const directoryCreateShape = {
   recursive: z.boolean().default(true).describe("Create parent directories as needed."),
 }
 
-async function execDirectoryCreate(args) {
+async function execDirectoryCreate(args: ToolArgs<typeof directoryCreateShape>) {
   try {
     assertNotSecretEscape(undefined, args.path)
     // `mkdir -p` on an existing directory is a no-op — report what actually
@@ -49,7 +50,7 @@ const directoryDeleteShape = {
     .describe("Delete contents recursively. Required for non-empty directories."),
 }
 
-async function execDirectoryDelete(args) {
+async function execDirectoryDelete(args: ToolArgs<typeof directoryDeleteShape>) {
   try {
     assertNotSecretEscape(undefined, args.path)
     const st = await statOrNull(args.path)

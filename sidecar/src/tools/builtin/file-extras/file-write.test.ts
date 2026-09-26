@@ -9,9 +9,9 @@ import {
   execFileBinaryWrite,
   exceedsBinaryWriteLimit,
   MAX_BINARY_WRITE_BYTES,
-} from "./file-write.mjs"
+} from "./file-write.ts"
 
-let TMP
+let TMP: string
 before(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-fe-write-"))
 })

@@ -5,9 +5,10 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { statOrNull } from "../../src/platform/fs/stat.ts"
+import { assertNotSecretEscape } from "../../../policy/confinement/enforce.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { statOrNull } from "../../../platform/fs/stat.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 // ---- file_append ----------------------------------------------------------
 
@@ -20,7 +21,7 @@ const fileAppendShape = {
     .describe("Append a final newline if the content doesn't already end with one."),
 }
 
-async function execFileAppend(args) {
+async function execFileAppend(args: ToolArgs<typeof fileAppendShape>) {
   try {
     // Tool-body backstop: these tools carry absolute paths and are auto-approved
     // in `acceptEdits`, so the credential deny must hold here too.
@@ -59,7 +60,7 @@ export const MAX_BINARY_WRITE_BYTES = 100 * 1024 * 1024
  * {@link MAX_BINARY_WRITE_BYTES}. Pure + length-based so the check (and its
  * test) never allocates the payload.
  */
-export function exceedsBinaryWriteLimit(base64Length) {
+export function exceedsBinaryWriteLimit(base64Length: number): boolean {
   return Math.floor((base64Length * 3) / 4) > MAX_BINARY_WRITE_BYTES
 }
 
@@ -69,7 +70,7 @@ const fileBinaryWriteShape = {
   createDirectories: z.boolean().default(false).describe("Create parent directories if missing."),
 }
 
-async function execFileBinaryWrite(args) {
+async function execFileBinaryWrite(args: ToolArgs<typeof fileBinaryWriteShape>) {
   try {
     // Reject early so a multi-hundred-MB blob never reaches Buffer.from.
     if (exceedsBinaryWriteLimit(args.data.length)) {

@@ -4,9 +4,11 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 
-import { execContentSearch } from "./content-search.mjs"
+import { execContentSearch } from "./content-search.ts"
+import { firstJson } from "../../../../test-support/tool-result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
 
-let TMP
+let TMP: string
 before(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-fe-content-"))
 })
@@ -14,8 +16,14 @@ after(() => {
   fs.rmSync(TMP, { recursive: true, force: true })
 })
 
-function decode(result) {
-  return JSON.parse(result.content[0].text)
+interface SearchResult {
+  matches: { file: string; line: number; text: string }[]
+  truncated: boolean
+  note?: string
+}
+
+function decode(result: ToolResult): SearchResult {
+  return firstJson<SearchResult>(result)
 }
 
 test("content_search finds line numbers (substring mode)", async () => {
@@ -23,6 +31,7 @@ test("content_search finds line numbers (substring mode)", async () => {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, "x.txt"), "alpha\nbeta\ngamma\nbeta-again\n")
   const r = await execContentSearch({
+    respectGitignore: true,
     directory: dir,
     pattern: "beta",
     regex: false,
@@ -32,8 +41,8 @@ test("content_search finds line numbers (substring mode)", async () => {
   })
   const data = decode(r)
   assert.equal(data.matches.length, 2)
-  assert.equal(data.matches[0].line, 2)
-  assert.equal(data.matches[1].line, 4)
+  assert.equal(data.matches[0]!.line, 2)
+  assert.equal(data.matches[1]!.line, 4)
 })
 
 test("content_search supports regex mode", async () => {
@@ -41,6 +50,7 @@ test("content_search supports regex mode", async () => {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, "y.txt"), "ID-100\nid-200\nfoo\n")
   const r = await execContentSearch({
+    respectGitignore: true,
     directory: dir,
     pattern: "^id-\\d+$",
     regex: true,
@@ -57,6 +67,7 @@ test("content_search caseSensitive=true is enforced", async () => {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, "z.txt"), "Foo\nfoo\nFOO\n")
   const r = await execContentSearch({
+    respectGitignore: true,
     directory: dir,
     pattern: "Foo",
     regex: false,
@@ -116,6 +127,7 @@ test("content_search caps results and surfaces an explicit, non-silent truncatio
   // 5 matching lines, cap at 2 → must truncate.
   fs.writeFileSync(path.join(dir, "x.txt"), "hit\nhit\nhit\nhit\nhit\n")
   const r = await execContentSearch({
+    respectGitignore: true,
     directory: dir,
     pattern: "hit",
     regex: false,
@@ -126,8 +138,8 @@ test("content_search caps results and surfaces an explicit, non-silent truncatio
   const data = decode(r)
   assert.equal(data.matches.length, 2)
   assert.equal(data.truncated, true)
-  assert.match(data.note, /capped at 2 matches/)
-  assert.match(data.note, /more exist/)
+  assert.match(data.note ?? "", /capped at 2 matches/)
+  assert.match(data.note ?? "", /more exist/)
 })
 
 test("content_search omits the truncation note when results fit", async () => {
@@ -135,6 +147,7 @@ test("content_search omits the truncation note when results fit", async () => {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, "x.txt"), "hit\nmiss\nhit\n")
   const r = await execContentSearch({
+    respectGitignore: true,
     directory: dir,
     pattern: "hit",
     regex: false,
@@ -161,6 +174,7 @@ test("content_search preserves deterministic file+line order under concurrent re
     fs.writeFileSync(path.join(dir, name), "noise\nneedle\n")
   }
   const r = await execContentSearch({
+    respectGitignore: true,
     directory: dir,
     pattern: "needle",
     regex: false,
@@ -182,6 +196,7 @@ test("content_search rejects non-directory roots", async () => {
   const f = path.join(TMP, "cs.txt")
   fs.writeFileSync(f, "x")
   const r = await execContentSearch({
+    respectGitignore: true,
     directory: f,
     pattern: "x",
     regex: false,

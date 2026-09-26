@@ -4,9 +4,11 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 
-import { execFileInfo, execFileExists } from "./file-stat.mjs"
+import { execFileInfo, execFileExists } from "./file-stat.ts"
+import { firstJson } from "../../../../test-support/tool-result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
 
-let TMP
+let TMP: string
 before(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-fe-stat-"))
 })
@@ -14,8 +16,15 @@ after(() => {
   fs.rmSync(TMP, { recursive: true, force: true })
 })
 
-function decode(result) {
-  return JSON.parse(result.content[0].text)
+interface StatResult {
+  exists: boolean
+  isFile?: boolean
+  mime?: string
+  size?: number
+}
+
+function decode(result: ToolResult): StatResult {
+  return firstJson<StatResult>(result)
 }
 
 test("file_info returns size + mtime + isFile", async () => {

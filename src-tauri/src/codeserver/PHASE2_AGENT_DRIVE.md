@@ -47,7 +47,7 @@ The agent has **no existing path to drive any editor** — not code-server, not
 Monaco. Verified:
 
 - The agent's write tool writes raw bytes to disk with Node fs:
-  `sidecar/builtin-tools/file-ops/file-write.mjs` → `fsp.writeFile(path, bytes)`.
+  `sidecar/src/tools/builtin/file-extras/file-write.ts` → `fsp.writeFile(path, bytes)`.
   No editor, no Tauri command, no event.
 - The Project Editor only reflects disk out-of-band via `watchWorkspace`
   (`components/agent/workspace/editor/use-project-editor.ts`), which bumps a

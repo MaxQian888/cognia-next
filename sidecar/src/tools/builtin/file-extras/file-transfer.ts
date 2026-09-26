@@ -4,16 +4,17 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { assertNotSecretEscape } from "../../src/policy/confinement/enforce.ts"
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { statOrNull } from "../../src/platform/fs/stat.ts"
+import { assertNotSecretEscape } from "../../../policy/confinement/enforce.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { statOrNull } from "../../../platform/fs/stat.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 /**
  * Refuse a transfer touching a credential path in EITHER position. Guarding the
  * source too is deliberate: copying `~/.ssh/id_rsa` into the workspace is
  * exfiltration even though the write itself lands somewhere innocuous.
  */
-function assertTransferPaths(...targets) {
+function assertTransferPaths(...targets: string[]): void {
   for (const t of targets) assertNotSecretEscape(undefined, t)
 }
 
@@ -25,7 +26,7 @@ const fileCopyShape = {
   overwrite: z.boolean().default(false).describe("Overwrite destination if it exists."),
 }
 
-async function execFileCopy(args) {
+async function execFileCopy(args: ToolArgs<typeof fileCopyShape>) {
   try {
     assertTransferPaths(args.source, args.destination)
     if (!args.overwrite) {
@@ -59,7 +60,7 @@ const fileRenameShape = {
   overwrite: z.boolean().default(false).describe("Overwrite the destination if it exists."),
 }
 
-async function execFileRename(args) {
+async function execFileRename(args: ToolArgs<typeof fileRenameShape>) {
   try {
     assertTransferPaths(args.oldPath, args.newPath)
     // Guard against silently clobbering an existing file (matches file_copy).
@@ -89,7 +90,7 @@ const fileMoveShape = {
   overwrite: z.boolean().default(false).describe("Overwrite the destination if it exists."),
 }
 
-async function execFileMove(args) {
+async function execFileMove(args: ToolArgs<typeof fileMoveShape>) {
   try {
     assertTransferPaths(args.source, args.destination)
     // Guard against silently clobbering an existing file (matches file_copy).
@@ -100,7 +101,7 @@ async function execFileMove(args) {
     try {
       await fsp.rename(args.source, args.destination)
     } catch (err) {
-      if (err.code === "EXDEV") {
+      if ((err as NodeJS.ErrnoException).code === "EXDEV") {
         // Cross-device move: fall back to copy-then-delete.
         await fsp.copyFile(args.source, args.destination)
         await fsp.unlink(args.source)

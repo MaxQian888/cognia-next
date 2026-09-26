@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { fileExtrasTools, FILE_EXTRAS_TOOL_NAMES, __testExports } from "./index.mjs"
+import { fileExtrasTools, FILE_EXTRAS_TOOL_NAMES, __testExports } from "./index.ts"
 
 test("fileExtrasTools registration order is byte-stable", () => {
   assert.deepEqual(
@@ -31,7 +31,11 @@ test("__testExports exposes every handler + mimeForPath", () => {
     "execDirectoryDelete",
     "mimeForPath",
   ]) {
-    assert.equal(typeof __testExports[key], "function", `missing ${key}`)
+    assert.equal(
+      typeof __testExports[key as keyof typeof __testExports],
+      "function",
+      `missing ${key}`
+    )
   }
 })
 
