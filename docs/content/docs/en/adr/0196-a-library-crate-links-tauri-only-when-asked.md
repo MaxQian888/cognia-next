@@ -5,7 +5,7 @@ description: "ADR-0067 cut the Tauri crate `app_lib` from 170k lines to 67k, and
 
 # ADR 0196 — A library crate links Tauri only when asked
 
-**Status:** Accepted — in progress (P0 and the P1 gates landed; phases P2–P10 tracked below)
+**Status:** Accepted — in progress (P0–P4 landed, P5 and P6 partly; see Progress below)
 **Date:** 2026-09-25
 **Related:** [ADR-0067](./0067-src-tauri-crate-decomposition-and-build-speed) (the first decomposition; this ADR continues it), [ADR-0014](./0014-capacitor-mobile-shell) (the headless server), [ADR-0021](./0021-webrtc-datachannel-wan-transport) (the WebRTC transport `companion_api` owns), [ADR-0059](./0059-cloud-deployment-headless-brain) (the `cognia-server` image)
 
@@ -190,6 +190,42 @@ tests with and without `tauri-host`, `cargo check -p cognia-next`,
 | P8 | Move the RPC families into `cognia-companion-rpc` |
 | P9 | `cognia-server` as its own Tauri-free package; the image drops webkit |
 | P10 | Collapse facades, lower the line ceiling, record the before/after numbers here |
+
+### Progress (2026-09-27)
+
+`src-tauri/src` is down from 187k lines to 141k, and the line ceiling in
+`scripts/gates/rust-architecture.json` follows each extraction down.
+
+| Phase | Landed | Open |
+| --- | --- | --- |
+| P0–P3 | All of it: setup fixed and split into steps, workspace governance and the gates, the layering fixes, and `tauri-host` on every library crate | `tracing-host` split out of observability's `desktop-host` |
+| P4 | `cognia-companion-connectivity`, `-bus`, `-contract`, `-security` | — |
+| P5 | `RendererPort` (the companion holds no `AppHandle`); the terminal-host client and its resource dir (part of P5.6) | `CommandDispatcher`, `RpcHost`, runtime hooks, the `commands.rs` split |
+| P6 | `cognia-codex-app`, `cognia-browser-cookies`, `cognia-hooks`, `cognia-fleet`, `cognia-task-workspace-host`, `cognia-terminal::host_client`, GitHub workspace and repo import into `cognia-git` | The sidecar locator, codeserver, the setup binaries, `jobs` |
+
+Where the plan met the code:
+
+- **`cognia-task-workspace-host` is a crate, not a module of
+  `cognia-task-workspace`.** That crate is deliberately sync (no tokio), and
+  every host-surface body runs on the async runtime.
+- **The desktop terminal bridge and its commands stay in the app.**
+  `cognia-terminal::commands` already defines unregistered commands with the
+  same names, and `#[tauri::command]` exports crate-global macros, so the two
+  cannot share a crate until the old ones are deleted. Only the Tauri-free
+  host client moved.
+- **The hooks runtime and Fleet reach the binary through slots**
+  (`cognia_hooks::host::HOST`, `cognia_fleet::companion::COMPANION`), which the
+  desktop fills at boot and `cognia-server` fills with its headless services.
+  A source test pins both installs for Fleet.
+- **A crate's `cfg(test)` behaviour forks become `test-support` forks** when
+  the desktop's own tests relied on them (Fleet's recovery file and `git`
+  capture). `src-tauri` enables `test-support` only from its dev-dependencies,
+  so release builds never see it.
+- **`CommandDispatcher` waits for P7.** Breaking the rpc ↔ remote-execution
+  cycle only pays off once the core leaves the app crate, and done alone it
+  adds an install every test path needs.
+- **The sidecar locator waits for `lib.rs`.** The plugin runtime's resolver is
+  installed there, and that file has had other work in flight throughout.
 
 ## Consequences
 

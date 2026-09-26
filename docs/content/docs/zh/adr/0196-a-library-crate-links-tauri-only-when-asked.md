@@ -5,7 +5,7 @@ description: "ADR-0067 把 Tauri crate `app_lib` 从 17 万行削到 6.7 万行�
 
 # ADR 0196 — 库 crate 只在被要求时才链接 Tauri
 
-**状态：** 已接受 — 实施中（P0 与 P1 门禁已落地；P2–P10 见下文阶段表）
+**状态：** 已接受 — 实施中（P0–P4 已落地，P5 与 P6 部分落地；见下文"进展"）
 **日期：** 2026-09-25
 **相关：** [ADR-0067](./0067-src-tauri-crate-decomposition-and-build-speed)（第一次拆分；本 ADR 是它的延续）、[ADR-0014](./0014-capacitor-mobile-shell)（headless 服务端）、[ADR-0021](./0021-webrtc-datachannel-wan-transport)（`companion_api` 持有的 WebRTC 传输）、[ADR-0059](./0059-cloud-deployment-headless-brain)（`cognia-server` 镜像）
 
@@ -126,6 +126,26 @@ headless 服务端移到 `crates/cognia-server`（lib + bin），不链接 Tauri
 | P8 | 把 RPC 族移入 `cognia-companion-rpc` |
 | P9 | `cognia-server` 成为独立的无 Tauri 包；镜像去掉 webkit |
 | P10 | 收拢门面、下调行数上限，并在此记录前后对比数据 |
+
+### 进展（2026-09-27）
+
+`src-tauri/src` 从 18.7 万行降到 14.1 万行，`scripts/gates/rust-architecture.json` 中的行数上限随每次抽取同步下调。
+
+| 阶段 | 已落地 | 未完成 |
+| --- | --- | --- |
+| P0–P3 | 全部：修复并拆分 setup、工作区治理与门禁、分层修正、每个库 crate 的 `tauri-host` | 从 observability 的 `desktop-host` 中拆出 `tracing-host` |
+| P4 | `cognia-companion-connectivity`、`-bus`、`-contract`、`-security` | — |
+| P5 | `RendererPort`（companion 不再持有 `AppHandle`）；终端宿主客户端及其资源目录（P5.6 的一部分） | `CommandDispatcher`、`RpcHost`、运行时钩子、拆分 `commands.rs` |
+| P6 | `cognia-codex-app`、`cognia-browser-cookies`、`cognia-hooks`、`cognia-fleet`、`cognia-task-workspace-host`、`cognia-terminal::host_client`，GitHub 工作区与仓库导入并入 `cognia-git` | sidecar 定位器、codeserver、安装辅助二进制、`jobs` |
+
+计划与代码相遇之处：
+
+- **`cognia-task-workspace-host` 是独立 crate，而不是 `cognia-task-workspace` 的模块。** 后者刻意保持同步（不引入 tokio），而宿主层的每个函数体都跑在异步运行时上。
+- **桌面端终端桥及其命令留在应用中。** `cognia-terminal::commands` 已有同名但未注册的命令，而 `#[tauri::command]` 会导出 crate 级的全局宏，两者在删除旧命令前无法共存于同一 crate。只有不依赖 Tauri 的宿主客户端迁出。
+- **hooks 运行时与 Fleet 通过槽位接触宿主二进制**（`cognia_hooks::host::HOST`、`cognia_fleet::companion::COMPANION`）：桌面端在启动时填充，`cognia-server` 在安装 headless 服务时填充。Fleet 的两处安装由源码测试固定。
+- **当桌面端自身的测试依赖某个 crate 的 `cfg(test)` 行为分叉时，改为 `test-support` 分叉**（Fleet 的恢复文件与 `git` 采集）。`src-tauri` 只在 dev-dependencies 中开启 `test-support`，发布构建不会带上它。
+- **`CommandDispatcher` 等到 P7。** 打破 rpc ↔ remote-execution 的循环只有在核心离开应用 crate 后才有收益；单独做反而会引入一个每条测试路径都要安装的槽位。
+- **sidecar 定位器等待 `lib.rs`。** 插件运行时的解析器在该文件中安装，而它一直有其他会话的改动。
 
 ## 影响
 
