@@ -156,7 +156,7 @@ cognia-environment = { path = "../crates/cognia-environment", default-features =
 # uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/
 # libc stay below (shared with pet_window/fleet/scheduler/etc.).
-cognia-automation = { path = "../crates/cognia-automation" }
+cognia-automation = { path = "../crates/cognia-automation", features = ["tauri-host"] }
 # ADR-0067 Phase 1 — process-global span instrumentation registry, extracted
 # from `perf/{span,registry}.rs` so the Tier-A leaf crates (cognia-git,
 # cognia-vector, cognia-ocr) can instrument without depending on the whole app.

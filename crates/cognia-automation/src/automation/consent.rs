@@ -4,7 +4,8 @@
 //!
 //! 1. Tauri command resolves to `Decision::RequireConsent { prompt }`.
 //! 2. The command body calls `ConsentBroker::request` with the prompt, an
-//!    `app_handle`, and the caller's timeout budget. The broker:
+//!    event sink (the desktop's `AppHandle`), and the caller's timeout
+//!    budget. The broker:
 //!    - Checks `session_grants` for an unexpired "always-allow" matching the
 //!      `(session_key, surface, command, plugin_id, process_name)` tuple. If
 //!      found, resolves to `Allow` immediately.
@@ -35,6 +36,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
+use super::host::{self, AutomationEventSink};
 use super::permission::{ConsentPrompt, Surface};
 
 /// Fallback wait budget when a caller doesn't supply one. Callers normally
@@ -177,11 +179,11 @@ impl ConsentBroker {
     /// countdown that matches what the broker actually honors.
     pub async fn request(
         &self,
-        app: tauri::AppHandle,
+        sink: impl AutomationEventSink,
         prompt: ConsentPrompt,
         timeout_ms: u64,
     ) -> bool {
-        self.request_with_thumbnail(app, prompt, timeout_ms, None)
+        self.request_with_thumbnail(sink, prompt, timeout_ms, None)
             .await
     }
 
@@ -191,15 +193,13 @@ impl ConsentBroker {
     /// influences the decision, the grant key, or the audit row.
     pub async fn request_with_thumbnail(
         &self,
-        app: tauri::AppHandle,
+        sink: impl AutomationEventSink,
         prompt: ConsentPrompt,
         timeout_ms: u64,
         thumbnail: Option<ConsentThumbnail>,
     ) -> bool {
-        use tauri::Emitter as _;
         self.request_with_emitter(prompt, timeout_ms, thumbnail, move |event| {
-            app.emit("automation:consent-request", event)
-                .map_err(|error| error.to_string())
+            host::emit(&sink, "automation:consent-request", event)
         })
         .await
     }

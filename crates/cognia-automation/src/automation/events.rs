@@ -3,7 +3,7 @@
 //!
 //! The backend watcher threads (see `platform/uia/events.rs`) run on plain
 //! OS threads without an `AppHandle`, so delivery goes through a process-wide
-//! sink seam: `lib.rs` wires the real Tauri emitter at setup; unit tests
+//! sink seam: `lib.rs` wires the desktop's `AppHandle` at setup; unit tests
 //! install a capturing closure. Distinct from `automation:event` (the audit
 //! ring channel) — this stream carries live UI events for the workflow
 //! `trigger.desktop.event` fan-out.
@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+
+use super::host::{self, AutomationEventSink};
 
 /// Renderer event name the TS trigger listens on.
 pub const UIA_EVENT_NAME: &str = "automation:uia-event";
@@ -48,10 +49,11 @@ pub fn set_uia_event_sink(sink: Sink) {
     *EVENT_SINK.write() = Some(sink);
 }
 
-/// Wire the sink to a Tauri `AppHandle` — called once from `lib.rs::setup`.
-pub fn wire_uia_event_sink(app: AppHandle) {
+/// Wire the sink to a renderer event sink (the desktop passes its
+/// `AppHandle`) — called once from `lib.rs::setup`.
+pub fn wire_uia_event_sink(app: impl AutomationEventSink + 'static) {
     set_uia_event_sink(Arc::new(move |payload| {
-        let _ = app.emit(UIA_EVENT_NAME, &payload);
+        let _ = host::emit(&app, UIA_EVENT_NAME, &payload);
     }));
 }
 

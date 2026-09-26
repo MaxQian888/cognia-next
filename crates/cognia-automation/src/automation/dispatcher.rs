@@ -23,7 +23,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tauri::AppHandle;
+use super::host::AppHandle;
 
 use super::audit::{AuditEntry, AuditRing, Decision as AuditDecision};
 use super::commands::{
@@ -349,7 +349,7 @@ where
                     };
                     consent
                         .request_with_thumbnail(
-                            app.clone(),
+                            app,
                             prompt.clone(),
                             gate.settings().consent_timeout_ms(),
                             thumbnail,

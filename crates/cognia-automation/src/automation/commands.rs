@@ -13,14 +13,23 @@
 //! The audit ring is non-authoritative; the renderer mirrors `automation:event`
 //! into the Dexie `automationAuditLog` table.
 
+// The command shells compile only with `tauri-host`; without it the helpers
+// and imports that exist for them are unused (ADR-0196).
+#![cfg_attr(
+    not(feature = "tauri-host"),
+    allow(dead_code, unused_imports, unused_macros)
+)]
+
 use std::time::Instant;
 
 use serde::Deserialize;
-use tauri::{Emitter, State};
+#[cfg(feature = "tauri-host")]
+use tauri::State;
 
 use super::audit::{AuditEntry, AuditRing, Decision as AuditDecision};
 use super::consent::ConsentBroker;
 use super::dispatcher;
+use super::host::{self, AppHandle};
 use super::input_monitor::InputMonitor;
 use super::permission::{PermissionGate, Surface, TargetMeta, Tier};
 use super::policy::{Policy, PolicyState};
@@ -196,8 +205,8 @@ pub(crate) fn record_allow<T>(
     })
 }
 
-pub(crate) fn emit_audit(app: &tauri::AppHandle, entry: &AuditEntry) {
-    if let Err(err) = app.emit("automation:event", entry) {
+pub(crate) fn emit_audit(app: &AppHandle, entry: &AuditEntry) {
+    if let Err(err) = host::emit(app, "automation:event", entry) {
         log::warn!("automation:event emit failed: {err}");
     }
 }
@@ -360,6 +369,7 @@ macro_rules! command_body {
 /// default, is not silenced by the automation engine switch, and accepts only
 /// this command (`permission::evaluate_chat_copilot`). The frontmost app is
 /// probed first so the whitelist tier and the consent prompt can name it.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_capture_frontmost_window(
     app: tauri::AppHandle,
@@ -408,6 +418,7 @@ pub async fn desktop_capture_frontmost_window(
     .map_err(|e| err_to_string(&e))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_capabilities(
     state: State<'_, AutomationState>,
@@ -421,6 +432,7 @@ pub async fn desktop_capabilities(
         .map_err(|e| err_to_string(&e))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_get_focus(
     app: tauri::AppHandle,
@@ -440,6 +452,7 @@ pub async fn desktop_get_focus(
 /// Subscribe to live UI events (v1: focus-changed). Read-only per the
 /// permission model (`subscribe_events` is an observing call); events reach
 /// the renderer on `automation:uia-event` via the sink wired in `lib.rs`.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_subscribe_events(
     app: tauri::AppHandle,
@@ -458,6 +471,7 @@ pub async fn desktop_subscribe_events(
 }
 
 /// Stop a live UI-event subscription (the paired watcher thread exits).
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_unsubscribe(
     app: tauri::AppHandle,
@@ -486,6 +500,7 @@ pub struct ReadTreeArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_list_apps(
     app: tauri::AppHandle,
@@ -507,6 +522,7 @@ pub struct GetAppStateArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_get_app_state(
     app: tauri::AppHandle,
@@ -583,6 +599,7 @@ fn default_query_limit() -> usize {
     100
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_query_elements(
     app: tauri::AppHandle,
@@ -630,6 +647,7 @@ pub struct ZoomArgs {
 /// exposes pixels the caller has already been shown, but it still exposes
 /// screen content, so it goes through the same permission / consent / audit
 /// path rather than around it.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_zoom(
     app: tauri::AppHandle,
@@ -669,6 +687,7 @@ fn default_expand_limit() -> usize {
     super::session::EXPANSION_PAGE_MAX_NODES
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_expand_element(
     app: tauri::AppHandle,
@@ -699,6 +718,7 @@ pub struct PerformActionArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_perform_action(
     app: tauri::AppHandle,
@@ -720,6 +740,7 @@ pub async fn desktop_perform_action(
     )
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_read_tree(
     app: tauri::AppHandle,
@@ -753,6 +774,7 @@ pub struct FindArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_find(
     app: tauri::AppHandle,
@@ -785,6 +807,7 @@ pub struct ScreenshotArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_screenshot(
     app: tauri::AppHandle,
@@ -849,6 +872,7 @@ pub struct ClickArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_click(
     app: tauri::AppHandle,
@@ -884,6 +908,7 @@ pub struct TypeArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_type(
     app: tauri::AppHandle,
@@ -934,8 +959,10 @@ pub async fn desktop_type(
 /// keystrokes to per-key hooks. Restore is best-effort — a non-text
 /// clipboard reads as `Err`, in which case we clear our temporary text after
 /// the target consumed it rather than leaving generated content behind.
+#[cfg(feature = "tauri-host")]
 static CLIPBOARD_PASTE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+#[cfg(feature = "tauri-host")]
 fn clipboard_value_is_still_temporary(
     current: tauri_plugin_clipboard_manager::Result<String>,
     temporary: &str,
@@ -943,6 +970,7 @@ fn clipboard_value_is_still_temporary(
     current.is_ok_and(|value| value == temporary)
 }
 
+#[cfg(feature = "tauri-host")]
 pub async fn paste_via_clipboard(
     app: &tauri::AppHandle,
     handle: &AutomationHandle,
@@ -1007,6 +1035,7 @@ pub struct PasteArgs {
 /// Explicit clipboard-paste command ("paste" on the gate — driving call,
 /// audited). Remote targets fall back to a plain `type` through the cua
 /// route since the host clipboard doesn't exist there.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_paste(
     app: tauri::AppHandle,
@@ -1092,6 +1121,7 @@ fn shell_escape(s: &str) -> String {
 
 /// Launch an application or focus an existing window by process name.
 /// Driving call ("launch_app") — gated + audited like click/type.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_launch_app(
     app: tauri::AppHandle,
@@ -1136,6 +1166,7 @@ pub struct KeysArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_keys(
     app: tauri::AppHandle,
@@ -1170,6 +1201,7 @@ pub struct InvokePatternArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_invoke_pattern(
     app: tauri::AppHandle,
@@ -1203,6 +1235,7 @@ pub async fn desktop_invoke_pattern(
 /// audit pipeline and the backend dispatch live in exactly one place. The
 /// granular `desktop_*` commands remain for the inspector/workflow callers
 /// that build typed args; both ultimately reach `dispatcher::execute_action`.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_execute(
     app: tauri::AppHandle,
@@ -1246,6 +1279,7 @@ pub async fn automation_execute(
     .map_err(|e| err_to_string(&e))
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_audit_snapshot(
     state: State<'_, AutomationState>,
@@ -1253,6 +1287,7 @@ pub async fn automation_audit_snapshot(
     Ok(state.audit.snapshot())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_settings_get(
     state: State<'_, AutomationState>,
@@ -1260,6 +1295,7 @@ pub async fn automation_settings_get(
     Ok(state.gate.settings())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_settings_set(
     state: State<'_, AutomationState>,
@@ -1278,6 +1314,7 @@ pub async fn automation_settings_set(
 /// Explicit operator toggle of the master enable flag. Enabling releases an
 /// engaged emergency kill switch (the deliberate "resume" action); a bulk
 /// `automation_settings_set` never does. Persists the merged settings.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_set_enabled(
     state: State<'_, AutomationState>,
@@ -1291,6 +1328,7 @@ pub async fn automation_set_enabled(
 /// Whether the runtime emergency kill switch is currently engaged. Lets the
 /// Settings UI show the engaged state and route "enable" through the explicit
 /// resume path.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_kill_switch_engaged(
     state: State<'_, AutomationState>,
@@ -1298,6 +1336,7 @@ pub async fn automation_kill_switch_engaged(
     Ok(state.gate.kill_switch_engaged())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_kill_switch(
     app: tauri::AppHandle,
@@ -1318,6 +1357,7 @@ pub async fn automation_kill_switch(
 /// Read-only health snapshot for the Settings → Automation → Screen-off card.
 /// Overlays the live controller status (active monitor / last error) onto the
 /// platform + driver-install probe. Cheap; safe to poll.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn virtual_display_health_probe(
     state: State<'_, AutomationState>,
@@ -1338,7 +1378,7 @@ pub async fn virtual_display_health_probe(
 /// Trigger the UAC-elevated bundled virtual-display driver install. The setup
 /// binary's manifest requests administrator, so launching it surfaces the UAC
 /// prompt. Mirrors the sandbox `first_time_setup` shape.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn virtual_display_setup() -> std::result::Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -1389,6 +1429,7 @@ pub struct VirtualDisplayProbeResult {
 /// One-shot capture probe: ensure a virtual display, screenshot it,
 /// heuristically check the frame isn't uniformly black, then release. Returns
 /// a summary — NOT the image bytes (no 4K PNG over IPC for a health check).
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn virtual_display_probe(
     state: State<'_, AutomationState>,
@@ -1443,6 +1484,7 @@ pub struct VirtualDisplayArmResult {
 /// Idempotent — re-arms the idle timer when already active. Returns
 /// `status: "unavailable"` (with a reason) so the renderer fails strictly
 /// rather than capturing a black frame.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn virtual_display_arm(
     state: State<'_, AutomationState>,
@@ -1485,6 +1527,7 @@ pub struct VirtualDisplayReleaseArgs {
 
 /// Release the virtual display when a chat session closes — the EXIT signal
 /// piggybacked on the renderer's session-close path.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn virtual_display_release(
     state: State<'_, AutomationState>,
@@ -1510,6 +1553,7 @@ pub struct MouseMoveArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_mouse_move(
     app: tauri::AppHandle,
@@ -1539,6 +1583,7 @@ pub struct DragArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_drag(
     app: tauri::AppHandle,
@@ -1576,6 +1621,7 @@ pub struct ScrollArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_scroll(
     app: tauri::AppHandle,
@@ -1610,6 +1656,7 @@ pub struct HoldKeyArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_hold_key(
     app: tauri::AppHandle,
@@ -1644,6 +1691,7 @@ pub struct MouseButtonArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_mouse_button(
     app: tauri::AppHandle,
@@ -1678,6 +1726,7 @@ pub struct WindowOpArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_window_op(
     app: tauri::AppHandle,
@@ -1703,6 +1752,7 @@ pub async fn desktop_window_op(
     )
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_cursor_position(
     app: tauri::AppHandle,
@@ -1728,6 +1778,7 @@ pub struct PickAtPointArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_pick_at_point(
     app: tauri::AppHandle,
@@ -1774,6 +1825,7 @@ pub struct ConsentRespondArgs {
     pub grant_duration_ms: Option<u64>,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_consent_respond(
     state: State<'_, AutomationState>,
@@ -1801,6 +1853,7 @@ pub fn automation_consent_respond_for_broker(
 // so writes take effect on the very next call without a restart.
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_policy_get(
     state: State<'_, AutomationState>,
@@ -1808,6 +1861,7 @@ pub async fn automation_policy_get(
     Ok(state.policy.get())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_policy_set(
     state: State<'_, AutomationState>,
@@ -1861,6 +1915,7 @@ pub struct PickSessionStartArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_pick_session_start(
     app: tauri::AppHandle,
@@ -1891,6 +1946,7 @@ pub struct PickSessionCancelArgs {
     pub ctx: CallContext,
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_pick_session_cancel(
     app: tauri::AppHandle,
@@ -1913,7 +1969,7 @@ pub async fn desktop_pick_session_cancel(
 /// `automation:backend-init-failed` is still rendered as a destructive
 /// `<Alert>`. Returns `None` when no failure is pending — the common
 /// case on healthy installs.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn automation_drain_init_failure(
 ) -> std::result::Result<Option<super::InitFailure>, String> {
     Ok(super::drain_init_failure())
@@ -2065,6 +2121,7 @@ mod tests {
         assert!(facts.click_y.is_none());
     }
 
+    #[cfg(feature = "tauri-host")]
     #[test]
     fn clipboard_restore_only_runs_while_the_temporary_value_is_still_owned() {
         assert!(clipboard_value_is_still_temporary(

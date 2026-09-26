@@ -21,6 +21,7 @@ pub mod consent;
 pub mod cua_route;
 pub mod dispatcher;
 pub mod events;
+pub mod host;
 pub mod input_monitor;
 pub mod instruction_pack;
 pub mod kill_switch;
@@ -39,9 +40,9 @@ pub mod types;
 pub mod virtual_display;
 pub mod worker;
 
+use host::AppHandle;
 use parking_lot::Mutex;
 use serde_json::json;
-use tauri::{AppHandle, Emitter};
 
 // Public re-exports — only the names lib.rs reaches for directly. Everything
 // else stays accessible via its fully-qualified path (e.g.
@@ -91,7 +92,7 @@ fn record_init_failure(app: Option<&AppHandle>, platform: Platform, error: Strin
     };
     *INIT_FAILURE.lock() = Some(failure.clone());
     if let Some(handle) = app {
-        let _ = handle.emit("automation:backend-init-failed", json!(failure));
+        let _ = host::emit(handle, "automation:backend-init-failed", &json!(failure));
     }
 }
 

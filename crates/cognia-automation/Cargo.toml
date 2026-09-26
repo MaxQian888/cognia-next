@@ -17,6 +17,15 @@ publish.workspace = true
 name = "cognia_automation"
 path = "src/lib.rs"
 
+[features]
+# ADR-0196 — the Tauri surface: the renderer `#[tauri::command]` shells, the
+# clipboard-backed paste, the recorder's Tauri event sink, and the
+# `AutomationEventSink` implementation for Tauri's `AppHandle`. Off by default,
+# so the automation stack builds and tests Tauri-free; only `src-tauri`
+# enables it.
+default = []
+tauri-host = ["dep:tauri", "dep:tauri-plugin-clipboard-manager"]
+
 [build-dependencies]
 cc = "1"
 
@@ -27,9 +36,9 @@ cognia-core = { path = "../cognia-core" }
 # re-exported as `crate::sandbox`; the three sandbox Tauri commands and the
 # plugin-grant admission check stay in `src/sandbox.rs`.
 cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
-tauri = { workspace = true, features = ["image-png"] }
+tauri = { workspace = true, features = ["image-png"], optional = true }
 # `desktop_paste` writes to the clipboard via ClipboardExt before pasting.
-tauri-plugin-clipboard-manager.workspace = true
+tauri-plugin-clipboard-manager = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "fs", "io-util", "sync", "time", "net", "signal"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

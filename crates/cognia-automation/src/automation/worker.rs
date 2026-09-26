@@ -26,10 +26,10 @@ use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 use serde_json::json;
-use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 
 use super::backend::AutomationBackend;
+use super::host::{self, AppHandle};
 use super::permission::ScreenshotScalingSettings;
 use super::policy::{self, Decision, HardTargetFacts};
 use super::selection::TextSelectionSnapshot;
@@ -270,9 +270,10 @@ impl Worker {
                             }
                             restart_count = restart_count.saturating_add(1);
                             if let Some(handle) = app.as_ref() {
-                                let _ = handle.emit(
+                                let _ = host::emit(
+                                    handle,
                                     "automation:worker-restart",
-                                    json!({
+                                    &json!({
                                         "attempt": restart_count,
                                         "panic_message": panic_message,
                                     }),
@@ -280,9 +281,10 @@ impl Worker {
                             }
                             if restart_count > MAX_RESTARTS_PER_WINDOW {
                                 if let Some(handle) = app.as_ref() {
-                                    let _ = handle.emit(
+                                    let _ = host::emit(
+                                        handle,
                                         "automation:worker-dead",
-                                        json!({
+                                        &json!({
                                             "panic_message": panic_message,
                                         }),
                                     );

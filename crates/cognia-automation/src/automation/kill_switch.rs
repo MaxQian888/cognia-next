@@ -18,9 +18,9 @@
 //! resources; then notify.
 
 use serde::Serialize;
-use tauri::Emitter;
 
 use super::commands::AutomationState;
+use super::host::{self, AutomationEventSink};
 use super::record::journal::InterruptReason;
 use super::virtual_display::ReleaseReason;
 
@@ -55,13 +55,13 @@ pub struct KillSwitchEvent {
 
 /// Engage the emergency stop and tear down everything it owns.
 ///
-/// Generic over the Tauri runtime so the tray and shortcut dispatchers — both
-/// of which are themselves generic — can call it without an `AppHandle`
-/// concretization. That works because `RecorderState::interrupt_blocking` needs
-/// no `AppHandle` of its own (it emits through the sink captured at session
-/// start).
-pub fn engage<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
+/// Generic over the event sink so the tray and shortcut dispatchers — both of
+/// which are generic over the Tauri runtime — can pass their `AppHandle<R>`
+/// without concretizing it. That works because
+/// `RecorderState::interrupt_blocking` needs no `AppHandle` of its own (it
+/// emits through the sink captured at session start).
+pub fn engage<E: AutomationEventSink + ?Sized>(
+    app: &E,
     state: &AutomationState,
     cause: KillSwitchCause,
 ) -> KillSwitchEvent {
@@ -100,7 +100,7 @@ pub fn engage<R: tauri::Runtime>(
         interrupted_recording_id,
     };
     // 8. One event, one payload, whichever trigger fired.
-    let _ = app.emit(KILL_SWITCH_EVENT, &event);
+    let _ = host::emit(app, KILL_SWITCH_EVENT, &event);
     event
 }
 
@@ -152,7 +152,9 @@ mod tests {
         assert_eq!(KILL_SWITCH_EVENT, "automation:kill-switch");
     }
 
-    // `engage` itself needs a live `AppHandle` and managed `AutomationState`, so
-    // it is covered by the desktop smoke procedure rather than a unit test —
-    // the same limitation the code it replaces always had.
+    // `engage` persists `enabled = false` into the real
+    // `<data_dir>/cognia/automation` settings (there is no test override) and
+    // needs a live worker, recorder and virtual display, so it is covered by
+    // the desktop smoke procedure rather than a unit test — the same
+    // limitation the code it replaces always had.
 }

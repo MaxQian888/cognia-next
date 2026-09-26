@@ -13,7 +13,7 @@
 //!   `Vec` in for the real emitter, and the pause/stop/undo flush behaviour can
 //!   finally be asserted rather than reasoned about.
 //! - `RecorderState::interrupt_blocking` needs no `AppHandle`, which is what
-//!   lets the shared kill-switch helper stay generic over `R` without infecting
+//!   lets the shared kill-switch helper take any event sink without infecting
 //!   the session type.
 
 use std::sync::Arc;
@@ -85,6 +85,7 @@ pub enum RecordEvent {
 pub struct EventSink(Arc<dyn Fn(RecordEvent) + Send + Sync>);
 
 impl EventSink {
+    #[cfg(feature = "tauri-host")]
     pub fn tauri<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Self {
         use tauri::Emitter;
         Self(Arc::new(move |event| {

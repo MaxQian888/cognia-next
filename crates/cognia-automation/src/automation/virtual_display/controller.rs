@@ -19,10 +19,10 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use tauri::{AppHandle, Emitter};
 
 use super::{ArmOutcome, ReleaseReason, VddDriver};
 use crate::automation::audit::{AuditEntry, AuditRing, Decision};
+use crate::automation::host::{self, AppHandle};
 use crate::automation::permission::Surface;
 
 /// Default idle window before an unused virtual display is torn down. Long
@@ -314,7 +314,7 @@ fn emit(
         error,
     });
     if let Some(handle) = app {
-        let _ = handle.emit("automation:event", &entry);
+        let _ = host::emit(handle, "automation:event", &entry);
     }
 }
 

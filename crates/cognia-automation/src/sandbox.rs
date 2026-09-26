@@ -17,7 +17,7 @@ use cognia_exec_sandbox::types::SandboxHealth;
 /// required" / "Unavailable") and the "Retry setup" button visibility.
 ///
 /// Cheap — no I/O, no keyring, no spawn. Safe to poll on a 5s interval.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn sandbox_health_probe() -> Result<SandboxHealth, String> {
     Ok(current_backend().health())
 }
@@ -28,7 +28,7 @@ pub async fn sandbox_health_probe() -> Result<SandboxHealth, String> {
 /// invoked on-demand (a "Verify confinement" action), NOT on the status poll.
 /// A present-but-broken backend reports `confined: false` here even though the
 /// cheap probe shows "Active".
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn sandbox_health_check() -> Result<crate::sandbox::types::ProbeReport, String> {
     Ok(current_backend().probe_confinement().await)
 }
@@ -50,6 +50,7 @@ pub const SANDBOX_PLUGIN_ID: &str = "cognia-sandboxed-tools";
 /// network scope) and never looked at a grant at all.
 pub const SANDBOX_REQUIRED_GRANTS: [&str; 2] = ["native:filesystem", "native:process"];
 
+#[cfg(any(feature = "tauri-host", test))]
 fn sandbox_audit_reason(
     termination: &str,
     provider: &str,
@@ -147,6 +148,7 @@ pub fn admit_sandbox_call(
 /// `SandboxError` enum directly without a custom impl); the plugin uses
 /// `error.message` verbatim as the ToolResult error so the model sees the
 /// same stderr-style failure a native shell command would emit.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn sandbox_exec(
     app: tauri::AppHandle,

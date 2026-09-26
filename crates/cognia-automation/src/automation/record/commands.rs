@@ -5,7 +5,12 @@
 //! after it — pause, undo, stop, reading a bundle back — operates on a session
 //! the user has already authorized and needs no further approval.
 
+// The command shells compile only with `tauri-host`; without it the helpers
+// and imports that exist for them are unused (ADR-0196).
+#![cfg_attr(not(feature = "tauri-host"), allow(dead_code, unused_imports))]
+
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, State};
 
 use super::assets::{self, AssetId, AssetMeta, AssetPayload, RecordingId};
@@ -67,6 +72,7 @@ fn default_true() -> bool {
 }
 
 /// Collect everything the setup screen needs to explain a blocker.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn record_preflight(
     state: State<'_, AutomationState>,
@@ -205,6 +211,7 @@ async fn ui_automation_state(state: &AutomationState) -> ProbeState {
     }
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn record_start(
     app: AppHandle,
@@ -355,6 +362,7 @@ fn scope_window_title(scope: &CaptureScope) -> Option<String> {
 /// The row is deliberately untargeted and its reason carries only a scope
 /// *kind* and a count — the recorder's telemetry rule is that no window title,
 /// app name or captured content ever reaches a log.
+#[cfg(feature = "tauri-host")]
 fn audit_session_end(
     app: &AppHandle,
     state: &AutomationState,
@@ -378,21 +386,25 @@ fn audit_session_end(
     emit_audit(app, &entry);
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn record_pause(state: State<'_, AutomationState>) -> Result<RecordStatus, String> {
     state.recorder.pause().await.map_err(backend_err)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn record_resume(state: State<'_, AutomationState>) -> Result<RecordStatus, String> {
     state.recorder.resume().await.map_err(backend_err)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn record_undo_last(state: State<'_, AutomationState>) -> Result<RecordStatus, String> {
     state.recorder.undo_last().await.map_err(backend_err)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn record_stop(
     app: AppHandle,
@@ -416,6 +428,7 @@ pub async fn record_stop(
 
 /// End a recording without discarding it. The bundle stays on disk and shows up
 /// in `record_list_recoverable`.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn record_interrupt(
     app: AppHandle,
@@ -443,12 +456,13 @@ pub async fn record_interrupt(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn record_status(state: State<'_, AutomationState>) -> Result<RecordStatus, String> {
     Ok(state.recorder.status())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn record_list_recoverable() -> Result<Vec<RecoverableBundle>, String> {
     Ok(journal::scan_recoverable(&root()?))
 }
@@ -511,7 +525,7 @@ pub fn capture_targets_from(
 ///
 /// Needs no gate: it returns window titles the user can already see on their own
 /// screen, and it arms nothing. `record_start` remains the privileged call.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn record_list_capture_targets() -> Result<Vec<CaptureTarget>, String> {
     Ok(capture_targets_from(
         &super::scope::snapshot_windows(),
@@ -519,7 +533,7 @@ pub async fn record_list_capture_targets() -> Result<Vec<CaptureTarget>, String>
     ))
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn record_load_bundle(recording_id: String) -> Result<RecordingBundle, String> {
     let id = RecordingId::parse(&recording_id)
         .map_err(|_| backend_err("the recording id must be a canonical UUID"))?;
@@ -531,7 +545,7 @@ pub async fn record_load_bundle(recording_id: String) -> Result<RecordingBundle,
 /// `AssetMeta` is not taken from the caller — it is looked up in the journal, so
 /// a renderer cannot influence how the bytes are interpreted, and an id that is
 /// not part of this bundle simply is not found.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn record_read_asset(
     recording_id: String,
     asset_id: String,
@@ -551,7 +565,7 @@ pub async fn record_read_asset(
     assets::read_asset(&root, &id, &asset, meta).map_err(|e| backend_err(e.to_string()))
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn record_delete_bundle(recording_id: String) -> Result<(), String> {
     let id = RecordingId::parse(&recording_id)
         .map_err(|_| backend_err("the recording id must be a canonical UUID"))?;

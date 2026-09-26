@@ -2,7 +2,6 @@
   "$comment": "Written by `pnpm audit:rust-architecture:baseline`. Rows are violations that existed when the gate landed; the list may only shrink (ADR-0196).",
   "findings": [
     "direct-only: cognia-subscription depends on keyring",
-    "direct-only: cognia-terminal depends on keyring",
-    "tauri-default: cognia-automation"
+    "direct-only: cognia-terminal depends on keyring"
   ]
 }

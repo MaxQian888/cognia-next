@@ -7,7 +7,9 @@
 //! `protocol/companion-commands.json`. Docker orchestration is local to the
 //! machine running the renderer, so these never follow an active remote host.
 
+#[cfg(feature = "tauri-host")]
 use std::collections::BTreeMap;
+#[cfg(feature = "tauri-host")]
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -22,8 +24,10 @@ pub use registry::CuaSandboxRegistry;
 use lifecycle::{ContainerPolicy, WorkspaceMount};
 
 /// Default ceiling for one `docker exec`, when the caller names none.
+#[cfg(feature = "tauri-host")]
 const DEFAULT_EXEC_TIMEOUT_MS: u64 = 120_000;
 /// Default cap for a single container file read.
+#[cfg(feature = "tauri-host")]
 const DEFAULT_READ_MAX_BYTES: usize = 2 * 1024 * 1024;
 
 /// Container-level isolation the caller wants frozen in at create time.
@@ -216,6 +220,7 @@ impl From<lifecycle::ExecOutcome> for SandboxExecDto {
 }
 
 /// Provision the container for `connection_id` without starting it.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn cua_sandbox_create(
     reg: tauri::State<'_, CuaSandboxRegistry>,
@@ -231,6 +236,7 @@ pub async fn cua_sandbox_create(
 
 /// Bring the container for `connection_id` to running and return its mapped
 /// host port. Adopts an existing container instead of creating a second one.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn cua_sandbox_start(
     reg: tauri::State<'_, CuaSandboxRegistry>,
@@ -246,6 +252,7 @@ pub async fn cua_sandbox_start(
 
 /// Suspend with `docker pause`, keeping memory resident so the desktop session
 /// survives. This is not `docker stop`.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn cua_sandbox_suspend(
     reg: tauri::State<'_, CuaSandboxRegistry>,
@@ -254,6 +261,7 @@ pub async fn cua_sandbox_suspend(
     reg.suspend(&connection_id).await.map_err(|e| e.to_string())
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn cua_sandbox_resume(
     reg: tauri::State<'_, CuaSandboxRegistry>,
@@ -267,6 +275,7 @@ pub async fn cua_sandbox_resume(
 
 /// Stop the container for `connection_id`. It keeps existing, along with
 /// everything written inside it.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn cua_sandbox_stop(
     reg: tauri::State<'_, CuaSandboxRegistry>,
@@ -276,6 +285,7 @@ pub async fn cua_sandbox_stop(
 }
 
 /// Destroy the container and everything in it that is not on a bind mount.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn cua_sandbox_delete(
     reg: tauri::State<'_, CuaSandboxRegistry>,
@@ -285,6 +295,7 @@ pub async fn cua_sandbox_delete(
 }
 
 /// Docker's own view of the container, or `null` when it does not exist.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn cua_sandbox_inspect(
     reg: tauri::State<'_, CuaSandboxRegistry>,
@@ -297,6 +308,7 @@ pub async fn cua_sandbox_inspect(
 }
 
 /// Whether the container for `connection_id` answers `docker exec`.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn cua_sandbox_health(
     reg: tauri::State<'_, CuaSandboxRegistry>,
@@ -309,6 +321,7 @@ pub async fn cua_sandbox_health(
 ///
 /// `argv` is passed to `docker exec` as separate arguments and is never joined
 /// into a shell string.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn cua_sandbox_exec(
     reg: tauri::State<'_, CuaSandboxRegistry>,
@@ -335,6 +348,7 @@ pub async fn cua_sandbox_exec(
 }
 
 /// Read one file from inside the machine.
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn cua_sandbox_read_file(
     reg: tauri::State<'_, CuaSandboxRegistry>,
