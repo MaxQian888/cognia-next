@@ -6450,11 +6450,13 @@ export interface Character {
    */
   sandboxPolicy?: SandboxResourcePolicy
   /**
-   * Provider id used for embedding this character's twin sources.
-   * Independent of chat provider — a character can chat through OpenAI but
-   * embed via Anthropic, or vice versa. When unset the twin runtime falls
-   * back to `AppSettings.defaultProvider`. Switching this on an existing
-   * character requires a re-embed (twin Workbench surfaces the banner). P5.
+   * Provider id meant for embedding this character's twin sources,
+   * independently of its chat provider.
+   *
+   * INERT: stored and carried through plugin-pack projection and diffs, but no
+   * runtime path reads it; twin embedding uses the app-level provider. The
+   * agent editor does not offer it, and
+   * `components/settings/character/agent-overrides.test.ts` pins that.
    */
   embeddingProviderId?: string
   permissionMode?: SendOptions["permissionMode"]
@@ -6526,7 +6528,15 @@ export interface Character {
   variant?: import("./agent-variant").CharacterVariantLink
   /** Whether this character is allowed to drive A2UI surfaces (4-tool whitelist + system prompt). */
   a2uiEnabled?: boolean
-  /** Optional A2UI catalog this character defaults to (academic / financial / general / …). */
+  /**
+   * A2UI catalog this character is meant to default to (academic / financial /
+   * general / …).
+   *
+   * INERT: stored and carried through plugin-pack projection and diffs, but the
+   * A2UI surface only reads `settings.a2uiDefaultCatalogId`. The agent editor
+   * does not offer it, and
+   * `components/settings/character/agent-overrides.test.ts` pins that.
+   */
   a2uiCatalogId?: string
   /**
    * Soft-bind this character to an Employee Digital Twin. When set, the runtime

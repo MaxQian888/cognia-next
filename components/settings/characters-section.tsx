@@ -119,6 +119,13 @@ import {
   TwinBindingSection,
   type TwinBindingValue,
 } from "@/components/settings/character/twin-binding-section"
+import { AdvancedOverridesSection } from "@/components/settings/character/advanced-overrides-section"
+import {
+  emptyAgentOverrides,
+  pickAgentOverrides,
+  type AgentOverrideField,
+  type AgentOverrides,
+} from "@/components/settings/character/agent-overrides"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   CheckSquareIcon,
@@ -717,6 +724,7 @@ export function CharactersSection() {
             voicePitch: 1,
             voiceVolume: 1,
             availablePlatforms: [],
+            overrides: emptyAgentOverrides(),
           }}
           skillsCatalog={skills}
           mcpCatalog={mcpServers}
@@ -1031,6 +1039,7 @@ function CharacterRow({
             voicePitch: character.voiceProfile?.pitch ?? 1,
             voiceVolume: character.voiceProfile?.volume ?? 1,
             availablePlatforms: character.availableOnPlatforms ?? [],
+            overrides: pickAgentOverrides(character),
           }}
           skillsCatalog={skillsCatalog}
           mcpCatalog={mcpCatalog}
@@ -1710,6 +1719,11 @@ export type EditorState = {
   voiceVolume: number
   /** Host profiles this character is available on (empty = all). */
   availablePlatforms: PluginRuntimeProfile[]
+  /**
+   * Overrides of app-level defaults, held verbatim (`undefined` = inherit) and
+   * written back as-is, so an unchanged agent round-trips exactly.
+   */
+  overrides: AgentOverrides
 }
 
 type AgentMemoryScope = EditorState["memoryReadableScopes"][number]
@@ -1808,7 +1822,7 @@ function MemoryPolicyEditor({
   )
 }
 
-type EditorOutput = {
+type EditorOutput = Partial<Pick<Character, AgentOverrideField>> & {
   name: string
   description?: string
   avatarColor: string
@@ -2073,6 +2087,9 @@ export function CharacterEditor({
         }),
         avatarImage: s.avatarImageDataUrl ? { webDataUrl: s.avatarImageDataUrl } : undefined,
         availableOnPlatforms: s.availablePlatforms.length > 0 ? s.availablePlatforms : undefined,
+        // Every override key is written, `undefined` included: an override the
+        // user switched back to "inherit" has to clear the stored value.
+        ...pickAgentOverrides(s.overrides),
       })
     } finally {
       setSaving(false)
@@ -2850,6 +2867,11 @@ export function CharacterEditor({
           })}
         </div>
       </div>
+
+      <AdvancedOverridesSection
+        value={s.overrides}
+        onChange={(overrides) => setS((current) => ({ ...current, overrides }))}
+      />
 
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button variant="ghost" size="sm" onClick={onCancel}>

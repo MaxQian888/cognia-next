@@ -279,7 +279,107 @@
     "workingDir": "Working directory",
     "workingDirPlaceholder": "/path/to/project (optional)",
     "pluginSkills": "Plugin skills",
-    "pluginSkillsHint": "Skills contributed by enabled plugins. They join this character's turns alongside its chat skills."
+    "pluginSkillsHint": "Skills contributed by enabled plugins. They join this character's turns alongside its chat skills.",
+    "advanced": {
+      "title": "Advanced overrides",
+      "count": "{count, plural, one {# override} other {# overrides}}",
+      "description": "Per-agent overrides of app-level defaults. Anything left on “Inherit” follows Settings, and a session can still override most of these.",
+      "inherit": "Inherit app default",
+      "inheritPlaceholder": "Inherit",
+      "on": "On",
+      "off": "Off",
+      "unknownValue": "{value} (not recognized)",
+      "groups": {
+        "model": "Model & output",
+        "tools": "Tools",
+        "context": "Context",
+        "safety": "Sandbox & confinement",
+        "platforms": "Messaging platforms"
+      },
+      "provider": {
+        "label": "Provider",
+        "description": "Provider this agent sends through. A session's provider choice still wins."
+      },
+      "thinking": {
+        "label": "Extended thinking budget",
+        "description": "Tokens for extended thinking (0–64000). Empty inherits the app default; 0 uses the model's own default."
+      },
+      "outputStyle": {
+        "label": "Output style",
+        "description": "How this agent's replies are shaped. “Default” turns off an app-wide style for this agent.",
+        "customLabel": "Custom style instruction",
+        "customPlaceholder": "Describe how replies should read…",
+        "customHint": "Used whenever the effective output style is Custom. Leave empty to inherit."
+      },
+      "a2ui": {
+        "label": "A2UI surfaces",
+        "description": "Whether this agent may render interactive A2UI surfaces. A session or agent mode can still override it."
+      },
+      "pluginTools": {
+        "label": "Plugin tools",
+        "description": "Tools contributed by enabled plugins. Off removes them from this agent's turns.",
+        "default": "Default (on)"
+      },
+      "builtInSkills": {
+        "label": "Built-in skills in app chats",
+        "description": "Expose built-in skills (calendar, IM and similar) in desktop chats. Messaging-platform chats always get them.",
+        "default": "Default (off)"
+      },
+      "ocr": {
+        "label": "OCR tool",
+        "description": "Text extraction from images. Available by default; Off removes it for this agent.",
+        "default": "Default (on)"
+      },
+      "workspaceConfinement": {
+        "label": "Workspace confinement",
+        "description": "Confine built-in file and shell tools to the active workspace. A session override still wins."
+      },
+      "toolFilter": {
+        "label": "Tool filter",
+        "description": "Replaces the app-wide tool filter for this agent. A session filter replaces this one in turn."
+      },
+      "toolSearch": {
+        "label": "Deferred tool loading",
+        "description": "Replaces the app-wide deferred-loading policy for this agent.",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "remove": "Remove"
+      },
+      "compaction": {
+        "title": "Conversation compaction",
+        "description": "Each field overrides the app setting on its own. Leave a field on Inherit or empty to follow Settings.",
+        "inheritPlaceholder": "Inherit",
+        "range": "{min}–{max}"
+      },
+      "instructions": {
+        "label": "Project instruction files",
+        "description": "While overridden, these settings replace the app-level instruction-file settings entirely.",
+        "override": "Override for this agent"
+      },
+      "sandboxPolicy": {
+        "label": "Sandbox resource ceiling",
+        "description": "While overridden, replaces the app-level ceiling for this agent. Only applies when the sandbox is enabled.",
+        "override": "Override for this agent"
+      },
+      "platformDefaults": {
+        "title": "Bot defaults",
+        "description": "How a messaging bot wearing this agent behaves unless the bot or a conversation says otherwise.",
+        "mode": {
+          "label": "Reply mode",
+          "description": "Replaces the bot's default mode. A conversation override still wins.",
+          "inherit": "Inherit bot default",
+          "auto": "Auto-reply",
+          "manual": "Manual (no AI replies)",
+          "draft": "Draft (AI drafts, you send)"
+        },
+        "triggerDescription": "Take over the parts of “when to answer” this agent needs to differ on. A part you take over starts from the standard private-chat profile; the rest keeps following the bot.",
+        "parts": {
+          "rules": "Use this agent's own conditions",
+          "blockers": "Use this agent's own blockers",
+          "storeUnmatched": "Decide separately whether to keep unmatched messages"
+        }
+      }
+    }
   },
   "emptyHint": "No characters yet. The built-ins should appear here automatically.",
   "exportPackAria": "Export source pack for {name}",

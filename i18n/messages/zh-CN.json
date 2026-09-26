@@ -35631,6 +35631,106 @@
           "label": "账号覆盖",
           "optionLabel": "{provider}：{label}"
         },
+        "advanced": {
+          "a2ui": {
+            "description": "此智能体是否可以渲染交互式 A2UI 界面。会话或智能体模式仍可覆盖。",
+            "label": "A2UI 界面"
+          },
+          "builtInSkills": {
+            "default": "默认（关闭）",
+            "description": "在桌面对话中提供内置技能（日历、IM 等）。消息平台对话始终可用。",
+            "label": "应用内对话的内置技能"
+          },
+          "compaction": {
+            "description": "每个字段单独覆盖应用设置。保持“继承”或留空即跟随设置。",
+            "inheritPlaceholder": "继承",
+            "range": "{min}–{max}",
+            "title": "对话压缩"
+          },
+          "count": "{count} 项覆盖",
+          "description": "按智能体覆盖应用级默认值。保持“继承”的项跟随设置，会话仍可覆盖其中大部分。",
+          "groups": {
+            "context": "上下文",
+            "model": "模型与输出",
+            "platforms": "消息平台",
+            "safety": "沙箱与约束",
+            "tools": "工具"
+          },
+          "inherit": "继承应用默认",
+          "inheritPlaceholder": "继承",
+          "instructions": {
+            "description": "覆盖期间，这些设置将整体替换应用级指令文件设置。",
+            "label": "项目指令文件",
+            "override": "为此智能体覆盖"
+          },
+          "ocr": {
+            "default": "默认（开启）",
+            "description": "从图片中提取文字。默认可用；关闭后此智能体不再提供。",
+            "label": "OCR 工具"
+          },
+          "off": "关闭",
+          "on": "开启",
+          "outputStyle": {
+            "customHint": "当生效的输出风格为“自定义”时使用。留空则继承。",
+            "customLabel": "自定义风格说明",
+            "customPlaceholder": "描述回复应当如何呈现…",
+            "description": "此智能体回复的呈现方式。选择“默认”可为此智能体关闭应用级风格。",
+            "label": "输出风格"
+          },
+          "platformDefaults": {
+            "description": "使用此智能体的消息机器人在机器人或会话未另行设置时的行为。",
+            "mode": {
+              "auto": "自动回复",
+              "description": "替换机器人的默认模式。会话级覆盖仍然优先。",
+              "draft": "草稿（AI 起草，由你发送）",
+              "inherit": "继承机器人默认",
+              "label": "回复模式",
+              "manual": "手动（不使用 AI 回复）"
+            },
+            "parts": {
+              "blockers": "使用此智能体自己的拦截规则",
+              "rules": "使用此智能体自己的触发条件",
+              "storeUnmatched": "单独决定是否保留未匹配的消息"
+            },
+            "title": "机器人默认行为",
+            "triggerDescription": "接管此智能体需要不同的“何时回答”部分。接管的部分从标准私聊配置开始，其余部分继续跟随机器人。"
+          },
+          "pluginTools": {
+            "default": "默认（开启）",
+            "description": "已启用插件提供的工具。关闭后将从此智能体的对话轮次中移除。",
+            "label": "插件工具"
+          },
+          "provider": {
+            "description": "此智能体发送请求所用的服务商。会话选择的服务商仍然优先。",
+            "label": "服务商"
+          },
+          "sandboxPolicy": {
+            "description": "覆盖期间，为此智能体替换应用级上限。仅在启用沙箱时生效。",
+            "label": "沙箱资源上限",
+            "override": "为此智能体覆盖"
+          },
+          "thinking": {
+            "description": "扩展思考的 token 数（0–64000）。留空继承应用默认；0 使用模型自身默认值。",
+            "label": "扩展思考预算"
+          },
+          "title": "高级覆盖",
+          "toolFilter": {
+            "description": "为此智能体替换应用级工具过滤。会话级过滤会再替换此设置。",
+            "label": "工具过滤"
+          },
+          "toolSearch": {
+            "description": "为此智能体替换应用级延迟加载策略。",
+            "disabled": "停用",
+            "enabled": "启用",
+            "label": "延迟加载工具",
+            "remove": "移除"
+          },
+          "unknownValue": "{value}（无法识别）",
+          "workspaceConfinement": {
+            "description": "将内置文件与 Shell 工具限制在当前工作区内。会话级覆盖仍然优先。",
+            "label": "工作区约束"
+          }
+        },
         "allowedTools": "允许的工具（用逗号分隔）",
         "allowedToolsPlaceholder": "Bash, Read, WebSearch",
         "avatarEmoji": "头像 Emoji",

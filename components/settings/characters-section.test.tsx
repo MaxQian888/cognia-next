@@ -149,11 +149,17 @@ jest.mock("@/stores/ui/ui-store", () => ({
     sel: (s: { pendingCreateRequest: undefined; clearPendingCreate: () => void }) => unknown
   ) => sel({ pendingCreateRequest: undefined, clearPendingCreate: () => {} }),
 }))
+// Only consulted once a tool-filter override is opened in the advanced area.
+jest.mock("@/lib/tools/tool-catalog", () => ({
+  getToolCatalog: jest.fn(async () => []),
+  searchToolCatalog: (entries: unknown[]) => entries,
+}))
 jest.mock("@/lib/files/download", () => ({
   downloadBlob: (...a: unknown[]) => mockDownloadBlob(...a),
 }))
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { CharacterEditor, CharactersSection, type EditorState } from "./characters-section"
 import type { Character } from "@cognia/agent-config-types"
@@ -163,6 +169,12 @@ import {
   registerCharacterPack,
 } from "@/lib/plugin/registries/character-pack-registry"
 import { __resetSkillsForTesting, registerSkill } from "@/lib/plugin/registries/skill-registry"
+import {
+  AGENT_OVERRIDE_FIELDS,
+  emptyAgentOverrides,
+  pickAgentOverrides,
+} from "@/components/settings/character/agent-overrides"
+import { createCharacter, updateCharacter } from "@/lib/db/characters"
 
 afterEach(() => {
   __resetCharacterPacksForTesting()
@@ -239,6 +251,7 @@ function baseInitial(overrides: Partial<EditorState> = {}): EditorState {
     voicePitch: 1,
     voiceVolume: 1,
     availablePlatforms: [],
+    overrides: emptyAgentOverrides(),
     ...overrides,
   }
 }
@@ -784,5 +797,139 @@ describe("CharactersSection — agent variants", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "deleteAria" })[0]!)
     fireEvent.click(await screen.findByRole("button", { name: "remove" }))
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("variants.deleteBlocked"))
+  })
+})
+
+describe("CharacterEditor — advanced overrides", () => {
+  // One value for every override the editor owns, each deliberately NOT the
+  // default a control would seed, so a round trip that normalised anything
+  // would show up as a diff.
+  const everyOverride = {
+    providerId: "openrouter",
+    sandboxPolicy: { maxCpuSeconds: 30, network: "allowlist", networkAllowlist: ["api.test"] },
+    toolFilter: { mode: "deny", tools: ["Bash"], mcpServerIds: ["github"] },
+    toolSearchRuntimeOverride: { enabled: false, alwaysLoadTools: ["read_file"] },
+    compactionOverride: { compressionEnabled: false, tokenThreshold: 70 },
+    instructionsOverride: { enabled: true, mode: "nearest", fileNames: ["RULES.md"] },
+    outputStyle: "some-pack-style",
+    customOutputStyle: "  Keep it short.  ",
+    maxThinkingTokens: 0,
+    a2uiEnabled: false,
+    enableOcr: false,
+    enableBuiltInSkills: true,
+    disablePluginTools: false,
+    workspaceConfinementEnabled: false,
+    platformDefaults: { mode: "draft", trigger: { storeUnmatchedInDraftMode: true } },
+  } satisfies Partial<Character>
+
+  const agent = (extra: Partial<Character> = {}): Character => ({
+    id: "char_full",
+    name: "Full",
+    systemPrompt: "x",
+    avatarColor: "#abc",
+    createdAt: 0,
+    updatedAt: 0,
+    ...extra,
+  })
+
+  const updateMock = updateCharacter as jest.Mock
+  const createMock = createCharacter as jest.Mock
+
+  beforeEach(() => {
+    updateMock.mockClear()
+    createMock.mockClear()
+  })
+
+  it("covers every override field in the round-trip fixture", () => {
+    expect(Object.keys(everyOverride).sort()).toEqual([...AGENT_OVERRIDE_FIELDS].sort())
+  })
+
+  it("loads an agent with every override set and saves each one back identical", async () => {
+    mockCharacterList = [agent(everyOverride)]
+    render(<CharactersSection />)
+    fireEvent.click(screen.getByRole("button", { name: "editAria" }))
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1))
+    const [id, patch] = updateMock.mock.calls[0] as [string, Partial<Character>]
+    expect(id).toBe("char_full")
+    for (const field of AGENT_OVERRIDE_FIELDS) {
+      // Same reference, not merely equal: nothing was rebuilt on the way through.
+      expect(patch[field]).toBe(everyOverride[field])
+    }
+  })
+
+  it("round-trips them unchanged even with every override control mounted", async () => {
+    const user = userEvent.setup()
+    mockCharacterList = [agent(everyOverride)]
+    render(<CharactersSection />)
+    fireEvent.click(screen.getByRole("button", { name: "editAria" }))
+    await user.click(screen.getByTestId("agent-advanced-overrides"))
+    expect(screen.getByTestId("agent-override-tool-filter")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "save" }))
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1))
+    const patch = updateMock.mock.calls[0]![1] as Partial<Character>
+    for (const field of AGENT_OVERRIDE_FIELDS) expect(patch[field]).toBe(everyOverride[field])
+  })
+
+  it("saves none of them for an agent that sets none", async () => {
+    mockCharacterList = [agent()]
+    render(<CharactersSection />)
+    fireEvent.click(screen.getByRole("button", { name: "editAria" }))
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1))
+    const patch = updateMock.mock.calls[0]![1] as Partial<Character>
+    expect(pickAgentOverrides(patch)).toEqual(emptyAgentOverrides())
+  })
+
+  it("creates a new agent without inventing any override", async () => {
+    mockCharacterList = []
+    render(<CharactersSection />)
+    fireEvent.click(screen.getByRole("button", { name: "newCharacter" }))
+    // The knowledge-base form above shares both keys; the editor renders last.
+    fireEvent.change(screen.getAllByPlaceholderText("namePlaceholder").at(-1)!, {
+      target: { value: "New" },
+    })
+    fireEvent.change(screen.getByPlaceholderText("systemPromptPlaceholder"), {
+      target: { value: "Be helpful." },
+    })
+    fireEvent.click(screen.getAllByRole("button", { name: "create" }).at(-1)!)
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1))
+    const draft = createMock.mock.calls[0]![0] as Partial<Character>
+    for (const field of AGENT_OVERRIDE_FIELDS) expect(draft[field]).toBeUndefined()
+  })
+
+  it("keeps the overrides collapsed until opened, then saves an edit made there", async () => {
+    const user = userEvent.setup()
+    const { onSave } = renderEditor(baseInitial())
+    expect(screen.queryByRole("combobox", { name: "ocr.label" })).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId("agent-advanced-overrides"))
+    await user.click(screen.getByRole("combobox", { name: "ocr.label" }))
+    await user.click(screen.getByRole("option", { name: "off" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const payload = onSave.mock.calls[0]![0] as Partial<Character>
+    expect(payload.enableOcr).toBe(false)
+    expect(payload.providerId).toBeUndefined()
+  })
+
+  it("clears a stored override that is switched back to inherit", async () => {
+    const user = userEvent.setup()
+    const { onSave } = renderEditor(
+      baseInitial({ overrides: pickAgentOverrides({ workspaceConfinementEnabled: false }) })
+    )
+    await user.click(screen.getByTestId("agent-advanced-overrides"))
+    await user.click(screen.getByRole("combobox", { name: "workspaceConfinement.label" }))
+    await user.click(screen.getByRole("option", { name: "inherit" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const payload = onSave.mock.calls[0]![0] as Partial<Character>
+    expect(payload).toHaveProperty("workspaceConfinementEnabled", undefined)
   })
 })
