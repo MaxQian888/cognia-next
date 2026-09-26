@@ -3,7 +3,7 @@
 // The shared list. Both hosts render this component, so its cases are about
 // what a row says and what an empty list offers, not about either layout.
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { Team } from "@cognia/agent-config-types"
@@ -150,6 +150,37 @@ describe("narrowing", () => {
     expect(setQuery).toHaveBeenCalledWith("r")
     await userEvent.click(screen.getByTestId("squad-fleet-filter-waiting"))
     expect(setFilter).toHaveBeenCalledWith("waiting")
+  })
+
+  // The URL lags a keystroke behind. Bound to it, the box reset itself under
+  // the typist; this route never catches up at all, which is the worst case.
+  it("keeps what is typed while the URL catches up", async () => {
+    render(<SquadListPane fleet={fleet()} route={route({ query: "" })} />)
+    const search = screen.getByTestId("squad-fleet-search")
+    await userEvent.type(search, "ab")
+    expect(search).toHaveValue("ab")
+    expect(setQuery).toHaveBeenLastCalledWith("ab")
+  })
+
+  // Mid-composition text is pinyin, not a query. Writing it to the URL both
+  // filtered on "ni" and, on the round trip, committed the IME half-typed.
+  it("writes nothing to the URL until an IME composition ends", () => {
+    render(<SquadListPane fleet={fleet()} route={route({ query: "" })} />)
+    const search = screen.getByTestId("squad-fleet-search")
+    fireEvent.compositionStart(search)
+    fireEvent.input(search, { target: { value: "ni" }, isComposing: true })
+    expect(search).toHaveValue("ni")
+    expect(setQuery).not.toHaveBeenCalled()
+    fireEvent.input(search, { target: { value: "你" }, isComposing: true })
+    fireEvent.compositionEnd(search)
+    expect(setQuery).toHaveBeenCalledTimes(1)
+    expect(setQuery).toHaveBeenCalledWith("你")
+  })
+
+  it("follows a query the URL gets from elsewhere", () => {
+    const { rerender } = render(<SquadListPane fleet={fleet()} route={route({ query: "" })} />)
+    rerender(<SquadListPane fleet={fleet()} route={route({ query: "alpha" })} />)
+    expect(screen.getByTestId("squad-fleet-search")).toHaveValue("alpha")
   })
 
   /**
