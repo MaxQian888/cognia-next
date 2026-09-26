@@ -1,19 +1,20 @@
 //! Import Chromium cookies into the embedded browser without exposing values
 //! across the renderer IPC boundary (ADR-0073).
 
-mod chromium;
 #[cfg(target_os = "macos")]
 mod inject_macos;
 #[cfg(target_os = "macos")]
 mod keychain_macos;
 
-use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use tauri::Manager;
+
+// The Chromium reader, and the types it shares with the macOS keychain adapter
+// and the WebKit sink below, live in `cognia-browser-cookies` (ADR-0196 P6g).
+use cognia_browser_cookies::{chromium, ImportError};
 
 use crate::browser::embedded::EMBED_LABEL;
 
@@ -96,63 +97,6 @@ pub struct CookieClearResult {
 #[serde(rename_all = "camelCase")]
 pub struct CookieClearAllResult {
     removed: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SameSite {
-    Unspecified,
-    None,
-    Lax,
-    Strict,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct ImportedCookie {
-    host_key: String,
-    name: String,
-    value: String,
-    path: String,
-    expires_unix: Option<i64>,
-    is_secure: bool,
-    is_httponly: bool,
-    same_site: SameSite,
-}
-
-impl fmt::Debug for ImportedCookie {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ImportedCookie")
-            .field("host_key", &self.host_key)
-            .field("name", &self.name)
-            .field("value", &"[REDACTED]")
-            .field("path", &self.path)
-            .field("expires_unix", &self.expires_unix)
-            .field("is_secure", &self.is_secure)
-            .field("is_httponly", &self.is_httponly)
-            .field("same_site", &self.same_site)
-            .finish()
-    }
-}
-
-trait Keychain {
-    fn read(&self, service: &str, account: &str) -> Result<String, ImportError>;
-}
-
-trait CookieSink {
-    fn inject(&self, cookies: &[ImportedCookie]) -> Result<Vec<ImportedCookie>, ImportError>;
-}
-
-#[derive(Debug, Error)]
-enum ImportError {
-    #[error("cookie database could not be read")]
-    Database,
-    #[error("cookie decryption failed")]
-    Decryption,
-    #[error("invalid target domain")]
-    InvalidDomain,
-    #[error("cookie injection failed")]
-    Injection,
-    #[error("keychain access was denied")]
-    PermissionDenied,
 }
 
 fn is_supported_platform(platform: &str) -> bool {
@@ -443,24 +387,6 @@ mod tests {
             json,
             serde_json::json!({ "removed": 3, "domain": "example.com" })
         );
-    }
-
-    #[test]
-    fn imported_cookie_debug_redacts_the_value() {
-        let cookie = ImportedCookie {
-            host_key: ".example.com".into(),
-            name: "session".into(),
-            value: "top-secret".into(),
-            path: "/".into(),
-            expires_unix: None,
-            is_secure: true,
-            is_httponly: true,
-            same_site: SameSite::Lax,
-        };
-
-        let debug = format!("{cookie:?}");
-        assert!(debug.contains("[REDACTED]"));
-        assert!(!debug.contains("top-secret"));
     }
 
     #[test]

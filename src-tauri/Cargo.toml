@@ -101,6 +101,9 @@ cognia-companion-connectivity = { path = "../crates/cognia-companion-connectivit
 # (`register_tauri_event`, `WebViewBridgeTransport`); `companion_api`
 # re-exports each module at its old path.
 cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["tauri-host"] }
+# ADR-0196 P6g — Chromium cookie import; `browser/cookie_import` keeps the
+# command shells, the macOS keychain adapter and the WebKit sink.
+cognia-browser-cookies = { path = "../crates/cognia-browser-cookies" }
 # Native local-video metadata, frame extraction, trimming, and analysis.
 cognia-media = { path = "../crates/cognia-media", features = ["tauri-host"] }
 # ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased
@@ -335,10 +338,6 @@ ed25519-dalek.workspace = true
 hex.workspace = true
 url.workspace = true
 aes-gcm = { workspace = true, features = ["aes"] }
-aes = "0.9"
-cbc = { version = "0.2", features = ["alloc"] }
-pbkdf2 = "0.13"
-psl = "2.1"
 rand.workspace = true
 jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
 serde_urlencoded = "0.7"

@@ -10,13 +10,13 @@ use sha2::{Digest, Sha256};
 
 use super::{CookieSink, ImportError, ImportedCookie, Keychain, SameSite};
 
-pub(super) struct ImportSummary {
-    pub(super) injected: usize,
-    pub(super) names: Vec<String>,
-    pub(super) domains: Vec<String>,
+pub struct ImportSummary {
+    pub injected: usize,
+    pub names: Vec<String>,
+    pub domains: Vec<String>,
 }
 
-pub(super) fn find_cookie_database(profile_dir: &Path) -> Option<PathBuf> {
+pub fn find_cookie_database(profile_dir: &Path) -> Option<PathBuf> {
     [
         profile_dir.join("Network/Cookies"),
         profile_dir.join("Cookies"),
@@ -38,7 +38,7 @@ fn copy_cookie_database(source: &Path, destination_dir: &Path) -> Result<PathBuf
     Ok(destination)
 }
 
-pub(super) fn import_profile(
+pub fn import_profile(
     profile_dir: &Path,
     target: &str,
     service: &str,
@@ -120,7 +120,7 @@ fn chrome_expires_to_unix(expires_utc: i64) -> Option<i64> {
     (expires_utc != 0).then(|| expires_utc / 1_000_000 - 11_644_473_600)
 }
 
-pub(super) fn registrable_domain(target: &str) -> Result<String, ImportError> {
+pub fn registrable_domain(target: &str) -> Result<String, ImportError> {
     let normalized = target.trim().trim_start_matches('.').to_ascii_lowercase();
     let domain = match url::Host::parse(&normalized).map_err(|_| ImportError::InvalidDomain)? {
         url::Host::Domain(domain) => domain,
@@ -271,7 +271,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::browser::cookie_import::SameSite;
+    use crate::SameSite;
 
     fn encrypt_v10(passphrase: &str, host_key: &str, value: &str, prefixed: bool) -> Vec<u8> {
         let key = derive_key(passphrase);

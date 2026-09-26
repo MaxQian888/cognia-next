@@ -1,4 +1,4 @@
-use super::{ImportError, Keychain};
+use cognia_browser_cookies::{ImportError, Keychain};
 
 pub(super) struct MacKeychain;
 

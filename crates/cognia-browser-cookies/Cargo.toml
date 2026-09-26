@@ -1,0 +1,46 @@
+# ADR-0196 P6g — importing a site's cookies from a local Chromium profile:
+# find the profile's cookie database, decrypt the values with the browser's
+# Safe Storage passphrase, keep the target site's cookies. The passphrase
+# source (`Keychain`) and the destination (`CookieSink`) are traits; the
+# desktop's macOS keychain adapter and WebKit sink stay in
+# `src-tauri/src/browser/cookie_import`, with the command shells, so this crate
+# links neither Tauri nor the OS credential store.
+[package]
+name = "cognia-browser-cookies"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Chromium cookie import: profile discovery, Safe Storage decryption and site filtering, behind keychain and sink traits."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_browser_cookies"
+path = "src/lib.rs"
+
+[dependencies]
+# Chromium's v10 cookie values: AES-128-CBC, keyed by PBKDF2-HMAC-SHA1 over
+# the Safe Storage passphrase.
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
+pbkdf2 = "0.13"
+sha1 = "0.11"
+# The SHA-256 of the host key that cookie databases from version 24 on put in
+# front of each value.
+sha2.workspace = true
+# Registrable domain of the target site: `url` parses the host, `psl` holds the
+# public suffix list.
+psl = "2.1"
+url.workspace = true
+# The profile's database is copied into a temporary directory and opened
+# read-only and immutable there, so a running browser's locks never matter.
+rusqlite = { workspace = true, features = ["bundled"] }
+tempfile.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# The key-derivation test compares against a documented hex digest.
+hex.workspace = true
+
+[lints]
+workspace = true

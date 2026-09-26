@@ -5,6 +5,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use cognia_browser_cookies::{CookieSink, ImportError, ImportedCookie, SameSite};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_foundation::{
@@ -16,7 +17,6 @@ use objc2_foundation::{
 use objc2_web_kit::WKWebView;
 use tauri::{AppHandle, Manager};
 
-use super::{CookieSink, ImportError, ImportedCookie, SameSite};
 use crate::browser::embedded::EMBED_LABEL;
 
 pub(super) struct WkWebviewSink {

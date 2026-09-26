@@ -1915,6 +1915,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-browser-cookies"
+version = "0.1.0"
+dependencies = [
+ "aes 0.9.2",
+ "cbc 0.2.1",
+ "hex",
+ "pbkdf2 0.13.0",
+ "psl",
+ "rusqlite",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.20",
+ "url",
+]
+
+[[package]]
 name = "cognia-canonical-json"
 version = "0.1.0"
 dependencies = [
@@ -2425,7 +2442,6 @@ dependencies = [
 name = "cognia-next"
 version = "0.1.0"
 dependencies = [
- "aes 0.9.2",
  "aes-gcm 0.11.0",
  "anyhow",
  "argon2 0.5.3",
@@ -2436,12 +2452,12 @@ dependencies = [
  "base64 0.23.1",
  "block2",
  "bytes",
- "cbc 0.2.1",
  "chrono",
  "clap",
  "cognia-agent-state",
  "cognia-agents",
  "cognia-automation",
+ "cognia-browser-cookies",
  "cognia-ccswitch",
  "cognia-companion-bus",
  "cognia-companion-connectivity",
@@ -2501,8 +2517,6 @@ dependencies = [
  "once_cell",
  "p256 0.14.0",
  "parking_lot",
- "pbkdf2 0.13.0",
- "psl",
  "rand 0.10.2",
  "rcgen",
  "regex",

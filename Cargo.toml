@@ -60,6 +60,9 @@ members = [
   # ADR-0196 P4 — the companion's event bus, push delivery, store bridges and
   # remote execution contexts, out of `companion_api`.
   "crates/cognia-companion-bus",
+  # ADR-0196 P6g — Chromium cookie import (profile discovery, Safe Storage
+  # decryption), out of `app_lib`.
+  "crates/cognia-browser-cookies",
   # ADR-0182 — runtime environments: EnvironmentSpec, the two-level image
   # catalog, admission policy and the tenant environment store.
   "crates/cognia-environment",
