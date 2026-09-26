@@ -15,9 +15,11 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { resolveShellInvocation } from "./bash.mjs"
-import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../src/platform/host-rpc.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { resolveShellInvocation } from "./bash.ts"
+import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../../platform/host-rpc.ts"
+import type { CoreFileToolContext } from "./context.ts"
 
 /** Past this, stop blocking and let the durable watch deliver. */
 export const BLOCKING_THRESHOLD_MS = 5 * 60_000
@@ -72,13 +74,48 @@ export const monitorShape = {
   label: z.string().optional().describe("Short human-readable label shown in the Job Center."),
 }
 
+type MonitorArgs = ToolArgs<typeof monitorShape>
+
+/** The host's tagged condition union, as `monitors.register` takes it. */
+export type MonitorCondition =
+  | { kind: "jobExit"; jobId: string }
+  | { kind: "jobOutput"; jobId: string; pattern: string }
+  | {
+      kind: "shellPredicate"
+      command: string
+      program: string
+      args: string[]
+      cwd: string
+      env: NodeJS.ProcessEnv
+      intervalMs?: number
+    }
+  | { kind: "upstream"; source: string; id: string }
+
+/** A monitor as the host reports it. */
+interface MonitorRecord {
+  id: string
+  status: string
+  detail?: string | null | undefined
+}
+
+const errorText = (err: unknown) => String((err as { message?: unknown } | null)?.message ?? err)
+
 /**
  * Translate the flat tool arguments into the host's tagged condition union.
  * Pure and exported so the argument contract is testable without a host.
- *
- * @returns {{ ok: true, condition: object } | { ok: false, error: string }}
  */
-export function buildCondition(args, { resolveShell = resolveShellInvocation } = {}) {
+export function buildCondition(
+  args: Omit<MonitorArgs, "timeout_ms" | "label">,
+  {
+    resolveShell = resolveShellInvocation,
+  }: {
+    resolveShell?: (command: string) => {
+      shell: string
+      shellArgs: string[]
+      env: NodeJS.ProcessEnv
+    }
+  } = {}
+): { ok: true; condition: MonitorCondition } | { ok: false; error: string } {
   switch (args.condition) {
     case "job_exit":
       if (!args.shellId) return { ok: false, error: "job_exit requires shellId" }
@@ -90,7 +127,7 @@ export function buildCondition(args, { resolveShell = resolveShellInvocation } =
         new RegExp(args.pattern)
       } catch (err) {
         // Reject here rather than registering a watch that can never match.
-        return { ok: false, error: `invalid pattern: ${err?.message ?? err}` }
+        return { ok: false, error: `invalid pattern: ${errorText(err)}` }
       }
       return {
         ok: true,
@@ -118,12 +155,12 @@ export function buildCondition(args, { resolveShell = resolveShellInvocation } =
       if (!args.id) return { ok: false, error: "upstream requires id" }
       return { ok: true, condition: { kind: "upstream", source: args.source, id: args.id } }
     default:
-      return { ok: false, error: `unknown condition: ${args.condition}` }
+      return { ok: false, error: `unknown condition: ${String(args.condition)}` }
   }
 }
 
 /** Render a settled monitor for the model. */
-export function describeOutcome(record) {
+export function describeOutcome(record: Pick<MonitorRecord, "status" | "detail">): string {
   const detail = record.detail ? ` — ${record.detail}` : ""
   switch (record.status) {
     case "fired":
@@ -139,21 +176,14 @@ export function describeOutcome(record) {
   }
 }
 
-/**
- * @param {{
- *   hostRpc?: { call: (m: string, p: any, o?: any) => Promise<any> },
- *   sessionId?: string,
- *   blockingThresholdMs?: number,
- *   waitChunkMs?: number,
- * }} ctx
- */
+/** `blockingThresholdMs` and `waitChunkMs` are shortened by tests. */
 export function createMonitorTool({
   hostRpc,
   sessionId,
   blockingThresholdMs = BLOCKING_THRESHOLD_MS,
   waitChunkMs = WAIT_CHUNK_MS,
-}) {
-  async function execMonitor(args) {
+}: CoreFileToolContext & { blockingThresholdMs?: number; waitChunkMs?: number }) {
+  async function execMonitor(args: MonitorArgs) {
     if (!hostRpc) {
       return toolError("monitors are not available in this session")
     }
@@ -164,31 +194,31 @@ export function createMonitorTool({
     const willBlock = Math.min(budget, blockingThresholdMs)
     const owner = { kind: "session", sessionId }
 
-    let record
+    let record: MonitorRecord
     try {
-      record = await hostRpc.call("monitors.register", {
+      record = (await hostRpc.call("monitors.register", {
         condition: built.condition,
         owner,
         // The deadline covers the caller's FULL patience, not just the part we
         // block for — otherwise a degraded watch would expire early.
         expiresAtMs: Date.now() + budget,
         label: args.label ?? null,
-      })
+      })) as MonitorRecord
     } catch (err) {
-      return toolError(String(err?.message ?? err), "Monitor")
+      return toolError(errorText(err), "Monitor")
     }
 
     const deadline = Date.now() + willBlock
     while (Date.now() < deadline) {
       const remaining = Math.min(waitChunkMs, deadline - Date.now())
       try {
-        record = await hostRpc.call(
+        record = (await hostRpc.call(
           "monitors.wait",
           { monitorId: record.id, waitMs: remaining },
           { timeoutMs: remaining + HOST_RPC_TIMEOUT_MARGIN_MS }
-        )
+        )) as MonitorRecord
       } catch (err) {
-        return toolError(String(err?.message ?? err), "Monitor")
+        return toolError(errorText(err), "Monitor")
       }
       if (record.status !== "waiting") {
         return toolText(`${describeOutcome(record)} (monitor ${record.id})`)
@@ -211,7 +241,7 @@ export function createMonitorTool({
   )
 }
 
-function describeCondition(args) {
+function describeCondition(args: MonitorArgs): string {
   switch (args.condition) {
     case "job_exit":
       return `shell ${args.shellId} to exit`
@@ -226,17 +256,17 @@ function describeCondition(args) {
   }
 }
 
-export function createMonitorCancelTool({ hostRpc, sessionId }) {
-  async function execCancel(args) {
+export function createMonitorCancelTool({ hostRpc, sessionId }: CoreFileToolContext) {
+  async function execCancel(args: { monitorId: string }) {
     if (!hostRpc) return toolError("monitors are not available in this session")
     try {
-      const record = await hostRpc.call("monitors.cancel", {
+      const record = (await hostRpc.call("monitors.cancel", {
         monitorId: args.monitorId,
         requester: { kind: "session", sessionId },
-      })
+      })) as MonitorRecord
       return toolText(`monitor ${record.id} is now ${record.status}`)
     } catch (err) {
-      return toolError(String(err?.message ?? err), "monitor_cancel")
+      return toolError(errorText(err), "monitor_cancel")
     }
   }
 
@@ -248,16 +278,16 @@ export function createMonitorCancelTool({ hostRpc, sessionId }) {
   )
 }
 
-export function createMonitorListTool({ hostRpc, sessionId }) {
+export function createMonitorListTool({ hostRpc, sessionId }: CoreFileToolContext) {
   async function execList() {
     if (!hostRpc) return toolError("monitors are not available in this session")
     try {
-      const { monitors } = await hostRpc.call("monitors.list", {
+      const { monitors } = (await hostRpc.call("monitors.list", {
         owner: { kind: "session", sessionId },
-      })
+      })) as { monitors?: unknown[] | null }
       return toolText(JSON.stringify({ monitors: monitors ?? [] }, null, 2))
     } catch (err) {
-      return toolError(String(err?.message ?? err), "monitor_list")
+      return toolError(errorText(err), "monitor_list")
     }
   }
 
@@ -272,6 +302,6 @@ export function createMonitorListTool({ hostRpc, sessionId }) {
 export const MONITOR_TOOL_NAMES = Object.freeze(["Monitor", "monitor_cancel", "monitor_list"])
 
 /** Build all three monitor tools in the fixed registration order. */
-export function createMonitorTools(ctx = {}) {
+export function createMonitorTools(ctx: Parameters<typeof createMonitorTool>[0] = {}) {
   return [createMonitorTool(ctx), createMonitorCancelTool(ctx), createMonitorListTool(ctx)]
 }

@@ -7,6 +7,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { resolveToolPath } from "../../../platform/fs/paths.ts"
 import type { ToolArgs } from "../../kernel/define.ts"
+import type { CoreFileToolContext } from "./context.ts"
 
 export const MAX_ENTRIES = 500
 
@@ -32,7 +33,7 @@ export function nameGlobToRegExp(glob: string): RegExp {
   return new RegExp(`^${escaped}$`)
 }
 
-export function createLsTool({ cwd }: { cwd: string }) {
+export function createLsTool({ cwd }: Pick<CoreFileToolContext, "cwd">) {
   async function execLs(args: ToolArgs<typeof lsShape>) {
     try {
       const abs = resolveToolPath(cwd, args.path ?? ".")

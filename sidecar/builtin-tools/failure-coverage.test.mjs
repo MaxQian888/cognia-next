@@ -27,7 +27,7 @@ const WAIVERS = new Map([
     "the result constructor itself: toolText sets `isError` for its callers, and toolError, which every failure goes through, attaches the classification.",
   ],
   [
-    "builtin-tools/core/bash.mjs",
+    "src/tools/builtin/core-files/bash.ts",
     "a non-zero exit is not a tool failure: the command ran and its output IS the answer. Classifying it would tell the model the tool broke when the truth is the command returned 1, which is often the useful result (grep, test runners, diff).",
   ],
 ])

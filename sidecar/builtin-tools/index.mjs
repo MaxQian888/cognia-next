@@ -28,9 +28,13 @@ import { clonedepsTools } from "../src/tools/builtin/dependency-research/index.t
 import { webcloneTools } from "../src/tools/builtin/webclone/index.ts"
 import { createLspTools } from "../src/tools/builtin/lsp/index.ts"
 import { createCodeGraphTools } from "../src/tools/builtin/code-graph/tools.ts"
-import { createBashOutputTool, createKillShellTool, createListShellsTool } from "./core/bash.mjs"
-import { createCoreTools } from "./core/core-tools.mjs"
-import { createMonitorTools } from "./core/monitor.mjs"
+import {
+  createBashOutputTool,
+  createKillShellTool,
+  createListShellsTool,
+} from "../src/tools/builtin/core-files/bash.ts"
+import { createCoreTools } from "../src/tools/builtin/core-files/index.ts"
+import { createMonitorTools } from "../src/tools/builtin/core-files/monitor.ts"
 import { createExitPlanTool } from "../src/tools/builtin/plan/exit-plan.ts"
 import { createPlanTools } from "../src/tools/builtin/plan/plan-tools.ts"
 import { codeModeToolDefs } from "./run-code/index.mjs"

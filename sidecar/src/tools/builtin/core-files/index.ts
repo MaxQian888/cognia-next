@@ -10,29 +10,25 @@
 // layer supplies the per-session working directory, read tracker, and the
 // lazy LSP resolver.
 
-import { createGrepTool } from "../../src/tools/builtin/core-files/grep.ts"
-import { createGlobTool } from "../../src/tools/builtin/core-files/glob.ts"
-import { createReadTool } from "../../src/tools/builtin/core-files/read.ts"
-import { createLsTool } from "../../src/tools/builtin/core-files/ls.ts"
-import { createEditTool, createMultiEditTool } from "../../src/tools/builtin/core-files/edit.ts"
-import { createWriteTool } from "../../src/tools/builtin/core-files/write.ts"
+import { createGrepTool } from "./grep.ts"
+import { createGlobTool } from "./glob.ts"
+import { createReadTool } from "./read.ts"
+import { createLsTool } from "./ls.ts"
+import { createEditTool, createMultiEditTool } from "./edit.ts"
+import { createWriteTool } from "./write.ts"
 import {
   createBashTool,
   createBashOutputTool,
   createKillShellTool,
   createListShellsTool,
-} from "./bash.mjs"
-import { createTodoWriteTool, TODO_WRITE_NAME } from "../../src/tools/builtin/core-files/todo.ts"
-import {
-  createSessionTaskTools,
-  SESSION_TASK_TOOL_NAMES,
-} from "../../src/tools/builtin/core-files/tasks.ts"
-import {
-  createNotebookEditTool,
-  NOTEBOOK_EDIT_NAME,
-} from "../../src/tools/builtin/core-files/notebook-edit.ts"
-import { createApplyPatchTool } from "../../src/tools/builtin/core-files/apply-patch.ts"
-import { createMonitorTools, MONITOR_TOOL_NAMES } from "./monitor.mjs"
+} from "./bash.ts"
+import { createTodoWriteTool, TODO_WRITE_NAME } from "./todo.ts"
+import { createSessionTaskTools, SESSION_TASK_TOOL_NAMES } from "./tasks.ts"
+import { createNotebookEditTool, NOTEBOOK_EDIT_NAME } from "./notebook-edit.ts"
+import { createApplyPatchTool } from "./apply-patch.ts"
+import { createMonitorTools, MONITOR_TOOL_NAMES } from "./monitor.ts"
+import type { SessionTaskStore } from "../../state/tasks.ts"
+import type { CoreFileToolContext } from "./context.ts"
 
 /**
  * Fixed registration order — do not reorder (prompt-cache stability). New
@@ -77,13 +73,8 @@ export const CORE_MUTATING_TOOL_NAMES = Object.freeze([
 ])
 
 /**
- * @param {{ cwd?: string, readTracker?: unknown, lspResolver?: unknown,
- *           bgShells?: unknown, taskStore?: unknown,
- *           hostRpc?: unknown, sessionId?: string,
- *           model?: string, provider?: string }} ctx
- *   `bgShells` is the per-session background-shell registry (Module: async
- *   bash); `model`/`provider` let `read` decide whether to inline images.
- * @returns {Array} SdkMcpToolDefinitions in CORE_TOOL_NAMES order.
+ * The core tool definitions in CORE_TOOL_NAMES order. `taskStore` backs the
+ * Task* tools; a fresh store is made when the session supplies none.
  */
 export function createCoreTools({
   cwd,
@@ -96,8 +87,8 @@ export function createCoreTools({
   sessionId,
   model,
   provider,
-} = {}) {
-  const ctx = {
+}: CoreFileToolContext & { taskStore?: SessionTaskStore | undefined } = {}) {
+  const ctx: CoreFileToolContext = {
     cwd,
     readTracker,
     lspResolver,
@@ -128,8 +119,10 @@ export function createCoreTools({
   ]
   // Defensive: the emitted order must match the public constant.
   for (let i = 0; i < tools.length; i++) {
-    if (tools[i].name !== CORE_TOOL_NAMES[i]) {
-      throw new Error(`core tool order drift: expected ${CORE_TOOL_NAMES[i]}, got ${tools[i].name}`)
+    if (tools[i]!.name !== CORE_TOOL_NAMES[i]) {
+      throw new Error(
+        `core tool order drift: expected ${CORE_TOOL_NAMES[i]}, got ${tools[i]!.name}`
+      )
     }
   }
   return tools

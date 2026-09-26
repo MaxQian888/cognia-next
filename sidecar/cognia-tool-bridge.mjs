@@ -30,7 +30,7 @@ import { READ_ONLY_TOOL_NAMES } from "./src/policy/tool-catalog/catalog.ts"
 import { createReadTracker } from "./src/tools/state/read-tracker.ts"
 import { createBgShellRegistry } from "./src/tools/state/background-shells.ts"
 import { createSessionTaskStore } from "./src/tools/state/tasks.ts"
-import { MONITOR_TOOL_NAMES } from "./builtin-tools/core/monitor.mjs"
+import { MONITOR_TOOL_NAMES } from "./src/tools/builtin/core-files/monitor.ts"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   wrapDefsWithReadOnlyTimeout,

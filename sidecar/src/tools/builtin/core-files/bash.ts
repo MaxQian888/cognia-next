@@ -11,22 +11,26 @@
 import os from "node:os"
 import { spawn } from "node:child_process"
 import { createWriteStream } from "node:fs"
+import type { WriteStream } from "node:fs"
 import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { DANGEROUS_PATTERNS } from "../../src/policy/shell/rules.ts"
-import { findDangerousShellFragment } from "../../src/policy/shell/ast-scan.ts"
-import { tailTruncate } from "../../src/shared/text/truncate.ts"
-import { pickStreamDecoder } from "../../src/platform/process/console-decode.ts"
-import { sandboxedProcessTarget, sandboxedProcessEnv } from "../../src/platform/process/exec.ts"
-import { activeShellDescriptor, applyNonInteractiveEnv } from "../../src/platform/process/shell.ts"
-import { detectInteractiveCommand } from "../../src/policy/shell/interactive.ts"
-import { resolveToolPath } from "../../src/platform/fs/paths.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { DANGEROUS_PATTERNS } from "../../../policy/shell/rules.ts"
+import { findDangerousShellFragment } from "../../../policy/shell/ast-scan.ts"
+import { tailTruncate } from "../../../shared/text/truncate.ts"
+import { pickStreamDecoder } from "../../../platform/process/console-decode.ts"
+import { sandboxedProcessTarget, sandboxedProcessEnv } from "../../../platform/process/exec.ts"
+import { activeShellDescriptor, applyNonInteractiveEnv } from "../../../platform/process/shell.ts"
+import type { ShellDescriptor } from "../../../platform/process/shell.ts"
+import { detectInteractiveCommand } from "../../../policy/shell/interactive.ts"
+import { resolveToolPath } from "../../../platform/fs/paths.ts"
+import type { CoreFileToolContext } from "./context.ts"
 
 // Re-exported for back-compat: the canonical implementation now lives in
-// src/shared/text/truncate.ts (shared with future tail-keeping tools). bash.test.mjs
+// src/shared/text/truncate.ts (shared with future tail-keeping tools). bash.test.ts
 // imports it from here.
 export { tailTruncate }
 
@@ -116,10 +120,10 @@ export const killShellShape = {
  * Build the `bash` tool description for a given shell descriptor. The syntax hint
  * is what tells the model to write PowerShell vs POSIX — it is the prompt half of
  * the single-shell-abstraction design, read by the model every turn.
- *
- * @param {{ syntaxHint: string, label: string }} [descriptor]
  */
-export function bashToolDescription(descriptor = activeShellDescriptor()) {
+export function bashToolDescription(
+  descriptor: Pick<ShellDescriptor, "syntaxHint" | "label"> = activeShellDescriptor()
+): string {
   const base =
     "Execute a shell command in the session working directory and return its combined output."
   const hint = descriptor.syntaxHint ? ` ${descriptor.syntaxHint}` : ` Runs ${descriptor.label}.`
@@ -137,7 +141,13 @@ export function bashToolDescription(descriptor = activeShellDescriptor()) {
  * in src/platform/process/shell.ts. `env` drops PowerShell injection vectors (PSModulePath, …) for
  * PowerShell shells and is the live `process.env` otherwise.
  */
-export function resolveShellInvocation(command, descriptor = activeShellDescriptor()) {
+export function resolveShellInvocation(
+  command: string,
+  descriptor: Pick<
+    ShellDescriptor,
+    "isWin" | "bin" | "buildArgs" | "sanitizeEnv"
+  > = activeShellDescriptor()
+): { isWin: boolean; shell: string; shellArgs: string[]; env: NodeJS.ProcessEnv } {
   return {
     isWin: descriptor.isWin,
     shell: descriptor.bin,
@@ -153,11 +163,18 @@ export function resolveShellInvocation(command, descriptor = activeShellDescript
  * a file and exceeds the inline budget, return a head + tail preview pointing at
  * the file (Claude Code parity — the model can `read` the file for the rest);
  * otherwise return the (possibly tail-truncated) output inline.
- *
- * @param {{ head: string, tail: string, total: number, fullPath: string|null }} args
- * @returns {{ body: string, truncated: boolean }}
  */
-export function composeBashBody({ head, tail, total, fullPath }) {
+export function composeBashBody({
+  head,
+  tail,
+  total,
+  fullPath,
+}: {
+  head: string
+  tail: string
+  total: number
+  fullPath: string | null
+}): { body: string; truncated: boolean } {
   if (!fullPath || total <= MAX_OUTPUT_CHARS) {
     // `tail` carries the full output when it fits the in-memory window.
     const t = tailTruncate(tail)
@@ -171,17 +188,39 @@ export function composeBashBody({ head, tail, total, fullPath }) {
 }
 
 /** Temp path for spilling a single bash run's full output. */
-function bashSpillPath() {
+function bashSpillPath(): string {
   const rand = Math.floor(Math.random() * 1e9)
   return `${os.tmpdir()}/cognia-bash-${process.pid}-${Date.now()}-${rand}.log`
 }
 
-export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) {
+/** How a foreground run ended, plus what it captured. */
+interface BashRun {
+  head: string
+  mem: string
+  total: number
+  fileOk: boolean
+  fileCreated: boolean
+  tmpPath: string
+  timedOut: boolean
+  code: number | null
+  signal?: NodeJS.Signals | null
+  spawnError?: NodeJS.ErrnoException
+}
+
+export function createBashTool({
+  cwd,
+  bgShells,
+  shell,
+  builtinProcessSandbox,
+}: CoreFileToolContext & {
+  /** Pins the shell (tests); the host's preferred shell otherwise. */
+  shell?: ShellDescriptor | undefined
+}) {
   // The shell descriptor the tool drives. Defaults to the host's preferred shell
   // (PowerShell on Windows when present); injectable so tests pin a deterministic
   // shell regardless of what the runner machine happens to have on PATH.
   const descriptor = shell ?? activeShellDescriptor()
-  async function execBash(args) {
+  async function execBash(args: ToolArgs<typeof bashShape>) {
     try {
       // A one-shot capture shell has no TTY: an interactive program (REPL,
       // editor, ssh, login flow, `git rebase -i`, `psql`, `top`, …) would hang
@@ -201,7 +240,7 @@ export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) 
       // >/dev/null are not confused with executable destructive fragments.
       // PowerShell/cmd use their own grammar, so retain the legacy fail-closed
       // scan on Windows rather than pretending a Bash AST represents them.
-      let dangerous = null
+      let dangerous: { fragment: string; kind: string } | null = null
       if (descriptor.isWin) {
         for (const pattern of DANGEROUS_PATTERNS) {
           const match = args.command.match(pattern)
@@ -261,7 +300,7 @@ export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) 
       const timeoutMs = Math.min(args.timeout ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
       const tmpPath = bashSpillPath()
 
-      const result = await new Promise((resolve) => {
+      const result = await new Promise<BashRun>((resolve) => {
         const child = spawn(target.command, target.args, {
           cwd: workdir,
           env,
@@ -286,7 +325,7 @@ export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) 
         let total = 0
         let timedOut = false
         let fileOk = true
-        let stream = null
+        let stream: WriteStream | null = null
         let spilling = false
         let fileCreated = false
         const openSpill = () => {
@@ -308,8 +347,8 @@ export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) 
         // code page on Windows — cmd built-ins print GBK/Shift-JIS/… to a pipe).
         // One streaming decoder per run, picked from the first chunk and flushed
         // at the end, so multibyte chars split across chunks decode intact.
-        let decoder = null
-        const append = (s) => {
+        let decoder: TextDecoder | null = null
+        const append = (s: string) => {
           if (!s) return
           total += s.length
           if (head.length < PREVIEW_HEAD_CHARS) head += s.slice(0, PREVIEW_HEAD_CHARS - head.length)
@@ -326,7 +365,7 @@ export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) 
             }
           }
         }
-        const cap = (chunk) => {
+        const cap = (chunk: Buffer) => {
           if (!decoder) decoder = pickStreamDecoder(chunk)
           append(decoder.decode(chunk, { stream: true }))
         }
@@ -336,7 +375,9 @@ export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) 
           timedOut = true
           child.kill()
         }, timeoutMs)
-        const finish = (extra) => {
+        const finish = (
+          extra: Pick<BashRun, "code"> & Partial<Pick<BashRun, "signal" | "spawnError">>
+        ) => {
           clearTimeout(timer)
           // Flush any bytes the streaming decoder is holding for a partial char.
           if (decoder) append(decoder.decode())
@@ -345,7 +386,7 @@ export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) 
           if (stream) stream.end(done)
           else done()
         }
-        child.on("error", (err) => {
+        child.on("error", (err: NodeJS.ErrnoException) => {
           fileOk = false
           append(String(err.message ?? err))
           // Carry the error through: `code: null` alone is indistinguishable
@@ -358,7 +399,7 @@ export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) 
       })
 
       const tailPreview = result.mem.slice(-(MAX_OUTPUT_CHARS - PREVIEW_HEAD_CHARS))
-      let fullPath = null
+      let fullPath: string | null = null
       if (result.fileCreated && result.fileOk && result.total > MAX_OUTPUT_CHARS) {
         fullPath = result.tmpPath
       } else if (result.fileCreated) {
@@ -398,16 +439,26 @@ export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) 
   return tool("bash", bashToolDescription(descriptor), bashShape, execBash)
 }
 
+/** A background-shell read from either registry. */
+type ShellRead =
+  | {
+      ok: true
+      data: string
+      status: string
+      exitCode: number | null
+      nextOffset?: number
+      hasMore?: boolean
+    }
+  | { ok: false; reason?: string }
+
 /**
  * `bash_output` — read new output from a background shell started by
  * `bash({ run_in_background: true })`. Non-destructive incremental read:
  * returns only the output appended since the previous poll plus the shell's
  * current status/exit code. Read-only.
- *
- * @param {{ bgShells?: ReturnType<typeof import("../../src/tools/state/background-shells.ts").createBgShellRegistry> }} ctx
  */
-export function createBashOutputTool({ bgShells }) {
-  async function execBashOutput(args) {
+export function createBashOutputTool({ bgShells }: CoreFileToolContext) {
+  async function execBashOutput(args: ToolArgs<typeof bashOutputShape>) {
     if (!bgShells) {
       return toolError("background shells are not available in this session")
     }
@@ -419,7 +470,8 @@ export function createBashOutputTool({ bgShells }) {
     }
     // A long-poll only makes sense from the live cursor; an explicit look-back
     // offset is a history read and returns immediately.
-    const r =
+    // Either registry's read; only the host one reports a cursor.
+    const r: ShellRead =
       args.wait_ms && args.from_offset === undefined && typeof bgShells.waitForOutput === "function"
         ? await bgShells.waitForOutput(args.shellId, readOptions)
         : await bgShells.read(args.shellId, readOptions)
@@ -447,7 +499,7 @@ export function createBashOutputTool({ bgShells }) {
 }
 
 /** List every background shell owned by this Agent session. */
-export function createListShellsTool({ bgShells }) {
+export function createListShellsTool({ bgShells }: CoreFileToolContext) {
   async function execListShells() {
     if (!bgShells) {
       return toolError("background shells are not available in this session")
@@ -474,11 +526,9 @@ export function createListShellsTool({ bgShells }) {
 /**
  * `kill_shell` — terminate a background shell started by `bash`. Idempotent;
  * safe to call on an already-exited shell.
- *
- * @param {{ bgShells?: ReturnType<typeof import("../../src/tools/state/background-shells.ts").createBgShellRegistry> }} ctx
  */
-export function createKillShellTool({ bgShells }) {
-  async function execKillShell(args) {
+export function createKillShellTool({ bgShells }: CoreFileToolContext) {
+  async function execKillShell(args: ToolArgs<typeof killShellShape>) {
     if (!bgShells) {
       return toolError("background shells are not available in this session")
     }

@@ -6,15 +6,24 @@ import {
   createMonitorTools,
   describeOutcome,
   MONITOR_TOOL_NAMES,
-} from "./monitor.mjs"
+} from "./monitor.ts"
+import { findTool, firstJson, firstText } from "../../../../test-support/tool-result.ts"
+import type { CallableTool } from "../../../../test-support/tool-result.ts"
 
-function fakeHost(handlers) {
-  const calls = []
+/** The params fields these tests read back from a recorded host call. */
+interface RecordedParams {
+  owner?: unknown
+  requester?: unknown
+  expiresAtMs?: number
+}
+
+function fakeHost(handlers: Record<string, (params: unknown) => unknown>) {
+  const calls: { method: string; params: RecordedParams; options: unknown }[] = []
   return {
     calls,
     hostRpc: {
-      async call(method, params, options) {
-        calls.push({ method, params, options })
+      async call(method: string, params: unknown, options?: unknown) {
+        calls.push({ method, params: params as RecordedParams, options })
         const handler = handlers[method]
         if (!handler) throw new Error(`unexpected host_rpc method ${method}`)
         return handler(params)
@@ -68,14 +77,23 @@ test("buildCondition maps every public condition shape onto the host protocol", 
   )
 })
 
+/** The rejection message of a buildCondition result that must have failed. */
+function rejection(result: ReturnType<typeof buildCondition>): string {
+  assert.equal(result.ok, false)
+  return (result as { error: string }).error
+}
+
 test("buildCondition rejects incomplete or invalid conditions before host registration", () => {
-  assert.match(buildCondition({ condition: "job_exit" }).error, /requires shellId/)
+  assert.match(rejection(buildCondition({ condition: "job_exit" })), /requires shellId/)
   assert.match(
-    buildCondition({ condition: "job_output", shellId: "job-1", pattern: "[" }).error,
+    rejection(buildCondition({ condition: "job_output", shellId: "job-1", pattern: "[" })),
     /invalid pattern/
   )
-  assert.match(buildCondition({ condition: "shell" }).error, /requires command/)
-  assert.match(buildCondition({ condition: "upstream", source: "subagent" }).error, /requires id/)
+  assert.match(rejection(buildCondition({ condition: "shell" })), /requires command/)
+  assert.match(
+    rejection(buildCondition({ condition: "upstream", source: "subagent" })),
+    /requires id/
+  )
 })
 
 test("Monitor returns a terminal outcome inline and preserves session ownership", async () => {
@@ -87,17 +105,17 @@ test("Monitor returns a terminal outcome inline and preserves session ownership"
       detail: "job job-1 exited with code 0",
     }),
   })
-  const [monitor] = createMonitorTools({ hostRpc, sessionId: "session-1" })
+  const monitor = findTool(createMonitorTools({ hostRpc, sessionId: "session-1" }), "Monitor")
 
   const result = await monitor.handler(
     { condition: "job_exit", shellId: "job-1", timeout_ms: 1_000 },
     {}
   )
 
-  assert.match(result.content[0].text, /condition met/)
-  assert.match(result.content[0].text, /monitor-1/)
-  assert.deepEqual(calls[0].params.owner, { kind: "session", sessionId: "session-1" })
-  assert.equal(calls[1].method, "monitors.wait")
+  assert.match(firstText(result), /condition met/)
+  assert.match(firstText(result), /monitor-1/)
+  assert.deepEqual(calls[0]!.params.owner, { kind: "session", sessionId: "session-1" })
+  assert.equal(calls[1]!.method, "monitors.wait")
 })
 
 test("Monitor degrades a long wait into a durable watch at the blocking threshold", async () => {
@@ -108,21 +126,24 @@ test("Monitor degrades a long wait into a durable watch at the blocking threshol
       return { id: "monitor-async", status: "waiting" }
     },
   })
-  const [monitor] = createMonitorTools({
-    hostRpc,
-    sessionId: "session-1",
-    blockingThresholdMs: 5,
-    waitChunkMs: 5,
-  })
+  const monitor = findTool(
+    createMonitorTools({
+      hostRpc,
+      sessionId: "session-1",
+      blockingThresholdMs: 5,
+      waitChunkMs: 5,
+    }),
+    "Monitor"
+  )
 
   const result = await monitor.handler(
     { condition: "upstream", source: "subagent", id: "task-1", timeout_ms: 60_000 },
     {}
   )
 
-  assert.match(result.content[0].text, /background watch/)
-  assert.match(result.content[0].text, /monitor-async/)
-  assert.equal(calls[0].params.expiresAtMs > Date.now(), true)
+  assert.match(firstText(result), /background watch/)
+  assert.match(firstText(result), /monitor-async/)
+  assert.equal(calls[0]!.params.expiresAtMs! > Date.now(), true)
 })
 
 test("monitor_cancel and monitor_list are scoped to the owning session", async () => {
@@ -133,17 +154,17 @@ test("monitor_cancel and monitor_list are scoped to the owning session", async (
   const tools = Object.fromEntries(
     createMonitorTools({ hostRpc, sessionId: "session-1" }).map((definition) => [
       definition.name,
-      definition,
+      definition as unknown as CallableTool,
     ])
-  )
+  ) as Record<string, CallableTool>
 
-  const cancelled = await tools.monitor_cancel.handler({ monitorId: "monitor-1" }, {})
-  const listed = await tools.monitor_list.handler({}, {})
+  const cancelled = await tools.monitor_cancel!.handler({ monitorId: "monitor-1" }, {})
+  const listed = await tools.monitor_list!.handler({}, {})
 
-  assert.match(cancelled.content[0].text, /cancelled/)
-  assert.deepEqual(calls[0].params.requester, { kind: "session", sessionId: "session-1" })
-  assert.deepEqual(calls[1].params.owner, { kind: "session", sessionId: "session-1" })
-  assert.deepEqual(JSON.parse(listed.content[0].text).monitors, [
+  assert.match(firstText(cancelled), /cancelled/)
+  assert.deepEqual(calls[0]!.params.requester, { kind: "session", sessionId: "session-1" })
+  assert.deepEqual(calls[1]!.params.owner, { kind: "session", sessionId: "session-1" })
+  assert.deepEqual(firstJson<{ monitors: unknown[] }>(listed).monitors, [
     { id: "monitor-2", status: "waiting" },
   ])
 })

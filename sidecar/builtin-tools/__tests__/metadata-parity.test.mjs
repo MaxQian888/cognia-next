@@ -16,7 +16,7 @@ import {
   READ_ONLY_TOOL_NAMES,
   TOOL_NAMES_BY_CATEGORY,
 } from "../../src/policy/tool-catalog/catalog.ts"
-import { CORE_TOOL_NAMES } from "../core/core-tools.mjs"
+import { CORE_TOOL_NAMES } from "../../src/tools/builtin/core-files/index.ts"
 import { CODE_GRAPH_TOOL_NAMES } from "../../src/tools/builtin/code-graph/names.ts"
 
 /** Every category enabled, so collectCogniaToolDefs emits the full set. */

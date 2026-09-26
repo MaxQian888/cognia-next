@@ -7,7 +7,7 @@
 // files the model has never seen (or that changed under it).
 //
 // One tracker is created per dispatch session and threaded into the core
-// tool defs by `builtin-tools/core/core-tools.mjs`.
+// tool defs by `src/tools/builtin/core-files/index.ts`.
 
 import path from "node:path"
 

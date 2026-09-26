@@ -1,16 +1,14 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { createCoreTools, CORE_TOOL_NAMES, CORE_MUTATING_TOOL_NAMES } from "./core-tools.mjs"
-import { createReadTracker } from "../../src/tools/state/read-tracker.ts"
-import {
-  todoWriteShape,
-  TODO_WRITE_NAME,
-  createTodoWriteTool,
-} from "../../src/tools/builtin/core-files/todo.ts"
-import { createSessionTaskStore } from "../../src/tools/state/tasks.ts"
-import { SESSION_TASK_TOOL_NAMES } from "../../src/tools/builtin/core-files/tasks.ts"
-import { MONITOR_TOOL_NAMES } from "./monitor.mjs"
+import { createCoreTools, CORE_TOOL_NAMES, CORE_MUTATING_TOOL_NAMES } from "./index.ts"
+import { createReadTracker } from "../../state/read-tracker.ts"
+import { todoWriteShape, TODO_WRITE_NAME, createTodoWriteTool } from "./todo.ts"
+import { createSessionTaskStore } from "../../state/tasks.ts"
+import { SESSION_TASK_TOOL_NAMES } from "./tasks.ts"
+import { asCallable, firstJson } from "../../../../test-support/tool-result.ts"
+import type { CallableTool } from "../../../../test-support/tool-result.ts"
+import { MONITOR_TOOL_NAMES } from "./monitor.ts"
 import { z } from "zod"
 
 test("createCoreTools emits tools in the fixed CORE_TOOL_NAMES order", () => {
@@ -57,12 +55,12 @@ test("createCoreTools binds structured task tools to the supplied session store"
   const tools = Object.fromEntries(
     createCoreTools({ cwd: ".", readTracker: createReadTracker(), taskStore }).map((tool) => [
       tool.name,
-      tool,
+      asCallable(tool),
     ])
-  )
-  await tools.TaskCreate.handler({ subject: "One", description: "First task" }, {})
-  const listed = await tools.TaskList.handler({}, {})
-  const payload = JSON.parse(listed.content[0].text)
+  ) as Record<string, CallableTool>
+  await tools.TaskCreate!.handler({ subject: "One", description: "First task" }, {})
+  const listed = await tools.TaskList!.handler({}, {})
+  const payload = firstJson<{ tasks: { subject: string }[] }>(listed)
   assert.deepEqual(
     payload.tasks.map((task) => task.subject),
     ["One"]
@@ -99,7 +97,7 @@ test("TodoWrite handler summarizes progress", async () => {
     },
     {}
   )
-  const text = res.content.map((b) => b.text).join("\n")
+  const text = res.content.map((b) => (b as { text?: string }).text).join("\n")
   assert.match(text, /1\/3 completed/)
   assert.match(text, /Working on b/)
 })
