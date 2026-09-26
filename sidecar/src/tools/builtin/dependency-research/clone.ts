@@ -8,7 +8,8 @@
 import path from "node:path"
 import fsp from "node:fs/promises"
 
-import { runGit as defaultRunGit } from "../../src/platform/process/git.ts"
+import { runGit as defaultRunGit } from "../../../platform/process/git.ts"
+import type { GitOutput } from "../../../platform/process/git.ts"
 import {
   CLONEDEPS_DIR,
   MANIFEST_REL,
@@ -18,15 +19,28 @@ import {
   safeRepoName,
   serializeManifest,
   upsertDependency,
-} from "./manifest.mjs"
-import { applyMarkerBlock } from "./gitignore.mjs"
+} from "./manifest.ts"
+import type { ClonedDependency, ClonedepsManifest } from "./manifest.ts"
+import { applyMarkerBlock } from "./gitignore.ts"
 
 /** POSIX-style relative path stored in the manifest (stable across platforms). */
-function manifestRelPath(safeName) {
+function manifestRelPath(safeName: string): string {
   return `.cognia/clonedeps/repos/${safeName}`
 }
 
-function defaultDeps() {
+/** The clone's side effects; each is injectable for tests. */
+export interface ClonedepsDeps {
+  runGit: (args: string[], cwd: string, opts?: { timeoutMs?: number }) => Promise<GitOutput>
+  fs: {
+    readFile(path: string): Promise<string>
+    writeFile(path: string, contents: string): Promise<unknown>
+    mkdir(path: string): Promise<unknown>
+    exists(path: string): Promise<boolean>
+  }
+  now: () => string
+}
+
+function defaultDeps(): ClonedepsDeps {
   return {
     runGit: defaultRunGit,
     fs: {
@@ -46,14 +60,14 @@ function defaultDeps() {
   }
 }
 
-async function resolveRepoRoot(cwd, deps) {
+async function resolveRepoRoot(cwd: string, deps: ClonedepsDeps): Promise<string> {
   const { stdout } = await deps.runGit(["rev-parse", "--show-toplevel"], cwd)
   const root = stdout.trim()
   if (!root) throw new Error(`not a git repository: ${cwd}`)
   return root
 }
 
-async function readManifest(root, deps) {
+async function readManifest(root: string, deps: ClonedepsDeps) {
   const manifestPath = path.join(root, MANIFEST_REL)
   let text = ""
   if (await deps.fs.exists(manifestPath)) {
@@ -62,13 +76,13 @@ async function readManifest(root, deps) {
   return { manifestPath, manifest: parseManifest(text) }
 }
 
-async function writeManifest(root, manifest, deps) {
+async function writeManifest(root: string, manifest: ClonedepsManifest, deps: ClonedepsDeps) {
   const manifestPath = path.join(root, MANIFEST_REL)
   await deps.fs.mkdir(path.dirname(manifestPath))
   await deps.fs.writeFile(manifestPath, serializeManifest(manifest))
 }
 
-async function ensureGitignore(root, deps) {
+async function ensureGitignore(root: string, deps: ClonedepsDeps): Promise<void> {
   const gitignorePath = path.join(root, ".gitignore")
   let existing = ""
   if (await deps.fs.exists(gitignorePath)) {
@@ -81,19 +95,24 @@ async function ensureGitignore(root, deps) {
 /**
  * Clone one dependency source repo (idempotent — reuses an existing clone) and
  * record it in the manifest.
- *
- * @param {{
- *   cwd: string,
- *   repoUrl: string,
- *   ref?: string,
- *   name?: string,
- *   reason?: string,
- *   packagePath?: string,
- * }} args
- * @param {Partial<ReturnType<typeof defaultDeps>>} [injected]
- * @returns {Promise<{ cloned: boolean, name: string, path: string, reused: boolean, dependencyCount: number }>}
  */
-export async function cloneDependencySource(args, injected = {}) {
+export async function cloneDependencySource(
+  args: {
+    cwd: string
+    repoUrl: string
+    ref?: string | undefined
+    name?: string | undefined
+    reason?: string | undefined
+    packagePath?: string | undefined
+  },
+  injected: Partial<ClonedepsDeps> = {}
+): Promise<{
+  cloned: boolean
+  reused: boolean
+  name: string
+  path: string
+  dependencyCount: number
+}> {
   const deps = { ...defaultDeps(), ...injected }
 
   if (!args || typeof args.repoUrl !== "string") {
@@ -147,13 +166,11 @@ export async function cloneDependencySource(args, injected = {}) {
   }
 }
 
-/**
- * Read the clonedeps manifest for the workspace containing `cwd`.
- * @param {{ cwd: string }} args
- * @param {Partial<ReturnType<typeof defaultDeps>>} [injected]
- * @returns {Promise<{ path: string, dependencies: any[] }>}
- */
-export async function listClonedDeps(args, injected = {}) {
+/** Read the clonedeps manifest for the workspace containing `cwd`. */
+export async function listClonedDeps(
+  args: { cwd: string },
+  injected: Partial<ClonedepsDeps> = {}
+): Promise<{ path: string; dependencies: ClonedDependency[] }> {
   const deps = { ...defaultDeps(), ...injected }
   const root = await resolveRepoRoot(args.cwd, deps)
   const { manifest } = await readManifest(root, deps)

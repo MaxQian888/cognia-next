@@ -7,8 +7,10 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { cloneDependencySource, listClonedDeps } from "./clone.mjs"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { cloneDependencySource, listClonedDeps } from "./clone.ts"
+import type { ClonedepsDeps } from "./clone.ts"
 
 // ---- clone_dep_source -----------------------------------------------------
 
@@ -36,8 +38,16 @@ export const cloneDepSourceShape = {
     .describe("Sub-path within a monorepo where this package lives (e.g. 'packages/sdk')."),
 }
 
-/** @param {z.infer<z.ZodObject<typeof cloneDepSourceShape>>} args */
-export async function execCloneDepSource(args, deps) {
+/** Test deps when `extra` carries a `runGit`; the SDK tool context otherwise. */
+const injectedDeps = (extra: unknown): Partial<ClonedepsDeps> | undefined =>
+  extra && typeof extra === "object" && typeof (extra as ClonedepsDeps).runGit === "function"
+    ? (extra as Partial<ClonedepsDeps>)
+    : undefined
+
+export async function execCloneDepSource(
+  args: ToolArgs<typeof cloneDepSourceShape>,
+  deps?: unknown
+) {
   try {
     const result = await cloneDependencySource(
       {
@@ -48,7 +58,7 @@ export async function execCloneDepSource(args, deps) {
         reason: args.reason,
         packagePath: args.packagePath,
       },
-      deps && typeof deps === "object" && typeof deps.runGit === "function" ? deps : undefined
+      injectedDeps(deps)
     )
     const verb = result.reused ? "Reused existing clone" : "Cloned"
     return toolText({
@@ -75,13 +85,12 @@ export const listClonedDepsShape = {
   cwd: z.string().min(1).describe("Absolute path inside the target git repository."),
 }
 
-/** @param {z.infer<z.ZodObject<typeof listClonedDepsShape>>} args */
-export async function execListClonedDeps(args, deps) {
+export async function execListClonedDeps(
+  args: ToolArgs<typeof listClonedDepsShape>,
+  deps?: unknown
+) {
   try {
-    const result = await listClonedDeps(
-      { cwd: args.cwd },
-      deps && typeof deps === "object" && typeof deps.runGit === "function" ? deps : undefined
-    )
+    const result = await listClonedDeps({ cwd: args.cwd }, injectedDeps(deps))
     return toolText({
       manifest: result.path,
       count: result.dependencies.length,
@@ -109,9 +118,9 @@ export const CLONEDEPS_TOOL_NAMES = Object.freeze(["clone_dep_source", "list_clo
 export const clonedepsTools = [cloneDepSourceTool, listClonedDepsTool]
 
 for (let i = 0; i < clonedepsTools.length; i++) {
-  if (clonedepsTools[i].name !== CLONEDEPS_TOOL_NAMES[i]) {
+  if (clonedepsTools[i]!.name !== CLONEDEPS_TOOL_NAMES[i]) {
     throw new Error(
-      `clonedeps tool order drift: expected ${CLONEDEPS_TOOL_NAMES[i]}, got ${clonedepsTools[i].name}`
+      `clonedeps tool order drift: expected ${CLONEDEPS_TOOL_NAMES[i]}, got ${clonedepsTools[i]!.name}`
     )
   }
 }

@@ -2,42 +2,47 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import path from "node:path"
 
-import { cloneDependencySource, listClonedDeps } from "./clone.mjs"
-import { MANIFEST_REL, parseManifest } from "./manifest.mjs"
-import { MARKER_START } from "./gitignore.mjs"
+import { cloneDependencySource, listClonedDeps } from "./clone.ts"
+import { MANIFEST_REL, parseManifest } from "./manifest.ts"
+import { MARKER_START } from "./gitignore.ts"
+
+type FakeFs = {
+  files: Map<string, string>
+  dirs: Set<string>
+} & import("./clone.ts").ClonedepsDeps["fs"]
 
 const ROOT = path.join(path.sep === "\\" ? "C:\\repo" : "/repo")
 
-/** In-memory fs honouring the deps.fs contract clone.mjs expects. */
-function makeFakeFs(initial = {}) {
-  const files = new Map(Object.entries(initial))
-  const dirs = new Set()
+/** In-memory fs honouring the deps.fs contract clone.ts expects. */
+function makeFakeFs(initial: Record<string, string> = {}): FakeFs {
+  const files = new Map<string, string>(Object.entries(initial))
+  const dirs = new Set<string>()
   return {
     files,
     dirs,
-    readFile: async (p) => {
+    readFile: async (p: string) => {
       if (!files.has(p)) throw new Error(`ENOENT ${p}`)
-      return files.get(p)
+      return files.get(p) as string
     },
-    writeFile: async (p, c) => {
+    writeFile: async (p: string, c: string) => {
       files.set(p, c)
     },
-    mkdir: async (p) => {
+    mkdir: async (p: string) => {
       dirs.add(p)
     },
-    exists: async (p) => files.has(p) || dirs.has(p),
+    exists: async (p: string) => files.has(p) || dirs.has(p),
   }
 }
 
 /** Fake git: answers rev-parse with ROOT; records clone and "creates" the target dir. */
-function makeFakeGit(fs, { failClone } = {}) {
-  const calls = []
-  const runGit = async (args) => {
+function makeFakeGit(fs: FakeFs, { failClone = false }: { failClone?: boolean } = {}) {
+  const calls: string[][] = []
+  const runGit = async (args: string[]) => {
     calls.push(args)
     if (args[0] === "rev-parse") return { stdout: `${ROOT}\n`, stderr: "" }
     if (args[0] === "clone") {
       if (failClone) throw new Error("fatal: repository not found")
-      fs.dirs.add(args[args.length - 1]) // the absolute target
+      fs.dirs.add(args[args.length - 1]!) // the absolute target
       return { stdout: "", stderr: "" }
     }
     return { stdout: "", stderr: "" }
@@ -71,16 +76,17 @@ test("cloneDependencySource clones, writes manifest, and ignores the repos dir",
 
   // A clone was issued with shallow depth.
   const clone = git.calls.find((c) => c[0] === "clone")
+  assert.ok(clone)
   assert.ok(clone.includes("--depth") && clone.includes("1"))
 
   // Manifest persisted with the dependency.
   const manifest = parseManifest(fs.files.get(manifestPath))
   assert.equal(manifest.dependencies.length, 1)
-  assert.equal(manifest.dependencies[0].name, "@opencode-ai/sdk")
+  assert.equal(manifest.dependencies[0]!.name, "@opencode-ai/sdk")
   assert.equal(manifest.updatedAt, NOW)
 
   // .gitignore now carries the managed block.
-  assert.ok(fs.files.get(gitignorePath).includes(MARKER_START))
+  assert.ok(fs.files.get(gitignorePath)!.includes(MARKER_START))
 })
 
 test("cloneDependencySource is idempotent — an existing clone is reused, not re-cloned", async () => {
@@ -108,6 +114,7 @@ test("cloneDependencySource threads a ref as --branch", async () => {
     { ...git, fs, now: () => NOW }
   )
   const clone = git.calls.find((c) => c[0] === "clone")
+  assert.ok(clone)
   assert.deepEqual(clone.slice(clone.indexOf("--branch"), clone.indexOf("--branch") + 2), [
     "--branch",
     "v1.2.3",
@@ -129,7 +136,9 @@ test("cloneDependencySource rejects non-HTTPS URLs before touching git", async (
 
 test("cloneDependencySource requires a repoUrl", async () => {
   await assert.rejects(
-    cloneDependencySource({ cwd: ROOT }, { fs: makeFakeFs() }),
+    cloneDependencySource({ cwd: ROOT } as Parameters<typeof cloneDependencySource>[0], {
+      fs: makeFakeFs(),
+    }),
     /repoUrl is required/
   )
 })
@@ -148,7 +157,7 @@ test("listClonedDeps returns the manifest dependencies", async () => {
   const res = await listClonedDeps({ cwd: ROOT }, { ...git, fs })
   assert.equal(res.path, ".cognia/clonedeps.json")
   assert.equal(res.dependencies.length, 1)
-  assert.equal(res.dependencies[0].reason, "r")
+  assert.equal(res.dependencies[0]!.reason, "r")
 })
 
 test("listClonedDeps returns empty when no manifest exists", async () => {

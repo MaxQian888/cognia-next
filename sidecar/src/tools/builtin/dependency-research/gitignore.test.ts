@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { applyMarkerBlock, hasMarkerBlock, MARKER_START, MARKER_END } from "./gitignore.mjs"
+import { applyMarkerBlock, hasMarkerBlock, MARKER_START, MARKER_END } from "./gitignore.ts"
 
 const LINES = ["/.cognia/clonedeps/repos/"]
 

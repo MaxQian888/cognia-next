@@ -24,7 +24,7 @@ import {
   createTerminalReplTools,
 } from "../src/tools/builtin/terminal-repl/index.ts"
 import { astGrepTools, createAstGrepTools } from "../src/tools/builtin/ast-grep/index.ts"
-import { clonedepsTools } from "./clonedeps/index.mjs"
+import { clonedepsTools } from "../src/tools/builtin/dependency-research/index.ts"
 import { webcloneTools } from "../src/tools/builtin/webclone/index.ts"
 import { createLspTools } from "../src/tools/builtin/lsp/index.ts"
 import { createCodeGraphTools } from "../src/tools/builtin/code-graph/tools.ts"

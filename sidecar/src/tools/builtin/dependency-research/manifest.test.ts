@@ -9,7 +9,7 @@ import {
   isHttpsRepoUrl,
   upsertDependency,
   serializeManifest,
-} from "./manifest.mjs"
+} from "./manifest.ts"
 
 test("emptyManifest has the current version and no dependencies", () => {
   const m = emptyManifest()
@@ -33,7 +33,7 @@ test("parseManifest keeps only well-formed dependency entries", () => {
   const m = parseManifest(text)
   assert.equal(m.version, "9.9.9")
   assert.equal(m.dependencies.length, 1)
-  assert.equal(m.dependencies[0].repoUrl, "https://x/y.git")
+  assert.equal(m.dependencies[0]!.repoUrl, "https://x/y.git")
 })
 
 test("safeRepoName derives owner__repo, lowercased, sanitized", () => {
@@ -59,8 +59,8 @@ test("upsertDependency appends, drops undefined fields, stamps updatedAt", () =>
   )
   assert.equal(m.dependencies.length, 1)
   assert.equal(m.updatedAt, "2026-01-01T00:00:00.000Z")
-  assert.ok(!("name" in m.dependencies[0])) // undefined stripped
-  assert.equal(m.dependencies[0].reason, "r")
+  assert.ok(!("name" in m.dependencies[0]!)) // undefined stripped
+  assert.equal(m.dependencies[0]!.reason, "r")
 })
 
 test("upsertDependency replaces an entry with the same path+packagePath", () => {
@@ -75,7 +75,7 @@ test("upsertDependency replaces an entry with the same path+packagePath", () => 
     "t2"
   )
   assert.equal(m.dependencies.length, 1)
-  assert.equal(m.dependencies[0].reason, "two")
+  assert.equal(m.dependencies[0]!.reason, "two")
 })
 
 test("upsertDependency lets two packages from one repo coexist", () => {

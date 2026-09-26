@@ -8,33 +8,39 @@ import {
   listClonedDepsTool,
   CLONEDEPS_TOOL_NAMES,
   __testExports,
-} from "./index.mjs"
-import { MANIFEST_REL } from "./manifest.mjs"
+} from "./index.ts"
+import { MANIFEST_REL } from "./manifest.ts"
+import { firstText, firstJson } from "../../../../test-support/tool-result.ts"
+
+type FakeFs = {
+  files: Map<string, string>
+  dirs: Set<string>
+} & import("./clone.ts").ClonedepsDeps["fs"]
 
 const { execCloneDepSource, execListClonedDeps } = __testExports
 const ROOT = path.sep === "\\" ? "C:\\repo" : "/repo"
 
-function makeFakeFs(initial = {}) {
-  const files = new Map(Object.entries(initial))
-  const dirs = new Set()
+function makeFakeFs(initial: Record<string, string> = {}): FakeFs {
+  const files = new Map<string, string>(Object.entries(initial))
+  const dirs = new Set<string>()
   return {
     files,
     dirs,
-    readFile: async (p) => {
+    readFile: async (p: string) => {
       if (!files.has(p)) throw new Error(`ENOENT ${p}`)
-      return files.get(p)
+      return files.get(p) as string
     },
-    writeFile: async (p, c) => files.set(p, c),
-    mkdir: async (p) => dirs.add(p),
-    exists: async (p) => files.has(p) || dirs.has(p),
+    writeFile: async (p: string, c: string) => files.set(p, c),
+    mkdir: async (p: string) => dirs.add(p),
+    exists: async (p: string) => files.has(p) || dirs.has(p),
   }
 }
 
-function makeFakeGit(fs) {
-  const runGit = async (args) => {
+function makeFakeGit(fs: FakeFs) {
+  const runGit = async (args: string[]) => {
     if (args[0] === "rev-parse") return { stdout: `${ROOT}\n`, stderr: "" }
     if (args[0] === "clone") {
-      fs.dirs.add(args[args.length - 1])
+      fs.dirs.add(args[args.length - 1]!)
       return { stdout: "", stderr: "" }
     }
     return { stdout: "", stderr: "" }
@@ -42,8 +48,17 @@ function makeFakeGit(fs) {
   return { runGit }
 }
 
-function jsonOf(result) {
-  return JSON.parse(result.content[0].text)
+interface CloneOutput {
+  cloned: boolean
+  dependencyCount: number
+  message: string
+  count: number
+  manifest: string
+  dependencies: { name?: string }[]
+}
+
+function jsonOf(result: { content: readonly unknown[] }): CloneOutput {
+  return firstJson<CloneOutput>(result)
 }
 
 test("category exports the two tools in stable order", () => {
@@ -76,7 +91,7 @@ test("execCloneDepSource surfaces a rejection (non-HTTPS) as a tool error", asyn
     { ...makeFakeGit(makeFakeFs()), fs: makeFakeFs() }
   )
   assert.equal(r.isError, true)
-  assert.match(r.content[0].text, /clone_dep_source: Only HTTPS/)
+  assert.match(firstText(r), /clone_dep_source: Only HTTPS/)
 })
 
 test("execListClonedDeps reports the manifest contents", async () => {
@@ -103,5 +118,5 @@ test("execListClonedDeps surfaces errors (not a repo) as a tool error", async ()
   }
   const r = await execListClonedDeps({ cwd: ROOT }, { ...failingGit, fs })
   assert.equal(r.isError, true)
-  assert.match(r.content[0].text, /list_cloned_deps: not a git repository/)
+  assert.match(firstText(r), /list_cloned_deps: not a git repository/)
 })

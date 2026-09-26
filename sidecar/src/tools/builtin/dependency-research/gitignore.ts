@@ -9,11 +9,9 @@ export const MARKER_END = "# <<< cognia clonedeps (managed) <<<"
  * Ensure `.gitignore` content contains the managed block with exactly the given
  * ignore lines. Replaces an existing managed block in place; appends one when
  * absent. Returns the (possibly unchanged) full file content.
- * @param {string} existing  Current .gitignore content ("" when the file is new).
- * @param {string[]} ignoreLines  Patterns to ignore inside the managed block.
- * @returns {string}
+ * `existing` is the current .gitignore content ("" when the file is new).
  */
-export function applyMarkerBlock(existing, ignoreLines) {
+export function applyMarkerBlock(existing: unknown, ignoreLines: readonly string[]): string {
   const content = typeof existing === "string" ? existing : ""
   const block = [MARKER_START, ...ignoreLines, MARKER_END].join("\n")
 
@@ -33,6 +31,6 @@ export function applyMarkerBlock(existing, ignoreLines) {
 }
 
 /** True when `existing` already contains the managed block with these lines. */
-export function hasMarkerBlock(existing, ignoreLines) {
+export function hasMarkerBlock(existing: string, ignoreLines: readonly string[]): boolean {
   return applyMarkerBlock(existing, ignoreLines) === existing
 }

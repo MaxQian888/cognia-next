@@ -161,6 +161,7 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/terminal-repl-tool.mjs` (+ both test suites, merged)      | `src/tools/builtin/terminal-repl/index.ts` (+ test)                | 8h          |
 | `builtin-tools/webclone/*` (+ tests)                                     | `src/tools/builtin/webclone/*`                                     | 8i          |
 | `runGit` (in `src/tools/builtin/git/run.ts`)                             | `src/platform/process/git.ts`                                      | 8j          |
+| `builtin-tools/clonedeps/*` (+ tests)                                    | `src/tools/builtin/dependency-research/*`                          | 8j          |
 
 ## Scripts (run from repo root)
 
