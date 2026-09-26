@@ -815,6 +815,8 @@ describe("CharacterEditor — advanced overrides", () => {
     customOutputStyle: "  Keep it short.  ",
     maxThinkingTokens: 0,
     a2uiEnabled: false,
+    // A pack catalog that is not registered here must still round-trip.
+    a2uiCatalogId: "pack-financial-catalog",
     enableOcr: false,
     enableBuiltInSkills: true,
     disablePluginTools: false,

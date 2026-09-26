@@ -33,9 +33,9 @@ describe("agent overrides", () => {
     expect(picked).not.toHaveProperty("name")
   })
 
-  it("does not list the fields no runtime path reads", () => {
+  it("leaves the embedding provider to the twin and offers the A2UI catalog", () => {
     expect(AGENT_OVERRIDE_FIELDS).not.toContain("embeddingProviderId")
-    expect(AGENT_OVERRIDE_FIELDS).not.toContain("a2uiCatalogId")
+    expect(AGENT_OVERRIDE_FIELDS).toContain("a2uiCatalogId")
   })
 
   it("counts only the fields that override a default", () => {

@@ -5,6 +5,8 @@
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { A2UISurface, A2UIInlineSurface, A2UIDialogSurface } from "./a2ui-surface"
+import { A2UIAgentCatalogProvider } from "./a2ui-agent-catalog"
+import { registerComponent } from "@/lib/a2ui/catalog"
 import type { A2UISurfaceState } from "@/types/a2ui/schema"
 
 // Mock components
@@ -124,6 +126,22 @@ describe("A2UISurface", () => {
     )
     expect(screen.getByTestId("a2ui-widget-shell")).toHaveAttribute("data-theme", "dark")
     expect(screen.getByTestId("a2ui-widget-shell")).toHaveStyle({ minHeight: "180px" })
+  })
+
+  it("renders with the producing agent's registered catalog when the surface names none", () => {
+    delete mockSurface.catalogId
+    registerComponent("Text", () => null, { catalogId: "agent-financial" })
+
+    render(
+      <A2UIAgentCatalogProvider catalogId="agent-financial">
+        <A2UISurface surfaceId="test-surface" />
+      </A2UIAgentCatalogProvider>
+    )
+
+    expect(screen.getByTestId("a2ui-provider")).toHaveAttribute(
+      "data-catalog-id",
+      "agent-financial"
+    )
   })
 
   it("preserves explicit surface catalog and widget fields", () => {

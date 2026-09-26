@@ -440,7 +440,7 @@ jest.mock("@/components/chat/message-parts/tool-call-row", () => ({
 
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { UIMessage } from "ai"
-import { HOVER_REVEAL_CLASS, MessageRenderer } from "./message-renderer"
+import { HOVER_REVEAL_CLASS, MessageRenderer, messageAgentCatalogId } from "./message-renderer"
 import { TranscriptSelectionHostContext } from "@/hooks/chat/use-transcript-selection"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useChatStore } from "@/stores/chat"
@@ -2197,5 +2197,37 @@ describe("message column width", () => {
 
     rerender(<MessageRenderer message={assistantMsg("w3")} />)
     expect(document.querySelector("[data-test='message']")).toHaveClass("max-w-full")
+  })
+})
+
+describe("messageAgentCatalogId", () => {
+  const agent = (id: string, a2uiCatalogId?: string) =>
+    ({
+      id,
+      name: id,
+      avatarColor: "red",
+      systemPrompt: "",
+      createdAt: 0,
+      updatedAt: 0,
+      a2uiCatalogId,
+    }) as never
+  const reply = (senderId?: string) =>
+    ({
+      id: "m",
+      role: "assistant",
+      parts: [],
+      ...(senderId ? { metadata: { senderId } } : {}),
+    }) as never
+
+  it("uses the room member who spoke, then the session's agent", () => {
+    const members = new Map([["m1", agent("m1", "financial")]])
+    expect(messageAgentCatalogId(reply("m1"), members, agent("s", "academic"))).toBe("financial")
+    expect(messageAgentCatalogId(reply("other"), members, agent("s", "academic"))).toBe("academic")
+    expect(messageAgentCatalogId(reply(), undefined, null)).toBeUndefined()
+  })
+
+  it("never applies an agent catalog to the user's own message", () => {
+    const user = { id: "u", role: "user", parts: [] } as never
+    expect(messageAgentCatalogId(user, undefined, agent("s", "academic"))).toBeUndefined()
   })
 })

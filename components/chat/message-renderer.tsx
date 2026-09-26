@@ -153,6 +153,7 @@ import { buildMessagePermalink } from "@/lib/chat/message-permalink"
 import { cn } from "@/lib/utils"
 import { avatarColor, deterministicColor, type AvatarSubject } from "@/lib/ui/avatar"
 import { resolveMessageSpeaker, type SpeakerSource } from "@/lib/chat/speaker"
+import { A2UIAgentCatalogProvider } from "@/components/a2ui/a2ui-agent-catalog"
 import { runMetadataOf } from "@/lib/chat/message-run-metadata"
 import { useMemberStatus } from "@/stores/ui"
 import { useChatStore } from "@/stores/chat"
@@ -1615,8 +1616,34 @@ function MessageRendererInner({
   )
 }
 
+/**
+ * Surfaces in an assistant message that name no A2UI catalog render with the
+ * catalog of the agent that wrote it: the room member who spoke (same lookup
+ * as the speaker above), else the session's agent.
+ */
+export function messageAgentCatalogId(
+  message: Props["message"],
+  characterById: Props["characterById"],
+  directCharacter: Props["directCharacter"]
+): string | undefined {
+  if (message.role !== "assistant") return undefined
+  const senderId = (message as { metadata?: { senderId?: string } }).metadata?.senderId
+  const speaker = senderId ? characterById?.get(senderId) : undefined
+  return (speaker ?? directCharacter ?? undefined)?.a2uiCatalogId
+}
+
+function MessageRendererWithAgentCatalog(props: Props) {
+  return (
+    <A2UIAgentCatalogProvider
+      catalogId={messageAgentCatalogId(props.message, props.characterById, props.directCharacter)}
+    >
+      <MessageRendererInner {...props} />
+    </A2UIAgentCatalogProvider>
+  )
+}
+
 export const MessageRenderer = memo(
-  MessageRendererInner,
+  MessageRendererWithAgentCatalog,
   (prev, next) =>
     prev.message === next.message &&
     prev.isStreaming === next.isStreaming &&

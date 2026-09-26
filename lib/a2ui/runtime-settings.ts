@@ -28,16 +28,26 @@ export function getA2UIPersistenceLimit(settings?: A2UIRuntimeSettings | null): 
   )
 }
 
+/**
+ * The catalog a surface renders with. Most specific first: the catalog the
+ * surface itself names (kept even before it is registered, so a late plugin
+ * catalog still resolves), then the default of the agent that produced it
+ * (`Character.a2uiCatalogId`), then the app-level default. The agent and app
+ * defaults only count when registered; anything else falls to the standard
+ * catalog.
+ */
 export function resolveA2UICatalogId(
   surfaceCatalogId?: string,
-  configuredCatalogId?: string
+  configuredCatalogId?: string,
+  agentCatalogId?: string
 ): string {
   if (surfaceCatalogId) {
     return surfaceCatalogId
   }
 
-  if (configuredCatalogId && getRegisteredCatalogIds().includes(configuredCatalogId)) {
-    return configuredCatalogId
+  const registered = getRegisteredCatalogIds()
+  for (const candidate of [agentCatalogId, configuredCatalogId]) {
+    if (candidate && registered.includes(candidate)) return candidate
   }
 
   return DEFAULT_CATALOG_ID

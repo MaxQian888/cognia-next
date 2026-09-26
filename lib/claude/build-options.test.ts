@@ -4199,6 +4199,21 @@ describe("resolveSendOptions — brief mode", () => {
     expect(opts.appendSystemPrompt).toMatch(/A2UI[\s\S]+\n\nRespond concisely/i)
   })
 
+  it("names the component types of the agent's own A2UI catalog", async () => {
+    const { registerComponent, clearRegistry } = await import("@/lib/a2ui/catalog")
+    registerComponent("StockTicker" as never, (() => null) as never, { catalogId: "financial" })
+    try {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        character: makeChar({ a2uiEnabled: true, a2uiCatalogId: "financial" }),
+      })
+      expect(opts.appendSystemPrompt).toContain('"financial" component catalog')
+      expect(opts.appendSystemPrompt).toContain("StockTicker")
+    } finally {
+      clearRegistry()
+    }
+  })
+
   it("omits the snippet when briefMode is off", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1" }),

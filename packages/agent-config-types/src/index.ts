@@ -6529,13 +6529,12 @@ export interface Character {
   /** Whether this character is allowed to drive A2UI surfaces (4-tool whitelist + system prompt). */
   a2uiEnabled?: boolean
   /**
-   * A2UI catalog this character is meant to default to (academic / financial /
-   * general / …).
-   *
-   * INERT: stored and carried through plugin-pack projection and diffs, but the
-   * A2UI surface only reads `settings.a2uiDefaultCatalogId`. The agent editor
-   * does not offer it, and
-   * `components/settings/character/agent-overrides.test.ts` pins that.
+   * A2UI component catalog for surfaces this agent renders without naming one
+   * (academic / financial / general / …). Precedence at render time
+   * (`resolveA2UICatalogId`): the surface's own `catalogId`, then this, then
+   * `settings.a2uiDefaultCatalogId`; an id that is not registered is skipped.
+   * Chat applies it per message (`messageAgentCatalogId`), so each room member
+   * uses its own.
    */
   a2uiCatalogId?: string
   /**

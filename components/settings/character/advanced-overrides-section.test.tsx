@@ -95,6 +95,7 @@ describe("AdvancedOverridesFields", () => {
       "provider.label",
       "outputStyle.label",
       "a2ui.label",
+      "a2uiCatalog.label",
       "workspaceConfinement.label",
     ]) {
       expect(screen.getByRole("combobox", { name: label })).toHaveTextContent("inherit")
@@ -136,6 +137,22 @@ describe("AdvancedOverridesFields", () => {
     const { last } = renderFields()
     await choose(label, option)
     expect(last()?.[field]).toBe(expected)
+  })
+
+  it("picks a registered A2UI catalog and returns to inheriting", async () => {
+    const { last } = renderFields()
+    await choose("a2uiCatalog.label", "global.standardCatalog")
+    expect(last()?.a2uiCatalogId).toBe("cognia-standard-v1")
+    await choose("a2uiCatalog.label", "inherit")
+    expect(last()?.a2uiCatalogId).toBeUndefined()
+  })
+
+  it("keeps showing a pack catalog that is not registered here", () => {
+    renderFields(pickAgentOverrides({ a2uiCatalogId: "pack-financial" }))
+    // The mocked translator returns the key; the real copy names the value.
+    expect(screen.getByRole("combobox", { name: "a2uiCatalog.label" })).toHaveTextContent(
+      "unknownValue"
+    )
   })
 
   it("sets a thinking budget, keeps 0 as a real value, and clears on empty", async () => {

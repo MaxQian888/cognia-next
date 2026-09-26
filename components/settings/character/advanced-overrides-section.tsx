@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { OptionalNumberInput } from "@/components/settings/common/optional-number-input"
 import { useUtilityProviderOptions } from "@/components/settings/common/model-override-fields"
 import { OUTPUT_STYLE_IDS, type OutputStyleId } from "@/lib/claude/output-styles"
+import { DEFAULT_CATALOG_ID, getCatalog, getRegisteredCatalogIds } from "@/lib/a2ui/catalog"
 import { countAgentOverrides, type AgentOverrides } from "./agent-overrides"
 import { CompactionOverride, parseBoundedInteger } from "./compaction-override"
 import { InheritBooleanSelect, InheritSelect } from "./inherit-select"
@@ -74,6 +75,7 @@ export function AdvancedOverridesSection({ value, onChange }: AdvancedOverridesS
 export function AdvancedOverridesFields({ value, onChange }: AdvancedOverridesSectionProps) {
   const t = useTranslations("settings.characters.editor.advanced")
   const tDefaults = useTranslations("settings.agentRuntimeSection.defaults")
+  const tA2UIRuntime = useTranslations("settings.a2ui.runtime")
   const providers = useUtilityProviderOptions()
 
   const set = <K extends keyof AgentOverrides>(key: K, next: AgentOverrides[K]) =>
@@ -138,6 +140,20 @@ export function AdvancedOverridesFields({ value, onChange }: AdvancedOverridesSe
             description={t("a2ui.description")}
             value={value.a2uiEnabled}
             onChange={(next) => set("a2uiEnabled", next)}
+          />
+          <InheritSelect
+            id="agent-override-a2ui-catalog"
+            label={t("a2uiCatalog.label")}
+            description={t("a2uiCatalog.description")}
+            value={value.a2uiCatalogId}
+            options={getRegisteredCatalogIds().map((id) => ({
+              value: id,
+              label:
+                id === DEFAULT_CATALOG_ID
+                  ? tA2UIRuntime("global.standardCatalog")
+                  : (getCatalog(id)?.name ?? id),
+            }))}
+            onChange={(next) => set("a2uiCatalogId", next)}
           />
         </div>
         {showCustomStyle && (

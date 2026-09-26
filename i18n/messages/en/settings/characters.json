@@ -315,6 +315,10 @@
         "label": "A2UI surfaces",
         "description": "Whether this agent may render interactive A2UI surfaces. A session or agent mode can still override it."
       },
+      "a2uiCatalog": {
+        "label": "A2UI catalog",
+        "description": "Component catalog for surfaces this agent renders without naming one. Overrides the app default; a surface that names its own catalog keeps it."
+      },
       "pluginTools": {
         "label": "Plugin tools",
         "description": "Tools contributed by enabled plugins. Off removes them from this agent's turns.",

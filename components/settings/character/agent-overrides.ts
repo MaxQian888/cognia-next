@@ -12,11 +12,10 @@
  * profile against its base, so any normalisation here would make a variant
  * start owning fields it never changed.
  *
- * `embeddingProviderId` and `a2uiCatalogId` are deliberately NOT listed: no
- * runtime path reads the per-agent value today (the twin runtime and the A2UI
- * surface renderer only consult the app-level settings), so an editor for them
- * would be a control with no effect. They are left untouched on save because
- * the editor's patch never carries them.
+ * `embeddingProviderId` is deliberately NOT listed: embeddings belong to the
+ * twin whose vectors they build (one twin can back several agents), so the
+ * twin Workbench owns that setting. The field is left untouched on save
+ * because the editor's patch never carries it.
  */
 
 import type { Character } from "@cognia/agent-config-types"
@@ -32,6 +31,7 @@ export const AGENT_OVERRIDE_FIELDS = [
   "customOutputStyle",
   "maxThinkingTokens",
   "a2uiEnabled",
+  "a2uiCatalogId",
   "enableOcr",
   "enableBuiltInSkills",
   "disablePluginTools",

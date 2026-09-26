@@ -35639,6 +35639,10 @@
             "description": "此智能体是否可以渲染交互式 A2UI 界面。会话或智能体模式仍可覆盖。",
             "label": "A2UI 界面"
           },
+          "a2uiCatalog": {
+            "description": "此智能体渲染未指定目录的界面时使用的组件目录，覆盖应用默认值；界面自己指定的目录仍然优先。",
+            "label": "A2UI 组件目录"
+          },
           "builtInSkills": {
             "default": "默认（关闭）",
             "description": "在桌面对话中提供内置技能（日历、IM 等）。消息平台对话始终可用。",

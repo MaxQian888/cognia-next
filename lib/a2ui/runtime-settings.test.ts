@@ -43,6 +43,26 @@ describe("A2UI runtime settings", () => {
       expect(resolveA2UICatalogId(undefined, "plugin-catalog")).toBe("plugin-catalog")
     })
 
+    it("prefers the agent's registered catalog over the app default", () => {
+      const MockComponent: React.FC<A2UIComponentProps<A2UIComponent>> = () => null
+      registerComponent("Text", MockComponent, { catalogId: "agent-catalog" })
+
+      expect(resolveA2UICatalogId(undefined, "plugin-catalog", "agent-catalog")).toBe(
+        "agent-catalog"
+      )
+      expect(resolveA2UICatalogId("surface-catalog", "plugin-catalog", "agent-catalog")).toBe(
+        "surface-catalog"
+      )
+    })
+
+    it("skips an unregistered agent catalog", () => {
+      const MockComponent: React.FC<A2UIComponentProps<A2UIComponent>> = () => null
+      registerComponent("Text", MockComponent, { catalogId: "plugin-catalog" })
+
+      expect(resolveA2UICatalogId(undefined, "plugin-catalog", "gone")).toBe("plugin-catalog")
+      expect(resolveA2UICatalogId(undefined, undefined, "gone")).toBe(DEFAULT_CATALOG_ID)
+    })
+
     it("falls back from legacy template-category values to the standard catalog", () => {
       expect(resolveA2UICatalogId(undefined, "productivity")).toBe(DEFAULT_CATALOG_ID)
     })
