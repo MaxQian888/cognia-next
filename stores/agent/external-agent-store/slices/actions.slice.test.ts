@@ -230,6 +230,19 @@ describe("useExternalAgentStore addAgentFromPreset", () => {
     expect(useExternalAgentStore.getState().addAgentFromPreset("does-not-exist")).toBeNull()
   })
 
+  it("keeps Codex options and the Cognia model binding a variant was created with", () => {
+    const cogniaModel = { providerId: "openai", modelId: "gpt-5" }
+    const id = useExternalAgentStore.getState().addAgentFromPreset("codex", {
+      name: "Codex (strict)",
+      codexOptions: { sandboxMode: "readOnly" },
+      cogniaModel,
+    })
+    const agent = useExternalAgentStore.getState().getAgent(id!)
+    expect(agent?.name).toBe("Codex (strict)")
+    expect(agent?.codexOptions).toEqual({ sandboxMode: "readOnly" })
+    expect(agent?.cogniaModel).toMatchObject(cogniaModel)
+  })
+
   it("normalizes an already-attached validity snapshot", () => {
     const id = useExternalAgentStore.getState().addAgentFromPreset("claude-code", {
       validitySnapshot: {

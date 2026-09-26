@@ -23,6 +23,10 @@ import { resolveContextContributions } from "./context-providers"
 import { withRunTrace } from "./tracing"
 import { createPiiRedactionGate } from "./pii-gate"
 import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
+import {
+  validateAgentCapabilityGrant,
+  type AgentCapabilityGrantV1,
+} from "@cognia/agent-config-types/agent-capability-grant"
 import type {
   PluginAgentRun,
   PluginAgentRunOptions,
@@ -98,17 +102,44 @@ function toAgentTool(tool: NonNullable<PluginAgentRunOptions["tools"]>[number]):
  * cancellation signal and composed gate. `onEvent` is supplied by the streaming
  * caller; the one-shot caller leaves it undefined.
  */
+/**
+ * Validate a plugin's capability grants and stamp the plugin as their source,
+ * whatever each one claims. A malformed grant fails the run: running without a
+ * denial the plugin asked for is the unsafe direction.
+ */
+export function acceptPluginGrants(
+  grants: PluginAgentRunOptions["capabilityGrants"],
+  pluginId: string | undefined
+): AgentCapabilityGrantV1[] | undefined {
+  if (!grants?.length) return undefined
+  return grants.map((grant, index) => {
+    const checked = validateAgentCapabilityGrant(grant)
+    if (!checked.ok) {
+      throw new Error(
+        `Plugin agent run: capabilityGrants[${index}] is invalid: ${checked.errors.join("; ")}`
+      )
+    }
+    return { ...checked.value, source: { kind: "plugin", ...(pluginId ? { id: pluginId } : {}) } }
+  })
+}
+
 function toExecuteConfig(
   options: PluginAgentRunOptions,
   signal: AbortSignal,
-  onEvent?: ExecuteAgentConfig["onEvent"]
+  onEvent?: ExecuteAgentConfig["onEvent"],
+  pluginId?: string
 ): ExecuteAgentConfig {
   const gate = composeGate(options.canUseTool, options.tools, options.hooks?.onPreToolUse)
+  const capabilityGrants = acceptPluginGrants(options.capabilityGrants, pluginId)
   return {
     ...(options.system ? { systemPrompt: options.system } : {}),
     ...(options.appendSystem ? { appendSystem: options.appendSystem } : {}),
     ...(options.model ? { model: options.model } : {}),
-    ...(options.provider ? { defaultProvider: options.provider } : {}),
+    // `provider` is the per-run override both rails honour; `defaultProvider`
+    // alone only fed the text rail's snapshot, so the tool rail ignored it.
+    ...(options.provider ? { provider: options.provider, defaultProvider: options.provider } : {}),
+    grantSource: { kind: "plugin", ...(pluginId ? { id: pluginId } : {}) },
+    ...(capabilityGrants ? { capabilityGrants } : {}),
     ...(options.tools && options.tools.length > 0 ? { tools: options.tools.map(toAgentTool) } : {}),
     ...(options.toolsEnabled !== undefined ? { toolsEnabled: options.toolsEnabled } : {}),
     ...(options.characterId ? { characterId: options.characterId } : {}),
@@ -217,7 +248,7 @@ function executeWithRobustness(
     throw new Error("Plugin agent input failed the outbound PII gate")
   }
   const runOnce = (model?: string): Promise<ExecuteAgentResult> => {
-    const cfg = toExecuteConfig(model ? { ...opts, model } : opts, signal, onEvent)
+    const cfg = toExecuteConfig(model ? { ...opts, model } : opts, signal, onEvent, meta.pluginId)
     const traceModel = model ?? opts.model
     return withRunTrace(
       Boolean(opts.trace),

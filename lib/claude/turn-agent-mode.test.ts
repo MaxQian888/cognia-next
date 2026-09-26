@@ -81,6 +81,24 @@ describe("resolveTurnAgentMode", () => {
     expect(resolveTurnAgentMode({ sessionId: "other" }).preset?.id).toBe("standard")
   })
 
+  it("prefers a caller-owned selection over the desktop store", () => {
+    useAgentRuntimeStore.setState({
+      defaultComposition: { presetId: "minimal" },
+      sessionCompositions: { s1: { presetId: "minimal" } },
+    })
+
+    const resolved = resolveTurnAgentMode({
+      sessionId: "s1",
+      selection: { presetId: "standard", authority: "plan" },
+    })
+    expect(resolved.preset?.id).toBe("standard")
+    expect(resolved.requestedAuthority).toBe("plan")
+    // An unknown session with a caller selection never reads the desktop default.
+    expect(
+      resolveTurnAgentMode({ sessionId: "im-1", selection: { presetId: "standard" } }).preset?.id
+    ).toBe("standard")
+  })
+
   it("carries a preset with no mode record behind it", () => {
     useAgentRuntimeStore.setState({ sessionCompositions: { s1: { presetId: "minimal" } } })
 

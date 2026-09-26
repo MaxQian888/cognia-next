@@ -23,7 +23,7 @@ import {
   simulateWebviewRuntime,
   truncatedStreamModel,
 } from "@/lib/ai/webview-stream-fixtures"
-import { executeAgent, runCompletionRail } from "./agent-executor"
+import { buildAgentBoundContext, executeAgent, runCompletionRail } from "./agent-executor"
 
 const mockPlanRoute = jest.fn()
 const mockApplyCircuitBreakerSettings = jest.fn()
@@ -85,6 +85,10 @@ jest.mock("@/lib/task-workspace/run-lease", () => ({
   }),
 }))
 jest.mock("@/lib/db/characters", () => ({ resolveCharacterById: jest.fn() }))
+const mockTryBuildTwinDeps = jest.fn()
+jest.mock("@/lib/twin/runtime/build-deps", () => ({
+  tryBuildTwinDeps: (...args: unknown[]) => mockTryBuildTwinDeps(...args),
+}))
 jest.mock("@/lib/db/sessions", () => ({
   createSession: jest.fn(),
   getSession: jest.fn(),
@@ -193,6 +197,33 @@ describe("executeAgent", () => {
   })
 
   describe("text-only channel", () => {
+    it("speaks as the named agent when the caller leaves prompt and model unset", async () => {
+      primeTextChannel(["ok"])
+      mockResolveCharacter.mockResolvedValue({
+        id: "char-1",
+        name: "Persona",
+        systemPrompt: "PERSONA_PROMPT",
+        model: "gpt-4o-mini",
+      } as never)
+      await runCompletionRail("hi", { characterId: "char-1", appendSystem: "EXTRA" })
+      const opts = mockStreamText.mock.calls[0][0] as { system?: string }
+      expect(opts.system).toContain("PERSONA_PROMPT")
+      expect(opts.system).toContain("EXTRA")
+      expect(mockPlanRoute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          selection: { kind: "manual", providerId: "openai", modelId: "gpt-4o-mini" },
+        })
+      )
+    })
+
+    it("fails on the text rail when the named agent is gone", async () => {
+      primeTextChannel(["ok"])
+      mockResolveCharacter.mockResolvedValue(null as never)
+      await expect(runCompletionRail("hi", { characterId: "gone" })).rejects.toThrow(
+        /character "gone" not found/
+      )
+    })
+
     it("streams text and reports channel='text', toolsAvailable=false", async () => {
       primeTextChannel(["foo", "bar"])
       const result = await executeAgent("hi")
@@ -645,13 +676,16 @@ describe("executeAgent", () => {
         disallowedTools: ["Bash", "Write"],
       })
       expect(mockResolveSendOptions).toHaveBeenCalledWith(
-        expect.objectContaining({ session: expect.objectContaining({ effort: "high" }) })
-      )
-      expect(mockRunAndCapture).toHaveBeenCalledWith(
-        "s1",
-        "do work",
-        expect.objectContaining({ disallowedTools: ["Write", "Bash"] }),
-        expect.anything()
+        expect.objectContaining({
+          session: expect.objectContaining({ effort: "high" }),
+          // The deny list enters the resolver as a grant, ahead of every clamp.
+          capabilityGrants: [
+            expect.objectContaining({
+              source: { kind: "automation" },
+              tools: { deny: ["Bash", "Write"] },
+            }),
+          ],
+        })
       )
       // The persisted row is never touched: the overlay is in-memory only.
       expect(mockSetSdkSessionId).not.toHaveBeenCalledWith(
@@ -833,6 +867,46 @@ describe("executeAgent", () => {
       expect(ctx.character?.id).toBe("char-1")
     })
 
+    it("honours the caller's model, tool restriction and maxSteps for a named agent", async () => {
+      mockResolveCharacter.mockResolvedValue({ id: "char-1", name: "Persona" } as never)
+      await executeAgent("x", {
+        toolsEnabled: true,
+        characterId: "char-1",
+        model: "claude-opus-4-8",
+        allowedTools: ["Read"],
+        maxSteps: 250,
+        grantSource: { kind: "workflow", id: "node-1" },
+      })
+      const ctx = mockResolveSendOptions.mock.calls[0][0]
+      expect(ctx.character?.id).toBe("char-1")
+      expect(ctx.capabilityGrants).toEqual([
+        {
+          schemaVersion: 1,
+          source: { kind: "workflow", id: "node-1" },
+          model: "claude-opus-4-8",
+          tools: { restrictTo: ["Read"] },
+          maxTurns: 100,
+        },
+      ])
+    })
+
+    it("layers caller grants after the config's own grant", async () => {
+      const extra = {
+        schemaVersion: 1 as const,
+        source: { kind: "plugin" as const, id: "p" },
+        skills: { add: ["report"] },
+      }
+      await executeAgent("x", { toolsEnabled: true, maxSteps: 3, capabilityGrants: [extra] })
+      const ctx = mockResolveSendOptions.mock.calls[0][0]
+      expect(ctx.capabilityGrants).toEqual([expect.objectContaining({ maxTurns: 3 }), extra])
+    })
+
+    it("sends no grant when the config sets no grant knob", async () => {
+      await executeAgent("x", { toolsEnabled: true })
+      const ctx = mockResolveSendOptions.mock.calls[0][0]
+      expect(ctx.capabilityGrants).toBeUndefined()
+    })
+
     it("throws when characterId cannot be resolved", async () => {
       mockResolveCharacter.mockResolvedValue(null as never)
       await expect(
@@ -888,8 +962,10 @@ describe("executeAgent", () => {
       })
       const sendOpts = mockRunAndCapture.mock.calls[0][2] as { appendSystemPrompt: string }
       expect(sendOpts.appendSystemPrompt).toContain("BASE")
-      expect(sendOpts.appendSystemPrompt).toContain("EXTRA")
       expect(sendOpts.appendSystemPrompt).toMatch(/JSON/i)
+      // The caller's fragment is a grant instruction the resolver appends.
+      const ctx = mockResolveSendOptions.mock.calls[0][0]
+      expect(ctx.capabilityGrants?.[0]?.instructions).toEqual(["EXTRA"])
     })
 
     it("forwards onEvent and a canUseTool-derived permission responder to the runner", async () => {
@@ -1066,5 +1142,58 @@ describe("executeAgent", () => {
       expect(result.channel).toBe("text")
       expect(result.degradedReason).toBeUndefined()
     })
+  })
+})
+
+describe("buildAgentBoundContext", () => {
+  const persona = (fields: Record<string, unknown> = {}) =>
+    ({
+      id: "c",
+      name: "C",
+      avatarColor: "x",
+      systemPrompt: "",
+      createdAt: 0,
+      updatedAt: 0,
+      ...fields,
+    }) as never
+  const deps = { store: {}, embedding: {}, vectorBackend: "native" }
+
+  beforeEach(() => {
+    mockTryBuildTwinDeps.mockReset()
+    mockTryBuildTwinDeps.mockResolvedValue(deps)
+  })
+
+  it("builds nothing for an unbound agent", async () => {
+    expect(await buildAgentBoundContext("q", persona(), undefined)).toEqual({})
+    expect(mockTryBuildTwinDeps).not.toHaveBeenCalled()
+  })
+
+  it("supplies knowledge deps for the agent's own knowledge bases", async () => {
+    expect(
+      await buildAgentBoundContext("q", persona({ knowledgeBaseIds: ["kb"] }), undefined)
+    ).toEqual({
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "q",
+    })
+  })
+
+  it("supplies knowledge deps when only a grant attaches a knowledge base", async () => {
+    const out = await buildAgentBoundContext("q", persona(), [
+      { schemaVersion: 1, source: { kind: "workflow" }, knowledgeBases: { add: ["kb"] } },
+    ])
+    expect(out.projectKnowledgeDeps).toBe(deps)
+  })
+
+  it("supplies twin deps for a twin-bound agent", async () => {
+    expect(await buildAgentBoundContext("q", persona({ twinId: "t" }), undefined)).toEqual({
+      twinDeps: deps,
+      twinUserMessage: "q",
+    })
+  })
+
+  it("degrades to no retrieval when the vector store is not configured or the prompt is empty", async () => {
+    mockTryBuildTwinDeps.mockResolvedValueOnce(undefined)
+    expect(await buildAgentBoundContext("q", persona({ twinId: "t" }), undefined)).toEqual({})
+    expect(await buildAgentBoundContext("  ", persona({ twinId: "t" }), undefined)).toEqual({})
   })
 })

@@ -7169,3 +7169,156 @@ describe("resolveSendOptions — a model that belongs to an external agent", () 
     expect(opts.model).toBe("gpt-4o-mini")
   })
 })
+
+describe("resolveSendOptions — capability grants", () => {
+  const grant = (
+    fields: Partial<
+      import("@cognia/agent-config-types/agent-capability-grant").AgentCapabilityGrantV1
+    >
+  ) =>
+    ({
+      schemaVersion: 1,
+      source: { kind: "scheduler", id: "task-1" },
+      ...fields,
+    }) as import("@cognia/agent-config-types/agent-capability-grant").AgentCapabilityGrantV1
+
+  it("heads the model, effort and maxTurns chains", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        providerId: "anthropic",
+        model: "claude-sonnet-4-6",
+        executionPolicy: { maxTurns: 40 },
+      }),
+      session: makeSession({ model: "claude-haiku-4-5", effort: "low" }),
+      capabilityGrants: [grant({ model: "claude-opus-4-8", effort: "high", maxTurns: 5 })],
+    })
+    expect(opts.model).toBe("claude-opus-4-8")
+    expect(opts.effort).toBe("high")
+    expect(opts.maxTurns).toBe(5)
+  })
+
+  it("joins added skills to the character's set and honours removals", async () => {
+    await resolveSendOptions({
+      character: makeChar({ skillIds: ["keep", "drop"] }),
+      capabilityGrants: [grant({ skills: { add: ["report"], remove: ["drop"] } })],
+    })
+    const requested = mListSkills.mock.calls[0]?.[0] as string[]
+    expect(requested).toEqual(expect.arrayContaining(["keep", "report"]))
+    expect(requested).not.toContain("drop")
+  })
+
+  it("adds, denies and restricts tools against the character's lists", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ allowedTools: ["Read", "Grep"], disallowedTools: ["Write"] }),
+      capabilityGrants: [
+        grant({
+          tools: { add: ["WebFetch", "Bash"], deny: ["Bash"], restrictTo: ["Read", "WebFetch"] },
+        }),
+      ],
+    })
+    expect(opts.allowedTools?.sort()).toEqual(["Read", "WebFetch"])
+    expect(opts.disallowedTools).toEqual(expect.arrayContaining(["Bash", "Write"]))
+  })
+
+  it("cannot widen past a parent permission ceiling", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ allowedTools: ["Read"] }),
+      permissionCeiling: { allowedTools: ["Read"], permissionMode: "default" },
+      capabilityGrants: [grant({ tools: { add: ["Bash"] } })],
+    })
+    expect(opts.allowedTools).toEqual(["Read"])
+    expect(opts.permissionMode).toBe("default")
+  })
+
+  it("cannot widen past the tool filter", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        allowedTools: ["Read"],
+        toolFilter: { mode: "allow", tools: ["Read"] },
+      }),
+      capabilityGrants: [grant({ tools: { add: ["Bash"] } })],
+    })
+    expect(opts.allowedTools).toEqual(["Read"])
+  })
+
+  it("treats permissionMode as a cap, never a rung", async () => {
+    const lowered = await resolveSendOptions({
+      character: makeChar({ permissionMode: "bypassPermissions" }),
+      capabilityGrants: [grant({ permissionMode: "plan" })],
+    })
+    expect(lowered.permissionMode).toBe("plan")
+
+    const unchanged = await resolveSendOptions({
+      character: makeChar({ permissionMode: "plan" }),
+      capabilityGrants: [grant({ permissionMode: "bypassPermissions" })],
+    })
+    expect(unchanged.permissionMode).toBe("plan")
+  })
+
+  it("keeps the less privileged cap across layered grants", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ permissionMode: "bypassPermissions" }),
+      capabilityGrants: [
+        grant({ permissionMode: "acceptEdits" }),
+        grant({ source: { kind: "bot" }, permissionMode: "bypassPermissions" }),
+      ],
+    })
+    expect(opts.permissionMode).toBe("acceptEdits")
+  })
+
+  it("adjusts the MCP subset only from enabled servers", async () => {
+    mListMcp.mockResolvedValue([
+      { id: "a", name: "a" },
+      { id: "b", name: "b" },
+      { id: "c", name: "c" },
+    ])
+    await resolveSendOptions({
+      character: makeChar({ mcpServerIds: ["a", "b"] }),
+      capabilityGrants: [
+        grant({ mcpServers: { only: ["a"], add: ["c", "not-enabled"], remove: ["b"] } }),
+      ],
+    })
+    expect(mBuildMap).toHaveBeenCalledWith([
+      { id: "a", name: "a" },
+      { id: "c", name: "c" },
+    ])
+  })
+
+  it("appends instruction fragments after the agent's own prompt", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ systemPrompt: "base prompt" }),
+      capabilityGrants: [grant({ instructions: ["  Reply in French.  ", "", "Be brief."] })],
+    })
+    expect(opts.systemPrompt).toContain("base prompt")
+    expect(opts.appendSystemPrompt).toContain("Reply in French.\n\nBe brief.")
+  })
+
+  it("queries granted knowledge bases alongside the character's", async () => {
+    mApplyAgentKnowledge.mockResolvedValue({
+      systemPromptSection: "",
+      retrievedChunks: [],
+      citations: [],
+      failures: [],
+      degraded: false,
+      budget: { limit: 2000, used: 0, truncated: false },
+    })
+    await resolveSendOptions({
+      character: makeChar({ knowledgeBaseIds: ["kb-1"] }),
+      projectKnowledgeDeps: { store: {}, embedding: {}, vectorBackend: "native" } as never,
+      projectKnowledgeUserMessage: "question",
+      capabilityGrants: [grant({ knowledgeBases: { add: ["kb-2"] } })],
+    })
+    expect(mApplyAgentKnowledge).toHaveBeenCalledWith(
+      expect.objectContaining({ knowledgeBaseIds: ["kb-1", "kb-2"] })
+    )
+  })
+
+  it("resolves the turn's preset from a caller-owned composition selection", async () => {
+    selectPreset("standard")
+    const opts = await resolveSendOptions({
+      character: makeChar({ permissionMode: "bypassPermissions" }),
+      compositionSelection: { presetId: "standard", authority: "plan" },
+    })
+    expect(opts.permissionMode).toBe("plan")
+  })
+})

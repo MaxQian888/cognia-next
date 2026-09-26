@@ -30,6 +30,7 @@ import {
   type PluginAgentTurnResult,
 } from "@cognia/plugin-sdk/api/agent-turn"
 import { createUnattendedPermissionResponder } from "@/lib/claude/unattended-permission-responder"
+import type { AgentCapabilityGrantV1 } from "@cognia/agent-config-types/agent-capability-grant"
 
 export {
   PluginAgentTurnError,
@@ -70,8 +71,40 @@ async function ensureSession(
   return created.id
 }
 
+/**
+ * Validate the request's grants and attribute them to the caller. A malformed
+ * grant fails the turn rather than being dropped: running without a denial the
+ * caller asked for is the unsafe direction.
+ */
+async function acceptedGrants(
+  request: PluginAgentTurnRequest,
+  source: { kind: "plugin" | "bot"; id?: string } | undefined
+): Promise<AgentCapabilityGrantV1[] | undefined> {
+  if (!request.capabilityGrants?.length) return undefined
+  const { validateAgentCapabilityGrant } =
+    await import("@cognia/agent-config-types/agent-capability-grant")
+  return request.capabilityGrants.map((grant, index) => {
+    const checked = validateAgentCapabilityGrant(grant)
+    if (!checked.ok) {
+      throw new PluginAgentTurnError(
+        `runPluginAgentTurn: capabilityGrants[${index}] is invalid: ${checked.errors.join("; ")}`
+      )
+    }
+    return source ? { ...checked.value, source } : checked.value
+  })
+}
+
+export interface RunPluginAgentTurnOptions {
+  /**
+   * Who is calling, stamped over every grant's self-declared source so the
+   * audit trail names the real caller. Host-side callers (bots) pass their own.
+   */
+  grantSource?: { kind: "plugin" | "bot"; id?: string }
+}
+
 export async function runPluginAgentTurn(
-  request: PluginAgentTurnRequest
+  request: PluginAgentTurnRequest,
+  options: RunPluginAgentTurnOptions = {}
 ): Promise<PluginAgentTurnResult> {
   const prompt = request.prompt.trim()
   const cwd = request.cwd.trim()
@@ -94,12 +127,15 @@ export async function runPluginAgentTurn(
     )
   }
 
+  const capabilityGrants = await acceptedGrants(request, options.grantSource)
   const sessionId = await ensureSession(request.characterId, cwd, request.sessionId?.trim())
   const appSettings = await getSettings().catch(() => undefined)
   const sendOptions = await resolveSendOptions({
     session: (await sessionsDb.getSession(sessionId)) ?? null,
     character,
     appSettings: appSettings ?? null,
+    ...(request.composition ? { compositionSelection: request.composition } : {}),
+    ...(capabilityGrants ? { capabilityGrants } : {}),
   })
   if (request.permissionMode) sendOptions.permissionMode = request.permissionMode
 

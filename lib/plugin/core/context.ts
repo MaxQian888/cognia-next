@@ -925,7 +925,7 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
         )
       }
       const { runPluginAgentTurn } = await import("../api/agent-turn")
-      return runPluginAgentTurn(request)
+      return runPluginAgentTurn(request, { grantSource: { kind: "plugin", id: pluginId } })
     },
 
     runStreamed: (prompt: string, options: PluginAgentRunOptions = {}): PluginAgentRun => {

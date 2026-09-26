@@ -3,7 +3,8 @@
     "allowedTools": {
       "hint": "限制临时角色的工具面。留空 = 主机默认。",
       "label": "允许的工具（逗号分隔）",
-      "placeholder": "Bash, Read, Edit"
+      "placeholder": "Bash, Read, Edit",
+      "hintAgent": "本轮收窄该智能体可用的工具。留空则沿用智能体自己的工具面。"
     },
     "characterId": {
       "hint": "以现有角色身份运行——沿用其系统提示词、模型和工具白名单。",
@@ -19,7 +20,8 @@
     },
     "model": {
       "hint": "默认使用提供方配置的模型。",
-      "label": "模型（可选）"
+      "label": "模型（可选）",
+      "hintAgent": "本轮覆盖该智能体的模型。留空则沿用智能体自己的模型。"
     },
     "piiGate": {
       "block": "阻断敏感数据",
@@ -50,6 +52,35 @@
     "toolsEnabled": {
       "hint": "使用桌面 sidecar 的工具管线。关闭 = 纯文本补全。",
       "label": "启用工具"
+    },
+    "skillIds": {
+      "label": "额外技能",
+      "hint": "在智能体自身技能之外，为本轮附加的技能。"
+    },
+    "mcpServerIds": {
+      "label": "额外 MCP 服务器",
+      "hint": "为本轮附加已启用的服务器。未启用的服务器会被忽略，不会被自动开启。"
+    },
+    "knowledgeBaseIds": {
+      "label": "额外知识库",
+      "hint": "本轮与智能体自己的知识库一起检索。需要桌面端向量库。"
+    },
+    "disallowedTools": {
+      "label": "禁用工具",
+      "hint": "无论智能体允许与否，本轮都不会提供这些工具。",
+      "empty": "未禁用任何工具。"
+    },
+    "instructions": {
+      "label": "额外指令",
+      "hint": "追加在智能体自身提示词之后，仅作用于本轮，不会替换原提示词。"
+    },
+    "permissionCap": {
+      "label": "权限上限",
+      "hint": "只能降低智能体本轮的权限模式，不能提高。",
+      "none": "不设上限",
+      "plan": "计划（只读）",
+      "default": "执行前询问",
+      "acceptEdits": "自动接受编辑"
     }
   },
   "aggregate": {
@@ -2140,7 +2171,8 @@
     "toolsUnrestricted": "未列出工具。本轮可使用其角色或预设允许的全部工具。",
     "twin": "选择数字分身",
     "useExpression": "使用表达式",
-    "usePicker": "从列表选择"
+    "usePicker": "从列表选择",
+    "knowledgeBase": "添加知识库"
   },
   "planCommon": {
     "planId": {

@@ -371,10 +371,12 @@ export interface MonitorTaskPayload extends Record<string, unknown> {
  * interactive turn (character / agent mode / skills / tools / MCP / built-in
  * tools / permission mode / additional dirs / max turns / effort / resume).
  *
- * The executor layers payload-level overrides on top of the base resolution
- * (see `lib/scheduler/executors/index.ts`). `allowedTools` and
- * `additionalDirectories` are *unioned* with the resolved set; the rest are
- * direct overrides. Leave a field undefined to defer to the resolved value.
+ * The executor hands the capability knobs to `resolveSendOptions` as one
+ * capability grant (`buildSchedulerCapabilityGrant` in
+ * `lib/scheduler/executors/index.ts`), so the tool filter, Restricted Mode and
+ * the finalizer clamp them like the agent's own settings. Additions join the
+ * resolved sets; denials and `permissionMode` only ever narrow. Leave a field
+ * undefined to defer to the resolved value.
  */
 export interface ChatLikeTaskPayload extends Record<string, unknown> {
   /** Required. The user-turn content sent to the sidecar. */
@@ -392,7 +394,10 @@ export interface ChatLikeTaskPayload extends Record<string, unknown> {
    */
   executionContext?: import("@/types/execution-context").SessionExecutionContext
 
-  /** Override the model picked by character / mode / app default. */
+  /**
+   * Model for this run. Heads the model chain; the provider is re-derived for
+   * it rather than kept from the character.
+   */
   model?: string
   /**
    * Apply a specific built-in or custom agent mode to this run.
@@ -401,13 +406,19 @@ export interface ChatLikeTaskPayload extends Record<string, unknown> {
    * - string    → look up by id in built-in then custom mode registries
    */
   agentModeId?: string | null
-  /** SDK permission mode override. */
+  /**
+   * Permission cap for this run. It can lower the mode the character / session
+   * / app chain resolved, never raise it.
+   */
   permissionMode?: SendOptions["permissionMode"]
-  /** Tools to UNION onto the resolved allowedTools whitelist. */
+  /** Tools to UNION onto the resolved allowedTools whitelist (still clamped). */
   allowedTools?: string[]
-  /** Tools to add to the disallow list (replaces resolved value when set). */
+  /** Tools to ADD to the resolved deny list. Never replaces the resolved denials. */
   disallowedTools?: string[]
-  /** Subset of MCP server ids to use (replaces character/team subset when set). */
+  /**
+   * Exactly these MCP servers, drawn from the ones enabled in the task's
+   * workspace (an id that is not enabled is ignored). `[]` means none.
+   */
   mcpServerIds?: string[]
   /** Extra directories the SDK may read from (UNIONED with resolved value). */
   additionalDirectories?: string[]

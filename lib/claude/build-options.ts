@@ -176,6 +176,12 @@ import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
 import { resolveProviderAttemptOptions } from "./provider-attempt-options"
 import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
+import {
+  applyCapabilityIdDelta,
+  capPermissionModeByGrant,
+  foldCapabilityGrants,
+  type AgentCapabilityGrantV1,
+} from "@cognia/agent-config-types/agent-capability-grant"
 import { resolveTurnCompositionSafely } from "./resolve-turn-composition-safely"
 import {
   applySupportAgentSafety,
@@ -721,6 +727,15 @@ export interface BuildOptionsContext {
    */
   compositionSelection?: AgentCompositionSelectionV1
   /**
+   * Per-invocation capability grants, outermost first (see
+   * `packages/agent-config-types/src/agent-capability-grant.ts`). Each field is
+   * applied at the stage of the profile field it extends, so the tool filter,
+   * Restricted Mode, the parent ceiling and the finalizer clamp a grant exactly
+   * like they clamp the character. Callers that are not the chat composer use
+   * this instead of patching `SendOptions` after the resolver returns.
+   */
+  capabilityGrants?: readonly AgentCapabilityGrantV1[]
+  /**
    * Pre-resolved MCP server list, injected by desktop-independent callers
    * (the standalone agent CLI) that cannot reach Dexie. When provided —
    * including an empty array — the resolver uses it verbatim instead of
@@ -1194,13 +1209,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (agentExecutionPolicy.maxTurns !== undefined) {
     opts.maxTurns = agentExecutionPolicy.maxTurns
   }
+  // Per-invocation grants fold into one view here; each field is applied below
+  // at the stage of the profile field it extends.
+  const grant = foldCapabilityGrants(ctx.capabilityGrants)
+  if (grant?.maxTurns !== undefined) opts.maxTurns = grant.maxTurns
 
   // --- Resolve skills: character.skillIds ∪ ephemeralSkillIds, minus session-disables.
   // Honour the per-skill `status` flag — disabled skills don't get appended,
   // even if the character references them or the user attached them ad-hoc.
   // Non-fatal: a missing/legacy row that has no status is treated as enabled.
   let skills: Skill[] = []
-  const characterSkillIds = character?.skillIds ?? []
+  // A grant's skills join the character's own set (same invocation policy,
+  // same budget); its removals join the session's disables.
+  const characterSkillIds = applyCapabilityIdDelta(character?.skillIds ?? [], grant?.skills)
   const ephemeralIds = ctx.ephemeralSkillIds ?? []
   const explicitBuiltInSkillIds = ephemeralIds.filter((id) => resolveBuiltinSkillIdentity(id))
   if (characterSkillIds.length || ephemeralIds.length) {
@@ -1209,7 +1230,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const wantedIds = activeEffectiveSkillIds({
       characterSkillIds,
       ephemeralSkillIds: ephemeralIds,
-      disabledIds: session?.disabledSkillIds ?? [],
+      disabledIds: [...(session?.disabledSkillIds ?? []), ...(grant?.skills?.remove ?? [])],
     })
     if (wantedIds.length) {
       skills = await listEnabledSkillsByIds(wantedIds, capabilityScope)
@@ -1270,6 +1291,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const turnMode = resolveTurnAgentMode({
     explicitMode: ctx.agentMode,
     sessionId: session?.id,
+    // A caller-owned selection (the connector's own config stack, a bot's
+    // projected composition) beats the desktop store's per-session entry.
+    selection: ctx.compositionSelection,
   })
   const activeMode = turnMode.mode
   const activePreset = turnMode.preset
@@ -1358,6 +1382,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     sessionModelBelongsToAgent && !sessionModelMatchesAgent ? undefined : session?.model
   const sessionProviderOverride = sessionModelBelongsToAgent ? undefined : session?.providerOverride
   let model: string | undefined =
+    grant?.model ??
     imModelOverride ??
     sessionModel ??
     memberOverride?.modelOverride ??
@@ -1373,6 +1398,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // let the sidecar fall back to ANTHROPIC_API_KEY (legacy path) — that
   // best-effort semantic also covers a stale bot-default provider id.
   let providerId =
+    grant?.provider ??
     imProviderOverride ??
     sessionProviderOverride ??
     imDefaultProvider ??
@@ -1380,6 +1406,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     appDefault.provider ??
     "anthropic"
   const requestedEffort =
+    grant?.effort ??
     imOverrideRow?.reasoningOverride ??
     session?.effort ??
     session?.executionPolicy?.effort ??
@@ -2173,8 +2200,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // in parallel. The shared vector backend is reused, while each library keeps
   // its own collection and failure boundary.
   let agentKnowledgeSection = ""
+  const agentKnowledgeBaseIds = applyCapabilityIdDelta(
+    character?.knowledgeBaseIds ?? [],
+    grant?.knowledgeBases
+  )
   if (
-    (character?.knowledgeBaseIds?.length ?? 0) > 0 &&
+    agentKnowledgeBaseIds.length > 0 &&
     ctx.projectKnowledgeDeps?.vectorBackend &&
     ctx.projectKnowledgeUserMessage?.trim()
   ) {
@@ -2182,7 +2213,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       const { applyAgentKnowledgeContextFromDb } =
         await import("@/lib/knowledge-base/runtime/apply-agent-knowledge-context")
       const result = await applyAgentKnowledgeContextFromDb({
-        knowledgeBaseIds: character?.knowledgeBaseIds ?? [],
+        knowledgeBaseIds: agentKnowledgeBaseIds,
         userMessage: ctx.projectKnowledgeUserMessage,
         topKPerBase: 5,
         tokenBudget: 2_000,
@@ -2330,17 +2361,27 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const pluginAllowedTools = new Set<string>()
   const pluginUsageIds: string[] = []
   const pluginIdMap = new Map<string, string>()
-  if (character?.pluginSkillIds?.length || explicitSkillIds.size > 0) {
+  if (
+    character?.pluginSkillIds?.length ||
+    explicitSkillIds.size > 0 ||
+    (grant?.skills?.add?.length ?? 0) > 0
+  ) {
     try {
       const { resolveSkillsForCharacter, extractContainerSkillIds, renderResolvedSkillsSection } =
         await import("@/lib/claude/skills-bridge")
       const { getSkill } = await import("@/lib/plugin/registries/skill-registry")
-      const pluginSkillIds = [
-        ...new Set([
+      // A grant's skill ids reach this path only when they name a plugin skill;
+      // host ids were already resolved with the character's own set above.
+      const pluginSkillIds = applyCapabilityIdDelta(
+        [
           ...(character?.pluginSkillIds ?? []),
           ...[...explicitSkillIds].filter((id) => getSkill(id)),
-        ]),
-      ]
+        ],
+        {
+          add: (grant?.skills?.add ?? []).filter((id) => getSkill(id)),
+          remove: grant?.skills?.remove,
+        }
+      )
       const resolvedPlugin = await resolveSkillsForCharacter(pluginSkillIds, capabilityScope, [
         ...explicitSkillIds,
       ])
@@ -2470,7 +2511,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     activeMode?.permissionMode ??
     character?.permissionMode ??
     appSettings?.permissionMode
-  if (permissionMode) opts.permissionMode = permissionMode
+  // A grant's mode is a cap, never a rung: it can only lower what the chain chose.
+  const cappedPermissionMode = capPermissionModeByGrant(permissionMode, grant)
+  if (cappedPermissionMode) opts.permissionMode = cappedPermissionMode
 
   // --- Permission ruleset (OpenCode-style static command rules) ------------
   // Serialize the user's explicit `command-glob → allow|ask|deny` overrides
@@ -2802,8 +2845,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // A grant's tools join the allow list the way a skill's declared tools do.
+  for (const t of grant?.tools?.add ?? []) allowed.add(t)
   if (allowed.size > 0) opts.allowedTools = [...allowed]
-  if (character?.disallowedTools?.length) opts.disallowedTools = [...character.disallowedTools]
+  {
+    const denied = new Set([...(character?.disallowedTools ?? []), ...(grant?.tools?.deny ?? [])])
+    if (denied.size > 0) opts.disallowedTools = [...denied]
+  }
 
   // --- Tool/MCP filter overlay (global → character → session; deny wins) ---
   // Configurable allow/deny filter over the unified tool catalog
@@ -2890,6 +2938,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         const wanted = new Set(team.mcpServerIds)
         chosen = enabled.filter((srv) => wanted.has(srv.id))
       }
+    }
+
+    // A grant adjusts the subset, drawing only from servers enabled in this
+    // workspace: an id that is not enabled is ignored, never switched on.
+    if (grant?.mcpServers) {
+      const only = grant.mcpServers.only ? new Set(grant.mcpServers.only) : null
+      const base = only ? chosen.filter((srv) => only.has(srv.id)) : chosen
+      const wanted = new Set(
+        applyCapabilityIdDelta(
+          base.map((srv) => srv.id),
+          grant.mcpServers
+        )
+      )
+      chosen = enabled.filter((srv) => wanted.has(srv.id))
     }
 
     // Apply the configurable filter's MCP-server subset on top of the
@@ -4181,6 +4243,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     })
   }
 
+  // --- Capability-grant instructions ----------------------------------------
+  // Prompt fragments a feature attached to this run. They ride the dynamic
+  // tail after the agent's own prompt and never replace it.
+  {
+    const fragments = (grant?.instructions ?? []).map((f) => f.trim()).filter(Boolean)
+    if (fragments.length > 0) {
+      const existing = opts.appendSystemPrompt?.trim() ?? ""
+      opts.appendSystemPrompt = [existing, ...fragments].filter(Boolean).join("\n\n")
+    }
+  }
+
   // --- Inbox / connector suppression gate (ADR-0009) -----------------------
   // Stamps `opts.suppressedReason` so the connector runtime can short-circuit
   // the sidecar call (no streaming run, no outbound enqueue) and instead
@@ -4549,6 +4622,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (patched.appendSystemPrompt !== undefined)
       opts.appendSystemPrompt = patched.appendSystemPrompt
     if (patched.allowedTools !== undefined) opts.allowedTools = patched.allowedTools
+  }
+
+  // --- Capability-grant narrowing ------------------------------------------
+  // Re-applied after the plugin hook so no earlier layer can re-open what a
+  // grant denied or restricted. The ceiling and the finalizer still run below.
+  if (grant?.tools?.restrictTo) {
+    const keep = new Set(grant.tools.restrictTo)
+    opts.allowedTools =
+      opts.allowedTools && opts.allowedTools.length > 0
+        ? opts.allowedTools.filter((t) => keep.has(t))
+        : [...keep]
+  }
+  if (grant?.tools?.deny?.length) {
+    opts.disallowedTools = [...new Set([...(opts.disallowedTools ?? []), ...grant.tools.deny])]
+  }
+  if (grant?.permissionMode) {
+    const capped = capPermissionModeByGrant(opts.permissionMode, grant)
+    if (capped) opts.permissionMode = capped
   }
 
   // --- Parent permission ceiling (fail-closed, FINAL clamp) ----------------

@@ -67,12 +67,43 @@ describe("runPluginAgent", () => {
       systemPrompt: "S",
       appendSystem: "A",
       model: "m",
+      provider: "openai",
       defaultProvider: "openai",
+      grantSource: { kind: "plugin" },
       toolsEnabled: true,
       allowedTools: ["web_fetch"],
       temperature: 0.3,
     })
     expect(cfg.abortSignal).toBeInstanceOf(AbortSignal)
+  })
+
+  it("passes validated grants through, stamped with the calling plugin", async () => {
+    await runPluginAgent(
+      "hi",
+      {
+        toolsEnabled: true,
+        capabilityGrants: [
+          { schemaVersion: 1, source: { kind: "bot", id: "spoof" }, skills: { add: ["report"] } },
+        ],
+      },
+      { pluginId: "acme" }
+    )
+    const cfg = mockExecute.mock.calls[0][1]!
+    expect(cfg.grantSource).toEqual({ kind: "plugin", id: "acme" })
+    expect(cfg.capabilityGrants).toEqual([
+      { schemaVersion: 1, source: { kind: "plugin", id: "acme" }, skills: { add: ["report"] } },
+    ])
+  })
+
+  it("rejects a run carrying a malformed grant", async () => {
+    await expect(
+      runPluginAgent("hi", {
+        capabilityGrants: [
+          { schemaVersion: 1, source: { kind: "plugin" }, effort: "huge" } as never,
+        ],
+      })
+    ).rejects.toThrow(/capabilityGrants\[0\] is invalid/)
+    expect(mockExecute).not.toHaveBeenCalled()
   })
 
   it("honours a caller-supplied agentId", async () => {

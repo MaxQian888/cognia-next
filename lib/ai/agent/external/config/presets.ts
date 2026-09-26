@@ -531,6 +531,7 @@ export function createAgentFromPreset(
       : overrides?.network,
     defaultPermissionMode: overrides?.defaultPermissionMode || preset.defaultPermissionMode,
     ...(overrides?.codexOptions !== undefined ? { codexOptions: overrides.codexOptions } : {}),
+    ...(overrides?.cogniaModel !== undefined ? { cogniaModel: overrides.cogniaModel } : {}),
     tags: [...preset.tags, ...(overrides?.tags || [])],
     timeout: overrides?.timeout || 30000,
     metadata: {

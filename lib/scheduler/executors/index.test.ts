@@ -5,8 +5,8 @@
  * built-in chat/agent/skill/external-agent/script/plugin/backup/custom
  * handlers into the task scheduler. The chat-style runner is the bulk of the
  * surface here: it plumbs the same `resolveSendOptions` pipeline that the
- * interactive composer uses, then layers payload-level overrides on top
- * before handing off to `lib/claude/ipc.sendPrompt`.
+ * interactive composer uses, with the payload's capability knobs passed in as
+ * a grant, before handing off to `lib/claude/ipc.sendPrompt`.
  */
 
 // Host gating goes through `lib/scheduler/host-support` → `lib/platform/detect`
@@ -27,13 +27,6 @@ jest.mock("@/lib/platform/detect", () => {
 import * as platformDetect from "@/lib/platform/detect"
 import { BUILT_IN_EXECUTOR_TASK_TYPES } from "../executor-owners"
 
-/**
- * The capability scope these helpers take. A schedule resolves skills and MCP
- * servers against the workspace that owns its conversation; `{}` here means
- * "whatever `resolveScopeProjectId` decides", which is what these unit cases
- * exercise — the threading itself is covered by the run-level tests.
- */
-const SCOPE = {}
 const hostState = (
   platformDetect as unknown as { __hostState: { tauri: boolean; platform?: string } }
 ).__hostState
@@ -134,6 +127,16 @@ const renderSkillsSectionMock = jest.fn((skills: Array<{ id: string }>) =>
 jest.mock("@/lib/db/skills", () => ({
   listEnabledSkillsByIds: (ids: string[]) => listEnabledSkillsByIdsMock(ids),
   renderSkillsSection: (skills: Array<{ id: string }>) => renderSkillsSectionMock(skills),
+}))
+
+const resolveCharacterByIdMock = jest.fn(async (id: string) => ({ id }) as unknown)
+jest.mock("@/lib/db/characters", () => ({
+  resolveCharacterById: (id: string) => resolveCharacterByIdMock(id),
+}))
+
+const getPluginSkillMock = jest.fn((_id: string) => undefined as unknown)
+jest.mock("@/lib/plugin/registries/skill-registry", () => ({
+  getSkill: (id: string) => getPluginSkillMock(id),
 }))
 
 const resolveSendOptionsMock = jest.fn(async (_ctx: unknown) => ({}) as Record<string, unknown>)
@@ -244,8 +247,9 @@ import {
   executeCustomTask,
   reconcileLegacyPromptFields,
   resolveAgentMode,
-  applyPayloadOverrides,
-  applyAdHocSkill,
+  buildSchedulerCapabilityGrant,
+  withPayloadBuiltinTools,
+  applyPayloadDirectories,
   alignConfinementRoots,
 } from "./index"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
@@ -317,6 +321,10 @@ beforeEach(() => {
   renderSkillsSectionMock.mockClear()
   resolveSendOptionsMock.mockReset()
   resolveSendOptionsMock.mockResolvedValue({})
+  resolveCharacterByIdMock.mockReset()
+  resolveCharacterByIdMock.mockImplementation(async (id: string) => ({ id }))
+  getPluginSkillMock.mockReset()
+  getPluginSkillMock.mockReturnValue(undefined)
   executeScriptMock.mockReset()
   executePluginTaskMock.mockClear()
   executeBackupTaskMock.mockClear()
@@ -439,102 +447,66 @@ describe("resolveAgentMode", () => {
   })
 })
 
-describe("applyPayloadOverrides", () => {
-  it("assigns model / permissionMode / maxTurns / effort", async () => {
-    const out = await applyPayloadOverrides(
-      {},
-      { prompt: "p", model: "m", permissionMode: "plan", maxTurns: 5, effort: "high" },
-      null,
-      SCOPE
-    )
-    expect(out).toMatchObject({
+describe("buildSchedulerCapabilityGrant", () => {
+  const task = { id: "task-1" }
+
+  it("returns undefined when the payload sets no capability knob", () => {
+    expect(buildSchedulerCapabilityGrant(task, { prompt: "p" })).toBeUndefined()
+    expect(
+      buildSchedulerCapabilityGrant(task, { prompt: "p", model: "  ", appendSystemPrompt: " " })
+    ).toBeUndefined()
+  })
+
+  it("maps every knob onto the grant, attributed to the task", () => {
+    expect(
+      buildSchedulerCapabilityGrant(task, {
+        prompt: "p",
+        model: " m ",
+        effort: "high",
+        maxTurns: 5,
+        appendSystemPrompt: " extra ",
+        allowedTools: ["Bash"],
+        disallowedTools: ["WebSearch"],
+        mcpServerIds: ["a"],
+        disabledSkillIds: ["s2"],
+        permissionMode: "plan",
+      })
+    ).toEqual({
+      schemaVersion: 1,
+      source: { kind: "scheduler", id: "task-1" },
       model: "m",
-      permissionMode: "plan",
-      maxTurns: 5,
       effort: "high",
+      maxTurns: 5,
+      instructions: ["extra"],
+      tools: { add: ["Bash"], deny: ["WebSearch"] },
+      mcpServers: { only: ["a"], add: ["a"] },
+      skills: { remove: ["s2"] },
+      permissionMode: "plan",
     })
   })
-  it("appends to existing appendSystemPrompt", async () => {
-    const out = await applyPayloadOverrides(
-      { appendSystemPrompt: "base" },
-      { prompt: "p", appendSystemPrompt: "extra" },
-      null,
-      SCOPE
-    )
-    expect(out.appendSystemPrompt).toBe("base\n\nextra")
+
+  it("keeps an empty MCP list as an explicit 'no servers'", () => {
+    expect(
+      buildSchedulerCapabilityGrant(task, { prompt: "p", mcpServerIds: [] })?.mcpServers
+    ).toEqual({ only: [], add: [] })
   })
-  it("uses payload appendSystemPrompt verbatim when base is empty", async () => {
-    const out = await applyPayloadOverrides(
-      {},
-      { prompt: "p", appendSystemPrompt: "extra" },
-      null,
-      SCOPE
-    )
-    expect(out.appendSystemPrompt).toBe("extra")
+
+  it("adds denials rather than replacing the resolved deny list", () => {
+    const grant = buildSchedulerCapabilityGrant(task, { prompt: "p", disallowedTools: ["New"] })
+    expect(grant?.tools).toEqual({ deny: ["New"] })
   })
-  it("unions allowedTools", async () => {
-    const out = await applyPayloadOverrides(
-      { allowedTools: ["Read", "Write"] },
-      { prompt: "p", allowedTools: ["Bash", "Read"] },
-      null,
-      SCOPE
-    )
-    expect(out.allowedTools).toEqual(expect.arrayContaining(["Read", "Write", "Bash"]))
-    expect(out.allowedTools).toHaveLength(3)
+})
+
+describe("withPayloadBuiltinTools", () => {
+  it("returns the settings untouched without a patch", () => {
+    const settings = { id: "singleton" } as unknown as Parameters<typeof withPayloadBuiltinTools>[0]
+    expect(withPayloadBuiltinTools(settings, { prompt: "p" })).toBe(settings)
   })
-  it("unions additionalDirectories", async () => {
-    const out = await applyPayloadOverrides(
-      { additionalDirectories: ["/a"] },
-      { prompt: "p", additionalDirectories: ["/b", "/a"] },
-      null,
-      SCOPE
-    )
-    expect(out.additionalDirectories).toHaveLength(2)
-  })
-  it("replaces disallowedTools", async () => {
-    const out = await applyPayloadOverrides(
-      { disallowedTools: ["Old"] },
-      { prompt: "p", disallowedTools: ["New"] },
-      null,
-      SCOPE
-    )
-    expect(out.disallowedTools).toEqual(["New"])
-  })
-  it("resolves payload.mcpServerIds against enabled servers", async () => {
-    listEnabledMcpServersMock.mockResolvedValueOnce([
-      { id: "a", enabled: true },
-      { id: "b", enabled: true },
-    ])
-    const out = await applyPayloadOverrides({}, { prompt: "p", mcpServerIds: ["a"] }, null, SCOPE)
-    expect(out.mcpServers).toMatchObject({ a: { id: "a" } })
-  })
-  it("strips mcpServers when payload requests an empty subset", async () => {
-    listEnabledMcpServersMock.mockResolvedValueOnce([{ id: "a", enabled: true }])
-    const out = await applyPayloadOverrides(
-      { mcpServers: { x: {} } },
-      { prompt: "p", mcpServerIds: [] },
-      null,
-      SCOPE
-    )
-    expect(out.mcpServers).toBeUndefined()
-  })
-  it("survives listEnabledMcpServers failure", async () => {
-    listEnabledMcpServersMock.mockRejectedValueOnce(new Error("boom"))
-    const out = await applyPayloadOverrides(
-      { mcpServers: { x: {} } },
-      { prompt: "p", mcpServerIds: ["a"] },
-      null,
-      SCOPE
-    )
-    expect(out).toBeDefined()
-  })
-  it("shallow-merges builtinTools over the resolved AppSettings", async () => {
-    const out = await applyPayloadOverrides(
-      {},
-      { prompt: "p", builtinTools: { git: false } },
+
+  it("shallow-merges the patch over the user's toggles", () => {
+    const out = withPayloadBuiltinTools(
       {
         id: "singleton",
-        alwaysAllowTools: [],
         builtinTools: {
           fileExtras: true,
           git: true,
@@ -542,40 +514,37 @@ describe("applyPayloadOverrides", () => {
           environment: true,
           shellAdvanced: false,
         },
-      } as unknown as Parameters<typeof applyPayloadOverrides>[2],
-      SCOPE
+      } as unknown as Parameters<typeof withPayloadBuiltinTools>[0],
+      { prompt: "p", builtinTools: { git: false } }
     )
-    expect(out.builtinTools).toMatchObject({
-      fileExtras: true,
-      git: false,
-      environment: true,
+    expect(out?.builtinTools).toMatchObject({ fileExtras: true, git: false, environment: true })
+  })
+
+  it("starts from all-off toggles when there are no settings", () => {
+    expect(
+      withPayloadBuiltinTools(null, { prompt: "p", builtinTools: { git: true } })?.builtinTools
+    ).toEqual({
+      fileExtras: false,
+      git: true,
+      process: false,
+      environment: false,
+      shellAdvanced: false,
     })
   })
 })
 
-describe("applyAdHocSkill", () => {
-  it("is a no-op when no skillId is given", async () => {
-    const out = await applyAdHocSkill({}, undefined, SCOPE)
-    expect(out).toEqual({})
+describe("applyPayloadDirectories", () => {
+  it("unions additionalDirectories", () => {
+    const out = applyPayloadDirectories(
+      { additionalDirectories: ["/a"] },
+      { prompt: "p", additionalDirectories: ["/b", "/a"] }
+    )
+    expect(out.additionalDirectories).toEqual(["/a", "/b"])
   })
-  it("is a no-op when the skill is not found", async () => {
-    listEnabledSkillsByIdsMock.mockResolvedValueOnce([])
-    const out = await applyAdHocSkill({}, "missing", SCOPE)
-    expect(out).toEqual({})
-  })
-  it("appends the skill section and unions allowedTools", async () => {
-    listEnabledSkillsByIdsMock.mockResolvedValueOnce([{ id: "s1", allowedTools: ["TodoWrite"] }])
-    renderSkillsSectionMock.mockReturnValueOnce("SKILL_SECTION")
-    const out = await applyAdHocSkill({ systemPrompt: "base", allowedTools: ["Read"] }, "s1", SCOPE)
-    expect(out.systemPrompt).toContain("base")
-    expect(out.systemPrompt).toContain("SKILL_SECTION")
-    expect(out.allowedTools).toEqual(expect.arrayContaining(["Read", "TodoWrite"]))
-  })
-  it("uses skill section verbatim when base systemPrompt is absent", async () => {
-    listEnabledSkillsByIdsMock.mockResolvedValueOnce([{ id: "s1" }])
-    renderSkillsSectionMock.mockReturnValueOnce("SKILL")
-    const out = await applyAdHocSkill({}, "s1", SCOPE)
-    expect(out.systemPrompt).toBe("SKILL")
+
+  it("returns the options untouched without directories", () => {
+    const base = { allowedTools: ["Read"] }
+    expect(applyPayloadDirectories(base, { prompt: "p" })).toBe(base)
   })
 })
 
@@ -647,7 +616,12 @@ describe("executeChatTask", () => {
     const [sId, prompt, options] = sendPromptMock.mock.calls[0] as [string, string, SendOptions]
     expect(sId).toBe("session-created")
     expect(prompt).toBe("hello")
-    expect(options.model).toBe("m")
+    expect(options).toEqual({})
+    // The model heads the resolver's chain, so the provider is derived for it.
+    const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as {
+      capabilityGrants?: Array<{ model?: string }>
+    }
+    expect(ctx.capabilityGrants?.[0]?.model).toBe("m")
     expect(r.success).toBe(true)
   })
   it("reuses an existing sessionId when getSession returns a row", async () => {
@@ -871,7 +845,7 @@ describe("executeChatTask", () => {
     expect(sendPromptMock).toHaveBeenCalled()
     expect(result.success).toBe(true)
   })
-  it("layers payload.allowedTools on top of resolved allowedTools", async () => {
+  it("hands payload.allowedTools to the resolver as a grant instead of patching after it", async () => {
     resolveSendOptionsMock.mockResolvedValueOnce({ allowedTools: ["Read"] } as Record<
       string,
       unknown
@@ -882,11 +856,15 @@ describe("executeChatTask", () => {
       makeExecution(),
       makeSignal()
     )
+    const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as {
+      capabilityGrants?: Array<{ tools?: { add?: string[] } }>
+    }
+    expect(ctx.capabilityGrants?.[0]?.tools?.add).toEqual(["Bash", "Read"])
+    // What the resolver clamped is what is sent.
     const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
-    expect(options.allowedTools).toEqual(expect.arrayContaining(["Read", "Bash"]))
-    expect(options.allowedTools).toHaveLength(2)
+    expect(options.allowedTools).toEqual(["Read"])
   })
-  it("propagates payload.disabledSkillIds into resolveSendOptions ctx", async () => {
+  it("propagates payload.disabledSkillIds into the grant's skill removals", async () => {
     emitTerminalResult()
     await executeChatTask(
       makeTask({ payload: { prompt: "hi", disabledSkillIds: ["s2"] } }),
@@ -894,9 +872,27 @@ describe("executeChatTask", () => {
       makeSignal()
     )
     const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as {
-      session?: { disabledSkillIds?: string[] }
+      capabilityGrants?: Array<{ skills?: { remove?: string[] } }>
     }
-    expect(ctx?.session?.disabledSkillIds).toEqual(expect.arrayContaining(["s2"]))
+    expect(ctx.capabilityGrants?.[0]?.skills?.remove).toEqual(["s2"])
+  })
+  it("sends no grant when the payload sets no capability knob", async () => {
+    emitTerminalResult()
+    await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution(), makeSignal())
+    const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(ctx).not.toHaveProperty("capabilityGrants")
+  })
+  it("resolves with the payload's builtinTools patch applied to settings", async () => {
+    emitTerminalResult()
+    await executeChatTask(
+      makeTask({ payload: { prompt: "hi", builtinTools: { git: true } } }),
+      makeExecution(),
+      makeSignal()
+    )
+    const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as {
+      appSettings?: { builtinTools?: { git?: boolean } }
+    }
+    expect(ctx.appSettings?.builtinTools?.git).toBe(true)
   })
   it("translates an `error` event into a failure result", async () => {
     onClaudeMessageMock.mockImplementationOnce(async (cb) => {
@@ -1145,7 +1141,6 @@ describe("executeChatTask — owning workspace (ADR-0144)", () => {
     const bound = makeProject("project-1")
     getSessionMock.mockResolvedValueOnce({ id: "reuse", title: "x", projectId: "proj-session" })
     getAllProjectsMock.mockResolvedValueOnce([makeProject("proj-session"), bound])
-    listEnabledMcpServersMock.mockResolvedValueOnce([{ id: "a", enabled: true }])
     emitTerminalResult("reuse")
 
     const r = await executeChatTask(
@@ -1167,7 +1162,11 @@ describe("executeChatTask — owning workspace (ADR-0144)", () => {
     )
 
     expect(r.success).toBe(true)
-    expect(listEnabledMcpServersMock).toHaveBeenCalledWith({ projectId: "project-1" })
+    // The resolver scopes the grant's MCP servers by the session it reads.
+    expect(resolveSendOptionsMock.mock.calls[0]?.[0]).toMatchObject({
+      session: { projectId: "project-1" },
+      capabilityGrants: [expect.objectContaining({ mcpServers: { only: ["a"], add: ["a"] } })],
+    })
     expect(resolvedActiveProject()).toBe(bound)
   })
 
@@ -1356,6 +1355,17 @@ describe("executeAgentTask", () => {
       expect.objectContaining({ status: "completed" })
     )
   })
+  it("fails without minting a session when the agent no longer exists", async () => {
+    resolveCharacterByIdMock.mockResolvedValueOnce(undefined)
+    const r = await executeAgentTask(
+      makeTask({ payload: { prompt: "hi", characterId: "gone" } }),
+      makeExecution(),
+      makeSignal()
+    )
+    expect(r).toMatchObject({ success: false, error: 'Agent "gone" not found' })
+    expect(createSessionMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
   it("rejects undefined payload", async () => {
     const r = await executeAgentTask(
       makeTask({ payload: undefined }),
@@ -1389,11 +1399,10 @@ describe("executeSkillTask", () => {
     )
     expect(r.success).toBe(false)
   })
-  it("invokes applyAdHocSkill when skillId is provided", async () => {
+  it("attaches the task's skill as an explicit ephemeral skill", async () => {
     listEnabledSkillsByIdsMock.mockResolvedValueOnce([
       { id: "skill-1", allowedTools: ["TodoWrite"] },
     ])
-    renderSkillsSectionMock.mockReturnValueOnce("SKILL")
     emitTerminalResult()
     const r = await executeSkillTask(
       makeTask({ payload: { prompt: "hi", skillId: "skill-1" } }),
@@ -1402,8 +1411,27 @@ describe("executeSkillTask", () => {
     )
     expect(r.success).toBe(true)
     expect(listEnabledSkillsByIdsMock).toHaveBeenCalledWith(["skill-1"])
-    const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
-    expect(options.allowedTools).toEqual(expect.arrayContaining(["TodoWrite"]))
+    const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as { ephemeralSkillIds?: string[] }
+    expect(ctx.ephemeralSkillIds).toEqual(["skill-1"])
+  })
+  it("accepts a plugin-contributed skill", async () => {
+    getPluginSkillMock.mockReturnValueOnce({ id: "plugin:skill" })
+    emitTerminalResult()
+    const r = await executeSkillTask(
+      makeTask({ payload: { prompt: "hi", skillId: "plugin:skill" } }),
+      makeExecution(),
+      makeSignal()
+    )
+    expect(r.success).toBe(true)
+  })
+  it("fails when the task's skill is not enabled anywhere", async () => {
+    const r = await executeSkillTask(
+      makeTask({ payload: { prompt: "hi", skillId: "missing" } }),
+      makeExecution(),
+      makeSignal()
+    )
+    expect(r).toMatchObject({ success: false, error: 'Skill "missing" is not enabled' })
+    expect(sendPromptMock).not.toHaveBeenCalled()
   })
 })
 
@@ -1463,7 +1491,7 @@ describe("chat-style runs — Workspace Trust", () => {
     expect((r.output as { workspaceTrust: object }).workspaceTrust).not.toHaveProperty("unverified")
   })
 
-  it("keeps Restricted Mode when the payload replaces disallowedTools or allows a mutator", async () => {
+  it("keeps Restricted Mode when the payload denies a tool or allows a mutator", async () => {
     getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
     isWorkspaceTrustedMock.mockResolvedValue(false)
     // What `resolveSendOptions` returns for a restricted send.
@@ -1479,24 +1507,30 @@ describe("chat-style runs — Workspace Trust", () => {
       makeSignal()
     )
 
+    // The payload reaches the resolver, which owns Restricted Mode; nothing
+    // after it can hand back a tool the restriction removed.
+    expect(sendCtx()).toMatchObject({
+      workspaceRestricted: true,
+      capabilityGrants: [
+        expect.objectContaining({ tools: { add: ["Bash"], deny: ["WebSearch"] } }),
+      ],
+    })
     const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
-    expect(options.disallowedTools).toEqual(
-      expect.arrayContaining(["WebSearch", "Bash", "Edit", "Write"])
-    )
+    expect(options.disallowedTools).toEqual(["Bash", "Edit", "Write"])
     expect(options.allowedTools).toEqual(["Read"])
   })
 
-  it("leaves a trusted run's payload disallowedTools as the payload set them", async () => {
+  it("never lets a trusted run's payload disallowedTools replace the resolved denials", async () => {
     getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
     resolveSendOptionsMock.mockResolvedValueOnce({
-      disallowedTools: ["Old"],
+      disallowedTools: ["Old", "New"],
     } as unknown as Record<string, unknown>)
     emitTerminalResult()
 
     await executeChatTask(ownedTask({ disallowedTools: ["New"] }), makeExecution(), makeSignal())
 
     const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
-    expect(options.disallowedTools).toEqual(["New"])
+    expect(options.disallowedTools).toEqual(["Old", "New"])
   })
 
   it("names only the roots that lack a grant", async () => {
@@ -1581,6 +1615,7 @@ describe("chat-style runs — Workspace Trust", () => {
       makeSignal()
     )
     emitTerminalResult()
+    listEnabledSkillsByIdsMock.mockResolvedValueOnce([{ id: "s" }])
     const skill = await executeSkillTask(
       makeTask({ type: "skill", projectId: "project-1", payload: { prompt: "hi", skillId: "s" } }),
       makeExecution(),

@@ -36,6 +36,7 @@ import { getMcpServer, listMcpServers } from "@/lib/db/mcp-servers"
 import { listPlugins } from "@/lib/db/plugins"
 import { listWorkflows } from "@/lib/db/workflows"
 import { listTwins } from "@/lib/db/twins"
+import { listKnowledgeBases } from "@/lib/db/knowledge-bases"
 import { listAdapterInstances } from "@/lib/db/adapter-instances"
 import { discoverMcpServerViaSidecar } from "@/lib/claude/feature-call"
 import { isTauri } from "@/lib/tauri"
@@ -307,13 +308,18 @@ interface MultiWrapperProps {
   onChange: (next: string[]) => void
 }
 
+interface ToolPickerProps extends MultiWrapperProps {
+  /** What an empty list means for this field. Defaults to "unrestricted". */
+  emptyHint?: string
+}
+
 /**
  * Tool names an agent turn may use. Two registries feed it: the SDK's own
  * native tools, which cannot be derived and are listed in
  * `agent-tool-names.ts`, and every entry in `builtin-tools-data.json`. Free
  * entry stays open for plugin tools the host has not loaded yet.
  */
-export function ToolPicker(props: MultiWrapperProps) {
+export function ToolPicker({ emptyHint, ...props }: ToolPickerProps) {
   const t = useTranslations("workflows.forms.pickers")
   const options = useMemo(
     () => [
@@ -327,7 +333,7 @@ export function ToolPicker(props: MultiWrapperProps) {
       {...props}
       options={options}
       placeholder={t("tool")}
-      emptyHint={t("toolsUnrestricted")}
+      emptyHint={emptyHint ?? t("toolsUnrestricted")}
     />
   )
 }
@@ -338,6 +344,25 @@ export function SkillMultiPicker(props: MultiWrapperProps) {
   const rows = useLiveQuery(() => listSkills(), [])
   const options = useMemo(() => rows?.map((s) => ({ value: s.id, label: s.name })) ?? [], [rows])
   return <MultiEntityPicker {...props} options={options} placeholder={t("skill")} />
+}
+
+/** Multi-select over the same MCP server rows `McpServerPicker` reads. */
+export function McpServerMultiPicker(props: MultiWrapperProps) {
+  const t = useTranslations("workflows.forms.pickers")
+  const rows = useLiveQuery(() => listMcpServers(), [])
+  const options = useMemo(
+    () => rows?.map((s) => ({ value: s.id, label: s.name ?? s.id })) ?? [],
+    [rows]
+  )
+  return <MultiEntityPicker {...props} options={options} placeholder={t("mcpServer")} />
+}
+
+/** Multi-select over the reusable Agent knowledge bases. */
+export function KnowledgeBaseMultiPicker(props: MultiWrapperProps) {
+  const t = useTranslations("workflows.forms.pickers")
+  const rows = useLiveQuery(() => listKnowledgeBases(), [])
+  const options = useMemo(() => rows?.map((kb) => ({ value: kb.id, label: kb.name })) ?? [], [rows])
+  return <MultiEntityPicker {...props} options={options} placeholder={t("knowledgeBase")} />
 }
 
 export function CharacterPicker({ allowExpression = true, ...props }: WrapperProps) {

@@ -1,4 +1,4 @@
-import { runAgentTurn } from "./agent-turn"
+import { agentTurnCapabilityGrant, runAgentTurn } from "./agent-turn"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 
 const mockStartSpan = jest.fn(() => ({ spanId: "span1", traceId: "trace1" }))
@@ -151,6 +151,63 @@ describe("runAgentTurn", () => {
         autoRouting: expect.objectContaining({ defaultSelection: "auto" }),
       })
     )
+  })
+
+  it("injects the node's capability fields as one grant attributed to the step", async () => {
+    await runAgentTurn(
+      makeCtx({
+        prompt: "go",
+        characterId: "char1",
+        skillIds: ["report", " ", "report"],
+        mcpServerIds: ["github"],
+        knowledgeBaseIds: ["kb-1"],
+        disallowedTools: ["Bash"],
+        instructions: "  Cite sources.  ",
+        permissionCap: "plan",
+      })
+    )
+    expect(mockRunCompletionRail).toHaveBeenCalledWith(
+      "go",
+      expect.objectContaining({
+        grantSource: { kind: "workflow", id: "wf1:n1" },
+        capabilityGrants: [
+          {
+            schemaVersion: 1,
+            source: { kind: "workflow", id: "wf1:n1" },
+            skills: { add: ["report"] },
+            mcpServers: { add: ["github"] },
+            knowledgeBases: { add: ["kb-1"] },
+            tools: { deny: ["Bash"] },
+            instructions: ["Cite sources."],
+            permissionMode: "plan",
+          },
+        ],
+      })
+    )
+  })
+
+  it("sends no grant for a node that injects nothing", async () => {
+    await runAgentTurn(makeCtx({ prompt: "go", characterId: "char1" }))
+    const cfg = mockRunCompletionRail.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(cfg).not.toHaveProperty("capabilityGrants")
+  })
+
+  it("runs injected instructions through the same egress guard as the prompt", async () => {
+    await runAgentTurn(
+      makeCtx(
+        { prompt: "go", instructions: "Email me at alice@example.com", piiGate: "redact" },
+        {
+          securityContext: {
+            piiEgressRequired: true,
+            sourceTriggerKind: "trigger.connector.inbound" as const,
+          },
+        }
+      )
+    )
+    const cfg = mockRunCompletionRail.mock.calls[0]?.[1] as {
+      capabilityGrants?: Array<{ instructions?: string[] }>
+    }
+    expect(cfg.capabilityGrants?.[0]?.instructions?.[0]).not.toContain("alice@example.com")
   })
 
   it("applies the parent IM ceiling only to the dynamic agent turn", async () => {
@@ -387,6 +444,24 @@ describe("runAgentTurn", () => {
       expect(output.channel).toBe("sidecar")
       expect(mockRunAgentRail).toHaveBeenCalledTimes(1)
       expect(mockRunCompletionRail).not.toHaveBeenCalled()
+    })
+  })
+})
+
+describe("agentTurnCapabilityGrant", () => {
+  const source = { workflowId: "wf", stepId: "s" }
+
+  it("is undefined when nothing is injected", () => {
+    expect(
+      agentTurnCapabilityGrant({ skillIds: [" "], mcpServerIds: [] }, "  ", source)
+    ).toBeUndefined()
+  })
+
+  it("carries only the fields that were set", () => {
+    expect(agentTurnCapabilityGrant({ permissionCap: "acceptEdits" }, undefined, source)).toEqual({
+      schemaVersion: 1,
+      source: { kind: "workflow", id: "wf:s" },
+      permissionMode: "acceptEdits",
     })
   })
 })

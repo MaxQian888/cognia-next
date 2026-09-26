@@ -26,7 +26,7 @@ import { registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution } from "@/lib/db/conversation-overrides"
-import { getCharacter } from "@/lib/db/characters"
+import { resolveCharacterById } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions, type InboxSendPolicy } from "@/lib/claude/build-options"
 import { resolveInboxSuppression } from "./policy-resolve"
@@ -249,7 +249,9 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
     getAdapterInstance(adapterId).catch(() => undefined),
     readForResolution(conversationKey).catch(() => undefined),
     getSettings().catch(() => undefined),
-    characterId ? getCharacter(characterId).catch(() => undefined) : Promise.resolve(undefined),
+    characterId
+      ? resolveCharacterById(characterId).catch(() => undefined)
+      : Promise.resolve(undefined),
   ])
 
   // Same resolver the inbound turn uses, so the digest cannot reach a

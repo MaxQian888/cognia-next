@@ -78,6 +78,43 @@ describe("createCharacter", () => {
     expect(fetched?.name).toBe("Hero")
   })
 
+  it("keeps every profile field the editor sets, including later additions", async () => {
+    const c = await createCharacter({
+      name: "Operator",
+      systemPrompt: "x",
+      enableComputerUse: true,
+      enableBrowserTools: true,
+      computerUseTarget: { connectionId: "conn-1" },
+      sandboxEnabled: true,
+      sandboxTier: "microvm",
+      accountIdOverride: "acct-2",
+      outputStyle: "concise",
+      maxThinkingTokens: 4096,
+    })
+    const fetched = await getCharacter(c.id)
+    expect(fetched).toMatchObject({
+      enableComputerUse: true,
+      enableBrowserTools: true,
+      computerUseTarget: { connectionId: "conn-1" },
+      sandboxEnabled: true,
+      sandboxTier: "microvm",
+      accountIdOverride: "acct-2",
+      outputStyle: "concise",
+      maxThinkingTokens: 4096,
+    })
+  })
+
+  it("never takes identity, timestamps or the built-in flag from the caller", async () => {
+    const c = await createCharacter({
+      name: "Copy",
+      systemPrompt: "x",
+      ...({ id: "char_taken", createdAt: 1, updatedAt: 1, isBuiltIn: true } as object),
+    })
+    expect(c.id).not.toBe("char_taken")
+    expect(c.createdAt).toBeGreaterThan(1)
+    expect(c.isBuiltIn).toBeUndefined()
+  })
+
   it("falls back to 'Untitled character' on empty name", async () => {
     const c = await createCharacter({ name: "   ", systemPrompt: "x" })
     expect(c.name).toBe("Untitled character")

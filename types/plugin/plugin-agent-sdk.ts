@@ -87,6 +87,14 @@ export interface PluginAgentRunOptions {
   characterId?: string
   /** Restrict the host tool surface for the run. */
   allowedTools?: string[]
+  /**
+   * Per-run capability grants, outermost first: extra skills, MCP servers,
+   * knowledge bases, instructions, tool additions and denials, a permission
+   * cap. The host validates each one, stamps this plugin as its source, and
+   * applies it inside the send-option resolver, so the agent's tool filter,
+   * Restricted Mode and any parent ceiling still clamp it. Tool-rail only.
+   */
+  capabilityGrants?: import("@cognia/agent-config-types/agent-capability-grant").AgentCapabilityGrantV1[]
   maxSteps?: number
   temperature?: number
   cwd?: string

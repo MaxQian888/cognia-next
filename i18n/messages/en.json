@@ -11499,7 +11499,9 @@
           "team": "Chats / Team",
           "workspace": "Workspace"
         },
-        "scopeTreeNote": "The expanded sidebar always groups by team. This choice applies to the list in the collapsed sidebar and the narrow-window drawer."
+        "scopeTreeNote": "The expanded sidebar always groups by team first. The options below apply to the list in the collapsed sidebar and the narrow-window drawer.",
+        "teamDateHeadings": "Date headings in each team",
+        "teamDateHeadingsSortNote": "Title and unread sorts have no date to split by."
       },
       "groupEmpty": "No conversations yet",
       "groupShowAll": "Show all {count}",
@@ -50641,6 +50643,7 @@
       "agentTurn": {
         "allowedTools": {
           "hint": "Restrict the synthesised persona's tool surface. Empty = host defaults.",
+          "hintAgent": "Restricts the agent's tools for this turn. Leave empty to keep the agent's own surface.",
           "label": "Allowed tools (comma-separated)",
           "placeholder": "Bash, Read, Edit"
         },
@@ -50652,13 +50655,39 @@
           "hint": "Scope for tool calls (desktop only).",
           "label": "Working directory"
         },
+        "disallowedTools": {
+          "empty": "No tools denied.",
+          "hint": "Never offered in this turn, whatever the agent allows.",
+          "label": "Denied tools"
+        },
+        "instructions": {
+          "hint": "Appended after the agent's own prompt for this turn. It never replaces it.",
+          "label": "Extra instructions"
+        },
+        "knowledgeBaseIds": {
+          "hint": "Queried for this turn alongside the agent's own. Needs the desktop vector store.",
+          "label": "Extra knowledge bases"
+        },
         "maxTurns": {
           "hint": "Upper bound on agent steps.",
           "label": "Max turns"
         },
+        "mcpServerIds": {
+          "hint": "Enabled servers attached for this turn. A disabled server is ignored, not switched on.",
+          "label": "Extra MCP servers"
+        },
         "model": {
           "hint": "Defaults to the provider's configured model.",
+          "hintAgent": "Overrides the agent's model for this turn. Leave empty to keep the agent's own.",
           "label": "Model (optional)"
+        },
+        "permissionCap": {
+          "acceptEdits": "Accept edits",
+          "default": "Ask before acting",
+          "hint": "Can lower the agent's permission mode for this turn, never raise it.",
+          "label": "Permission cap",
+          "none": "No cap",
+          "plan": "Plan (read-only)"
         },
         "piiGate": {
           "block": "Block sensitive data",
@@ -50672,6 +50701,10 @@
         "requireTools": {
           "hint": "Fail instead of degrading to text-only when the sidecar is unavailable (web/mobile).",
           "label": "Require tools"
+        },
+        "skillIds": {
+          "hint": "Attached for this turn on top of the agent's own skills.",
+          "label": "Extra skills"
         },
         "systemPrompt": {
           "hint": "Used when no character is selected.",
@@ -52895,6 +52928,7 @@
         "addLiteral": "Use “{value}”",
         "character": "Select a character",
         "externalAgent": "Select an external agent",
+        "knowledgeBase": "Add a knowledge base",
         "mcpServer": "Select an MCP server",
         "model": "Select a model",
         "noResults": "No matches",

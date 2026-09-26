@@ -73,27 +73,32 @@ jest.mock("./shared/entity-picker", () => ({
       }
     />
   ),
-  SkillMultiPicker: ({
-    value,
-    onChange,
-    id,
-  }: {
-    value?: readonly string[]
-    onChange?: (next: string[]) => void
-    id?: string
-  }) => (
-    <input
-      id={id}
-      value={(value ?? []).join(",")}
-      onChange={(e) =>
-        onChange?.(
-          e.target.value
-            .split(",")
-            .map((v) => v.trim())
-            .filter(Boolean)
-        )
-      }
-    />
+  ...Object.fromEntries(
+    ["SkillMultiPicker", "McpServerMultiPicker", "KnowledgeBaseMultiPicker"].map((name) => [
+      name,
+      ({
+        value,
+        onChange,
+        id,
+      }: {
+        value?: readonly string[]
+        onChange?: (next: string[]) => void
+        id?: string
+      }) => (
+        <input
+          id={id}
+          value={(value ?? []).join(",")}
+          onChange={(e) =>
+            onChange?.(
+              e.target.value
+                .split(",")
+                .map((v) => v.trim())
+                .filter(Boolean)
+            )
+          }
+        />
+      ),
+    ])
   ),
 }))
 
@@ -239,10 +244,59 @@ describe("AgentTurnConfig", () => {
     )
   })
 
-  it("hides persona fields when a character is selected", () => {
+  it("hides the system prompt for a named agent but keeps its model and tool overrides", () => {
     wrap(<AgentTurnConfig params={{ characterId: "char_1" }} onChange={jest.fn()} />)
     expect(screen.queryByLabelText("System prompt")).toBeNull()
-    expect(screen.queryByLabelText("Allowed tools (comma-separated)")).toBeNull()
+    expect(screen.getByLabelText("Allowed tools (comma-separated)")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Restricts the agent's tools for this turn. Leave empty to keep the agent's own surface."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("edits the per-turn capability fields and clears emptied lists", () => {
+    const onChange = jest.fn()
+    wrap(<AgentTurnConfig params={{ skillIds: ["old"] }} onChange={onChange} />)
+
+    fireEvent.change(screen.getByLabelText("Extra skills"), { target: { value: "report, digest" } })
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ skillIds: ["report", "digest"] })
+    )
+    fireEvent.change(screen.getByLabelText("Extra skills"), { target: { value: "" } })
+    expect(onChange.mock.calls.at(-1)?.[0].skillIds).toBeUndefined()
+
+    fireEvent.change(screen.getByLabelText("Extra MCP servers"), { target: { value: "github" } })
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ mcpServerIds: ["github"] }))
+
+    fireEvent.change(screen.getByLabelText("Extra knowledge bases"), { target: { value: "kb-1" } })
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ knowledgeBaseIds: ["kb-1"] })
+    )
+
+    fireEvent.change(screen.getByLabelText("Denied tools"), { target: { value: "Bash" } })
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ disallowedTools: ["Bash"] })
+    )
+
+    fireEvent.change(screen.getByLabelText("Extra instructions"), {
+      target: { value: "Cite sources." },
+    })
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ instructions: "Cite sources." })
+    )
+  })
+
+  it("shows no permission cap by default", () => {
+    wrap(<AgentTurnConfig params={{}} onChange={jest.fn()} />)
+    expect(screen.getByRole("combobox", { name: "Permission cap" })).toHaveTextContent("No cap")
+  })
+
+  it("renders a saved permission cap", () => {
+    wrap(<AgentTurnConfig params={{ permissionCap: "plan" }} onChange={jest.fn()} />)
+    expect(screen.getByRole("combobox", { name: "Permission cap" })).toHaveTextContent(
+      "Plan (read-only)"
+    )
   })
 
   it("shows requireTools only while tools are enabled", () => {

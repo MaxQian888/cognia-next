@@ -61,7 +61,6 @@ import {
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import { provisioningForWorkspaceRoot } from "@/lib/task-workspace/workspace-provisioning"
 import { getProjectEnvironment } from "@/lib/db/project-environments"
-import { withRestrictedModeDenials } from "@/lib/workspace/restricted-tools"
 import { remapExactRoots } from "@/lib/task-workspace/root-aliases"
 import type { Project } from "@/types"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
@@ -107,13 +106,16 @@ import {
   settleAgentTaskAttempt,
 } from "@/lib/db/agent-tasks"
 import { getSettings } from "@/lib/db/settings"
-import { listEnabledMcpServers, buildMcpServerMapResolved } from "@/lib/db/mcp-servers"
 import type { WorkspaceCapabilityScope } from "@/lib/db/workspace-capabilities"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
-import { listEnabledSkillsByIds, renderSkillsSection } from "@/lib/db/skills"
-import { DEFAULT_SKILL_CATALOG_TOKEN_BUDGET } from "@/lib/skills/prompt-budget"
+import { listEnabledSkillsByIds } from "@/lib/db/skills"
+import { resolveCharacterById } from "@/lib/db/characters"
+import {
+  AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
+  type AgentCapabilityGrantV1,
+} from "@cognia/agent-config-types/agent-capability-grant"
 import { executeOnExternalAgent } from "@/lib/ai/agent/external/manager"
 import { loggers } from "@cognia/logging"
 import { assertTaskTypeSupportedOnHost } from "../host-support"
@@ -288,84 +290,114 @@ function unionStrings(...sources: (readonly string[] | undefined)[]): string[] {
 }
 
 /**
- * Layer the payload-level overrides on top of the SendOptions returned by
- * `resolveSendOptions`. Mirrors the rules used in `use-claude-chat.ts:111-140`
- * for `pendingCommandOverrides`:
+ * The payload's per-run capability knobs as one grant for `resolveSendOptions`
+ * (`packages/agent-config-types/src/agent-capability-grant.ts`).
  *
- *   - `model`, `permissionMode`, `maxTurns`, `effort` → assign
- *   - `appendSystemPrompt`                            → join with existing (if any)
- *   - `allowedTools`, `additionalDirectories`         → UNION with resolved set
- *   - `disallowedTools`                               → assign
- *   - `mcpServerIds`                                  → resolve to a server map
- *                                                       and assign
- *   - `builtinTools`                                  → shallow-merge over the
- *                                                       resolved AppSettings
- *                                                       toggles
+ * These used to be patched onto the resolved `SendOptions`, which ran after the
+ * tool filter, Restricted Mode and the finalizer, and let a task widen its own
+ * run: `disallowedTools` replaced the character's, the tool filter's, the MCP
+ * servers' and the IM safeguard's denials, and `permissionMode` was assigned
+ * over the whole permission chain. As a grant each knob enters at the stage of
+ * the profile field it extends:
+ *
+ *   - `model`, `effort`, `maxTurns`     → head of their chains (the provider is
+ *                                          re-derived for the model, not kept)
+ *   - `appendSystemPrompt`              → instruction fragment
+ *   - `allowedTools`                    → joins the allow list, then clamped
+ *   - `disallowedTools`                 → joins the deny list; never replaces it
+ *   - `mcpServerIds`                    → exactly these enabled servers
+ *   - `disabledSkillIds`                → skill removals
+ *   - `permissionMode`                  → a cap: it can lower the resolved
+ *                                          mode, never raise it
+ *
+ * `undefined` when the payload sets none of them.
  */
-async function applyPayloadOverrides(
-  base: SendOptions,
-  payload: ChatLikeTaskPayload,
-  appSettings: AppSettings | null,
-  capabilityScope: WorkspaceCapabilityScope
-): Promise<SendOptions> {
-  const out: SendOptions = { ...base }
-
-  if (payload.model) out.model = payload.model
-  if (payload.permissionMode) out.permissionMode = payload.permissionMode
-  if (typeof payload.maxTurns === "number") out.maxTurns = payload.maxTurns
-  if (payload.effort) out.effort = payload.effort
-
-  if (payload.appendSystemPrompt && payload.appendSystemPrompt.trim().length > 0) {
-    const existing = out.appendSystemPrompt?.trim() ?? ""
-    out.appendSystemPrompt = existing
-      ? `${existing}\n\n${payload.appendSystemPrompt.trim()}`
-      : payload.appendSystemPrompt.trim()
+function buildSchedulerCapabilityGrant(
+  task: Pick<ScheduledTask, "id">,
+  payload: ChatLikeTaskPayload
+): AgentCapabilityGrantV1 | undefined {
+  const grant: AgentCapabilityGrantV1 = {
+    schemaVersion: AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
+    source: { kind: "scheduler", id: task.id },
   }
-
-  if (payload.allowedTools && payload.allowedTools.length > 0) {
-    out.allowedTools = unionStrings(out.allowedTools, payload.allowedTools)
+  let touched = false
+  if (payload.model?.trim()) {
+    grant.model = payload.model.trim()
+    touched = true
   }
-
-  if (payload.disallowedTools && payload.disallowedTools.length > 0) {
-    out.disallowedTools = [...payload.disallowedTools]
+  if (payload.effort) {
+    grant.effort = payload.effort
+    touched = true
   }
-
-  if (payload.additionalDirectories && payload.additionalDirectories.length > 0) {
-    out.additionalDirectories = unionStrings(
-      out.additionalDirectories,
-      payload.additionalDirectories
-    )
+  if (typeof payload.maxTurns === "number") {
+    grant.maxTurns = payload.maxTurns
+    touched = true
   }
-
-  if (payload.mcpServerIds) {
-    try {
-      const enabled = await listEnabledMcpServers(capabilityScope)
-      const wanted = new Set(payload.mcpServerIds)
-      const subset = enabled.filter((srv) => wanted.has(srv.id))
-      if (subset.length > 0) {
-        out.mcpServers = await buildMcpServerMapResolved(subset)
-      } else {
-        // Empty array means "no MCP servers" — strip the resolved map.
-        delete out.mcpServers
-      }
-    } catch (err) {
-      log.warn("Scheduler payload mcpServerIds resolution failed", { err: String(err) })
+  if (payload.appendSystemPrompt?.trim()) {
+    grant.instructions = [payload.appendSystemPrompt.trim()]
+    touched = true
+  }
+  const addTools = payload.allowedTools?.filter(Boolean) ?? []
+  const denyTools = payload.disallowedTools?.filter(Boolean) ?? []
+  if (addTools.length > 0 || denyTools.length > 0) {
+    grant.tools = {
+      ...(addTools.length > 0 ? { add: addTools } : {}),
+      ...(denyTools.length > 0 ? { deny: denyTools } : {}),
     }
+    touched = true
   }
-
-  if (payload.builtinTools) {
-    const baseTools: BuiltinToolsConfig = out.builtinTools ??
-      appSettings?.builtinTools ?? {
-        fileExtras: false,
-        git: false,
-        process: false,
-        environment: false,
-        shellAdvanced: false,
-      }
-    out.builtinTools = { ...baseTools, ...payload.builtinTools }
+  if (payload.mcpServerIds) {
+    // `only` narrows the resolved subset to these ids and `add` brings in the
+    // ones the character did not pick, so the run gets exactly these enabled
+    // servers. An empty list means no MCP servers.
+    grant.mcpServers = { only: [...payload.mcpServerIds], add: [...payload.mcpServerIds] }
+    touched = true
   }
+  if (payload.disabledSkillIds?.length) {
+    grant.skills = { remove: [...payload.disabledSkillIds] }
+    touched = true
+  }
+  if (payload.permissionMode) {
+    grant.permissionMode = payload.permissionMode
+    touched = true
+  }
+  return touched ? grant : undefined
+}
 
-  return out
+/**
+ * App settings for this run with the payload's `builtinTools` patch applied, so
+ * the resolver enables the built-in tool groups the same way it would for the
+ * user's own settings.
+ */
+function withPayloadBuiltinTools(
+  appSettings: AppSettings | null,
+  payload: ChatLikeTaskPayload
+): AppSettings | null {
+  if (!payload.builtinTools) return appSettings
+  const baseTools: BuiltinToolsConfig = appSettings?.builtinTools ?? {
+    fileExtras: false,
+    git: false,
+    process: false,
+    environment: false,
+    shellAdvanced: false,
+  }
+  const builtinTools = { ...baseTools, ...payload.builtinTools }
+  return appSettings
+    ? { ...appSettings, builtinTools }
+    : ({ builtinTools } as unknown as AppSettings)
+}
+
+/**
+ * Union the payload's extra readable directories onto the resolved set. This
+ * is path scope, not a capability: it adds no tool and survives the resolver's
+ * clamps unchanged.
+ */
+function applyPayloadDirectories(base: SendOptions, payload: ChatLikeTaskPayload): SendOptions {
+  if (!payload.additionalDirectories?.length) return base
+  return {
+    ...base,
+    additionalDirectories: unionStrings(base.additionalDirectories, payload.additionalDirectories),
+  }
 }
 
 // =============================================================================
@@ -405,40 +437,32 @@ async function resolveOrCreateSession(
 }
 
 /**
- * For `skill` tasks the user picks one ad-hoc skill on top of the character's
- * own skill set. We splice that skill's prompt section onto the resolved
- * system prompt and union its `allowedTools` into the resolved whitelist.
+ * A `skill` task names one skill on top of the character's own set. It rides
+ * `ephemeralSkillIds`, the composer's explicit attachment, so the resolver
+ * delivers it whatever its invocation policy and clamps its declared tools like
+ * every other skill's. A skill that is neither enabled in the task's workspace
+ * nor contributed by a plugin fails the run instead of running without it.
  */
-async function applyAdHocSkill(
-  base: SendOptions,
-  skillId: string | undefined,
+async function assertTaskSkillAvailable(
+  skillId: string,
   capabilityScope: WorkspaceCapabilityScope
-): Promise<SendOptions> {
-  if (!skillId) return base
-  const skills = await listEnabledSkillsByIds([skillId], capabilityScope)
-  if (skills.length === 0) return base
+): Promise<string | null> {
+  const host = await listEnabledSkillsByIds([skillId], capabilityScope)
+  if (host.length > 0) return null
+  const { getSkill } = await import("@/lib/plugin/registries/skill-registry")
+  if (getSkill(skillId)) return null
+  return `Skill "${skillId}" is not enabled`
+}
 
-  const out: SendOptions = { ...base }
-  // Same ceiling the interactive send pipeline applies — a scheduled run has
-  // no one watching to notice a prompt that grew past the model's budget.
-  const skillSection = renderSkillsSection(skills, {
-    maxTokens: DEFAULT_SKILL_CATALOG_TOKEN_BUDGET,
-    onDegrade: (report) =>
-      log.warn("skills block exceeded its prompt budget", {
-        ...report,
-        omittedCount: report.omitted.length,
-      }),
-  })
-  if (skillSection) {
-    out.systemPrompt = out.systemPrompt
-      ? `${out.systemPrompt}\n\n---\n\n${skillSection}`
-      : skillSection
-  }
-  const skillTools = skills.flatMap((s) => s.allowedTools ?? [])
-  if (skillTools.length > 0) {
-    out.allowedTools = unionStrings(out.allowedTools, skillTools)
-  }
-  return out
+/**
+ * The agent a run is bound to must still exist. Resolving a deleted id would
+ * otherwise run the task as a persona-less default agent with none of the
+ * agent's tools, skills or knowledge — a silent change of who does the work.
+ */
+async function assertAgentAvailable(characterId: string | undefined): Promise<string | null> {
+  if (!characterId) return null
+  const character = await resolveCharacterById(characterId)
+  return character ? null : `Agent "${characterId}" not found`
 }
 
 // =============================================================================
@@ -584,7 +608,10 @@ async function runChatPrompt(
     return { success: false, error: "Empty prompt" }
   }
 
-  // 1. Resolve / create the session.
+  // 1. Resolve / create the session. The bound agent is checked first so a
+  // deleted agent fails the run before a session is minted for it.
+  const missingAgent = await assertAgentAvailable(options.characterId)
+  if (missingAgent) return { success: false, error: missingAgent }
   const sessionResult = await resolveOrCreateSession(task, payload, {
     characterId: options.characterId,
     runId: execution.id,
@@ -594,6 +621,11 @@ async function runChatPrompt(
   }
   const { session } = sessionResult
   const sessionId = session.id
+  if (!options.characterId) {
+    // An appended-to session carries its own agent binding.
+    const missingSessionAgent = await assertAgentAvailable(session.characterId)
+    if (missingSessionAgent) return { success: false, error: missingSessionAgent }
+  }
 
   // 2. Pull AppSettings and resolve full SendOptions through the same
   // pipeline the interactive composer uses.
@@ -608,15 +640,7 @@ async function runChatPrompt(
 
   const agentMode = resolveAgentMode(task.id, payload.agentModeId)
 
-  // Splice the per-task disabled-skill list onto the session for this turn
-  // only. resolveSendOptions reads `session.disabledSkillIds` directly, so a
-  // synthetic clone is the cleanest seam.
-  const sessionForResolution: ChatSession = payload.disabledSkillIds?.length
-    ? {
-        ...session,
-        disabledSkillIds: unionStrings(session.disabledSkillIds, payload.disabledSkillIds),
-      }
-    : session
+  const capabilityGrant = buildSchedulerCapabilityGrant(task, payload)
 
   // A schedule fires for the workspace that owns its conversation, which is
   // almost never the one the user happens to be looking at when it fires — and
@@ -630,6 +654,10 @@ async function runChatPrompt(
   const sessionProjectId = sessionResult.created ? task.projectId : session.projectId
   const owningProjectId = payload.executionContext?.projectId ?? sessionProjectId ?? null
   const capabilityScope: WorkspaceCapabilityScope = { projectId: owningProjectId }
+  if (options.skillId) {
+    const missingSkill = await assertTaskSkillAvailable(options.skillId, capabilityScope)
+    if (missingSkill) return { success: false, error: missingSkill }
+  }
   const owning = await loadOwningWorkspace(owningProjectId, { taskId: task.id })
   const activeProject = owning.project
   // Same gate, same workspace as an interactive turn: a schedule must not be
@@ -644,9 +672,11 @@ async function runChatPrompt(
       // `resolveSendOptions` scopes skills, MCP servers, memory and RAG by
       // `session.projectId` first, so the session it reads must carry the
       // owning workspace, not the UI-active one `createSession` stamped.
-      session: { ...sessionForResolution, projectId: owningProjectId ?? undefined },
-      appSettings,
+      session: { ...session, projectId: owningProjectId ?? undefined },
+      appSettings: withPayloadBuiltinTools(appSettings, payload),
       agentMode,
+      ...(capabilityGrant ? { capabilityGrants: [capabilityGrant] } : {}),
+      ...(options.skillId ? { ephemeralSkillIds: [options.skillId] } : {}),
       activeProject,
       workspaceRestricted: workspaceTrust.restricted,
       trustedWorkspaceRoots: workspaceTrust.trustedRoots,
@@ -658,16 +688,8 @@ async function runChatPrompt(
     }
   }
 
-  // 3. Layer payload-level overrides on top.
-  let finalOptions = await applyPayloadOverrides(resolved, payload, appSettings, capabilityScope)
-
-  // 4. Skill-task ad-hoc skill: splice into system prompt + allowedTools.
-  finalOptions = await applyAdHocSkill(finalOptions, options.skillId, capabilityScope)
-
-  // The payload replaces `disallowedTools` and unions `allowedTools`, and the
-  // ad-hoc skill unions its tools too. Either could hand back a tool Restricted
-  // Mode removed, so the restriction is re-applied after every override.
-  if (workspaceTrust.restricted) finalOptions = withRestrictedModeDenials(finalOptions)
+  // 3. Path scope only; every capability knob went through the resolver.
+  let finalOptions = applyPayloadDirectories(resolved, payload)
 
   // Scheduled managed-worktree runs fail closed: unlike an interactive run,
   // there is nobody present to approve bypassing failed isolation/setup. The
@@ -1268,7 +1290,8 @@ export {
   // Internal helpers exposed for unit testing.
   reconcileLegacyPromptFields,
   resolveAgentMode,
-  applyPayloadOverrides,
-  applyAdHocSkill,
+  buildSchedulerCapabilityGrant,
+  withPayloadBuiltinTools,
+  applyPayloadDirectories,
   alignConfinementRoots,
 }

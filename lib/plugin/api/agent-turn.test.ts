@@ -129,6 +129,59 @@ describe("runPluginAgentTurn", () => {
     expect(sendOptions).toMatchObject({ permissionMode: "bypassPermissions" })
   })
 
+  it("resolves under the caller's composition instead of the desktop default", async () => {
+    await runPluginAgentTurn({ ...base, composition: { presetId: "minimal" } })
+    expect(resolveSendOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ compositionSelection: { presetId: "minimal" } })
+    )
+  })
+
+  it("hands validated grants to the resolver, stamped with the real caller", async () => {
+    await runPluginAgentTurn(
+      {
+        ...base,
+        capabilityGrants: [
+          {
+            schemaVersion: 1,
+            source: { kind: "scheduler", id: "spoofed" },
+            skills: { add: ["report"] },
+            tools: { deny: ["Bash"] },
+          },
+        ],
+      },
+      { grantSource: { kind: "plugin", id: "acme" } }
+    )
+    expect(resolveSendOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capabilityGrants: [
+          {
+            schemaVersion: 1,
+            source: { kind: "plugin", id: "acme" },
+            skills: { add: ["report"] },
+            tools: { deny: ["Bash"] },
+          },
+        ],
+      })
+    )
+  })
+
+  it("refuses a malformed grant rather than running without it", async () => {
+    await expect(
+      runPluginAgentTurn({
+        ...base,
+        capabilityGrants: [{ schemaVersion: 1, source: { kind: "plugin" }, maxTurns: 0 } as never],
+      })
+    ).rejects.toThrow(/capabilityGrants\[0\] is invalid: maxTurns must be an integer/)
+    expect(runAndCaptureAssistantReply).not.toHaveBeenCalled()
+  })
+
+  it("sends neither composition nor grants when the caller set none", async () => {
+    await runPluginAgentTurn(base)
+    const ctx = (resolveSendOptions.mock.calls[0] as unknown[])[0] as Record<string, unknown>
+    expect(ctx).not.toHaveProperty("compositionSelection")
+    expect(ctx).not.toHaveProperty("capabilityGrants")
+  })
+
   it("survives an unreadable settings row", async () => {
     getSettings.mockRejectedValue(new Error("db closed"))
     await expect(runPluginAgentTurn(base)).resolves.toMatchObject({ text: "done" })

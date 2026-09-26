@@ -210,6 +210,13 @@ const AgentTurnParams = z.object({
   systemPrompt: optionalString,
   model: optionalString,
   allowedTools: z.array(z.string()).optional(),
+  // Per-turn capability grant (ADR-0117 amendment: capability grants).
+  disallowedTools: z.array(z.string()).optional(),
+  skillIds: z.array(z.string()).optional(),
+  mcpServerIds: z.array(z.string()).optional(),
+  knowledgeBaseIds: z.array(z.string()).optional(),
+  instructions: optionalString,
+  permissionCap: z.enum(["plan", "default", "acceptEdits"]).optional(),
   maxTurns: numberRange(1, 100).optional(),
   temperature: numberRange(0, 2).optional(),
   timeoutMs: numberRange(1000, 3_600_000).optional(),

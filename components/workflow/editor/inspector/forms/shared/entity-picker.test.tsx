@@ -5,11 +5,36 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import {
   EntityPicker,
+  KnowledgeBaseMultiPicker,
+  McpServerMultiPicker,
   McpToolPicker,
   ModelPicker,
   TeamPicker,
+  ToolPicker,
   providerForModel,
 } from "./entity-picker"
+
+// Resolve each live query once, like Dexie does for a table nobody writes to
+// during the test — the pickers only render what the query yields.
+jest.mock("dexie-react-hooks", () => {
+  const React = jest.requireActual<typeof import("react")>("react")
+  return {
+    useLiveQuery: <T,>(query: () => Promise<T> | T, deps: unknown[] = []) => {
+      const [value, setValue] = React.useState<T | undefined>(undefined)
+      React.useEffect(() => {
+        let alive = true
+        void Promise.resolve(query()).then((next) => {
+          if (alive) setValue(next)
+        })
+        return () => {
+          alive = false
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, deps)
+      return value
+    },
+  }
+})
 
 const getMcpServerMock = jest.fn()
 jest.mock("@/lib/db/characters", () => ({ listCharacters: jest.fn(async () => []) }))
@@ -18,12 +43,15 @@ jest.mock("@/lib/db/teams", () => ({
 }))
 jest.mock("@/lib/db/skills", () => ({ listSkills: jest.fn(async () => []) }))
 jest.mock("@/lib/db/mcp-servers", () => ({
-  listMcpServers: jest.fn(async () => []),
+  listMcpServers: jest.fn(async () => [{ id: "srv-1", name: "GitHub" }, { id: "srv-2" }]),
   getMcpServer: (...a: unknown[]) => getMcpServerMock(...a),
 }))
 jest.mock("@/lib/db/plugins", () => ({ listPlugins: jest.fn(async () => []) }))
 jest.mock("@/lib/db/workflows", () => ({ listWorkflows: jest.fn(async () => []) }))
 jest.mock("@/lib/db/twins", () => ({ listTwins: jest.fn(async () => []) }))
+jest.mock("@/lib/db/knowledge-bases", () => ({
+  listKnowledgeBases: jest.fn(async () => [{ id: "kb-1", name: "Product docs" }]),
+}))
 jest.mock("@/lib/claude/feature-call", () => ({ discoverMcpServerViaSidecar: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 jest.mock("@/lib/settings/builtin-tools", () => ({ listBuiltinTools: () => [] }))
@@ -157,6 +185,22 @@ describe("entity wrappers", () => {
   it("TeamPicker loads teams from Dexie and renders the picker", async () => {
     wrap(<TeamPicker id="tp" value="" onChange={jest.fn()} />)
     expect(await screen.findByLabelText("Select a team")).toBeInTheDocument()
+  })
+
+  it("McpServerMultiPicker labels selected servers by name, falling back to the id", async () => {
+    wrap(<McpServerMultiPicker id="mp" value={["srv-1", "srv-2"]} onChange={jest.fn()} />)
+    expect(await screen.findByText("GitHub")).toBeInTheDocument()
+    expect(screen.getByText("srv-2")).toBeInTheDocument()
+  })
+
+  it("KnowledgeBaseMultiPicker labels selected knowledge bases by name", async () => {
+    wrap(<KnowledgeBaseMultiPicker id="kp" value={["kb-1"]} onChange={jest.fn()} />)
+    expect(await screen.findByText("Product docs")).toBeInTheDocument()
+  })
+
+  it("ToolPicker shows the caller's empty hint instead of the unrestricted one", () => {
+    wrap(<ToolPicker id="tl" value={[]} onChange={jest.fn()} emptyHint="Nothing denied." />)
+    expect(screen.getByText("Nothing denied.")).toBeInTheDocument()
   })
 })
 

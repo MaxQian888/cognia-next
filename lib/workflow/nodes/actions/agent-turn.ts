@@ -19,6 +19,10 @@ import {
   type SchemaViolationMode,
 } from "@/lib/workflow/nodes/ai/structured-turn"
 import type { ExecuteAgentConfig, ExecuteAgentResult } from "@/lib/ai/agent/agent-executor"
+import {
+  AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
+  type AgentCapabilityGrantV1,
+} from "@cognia/agent-config-types/agent-capability-grant"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { guardWorkflowEgress } from "@/lib/workflow/runtime/egress-guard"
 
@@ -28,9 +32,25 @@ export interface AgentTurnParams {
   characterId?: string
   /** Used when no characterId — synthesised into an ephemeral persona. */
   systemPrompt?: string
+  /** Model for this turn. With a characterId it heads the agent's model chain. */
   model?: string
-  /** Restrict the tool surface of the synthesised persona. */
+  /**
+   * Tool surface. Without a characterId it is the synthesised persona's allow
+   * list; with one it restricts the agent's own resolved surface.
+   */
   allowedTools?: string[]
+  /** Tools this turn must never see, on top of the agent's own denials. */
+  disallowedTools?: string[]
+  /** Skills attached for this turn on top of the agent's own. */
+  skillIds?: string[]
+  /** Enabled MCP servers attached for this turn on top of the agent's subset. */
+  mcpServerIds?: string[]
+  /** Knowledge bases queried for this turn on top of the agent's own. */
+  knowledgeBaseIds?: string[]
+  /** Instructions appended after the agent's own prompt for this turn. */
+  instructions?: string
+  /** Permission cap. It can lower the agent's resolved mode, never raise it. */
+  permissionCap?: "plan" | "default" | "acceptEdits"
   /** Upper bound on agent steps (text channel's AI-SDK maxSteps). */
   maxTurns?: number
   temperature?: number
@@ -59,6 +79,39 @@ export interface AgentTurnParams {
 
 const DEFAULT_TIMEOUT_MS = 600_000
 
+function nonEmptyIds(ids: readonly string[] | undefined): string[] | undefined {
+  const cleaned = (ids ?? []).map((id) => id.trim()).filter(Boolean)
+  return cleaned.length > 0 ? [...new Set(cleaned)] : undefined
+}
+
+/**
+ * The node's capability-injection fields as one grant, attributed to this
+ * step. `instructions` is the already PII-guarded text. `undefined` when the
+ * node injects nothing, so an un-customised node sends exactly what it did.
+ */
+export function agentTurnCapabilityGrant(
+  params: AgentTurnParams,
+  instructions: string | undefined,
+  source: { workflowId: string; stepId: string }
+): AgentCapabilityGrantV1 | undefined {
+  const skills = nonEmptyIds(params.skillIds)
+  const mcp = nonEmptyIds(params.mcpServerIds)
+  const knowledge = nonEmptyIds(params.knowledgeBaseIds)
+  const deny = nonEmptyIds(params.disallowedTools)
+  const text = instructions?.trim()
+  if (!skills && !mcp && !knowledge && !deny && !text && !params.permissionCap) return undefined
+  return {
+    schemaVersion: AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
+    source: { kind: "workflow", id: `${source.workflowId}:${source.stepId}` },
+    ...(skills ? { skills: { add: skills } } : {}),
+    ...(mcp ? { mcpServers: { add: mcp } } : {}),
+    ...(knowledge ? { knowledgeBases: { add: knowledge } } : {}),
+    ...(deny ? { tools: { deny } } : {}),
+    ...(text ? { instructions: [text] } : {}),
+    ...(params.permissionCap ? { permissionMode: params.permissionCap } : {}),
+  }
+}
+
 /** Pinned copy — asserted by tests; the service path must fail with the same words. */
 const REQUIRE_TOOLS_UNAVAILABLE_MESSAGE =
   "action.agent.turn: tools required but the desktop sidecar is unavailable " +
@@ -70,13 +123,21 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
     securityContext: ctx.securityContext,
     sink: "model",
     requestedMode: params.piiGate,
-    value: { prompt: params.prompt ?? "", systemPrompt: params.systemPrompt },
+    value: {
+      prompt: params.prompt ?? "",
+      systemPrompt: params.systemPrompt,
+      instructions: params.instructions,
+    },
   })
   const prompt = guarded.value.prompt.trim()
   if (!prompt) {
     throw nonRetryable("action.agent.turn requires a non-empty 'prompt'")
   }
   const toolsEnabled = params.toolsEnabled !== false
+  const capabilityGrant = agentTurnCapabilityGrant(params, guarded.value.instructions, {
+    workflowId: ctx.workflowId,
+    stepId: ctx.stepId,
+  })
 
   // ADR-0090: the unified service owns rail selection AND the requireTools
   // fail-before-spend. Its host truth comes from the resolver environment, so
@@ -141,6 +202,8 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
       characterId: params.characterId,
       cwd: params.cwd,
       allowedTools: params.allowedTools,
+      grantSource: { kind: "workflow" as const, id: `${ctx.workflowId}:${ctx.stepId}` },
+      ...(capabilityGrant ? { capabilityGrants: [capabilityGrant] } : {}),
       timeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       permissionCeiling: ctx.securityContext?.permissionCeiling,
       onDelta: ctx.emitStream,

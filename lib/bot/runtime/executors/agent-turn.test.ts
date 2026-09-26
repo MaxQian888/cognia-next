@@ -137,6 +137,15 @@ describe("createAgentTurnBotExecutor", () => {
     expect(run.mock.calls[0][0].permissionMode).toBe("plan")
   })
 
+  it("hands the turn the Bot's whole projected composition", async () => {
+    const run = jest.fn().mockResolvedValue({ sessionId: "s1", text: "" })
+    const selection = { presetId: "reviewer", authority: "plan", autonomy: "suggest" }
+    await createAgentTurnBotExecutor({ run })(
+      ctx({ composition: { selection, provenance: {} } as never })
+    )
+    expect(run.mock.calls[0][0].composition).toEqual(selection)
+  })
+
   it("omits the permission mode when no layer resolved one", async () => {
     const run = jest.fn().mockResolvedValue({ sessionId: "s1", text: "" })
     await createAgentTurnBotExecutor({ run })(ctx())

@@ -173,77 +173,29 @@ export async function listCharactersByIds(ids: string[]): Promise<Character[]> {
   return out
 }
 
+/**
+ * Everything a caller may set on a new character. Identity, timestamps and the
+ * built-in flag belong to the store.
+ */
 export type CharacterDraft = Pick<Character, "name" | "systemPrompt"> &
-  Partial<
-    Pick<
-      Character,
-      | "description"
-      | "avatarColor"
-      | "avatarEmoji"
-      | "model"
-      | "modelRouting"
-      | "executionPolicy"
-      | "knowledgeBaseIds"
-      | "memoryPolicy"
-      | "permissionMode"
-      | "allowedTools"
-      | "disallowedTools"
-      | "mcpServerIds"
-      | "skillIds"
-      | "pluginSkillIds"
-      | "workingDir"
-      | "bareMode"
-      | "debugMode"
-      | "briefMode"
-      | "twinId"
-      | "twinSettings"
-      | "sourcePluginId"
-      | "sourcePackId"
-      | "clonedFromPackCharacterId"
-      | "packVersionAtClone"
-      | "pristineSnapshot"
-      | "avatarImage"
-      | "persona"
-      | "voiceProfile"
-      | "availableOnPlatforms"
-    >
-  >
+  Partial<Omit<Character, "id" | "name" | "systemPrompt" | "createdAt" | "updatedAt" | "isBuiltIn">>
+
+/** Fields the store assigns, stripped even when a caller's object carries them. */
+const STORE_OWNED_CHARACTER_FIELDS = ["id", "createdAt", "updatedAt", "isBuiltIn"] as const
 
 export async function createCharacter(draft: CharacterDraft): Promise<Character> {
   const now = Date.now()
+  // Every profile field the caller set is kept. A hand-maintained copy list
+  // here silently dropped each field added after it was written (computer use,
+  // sandbox, account override…), so a new agent lost settings its editor showed.
+  const fields: Partial<Character> = { ...draft }
+  for (const key of STORE_OWNED_CHARACTER_FIELDS) delete fields[key]
   const character: Character = {
+    ...fields,
     id: newId(),
     name: draft.name.trim() || "Untitled character",
-    description: draft.description,
     avatarColor: draft.avatarColor ?? "oklch(0.7 0.15 250)",
-    avatarEmoji: draft.avatarEmoji,
     systemPrompt: draft.systemPrompt,
-    model: draft.model,
-    modelRouting: draft.modelRouting,
-    executionPolicy: draft.executionPolicy,
-    knowledgeBaseIds: draft.knowledgeBaseIds,
-    memoryPolicy: draft.memoryPolicy,
-    permissionMode: draft.permissionMode,
-    allowedTools: draft.allowedTools,
-    disallowedTools: draft.disallowedTools,
-    mcpServerIds: draft.mcpServerIds,
-    skillIds: draft.skillIds,
-    pluginSkillIds: draft.pluginSkillIds,
-    workingDir: draft.workingDir,
-    bareMode: draft.bareMode,
-    debugMode: draft.debugMode,
-    briefMode: draft.briefMode,
-    twinId: draft.twinId,
-    twinSettings: draft.twinSettings,
-    sourcePluginId: draft.sourcePluginId,
-    sourcePackId: draft.sourcePackId,
-    clonedFromPackCharacterId: draft.clonedFromPackCharacterId,
-    packVersionAtClone: draft.packVersionAtClone,
-    pristineSnapshot: draft.pristineSnapshot,
-    avatarImage: draft.avatarImage,
-    persona: draft.persona,
-    voiceProfile: draft.voiceProfile,
-    availableOnPlatforms: draft.availableOnPlatforms,
     createdAt: now,
     updatedAt: now,
   }

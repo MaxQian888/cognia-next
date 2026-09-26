@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Agent runs launched by other features now take per-run capability grants instead of patching the resolved options: scheduled tasks, workflow agent-turn nodes, plugin and bot turns can add skills, MCP servers, knowledge bases and instructions, deny tools and cap the permission mode, and every addition is still clamped by the agent's tool filter, Restricted Mode and permission ceiling. Scheduled `disallowedTools` now add to the agent's denials instead of replacing them and a scheduled `permissionMode` can only lower the resolved mode; a scheduled run whose agent was deleted, or whose skill is not enabled, fails instead of running a default persona. Fixes new agents losing computer-use, sandbox and account settings on create, preset-created external agents losing Codex options and model bindings, `maxSteps`/`maxTurns` being ignored on plugin, workflow and subagent runs, connector and bot turns composing from the desktop composer's last mode, and plugin-pack agents not resolving in goals, scheduled outbound and workflow twin lookups.

@@ -26,7 +26,10 @@ import { compositionForSession } from "@/stores/agent/agent-runtime-store"
 import { STANDARD_PRESET, presetFromAgentMode } from "@/lib/agent/composition/preset-catalog"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import type { AgentPermissionMode } from "@cognia/agent-config-types"
-import type { AgentPresetDefinitionV1 } from "@cognia/agent-config-types/agent-composition"
+import type {
+  AgentCompositionSelectionV1,
+  AgentPresetDefinitionV1,
+} from "@cognia/agent-config-types/agent-composition"
 import type { MessageRunMetadata } from "@/lib/chat/message-run-metadata"
 
 export interface TurnAgentMode {
@@ -51,6 +54,13 @@ export interface ResolveTurnAgentModeInput {
   /** `null` suppresses modes; a record overrides the session's selection. */
   explicitMode?: AgentModeConfig | null
   sessionId?: string
+  /**
+   * Selection owned by the caller rather than the desktop store: the connector
+   * runtime's own config stack, a bot's projected composition. Without it a
+   * turn composes from `compositionForSession`, which falls back to the desktop
+   * user's default for any session the store has never seen.
+   */
+  selection?: AgentCompositionSelectionV1
 }
 
 /** Rank used only to apply a preset's `maxAuthority` cap. */
@@ -88,7 +98,7 @@ export function resolveTurnAgentMode(input: ResolveTurnAgentModeInput = {}): Tur
     }
   }
 
-  const selection = compositionForSession(input.sessionId)
+  const selection = input.selection ?? compositionForSession(input.sessionId)
   const preset =
     appPresetCatalog().find((candidate) => candidate.id === selection.presetId) ?? STANDARD_PRESET
 

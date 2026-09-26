@@ -116,7 +116,7 @@ jest.mock("@/lib/db/conversation-overrides", () => ({
   readForResolution: (k: string) => readOverrideImpl(k),
 }))
 jest.mock("@/lib/db/characters", () => ({
-  getCharacter: (id: string) => getCharacterImpl(id),
+  resolveCharacterById: (id: string) => getCharacterImpl(id),
   // The real schema seed calls seedBuiltInCharacters during getDb() open; an
   // undefined export throws inside the populate hook and aborts the version
   // transaction, breaking every subsequent write (empty outboundQueue).

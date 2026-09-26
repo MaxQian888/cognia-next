@@ -3,7 +3,8 @@
     "allowedTools": {
       "hint": "Restrict the synthesised persona's tool surface. Empty = host defaults.",
       "label": "Allowed tools (comma-separated)",
-      "placeholder": "Bash, Read, Edit"
+      "placeholder": "Bash, Read, Edit",
+      "hintAgent": "Restricts the agent's tools for this turn. Leave empty to keep the agent's own surface."
     },
     "characterId": {
       "hint": "Run as an existing persona — its system prompt, model, and tool allowlist apply.",
@@ -19,7 +20,8 @@
     },
     "model": {
       "hint": "Defaults to the provider's configured model.",
-      "label": "Model (optional)"
+      "label": "Model (optional)",
+      "hintAgent": "Overrides the agent's model for this turn. Leave empty to keep the agent's own."
     },
     "piiGate": {
       "block": "Block sensitive data",
@@ -50,6 +52,35 @@
     "toolsEnabled": {
       "hint": "Use the desktop sidecar's tool pipeline. Off = plain completion.",
       "label": "Enable tools"
+    },
+    "skillIds": {
+      "label": "Extra skills",
+      "hint": "Attached for this turn on top of the agent's own skills."
+    },
+    "mcpServerIds": {
+      "label": "Extra MCP servers",
+      "hint": "Enabled servers attached for this turn. A disabled server is ignored, not switched on."
+    },
+    "knowledgeBaseIds": {
+      "label": "Extra knowledge bases",
+      "hint": "Queried for this turn alongside the agent's own. Needs the desktop vector store."
+    },
+    "disallowedTools": {
+      "label": "Denied tools",
+      "hint": "Never offered in this turn, whatever the agent allows.",
+      "empty": "No tools denied."
+    },
+    "instructions": {
+      "label": "Extra instructions",
+      "hint": "Appended after the agent's own prompt for this turn. It never replaces it."
+    },
+    "permissionCap": {
+      "label": "Permission cap",
+      "hint": "Can lower the agent's permission mode for this turn, never raise it.",
+      "none": "No cap",
+      "plan": "Plan (read-only)",
+      "default": "Ask before acting",
+      "acceptEdits": "Accept edits"
     }
   },
   "aggregate": {
@@ -2140,7 +2171,8 @@
     "toolsUnrestricted": "No tools listed. The turn may use every tool its character or preset allows.",
     "twin": "Select a twin",
     "useExpression": "Use expression",
-    "usePicker": "Pick from list"
+    "usePicker": "Pick from list",
+    "knowledgeBase": "Add a knowledge base"
   },
   "planCommon": {
     "planId": {

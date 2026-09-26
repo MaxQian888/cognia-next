@@ -16,7 +16,7 @@
  * so chat / workflow runs keep working when the twin runtime is down.
  */
 
-import { getCharacter } from "@/lib/db/characters"
+import { resolveCharacterById } from "@/lib/db/characters"
 import { recordTwinInject } from "@/lib/twin/runtime/inject-log"
 import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 
@@ -44,7 +44,7 @@ export async function injectTwinContext(input: TwinInjectionInput): Promise<Twin
   if (!input.characterId) return { systemPrompt: base, applied: false }
   if (!input.userPrompt.trim()) return { systemPrompt: base, applied: false }
   try {
-    const character = await getCharacter(input.characterId)
+    const character = await resolveCharacterById(input.characterId)
     if (!character?.twinId) return { systemPrompt: base, applied: false }
     const [{ tryBuildTwinDeps }, { applyTwinContext }] = await Promise.all([
       import("@/lib/twin/runtime/build-deps"),

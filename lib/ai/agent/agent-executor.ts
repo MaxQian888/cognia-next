@@ -32,6 +32,13 @@ import {
   type RichCustomProviderEntry,
 } from "@/lib/ai/provider-consumption"
 import type { AppSettings, Character } from "@cognia/agent-config-types"
+import {
+  AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
+  foldCapabilityGrants,
+  type AgentCapabilityGrantV1,
+  type CapabilityGrantSourceKind,
+} from "@cognia/agent-config-types/agent-capability-grant"
+import { resolveAgentModel } from "@/lib/agent/agent-profile-policy"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { DispatchContext } from "@/lib/claude/agents/dispatch-context-registry"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/policy/permission-cascade"
@@ -94,6 +101,11 @@ export interface ExecuteAgentConfig {
   systemPrompt?: string
   model?: string
   tools?: AgentTool[]
+  /**
+   * Agentic-turn ceiling for this run. Rides the run's capability grant as
+   * `maxTurns` (clamped to 1–100) on the tool rail; the single-completion text
+   * rail has no agentic loop to bound.
+   */
   maxSteps?: number
   temperature?: number
   abortSignal?: AbortSignal
@@ -146,13 +158,26 @@ export interface ExecuteAgentConfig {
   characterId?: string
   /** Absolute working directory the tool-enabled run is scoped to. */
   cwd?: string
-  /** Restrict the tool surface for the synthesised character. */
+  /**
+   * Tool surface for this run. Without a `characterId` it is the synthesised
+   * character's allow list; with one it restricts the agent's own resolved
+   * surface (an intersection, never a widening).
+   */
   allowedTools?: string[]
   /**
-   * Tools the run must never see, unioned onto the resolved deny list after
-   * the permission chain runs (a subagent definition's `disallowedTools`).
+   * Tools the run must never see. Joins the resolved deny list through the
+   * run's capability grant, so nothing later in the chain re-admits them.
    */
   disallowedTools?: string[]
+  /**
+   * Extra per-invocation capability grants, outermost first (skills, MCP
+   * servers, knowledge bases, prompt fragments, tool additions, a permission
+   * cap). Applied inside `resolveSendOptions` after the grant derived from this
+   * config's own fields, so every clamp that governs the agent governs them.
+   */
+  capabilityGrants?: readonly AgentCapabilityGrantV1[]
+  /** Who launched this run, stamped on the derived grant. Defaults to `automation`. */
+  grantSource?: { kind: CapabilityGrantSourceKind; id?: string }
   /** Reasoning-effort dial for this run, ahead of the session/character chain. */
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
   /** Wall-clock timeout (ms) for the tool-enabled run. Defaults to the runner's own default. */
@@ -353,6 +378,86 @@ function synthesizeCharacter(config: ExecuteAgentConfig): Character {
 }
 
 /**
+ * This config's own knobs as a capability grant, so they are applied inside
+ * `resolveSendOptions` rather than patched onto its result. With a
+ * `characterId` the caller's `model` heads the agent's model chain and
+ * `allowedTools` narrows the agent's surface; without one both already live on
+ * the synthesised character and are not repeated here.
+ */
+export function executeAgentConfigGrant(
+  config: ExecuteAgentConfig,
+  hasPersona: boolean
+): AgentCapabilityGrantV1 | undefined {
+  const grant: AgentCapabilityGrantV1 = {
+    schemaVersion: AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
+    source: config.grantSource ?? {
+      kind: config.isDispatchedSubagent ? "subagent" : "automation",
+    },
+  }
+  let touched = false
+  if (hasPersona && config.model?.trim()) {
+    grant.model = config.model.trim()
+    touched = true
+  }
+  if (hasPersona && config.allowedTools && config.allowedTools.length > 0) {
+    grant.tools = { restrictTo: [...config.allowedTools] }
+    touched = true
+  }
+  if (config.disallowedTools && config.disallowedTools.length > 0) {
+    grant.tools = { ...grant.tools, deny: [...config.disallowedTools] }
+    touched = true
+  }
+  if (config.appendSystem?.trim()) {
+    grant.instructions = [config.appendSystem.trim()]
+    touched = true
+  }
+  if (typeof config.maxSteps === "number" && Number.isFinite(config.maxSteps)) {
+    grant.maxTurns = Math.min(100, Math.max(1, Math.floor(config.maxSteps)))
+    touched = true
+  }
+  return touched ? grant : undefined
+}
+
+function runGrants(
+  config: ExecuteAgentConfig,
+  hasPersona: boolean
+): AgentCapabilityGrantV1[] | undefined {
+  const own = executeAgentConfigGrant(config, hasPersona)
+  const grants = [...(own ? [own] : []), ...(config.capabilityGrants ?? [])]
+  return grants.length > 0 ? grants : undefined
+}
+
+/**
+ * Retrieval inputs for the context an agent is bound to: its knowledge bases
+ * (and the grants' additions) and its twin. The resolver still decides whether
+ * to inject; this only supplies the deps it gates on, mirroring what the chat
+ * composer hands it. `{}` when nothing is bound or the vector store is not
+ * configured, so the run proceeds without retrieval exactly as before.
+ */
+export async function buildAgentBoundContext(
+  prompt: string,
+  character: Character,
+  grants: readonly AgentCapabilityGrantV1[] | undefined
+): Promise<{
+  projectKnowledgeDeps?: import("@/lib/claude/build-options").TwinRuntimeDepsForBuild
+  projectKnowledgeUserMessage?: string
+  twinDeps?: import("@/lib/claude/build-options").TwinRuntimeDepsForBuild
+  twinUserMessage?: string
+}> {
+  const grantKnowledge = foldCapabilityGrants(grants)?.knowledgeBases?.add ?? []
+  const hasKnowledge = (character.knowledgeBaseIds?.length ?? 0) > 0 || grantKnowledge.length > 0
+  const hasTwin = Boolean(character.twinId)
+  if (!prompt.trim() || (!hasKnowledge && !hasTwin)) return {}
+  const { tryBuildTwinDeps } = await import("@/lib/twin/runtime/build-deps")
+  const deps = await tryBuildTwinDeps().catch(() => undefined)
+  if (!deps) return {}
+  return {
+    ...(hasKnowledge ? { projectKnowledgeDeps: deps, projectKnowledgeUserMessage: prompt } : {}),
+    ...(hasTwin ? { twinDeps: deps, twinUserMessage: prompt } : {}),
+  }
+}
+
+/**
  * Run one tool-enabled turn through the desktop sidecar. Creates a fresh
  * ephemeral session (the sidecar tracks one in-flight query per session id),
  * resolves the full send options, drives `runAndCaptureAssistantReply`, and
@@ -389,6 +494,7 @@ async function runToolEnabledStandalone(
 
   let character: Character
   const characterId = config.characterId ?? existingRow?.characterId
+  const capabilityGrants = runGrants(config, Boolean(characterId))
   if (characterId) {
     const resolved = await resolveCharacterById(characterId)
     if (!resolved) {
@@ -433,28 +539,27 @@ async function runToolEnabledStandalone(
       ...(config.provider ? { providerOverride: config.provider } : {}),
       ...(config.effort ? { effort: config.effort } : {}),
     }
+    // Agent-bound retrieval: the agent's own knowledge bases (plus any a grant
+    // attached) and its twin. Built only when something is bound, so an
+    // unbound run pays no vector-store handshake. User-level long-term memory
+    // stays a chat-surface feature and is not recalled here.
+    const boundContext = await buildAgentBoundContext(prompt, character, capabilityGrants)
     const sendOptions = await buildOpts.resolveSendOptions({
       session: sessionRow,
       character,
       appSettings: appSettings ?? null,
+      ...boundContext,
       ...(config.dispatchContext ? { dispatchContext: config.dispatchContext } : {}),
       ...(config.isDispatchedSubagent ? { isDispatchedSubagent: true } : {}),
       ...(config.permissionCeiling ? { permissionCeiling: config.permissionCeiling } : {}),
+      ...(capabilityGrants ? { capabilityGrants } : {}),
       routingSurface: "agent",
       routingContextHint: { promptText: prompt },
     })
-    // The run's own deny list is unioned AFTER the permission chain so it can
-    // only narrow: nothing a definition lists can be re-admitted by a mode.
-    if (config.disallowedTools && config.disallowedTools.length > 0) {
-      sendOptions.disallowedTools = [
-        ...new Set([...(sendOptions.disallowedTools ?? []), ...config.disallowedTools]),
-      ]
-    }
-    // Append-style system extension + structured-output instruction ride
-    // `appendSystemPrompt` so the resolved character/skill blocks survive.
+    // The structured-output instruction rides `appendSystemPrompt` after the
+    // grant's fragments so the resolved character/skill blocks survive.
     const appended = composeSystem(
       sendOptions.appendSystemPrompt,
-      config.appendSystem,
       structuredInstruction(config.outputFormat)
     )
     if (appended) sendOptions.appendSystemPrompt = appended
@@ -726,6 +831,28 @@ export async function runCompletionRail(
   const liveSettings = await import("@/stores/settings")
     .then(({ useSettingsStore }) => useSettingsStore.getState().settings)
     .catch(() => undefined)
+  // The agent a caller named still speaks on this rail: its prompt, model and
+  // provider stand in wherever the caller left them unset, and the grants'
+  // model and instruction fragments apply as they would on the tool rail.
+  // Tools, skills and MCP servers need the sidecar and are not offered here.
+  let persona: Character | undefined
+  if (config.characterId) {
+    const { resolveCharacterById } = await import("@/lib/db/characters")
+    persona = await resolveCharacterById(config.characterId)
+    if (!persona) throw new Error(`executeAgent: character "${config.characterId}" not found`)
+  }
+  const railGrant = foldCapabilityGrants(runGrants(config, Boolean(persona)))
+  config = {
+    ...config,
+    systemPrompt: config.systemPrompt ?? persona?.systemPrompt,
+    model:
+      railGrant?.model ??
+      config.model ??
+      (persona ? resolveAgentModel("execute", persona, undefined) : undefined),
+    provider: railGrant?.provider ?? config.provider ?? persona?.providerId,
+    effort: railGrant?.effort ?? config.effort,
+  }
+  const railInstructions = railGrant?.instructions?.join("\n\n")
   const providerSettings = config.providerSettings ?? liveSettings?.providerSettings
   const customProviders = config.customProviders ?? liveSettings?.customProviders
   const modelMappings = config.modelMappings ?? liveSettings?.modelMappings
@@ -757,7 +884,7 @@ export async function runCompletionRail(
   const providerVisiblePayload: Record<string, unknown> = {}
   const system = composeSystem(
     config.systemPrompt,
-    config.appendSystem,
+    railInstructions,
     structuredInstruction(config.outputFormat)
   )
   if (config.priorMessages && config.priorMessages.length > 0) {

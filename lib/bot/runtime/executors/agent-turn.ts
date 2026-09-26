@@ -11,6 +11,7 @@
 
 import { interpolateEnvelopeTemplate } from "@/lib/bot/events/envelope"
 import type { SendOptions } from "@cognia/agent-config-types"
+import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
 import type { PluginAgentTurnResult } from "@cognia/plugin-sdk/api/agent-turn"
 
 import { BotExecutorUnavailableError, type BotExecutorContext, type BotExecutorFn } from "./types"
@@ -23,6 +24,7 @@ export interface AgentTurnExecutorDeps {
     signal?: AbortSignal
     timeoutMs?: number
     permissionMode?: SendOptions["permissionMode"]
+    composition?: AgentCompositionSelectionV1
   }) => Promise<
     Pick<PluginAgentTurnResult, "sessionId" | "text"> &
       Partial<Pick<PluginAgentTurnResult, "status" | "needsApproval">>
@@ -68,7 +70,7 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
       deps.run ??
       (async (input) => {
         const { runPluginAgentTurn } = await import("@/lib/plugin/api/agent-turn")
-        return runPluginAgentTurn(input)
+        return runPluginAgentTurn(input, { grantSource: { kind: "bot", id: ctx.definition.id } })
       })
 
     // Inside a step, because a Bot handler is re-entered from the top after a
@@ -87,6 +89,10 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
         ...(ctx.composition.selection.authority
           ? { permissionMode: ctx.composition.selection.authority }
           : {}),
+        // The whole projected composition, not just its authority: the preset's
+        // prompt delta and tool set belong to this Bot, and without it the turn
+        // composed from the desktop composer's last choice.
+        composition: ctx.composition.selection,
       })
     )
 

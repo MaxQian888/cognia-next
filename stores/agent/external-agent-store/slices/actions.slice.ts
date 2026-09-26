@@ -163,6 +163,11 @@ export const createExternalAgentActionsSlice = (
         defaultPermissionMode: presetConfig.defaultPermissionMode,
         autoApprovePatterns: presetConfig.autoApprovePatterns,
         requireApprovalFor: presetConfig.requireApprovalFor,
+        // Carried like every other override: a caller that creates a Codex or
+        // model-bound variant from a preset must get that variant, not the
+        // preset's defaults.
+        codexOptions: presetConfig.codexOptions,
+        cogniaModel: presetConfig.cogniaModel,
         timeout: presetConfig.timeout,
         retryConfig: presetConfig.retryConfig,
         tags: presetConfig.tags,

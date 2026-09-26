@@ -25,7 +25,10 @@ import { DurationField } from "./shared/duration-field"
 import {
   CharacterPicker,
   ExternalAgentPicker,
+  KnowledgeBaseMultiPicker,
+  McpServerMultiPicker,
   ModelPicker,
+  SkillMultiPicker,
   TeamPicker,
   ToolPicker,
   TwinPicker,
@@ -492,6 +495,9 @@ export function TeamMessageConfig({ params, onChange }: ConfigProps) {
 }
 
 // ── action.agent.turn ─────────────────────────────────────────────────────
+/** Select sentinel for "no permission cap" (Radix Select has no empty value). */
+const AGENT_TURN_NO_CAP = "__none__"
+
 export function AgentTurnConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.agentTurn")
   const prompt = readString(params, "prompt")
@@ -501,6 +507,16 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
   // The node stores an array. The comma-joined string only existed because the
   // control was a text input.
   const allowedTools = Array.isArray(params.allowedTools) ? (params.allowedTools as string[]) : []
+  const readIds = (key: string): string[] =>
+    Array.isArray(params[key]) ? (params[key] as string[]) : []
+  const disallowedTools = readIds("disallowedTools")
+  const skillIds = readIds("skillIds")
+  const mcpServerIds = readIds("mcpServerIds")
+  const knowledgeBaseIds = readIds("knowledgeBaseIds")
+  const instructions = readString(params, "instructions")
+  const permissionCap = readString(params, "permissionCap", AGENT_TURN_NO_CAP)
+  const patchIds = (key: string, list: string[]) =>
+    onChange(patchParam(params, key, list.length > 0 ? list : undefined))
   const maxTurns = readNumber(params, "maxTurns", 10)
   const toolsEnabled = readBoolean(params, "toolsEnabled", true)
   const requireTools = readBoolean(params, "requireTools", false)
@@ -536,44 +552,133 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       {!characterId ? (
-        <>
-          <Field
-            label={t("systemPrompt.label")}
-            htmlFor="at-system"
-            hint={t("systemPrompt.hint")}
-            name="systemPrompt"
-          >
-            <ExpressionField
-              id="at-system"
-              value={systemPrompt}
-              onChange={(v) => onChange(patchParam(params, "systemPrompt", v))}
-              multiline
-              rows={3}
-            />
-          </Field>
-          <Field label={t("model.label")} htmlFor="at-model" hint={t("model.hint")} name="model">
-            <ModelPicker
-              id="at-model"
-              value={model}
-              onChange={(v) => onChange(patchParam(params, "model", v))}
-            />
-          </Field>
-          <Field
-            label={t("allowedTools.label")}
-            htmlFor="at-tools"
-            hint={t("allowedTools.hint")}
-            name="allowedTools"
-          >
-            <ToolPicker
-              id="at-tools"
-              value={allowedTools}
-              onChange={(list) =>
-                onChange(patchParam(params, "allowedTools", list.length > 0 ? list : undefined))
-              }
-            />
-          </Field>
-        </>
+        <Field
+          label={t("systemPrompt.label")}
+          htmlFor="at-system"
+          hint={t("systemPrompt.hint")}
+          name="systemPrompt"
+        >
+          <ExpressionField
+            id="at-system"
+            value={systemPrompt}
+            onChange={(v) => onChange(patchParam(params, "systemPrompt", v))}
+            multiline
+            rows={3}
+          />
+        </Field>
       ) : null}
+      {/* A named agent keeps its own model and tools unless these narrow them
+          for this turn, so both stay editable either way. */}
+      <Field
+        label={t("model.label")}
+        htmlFor="at-model"
+        hint={characterId ? t("model.hintAgent") : t("model.hint")}
+        name="model"
+      >
+        <ModelPicker
+          id="at-model"
+          value={model}
+          onChange={(v) => onChange(patchParam(params, "model", v))}
+        />
+      </Field>
+      <Field
+        label={t("allowedTools.label")}
+        htmlFor="at-tools"
+        hint={characterId ? t("allowedTools.hintAgent") : t("allowedTools.hint")}
+        name="allowedTools"
+      >
+        <ToolPicker
+          id="at-tools"
+          value={allowedTools}
+          onChange={(list) => patchIds("allowedTools", list)}
+        />
+      </Field>
+      <Field
+        label={t("skillIds.label")}
+        htmlFor="at-skills"
+        hint={t("skillIds.hint")}
+        name="skillIds"
+      >
+        <SkillMultiPicker
+          id="at-skills"
+          value={skillIds}
+          onChange={(list) => patchIds("skillIds", list)}
+        />
+      </Field>
+      <Field
+        label={t("mcpServerIds.label")}
+        htmlFor="at-mcp"
+        hint={t("mcpServerIds.hint")}
+        name="mcpServerIds"
+      >
+        <McpServerMultiPicker
+          id="at-mcp"
+          value={mcpServerIds}
+          onChange={(list) => patchIds("mcpServerIds", list)}
+        />
+      </Field>
+      <Field
+        label={t("knowledgeBaseIds.label")}
+        htmlFor="at-kb"
+        hint={t("knowledgeBaseIds.hint")}
+        name="knowledgeBaseIds"
+      >
+        <KnowledgeBaseMultiPicker
+          id="at-kb"
+          value={knowledgeBaseIds}
+          onChange={(list) => patchIds("knowledgeBaseIds", list)}
+        />
+      </Field>
+      <Field
+        label={t("disallowedTools.label")}
+        htmlFor="at-deny"
+        hint={t("disallowedTools.hint")}
+        name="disallowedTools"
+      >
+        <ToolPicker
+          id="at-deny"
+          value={disallowedTools}
+          emptyHint={t("disallowedTools.empty")}
+          onChange={(list) => patchIds("disallowedTools", list)}
+        />
+      </Field>
+      <Field
+        label={t("instructions.label")}
+        htmlFor="at-instructions"
+        hint={t("instructions.hint")}
+        name="instructions"
+      >
+        <ExpressionField
+          id="at-instructions"
+          value={instructions}
+          onChange={(v) => onChange(patchParam(params, "instructions", v || undefined))}
+          multiline
+          rows={3}
+        />
+      </Field>
+      <Field
+        label={t("permissionCap.label")}
+        htmlFor="at-permission-cap"
+        hint={t("permissionCap.hint")}
+        name="permissionCap"
+      >
+        <Select
+          value={permissionCap}
+          onValueChange={(v) =>
+            onChange(patchParam(params, "permissionCap", v === AGENT_TURN_NO_CAP ? undefined : v))
+          }
+        >
+          <SelectTrigger id="at-permission-cap" aria-label={t("permissionCap.label")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={AGENT_TURN_NO_CAP}>{t("permissionCap.none")}</SelectItem>
+            <SelectItem value="plan">{t("permissionCap.plan")}</SelectItem>
+            <SelectItem value="default">{t("permissionCap.default")}</SelectItem>
+            <SelectItem value="acceptEdits">{t("permissionCap.acceptEdits")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
       <FieldRow>
         <Field
           label={t("maxTurns.label")}

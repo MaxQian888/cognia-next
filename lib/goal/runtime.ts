@@ -57,7 +57,7 @@ import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { adapterAllowsHostCapability } from "@/lib/connectors/permission-resolve"
 import { append as appendConnectorAudit } from "@/lib/db/connector-audit"
-import { getCharacter } from "@/lib/db/characters"
+import { resolveCharacterById } from "@/lib/db/characters"
 import { classifyRisk } from "@/lib/policy/risk/classify-risk"
 import { requiredCeremony } from "@/lib/policy/risk/ceremony"
 import { buildGoalRiskInput } from "./risk-input"
@@ -298,7 +298,7 @@ class GoalRuntime {
     if (config.riskGating === false) return { config }
 
     const character = characterId
-      ? await getCharacter(characterId).catch(() => undefined)
+      ? await resolveCharacterById(characterId).catch(() => undefined)
       : undefined
     const assessment = classifyRisk(buildGoalRiskInput({ safeObjective, character, appSettings }))
     const ceremony = requiredCeremony(assessment)
