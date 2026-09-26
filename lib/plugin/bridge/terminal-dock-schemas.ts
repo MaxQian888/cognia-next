@@ -10,7 +10,7 @@
  * routed from `lib/claude/plugin-tool-ipc.ts` by the `terminal_dock_` prefix.
  *
  * Wire format: plain JSON Schema objects (not zod). The sidecar's
- * `jsonSchemaToZodShape` (`sidecar/builtin-tools/plugin-tools.mjs:92`)
+ * `jsonSchemaToZodShape` (`sidecar/src/tools/plugin/json-schema-zod.ts`)
  * converts each on registration so the MCP tool validates arguments
  * before the proxy roundtrip.
  */

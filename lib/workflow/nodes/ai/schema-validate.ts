@@ -2,7 +2,7 @@
  * JSON-Schema → zod validation for typed node output (D3).
  *
  * This is a TS twin of the sidecar's `jsonSchemaToZodShape` /
- * `jsonSchemaPropToZod` (`sidecar/builtin-tools/plugin-tools.mjs:164-230`).
+ * `jsonSchemaPropToZod` (`sidecar/src/tools/plugin/json-schema-zod.ts`).
  * The sidecar copy validates *tool inputs*; this copy validates an agent
  * turn's *structured output* against a node-declared schema. The two live in
  * different runtimes (Node sidecar vs the app bundle) so they cannot share a

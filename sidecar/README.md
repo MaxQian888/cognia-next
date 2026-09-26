@@ -140,6 +140,9 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/result-cap.mjs`                                           | `src/tools/middleware/result-cap.ts`                               | 7b          |
 | `dispatch/ai-sdk-tool-search.mjs`                                        | `src/tools/adapters/ai-sdk-tool-search.ts`                         | 7b          |
 | `permissionDecisionHasUnprovenRewrite` (in `anthropic-mcp-relay.mjs`)    | `src/policy/permission/delegated-approval.ts`                      | 7c          |
+| `builtin-tools/plugin-tools.mjs` (server, response waiter)               | `src/tools/plugin/server.ts`                                       | 7c          |
+| `jsonSchemaToZodShape`, `jsonSchemaPropToZod` (in `plugin-tools.mjs`)    | `src/tools/plugin/json-schema-zod.ts`                              | 7c          |
+| `builtin-tools/{,__tests__/}plugin-tools.test.mjs` (merged)              | `src/tools/plugin/{server,json-schema-zod}.test.ts`                | 7c          |
 
 ## Scripts (run from repo root)
 

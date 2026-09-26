@@ -40,7 +40,7 @@ export function grantDurationMinutes(ms: number): number {
  * in `crates/cognia-automation/src/automation/permission.rs`.
  *
  * The ceiling exists because the sidecar aborts a plugin tool call at 120s
- * (`sidecar/builtin-tools/plugin-tools.mjs`). A consent window past that would
+ * (`sidecar/src/tools/plugin/server.ts`). A consent window past that would
  * let the operator answer a call that already died, so the settings input must
  * not offer it.
  */

@@ -109,7 +109,7 @@ re-executed — the only iterating construct is the `flow.loop` v2 container).
     mechanism for any agentic turn.** Native `generateObject` stays an optional
     fast-path for single-shot non-agentic nodes only.
   - **Validation semantics (D3a):** parse → validate against JSON-Schema (reuse
-    the sidecar's existing `jsonSchemaToZodShape`, `plugin-tools.mjs:164`) → on
+    the sidecar's existing `jsonSchemaToZodShape`, `src/tools/plugin/json-schema-zod.ts`) → on
     violation, **bounded auto-fix retry ×1** (re-prompt with error + schema) →
     still failing ⇒ **node hard-fails into the existing `errorPolicy`**
     (retry / error-branch / continue). Per-node `onSchemaViolation: "fail" |

@@ -255,7 +255,7 @@ pub struct AutomationSettings {
 /// Upper bound for [`AutomationSettings::consent_timeout_ms`].
 ///
 /// The sidecar aborts a plugin tool call at `DEFAULT_PLUGIN_TOOL_TIMEOUT_MS`
-/// (120 s, `sidecar/builtin-tools/plugin-tools.mjs`). A consent window at or
+/// (120 s, `sidecar/src/tools/plugin/server.ts`). A consent window at or
 /// past that ceiling is worse than useless: the operator answers, and the
 /// answer lands on a tool call the sidecar already gave up on. Leave headroom.
 pub const MAX_CONSENT_TIMEOUT_MS: u64 = 115_000;

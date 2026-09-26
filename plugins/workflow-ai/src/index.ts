@@ -3,7 +3,7 @@
  *
  * Activates a suite of MCP-bridged tools that let the chat agent inspect,
  * mutate, lay out, and run workflows. Tools are surfaced to the agent via the
- * `cognia-plugin-tools` MCP server (sidecar/builtin-tools/plugin-tools.mjs).
+ * `cognia-plugin-tools` MCP server (sidecar/src/tools/plugin/server.ts).
  *
  * The editing tools target the workflow open in the visual editor; if none is
  * open when one fires, it returns a typed `editor-not-open` error and the

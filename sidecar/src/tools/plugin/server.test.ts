@@ -1,6 +1,10 @@
-// @ts-nocheck -- moved from builtin-tools/plugin-tools.mjs; typed in the next commit.
 import { test } from "node:test"
 import assert from "node:assert/strict"
+
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 
 import {
   SERVER_NAME,
@@ -8,9 +12,49 @@ import {
   awaitPluginToolResponse,
   buildPluginToolsServer,
   isCallToolResult,
-  jsonSchemaToZodShape,
-  jsonSchemaPropToZod,
 } from "./server.ts"
+import type { PendingPluginToolCalls, PluginToolResponse } from "./server.ts"
+
+/** The `plugin_tool_exec` frame the server emits. */
+interface ExecFrame {
+  type: string
+  sessionId: string
+  toolUseId: string
+  name: string
+  args: Record<string, unknown>
+  [field: string]: unknown
+}
+
+const asFrame = (frame: Record<string, unknown>) => frame as unknown as ExecFrame
+
+type RegisteredTool = { handler(args: unknown, extra?: unknown): Promise<CallToolResult> }
+
+/**
+ * The SDK registers each tool() on `instance._registeredTools[name]` with its
+ * `handler` callback exposed; the tests invoke it directly so they run without
+ * an MCP transport.
+ */
+function registeredTools(
+  server: McpSdkServerConfigWithInstance | null
+): Record<string, RegisteredTool | undefined> {
+  assert.ok(server, "expected a server")
+  return (server.instance as unknown as { _registeredTools: Record<string, RegisteredTool> })
+    ._registeredTools
+}
+
+/** Resolve the pending call a frame opened, as the host does. */
+function answer(pending: PendingPluginToolCalls, toolUseId: string, response: PluginToolResponse) {
+  const entry = pending.get(toolUseId)
+  assert.ok(entry, `no pending call ${toolUseId}`)
+  entry.resolve(response)
+}
+
+/** The text of a result's first block. */
+function firstText(result: CallToolResult): string {
+  const block = result.content[0]
+  assert.equal(block?.type, "text")
+  return (block as { text: string }).text
+}
 
 test("server name + version are stable", () => {
   assert.equal(SERVER_NAME, "cognia-plugin-tools")
@@ -60,25 +104,56 @@ test("buildPluginToolsServer returns a server config with the SERVER_NAME", () =
   assert.equal(server?.name, SERVER_NAME)
 })
 
+test("awaitPluginToolResponse registers the resolver synchronously (before emit)", () => {
+  const pending: PendingPluginToolCalls = new Map()
+  void awaitPluginToolResponse(pending, "t3", "x", 1000)
+  assert.equal(pending.has("t3"), true)
+  answer(pending, "t3", { result: null })
+})
+
+test("awaitPluginToolResponse resolves with the response and clears the entry", async () => {
+  const pending: PendingPluginToolCalls = new Map()
+  const promise = awaitPluginToolResponse(pending, "t2", "sandbox_bash", 1000)
+  answer(pending, "t2", { result: "ok" })
+  assert.deepEqual(await promise, { result: "ok" })
+  assert.equal(pending.has("t2"), false)
+})
+
 test("awaitPluginToolResponse can disable its timeout for long-running tools", async () => {
-  const pending = new Map()
+  const pending: PendingPluginToolCalls = new Map()
   const promise = awaitPluginToolResponse(pending, "tool-1", "long", 0)
+  // Give a real timer a chance to fire — it must NOT.
+  await new Promise((resolve) => setTimeout(resolve, 30))
   assert.equal(pending.has("tool-1"), true)
-  pending.get("tool-1").resolve({ result: "ok" })
+  answer(pending, "tool-1", { result: "ok" })
   assert.deepEqual(await promise, { result: "ok" })
   assert.equal(pending.has("tool-1"), false)
 })
 
+test("awaitPluginToolResponse treats a negative / non-finite timeout as no timeout", async () => {
+  const pending: PendingPluginToolCalls = new Map()
+  const infinite = awaitPluginToolResponse(pending, "d", "dispatch_agent", Number.POSITIVE_INFINITY)
+  const negative = awaitPluginToolResponse(pending, "n", "dispatch_agent", -1)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(pending.has("d"), true)
+  assert.equal(pending.has("n"), true)
+  answer(pending, "d", { result: "done" })
+  answer(pending, "n", { result: "done" })
+  assert.equal((await infinite).result, "done")
+  assert.equal((await negative).result, "done")
+})
+
 test("awaitPluginToolResponse resolves with an error when the tool times out", async () => {
-  const pending = new Map()
+  const pending: PendingPluginToolCalls = new Map()
   const response = await awaitPluginToolResponse(pending, "tool-2", "slow", 1)
+  // The entry is cleaned up so a late response can't double-resolve.
   assert.equal(pending.has("tool-2"), false)
   assert.deepEqual(response, { error: "plugin tool 'slow' timed out after 1ms" })
 })
 
 test("synthesized tool emits plugin_tool_exec and resolves with the response result", async () => {
-  const emitted = []
-  const pending = new Map()
+  const emitted: ExecFrame[] = []
+  const pending: PendingPluginToolCalls = new Map()
   const server = buildPluginToolsServer({
     tools: [
       {
@@ -93,10 +168,10 @@ test("synthesized tool emits plugin_tool_exec and resolves with the response res
       },
     ],
     emit: (msg) => {
-      emitted.push(msg)
+      const frame = asFrame(msg)
+      emitted.push(frame)
       // Simulate the renderer responding immediately.
-      const pendingEntry = pending.get(msg.toolUseId)
-      if (pendingEntry) pendingEntry.resolve({ result: `got: ${msg.args.text}` })
+      answer(pending, frame.toolUseId, { result: `got: ${String(frame.args.text)}` })
     },
     sessionId: "sess-1",
     turnId: "turn-1",
@@ -105,30 +180,28 @@ test("synthesized tool emits plugin_tool_exec and resolves with the response res
     pendingPluginToolCalls: pending,
   })
 
-  // The SDK registers each tool() on `instance._registeredTools[name]` with
-  // its `handler` callback exposed; we invoke it directly so the test can
-  // run without spinning up an MCP transport.
-  const registered = server.instance?._registeredTools?.echo
+  const registered = registeredTools(server).echo
   assert.ok(registered, "expected the wrapped tool to be exposed on the server")
   const result = await registered.handler({ text: "hi" })
+  const [frame] = emitted
+  assert.ok(frame)
 
   assert.equal(emitted.length, 1)
-  assert.equal(emitted[0].type, "plugin_tool_exec")
-  assert.equal(emitted[0].sessionId, "sess-1")
-  assert.equal(emitted[0].turnId, "turn-1")
-  assert.equal(emitted[0].attemptId, "attempt-2")
-  assert.equal(emitted[0].sandboxRuntimeRef, "sandbox-runtime:one")
-  assert.equal(emitted[0].name, "echo")
-  assert.deepEqual(emitted[0].args, { text: "hi" })
-  assert.equal(typeof emitted[0].toolUseId, "string")
+  assert.equal(frame.type, "plugin_tool_exec")
+  assert.equal(frame.sessionId, "sess-1")
+  assert.equal(frame.turnId, "turn-1")
+  assert.equal(frame.attemptId, "attempt-2")
+  assert.equal(frame.sandboxRuntimeRef, "sandbox-runtime:one")
+  assert.equal(frame.name, "echo")
+  assert.deepEqual(frame.args, { text: "hi" })
+  assert.equal(typeof frame.toolUseId, "string")
   assert.equal(result.isError, undefined)
-  assert.equal(result.content[0].type, "text")
-  assert.equal(result.content[0].text, "got: hi")
+  assert.equal(firstText(result), "got: hi")
 })
 
 test("synthesized tool preserves the server-issued remote execution context", async () => {
-  const emitted = []
-  const pending = new Map()
+  const emitted: ExecFrame[] = []
+  const pending: PendingPluginToolCalls = new Map()
   const remoteExecutionContext = {
     hostId: "host-a",
     originDeviceId: "device-a",
@@ -140,21 +213,23 @@ test("synthesized tool preserves the server-issued remote execution context", as
   }
   const server = buildPluginToolsServer({
     tools: [{ name: "remote-tool", jsonSchema: { type: "object", properties: {} } }],
-    emit: (event) => emitted.push(event),
+    emit: (event) => emitted.push(asFrame(event)),
     sessionId: "session-a",
     pendingPluginToolCalls: pending,
     remoteExecutionContext,
   })
 
-  const call = server.instance._registeredTools["remote-tool"].handler({})
+  const call = registeredTools(server)["remote-tool"]!.handler({})
   await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(emitted[0].remoteExecutionContext, remoteExecutionContext)
-  pending.get(emitted[0].toolUseId).resolve({ result: "ok" })
+  const [frame] = emitted
+  assert.ok(frame)
+  assert.deepEqual(frame.remoteExecutionContext, remoteExecutionContext)
+  answer(pending, frame.toolUseId, { result: "ok" })
   await call
 })
 
 test("synthesized tool returns compact JSON for structured results", async () => {
-  const pending = new Map()
+  const pending: PendingPluginToolCalls = new Map()
   const server = buildPluginToolsServer({
     tools: [
       {
@@ -164,25 +239,22 @@ test("synthesized tool returns compact JSON for structured results", async () =>
         pluginId: "p1",
       },
     ],
-    emit: (msg) => {
-      const pendingEntry = pending.get(msg.toolUseId)
-      if (pendingEntry) pendingEntry.resolve({ result: { ok: true, rows: [1, 2] } })
-    },
+    emit: (msg) => answer(pending, asFrame(msg).toolUseId, { result: { ok: true, rows: [1, 2] } }),
     sessionId: "sess-1",
     pendingPluginToolCalls: pending,
   })
-  const registered = server.instance?._registeredTools?.structured
+  const registered = registeredTools(server).structured
   assert.ok(registered)
   const result = await registered.handler({})
   assert.equal(result.isError, undefined)
-  assert.equal(result.content[0].text, '{"ok":true,"rows":[1,2]}')
+  assert.equal(firstText(result), '{"ok":true,"rows":[1,2]}')
 })
 
 test("synthesized tool passes an MCP CallToolResult through untouched", async () => {
   // Without the passthrough every plugin result is JSON.stringify-ed into one
   // text block, which makes returning an image / audio / embedded resource
   // structurally impossible — the model would only ever get base64 text.
-  const pending = new Map()
+  const pending: PendingPluginToolCalls = new Map()
   const callToolResult = {
     content: [
       { type: "text", text: "shot.png (12 bytes)" },
@@ -198,18 +270,15 @@ test("synthesized tool passes an MCP CallToolResult through untouched", async ()
         pluginId: "p1",
       },
     ],
-    emit: (msg) => {
-      const e = pending.get(msg.toolUseId)
-      if (e) e.resolve({ result: callToolResult })
-    },
+    emit: (msg) => answer(pending, asFrame(msg).toolUseId, { result: callToolResult }),
     sessionId: "s",
     pendingPluginToolCalls: pending,
   })
-  const registered = server.instance?._registeredTools?.take_screenshot
+  const registered = registeredTools(server).take_screenshot
   assert.ok(registered)
   const result = await registered.handler({})
   assert.deepEqual(result, callToolResult)
-  assert.equal(result.content[1].data, "AAAA")
+  assert.equal((result.content[1] as { data?: string }).data, "AAAA")
 })
 
 test("isCallToolResult accepts a well-formed MCP result", () => {
@@ -245,7 +314,7 @@ test("isCallToolResult rejects a malformed or empty content array", () => {
 })
 
 test("synthesized tool surfaces error responses as isError content", async () => {
-  const pending = new Map()
+  const pending: PendingPluginToolCalls = new Map()
   const server = buildPluginToolsServer({
     tools: [
       {
@@ -255,140 +324,25 @@ test("synthesized tool surfaces error responses as isError content", async () =>
         pluginId: "p1",
       },
     ],
-    emit: (msg) => {
-      const e = pending.get(msg.toolUseId)
-      if (e) e.resolve({ error: "boom" })
-    },
+    emit: (msg) => answer(pending, asFrame(msg).toolUseId, { error: "boom" }),
     sessionId: "s",
     pendingPluginToolCalls: pending,
   })
-  const registered = server.instance?._registeredTools?.fail
+  const registered = registeredTools(server).fail
   assert.ok(registered)
   const result = await registered.handler({})
   assert.equal(result.isError, true)
-  assert.match(result.content[0].text, /plugin tool: boom/)
+  assert.match(firstText(result), /plugin tool: boom/)
   // A plugin failure is classified like any other, so the model is told
   // whether repeating the call could help.
-  assert.equal(result._meta["cognia/failure"].kind, "execution-failed")
-})
-
-test("jsonSchemaToZodShape returns empty shape for non-object schemas", () => {
-  assert.deepEqual(jsonSchemaToZodShape(null), {})
-  assert.deepEqual(jsonSchemaToZodShape(undefined), {})
-  assert.deepEqual(jsonSchemaToZodShape({ type: "string" }), {})
-  assert.deepEqual(jsonSchemaToZodShape({ type: "object" }), {})
-})
-
-test("jsonSchemaToZodShape produces one zod entry per declared property", () => {
-  const shape = jsonSchemaToZodShape({
-    type: "object",
-    properties: {
-      a: { type: "string" },
-      b: { type: "number" },
-      c: { type: "boolean" },
-    },
-    required: ["a"],
-  })
-  assert.deepEqual(Object.keys(shape).sort(), ["a", "b", "c"])
-})
-
-test("jsonSchemaPropToZod handles the common primitive types", () => {
-  // Smoke-check: each call returns a zod-like object with a parse() method.
-  const types = ["string", "number", "integer", "boolean", "null", "array", "object", "weird"]
-  for (const t of types) {
-    const z = jsonSchemaPropToZod({ type: t }, true)
-    assert.equal(typeof z.parse, "function", `expected zod for type=${t}`)
-  }
-})
-
-test("jsonSchemaPropToZod wraps non-required fields in .optional()", () => {
-  const required = jsonSchemaPropToZod({ type: "string" }, true)
-  const optional = jsonSchemaPropToZod({ type: "string" }, false)
-  // Optional schemas expose isOptional() on zod v3+ instances.
-  assert.equal(typeof required.isOptional, "function")
-  assert.equal(required.isOptional(), false)
-  assert.equal(optional.isOptional(), true)
-})
-
-test("jsonSchemaPropToZod preserves descriptions on known fields", () => {
-  const schema = jsonSchemaPropToZod({ type: "string", description: "field docs" }, true)
-  assert.equal(schema.description, "field docs")
-})
-
-test("jsonSchemaPropToZod accepts null as a declared enum member", () => {
-  // `enum: [...,null]` is how a schema says "one of these, or explicitly
-  // cleared". Dropping the null made this rail reject a value the schema
-  // declares, while the ai-sdk rail accepted it — the same tool validating
-  // differently per provider.
-  const schema = jsonSchemaPropToZod({ type: ["string", "null"], enum: ["a", "b", null] }, true)
-  assert.equal(schema.safeParse("a").success, true)
-  assert.equal(schema.safeParse(null).success, true)
-  assert.equal(schema.safeParse("nope").success, false)
-})
-
-test("jsonSchemaPropToZod maps a null-only enum to null, not to undefined", () => {
-  // `enum: [null]` is legal JSON Schema for "must be null". Filtering the only
-  // member out once left a union of two `z.literal(undefined)` — a schema whose
-  // declared value was the one thing it rejected.
-  const schema = jsonSchemaPropToZod({ enum: [null] }, true)
-  assert.equal(schema.safeParse(null).success, true)
-  assert.equal(schema.safeParse("a").success, false)
-})
-
-test("jsonSchemaPropToZod maps a single-member enum to that literal", () => {
-  const schema = jsonSchemaPropToZod({ enum: [7] }, true)
-  assert.equal(schema.safeParse(7).success, true)
-  assert.equal(schema.safeParse(8).success, false)
-})
-
-test("jsonSchemaPropToZod keeps mixed-type enums exact", () => {
-  const schema = jsonSchemaPropToZod({ enum: ["a", 2, true] }, true)
-  for (const value of ["a", 2, true]) {
-    assert.equal(schema.safeParse(value).success, true, `expected ${String(value)} to parse`)
-  }
-  assert.equal(schema.safeParse("2").success, false)
-})
-
-test("jsonSchemaPropToZod maps oneOf to a real union", () => {
-  // The model-visible MCP schema is derived from THIS zod shape, not from the
-  // manifest JSON Schema. Before `oneOf` was handled, every discriminated
-  // union fell through to `z.unknown()` — which is how computer-use's entire
-  // action vocabulary reached the model as an opaque object.
-  const schema = jsonSchemaPropToZod(
-    {
-      oneOf: [
-        { type: "object", properties: { kind: { const: "click" } }, required: ["kind"] },
-        {
-          type: "object",
-          properties: { kind: { const: "pressKey" }, chord: { type: "string" } },
-          required: ["kind", "chord"],
-        },
-      ],
-    },
-    true
-  )
-  assert.equal(schema.safeParse({ kind: "click" }).success, true)
-  assert.equal(schema.safeParse({ kind: "pressKey", chord: "ctrl+c" }).success, true)
-  assert.equal(schema.safeParse({ kind: "nope" }).success, false)
-})
-
-test("jsonSchemaPropToZod treats anyOf like oneOf", () => {
-  const schema = jsonSchemaPropToZod({ anyOf: [{ type: "string" }, { type: "number" }] }, true)
-  assert.equal(schema.safeParse("a").success, true)
-  assert.equal(schema.safeParse(3).success, true)
-  assert.equal(schema.safeParse(true).success, false)
-})
-
-test("jsonSchemaPropToZod keeps a single-branch oneOf as that branch", () => {
-  const schema = jsonSchemaPropToZod({ oneOf: [{ type: "string" }] }, true)
-  assert.equal(schema.safeParse("a").success, true)
-  assert.equal(schema.safeParse(1).success, false)
+  const failure = result._meta?.["cognia/failure"] as { kind?: string } | undefined
+  assert.equal(failure?.kind, "execution-failed")
 })
 
 test("a manifest name the API would reject registers under its model-facing form and round-trips", async () => {
-  const emitted = []
-  const pending = new Map()
-  const aliases = new Map()
+  const emitted: ExecFrame[] = []
+  const pending: PendingPluginToolCalls = new Map()
+  const aliases = new Map<string, string>()
   const server = buildPluginToolsServer({
     tools: [
       {
@@ -405,22 +359,23 @@ test("a manifest name the API would reject registers under its model-facing form
       },
     ],
     emit: (msg) => {
-      emitted.push(msg)
-      pending.get(msg.toolUseId)?.resolve({ result: "text" })
+      const frame = asFrame(msg)
+      emitted.push(frame)
+      pending.get(frame.toolUseId)?.resolve({ result: "text" })
     },
     sessionId: "sess-1",
     pendingPluginToolCalls: pending,
     toolNameAliases: aliases,
   })
-  const registered = server.instance?._registeredTools ?? {}
+  const registered = registeredTools(server)
   assert.ok(registered.ocr_extract, "the model-facing name is what the SDK registers")
   assert.equal(registered["ocr.extract"], undefined)
   assert.ok(registered.sandbox_bash, "a safe name is registered unchanged")
   assert.deepEqual([...aliases], [["ocr_extract", "ocr.extract"]])
 
-  await registered.ocr_extract.handler({})
+  await registered.ocr_extract!.handler({})
   assert.equal(emitted.length, 1)
-  assert.equal(emitted[0].name, "ocr.extract", "the renderer keeps seeing the manifest name")
+  assert.equal(emitted[0]!.name, "ocr.extract", "the renderer keeps seeing the manifest name")
 })
 
 test("buildPluginToolsServer works without an alias map to fill", () => {
@@ -430,5 +385,55 @@ test("buildPluginToolsServer works without an alias map to fill", () => {
     sessionId: "s",
     pendingPluginToolCalls: new Map(),
   })
-  assert.ok(server.instance?._registeredTools?.docs_search)
+  assert.ok(registeredTools(server).docs_search)
+})
+
+test("real SDK plugin permission delegate allows original input and refuses post-hook rewrites", async () => {
+  const pending: PendingPluginToolCalls = new Map()
+  let rewrite = false
+  const server = buildPluginToolsServer({
+    tools: [
+      {
+        name: "review",
+        description: "approval",
+        jsonSchema: {
+          type: "object",
+          properties: {
+            tool_name: { type: "string" },
+            input: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+          },
+          required: ["tool_name", "input"],
+        },
+      },
+    ],
+    sessionId: "delegate",
+    pendingPluginToolCalls: pending,
+    permissionPromptToolName: "mcp__cognia-plugin-tools__review",
+    emit: (event) => {
+      const frame = asFrame(event)
+      answer(pending, frame.toolUseId, {
+        result: {
+          behavior: "allow",
+          updatedInput: rewrite ? { path: "/unsafe" } : frame.args.input,
+        },
+      })
+    },
+  })
+  assert.ok(server)
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  const client = new Client({ name: "test", version: "1" })
+  await server.instance.connect(serverTransport)
+  await client.connect(clientTransport)
+  try {
+    const request = { name: "review", arguments: { tool_name: "Write", input: { path: "/safe" } } }
+    const allowed = (await client.callTool(request)) as CallToolResult
+    assert.equal((JSON.parse(firstText(allowed)) as { behavior: string }).behavior, "allow")
+    rewrite = true
+    const denied = (await client.callTool(request)) as CallToolResult
+    assert.equal(denied.isError, true)
+    assert.match(firstText(denied), /cannot rewrite/)
+  } finally {
+    await client.close()
+    await server.instance.close()
+  }
 })

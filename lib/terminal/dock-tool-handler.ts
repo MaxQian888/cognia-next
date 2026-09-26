@@ -7,7 +7,7 @@
  * the four synthetic `terminal_dock_*` tools are manifested by
  * `lib/plugin/bridge/sidecar-tools-bridge.ts:buildTerminalDockManifestEntries`,
  * the sidecar proxies them through the existing `plugin_tool_exec`
- * stream (`sidecar/builtin-tools/plugin-tools.mjs`), and the renderer's
+ * stream (`sidecar/src/tools/plugin/server.ts`), and the renderer's
  * `lib/claude/plugin-tool-ipc.ts:handlePluginToolExec` recognises the
  * `terminal_dock_` prefix and routes here.
  *

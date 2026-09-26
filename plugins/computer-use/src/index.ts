@@ -620,7 +620,7 @@ const definition = definePlugin({
     const t = (key: string, params?: Record<string, string | number>) => ctx.i18n.t(key, params)
 
     // Register the app-session tools for the chat-side plugin MCP bridge.
-    // The sidecar's plugin-tools bridge (sidecar/builtin-tools/plugin-tools.mjs)
+    // The sidecar's plugin-tools bridge (sidecar/src/tools/plugin/server.ts)
     // synthesizes the MCP server from `SendOptions.pluginTools`, which is
     // populated by `buildPluginToolsManifest()` from the plugin store. The
     // runtime unregisters them on deactivate.
