@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Code-level protocol adapter (P2-E): for upstreams the declarative
 // `openai-compatible-variant` spec can't express, the plugin ships REAL code
 // that runs in the RENDERER (where plugin code legitimately executes — same
@@ -16,7 +17,7 @@
 // stays the single normalizer no matter which adapter served the turn.
 
 import { randomUUID } from "node:crypto"
-import { makeInputStream } from "../../src/shared/input-stream.ts"
+import { makeInputStream } from "../../shared/input-stream.ts"
 
 /**
  * Register a pending execution channel for an execId. The host's

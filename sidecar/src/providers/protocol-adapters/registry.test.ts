@@ -1,6 +1,7 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { BUILTIN_PROTOCOLS, isBuiltinProtocol, resolveAdapter } from "./registry.mjs"
+import { BUILTIN_PROTOCOLS, isBuiltinProtocol, resolveAdapter } from "./registry.ts"
 
 test("the builtin protocol set matches the @ai-sdk families (incl. azure/bedrock)", () => {
   assert.deepEqual([...BUILTIN_PROTOCOLS].sort(), [

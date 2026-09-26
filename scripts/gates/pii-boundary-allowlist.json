@@ -229,7 +229,7 @@
     "protection": "Owning renderer feature boundaries redact derived payloads before dispatch; this import only constructs the provider model."
   },
   {
-    "file": "sidecar/dispatch/protocol-adapters/ai-sdk-adapter.mjs",
+    "file": "sidecar/src/providers/protocol-adapters/ai-sdk-adapter.ts",
     "boundaries": [
       "ai",
       "@ai-sdk/openai",

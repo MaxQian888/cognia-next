@@ -4,7 +4,7 @@
 // WHY THIS FILE EXISTS: the same two facts — "which AI SDK family does provider
 // id X speak?" and "does this openai-protocol endpoint serve /responses or
 // /chat/completions?" — used to be hand-copied across four call sites
-// (sidecar/dispatch/ai-sdk.mjs, sidecar/.../ai-sdk-adapter.mjs, the renderer's
+// (sidecar/dispatch/ai-sdk.mjs, sidecar/.../ai-sdk-adapter, the renderer's
 // packages/provider-core client.ts, and lib/ai/provider-consumption.ts). The
 // copies DRIFTED (the renderer list had openrouter/codex/local-engines; the
 // resolver list had xai/togetherai/fireworks/deepinfra) and a mismatch silently

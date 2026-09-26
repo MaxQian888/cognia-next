@@ -1,8 +1,8 @@
 /**
  * Drift guard: the renderer's protocol-adapter contracts and the sidecar's
  * executing implementation are maintained in two packages (sidecar/ is not
- * in the pnpm workspace). This test cross-imports the sidecar `.mjs` modules
- * (same precedent as `lib/a2ui/mcp-tool-schemas.test.ts`) and pins:
+ * in the pnpm workspace). This test cross-imports the sidecar modules (same
+ * precedent as `lib/a2ui/mcp-tool-schemas.test.ts`) and pins:
  *
  *  1. the builtin protocol sets stay in sync (renderer `gemini` ↔ sidecar
  *     `google` naming mapped explicitly),
@@ -13,25 +13,24 @@
 
 import { BUILTIN_API_PROTOCOLS } from "@cognia/provider-types/provider"
 import type { OpenAiCompatibleVariantSpec } from "./protocol-adapter-registry"
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — plain ESM JS from the sidecar package (no type declarations).
-import { BUILTIN_PROTOCOLS as SIDECAR_BUILTIN_PROTOCOLS } from "../../../../sidecar/dispatch/protocol-adapters/registry.mjs"
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — plain ESM JS from the sidecar package (no type declarations).
+// The names the sidecar registry builds its builtin set from. Importing the
+// registry itself would pull the whole AI SDK adapter chain into this build.
+import { BUILTIN_PROTOCOL_NAMES } from "../../../../sidecar/src/providers/provider-protocol.ts"
 import {
   SPEC_REQUIRED_KEYS,
   validateSpec,
-} from "../../../../sidecar/dispatch/protocol-adapters/openai-compatible-variant-adapter.mjs"
+} from "../../../../sidecar/src/providers/protocol-adapters/openai-compatible-variant-adapter.ts"
+
+const SIDECAR_BUILTIN_PROTOCOLS: ReadonlySet<string> = new Set(BUILTIN_PROTOCOL_NAMES)
 
 /** The renderer name → sidecar/AI-SDK family name map (provider-consumption.ts). */
 const RENDERER_TO_SIDECAR: Record<string, string> = { gemini: "google" }
 
 describe("protocol-adapter renderer ↔ sidecar parity", () => {
   it("every renderer builtin protocol maps onto a sidecar builtin", () => {
-    const sidecarSet = SIDECAR_BUILTIN_PROTOCOLS as Set<string>
     for (const p of BUILTIN_API_PROTOCOLS) {
       const sidecarName = RENDERER_TO_SIDECAR[p] ?? p
-      expect(sidecarSet.has(sidecarName)).toBe(true)
+      expect(SIDECAR_BUILTIN_PROTOCOLS.has(sidecarName)).toBe(true)
     }
   })
 
@@ -48,9 +47,7 @@ describe("protocol-adapter renderer ↔ sidecar parity", () => {
     // in the sidecar (`amazon-bedrock.sidecar`), which is what the first parity
     // assertion above covers.
     const rendererMapped = new Set(BUILTIN_API_PROTOCOLS.map((p) => RENDERER_TO_SIDECAR[p] ?? p))
-    const remainder = [...(SIDECAR_BUILTIN_PROTOCOLS as Set<string>)]
-      .filter((p) => !rendererMapped.has(p))
-      .sort()
+    const remainder = [...SIDECAR_BUILTIN_PROTOCOLS].filter((p) => !rendererMapped.has(p)).sort()
     expect(remainder).toEqual(["azure", "cohere", "mistral"])
   })
 

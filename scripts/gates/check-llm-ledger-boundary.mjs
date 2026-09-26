@@ -64,7 +64,7 @@
  *     `SendOptions.ledger` stamp. Whether a sender stamps is decided upstream
  *     (`lib/claude/build-options.ts`), outside any file this gate reads.
  *   - A plugin protocol adapter that `fetch`es a URL built at runtime
- *     (`sidecar/dispatch/protocol-adapters/{openai-compatible-variant,code}-adapter.mjs`)
+ *     (`sidecar/src/providers/protocol-adapters/{openai-compatible-variant,code}-adapter.ts`)
  *     names no endpoint literal. Both are reached only through `ai-sdk.mjs`
  *     (ledgered legs) and `feature-call.mjs` (listed on its own row).
  *   - The Rust gateway's upstream calls are the gateway passthrough ledger's

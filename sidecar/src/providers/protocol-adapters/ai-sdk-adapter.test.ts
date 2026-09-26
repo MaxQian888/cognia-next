@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
@@ -9,8 +10,8 @@ import {
   buildReasoningProviderOptions,
   buildCodexResponsesProviderOptions,
   withReasoningExtraction,
-} from "./ai-sdk-adapter.mjs"
-import { createEventAdapter } from "../event-adapter.mjs"
+} from "./ai-sdk-adapter.ts"
+import { createEventAdapter } from "../../../dispatch/event-adapter.mjs"
 
 test("CommandCode selects the model protocol for chat and auxiliary requests", async () => {
   for (const [model, expected] of [
@@ -569,7 +570,7 @@ test("buildModel wraps every protocol with <think>-tag reasoning extraction", as
 test("gpt-oss streaming fixture marks raw analysis and prevents display or persistence", async () => {
   const fixture = JSON.parse(
     readFileSync(
-      new URL("../../test-support/fixtures/gpt-oss-raw-analysis-stream.json", import.meta.url),
+      new URL("../../../test-support/fixtures/gpt-oss-raw-analysis-stream.json", import.meta.url),
       "utf8"
     )
   )

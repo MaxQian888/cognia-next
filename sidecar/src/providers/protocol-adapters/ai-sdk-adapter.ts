@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Built-in protocol adapter: wraps the historical `@ai-sdk/*` execution path
 // behind the ProtocolAdapter seam. Behavior is intentionally byte-identical
 // to the pre-seam `ai-sdk.mjs` inline code — `ai-sdk.test.mjs` is the canary
@@ -15,14 +16,11 @@ import {
   decideOpenAiEndpointFlavor,
   RESPONSES_ONLY_PROVIDERS,
   resolveProviderProtocol,
-} from "../../src/providers/provider-protocol.ts"
-import { buildBedrockProviderOptions } from "../../src/providers/bedrock.ts"
-import { partitionPrompt } from "../../src/providers/prompt-partition.ts"
-import { aiSdkTelemetry, withTraceparent } from "../../src/platform/telemetry/index.ts"
-import {
-  EFFORT_TO_BUDGET,
-  OPENAI_EFFORT_VALUES,
-} from "../../src/providers/reasoning-effort-tables.ts"
+} from "../provider-protocol.ts"
+import { buildBedrockProviderOptions } from "../bedrock.ts"
+import { partitionPrompt } from "../prompt-partition.ts"
+import { aiSdkTelemetry, withTraceparent } from "../../platform/telemetry/index.ts"
+import { EFFORT_TO_BUDGET, OPENAI_EFFORT_VALUES } from "../reasoning-effort-tables.ts"
 
 export { isGenuineOpenAiEndpoint, isResponsesOnlyEndpoint }
 

@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Declarative "openai-compatible-variant" protocol adapter (one-api channel
 // analog). A plugin describes an upstream as pure JSON — URL template, header
 // rules, request field renames/injections, response JSON paths — and this
@@ -8,8 +9,8 @@
 // intentionally OUT of scope for declarative adapters (needs real code; the
 // renderer round-trip path is the planned phase-2 escape hatch).
 
-import { getPath } from "./json-path-lite.mjs"
-import { GENERIC_REASONING_EFFORT } from "../../src/providers/reasoning-effort-tables.ts"
+import { getPath } from "./json-path-lite.ts"
+import { GENERIC_REASONING_EFFORT } from "../reasoning-effort-tables.ts"
 
 /** Keys a well-formed spec must carry (parity-tested against the renderer). */
 export const SPEC_REQUIRED_KEYS = ["kind", "urlTemplate", "responsePaths"]

@@ -1,5 +1,5 @@
-import { buildModel as defaultBuildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
-import { resolveAdapter as defaultResolveProtocolAdapter } from "./protocol-adapters/registry.mjs"
+import { buildModel as defaultBuildModel } from "../src/providers/protocol-adapters/ai-sdk-adapter.ts"
+import { resolveAdapter as defaultResolveProtocolAdapter } from "../src/providers/protocol-adapters/registry.ts"
 import { buildBedrockProviderOptions, discoverBedrockModels } from "../src/providers/bedrock.ts"
 import { discoverMcpServer as defaultDiscoverMcpServer } from "./mcp-runtime-gateway.mjs"
 import { toLanguageModelUsage } from "../src/providers/usage-normalize.ts"

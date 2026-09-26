@@ -1,6 +1,7 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { makeCodeAdapter, registerProtocolExec } from "./code-adapter.mjs"
+import { makeCodeAdapter, registerProtocolExec } from "./code-adapter.ts"
 
 async function collect(iterable) {
   const out = []

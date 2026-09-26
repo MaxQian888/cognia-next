@@ -4,7 +4,7 @@
  * describes an OpenAI-compatible-variant upstream as a pure-JSON spec; the
  * renderer forwards the spec to the sidecar via
  * `sendOptions.protocolAdapterSpec` and the sidecar's
- * `protocol-adapters/openai-compatible-variant-adapter.mjs` executes it
+ * `src/providers/protocol-adapters/openai-compatible-variant-adapter.ts` executes it
  * with fetch + an SSE parser. No plugin code ever loads into the sidecar
  * process (it holds full Node privileges and the user's API keys).
  *

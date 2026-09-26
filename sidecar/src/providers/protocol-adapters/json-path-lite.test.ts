@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { getPath, parsePath } from "./json-path-lite.mjs"
+import { getPath, parsePath } from "./json-path-lite.ts"
 
 test("parsePath splits dot segments and numeric brackets", () => {
   assert.deepEqual(parsePath("choices[0].delta.content"), ["choices", 0, "delta", "content"])

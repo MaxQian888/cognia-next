@@ -36,8 +36,8 @@ import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
-import { resolveAdapter } from "./protocol-adapters/registry.mjs"
-import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
+import { resolveAdapter } from "../src/providers/protocol-adapters/registry.ts"
+import { buildModel } from "../src/providers/protocol-adapters/ai-sdk-adapter.ts"
 import {
   resolveProviderProtocol,
   normalizeProtocol,
@@ -101,9 +101,9 @@ function resolveProtocol(provider, credentials, model) {
   return resolveProviderProtocol(provider)
 }
 
-// `buildModel` moved to `protocol-adapters/ai-sdk-adapter.mjs` (the built-in
-// adapter behind the ProtocolAdapter seam); re-imported above so the
-// `__testing__` surface stays stable.
+// `buildModel` moved to `src/providers/protocol-adapters/ai-sdk-adapter.ts`
+// (the built-in adapter behind the ProtocolAdapter seam); re-imported above so
+// the `__testing__` surface stays stable.
 
 /**
  * Drop `reasoning` parts from assistant messages before they re-enter the

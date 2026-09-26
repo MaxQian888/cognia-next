@@ -1,3 +1,4 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Minimal JSON-path getter for declarative protocol adapters: dot segments
 // and numeric brackets only (`choices[0].delta.content`). No wildcards, no
 // filters, no eval — specs are plugin-supplied DATA and must stay inert.

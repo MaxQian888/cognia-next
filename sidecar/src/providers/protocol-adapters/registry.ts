@@ -1,13 +1,14 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Protocol-adapter registry (one-api `GetAdaptor` analog). Resolution order:
 // the five built-in AI SDK protocols win unconditionally; anything else needs
 // a declarative spec forwarded by the renderer (`sendOptions.
 // protocolAdapterSpec`, contributed by a plugin). No match → null and the
 // dispatcher emits the same "no resolvable protocol" session_ended as before.
 
-import { makeAiSdkAdapter } from "./ai-sdk-adapter.mjs"
-import { makeCodeAdapter } from "./code-adapter.mjs"
-import { makeOpenAiCompatVariantAdapter } from "./openai-compatible-variant-adapter.mjs"
-import { BUILTIN_PROTOCOL_NAMES } from "../../src/providers/provider-protocol.ts"
+import { makeAiSdkAdapter } from "./ai-sdk-adapter.ts"
+import { makeCodeAdapter } from "./code-adapter.ts"
+import { makeOpenAiCompatVariantAdapter } from "./openai-compatible-variant-adapter.ts"
+import { BUILTIN_PROTOCOL_NAMES } from "../provider-protocol.ts"
 
 /**
  * Protocols the built-in `@ai-sdk/*` adapter handles, derived from the single

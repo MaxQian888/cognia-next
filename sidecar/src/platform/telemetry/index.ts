@@ -41,9 +41,8 @@ let aiTelemetryRegistered = false
  * `ai` and `@langfuse/vercel-ai-sdk` are loaded LAZILY, and the Langfuse
  * integration is a sidecar-only dependency (it is not in the root manifest, and
  * it pulls in ESM-only `@ai-sdk/otel`). A static import would make this module
- * unloadable from the renderer/root context, which does import the adapter
- * chain — `protocol-adapter-spec.parity.test.ts` reaches `registry.mjs` →
- * `ai-sdk-adapter.mjs` → here.
+ * unloadable anywhere but the sidecar process, and would put both on the cold
+ * start of every rail that imports the AI SDK adapter.
  *
  * A failed load therefore means "not the sidecar process", where collecting AI
  * SDK spans would be meaningless anyway: swallow it and leave telemetry

@@ -1,10 +1,11 @@
+// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
   makeOpenAiCompatVariantAdapter,
   SPEC_REQUIRED_KEYS,
   validateSpec,
-} from "./openai-compatible-variant-adapter.mjs"
+} from "./openai-compatible-variant-adapter.ts"
 
 const SPEC = {
   kind: "openai-compatible-variant",

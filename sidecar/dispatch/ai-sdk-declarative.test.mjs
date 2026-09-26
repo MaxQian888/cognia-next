@@ -6,7 +6,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { dispatchAiSdk } from "../ai-sdk.mjs"
+import { dispatchAiSdk } from "./ai-sdk.mjs"
 
 const SPEC = {
   kind: "openai-compatible-variant",

@@ -274,7 +274,7 @@
       "entries": ["agent-sdk:startup"],
       "note": "startup() spawns and initializes a Claude Code subprocess with no prompt; the model call is the query anthropic.mjs sends on the claimed warm process."
     },
-    "sidecar/dispatch/protocol-adapters/ai-sdk-adapter.mjs": {
+    "sidecar/src/providers/protocol-adapters/ai-sdk-adapter.ts": {
       "reason": "ledgered-entry",
       "entries": ["ai:streamText"],
       "seam": "sidecar/dispatch/ai-sdk.mjs",

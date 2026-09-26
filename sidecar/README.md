@@ -125,6 +125,8 @@ Each migration batch appends its moves here (old → new).
 | `dispatch/stream-watchdog.mjs`                                           | `src/providers/stream-watchdog.ts`                                 | 5c          |
 | `dispatch/provider-stream-log.mjs`                                       | `src/providers/stream-log.ts`                                      | 5c          |
 | `dispatch/bedrock.mjs`                                                   | `src/providers/bedrock.ts`                                         | 5c          |
+| `dispatch/protocol-adapters/*.mjs`                                       | `src/providers/protocol-adapters/*.ts`                             | 5d          |
+| `dispatch/protocol-adapters/dispatch-declarative.test.mjs`               | `dispatch/ai-sdk-declarative.test.mjs`                             | 5d          |
 
 ## Scripts (run from repo root)
 
