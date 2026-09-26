@@ -149,6 +149,7 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/core/bash-sessions.mjs`                                   | `src/tools/state/background-shells.ts`                             | 7e          |
 | `createSessionTaskStore` (in `builtin-tools/core/tasks.mjs`)             | `src/tools/state/tasks.ts`                                         | 7f          |
 | `builtin-tools/core/bash-host-sessions.mjs`                              | `src/tools/state/host-background-shells.ts`                        | 7g          |
+| `builtin-tools/git/*` (+ tests)                                          | `src/tools/builtin/git/*`                                          | 8a          |
 
 ## Scripts (run from repo root)
 

@@ -1,17 +1,26 @@
 import { test, before, after } from "node:test"
 import assert from "node:assert/strict"
 
-import { execGitRepoInspect, execGitChanges } from "./inspect.mjs"
-import { seededRepo, rm } from "../../test-support/git-repo.ts"
+import { execGitRepoInspect, execGitChanges } from "./inspect.ts"
+import { seededRepo, rm } from "../../../../test-support/git-repo.ts"
+import { firstJson } from "../../../../test-support/tool-result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
 
-let REPO
+let REPO: string
 before(() => {
   REPO = seededRepo()
 })
 after(() => rm(REPO))
 
-function decodeJSON(result) {
-  return JSON.parse(result.content[0].text)
+interface Inspect {
+  headHash: string
+  headRef: string | null
+  upstream: string | null
+  entries: { status: string; file: string }[]
+}
+
+function decodeJSON(result: ToolResult): Inspect {
+  return firstJson<Inspect>(result)
 }
 
 test("git_repo_inspect returns top-level + HEAD info", async () => {

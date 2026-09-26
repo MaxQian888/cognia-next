@@ -3,7 +3,7 @@
  *
  * Spawns via `execFile` (no shell) so a multi-line commit message or a CJK path
  * can never be re-parsed as shell metacharacters — the same discipline the
- * sidecar git tools use (`sidecar/builtin-tools/git/run.mjs`). Every git call is
+ * sidecar git tools use (`sidecar/src/tools/builtin/git/run.ts`). Every git call is
  * prefixed with `-c core.quotepath=false` (readable non-ASCII paths) and
  * `--no-optional-locks` (don't contend with a concurrent git process). The
  * spawner is injectable so the controllers unit-test without a real process.

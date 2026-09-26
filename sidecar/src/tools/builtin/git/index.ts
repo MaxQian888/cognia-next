@@ -5,9 +5,9 @@
 // stability). New tools are APPENDED. Most tools are read-only; git_stage and
 // git_commit are WRITE and route through the permission resolver.
 
-import { gitStatusTool, execGitStatus } from "./status.mjs"
-import { gitDiffTool, execGitDiff } from "./diff.mjs"
-import { gitLogTool, gitHistoryTool, execGitLog, execGitHistory } from "./log.mjs"
+import { gitStatusTool, execGitStatus } from "./status.ts"
+import { gitDiffTool, execGitDiff } from "./diff.ts"
+import { gitLogTool, gitHistoryTool, execGitLog, execGitHistory } from "./log.ts"
 import {
   gitBranchTool,
   gitRemoteTool,
@@ -15,15 +15,15 @@ import {
   execGitBranch,
   execGitRemote,
   execGitTag,
-} from "./refs.mjs"
+} from "./refs.ts"
 import {
   gitRepoInspectTool,
   gitChangesTool,
   execGitRepoInspect,
   execGitChanges,
-} from "./inspect.mjs"
-import { gitStageTool, gitCommitTool, execGitStage, execGitCommit } from "./write.mjs"
-import { runGit, assertRepo, trimTail } from "./run.mjs"
+} from "./inspect.ts"
+import { gitStageTool, gitCommitTool, execGitStage, execGitCommit } from "./write.ts"
+import { runGit, assertRepo, trimTail } from "./run.ts"
 
 /** Fixed registration order — do not reorder (prompt-cache stability). */
 export const GIT_TOOL_NAMES = Object.freeze([
@@ -56,8 +56,8 @@ export const gitTools = [
 
 // Defensive: the emitted order must match the public constant.
 for (let i = 0; i < gitTools.length; i++) {
-  if (gitTools[i].name !== GIT_TOOL_NAMES[i]) {
-    throw new Error(`git tool order drift: expected ${GIT_TOOL_NAMES[i]}, got ${gitTools[i].name}`)
+  if (gitTools[i]!.name !== GIT_TOOL_NAMES[i]) {
+    throw new Error(`git tool order drift: expected ${GIT_TOOL_NAMES[i]}, got ${gitTools[i]!.name}`)
   }
 }
 

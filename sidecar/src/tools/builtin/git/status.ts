@@ -3,14 +3,15 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { runGit, assertRepo } from "./run.mjs"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { runGit, assertRepo } from "./run.ts"
 
 const gitStatusShape = {
   cwd: z.string().min(1).describe("Absolute path inside the git repo."),
 }
 
-async function execGitStatus(args) {
+async function execGitStatus(args: ToolArgs<typeof gitStatusShape>) {
   try {
     await assertRepo(args.cwd)
     const { stdout } = await runGit(["status", "--porcelain=v2", "--branch"], args.cwd)

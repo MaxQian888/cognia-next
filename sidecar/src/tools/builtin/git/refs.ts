@@ -3,8 +3,9 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { runGit, assertRepo } from "./run.mjs"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { runGit, assertRepo } from "./run.ts"
 
 // ---- git_branch -----------------------------------------------------------
 
@@ -13,7 +14,7 @@ const gitBranchShape = {
   remote: z.boolean().default(false).describe("Include remote-tracking branches."),
 }
 
-async function execGitBranch(args) {
+async function execGitBranch(args: ToolArgs<typeof gitBranchShape>) {
   try {
     await assertRepo(args.cwd)
     const argv = ["branch", "-vv"]
@@ -38,7 +39,7 @@ const gitRemoteShape = {
   cwd: z.string().min(1).describe("Absolute path inside the git repo."),
 }
 
-async function execGitRemote(args) {
+async function execGitRemote(args: ToolArgs<typeof gitRemoteShape>) {
   try {
     await assertRepo(args.cwd)
     const { stdout } = await runGit(["remote", "-v"], args.cwd)
@@ -62,7 +63,7 @@ const gitTagShape = {
   pattern: z.string().optional().describe("Optional tag glob pattern (e.g. 'v*')."),
 }
 
-async function execGitTag(args) {
+async function execGitTag(args: ToolArgs<typeof gitTagShape>) {
   try {
     await assertRepo(args.cwd)
     const argv = ["tag", "--list"]

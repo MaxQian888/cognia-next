@@ -12,7 +12,7 @@
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk"
 
 import { fileExtrasTools } from "./file-ops/index.mjs"
-import { gitTools } from "./git/index.mjs"
+import { gitTools } from "../src/tools/builtin/git/index.ts"
 import { processTools, createProcessTools } from "./process/index.mjs"
 import { environmentTools } from "./environment.mjs"
 import { shellAdvancedTools, createShellAdvancedTools } from "./shell-advanced.mjs"

@@ -3,8 +3,9 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { runGit, assertRepo } from "./run.mjs"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { runGit, assertRepo } from "./run.ts"
 
 // ---- git_log --------------------------------------------------------------
 
@@ -15,7 +16,7 @@ const gitLogShape = {
   pathspec: z.array(z.string()).optional().describe("Limit log to these path specs."),
 }
 
-async function execGitLog(args) {
+async function execGitLog(args: ToolArgs<typeof gitLogShape>) {
   try {
     await assertRepo(args.cwd)
     const argv = ["log", `-n`, String(args.limit), "--pretty=format:%H%x09%an%x09%ae%x09%aI%x09%s"]
@@ -57,7 +58,7 @@ const gitHistoryShape = {
   limit: z.number().int().min(1).max(200).default(10).describe("Max commits returned."),
 }
 
-async function execGitHistory(args) {
+async function execGitHistory(args: ToolArgs<typeof gitHistoryShape>) {
   try {
     await assertRepo(args.cwd)
     const argv = [

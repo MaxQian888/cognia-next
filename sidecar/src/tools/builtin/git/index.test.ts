@@ -4,7 +4,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { gitTools, GIT_TOOL_NAMES, __testExports } from "./index.mjs"
+import { gitTools, GIT_TOOL_NAMES, __testExports } from "./index.ts"
 
 const {
   execGitStatus,
@@ -46,7 +46,11 @@ test("__testExports exposes every handler + runner helpers", () => {
     "assertRepo",
     "trimTail",
   ]) {
-    assert.equal(typeof __testExports[key], "function", `missing ${key}`)
+    assert.equal(
+      typeof __testExports[key as keyof typeof __testExports],
+      "function",
+      `missing ${key}`
+    )
   }
 })
 

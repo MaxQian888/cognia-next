@@ -5,8 +5,8 @@
 // root upfront; `trimTail` caps output (a thin alias over the shared
 // head-truncate primitive so all output-capping behaviour lives in one place).
 
-import { runCapped } from "../../src/platform/process/exec.ts"
-import { headTruncate } from "../../src/shared/text/truncate.ts"
+import { runCapped } from "../../../platform/process/exec.ts"
+import { headTruncate } from "../../../shared/text/truncate.ts"
 
 export const MAX_OUTPUT_BYTES = 256 * 1024 // 256 KB display cap (trimTail)
 // The child may BUFFER far more than we DISPLAY. Keeping the execFile maxBuffer
@@ -17,14 +17,19 @@ export const MAX_OUTPUT_BYTES = 256 * 1024 // 256 KB display cap (trimTail)
 export const MAX_CAPTURE_BYTES = 16 * 1024 * 1024
 export const DEFAULT_TIMEOUT_MS = 30 * 1000
 
-/**
- * Run `git` with an argv list, capped output, stdout/stderr as strings.
- * @param {ReadonlyArray<string>} args
- * @param {string} cwd
- * @param {{ timeoutMs?: number }} [opts]
- * @returns {Promise<{ stdout: string, stderr: string }>}
- */
-export async function runGit(args, cwd, opts = {}) {
+export interface GitOutput {
+  stdout: string
+  stderr: string
+}
+
+export type GitRunner = (args: readonly string[], cwd: string) => Promise<GitOutput>
+
+/** Run `git` with an argv list, capped output, stdout/stderr as strings. */
+export async function runGit(
+  args: readonly unknown[],
+  cwd: string,
+  opts: { timeoutMs?: number } = {}
+): Promise<GitOutput> {
   if (!Array.isArray(args)) throw new Error("git args must be an array")
   for (const a of args) {
     if (typeof a !== "string") throw new Error("every git arg must be a string")
@@ -36,7 +41,7 @@ export async function runGit(args, cwd, opts = {}) {
   //     is readable for the model and the user.
   //   --no-optional-locks — read-only commands (status, diff) won't take the
   //     index lock, avoiding contention with a concurrent git process.
-  const fullArgs = ["-c", "core.quotepath=false", "--no-optional-locks", ...args]
+  const fullArgs = ["-c", "core.quotepath=false", "--no-optional-locks", ...(args as string[])]
   return runCapped("git", fullArgs, { cwd, timeoutMs: timeout, maxBuffer: MAX_CAPTURE_BYTES })
 }
 
@@ -44,16 +49,15 @@ export async function runGit(args, cwd, opts = {}) {
 // subprocess per call. A cwd's repo-membership doesn't change within a session,
 // so a successful validation is memoized (failures are not cached — a freshly
 // `git init`-ed cwd must be retried). Cache is keyed by cwd string.
-/** @type {Set<string>} */
-const validatedRepos = new Set()
+const validatedRepos = new Set<string>()
 
 /** Drop the repo-validation cache (tests). */
-export function resetRepoCache() {
+export function resetRepoCache(): void {
   validatedRepos.clear()
 }
 
 /** Throw unless `cwd` is inside a git repository. */
-export async function assertRepo(cwd, runner = runGit) {
+export async function assertRepo(cwd: unknown, runner: GitRunner = runGit): Promise<void> {
   if (typeof cwd !== "string" || cwd.length === 0) {
     throw new Error("cwd must be a non-empty absolute path")
   }
@@ -61,7 +65,7 @@ export async function assertRepo(cwd, runner = runGit) {
   try {
     await runner(["rev-parse", "--git-dir"], cwd)
   } catch (err) {
-    const detail = String(err?.message ?? err)
+    const detail = String((err as { message?: unknown } | null)?.message ?? err)
     if (/not a git repository|not a git work tree/i.test(detail)) {
       throw new Error(`not a git repository: ${cwd} (${detail})`)
     }
@@ -74,6 +78,6 @@ export async function assertRepo(cwd, runner = runGit) {
 }
 
 /** Cap output, keeping the head + a "... (truncated)" marker. */
-export function trimTail(s, max = MAX_OUTPUT_BYTES) {
+export function trimTail(s: string, max: number = MAX_OUTPUT_BYTES) {
   return headTruncate(s, max)
 }

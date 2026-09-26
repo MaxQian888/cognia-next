@@ -3,8 +3,9 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { runGit, assertRepo, trimTail } from "./run.mjs"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { runGit, assertRepo, trimTail } from "./run.ts"
 
 const gitDiffShape = {
   cwd: z.string().min(1).describe("Absolute path inside the git repo."),
@@ -16,7 +17,7 @@ const gitDiffShape = {
   context: z.number().int().min(0).max(20).default(3).describe("Context lines."),
 }
 
-async function execGitDiff(args) {
+async function execGitDiff(args: ToolArgs<typeof gitDiffShape>) {
   try {
     await assertRepo(args.cwd)
     const argv = ["diff", `-U${args.context}`]

@@ -8,7 +8,7 @@
 import path from "node:path"
 import fsp from "node:fs/promises"
 
-import { runGit as defaultRunGit } from "../git/run.mjs"
+import { runGit as defaultRunGit } from "../../src/tools/builtin/git/run.ts"
 import {
   CLONEDEPS_DIR,
   MANIFEST_REL,

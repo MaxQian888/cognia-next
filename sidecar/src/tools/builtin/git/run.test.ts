@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { assertRepo, resetRepoCache, trimTail } from "./run.mjs"
+import { assertRepo, resetRepoCache, trimTail } from "./run.ts"
 
 test("assertRepo rejects empty cwd", async () => {
   await assert.rejects(() => assertRepo(""), /cwd/)
@@ -26,7 +26,7 @@ test("assertRepo reports subprocess health failures instead of mislabeling the d
   }
   await assert.rejects(
     () => assertRepo("/workspace", brokenGit),
-    (err) => {
+    (err: Error) => {
       assert.match(err.message, /git subprocess health check failed/i)
       assert.doesNotMatch(err.message, /not a git repository/i)
       assert.match(err.message, /restart/i)

@@ -3,11 +3,19 @@ import assert from "node:assert/strict"
 import path from "node:path"
 import fs from "node:fs"
 
-import { execGitStage, execGitCommit } from "./write.mjs"
-import { initRepo, git, rm } from "../../test-support/git-repo.ts"
+import { execGitStage, execGitCommit } from "./write.ts"
+import { initRepo, git, rm } from "../../../../test-support/git-repo.ts"
+import { firstJson } from "../../../../test-support/tool-result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
 
-function decodeJSON(result) {
-  return JSON.parse(result.content[0].text)
+interface WriteResult {
+  staged: string[]
+  committed: boolean
+  hash: string
+}
+
+function decodeJSON(result: ToolResult): WriteResult {
+  return firstJson<WriteResult>(result)
 }
 
 test("git_stage stages a path (WRITE)", async () => {

@@ -3,8 +3,9 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { runGit, assertRepo } from "./run.mjs"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { runGit, assertRepo } from "./run.ts"
 
 // ---- git_repo_inspect -----------------------------------------------------
 
@@ -12,7 +13,7 @@ const gitRepoInspectShape = {
   cwd: z.string().min(1).describe("Absolute path inside the git repo."),
 }
 
-async function execGitRepoInspect(args) {
+async function execGitRepoInspect(args: ToolArgs<typeof gitRepoInspectShape>) {
   try {
     await assertRepo(args.cwd)
     const [topLevel, headRef, headHash, upstream] = await Promise.all([
@@ -46,7 +47,7 @@ const gitChangesShape = {
   cwd: z.string().min(1).describe("Absolute path inside the git repo."),
 }
 
-async function execGitChanges(args) {
+async function execGitChanges(args: ToolArgs<typeof gitChangesShape>) {
   try {
     await assertRepo(args.cwd)
     const { stdout } = await runGit(["status", "--porcelain"], args.cwd)

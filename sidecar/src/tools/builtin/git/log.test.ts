@@ -1,17 +1,23 @@
 import { test, before, after } from "node:test"
 import assert from "node:assert/strict"
 
-import { execGitLog, execGitHistory } from "./log.mjs"
-import { seededRepo, rm } from "../../test-support/git-repo.ts"
+import { execGitLog, execGitHistory } from "./log.ts"
+import { seededRepo, rm } from "../../../../test-support/git-repo.ts"
+import { firstJson } from "../../../../test-support/tool-result.ts"
+import type { ToolResult } from "../../kernel/result.ts"
 
-let REPO
+let REPO: string
 before(() => {
   REPO = seededRepo()
 })
 after(() => rm(REPO))
 
-function decodeJSON(result) {
-  return JSON.parse(result.content[0].text)
+interface Commits {
+  commits: { hash: string; subject: string }[]
+}
+
+function decodeJSON(result: ToolResult): Commits {
+  return firstJson<Commits>(result)
 }
 
 test("git_log returns structured commits", async () => {
@@ -19,8 +25,8 @@ test("git_log returns structured commits", async () => {
   assert.equal(r.isError, undefined)
   const data = decodeJSON(r)
   assert.equal(data.commits.length, 1)
-  assert.equal(data.commits[0].subject, "first")
-  assert.match(data.commits[0].hash, /^[a-f0-9]{40}$/)
+  assert.equal(data.commits[0]!.subject, "first")
+  assert.match(data.commits[0]!.hash, /^[a-f0-9]{40}$/)
 })
 
 test("git_log honours limit", async () => {

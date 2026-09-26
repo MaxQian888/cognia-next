@@ -4,10 +4,11 @@ import assert from "node:assert/strict"
 import fs from "node:fs"
 import path from "node:path"
 
-import { execGitDiff } from "./diff.mjs"
-import { seededRepo, initRepo, git, rm } from "../../test-support/git-repo.ts"
+import { execGitDiff } from "./diff.ts"
+import { seededRepo, initRepo, git, rm } from "../../../../test-support/git-repo.ts"
+import { firstText } from "../../../../test-support/tool-result.ts"
 
-let REPO
+let REPO: string
 before(() => {
   REPO = seededRepo()
 })
@@ -16,7 +17,7 @@ after(() => rm(REPO))
 test("git_diff (working tree) shows BETA replacement", async () => {
   const r = await execGitDiff({ cwd: REPO, staged: false, context: 3 })
   assert.equal(r.isError, undefined)
-  const text = r.content[0].text
+  const text = firstText(r)
   assert.match(text, /-beta/)
   assert.match(text, /\+BETA/)
 })
@@ -24,7 +25,7 @@ test("git_diff (working tree) shows BETA replacement", async () => {
 test("git_diff returns '(no changes)' when staged area is clean", async () => {
   const r = await execGitDiff({ cwd: REPO, staged: true, context: 3 })
   assert.equal(r.isError, undefined)
-  assert.match(r.content[0].text, /\(no changes\)/)
+  assert.match(firstText(r), /\(no changes\)/)
 })
 
 test("git_diff appends actionable guidance when the diff is truncated", async () => {
@@ -39,7 +40,7 @@ test("git_diff appends actionable guidance when the diff is truncated", async ()
     fs.writeFileSync(file, "x".repeat(300 * 1024) + "\n")
     const r = await execGitDiff({ cwd: dir, staged: false, context: 3 })
     assert.equal(r.isError, undefined)
-    const text = r.content[0].text
+    const text = firstText(r)
     assert.match(text, /truncated/)
     assert.match(text, /pathspec/)
   } finally {

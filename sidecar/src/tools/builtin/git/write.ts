@@ -8,8 +8,9 @@
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../../src/tools/kernel/result.ts"
-import { runGit, assertRepo } from "./run.mjs"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { runGit, assertRepo } from "./run.ts"
 
 // ---- git_stage (WRITE) ----------------------------------------------------
 
@@ -21,7 +22,7 @@ const gitStageShape = {
     .describe("Repo-relative paths to stage (git add). Use '.' to stage all."),
 }
 
-async function execGitStage(args) {
+async function execGitStage(args: ToolArgs<typeof gitStageShape>) {
   try {
     await assertRepo(args.cwd)
     await runGit(["add", "--", ...args.paths], args.cwd)
@@ -63,7 +64,7 @@ const gitCommitShape = {
   signoff: z.boolean().default(false).describe("Append a Signed-off-by trailer."),
 }
 
-async function execGitCommit(args) {
+async function execGitCommit(args: ToolArgs<typeof gitCommitShape>) {
   try {
     await assertRepo(args.cwd)
     const argv = ["commit", "-m", args.message]

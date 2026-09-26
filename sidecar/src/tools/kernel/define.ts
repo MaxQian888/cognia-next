@@ -3,6 +3,11 @@
 // It is the Claude Agent SDK's `SdkMcpToolDefinition` shape, which the Claude
 // Agent SDK rail registers as is.
 
+import type { z } from "zod"
+
+/** The parsed arguments a handler receives for a zod raw shape (defaults applied). */
+export type ToolArgs<S extends z.ZodRawShape> = z.output<z.ZodObject<S>>
+
 /** The second argument every handler receives. */
 export interface ToolHandlerExtra {
   /** Aborted when the user interrupts the call; long-running handlers stop on it. */
