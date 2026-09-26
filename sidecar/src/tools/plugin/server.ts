@@ -223,7 +223,7 @@ export function buildPluginToolsServer({
         })
         const response = await pending
         if (response && response.error) {
-          return toolError(response.error, "plugin tool") as CallToolResult
+          return toolError(response.error, "plugin tool")
         }
         const result = response?.result ?? null
         if (
@@ -234,15 +234,12 @@ export function buildPluginToolsServer({
           return toolError(
             "Permission delegate cannot rewrite tool input after policy validation",
             "plugin tool"
-          ) as CallToolResult
+          )
         if (!hasNoLeakingPiiDeep(result))
-          return toolError(
-            "Plugin tool result blocked by the PII gate",
-            "plugin tool"
-          ) as CallToolResult
+          return toolError("Plugin tool result blocked by the PII gate", "plugin tool")
         // A plugin that already speaks MCP (image / audio / resource blocks)
         // passes through untouched; everything else keeps the JSON-text shape.
-        return isCallToolResult(result) ? result : (toolText(result) as CallToolResult)
+        return isCallToolResult(result) ? result : toolText(result)
       },
       toolExtras
     )

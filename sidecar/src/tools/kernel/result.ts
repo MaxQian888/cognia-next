@@ -7,12 +7,16 @@ export type ToolContentBlock =
   { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
 
 /** The failure classification a result carries for the UI and telemetry. */
-export interface ToolFailureMeta {
+export type ToolFailureMeta = {
   kind: ToolFailureKind
   retryable: boolean
 }
 
-export interface ToolResult {
+/**
+ * A type alias, not an interface: only aliases satisfy the MCP SDK's
+ * `CallToolResult` index signature, so a handler can return this directly.
+ */
+export type ToolResult = {
   content: ToolContentBlock[]
   isError?: true
   _meta?: { "cognia/failure": ToolFailureMeta }
