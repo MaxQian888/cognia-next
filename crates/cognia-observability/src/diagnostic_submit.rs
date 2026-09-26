@@ -129,12 +129,8 @@ impl InstallationIdentity {
         Self { key }
     }
 
-    /// Build an identity from a raw 32-byte seed.
-    ///
-    /// Exists so a consumer can construct one in a test without naming
-    /// `ed25519_dalek::SigningKey`: `src-tauri` resolves a *different* major
-    /// version of that crate than this one does, so the type is not
-    /// nameable across the boundary even though values flow through it fine.
+    /// Build an identity from a raw 32-byte seed — a fixed one in a test, or a
+    /// consumer that holds the seed rather than an `ed25519_dalek::SigningKey`.
     pub fn from_seed(seed: &[u8; 32]) -> Self {
         Self {
             key: SigningKey::from_bytes(seed),
@@ -1158,5 +1154,42 @@ mod tests {
         bytes[last] ^= 0xff;
         std::fs::write(&package, bytes).unwrap();
         assert!(read_package_parts(&package).is_err());
+    }
+
+    /// Captured with ed25519-dalek 2 and sha2 0.10, before this crate moved
+    /// to ed25519-dalek 3 and sha2 0.11 (ADR-0196 P1c). An installation keeps
+    /// its key across app updates and the diagnostic service verifies what it
+    /// signs, so the public key, the id derived from it and every signature
+    /// must come out byte-identical, and a signature the old version made must
+    /// still pass the checks `diagnostic_package` applies to a manifest.
+    #[test]
+    fn identity_output_matches_what_ed25519_dalek_2_produced() {
+        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+        const MESSAGE: &[u8] = b"cognia diagnostic signing golden";
+        const PUBLIC_KEY_HEX: &str =
+            "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c";
+        const SIGNATURE_HEX: &str = "47ff1c321e0807f84bec1b7213decb2b9a0ecd59cee72f8bf819aca4e1658e56\
+                                     bf4e9f7e8238915413bb330609a68849bbe61b1b9eb8fd432b37803f42d2160d";
+
+        let identity = InstallationIdentity::from_seed(&[7; 32]);
+        assert_eq!(
+            identity.public_key_base64(),
+            "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw="
+        );
+        assert_eq!(
+            identity.installation_id(),
+            "inst_fe812c12f3ab4ce6ac5db69ac352f906"
+        );
+        assert_eq!(
+            identity.sign_base64(MESSAGE),
+            "R/8cMh4IB/hL7BtyE97LK5oOzVnO5y+L+BmspOFljla/Tp9+gjiRVBO7MwYJpohJu+YbG564/UMrN4A/QtIWDQ=="
+        );
+
+        let public_key: [u8; 32] = hex::decode(PUBLIC_KEY_HEX).unwrap().try_into().unwrap();
+        let signature = Signature::from_slice(&hex::decode(SIGNATURE_HEX).unwrap()).unwrap();
+        VerifyingKey::from_bytes(&public_key)
+            .and_then(|key| key.verify(MESSAGE, &signature))
+            .expect("a signature ed25519-dalek 2 made verifies");
     }
 }
