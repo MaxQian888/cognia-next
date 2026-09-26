@@ -1,4 +1,4 @@
-import type { TeammateRuntime } from "@/types/agent/agent-team"
+import type { TeammateConfig, TeammateRuntime } from "@/types/agent/agent-team"
 import { BUILTIN_EXECUTABLE_PRESET_IDS } from "@/lib/ai/agent/external/config/presets"
 
 /**
@@ -37,4 +37,28 @@ export const RUNTIME_LABEL_KEYS: Record<TeammateRuntime, string> = {
 
 export function runtimeLabelKey(runtime: TeammateRuntime): string {
   return RUNTIME_LABEL_KEYS[runtime]
+}
+
+/**
+ * `config` switched to `runtime`. A switch drops the exact-config pin
+ * (`externalAgentConfigId`): the pin names a config of the OLD runtime, and
+ * left in place it would either fail every dispatch as a preset mismatch or
+ * silently wait to re-apply if the user ever switched back.
+ */
+export function withTeammateRuntime(
+  config: TeammateConfig,
+  runtime: TeammateRuntime
+): TeammateConfig {
+  if ((config.runtime ?? "claude") === runtime) return { ...config, runtime }
+  const { externalAgentConfigId: _dropped, ...rest } = config
+  return { ...rest, runtime }
+}
+
+/** `config` pinned to one external-agent config, or unpinned with `undefined`. */
+export function withTeammateConfigPin(
+  config: TeammateConfig,
+  externalAgentConfigId: string | undefined
+): TeammateConfig {
+  const { externalAgentConfigId: _previous, ...rest } = config
+  return externalAgentConfigId ? { ...rest, externalAgentConfigId } : rest
 }

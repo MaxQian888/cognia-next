@@ -61,7 +61,13 @@ import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useSettingsStore } from "@/stores/settings"
 import { TeammateExecutionBindingField } from "@/components/agent/team/teammate-execution-binding-field"
-import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
+import {
+  RUNTIME_OPTIONS,
+  runtimeLabelKey,
+  withTeammateConfigPin,
+  withTeammateRuntime,
+} from "./runtime-options"
+import { ExternalAgentConfigPinField } from "@/components/agent/external-agent/external-agent-config-pin-field"
 import { FusionActionField } from "@/components/router-fusion/fusion-action-field"
 import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
 import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
@@ -230,8 +236,9 @@ export function TeammateConfigDialog({
                         onValueChange={(v) => {
                           updateTeammate(teammate.id, {
                             config: {
-                              ...teammate.config,
-                              runtime: v as TeammateRuntime,
+                              // A runtime switch drops the exact-config pin,
+                              // which names a config of the old runtime.
+                              ...withTeammateRuntime(teammate.config, v as TeammateRuntime),
                               ...(v === "claude" &&
                               !state.externalAgentPresetId &&
                               teammate.config.cogniaModel
@@ -319,6 +326,21 @@ export function TeammateConfigDialog({
                       />
                     </div>
                   </div>
+                  {teammate.role !== "lead" &&
+                    teammate.config.runtime &&
+                    teammate.config.runtime !== "claude" && (
+                      <ExternalAgentConfigPinField
+                        presetId={teammate.config.runtime}
+                        presetLabel={tRuntime(runtimeLabelKey(teammate.config.runtime))}
+                        value={teammate.config.externalAgentConfigId}
+                        onChange={(configId) =>
+                          updateTeammate(teammate.id, {
+                            config: withTeammateConfigPin(teammate.config, configId),
+                          })
+                        }
+                        data-testid="teammate-config-pin"
+                      />
+                    )}
                   {teammate.role !== "lead" && (
                     <TeammateGatewayField
                       key={`${teammate.id}:${teammate.config.runtime}:${state.externalAgentPresetId}:${JSON.stringify(teammate.config.cogniaModel)}`}

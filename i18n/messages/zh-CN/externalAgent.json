@@ -775,5 +775,17 @@
       "connect": "连接",
       "addRule": "添加路由规则"
     }
+  },
+  "configPin": {
+    "label": "智能体配置",
+    "any": "任意 {preset} 配置",
+    "hint": "固定使用你保存的某个配置，或由 Cognia 从该预设的配置中选择。",
+    "noConfigs": "你还没有保存 {preset} 配置。运行时 Cognia 会根据预设创建一个。",
+    "disabledOption": "{name}（已停用）",
+    "otherPresetOption": "{name}（预设不同）",
+    "missingOption": "配置已不存在",
+    "problemMissing": "固定的配置已不存在。在你选择其他配置或改为“任意”之前，运行都会失败。",
+    "problemDisabled": "固定的配置已停用。在你启用它、选择其他配置或改为“任意”之前，运行都会失败。",
+    "problemPresetMismatch": "固定的配置已不再使用该预设。在你选择其他配置或改为“任意”之前，运行都会失败。"
   }
 }

@@ -38,6 +38,8 @@ import {
   PROTOCOL_PERMISSION_MODE_SUPPORT,
 } from "@/lib/ai/agent/external/policy/permission-modes"
 import { resolveTeammateCapabilities } from "./capability-resolver"
+import { resolveTeammatePinnedConfigId } from "./resolve-external-backing"
+import { ExternalAgentBindingError } from "@/lib/ai/agent/external/config/agent-binding"
 import { teammateToCharacter } from "./teammate-character"
 import { applyTeammateTwinContext } from "./twin-context"
 import type { TeamRunContext } from "../team-run-context"
@@ -570,10 +572,12 @@ async function runExternalBacked(
   try {
     const result = await manager.execute(agentId, prompt, {
       // The preset is only the executable. An absent teammate binding selects
-      // native mode; a retained gateway session carries its frozen binding.
+      // native mode; a retained gateway session carries its frozen binding. A
+      // teammate pinned to one exact config runs THAT saved agent, so its own
+      // gateway binding (or native mode) applies unless the teammate overrides.
       ...(teammate.config?.cogniaModel !== undefined
         ? { cogniaModel: teammate.config.cogniaModel }
-        : sessionId
+        : sessionId || resolveTeammatePinnedConfigId(teammate)
           ? {}
           : { cogniaModel: null }),
       ...(sessionId ? { sessionId } : {}),
@@ -860,7 +864,24 @@ export async function dispatchTeammate(
       // with an unknown preset, or with the contributing plugin disabled, this
       // returns null — which is now a HARD FAILURE, see below.
       const { resolveTeammateExternalAgent } = await import("./resolve-external-backing")
-      externalAgentId = await resolveTeammateExternalAgent(teammate, resolvedCaps, teamCtx)
+      try {
+        externalAgentId = await resolveTeammateExternalAgent(teammate, resolvedCaps, teamCtx)
+      } catch (error) {
+        // A pinned config that cannot run is the user's choice failing, not a
+        // host limitation: say which config, and do not run another one.
+        if (error instanceof ExternalAgentBindingError) {
+          teamCtx.notifier.notify({
+            level: "critical",
+            title: "Pinned external agent config unavailable",
+            body: `${teammate.name} is pinned to external agent config "${error.configId}": ${error.message}`,
+            runId: teamCtx.runId,
+            teamId: teamCtx.teamId,
+            taskId: args.taskId,
+            dedupeKey: `external-binding:${teamCtx.runId}:${teammate.id}`,
+          })
+        }
+        throw error
+      }
       if (externalAgentId) channel = "external"
     }
 

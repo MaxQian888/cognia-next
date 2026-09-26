@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { RUNTIME_OPTIONS, RUNTIME_LABEL_KEYS, runtimeLabelKey } from "./runtime-options"
+import {
+  RUNTIME_OPTIONS,
+  RUNTIME_LABEL_KEYS,
+  runtimeLabelKey,
+  withTeammateConfigPin,
+  withTeammateRuntime,
+} from "./runtime-options"
 import { BUILTIN_EXECUTABLE_PRESET_IDS } from "@/lib/ai/agent/external/config/presets"
 
 describe("runtime-options", () => {
@@ -65,5 +71,45 @@ describe("runtime-options", () => {
         expect(read(file)).not.toMatch(/labelKey\s*:/)
       }
     )
+  })
+})
+
+describe("withTeammateRuntime / withTeammateConfigPin", () => {
+  it("drops the exact-config pin when the runtime changes and keeps everything else", () => {
+    const next = withTeammateRuntime(
+      { runtime: "codex", externalAgentConfigId: "strict", model: "m" },
+      "gemini-cli"
+    )
+    expect(next).toEqual({ runtime: "gemini-cli", model: "m" })
+    expect(next).not.toHaveProperty("externalAgentConfigId")
+  })
+
+  it("keeps the pin when the runtime is re-selected unchanged", () => {
+    expect(
+      withTeammateRuntime({ runtime: "codex", externalAgentConfigId: "strict" }, "codex")
+    ).toEqual({
+      runtime: "codex",
+      externalAgentConfigId: "strict",
+    })
+  })
+
+  it("treats a missing runtime as claude", () => {
+    expect(withTeammateRuntime({ externalAgentConfigId: "x" }, "claude")).toEqual({
+      runtime: "claude",
+      externalAgentConfigId: "x",
+    })
+  })
+
+  it("pins and clears a config", () => {
+    expect(withTeammateConfigPin({ runtime: "codex" }, "strict")).toEqual({
+      runtime: "codex",
+      externalAgentConfigId: "strict",
+    })
+    const cleared = withTeammateConfigPin(
+      { runtime: "codex", externalAgentConfigId: "strict" },
+      undefined
+    )
+    expect(cleared).toEqual({ runtime: "codex" })
+    expect(cleared).not.toHaveProperty("externalAgentConfigId")
   })
 })

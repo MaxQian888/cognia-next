@@ -85,6 +85,20 @@ export interface PluginSubagentDef {
    * the built-in executor. `prompt` / `tools` remain advisory.
    */
   externalPresetId?: string
+  /**
+   * Pin the external backing to ONE saved external-agent config of
+   * `externalPresetId` (a local config id, so in practice only user templates
+   * set it). Read only alongside `externalPresetId`, and only while the
+   * dispatch runs that preset (a caller's `externalAgentId` preset override
+   * naming a different preset drops it).
+   *
+   * When set it wins over the preset: exactly that config runs, and a pinned
+   * config that is missing, disabled, or no longer built from the preset's
+   * family FAILS the dispatch instead of falling back to another config. Unset
+   * keeps preset-only selection in the documented order (see
+   * `lib/ai/agent/external/config/agent-binding.ts`).
+   */
+  externalAgentConfigId?: string
   /** Task-scoped Cognia model/account for an external preset; null keeps native model selection. */
   cogniaModel?: import("@/types/agent/external-agent").ExternalAgentCogniaModelBinding | null
   /**

@@ -657,7 +657,7 @@
       "allowedHeading": "允许的工具（与角色/模式/技能工具集合并）",
       "allowedHelp": "可填 Read、Write、Bash 等内置工具名；MCP 工具遵循 mcp__server__tool 命名。",
       "disallowedHeading": "禁用的工具",
-      "disallowedHelp": "设置后会替换角色的禁用列表。",
+      "disallowedHelp": "会追加到智能体自身的禁用列表中，不会重新放开智能体、工具过滤器或受限模式已禁用的工具。",
       "heading": "工具白/黑名单"
     },
     "webhookUrl": "Webhook URL",
@@ -694,7 +694,8 @@
       "maxRuntime": "最长运行时间（分钟）",
       "maxRuntimePlaceholder": "不限制",
       "maxRuntimeHelp": "超过这个时长仍在运行的进程会被结束。留空表示一直运行到自然结束或应用关闭。"
-    }
+    },
+    "permissionModeCapHelp": "本次运行的权限上限：只能降低智能体的权限模式，不能提高。"
   },
   "payloadEditorMode": {
     "toJson": "切换到 JSON 编辑",

@@ -383,6 +383,7 @@ export function ChatPayloadEditor({
           disabled={disabled}
           testId={`${testId}-permission-mode`}
         />
+        <p className="text-xs text-muted-foreground">{t("payload.permissionModeCapHelp")}</p>
       </div>
 
       {/* Tools — collapsible */}

@@ -69,6 +69,7 @@ import { SUB_AGENT_PRIORITY_CONFIG } from "@/types/agent/sub-agent"
 import { usePolicyDraft } from "../use-policy-draft"
 import { useReportPanelDirty } from "../panel-dirty-context"
 import { ToolScopeField } from "../tool-scope-field"
+import { ExternalAgentConfigPinField } from "@/components/agent/external-agent/external-agent-config-pin-field"
 import {
   dispatchRailUnavailable,
   reachability,
@@ -632,9 +633,19 @@ function EditableView({
             <Label className="text-xs">{t("editorExternalRuntime")}</Label>
             <Select
               value={draft.config?.externalPresetId ?? EXTERNAL_NONE_VALUE}
-              onValueChange={(v) =>
-                updateConfig("externalPresetId", v === EXTERNAL_NONE_VALUE ? undefined : v)
-              }
+              onValueChange={(v) => {
+                const next = v === EXTERNAL_NONE_VALUE ? undefined : v
+                if (next === draft.config?.externalPresetId) return
+                // A preset change drops the exact-config pin: it names a config
+                // of the previous preset and would fail every dispatch.
+                patch({
+                  config: {
+                    ...draft.config,
+                    externalPresetId: next,
+                    externalAgentConfigId: undefined,
+                  },
+                })
+              }}
             >
               <SelectTrigger className="h-8 text-xs" data-testid="editor-external-runtime">
                 <SelectValue />
@@ -650,6 +661,13 @@ function EditableView({
             </Select>
             <p className="text-[11px] text-muted-foreground">{t("editorExternalRuntimeHint")}</p>
           </div>
+
+          <ExternalAgentConfigPinField
+            presetId={draft.config?.externalPresetId}
+            value={draft.config?.externalAgentConfigId}
+            onChange={(configId) => updateConfig("externalAgentConfigId", configId)}
+            data-testid="editor-external-config-pin"
+          />
 
           <ToolScopeField
             label={t("mcpLabel")}

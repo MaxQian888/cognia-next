@@ -23,4 +23,28 @@ describe("ChatPayloadEditor", () => {
       'Defaults to "Task Name (scheduled)"'
     )
   })
+
+  it("says the permission mode and denied tools can only narrow the agent", () => {
+    render(
+      <ChatPayloadEditor
+        taskType="agent"
+        draft={{ ...EMPTY_CHAT_LIKE_DRAFT, disallowedTools: ["Bash"] }}
+        onDraftChange={jest.fn()}
+        charactersForTesting={[]}
+        skillsForTesting={[]}
+        teamsForTesting={[]}
+      />
+    )
+
+    expect(
+      screen.getByText(
+        "A cap for this run: it can lower the agent's permission mode, never raise it."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Added to the agent's own disallowed tools. It never re-allows a tool the agent, a tool filter or Restricted Mode already blocks."
+      )
+    ).toBeInTheDocument()
+  })
 })

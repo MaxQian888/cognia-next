@@ -82,6 +82,12 @@ jest.mock("@/hooks/agent-runs/use-team-pr-status", () => ({
   useTeamPrStatusByTeammate: () => mockPrStatus.current,
 }))
 
+const mockExternalAgents: { current: Record<string, unknown> } = { current: {} }
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: (selector: (s: unknown) => unknown) =>
+    selector({ agents: mockExternalAgents.current }),
+}))
+
 import { AgentTeamMembers } from "./members"
 import { buildTeam } from "@/lib/storybook/fixtures/agent-team"
 import type { AgentTeammate } from "@/types/agent/agent-team"
@@ -106,6 +112,22 @@ beforeEach(() => {
   removeTeammateMock.mockClear()
   updateTeammateMock.mockClear()
   mockPrStatus.current = new Map()
+  mockExternalAgents.current = {
+    strict: {
+      id: "strict",
+      name: "Codex strict",
+      enabled: true,
+      metadata: { preset: "codex" },
+      createdAt: "2025-01-01T00:00:00Z",
+    },
+    lenient: {
+      id: "lenient",
+      name: "Codex lenient",
+      enabled: true,
+      metadata: { preset: "codex" },
+      createdAt: "2026-01-01T00:00:00Z",
+    },
+  }
 })
 
 describe("AgentTeamMembers", () => {
@@ -317,5 +339,77 @@ describe("AgentTeamMembers", () => {
 
     await user.keyboard("{Escape}")
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
+  })
+
+  describe("exact external-agent config pin", () => {
+    it("pins a codex worker to one saved config", async () => {
+      const user = userEvent.setup()
+      const worker = teammate({ id: "tm_1", role: "teammate", config: { runtime: "codex" } })
+      render(<AgentTeamMembers teamId="team_x" teammates={[worker]} leadId="" />)
+      const pin = screen.getByTestId("config-pin-tm_1")
+      expect(pin).toHaveTextContent("Any Codex config")
+      await user.click(pin)
+      await user.click(await screen.findByRole("option", { name: "Codex strict" }))
+      expect(updateTeammateMock).toHaveBeenCalledWith("tm_1", {
+        config: { runtime: "codex", externalAgentConfigId: "strict" },
+      })
+    })
+
+    it("clears the pin back to any config", async () => {
+      const user = userEvent.setup()
+      const worker = teammate({
+        id: "tm_1",
+        role: "teammate",
+        config: { runtime: "codex", externalAgentConfigId: "strict" },
+      })
+      render(<AgentTeamMembers teamId="team_x" teammates={[worker]} leadId="" />)
+      await user.click(screen.getByTestId("config-pin-tm_1"))
+      await user.click(await screen.findByRole("option", { name: "Any Codex config" }))
+      const config = updateTeammateMock.mock.calls[0][1].config
+      expect(config).toEqual({ runtime: "codex" })
+      expect(config).not.toHaveProperty("externalAgentConfigId")
+    })
+
+    it("drops the pin when the runtime switches", async () => {
+      const user = userEvent.setup()
+      const worker = teammate({
+        id: "tm_1",
+        role: "teammate",
+        config: { runtime: "codex", externalAgentConfigId: "strict" },
+      })
+      render(<AgentTeamMembers teamId="team_x" teammates={[worker]} leadId="" />)
+      await user.click(screen.getByTestId("runtime-select-tm_1"))
+      await user.click(await screen.findByRole("option", { name: "Claude" }))
+      const config = updateTeammateMock.mock.calls[0][1].config
+      expect(config.runtime).toBe("claude")
+      expect(config).not.toHaveProperty("externalAgentConfigId")
+    })
+
+    it("offers no pin to a claude worker or to the lead", () => {
+      const lead = teammate({ id: "lead_1", role: "lead", config: { runtime: "codex" } })
+      const worker = teammate({ id: "tm_1", role: "teammate", config: { runtime: "claude" } })
+      render(<AgentTeamMembers teamId="team_x" teammates={[lead, worker]} leadId="lead_1" />)
+      expect(screen.queryByTestId("config-pin-tm_1")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("config-pin-lead_1")).not.toBeInTheDocument()
+    })
+
+    it("adds a teammate pinned to the chosen config", async () => {
+      const user = userEvent.setup()
+      render(<AgentTeamMembers teamId="team_x" teammates={[]} leadId="" />)
+      await user.click(screen.getByRole("button", { name: /Add teammate/i }))
+      fireEvent.change(screen.getByPlaceholderText(/Security Reviewer/i), {
+        target: { value: "Eve" },
+      })
+      expect(screen.queryByTestId("config-pin-add")).not.toBeInTheDocument()
+      await user.click(screen.getByTestId("runtime-select-add"))
+      await user.click(await screen.findByRole("option", { name: "Codex" }))
+      await user.click(screen.getByTestId("config-pin-add"))
+      await user.click(await screen.findByRole("option", { name: "Codex lenient" }))
+      await user.click(screen.getAllByRole("button", { name: /Add/ }).at(-1)!)
+      expect(addTeammateMock.mock.calls[0][0].config).toEqual({
+        runtime: "codex",
+        externalAgentConfigId: "lenient",
+      })
+    })
   })
 })

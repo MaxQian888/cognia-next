@@ -65,6 +65,12 @@ jest.mock("@/stores/agent/subagent-runtime-store", () => ({
     selector({ templates, addTemplate, updateTemplate, deleteTemplate }),
 }))
 
+let mockExternalAgents: Record<string, unknown> = {}
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: (selector: (s: unknown) => unknown) =>
+    selector({ agents: mockExternalAgents }),
+}))
+
 let nestingEnabled = false
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: unknown) => unknown) =>
@@ -87,6 +93,22 @@ const onNavigate = jest.fn()
 beforeEach(() => {
   jest.clearAllMocks()
   nestingEnabled = false
+  mockExternalAgents = {
+    strict: {
+      id: "strict",
+      name: "CC strict",
+      enabled: true,
+      metadata: { preset: "claude-code" },
+      createdAt: "2025-01-01T00:00:00Z",
+    },
+    lenient: {
+      id: "lenient",
+      name: "CC lenient",
+      enabled: true,
+      metadata: { preset: "claude-code" },
+      createdAt: "2026-01-01T00:00:00Z",
+    },
+  }
   templates = {
     mine: tpl({ id: "mine", name: "My Fork" }),
     seeded: tpl({ id: "seeded", name: "Explore", isBuiltIn: true, taskTemplate: "Look at {{x}}" }),
@@ -251,5 +273,66 @@ describe("editing lifecycle", () => {
     await userEvent.click(screen.getByTestId("template-delete"))
     await userEvent.click(await screen.findByTestId("template-delete-confirm"))
     expect(deleteTemplate).toHaveBeenCalledWith("mine")
+  })
+})
+
+describe("exact external-agent config pin", () => {
+  it("offers no pin until the template names an external preset", async () => {
+    render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
+    await userEvent.click(screen.getByRole("button", { name: /configTitle/ }))
+    expect(screen.queryByTestId("editor-external-config-pin")).not.toBeInTheDocument()
+  })
+
+  it("pins one config of the template's preset", async () => {
+    templates.mine = tpl({
+      id: "mine",
+      name: "My Fork",
+      config: { externalPresetId: "claude-code" },
+    })
+    render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
+    await userEvent.click(screen.getByRole("button", { name: /configTitle/ }))
+    await userEvent.click(await screen.findByTestId("editor-external-config-pin"))
+    await userEvent.click(await screen.findByRole("option", { name: "CC lenient" }))
+    await userEvent.click(screen.getByTestId("unsaved-bar-save"))
+    await waitFor(() => expect(updateTemplate).toHaveBeenCalled())
+    expect(updateTemplate.mock.calls[0][1].config).toMatchObject({
+      externalPresetId: "claude-code",
+      externalAgentConfigId: "lenient",
+    })
+  })
+
+  it("clears the pin back to any config", async () => {
+    templates.mine = tpl({
+      id: "mine",
+      name: "My Fork",
+      config: { externalPresetId: "claude-code", externalAgentConfigId: "strict" },
+    })
+    render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
+    await userEvent.click(screen.getByRole("button", { name: /configTitle/ }))
+    await userEvent.click(await screen.findByTestId("editor-external-config-pin"))
+    await userEvent.click(await screen.findByRole("option", { name: "any" }))
+    await userEvent.click(screen.getByTestId("unsaved-bar-save"))
+    await waitFor(() => expect(updateTemplate).toHaveBeenCalled())
+    const saved = updateTemplate.mock.calls[0][1].config
+    expect(saved.externalPresetId).toBe("claude-code")
+    expect(saved.externalAgentConfigId).toBeUndefined()
+  })
+
+  it("drops the pin when the external preset changes", async () => {
+    templates.mine = tpl({
+      id: "mine",
+      name: "My Fork",
+      config: { externalPresetId: "claude-code", externalAgentConfigId: "strict" },
+    })
+    render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
+    await userEvent.click(screen.getByRole("button", { name: /configTitle/ }))
+    await userEvent.click(await screen.findByTestId("editor-external-runtime"))
+    await userEvent.click(await screen.findByRole("option", { name: "externalRuntimeNone" }))
+    expect(screen.queryByTestId("editor-external-config-pin")).not.toBeInTheDocument()
+    await userEvent.click(screen.getByTestId("unsaved-bar-save"))
+    await waitFor(() => expect(updateTemplate).toHaveBeenCalled())
+    const saved = updateTemplate.mock.calls[0][1].config
+    expect(saved.externalPresetId).toBeUndefined()
+    expect(saved.externalAgentConfigId).toBeUndefined()
   })
 })

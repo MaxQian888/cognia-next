@@ -79,6 +79,27 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
     selector({ updateTeammate: updateTeammateMock }),
 }))
 
+const mockExternalAgents: Record<string, unknown> = {
+  strict: {
+    id: "strict",
+    name: "Codex strict",
+    enabled: true,
+    metadata: { preset: "codex" },
+    createdAt: "2025-01-01T00:00:00Z",
+  },
+  lenient: {
+    id: "lenient",
+    name: "Codex lenient",
+    enabled: true,
+    metadata: { preset: "codex-app-server" },
+    createdAt: "2026-01-01T00:00:00Z",
+  },
+}
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: (selector: (state: unknown) => unknown) =>
+    selector({ agents: mockExternalAgents }),
+}))
+
 const mockSettings: { settings: unknown } = { settings: null }
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: unknown) => unknown) => selector(mockSettings),
@@ -335,6 +356,84 @@ describe("TeammateConfigDialog", () => {
       fireEvent.click(within(screen.getByRole("listbox")).getByText("rosterSection.twinNone"))
       expect(updateTeammateMock).toHaveBeenCalledWith("t1", { config: { twinId: undefined } })
     })
+  })
+})
+
+describe("teammate exact external-agent config pin", () => {
+  beforeEach(() => updateTeammateMock.mockClear())
+  const pinTrigger = () => screen.getByTestId("teammate-config-pin")
+
+  it("pins an external teammate to one saved config of its runtime family", () => {
+    const member: AgentTeammate = { ...teammate, config: { runtime: "codex", model: "m" } }
+    render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={member} team={team} />)
+    fireEvent.click(pinTrigger())
+    // Both surfaces of the Codex family are offered.
+    expect(screen.getByRole("option", { name: "Codex lenient" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("option", { name: "Codex strict" }))
+    expect(updateTeammateMock).toHaveBeenCalledWith("t1", {
+      config: { runtime: "codex", model: "m", externalAgentConfigId: "strict" },
+    })
+  })
+
+  it("clears the pin back to any config of the preset", () => {
+    const member: AgentTeammate = {
+      ...teammate,
+      config: { runtime: "codex", externalAgentConfigId: "strict" },
+    }
+    render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={member} team={team} />)
+    fireEvent.click(pinTrigger())
+    fireEvent.click(screen.getByRole("option", { name: 'any:{"preset":"codex"}' }))
+    const config = updateTeammateMock.mock.calls[0][1].config
+    expect(config).toEqual({ runtime: "codex" })
+  })
+
+  it("drops the pin when the runtime changes", () => {
+    const member: AgentTeammate = {
+      ...teammate,
+      config: { runtime: "codex", externalAgentConfigId: "strict" },
+    }
+    render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={member} team={team} />)
+    fireEvent.click(
+      within(screen.getByText("rosterSection.runtime").parentElement!).getByRole("combobox")
+    )
+    fireEvent.click(screen.getByRole("option", { name: "geminiCli" }))
+    const config = updateTeammateMock.mock.calls[0][1].config
+    expect(config.runtime).toBe("gemini-cli")
+    expect(config).not.toHaveProperty("externalAgentConfigId")
+  })
+
+  it("is not offered on the claude runtime or to the lead", () => {
+    const { unmount } = render(
+      <TeammateConfigDialog open onOpenChange={() => {}} teammate={teammate} team={team} />
+    )
+    expect(screen.queryByTestId("teammate-config-pin")).not.toBeInTheDocument()
+    unmount()
+    render(
+      <TeammateConfigDialog
+        open
+        onOpenChange={() => {}}
+        teammate={{ ...lead, config: { runtime: "codex" } }}
+        team={team}
+      />
+    )
+    expect(screen.queryByTestId("teammate-config-pin")).not.toBeInTheDocument()
+  })
+
+  it("keeps the pin when the member is saved through the editor", async () => {
+    const member: AgentTeammate = {
+      ...teammate,
+      config: { runtime: "codex", externalAgentConfigId: "strict" },
+    }
+    render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={member} team={team} />)
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
+    await waitFor(() =>
+      expect(updateTeammateMock).toHaveBeenCalledWith(
+        "t1",
+        expect.objectContaining({
+          config: expect.objectContaining({ runtime: "codex", externalAgentConfigId: "strict" }),
+        })
+      )
+    )
   })
 })
 

@@ -1,4 +1,9 @@
-import { resolveTeammatePresetId, resolveTeammateExternalAgent } from "./resolve-external-backing"
+import {
+  resolveTeammatePinnedConfigId,
+  resolveTeammatePresetId,
+  resolveTeammateExternalAgent,
+} from "./resolve-external-backing"
+import { ExternalAgentBindingError } from "@/lib/ai/agent/external/config/agent-binding"
 import type { AgentTeammate, ResolvedCapabilities } from "@/types/agent/agent-team"
 import type { TeamRunContext } from "../team-run-context"
 
@@ -29,8 +34,20 @@ const isFromPreset = jest.fn()
 const resolvePreferredCodex = jest.fn<Promise<string>, []>(async () => "codex")
 const supportsExternalAgents = jest.fn(() => true)
 
+const getAgent = jest.fn()
 jest.mock("@/lib/ai/agent/external/manager", () => ({
-  getExternalAgentManager: () => ({ addAgent, getAllAgents }),
+  getExternalAgentManager: () => ({ addAgent, getAllAgents, getAgent }),
+}))
+const storeState: { agents: Record<string, unknown>; connectionStatus: Record<string, string> } = {
+  agents: {},
+  connectionStatus: {},
+}
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: { getState: () => storeState },
+}))
+const ensureReady = jest.fn()
+jest.mock("@/lib/agent/ensure-external-agent-ready", () => ({
+  ensureExternalAgentReady: (...a: unknown[]) => ensureReady(...a),
 }))
 jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
   supportsExternalAgents: () => supportsExternalAgents(),
@@ -52,6 +69,140 @@ beforeEach(() => {
   isFromPreset.mockReset().mockReturnValue(null)
   resolvePreferredCodex.mockReset().mockResolvedValue("codex")
   supportsExternalAgents.mockReset().mockReturnValue(true)
+  getAgent.mockReset().mockReturnValue(undefined)
+  ensureReady.mockReset().mockResolvedValue({ ok: true, alreadyConnected: false })
+  storeState.agents = {}
+  storeState.connectionStatus = {}
+})
+
+describe("resolveTeammatePinnedConfigId", () => {
+  it("reads the pin only for an external runtime", () => {
+    expect(
+      resolveTeammatePinnedConfigId(
+        teammate({ config: { runtime: "codex", externalAgentConfigId: "strict" } })
+      )
+    ).toBe("strict")
+    expect(
+      resolveTeammatePinnedConfigId(
+        teammate({ config: { runtime: "claude", externalAgentConfigId: "strict" } })
+      )
+    ).toBeUndefined()
+    expect(
+      resolveTeammatePinnedConfigId(
+        teammate({ config: { runtime: "codex", externalAgentConfigId: " " } })
+      )
+    ).toBeUndefined()
+  })
+})
+
+describe("resolveTeammateExternalAgent with a pinned config", () => {
+  const presetOf = (cfg: { metadata?: { preset?: string } }) => cfg.metadata?.preset ?? null
+
+  it("runs exactly the pinned config instead of the preset's first live one", async () => {
+    isFromPreset.mockImplementation(presetOf)
+    getAllAgents.mockReturnValue([
+      {
+        config: { id: "lenient", enabled: true, metadata: { preset: "codex" } },
+        connectionStatus: "connected",
+      },
+    ])
+    storeState.agents = {
+      lenient: { id: "lenient", enabled: true, metadata: { preset: "codex" } },
+      strict: { id: "strict", enabled: true, metadata: { preset: "codex-app-server" } },
+    }
+    const c = ctx()
+    const id = await resolveTeammateExternalAgent(
+      teammate({ config: { runtime: "codex", externalAgentConfigId: "strict" } }),
+      EMPTY_CAPS,
+      c
+    )
+    expect(id).toBe("strict")
+    expect(ensureReady).toHaveBeenCalledWith("strict", { deferConnect: true })
+    // No Codex surface rewrite, no spawn, nothing cached under the preset.
+    expect(resolvePreferredCodex).not.toHaveBeenCalled()
+    expect(createAgentFromPreset).not.toHaveBeenCalled()
+    expect(addAgent).not.toHaveBeenCalled()
+    expect(c.externalAgentInstances.size).toBe(0)
+  })
+
+  it("fails loudly for a missing pin rather than spawning or borrowing a config", async () => {
+    isFromPreset.mockImplementation(presetOf)
+    getAllAgents.mockReturnValue([
+      {
+        config: { id: "lenient", enabled: true, metadata: { preset: "codex" } },
+        connectionStatus: "connected",
+      },
+    ])
+    createAgentFromPreset.mockReturnValue({ id: "fresh" })
+    await expect(
+      resolveTeammateExternalAgent(
+        teammate({ config: { runtime: "codex", externalAgentConfigId: "deleted" } }),
+        EMPTY_CAPS,
+        ctx()
+      )
+    ).rejects.toBeInstanceOf(ExternalAgentBindingError)
+    expect(createAgentFromPreset).not.toHaveBeenCalled()
+    expect(addAgent).not.toHaveBeenCalled()
+  })
+
+  it("ignores a stale pin on a claude teammate whose preset comes from capabilities", async () => {
+    isFromPreset.mockImplementation(presetOf)
+    getAllAgents.mockReturnValue([
+      {
+        config: { id: "cc", enabled: true, metadata: { preset: "claude-code" } },
+        connectionStatus: "connected",
+      },
+    ])
+    const id = await resolveTeammateExternalAgent(
+      teammate({ config: { runtime: "claude", externalAgentConfigId: "deleted" } }),
+      { ...EMPTY_CAPS, externalAgentPresetIds: ["claude-code"] },
+      ctx()
+    )
+    expect(id).toBe("cc")
+  })
+})
+
+describe("resolveTeammateExternalAgent preset fallback order", () => {
+  it("picks the earliest-created enabled config, whatever order the manager lists them in", async () => {
+    isFromPreset.mockImplementation(
+      (cfg: { metadata?: { preset?: string } }) => cfg.metadata?.preset ?? null
+    )
+    getAllAgents.mockReturnValue([
+      {
+        config: {
+          id: "newer",
+          enabled: true,
+          metadata: { preset: "gemini-cli" },
+          createdAt: new Date("2026-02-01"),
+        },
+        connectionStatus: "disconnected",
+      },
+      {
+        config: {
+          id: "disabled",
+          enabled: false,
+          metadata: { preset: "gemini-cli" },
+          createdAt: new Date("2020-01-01"),
+        },
+        connectionStatus: "connected",
+      },
+      {
+        config: {
+          id: "older",
+          enabled: true,
+          metadata: { preset: "gemini-cli" },
+          createdAt: new Date("2025-02-01"),
+        },
+        connectionStatus: "disconnected",
+      },
+    ])
+    const id = await resolveTeammateExternalAgent(
+      teammate({ config: { runtime: "gemini-cli" } }),
+      EMPTY_CAPS,
+      ctx()
+    )
+    expect(id).toBe("older")
+  })
 })
 
 describe("resolveTeammatePresetId", () => {

@@ -153,6 +153,19 @@ export interface SubAgentConfig {
    */
   externalPresetId?: string
   /**
+   * Pin this sub-agent to ONE saved external-agent config of
+   * `externalPresetId` (the nanoid key of `useExternalAgentStore().agents`).
+   * Read only alongside `externalPresetId`; the template editor clears it when
+   * the preset changes. Projected onto `PluginSubagentDef.externalAgentConfigId`.
+   *
+   * When set it wins over the preset: the dispatch runs exactly that config,
+   * and a pinned config that is missing, disabled, or no longer built from the
+   * preset's family FAILS the dispatch rather than falling back to another
+   * config. Unset keeps preset-only selection in the documented order (see
+   * `lib/ai/agent/external/config/agent-binding.ts`).
+   */
+  externalAgentConfigId?: string
+  /**
    * MCP server ids/names forwarded into the external agent's ACP session
    * (`session/new` `mcpServers`) when this sub-agent runs on an external preset.
    * Projected onto `AgentDefinition.mcpServerIds`, resolved via

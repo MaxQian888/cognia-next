@@ -923,6 +923,25 @@ export interface TeammateConfig {
    */
   runtime?: TeammateRuntime
   /**
+   * Pin this teammate to ONE saved external-agent config (the nanoid key of
+   * `useExternalAgentStore().agents`), e.g. "Codex strict" rather than any
+   * Codex. Read only when `runtime` is an external preset; the editors clear it
+   * whenever the runtime changes.
+   *
+   * Precedence: when set it wins over the preset, and the dispatch runs exactly
+   * that config. A pinned config that is missing, disabled, or no longer built
+   * from `runtime`'s preset family FAILS the dispatch (and refuses an
+   * `@member` route) instead of falling back to another config of the preset.
+   * Unset keeps the preset-only behaviour: the resolver picks a config of the
+   * preset in the documented order (enabled, connected, earliest `createdAt`,
+   * id). See `lib/ai/agent/external/config/agent-binding.ts`.
+   *
+   * Distinct from `execution` (`TeammateExecutionBinding`): that binding pins
+   * the built-in rail's runtime policy / deployment / credential profile and
+   * says outright that external runtimes pin via `runtime`, not there.
+   */
+  externalAgentConfigId?: string
+  /**
    * How this member's turn is executed by Router + Fusion (ADR-0188 B5, D3/D21).
    *
    * `"auto"` — the default, and what every teammate without this field does —

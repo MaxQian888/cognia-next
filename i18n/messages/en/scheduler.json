@@ -657,7 +657,7 @@
       "allowedHeading": "Allowed tools (unioned with character / mode / skill tools)",
       "allowedHelp": "Use built-in tool names like Read, Write, Bash. MCP tools follow the mcp__server__tool convention.",
       "disallowedHeading": "Disallowed tools",
-      "disallowedHelp": "Replaces the character's disallow list when set.",
+      "disallowedHelp": "Added to the agent's own disallowed tools. It never re-allows a tool the agent, a tool filter or Restricted Mode already blocks.",
       "heading": "Tool whitelist / blocklist"
     },
     "webhookUrl": "Webhook URL",
@@ -694,7 +694,8 @@
       "maxRuntime": "Maximum runtime (minutes)",
       "maxRuntimePlaceholder": "No limit",
       "maxRuntimeHelp": "Kill the process if it is still running after this long. Leave blank to let it run until it finishes or the app closes."
-    }
+    },
+    "permissionModeCapHelp": "A cap for this run: it can lower the agent's permission mode, never raise it."
   },
   "payloadEditorMode": {
     "toJson": "Edit as JSON",

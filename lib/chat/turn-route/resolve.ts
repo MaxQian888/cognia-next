@@ -12,7 +12,9 @@
  *    user never set up is a refusal with a reason, not a silent spawn.
  *  - `@<member>` runs as that Squad member (its persona and its model) on the
  *    member's runtime: the builtin lane for `claude`, otherwise that preset's
- *    family, chosen exactly like `@codex`.
+ *    family, chosen exactly like `@codex` — unless the member pins one exact
+ *    config (`TeammateConfig.externalAgentConfigId`), which then answers or
+ *    the route is refused.
  *
  * A refusal is never turned into a builtin turn. Routing a turn somewhere and
  * having it quietly answered somewhere else is the one outcome worse than not
@@ -22,29 +24,27 @@
  */
 
 import type { AgentRuntimeDescriptor, AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
+import {
+  CODEX_PRESET_FAMILY,
+  checkPinnedExternalAgent,
+  presetFamilyOf,
+} from "@/lib/ai/agent/external/config/agent-binding"
 import { isSameRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 import { resolveTeammateCapabilities } from "@/lib/ai/agent/team/teammate/capability-resolver"
-import { resolveTeammatePresetId } from "@/lib/ai/agent/team/teammate/resolve-external-backing"
+import {
+  resolveTeammatePinnedConfigId,
+  resolveTeammatePresetId,
+} from "@/lib/ai/agent/team/teammate/resolve-external-backing"
 import { teammateToCharacter } from "@/lib/ai/agent/team/teammate/teammate-character"
 import type { Character } from "@cognia/agent-config-types"
 import type { MessageRunRouteStamp } from "@/lib/chat/message-run-metadata"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import type { RouteLane, TurnRoute, TurnRouteTarget } from "./types"
 
-/**
- * Presets that are one runtime shipped as several executable surfaces. Codex is
- * the one: the native `codex app-server`, the `codex` shim and the ACP adapter
- * all answer as Codex, in that order of preference (the same preference
- * `resolvePreferredCodexExecutablePresetId` applies when adding one). Every
- * other preset is a family of one.
- */
-export const CODEX_PRESET_FAMILY: readonly string[] = ["codex-app-server", "codex", "codex-acp"]
-
-const PRESET_FAMILIES: ReadonlyArray<readonly string[]> = [CODEX_PRESET_FAMILY]
-
-export function presetFamilyOf(presetId: string): readonly string[] {
-  return PRESET_FAMILIES.find((family) => family.includes(presetId)) ?? [presetId]
-}
+// The preset-family rule lives beside the external-agent config code so the
+// team backing, the subagent dispatch and this route read one answer. Re-exported
+// for the callers that already import it from here.
+export { CODEX_PRESET_FAMILY, presetFamilyOf }
 
 export interface RouteResolutionContext {
   /** The runtime catalog, as the composer's runtime chip lists it. */
@@ -118,6 +118,37 @@ function laneForPresetFamily(
   }
 }
 
+/**
+ * The lane of a member pinned to one exact external-agent config. That config
+ * answers or the route is refused: a sibling config of the same preset is never
+ * substituted (see `lib/ai/agent/external/config/agent-binding.ts`). A config
+ * the catalog does not list (deleted, or dropped because it is disabled) is as
+ * unavailable as a disabled one.
+ */
+function laneForPinnedConfig(
+  presetId: string,
+  configId: string,
+  ctx: RouteResolutionContext
+): Extract<RouteLane, { ok: true }> | Extract<RouteLane, { ok: false }> {
+  const row = ctx.runtimes.find(
+    (candidate) => candidate.ref.kind === "external" && candidate.ref.agentId === configId
+  )
+  const check = checkPinnedExternalAgent(
+    row ? { id: configId, presetId: row.presetId, enabled: true, connected: false } : undefined,
+    presetId
+  )
+  if (!row || !check.ok) return { ok: false, reason: "blocked", runtime: presetId }
+  if (row.blockedReason) {
+    return {
+      ok: false,
+      reason: row.blockTransient ? "transient" : "blocked",
+      detail: row.blockedReason,
+      runtime: presetId,
+    }
+  }
+  return { ok: true, runtimeRef: row.ref }
+}
+
 /** The lane `target` runs on, or why it cannot run. */
 export function resolveRouteLane(target: TurnRouteTarget, ctx: RouteResolutionContext): RouteLane {
   if (target.kind === "runtime") {
@@ -131,7 +162,10 @@ export function resolveRouteLane(target: TurnRouteTarget, ctx: RouteResolutionCo
   }
   const presetId = memberPresetId(team, teammate)
   if (!presetId) return { ok: true, runtimeRef: { kind: "builtin" }, member: { team, teammate } }
-  const lane = laneForPresetFamily(presetId, ctx)
+  const pinnedConfigId = resolveTeammatePinnedConfigId(teammate)
+  const lane = pinnedConfigId
+    ? laneForPinnedConfig(presetId, pinnedConfigId, ctx)
+    : laneForPresetFamily(presetId, ctx)
   if (lane.ok) return { ...lane, member: { team, teammate } }
   return {
     ok: false,

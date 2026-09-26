@@ -775,5 +775,17 @@
       "connect": "Connect",
       "addRule": "Add routing rule"
     }
+  },
+  "configPin": {
+    "label": "Agent config",
+    "any": "Any {preset} config",
+    "hint": "Pin one of your saved configs, or let Cognia pick a config of this preset.",
+    "noConfigs": "You have no saved {preset} configs yet. Cognia will create one from the preset when it runs.",
+    "disabledOption": "{name} (disabled)",
+    "otherPresetOption": "{name} (different preset)",
+    "missingOption": "Missing config",
+    "problemMissing": "The pinned config no longer exists. Runs fail until you pick another config or choose Any.",
+    "problemDisabled": "The pinned config is disabled. Runs fail until you enable it, pick another config, or choose Any.",
+    "problemPresetMismatch": "The pinned config no longer uses this preset. Runs fail until you pick another config or choose Any."
   }
 }

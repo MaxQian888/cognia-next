@@ -147,6 +147,13 @@ export async function dispatchSubagent(
   // preset. External agents run their own loop and do not nest back in, so the
   // depth/budget threading stops here.
   const externalPresetId = options.externalAgentId ?? def.externalPresetId
+  // The def's exact-config pin rides along only while the dispatch runs the
+  // def's own preset: a caller overriding the preset has asked for a different
+  // runtime, and the pin names a config of the old one.
+  const externalAgentConfigId =
+    def.externalPresetId && externalPresetId === def.externalPresetId
+      ? def.externalAgentConfigId
+      : undefined
   const cogniaModel = normalizeCogniaModelBinding(
     options.cogniaModel === undefined ? def.cogniaModel : options.cogniaModel
   )
@@ -154,7 +161,7 @@ export async function dispatchSubagent(
     throw new Error("A Cognia gateway model binding requires an external subagent preset")
   }
   if (externalPresetId) {
-    const ext = await runExternalSubagent(externalPresetId, prompt, def, {
+    const ext = await runExternalSubagent(externalPresetId, externalAgentConfigId, prompt, def, {
       ...options,
       cogniaModel,
     })
@@ -350,22 +357,29 @@ async function isDispatchAllowedByPolicy(subagentId: string): Promise<boolean> {
 
 /**
  * Resolve (reuse or spawn) an external CLI agent from a preset and run one
- * prompt through it (Thread A2). Throws on unknown preset or a failure result.
+ * prompt through it (Thread A2). A pinned config (`externalAgentConfigId`) runs
+ * exactly that config and throws `ExternalAgentBindingError` when it cannot,
+ * never borrowing a sibling config; a bare preset reuses a live config in the
+ * shared order (`lib/ai/agent/external/config/agent-binding.ts`) or spawns one.
+ * Throws on unknown preset or a failure result.
  */
 async function runExternalSubagent(
   presetId: string,
+  externalAgentConfigId: string | undefined,
   prompt: string,
   def: PluginSubagentDef,
   options: PluginDispatchSubagentOptions
 ): Promise<PluginSubagentDispatchResult> {
   const [
     { getExternalAgentManager },
-    { createAgentFromPreset, isFromPreset },
+    { createAgentFromPreset },
     { supportsExternalAgents },
+    { resolveExternalAgentForBinding },
   ] = await Promise.all([
     import("@/lib/ai/agent/external/manager"),
     import("@/lib/ai/agent/external/config/presets"),
     import("@/lib/ai/agent/external/agent-transport"),
+    import("@/lib/agent/external-agent-binding"),
   ])
 
   // External CLIs only run on the desktop / headless host — never in the browser
@@ -379,12 +393,14 @@ async function runExternalSubagent(
 
   const manager = getExternalAgentManager()
   const cogniaModel = options.cogniaModel
-  const existing = manager
-    .getAllAgents()
-    .find((inst) => isFromPreset(inst.config) === presetId && !inst.config.cogniaModel)
+  const resolution = await resolveExternalAgentForBinding({
+    presetId,
+    ...(externalAgentConfigId ? { configId: externalAgentConfigId } : {}),
+  })
+  const pinned = resolution.kind === "pinned"
   let agentId: string
-  if (existing) {
-    agentId = existing.config.id
+  if (resolution.agentId) {
+    agentId = resolution.agentId
   } else {
     const config = createAgentFromPreset(presetId)
     if (!config) {
@@ -425,7 +441,9 @@ async function runExternalSubagent(
 
   const result = await manager.execute(agentId, prompt, {
     // A preset names an executable, not another saved agent's model/account.
-    cogniaModel: cogniaModel ?? null,
+    // A pinned config IS the saved agent, so without an explicit override its
+    // own gateway binding (or native mode) applies.
+    ...(cogniaModel !== undefined ? { cogniaModel } : pinned ? {} : { cogniaModel: null }),
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
     // Honor the subagent's declared model on the external CLI too (the sidecar
     // path already threads `def.model`). Best-effort per the manager.

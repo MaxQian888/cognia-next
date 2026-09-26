@@ -14725,6 +14725,18 @@
     "commands": "Commands",
     "commandsDescription": "Slash commands provided by this external agent",
     "commandsTooltip": "View available agent commands",
+    "configPin": {
+      "any": "Any {preset} config",
+      "disabledOption": "{name} (disabled)",
+      "hint": "Pin one of your saved configs, or let Cognia pick a config of this preset.",
+      "label": "Agent config",
+      "missingOption": "Missing config",
+      "noConfigs": "You have no saved {preset} configs yet. Cognia will create one from the preset when it runs.",
+      "otherPresetOption": "{name} (different preset)",
+      "problemDisabled": "The pinned config is disabled. Runs fail until you enable it, pick another config, or choose Any.",
+      "problemMissing": "The pinned config no longer exists. Runs fail until you pick another config or choose Any.",
+      "problemPresetMismatch": "The pinned config no longer uses this preset. Runs fail until you pick another config or choose Any."
+    },
     "credential": {
       "checking": "Checking sign-in...",
       "none": "Not signed in",
@@ -31909,6 +31921,7 @@
       "model": "Model",
       "modelPlaceholder": "claude-opus-4-7",
       "permissionMode": "Permission mode",
+      "permissionModeCapHelp": "A cap for this run: it can lower the agent's permission mode, never raise it.",
       "plan": {
         "planId": "Agent plan",
         "planIdPlaceholder": "Select or paste a plan id",
@@ -31932,7 +31945,7 @@
         "allowedHeading": "Allowed tools (unioned with character / mode / skill tools)",
         "allowedHelp": "Use built-in tool names like Read, Write, Bash. MCP tools follow the mcp__server__tool convention.",
         "disallowedHeading": "Disallowed tools",
-        "disallowedHelp": "Replaces the character's disallow list when set.",
+        "disallowedHelp": "Added to the agent's own disallowed tools. It never re-allows a tool the agent, a tool filter or Restricted Mode already blocks.",
         "heading": "Tool whitelist / blocklist"
       },
       "webhookUrl": "Webhook URL",

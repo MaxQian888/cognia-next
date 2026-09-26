@@ -282,6 +282,11 @@ export function resolveDispatchableSubagents(): Array<{ id: string; def: PluginS
         // ACP session. Without these two, `dispatch_agent` would silently route
         // the template to the built-in executor instead.
         ...(tpl.config.externalPresetId ? { externalPresetId: tpl.config.externalPresetId } : {}),
+        // The exact-config pin only means something next to its preset; a
+        // stray pin on a template without one is dropped, not dispatched.
+        ...(tpl.config.externalPresetId && tpl.config.externalAgentConfigId
+          ? { externalAgentConfigId: tpl.config.externalAgentConfigId }
+          : {}),
         ...(tpl.config.mcpServerIds?.length ? { mcpServerIds: tpl.config.mcpServerIds } : {}),
         ...(tpl.config.allowNesting ? { allowNesting: true } : {}),
         ...(tpl.config.maxNestingDepth !== undefined

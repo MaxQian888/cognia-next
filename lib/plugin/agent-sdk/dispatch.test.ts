@@ -54,7 +54,20 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
     execute: (...a: unknown[]) => externalExecute(...a),
     getAllAgents: (...a: unknown[]) => externalGetAllAgents(...a),
     addAgent: (...a: unknown[]) => externalAddAgent(...a),
+    getAgent: (id: string) =>
+      (externalGetAllAgents() as Array<{ config: { id: string } }>).find((i) => i.config.id === id),
   }),
+}))
+const externalStoreState: {
+  agents: Record<string, unknown>
+  connectionStatus: Record<string, string>
+} = { agents: {}, connectionStatus: {} }
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: { getState: () => externalStoreState },
+}))
+const externalEnsureReady = jest.fn(async (..._a: unknown[]) => ({ ok: true }))
+jest.mock("@/lib/agent/ensure-external-agent-ready", () => ({
+  ensureExternalAgentReady: (...a: unknown[]) => externalEnsureReady(...a),
 }))
 const externalCreatePreset = jest.fn()
 const externalIsFromPreset = jest.fn<string | null, unknown[]>(() => null)
@@ -410,6 +423,104 @@ describe("dispatchSubagent — external backing (A2)", () => {
     })
     expect(externalExecute.mock.calls[0][2].cogniaModel).toEqual(override)
     expect(externalExecute.mock.calls[1][2].cogniaModel).toBeNull()
+  })
+
+  describe("exact external-agent config pin", () => {
+    const presetOf = (cfg: { metadata?: { preset?: string } }) => cfg.metadata?.preset ?? null
+    const pinnedDef: PluginSubagentDef = {
+      ...externalDef,
+      externalPresetId: "codex",
+      externalAgentConfigId: "strict",
+    }
+
+    beforeEach(() => {
+      externalStoreState.agents = {}
+      externalStoreState.connectionStatus = {}
+      externalIsFromPreset.mockImplementation(presetOf as never)
+      externalGetAllAgents.mockReturnValue([
+        {
+          config: { id: "lenient", enabled: true, metadata: { preset: "codex" } },
+          connectionStatus: "connected",
+        },
+      ])
+      externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+    })
+
+    it("runs exactly the pinned config and keeps its own gateway binding", async () => {
+      externalStoreState.agents = {
+        lenient: { id: "lenient", enabled: true, metadata: { preset: "codex" } },
+        strict: { id: "strict", enabled: true, metadata: { preset: "codex-app-server" } },
+      }
+      await dispatchSubagent(pinnedDef, "go")
+      expect(externalEnsureReady).toHaveBeenCalledWith("strict", { deferConnect: true })
+      expect(externalCreatePreset).not.toHaveBeenCalled()
+      expect(externalExecute.mock.calls[0][0]).toBe("strict")
+      expect(externalExecute.mock.calls[0][2]).not.toHaveProperty("cogniaModel")
+    })
+
+    it("still honours an explicit native-mode override on a pinned config", async () => {
+      externalStoreState.agents = {
+        strict: { id: "strict", enabled: true, metadata: { preset: "codex" } },
+      }
+      await dispatchSubagent(pinnedDef, "go", { cogniaModel: null })
+      expect(externalExecute.mock.calls[0][2].cogniaModel).toBeNull()
+    })
+
+    it.each([
+      ["missing", {}],
+      ["disabled", { strict: { id: "strict", enabled: false, metadata: { preset: "codex" } } }],
+      [
+        "preset-mismatch",
+        { strict: { id: "strict", enabled: true, metadata: { preset: "gemini-cli" } } },
+      ],
+    ])("fails a %s pin without running another config", async (problem, agents) => {
+      externalStoreState.agents = agents
+      const { ExternalAgentBindingError } = jest.requireActual(
+        "@/lib/ai/agent/external/config/agent-binding"
+      )
+      const attempt = dispatchSubagent(pinnedDef, "go")
+      await expect(attempt).rejects.toBeInstanceOf(ExternalAgentBindingError)
+      await expect(attempt).rejects.toMatchObject({ problem })
+      expect(externalExecute).not.toHaveBeenCalled()
+      expect(externalAddAgent).not.toHaveBeenCalled()
+    })
+
+    it("drops the pin when the caller overrides the preset", async () => {
+      externalGetAllAgents.mockReturnValue([
+        {
+          config: { id: "gem", enabled: true, metadata: { preset: "gemini-cli" } },
+          connectionStatus: "connected",
+        },
+      ])
+      await dispatchSubagent(pinnedDef, "go", { externalAgentId: "gemini-cli" })
+      expect(externalExecute.mock.calls[0][0]).toBe("gem")
+      expect(externalExecute.mock.calls[0][2].cogniaModel).toBeNull()
+    })
+
+    it("picks a bare preset's live configs in the documented order", async () => {
+      externalGetAllAgents.mockReturnValue([
+        {
+          config: {
+            id: "newer",
+            enabled: true,
+            metadata: { preset: "codex" },
+            createdAt: new Date("2026-01-01"),
+          },
+          connectionStatus: "disconnected",
+        },
+        {
+          config: {
+            id: "older",
+            enabled: true,
+            metadata: { preset: "codex" },
+            createdAt: new Date("2025-01-01"),
+          },
+          connectionStatus: "disconnected",
+        },
+      ])
+      await dispatchSubagent({ ...externalDef, externalPresetId: "codex" }, "go")
+      expect(externalExecute.mock.calls[0][0]).toBe("older")
+    })
   })
 
   it("rejects malformed bindings and bindings without an external runtime before connecting", async () => {

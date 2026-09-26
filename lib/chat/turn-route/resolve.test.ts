@@ -252,6 +252,64 @@ describe("resolveRouteLane — Squad member", () => {
     })
   })
 
+  it("runs a member pinned to one config on exactly that config", () => {
+    const m = teammate({ config: { runtime: "codex", externalAgentConfigId: "strict" } })
+    const lane = resolveRouteLane(
+      target,
+      ctx({
+        teams: { s1: team() },
+        teammates: { "tm-1": m },
+        // The family order would pick `lenient` first.
+        runtimes: [BUILTIN, external("lenient", "codex-app-server"), external("strict", "codex")],
+      })
+    )
+    expect(lane).toMatchObject({
+      ok: true,
+      runtimeRef: { kind: "external", agentId: "strict" },
+      member: { teammate: m },
+    })
+  })
+
+  it.each([
+    ["missing from the catalog", [external("lenient", "codex")]],
+    ["of another preset now", [external("lenient", "codex"), external("strict", "gemini-cli")]],
+  ])("refuses a pinned config that is %s instead of substituting a sibling", (_label, rows) => {
+    const lane = resolveRouteLane(
+      target,
+      ctx({
+        teams: { s1: team() },
+        teammates: {
+          "tm-1": teammate({ config: { runtime: "codex", externalAgentConfigId: "strict" } }),
+        },
+        runtimes: [BUILTIN, ...rows],
+      })
+    )
+    expect(lane).toEqual({ ok: false, reason: "member-runtime", runtime: "codex" })
+  })
+
+  it("passes a blocked pinned config's reason through", () => {
+    const lane = resolveRouteLane(
+      target,
+      ctx({
+        teams: { s1: team() },
+        teammates: {
+          "tm-1": teammate({ config: { runtime: "codex", externalAgentConfigId: "strict" } }),
+        },
+        runtimes: [
+          BUILTIN,
+          external("lenient", "codex"),
+          external("strict", "codex", { blockedReason: "disabled" }),
+        ],
+      })
+    )
+    expect(lane).toEqual({
+      ok: false,
+      reason: "member-runtime",
+      runtime: "codex",
+      detail: "disabled",
+    })
+  })
+
   it("honours a capability-bundle preset on a claude member, like a Squad dispatch", () => {
     const t = team({
       config: { capabilities: { externalAgentPresetIds: ["claude-code"] } },

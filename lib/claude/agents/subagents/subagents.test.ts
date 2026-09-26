@@ -272,4 +272,37 @@ describe("resolveDispatchableSubagents — built-in dispatch targets", () => {
       useSubagentRuntimeStore.getState().deleteTemplate("user-disp-ext")
     }
   })
+
+  it("carries an exact external-agent config pin only alongside its preset", () => {
+    const base = {
+      description: "pinned",
+      category: "coding" as const,
+      taskTemplate: "run {{x}}",
+      isBuiltIn: false,
+    }
+    useSubagentRuntimeStore.getState().addTemplate({
+      ...base,
+      id: "user-pinned",
+      name: "Pinned Codex",
+      config: { externalPresetId: "codex", externalAgentConfigId: "codex-strict" },
+    })
+    useSubagentRuntimeStore.getState().addTemplate({
+      ...base,
+      id: "user-stray-pin",
+      name: "Stray Pin",
+      config: { externalAgentConfigId: "codex-strict" },
+    })
+    try {
+      expect(getDispatchableSubagentDef("template:pinned-codex")).toMatchObject({
+        externalPresetId: "codex",
+        externalAgentConfigId: "codex-strict",
+      })
+      const stray = getDispatchableSubagentDef("template:stray-pin")
+      expect(stray).toBeDefined()
+      expect(stray).not.toHaveProperty("externalAgentConfigId")
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("user-pinned")
+      useSubagentRuntimeStore.getState().deleteTemplate("user-stray-pin")
+    }
+  })
 })

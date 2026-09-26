@@ -141,6 +141,8 @@ const resolveExternalMock = jest.fn<Promise<string | null>, unknown[]>(async () 
 jest.mock("./resolve-external-backing", () => ({
   resolveTeammateExternalAgent: (...a: Parameters<typeof resolveExternalMock>) =>
     resolveExternalMock(...a),
+  resolveTeammatePinnedConfigId: jest.requireActual("./resolve-external-backing")
+    .resolveTeammatePinnedConfigId,
 }))
 
 // Passthrough spy on the ONE resolver, so a test can assert what was handed to
@@ -1208,6 +1210,50 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     expect(runAndCaptureMock).not.toHaveBeenCalled()
     expect(externalExecuteMock).not.toHaveBeenCalled()
     expect(executeAgentMock).not.toHaveBeenCalled()
+  })
+
+  it("fails loudly and names the config when a pinned external config cannot run", async () => {
+    isTauriMock.mockReturnValue(true)
+    const { ExternalAgentBindingError } = jest.requireActual(
+      "@/lib/ai/agent/external/config/agent-binding"
+    )
+    resolveExternalMock.mockRejectedValue(
+      new ExternalAgentBindingError("disabled", "codex-strict", "codex")
+    )
+    const { ctx, notifier } = makeCtx(
+      makeTeammate({ config: { runtime: "codex", externalAgentConfigId: "codex-strict" } })
+    )
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "x" })).rejects.toThrow(
+      /codex-strict.*disabled/
+    )
+    expect(notifier.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "critical",
+        title: "Pinned external agent config unavailable",
+        body: expect.stringContaining('"codex-strict"'),
+      })
+    )
+    expect(externalExecuteMock).not.toHaveBeenCalled()
+    expect(executeAgentMock).not.toHaveBeenCalled()
+    expect(runAndCaptureMock).not.toHaveBeenCalled()
+  })
+
+  it("lets a pinned config keep its own gateway binding while a preset-only teammate runs native", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("codex-strict")
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const pinned = makeCtx(
+      makeTeammate({ config: { runtime: "codex", externalAgentConfigId: "codex-strict" } })
+    )
+    await dispatchTeammate(pinned.ctx, { taskId: "t1", prompt: "x" })
+    expect(externalExecuteMock.mock.calls[0][0]).toBe("codex-strict")
+    expect(externalExecuteMock.mock.calls[0][2]).not.toHaveProperty("cogniaModel")
+
+    externalExecuteMock.mockClear()
+    const presetOnly = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+    await dispatchTeammate(presetOnly.ctx, { taskId: "t2", prompt: "x" })
+    expect(externalExecuteMock.mock.calls[0][2]).toMatchObject({ cogniaModel: null })
   })
 
   it("dispatches to the external CLI agent when a preset resolves", async () => {

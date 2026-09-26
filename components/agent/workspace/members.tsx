@@ -63,7 +63,13 @@ import { TEAMMATE_STATUS_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
 import { DEFAULT_TEAMMATE_RUNTIME } from "@/types/agent/agent-team"
 import { RuntimeBadge } from "./runtime-badge"
-import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
+import {
+  RUNTIME_OPTIONS,
+  runtimeLabelKey,
+  withTeammateConfigPin,
+  withTeammateRuntime,
+} from "./runtime-options"
+import { ExternalAgentConfigPinField } from "@/components/agent/external-agent/external-agent-config-pin-field"
 import { TeammateConfigDialog } from "./teammate-config-dialog"
 import { AgentTeamAvatar } from "./agent-team-avatar"
 
@@ -112,9 +118,13 @@ export function AgentTeamMembers({
     description: string
     specialization?: string
     runtime: TeammateRuntime
+    externalAgentConfigId?: string
   }) => {
     const config: AgentTeammate["config"] = { runtime: data.runtime }
     if (data.specialization) config.specialization = data.specialization
+    if (data.runtime !== "claude" && data.externalAgentConfigId) {
+      config.externalAgentConfigId = data.externalAgentConfigId
+    }
     addTeammate({
       teamId,
       name: data.name.trim(),
@@ -134,9 +144,17 @@ export function AgentTeamMembers({
 
   const handleRuntimeChange = (member: AgentTeammate, runtime: TeammateRuntime) => {
     updateTeammate(member.id, {
-      config: { ...member.config, runtime },
+      // A runtime switch drops the exact-config pin, which names a config of
+      // the old runtime.
+      config: withTeammateRuntime(member.config, runtime),
     })
     toast.success(t("runtimeUpdated", { name: member.name }))
+  }
+
+  const handleConfigPinChange = (member: AgentTeammate, configId: string | undefined) => {
+    updateTeammate(member.id, {
+      config: withTeammateConfigPin(member.config, configId),
+    })
   }
 
   const handleRemove = (m: AgentTeammate) => {
@@ -217,6 +235,7 @@ export function AgentTeamMembers({
                     onRemove={() => setRemoving(m)}
                     onConfigure={() => setConfiguring(m)}
                     onRuntimeChange={(r) => handleRuntimeChange(m, r)}
+                    onConfigPinChange={(id) => handleConfigPinChange(m, id)}
                   />
                 </Card>
               </motion.div>
@@ -277,6 +296,7 @@ function MemberRow({
   onRemove,
   onConfigure,
   onRuntimeChange,
+  onConfigPinChange,
 }: {
   member: AgentTeammate
   teamId: string
@@ -284,6 +304,8 @@ function MemberRow({
   onRemove: () => void
   onConfigure: () => void
   onRuntimeChange: (runtime: TeammateRuntime) => void
+  /** Pin (or clear) the exact external-agent config. Absent for the lead. */
+  onConfigPinChange?: (configId: string | undefined) => void
 }) {
   const t = useTranslations("agentTeamsWorkspace.members")
   const tRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
@@ -341,6 +363,18 @@ function MemberRow({
             </SelectContent>
           </Select>
         </div>
+        {onConfigPinChange && runtime !== "claude" ? (
+          <ExternalAgentConfigPinField
+            compact
+            className="mt-1.5 max-w-[16rem]"
+            triggerClassName="h-7"
+            presetId={runtime}
+            presetLabel={tRuntime(runtimeLabelKey(runtime))}
+            value={member.config.externalAgentConfigId}
+            onChange={onConfigPinChange}
+            data-testid={`config-pin-${member.id}`}
+          />
+        ) : null}
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -394,6 +428,7 @@ function AddDialog({
     description: string
     specialization?: string
     runtime: TeammateRuntime
+    externalAgentConfigId?: string
   }) => void
 }) {
   const t = useTranslations("agentTeamsWorkspace.members")
@@ -402,6 +437,7 @@ function AddDialog({
   const [description, setDescription] = useState("")
   const [specialization, setSpecialization] = useState("")
   const [runtime, setRuntime] = useState<TeammateRuntime>(DEFAULT_TEAMMATE_RUNTIME)
+  const [configPin, setConfigPin] = useState<string | undefined>(undefined)
 
   const submit = () => {
     if (!name.trim()) return
@@ -410,11 +446,13 @@ function AddDialog({
       description: description.trim(),
       specialization: specialization.trim() || undefined,
       runtime,
+      ...(configPin ? { externalAgentConfigId: configPin } : {}),
     })
     setName("")
     setDescription("")
     setSpecialization("")
     setRuntime(DEFAULT_TEAMMATE_RUNTIME)
+    setConfigPin(undefined)
   }
 
   return (
@@ -454,7 +492,14 @@ function AddDialog({
           </div>
           <div className="space-y-1">
             <Label className="text-xs">{t("runtime")}</Label>
-            <Select value={runtime} onValueChange={(v) => setRuntime(v as TeammateRuntime)}>
+            <Select
+              value={runtime}
+              onValueChange={(v) => {
+                // The pin names a config of the previous runtime.
+                if (v !== runtime) setConfigPin(undefined)
+                setRuntime(v as TeammateRuntime)
+              }}
+            >
               <SelectTrigger className="h-8 text-xs" data-testid="runtime-select-add">
                 <SelectValue />
               </SelectTrigger>
@@ -467,6 +512,15 @@ function AddDialog({
               </SelectContent>
             </Select>
           </div>
+          {runtime !== "claude" ? (
+            <ExternalAgentConfigPinField
+              presetId={runtime}
+              presetLabel={tRuntime(runtimeLabelKey(runtime))}
+              value={configPin}
+              onChange={setConfigPin}
+              data-testid="config-pin-add"
+            />
+          ) : null}
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
