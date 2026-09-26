@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 
@@ -36,7 +35,7 @@ test("buildBedrockProviderOptions builds explicit IAM settings", async () => {
 })
 
 test("default-chain composes profile resolution and optional role assumption", async () => {
-  const calls = []
+  const calls: [string, Record<string, unknown>][] = []
   const base = async () => ({ accessKeyId: "base", secretAccessKey: "base-secret" })
   const assumed = async () => ({ accessKeyId: "role", secretAccessKey: "role-secret" })
   const provider = await createBedrockCredentialProvider(
@@ -60,10 +59,10 @@ test("default-chain composes profile resolution and optional role assumption", a
   )
 
   assert.equal(provider, assumed)
-  assert.equal(calls[0][0], "chain")
-  assert.equal(calls[0][1].profile, "engineering")
-  assert.equal(calls[1][1].masterCredentials, base)
-  assert.deepEqual(calls[1][1].params, {
+  assert.equal(calls[0]?.[0], "chain")
+  assert.equal(calls[0]?.[1].profile, "engineering")
+  assert.equal(calls[1]?.[1].masterCredentials, base)
+  assert.deepEqual(calls[1]?.[1].params, {
     RoleArn: "arn:aws:iam::123456789012:role/Cognia",
     RoleSessionName: "cognia-test",
   })
@@ -71,7 +70,7 @@ test("default-chain composes profile resolution and optional role assumption", a
 
 test("discovery merges foundation models and inference profiles without credentials in output", async () => {
   class MockClient {
-    async send(command) {
+    async send(command: { kind?: string }) {
       if (command.kind === "foundation") {
         return {
           modelSummaries: [
