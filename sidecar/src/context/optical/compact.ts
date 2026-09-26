@@ -8,29 +8,47 @@
 // summarizes the same `middle` as text instead, so context is never dropped to
 // an unreadable image.
 
-import { normalizeForOptical } from "./normalize.mjs"
-import { planOpticalFrames } from "./layout.mjs"
-import { renderSnapcompactPng } from "./render.mjs"
-import { checkReadability } from "./readability.mjs"
-import { makeOpticalMessage } from "../../src/context/compaction.ts"
+import { normalizeForOptical } from "./normalize.ts"
+import { planOpticalFrames } from "./layout.ts"
+import { renderSnapcompactPng } from "./render.ts"
+import { checkReadability } from "./readability.ts"
+import { makeOpticalMessage } from "../compaction.ts"
+import type { ConversationMessage } from "../compaction.ts"
+import type { OpticalShape, ResolvedShape } from "./layout.ts"
 
-function stripUndefined(obj) {
-  const out = {}
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) if (v !== undefined) out[k] = v
-  return out
+  return out as Partial<T>
+}
+
+/** `CompressionSettings.optical`: the shape overrides and the gates' thresholds. */
+export interface OpticalCompactionOptions extends OpticalShape {
+  size?: number
+  maxFrames?: number
+  minCoverage?: number
+  minSavings?: number
+  verify?: boolean
+  readabilityThreshold?: number
 }
 
 /**
- * @param {{
- *   middle: Array<{role:string, content:any}>,
- *   modelId?: string,
- *   version: number,
- *   options?: object,
- *   transcribe?: (dataUrl:string) => Promise<string>,
- *   log?: (level:string, msg:string) => void,
- * }} p
- * @returns {Promise<{ message:object, meta:object } | null>}
+ * Rides the compaction event to the renderer, which archives the frames
+ * (`lib/claude/optical-archive-persist.ts`).
  */
+export interface OpticalCompactionMeta {
+  frameCount: number
+  size: number
+  shape: ResolvedShape
+  coverage: number
+  charCount: number
+  estImageTokens: number
+  estTextTokens: number
+  readability?: number
+  byteLength: number
+  frames: { base64: string; width: number; height: number }[]
+}
+
 export async function buildOpticalCompaction({
   middle,
   modelId,
@@ -38,7 +56,15 @@ export async function buildOpticalCompaction({
   options = {},
   transcribe,
   log,
-}) {
+}: {
+  middle: readonly ConversationMessage[]
+  modelId?: string
+  version: number
+  options?: OpticalCompactionOptions
+  /** A one-shot vision read-back of a rendered frame. */
+  transcribe?: (dataUrl: string) => Promise<string>
+  log?: (level: "info" | "warn", msg: string) => void
+}): Promise<{ message: ConversationMessage; meta: OpticalCompactionMeta } | null> {
   const {
     size = 1024,
     font,
@@ -53,7 +79,7 @@ export async function buildOpticalCompaction({
     verify = true,
     readabilityThreshold = 0.6,
   } = options
-  const note = (level, msg) => log?.(level, `optical-compaction: ${msg}`)
+  const note = (level: "info" | "warn", msg: string) => log?.(level, `optical-compaction: ${msg}`)
 
   const norm = normalizeForOptical(middle, { fontName: font ?? "8x8", columns: columns ?? 1 })
   if (norm.charCount === 0) {
@@ -90,10 +116,10 @@ export async function buildOpticalCompaction({
   const rendered = plan.frames.map((chunk) => renderSnapcompactPng(chunk, { size, ...plan.shape }))
 
   // Round-trip verify the first (representative) frame — one extra vision call.
-  let readability
+  let readability: number | undefined
   if (verify && typeof transcribe === "function") {
     try {
-      const back = await transcribe(rendered[0].dataUrl)
+      const back = await transcribe(rendered[0]!.dataUrl)
       const check = checkReadability(plan.frames[0], back, readabilityThreshold)
       readability = check.score
       if (!check.ok) {
@@ -104,13 +130,13 @@ export async function buildOpticalCompaction({
         return null
       }
     } catch (err) {
-      note("warn", `verify failed (${err?.message ?? err}), falling back`)
+      note("warn", `verify failed (${(err as Error | null)?.message ?? err}), falling back`)
       return null
     }
   }
 
   const imageParts = rendered.map((f) => ({
-    type: "image",
+    type: "image" as const,
     image: f.dataUrl,
     mediaType: "image/png",
   }))
@@ -119,7 +145,7 @@ export async function buildOpticalCompaction({
     { messageCount: middle.length, frameCount: rendered.length },
     version
   )
-  const meta = {
+  const meta: OpticalCompactionMeta = {
     frameCount: rendered.length,
     size,
     shape: plan.shape,

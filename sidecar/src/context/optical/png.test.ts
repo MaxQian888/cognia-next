@@ -2,15 +2,31 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { inflateSync } from "node:zlib"
 
-import { encodeIndexedPng, encodeRgbPng } from "./png.mjs"
-import { PALETTE, INK_BLACK, INK_DIM, BG_REPEAT } from "./constants.mjs"
+import { encodeIndexedPng, encodeRgbPng } from "./png.ts"
+import { PALETTE, INK_BLACK, INK_DIM, BG_REPEAT } from "./constants.ts"
+
+interface ParsedPng {
+  width: number
+  height: number
+  bitDepth: number
+  colorType: number
+  palette: (number | undefined)[][]
+  idat: Buffer
+}
 
 // Minimal PNG reader for the tests: parse chunks, verify CRCs implicitly by
 // re-reading structure, inflate IDAT, unpack scanlines.
-function parsePng(buf) {
+function parsePng(buf: Buffer): ParsedPng {
   assert.deepEqual([...buf.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], "PNG signature")
   let off = 8
-  const out = { idat: [] }
+  const out: Omit<ParsedPng, "idat"> = {
+    width: 0,
+    height: 0,
+    bitDepth: 0,
+    colorType: 0,
+    palette: [],
+  }
+  const idat: Buffer[] = []
   while (off < buf.length) {
     const len = buf.readUInt32BE(off)
     const type = buf.toString("latin1", off + 4, off + 8)
@@ -18,33 +34,32 @@ function parsePng(buf) {
     if (type === "IHDR") {
       out.width = data.readUInt32BE(0)
       out.height = data.readUInt32BE(4)
-      out.bitDepth = data[8]
-      out.colorType = data[9]
+      out.bitDepth = data[8]!
+      out.colorType = data[9]!
     } else if (type === "PLTE") {
       out.palette = []
       for (let i = 0; i < data.length; i += 3) out.palette.push([data[i], data[i + 1], data[i + 2]])
     } else if (type === "IDAT") {
-      out.idat.push(data)
+      idat.push(data)
     }
     off += 12 + len
   }
-  out.idat = Buffer.concat(out.idat)
-  return out
+  return { ...out, idat: Buffer.concat(idat) }
 }
 
 // Decode indexed pixels back to RGB triples via the parsed palette.
-function decodeIndexedToRgb(png) {
+function decodeIndexedToRgb(png: ParsedPng) {
   const raw = inflateSync(png.idat)
   const per = 8 / png.bitDepth
   const rowBytes = Math.ceil(png.width / per)
   const stride = 1 + rowBytes
   const mask = (1 << png.bitDepth) - 1
-  const rgb = []
+  const rgb: ((number | undefined)[] | undefined)[] = []
   for (let y = 0; y < png.height; y++) {
     assert.equal(raw[y * stride], 0, "None filter byte")
     for (let x = 0; x < png.width; x++) {
       const byte = raw[y * stride + 1 + Math.floor(x / per)]
-      const slot = (byte >> (png.bitDepth * (per - 1 - (x % per)))) & mask
+      const slot = (byte! >> (png.bitDepth * (per - 1 - (x % per)))) & mask
       rgb.push(png.palette[slot])
     }
   }

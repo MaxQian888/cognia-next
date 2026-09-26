@@ -1,13 +1,13 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { resolveFont } from "./fonts.mjs"
-import { renderBitmap, renderDocBitmap, usedRows, placeCell, cellUnits, isWide } from "./raster.mjs"
-import { INK_BLACK, BG_REPEAT, INK_DIM, DIM_ON, DIM_OFF, FULL_BLOCK } from "./constants.mjs"
+import { resolveFont } from "./fonts.ts"
+import { renderBitmap, renderDocBitmap, usedRows, placeCell, cellUnits, isWide } from "./raster.ts"
+import { INK_BLACK, BG_REPEAT, INK_DIM, DIM_ON } from "./constants.ts"
 
-const F8 = resolveFont("8x8")
-const F5 = resolveFont("5x8")
-const inkSet = (px) => new Set([...px].filter((p) => p !== 0))
+const F8 = resolveFont("8x8")!
+const F5 = resolveFont("5x8")!
+const inkSet = (px: Uint8Array) => new Set([...px].filter((p) => p !== 0))
 
 test("cell geometry: dim toggles zero-width, wide code points double", () => {
   assert.equal(cellUnits(DIM_ON, true), 0)

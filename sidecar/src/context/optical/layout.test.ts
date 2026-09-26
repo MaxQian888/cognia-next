@@ -9,8 +9,8 @@ import {
   paginateCells,
   planOpticalFrames,
   wrapForDoc,
-} from "./layout.mjs"
-import { DIM_ON, DIM_OFF } from "./constants.mjs"
+} from "./layout.ts"
+import { DIM_ON, DIM_OFF } from "./constants.ts"
 
 const ON = String.fromCharCode(DIM_ON)
 const OFF = String.fromCharCode(DIM_OFF)
@@ -65,8 +65,8 @@ test("paginateCells splits at capacity, doubling wide cells and balancing dim sp
   // A dim span that straddles the cut is closed and reopened.
   const split = paginateCells(`${ON}abcdef${OFF}`, 3)
   assert.equal(split.length, 2)
-  assert.ok(split[0].startsWith(ON) && split[0].endsWith(OFF), "first chunk closes the span")
-  assert.ok(split[1].startsWith(ON), "second chunk reopens the span")
+  assert.ok(split[0]?.startsWith(ON) && split[0].endsWith(OFF), "first chunk closes the span")
+  assert.ok(split[1]?.startsWith(ON), "second chunk reopens the span")
 })
 
 test("planOpticalFrames fits frames, flags overflow, and judges worthwhile", () => {

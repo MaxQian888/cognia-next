@@ -3,46 +3,55 @@
 // Ports `render_snapcompact_png_sync` from snapcompact.rs. Native-cell bitmap
 // shapes encode as indexed PNG; stretched shapes (target cell ≠ font cell)
 // rasterize at the natural cell, Lanczos3-resample to the target, and encode as
-// RGB. Text normalization / framing / shape selection live in `shape.mjs`.
+// RGB. Text normalization and framing live in `./normalize.ts`, shape
+// selection in `./layout.ts`.
 
-import { MAX_FRAME_SIZE } from "./constants.mjs"
-import { resolveFont, AVAILABLE_FONTS } from "./fonts.mjs"
-import { renderBitmap, renderDocBitmap, usedRows, indexedToRgbFloat } from "./raster.mjs"
-import { resizeRgb } from "./resample.mjs"
-import { encodeIndexedPng, encodeRgbPng } from "./png.mjs"
+import { MAX_FRAME_SIZE } from "./constants.ts"
+import { resolveFont, AVAILABLE_FONTS } from "./fonts.ts"
+import { renderBitmap, renderDocBitmap, usedRows, indexedToRgbFloat } from "./raster.ts"
+import { resizeRgb } from "./resample.ts"
+import { encodeIndexedPng, encodeRgbPng } from "./png.ts"
 
 /** Default font: the eval-winning square 8x8 unscii cell. */
 export const DEFAULT_FONT = "8x8"
 
-/**
- * @typedef {Object} SnapcompactRenderOptions
- * @property {number} size        Frame width in px; also bounds grid rows.
- * @property {string} [font]      "8x8" | "5x8". Default "8x8".
- * @property {number} [cellWidth]  Target cell advance px (triggers stretch).
- * @property {number} [cellHeight] Target cell pitch px.
- * @property {"sent"|"bw"} [variant] Ink variant. Default "sent".
- * @property {number} [lineRepeat] Print each line N times. Default 1.
- * @property {boolean} [stretch]  Unset=auto, false=never, true=force.
- * @property {number} [columns]   1 (grid) or 2 (doc). Default 1.
- */
+export interface SnapcompactRenderOptions {
+  /** Frame width in px; also bounds grid rows. */
+  size: number
+  /** "8x8" | "5x8". Default "8x8". */
+  font?: string
+  /** Target cell advance px (triggers stretch). */
+  cellWidth?: number
+  /** Target cell pitch px. */
+  cellHeight?: number
+  /** Ink variant, "sent" or "bw" (validated here). Default "sent". */
+  variant?: string
+  /** Print each line N times. Default 1. */
+  lineRepeat?: number
+  /** Unset=auto, false=never, true=force. */
+  stretch?: boolean
+  /** 1 (grid) or 2 (doc). Default 1. */
+  columns?: number
+}
 
-/**
- * @typedef {Object} SnapcompactFrame
- * @property {string} base64     PNG bytes, base64.
- * @property {string} dataUrl    `data:image/png;base64,…`.
- * @property {number} width
- * @property {number} height
- * @property {number} colorType  3 = indexed, 2 = truecolor RGB.
- * @property {number} byteLength PNG byte length.
- */
+export interface SnapcompactFrame {
+  /** PNG bytes, base64. */
+  base64: string
+  /** `data:image/png;base64,…`. */
+  dataUrl: string
+  width: number
+  height: number
+  /** 3 = indexed, 2 = truecolor RGB. */
+  colorType: number
+  /** PNG byte length. */
+  byteLength: number
+}
 
-/**
- * Render one optical frame.
- * @param {string} text  Pre-normalized text (see `shape.mjs`).
- * @param {SnapcompactRenderOptions} options
- * @returns {SnapcompactFrame}
- */
-export function renderSnapcompactPng(text, options) {
+/** Render one optical frame from pre-normalized text (see `./normalize.ts`). */
+export function renderSnapcompactPng(
+  text: string,
+  options: SnapcompactRenderOptions
+): SnapcompactFrame {
   const size = options.size
   if (!Number.isInteger(size) || size <= 0 || size > MAX_FRAME_SIZE) {
     throw new Error(`Invalid frame size ${size}: expected 1..=${MAX_FRAME_SIZE}`)
@@ -113,14 +122,19 @@ export function renderSnapcompactPng(text, options) {
     const srcBase = y * dstW * 3
     const dstBase = y * size * 3
     for (let d = 0; d < copyW; d++) {
-      frame[dstBase + d] = Math.max(0, Math.min(255, Math.round(resized[srcBase + d])))
+      frame[dstBase + d] = Math.max(0, Math.min(255, Math.round(resized[srcBase + d]!)))
     }
   }
   const png = encodeRgbPng(frame, size, dstH)
   return frameResult(png, size, dstH, 2)
 }
 
-function frameResult(png, width, height, colorType) {
+function frameResult(
+  png: Buffer,
+  width: number,
+  height: number,
+  colorType: number
+): SnapcompactFrame {
   const base64 = png.toString("base64")
   return {
     base64,

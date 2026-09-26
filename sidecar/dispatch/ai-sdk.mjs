@@ -981,7 +981,7 @@ export function dispatchAiSdk({
     // budget, and a round-trip readability check; on any failure it returns null
     // and we drop through to summarize the same `middle` as text below.
     if (plan.kind === "optical") {
-      const { buildOpticalCompaction } = await import("./optical/compact.mjs")
+      const { buildOpticalCompaction } = await import("../src/context/optical/compact.ts")
       const opticalTranscribe = async (dataUrl) => {
         const sum = comp.summary ?? {}
         let visionAdapter = protocolAdapter

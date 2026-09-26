@@ -7,8 +7,8 @@
 // compaction never silently drops context to an unreadable image.
 
 /** Lowercased alphanumeric word tokens (Unicode aware). */
-function tokenize(s) {
-  const out = []
+function tokenize(s: unknown): string[] {
+  const out: string[] = []
   for (const m of String(s ?? "")
     .toLowerCase()
     .matchAll(/[\p{L}\p{N}]+/gu)) {
@@ -21,12 +21,11 @@ function tokenize(s) {
  * Multiset word-recall of `original` recovered in `transcribed` (0..1). Recall
  * (not F1) is the right measure here: we care whether the model recovered the
  * archived content, not whether it added extra words.
- * @returns {number}
  */
-export function readabilityScore(original, transcribed) {
+export function readabilityScore(original: unknown, transcribed: unknown): number {
   const orig = tokenize(original)
   if (orig.length === 0) return String(transcribed ?? "").trim() === "" ? 1 : 0
-  const counts = new Map()
+  const counts = new Map<string, number>()
   for (const w of tokenize(transcribed)) counts.set(w, (counts.get(w) ?? 0) + 1)
   let hit = 0
   for (const w of orig) {
@@ -43,7 +42,11 @@ export function readabilityScore(original, transcribed) {
  * Convenience wrapper: `{ score, ok }` where `ok` means the frame is readable
  * enough to keep. Default threshold 0.6 (recover ≥60% of the words).
  */
-export function checkReadability(original, transcribed, threshold = 0.6) {
+export function checkReadability(
+  original: unknown,
+  transcribed: unknown,
+  threshold = 0.6
+): { score: number; ok: boolean } {
   const score = readabilityScore(original, transcribed)
   return { score, ok: score >= threshold }
 }

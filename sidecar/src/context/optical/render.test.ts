@@ -1,10 +1,11 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { renderSnapcompactPng } from "./render.mjs"
+import { renderSnapcompactPng } from "./render.ts"
+import type { SnapcompactFrame, SnapcompactRenderOptions } from "./render.ts"
 
 // IHDR fields live at fixed offsets: width@16, height@20, depth@24, colorType@25.
-function header(frame) {
+function header(frame: SnapcompactFrame) {
   const png = Buffer.from(frame.base64, "base64")
   assert.equal(png.length, frame.byteLength)
   return {
@@ -76,7 +77,11 @@ test("indexed PNG narrows palette + bit depth by content", () => {
 })
 
 test("frame height hugs the rows the text actually uses", () => {
-  const opt = (extra) => ({ size: 64, font: "8x8", ...extra })
+  const opt = (extra: Partial<SnapcompactRenderOptions> = {}): SnapcompactRenderOptions => ({
+    size: 64,
+    font: "8x8",
+    ...extra,
+  })
   // 8 cols of 8x8 cells: 10 chars span 2 rows → 16px tall.
   assert.deepEqual(dims(renderSnapcompactPng("0123456789", opt())), [64, 16])
   // Dim toggles are zero-width and add no row.
@@ -93,7 +98,7 @@ test("frame height hugs the rows the text actually uses", () => {
     [60, 12]
   )
 
-  function dims(frame) {
+  function dims(frame: SnapcompactFrame) {
     const h = header(frame)
     return [h.width, h.height]
   }

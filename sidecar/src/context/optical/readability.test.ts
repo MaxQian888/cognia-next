@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { readabilityScore, checkReadability } from "./readability.mjs"
+import { readabilityScore, checkReadability } from "./readability.ts"
 
 test("perfect transcription scores 1; empty pair scores 1", () => {
   assert.equal(readabilityScore("The auth module uses JWT.", "the auth module uses jwt"), 1)

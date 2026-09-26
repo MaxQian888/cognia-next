@@ -7,7 +7,7 @@
 
 const PI = Math.PI
 
-export function lanczos3(x) {
+export function lanczos3(x: number): number {
   x = Math.abs(x)
   if (x < 1e-6) return 1
   if (x >= 3) return 0
@@ -15,17 +15,20 @@ export function lanczos3(x) {
   return (Math.sin(pix) / pix) * (Math.sin(pix / 3) / (pix / 3))
 }
 
-/** Per-output-pixel kernel contributions for one axis: `[begin, weights][]`. */
-export function contributions(srcLen, dstLen) {
+/** One output pixel's kernel: the first source index and its weights. */
+export type Contribution = [begin: number, weights: number[]]
+
+/** Per-output-pixel kernel contributions for one axis. */
+export function contributions(srcLen: number, dstLen: number): Contribution[] {
   const scale = srcLen / dstLen
   const filtScale = Math.max(scale, 1)
   const support = 3 * filtScale
-  const out = []
+  const out: Contribution[] = []
   for (let i = 0; i < dstLen; i++) {
     const center = (i + 0.5) * scale
     const begin = Math.max(0, Math.trunc(center - support))
     const end = Math.min(srcLen, Math.ceil(center + support))
-    const weights = []
+    const weights: number[] = []
     let total = 0
     for (let x = begin; x < end; x++) {
       const w = lanczos3((x + 0.5 - center) / filtScale)
@@ -33,35 +36,37 @@ export function contributions(srcLen, dstLen) {
       total += w
     }
     if (total !== 0) {
-      for (let k = 0; k < weights.length; k++) weights[k] /= total
+      for (let k = 0; k < weights.length; k++) weights[k]! /= total
     }
     out.push([begin, weights])
   }
   return out
 }
 
-/**
- * Separable Lanczos3 resize of an interleaved RGB f32 buffer.
- * @param {Float32Array} src
- * @returns {Float32Array}
- */
-export function resizeRgb(src, sw, sh, dw, dh) {
+/** Separable Lanczos3 resize of an interleaved RGB f32 buffer. */
+export function resizeRgb(
+  src: Float32Array,
+  sw: number,
+  sh: number,
+  dw: number,
+  dh: number
+): Float32Array {
   const horiz = contributions(sw, dw)
   const tmp = new Float32Array(dw * sh * 3)
   for (let y = 0; y < sh; y++) {
     const srcBase = y * sw * 3
     const dstBase = y * dw * 3
     for (let x = 0; x < dw; x++) {
-      const [begin, weights] = horiz[x]
+      const [begin, weights] = horiz[x]!
       let a0 = 0
       let a1 = 0
       let a2 = 0
       for (let k = 0; k < weights.length; k++) {
         const s = srcBase + (begin + k) * 3
-        const w = weights[k]
-        a0 += src[s] * w
-        a1 += src[s + 1] * w
-        a2 += src[s + 2] * w
+        const w = weights[k]!
+        a0 += src[s]! * w
+        a1 += src[s + 1]! * w
+        a2 += src[s + 2]! * w
       }
       tmp[dstBase + x * 3] = a0
       tmp[dstBase + x * 3 + 1] = a1
@@ -71,12 +76,12 @@ export function resizeRgb(src, sw, sh, dw, dh) {
   const vert = contributions(sh, dh)
   const out = new Float32Array(dw * dh * 3)
   for (let y = 0; y < dh; y++) {
-    const [begin, weights] = vert[y]
+    const [begin, weights] = vert[y]!
     const dstBase = y * dw * 3
     for (let k = 0; k < weights.length; k++) {
       const srcBase = (begin + k) * dw * 3
-      const w = weights[k]
-      for (let d = 0; d < dw * 3; d++) out[dstBase + d] += tmp[srcBase + d] * w
+      const w = weights[k]!
+      for (let d = 0; d < dw * 3; d++) out[dstBase + d]! += tmp[srcBase + d]! * w
     }
   }
   return out

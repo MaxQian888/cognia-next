@@ -1,8 +1,8 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { extractMessageText, normalizeForOptical } from "./normalize.mjs"
-import { DIM_ON, DIM_OFF, FULL_BLOCK } from "./constants.mjs"
+import { extractMessageText, normalizeForOptical } from "./normalize.ts"
+import { DIM_ON, DIM_OFF, FULL_BLOCK } from "./constants.ts"
 
 const BLOCK = String.fromCodePoint(FULL_BLOCK)
 const ON = String.fromCharCode(DIM_ON)

@@ -1,17 +1,18 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { buildOpticalCompaction } from "./compact.mjs"
+import { buildOpticalCompaction } from "./compact.ts"
 import {
   isSummaryMessage,
   isOpticalMessage,
   summaryVersion,
   makeOpticalMessage,
-} from "../../src/context/compaction.ts"
+} from "../compaction.ts"
+import type { ConversationMessage } from "../compaction.ts"
 
 // A middle of substantial ASCII dialogue so optical is worthwhile.
-function makeMiddle(n) {
-  const out = []
+function makeMiddle(n: number): ConversationMessage[] {
+  const out: ConversationMessage[] = []
   for (let i = 0; i < n; i++) {
     const role = i % 2 === 0 ? "user" : "assistant"
     out.push({
@@ -23,13 +24,16 @@ function makeMiddle(n) {
 }
 
 test("makeOpticalMessage is recognized as a frozen optical artifact", () => {
-  const parts = [{ type: "image", image: "data:image/png;base64,AAAA", mediaType: "image/png" }]
+  const parts = [
+    { type: "image" as const, image: "data:image/png;base64,AAAA", mediaType: "image/png" },
+  ]
   const msg = makeOpticalMessage(parts, { messageCount: 5, frameCount: 1 }, 3)
   assert.ok(isSummaryMessage(msg), "optical message is frozen like a summary")
   assert.ok(isOpticalMessage(msg), "and flagged as optical (image-bearing)")
   assert.equal(summaryVersion(msg), 3)
-  assert.equal(msg.content[0].type, "text")
-  assert.equal(msg.content[1].type, "image")
+  const content = msg.content as { type: string }[]
+  assert.equal(content[0]?.type, "text")
+  assert.equal(content[1]?.type, "image")
 })
 
 test("renders an optical archive when worthwhile (verify off)", async () => {
@@ -44,7 +48,7 @@ test("renders an optical archive when worthwhile (verify off)", async () => {
   assert.ok(isOpticalMessage(result.message))
   assert.ok(result.meta.frameCount >= 1)
   assert.ok(result.meta.frames.length === result.meta.frameCount)
-  assert.ok(result.meta.frames[0].base64.length > 0)
+  assert.ok((result.meta.frames[0]?.base64.length ?? 0) > 0)
   assert.equal(result.meta.coverage, 1)
   assert.ok(result.meta.estImageTokens < result.meta.estTextTokens, "cheaper than text")
 })
@@ -92,7 +96,7 @@ test("round-trip: keeps a readable frame, falls back on an unreadable one", asyn
     transcribe: async () => allWords, // model "reads back" all the words
   })
   assert.ok(readable, "readable frame is kept")
-  assert.ok(readable.meta.readability >= 0.6)
+  assert.ok((readable.meta.readability ?? 0) >= 0.6)
 
   const unreadable = await buildOpticalCompaction({
     middle,

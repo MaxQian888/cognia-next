@@ -18,18 +18,27 @@ import {
   DIM_OFF,
   FULL_BLOCK,
   LINE_FEED,
-} from "./constants.mjs"
+} from "./constants.ts"
+import type { BitmapFont, Glyph } from "./fonts.ts"
 
-/** @typedef {{cols:number, rows:number, repeat:number, cellW:number, cellH:number}} Grid */
+/** The character grid a frame is laid out on. */
+export interface Grid {
+  cols: number
+  rows: number
+  /** How many times each text row is drawn (repeat bands). */
+  repeat: number
+  cellW: number
+  cellH: number
+}
 
-const isTerminator = (code) => code === 0x2e || code === 0x21 || code === 0x3f
+const isTerminator = (code: number) => code === 0x2e || code === 0x21 || code === 0x3f
 
 /**
  * East Asian Wide / Fullwidth code points that occupy two grid cells in a
  * narrow bitmap shape. Kept for layout parity with the reference renderer and
  * the pagination math even though this build has no CJK glyphs to draw.
  */
-export function isWide(cp) {
+export function isWide(cp: number): boolean {
   return (
     (cp >= 0x1100 && cp <= 0x115f) ||
     (cp >= 0x2e80 && cp <= 0x2eff) ||
@@ -51,7 +60,7 @@ export function isWide(cp) {
 
 /** Cells one code point consumes: 0 for dim toggles, 2 for wide (narrow-cell
  * shapes), 1 otherwise. */
-export function cellUnits(code, wideCells) {
+export function cellUnits(code: number, wideCells: boolean): number {
   if (code === DIM_ON || code === DIM_OFF) return 0
   if (wideCells && isWide(code)) return 2
   return 1
@@ -62,7 +71,12 @@ export function cellUnits(code, wideCells) {
  * wide glyph would straddle the right edge. Returns `[cellToDrawAt, units,
  * nextCursor]` or `null` for a zero-width toggle.
  */
-export function placeCell(cursor, cols, code, wideCells) {
+export function placeCell(
+  cursor: number,
+  cols: number,
+  code: number,
+  wideCells: boolean
+): [cell: number, units: number, next: number] | null {
   const units = cellUnits(code, wideCells)
   if (units === 0) return null
   let cell = cursor
@@ -71,14 +85,14 @@ export function placeCell(cursor, cols, code, wideCells) {
 }
 
 /** Grid rows the text actually occupies (so the canvas height hugs content). */
-export function usedRows(text, grid, doc, wideCells) {
-  let rows
+export function usedRows(text: string, grid: Grid, doc: boolean, wideCells: boolean): number {
+  let rows: number
   if (doc) {
     rows = text.split("\n").length
   } else {
     let cursor = 0
     for (const ch of text) {
-      const placed = placeCell(cursor, grid.cols, ch.codePointAt(0), wideCells)
+      const placed = placeCell(cursor, grid.cols, ch.codePointAt(0)!, wideCells)
       if (placed) cursor = placed[2]
     }
     rows = Math.ceil(cursor / grid.cols)
@@ -86,7 +100,7 @@ export function usedRows(text, grid, doc, wideCells) {
   return Math.min(Math.max(rows, 1), grid.rows)
 }
 
-function fillRepeatBands(pixels, width, height, grid) {
+function fillRepeatBands(pixels: Uint8Array, width: number, height: number, grid: Grid): void {
   if (grid.repeat <= 1) return
   for (let row = 0; row < grid.rows; row++) {
     for (let copy = 1; copy < grid.repeat; copy++) {
@@ -98,9 +112,17 @@ function fillRepeatBands(pixels, width, height, grid) {
   }
 }
 
-function blitGlyph(pixels, width, height, glyph, left, top, ink) {
+function blitGlyph(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  glyph: Glyph,
+  left: number,
+  top: number,
+  ink: number
+): void {
   for (let r = 0; r < glyph.rows.length; r++) {
-    const bits = glyph.rows[r]
+    const bits = glyph.rows[r]!
     if (bits === 0) continue
     const y = top + r
     if (y < 0 || y >= height) continue
@@ -114,7 +136,15 @@ function blitGlyph(pixels, width, height, glyph, left, top, ink) {
   }
 }
 
-function fillCell(pixels, width, height, grid, xOrigin, row, ink) {
+function fillCell(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  grid: Grid,
+  xOrigin: number,
+  row: number,
+  ink: number
+): void {
   const x0 = Math.min(xOrigin, width)
   const x1 = Math.min(xOrigin + grid.cellW, width)
   if (x0 >= x1) return
@@ -130,20 +160,26 @@ function fillCell(pixels, width, height, grid, xOrigin, row, ink) {
  * Rasterize `text` onto a `width`×`height` palette-indexed bitmap, row-major on
  * the grid's cell box. Ink cycles through six hues at sentence boundaries
  * unless `blackInk`; U+000E/F toggle dim ink; U+2588 fills its cell black.
- * @returns {Uint8Array}
  */
-export function renderBitmap(text, width, height, font, grid, blackInk) {
+export function renderBitmap(
+  text: string,
+  width: number,
+  height: number,
+  font: BitmapFont,
+  grid: Grid,
+  blackInk: boolean
+): Uint8Array {
   const pixels = new Uint8Array(width * height) // 0 = white background
   const capacity = grid.cols * grid.rows
   if (capacity === 0) return pixels
   fillRepeatBands(pixels, width, height, grid)
-  const codes = Array.from(text, (ch) => ch.codePointAt(0))
+  const codes = Array.from(text, (ch) => ch.codePointAt(0)!)
   let sentence = 0
   let dim = false
   let cursor = 0
   for (let i = 0; i < codes.length; i++) {
     if (cursor >= capacity) break
-    const code = codes[i]
+    const code = codes[i]!
     if (code === DIM_ON) {
       dim = true
       continue
@@ -187,20 +223,26 @@ export const GUTTER = 3
  * Rasterize pre-wrapped text as a two-column "doc" page. Input splits on '\n'
  * (zero-width): line `li` lands at column `li / rows`, row `li % rows`. Lines
  * longer than the column width are clipped (the caller pre-wraps).
- * @returns {Uint8Array}
  */
-export function renderDocBitmap(text, width, height, font, grid, blackInk) {
+export function renderDocBitmap(
+  text: string,
+  width: number,
+  height: number,
+  font: BitmapFont,
+  grid: Grid,
+  blackInk: boolean
+): Uint8Array {
   const pixels = new Uint8Array(width * height)
   const colW = Math.floor(Math.max(0, grid.cols - GUTTER) / 2)
   if (colW === 0 || grid.rows === 0) return pixels
   fillRepeatBands(pixels, width, height, grid)
-  const codes = Array.from(text, (ch) => ch.codePointAt(0))
+  const codes = Array.from(text, (ch) => ch.codePointAt(0)!)
   let sentence = 0
   let dim = false
   let line = 0
   let col = 0
   for (let i = 0; i < codes.length; i++) {
-    const code = codes[i]
+    const code = codes[i]!
     if (code === DIM_ON) {
       dim = true
       continue
@@ -249,10 +291,10 @@ export function renderDocBitmap(text, width, height, font, grid, blackInk) {
 
 /** Convert an indexed pixel buffer to an interleaved RGB f32 buffer (for the
  * Lanczos stretch path). */
-export function indexedToRgbFloat(indexed) {
+export function indexedToRgbFloat(indexed: Uint8Array): Float32Array {
   const rgb = new Float32Array(indexed.length * 3)
   for (let i = 0; i < indexed.length; i++) {
-    const [r, g, b] = PALETTE[indexed[i]]
+    const [r, g, b] = PALETTE[indexed[i]!]!
     rgb[i * 3] = r
     rgb[i * 3 + 1] = g
     rgb[i * 3 + 2] = b

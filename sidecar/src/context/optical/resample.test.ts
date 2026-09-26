@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { lanczos3, contributions, resizeRgb } from "./resample.mjs"
+import { lanczos3, contributions, resizeRgb } from "./resample.ts"
 
 test("lanczos3 kernel: peak at 0, zero past support, symmetric", () => {
   assert.equal(lanczos3(0), 1)
@@ -17,7 +17,7 @@ test("contributions weights are normalized per output pixel", () => {
     [8, 4],
     [4, 8],
     [13, 6],
-  ]) {
+  ] as const) {
     for (const [, weights] of contributions(src, dst)) {
       const sum = weights.reduce((a, b) => a + b, 0)
       assert.ok(Math.abs(sum - 1) < 1e-5, `weights sum to 1 for ${src}->${dst}`)
@@ -40,5 +40,5 @@ test("resizeRgb identity keeps the source (Lanczos interpolates exactly)", () =>
   const sh = 1
   const src = new Float32Array([0, 0, 0, 255, 255, 255, 0, 0, 0, 255, 255, 255])
   const out = resizeRgb(src, sw, sh, sw, sh)
-  for (let i = 0; i < src.length; i++) assert.ok(Math.abs(out[i] - src[i]) < 1e-3)
+  for (let i = 0; i < src.length; i++) assert.ok(Math.abs(out[i]! - src[i]!) < 1e-3)
 })

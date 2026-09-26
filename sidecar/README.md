@@ -118,6 +118,7 @@ Each migration batch appends its moves here (old → new).
 | `dispatch/importance.mjs`                                                | `src/context/importance.ts`                                        | 5a          |
 | `dispatch/tool-result-cap.mjs`                                           | `src/context/tool-result-cap.ts`                                   | 5a          |
 | `dispatch/tool-message-pairing.mjs`                                      | `src/context/tool-message-pairing.ts`                              | 5a          |
+| `dispatch/optical/*.mjs`                                                 | `src/context/optical/*.ts`                                         | 5b          |
 
 ## Scripts (run from repo root)
 

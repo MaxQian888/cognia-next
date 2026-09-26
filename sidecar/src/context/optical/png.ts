@@ -6,7 +6,7 @@
 // lands in the archive.
 
 import { deflateSync } from "node:zlib"
-import { PALETTE } from "./constants.mjs"
+import { PALETTE } from "./constants.ts"
 
 const SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 
@@ -21,13 +21,13 @@ const CRC_TABLE = (() => {
   return t
 })()
 
-function crc32(buf) {
+function crc32(buf: Uint8Array): number {
   let c = 0xffffffff
-  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8)
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]!) & 0xff]! ^ (c >>> 8)
   return (c ^ 0xffffffff) >>> 0
 }
 
-function chunk(type, data) {
+function chunk(type: string, data: Uint8Array): Buffer {
   const typeBuf = Buffer.from(type, "latin1")
   const len = Buffer.alloc(4)
   len.writeUInt32BE(data.length, 0)
@@ -36,7 +36,7 @@ function chunk(type, data) {
   return Buffer.concat([len, typeBuf, data, crc])
 }
 
-function ihdr(width, height, bitDepth, colorType) {
+function ihdr(width: number, height: number, bitDepth: number, colorType: number): Buffer {
   const d = Buffer.alloc(13)
   d.writeUInt32BE(width, 0)
   d.writeUInt32BE(height, 4)
@@ -53,7 +53,13 @@ function ihdr(width, height, bitDepth, colorType) {
  * prepending a `0` (None) filter byte per row and remapping each global palette
  * index through `remap`.
  */
-function packIndexedScanlines(pixels, width, height, bits, remap) {
+function packIndexedScanlines(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  bits: number,
+  remap: Uint8Array
+): Uint8Array {
   const per = 8 / bits
   const rowBytes = Math.ceil(width / per)
   const stride = 1 + rowBytes
@@ -62,8 +68,8 @@ function packIndexedScanlines(pixels, width, height, bits, remap) {
     const src = y * width
     const rowStart = y * stride // out[rowStart] = 0 (None filter)
     for (let x = 0; x < width; x++) {
-      const val = remap[pixels[src + x]]
-      out[rowStart + 1 + Math.floor(x / per)] |= val << (bits * (per - 1 - (x % per)))
+      const val = remap[pixels[src + x]!]!
+      out[rowStart + 1 + Math.floor(x / per)]! |= val << (bits * (per - 1 - (x % per)))
     }
   }
   return out
@@ -73,18 +79,18 @@ function packIndexedScanlines(pixels, width, height, bits, remap) {
  * Encode a palette-indexed bitmap as an indexed PNG. The palette is narrowed to
  * the colors the frame actually uses and the bit depth follows: bg+ink → 1-bit,
  * dim/banded → 2-bit, sentence-hue → 4-bit.
- * @param {Uint8Array} pixels @returns {Buffer}
  */
-export function encodeIndexedPng(pixels, width, height) {
-  const used = new Array(PALETTE.length).fill(false)
-  for (let i = 0; i < pixels.length; i++) used[pixels[i]] = true
+export function encodeIndexedPng(pixels: Uint8Array, width: number, height: number): Buffer {
+  const used: boolean[] = new Array<boolean>(PALETTE.length).fill(false)
+  for (let i = 0; i < pixels.length; i++) used[pixels[i]!] = true
   const remap = new Uint8Array(PALETTE.length)
-  const palette = []
+  const palette: number[] = []
   let count = 0
   for (let g = 0; g < PALETTE.length; g++) {
     if (used[g]) {
       remap[g] = count++
-      palette.push(PALETTE[g][0], PALETTE[g][1], PALETTE[g][2])
+      const [r, gr, b] = PALETTE[g]!
+      palette.push(r, gr, b)
     }
   }
   const [depth, bits] = count <= 2 ? [1, 1] : count <= 4 ? [2, 2] : [4, 4]
@@ -99,11 +105,8 @@ export function encodeIndexedPng(pixels, width, height) {
   ])
 }
 
-/**
- * Encode an interleaved RGB8 buffer as a truecolor PNG (`None` filtering).
- * @param {Uint8Array} pixels @returns {Buffer}
- */
-export function encodeRgbPng(pixels, width, height) {
+/** Encode an interleaved RGB8 buffer as a truecolor PNG (`None` filtering). */
+export function encodeRgbPng(pixels: Uint8Array, width: number, height: number): Buffer {
   const stride = 1 + width * 3
   const scan = new Uint8Array(stride * height)
   for (let y = 0; y < height; y++) {

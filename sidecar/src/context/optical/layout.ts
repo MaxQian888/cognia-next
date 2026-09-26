@@ -8,14 +8,56 @@
 // paginates archived text across as many frames as needed — closing and
 // reopening dim spans across the cut so tool-noise shading survives.
 
-import { DIM_ON, DIM_OFF } from "./constants.mjs"
-import { isWide, GUTTER } from "./raster.mjs"
+import { DIM_ON, DIM_OFF } from "./constants.ts"
+import { isWide, GUTTER } from "./raster.ts"
 
 const DIM_ON_CH = String.fromCharCode(DIM_ON)
 const DIM_OFF_CH = String.fromCharCode(DIM_OFF)
 
+/** Coarse vision-pricing family of a model. */
+export type VisionFamily = "anthropic" | "openai" | "google" | "default"
+
+/** How a frame is drawn: font, ink variant and cell geometry. */
+export interface OpticalShape {
+  font?: string
+  /** "sent" (hue per sentence) or "bw"; the renderer rejects anything else. */
+  variant?: string
+  cellWidth?: number
+  cellHeight?: number
+  lineRepeat?: number
+  /** 1 (grid) or 2 (two-column doc). */
+  columns?: number
+}
+
+/** A shape resolved for a model: the family's preset plus caller overrides. */
+export interface ResolvedShape extends OpticalShape {
+  family: VisionFamily
+}
+
+/** Grid geometry and character capacity of one frame. */
+export interface FrameGrid {
+  cols: number
+  rows: number
+  cellW: number
+  cellH: number
+  repeat: number
+  capacity: number
+}
+
+export interface OpticalFramePlan {
+  frames: string[]
+  shape: ResolvedShape
+  size: number
+  family: VisionFamily
+  capacity: number
+  estImageTokens: number
+  estTextTokens: number
+  worthwhile: boolean
+  overflow: boolean
+}
+
 /** Coarse vision-pricing family for a model id. */
-export function visionFamily(modelId) {
+export function visionFamily(modelId: unknown): VisionFamily {
   const id = String(modelId ?? "").toLowerCase()
   if (/claude|anthropic/.test(id)) return "anthropic"
   if (/gpt|o[134]\b|openai|azure/.test(id)) return "openai"
@@ -29,7 +71,11 @@ export function visionFamily(modelId) {
  * 85+170/tile; Gemini 258 per ≤768px crop). Used only for the relative
  * "is optical cheaper than text?" decision, so approximate is fine.
  */
-export function estimateImageTokens(width, height, family = "default") {
+export function estimateImageTokens(
+  width: number,
+  height: number,
+  family: VisionFamily | (string & {}) = "default"
+): number {
   switch (family) {
     case "openai": {
       const tiles = Math.ceil(width / 512) * Math.ceil(height / 512)
@@ -51,7 +97,7 @@ export function estimateImageTokens(width, height, family = "default") {
  * Anthropic; the 6×6 stretch ("6x6u") is OpenAI-optimal; hue-cycling aids
  * segmentation elsewhere). Callers may override any field.
  */
-export const SHAPE_PRESETS = {
+export const SHAPE_PRESETS: Readonly<Record<VisionFamily, OpticalShape>> = {
   anthropic: { font: "8x8", variant: "bw" },
   openai: { font: "8x8", variant: "sent", cellWidth: 6, cellHeight: 6 },
   google: { font: "8x8", variant: "sent" },
@@ -59,28 +105,34 @@ export const SHAPE_PRESETS = {
 }
 
 /** Resolve the shape for a model, applying caller overrides on top. */
-export function selectShape({ modelId, overrides = {} } = {}) {
+export function selectShape({
+  modelId,
+  overrides = {},
+}: { modelId?: unknown; overrides?: OpticalShape } = {}): ResolvedShape {
   const family = visionFamily(modelId)
   return { family, ...SHAPE_PRESETS[family], ...stripUndefined(overrides) }
 }
 
-function stripUndefined(obj) {
-  const out = {}
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) if (v !== undefined) out[k] = v
-  return out
+  return out as Partial<T>
 }
 
-const FONT_CELL = { "8x8": [8, 8], "5x8": [5, 8] }
+const FONT_CELL: Readonly<Record<string, readonly [number, number]>> = {
+  "8x8": [8, 8],
+  "5x8": [5, 8],
+}
 
 /** Grid geometry + character capacity of one frame for a shape at `size`. */
-export function frameGrid(shape, size) {
+export function frameGrid(shape: OpticalShape, size: number): FrameGrid {
   const [natW, natH] = FONT_CELL[shape.font ?? "8x8"] ?? [8, 8]
   const cellW = Math.max(1, shape.cellWidth ?? natW)
   const cellH = Math.max(1, shape.cellHeight ?? natH)
   const repeat = Math.max(1, shape.lineRepeat ?? 1)
   const cols = Math.floor(size / cellW)
   const rows = Math.floor(size / cellH / repeat)
-  let capacity
+  let capacity: number
   if ((shape.columns ?? 1) === 2) {
     const colW = Math.floor(Math.max(0, cols - GUTTER) / 2)
     capacity = colW * rows * 2
@@ -94,16 +146,15 @@ export function frameGrid(shape, size) {
  * Split `text` into ≤`capacity`-cell chunks (one per frame), keeping dim spans
  * balanced: a chunk that ends mid-span closes it and the next chunk reopens it.
  * Wide code points count as two cells, dim toggles as zero.
- * @returns {string[]}
  */
-export function paginateCells(text, capacity) {
+export function paginateCells(text: string, capacity: number): string[] {
   if (capacity <= 0) return text ? [text] : []
-  const chunks = []
+  const chunks: string[] = []
   let cur = ""
   let cells = 0
   let dim = false
   for (const ch of text) {
-    const cp = ch.codePointAt(0)
+    const cp = ch.codePointAt(0)!
     if (cp === DIM_ON) {
       dim = true
       cur += ch
@@ -128,14 +179,7 @@ export function paginateCells(text, capacity) {
   return chunks
 }
 
-/**
- * Plan the optical frames for a normalized transcript.
- * @param {{ text:string, modelId?:string, size?:number, shape?:object,
- *           maxFrames?:number, minSavings?:number }} p
- * @returns {{ frames:string[], shape:object, size:number, family:string,
- *   capacity:number, estImageTokens:number, estTextTokens:number,
- *   worthwhile:boolean, overflow:boolean }}
- */
+/** Plan the optical frames for a normalized transcript. */
 export function planOpticalFrames({
   text,
   modelId,
@@ -143,8 +187,18 @@ export function planOpticalFrames({
   shape,
   maxFrames = 4,
   minSavings = 0.15,
-}) {
-  const resolved = shape ? { family: visionFamily(modelId), ...shape } : selectShape({ modelId })
+}: {
+  text: string
+  modelId?: unknown
+  size?: number
+  /** Replaces the family preset outright; a `family` in it wins over the model's. */
+  shape?: OpticalShape & { family?: VisionFamily }
+  maxFrames?: number
+  minSavings?: number
+}): OpticalFramePlan {
+  const resolved: ResolvedShape = shape
+    ? { family: visionFamily(modelId), ...shape }
+    : selectShape({ modelId })
   const grid = frameGrid(resolved, size)
   const capacity = Math.max(1, grid.capacity)
   const all = paginateCells(text, capacity)
@@ -155,7 +209,7 @@ export function planOpticalFrames({
   const family = resolved.family ?? visionFamily(modelId)
   let estImageTokens = 0
   for (let i = 0; i < frames.length; i++) {
-    const fill = i < frames.length - 1 ? 1 : Math.min(1, frames[i].length / capacity)
+    const fill = i < frames.length - 1 ? 1 : Math.min(1, frames[i]!.length / capacity)
     const height = Math.max(grid.cellH, Math.ceil(size * fill))
     estImageTokens += estimateImageTokens(size, height, family)
   }
@@ -179,11 +233,10 @@ export function planOpticalFrames({
  * Pre-wrap plain text into newline-separated lines no wider than `colWidth`
  * cells, for the two-column doc layout. Greedy word wrap; over-long words are
  * hard-split.
- * @returns {string}
  */
-export function wrapForDoc(text, colWidth) {
+export function wrapForDoc(text: string, colWidth: number): string {
   if (colWidth <= 0) return text
-  const lines = []
+  const lines: string[] = []
   for (const paragraph of text.split("\n")) {
     let line = ""
     for (const word of paragraph.split(/ +/)) {

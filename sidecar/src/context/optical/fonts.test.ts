@@ -8,8 +8,8 @@ import {
   fontSupports,
   supportedChars,
   AVAILABLE_FONTS,
-} from "./fonts.mjs"
-import { UNSCII_8_HEX, MISC_5X8_BDF } from "./fonts-data.mjs"
+} from "./fonts.ts"
+import { UNSCII_8_HEX, MISC_5X8_BDF } from "./fonts-data.ts"
 
 test("8x8 hex font parses full printable ASCII with ascent 7", () => {
   const font = parseHex(UNSCII_8_HEX)
@@ -20,6 +20,7 @@ test("8x8 hex font parses full printable ASCII with ascent 7", () => {
     assert.ok(font.glyphs.has(cp), `missing 8x8 glyph U+${cp.toString(16)}`)
   }
   const A = font.glyphs.get(0x41)
+  assert.ok(A)
   assert.equal(A.w, 8)
   assert.equal(A.rows.length, 8)
 })
@@ -34,6 +35,7 @@ test("5x8 BDF font parses printable ASCII, ascent 7, width 5", () => {
   }
   // BBX width is clamped to ≤ 8 and captured; 'A' is 5px wide in this font.
   const A = font.glyphs.get(0x41)
+  assert.ok(A)
   assert.equal(A.w, 5)
 })
 
@@ -49,6 +51,7 @@ test("resolveFont caches and only knows the embedded fonts", () => {
 
 test("fontSupports treats control codes as renderable", () => {
   const font = resolveFont("8x8")
+  assert.ok(font)
   for (const cc of [0x0e, 0x0f, 0x2588, 0x0a]) {
     assert.ok(fontSupports(font, cc), `control U+${cc.toString(16)} must be renderable`)
   }

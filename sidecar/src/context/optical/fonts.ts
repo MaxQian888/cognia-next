@@ -9,35 +9,40 @@
 // heavy to inline, and CJK-heavy text is routed to the text-summary fallback by
 // the coverage gate + round-trip readability check rather than mis-rendered.
 
-import { DIM_ON, DIM_OFF, FULL_BLOCK, LINE_FEED } from "./constants.mjs"
-import { UNSCII_8_HEX, MISC_5X8_BDF } from "./fonts-data.mjs"
+import { DIM_ON, DIM_OFF, FULL_BLOCK, LINE_FEED } from "./constants.ts"
+import { UNSCII_8_HEX, MISC_5X8_BDF } from "./fonts-data.ts"
 
-/**
- * @typedef {Object} Glyph
- * @property {number} w    Glyph width in pixels (≤ 8 for the bundled fonts).
- * @property {number} h    Glyph height in pixels.
- * @property {number} xoff X bearing.
- * @property {number} yoff Y bearing (BDF baseline convention).
- * @property {Uint8Array} rows One bitmask per bitmap row, MSB-leftmost.
- */
+export interface Glyph {
+  /** Glyph width in pixels (≤ 8 for the bundled fonts). */
+  w: number
+  /** Glyph height in pixels. */
+  h: number
+  /** X bearing. */
+  xoff: number
+  /** Y bearing (BDF baseline convention). */
+  yoff: number
+  /** One bitmask per bitmap row, MSB-leftmost. */
+  rows: Uint8Array
+}
 
-/**
- * @typedef {Object} BitmapFont
- * @property {Map<number, Glyph>} glyphs Keyed by Unicode code point.
- * @property {number} ascent Baseline offset from the cell top.
- * @property {number} cellW  Natural cell advance (x) in pixels.
- * @property {number} cellH  Natural cell pitch (y) in pixels.
- */
+export interface BitmapFont {
+  /** Keyed by Unicode code point. */
+  glyphs: Map<number, Glyph>
+  /** Baseline offset from the cell top. */
+  ascent: number
+  /** Natural cell advance (x) in pixels. */
+  cellW: number
+  /** Natural cell pitch (y) in pixels. */
+  cellH: number
+}
 
 /**
  * Parse a unifont-style `.hex` font (`CODEPOINT:16-hex-digit bitmap`, one byte
  * per row of an 8x8 glyph). Baseline sits at row 7 (ascent 7 with a one-pixel
  * descender row), matching the eval renderer.
- * @param {string} text
- * @returns {BitmapFont}
  */
-export function parseHex(text) {
-  const glyphs = new Map()
+export function parseHex(text: string): BitmapFont {
+  const glyphs = new Map<number, Glyph>()
   for (const line of text.split("\n")) {
     const colon = line.indexOf(":")
     if (colon < 0) continue
@@ -64,19 +69,15 @@ export function parseHex(text) {
 /**
  * Parse a BDF font, keeping only the fields the rasterizer needs. Mirrors
  * `parse_bdf`: reads `FONT_ASCENT`, per-glyph `ENCODING` / `BBX` / `BITMAP`.
- * @param {string} text
- * @param {number} cellW
- * @param {number} cellH
- * @returns {BitmapFont}
  */
-export function parseBdf(text, cellW, cellH) {
-  const glyphs = new Map()
+export function parseBdf(text: string, cellW: number, cellH: number): BitmapFont {
+  const glyphs = new Map<number, Glyph>()
   let ascent = 0
   let enc = -1
-  let bbx = [0, 0, 0, 0]
+  let bbx: [number, number, number, number] = [0, 0, 0, 0]
   const lines = text.split("\n")
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
+    const line = lines[i]!
     if (line.startsWith("FONT_ASCENT")) {
       ascent = Number.parseInt(line.slice("FONT_ASCENT".length).trim(), 10) || 0
     } else if (line.startsWith("ENCODING")) {
@@ -84,12 +85,14 @@ export function parseBdf(text, cellW, cellH) {
       enc = Number.isInteger(v) ? v : -1
     } else if (line.startsWith("BBX")) {
       const parts = line.slice("BBX".length).trim().split(/\s+/)
-      bbx = [0, 1, 2, 3].map((k) => Number.parseInt(parts[k], 10) || 0)
+      const field = (k: number) => Number.parseInt(parts[k] ?? "", 10) || 0
+      bbx = [field(0), field(1), field(2), field(3)]
     } else if (line.startsWith("BITMAP")) {
-      const rows = []
+      const rows: number[] = []
       for (i++; i < lines.length; i++) {
-        if (lines[i].startsWith("ENDCHAR")) break
-        rows.push(Number.parseInt(lines[i].trim(), 16) || 0)
+        const row = lines[i]!
+        if (row.startsWith("ENDCHAR")) break
+        rows.push(Number.parseInt(row.trim(), 16) || 0)
       }
       if (enc >= 0) {
         glyphs.set(enc, {
@@ -106,12 +109,11 @@ export function parseBdf(text, cellW, cellH) {
 }
 
 // Lazy, parse-once registry (LazyLock parity).
-const CACHE = new Map()
+const CACHE = new Map<string, BitmapFont | null>()
 
-/** @param {string} name @returns {BitmapFont | null} */
-export function resolveFont(name) {
-  if (CACHE.has(name)) return CACHE.get(name)
-  let font = null
+export function resolveFont(name: string): BitmapFont | null {
+  if (CACHE.has(name)) return CACHE.get(name)!
+  let font: BitmapFont | null = null
   switch (name) {
     case "8x8":
       font = parseHex(UNSCII_8_HEX)
@@ -127,25 +129,22 @@ export function resolveFont(name) {
 }
 
 /** Fonts this build can render (used to validate `options.font`). */
-export const AVAILABLE_FONTS = ["8x8", "5x8"]
+export const AVAILABLE_FONTS: readonly string[] = ["8x8", "5x8"]
 
 /** True when `font` can draw `code` (control codes are handled outside lookup). */
-export function fontSupports(font, code) {
+export function fontSupports(font: BitmapFont, code: number | undefined): boolean {
   if (code === DIM_ON || code === DIM_OFF || code === FULL_BLOCK || code === LINE_FEED) {
     return true
   }
-  return font.glyphs.has(code)
+  return code !== undefined && font.glyphs.has(code)
 }
 
 /**
  * Return the subset of `chars` the named font can render (renderer control
  * codes count as renderable — they are interpreted outside font lookup).
  * Mirrors `snapcompact_supported_chars`.
- * @param {string} fontName
- * @param {string} chars
- * @returns {string}
  */
-export function supportedChars(fontName, chars) {
+export function supportedChars(fontName: string, chars: string): string {
   const font = resolveFont(fontName)
   if (!font) {
     throw new Error(

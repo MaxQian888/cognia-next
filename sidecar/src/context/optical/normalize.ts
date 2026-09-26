@@ -11,25 +11,29 @@
 //    actually draw, so the orchestrator can route CJK-heavy text to the
 //    text-summary fallback instead of rendering blanks (ADR-0063).
 
-import { DIM_ON, DIM_OFF, FULL_BLOCK } from "./constants.mjs"
-import { resolveFont, fontSupports } from "./fonts.mjs"
+import { DIM_ON, DIM_OFF, FULL_BLOCK } from "./constants.ts"
+import { resolveFont, fontSupports } from "./fonts.ts"
+import type { ConversationMessage } from "../compaction.ts"
+
+type Part = Record<string, unknown>
 
 const DIM_ON_CH = String.fromCharCode(DIM_ON)
 const DIM_OFF_CH = String.fromCharCode(DIM_OFF)
 const FULL_BLOCK_CH = String.fromCodePoint(FULL_BLOCK)
 
 /** Extract plain text from one message's `content` (string | parts array). */
-export function extractMessageText(content) {
+export function extractMessageText(content: unknown): string {
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
-  const out = []
-  for (const part of content) {
+  const out: string[] = []
+  for (const part of content as (Part | string | null | undefined)[]) {
     if (typeof part === "string") out.push(part)
     else if (part && typeof part.text === "string") out.push(part.text)
     else if (part && typeof part === "object") {
       const body = part.output ?? part.result ?? part.content ?? part.value
       if (typeof body === "string") out.push(body)
-      else if (Array.isArray(body)) out.push(body.map((b) => b?.text ?? "").join(""))
+      else if (Array.isArray(body))
+        out.push((body as ({ text?: unknown } | null)[]).map((b) => b?.text ?? "").join(""))
       else if (body != null) {
         try {
           out.push(JSON.stringify(body))
@@ -43,30 +47,37 @@ export function extractMessageText(content) {
 }
 
 /** True when a message is tool output (its body should read dim). */
-function isToolMessage(m) {
+function isToolMessage(m: ConversationMessage | null | undefined): boolean {
   if (!m) return false
   if (m.role === "tool") return true
   if (Array.isArray(m.content)) {
-    return m.content.some(
+    return (m.content as (Part | null | undefined)[]).some(
       (p) => p && typeof p === "object" && /tool-result|tool_result/.test(String(p.type ?? ""))
     )
   }
   return false
 }
 
-/**
- * Normalize a message list into optical-render-ready text.
- * @param {Array<{role:string, content:any}>} messages
- * @param {{ fontName?:string, columns?:number, dimToolOutput?:boolean, replacement?:string }} [opts]
- * @returns {{ text:string, coverage:number, charCount:number, renderableCount:number }}
- */
-export function normalizeForOptical(messages, opts = {}) {
+/** Optical-render-ready text and how much of it the font can draw. */
+export interface NormalizedTranscript {
+  text: string
+  /** Renderable share of the counted characters (1 when there are none). */
+  coverage: number
+  charCount: number
+  renderableCount: number
+}
+
+/** Normalize a message list into optical-render-ready text. */
+export function normalizeForOptical(
+  messages: readonly (ConversationMessage | null | undefined)[] | null | undefined,
+  opts: { fontName?: string; columns?: number; dimToolOutput?: boolean; replacement?: string } = {}
+): NormalizedTranscript {
   const { fontName = "8x8", columns = 1, dimToolOutput = true, replacement = "?" } = opts
   const doc = columns === 2
   const font = resolveFont(fontName)
   if (!font) throw new Error(`Unknown optical font ${JSON.stringify(fontName)}`)
 
-  const blocks = []
+  const blocks: string[] = []
   for (const m of messages ?? []) {
     const role = typeof m?.role === "string" ? m.role : "?"
     let body = extractMessageText(m?.content).trim()
@@ -87,7 +98,7 @@ export function normalizeForOptical(messages, opts = {}) {
   let renderable = 0
   let out = ""
   for (const ch of text) {
-    const cp = ch.codePointAt(0)
+    const cp = ch.codePointAt(0)!
     const isMarker = cp === DIM_ON || cp === DIM_OFF || cp === FULL_BLOCK || cp === 0x0a
     if (isMarker || cp === 0x20) {
       out += ch

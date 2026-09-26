@@ -14,7 +14,7 @@ export const MAX_FRAME_SIZE = 16384
  * .78}), 7 is plain black ink (`bw` variant), 8 is the pale highlight band
  * behind repeated line copies, 9 is the dim gray ink for tool-output spans.
  */
-export const PALETTE = [
+export const PALETTE: readonly (readonly [number, number, number])[] = [
   [255, 255, 255],
   [109, 2, 2], // red
   [109, 53, 2], // amber
