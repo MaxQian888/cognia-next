@@ -10411,6 +10411,12 @@
     "add": "添加",
     "all": "全部",
     "back": "上一步",
+    "biometricBlocked": {
+      "cancelled": "已取消生物识别验证。",
+      "error": "生物识别验证失败。",
+      "lockout": "尝试次数过多。请先解锁手机，然后重试。",
+      "unavailable": "此设备不支持生物识别验证。"
+    },
     "cancel": "取消",
     "close": "关闭",
     "confirm": "确认",
@@ -20156,7 +20162,7 @@
     },
     "automation": {
       "consent": {
-        "biometricBlocked": "批准未完成（{reason}）。",
+        "biometricBlocked": "批准未完成。{reason}",
         "biometricDescription": "允许后，已连接的桌面将执行此操作。",
         "biometricReason": "批准桌面的 computer-use 操作",
         "biometricTitle": "确认远程操作",
@@ -20197,7 +20203,7 @@
       "autoBackup": "自动备份",
       "autoBackupHint": "在桌面联线时按设定的间隔加密自动备份。",
       "autoBackupInterval": "间隔（天）",
-      "biometricBlocked": "生物识别失败，已取消导出。",
+      "biometricBlocked": "已取消导出。{reason}",
       "description": "把全部本地数据加密导出到设备上。",
       "exportBiometricReason": "通过生物识别验证后导出加密备份。",
       "exportBiometricTitle": "确认导出",
@@ -20286,7 +20292,7 @@
     },
     "companion": {
       "agentControl": {
-        "blocked": "未启用运行 Agent 权限（{reason}）。",
+        "blocked": "未启用运行 Agent 权限。{reason}",
         "col": "运行 Agent",
         "description": "允许此设备在本桌面上启动和停止外部 Agent 进程。启动策略仍会限制可运行的程序、工作目录和环境变量——但在这些限制内由该设备决定运行什么。远程控制是另一项独立且更小的授权。",
         "disabledToast": "已为 {label} 关闭运行 Agent 权限。",
@@ -20405,7 +20411,7 @@
       },
       "hostAdminCapability": "主机管理",
       "lockedComputerUse": {
-        "blocked": "Locked Use 未启用（{reason}）。",
+        "blocked": "Locked Use 未启用。{reason}",
         "col": "Locked Use",
         "description": "授予此设备 Locked Use —— 短时、与任务绑定的解锁 lease。尚未生效：本版本未包含 macOS Locked Use 系统组件，在其发布前此开关不会授予任何权限。",
         "disabledToast": "已为 {label} 关闭 Locked Use。",
@@ -20463,7 +20469,7 @@
         "unpinned": "未固定"
       },
       "pause": {
-        "blocked": "暂停未完成（{reason}）。",
+        "blocked": "暂停未完成。{reason}",
         "description": "在恢复之前，该设备的 JWT 会被加入拒绝名单。",
         "reason": "确认暂停 {label}",
         "title": "暂停设备"
@@ -20541,7 +20547,7 @@
         "workspaceHint": "请先选择工作区，再管理配置文件或域名。"
       },
       "remoteControl": {
-        "blocked": "远程控制未启用（{reason}）。",
+        "blocked": "远程控制未启用。{reason}",
         "col": "远程控制",
         "description": "允许此设备驱动并操控本桌面上的实时会话，并批准 computer-use 提示。无论是否开启，只读同步始终可用。",
         "disabledToast": "已为 {label} 关闭远程控制。",
@@ -20551,7 +20557,7 @@
         "toggleAria": "切换 {label} 的远程控制"
       },
       "remoteTerminal": {
-        "blocked": "终端访问权限未更改（{reason}）。",
+        "blocked": "终端访问权限未更改。{reason}",
         "col": "终端访问",
         "description": "允许此设备查看、恢复并控制由主机持有的终端会话。此权限独立于远程控制和智能体控制。",
         "disabledToast": "已为 {label} 关闭终端访问。",
@@ -20564,13 +20570,13 @@
         "toggleAria": "切换 {label} 的终端访问权限"
       },
       "resume": {
-        "blocked": "恢复未完成（{reason}）。",
+        "blocked": "恢复未完成。{reason}",
         "description": "该设备的 JWT 会被移出拒绝名单并恢复访问。",
         "reason": "确认恢复 {label}",
         "title": "恢复设备"
       },
       "revoke": {
-        "blocked": "解除配对未完成（{reason}）。",
+        "blocked": "解除配对未完成。{reason}",
         "description": "解除后此设备将立即失去访问权限。",
         "reason": "确认解除 {label} 的配对",
         "successToast": "已解除该设备的配对。",
@@ -20600,7 +20606,7 @@
         "title": "移动端伴侣服务器"
       },
       "sshFiles": {
-        "blocked": "文件传输权限未更改（{reason}）。",
+        "blocked": "文件传输权限未更改。{reason}",
         "col": "SSH 文件传输",
         "description": "允许该设备浏览并传输本机已保存的 SSH 主机上的文件。它以该配置的用户身份读写那些机器，没有目录范围限制，这正是在那些机器上开一个 shell 本来就能做的事。",
         "disabledToast": "已关闭 {label} 的 SSH 文件传输。",
@@ -20853,7 +20859,7 @@
       "switch": {
         "active": "当前",
         "addHost": "添加 Host",
-        "biometricFailed": "生物识别失败（{reason}）；未移除 Host。",
+        "biometricFailed": "未移除 Host。{reason}",
         "cancel": "取消",
         "confirmRemove": "移除 Host",
         "daysAgo": "{n} 天",
@@ -21747,7 +21753,7 @@
     "pair": {
       "accountContextMissing": "配对 Host 前需要一个活动的本地账户。",
       "baseUrlLabel": "服务器地址",
-      "biometricFailed": "生物识别失败（{reason}），未退出登录。",
+      "biometricFailed": "未退出登录。{reason}",
       "brandMark": "Cognia",
       "checkingTitle": "正在重新检查链路",
       "codeError": {
@@ -22077,7 +22083,7 @@
       "approval": {
         "allow": "允许一次",
         "allowAlways": "本会话始终允许",
-        "blocked": "批准未完成（{reason}）。",
+        "blocked": "批准未完成。{reason}",
         "deny": "拒绝",
         "description": "宿主 agent 想要运行一个工具。允许后它将在已连接的桌面上执行。",
         "heading": "允许使用 {tool}？",

@@ -2,6 +2,12 @@
   "add": "添加",
   "all": "全部",
   "back": "上一步",
+  "biometricBlocked": {
+    "cancelled": "已取消生物识别验证。",
+    "error": "生物识别验证失败。",
+    "lockout": "尝试次数过多。请先解锁手机，然后重试。",
+    "unavailable": "此设备不支持生物识别验证。"
+  },
   "cancel": "取消",
   "close": "关闭",
   "confirm": "确认",

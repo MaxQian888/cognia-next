@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
+import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { saveExport } from "@/lib/files/save-export"
 import { notifyExportOutcome } from "@/lib/files/export-feedback"
@@ -80,6 +81,7 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
   const tNotif = useTranslations("mobile.offline")
   const isMobile = detectNativePlatform() === "mobile"
   const guard = useBiometricGuard()
+  const blockReason = useBiometricBlockReason()
   const biometricRequired =
     useSettingsStore((s) => s.settings?.biometricRequiredFor?.exportBackup) ?? false
 
@@ -133,7 +135,7 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
           runExport
         )
         if (outcome.kind === "blocked" && outcome.reason !== "cancelled") {
-          toast.error(t("biometricBlocked", { reason: outcome.reason }))
+          toast.error(t("biometricBlocked", { reason: blockReason(outcome.reason) }))
         }
       } else {
         await runExport()

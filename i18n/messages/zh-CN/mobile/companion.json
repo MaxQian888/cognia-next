@@ -1,6 +1,6 @@
 {
   "agentControl": {
-    "blocked": "未启用运行 Agent 权限（{reason}）。",
+    "blocked": "未启用运行 Agent 权限。{reason}",
     "col": "运行 Agent",
     "description": "允许此设备在本桌面上启动和停止外部 Agent 进程。启动策略仍会限制可运行的程序、工作目录和环境变量——但在这些限制内由该设备决定运行什么。远程控制是另一项独立且更小的授权。",
     "disabledToast": "已为 {label} 关闭运行 Agent 权限。",
@@ -69,7 +69,7 @@
   },
   "hostAdminCapability": "主机管理",
   "lockedComputerUse": {
-    "blocked": "Locked Use 未启用（{reason}）。",
+    "blocked": "Locked Use 未启用。{reason}",
     "col": "Locked Use",
     "description": "授予此设备 Locked Use —— 短时、与任务绑定的解锁 lease。尚未生效：本版本未包含 macOS Locked Use 系统组件，在其发布前此开关不会授予任何权限。",
     "disabledToast": "已为 {label} 关闭 Locked Use。",
@@ -127,7 +127,7 @@
     "unpinned": "未固定"
   },
   "pause": {
-    "blocked": "暂停未完成（{reason}）。",
+    "blocked": "暂停未完成。{reason}",
     "description": "在恢复之前，该设备的 JWT 会被加入拒绝名单。",
     "reason": "确认暂停 {label}",
     "title": "暂停设备"
@@ -205,7 +205,7 @@
     "workspaceHint": "请先选择工作区，再管理配置文件或域名。"
   },
   "remoteControl": {
-    "blocked": "远程控制未启用（{reason}）。",
+    "blocked": "远程控制未启用。{reason}",
     "col": "远程控制",
     "description": "允许此设备驱动并操控本桌面上的实时会话，并批准 computer-use 提示。无论是否开启，只读同步始终可用。",
     "disabledToast": "已为 {label} 关闭远程控制。",
@@ -215,7 +215,7 @@
     "toggleAria": "切换 {label} 的远程控制"
   },
   "remoteTerminal": {
-    "blocked": "终端访问权限未更改（{reason}）。",
+    "blocked": "终端访问权限未更改。{reason}",
     "col": "终端访问",
     "description": "允许此设备查看、恢复并控制由主机持有的终端会话。此权限独立于远程控制和智能体控制。",
     "disabledToast": "已为 {label} 关闭终端访问。",
@@ -228,13 +228,13 @@
     "toggleAria": "切换 {label} 的终端访问权限"
   },
   "resume": {
-    "blocked": "恢复未完成（{reason}）。",
+    "blocked": "恢复未完成。{reason}",
     "description": "该设备的 JWT 会被移出拒绝名单并恢复访问。",
     "reason": "确认恢复 {label}",
     "title": "恢复设备"
   },
   "revoke": {
-    "blocked": "解除配对未完成（{reason}）。",
+    "blocked": "解除配对未完成。{reason}",
     "description": "解除后此设备将立即失去访问权限。",
     "reason": "确认解除 {label} 的配对",
     "successToast": "已解除该设备的配对。",
@@ -474,7 +474,7 @@
     "title": "该主机允许的目录"
   },
   "sshFiles": {
-    "blocked": "文件传输权限未更改（{reason}）。",
+    "blocked": "文件传输权限未更改。{reason}",
     "col": "SSH 文件传输",
     "description": "允许该设备浏览并传输本机已保存的 SSH 主机上的文件。它以该配置的用户身份读写那些机器，没有目录范围限制，这正是在那些机器上开一个 shell 本来就能做的事。",
     "disabledToast": "已关闭 {label} 的 SSH 文件传输。",

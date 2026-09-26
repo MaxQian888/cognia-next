@@ -2,7 +2,7 @@
   "autoBackup": "Auto backup",
   "autoBackupHint": "Back up automatically while paired with desktop.",
   "autoBackupInterval": "Interval (days)",
-  "biometricBlocked": "Biometric check failed. Export cancelled.",
+  "biometricBlocked": "Export cancelled. {reason}",
   "description": "Export all local data encrypted to this device.",
   "exportBiometricReason": "Authenticate to export an encrypted backup.",
   "exportBiometricTitle": "Confirm export",

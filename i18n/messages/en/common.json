@@ -2,6 +2,12 @@
   "add": "Add",
   "all": "All",
   "back": "Back",
+  "biometricBlocked": {
+    "cancelled": "The biometric check was cancelled.",
+    "error": "The biometric check failed.",
+    "lockout": "Too many attempts. Unlock your phone, then try again.",
+    "unavailable": "Biometric check isn't available on this device."
+  },
   "cancel": "Cancel",
   "close": "Close",
   "confirm": "Confirm",

@@ -17,6 +17,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { setRemoteTerminalAllowed } from "@/lib/db/paired-devices"
+import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { transport } from "@/lib/tauri"
 import type { TerminalHostDescriptor } from "@/types/mobile/paired-device"
@@ -161,6 +162,7 @@ export function useRemoteTerminalGrantToggle(
   onChanged?: () => Promise<void> | void
 ): ToggleRemoteTerminal {
   const guard = useBiometricGuard()
+  const blockReason = useBiometricBlockReason()
   const tTerminal = useTranslations("mobile.companion.remoteTerminal")
 
   return useCallback<ToggleRemoteTerminal>(
@@ -222,12 +224,12 @@ export function useRemoteTerminalGrantToggle(
       }
       if (result.kind === "blocked") {
         if (result.reason === "cancelled") return
-        toast.error(tTerminal("blocked", { reason: result.reason }))
+        toast.error(tTerminal("blocked", { reason: blockReason(result.reason) }))
         return
       }
       await onChanged?.()
       toast.success(tTerminal("enabledToast", { label }))
     },
-    [guard, onChanged, tTerminal]
+    [blockReason, guard, onChanged, tTerminal]
   )
 }

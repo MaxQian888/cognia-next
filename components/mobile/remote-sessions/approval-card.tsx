@@ -27,6 +27,7 @@ import { toast } from "sonner"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { PendingDecisionSurface } from "@/components/chat/decisions/pending-decision-surface"
+import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import type { ApprovalDecision, PendingApproval } from "@cognia/agent-config-types"
 
@@ -44,6 +45,7 @@ export interface ApprovalCardProps {
 export function ApprovalCard({ approval, onRespond, mode = "control" }: ApprovalCardProps) {
   const t = useTranslations("mobile.remoteSessions.approval")
   const guard = useBiometricGuard()
+  const blockReason = useBiometricBlockReason()
 
   const confirmAllow = useCallback(
     async (run: () => Promise<void>) => {
@@ -57,10 +59,10 @@ export function ApprovalCard({ approval, onRespond, mode = "control" }: Approval
       )
       if (result.kind === "blocked") {
         if (result.reason === "cancelled") return
-        toast.error(t("blocked", { reason: result.reason }))
+        toast.error(t("blocked", { reason: blockReason(result.reason) }))
       }
     },
-    [approval.toolName, guard, t]
+    [approval.toolName, blockReason, guard, t]
   )
 
   return (

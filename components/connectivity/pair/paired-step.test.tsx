@@ -33,9 +33,12 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 const guardCalls: unknown[] = []
+// `null` passes the prompt; a reason makes the guard refuse with that code.
+const guardBlock: { reason: string | null } = { reason: null }
 jest.mock("@/hooks/use-biometric-guard", () => ({
   useBiometricGuard: () => async (opts: unknown, action: () => Promise<void>) => {
     guardCalls.push(opts)
+    if (guardBlock.reason) return { kind: "blocked" as const, reason: guardBlock.reason }
     await action()
     return { kind: "ok" as const }
   },
@@ -49,7 +52,15 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
+  useTranslations: (namespace?: string) => (key: string, vars?: Record<string, unknown>) => {
+    // The shared biometric reason labels resolve against the real bundle, so
+    // the blocked message is asserted with the words a person actually reads.
+    if (namespace === "common.biometricBlocked") {
+      const en = jest.requireActual("@/i18n/messages/en.json") as {
+        common: { biometricBlocked: Record<string, string> }
+      }
+      return en.common.biometricBlocked[key] ?? key
+    }
     const map: Record<string, string> = {
       transportLabel: "Transport",
       connectedTitle: "Connected",
@@ -83,7 +94,7 @@ jest.mock("next-intl", () => ({
       signOutTitle: "Sign out",
       signOutReason: "Confirm sign out",
       signOutDescription: "Reconnect requires re-pairing.",
-      biometricFailed: `Biometric failed (${(vars?.reason as string) ?? ""})`,
+      biometricFailed: `You were not signed out. ${(vars?.reason as string) ?? ""}`,
     }
     return map[key] ?? key
   },
@@ -196,7 +207,34 @@ describe("<PairedStep /> — Settings → Security → signOut", () => {
   // surfaces that sign a companion out.
   beforeEach(() => {
     guardCalls.length = 0
+    guardBlock.reason = null
     biometricPolicy.value = undefined
+  })
+
+  it("explains a blocked prompt in words and does not sign out", async () => {
+    guardBlock.reason = "lockout"
+    const onAfterSignOut = jest.fn()
+    const user = userEvent.setup()
+    render(<PairedStep {...baseProps} onAfterSignOut={onAfterSignOut} />)
+    await user.click(screen.getByTestId("pair-signout"))
+    const error = await screen.findByTestId("pair-signout-error")
+    expect(error).toHaveTextContent(
+      "You were not signed out. Too many attempts. Unlock your phone, then try again."
+    )
+    expect(error.textContent).not.toContain("lockout")
+    expect(onAfterSignOut).not.toHaveBeenCalled()
+    expect(removeHost).not.toHaveBeenCalled()
+  })
+
+  it("stays quiet when the person cancels the prompt", async () => {
+    guardBlock.reason = "cancelled"
+    const onAfterSignOut = jest.fn()
+    const user = userEvent.setup()
+    render(<PairedStep {...baseProps} onAfterSignOut={onAfterSignOut} />)
+    await user.click(screen.getByTestId("pair-signout"))
+    await waitFor(() => expect(guardCalls).toHaveLength(1))
+    expect(screen.queryByTestId("pair-signout-error")).not.toBeInTheDocument()
+    expect(onAfterSignOut).not.toHaveBeenCalled()
   })
 
   it("prompts by default (the shipped policy has the row on)", async () => {

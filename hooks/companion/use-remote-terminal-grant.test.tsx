@@ -268,6 +268,11 @@ describe("useRemoteTerminalGrantToggle", () => {
       await result.current("dev-a", "pk-a", "Phone", true)
     })
     expect(toastMock.error).toHaveBeenCalledTimes(1)
+    // The reason reads as words, not the guard's `unavailable` code.
+    expect(toastMock.error).toHaveBeenCalledWith(
+      "Terminal access was not changed. Biometric check isn't available on this device."
+    )
+    expect(String(toastMock.error.mock.calls[0][0])).not.toContain("(unavailable)")
   })
 
   it("disables without a gate: host first, then mirror, then reports", async () => {

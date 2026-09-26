@@ -40,7 +40,7 @@
   "switch": {
     "active": "当前",
     "addHost": "添加 Host",
-    "biometricFailed": "生物识别失败（{reason}）；未移除 Host。",
+    "biometricFailed": "未移除 Host。{reason}",
     "cancel": "取消",
     "confirmRemove": "移除 Host",
     "daysAgo": "{n} 天",

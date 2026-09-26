@@ -1,7 +1,7 @@
 {
   "accountContextMissing": "配对 Host 前需要一个活动的本地账户。",
   "baseUrlLabel": "服务器地址",
-  "biometricFailed": "生物识别失败（{reason}），未退出登录。",
+  "biometricFailed": "未退出登录。{reason}",
   "brandMark": "Cognia",
   "checkingTitle": "正在重新检查链路",
   "codeError": {

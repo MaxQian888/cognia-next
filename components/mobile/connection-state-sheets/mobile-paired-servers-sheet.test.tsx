@@ -8,14 +8,29 @@ const push = jest.fn()
 const replace = jest.fn()
 jest.mock("next/navigation", () => ({ useRouter: () => ({ push, replace }) }))
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    key === "removeTitle" ? `Remove ${vars?.name ?? ""}` : key,
+  useTranslations: (namespace?: string) => (key: string, vars?: Record<string, unknown>) => {
+    // The shared biometric reason labels resolve against the real bundle, so
+    // the blocked message is asserted with the words a person actually reads.
+    if (namespace === "common.biometricBlocked") {
+      const en = jest.requireActual("@/i18n/messages/en.json") as {
+        common: { biometricBlocked: Record<string, string> }
+      }
+      return en.common.biometricBlocked[key] ?? key
+    }
+    if (key === "removeTitle") return `Remove ${vars?.name ?? ""}`
+    if (key === "biometricFailed") return `The Host was not removed. ${vars?.reason ?? ""}`
+    return key
+  },
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
 jest.mock("@/lib/capacitor/haptics", () => ({ impact: jest.fn() }))
 jest.mock("@/hooks/ui/use-back-dismiss", () => ({ useBackDismiss: jest.fn() }))
+// `null` passes the prompt; a reason makes the guard refuse with that code.
+const guardBlock: { reason: string | null; calls: number } = { reason: null, calls: 0 }
 jest.mock("@/hooks/use-biometric-guard", () => ({
   useBiometricGuard: () => async (_request: unknown, action: () => Promise<void>) => {
+    guardBlock.calls += 1
+    if (guardBlock.reason) return { kind: "blocked", reason: guardBlock.reason }
     await action()
     return { kind: "ran" }
   },
@@ -60,6 +75,8 @@ function host(hostId: string, label = hostId): CompanionHostRecord {
 beforeEach(() => {
   records = []
   active = null
+  guardBlock.reason = null
+  guardBlock.calls = 0
   push.mockClear()
   replace.mockClear()
   switchHost.mockClear()
@@ -123,4 +140,38 @@ it("enters the unpaired flow after the sole Host is removed", async () => {
   fireEvent.click(screen.getByText("confirmRemove"))
 
   await waitFor(() => expect(replace).toHaveBeenCalledWith("/pair"))
+})
+
+it("explains a blocked biometric prompt in words and keeps the Host", async () => {
+  guardBlock.reason = "unavailable"
+  records = [host("host-a", "A"), host("host-b", "B")]
+  active = records[0]
+  render(<MobilePairedServersSheet open onOpenChange={jest.fn()} />)
+  await screen.findByTestId("mobile-paired-remove-host-a")
+
+  fireEvent.click(screen.getByTestId("mobile-paired-remove-host-a"))
+  fireEvent.click(screen.getByText("confirmRemove"))
+
+  const message = await screen.findByText(
+    "The Host was not removed. Biometric check isn't available on this device."
+  )
+  expect(message.textContent).not.toMatch(/\bunavailable\b/)
+  expect(removeHost).not.toHaveBeenCalled()
+  expect(screen.getByTestId("mobile-paired-row-host-a")).toBeInTheDocument()
+})
+
+it("says nothing when the person cancels the biometric prompt", async () => {
+  guardBlock.reason = "cancelled"
+  records = [host("host-a", "A"), host("host-b", "B")]
+  active = records[0]
+  render(<MobilePairedServersSheet open onOpenChange={jest.fn()} />)
+  await screen.findByTestId("mobile-paired-remove-host-a")
+
+  fireEvent.click(screen.getByTestId("mobile-paired-remove-host-a"))
+  fireEvent.click(screen.getByText("confirmRemove"))
+
+  await waitFor(() => expect(guardBlock.calls).toBe(1))
+  await waitFor(() => expect(screen.getByTestId("mobile-paired-row-host-b")).toBeEnabled())
+  expect(screen.queryByText(/The Host was not removed/)).not.toBeInTheDocument()
+  expect(removeHost).not.toHaveBeenCalled()
 })

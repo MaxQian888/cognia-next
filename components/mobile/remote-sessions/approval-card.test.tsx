@@ -1,8 +1,31 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { ApprovalCard } from "./approval-card"
 import type { PendingApproval } from "@cognia/agent-config-types"
+
+// `null` keeps the real guard (which passes through with no biometric in
+// jsdom); a reason makes it refuse with that code.
+const guardBlock: { reason: string | null } = { reason: null }
+jest.mock("@/hooks/use-biometric-guard", () => {
+  const actual = jest.requireActual("@/hooks/use-biometric-guard")
+  return {
+    ...actual,
+    useBiometricGuard: () => {
+      const real = actual.useBiometricGuard()
+      return async (gate: unknown, action: () => Promise<unknown>) =>
+        guardBlock.reason ? { kind: "blocked", reason: guardBlock.reason } : real(gate, action)
+    },
+  }
+})
+
+const toastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => toastError(...a) } }))
+
+beforeEach(() => {
+  guardBlock.reason = null
+  toastError.mockClear()
+})
 
 const approval: PendingApproval = {
   sessionId: "s1",
@@ -71,6 +94,32 @@ describe("<ApprovalCard />", () => {
     render(<ApprovalCard approval={approval} onRespond={onRespond} />)
     await user.click(await screen.findByTestId("decision-allow-always"))
     expect(onRespond).toHaveBeenCalledWith("allow_always")
+  })
+
+  it("explains a refused biometric in words and does not allow", async () => {
+    guardBlock.reason = "lockout"
+    const user = userEvent.setup()
+    const onRespond = jest.fn().mockResolvedValue(undefined)
+    render(<ApprovalCard approval={approval} onRespond={onRespond} />)
+    await user.click(await screen.findByTestId("decision-allow"))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "Approval not completed. Too many attempts. Unlock your phone, then try again."
+      )
+    )
+    expect(String(toastError.mock.calls[0][0])).not.toContain("lockout")
+    expect(onRespond).not.toHaveBeenCalled()
+  })
+
+  it("stays quiet when the person cancels the biometric prompt", async () => {
+    guardBlock.reason = "cancelled"
+    const user = userEvent.setup()
+    const onRespond = jest.fn().mockResolvedValue(undefined)
+    render(<ApprovalCard approval={approval} onRespond={onRespond} />)
+    await user.click(await screen.findByTestId("decision-allow"))
+    await waitFor(() => expect(screen.getByTestId("decision-allow")).toBeEnabled())
+    expect(toastError).not.toHaveBeenCalled()
+    expect(onRespond).not.toHaveBeenCalled()
   })
 
   it("deny forwards 'deny' without a biometric prompt", async () => {

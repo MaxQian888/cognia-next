@@ -2,7 +2,7 @@
   "approval": {
     "allow": "Allow once",
     "allowAlways": "Always this session",
-    "blocked": "Approval not completed ({reason}).",
+    "blocked": "Approval not completed. {reason}",
     "deny": "Deny",
     "description": "The host agent wants to run a tool. Allowing lets it execute on the connected desktop.",
     "heading": "Allow {tool}?",

@@ -208,6 +208,69 @@ describe("lifecycle", () => {
     const { actions: a } = actions()
     await a.revoke("d1", "Phone")
     expect(db.revokePairedDevice).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+})
+
+describe("a refused guard explains itself in words", () => {
+  /**
+   * The guard reports a code (`lockout`, `unavailable`, `error`). Each toast
+   * used to interpolate it raw — "Pause not completed (lockout)." — so every
+   * gated action is pinned to the translated sentence instead.
+   */
+  const LOCKOUT = "Too many attempts. Unlock your phone, then try again."
+  const cases: [string, (a: DeviceGrantActions) => Promise<void>, string][] = [
+    [
+      "remote control",
+      (a) => a.toggleRemoteControl("d1", "Phone", true),
+      `Remote control not enabled. ${LOCKOUT}`,
+    ],
+    [
+      "agent control",
+      (a) => a.toggleAgentControl("d1", "Phone", true),
+      `Agent control not enabled. ${LOCKOUT}`,
+    ],
+    [
+      "SSH file transfer",
+      (a) => a.toggleSshFiles("d1", "Phone", true),
+      `File transfer was not changed. ${LOCKOUT}`,
+    ],
+    [
+      "Locked Use",
+      (a) => a.toggleLockedComputerUse("d1", "Phone", true),
+      `Locked Use not enabled. ${LOCKOUT}`,
+    ],
+    ["pause", (a) => a.pause("d1", "Phone"), `Pause not completed. ${LOCKOUT}`],
+    ["resume", (a) => a.resume("d1", "Phone"), `Resume not completed. ${LOCKOUT}`],
+    ["revoke", (a) => a.revoke("d1", "Phone"), `Revoke not completed. ${LOCKOUT}`],
+  ]
+
+  it.each(cases)("%s", async (_name, run, expected) => {
+    guardResult = { kind: "blocked", reason: "lockout" }
+    const { actions: a } = actions()
+    await run(a)
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledWith(expected)
+    expect(String((toast.error as jest.Mock).mock.calls[0][0])).not.toContain("(lockout)")
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it("names an unavailable biometric rather than printing the code", async () => {
+    guardResult = { kind: "blocked", reason: "unavailable" }
+    const { actions: a } = actions()
+    await a.toggleAgentControl("d1", "Phone", true)
+    expect(toast.error).toHaveBeenCalledWith(
+      "Agent control not enabled. Biometric check isn't available on this device."
+    )
+  })
+
+  it("names a failed biometric rather than printing the code", async () => {
+    guardResult = { kind: "blocked", reason: "error" }
+    const { actions: a } = actions()
+    await a.toggleRemoteControl("d1", "Phone", true)
+    expect(toast.error).toHaveBeenCalledWith(
+      "Remote control not enabled. The biometric check failed."
+    )
   })
 })
 

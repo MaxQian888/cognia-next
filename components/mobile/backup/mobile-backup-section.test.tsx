@@ -114,7 +114,15 @@ jest.mock("dexie-react-hooks", () => ({
 }))
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
+  useTranslations: (namespace?: string) => (key: string, vars?: Record<string, unknown>) => {
+    // The shared biometric reason labels resolve against the real bundle, so
+    // the blocked toast is asserted with the words a person actually reads.
+    if (namespace === "common.biometricBlocked") {
+      const en = jest.requireActual("@/i18n/messages/en.json") as {
+        common: { biometricBlocked: Record<string, string> }
+      }
+      return en.common.biometricBlocked[key] ?? key
+    }
     const map: Record<string, string> = {
       title: "Backup & sync",
       description: "Export all local data encrypted to this device.",
@@ -143,7 +151,7 @@ jest.mock("next-intl", () => ({
       passphraseLabel: "Passphrase",
       exportBiometricTitle: "Confirm export",
       exportBiometricReason: "Authenticate to export.",
-      biometricBlocked: "Biometric failed.",
+      biometricBlocked: `Export cancelled. ${(vars?.reason as string) ?? ""}`,
       passphraseRequiredHint: "Required.",
       webModeNote: "Web mode note.",
     }
@@ -497,8 +505,12 @@ describe("<MobileBackupSection />", () => {
       fireEvent.click(screen.getByTestId("backup-export"))
 
       await waitFor(() => {
-        expect(mockToastError).toHaveBeenCalledWith("Biometric failed.")
+        expect(mockToastError).toHaveBeenCalledWith(
+          "Export cancelled. Biometric check isn't available on this device."
+        )
       })
+      // The reason reads as words, not the guard's `unavailable` code.
+      expect(mockToastError.mock.calls[0][0]).not.toMatch(/\bunavailable\b/)
     })
 
     it("passes through biometric guard when cancelled", async () => {
@@ -526,7 +538,7 @@ describe("<MobileBackupSection />", () => {
       })
 
       // cancelled should NOT trigger toast.error for biometric blocked
-      expect(mockToastError).not.toHaveBeenCalledWith("Biometric failed.")
+      expect(mockToastError).not.toHaveBeenCalled()
       // runExport should NOT have been called
       expect(mockSaveExport).not.toHaveBeenCalled()
     })

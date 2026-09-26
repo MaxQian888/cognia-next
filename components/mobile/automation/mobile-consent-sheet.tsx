@@ -35,6 +35,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
+import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useCanControl } from "@/hooks/data/use-can-control"
 import {
@@ -50,6 +51,7 @@ export function MobileConsentSheet() {
   const t = useTranslations("automation.consent")
   const tm = useTranslations("mobile.automation.consent")
   const guard = useBiometricGuard()
+  const blockReason = useBiometricBlockReason()
   const canControl = useCanControl()
   const { queue, now, respond } = useAutomationConsent({ enabled: canControl === true })
 
@@ -68,10 +70,10 @@ export function MobileConsentSheet() {
         }
       )
       if (result.kind === "blocked" && result.reason !== "cancelled") {
-        toast.error(tm("biometricBlocked", { reason: result.reason }))
+        toast.error(tm("biometricBlocked", { reason: blockReason(result.reason) }))
       }
     },
-    [guard, respond, tm]
+    [blockReason, guard, respond, tm]
   )
 
   // Android hardware back rejects the current prompt (same as swipe-down).

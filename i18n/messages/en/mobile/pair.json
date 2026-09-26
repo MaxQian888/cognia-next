@@ -1,7 +1,7 @@
 {
   "accountContextMissing": "An active local account is required before pairing a Host.",
   "baseUrlLabel": "Server URL",
-  "biometricFailed": "Biometric check failed ({reason}); did not sign out.",
+  "biometricFailed": "You were not signed out. {reason}",
   "brandMark": "Cognia",
   "checkingTitle": "Re-checking link",
   "codeError": {

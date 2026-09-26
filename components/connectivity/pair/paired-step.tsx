@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
@@ -68,6 +69,7 @@ export function PairedStep({
 }: PairedStepProps) {
   const t = useTranslations("mobile.pair")
   const guard = useBiometricGuard()
+  const blockReason = useBiometricBlockReason()
   // Settings → Security → "Require biometrics to sign out". `useCompanionSignOut`
   // has always honoured this flag; this second sign-out path prompted
   // unconditionally, so switching the row off silently only worked on one of
@@ -186,12 +188,12 @@ export function PairedStep({
     )
     if (out.kind === "blocked") {
       if (out.reason !== "cancelled") {
-        setSignOutError(t("biometricFailed", { reason: out.reason }))
+        setSignOutError(t("biometricFailed", { reason: blockReason(out.reason) }))
       }
       return
     }
     onAfterSignOut()
-  }, [guard, onAfterSignOut, platform, requireBiometricForSignOut, t])
+  }, [blockReason, guard, onAfterSignOut, platform, requireBiometricForSignOut, t])
 
   // Explicit label — `constructor.name` gets mangled by production minifiers.
   // Duck-typed on `onTierChange` (CompanionTransport-only) like the

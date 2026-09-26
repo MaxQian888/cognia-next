@@ -33,6 +33,7 @@ import {
   setRemoteControlAllowed,
   setSshFilesAllowed,
 } from "@/lib/db/paired-devices"
+import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
@@ -147,6 +148,7 @@ function describeError(error: unknown): string {
 
 export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): DeviceGrantActions {
   const guard = useBiometricGuard()
+  const blockReason = useBiometricBlockReason()
   // Settings → Security → "Require biometrics to delete a pairing". `revoke`
   // used to prompt unconditionally, so switching the row off changed nothing —
   // the only surface that reads the flag is the settings page that writes it.
@@ -196,13 +198,13 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
       )
       if (result.kind === "blocked") {
         if (result.reason === "cancelled") return
-        toast.error(tRc("blocked", { reason: result.reason }))
+        toast.error(tRc("blocked", { reason: blockReason(result.reason) }))
         return
       }
       await notifyChanged()
       toast.success(tRc("enabledToast", { label }))
     },
-    [guard, notifyChanged, tRc]
+    [blockReason, guard, notifyChanged, tRc]
   )
 
   const toggleAgentControl = useCallback(
@@ -231,13 +233,13 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
       )
       if (result.kind === "blocked") {
         if (result.reason === "cancelled") return
-        toast.error(tAc("blocked", { reason: result.reason }))
+        toast.error(tAc("blocked", { reason: blockReason(result.reason) }))
         return
       }
       await notifyChanged()
       toast.success(tAc("enabledToast", { label }))
     },
-    [guard, notifyChanged, tAc]
+    [blockReason, guard, notifyChanged, tAc]
   )
 
   // Shared with the terminal share dialog (ADR-0133) so both surfaces drive the
@@ -272,13 +274,13 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
       )
       if (result.kind === "blocked") {
         if (result.reason === "cancelled") return
-        toast.error(tSshFiles("blocked", { reason: result.reason }))
+        toast.error(tSshFiles("blocked", { reason: blockReason(result.reason) }))
         return
       }
       await notifyChanged()
       toast.success(tSshFiles("enabledToast", { label }))
     },
-    [guard, notifyChanged, tSshFiles]
+    [blockReason, guard, notifyChanged, tSshFiles]
   )
 
   const toggleLockedComputerUse = useCallback(
@@ -303,13 +305,13 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
       )
       if (result.kind === "blocked") {
         if (result.reason === "cancelled") return
-        toast.error(tLocked("blocked", { reason: result.reason }))
+        toast.error(tLocked("blocked", { reason: blockReason(result.reason) }))
         return
       }
       await notifyChanged()
       toast.success(tLocked("enabledToast", { label }))
     },
-    [guard, notifyChanged, tLocked]
+    [blockReason, guard, notifyChanged, tLocked]
   )
 
   const pause = useCallback(
@@ -337,13 +339,13 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
       )
       if (result.kind === "blocked") {
         if (result.reason === "cancelled") return
-        toast.error(tPause("blocked", { reason: result.reason }))
+        toast.error(tPause("blocked", { reason: blockReason(result.reason) }))
         return
       }
       await notifyChanged()
       toast.success(t("toastPaused", { label }))
     },
-    [guard, notifyChanged, t, tPause]
+    [blockReason, guard, notifyChanged, t, tPause]
   )
 
   const resume = useCallback(
@@ -369,13 +371,13 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
       )
       if (result.kind === "blocked") {
         if (result.reason === "cancelled") return
-        toast.error(tResume("blocked", { reason: result.reason }))
+        toast.error(tResume("blocked", { reason: blockReason(result.reason) }))
         return
       }
       await notifyChanged()
       toast.success(t("toastResumed", { label }))
     },
-    [guard, notifyChanged, t, tResume]
+    [blockReason, guard, notifyChanged, t, tResume]
   )
 
   const revoke = useCallback(
@@ -400,13 +402,13 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
       )
       if (result.kind === "blocked") {
         if (result.reason === "cancelled") return
-        toast.error(tRev("blocked", { reason: result.reason }))
+        toast.error(tRev("blocked", { reason: blockReason(result.reason) }))
         return
       }
       await notifyChanged()
       toast.success(tRev("successToast"))
     },
-    [guard, notifyChanged, requireBiometricForRevoke, tRev]
+    [blockReason, guard, notifyChanged, requireBiometricForRevoke, tRev]
   )
 
   // Wrapped at the boundary rather than inside each body: the seven actions

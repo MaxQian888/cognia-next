@@ -39,8 +39,14 @@ export interface BiometricGate {
   fallthroughWhenUnavailable?: boolean
 }
 
+/**
+ * Why the guard refused to run the action. A machine code, not copy: show it
+ * to a person through `useBiometricBlockReason()`, never interpolated raw.
+ */
+export type BiometricBlockReason = Exclude<VerifyOutcome["kind"], "verified">
+
 export type GuardOutcome<T> =
-  { kind: "ok"; value: T } | { kind: "blocked"; reason: VerifyOutcome["kind"] }
+  { kind: "ok"; value: T } | { kind: "blocked"; reason: BiometricBlockReason }
 
 export type BiometricGuard = <T>(
   gate: BiometricGate,

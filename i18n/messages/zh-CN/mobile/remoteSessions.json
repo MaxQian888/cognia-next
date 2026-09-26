@@ -2,7 +2,7 @@
   "approval": {
     "allow": "允许一次",
     "allowAlways": "本会话始终允许",
-    "blocked": "批准未完成（{reason}）。",
+    "blocked": "批准未完成。{reason}",
     "deny": "拒绝",
     "description": "宿主 agent 想要运行一个工具。允许后它将在已连接的桌面上执行。",
     "heading": "允许使用 {tool}？",

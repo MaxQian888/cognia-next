@@ -2,7 +2,7 @@
   "autoBackup": "自动备份",
   "autoBackupHint": "在桌面联线时按设定的间隔加密自动备份。",
   "autoBackupInterval": "间隔（天）",
-  "biometricBlocked": "生物识别失败，已取消导出。",
+  "biometricBlocked": "已取消导出。{reason}",
   "description": "把全部本地数据加密导出到设备上。",
   "exportBiometricReason": "通过生物识别验证后导出加密备份。",
   "exportBiometricTitle": "确认导出",

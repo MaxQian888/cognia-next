@@ -1,6 +1,6 @@
 {
   "agentControl": {
-    "blocked": "Agent control not enabled ({reason}).",
+    "blocked": "Agent control not enabled. {reason}",
     "col": "Run agents",
     "description": "Lets this device start and stop external agent processes on this desktop. The spawn policy still limits which programs may run, from which folder, and with which environment — but within those limits the device chooses. Remote control is a separate, lesser grant.",
     "disabledToast": "Agent control disabled for {label}.",
@@ -69,7 +69,7 @@
   },
   "hostAdminCapability": "Host administration",
   "lockedComputerUse": {
-    "blocked": "Locked Use not enabled ({reason}).",
+    "blocked": "Locked Use not enabled. {reason}",
     "col": "Locked Use",
     "description": "Grants this device Locked Use — a short, task-bound unlock lease. Not active yet: the macOS Locked Use system component is not part of this build, so this switch grants nothing until it ships.",
     "disabledToast": "Locked Use disabled for {label}.",
@@ -127,7 +127,7 @@
     "unpinned": "unpinned"
   },
   "pause": {
-    "blocked": "Pause not completed ({reason}).",
+    "blocked": "Pause not completed. {reason}",
     "description": "The device's JWT is added to the deny-list until you resume it.",
     "reason": "Confirm pausing {label}",
     "title": "Pause device"
@@ -205,7 +205,7 @@
     "workspaceHint": "Select a workspace before managing profiles or domains."
   },
   "remoteControl": {
-    "blocked": "Remote control not enabled ({reason}).",
+    "blocked": "Remote control not enabled. {reason}",
     "col": "Remote control",
     "description": "Lets this device drive and steer live agent sessions on this desktop, and approve computer-use prompts. Read-only sync stays available either way.",
     "disabledToast": "Remote control disabled for {label}.",
@@ -215,7 +215,7 @@
     "toggleAria": "Toggle remote control for {label}"
   },
   "remoteTerminal": {
-    "blocked": "Terminal access was not changed ({reason}).",
+    "blocked": "Terminal access was not changed. {reason}",
     "col": "Terminal access",
     "description": "Lets this device view, resume, and control host-owned terminal sessions. This permission is independent from remote control and agent control.",
     "disabledToast": "Terminal access disabled for {label}.",
@@ -228,13 +228,13 @@
     "toggleAria": "Toggle terminal access for {label}"
   },
   "resume": {
-    "blocked": "Resume not completed ({reason}).",
+    "blocked": "Resume not completed. {reason}",
     "description": "The device's JWT is removed from the deny-list and regains access.",
     "reason": "Confirm resuming {label}",
     "title": "Resume device"
   },
   "revoke": {
-    "blocked": "Revoke not completed ({reason}).",
+    "blocked": "Revoke not completed. {reason}",
     "description": "The device loses access immediately.",
     "reason": "Confirm revoking pairing for {label}",
     "successToast": "Device revoked.",
@@ -474,7 +474,7 @@
     "title": "Folders this Host allows"
   },
   "sshFiles": {
-    "blocked": "File transfer was not changed ({reason}).",
+    "blocked": "File transfer was not changed. {reason}",
     "col": "SSH file transfer",
     "description": "Lets this device browse and transfer files over the SSH hosts this machine has saved. It reads and writes those machines as the profile's user, with no folder limit, which is what a shell on them already allows.",
     "disabledToast": "SSH file transfer disabled for {label}.",

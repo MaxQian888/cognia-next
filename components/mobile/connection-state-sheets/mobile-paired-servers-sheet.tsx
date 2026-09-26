@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { DEFAULT_LOCAL_ACCOUNT_ID } from "@/lib/accounts/active-account-id"
@@ -63,6 +64,7 @@ export function MobilePairedServersSheet({ open, onOpenChange }: MobilePairedSer
   const t = useTranslations("mobile.connectionState.switch")
   const router = useRouter()
   const guard = useBiometricGuard()
+  const blockReason = useBiometricBlockReason()
   useBackDismiss(open, () => onOpenChange(false))
   const [hosts, setHosts] = useState<CompanionHostRecord[]>([])
   const [activeHostId, setActiveHostId] = useState<string | null>(null)
@@ -147,7 +149,7 @@ export function MobilePairedServersSheet({ open, onOpenChange }: MobilePairedSer
           })
       )
       if (outcome.kind === "blocked") {
-        if (outcome.reason !== "cancelled") setError(t("biometricFailed", { reason: outcome.reason }))
+        if (outcome.reason !== "cancelled") setError(t("biometricFailed", { reason: blockReason(outcome.reason) }))
         return
       }
       toast.success(t("removed", { name: removeCandidate.label }))

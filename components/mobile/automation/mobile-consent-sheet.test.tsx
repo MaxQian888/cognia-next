@@ -189,6 +189,11 @@ describe("<MobileConsentSheet />", () => {
     render(<MobileConsentSheet />)
     fireEvent.click(screen.getByTestId("mobile-consent-allow"))
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
+    // The reason reads as words, not the guard's `lockout` code.
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      "Approval not completed. Too many attempts. Unlock your phone, then try again."
+    )
+    expect(toastErrorMock.mock.calls[0][0]).not.toContain("lockout")
     expect(respondMock).not.toHaveBeenCalled()
   })
 })

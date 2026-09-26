@@ -40,7 +40,7 @@
   "switch": {
     "active": "Active",
     "addHost": "Add Host",
-    "biometricFailed": "Biometric check failed ({reason}); the Host was not removed.",
+    "biometricFailed": "The Host was not removed. {reason}",
     "cancel": "Cancel",
     "confirmRemove": "Remove Host",
     "daysAgo": "{n}d",
