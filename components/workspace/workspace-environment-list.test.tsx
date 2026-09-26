@@ -49,6 +49,16 @@ jest.mock("@/lib/workspace/open-folder", () => ({
   openPathAsWorkspace: (...args: unknown[]) => openMock(...args),
 }))
 
+// The host's verdict per command. Every case but the gate's own runs with
+// everything allowed, which is what the real gate says on a desktop host.
+type MockVerdict = { available: boolean; reason: string | null }
+const ALLOWED: MockVerdict = { available: true, reason: null }
+let mockDenied: Record<string, string> = {}
+jest.mock("@/hooks/workspace/use-workspace-command-gate", () => ({
+  useWorkspaceCommandGate: () => (command: string) =>
+    mockDenied[command] ? { available: false, reason: mockDenied[command] } : ALLOWED,
+}))
+
 /**
  * Radix portals don't render into jsdom — flatten the row overflow menu.
  *
@@ -723,6 +733,59 @@ describe("WorkspaceEnvironmentList — empty state", () => {
 
     expect(await screen.findByText("emptyTitle")).toBeInTheDocument()
     expect(screen.queryByTestId("workspace-environments-empty-create")).not.toBeInTheDocument()
+  })
+})
+
+describe("WorkspaceEnvironmentList — what this device may not do", () => {
+  afterEach(() => {
+    mockDenied = {}
+  })
+
+  // A disabled button shows no tooltip and a phone has no hover, so the
+  // reason that lived only in `title` never reached a touch reader.
+  it("says why the writes are off once, in text, not only in each tooltip", async () => {
+    mockDenied = { git_worktree_add: "Missing the Remote control permission." }
+    listMock.mockResolvedValue([])
+    render(<WorkspaceEnvironmentList rootDir="/repo" showCreate />)
+
+    expect(await screen.findByTestId("workspace-environments-write-unavailable")).toHaveTextContent(
+      "Missing the Remote control permission."
+    )
+    expect(screen.getByTestId("workspace-environments-empty-create")).toBeDisabled()
+  })
+
+  it("says nothing when every write is allowed", async () => {
+    listMock.mockResolvedValue([])
+    render(<WorkspaceEnvironmentList rootDir="/repo" showCreate />)
+
+    expect(await screen.findByText("emptyTitle")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-environments-write-unavailable")).not.toBeInTheDocument()
+  })
+
+  // A host that cannot list used to fetch anyway, print the transport's own
+  // error and then offer to create a worktree it could not create either.
+  it("does not fetch a list the host cannot give, and says so instead", () => {
+    mockDenied = {
+      task_workspace_environment_list: "This host doesn't offer this.",
+      git_worktree_add: "This host doesn't offer this.",
+    }
+    render(<WorkspaceEnvironmentList rootDir="/repo" showCreate presentation="sheet" />)
+
+    expect(listMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId("workspace-environments-unavailable")).toHaveTextContent(
+      "unavailableTitle"
+    )
+    expect(screen.getByTestId("workspace-environments-unavailable")).toHaveTextContent(
+      "This host doesn't offer this."
+    )
+    expect(screen.queryByText("emptyTitle")).not.toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    // One statement of it, not the list's and the writes' both.
+    expect(screen.queryByTestId("workspace-environments-write-unavailable")).not.toBeInTheDocument()
+    // Nothing is loading, so the refresh neither spins nor offers itself.
+    const refresh = screen.getByRole("button", { name: "refresh" })
+    expect(refresh).toBeDisabled()
+    expect(refresh.querySelector("svg")).not.toHaveClass("animate-spin")
   })
 })
 

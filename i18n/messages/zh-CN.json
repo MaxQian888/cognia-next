@@ -56048,9 +56048,9 @@
       "consentRequiredNoCode": "正在等待宿主设备批准，请在该设备上确认后继续。",
       "unavailable": {
         "incompatible": "宿主版本不兼容。",
-        "offline": "宿主已离线，操作未发送。",
+        "offline": "宿主已离线，请在它重新连接后再试。",
         "queued": "已排队，等待宿主恢复连接。",
-        "readOnly": "该宿主为只读，操作未发送。",
+        "readOnly": "该宿主为只读，无法进行更改。",
         "requiresGrant": "本设备缺少 {grant} 权限，请在设备控制台中授予。",
         "requiresPairing": "请先配对宿主再执行该操作。",
         "requiresUnlock": "请先解锁保险库再执行该操作。",
@@ -56294,6 +56294,7 @@
         "restorable": "可恢复"
       },
       "title": "执行环境",
+      "unavailableTitle": "此处无法查看执行环境",
       "unpin": "取消固定环境"
     },
     "manage": {

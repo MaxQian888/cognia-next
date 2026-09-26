@@ -11,6 +11,7 @@ import {
   FolderMinusIcon,
   FolderOpenIcon,
   GitBranchIcon,
+  LockIcon,
   MoreHorizontalIcon,
   PinIcon,
   PinOffIcon,
@@ -351,7 +352,15 @@ export function WorkspaceEnvironmentList({
   const [deleteBranch, setDeleteBranch] = useState(false)
   const [reloading, setReloading] = useState(false)
 
+  // The read has a gate too. Without it a host that cannot list environments
+  // (a plain browser, an older host) fetched anyway, printed the transport's
+  // own error ("tauri-only command from web mode: …") and then offered to
+  // create a worktree it could not create either.
+  const listVerdict = gate("task_workspace_environment_list")
+  const canList = listVerdict.available
+
   const load = useCallback(async () => {
+    if (!canList) return null
     clearError()
     setReloading(true)
     try {
@@ -365,15 +374,17 @@ export function WorkspaceEnvironmentList({
     } finally {
       setReloading(false)
     }
-  }, [clearError, rootDir, setError])
+  }, [canList, clearError, rootDir, setError])
   /**
    * The refresh buttons spin and refuse while any read is out, the first one
    * included. Clickable during a load, they stacked parallel reads whose
    * answers landed in whatever order the host returned them.
    */
-  const refreshBusy = reloading || rows === null
+  // A host that cannot list has nothing in flight, so nothing spins either.
+  const refreshBusy = canList && (reloading || rows === null)
 
   useEffect(() => {
+    if (!canList) return
     let cancelled = false
     void listWorkspaceEnvironments(rootDir).then(
       (environments) => {
@@ -388,7 +399,7 @@ export function WorkspaceEnvironmentList({
     return () => {
       cancelled = true
     }
-  }, [rootDir, refreshKey, setError])
+  }, [canList, rootDir, refreshKey, setError])
 
   /**
    * Every managed action is `approval: "interactive"`, so from a paired phone
@@ -898,8 +909,23 @@ export function WorkspaceEnvironmentList({
   const showCreateButton = Boolean(showCreate && rootDir) && !emptyOffersCreate
   const showActionRow = showCreateButton || showPrune || presentation === "sheet"
 
+  // One sentence for every write this device may not make. The per-button
+  // `title` carries the same reason, but a phone has no hover and a disabled
+  // button shows no tooltip, so on touch the buttons were grey and mute.
+  const writeVerdict = gate("git_worktree_add")
+
   const toolbar = (
     <div className="flex flex-col gap-2 empty:hidden" data-testid="workspace-environments-toolbar">
+      {canList && !writeVerdict.available && writeVerdict.reason ? (
+        <p
+          role="status"
+          className="flex items-start gap-1.5 text-xs text-muted-foreground"
+          data-testid="workspace-environments-write-unavailable"
+        >
+          <LockIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
+          <span className="min-w-0">{writeVerdict.reason}</span>
+        </p>
+      ) : null}
       {offerSearch || offerBandFilter || showActionRow ? (
         <div className="flex flex-wrap items-center gap-2">
           {offerSearch ? (
@@ -1018,7 +1044,7 @@ export function WorkspaceEnvironmentList({
                   size="icon-sm"
                   variant="ghost"
                   onClick={() => void load()}
-                  disabled={refreshBusy}
+                  disabled={refreshBusy || !canList}
                   aria-label={t("refresh")}
                 >
                   <RefreshCwIcon
@@ -1036,176 +1062,185 @@ export function WorkspaceEnvironmentList({
 
   // ------------------------------------------------------------------- content
 
-  const content =
-    searched === null ? (
-      // `role="status"`: an `aria-label` on a plain div names nothing a screen
-      // reader announces, so the wait was silent.
-      <div className="flex flex-col gap-2" role="status" aria-busy="true" aria-label={t("loading")}>
-        <Skeleton className="h-14 w-full" />
-        <Skeleton className="h-14 w-full" />
-        <Skeleton className="h-14 w-full" />
-      </div>
-    ) : visibleCount === 0 ? (
-      /*
+  const content = !canList ? (
+    <Empty className="border" data-testid="workspace-environments-unavailable">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <LockIcon aria-hidden />
+        </EmptyMedia>
+        <EmptyTitle>{t("unavailableTitle")}</EmptyTitle>
+        <EmptyDescription>{listVerdict.reason}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  ) : searched === null ? (
+    // `role="status"`: an `aria-label` on a plain div names nothing a screen
+    // reader announces, so the wait was silent.
+    <div className="flex flex-col gap-2" role="status" aria-busy="true" aria-label={t("loading")}>
+      <Skeleton className="h-14 w-full" />
+      <Skeleton className="h-14 w-full" />
+      <Skeleton className="h-14 w-full" />
+    </div>
+  ) : visibleCount === 0 ? (
+    /*
         Two different nothings. "This workspace has no environments" is answered
         with the way to make one; "your filter matched none" is answered with
         the way to clear it. One shared empty state told the reader to create a
         worktree when they had ten and had simply mistyped a branch name.
       */
-      <Empty className="border">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            {filtering ? <SearchIcon aria-hidden /> : <BoxesIcon aria-hidden />}
-          </EmptyMedia>
-          <EmptyTitle>{filtering ? t("noMatchesTitle") : t("emptyTitle")}</EmptyTitle>
-          <EmptyDescription>
-            {filtering ? t("noMatchesDescription") : t("emptyDescription")}
-          </EmptyDescription>
-        </EmptyHeader>
-        {filtering ? (
-          <EmptyContent>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={clearFilters}
-              data-testid="workspace-environments-clear-filters"
-            >
-              {t("clearFilters")}
-            </Button>
-          </EmptyContent>
-        ) : showCreate && rootDir ? (
-          <EmptyContent>
-            <Button
-              size="sm"
-              onClick={() => setCreateOpen(true)}
-              data-testid="workspace-environments-empty-create"
-              {...actionProps("git_worktree_add")}
-            >
-              <GitBranchPlusIcon aria-hidden className="size-4" />
-              {t("create")}
-            </Button>
-          </EmptyContent>
-        ) : null}
-      </Empty>
-    ) : compact ? (
-      /* Narrow container: one card per row, same parts, same bands. */
-      <div className="flex flex-col gap-3">
-        {(bands ?? []).map((group) => (
-          <section key={group.band} className="flex flex-col gap-2">
-            <h3
-              className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
-              data-testid={`workspace-environment-band-${group.band}`}
-            >
-              <span aria-hidden className={cn("size-1.5 rounded-full", PULSE_CLASS[group.band])} />
-              {t(`bands.${group.band}`)}
-              <span className="font-normal tabular-nums">{group.rows.length}</span>
-            </h3>
-            <ul className="flex flex-col gap-2">
-              {group.rows.map((row) => (
-                <Surface asChild key={row.environmentId} radius="panel">
-                  <li
-                    data-testid={`workspace-environment-card-${row.environmentId}`}
-                    className="flex flex-col gap-2 border p-3"
-                  >
-                    {/*
+    <Empty className="border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          {filtering ? <SearchIcon aria-hidden /> : <BoxesIcon aria-hidden />}
+        </EmptyMedia>
+        <EmptyTitle>{filtering ? t("noMatchesTitle") : t("emptyTitle")}</EmptyTitle>
+        <EmptyDescription>
+          {filtering ? t("noMatchesDescription") : t("emptyDescription")}
+        </EmptyDescription>
+      </EmptyHeader>
+      {filtering ? (
+        <EmptyContent>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={clearFilters}
+            data-testid="workspace-environments-clear-filters"
+          >
+            {t("clearFilters")}
+          </Button>
+        </EmptyContent>
+      ) : showCreate && rootDir ? (
+        <EmptyContent>
+          <Button
+            size="sm"
+            onClick={() => setCreateOpen(true)}
+            data-testid="workspace-environments-empty-create"
+            {...actionProps("git_worktree_add")}
+          >
+            <GitBranchPlusIcon aria-hidden className="size-4" />
+            {t("create")}
+          </Button>
+        </EmptyContent>
+      ) : null}
+    </Empty>
+  ) : compact ? (
+    /* Narrow container: one card per row, same parts, same bands. */
+    <div className="flex flex-col gap-3">
+      {(bands ?? []).map((group) => (
+        <section key={group.band} className="flex flex-col gap-2">
+          <h3
+            className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+            data-testid={`workspace-environment-band-${group.band}`}
+          >
+            <span aria-hidden className={cn("size-1.5 rounded-full", PULSE_CLASS[group.band])} />
+            {t(`bands.${group.band}`)}
+            <span className="font-normal tabular-nums">{group.rows.length}</span>
+          </h3>
+          <ul className="flex flex-col gap-2">
+            {group.rows.map((row) => (
+              <Surface asChild key={row.environmentId} radius="panel">
+                <li
+                  data-testid={`workspace-environment-card-${row.environmentId}`}
+                  className="flex flex-col gap-2 border p-3"
+                >
+                  {/*
                       Actions ride beside the identity rather than under the
                       whole card. A `justify-end` footer row put the only
                       controls a card has at the far edge of a 340px column,
                       under two lines of metadata nobody was reading on the way
                       to them.
                     */}
-                    <div className="flex items-start gap-2">
-                      <div className="min-w-0 flex-1">{renderIdentity(row)}</div>
-                      {renderActions(row)}
-                    </div>
-                    {/*
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">{renderIdentity(row)}</div>
+                    {renderActions(row)}
+                  </div>
+                  {/*
                       The card has no column headers, so an unlabelled
                       placeholder is noise rather than information: a bare
                       dash beside the ownership badge says nothing the
                       reader can decode. The table keeps its placeholders,
                       because there the header names the column.
                     */}
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      {renderKind(row)}
-                      {presentation === "page" && row.state ? (
-                        <span className="text-xs text-muted-foreground">
-                          {t(`states.${row.state}`)}
-                        </span>
-                      ) : null}
-                      {presentation === "page" && row.base ? (
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {t(`bases.${row.base.kind}`)}
-                        </span>
-                      ) : null}
-                    </div>
-                  </li>
-                </Surface>
-              ))}
-            </ul>
-          </section>
-        ))}
-      </div>
-    ) : (
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t("path")}</TableHead>
-            <TableHead>{t("kind")}</TableHead>
-            {presentation === "page" ? <TableHead>{t("state")}</TableHead> : null}
-            {presentation === "page" ? <TableHead>{t("base")}</TableHead> : null}
-            <TableHead className="w-20 text-right">{t("actions")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {(bands ?? []).map((group) => (
-            <Fragment key={group.band}>
-              {/*
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {renderKind(row)}
+                    {presentation === "page" && row.state ? (
+                      <span className="text-xs text-muted-foreground">
+                        {t(`states.${row.state}`)}
+                      </span>
+                    ) : null}
+                    {presentation === "page" && row.base ? (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {t(`bases.${row.base.kind}`)}
+                      </span>
+                    ) : null}
+                  </div>
+                </li>
+              </Surface>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  ) : (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t("path")}</TableHead>
+          <TableHead>{t("kind")}</TableHead>
+          {presentation === "page" ? <TableHead>{t("state")}</TableHead> : null}
+          {presentation === "page" ? <TableHead>{t("base")}</TableHead> : null}
+          <TableHead className="w-20 text-right">{t("actions")}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {(bands ?? []).map((group) => (
+          <Fragment key={group.band}>
+            {/*
                 A spanning header row rather than one table per band, so
                 every band keeps the same column widths. Three narrow
                 tables stacked would make the same path column three
                 different widths down the page.
               */}
-              <TableRow
-                className="hover:bg-transparent"
-                data-testid={`workspace-environment-band-${group.band}`}
+            <TableRow
+              className="hover:bg-transparent"
+              data-testid={`workspace-environment-band-${group.band}`}
+            >
+              <TableCell
+                colSpan={presentation === "page" ? 5 : 3}
+                className="bg-muted/40 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
               >
-                <TableCell
-                  colSpan={presentation === "page" ? 5 : 3}
-                  className="bg-muted/40 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <span
-                      aria-hidden
-                      className={cn("size-1.5 rounded-full", PULSE_CLASS[group.band])}
-                    />
-                    {t(`bands.${group.band}`)}
-                    <span className="font-normal tabular-nums">{group.rows.length}</span>
-                  </span>
-                </TableCell>
+                <span className="flex items-center gap-1.5">
+                  <span
+                    aria-hidden
+                    className={cn("size-1.5 rounded-full", PULSE_CLASS[group.band])}
+                  />
+                  {t(`bands.${group.band}`)}
+                  <span className="font-normal tabular-nums">{group.rows.length}</span>
+                </span>
+              </TableCell>
+            </TableRow>
+            {group.rows.map((row) => (
+              <TableRow
+                key={row.environmentId}
+                data-testid={`workspace-environment-${row.environmentId}`}
+              >
+                <TableCell className="max-w-80">{renderIdentity(row)}</TableCell>
+                <TableCell>{renderKind(row)}</TableCell>
+                {presentation === "page" ? (
+                  <TableCell>{row.state ? t(`states.${row.state}`) : t("stateNone")}</TableCell>
+                ) : null}
+                {presentation === "page" ? (
+                  <TableCell className="font-mono text-xs">
+                    {row.base ? t(`bases.${row.base.kind}`) : t("baseNone")}
+                  </TableCell>
+                ) : null}
+                <TableCell>{renderActions(row)}</TableCell>
               </TableRow>
-              {group.rows.map((row) => (
-                <TableRow
-                  key={row.environmentId}
-                  data-testid={`workspace-environment-${row.environmentId}`}
-                >
-                  <TableCell className="max-w-80">{renderIdentity(row)}</TableCell>
-                  <TableCell>{renderKind(row)}</TableCell>
-                  {presentation === "page" ? (
-                    <TableCell>{row.state ? t(`states.${row.state}`) : t("stateNone")}</TableCell>
-                  ) : null}
-                  {presentation === "page" ? (
-                    <TableCell className="font-mono text-xs">
-                      {row.base ? t(`bases.${row.base.kind}`) : t("baseNone")}
-                    </TableCell>
-                  ) : null}
-                  <TableCell>{renderActions(row)}</TableCell>
-                </TableRow>
-              ))}
-            </Fragment>
-          ))}
-        </TableBody>
-      </Table>
-    )
+            ))}
+          </Fragment>
+        ))}
+      </TableBody>
+    </Table>
+  )
 
   const body = (
     <div
@@ -1229,7 +1264,7 @@ export function WorkspaceEnvironmentList({
         </Surface>
       ) : null}
 
-      {error ? (
+      {error && canList ? (
         <p className="text-sm text-destructive" role="alert">
           {t("loadError", { error })}
         </p>
@@ -1381,7 +1416,7 @@ export function WorkspaceEnvironmentList({
                 variant="ghost"
                 className="-my-1 size-6"
                 onClick={() => void load()}
-                disabled={refreshBusy}
+                disabled={refreshBusy || !canList}
                 aria-label={t("refresh")}
               >
                 <RefreshCwIcon
