@@ -1,10 +1,10 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import test from "node:test"
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import type { TestContext } from "node:test"
 import { build } from "esbuild"
 
 const entry = fileURLToPath(new URL("./service-loader.ts", import.meta.url))
@@ -27,8 +27,18 @@ exports.createLspInstaller = () => ({
 // Exercise relocation with the same ESM bundling that collapses import.meta.url,
 // using a temporary package rather than rebuilding shared acceptance artifacts.
 async function fixture(
-  t,
-  { bundled = true, flat = false, serviceSource = service, installerSource = installer } = {}
+  t: TestContext,
+  {
+    bundled = true,
+    flat = false,
+    serviceSource = service,
+    installerSource = installer,
+  }: {
+    bundled?: boolean
+    flat?: boolean
+    serviceSource?: string | null
+    installerSource?: string | null
+  } = {}
 ) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "cognia-lsp-loader-"))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
@@ -47,10 +57,10 @@ async function fixture(
       format: "esm",
       write: false,
     })
-    await fs.writeFile(output, result.outputFiles[0].text)
+    await fs.writeFile(output, result.outputFiles[0]!.text)
   } else {
-    const real = (specifier) => JSON.stringify(new URL(specifier, import.meta.url).href)
-    const rewrite = (text, from, to) => {
+    const real = (specifier: string) => JSON.stringify(new URL(specifier, import.meta.url).href)
+    const rewrite = (text: string, from: string, to: string) => {
       assert.ok(text.includes(from), `fixture: ${from} is not imported by service-loader.ts`)
       return text.replace(from, to)
     }
@@ -87,7 +97,7 @@ async function fixture(
   await fs.writeFile(path.join(root, "tsconfig.json"), "{}")
   const file = path.join(root, "index.ts")
   await fs.writeFile(file, "const answer = 42")
-  const loader = await import(pathToFileURL(output).href)
+  const loader = (await import(pathToFileURL(output).href)) as typeof import("./service-loader.ts")
   const options = {
     cwd: root,
     servers: [
@@ -124,6 +134,7 @@ test("source layout keeps cached host loading, custom binary resolution and push
     ...options,
     ensureCommand: () => "/custom/server",
   })
+  assert.ok(resolver)
   t.after(() => resolver.dispose())
   assert.deepEqual(await resolver.request(file, "textDocument/hover"), {
     contents: "hover from /custom/server",
@@ -146,8 +157,12 @@ test("a flat loader loads adjacent CommonJS installer default exports", async (t
       ) + "}",
   })
   const resolver = await loader.createSessionLspResolver(options)
+  assert.ok(resolver)
   t.after(() => resolver.dispose())
-  assert.match((await resolver.request(file, "textDocument/hover")).contents, /managed/)
+  assert.match(
+    ((await resolver.request(file, "textDocument/hover")) as { contents: string }).contents,
+    /managed/
+  )
 })
 
 test("a host that throws a non-Error still reports its startup cause", async (t) => {
@@ -155,15 +170,15 @@ test("a host that throws a non-Error still reports its startup cause", async (t)
     bundled: false,
     serviceSource: 'throw "unsupported host runtime"',
   })
-  const warnings = []
+  const warnings: unknown[][] = []
   assert.equal(
     await loader.createSessionLspResolver({
       ...options,
-      logger: { warn: (...args) => warnings.push(args) },
+      logger: { warn: (...args: unknown[]) => warnings.push(args) },
     }),
     null
   )
-  assert.equal(warnings[0][1].err, "unsupported host runtime")
+  assert.equal((warnings[0]?.[1] as { err?: unknown } | undefined)?.err, "unsupported host runtime")
 })
 
 for (const [label, serviceSource] of [
@@ -172,7 +187,7 @@ for (const [label, serviceSource] of [
 ]) {
   test(`${label} compiled host reports unavailability without crashing the session`, async (t) => {
     const { loader, options } = await fixture(t, { bundled: false, serviceSource })
-    const warnings = []
+    const warnings: unknown[][] = []
     assert.equal(
       await loader.createSessionLspResolver({
         ...options,
@@ -180,9 +195,9 @@ for (const [label, serviceSource] of [
       }),
       null
     )
-    assert.match(warnings[0][0], /LSP host unavailable/)
+    assert.match(String(warnings[0]?.[0]), /LSP host unavailable/)
     assert.match(
-      warnings[0][1].err,
+      String((warnings[0]?.[1] as { err?: unknown } | undefined)?.err),
       label === "missing" ? /lsp-service.js/ : /LspService not found/
     )
   })
@@ -198,8 +213,12 @@ for (const [label, serviceSource] of [
   test(`loads a CommonJS ${label} host`, async (t) => {
     const { loader, options, file } = await fixture(t, { bundled: false, serviceSource })
     const resolver = await loader.createSessionLspResolver(options)
+    assert.ok(resolver)
     t.after(() => resolver.dispose())
-    assert.match((await resolver.request(file, "textDocument/hover")).contents, /managed/)
+    assert.match(
+      ((await resolver.request(file, "textDocument/hover")) as { contents: string }).contents,
+      /managed/
+    )
   })
 }
 
@@ -209,8 +228,9 @@ for (const [label, installerSource] of [
 ]) {
   test(`${label} installer preserves the resolver's explicit binary fallback`, async (t) => {
     const { loader, options, file } = await fixture(t, { bundled: false, installerSource })
-    options.servers[0].command = process.execPath
+    options.servers[0]!.command = process.execPath
     const resolver = await loader.createSessionLspResolver(options)
+    assert.ok(resolver)
     t.after(() => resolver.dispose())
     assert.deepEqual(await resolver.request(file, "textDocument/hover"), {
       contents: "hover from " + process.execPath,
@@ -224,11 +244,12 @@ test("installer failure is observable and does not start an unavailable server",
     installerSource:
       'exports.createLspInstaller = () => ({ resolveBinary: async () => ({ status: "missing", error: "registry offline", resolvedPath: null }) })',
   })
-  const warnings = []
+  const warnings: string[] = []
   const resolver = await loader.createSessionLspResolver({
     ...options,
-    logger: { warn: (message) => warnings.push(message) },
+    logger: { warn: (message: string) => warnings.push(message) },
   })
+  assert.ok(resolver)
   t.after(() => resolver.dispose())
   assert.deepEqual(await resolver.touchFile(file), [])
   assert.ok(warnings.some((message) => message.includes("registry offline")))
@@ -241,6 +262,7 @@ test("a slow installer cannot hold the agent turn beyond its budget", async (t) 
       "exports.createLspInstaller = () => ({ resolveBinary: () => new Promise(() => {}) })",
   })
   const resolver = await loader.createSessionLspResolver(options)
+  assert.ok(resolver)
   t.after(() => resolver.dispose())
   const touch = resolver.touchFile(file)
   await new Promise(setImmediate)
@@ -257,8 +279,12 @@ test("managed installation stays disabled when there is no installation director
     } })`,
   })
   const resolver = await loader.createSessionLspResolver({ ...options, allowInstall: true })
+  assert.ok(resolver)
   t.after(() => resolver.dispose())
-  assert.match((await resolver.request(file, "textDocument/hover")).contents, /existing/)
+  assert.match(
+    ((await resolver.request(file, "textDocument/hover")) as { contents: string }).contents,
+    /existing/
+  )
 })
 
 test("sandboxed installer rejects npm before execution when network permission is absent", async (t) => {
@@ -271,14 +297,15 @@ test("sandboxed installer rejects npm before execution when network permission i
       throw new Error("npm unexpectedly allowed")
     } })`,
   })
-  const warnings = []
+  const warnings: string[] = []
   const resolver = await loader.createSessionLspResolver({
     ...options,
     installDir: options.cwd,
     allowInstall: true,
     builtinProcessSandbox: { network: false, writableRoots: [options.cwd] },
-    logger: { warn: (message) => warnings.push(message) },
+    logger: { warn: (message: string) => warnings.push(message) },
   })
+  assert.ok(resolver)
   t.after(() => resolver.dispose())
   assert.deepEqual(await resolver.touchFile(file), [])
   assert.ok(

@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import fs from "node:fs"
@@ -6,6 +5,7 @@ import os from "node:os"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { createLspResolver } from "./resolver.ts"
+import type { LspServiceLike } from "./resolver.ts"
 
 // The resolved config list the renderer hands the sidecar via
 // `sendOptions.lsp.servers`. The resolver no longer owns a hard-coded
@@ -24,26 +24,49 @@ const TS_SERVERS = [
   },
 ]
 
+/** What the resolver passes to `LspService.start`. */
+interface StartParams {
+  ownerId: string
+  serverId: string
+  command: string
+  args: string[]
+  env?: Record<string, string | undefined>
+  inheritEnv?: boolean
+  cwd: string
+  settings?: unknown
+  [field: string]: unknown
+}
+
+type DocParams = Parameters<LspServiceLike["didOpen"]>[0]
+type RequestParams = Parameters<LspServiceLike["request"]>[0]
+
 /** Fake LspService that records calls and never spawns a process. */
 function makeFakeService() {
-  const calls = { start: [], didOpen: [], didChange: [], request: [], stop: [] }
+  const calls = {
+    start: [] as StartParams[],
+    didOpen: [] as DocParams[],
+    didChange: [] as DocParams[],
+    request: [] as RequestParams[],
+    stop: [] as { ownerId: string; serverId: string }[],
+  }
   return {
     calls,
-    async start(p) {
-      calls.start.push(p)
-      return { state: "running", key: `${p.ownerId}:${p.serverId}` }
+    async start(p: Record<string, unknown>) {
+      const params = p as StartParams
+      calls.start.push(params)
+      return { state: "running", key: `${params.ownerId}:${params.serverId}` }
     },
-    didOpen(p) {
+    didOpen(p: DocParams) {
       calls.didOpen.push(p)
     },
-    didChange(p) {
+    didChange(p: DocParams) {
       calls.didChange.push(p)
     },
-    async request(p) {
+    async request(p: RequestParams) {
       calls.request.push(p)
       return { ok: true, method: p.method, uri: p.payload.uri }
     },
-    async stop(ownerId, serverId) {
+    async stop(ownerId: string, serverId: string) {
       calls.stop.push({ ownerId, serverId })
       return { removed: true }
     },
@@ -73,7 +96,7 @@ test("touchFile starts a server once and didOpens, then didChanges", async () =>
   assert.equal(service.calls.start.length, 1)
   assert.equal(service.calls.didOpen.length, 1)
   assert.equal(service.calls.didChange.length, 0)
-  assert.equal(service.calls.start[0].cwd, root)
+  assert.equal(service.calls.start[0]?.cwd, root)
 
   await resolver.touchFile(file, "const x: number = 2")
   assert.equal(service.calls.start.length, 1) // not restarted
@@ -122,7 +145,7 @@ test("ingestDiagnostics + getDiagnostics returns cached diagnostics", async () =
   resolver.ingestDiagnostics({ uri, diagnostics: [{ message: "boom", severity: 1 }] })
   const diags = await resolver.getDiagnostics(file)
   assert.equal(diags.length, 1)
-  assert.equal(diags[0].message, "boom")
+  assert.equal((diags[0] as { message?: string }).message, "boom")
 })
 
 test("request routes to service.request with the file uri", async () => {
@@ -135,10 +158,11 @@ test("request routes to service.request with the file uri", async () => {
     ensureCommand: (c) => c,
   })
   const res = await resolver.request(file, "definition", { position: { line: 0, character: 6 } })
-  assert.equal(res.method, "definition")
+  assert.equal((res as { method?: string }).method, "definition")
   assert.equal(service.calls.request.length, 1)
-  assert.equal(service.calls.request[0].payload.uri, pathToFileURL(file).href)
-  assert.equal(service.calls.request[0].payload.position.line, 0)
+  const payload = service.calls.request[0]?.payload
+  assert.equal(payload?.uri, pathToFileURL(file).href)
+  assert.equal((payload?.position as { line?: number } | undefined)?.line, 0)
 })
 
 test("request throws when no server available", async () => {
@@ -166,7 +190,7 @@ test("per-server settings are forwarded to service.start", async () => {
   })
   await resolver.touchFile(file)
   assert.equal(service.calls.start.length, 1)
-  assert.deepEqual(service.calls.start[0].settings, {
+  assert.deepEqual(service.calls.start[0]?.settings, {
     typescript: { preferences: { importModuleSpecifier: "relative" } },
   })
 })
@@ -219,6 +243,7 @@ test("project LSP commands are sandboxed with a clean environment", async () => 
   try {
     await resolver.touchFile(file)
     const start = service.calls.start[0]
+    assert.ok(start)
     assert.equal(start.command, process.execPath)
     assert.deepEqual(start.args.slice(-3), ["--", "/project/custom-server", "--stdio"])
     assert.equal(start.inheritEnv, false)

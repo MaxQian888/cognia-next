@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Format LSP diagnostics into a compact text block for the agent.
 //
 // The renderer's `lsp-protocol-adapter.ts` converts diagnostics into
@@ -10,22 +9,37 @@
 //     12:5 ERROR Cannot find name 'bar'. [ts]
 //     20:1 WARN 'baz' is declared but never read. [ts]
 
+/** An LSP diagnostic, as far as the report reads it. */
+export interface LspDiagnostic {
+  range?: { start?: { line?: number; character?: number } }
+  severity?: number
+  message?: string
+  source?: string
+}
+
 /** LSP DiagnosticSeverity (1..4) → label. */
-const SEVERITY_LABEL = { 1: "ERROR", 2: "WARN", 3: "INFO", 4: "HINT" }
+const SEVERITY_LABEL: Readonly<Record<number, string>> = {
+  1: "ERROR",
+  2: "WARN",
+  3: "INFO",
+  4: "HINT",
+}
 
 /**
- * @param {string} filePath  Absolute or display path, used as the header.
- * @param {Array<{ range?: { start?: { line?: number, character?: number } }, severity?: number, message?: string, source?: string }>} diagnostics
- * @param {{ minSeverity?: number, includeHeader?: boolean }} [opts]
- *        minSeverity: highest numeric severity to include (default 2 =
- *        errors + warnings; LSP severity is ascending in badness so
- *        `<= minSeverity` keeps the more severe items).
- * @returns {string | null}  Formatted block, or null when nothing matches.
+ * The diagnostics block for one file, or null when nothing matches.
+ * `filePath` is the header (absolute or display path). `minSeverity` is the
+ * highest numeric severity to include (default 2 = errors + warnings; LSP
+ * severity is ascending in badness so `<= minSeverity` keeps the more severe
+ * items).
  */
-export function formatDiagnostics(filePath, diagnostics, opts = {}) {
+export function formatDiagnostics(
+  filePath: string,
+  diagnostics: unknown,
+  opts: { minSeverity?: number; includeHeader?: boolean } = {}
+): string | null {
   const minSeverity = opts.minSeverity ?? 2
   const includeHeader = opts.includeHeader ?? true
-  const items = (Array.isArray(diagnostics) ? diagnostics : []).filter(
+  const items = (Array.isArray(diagnostics) ? (diagnostics as LspDiagnostic[]) : []).filter(
     (d) => (d.severity ?? 1) <= minSeverity
   )
   if (items.length === 0) return null
@@ -42,14 +56,9 @@ export function formatDiagnostics(filePath, diagnostics, opts = {}) {
   return includeHeader ? `${filePath}\n${lines.join("\n")}` : lines.join("\n")
 }
 
-/**
- * Count diagnostics at or above (more severe than) `minSeverity`.
- * @param {Array<{ severity?: number }>} diagnostics
- * @param {number} [minSeverity]
- * @returns {number}
- */
-export function countDiagnostics(diagnostics, minSeverity = 2) {
-  return (Array.isArray(diagnostics) ? diagnostics : []).filter(
+/** Count diagnostics at or above (more severe than) `minSeverity`. */
+export function countDiagnostics(diagnostics: unknown, minSeverity = 2): number {
+  return (Array.isArray(diagnostics) ? (diagnostics as LspDiagnostic[]) : []).filter(
     (d) => (d.severity ?? 1) <= minSeverity
   ).length
 }

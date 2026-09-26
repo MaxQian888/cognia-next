@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import fs from "node:fs"
@@ -88,6 +87,7 @@ test("buildServers maps config into ServerInfo with command + settings", () => {
     ["typescript", "rust-analyzer", "eslint"]
   )
   const ra = built.find((s) => s.id === "rust-analyzer")
+  assert.ok(ra)
   const spawn = ra.resolveCommand("/tmp/proj", { cwd: "/tmp/proj" })
   assert.equal(spawn.command, "rust-analyzer")
   assert.deepEqual(ra.settings, { "rust-analyzer": { cargo: { features: "all" } } })
@@ -108,6 +108,7 @@ test("buildServers drops entries with no id or no command", () => {
 test("markerless server anchors its root at cwd", () => {
   const built = buildServers(SAMPLE_CONFIG)
   const eslint = built.find((s) => s.id === "eslint")
+  assert.ok(eslint)
   assert.equal(eslint.root("/proj/sub/a.eslintrc", { cwd: "/proj" }), "/proj")
 })
 

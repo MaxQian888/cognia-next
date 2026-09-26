@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Agent-side LSP server registry helpers.
 //
 // The server LIST is no longer hard-coded here. The renderer resolves the
@@ -18,18 +17,86 @@
 import fs from "node:fs"
 import path from "node:path"
 
+/** npm-provisioning metadata for the install ladder. */
+export interface LspInstallSpec {
+  npmPackage: string
+  version?: string
+}
+
+/**
+ * One server as the renderer resolved it into `sendOptions.lsp.servers`: the
+ * fields the agent runtime reads from `LspServerConfig`
+ * (packages/agent-config-types/src/lsp-config.ts). A root-side contract test
+ * keeps that type assignable to this one.
+ */
+export interface LspServerEntry {
+  id: string
+  command: string
+  args?: string[]
+  env?: Record<string, string>
+  extensions?: string[]
+  filenames?: string[]
+  rootMarkers?: string[]
+  excludeRootMarkers?: string[]
+  initializationOptions?: unknown
+  settings?: Record<string, unknown>
+  workspaceFolderRequired?: boolean
+  install?: LspInstallSpec
+  startupTimeout?: number
+}
+
+/**
+ * `sendOptions.lsp`, as the renderer resolved it (`LspSendOptions` in the
+ * same package file). `servers` is read through `buildServers`.
+ */
+export interface LspSendOptions {
+  enabled?: boolean
+  servers?: unknown
+  installDir?: string
+  autoInstall?: boolean
+}
+
+export interface RootContext {
+  cwd?: string | undefined
+}
+
+/** The workspace root for a file, or undefined when this server does not apply. */
+export type RootResolver = (filePath: string, ctx?: RootContext) => string | undefined
+
+/** What to spawn for one root. */
+export interface ServerCommand {
+  command: string
+  args?: string[]
+  env?: Record<string, string> | undefined
+  initializationOptions?: unknown
+}
+
+/** A runnable server built from one config entry. */
+export interface ServerInfo {
+  id: string
+  /** Lower-cased, with leading dot. */
+  extensions: string[]
+  filenames: string[]
+  root: RootResolver
+  resolveCommand: (root: string, ctx?: RootContext) => ServerCommand
+  settings?: Record<string, unknown> | undefined
+  workspaceFolderRequired?: boolean | undefined
+  install?: LspInstallSpec | undefined
+  /** ms to wait for `initialize` before treating the spawn as failed. */
+  startupTimeout?: number | undefined
+}
+
 /**
  * Build a root resolver that walks up from a file's directory toward the
  * agent cwd (inclusive). Returns the first directory containing one of
  * `markers`. If a directory contains one of `excludeMarkers`, this server
  * is considered inapplicable for that tree and the resolver returns
  * `undefined` (a higher-priority toolchain owns it).
- *
- * @param {string[]} markers
- * @param {{ excludeMarkers?: string[] }} [opts]
- * @returns {(filePath: string, ctx?: { cwd?: string }) => string | undefined}
  */
-export function nearestRoot(markers, opts = {}) {
+export function nearestRoot(
+  markers: readonly string[],
+  opts: { excludeMarkers?: readonly string[] } = {}
+): RootResolver {
   const excludeMarkers = opts.excludeMarkers ?? []
   return (filePath, ctx = {}) => {
     const resolved = path.resolve(filePath)
@@ -51,7 +118,7 @@ export function nearestRoot(markers, opts = {}) {
   }
 }
 
-function existsIn(dir, marker) {
+function existsIn(dir: string, marker: string): boolean {
   try {
     return fs.existsSync(path.join(dir, marker))
   } catch {
@@ -60,7 +127,7 @@ function existsIn(dir, marker) {
 }
 
 /** True when `ancestor` is `dir` or a parent directory of `dir`. */
-function isAncestor(ancestor, dir) {
+function isAncestor(ancestor: string, dir: string): boolean {
   const a = path.resolve(ancestor)
   const d = path.resolve(dir)
   if (a === d) return true
@@ -69,28 +136,12 @@ function isAncestor(ancestor, dir) {
 }
 
 /**
- * @typedef {Object} ServerInfo
- * @property {string} id
- * @property {string[]} extensions  lower-cased, with leading dot
- * @property {string[]} filenames
- * @property {(filePath: string, ctx?: { cwd?: string }) => string | undefined} root
- * @property {(root: string, ctx?: { cwd?: string }) => { command: string, args?: string[], env?: Record<string,string>, initializationOptions?: unknown }} resolveCommand
- * @property {Record<string, unknown>=} settings
- * @property {boolean=} workspaceFolderRequired
- * @property {{ npmPackage: string, version?: string }=} install  npm-provisioning metadata for the install ladder
- * @property {number=} startupTimeout  ms to wait for `initialize` before treating the spawn as failed
- */
-
-/**
  * Root resolver for a config entry. With `rootMarkers`, walks up looking for
  * them (honouring `excludeRootMarkers`). Without markers, the server is
  * workspace-agnostic, so it anchors at the agent cwd (falling back to the
  * file's own directory when no cwd is supplied).
- *
- * @param {object} cfg
- * @returns {(filePath: string, ctx?: { cwd?: string }) => string | undefined}
  */
-function rootResolverFor(cfg) {
+function rootResolverFor(cfg: LspServerEntry): RootResolver {
   const markers = cfg.rootMarkers ?? []
   if (markers.length === 0) {
     return (filePath, ctx = {}) => ctx.cwd ?? path.dirname(path.resolve(filePath))
@@ -102,14 +153,16 @@ function rootResolverFor(cfg) {
  * Turn the resolved config list (plain objects from `sendOptions.lsp.servers`)
  * into runnable `ServerInfo`s. Entries with no `command` or no `id` are
  * dropped.
- *
- * @param {Array<object>} configList
- * @returns {ServerInfo[]}
  */
-export function buildServers(configList) {
-  const list = Array.isArray(configList) ? configList : []
+export function buildServers(configList: unknown): ServerInfo[] {
+  const list: readonly (Partial<LspServerEntry> | null | undefined)[] = Array.isArray(configList)
+    ? configList
+    : []
   return list
-    .filter((cfg) => cfg && cfg.id && typeof cfg.command === "string" && cfg.command.length > 0)
+    .filter(
+      (cfg): cfg is LspServerEntry =>
+        !!cfg && !!cfg.id && typeof cfg.command === "string" && cfg.command.length > 0
+    )
     .map((cfg) => ({
       id: cfg.id,
       extensions: (cfg.extensions ?? []).map((e) => String(e).toLowerCase()),
@@ -132,12 +185,11 @@ export function buildServers(configList) {
  * Candidate servers for a file, by extension (or exact filename). An
  * extension may match several servers (the resolver then filters by root
  * resolution).
- *
- * @param {string} filePath
- * @param {ServerInfo[]} servers  the built server list
- * @returns {ServerInfo[]}
  */
-export function serversForFile(filePath, servers) {
+export function serversForFile(
+  filePath: string,
+  servers: readonly ServerInfo[] | null | undefined
+): ServerInfo[] {
   const list = Array.isArray(servers) ? servers : []
   const ext = path.extname(filePath).toLowerCase()
   const base = path.basename(filePath)

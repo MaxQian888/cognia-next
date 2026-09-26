@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Lazily import the COMPILED LspService from the vscode-ext-host sidecar
 // and wire a per-agent-session resolver to it.
 //
@@ -14,12 +13,55 @@
 
 import path from "node:path"
 import { createLspResolver } from "./resolver.ts"
+import type {
+  EnsureCommand,
+  LspLogger,
+  LspResolver,
+  LspServiceLike,
+  PublishDiagnosticsParams,
+} from "./resolver.ts"
 import {
   execFileAsync,
   sandboxedProcessTarget,
   sandboxedProcessEnv,
 } from "../../platform/process/exec.ts"
+import type { ProcessSandboxScope } from "../../platform/process/exec.ts"
 import { sidecarPath } from "../../platform/sidecar-paths.ts"
+
+/** The compiled `LspService` class: notifications flow into `sink`. */
+type LspServiceCtor = new (
+  sink: (method: string, params: unknown) => void,
+  logger: LspLogger
+) => LspServiceLike
+
+/** The compiled installer's npm-first binary ladder. */
+interface LspInstaller {
+  resolveBinary(request: {
+    command: string
+    npmPackage?: string | undefined
+    version?: string | undefined
+    projectRoot?: string | undefined
+    installDir?: string | undefined
+    allowInstall: boolean
+  }): Promise<{ status: string; resolvedPath: string | null; error?: string }>
+}
+
+type CreateLspInstaller = (options: {
+  runNpm?: (args: string[], runOptions: { cwd: string; timeoutMs?: number }) => Promise<void>
+}) => LspInstaller
+
+/** A sandbox scope that must name its writable roots (the installer widens them). */
+type InstallSandbox = ProcessSandboxScope & { writableRoots: readonly string[] }
+
+export interface SessionLspOptions {
+  cwd: string
+  servers?: unknown
+  installDir?: string | undefined
+  allowInstall?: boolean
+  logger?: LspLogger | undefined
+  ensureCommand?: EnsureCommand | undefined
+  builtinProcessSandbox?: InstallSandbox | undefined
+}
 
 // The extension host sits beside the sidecar root in the source tree, and
 // beside the bundle when a bundler flattened this module into it.
@@ -35,24 +77,27 @@ const LSP_INSTALLER_PATH = path.join(LSP_HOST_DIR, "dist/lsp-installer.js")
  */
 const ENSURE_COMMAND_TURN_BUDGET_MS = 30_000
 
-let lspServiceCtorPromise = null
+let lspServiceCtorPromise: Promise<LspServiceCtor> | null = null
 
 /** Dynamically import the compiled `LspService` constructor (cached). */
-export async function loadLspServiceCtor() {
+export async function loadLspServiceCtor(): Promise<LspServiceCtor> {
   if (!lspServiceCtorPromise) {
     lspServiceCtorPromise = (async () => {
-      const mod = await import(pathToImportUrl(LSP_SERVICE_PATH))
+      const mod = (await import(pathToImportUrl(LSP_SERVICE_PATH))) as {
+        LspService?: unknown
+        default?: { LspService?: unknown } | undefined
+      }
       const Ctor = mod.LspService ?? mod.default?.LspService ?? mod.default
       if (typeof Ctor !== "function") {
         throw new Error("LspService not found in compiled vscode-ext-host bundle")
       }
-      return Ctor
+      return Ctor as LspServiceCtor
     })()
   }
   return lspServiceCtorPromise
 }
 
-function pathToImportUrl(p) {
+function pathToImportUrl(p: string): string {
   // On Windows a bare path import must be a file:// URL.
   return process.platform === "win32" ? `file://${p.replace(/\\/g, "/")}` : p
 }
@@ -62,24 +107,26 @@ function pathToImportUrl(p) {
  * project node_modules/.bin → managed dir → PATH → npm install). Returns
  * `null` when the compiled installer is unavailable so the resolver falls
  * back to its built-in PATH probe.
- *
- * @param {{ installDir?: string, allowInstall?: boolean, logger?: object }} opts
  */
-async function makeInstallerEnsureCommand(opts) {
-  let installer
+async function makeInstallerEnsureCommand(opts: SessionLspOptions): Promise<EnsureCommand | null> {
+  let installer: LspInstaller
   try {
-    const mod = await import(pathToImportUrl(LSP_INSTALLER_PATH))
+    const mod = (await import(pathToImportUrl(LSP_INSTALLER_PATH))) as {
+      createLspInstaller?: unknown
+      default?: { createLspInstaller?: unknown } | undefined
+    }
     const createLspInstaller = mod.createLspInstaller ?? mod.default?.createLspInstaller
     if (typeof createLspInstaller !== "function") return null
-    installer = createLspInstaller(
-      opts.builtinProcessSandbox
+    const sandbox = opts.builtinProcessSandbox
+    installer = (createLspInstaller as CreateLspInstaller)(
+      sandbox
         ? {
             runNpm: async (args, runOptions) => {
-              if (opts.builtinProcessSandbox.network !== true)
+              if (sandbox.network !== true)
                 throw new Error("LSP installation requires network permission")
               const scope = {
-                ...opts.builtinProcessSandbox,
-                writableRoots: [...opts.builtinProcessSandbox.writableRoots, opts.installDir],
+                ...sandbox,
+                writableRoots: [...sandbox.writableRoots, opts.installDir as string],
               }
               const target = sandboxedProcessTarget("npm", args, runOptions.cwd, scope)
               await execFileAsync(target.command, target.args, {
@@ -94,7 +141,7 @@ async function makeInstallerEnsureCommand(opts) {
   } catch {
     return null
   }
-  return async (command, ctx = {}) => {
+  return async (command, ctx) => {
     const ladder = installer
       .resolveBinary({
         command,
@@ -111,7 +158,7 @@ async function makeInstallerEnsureCommand(opts) {
         return res.resolvedPath
       })
     // Never let a slow install hold an agent turn hostage.
-    const budget = new Promise((resolve) =>
+    const budget = new Promise<null>((resolve) =>
       setTimeout(() => resolve(null), ENSURE_COMMAND_TURN_BUDGET_MS)
     )
     return Promise.race([ladder, budget])
@@ -122,12 +169,11 @@ async function makeInstallerEnsureCommand(opts) {
  * Create a resolver backed by a real per-session LspService. Returns
  * `null` when the LSP host can't be loaded (e.g. dist not built / mobile)
  * so callers can no-op gracefully.
- *
- * @param {{ cwd: string, servers?: Array<object>, installDir?: string, allowInstall?: boolean, logger?: object, ensureCommand?: Function }} opts
- * @returns {Promise<ReturnType<typeof createLspResolver> | null>}
  */
-export async function createSessionLspResolver(opts) {
-  let LspService
+export async function createSessionLspResolver(
+  opts: SessionLspOptions
+): Promise<LspResolver | null> {
+  let LspService: LspServiceCtor
   try {
     LspService = await loadLspServiceCtor()
   } catch (err) {
@@ -138,9 +184,10 @@ export async function createSessionLspResolver(opts) {
   }
 
   // Forward `lsp:publishDiagnostics` notifications into the resolver cache.
-  let resolverRef = null
+  let resolverRef: LspResolver | null = null
   const service = new LspService((method, params) => {
-    if (method === "lsp:publishDiagnostics") resolverRef?.ingestDiagnostics(params)
+    if (method === "lsp:publishDiagnostics")
+      resolverRef?.ingestDiagnostics(params as PublishDiagnosticsParams)
   }, opts.logger ?? {})
 
   const ensureCommand = opts.ensureCommand ?? (await makeInstallerEnsureCommand(opts)) ?? undefined

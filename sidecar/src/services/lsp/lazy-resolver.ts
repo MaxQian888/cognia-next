@@ -1,4 +1,3 @@
-// @ts-nocheck -- typed in the next commit; this one keeps the rename detectable.
 // Shared lazy LSP resolver construction for both dispatch paths.
 //
 // Lifted from anthropic.mjs so the ai-sdk path gets the identical lazy-proxy
@@ -8,27 +7,40 @@
 // to tear down any servers the resolver started.
 
 import { createSessionLspResolver } from "./service-loader.ts"
+import type { SessionLspOptions } from "./service-loader.ts"
+import type { LspResolver } from "./resolver.ts"
+import type { LspSendOptions } from "./servers.ts"
 
-/**
- * @param {{ sendOptions: Record<string, any>, log: (level: string, msg: string) => void }} params
- * @returns {{
- *   lspEnabled: boolean,
- *   lspResolver: { request: Function, getDiagnostics: Function } | null,
- *   dispose: () => void,
- * }}
- */
+/** The resolver surface the tools and hooks call; creates the real one on first use. */
+export interface LazyLspResolver {
+  request(file: string, method: string, payload?: Record<string, unknown>): Promise<unknown>
+  getDiagnostics(file: string, opts?: { text?: string; waitMs?: number }): Promise<unknown[]>
+}
+
 export function makeLazyLspResolver(
-  { sendOptions, log },
-  createResolver = createSessionLspResolver
-) {
+  {
+    sendOptions,
+    log,
+  }: {
+    sendOptions: {
+      lsp?: LspSendOptions | null
+      cwd?: string
+      builtinProcessSandbox?: SessionLspOptions["builtinProcessSandbox"]
+    }
+    log: (level: "info" | "warn" | "error", message: string) => void
+  },
+  createResolver: (
+    opts: SessionLspOptions
+  ) => Promise<LspResolver | null> = createSessionLspResolver
+): { lspEnabled: boolean; lspResolver: LazyLspResolver | null; dispose(): void } {
   const lspConfig = sendOptions.lsp
   const lspEnabled = !!(lspConfig && lspConfig.enabled && sendOptions.cwd)
-  let lspResolverPromise = null
+  let lspResolverPromise: Promise<LspResolver | null> | null = null
 
   const getLspResolver = () => {
     if (!lspResolverPromise) {
       lspResolverPromise = createResolver({
-        cwd: sendOptions.cwd,
+        cwd: sendOptions.cwd!,
         builtinProcessSandbox: sendOptions.builtinProcessSandbox,
         servers: lspConfig?.servers ?? [],
         installDir: lspConfig?.installDir,
@@ -38,7 +50,10 @@ export function makeLazyLspResolver(
         // Surface the reason and clear the cached promise so a TRANSIENT
         // failure (installer race, first-run download hiccup) doesn't disable
         // LSP for the whole session — the next tool call retries.
-        log("warn", `LSP resolver init failed (will retry on next use): ${e?.message ?? e}`)
+        log(
+          "warn",
+          `LSP resolver init failed (will retry on next use): ${(e as Error | null)?.message ?? e}`
+        )
         lspResolverPromise = null
         return null
       })
@@ -48,7 +63,7 @@ export function makeLazyLspResolver(
 
   const lspResolver = lspEnabled
     ? {
-        async request(file, method, payload) {
+        async request(file: string, method: string, payload?: Record<string, unknown>) {
           const r = await getLspResolver()
           if (!r)
             throw new Error(
@@ -56,7 +71,7 @@ export function makeLazyLspResolver(
             )
           return r.request(file, method, payload)
         },
-        async getDiagnostics(file, opts) {
+        async getDiagnostics(file: string, opts?: { text?: string; waitMs?: number }) {
           const r = await getLspResolver()
           if (!r)
             throw new Error(

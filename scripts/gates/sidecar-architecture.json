@@ -110,6 +110,7 @@
     "sidecar/src/providers/provider-protocol.ts",
     "sidecar/src/providers/reasoning-effort-tables.ts",
     "sidecar/src/providers/usage-normalize.ts",
+    "sidecar/src/services/lsp/servers.ts",
     "sidecar/test-support/live-harness.ts"
   ],
   "externalScanRoots": [
