@@ -1,11 +1,11 @@
 //! Tauri-facing helpers for the integrated terminal subsystem.
 //!
 //! The PTY lifecycle commands (`terminal_spawn` / `_reattach` / `_write` /
-//! `_resize` / `_kill` / `_list_*`) live in `src-tauri`'s
-//! `terminal_host_bridge`, which forwards them to the durable
-//! `cognia-server desktop-host`. What stays here is what that bridge and the
-//! headless sessions share: the shell-integration script and `cognia` CLI
-//! path resolvers, and the `terminal_kill_port` quick-fix command.
+//! `_resize` / `_kill` / `_list_*`) live in `crate::host_bridge`, which
+//! forwards them to the durable `cognia-server desktop-host`. What stays here
+//! is what that bridge and the headless sessions share: the
+//! shell-integration script and `cognia` CLI path resolvers, and the
+//! `terminal_kill_port` quick-fix command.
 
 // Without `tauri-host` the `AppHandle` path resolvers compile out (ADR-0196),
 // leaving imports and helpers only they use; the feature build still lints

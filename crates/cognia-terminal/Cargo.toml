@@ -1,6 +1,7 @@
 # ADR-0067 Tier B — integrated terminal subsystem (ADR-0031/0033) extracted
 # from app_lib's `terminal/` module. Isolates `portable-pty`. Re-aliased as
-# `crate::terminal`; its `commands::terminal_kill_port` / `exec::terminal_exec` /
+# `crate::terminal`; its `commands::terminal_kill_port` / `host_bridge::…` /
+# `exec::terminal_exec` /
 # `complete::…` / `headless::…` shells are referenced from generate_handler!.
 # The one upward edge (cli_bridge::detect::managed_dirs_snapshot) is inverted:
 # the app shell registers a provider via `set_managed_cli_dirs_provider` at
