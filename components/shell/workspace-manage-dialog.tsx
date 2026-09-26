@@ -51,6 +51,7 @@ import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
 import { WorkspaceKnowledgeSection } from "@/components/shell/workspace-knowledge-section"
 import { WorkspaceFolderPicker } from "@/components/shell/workspace-folder-picker"
+import { WorkspaceDefaultAgentField } from "@/components/shell/workspace-default-agent-field"
 import { normalizeRoots } from "@/lib/workspace/roots"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { WORKSPACE_INSTRUCTIONS_MAX_CHARS } from "@/lib/workspace/workspace-instructions"
@@ -97,6 +98,8 @@ interface Draft {
   instructions: string
   tags: string[]
   roots: WorkspaceRoot[]
+  /** `Project.defaultCharacterId`, `""` for none. */
+  defaultAgentId: string
 }
 
 function draftOf(project: Project | null): Draft {
@@ -106,6 +109,7 @@ function draftOf(project: Project | null): Draft {
     instructions: project?.customInstructions ?? "",
     tags: [...(project?.tags ?? [])],
     roots: project?.roots ? project.roots.map((r) => ({ ...r })) : [],
+    defaultAgentId: project?.defaultCharacterId ?? "",
   }
 }
 
@@ -120,6 +124,7 @@ function isDirty(stored: Draft, draft: Draft): boolean {
   if (stored.name !== draft.name) return true
   if (stored.description !== draft.description) return true
   if (stored.instructions !== draft.instructions) return true
+  if (stored.defaultAgentId !== draft.defaultAgentId) return true
   if (stored.tags.join("\n") !== draft.tags.join("\n")) return true
   if (stored.roots.length !== draft.roots.length) return true
   return stored.roots.some((root, index) => {
@@ -189,6 +194,7 @@ export function WorkspaceManageDialog({ open, onOpenChange, initialId }: Props) 
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState("")
   const [roots, setRoots] = useState<WorkspaceRoot[]>([])
+  const [defaultAgentId, setDefaultAgentId] = useState("")
   const [manualDir, setManualDir] = useState("")
   const [search, setSearch] = useState("")
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
@@ -241,6 +247,7 @@ export function WorkspaceManageDialog({ open, onOpenChange, initialId }: Props) 
     setTags(loaded.tags)
     setTagInput("")
     setRoots(loaded.roots)
+    setDefaultAgentId(loaded.defaultAgentId)
     setManualDir("")
     setConfirmingDelete(false)
   }
@@ -263,7 +270,7 @@ export function WorkspaceManageDialog({ open, onOpenChange, initialId }: Props) 
   const visibleArchived = archived.filter(matches)
   const offerSearch = projects.length >= SEARCH_THRESHOLD || query.length > 0
 
-  const draft: Draft = { name, description, instructions, tags, roots }
+  const draft: Draft = { name, description, instructions, tags, roots, defaultAgentId }
   const dirty = creating
     ? isDirty(draftOf(null), draft)
     : editing
@@ -427,6 +434,7 @@ export function WorkspaceManageDialog({ open, onOpenChange, initialId }: Props) 
       customInstructions: instructions.trim() || undefined,
       tags: tags.length > 0 ? tags : undefined,
       roots: normalizeRoots(roots),
+      defaultCharacterId: defaultAgentId || undefined,
     }
     if (creating) {
       const created = createProject({
@@ -436,6 +444,9 @@ export function WorkspaceManageDialog({ open, onOpenChange, initialId }: Props) 
         tags: fields.tags,
         roots: fields.roots,
       })
+      if (fields.defaultCharacterId) {
+        updateProject(created.id, { defaultCharacterId: fields.defaultCharacterId })
+      }
       setSelectedId(created.id)
       toast.success(t("created"))
       return
@@ -795,6 +806,11 @@ export function WorkspaceManageDialog({ open, onOpenChange, initialId }: Props) 
                           </p>
                         )}
                       </div>
+
+                      <WorkspaceDefaultAgentField
+                        value={defaultAgentId}
+                        onChange={setDefaultAgentId}
+                      />
                     </Surface>
 
                     {/*

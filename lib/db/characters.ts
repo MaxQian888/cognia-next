@@ -24,6 +24,22 @@ import {
 } from "@/plugins/cognia-builtin-characters/src/index"
 import { getDb } from "./schema"
 import { recordTombstones } from "@/lib/sync/tombstones"
+import {
+  CHARACTER_ROW_FIELDS,
+  MAX_VARIANT_DEPTH,
+  applyVariantOverlay,
+  diffVariantOwnFields,
+  materializeVariantProfile,
+} from "@cognia/agent-config-types/agent-variant"
+import { loggers } from "@cognia/logging"
+
+// Resolved on first use: this module is imported by many surfaces, some under
+// test doubles of the logging package, and none of them should fail at import.
+let cachedLog: ReturnType<typeof loggers.agent.child> | undefined
+const log = {
+  warn: (...args: Parameters<ReturnType<typeof loggers.agent.child>["warn"]>) =>
+    (cachedLog ??= loggers.agent.child("characters")).warn(...args),
+}
 
 function newId() {
   return "char_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -126,21 +142,197 @@ export async function getCharacter(id: string): Promise<Character | undefined> {
   return getDb().characters.get(id)
 }
 
-/**
- * Two-tier lookup (ADR-0030). Dexie row first (built-ins + user-created +
- * user-cloned), then plugin overlay packs by synthetic id. Returns
- * undefined when neither source has the id — callers (notably
- * `lib/claude/build-options.ts:resolveSendOptions` and the chat header)
- * treat undefined as "character disappeared" and fall back to app
- * defaults, possibly surfacing a banner to the user.
- */
-export async function resolveCharacterById(id: string): Promise<Character | undefined> {
+/** The stored row for an id: a Dexie row, else a plugin-pack overlay projection. */
+async function loadCharacterRow(id: string): Promise<Character | undefined> {
   const row = await getCharacter(id)
   if (row) return row
   if (!isOverlayCharacterId(id)) return undefined
   const overlay = getPackCharacterByRuntimeId(id)
   if (!overlay) return undefined
   return projectOverlayCharacter(overlay.pack, overlay.character, overlay.pluginId)
+}
+
+/**
+ * The effective agent for a row: a variant overlays its base's current
+ * profile. `chain` holds the ids already on the path, so a cycle or a chain
+ * past {@link MAX_VARIANT_DEPTH} stops there. When the base cannot be resolved
+ * the row's own materialized profile is the answer, which keeps the agent's
+ * last known prompt and tools instead of degrading to an empty persona.
+ */
+async function resolveVariantChain(
+  row: Character,
+  chain: ReadonlySet<string>,
+  load: (id: string) => Promise<Character | undefined> = loadCharacterRow
+): Promise<Character> {
+  const link = row.variant
+  if (!link) return row
+  if (chain.has(link.baseId) || chain.size >= MAX_VARIANT_DEPTH) {
+    log.warn("agent variant chain stopped; using the stored profile", {
+      id: row.id,
+      baseId: link.baseId,
+      reason: chain.has(link.baseId) ? "cycle" : "depth",
+    })
+    return row
+  }
+  const baseRow = await load(link.baseId)
+  if (!baseRow) {
+    log.warn("agent variant base is missing; using the stored profile", {
+      id: row.id,
+      baseId: link.baseId,
+    })
+    return row
+  }
+  const base = await resolveVariantChain(baseRow, new Set([...chain, link.baseId]), load)
+  return applyVariantOverlay(row, base)
+}
+
+/**
+ * Two-tier lookup (ADR-0030). Dexie row first (built-ins + user-created +
+ * user-cloned), then plugin overlay packs by synthetic id. A variant comes
+ * back with its base's current profile applied (see `./agent-variant`).
+ * Returns undefined when neither source has the id — callers (notably
+ * `lib/claude/build-options.ts:resolveSendOptions` and the chat header)
+ * treat undefined as "character disappeared" and fall back to app
+ * defaults, possibly surfacing a banner to the user.
+ */
+export async function resolveCharacterById(id: string): Promise<Character | undefined> {
+  const row = await loadCharacterRow(id)
+  return row ? resolveVariantChain(row, new Set([id])) : undefined
+}
+
+/**
+ * Apply variant overlays across an already-loaded list (the settings list,
+ * pickers). Bases are looked up in the list first, then in storage, so a
+ * variant of a hidden or unlisted agent still resolves.
+ */
+export async function resolveCharacterVariants(rows: readonly Character[]): Promise<Character[]> {
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const load = async (id: string) => byId.get(id) ?? loadCharacterRow(id)
+  return Promise.all(rows.map((row) => resolveVariantChain(row, new Set([row.id]), load)))
+}
+
+/** `listCharacters` with every variant showing its effective profile. */
+export async function listResolvedCharacters(): Promise<Character[]> {
+  return resolveCharacterVariants(await listCharacters())
+}
+
+/** Variant rows whose base is `baseId`. */
+export async function listCharacterVariants(baseId: string): Promise<Character[]> {
+  return getDb()
+    .characters.filter((row) => row.variant?.baseId === baseId)
+    .toArray()
+}
+
+/** Raised when deleting an agent that other agents are variants of. */
+export class CharacterHasVariantsError extends Error {
+  readonly variantNames: string[]
+
+  constructor(id: string, variantNames: string[]) {
+    super(
+      `Agent ${id} is the base of ${variantNames.length} variant(s): ${variantNames.join(", ")}. Detach or delete them first.`
+    )
+    this.name = "CharacterHasVariantsError"
+    this.variantNames = variantNames
+  }
+}
+
+/** The row fields an object carries (`key in` so an explicit clear counts). */
+function rowFieldsOf(source: Partial<Character>): Partial<Character> {
+  const out: Record<string, unknown> = {}
+  for (const key of CHARACTER_ROW_FIELDS) {
+    if (key in source) out[key] = (source as Record<string, unknown>)[key]
+  }
+  return out as Partial<Character>
+}
+
+/**
+ * Create a variant of `baseId` named `name`. It starts owning nothing, so it
+ * behaves exactly like the base until edited. The base may be a user agent, a
+ * built-in, a plugin-pack overlay, or another variant.
+ */
+export async function createCharacterVariant(baseId: string, name: string): Promise<Character> {
+  const base = await resolveCharacterById(baseId)
+  if (!base) throw new Error(`Character ${baseId} not found`)
+  const now = Date.now()
+  const variant: Character = {
+    ...(materializeVariantProfile(base) as Omit<Character, "id" | "name" | "avatarColor">),
+    id: newId(),
+    name: name.trim() || base.name,
+    avatarColor: base.avatarColor,
+    ...(base.avatarEmoji ? { avatarEmoji: base.avatarEmoji } : {}),
+    ...(base.avatarImage ? { avatarImage: base.avatarImage } : {}),
+    ...(base.description ? { description: base.description } : {}),
+    systemPrompt: base.systemPrompt,
+    variant: { baseId, ownFields: [] },
+    createdAt: now,
+    updatedAt: now,
+  }
+  await getDb().characters.put(variant)
+  return variant
+}
+
+/**
+ * Save an edit to a variant. The patch is applied to the variant's effective
+ * agent, and the variant then owns exactly the profile fields that differ
+ * from its base, so a field edited back to the base's value follows the base
+ * again. The row keeps a full materialized profile as its fallback.
+ */
+async function saveVariantEdit(row: Character, patch: Partial<Character>): Promise<void> {
+  const link = row.variant
+  if (!link) throw new Error(`Character ${row.id} is not a variant`)
+  const base = await resolveCharacterById(link.baseId)
+  if (!base) {
+    throw new Error(
+      `The base of agent ${row.id} (${link.baseId}) is missing. Detach the variant to keep editing it.`
+    )
+  }
+  const effective = await resolveVariantChain(row, new Set([row.id]))
+  const edited = { ...effective, ...patch } as Character
+  const next = {
+    ...rowFieldsOf(row),
+    ...rowFieldsOf(patch),
+    ...materializeVariantProfile(edited),
+    id: row.id,
+    createdAt: row.createdAt,
+    variant: { baseId: link.baseId, ownFields: diffVariantOwnFields(base, edited) },
+    updatedAt: Date.now(),
+  } as Character
+  await getDb().characters.put(next)
+}
+
+/**
+ * Turn a variant into an ordinary agent holding its current effective profile.
+ * It stops following its base from here on.
+ */
+export async function detachCharacterVariant(id: string): Promise<Character> {
+  const row = await getCharacter(id)
+  if (!row?.variant) throw new Error(`Character ${id} is not a variant`)
+  const effective = await resolveVariantChain(row, new Set([id]))
+  const next = {
+    ...rowFieldsOf(row),
+    ...materializeVariantProfile(effective),
+    variant: undefined,
+    updatedAt: Date.now(),
+  } as Character
+  delete (next as Partial<Character>).variant
+  await getDb().characters.put(next)
+  return next
+}
+
+/** Drop every override so the variant follows its base again. */
+export async function resetCharacterVariant(id: string): Promise<Character> {
+  const row = await getCharacter(id)
+  if (!row?.variant) throw new Error(`Character ${id} is not a variant`)
+  const base = await resolveCharacterById(row.variant.baseId)
+  if (!base) throw new Error(`The base of agent ${id} (${row.variant.baseId}) is missing`)
+  const next = {
+    ...rowFieldsOf(row),
+    ...materializeVariantProfile(base),
+    variant: { baseId: row.variant.baseId, ownFields: [] },
+    updatedAt: Date.now(),
+  } as Character
+  await getDb().characters.put(next)
+  return next
 }
 
 export async function listCharactersByIds(ids: string[]): Promise<Character[]> {
@@ -155,6 +347,10 @@ export async function listCharactersByIds(ids: string[]): Promise<Character[]> {
     else dexieIds.push(id)
   }
   const dexieRows = dexieIds.length > 0 ? await getDb().characters.bulkGet(dexieIds) : []
+  // Variants resolve against their bases the same way a single lookup does.
+  for (const [index, row] of dexieRows.entries()) {
+    if (row?.variant) dexieRows[index] = await resolveVariantChain(row, new Set([row.id]))
+  }
   // Re-index by id so we can splice results back in caller order.
   const byId = new Map<string, Character>()
   for (const row of dexieRows) {
@@ -215,6 +411,16 @@ export async function updateCharacter(
   if (id === "char_builtin_support") {
     throw new Error("The built-in Cognia Support Agent is immutable. Duplicate it first.")
   }
+  // A variant's profile edits decide which fields it owns; writing them
+  // straight onto the row would store values its base then shadows. The link
+  // itself is recomputed, so a patch that carries a stale `variant` (a whole
+  // effective agent spread back in) cannot corrupt it. Detaching and resetting
+  // have their own operations.
+  const existing = await getDb().characters.get(id)
+  if (existing?.variant) {
+    await saveVariantEdit(existing, patch)
+    return
+  }
   await getDb().characters.update(id, { ...patch, updatedAt: Date.now() })
 }
 
@@ -227,6 +433,13 @@ export async function deleteCharacter(id: string): Promise<void> {
   const existing = await getDb().characters.get(id)
   if (existing?.isBuiltIn) {
     throw new Error("Built-in characters cannot be deleted. Duplicate first.")
+  }
+  const variants = await listCharacterVariants(id)
+  if (variants.length > 0) {
+    throw new CharacterHasVariantsError(
+      id,
+      variants.map((variant) => variant.name)
+    )
   }
   await getDb().characters.delete(id)
   // Mirror the deletion to paired phones via the companion sync (v61).
@@ -255,6 +468,12 @@ export async function duplicateCharacter(id: string): Promise<Character> {
   } else {
     source = await getDb().characters.get(id)
     if (!source) throw new Error(`Character ${id} not found`)
+    // A duplicate is a detached copy of what the variant currently is.
+    if (source.variant) {
+      const effective: Character = await resolveVariantChain(source, new Set([id]))
+      source = { ...effective }
+      delete source.variant
+    }
   }
 
   // Capture a pristineSnapshot of the pack-managed fields so a future

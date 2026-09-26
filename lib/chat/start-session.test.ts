@@ -1,6 +1,7 @@
 import { startNewSession } from "./start-session"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getSession } from "@/lib/db/sessions"
+import { createCharacter } from "@/lib/db/characters"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useUIStore } from "@/stores/ui"
@@ -160,6 +161,38 @@ describe("startNewSession", () => {
     const session = await startNewSession()
 
     expect(addSessionToProject).toHaveBeenCalledWith("p_1", session.id)
+  })
+
+  it("starts a person's plain new chat as the workspace's default agent", async () => {
+    const agent = await createCharacter({ name: "Reviewer", systemPrompt: "Review." })
+    const withDefault = {
+      ...useProjectStore.getState(),
+      activeProjectId: "p_1",
+      projects: [{ id: "p_1", name: "Repo", roots: [], defaultCharacterId: agent.id }],
+      addSessionToProject: jest.fn(),
+    } as unknown as ReturnType<typeof useProjectStore.getState>
+    jest.spyOn(useProjectStore, "getState").mockReturnValue(withDefault)
+
+    const plain = await startNewSession()
+    expect(plain.characterId).toBe(agent.id)
+
+    // A named agent and a start nobody clicked keep their own choice.
+    const named = await startNewSession({ characterId: "c_other" })
+    expect(named.characterId).toBe("c_other")
+    const automated = await startNewSession({ activate: false })
+    expect(automated.characterId).toBeUndefined()
+  })
+
+  it("opens the chat without the default when that agent is gone", async () => {
+    jest.spyOn(useProjectStore, "getState").mockReturnValue({
+      ...useProjectStore.getState(),
+      activeProjectId: "p_1",
+      projects: [{ id: "p_1", name: "Repo", roots: [], defaultCharacterId: "char_deleted" }],
+      addSessionToProject: jest.fn(),
+    } as unknown as ReturnType<typeof useProjectStore.getState>)
+
+    const session = await startNewSession()
+    expect(session.characterId).toBeUndefined()
   })
 
   it("creates Quick Chat as a normal persisted task with project defaults", async () => {

@@ -193,6 +193,7 @@
     "0195-a-plugin-writes-to-the-contract-not-around-it",
     "0196-a-library-crate-links-tauri-only-when-asked",
     "0197-the-sidecar-runs-its-typescript-unbuilt",
-    "0198-a-runs-capabilities-are-granted-not-patched"
+    "0198-a-runs-capabilities-are-granted-not-patched",
+    "0199-an-agent-variant-follows-its-base"
   ]
 }

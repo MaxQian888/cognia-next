@@ -1,4 +1,6 @@
 import { createSession, updateSession } from "@/lib/db/sessions"
+import { resolveCharacterById } from "@/lib/db/characters"
+import { projectDefaultAgentId } from "@/lib/workspace/project-default-agent"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useUIStore } from "@/stores/ui"
@@ -122,9 +124,19 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
   // An explicit `projectId` wins: the caller named the workspace, and a caller
   // that names one knows something the UI pointer does not.
   const seededProjectId = sessionSeed.projectId ?? store.activeProjectId ?? undefined
-  let session = await createSession(
-    seededProjectId ? { ...sessionSeed, projectId: seededProjectId } : sessionSeed
-  )
+  // A person's plain new chat in a workspace with a default agent starts as
+  // that agent. Named agents/teams/squads and automated starts keep theirs.
+  const defaultAgentId = await projectDefaultAgentId({
+    project: seededProjectId ? store.projects.find((p) => p.id === seededProjectId) : undefined,
+    seed: sessionSeed,
+    activate: partial?.activate,
+    resolveAgent: resolveCharacterById,
+  })
+  let session = await createSession({
+    ...sessionSeed,
+    ...(seededProjectId ? { projectId: seededProjectId } : {}),
+    ...(defaultAgentId ? { characterId: defaultAgentId } : {}),
+  })
 
   // Never null: with no active workspace `createSession` adopts (or creates)
   // Default, so the row is always attributed. Everything below binds to THAT

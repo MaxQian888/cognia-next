@@ -60,6 +60,11 @@ jest.mock("@/lib/agent/agent-env-keyring", () => ({
 // hoisted factory.
 let mockCharacterList: Character[] = []
 const mockDeleteCharacter = jest.fn(async (_id: string) => undefined)
+const mockCreateCharacterVariant = jest.fn(async (..._args: unknown[]) => ({}) as Character)
+const mockDetachCharacterVariant = jest.fn(async (_id: string) => ({}) as Character)
+const mockResetCharacterVariant = jest.fn(async (_id: string) => ({}) as Character)
+const mockToastError = jest.fn()
+const mockToastSuccess = jest.fn()
 const mockDownloadBlob = jest.fn()
 let mockKnowledgeBases: Array<{
   id: string
@@ -95,8 +100,26 @@ jest.mock("@/hooks/automation/use-sandbox-connections", () => ({
   }),
 }))
 
+jest.mock("sonner", () => ({
+  toast: {
+    error: (...a: unknown[]) => mockToastError(...a),
+    success: (...a: unknown[]) => mockToastSuccess(...a),
+  },
+}))
+
 jest.mock("@/lib/db/characters", () => ({
+  CharacterHasVariantsError: class CharacterHasVariantsError extends Error {
+    variantNames: string[]
+    constructor(id: string, names: string[]) {
+      super(id)
+      this.variantNames = names
+    }
+  },
   listCharacters: () => mockCharacterList,
+  listResolvedCharacters: () => mockCharacterList,
+  createCharacterVariant: (...a: unknown[]) => mockCreateCharacterVariant(...a),
+  detachCharacterVariant: (id: string) => mockDetachCharacterVariant(id),
+  resetCharacterVariant: (id: string) => mockResetCharacterVariant(id),
   createCharacter: jest.fn(async () => ({ id: "new" })),
   updateCharacter: jest.fn(async () => undefined),
   deleteCharacter: (id: string) => mockDeleteCharacter(id),
@@ -688,4 +711,78 @@ it("includes registry-backed accounts in the character subscription picker", asy
   renderEditor(baseInitial())
   fireEvent.click(screen.getByTestId("character-account-override"))
   expect(await screen.findByRole("option", { name: "optionLabel" })).toBeInTheDocument()
+})
+
+describe("CharactersSection — agent variants", () => {
+  const base: Character = {
+    id: "char_base",
+    name: "Reviewer",
+    systemPrompt: "x",
+    avatarColor: "#abc",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+  const variant: Character = {
+    id: "char_variant",
+    name: "Reviewer (strict)",
+    systemPrompt: "x",
+    avatarColor: "#abc",
+    variant: { baseId: "char_base", ownFields: ["model"] },
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  beforeEach(() => {
+    mockCharacterList = [base, variant]
+    mockCreateCharacterVariant.mockReset().mockResolvedValue({ ...variant, id: "char_new" })
+    mockDetachCharacterVariant.mockReset().mockResolvedValue(base)
+    mockResetCharacterVariant.mockReset().mockResolvedValue(variant)
+    mockDeleteCharacter.mockReset().mockResolvedValue(undefined)
+    mockToastError.mockReset()
+    mockToastSuccess.mockReset()
+  })
+
+  it("creates a variant of the chosen agent under a translated default name", async () => {
+    render(<CharactersSection />)
+    fireEvent.click(screen.getAllByRole("button", { name: "variants.createAria" })[0]!)
+    await waitFor(() =>
+      expect(mockCreateCharacterVariant).toHaveBeenCalledWith("char_base", "variants.defaultName")
+    )
+    expect(mockToastSuccess).toHaveBeenCalledWith("variants.createdToast")
+  })
+
+  it("badges a variant and offers reset and detach only on variants", async () => {
+    render(<CharactersSection />)
+    expect(screen.getByText("variants.badge")).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "variants.resetAria" })).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole("button", { name: "variants.resetAria" }))
+    await waitFor(() => expect(mockResetCharacterVariant).toHaveBeenCalledWith("char_variant"))
+
+    fireEvent.click(screen.getByRole("button", { name: "variants.detachAria" }))
+    await waitFor(() => expect(mockDetachCharacterVariant).toHaveBeenCalledWith("char_variant"))
+  })
+
+  it("disables reset when the variant overrides nothing", () => {
+    mockCharacterList = [base, { ...variant, variant: { baseId: "char_base", ownFields: [] } }]
+    render(<CharactersSection />)
+    expect(screen.getByRole("button", { name: "variants.resetAria" })).toBeDisabled()
+  })
+
+  it("tells the editor it is editing a variant", () => {
+    render(<CharactersSection />)
+    const editButtons = screen.getAllByRole("button", { name: "editAria" })
+    fireEvent.click(editButtons[1]!)
+    expect(screen.getByTestId("variant-editor-notice")).toHaveTextContent("variants.editorNotice")
+  })
+
+  it("explains why a base with variants cannot be deleted", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { CharacterHasVariantsError } = require("@/lib/db/characters")
+    mockDeleteCharacter.mockRejectedValue(new CharacterHasVariantsError("char_base", ["Strict"]))
+    render(<CharactersSection />)
+    fireEvent.click(screen.getAllByRole("button", { name: "deleteAria" })[0]!)
+    fireEvent.click(await screen.findByRole("button", { name: "remove" }))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("variants.deleteBlocked"))
+  })
 })

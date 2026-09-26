@@ -27,13 +27,17 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
+  CharacterHasVariantsError,
   applyPackUpdate,
   applyPackUpdateForPack,
   createCharacter,
+  createCharacterVariant,
   deleteCharacter,
+  detachCharacterVariant,
   dismissPackUpdate,
   duplicateCharacter,
-  listCharacters,
+  listResolvedCharacters,
+  resetCharacterVariant,
   updateCharacter,
 } from "@/lib/db/characters"
 import { CharacterPackUpdateDialog } from "@/components/settings/character-pack-update-dialog"
@@ -120,6 +124,9 @@ import {
   CheckSquareIcon,
   CopyIcon,
   DownloadIcon,
+  GitBranchIcon,
+  RotateCcwIcon,
+  UnlinkIcon,
   LibraryBigIcon,
   PackageIcon,
   PencilIcon,
@@ -212,7 +219,9 @@ function VoiceSlider({
 
 export function CharactersSection() {
   const t = useTranslations("settings.characters")
-  const charactersRaw = useLiveQuery(() => listCharacters(), [])
+  // Variants are listed and edited as their effective agent, so what the row
+  // and the editor show is what a run would use.
+  const charactersRaw = useLiveQuery(() => listResolvedCharacters(), [])
   const characters = useMemo(() => charactersRaw ?? [], [charactersRaw])
   const skills = useLiveQuery(() => listSkills(), []) ?? []
   const mcpServers = useLiveQuery(() => listMcpServers(), []) ?? []
@@ -445,6 +454,55 @@ export function CharactersSection() {
                   toast.success(t("removedToast", { name: c.name }))
                 } catch (err) {
                   log.error("character_delete_failed", err, { id: c.id })
+                  toast.error(
+                    err instanceof CharacterHasVariantsError
+                      ? t("variants.deleteBlocked", {
+                          count: err.variantNames.length,
+                          names: err.variantNames.join(", "),
+                        })
+                      : err instanceof Error
+                        ? err.message
+                        : String(err)
+                  )
+                }
+              }}
+              baseName={
+                c.variant
+                  ? (characters.find((other) => other.id === c.variant?.baseId)?.name ??
+                    c.variant.baseId)
+                  : undefined
+              }
+              onCreateVariant={async () => {
+                try {
+                  const variant = await createCharacterVariant(
+                    c.id,
+                    t("variants.defaultName", { name: c.name })
+                  )
+                  log.info("character_variant_created", { baseId: c.id, id: variant.id })
+                  toast.success(t("variants.createdToast", { name: variant.name }))
+                  setEditing(variant)
+                } catch (err) {
+                  log.error("character_variant_create_failed", err, { id: c.id })
+                  toast.error(err instanceof Error ? err.message : String(err))
+                }
+              }}
+              onDetachVariant={async () => {
+                try {
+                  await detachCharacterVariant(c.id)
+                  log.info("character_variant_detached", { id: c.id })
+                  toast.success(t("variants.detachedToast", { name: c.name }))
+                } catch (err) {
+                  log.error("character_variant_detach_failed", err, { id: c.id })
+                  toast.error(err instanceof Error ? err.message : String(err))
+                }
+              }}
+              onResetVariant={async () => {
+                try {
+                  await resetCharacterVariant(c.id)
+                  log.info("character_variant_reset", { id: c.id })
+                  toast.success(t("variants.resetToast", { name: c.name }))
+                } catch (err) {
+                  log.error("character_variant_reset_failed", err, { id: c.id })
                   toast.error(err instanceof Error ? err.message : String(err))
                 }
               }}
@@ -837,6 +895,14 @@ interface RowProps {
   onSave: (patch: EditorOutput) => Promise<void>
   onDelete: () => Promise<void>
   onDuplicate: () => Promise<void>
+  /** Name of the base agent when this row is a variant. */
+  baseName?: string
+  /** Create a variant that follows this agent and owns only what it changes. */
+  onCreateVariant: () => Promise<void>
+  /** Turn this variant into an ordinary agent holding its current profile. */
+  onDetachVariant: () => Promise<void>
+  /** Drop every override so this variant follows its base again. */
+  onResetVariant: () => Promise<void>
   /** Re-clone from the current overlay-registered pack (ADR-0030 §D.3). */
   onRecloneFromPack: () => Promise<void>
   /** Snap `packVersionAtClone` to current pack.version to silence the badge. */
@@ -867,6 +933,10 @@ function CharacterRow({
   onSave,
   onDelete,
   onDuplicate,
+  baseName,
+  onCreateVariant,
+  onDetachVariant,
+  onResetVariant,
   onRecloneFromPack,
   onDismissUpdate,
   onExportPack,
@@ -882,83 +952,94 @@ function CharacterRow({
   // the call order stable across renders (rules-of-hooks).
   const sourcePluginId = character.sourcePluginId
   const pluginMeta = usePluginMetadata(sourcePluginId)
+  const variantLink = character.variant
   if (editing) {
     return (
-      <CharacterEditor
-        editingId={character.id}
-        initial={{
-          name: character.name,
-          description: character.description ?? "",
-          avatarColor: character.avatarColor,
-          avatarEmoji: character.avatarEmoji ?? "",
-          systemPrompt: character.systemPrompt,
-          model: character.modelRouting?.execute ?? character.model ?? "",
-          planModel: character.modelRouting?.plan ?? "",
-          utilityModel: character.modelRouting?.utility ?? "",
-          executionEffort: character.executionPolicy?.effort ?? "inherit",
-          executionMaxTurns: character.executionPolicy?.maxTurns?.toString() ?? "",
-          executionEnvBindings: character.executionPolicy?.envBindings,
-          permissionMode: character.permissionMode,
-          allowedTools: character.allowedTools ?? [],
-          disallowedTools: character.disallowedTools ?? [],
-          mcpServerIds: character.mcpServerIds,
-          skillIds: character.skillIds ?? [],
-          pluginSkillIds: character.pluginSkillIds ?? [],
-          knowledgeBaseIds: character.knowledgeBaseIds ?? [],
-          memoryRecall: character.memoryPolicy?.operations.recall ?? true,
-          memoryCreate: character.memoryPolicy?.operations.create ?? true,
-          memoryUpdate: character.memoryPolicy?.operations.update ?? true,
-          memoryForget: character.memoryPolicy?.operations.forget ?? true,
-          memoryAutoLearn: character.memoryPolicy?.autoLearn ?? true,
-          memoryReadableScopes: character.memoryPolicy?.readableScopes ?? [
-            "global",
-            "workspace",
-            "character",
-            "agent",
-          ],
-          memoryWritableScopes: character.memoryPolicy?.writableScopes ?? [
-            "global",
-            "workspace",
-            "character",
-            "agent",
-          ],
-          workingDir: character.workingDir ?? "",
-          bareMode: Boolean(character.bareMode),
-          debugMode: Boolean(character.debugMode),
-          briefMode: Boolean(character.briefMode),
-          twinId: character.twinId,
-          twinSettings: character.twinSettings,
-          enableComputerUse: Boolean(character.enableComputerUse),
-          enableBrowserTools: Boolean(character.enableBrowserTools),
-          computerUseSettings: character.computerUseSettings,
-          computerUseTarget:
-            character.computerUseTarget && typeof character.computerUseTarget === "object"
-              ? character.computerUseTarget.connectionId
-              : "local",
-          sandboxEnabled: Boolean(character.sandboxEnabled),
-          sandboxTier: character.sandboxTier ?? "inherit",
-          accountIdOverride: character.accountIdOverride ?? "inherit",
-          personaTone: character.persona?.tone ?? "",
-          personaPersonality: character.persona?.personality ?? "",
-          openingMessage: character.persona?.openingMessage ?? "",
-          exemplarPromptsText: (character.persona?.exemplarPrompts ?? []).join("\n"),
-          avatarImageDataUrl: character.avatarImage?.webDataUrl ?? "",
-          voiceProvider: character.voiceProfile
-            ? normalizeTTSProvider(character.voiceProfile.provider)
-            : "none",
-          voiceId: character.voiceProfile?.voiceId ?? "",
-          voiceRate: character.voiceProfile?.rate ?? 1,
-          voicePitch: character.voiceProfile?.pitch ?? 1,
-          voiceVolume: character.voiceProfile?.volume ?? 1,
-          availablePlatforms: character.availableOnPlatforms ?? [],
-        }}
-        skillsCatalog={skillsCatalog}
-        mcpCatalog={mcpCatalog}
-        knowledgeBaseCatalog={knowledgeBaseCatalog}
-        submitLabel={t("save")}
-        onCancel={onEditCancel}
-        onSave={onSave}
-      />
+      <div className="space-y-2">
+        {variantLink && (
+          <p
+            className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground"
+            data-testid="variant-editor-notice"
+          >
+            {t("variants.editorNotice", { base: baseName ?? variantLink.baseId })}
+          </p>
+        )}
+        <CharacterEditor
+          editingId={character.id}
+          initial={{
+            name: character.name,
+            description: character.description ?? "",
+            avatarColor: character.avatarColor,
+            avatarEmoji: character.avatarEmoji ?? "",
+            systemPrompt: character.systemPrompt,
+            model: character.modelRouting?.execute ?? character.model ?? "",
+            planModel: character.modelRouting?.plan ?? "",
+            utilityModel: character.modelRouting?.utility ?? "",
+            executionEffort: character.executionPolicy?.effort ?? "inherit",
+            executionMaxTurns: character.executionPolicy?.maxTurns?.toString() ?? "",
+            executionEnvBindings: character.executionPolicy?.envBindings,
+            permissionMode: character.permissionMode,
+            allowedTools: character.allowedTools ?? [],
+            disallowedTools: character.disallowedTools ?? [],
+            mcpServerIds: character.mcpServerIds,
+            skillIds: character.skillIds ?? [],
+            pluginSkillIds: character.pluginSkillIds ?? [],
+            knowledgeBaseIds: character.knowledgeBaseIds ?? [],
+            memoryRecall: character.memoryPolicy?.operations.recall ?? true,
+            memoryCreate: character.memoryPolicy?.operations.create ?? true,
+            memoryUpdate: character.memoryPolicy?.operations.update ?? true,
+            memoryForget: character.memoryPolicy?.operations.forget ?? true,
+            memoryAutoLearn: character.memoryPolicy?.autoLearn ?? true,
+            memoryReadableScopes: character.memoryPolicy?.readableScopes ?? [
+              "global",
+              "workspace",
+              "character",
+              "agent",
+            ],
+            memoryWritableScopes: character.memoryPolicy?.writableScopes ?? [
+              "global",
+              "workspace",
+              "character",
+              "agent",
+            ],
+            workingDir: character.workingDir ?? "",
+            bareMode: Boolean(character.bareMode),
+            debugMode: Boolean(character.debugMode),
+            briefMode: Boolean(character.briefMode),
+            twinId: character.twinId,
+            twinSettings: character.twinSettings,
+            enableComputerUse: Boolean(character.enableComputerUse),
+            enableBrowserTools: Boolean(character.enableBrowserTools),
+            computerUseSettings: character.computerUseSettings,
+            computerUseTarget:
+              character.computerUseTarget && typeof character.computerUseTarget === "object"
+                ? character.computerUseTarget.connectionId
+                : "local",
+            sandboxEnabled: Boolean(character.sandboxEnabled),
+            sandboxTier: character.sandboxTier ?? "inherit",
+            accountIdOverride: character.accountIdOverride ?? "inherit",
+            personaTone: character.persona?.tone ?? "",
+            personaPersonality: character.persona?.personality ?? "",
+            openingMessage: character.persona?.openingMessage ?? "",
+            exemplarPromptsText: (character.persona?.exemplarPrompts ?? []).join("\n"),
+            avatarImageDataUrl: character.avatarImage?.webDataUrl ?? "",
+            voiceProvider: character.voiceProfile
+              ? normalizeTTSProvider(character.voiceProfile.provider)
+              : "none",
+            voiceId: character.voiceProfile?.voiceId ?? "",
+            voiceRate: character.voiceProfile?.rate ?? 1,
+            voicePitch: character.voiceProfile?.pitch ?? 1,
+            voiceVolume: character.voiceProfile?.volume ?? 1,
+            availablePlatforms: character.availableOnPlatforms ?? [],
+          }}
+          skillsCatalog={skillsCatalog}
+          mcpCatalog={mcpCatalog}
+          knowledgeBaseCatalog={knowledgeBaseCatalog}
+          submitLabel={t("save")}
+          onCancel={onEditCancel}
+          onSave={onSave}
+        />
+      </div>
     )
   }
 
@@ -1039,6 +1120,15 @@ function CharacterRow({
             {character.isBuiltIn && (
               <Badge variant="secondary" className="text-[10px]">
                 {t("builtIn")}
+              </Badge>
+            )}
+            {variantLink && (
+              <Badge
+                variant="outline"
+                className="text-[10px]"
+                title={t("variants.badgeTitle", { count: variantLink.ownFields.length })}
+              >
+                {t("variants.badge", { base: baseName ?? variantLink.baseId })}
               </Badge>
             )}
             {sourceLabel && (
@@ -1155,6 +1245,41 @@ function CharacterRow({
           >
             <CopyIcon className="size-3.5" />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            onClick={() => void onCreateVariant()}
+            aria-label={t("variants.createAria", { name: character.name })}
+            title={t("variants.create")}
+          >
+            <GitBranchIcon className="size-3.5" />
+          </Button>
+          {variantLink && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={() => void onResetVariant()}
+                disabled={variantLink.ownFields.length === 0}
+                aria-label={t("variants.resetAria", { name: character.name })}
+                title={t("variants.reset")}
+              >
+                <RotateCcwIcon className="size-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={() => void onDetachVariant()}
+                aria-label={t("variants.detachAria", { name: character.name })}
+                title={t("variants.detach")}
+              >
+                <UnlinkIcon className="size-3.5" />
+              </Button>
+            </>
+          )}
           {(isOverlay || isCloned) && (
             <Button
               variant="ghost"

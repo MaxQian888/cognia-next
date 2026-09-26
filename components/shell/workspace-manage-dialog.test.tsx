@@ -96,6 +96,24 @@ jest.mock("@/lib/execution/broker", () => ({
   }),
 }))
 
+// The agent list is a Dexie live query with its own suite; a plain input
+// stands in so these cases drive the value the dialog saves.
+jest.mock("@/components/shell/workspace-default-agent-field", () => ({
+  WorkspaceDefaultAgentField: ({
+    value,
+    onChange,
+  }: {
+    value: string
+    onChange: (next: string) => void
+  }) => (
+    <input
+      aria-label="defaultAgentLabel"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}))
+
 import { WorkspaceManageDialog } from "./workspace-manage-dialog"
 import { useProjectStore } from "@/stores/project/project-store"
 const originalDeleteProject = useProjectStore.getState().deleteProject
@@ -255,6 +273,33 @@ describe("WorkspaceManageDialog", () => {
     expect(p.customInstructions).toBe("Never touch prod.")
     expect(p.tags).toEqual(["infra"])
     expect(toastSuccess).toHaveBeenCalledWith("saved")
+  })
+
+  it("saves and clears the workspace's default agent", () => {
+    const { id } = renderEditing("Stored")
+    const field = screen.getByLabelText("defaultAgentLabel")
+    fireEvent.change(field, { target: { value: "char_reviewer" } })
+    fireEvent.click(screen.getByTestId("workspace-save"))
+    expect(useProjectStore.getState().projects.find((q) => q.id === id)?.defaultCharacterId).toBe(
+      "char_reviewer"
+    )
+
+    fireEvent.change(field, { target: { value: "" } })
+    fireEvent.click(screen.getByTestId("workspace-save"))
+    expect(
+      useProjectStore.getState().projects.find((q) => q.id === id)?.defaultCharacterId
+    ).toBeUndefined()
+  })
+
+  it("creates a workspace with a default agent", () => {
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    fireEvent.change(screen.getByLabelText("nameLabel"), { target: { value: "Backend" } })
+    fireEvent.change(screen.getByLabelText("defaultAgentLabel"), {
+      target: { value: "char_reviewer" },
+    })
+    fireEvent.click(screen.getByTestId("workspace-save"))
+    expect(useProjectStore.getState().projects[0]?.defaultCharacterId).toBe("char_reviewer")
   })
 
   /**

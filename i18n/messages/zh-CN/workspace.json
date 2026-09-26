@@ -246,7 +246,12 @@
     "discardCloseDescription": "你对此工作区的修改还没有保存。现在关闭会丢弃这些修改。",
     "discardCloseConfirm": "放弃并关闭",
     "instructionsPii": "这里似乎包含个人或机密信息（如邮箱、密钥或令牌）。它会随每次对话发送给模型，请先删除再保存。",
-    "instructionsCount": "{count}/{max}"
+    "instructionsCount": "{count}/{max}",
+    "defaultAgentLabel": "默认智能体",
+    "defaultAgentNone": "无——不使用智能体开始",
+    "defaultAgentHint": "你在此工作区新建的会话会以该智能体开始。选择一个变体，可让该工作区拥有自己的配置。",
+    "defaultAgentMissing": "已缺失的智能体（{id}）",
+    "defaultAgentMissingHint": "该智能体已不存在，新会话将不使用它开始。请另选一个或清除。"
   },
   "switcher": {
     "active": "当前工作区：{name}",

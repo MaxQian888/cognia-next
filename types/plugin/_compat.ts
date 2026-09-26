@@ -206,6 +206,13 @@ export interface Project {
   defaultEnvironmentId?: string
   /** Device-local default remembered by the new-chat Local/Worktree selector. */
   defaultExecutionLocation?: "local" | "managedWorktree"
+  /**
+   * Agent a person's new conversation in this workspace starts as, when they
+   * did not pick one (`lib/workspace/project-default-agent.ts`). Point it at a
+   * variant to give one repository its own configuration of a shared agent.
+   * Automated conversation starts (`activate: false`) keep choosing their own.
+   */
+  defaultCharacterId?: string
   description?: string
   /**
    * Mounted directories of this workspace. Single source of truth for the cwd

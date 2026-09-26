@@ -3,14 +3,21 @@
 // overlay-aware paths exercised below.
 
 import {
+  CharacterHasVariantsError,
   createCharacter,
+  createCharacterVariant,
   deleteCharacter,
+  detachCharacterVariant,
   duplicateCharacter,
   getCharacter,
+  listCharacterVariants,
   listCharacters,
+  listResolvedCharacters,
   listCharactersByIds,
   projectOverlayCharacter,
+  resetCharacterVariant,
   resolveCharacterById,
+  resolveCharacterVariants,
   seedBuiltInCharacters,
   updateCharacter,
 } from "./characters"
@@ -514,5 +521,172 @@ describe("cognia-builtin-characters overlay/Dexie coexistence", () => {
     expect(row?.pristineSnapshot).toBeDefined()
     expect(row?.clonedFromPackCharacterId).toBe(runtimeIdFor("goal-tracker"))
     expect(row?.packVersionAtClone).toBe(BUILTIN_PACK.version)
+  })
+})
+
+describe("agent variants", () => {
+  async function makeBase() {
+    return createCharacter({
+      name: "Reviewer",
+      description: "Reviews code",
+      systemPrompt: "Review carefully.",
+      model: "sonnet",
+      allowedTools: ["Read", "Grep"],
+      skillIds: ["style"],
+    })
+  }
+
+  it("starts as an exact copy that follows the base", async () => {
+    const base = await makeBase()
+    const variant = await createCharacterVariant(base.id, "Reviewer (strict)")
+    expect(variant.variant).toEqual({ baseId: base.id, ownFields: [] })
+    expect(variant.isBuiltIn).toBeUndefined()
+
+    await updateCharacter(base.id, { systemPrompt: "Review very carefully." })
+    const resolved = await resolveCharacterById(variant.id)
+    expect(resolved).toMatchObject({
+      id: variant.id,
+      name: "Reviewer (strict)",
+      systemPrompt: "Review very carefully.",
+      model: "sonnet",
+    })
+  })
+
+  it("owns only the fields an edit changed, and keeps following the rest", async () => {
+    const base = await makeBase()
+    const variant = await createCharacterVariant(base.id, "Strict")
+    const effective = (await resolveCharacterById(variant.id))!
+    await updateCharacter(variant.id, {
+      ...effective,
+      model: "opus",
+      allowedTools: undefined,
+    })
+    const row = await getCharacter(variant.id)
+    expect(row?.variant?.ownFields).toEqual(["allowedTools", "model"])
+
+    await updateCharacter(base.id, { skillIds: ["style", "security"], model: "haiku" })
+    const resolved = await resolveCharacterById(variant.id)
+    expect(resolved?.model).toBe("opus")
+    expect(resolved?.allowedTools).toBeUndefined()
+    expect(resolved?.skillIds).toEqual(["style", "security"])
+  })
+
+  it("returns a field to the base when it is edited back", async () => {
+    const base = await makeBase()
+    const variant = await createCharacterVariant(base.id, "Strict")
+    await updateCharacter(variant.id, { model: "opus" })
+    await updateCharacter(variant.id, { model: "sonnet" })
+    expect((await getCharacter(variant.id))?.variant?.ownFields).toEqual([])
+  })
+
+  it("keeps row fields its own", async () => {
+    const base = await makeBase()
+    const variant = await createCharacterVariant(base.id, "Strict")
+    await updateCharacter(variant.id, { name: "Stricter", description: undefined })
+    await updateCharacter(base.id, { name: "Reviewer v2", description: "New" })
+    const resolved = await resolveCharacterById(variant.id)
+    expect(resolved?.name).toBe("Stricter")
+    expect(resolved?.description).toBeUndefined()
+  })
+
+  it("resolves chains, and variants inside id lists and loaded lists", async () => {
+    const base = await makeBase()
+    const mid = await createCharacterVariant(base.id, "Mid")
+    await updateCharacter(mid.id, { model: "opus" })
+    const leaf = await createCharacterVariant(mid.id, "Leaf")
+    await updateCharacter(base.id, { systemPrompt: "Base changed." })
+
+    const [viaIds] = await listCharactersByIds([leaf.id])
+    expect(viaIds).toMatchObject({ systemPrompt: "Base changed.", model: "opus" })
+
+    const listed = await resolveCharacterVariants(await listCharacters())
+    expect((await listResolvedCharacters()).find((c) => c.id === leaf.id)?.model).toBe("opus")
+    expect(listed.find((c) => c.id === leaf.id)).toMatchObject({
+      systemPrompt: "Base changed.",
+      model: "opus",
+    })
+  })
+
+  it("falls back to the stored profile when the base is gone or the chain loops", async () => {
+    const base = await makeBase()
+    const variant = await createCharacterVariant(base.id, "Orphan")
+    await getDb().characters.delete(base.id)
+    expect(await resolveCharacterById(variant.id)).toMatchObject({
+      systemPrompt: "Review carefully.",
+      model: "sonnet",
+    })
+
+    const a = await createCharacter({ name: "A", systemPrompt: "a" })
+    const b = await createCharacterVariant(a.id, "B")
+    await getDb().characters.update(a.id, { variant: { baseId: b.id, ownFields: [] } })
+    await expect(resolveCharacterById(b.id)).resolves.toMatchObject({ id: b.id })
+  })
+
+  it("can be a variant of a plugin-pack agent", async () => {
+    registerCharacterPack("workplace", makeOverlayPack("workplace", [makeOverlayChar("alice")]), {
+      pluginId: "plug-a",
+    })
+    const variant = await createCharacterVariant("cognia-pack:plug-a:workplace:alice", "Alice (EU)")
+    expect(await resolveCharacterById(variant.id)).toMatchObject({
+      name: "Alice (EU)",
+      systemPrompt: "Overlay prompt for alice",
+    })
+    expect(variant.sourcePluginId).toBeUndefined()
+  })
+
+  it("refuses to delete a base that has variants", async () => {
+    const base = await makeBase()
+    await createCharacterVariant(base.id, "Strict")
+    expect(await listCharacterVariants(base.id)).toHaveLength(1)
+    await expect(deleteCharacter(base.id)).rejects.toBeInstanceOf(CharacterHasVariantsError)
+    await expect(deleteCharacter(base.id)).rejects.toMatchObject({ variantNames: ["Strict"] })
+    expect(await getCharacter(base.id)).toBeDefined()
+  })
+
+  it("detaches into an ordinary agent holding the effective profile", async () => {
+    const base = await makeBase()
+    const variant = await createCharacterVariant(base.id, "Strict")
+    await updateCharacter(variant.id, { model: "opus" })
+    const detached = await detachCharacterVariant(variant.id)
+    expect(detached.variant).toBeUndefined()
+    await updateCharacter(base.id, { systemPrompt: "Changed later." })
+    expect(await resolveCharacterById(variant.id)).toMatchObject({
+      systemPrompt: "Review carefully.",
+      model: "opus",
+    })
+    await expect(deleteCharacter(base.id)).resolves.toBeUndefined()
+  })
+
+  it("resets every override", async () => {
+    const base = await makeBase()
+    const variant = await createCharacterVariant(base.id, "Strict")
+    await updateCharacter(variant.id, { model: "opus", skillIds: [] })
+    const reset = await resetCharacterVariant(variant.id)
+    expect(reset.variant?.ownFields).toEqual([])
+    expect(await resolveCharacterById(variant.id)).toMatchObject({
+      model: "sonnet",
+      skillIds: ["style"],
+    })
+  })
+
+  it("duplicates a variant as a detached copy of what it currently is", async () => {
+    const base = await makeBase()
+    const variant = await createCharacterVariant(base.id, "Strict")
+    await updateCharacter(variant.id, { model: "opus" })
+    const copy = await duplicateCharacter(variant.id)
+    expect(copy.variant).toBeUndefined()
+    expect(copy).toMatchObject({ model: "opus", systemPrompt: "Review carefully." })
+  })
+
+  it("rejects variant-only operations on ordinary agents and missing bases", async () => {
+    const plain = await createCharacter({ name: "Plain", systemPrompt: "x" })
+    await expect(detachCharacterVariant(plain.id)).rejects.toThrow(/not a variant/)
+    await expect(resetCharacterVariant(plain.id)).rejects.toThrow(/not a variant/)
+    await expect(createCharacterVariant("char_missing", "X")).rejects.toThrow(/not found/)
+
+    const base = await makeBase()
+    const variant = await createCharacterVariant(base.id, "Strict")
+    await getDb().characters.delete(base.id)
+    await expect(updateCharacter(variant.id, { model: "opus" })).rejects.toThrow(/missing/)
   })
 })

@@ -246,7 +246,12 @@
     "discardCloseDescription": "Your edits to this workspace have not been saved. Closing now throws them away.",
     "discardCloseConfirm": "Discard and close",
     "instructionsPii": "This looks like personal or secret data (an email address, key or token). It is sent to the model with every turn, so remove it before saving.",
-    "instructionsCount": "{count}/{max}"
+    "instructionsCount": "{count}/{max}",
+    "defaultAgentLabel": "Default agent",
+    "defaultAgentNone": "None — start with no agent",
+    "defaultAgentHint": "New conversations you start in this workspace begin as this agent. Pick a variant to give this workspace its own configuration.",
+    "defaultAgentMissing": "Missing agent ({id})",
+    "defaultAgentMissingHint": "This agent no longer exists, so new conversations start without it. Pick another or clear it."
   },
   "switcher": {
     "active": "Active workspace: {name}",
