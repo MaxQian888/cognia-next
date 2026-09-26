@@ -14,8 +14,11 @@ import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk"
 import { fileExtrasTools } from "../src/tools/builtin/file-extras/index.ts"
 import { gitTools } from "../src/tools/builtin/git/index.ts"
 import { processTools, createProcessTools } from "../src/tools/builtin/process/index.ts"
-import { environmentTools } from "./environment.mjs"
-import { shellAdvancedTools, createShellAdvancedTools } from "./shell-advanced.mjs"
+import { environmentTools } from "../src/tools/builtin/environment/index.ts"
+import {
+  shellAdvancedTools,
+  createShellAdvancedTools,
+} from "../src/tools/builtin/shell-advanced/index.ts"
 import { terminalReplTools, createTerminalReplTools } from "./terminal-repl-tool.mjs"
 import { astGrepTools, createAstGrepTools } from "../src/tools/builtin/ast-grep/index.ts"
 import { clonedepsTools } from "./clonedeps/index.mjs"

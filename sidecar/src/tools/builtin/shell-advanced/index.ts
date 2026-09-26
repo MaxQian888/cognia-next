@@ -14,14 +14,16 @@ import fs from "node:fs"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../src/tools/kernel/result.ts"
-import { validateShellCommand } from "../src/policy/shell/validate.ts"
+import type { ProcessSandboxScope } from "../../../platform/process/exec.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { validateShellCommand } from "../../../policy/shell/validate.ts"
 import {
   execFileAsync,
   sandboxedProcessTarget,
   sandboxedProcessEnv,
-} from "../src/platform/process/exec.ts"
-import { headTruncate } from "../src/shared/text/truncate.ts"
+} from "../../../platform/process/exec.ts"
+import { headTruncate } from "../../../shared/text/truncate.ts"
 
 // Mirror src-tauri/src/shell.rs:17-19 caps so the two paths feel consistent.
 const MAX_OUTPUT_BYTES = 64 * 1024 // model-facing display cap (headTruncate)
@@ -53,7 +55,30 @@ const shellExecuteAdvancedShape = {
     .describe("Hard timeout in ms. Clamped to 5 minutes."),
 }
 
-async function execShellExecuteAdvanced(args, ctx = {}) {
+/** The session state the tool uses when the host supplies it. */
+export interface ShellAdvancedContext {
+  builtinProcessSandbox?: ProcessSandboxScope | undefined
+}
+
+/** What a failed `execFile` rejects with. */
+type ExecFailure = {
+  stdout?: unknown
+  stderr?: unknown
+  code?: unknown
+  signal?: unknown
+  killed?: boolean
+  message?: string
+} | null
+
+/**
+ * `extra` is a {@link ShellAdvancedContext}, or the SDK's tool context when
+ * the static tool is called directly (which carries no sandbox).
+ */
+async function execShellExecuteAdvanced(
+  args: ToolArgs<typeof shellExecuteAdvancedShape>,
+  extra: unknown = {}
+) {
+  const ctx = (extra ?? {}) as ShellAdvancedContext
   try {
     const validation = validateShellCommand(args.command, args.args)
     if (!validation.safe) return toolError(validation.reason, "shell_execute_advanced")
@@ -80,7 +105,7 @@ async function execShellExecuteAdvanced(args, ctx = {}) {
     let stderr = ""
     let exitCode = 0
     let timedOut = false
-    let error
+    let error: string | null | undefined
     try {
       const result = await execFileAsync(target.command, target.args, {
         cwd: args.cwd,
@@ -93,7 +118,8 @@ async function execShellExecuteAdvanced(args, ctx = {}) {
       })
       stdout = String(result.stdout)
       stderr = String(result.stderr)
-    } catch (err) {
+    } catch (caught) {
+      const err = caught as ExecFailure
       // execFile rejects with stdout/stderr/code attached on non-zero exit.
       stdout = String(err?.stdout ?? "")
       stderr = String(err?.stderr ?? "")
@@ -136,8 +162,14 @@ export const shellExecuteAdvancedTool = tool(
 )
 
 export const shellAdvancedTools = [shellExecuteAdvancedTool]
-export function createShellAdvancedTools(ctx) {
-  return [{ ...shellExecuteAdvancedTool, handler: (args) => execShellExecuteAdvanced(args, ctx) }]
+export function createShellAdvancedTools(ctx: ShellAdvancedContext) {
+  return [
+    {
+      ...shellExecuteAdvancedTool,
+      handler: (args: ToolArgs<typeof shellExecuteAdvancedShape>) =>
+        execShellExecuteAdvanced(args, ctx),
+    },
+  ]
 }
 
 export const __testExports = {

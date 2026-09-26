@@ -2,7 +2,7 @@
  * lark-cli execFile wrapper (ADR-0026).
  *
  * Spawns the user's installed lark-cli binary with argv directly — no
- * shell interpolation. Caps mirror `sidecar/builtin-tools/shell-advanced.mjs`:
+ * shell interpolation. Caps mirror `sidecar/src/tools/builtin/shell-advanced/index.ts`:
  *   - 5-minute timeout (skill caller may shorten)
  *   - 1 MB stdout cap (lark-cli list/search responses can be sizeable)
  *   - `windowsHide: true` so no console window flashes on Windows

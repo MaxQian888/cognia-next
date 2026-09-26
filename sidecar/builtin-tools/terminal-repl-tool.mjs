@@ -19,7 +19,7 @@ import { sandboxedProcessTarget, sandboxedProcessEnv } from "../src/platform/pro
 // lazily inside `spawn`; on failure we return a clean structured error so
 // the model sees "REPL unavailable" instead of an unhandled rejection.
 //
-// Security model — mirrors `shell-advanced.mjs` + `terminal-dock-tool` (now
+// Security model — mirrors `src/tools/builtin/shell-advanced/` + `terminal-dock-tool` (now
 // deleted):
 //   * cwd must exist
 //   * caller's `agentId` is recorded on each session; reads/writes filter

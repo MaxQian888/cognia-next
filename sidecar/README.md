@@ -156,6 +156,8 @@ Each migration batch appends its moves here (old → new).
 | `builtin-tools/code/{names,tools}.mjs` (+ test)                          | `src/tools/builtin/code-graph/*`                                   | 8e          |
 | `builtin-tools/lsp.mjs` (+ `__tests__/lsp.test.mjs`)                     | `src/tools/builtin/lsp/index.ts` (+ test)                          | 8e          |
 | `builtin-tools/{plan-tools,exit-plan}.mjs` (+ tests)                     | `src/tools/builtin/plan/*`                                         | 8f          |
+| `builtin-tools/environment.mjs` (+ `__tests__/environment.test.mjs`)     | `src/tools/builtin/environment/index.ts` (+ test)                  | 8g          |
+| `builtin-tools/shell-advanced.mjs` (+ `__tests__` test)                  | `src/tools/builtin/shell-advanced/index.ts` (+ test)               | 8g          |
 
 ## Scripts (run from repo root)
 

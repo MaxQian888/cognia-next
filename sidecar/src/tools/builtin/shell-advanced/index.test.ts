@@ -4,12 +4,13 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 
-import { __testExports, shellExecuteAdvancedTool } from "../shell-advanced.mjs"
+import { __testExports, shellExecuteAdvancedTool } from "./index.ts"
+import { firstText, firstJson } from "../../../../test-support/tool-result.ts"
 
 const { execShellExecuteAdvanced, MAX_OUTPUT_BYTES, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } =
   __testExports
 
-let TMP
+let TMP: string
 
 before(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-shell-adv-"))
@@ -19,8 +20,15 @@ after(() => {
   fs.rmSync(TMP, { recursive: true, force: true })
 })
 
-function decode(r) {
-  return JSON.parse(r.content[0].text)
+interface ShellOutput {
+  exitCode: number
+  stdout: string
+  stdoutTruncated: boolean
+  timedOut: boolean
+}
+
+function decode(r: { content: readonly unknown[] }): ShellOutput {
+  return firstJson<ShellOutput>(r)
 }
 
 test("shell_execute_advanced rejects blocklisted commands", async () => {
@@ -31,7 +39,7 @@ test("shell_execute_advanced rejects blocklisted commands", async () => {
     timeoutMs: 5000,
   })
   assert.equal(r.isError, true)
-  assert.match(r.content[0].text, /blocked/i)
+  assert.match(firstText(r), /blocked/i)
 })
 
 test("shell_execute_advanced rejects unknown commands", async () => {
@@ -42,7 +50,7 @@ test("shell_execute_advanced rejects unknown commands", async () => {
     timeoutMs: 5000,
   })
   assert.equal(r.isError, true)
-  assert.match(r.content[0].text, /not in the allowed/i)
+  assert.match(firstText(r), /not in the allowed/i)
 })
 
 test("shell_execute_advanced rejects shell-injection patterns", async () => {
@@ -53,7 +61,7 @@ test("shell_execute_advanced rejects shell-injection patterns", async () => {
     timeoutMs: 5000,
   })
   assert.equal(r.isError, true)
-  assert.match(r.content[0].text, /Dangerous/i)
+  assert.match(firstText(r), /Dangerous/i)
 })
 
 test("shell_execute_advanced rejects non-existent cwd", async () => {
@@ -64,7 +72,7 @@ test("shell_execute_advanced rejects non-existent cwd", async () => {
     timeoutMs: 5000,
   })
   assert.equal(r.isError, true)
-  assert.match(r.content[0].text, /does not exist/)
+  assert.match(firstText(r), /does not exist/)
 })
 
 test("shell_execute_advanced rejects cwd that's a file, not a directory", async () => {
@@ -77,7 +85,7 @@ test("shell_execute_advanced rejects cwd that's a file, not a directory", async 
     timeoutMs: 5000,
   })
   assert.equal(r.isError, true)
-  assert.match(r.content[0].text, /not a directory/)
+  assert.match(firstText(r), /not a directory/)
 })
 
 test("shell_execute_advanced runs an allowlisted command", async () => {

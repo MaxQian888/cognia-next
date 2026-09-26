@@ -1,13 +1,8 @@
 import { test, before, after } from "node:test"
 import assert from "node:assert/strict"
 
-import {
-  __testExports,
-  listEnvTool,
-  getEnvTool,
-  systemInfoTool,
-  currentTimeTool,
-} from "../environment.mjs"
+import { __testExports, listEnvTool, getEnvTool, systemInfoTool, currentTimeTool } from "./index.ts"
+import { firstText, firstJson } from "../../../../test-support/tool-result.ts"
 
 const {
   execListEnv,
@@ -19,12 +14,57 @@ const {
   safeUser,
 } = __testExports
 
-function decode(r) {
-  return JSON.parse(r.content[0].text)
+interface EnvEntry {
+  key: string
+  value: string
+  redacted: boolean
 }
 
-const SAVED = {}
-function setEnv(k, v) {
+interface HealthCheck {
+  ok: boolean
+}
+
+/** Every field the environment tools answer with; each test reads its own. */
+interface EnvOutput {
+  env: EnvEntry[]
+  count: number
+  set: boolean
+  value: string
+  redacted: boolean
+  platform: string
+  arch: string
+  cpuCount: number
+  totalMemoryBytes: number
+  hostname: string
+  cogniaTools: {
+    serverName: string
+    serverVersion: string
+    pid: number
+    startedAt: string
+    runtimeFingerprint: string
+    health: { status: string; checks: Record<"stdio" | "tempDirectory" | "git", HealthCheck> }
+  }
+  iso: string
+  utc: string
+  epochMs: number
+  epochSec: number
+  timezone: string
+  local: string
+}
+
+function decode(r: { content: readonly unknown[] }): EnvOutput {
+  return firstJson<EnvOutput>(r)
+}
+
+// Some calls still pass the removed `revealSecrets` flag, to prove it is
+// ignored; these wrappers accept inputs beyond the schema for that.
+const listEnv = (args: Record<string, unknown>) =>
+  execListEnv(args as Parameters<typeof execListEnv>[0])
+const getEnv = (args: Record<string, unknown>) =>
+  execGetEnv(args as Parameters<typeof execGetEnv>[0])
+
+const SAVED: Record<string, string | undefined> = {}
+function setEnv(k: string, v: string | undefined) {
   SAVED[k] = process.env[k]
   if (v === undefined) delete process.env[k]
   else process.env[k] = v
@@ -65,36 +105,36 @@ test("safeUser returns a string or null", () => {
 })
 
 test("list_env returns redacted values for secret-shaped keys", async () => {
-  const r = await execListEnv({ prefix: "COGNIA_TEST_", revealSecrets: false })
+  const r = await listEnv({ prefix: "COGNIA_TEST_", revealSecrets: false })
   const data = decode(r)
   const byKey = Object.fromEntries(data.env.map((e) => [e.key, e]))
-  assert.equal(byKey.COGNIA_TEST_PUBLIC.value, "hello")
-  assert.equal(byKey.COGNIA_TEST_PUBLIC.redacted, false)
-  assert.equal(byKey.COGNIA_TEST_SECRET_KEY.value, "********")
-  assert.equal(byKey.COGNIA_TEST_SECRET_KEY.redacted, true)
-  assert.equal(byKey.COGNIA_TEST_API_KEY.value, "********")
-  assert.equal(byKey.COGNIA_TEST_API_KEY.redacted, true)
+  assert.equal(byKey.COGNIA_TEST_PUBLIC!.value, "hello")
+  assert.equal(byKey.COGNIA_TEST_PUBLIC!.redacted, false)
+  assert.equal(byKey.COGNIA_TEST_SECRET_KEY!.value, "********")
+  assert.equal(byKey.COGNIA_TEST_SECRET_KEY!.redacted, true)
+  assert.equal(byKey.COGNIA_TEST_API_KEY!.value, "********")
+  assert.equal(byKey.COGNIA_TEST_API_KEY!.redacted, true)
 })
 
 test("list_env cannot be made to reveal secrets", async () => {
   // `revealSecrets` was removed: it bypassed redaction on a tool declared
   // `requiresApproval: false`, so it was auto-allowed in plan mode, dontAsk and
   // headless. Passing it now has no effect — redaction is unconditional.
-  const r = await execListEnv({ prefix: "COGNIA_TEST_SECRET_", revealSecrets: true })
+  const r = await listEnv({ prefix: "COGNIA_TEST_SECRET_", revealSecrets: true })
   const data = decode(r)
   const e = data.env.find((x) => x.key === "COGNIA_TEST_SECRET_KEY")
-  assert.equal(e.value, "********")
-  assert.equal(e.redacted, true)
+  assert.equal(e!.value, "********")
+  assert.equal(e!.redacted, true)
 })
 
 test("list_env without prefix returns the full env", async () => {
-  const r = await execListEnv({ prefix: undefined, revealSecrets: false })
+  const r = await listEnv({ prefix: undefined, revealSecrets: false })
   const data = decode(r)
   assert.ok(data.count > 0)
 })
 
 test("get_env returns set:false for missing keys", async () => {
-  const r = await execGetEnv({
+  const r = await getEnv({
     key: "COGNIA_DEFINITELY_NOT_SET_XYZ",
     revealSecrets: false,
   })
@@ -102,7 +142,7 @@ test("get_env returns set:false for missing keys", async () => {
 })
 
 test("get_env redacts a secret value by default", async () => {
-  const r = await execGetEnv({ key: "COGNIA_TEST_SECRET_KEY", revealSecrets: false })
+  const r = await getEnv({ key: "COGNIA_TEST_SECRET_KEY", revealSecrets: false })
   const data = decode(r)
   assert.equal(data.set, true)
   assert.equal(data.value, "********")
@@ -110,14 +150,14 @@ test("get_env redacts a secret value by default", async () => {
 })
 
 test("get_env cannot be made to reveal a secret", async () => {
-  const r = await execGetEnv({ key: "COGNIA_TEST_SECRET_KEY", revealSecrets: true })
+  const r = await getEnv({ key: "COGNIA_TEST_SECRET_KEY", revealSecrets: true })
   const data = decode(r)
   assert.equal(data.value, "********")
   assert.equal(data.redacted, true)
 })
 
 test("get_env returns plain value for non-secret keys", async () => {
-  const r = await execGetEnv({ key: "COGNIA_TEST_PUBLIC", revealSecrets: false })
+  const r = await getEnv({ key: "COGNIA_TEST_PUBLIC", revealSecrets: false })
   const data = decode(r)
   assert.equal(data.value, "hello")
   assert.equal(data.redacted, false)
@@ -164,7 +204,7 @@ test("current_time honors an explicit IANA timezone", async () => {
 test("current_time rejects an invalid timezone", async () => {
   const r = await execCurrentTime({ timezone: "Not/AReal_Zone" })
   assert.equal(r.isError, true)
-  assert.match(r.content[0].text, /Invalid timezone/i)
+  assert.match(firstText(r), /Invalid timezone/i)
 })
 
 test("current_time falls back to host timezone for an empty string", async () => {

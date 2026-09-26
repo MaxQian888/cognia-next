@@ -19,21 +19,21 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { BUILTIN_SERVER_NAME, BUILTIN_SERVER_VERSION } from "../src/policy/tool-catalog/catalog.ts"
-import { toolError, toolText } from "../src/tools/kernel/result.ts"
-import { runCapped } from "../src/platform/process/exec.ts"
+import {
+  BUILTIN_SERVER_NAME,
+  BUILTIN_SERVER_VERSION,
+} from "../../../policy/tool-catalog/catalog.ts"
+import { toolError, toolText } from "../../kernel/result.ts"
+import { runCapped } from "../../../platform/process/exec.ts"
+import type { ToolArgs } from "../../kernel/define.ts"
 
 const TOOLS_STARTED_AT = new Date().toISOString()
 const RUNTIME_FINGERPRINT = `${BUILTIN_SERVER_NAME}@${BUILTIN_SERVER_VERSION}:${process.pid}:${TOOLS_STARTED_AT}`
 
 const SECRET_RE = /(key|secret|token|password|credential|passwd|api[_-]?key)/i
 
-/**
- * Decide whether a value should be redacted.
- * @param {string} key
- * @returns {boolean}
- */
-export function isSecretKey(key) {
+/** Decide whether a value should be redacted. */
+export function isSecretKey(key: unknown): boolean {
   if (typeof key !== "string") return false
   return SECRET_RE.test(key)
 }
@@ -55,7 +55,7 @@ const listEnvShape = {
     .describe("Filter to env keys starting with this prefix (case-insensitive)."),
 }
 
-async function execListEnv(args) {
+async function execListEnv(args: ToolArgs<typeof listEnvShape>) {
   try {
     const entries = Object.entries(process.env)
     const lower = args.prefix?.toLowerCase()
@@ -85,7 +85,7 @@ const getEnvShape = {
   key: z.string().min(1).describe("Environment variable name."),
 }
 
-async function execGetEnv(args) {
+async function execGetEnv(args: ToolArgs<typeof getEnvShape>) {
   try {
     const value = process.env[args.key]
     if (value === undefined) {
@@ -115,8 +115,17 @@ export const getEnvTool = tool(
 
 const systemInfoShape = {}
 
+interface HealthCheck {
+  ok: boolean
+  path?: string
+  version?: string
+  error?: string
+}
+
+const errorText = (err: unknown) => String((err as { message?: unknown } | null)?.message ?? err)
+
 async function runtimeHealth() {
-  const checks = {
+  const checks: { stdio: HealthCheck; tempDirectory: HealthCheck; git: HealthCheck } = {
     stdio: { ok: true },
     tempDirectory: { ok: true, path: os.tmpdir() },
     git: { ok: true },
@@ -125,7 +134,7 @@ async function runtimeHealth() {
   try {
     for (const fd of [0, 1, 2]) fstatSync(fd)
   } catch (err) {
-    checks.stdio = { ok: false, error: String(err?.message ?? err) }
+    checks.stdio = { ok: false, error: errorText(err) }
   }
   try {
     await fsp.access(os.tmpdir(), fsConstants.R_OK | fsConstants.W_OK)
@@ -133,7 +142,7 @@ async function runtimeHealth() {
     checks.tempDirectory = {
       ok: false,
       path: os.tmpdir(),
-      error: String(err?.message ?? err),
+      error: errorText(err),
     }
   }
   try {
@@ -143,7 +152,7 @@ async function runtimeHealth() {
     })
     checks.git.version = stdout.trim()
   } catch (err) {
-    checks.git = { ok: false, error: String(err?.message ?? err) }
+    checks.git = { ok: false, error: errorText(err) }
   }
 
   return {
@@ -210,7 +219,7 @@ const currentTimeShape = {
     ),
 }
 
-async function execCurrentTime(args) {
+async function execCurrentTime(args: ToolArgs<typeof currentTimeShape>) {
   try {
     const now = new Date()
     const systemTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
