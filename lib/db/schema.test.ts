@@ -1561,6 +1561,44 @@ describe("getDb", () => {
     expect(await db.sessions.where("folderId").anyOf(["folder-1", "folder-2"]).count()).toBe(2)
   })
 
+  it("v231 adds the Files page tables with favorite / folder / origin indexes", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(231)
+    expect(db.libraryItems.schema.primKey.name).toBe("key")
+    expect(db.libraryItems.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "kind",
+        "originSessionId",
+        "folderId",
+        "favoritedAt",
+        "lastOpenedAt",
+        "hiddenAt",
+        "projectId",
+      ])
+    )
+    expect(db.libraryFolders.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["parentFolderId", "[parentFolderId+name]", "name"])
+    )
+
+    await db.libraryItems.bulkAdd([
+      {
+        key: "artifact:a",
+        kind: "artifact",
+        sourceId: "a",
+        favoritedAt: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      { key: "artifact:b", kind: "artifact", sourceId: "b", createdAt: 1, updatedAt: 1 },
+    ])
+    // An unfavorited item carries no key, so it is absent from the index.
+    expect(await db.libraryItems.where("favoritedAt").above(0).primaryKeys()).toEqual([
+      "artifact:a",
+    ])
+  })
+
   it("v172 indexes agentTraces by run identity and lifecycle status", async () => {
     const db = getDb()
     await db.open()

@@ -359,6 +359,12 @@ function rehydratePersistedArtifactState<T extends Partial<ArtifactState>>(state
   return next
 }
 
+/** Artifacts / canvas documents of a deleted session that the Files page keeps. */
+export interface ArtifactSessionKeep {
+  artifactIds?: ReadonlySet<string>
+  canvasIds?: ReadonlySet<string>
+}
+
 /** Retention policy — Settings → Canvas → Versions. */
 export interface CanvasVersionRetention {
   /** Ceiling on the total number of versions kept for one document. */
@@ -951,7 +957,12 @@ interface ArtifactActions {
   setPanelView: (view: "artifact" | "canvas") => void
 
   // Utility
-  clearSessionData: (sessionId: string) => void
+  /**
+   * Drop a deleted conversation's artifacts and canvas documents. Ids in
+   * `keep` (items the Files page keeps, ADR-0200) stay in the store and in
+   * Dexie with their `sessionId` intact; only their tabs and active state go.
+   */
+  clearSessionData: (sessionId: string, keep?: ArtifactSessionKeep) => void
 
   // Batch operations
   deleteArtifacts: (ids: string[]) => void
@@ -2496,10 +2507,14 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           .slice(0, limit),
 
       // Utility
-      clearSessionData: (sessionId) => {
+      clearSessionData: (sessionId, keep) => {
+        const keepArtifactIds = keep?.artifactIds
+        const keepCanvasIds = keep?.canvasIds
         set((state) => {
           const artifacts = Object.fromEntries(
-            Object.entries(state.artifacts).filter(([, a]) => a.sessionId !== sessionId)
+            Object.entries(state.artifacts).filter(
+              ([id, a]) => a.sessionId !== sessionId || keepArtifactIds?.has(id) === true
+            )
           )
           const artifactVersions = Object.fromEntries(
             Object.entries(state.artifactVersions).filter(([id]) => artifacts[id])
@@ -2508,12 +2523,13 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             Object.entries(state.pendingReviews).filter(([id]) => artifacts[id])
           )
           const clearedCanvasIds = Object.entries(state.canvasDocuments)
-            .filter(([, d]) => d.sessionId === sessionId)
+            .filter(([id, d]) => d.sessionId === sessionId && keepCanvasIds?.has(id) !== true)
             .map(([id]) => id)
           useCanvasLayoutStore.getState().closeDocuments(clearedCanvasIds)
           for (const id of clearedCanvasIds) disposeCanvasDocument(id)
+          const cleared = new Set(clearedCanvasIds)
           const canvasDocuments = Object.fromEntries(
-            Object.entries(state.canvasDocuments).filter(([, d]) => d.sessionId !== sessionId)
+            Object.entries(state.canvasDocuments).filter(([id]) => !cleared.has(id))
           )
           return {
             artifacts,

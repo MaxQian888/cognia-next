@@ -164,6 +164,8 @@
   "larkEntryContexts": "metadata-only",
   "larkMessageImports": "metadata-only",
   "larkWebSessions": "metadata-only",
+  "libraryFolders": "encrypted-content",
+  "libraryItems": "encrypted-content",
   "loopEvents": "metadata-only",
   "loops": "metadata-only",
   "matrixPendingEncryptedEvents": "encrypted-content",

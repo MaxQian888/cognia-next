@@ -193,6 +193,42 @@ describe("project-scope helper", () => {
       expect(await db.syncTombstones.get(["sessions", "session-B"])).toBeUndefined()
     })
 
+    it("deletes the workspace's Files items, including ones kept from its conversations", async () => {
+      await seedProjectMedia()
+      const db = getDb()
+      await db.libraryItems.bulkPut([
+        {
+          key: "artifact:a",
+          kind: "artifact",
+          sourceId: "a",
+          projectId: "A",
+          favoritedAt: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          key: "canvas:c",
+          kind: "canvas",
+          sourceId: "c",
+          originSessionId: "session-A",
+          favoritedAt: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          key: "artifact:b",
+          kind: "artifact",
+          sourceId: "b",
+          projectId: "B",
+          favoritedAt: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ])
+      await deleteProjectCascade("A")
+      expect(await db.libraryItems.toCollection().primaryKeys()).toEqual(["artifact:b"])
+    })
+
     it("rolls back the project cascade when deletion evidence cannot be written", async () => {
       await seedProjectMedia()
       const db = getDb()

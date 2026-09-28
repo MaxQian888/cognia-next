@@ -211,6 +211,8 @@ export const CORE_TABLE_NAMES = [
   "larkEntryContexts",
   "larkMessageImports",
   "larkWebSessions",
+  "libraryFolders",
+  "libraryItems",
   "loopEvents",
   "loops",
   "matrixPendingEncryptedEvents",
@@ -459,6 +461,10 @@ export const PORTABLE_BACKUP_BINDINGS = {
   // a launch spec: the same class of thing as `promptPresets`, and portable
   // for the same reason. A phrase you wrote is yours, not this machine's.
   chatTemplates: "chatTemplates",
+  // Files page metadata (ADR-0200). Favorites and folders are organisation the
+  // user did by hand; the pinned bytes travel with them in the media section.
+  libraryItems: "libraryItems",
+  libraryFolders: "libraryFolders",
   // Schedules are configuration the user authored: a cron expression, a prompt,
   // a workspace binding. Losing them on a restore is losing work. The run
   // history (`scheduledTaskRuns`) deliberately stays out, for the same reason
@@ -882,6 +888,11 @@ const USER_CONTENT_TABLES = new Set<CoreTableName>([
   "chatTemplates",
   "artifacts",
   "artifactVersions",
+  // Files page metadata (ADR-0200): folder names the user typed, and a
+  // snapshot of each kept item's title and extracted text so the item outlives
+  // its source conversation. Content, not counters.
+  "libraryItems",
+  "libraryFolders",
   "canvasComments",
   "canvasDocuments",
   "canvasSessions",
@@ -1051,6 +1062,8 @@ const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>
   sessions: "session",
   messages: "chat",
   messageMediaRefs: "chat",
+  libraryItems: "artifact",
+  libraryFolders: "artifact",
   chatTranscriptIndexState: "chat",
   chatTurnSummaries: "chat",
   sessionState: "chat",

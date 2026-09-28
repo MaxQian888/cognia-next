@@ -1011,6 +1011,38 @@ function registerBuiltinEntityMentionSources(): void {
       return artifact ? String(artifact.updatedAt) : null
     },
   })
+
+  // Canvas documents share the artifact store; a standalone document (made in
+  // the Canvas guild or from Files, ADR-0200) belongs to no conversation and
+  // is scoped by workspace only, like an artifact.
+  registerEntityMentionSource({
+    entityKind: "canvas",
+    prefix: "canvas:",
+    async load(ctx) {
+      const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
+      const rows = Object.values(useArtifactStore.getState().canvasDocuments)
+      return rows
+        .filter((d) => !ctx.projectId || !d.projectId || d.projectId === ctx.projectId)
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .map((d) => ({
+          entityKind: "canvas" as const,
+          id: d.id,
+          title: d.title,
+          subtitle: d.language ? `${d.type} · ${d.language}` : d.type,
+          searchText: haystack(d.title, d.type, d.language),
+        }))
+    },
+    async snapshot(candidate) {
+      const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
+      const doc = useArtifactStore.getState().canvasDocuments[candidate.id]
+      return doc ? doc.content : null
+    },
+    async fingerprint(candidate) {
+      const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
+      const doc = useArtifactStore.getState().canvasDocuments[candidate.id]
+      return doc ? String(new Date(doc.updatedAt).getTime()) : null
+    },
+  })
 }
 
 /** Test-only: restore the registry to exactly the built-in set. */

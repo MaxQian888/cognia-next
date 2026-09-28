@@ -313,7 +313,7 @@ export interface EntityReferenceMember {
 
 /**
  * The records `@memory:` / `@issue:` / `@plan:` / `@chat:` / `@msg:` /
- * `@prompt:` / `@result:` (also `^`) / `@artifact:` / `@teammate:` reach.
+ * `@prompt:` / `@result:` (also `^`) / `@artifact:` / `@canvas:` / `@teammate:` reach.
  */
 export type EntitySelectionKind =
   | "memory"
@@ -330,6 +330,8 @@ export type EntitySelectionKind =
   | "prompt"
   | "result"
   | "artifact"
+  /** A canvas document (ADR-0200: referenced from the Files page or `@canvas:`). */
+  | "canvas"
   /** One member of a Squad. Its role and prompt are readable text. */
   | "teammate"
 

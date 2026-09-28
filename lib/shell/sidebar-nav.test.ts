@@ -72,8 +72,16 @@ describe("getSidebarCatalog", () => {
     expect(ids).toContain("workflows")
     // Derived, not hard-coded — the browser pane addition broke a literal "-2".
     expect(cat).toHaveLength(
-      SIDEBAR_NAV_META.filter((meta) => !meta.desktopOnly && meta.id !== "source-control").length
+      SIDEBAR_NAV_META.filter(
+        (meta) => !meta.desktopOnly && !meta.mobileHidden && meta.id !== "source-control"
+      ).length
     )
+  })
+
+  it("keeps Files off the phone but on the desktop and the web (ADR-0200)", () => {
+    expect(getSidebarCatalog("mobile").map((c) => c.id)).not.toContain("files")
+    expect(getSidebarCatalog("tauri").find((c) => c.id === "files")?.route).toBe("/files")
+    expect(getSidebarCatalog("web").map((c) => c.id)).toContain("files")
   })
 
   it("keeps desktop-only items hidden on mobile even before runtime targeting settles", () => {

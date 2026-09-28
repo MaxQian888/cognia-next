@@ -20,6 +20,8 @@ import type {
 } from "@cognia/agent-config-types"
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
+import type { LibraryFolder, LibraryItemRow } from "@/lib/db/files-library-types"
+import { reconcileLibraryPins } from "@/lib/db/files-library-items"
 import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
 import type { PetAchievementRecord, PetCharacterBinding, PetInventoryRow } from "@/types/pet"
 import type { PetModelRow } from "@/lib/db/pet-models"
@@ -75,6 +77,10 @@ import {
   prepareSessionAssetBackup,
   restoreSessionAssetBackup,
   prepareMessageMediaBackup,
+  prepareLibraryAssets,
+  restoreLibraryAssets,
+  type MessageMediaBackupRow,
+  type SessionAssetSourceChunk,
 } from "./session-assets-backup"
 
 import { collectMessageMediaHashes, messageMediaRefRows } from "@/lib/db/message-media-refs"
@@ -136,16 +142,37 @@ export async function applyBackupPackage(
         extras.attachmentSources
       )
     : undefined
-  const previewMedia = opts.includeSessions
-    ? await prepareMessageMediaBackup(
+  // Files page (ADR-0200): what it keeps or owns rides the media section too.
+  const libraryAssets = prepareLibraryAssets(env.libraryAssets)
+  const libraryMediaHashes = new Set<string>([
+    ...(env.libraryItems ?? []).flatMap((item) => (item?.mediaHash ? [item.mediaHash] : [])),
+    ...libraryAssets.map((asset) => `original:${asset.contentHash}`),
+  ])
+  const allowedMedia = new Set<string>([
+    ...(opts.includeSessions
+      ? (env.messages ?? []).flatMap((message) => collectMessageMediaHashes(message.parts))
+      : []),
+    ...libraryMediaHashes,
+  ])
+  // With transcripts the package's media must all be accounted for, exactly
+  // as before Files existed; without them only the Files media is taken.
+  const selectedMedia = opts.includeSessions
+    ? { rows: env.messageMedia, chunks: env.messageMediaChunks, sources: extras.previewSources }
+    : selectMediaBackup(
         env.messageMedia,
         env.messageMediaChunks,
-        new Set(
-          (env.messages ?? []).flatMap((message) => collectMessageMediaHashes(message.parts))
-        ),
-        extras.previewSources
+        extras.previewSources,
+        allowedMedia
       )
-    : []
+  const previewMedia =
+    allowedMedia.size > 0
+      ? await prepareMessageMediaBackup(
+          selectedMedia.rows,
+          selectedMedia.chunks,
+          allowedMedia,
+          selectedMedia.sources
+        )
+      : []
   const importedProfiles = env.providerProfileStore
     ? validateProfilesImport(env.providerProfileStore)
     : undefined
@@ -241,6 +268,8 @@ export async function applyBackupPackage(
       db.templatePackages,
       db.templateInstances,
       db.browserRecordings,
+      db.libraryItems,
+      db.libraryFolders,
       db.providerProfiles,
       db.deploymentProfiles,
       db.transportProfiles,
@@ -827,10 +856,10 @@ export async function applyBackupPackage(
       })
 
       // --- sessions + messages + sessionState (off by default) -----------
+      // Session ids are parents of both transcript rows and original-source
+      // owners (and of kept Files items). Duplicate restore remaps them together.
+      const sessionMapping = new Map<string, string>()
       if (opts.includeSessions) {
-        // Session ids are parents of both transcript rows and original-source owners.
-        // Duplicate restore must remap the whole bundle together.
-        const sessionMapping = new Map<string, string>()
         for (const session of env.sessions ?? []) {
           const existing = await db.sessions.get(session.id)
           const id = existing && opts.mergeStrategy === "duplicate" ? newId("s") : session.id
@@ -884,6 +913,41 @@ export async function applyBackupPackage(
         if (attachmentBackup)
           await restoreSessionAssetBackup(attachmentBackup, sessionMapping, opts.mergeStrategy)
       }
+
+      // --- Files page (ADR-0200) -----------------------------------------
+      // Bytes first (idempotent; a transcript import may already have put
+      // them), then the folder tree, the items, Files-owned upload owners, and
+      // finally the pins rebuilt from the items so nothing restored here is
+      // collectable. Keys are identities (an item's key names its source, a
+      // folder id is what items point at), so "duplicate" overwrites in place.
+      if (!opts.includeSessions) {
+        for (const media of previewMedia) {
+          if (libraryMediaHashes.has(media.hash)) await putMessageMedia(media)
+        }
+      }
+      await applyKeyedCollection<LibraryFolder>({
+        rows: env.libraryFolders,
+        table: db.libraryFolders,
+        kind: "libraryFolders",
+        opts,
+        summary,
+        keyOf: (row) => row.id,
+      })
+      await applyKeyedCollection<LibraryItemRow>({
+        rows: env.libraryItems?.map((item) =>
+          item.originSessionId && sessionMapping.has(item.originSessionId)
+            ? { ...item, originSessionId: sessionMapping.get(item.originSessionId)! }
+            : item
+        ),
+        table: db.libraryItems,
+        kind: "libraryItems",
+        opts,
+        summary,
+        keyOf: (row) => row.key,
+      })
+      const restoredAssets = await restoreLibraryAssets(libraryAssets, opts.mergeStrategy)
+      if (restoredAssets > 0) incrementCounter(summary.added, "libraryAssets")
+      if (env.libraryItems?.length || libraryAssets.length) await reconcileLibraryPins()
     }
   )
 
@@ -1172,6 +1236,39 @@ interface KeyedApplyArgs<T> {
  * collapses to "overwrite" for these tables — their natural keys are
  * intentional, and a duplicate would silently shadow the original.
  */
+/**
+ * The media rows (and their bytes) this import will actually write. A package
+ * carries its transcripts' media even when sessions are not being imported;
+ * the validator refuses any row it was not told to expect, so rows outside
+ * `allowed` — and the chunks or decoded sources only they reference — are
+ * dropped here rather than failing the whole import.
+ */
+function selectMediaBackup(
+  rows: MessageMediaBackupRow[] | undefined,
+  chunks: SessionAssetSourceChunk[] | undefined,
+  sources: ReadonlyMap<string, Blob> | undefined,
+  allowed: ReadonlySet<string>
+): {
+  rows: MessageMediaBackupRow[] | undefined
+  chunks: SessionAssetSourceChunk[] | undefined
+  sources: ReadonlyMap<string, Blob> | undefined
+} {
+  if (!Array.isArray(rows)) return { rows, chunks, sources }
+  const kept = rows.filter((row) => row && typeof row === "object" && allowed.has(row.hash))
+  const variants = new Set(
+    kept.flatMap(
+      (row) => [row.blobHash, row.thumbHash, row.originalHash].filter(Boolean) as string[]
+    )
+  )
+  return {
+    rows: kept,
+    chunks: Array.isArray(chunks)
+      ? chunks.filter((chunk) => variants.has(chunk?.contentHash))
+      : chunks,
+    sources: sources ? new Map([...sources].filter(([hash]) => variants.has(hash))) : undefined,
+  }
+}
+
 async function applyKeyedCollection<T>(args: KeyedApplyArgs<T>): Promise<void> {
   const { rows, table, kind, opts, summary, keyOf } = args
   if (!rows || rows.length === 0) return

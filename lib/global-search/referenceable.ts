@@ -29,14 +29,17 @@ import type { GlobalSearchItem, GlobalSearchKind } from "./types"
  * `session` and `message` are the two that matter and the two that could not
  * be expressed before: a conversation is `@chat:`, and a message hit is the
  * `@msg:` granularity ⌘K has always been able to FIND and never able to hand
- * over. `plan` and `artifact` are absent because ⌘K has no provider for
- * either — the map is keyed by what the palette actually produces.
+ * over. Artifacts and canvas documents arrived with the Files providers
+ * (ADR-0200). `plan` is absent because ⌘K has no provider for it — the map is
+ * keyed by what the palette actually produces.
  */
 const REFERENCEABLE_KINDS: Partial<Record<GlobalSearchKind, EntitySelectionKind>> = {
   session: "session",
   message: "message",
   memory: "memory",
   issue: "issue",
+  artifact: "artifact",
+  "canvas-document": "canvas",
 }
 
 /**

@@ -18,7 +18,12 @@ import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 import { getDb } from "./schema"
 import { revokeClaimsForChangedAttachment } from "@/lib/memory/lifecycle/claim-deletion-closure"
 import type { UIMessage } from "ai"
-import { SESSION_ASSET_OWNER_PREFIX } from "./message-media-refs"
+import {
+  LIBRARY_OWNER_PREFIX,
+  LIBRARY_REF_SESSION_ID,
+  SESSION_ASSET_OWNER_PREFIX,
+} from "./message-media-refs"
+import { libraryItemKey, type LibraryItemRow } from "./files-library-types"
 
 export const SESSION_ASSET_MAX_BYTES = 500 * 1024 * 1024
 export const SESSION_ASSET_QUOTA_BYTES = 1024 * 1024 * 1024
@@ -691,6 +696,252 @@ export async function persistMessageSessionAssets(
     changed = true
   }
   return changed ? { ...message, parts } : message
+}
+
+/**
+ * Every durable, live session upload across all conversations — the Files
+ * page's cross-session listing. One indexed range over the reserved owner
+ * prefix; metadata only, originals stay unloaded. Temporary (in-memory)
+ * uploads are excluded: they belong to a conversation that is not saved.
+ */
+export async function listAllSessionAssets(): Promise<ListedSessionAsset[]> {
+  const db = getDb()
+  const rows = (
+    await db.messageMediaRefs.where("messageId").startsWith(SESSION_ASSET_OWNER_PREFIX).toArray()
+  ).flatMap((row) => (row.sessionAsset && !row.sessionAsset.deletedAt ? [row.sessionAsset] : []))
+  return withSourceAvailability(db, rows)
+}
+
+async function withSourceAvailability(
+  db: ReturnType<typeof getDb>,
+  rows: SessionAsset[]
+): Promise<ListedSessionAsset[]> {
+  const hashes = [...new Set(rows.map((row) => originalKey(row.contentHash)))]
+  const available = new Set(
+    hashes.length ? await db.messageMedia.where("hash").anyOf(hashes).primaryKeys() : []
+  )
+  return structuredClone(
+    rows
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((row) => ({
+        ...row,
+        sourceAvailable:
+          row.sourceRetained !== false && available.has(originalKey(row.contentHash)),
+      }))
+  )
+}
+
+/** Owner key of a file uploaded straight into Files (ADR-0200). */
+export function libraryAssetOwnerKey(assetId: string): string {
+  return `${LIBRARY_OWNER_PREFIX}${libraryItemKey("upload", assetId)}`
+}
+
+export interface PutLibraryAssetInput {
+  assetId: string
+  blob: Blob
+  filename: string
+  mediaType: string
+  extractedContent?: AttachmentExtractedContent
+  /** Workspace active at upload time — the Files project filter reads it. */
+  projectId?: string
+  quotaBytes?: number
+  now?: number
+}
+
+/**
+ * Store a file uploaded straight into Files. It belongs to no conversation:
+ * the owner row carries the sentinel session id, so no session deletion
+ * releases it, and it counts toward the same global asset quota as every
+ * conversation upload. Writes the source, its owner row and its Files item in
+ * one transaction.
+ */
+export async function putLibraryAsset(input: PutLibraryAssetInput): Promise<SessionAsset> {
+  if (!input.assetId) throw new SessionAssetError("session_asset_identity_conflict")
+  if (!(input.blob instanceof Blob)) throw new SessionAssetError("session_asset_invalid_original")
+  if (input.blob.size > SESSION_ASSET_MAX_BYTES)
+    throw new SessionAssetError("session_asset_too_large")
+  const db = getDb()
+  const contentHash = await hashSessionAssetSource(input.blob)
+  const availableBytes = await availableStorageBytes()
+  if (getDb() !== db) throw new SessionAssetError("session_asset_scope_changed")
+  const now = input.now ?? Date.now()
+  const key = libraryAssetOwnerKey(input.assetId)
+  const asset: SessionAsset = {
+    sessionId: LIBRARY_REF_SESSION_ID,
+    assetId: input.assetId,
+    contentHash,
+    filename: input.filename,
+    mediaType: input.mediaType,
+    byteSize: input.blob.size,
+    ...(input.extractedContent ? { extractedContent: input.extractedContent } : {}),
+    createdAt: now,
+    updatedAt: now,
+    revision: 1,
+    temporary: false,
+    sourceRetained: true,
+  }
+  validateExtraction(asset, input.extractedContent)
+  return db.transaction("rw", db.messageMedia, db.messageMediaRefs, db.libraryItems, async () => {
+    if (await db.messageMediaRefs.where("messageId").equals(key).count()) {
+      throw new SessionAssetError("session_asset_identity_conflict")
+    }
+    const refs = await db.messageMediaRefs.filter((row) => row.sessionAsset !== undefined).toArray()
+    checkSessionAssetQuota(
+      refs
+        .map((row) => row.sessionAsset!)
+        .concat([...temporaryStore(db).values()].map(withoutBlob), asset),
+      input.quotaBytes
+    )
+    const hash = originalKey(contentHash)
+    const held = await db.messageMedia.get(hash)
+    const requiredBytes =
+      (held ? 0 : input.blob.size) + new TextEncoder().encode(JSON.stringify(asset)).byteLength
+    if (availableBytes !== undefined && requiredBytes > availableBytes)
+      throw new SessionAssetError("session_asset_quota_exceeded")
+    if (!held) {
+      await db.messageMedia.add({
+        hash,
+        blob: input.blob,
+        byteSize: input.blob.size,
+        mediaType: input.mediaType,
+        width: 0,
+        height: 0,
+        createdAt: now,
+        lastUsedAt: now,
+      })
+    }
+    await db.messageMediaRefs.put({
+      messageId: key,
+      sessionId: LIBRARY_REF_SESSION_ID,
+      hash,
+      sessionAsset: asset,
+    })
+    const item: LibraryItemRow = {
+      key: libraryItemKey("upload", input.assetId),
+      kind: "upload",
+      sourceId: input.assetId,
+      ownedByFiles: true,
+      mediaHash: hash,
+      snapshot: {
+        title: input.filename,
+        mediaType: input.mediaType,
+        byteSize: input.blob.size,
+        contentHash,
+      },
+      keptAt: now,
+      lastOpenedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+    }
+    await db.libraryItems.put(item)
+    return structuredClone(asset)
+  })
+}
+
+/** Files-owned uploads, newest first; metadata only. */
+export async function listLibraryAssets(): Promise<ListedSessionAsset[]> {
+  const db = getDb()
+  const prefix = `${LIBRARY_OWNER_PREFIX}${libraryItemKey("upload", "")}`
+  const rows = (await db.messageMediaRefs.where("messageId").startsWith(prefix).toArray()).flatMap(
+    (row) => (row.sessionAsset && !row.sessionAsset.deletedAt ? [row.sessionAsset] : [])
+  )
+  return withSourceAvailability(db, rows)
+}
+
+/** A Files-owned upload with its original bytes. */
+export async function getLibraryAsset(assetId: string): Promise<StoredSessionAsset | undefined> {
+  const db = getDb()
+  return db.transaction("r", db.messageMediaRefs, db.messageMedia, async () => {
+    const [ref] = await db.messageMediaRefs
+      .where("messageId")
+      .equals(libraryAssetOwnerKey(assetId))
+      .toArray()
+    if (!ref?.sessionAsset || ref.sessionAsset.deletedAt) return undefined
+    const media = await db.messageMedia.get(ref.hash)
+    return media?.blob instanceof Blob ? { ...ref.sessionAsset, blob: media.blob } : undefined
+  })
+}
+
+/** Original bytes of any held source, by content hash (Files preview / download). */
+export async function getHeldSessionAssetSource(contentHash: string): Promise<Blob | undefined> {
+  const media = await getDb().messageMedia.get(originalKey(contentHash))
+  return media?.blob instanceof Blob ? media.blob : undefined
+}
+
+export interface BindHeldSessionAssetInput {
+  sessionId: string
+  /** Fresh asset id in the target conversation. */
+  assetId: string
+  contentHash: string
+  filename: string
+  mediaType: string
+  /** Extraction re-keyed to `assetId` (attachmentId) by the caller. */
+  extractedContent?: AttachmentExtractedContent
+  now?: number
+}
+
+/**
+ * Attach a source this host already holds to a conversation without copying
+ * or re-reading its bytes — the Files "use in chat" path for originals too
+ * large for a composer draft. Adds one `session-asset:` owner row pointing at
+ * the held `original:` bytes.
+ */
+export async function bindHeldSessionAsset(
+  input: BindHeldSessionAssetInput
+): Promise<SessionAsset> {
+  const db = getDb()
+  const hash = originalKey(input.contentHash)
+  const key = ownerKey(input.sessionId, input.assetId)
+  const result = await db.transaction(
+    "rw",
+    db.sessions,
+    db.messageMedia,
+    db.messageMediaRefs,
+    async () => {
+      const session = await db.sessions.get(input.sessionId)
+      if (!session) throw new SessionAssetError("session_asset_session_missing")
+      assertSessionWritable(session, "send-message")
+      const held = await db.messageMedia.get(hash)
+      if (!held) throw new SessionAssetError("session_asset_not_found")
+      if (await ownedRef(db, input.sessionId, input.assetId)) {
+        throw new SessionAssetError("session_asset_identity_conflict")
+      }
+      const now = input.now ?? Date.now()
+      const asset: SessionAsset = {
+        sessionId: input.sessionId,
+        assetId: input.assetId,
+        contentHash: input.contentHash,
+        filename: input.filename,
+        mediaType: input.mediaType,
+        byteSize: held.byteSize,
+        ...(input.extractedContent ? { extractedContent: input.extractedContent } : {}),
+        createdAt: now,
+        updatedAt: now,
+        revision: 1,
+        temporary: false,
+        sourceRetained: true,
+      }
+      validateExtraction(asset, input.extractedContent)
+      const refs = await db.messageMediaRefs
+        .filter((row) => row.sessionAsset !== undefined)
+        .toArray()
+      checkSessionAssetQuota(
+        refs
+          .map((row) => row.sessionAsset!)
+          .concat([...temporaryStore(db).values()].map(withoutBlob), asset)
+      )
+      await db.messageMediaRefs.put({
+        messageId: key,
+        sessionId: input.sessionId,
+        hash,
+        sessionAsset: asset,
+      })
+      return asset
+    }
+  )
+  searchIndexes.get(db)?.delete(input.sessionId)
+  return structuredClone(result)
 }
 
 export interface SessionAssetSearchHit {

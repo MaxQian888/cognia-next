@@ -254,3 +254,172 @@ it("round trips canonical video/image previews, thumbnails and image originals w
     sessionId: refs[0]!.sessionId,
   })
 })
+
+describe("Files page backup (ADR-0200)", () => {
+  const exportOptions = {
+    includeSessions: false,
+    includeApiKey: false,
+    includePlugins: false,
+    includeSettings: false,
+    includeLocalStorage: false,
+  }
+
+  async function seedFiles() {
+    const { putLibraryAsset } = await import("@/lib/db/session-assets")
+    const { setLibraryItemFavorite } = await import("@/lib/db/files-library-items")
+    const { createLibraryFolder } = await import("@/lib/db/files-library-folders")
+    const { putMessageMedia, mediaRef } = await import("@/lib/db/message-media")
+    const { asset: sessionAsset } = await seed()
+    // An image kept after its conversation was deleted: referenced only by the pin.
+    const image = new Blob(["kept image"], { type: "image/png" })
+    const imageHash = "a".repeat(64)
+    await putMessageMedia({
+      hash: imageHash,
+      blob: image,
+      mediaType: "image/png",
+      byteSize: image.size,
+      width: 1,
+      height: 1,
+      createdAt: 1,
+      lastUsedAt: 1,
+    })
+    await getDb().messages.put({
+      id: "m",
+      sessionId: "source",
+      role: "user",
+      parts: [{ type: "file", mediaType: "image/png", url: mediaRef(imageHash) }],
+      createdAt: 1,
+    })
+    await getDb().messageMediaRefs.put({ messageId: "m", sessionId: "source", hash: imageHash })
+    const folder = await createLibraryFolder({ name: "Specs" })
+    await setLibraryItemFavorite(
+      { kind: "image", sourceId: imageHash, mediaHash: imageHash, originSessionId: "source" },
+      true
+    )
+    await setLibraryItemFavorite(
+      {
+        kind: "session-upload",
+        sourceId: sessionAsset.contentHash,
+        mediaHash: `original:${sessionAsset.contentHash}`,
+        snapshot: { title: "report.pdf" },
+      },
+      true
+    )
+    await putLibraryAsset({
+      assetId: "u1",
+      blob: new Blob(["owned notes"]),
+      filename: "notes.md",
+      mediaType: "text/markdown",
+    })
+    const { setLibraryItemFolder } = await import("@/lib/db/files-library-items")
+    await setLibraryItemFolder({ kind: "upload", sourceId: "u1" }, folder.id)
+    return { imageHash, sessionAsset, folder }
+  }
+
+  async function wipeLocal() {
+    const db = getDb()
+    await db.sessions.clear()
+    await db.messages.clear()
+    await db.messageMediaRefs.clear()
+    await db.messageMedia.clear()
+    await db.libraryItems.clear()
+    await db.libraryFolders.clear()
+  }
+
+  it("round trips kept images, kept uploads, Files uploads and folders without transcripts", async () => {
+    const { imageHash, sessionAsset, folder } = await seedFiles()
+    const backup = JSON.parse(JSON.stringify(await buildBackupPackage(exportOptions)))
+    expect(backup.payload.sessions).toBeUndefined()
+    expect(backup.payload.libraryItems).toHaveLength(3)
+    expect(backup.payload.libraryFolders).toHaveLength(1)
+    expect(backup.payload.libraryAssets).toHaveLength(1)
+    const exportedHashes = backup.payload.messageMedia.map((row: { hash: string }) => row.hash)
+    expect(exportedHashes).toHaveLength(3)
+    expect(exportedHashes).toEqual(
+      expect.arrayContaining([imageHash, `original:${sessionAsset.contentHash}`])
+    )
+
+    await wipeLocal()
+    await applyBackupPackage(
+      backup,
+      { includeSessions: false, includeApiKey: false, mergeStrategy: "skip" },
+      { storage: null, projectMcp: async () => [] }
+    )
+
+    const db = getDb()
+    expect(await db.libraryFolders.get(folder.id)).toMatchObject({ name: "Specs" })
+    expect((await db.libraryItems.get("upload:u1"))?.folderId).toBe(folder.id)
+    const { getLibraryAsset, getHeldSessionAssetSource } = await import("@/lib/db/session-assets")
+    expect(await (await getLibraryAsset("u1"))!.blob.text()).toBe("owned notes")
+    expect(await getHeldSessionAssetSource(sessionAsset.contentHash)).toBeInstanceOf(Blob)
+    expect(await (await db.messageMedia.get(imageHash))!.blob.text()).toBe("kept image")
+    // Pins rebuilt from the items: nothing restored is collectable.
+    const pins = await db.messageMediaRefs.where("sessionId").equals("library:files").toArray()
+    expect(pins).toHaveLength(3)
+    expect(pins.map((ref) => ref.hash)).toEqual(
+      expect.arrayContaining([imageHash, `original:${sessionAsset.contentHash}`])
+    )
+    const { collectUnreferencedMessageMedia } = await import("@/lib/db/message-media-refs")
+    await collectUnreferencedMessageMedia(undefined, { graceMs: 0 })
+    expect(await db.messageMedia.count()).toBe(3)
+  })
+
+  it("streams the Files sections and their bytes once", async () => {
+    await seedFiles()
+    const seen: Record<string, number> = {}
+    const chunkHashes: string[] = []
+    for await (const section of buildBackupSections(exportOptions)) {
+      seen[section.section] = (seen[section.section] ?? 0) + section.rows.length
+      if (section.section === "messageMediaChunks")
+        chunkHashes.push(
+          ...(section.rows as Array<{ contentHash: string; offset: number }>)
+            .filter((r) => r.offset === 0)
+            .map((r) => r.contentHash)
+        )
+    }
+    expect(seen).toMatchObject({
+      libraryItems: 3,
+      libraryFolders: 1,
+      libraryAssets: 1,
+      messageMedia: 3,
+    })
+    expect(new Set(chunkHashes).size).toBe(chunkHashes.length)
+  })
+
+  it("ignores transcript media it is not importing instead of refusing the package", async () => {
+    await seedFiles()
+    const backup = JSON.parse(
+      JSON.stringify(await buildBackupPackage({ ...exportOptions, includeSessions: true }))
+    )
+    await wipeLocal()
+    await expect(
+      applyBackupPackage(
+        backup,
+        { includeSessions: false, includeApiKey: false, mergeStrategy: "overwrite" },
+        { storage: null, projectMcp: async () => [] }
+      )
+    ).resolves.toBeDefined()
+    expect(await getDb().sessions.count()).toBe(0)
+    expect(await getDb().libraryItems.count()).toBe(3)
+  })
+
+  it("refuses a Files upload whose bytes are not in the package", async () => {
+    await seedFiles()
+    const backup = JSON.parse(JSON.stringify(await buildBackupPackage(exportOptions)))
+    backup.payload.messageMedia = backup.payload.messageMedia.filter(
+      (row: { hash: string }) =>
+        row.hash !== `original:${backup.payload.libraryAssets[0].contentHash}`
+    )
+    backup.payload.messageMediaChunks = []
+    backup.payload.messageMedia = []
+    await wipeLocal()
+    await expect(
+      applyBackupPackage(
+        backup,
+        { includeSessions: false, includeApiKey: false, mergeStrategy: "skip" },
+        { storage: null, projectMcp: async () => [] }
+      )
+    ).rejects.toThrow("library_asset_backup_source_missing")
+    expect(await getDb().libraryItems.count()).toBe(0)
+  })
+})

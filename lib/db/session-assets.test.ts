@@ -17,7 +17,14 @@ import {
   persistMessageSessionAssets,
   hashSessionAssetSource,
   searchAttachmentSegments,
+  putLibraryAsset,
+  listLibraryAssets,
+  listAllSessionAssets,
+  getLibraryAsset,
+  getHeldSessionAssetSource,
+  bindHeldSessionAsset,
 } from "./session-assets"
+import { LIBRARY_REF_SESSION_ID } from "./message-media-refs"
 import type { UIMessage } from "ai"
 
 jest.setTimeout(30_000)
@@ -353,4 +360,91 @@ it("retains original audio/video media type instead of its text or image project
     ],
   } as unknown as UIMessage)
   expect(await getSessionAssetMetadata("s1", "audio")).toMatchObject({ mediaType: "audio/webm" })
+})
+
+describe("Files library assets", () => {
+  it("stores a Files-owned upload outside every session and lists it separately", async () => {
+    const blob = new Blob(["files body"], { type: "text/plain" })
+    const contentHash = await hashSessionAssetSource(blob)
+    const asset = await putLibraryAsset({
+      assetId: "u1",
+      blob,
+      filename: "notes.txt",
+      mediaType: "text/plain",
+      extractedContent: extraction("u1", contentHash, "files body"),
+      now: 5,
+    })
+    expect(asset).toMatchObject({ sessionId: LIBRARY_REF_SESSION_ID, assetId: "u1", byteSize: 10 })
+    expect((await listLibraryAssets()).map((row) => row.assetId)).toEqual(["u1"])
+    expect(await listAllSessionAssets()).toEqual([])
+    expect((await getLibraryAsset("u1"))?.blob.size).toBe(10)
+    expect(await getHeldSessionAssetSource(contentHash)).toBeInstanceOf(Blob)
+    expect(await getDb().libraryItems.get("upload:u1")).toMatchObject({ ownedByFiles: true })
+    await expect(
+      putLibraryAsset({ assetId: "u1", blob, filename: "again.txt", mediaType: "text/plain" })
+    ).rejects.toMatchObject({ code: "session_asset_identity_conflict" })
+    expect(await getLibraryAsset("missing")).toBeUndefined()
+  })
+
+  it("survives deletion of every session and still counts toward the quota", async () => {
+    await expect(
+      putSessionAsset({ ...input("a8", "s1"), quotaBytes: 1_500 })
+    ).resolves.toBeDefined()
+    await putLibraryAsset({
+      assetId: "u1",
+      blob: new Blob(["x".repeat(2_000)]),
+      filename: "x.bin",
+      mediaType: "application/octet-stream",
+    })
+    await expect(
+      putSessionAsset({ ...input("a9", "s2"), quotaBytes: 1_500 })
+    ).rejects.toMatchObject({
+      code: "session_asset_quota_exceeded",
+    })
+    await getDb().sessions.clear()
+    await getDb().messageMediaRefs.where("sessionId").anyOf(["s1", "s2"]).delete()
+    expect((await listLibraryAssets())[0]?.sourceAvailable).toBe(true)
+  })
+
+  it("lists every live session upload across conversations", async () => {
+    await putSessionAsset(input("a1", "s1"))
+    await putSessionAsset(input("a2", "s2"))
+    await putSessionAsset(input("a3", "s2"))
+    await releaseSessionAsset("s2", "a3")
+    const listed = await listAllSessionAssets()
+    expect(listed.map((row) => [row.sessionId, row.assetId]).sort()).toEqual([
+      ["s1", "a1"],
+      ["s2", "a2"],
+    ])
+    expect(listed.every((row) => row.sourceAvailable)).toBe(true)
+  })
+
+  it("binds a held source into another conversation without copying bytes", async () => {
+    const stored = await putSessionAsset(input("a1", "s1"))
+    const bound = await bindHeldSessionAsset({
+      sessionId: "s2",
+      assetId: "b1",
+      contentHash: stored.contentHash,
+      filename: "source.txt",
+      mediaType: "text/plain",
+      extractedContent: extraction("b1", stored.contentHash),
+    })
+    expect(bound).toMatchObject({ sessionId: "s2", assetId: "b1", byteSize: 15 })
+    expect(await getDb().messageMedia.count()).toBe(1)
+    expect((await getSessionAsset("s2", "b1"))?.blob.size).toBe(15)
+    await expect(
+      bindHeldSessionAsset({ ...bound, contentHash: stored.contentHash })
+    ).rejects.toMatchObject({ code: "session_asset_identity_conflict" })
+    await expect(
+      bindHeldSessionAsset({
+        ...bound,
+        assetId: "b2",
+        contentHash: "nope",
+        extractedContent: undefined,
+      })
+    ).rejects.toMatchObject({ code: "session_asset_not_found" })
+    await expect(bindHeldSessionAsset({ ...bound, sessionId: "missing" })).rejects.toMatchObject({
+      code: "session_asset_session_missing",
+    })
+  })
 })

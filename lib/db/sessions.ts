@@ -869,8 +869,18 @@ async function purgeSessionStoreBuckets(sessionId: string): Promise<void> {
     // Store module absent in SSR/minimal test runtimes — non-fatal.
     return
   }
+  // Artifacts and canvas documents the Files page keeps (ADR-0200) outlive
+  // their conversation. A failed lookup keeps nothing rather than blocking
+  // deletion: the item then goes with its session, as before Files existed.
+  let keep: { artifactIds: Set<string>; canvasIds: Set<string> } | undefined
   try {
-    useArtifactStore.getState().clearSessionData?.(sessionId)
+    const { listKeptSourceIdsForSession } = await import("./files-library-items")
+    keep = await listKeptSourceIdsForSession(sessionId)
+  } catch (error) {
+    loggers.store.warn("files keep lookup failed", { sessionId, error: String(error) })
+  }
+  try {
+    useArtifactStore.getState().clearSessionData?.(sessionId, keep)
   } catch (error) {
     loggers.store.warn("session artifact cleanup failed", {
       sessionId,

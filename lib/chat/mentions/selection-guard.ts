@@ -23,6 +23,7 @@ const ENTITY_KINDS: ReadonlySet<string> = new Set([
   "prompt",
   "result",
   "artifact",
+  "canvas",
   "teammate",
 ] satisfies EntitySelectionKind[])
 

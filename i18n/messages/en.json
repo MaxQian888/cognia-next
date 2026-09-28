@@ -6654,6 +6654,7 @@
         "entityInsertHint": "insert the text",
         "entityKinds": {
           "artifact": "artifact",
+          "canvas": "canvas document",
           "issue": "issue",
           "memory": "memory",
           "message": "message",
@@ -11604,6 +11605,7 @@
       "agentRuns": "Agent runs",
       "aliases": {
         "devices": "Paired devices, remote hosts, phones, fleet, pairing, sandbox, workers",
+        "files": "Library, assets, attachments, uploads, documents, images, artifacts, favorites",
         "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
       },
       "badgeCount": "{count, plural, one {# waiting} other {# waiting}}",
@@ -11659,6 +11661,7 @@
       "editTeam": "Edit team",
       "eval": "Evaluation",
       "featuresGroup": "Features",
+      "files": "Files",
       "goals": "Goals",
       "inbox": "Inbox",
       "integrations": "Integrations",
@@ -15055,12 +15058,10 @@
       "addAgentToStart": "Add an agent to get started",
       "agentAdded": "Agent added successfully",
       "agentConfigDescription": "Configure the external agent connection settings",
+      "agentDuplicated": "Agent duplicated",
       "agentName": "Agent Name",
       "agentNamePlaceholder": "e.g., Claude Code",
       "agentRemoved": "Agent removed successfully",
-      "agentDuplicated": "Agent duplicated",
-      "duplicateName": "{name} (copy)",
-      "duplicateHint": "Make a copy with the same settings and credentials. The copy asks again for any unsandboxed-launch approval.",
       "agentUpdated": "Agent updated successfully",
       "allAgents": "All agents",
       "apiKey": "API Key",
@@ -15240,6 +15241,8 @@
       "disconnect": "Disconnect",
       "disconnectFailed": "Failed to disconnect",
       "disconnected": "Disconnected successfully",
+      "duplicateHint": "Make a copy with the same settings and credentials. The copy asks again for any unsandboxed-launch approval.",
+      "duplicateName": "{name} (copy)",
       "editAgent": "Edit Agent",
       "enableExternalAgents": "Enable External Agents",
       "enableExternalAgentsDesc": "Allow using external agents like Claude Code via ACP protocol",
@@ -15433,6 +15436,220 @@
     "loading": "Loading file…",
     "openAtLine": "Open at line {line}",
     "retry": "Try again"
+  },
+  "files": {
+    "actions": {
+      "delete": "Delete",
+      "download": "Download",
+      "favorite": "Add to favorites",
+      "moveToFolder": "Move to folder…",
+      "open": "Open",
+      "preview": "Preview",
+      "remove": "Remove from Files",
+      "removeFromFolder": "Take out of folder",
+      "unfavorite": "Remove from favorites",
+      "useInChat": "Use in chat"
+    },
+    "card": {
+      "favorite": "Favorite",
+      "menu": "More actions for {title}",
+      "modified": "Modified {date}",
+      "open": "Open {title}",
+      "owned": "Uploaded to Files",
+      "sourceDeleted": "Conversation deleted",
+      "usedIn": "In {count, plural, one {# conversation} other {# conversations}}"
+    },
+    "deleteDialog": {
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "description": "This file was uploaded to Files and will be deleted from this device. Conversations that already use it keep their copy.",
+      "title": "Delete “{title}”?"
+    },
+    "deleteFolderDialog": {
+      "cancel": "Cancel",
+      "cascade": "Delete its subfolders too, and take their items out of Folders",
+      "confirm": "Delete folder",
+      "description": "Its items and subfolders move up one level. Nothing in it is deleted.",
+      "title": "Delete “{name}”?"
+    },
+    "description": "Artifacts, canvas documents, images and files from every conversation, in one place.",
+    "empty": {
+      "all": {
+        "description": "Upload a file or start a conversation to fill this page.",
+        "title": "Nothing here yet"
+      },
+      "clear": "Clear search and filters",
+      "favorites": {
+        "description": "Favorite an item to keep it at hand. Favorites stay even if their conversation is deleted.",
+        "title": "No favorites"
+      },
+      "folders": {
+        "description": "Move items here from their menu. Items in folders stay even if their conversation is deleted.",
+        "title": "This folder is empty"
+      },
+      "images": {
+        "description": "Images you upload or generate in conversations show up here.",
+        "title": "No images"
+      },
+      "recent": {
+        "description": "Artifacts, canvas documents, images and files from your conversations show up here.",
+        "title": "Nothing here yet"
+      },
+      "search": {
+        "description": "Nothing matches the search and filters.",
+        "title": "No matches"
+      }
+    },
+    "errors": {
+      "files_not_attachable": "This item can’t be used in a chat.",
+      "files_source_empty": "This item has no content to use.",
+      "files_source_missing": "This item’s content is no longer stored on this device.",
+      "library_folder_cycle": "A folder can’t be moved into itself.",
+      "library_folder_name_required": "Enter a folder name.",
+      "library_folder_parent_missing": "The parent folder no longer exists.",
+      "library_item_not_found": "That folder no longer exists.",
+      "library_item_not_owned": "Only files uploaded to Files can be deleted here.",
+      "library_item_owned": "Files uploaded here are deleted, not removed.",
+      "library_item_source_missing": "This item’s content is no longer stored on this device.",
+      "session_asset_identity_conflict": "A different file with the same identity already exists.",
+      "session_asset_invalid_extraction": "The file’s extracted text didn’t match the file.",
+      "session_asset_invalid_original": "The file couldn’t be read.",
+      "session_asset_not_found": "The file is no longer stored on this device.",
+      "session_asset_quota_exceeded": "There isn’t room to store this file. Free up space in Settings → Storage.",
+      "session_asset_scope_changed": "The account changed while the file was being saved.",
+      "session_asset_session_missing": "The conversation no longer exists.",
+      "session_asset_too_large": "The file is larger than 500 MB.",
+      "unknown": "Something went wrong. Try again."
+    },
+    "folderDialog": {
+      "cancel": "Cancel",
+      "create": "Create",
+      "createTitle": "New folder",
+      "nameLabel": "Name",
+      "placeholder": "Folder name",
+      "renameTitle": "Rename folder",
+      "save": "Save"
+    },
+    "folders": {
+      "breadcrumbAria": "Folder path",
+      "delete": "Delete folder",
+      "menu": "Folder actions for {name}",
+      "newFolder": "New folder",
+      "open": "Open folder {name}",
+      "rename": "Rename folder",
+      "root": "Folders",
+      "subfolders": "Subfolders"
+    },
+    "itemCount": "{count, plural, one {# item} other {# items}}",
+    "kinds": {
+      "artifact": "Artifact",
+      "canvas": "Canvas document",
+      "image": "Image",
+      "session-upload": "File",
+      "upload": "File"
+    },
+    "loadMore": "Show more",
+    "loadOlderImages": "Load older images",
+    "loading": "Loading files",
+    "moveDialog": {
+      "cancel": "Cancel",
+      "confirm": "Move",
+      "description": "{count, plural, one {# item} other {# items}}. Items in folders stay even if their conversation is deleted.",
+      "empty": "No folders yet. Create one from the Folders tab.",
+      "none": "Take out of Folders",
+      "root": "Folders (top level)",
+      "title": "Move to folder"
+    },
+    "new": {
+      "canvas": "Canvas document",
+      "folder": "Folder",
+      "label": "New",
+      "upload": "Upload files",
+      "uploadInputAria": "Choose files to upload"
+    },
+    "newChatTitle": "About {title}",
+    "preview": {
+      "close": "Close preview",
+      "conversations": "Conversations",
+      "details": {
+        "added": "Added",
+        "language": "Language",
+        "modified": "Modified",
+        "size": "Size",
+        "type": "Type"
+      },
+      "label": "Preview",
+      "loading": "Loading preview",
+      "openConversation": "Open conversation",
+      "sourceDeleted": "Its conversation was deleted. Files keeps it because it is a favorite or in a folder.",
+      "unavailable": "The content is no longer stored on this device."
+    },
+    "scope": {
+      "all": "All workspaces",
+      "current": "This workspace",
+      "label": "Workspace"
+    },
+    "search": {
+      "aria": "Search files by name or content",
+      "placeholder": "Search files"
+    },
+    "sort": {
+      "created": "Date added",
+      "label": "Sort",
+      "name": "Name",
+      "recent": "Recently used",
+      "size": "Size",
+      "updated": "Last modified"
+    },
+    "tabs": {
+      "all": "All",
+      "favorites": "Favorites",
+      "folders": "Folders",
+      "images": "Images",
+      "recent": "Recent"
+    },
+    "tabsAria": "Files views",
+    "title": "Files",
+    "toasts": {
+      "attached": "“{title}” is attached to your next message.",
+      "bound": "“{title}” is too large for the message box, so it was added to the conversation’s files instead. The agent can read it with its attachment tools.",
+      "deleted": "Deleted “{title}”.",
+      "favorited": "Added “{title}” to favorites.",
+      "moved": "Moved {count, plural, one {# item} other {# items}}.",
+      "referenced": "“{title}” is referenced in your next message.",
+      "removed": "Removed “{title}” from Files.",
+      "removedHint": "It is still in its conversation, and comes back here if it changes.",
+      "unfavorited": "Removed “{title}” from favorites.",
+      "unfiled": "Took {count, plural, one {# item} other {# items}} out of Folders.",
+      "uploadFailed": "Could not upload “{name}”: {reason}",
+      "uploaded": "Uploaded {count, plural, one {# file} other {# files}}.",
+      "uploading": "Uploading {count, plural, one {# file} other {# files}}…"
+    },
+    "type": {
+      "all": "All types",
+      "artifact": "Artifacts",
+      "canvas": "Canvas documents",
+      "file": "Files",
+      "image": "Images",
+      "label": "Type"
+    },
+    "unsupported": {
+      "description": "Open Files in the desktop app or in a browser signed in to this account.",
+      "title": "Files isn’t available on the phone yet"
+    },
+    "untitled": {
+      "artifact": "Untitled artifact",
+      "canvas": "Untitled document",
+      "image": "Untitled image",
+      "session-upload": "Untitled file",
+      "upload": "Untitled file"
+    },
+    "untitledDocument": "Untitled document",
+    "view": {
+      "grid": "Grid",
+      "list": "List",
+      "toggleAria": "Layout"
+    }
   },
   "fleet": {
     "agents": {
@@ -15720,7 +15937,9 @@
     "jumpFailed": "The matching message could not be opened.",
     "kinds": {
       "action": "Commands",
+      "artifact": "Artifacts",
       "bot": "Bots",
+      "canvas-document": "Canvas documents",
       "character": "Characters",
       "device": "Devices",
       "git-branch": "Branch",
@@ -15728,6 +15947,7 @@
       "inbox-contact": "Contacts",
       "inbox-conversation": "Inbox conversations",
       "issue": "Issues",
+      "library-file": "Files",
       "mcp-server": "MCP servers",
       "memory": "Memories",
       "message": "Messages",

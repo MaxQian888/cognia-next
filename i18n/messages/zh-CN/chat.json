@@ -664,6 +664,7 @@
       "entityInsertHint": "填入原文",
       "entityKinds": {
         "artifact": "产物",
+        "canvas": "画布文档",
         "issue": "Issue",
         "memory": "记忆",
         "message": "消息",

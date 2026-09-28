@@ -19,7 +19,12 @@ import {
 import type { ExportOptions } from "./types"
 import { exportPortableRetrievalKeys, type PortableExportStore } from "./retrieval-key-backup"
 
-import { exportSessionAssetRecords, exportMessageMediaRecords } from "./session-assets-backup"
+import {
+  exportLibraryAssets,
+  exportMessageMediaRecords,
+  exportSessionAssetRecords,
+  listLibraryMediaHashes,
+} from "./session-assets-backup"
 
 type RowFilter<T> = (row: T) => boolean | Promise<boolean>
 const APP_VERSION = "0.1.0"
@@ -149,6 +154,12 @@ export async function* buildBackupSections(
     yield* tableSections("templatePackages", db.templatePackages, iterate)
     yield* tableSections("templateInstances", db.templateInstances, iterate)
     yield* tableSections("browserRecordings", db.browserRecordings, iterate)
+    // Files page (ADR-0200). Pinned and owned bytes follow in the media
+    // section below, together with the transcripts' media.
+    yield* tableSections("libraryItems", db.libraryItems, iterate)
+    yield* tableSections("libraryFolders", db.libraryFolders, iterate)
+    const libraryAssets = await exportLibraryAssets()
+    if (libraryAssets.length > 0) yield { section: "libraryAssets", rows: libraryAssets }
   }
 
   if (includeMemories) {
@@ -190,6 +201,10 @@ export async function* buildBackupSections(
     }
   }
 
+  const portableSessionIds = new Set<string>()
+  const sourceChunkBytes = extras.maxChunkBytes
+    ? Math.max(1, Math.floor(((extras.maxChunkBytes - 256) * 3) / 4))
+    : undefined
   if (options.includeSessions) {
     const sessionPortable = createBoundedLookup<string, boolean>(async (sessionId) => {
       const session = await db.sessions.get(sessionId)
@@ -202,16 +217,18 @@ export async function* buildBackupSections(
     yield* tableSections("sessionState", db.sessionState, iterate, (row) =>
       sessionPortable(row.sessionId)
     )
-    const portableSessionIds = new Set<string>()
     for await (const page of iterate(db.sessions)) {
       for (const session of page)
         if (isSessionExposed(session, "standard-export")) portableSessionIds.add(session.id)
     }
-    const sourceChunkBytes = extras.maxChunkBytes
-      ? Math.max(1, Math.floor(((extras.maxChunkBytes - 256) * 3) / 4))
-      : undefined
     yield* exportSessionAssetRecords(portableSessionIds, sourceChunkBytes)
-    yield* exportMessageMediaRecords(portableSessionIds, sourceChunkBytes)
+  }
+
+  // Transcript media plus whatever Files keeps or owns, in one pass so a hash
+  // shared by both is emitted once (the reader requires contiguous chunks).
+  const libraryMediaHashes = includeCoreData ? await listLibraryMediaHashes() : []
+  if (portableSessionIds.size > 0 || libraryMediaHashes.length > 0) {
+    yield* exportMessageMediaRecords(portableSessionIds, sourceChunkBytes, libraryMediaHashes)
   }
 
   if (includePlugins) {

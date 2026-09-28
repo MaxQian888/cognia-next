@@ -250,6 +250,7 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
   ])
   const tables = [...tableNames, "connectorInboundJobs", "syncTombstones"].map((t) => db.table(t))
   const orphanCandidates = new Set<string>()
+  let projectSessionIds: string[] = []
 
   await db.transaction("rw", tables, async () => {
     const projectSessions = await scopedWhere(db.sessions, projectId).toArray()
@@ -278,6 +279,7 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
       throw new Error("Workspace tasks changed during native cleanup; retry deletion")
     }
     const sessionIds = projectSessions.map((session) => session.id)
+    projectSessionIds = sessionIds
     const overrideConversationKeys = (await scopedWhere(
       db.conversationOverrides,
       projectId
@@ -360,6 +362,17 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
   const contentHashes = (await db.agentTeamContentObjects.toCollection().primaryKeys()) as string[]
   const orphanedHashes = contentHashes.filter((hash) => !liveContentHashes.has(hash))
   if (orphanedHashes.length > 0) await db.agentTeamContentObjects.bulkDelete(orphanedHashes)
+
+  // Files items of this workspace (ADR-0200) go with it: its artifacts and
+  // canvas documents were just deleted by projectId, and a kept image or file
+  // must not outlive the workspace the user asked to wipe. Own transaction
+  // (pins + media GC); a failure is logged, not thrown, like media cleanup.
+  try {
+    const { deleteLibraryItemsForProject } = await import("./files-library-items")
+    await deleteLibraryItemsForProject(projectId, projectSessionIds)
+  } catch (error) {
+    loggers.store.warn("project files cleanup failed", { projectId, error: String(error) })
+  }
 
   purgeProjectBuckets(projectId)
   await purgeProjectVectorCollection(projectId)

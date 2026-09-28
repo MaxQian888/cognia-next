@@ -1,0 +1,214 @@
+{
+  "actions": {
+    "delete": "删除",
+    "download": "下载",
+    "favorite": "加入收藏",
+    "moveToFolder": "移到文件夹…",
+    "open": "打开",
+    "preview": "预览",
+    "remove": "从文件中移除",
+    "removeFromFolder": "移出文件夹",
+    "unfavorite": "取消收藏",
+    "useInChat": "在对话中使用"
+  },
+  "card": {
+    "favorite": "收藏",
+    "menu": "「{title}」的更多操作",
+    "modified": "修改于 {date}",
+    "open": "打开「{title}」",
+    "owned": "上传到文件",
+    "sourceDeleted": "对话已删除",
+    "usedIn": "在 {count} 个对话中"
+  },
+  "deleteDialog": {
+    "cancel": "取消",
+    "confirm": "删除",
+    "description": "此文件是上传到文件的，将从本设备删除。已经使用它的对话会保留各自的副本。",
+    "title": "删除「{title}」？"
+  },
+  "deleteFolderDialog": {
+    "cancel": "取消",
+    "cascade": "同时删除子文件夹，并将其中内容移出文件夹",
+    "confirm": "删除文件夹",
+    "description": "其中的内容和子文件夹会上移一级，不会删除任何内容。",
+    "title": "删除「{name}」？"
+  },
+  "description": "所有对话中的产物、画布文档、图片和文件，集中在这里。",
+  "empty": {
+    "all": {
+      "description": "上传文件或开始一个对话来填充这里。",
+      "title": "这里还没有内容"
+    },
+    "clear": "清除搜索和筛选",
+    "favorites": {
+      "description": "收藏后可以随时找到。即使所在对话被删除，收藏的内容也会保留。",
+      "title": "还没有收藏"
+    },
+    "folders": {
+      "description": "可以从条目的菜单中移到这里。文件夹中的内容在所在对话被删除后仍会保留。",
+      "title": "此文件夹为空"
+    },
+    "images": {
+      "description": "在对话中上传或生成的图片会显示在这里。",
+      "title": "还没有图片"
+    },
+    "recent": {
+      "description": "对话中的产物、画布文档、图片和文件会显示在这里。",
+      "title": "这里还没有内容"
+    },
+    "search": {
+      "description": "没有符合搜索和筛选条件的内容。",
+      "title": "没有匹配项"
+    }
+  },
+  "errors": {
+    "files_not_attachable": "此项无法在对话中使用。",
+    "files_source_empty": "此项没有可用的内容。",
+    "files_source_missing": "此项内容已不在本设备上。",
+    "library_folder_cycle": "文件夹不能移到自身之中。",
+    "library_folder_name_required": "请输入文件夹名称。",
+    "library_folder_parent_missing": "上级文件夹已不存在。",
+    "library_item_not_found": "该文件夹已不存在。",
+    "library_item_not_owned": "只有上传到文件的内容才能在这里删除。",
+    "library_item_owned": "上传到文件的内容只能删除，不能移除。",
+    "library_item_source_missing": "此项内容已不在本设备上。",
+    "session_asset_identity_conflict": "已存在标识相同但内容不同的文件。",
+    "session_asset_invalid_extraction": "文件的提取文本与文件不一致。",
+    "session_asset_invalid_original": "无法读取该文件。",
+    "session_asset_not_found": "该文件已不在本设备上。",
+    "session_asset_quota_exceeded": "存储空间不足。请在 设置 → 存储 中释放空间。",
+    "session_asset_scope_changed": "保存文件时账户发生了切换。",
+    "session_asset_session_missing": "该对话已不存在。",
+    "session_asset_too_large": "文件超过 500 MB。",
+    "unknown": "出了点问题，请重试。"
+  },
+  "folderDialog": {
+    "cancel": "取消",
+    "create": "创建",
+    "createTitle": "新建文件夹",
+    "nameLabel": "名称",
+    "placeholder": "文件夹名称",
+    "renameTitle": "重命名文件夹",
+    "save": "保存"
+  },
+  "folders": {
+    "breadcrumbAria": "文件夹路径",
+    "delete": "删除文件夹",
+    "menu": "文件夹「{name}」的操作",
+    "newFolder": "新建文件夹",
+    "open": "打开文件夹「{name}」",
+    "rename": "重命名文件夹",
+    "root": "文件夹",
+    "subfolders": "子文件夹"
+  },
+  "itemCount": "{count} 项",
+  "kinds": {
+    "artifact": "产物",
+    "canvas": "画布文档",
+    "image": "图片",
+    "session-upload": "文件",
+    "upload": "文件"
+  },
+  "loadMore": "显示更多",
+  "loadOlderImages": "加载更早的图片",
+  "loading": "正在加载文件",
+  "moveDialog": {
+    "cancel": "取消",
+    "confirm": "移动",
+    "description": "{count} 项。文件夹中的内容在所在对话被删除后仍会保留。",
+    "empty": "还没有文件夹。可以在“文件夹”标签页中新建。",
+    "none": "移出文件夹",
+    "root": "文件夹（顶层）",
+    "title": "移到文件夹"
+  },
+  "new": {
+    "canvas": "画布文档",
+    "folder": "文件夹",
+    "label": "新建",
+    "upload": "上传文件",
+    "uploadInputAria": "选择要上传的文件"
+  },
+  "newChatTitle": "关于 {title}",
+  "preview": {
+    "close": "关闭预览",
+    "conversations": "所在对话",
+    "details": {
+      "added": "添加时间",
+      "language": "语言",
+      "modified": "修改时间",
+      "size": "大小",
+      "type": "类型"
+    },
+    "label": "预览",
+    "loading": "正在加载预览",
+    "openConversation": "打开对话",
+    "sourceDeleted": "所在对话已删除。因为它已收藏或在文件夹中，所以仍保留在这里。",
+    "unavailable": "内容已不在本设备上。"
+  },
+  "scope": {
+    "all": "全部工作区",
+    "current": "当前工作区",
+    "label": "工作区"
+  },
+  "search": {
+    "aria": "按名称或内容搜索文件",
+    "placeholder": "搜索文件"
+  },
+  "sort": {
+    "created": "添加时间",
+    "label": "排序",
+    "name": "名称",
+    "recent": "最近使用",
+    "size": "大小",
+    "updated": "最近修改"
+  },
+  "tabs": {
+    "all": "全部",
+    "favorites": "收藏",
+    "folders": "文件夹",
+    "images": "图片",
+    "recent": "最近"
+  },
+  "tabsAria": "文件视图",
+  "title": "文件",
+  "toasts": {
+    "attached": "「{title}」已附加到下一条消息。",
+    "bound": "「{title}」太大，无法放入输入框，已作为对话文件添加。Agent 可以用附件工具读取它。",
+    "deleted": "已删除「{title}」。",
+    "favorited": "已收藏「{title}」。",
+    "moved": "已移动 {count} 项。",
+    "referenced": "「{title}」已作为引用加入下一条消息。",
+    "removed": "已从文件中移除「{title}」。",
+    "removedHint": "它仍在原对话中；内容有变化时会重新出现在这里。",
+    "unfavorited": "已取消收藏「{title}」。",
+    "unfiled": "已将 {count} 项移出文件夹。",
+    "uploadFailed": "无法上传「{name}」：{reason}",
+    "uploaded": "已上传 {count} 个文件。",
+    "uploading": "正在上传 {count} 个文件…"
+  },
+  "type": {
+    "all": "全部类型",
+    "artifact": "产物",
+    "canvas": "画布文档",
+    "file": "文件",
+    "image": "图片",
+    "label": "类型"
+  },
+  "unsupported": {
+    "description": "请在桌面应用或已登录此账户的浏览器中打开“文件”。",
+    "title": "手机端暂不支持“文件”"
+  },
+  "untitled": {
+    "artifact": "未命名产物",
+    "canvas": "未命名文档",
+    "image": "未命名图片",
+    "session-upload": "未命名文件",
+    "upload": "未命名文件"
+  },
+  "untitledDocument": "未命名文档",
+  "view": {
+    "grid": "网格",
+    "list": "列表",
+    "toggleAria": "布局"
+  }
+}

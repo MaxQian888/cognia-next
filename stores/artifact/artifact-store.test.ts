@@ -1819,6 +1819,39 @@ describe("clearSessionData additional branches", () => {
     useArtifactStore.getState().clearSessionData("purge")
     expect(useArtifactStore.getState().activeCanvasId).toBeNull()
   })
+
+  it("spares the artifacts and canvas documents Files keeps, dropping only their tabs", () => {
+    const kept = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "k", content: "x" })
+    const gone = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "g", content: "y" })
+    const keptCanvas = useArtifactStore.getState().createCanvasDocument({
+      sessionId: "s1",
+      title: "kc",
+      content: "x",
+      language: "markdown",
+      type: "text",
+    })
+    const goneCanvas = useArtifactStore.getState().createCanvasDocument({
+      sessionId: "s1",
+      title: "gc",
+      content: "y",
+      language: "markdown",
+      type: "text",
+    })
+    useArtifactStore.getState().clearSessionData("s1", {
+      artifactIds: new Set([kept.id]),
+      canvasIds: new Set([keptCanvas]),
+    })
+    const state = useArtifactStore.getState()
+    expect(state.artifacts[kept.id]?.sessionId).toBe("s1")
+    expect(state.artifacts[gone.id]).toBeUndefined()
+    expect(state.canvasDocuments[keptCanvas]?.sessionId).toBe("s1")
+    expect(state.canvasDocuments[goneCanvas]).toBeUndefined()
+    expect(activeTab("s1")).toBeNull()
+  })
 })
 
 describe("persist migration", () => {

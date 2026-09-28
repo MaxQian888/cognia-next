@@ -144,6 +144,7 @@ pub const MENU_IDS: &[&str] = &[
     "go-a2ui",
     "go-dms",
     "go-canvas",
+    "go-files",
     "go-source-control",
     "go-agent-runs",
     "go-workspace",

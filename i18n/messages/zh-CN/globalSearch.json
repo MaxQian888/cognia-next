@@ -84,7 +84,9 @@
   "jumpFailed": "无法打开匹配的消息。",
   "kinds": {
     "action": "命令",
+    "artifact": "产物",
     "bot": "Bot",
+    "canvas-document": "画布文档",
     "character": "角色",
     "device": "设备",
     "git-branch": "分支",
@@ -92,6 +94,7 @@
     "inbox-contact": "联系人",
     "inbox-conversation": "收件箱会话",
     "issue": "议题",
+    "library-file": "文件",
     "mcp-server": "MCP 服务器",
     "memory": "记忆",
     "message": "消息",

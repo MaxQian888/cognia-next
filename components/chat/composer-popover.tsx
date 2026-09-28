@@ -63,6 +63,7 @@ import {
   UserRoundIcon,
   UserRoundPenIcon,
   WandSparklesIcon,
+  PenLineIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
@@ -1130,6 +1131,7 @@ const ENTITY_ROW_ICONS: Record<EntitySelectionKind, typeof BrainIcon> = {
   // back" from the artifact row sitting next to it in the same list.
   result: SquareChevronRightIcon,
   artifact: ShapesIcon,
+  canvas: PenLineIcon,
   // Singular on purpose: ⌘K gives a whole Squad the plural `UsersIcon`, and a
   // list can carry both a Squad row and one of its members.
   teammate: UserRoundIcon,

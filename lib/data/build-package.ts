@@ -29,7 +29,12 @@ import { deepStripSecrets } from "@/lib/settings/profile-transfer"
 import { createPagedTableReader } from "./paged-table-reader"
 import { redactMcpServerForExport } from "@/lib/mcp/credentials"
 
-import { exportSessionAssetRecords, exportMessageMediaRecords } from "./session-assets-backup"
+import {
+  exportLibraryAssets,
+  exportMessageMediaRecords,
+  exportSessionAssetRecords,
+  listLibraryMediaHashes,
+} from "./session-assets-backup"
 
 const APP_VERSION = "0.1.0"
 
@@ -119,6 +124,10 @@ export async function buildBackupPackage(
     templateInstances,
     browserRecordings,
     providerProfileStore,
+    libraryItems,
+    libraryFolders,
+    libraryAssets,
+    libraryMediaHashes,
   ] = await Promise.all([
     getSettings(),
     readTable(db.characters),
@@ -173,6 +182,10 @@ export async function buildBackupPackage(
     readTable(db.templateInstances),
     readTable(db.browserRecordings),
     exportStoredProfilesRedacted(),
+    includeCoreData ? readTable(db.libraryItems) : Promise.resolve([]),
+    includeCoreData ? readTable(db.libraryFolders) : Promise.resolve([]),
+    includeCoreData ? exportLibraryAssets() : Promise.resolve([]),
+    includeCoreData ? listLibraryMediaHashes() : Promise.resolve([] as string[]),
   ])
 
   // The setting face contains nested provider credentials. Reuse the settings
@@ -287,6 +300,10 @@ export async function buildBackupPackage(
     templateInstances,
     browserRecordings,
     providerProfileStore,
+    // Files page (ADR-0200). Gated with the rest of the core data below.
+    libraryItems,
+    libraryFolders,
+    libraryAssets,
   }
   if (opts.includeSessions) {
     const exportedSessions = filterExposedSessions(sessions, "standard-export")
@@ -298,7 +315,19 @@ export async function buildBackupPackage(
       if (record.section === "sessionAssets") (payload.sessionAssets ??= []).push(...record.rows)
       else (payload.sessionAssetSourceChunks ??= []).push(...record.rows)
     }
-    for await (const record of exportMessageMediaRecords(exportedSessionIds)) {
+  }
+  // Images and sources: the exported transcripts' media, plus whatever the
+  // Files page keeps or owns (its conversations may not be exported, or may no
+  // longer exist). One pass so a shared hash is carried once.
+  const exportedSessionIds = opts.includeSessions
+    ? new Set((payload.sessions ?? []).map((session) => session.id))
+    : new Set<string>()
+  if (exportedSessionIds.size > 0 || libraryMediaHashes.length > 0) {
+    for await (const record of exportMessageMediaRecords(
+      exportedSessionIds,
+      48 * 1024,
+      libraryMediaHashes
+    )) {
       if (record.section === "messageMedia") (payload.messageMedia ??= []).push(...record.rows)
       else (payload.messageMediaChunks ??= []).push(...record.rows)
     }
@@ -348,6 +377,9 @@ export async function buildBackupPackage(
       "templatePackages",
       "templateInstances",
       "browserRecordings",
+      "libraryItems",
+      "libraryFolders",
+      "libraryAssets",
     ] satisfies (keyof BackupPayloadV3)[]) {
       delete payload[key]
     }

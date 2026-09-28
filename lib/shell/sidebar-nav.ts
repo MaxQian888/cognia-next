@@ -35,6 +35,7 @@ import {
   UserRoundIcon,
   Users2Icon,
   WorkflowIcon,
+  FolderOpenIcon,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { arrayMove } from "@dnd-kit/sortable"
@@ -75,6 +76,7 @@ export const SIDEBAR_NAV_ICONS: Record<string, LucideIcon> = {
   "source-control": GitBranchIcon,
   "agent-runs": ListChecksIcon,
   sites: PanelsTopLeftIcon,
+  files: FolderOpenIcon,
   a2ui: LayoutGridIcon,
   memory: BrainIcon,
   servers: ServerCogIcon,
@@ -116,6 +118,8 @@ export function getSidebarCatalog(
     // desktop shell. Check this before the runtime contract so the initial
     // target-less snapshot cannot temporarily reveal them either.
     if (platform === "mobile" && meta.desktopOnly) return false
+    // Built for full clients only (see `SidebarNavMeta.mobileHidden`).
+    if (platform === "mobile" && meta.mobileHidden) return false
     // A desktop-only surface with no host operation cannot be served by any
     // companion, so no runtime snapshot can make it reachable here. Without
     // this the web path below consulted only the surface contract, and the pet

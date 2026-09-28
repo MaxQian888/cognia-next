@@ -110,6 +110,18 @@ const EXPECTED: Record<string, { scoping: Scoping; why: string }> = {
     why: "Schedules carry a workspace, but the palette lists them across workspaces on purpose — an unattributed or foreign schedule is exactly what a user searches for when it misfires.",
   },
   "builtin.pi-packages": { scoping: "global", why: "Python packages are machine-wide." },
+  "builtin.files.artifacts": {
+    scoping: "filter",
+    why: "An artifact is stamped with the workspace it was made in; the Files page scopes the same way, and unstamped legacy rows count as shared.",
+  },
+  "builtin.files.canvas": {
+    scoping: "filter",
+    why: "A canvas document is stamped with its workspace on create, like an artifact.",
+  },
+  "builtin.files.items": {
+    scoping: "filter",
+    why: "An upload belongs to the workspace of its conversation, or the one active when it was uploaded to Files; rows with neither are shared.",
+  },
 }
 
 describe("workspace scoping is decided for every provider", () => {

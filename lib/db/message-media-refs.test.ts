@@ -3,7 +3,11 @@ import { createDbTestFixture } from "./test-fixture"
 import {
   collectMessageMediaHashes,
   collectUnreferencedMessageMedia,
+  isLibraryMediaRef,
   isMessageMediaReferencedBySession,
+  isMessageOwnedMediaRef,
+  LIBRARY_OWNER_PREFIX,
+  LIBRARY_REF_SESSION_ID,
   listMessageMediaRefsForSession,
   messageMediaRefRows,
 } from "./message-media-refs"
@@ -166,5 +170,42 @@ describe("reference queries and collection", () => {
     await expect(collectUnreferencedMessageMedia(undefined, { now: 1_000_000 })).resolves.toBe(1)
     expect(await db.messageMedia.get("live")).toBeDefined()
     expect(await db.messageMedia.get("fresh")).toBeDefined()
+  })
+})
+
+describe("Files library owner", () => {
+  it("reserves the library: owner and sentinel session for Files rows", () => {
+    expect(() => messageMediaRefRows(`${LIBRARY_OWNER_PREFIX}x`, "s1", [])).toThrow(
+      "reserved_library_owner"
+    )
+    expect(() => messageMediaRefRows("m1", LIBRARY_REF_SESSION_ID, [])).toThrow(
+      "reserved_library_owner"
+    )
+  })
+
+  it("never treats a library pin as message-owned", () => {
+    const pin = {
+      messageId: `${LIBRARY_OWNER_PREFIX}image:h`,
+      sessionId: LIBRARY_REF_SESSION_ID,
+      hash: "h",
+    }
+    expect(isLibraryMediaRef(pin)).toBe(true)
+    expect(isMessageOwnedMediaRef(pin)).toBe(false)
+    expect(isMessageOwnedMediaRef({ messageId: "m1", sessionId: "s1", hash: "h" })).toBe(true)
+  })
+
+  it("keeps pinned bytes alive through collection without granting session access", async () => {
+    const db = getDb()
+    await db.messageMedia.put(media("pinned"))
+    await db.messageMediaRefs.put({
+      messageId: `${LIBRARY_OWNER_PREFIX}image:pinned`,
+      sessionId: LIBRARY_REF_SESSION_ID,
+      hash: "pinned",
+    })
+
+    await expect(collectUnreferencedMessageMedia(["pinned"], { now: 1_000_000 })).resolves.toBe(0)
+    await expect(collectUnreferencedMessageMedia(undefined, { now: 1_000_000 })).resolves.toBe(0)
+    expect(await db.messageMedia.get("pinned")).toBeDefined()
+    await expect(isMessageMediaReferencedBySession("s1", "pinned")).resolves.toBe(false)
   })
 })

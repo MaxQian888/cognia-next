@@ -358,6 +358,7 @@ import {
 } from "@/lib/notifications/identity-cache"
 import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 import type { ChatTemplateRow } from "./chat-templates"
+import type { LibraryFolder, LibraryItemRow } from "./files-library-types"
 import type {
   ExternalAgentConfigHeadRow,
   ExternalAgentConfigRevisionRow,
@@ -417,7 +418,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 230
+export const CURRENT_SCHEMA_VERSION = 231
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -982,6 +983,12 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
     "&id, scopeKey, kind, state, dueAt, [state+dueAt], factKey, intentId, aggregateKey",
   notificationAggregateMembers:
     "&id, scopeKey, aggregateKey, [aggregateKey+bucketOpenedAt], notificationId, flushedAt",
+  // v231 — Files page (ADR-0200). Favorites / folder membership / "removed
+  // from Files" over artifacts, canvas documents, images and uploads, plus the
+  // folder tree. See `lib/db/files-library-types.ts`.
+  libraryItems:
+    "&key, kind, originSessionId, folderId, favoritedAt, lastOpenedAt, hiddenAt, projectId",
+  libraryFolders: "&id, name, parentFolderId, [parentFolderId+name], updatedAt, createdAt",
 }
 
 let databaseConnectionSequence = 0
@@ -1600,6 +1607,9 @@ export class CogniaDB extends Dexie {
   externalAgentConfigRevisions!: Table<ExternalAgentConfigRevisionRow, string>
   // v193 — saved chat templates. See `lib/db/chat-templates.ts`.
   chatTemplates!: Table<ChatTemplateRow, string>
+  // v231 — Files page metadata. See `lib/db/files-library-types.ts`.
+  libraryItems!: Table<LibraryItemRow, string>
+  libraryFolders!: Table<LibraryFolder, string>
   // v194 — ADR-0149 identity projection. See `lib/db/identity.ts`.
   users!: Table<User, string>
   orgs!: Table<Org, string>

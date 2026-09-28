@@ -664,6 +664,7 @@
       "entityInsertHint": "insert the text",
       "entityKinds": {
         "artifact": "artifact",
+        "canvas": "canvas document",
         "issue": "issue",
         "memory": "memory",
         "message": "message",

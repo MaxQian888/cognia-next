@@ -43,6 +43,21 @@ const encrypted: EncryptedEnvelopeV1 = {
 }
 
 describe("scanBackupForShare", () => {
+  it("groups Files folders, items and extracted asset text under library", () => {
+    const result = scanBackupForShare(
+      plaintext({
+        libraryFolders: [{ name: "alice@example.com" }],
+        libraryItems: [{ title: "bob@example.com" }],
+        libraryAssets: [{ extractedContent: "carol@example.com" }],
+      })
+    )
+    expect(result).toMatchObject({
+      kind: "hits",
+      total: 3,
+      domains: [{ domain: "library", hits: 3, byKind: { EMAIL: 3 } }],
+    })
+  })
+
   it("reports plaintext hits grouped by domain, most hits first", () => {
     const result = scanBackupForShare(
       plaintext({

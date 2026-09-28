@@ -46,6 +46,7 @@ export const FULL_VIEWPORT_ROUTE_PATTERNS: readonly string[] = [
   "/a2ui/",
   // Feature-shell consoles. Each of these is `flex h-full min-h-0 flex-1`.
   "/sites",
+  "/files",
   "/devices",
   "/servers",
   "/servers/",

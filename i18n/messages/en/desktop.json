@@ -205,6 +205,7 @@
     "agentRuns": "Agent runs",
     "aliases": {
       "devices": "Paired devices, remote hosts, phones, fleet, pairing, sandbox, workers",
+      "files": "Library, assets, attachments, uploads, documents, images, artifacts, favorites",
       "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
     },
     "badgeCount": "{count, plural, one {# waiting} other {# waiting}}",
@@ -260,6 +261,7 @@
     "editTeam": "Edit team",
     "eval": "Evaluation",
     "featuresGroup": "Features",
+    "files": "Files",
     "goals": "Goals",
     "inbox": "Inbox",
     "integrations": "Integrations",

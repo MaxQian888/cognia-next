@@ -10,7 +10,12 @@ import {
   type SessionAsset,
 } from "@/lib/db/session-assets"
 import { revokeClaimsForChangedAttachment } from "@/lib/memory/lifecycle/claim-deletion-closure"
-import { SESSION_ASSET_OWNER_PREFIX } from "@/lib/db/message-media-refs"
+import {
+  LIBRARY_OWNER_PREFIX,
+  LIBRARY_REF_SESSION_ID,
+  SESSION_ASSET_OWNER_PREFIX,
+} from "@/lib/db/message-media-refs"
+import { libraryAssetOwnerKey } from "@/lib/db/session-assets"
 import { collectMessageMediaHashes } from "@/lib/db/message-media-refs"
 import type { MessageMediaRow } from "@/lib/db/message-media"
 
@@ -54,20 +59,30 @@ async function* encodeSourceChunks(
   }
 }
 
-/** Canonical images, thumbnails and their retained originals follow the exported transcript. */
+/**
+ * Canonical images, thumbnails and their retained originals follow the
+ * exported transcript. `extraHashes` adds media the Files page keeps or owns
+ * (ADR-0200) — pinned images and `original:` sources whose conversations may
+ * not be exported, or may no longer exist. One pass, so a hash shared by both
+ * is emitted once.
+ */
 export async function* exportMessageMediaRecords(
   sessionIds: ReadonlySet<string>,
-  chunkBytes = 48 * 1024
+  chunkBytes = 48 * 1024,
+  extraHashes: Iterable<string> = []
 ): AsyncIterable<MessageMediaBackupRecord> {
   const db = getDb()
   const hashes = new Set<string>()
-  if (!sessionIds.size) return
-  await db.messages
-    .where("sessionId")
-    .anyOf([...sessionIds])
-    .each((message) => {
-      for (const hash of collectMessageMediaHashes(message.parts)) hashes.add(hash)
-    })
+  if (sessionIds.size) {
+    await db.messages
+      .where("sessionId")
+      .anyOf([...sessionIds])
+      .each((message) => {
+        for (const hash of collectMessageMediaHashes(message.parts)) hashes.add(hash)
+      })
+  }
+  for (const hash of extraHashes) hashes.add(hash)
+  if (!hashes.size) return
   const emitted = new Set<string>()
   let byteTotal = 0
   for (const hash of hashes) {
@@ -427,4 +442,103 @@ export async function restoreSessionAssetBackup(
     if (!(await db.messageMediaRefs.where("hash").equals(hash).count()))
       await db.messageMedia.delete(hash)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Files page (ADR-0200)
+// ---------------------------------------------------------------------------
+
+/** Every `messageMedia` key a Files pin or Files-owned upload holds. */
+export async function listLibraryMediaHashes(): Promise<string[]> {
+  const refs = await getDb()
+    .messageMediaRefs.where("messageId")
+    .startsWith(LIBRARY_OWNER_PREFIX)
+    .toArray()
+  return [...new Set(refs.map((ref) => ref.hash))]
+}
+
+/** Metadata of files uploaded straight into Files; their bytes ride the media section. */
+export async function exportLibraryAssets(): Promise<SessionAsset[]> {
+  const prefix = libraryAssetOwnerKey("")
+  const refs = await getDb().messageMediaRefs.where("messageId").startsWith(prefix).toArray()
+  return refs.flatMap((ref) =>
+    ref.sessionAsset && !ref.sessionAsset.deletedAt ? [ref.sessionAsset] : []
+  )
+}
+
+/** Validate Files-owned upload metadata before any restore mutation. */
+export function prepareLibraryAssets(input: SessionAsset[] | undefined): SessionAsset[] {
+  if (input === undefined) return []
+  if (!Array.isArray(input)) throw new Error("library_asset_backup_invalid")
+  const ids = new Set<string>()
+  for (const asset of input) {
+    if (
+      !asset ||
+      typeof asset !== "object" ||
+      asset.sessionId !== LIBRARY_REF_SESSION_ID ||
+      typeof asset.assetId !== "string" ||
+      !asset.assetId ||
+      ids.has(asset.assetId) ||
+      typeof asset.contentHash !== "string" ||
+      !/^[a-f0-9]{64}$/.test(asset.contentHash) ||
+      typeof asset.filename !== "string" ||
+      typeof asset.mediaType !== "string" ||
+      !Number.isSafeInteger(asset.byteSize) ||
+      asset.byteSize < 0 ||
+      asset.byteSize > SESSION_ASSET_MAX_BYTES ||
+      !Number.isFinite(asset.createdAt) ||
+      !Number.isFinite(asset.updatedAt) ||
+      !Number.isSafeInteger(asset.revision) ||
+      asset.revision < 1 ||
+      asset.temporary !== false ||
+      asset.sourceRetained === false ||
+      asset.deletedAt !== undefined
+    )
+      throw new Error("library_asset_backup_invalid")
+    if (
+      asset.extractedContent &&
+      (!readAttachmentExtractedContent(asset.extractedContent) ||
+        asset.extractedContent.attachmentId !== asset.assetId ||
+        asset.extractedContent.contentHash !== asset.contentHash)
+    )
+      throw new Error("library_asset_backup_invalid_extraction")
+    ids.add(asset.assetId)
+  }
+  checkSessionAssetQuota(input)
+  return input
+}
+
+/**
+ * Restore Files-owned upload owner rows. Caller owns the transaction and has
+ * already restored the `original:` bytes through the media section; a source
+ * whose bytes did not arrive is an incomplete package.
+ */
+export async function restoreLibraryAssets(
+  assets: readonly SessionAsset[],
+  strategy: "skip" | "overwrite" | "duplicate"
+): Promise<number> {
+  if (assets.length === 0) return 0
+  const db = getDb()
+  const refs = await db.messageMediaRefs.filter((row) => !!row.sessionAsset).toArray()
+  const combined = new Map(refs.map((row) => [row.messageId, row.sessionAsset!]))
+  let written = 0
+  for (const asset of assets) {
+    const messageId = libraryAssetOwnerKey(asset.assetId)
+    if (combined.has(messageId) && strategy === "skip") continue
+    const hash = `original:${asset.contentHash}`
+    const media = await db.messageMedia.get(hash)
+    if (!(media?.blob instanceof Blob) || media.blob.size !== asset.byteSize)
+      throw new Error("library_asset_backup_source_missing")
+    combined.set(messageId, asset)
+    checkSessionAssetQuota([...combined.values()])
+    await db.messageMediaRefs.where("messageId").equals(messageId).delete()
+    await db.messageMediaRefs.put({
+      messageId,
+      sessionId: LIBRARY_REF_SESSION_ID,
+      hash,
+      sessionAsset: asset,
+    })
+    written += 1
+  }
+  return written
 }

@@ -89,6 +89,7 @@ const ENTITY_NOUNS: Record<EntitySelectionKind, string> = {
   prompt: "Something the user wrote in another conversation",
   result: "A result produced in another conversation",
   artifact: "Artifact",
+  canvas: "Canvas document",
   // Not "a teammate": the block is the ROLE, not something the member said.
   // A model handed "Reviewer" plus a description and a spawn prompt has to
   // know it is being told how to answer, not shown a transcript.

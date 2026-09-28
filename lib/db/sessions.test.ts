@@ -1344,7 +1344,48 @@ describe("deleteSession — artifact store purge", () => {
   it("drops the deleted session's artifacts from the persisted store", async () => {
     const s = await createSession({ title: "with artifacts" })
     await deleteSession(s.id)
-    expect(clearSessionDataMock).toHaveBeenCalledWith(s.id)
+    expect(clearSessionDataMock).toHaveBeenCalledWith(s.id, {
+      artifactIds: new Set(),
+      canvasIds: new Set(),
+    })
+  })
+
+  it("passes the artifacts and canvas documents Files keeps so they outlive the session", async () => {
+    const s = await createSession({ title: "kept work" })
+    await getDb().libraryItems.bulkPut([
+      {
+        key: "artifact:a1",
+        kind: "artifact",
+        sourceId: "a1",
+        originSessionId: s.id,
+        favoritedAt: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        key: "canvas:c1",
+        kind: "canvas",
+        sourceId: "c1",
+        originSessionId: s.id,
+        folderId: "root",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        key: "artifact:a2",
+        kind: "artifact",
+        sourceId: "a2",
+        originSessionId: s.id,
+        lastOpenedAt: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+    await deleteSession(s.id)
+    expect(clearSessionDataMock).toHaveBeenCalledWith(s.id, {
+      artifactIds: new Set(["a1"]),
+      canvasIds: new Set(["c1"]),
+    })
   })
 
   it("purges every id on bulkDeleteSessions", async () => {

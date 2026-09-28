@@ -9,6 +9,7 @@ import type { GlobalSearchProvider } from "../types"
 import { actionsProvider } from "./actions"
 import { botsProvider } from "./bots"
 import { devicesProvider } from "./devices"
+import { filesArtifactsProvider, filesCanvasProvider, filesItemsProvider } from "./files"
 import { gitBranchesProvider, gitWorktreesProvider } from "./git"
 import { sitesProvider } from "./sites"
 import { squadsProvider } from "./squads"
@@ -74,6 +75,10 @@ export function builtinGlobalSearchProviders(
     // than fetching, so the per-keystroke cost is a store read.
     gitBranchesProvider,
     gitWorktreesProvider,
+    // Files (ADR-0200). Empty on the phone shell, which Files does not serve.
+    filesArtifactsProvider,
+    filesCanvasProvider,
+    filesItemsProvider,
   ]
 }
 

@@ -84,7 +84,9 @@
   "jumpFailed": "The matching message could not be opened.",
   "kinds": {
     "action": "Commands",
+    "artifact": "Artifacts",
     "bot": "Bots",
+    "canvas-document": "Canvas documents",
     "character": "Characters",
     "device": "Devices",
     "git-branch": "Branch",
@@ -92,6 +94,7 @@
     "inbox-contact": "Contacts",
     "inbox-conversation": "Inbox conversations",
     "issue": "Issues",
+    "library-file": "Files",
     "mcp-server": "MCP servers",
     "memory": "Memories",
     "message": "Messages",

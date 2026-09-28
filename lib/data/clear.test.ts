@@ -4,7 +4,8 @@ import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { setDraftDebounced, clearDraft } from "@/lib/db/chat-drafts"
 import { loggers } from "@cognia/logging"
-import { putSessionAsset, listSessionAssets } from "@/lib/db/session-assets"
+import { putSessionAsset, listSessionAssets, putLibraryAsset } from "@/lib/db/session-assets"
+import { LIBRARY_OWNER_PREFIX, LIBRARY_REF_SESSION_ID } from "@/lib/db/message-media-refs"
 import { clearBrowserPreviewData } from "@/lib/browser/preview-data"
 import { clearTables, clearAll } from "./clear"
 
@@ -293,4 +294,36 @@ it("clears durable and temporary attachment ownership with sessions", async () =
   await clearTables(["sessions"])
   expect(await listSessionAssets("a")).toEqual([])
   expect(await getDb().messageMedia.where("hash").startsWith("original:").count()).toBe(0)
+})
+
+it("leaves Files pins and Files-owned uploads, with their bytes, when clearing conversations", async () => {
+  await seedSessions()
+  const db = getDb()
+  await putSessionAsset({
+    sessionId: "a",
+    assetId: "kept",
+    filename: "kept.txt",
+    mediaType: "text/plain",
+    blob: new Blob(["kept source"]),
+  })
+  const kept = await db.messageMediaRefs.where("messageId").startsWith("session-asset:").first()
+  await db.messageMediaRefs.put({
+    messageId: `${LIBRARY_OWNER_PREFIX}session-upload:x`,
+    sessionId: LIBRARY_REF_SESSION_ID,
+    hash: kept!.hash,
+  })
+  await putLibraryAsset({
+    assetId: "own",
+    filename: "own.md",
+    mediaType: "text/markdown",
+    blob: new Blob(["owned by files"]),
+  })
+
+  await clearTables(["sessions"])
+
+  const refs = await db.messageMediaRefs.toArray()
+  expect(refs.every((row) => row.sessionId === LIBRARY_REF_SESSION_ID)).toBe(true)
+  expect(refs).toHaveLength(2)
+  expect(await db.messageMedia.where("hash").startsWith("original:").count()).toBe(2)
+  expect(await db.libraryItems.get("upload:own")).toBeDefined()
 })

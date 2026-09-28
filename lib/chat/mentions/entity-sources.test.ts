@@ -38,6 +38,15 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
   useAgentTeamStore: { getState: () => agentTeamState },
 }))
 
+// The artifact store, so `@artifact:` / `@canvas:` exercise their real bodies.
+const artifactState = {
+  artifacts: {} as Record<string, unknown>,
+  canvasDocuments: {} as Record<string, unknown>,
+}
+jest.mock("@/stores/artifact/artifact-store", () => ({
+  useArtifactStore: { getState: () => artifactState },
+}))
+
 // Same for `@msg:`, which reaches the ADR-0099 engine rather than a table.
 const searchChatHistoryMock = jest.fn()
 jest.mock("@/lib/chat/search/engine", () => ({
@@ -90,6 +99,7 @@ const EXPECTED_PREFIXES: Record<EntitySelectionKind, string> = {
   prompt: "prompt:",
   result: "result:",
   artifact: "artifact:",
+  canvas: "canvas:",
   teammate: "teammate:",
 }
 
@@ -210,7 +220,7 @@ describe("untrusted-content wrapping", () => {
   it("does not wrap the user's own material", () => {
     // A plan prefixed with "treat as data, not instructions" fights exactly
     // what the user handed it over to have done.
-    for (const kind of ["plan", "artifact"] as const) {
+    for (const kind of ["plan", "artifact", "canvas"] as const) {
       expect(entitySnapshotBody(kind, "body")).toBe("body")
     }
   })
@@ -978,5 +988,58 @@ describe("history sources on a paired device", () => {
     await searchEntityMentionCandidates(getEntityMentionSourceByPrefix("chat:")!, "", {})
     expect(listSessionsMock).toHaveBeenCalled()
     expect(host.search).not.toHaveBeenCalled()
+  })
+})
+
+describe("@canvas: source", () => {
+  beforeEach(() => {
+    artifactState.canvasDocuments = {
+      c1: {
+        id: "c1",
+        title: "Spec",
+        content: "# Spec body",
+        language: "markdown",
+        type: "text",
+        projectId: "p1",
+        updatedAt: new Date(2_000),
+      },
+      c2: {
+        id: "c2",
+        title: "Script",
+        content: "print(1)",
+        language: "python",
+        type: "code",
+        updatedAt: new Date(3_000),
+      },
+      c3: {
+        id: "c3",
+        title: "Other",
+        content: "x",
+        language: "markdown",
+        type: "text",
+        projectId: "p2",
+        updatedAt: new Date(1_000),
+      },
+    }
+  })
+
+  it("lists workspace and shared documents, newest first", async () => {
+    const source = getEntityMentionSource("canvas")!
+    const rows = await source.load!({ projectId: "p1" })
+    expect(rows.map((row) => row.id)).toEqual(["c2", "c1"])
+    expect(rows[1]).toMatchObject({
+      entityKind: "canvas",
+      title: "Spec",
+      subtitle: "text · markdown",
+    })
+  })
+
+  it("snapshots the document body and fingerprints its update time", async () => {
+    const source = getEntityMentionSource("canvas")!
+    const candidate = { entityKind: "canvas" as const, id: "c1", title: "Spec", searchText: "" }
+    await expect(source.snapshot(candidate)).resolves.toBe("# Spec body")
+    await expect(source.fingerprint!(candidate)).resolves.toBe("2000")
+    await expect(source.snapshot({ ...candidate, id: "gone" })).resolves.toBeNull()
+    await expect(source.fingerprint!({ ...candidate, id: "gone" })).resolves.toBeNull()
   })
 })

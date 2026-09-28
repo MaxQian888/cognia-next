@@ -205,6 +205,7 @@
     "agentRuns": "智能体运行",
     "aliases": {
       "devices": "配对设备, 远程主机, 手机, 机队, 配对, 沙盒, worker, devices, paired devices, remote hosts",
+      "files": "资源库, 素材, 附件, 上传, 文档, 图片, 产物, 收藏, library, files",
       "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本"
     },
     "badgeCount": "{count} 项待处理",
@@ -260,6 +261,7 @@
     "editTeam": "编辑团队",
     "eval": "评估",
     "featuresGroup": "功能",
+    "files": "文件",
     "goals": "目标",
     "inbox": "收件箱",
     "integrations": "集成",

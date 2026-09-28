@@ -59,6 +59,13 @@ export interface SidebarNavMeta {
    * it never appears off desktop.
    */
   desktopOnly?: boolean
+  /**
+   * Hidden on the phone shell (Capacitor) only; shown on desktop and on the
+   * web. For a surface that runs on any full client but has not been built for
+   * the phone yet — Files (ADR-0200) reads this device's own database, and the
+   * phone mirrors none of what it lists. See `filesRequiresDesktopOrWeb`.
+   */
+  mobileHidden?: boolean
 }
 
 /**
@@ -152,6 +159,17 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   // reachable from the navigation — the menubar could go somewhere the rail
   // could not. In "More" by default, like every other auxiliary surface.
   { id: "sites", route: "/sites", i18nKey: "sites", group: "auxiliary", category: "spaces" },
+  // Files (ADR-0200): artifacts, canvas documents, images and uploads from
+  // every conversation. Desktop and web; not built for the phone yet.
+  {
+    id: "files",
+    route: "/files",
+    i18nKey: "files",
+    group: "auxiliary",
+    category: "spaces",
+    aliasKey: "files",
+    mobileHidden: true,
+  },
   { id: "a2ui", route: "/a2ui", i18nKey: "a2ui", group: "auxiliary", category: "spaces" },
   { id: "memory", route: "/memory", i18nKey: "memory", group: "auxiliary", category: "insights" },
   // No "observability" entry: the tracing dashboard is a sub-view of `/logs`

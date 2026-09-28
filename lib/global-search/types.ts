@@ -61,6 +61,12 @@ export type GlobalSearchKind =
   | "git-branch"
   /** A linked worktree of the bound repository. */
   | "git-worktree"
+  /** An artifact, opened on the Files page (ADR-0200). */
+  | "artifact"
+  /** A canvas document, opened on the Files page. */
+  | "canvas-document"
+  /** An uploaded file or named image on the Files page. */
+  | "library-file"
 
 /** The scope tabs across the top of the dialog. */
 export type GlobalSearchScope =
@@ -113,6 +119,10 @@ export const KIND_SCOPES: Readonly<Record<GlobalSearchKind, readonly GlobalSearc
   site: ["library"],
   "git-branch": ["library"],
   "git-worktree": ["library"],
+  // Library: things made or kept across conversations (ADR-0200).
+  artifact: ["library"],
+  "canvas-document": ["library"],
+  "library-file": ["library"],
 }
 
 /**
@@ -157,6 +167,11 @@ export const KIND_PRIORITY: Readonly<Record<GlobalSearchKind, number>> = {
   // asset that matched the same needle.
   "git-branch": 25,
   "git-worktree": 26,
+  // Files (ADR-0200) after the definitions: a file is found by name far less
+  // often than a workflow or skill, and there are many more of them.
+  artifact: 27,
+  "canvas-document": 28,
+  "library-file": 29,
 }
 
 /** What the dialog does when an item is chosen. */

@@ -42,6 +42,7 @@ import type { PetModelRow } from "@/lib/db/pet-models"
 import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import type { LocalStorageSnapshot } from "./snapshots/types"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
+import type { LibraryFolder, LibraryItemRow } from "@/lib/db/files-library-types"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
 import type { BrowserRecordingRow } from "@/lib/db/browser-recordings"
@@ -143,6 +144,18 @@ export interface BackupPayloadV3 {
    * answer than one carrying a number nobody reads directly.
    */
   chatTemplates?: ChatTemplateRow[]
+  /**
+   * Files page (ADR-0200, schema v231): favorites, folder membership and
+   * "removed from Files" over artifacts, canvas documents, images and uploads,
+   * plus the folder tree. Kept items' snapshots ride along so a kept file whose
+   * conversation is gone still has a name. Pins are rebuilt on import from
+   * these rows (`reconcileLibraryPins`); the bytes they pin travel in the media
+   * section (`messageMedia` / `messageMediaChunks`).
+   */
+  libraryItems?: LibraryItemRow[]
+  libraryFolders?: LibraryFolder[]
+  /** Files uploaded straight into Files: owner metadata. Bytes ride `messageMedia` as `original:<sha>`. */
+  libraryAssets?: SessionAsset[]
   /**
    * Scheduled tasks (schema v219). Configuration the user authored: a trigger,
    * a payload, a workspace binding. Run history is NOT here. It is append-heavy

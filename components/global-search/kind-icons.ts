@@ -40,6 +40,9 @@ import {
   UsersRoundIcon,
   WorkflowIcon,
   type LucideIcon,
+  ShapesIcon,
+  PenLineIcon,
+  FileIcon,
 } from "lucide-react"
 
 import type { GlobalSearchKind } from "@/lib/global-search/types"
@@ -79,6 +82,10 @@ export const KIND_ICONS: Readonly<Record<GlobalSearchKind, LucideIcon>> = {
   // palette row and the panel it opens read as the same object.
   "git-branch": GitBranchIcon,
   "git-worktree": FolderGitIcon,
+  // The Files page's glyphs (ADR-0200), so a row reads as the card it opens.
+  artifact: ShapesIcon,
+  "canvas-document": PenLineIcon,
+  "library-file": FileIcon,
 }
 
 export function kindIcon(kind: GlobalSearchKind): LucideIcon {

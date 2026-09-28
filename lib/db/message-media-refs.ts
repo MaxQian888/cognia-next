@@ -4,6 +4,18 @@ import type { SessionAsset } from "./session-assets"
 
 /** Reserved ledger owners are never chat message ids. */
 export const SESSION_ASSET_OWNER_PREFIX = "session-asset:"
+/**
+ * Files page owner (ADR-0200): `library:<itemKey>` pins a kept item's bytes,
+ * `library:upload:<assetId>` owns a file uploaded straight into Files.
+ */
+export const LIBRARY_OWNER_PREFIX = "library:"
+/**
+ * Session id carried by every `library:` ref row. Session ids never contain
+ * ":", so no real session matches it: session deletion, the project cascade
+ * and `[sessionId+hash]` authorization all leave these rows alone, while media
+ * GC — which only counts rows by hash — sees the bytes as referenced.
+ */
+export const LIBRARY_REF_SESSION_ID = "library:files"
 
 export interface MessageMediaRefRow {
   messageId: string
@@ -13,8 +25,12 @@ export interface MessageMediaRefRow {
   sessionAsset?: SessionAsset
 }
 
+export function isLibraryMediaRef(row: Pick<MessageMediaRefRow, "messageId">): boolean {
+  return row.messageId.startsWith(LIBRARY_OWNER_PREFIX)
+}
+
 export function isMessageOwnedMediaRef(row: MessageMediaRefRow): boolean {
-  return row.sessionAsset === undefined
+  return row.sessionAsset === undefined && !isLibraryMediaRef(row)
 }
 
 function visitMediaRefs(value: unknown, hashes: Set<string>, key?: string): void {
@@ -45,6 +61,9 @@ export function messageMediaRefRows(
 ): MessageMediaRefRow[] {
   if (messageId.startsWith(SESSION_ASSET_OWNER_PREFIX)) {
     throw new Error("reserved_session_asset_owner")
+  }
+  if (messageId.startsWith(LIBRARY_OWNER_PREFIX) || sessionId === LIBRARY_REF_SESSION_ID) {
+    throw new Error("reserved_library_owner")
   }
   return collectMessageMediaHashes(parts).map((hash) => ({ messageId, sessionId, hash }))
 }

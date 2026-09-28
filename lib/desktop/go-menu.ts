@@ -70,7 +70,7 @@ const GO_MENU_EXTRAS: Readonly<Record<string, Omit<GoMenuItem, "id">>> = {
 export const GO_MENU_LAYOUT: readonly (readonly string[])[] = [
   ["inbox", "workflows", "sites", "twin", "skills", "plugins", "squads", "scheduler", "discover"],
   ["issues", "templates", "goals", "pet", "browser"],
-  ["a2ui", "dms", "canvas"],
+  ["a2ui", "dms", "canvas", "files"],
   [
     "source-control",
     "agent-runs",

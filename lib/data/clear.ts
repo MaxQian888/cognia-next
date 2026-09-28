@@ -7,7 +7,11 @@ import { clearBrowserPreviewData } from "@/lib/browser/preview-data"
 import { getDb } from "@/lib/db/schema"
 import { clearTemporarySessionAssets } from "@/lib/db/session-assets"
 import { clearDraft } from "@/lib/db/chat-drafts"
-import { collectUnreferencedMessageMedia } from "@/lib/db/message-media-refs"
+import {
+  collectUnreferencedMessageMedia,
+  isLibraryMediaRef,
+  LIBRARY_OWNER_PREFIX,
+} from "@/lib/db/message-media-refs"
 import { fusionDatabaseName } from "@/lib/router-fusion/gate/database-name"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import { loggers } from "@cognia/logging"
@@ -57,14 +61,27 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
         for (const hash of await db.messageMediaRefs.orderBy("hash").uniqueKeys()) {
           orphanCandidates.add(String(hash))
         }
+        // Files (ADR-0200) owns `library:` rows: its pins and its own uploads
+        // belong to no conversation, so clearing conversations leaves them —
+        // and the bytes they hold — in place.
+        const libraryRefs = await db.messageMediaRefs
+          .where("messageId")
+          .startsWith(LIBRARY_OWNER_PREFIX)
+          .toArray()
+        const libraryHashes = new Set(libraryRefs.map((row) => row.hash))
         const sourceHashes = (
-          await db.messageMediaRefs.filter((row) => !!row.sessionAsset).toArray()
-        ).map((row) => row.hash)
+          await db.messageMediaRefs
+            .filter((row) => !!row.sessionAsset && !isLibraryMediaRef(row))
+            .toArray()
+        )
+          .map((row) => row.hash)
+          .filter((hash) => !libraryHashes.has(hash))
         await db.messages.clear()
         await db.sessionState.clear()
         await db.chatDrafts.clear()
         await db.chatInputHistory.clear()
         await db.messageMediaRefs.clear()
+        if (libraryRefs.length > 0) await db.messageMediaRefs.bulkPut(libraryRefs)
         await db.messageMedia.bulkDelete(sourceHashes)
         await db.chatTurnSummaries.clear()
         await db.chatTranscriptIndexState.clear()
