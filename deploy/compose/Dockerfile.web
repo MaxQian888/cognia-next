@@ -63,6 +63,11 @@ COPY package.json ./
 COPY packages ./packages
 COPY docs/package.json ./docs/package.json
 COPY mobile/package.json ./mobile/package.json
+COPY web/package.json ./web/package.json
+COPY cli/package.json ./cli/package.json
+COPY services/workspace-runtime/package.json ./services/workspace-runtime/package.json
+# WXT's workspace postinstall needs its configuration and entrypoints.
+COPY browser-extension ./browser-extension
 COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
 RUN pnpm install --frozen-lockfile --offline
 # Sources last. prebuild still runs the complete asset and sidecar pipeline.

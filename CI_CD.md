@@ -315,7 +315,11 @@ path globs alone would not exclude a file inside an archived parent directory.
 
 The web and server-brain Docker builds fetch pnpm dependencies in an ordinary
 layer keyed by lockfiles, workspace configuration, and patches, then perform a
-frozen offline install after copying package manifests and sources. Source-only
+frozen offline install after copying every workspace manifest and the sources
+required by install scripts, including WXT's extension configuration/entrypoints.
+This prevents pnpm from reinstalling after the remaining sources are copied;
+a local pnpm 11 fixture reproduced two install lifecycle executions with an
+omitted workspace and one with the complete workspace set. Source-only
 changes can reuse that fetch layer. Corepack's global fallback is explicitly
 pinned to the repository pnpm version, since this layer has no `package.json`
 from which to resolve a package manager. The pnpm 11 fixture verified installation
