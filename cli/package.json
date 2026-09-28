@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@types/ws": "8.18.1",
-    "undici": "^8.11.2",
+    "undici": "^8.10.2",
     "ws": "8.22.0"
   },
   "devDependencies": {
