@@ -1,6 +1,6 @@
 /**
  * Support Agent vertical contract:
- * standalone mobile home → choose immutable Cognia Support → send one real
+ * standalone mobile Discover → choose immutable Cognia Support → send one real
  * provider-backed turn → the Support strip's consent chip defaults to off, and
  * the unified "Report a problem" dialog carries the live conversation as a
  * redacted section with a GitHub-issue channel — nothing leaves the device
@@ -22,7 +22,7 @@ test.describe("mobile — Cognia Support Agent", () => {
     await injectCapacitor(page, { platform: "android" })
     await page.goto("/")
     await bootstrapCogniaMobile(page, "standalone", {
-      onboardingDismissedAt: "2026-08-07T00:00:00.000Z",
+      onboardingProgress: { version: 2, path: "completed", completedAt: "2026-09-07T00:00:00.000Z" },
       defaultProvider: "anthropic",
       providerSettings: {
         anthropic: {
@@ -37,10 +37,9 @@ test.describe("mobile — Cognia Support Agent", () => {
   test("@critical is reachable, defaults diagnostics off, and drafts feedback from the live turn", async ({
     page,
   }) => {
-    await page.getByTestId("mobile-quick-action-newChat").click()
-    const picker = page.getByRole("dialog", { name: /pick a character/i })
-    await expect(picker).toBeVisible()
-    await picker.getByRole("option", { name: /Cognia Support/i }).click()
+    await page.goto("/discover?category=characters")
+    await page.getByRole("button", { name: "Cognia Support", exact: true }).click()
+    await page.getByTestId("discover-inspector-start-chat").click()
 
     const supportPanel = page.getByTestId("support-agent-panel")
     await expect(supportPanel).toBeVisible()
@@ -60,7 +59,10 @@ test.describe("mobile — Cognia Support Agent", () => {
       page.getByText(/mock-anthropic-echo.*diagnose the sidecar support e2e/i).first()
     ).toBeVisible({ timeout: 30_000 })
 
-    await supportPanel.getByRole("button", { name: /Report a problem/i }).click()
+    const reportProblem = supportPanel.getByRole("button", { name: "Report a problem", exact: true })
+    // The streaming/settled chat transition briefly retains both panel trees.
+    await expect(reportProblem).toHaveCount(1)
+    await reportProblem.click()
     const dialog = page.getByTestId("report-problem-dialog")
     await expect(dialog).toBeVisible()
     await expect(dialog.getByRole("checkbox", { name: /Support conversation/i })).toBeChecked()

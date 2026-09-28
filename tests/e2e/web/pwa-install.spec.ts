@@ -15,7 +15,7 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
+import { resetCogniaDb, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 const SW_READY_TIMEOUT = 60_000
 
@@ -102,7 +102,7 @@ test.describe("PWA install surface", () => {
 
   test("shows the install card on the web shell's About section", async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
     await page.goto("about:blank")
     await page.goto("/")
     await waitForTestGlobals(page, 30_000)

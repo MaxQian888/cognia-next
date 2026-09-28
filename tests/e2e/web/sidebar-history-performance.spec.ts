@@ -6,14 +6,14 @@ import { createOwnerPairPayload } from "../mobile/companion-fixture"
 import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import { transcriptCapabilitiesV1 } from "@/lib/chat/transcript/source"
 import { createEmptyHostStateSession, hostStateDigest } from "@cognia/agent-config-types/host-state"
-import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
+import { resetCogniaDb, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 // The sidebar has no existing large-history browser workload. Seed only this
 // disposable browser context; exercise the real model, Dexie and row renderer.
 test("@critical sidebar preserves natural title order across a large history", async ({ page }) => {
   test.setTimeout(180_000)
   await page.goto("/")
-  await ensureCogniaAccount(page)
+  await resetCogniaDb(page)
   await page.goto("about:blank")
   await page.goto("/")
   await waitForTestGlobals(page, 30_000)
@@ -216,7 +216,7 @@ test("@critical paired web sidebar receives complete recent-first history over H
       await route.fulfill({ response: authenticated, status: 200, body: payload })
     })
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
     await page.goto("about:blank")
     await page.goto("/")
     await waitForTestGlobals(page, 30_000)

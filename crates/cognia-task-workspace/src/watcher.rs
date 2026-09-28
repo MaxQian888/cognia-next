@@ -258,7 +258,9 @@ fn watch_loop(
                             }
                             continue;
                         }
-                        let kind = map_kind(&event.kind);
+                        let Some(kind) = map_kind(&event.kind) else {
+                            continue;
+                        };
                         for path in event.paths {
                             if kind != ResourceEventKind::Deleted && initial_paths.remove(&path) {
                                 continue;
@@ -345,13 +347,16 @@ fn record_change(
     path_changes.push(change);
 }
 
-fn map_kind(kind: &EventKind) -> ResourceEventKind {
-    match kind {
+fn map_kind(kind: &EventKind) -> Option<ResourceEventKind> {
+    Some(match kind {
+        // Linux reports open/close alongside writes. These do not change the
+        // resource and must not interrupt create/modify coalescing.
+        EventKind::Access(_) => return None,
         EventKind::Create(_) => ResourceEventKind::Created,
         EventKind::Modify(_) => ResourceEventKind::Modified,
         EventKind::Remove(_) => ResourceEventKind::Deleted,
         _ => ResourceEventKind::Any,
-    }
+    })
 }
 
 fn relative_event_path(root: &Path, path: &Path, generated_roots: &[String]) -> Option<String> {
@@ -451,6 +456,38 @@ mod tests {
         fn emit(&self, event: TaskWorkspaceResourceEvent) {
             let _ = self.0.lock().send(event);
         }
+    }
+
+    #[test]
+    fn access_notifications_do_not_split_a_resource_change_batch() {
+        use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, RemoveKind};
+
+        let mut changes = BTreeMap::new();
+        for event in [
+            EventKind::Create(CreateKind::File),
+            EventKind::Access(AccessKind::Open(AccessMode::Write)),
+            EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+            EventKind::Access(AccessKind::Close(AccessMode::Write)),
+        ] {
+            if let Some(kind) = map_kind(&event) {
+                record_change(
+                    &mut changes,
+                    ResourceEventChange {
+                        path: "visible.txt".into(),
+                        kind,
+                        old_path: None,
+                    },
+                );
+            }
+        }
+        assert_eq!(changes["visible.txt"].len(), 1);
+        assert_eq!(changes["visible.txt"][0].kind, ResourceEventKind::Created);
+        assert_eq!(map_kind(&EventKind::Access(AccessKind::Read)), None);
+        assert_eq!(
+            map_kind(&EventKind::Remove(RemoveKind::File)),
+            Some(ResourceEventKind::Deleted)
+        );
+        assert_eq!(map_kind(&EventKind::Any), Some(ResourceEventKind::Any));
     }
 
     #[test]

@@ -29,6 +29,15 @@ function bindingId(runId: string, adapterId: string, conversationKey: string): s
   return `execution-binding:${runId}:${adapterId}:${conversationKey}`
 }
 
+function currentDatabaseGuard(): () => boolean {
+  const database = getDb()
+  return () => getDb() === database
+}
+
+function assertCurrent(isCurrent: () => boolean): void {
+  if (!isCurrent()) throw new Dexie.AbortError("Execution projection database changed")
+}
+
 /**
  * Bind an execution run to the IM conversation that started it.
  *
@@ -42,18 +51,22 @@ function bindingId(runId: string, adapterId: string, conversationKey: string): s
 export async function ensureConnectorRunBinding(
   runId: string,
   projectId: string | undefined,
-  session: ChatSession
+  session: ChatSession,
+  isCurrent = currentDatabaseGuard()
 ): Promise<void> {
   const platformBinding = session.platformBinding
   if (!platformBinding) return
   const override = await readForResolution(platformBinding.conversationKey)
+  assertCurrent(isCurrent)
   if (override?.liveActivity === false) return
   const deliveryTarget =
     platformBinding.deliveryTarget ??
     (await getConnectorConversationState(platformBinding.conversationKey))?.deliveryTarget
+  assertCurrent(isCurrent)
   if (!deliveryTarget) return
   const id = bindingId(runId, platformBinding.adapterId, platformBinding.conversationKey)
   if (await getDb().executionRunBindings.get(id)) return
+  assertCurrent(isCurrent)
   const now = Date.now()
   await putExecutionRunBinding({
     id,
@@ -71,16 +84,21 @@ export async function ensureConnectorRunBinding(
   })
 }
 
-async function ensureRun(input: {
-  kind: AgentStateKind
-  sourceId: string
-  session: ChatSession
-  projectId?: string
-  title: string
-  startedAt: number
-}): Promise<string> {
+async function ensureRun(
+  input: {
+    kind: AgentStateKind
+    sourceId: string
+    session: ChatSession
+    projectId?: string
+    title: string
+    startedAt: number
+  },
+  isCurrent: () => boolean
+): Promise<string> {
+  assertCurrent(isCurrent)
   const runId = agentStateExecutionRunId(input.kind, input.sourceId)
   if (!(await getExecutionRun(runId))) {
+    assertCurrent(isCurrent)
     try {
       await createExecutionRun({
         id: runId,
@@ -98,7 +116,8 @@ async function ensureRun(input: {
       if (!(error instanceof Error && error.name === "ConstraintError")) throw error
     }
   }
-  await ensureConnectorRunBinding(runId, input.projectId, input.session)
+  assertCurrent(isCurrent)
+  await ensureConnectorRunBinding(runId, input.projectId, input.session, isCurrent)
   return runId
 }
 
@@ -188,15 +207,23 @@ function runStepStatus(status: PlanStepStatus): RunStepStatus {
   return status === "ready" ? "pending" : status
 }
 
-export async function syncGoalExecutionRun(goal: Goal, session: ChatSession): Promise<void> {
-  const runId = await ensureRun({
-    kind: "goal",
-    sourceId: goal.id,
-    session,
-    projectId: goal.projectId ?? session.projectId,
-    title: goal.safeObjective || "Goal",
-    startedAt: goal.createdAt,
-  })
+export async function syncGoalExecutionRun(
+  goal: Goal,
+  session: ChatSession,
+  isCurrent = currentDatabaseGuard()
+): Promise<void> {
+  const runId = await ensureRun(
+    {
+      kind: "goal",
+      sourceId: goal.id,
+      session,
+      projectId: goal.projectId ?? session.projectId,
+      title: goal.safeObjective || "Goal",
+      startedAt: goal.createdAt,
+    },
+    isCurrent
+  )
+  assertCurrent(isCurrent)
   const steps = (goal.subgoals ?? [])
     .slice()
     .sort((a, b) => a.order - b.order)
@@ -225,7 +252,9 @@ export async function syncGoalExecutionRun(goal: Goal, session: ChatSession): Pr
     ),
   ]
   await runEventJournal.appendBatch(runId, events)
+  assertCurrent(isCurrent)
   const current = (await getExecutionRun(runId))?.latestSnapshot?.status ?? "queued"
+  assertCurrent(isCurrent)
   const type = lifecycleEvent(current, goalExecutionStatus(goal))
   if (type) {
     await runEventJournal.append(
@@ -242,15 +271,23 @@ export async function syncGoalExecutionRun(goal: Goal, session: ChatSession): Pr
   }
 }
 
-export async function syncPlanExecutionRun(plan: AgentPlan, session: ChatSession): Promise<void> {
-  const runId = await ensureRun({
-    kind: "plan",
-    sourceId: plan.id,
-    session,
-    projectId: plan.projectId ?? session.projectId,
-    title: plan.title || "Plan",
-    startedAt: plan.createdAt,
-  })
+export async function syncPlanExecutionRun(
+  plan: AgentPlan,
+  session: ChatSession,
+  isCurrent = currentDatabaseGuard()
+): Promise<void> {
+  const runId = await ensureRun(
+    {
+      kind: "plan",
+      sourceId: plan.id,
+      session,
+      projectId: plan.projectId ?? session.projectId,
+      title: plan.title || "Plan",
+      startedAt: plan.createdAt,
+    },
+    isCurrent
+  )
+  assertCurrent(isCurrent)
   const steps = plan.steps
     .slice()
     .sort((a, b) => a.order - b.order)
@@ -279,7 +316,9 @@ export async function syncPlanExecutionRun(plan: AgentPlan, session: ChatSession
       )
     ),
   ])
+  assertCurrent(isCurrent)
   const current = (await getExecutionRun(runId))?.latestSnapshot?.status ?? "queued"
+  assertCurrent(isCurrent)
   const type = lifecycleEvent(current, planExecutionStatus(plan))
   if (type) {
     await runEventJournal.append(
@@ -296,18 +335,47 @@ export async function syncPlanExecutionRun(plan: AgentPlan, session: ChatSession
   }
 }
 
-let subscription: Subscription | null = null
+type BridgeOwner = {
+  databaseName: string
+  subscription: Subscription | null
+  references: number
+}
+let activeBridge: BridgeOwner | null = null
+
+function releaseBridge(owner: BridgeOwner): () => void {
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    owner.references -= 1
+    if (owner.references === 0) {
+      owner.subscription?.unsubscribe()
+      if (activeBridge === owner) activeBridge = null
+    }
+  }
+}
 
 export function startAgentStateExecutionBridge(): () => void {
-  if (subscription) return stopAgentStateExecutionBridge
+  const databaseName = getDb().name
+  if (activeBridge?.databaseName === databaseName) {
+    activeBridge.references += 1
+    return releaseBridge(activeBridge)
+  }
+  stopAgentStateExecutionBridge()
+  const owner: BridgeOwner = { databaseName, subscription: null, references: 1 }
+  activeBridge = owner
+  const isCurrent = () => activeBridge === owner && getDb().name === databaseName
   // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
   // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
   // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
-  subscription = Dexie.liveQuery(async () => {
+  owner.subscription = Dexie.liveQuery(async () => {
+    assertCurrent(isCurrent)
+    // Schema upgrades can replace the Dexie connection without changing scope.
+    const database = getDb()
     const [goals, plans, sessions] = await Promise.all([
-      getDb().chatGoals.toArray(),
-      getDb().agentPlans.toArray(),
-      getDb().sessions.toArray(),
+      database.chatGoals.toArray(),
+      database.agentPlans.toArray(),
+      database.sessions.toArray(),
     ])
     const sessionsById = new Map(sessions.map((session) => [session.id, session]))
     return {
@@ -322,8 +390,10 @@ export function startAgentStateExecutionBridge(): () => void {
     }
   }).subscribe({
     next(rows) {
+      if (!isCurrent()) return
       for (const { goal, session } of rows.goals) {
-        void syncGoalExecutionRun(goal, session).catch((error) => {
+        void syncGoalExecutionRun(goal, session, isCurrent).catch((error) => {
+          if (!isCurrent()) return
           console.error(
             `[agent-state-execution-bridge] goal sync failed for goal=${goal.id}`,
             error
@@ -331,7 +401,8 @@ export function startAgentStateExecutionBridge(): () => void {
         })
       }
       for (const { plan, session } of rows.plans) {
-        void syncPlanExecutionRun(plan, session).catch((error) => {
+        void syncPlanExecutionRun(plan, session, isCurrent).catch((error) => {
+          if (!isCurrent()) return
           console.error(
             `[agent-state-execution-bridge] plan sync failed for plan=${plan.id}`,
             error
@@ -340,15 +411,16 @@ export function startAgentStateExecutionBridge(): () => void {
       }
     },
     error(error) {
+      if (!isCurrent()) return
       console.error("[agent-state-execution-bridge] subscription failed", error)
     },
   })
-  return stopAgentStateExecutionBridge
+  return releaseBridge(owner)
 }
 
 function stopAgentStateExecutionBridge(): void {
-  subscription?.unsubscribe()
-  subscription = null
+  activeBridge?.subscription?.unsubscribe()
+  activeBridge = null
 }
 
 export function __resetAgentStateExecutionBridgeForTesting(): void {

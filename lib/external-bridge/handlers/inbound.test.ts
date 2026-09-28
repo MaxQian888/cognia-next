@@ -79,9 +79,9 @@ describe("inbound write handlers", () => {
     expect(first.kind).toBe("note")
     expect(first.metadata).toMatchObject({ url: "https://x/y" })
 
-    await ingestNote({ title: "note2", note: "body2" })
-    const rows = await getDb().inboundDrafts.orderBy("createdAt").toArray()
-    expect(rows[1].metadata).toEqual({ origin: "mcp" })
+    const second = await ingestNote({ title: "note2", note: "body2" })
+    expect(await getDb().inboundDrafts.count()).toBe(2)
+    expect((await getInboundDraft(second.draftId))?.metadata).toEqual({ origin: "mcp" })
   })
 
   it("names the offending tool parameter in validation errors", async () => {

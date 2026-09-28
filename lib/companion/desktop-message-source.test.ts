@@ -3,6 +3,7 @@
  */
 
 import "fake-indexeddb/auto"
+import { waitFor } from "@testing-library/react"
 
 import type { MediaResponse } from "@/lib/headless/types"
 import { messageRepository } from "@/lib/db"
@@ -235,7 +236,7 @@ describe("installDesktopMessageSource — update", () => {
       },
     })
 
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => expect(invoke).toHaveBeenCalled())
 
     expect(invoke).toHaveBeenCalledWith("companion_message_response", {
       requestId: "rid-u",
@@ -280,7 +281,7 @@ describe("installDesktopMessageSource — update", () => {
       },
     })
 
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => expect(invoke).toHaveBeenCalled())
 
     expect(invoke).toHaveBeenCalledWith("companion_message_response", {
       requestId: "rid-err",
@@ -327,7 +328,7 @@ describe("installDesktopMessageSource — delete", () => {
       payload: { requestId: "rid-d", kind: "delete", sessionId: "s1", messageId: "m1" },
     })
 
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => expect(invoke).toHaveBeenCalled())
 
     expect(await db.messages.get("m1")).toBeUndefined()
     expect(invoke).toHaveBeenCalledWith("companion_message_response", {
@@ -367,7 +368,7 @@ describe("installDesktopMessageSource — delete", () => {
     handlers["companion://message-delete-request"]({
       payload: { requestId: "rid-de", kind: "delete", sessionId: "s1", messageId: "m1" },
     })
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => expect(invoke).toHaveBeenCalled())
 
     expect(invoke).toHaveBeenCalledWith("companion_message_response", {
       requestId: "rid-de",
@@ -409,7 +410,7 @@ describe("installDesktopMessageSource — session_list", () => {
       payload: { requestId: "rid-l", kind: "session_list", limit: 10, offset: 0 },
     })
 
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => expect(invoke).toHaveBeenCalled())
 
     expect(invoke).toHaveBeenCalledWith("companion_message_response", {
       requestId: "rid-l",
@@ -439,7 +440,7 @@ describe("installDesktopMessageSource — session_list", () => {
       payload: { requestId: "rid-bad", kind: "session_list", limit: 0, offset: 0 },
     })
 
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => expect(invoke).toHaveBeenCalled())
 
     expect(invoke).toHaveBeenCalledWith("companion_message_response", {
       requestId: "rid-bad",

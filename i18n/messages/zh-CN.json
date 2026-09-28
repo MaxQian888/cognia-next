@@ -2499,9 +2499,15 @@
         "label": "恢复方式",
         "reason": "原因：{reason}",
         "reasons": {
+          "dispatch_initialization_failed": "小队未能准备任务调度",
+          "evidence_incomplete": "缺少必需的完成证据",
+          "launch_failed": "小队未能启动此运行",
           "legacy_run_not_resumable": "此运行早于持久化运行时，没有留下检查点",
           "missing_checkpoint": "没有写入检查点",
+          "missing_execution_constraints": "缺少启动时保存的权限约束，无法安全恢复此运行",
           "recover_needs_input": "最后一个检查点需要人工决定",
+          "reentry_failed": "小队未能恢复此运行",
+          "replacement_cleanup_failed": "替代运行启动前，未能完全停止原运行",
           "squad_not_ready": "该小队缺少运行所需的绑定",
           "uncertain_side_effect": "某个副作用可能已发生也可能未发生"
         }

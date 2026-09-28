@@ -8,7 +8,7 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount } from "../helpers/db-reset"
+import { resetCogniaDb } from "../helpers/db-reset"
 
 const TASK_NAME = "E2E Release Reminder"
 const TASK_DESCRIPTION = "Keeps the release checklist visible"
@@ -16,7 +16,7 @@ const TASK_DESCRIPTION = "Keeps the release checklist visible"
 test.describe("scheduler — app task lifecycle", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
     await page.goto("about:blank")
     await page.goto("/scheduler", { waitUntil: "domcontentloaded" })
     await expect(page.locator('[data-slot="feature-page-header"]')).toHaveAttribute(
@@ -36,9 +36,7 @@ test.describe("scheduler — app task lifecycle", () => {
     await form.getByTestId("scheduler-task-submit").click()
 
     await expect(form).toBeHidden()
-    const taskRow = page
-      .locator('[data-testid^="unified-sidebar-item-app:"]')
-      .filter({ hasText: TASK_NAME })
+    const taskRow = page.getByRole("button", { name: new RegExp(TASK_NAME) })
     await expect(taskRow).toHaveCount(1)
     await expect(taskRow).toContainText("0 9 * * *")
     await taskRow.click()
@@ -51,9 +49,7 @@ test.describe("scheduler — app task lifecycle", () => {
     await page.reload({ waitUntil: "domcontentloaded" })
     await expect(page.getByTestId("scheduler-new-task-button")).toBeVisible()
 
-    const restoredRow = page
-      .locator('[data-testid^="unified-sidebar-item-app:"]')
-      .filter({ hasText: TASK_NAME })
+    const restoredRow = page.getByRole("button", { name: new RegExp(TASK_NAME) })
     await expect(restoredRow).toHaveCount(1)
     await restoredRow.click()
 

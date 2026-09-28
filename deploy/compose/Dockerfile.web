@@ -39,7 +39,12 @@ ENV HUSKY=0 \
     NEXT_PUBLIC_COGNIA_SAME_ORIGIN_HOST=${NEXT_PUBLIC_COGNIA_SAME_ORIGIN_HOST}
 # Node 25+ no longer bundles Corepack. Pin both explicitly so the image keeps
 # using the repository's pinned pnpm even when the Node base moves.
-RUN npm install --global "corepack@${COREPACK_VERSION}" "pnpm@${PNPM_VERSION}"
+# Fetch runs before package.json exists. Pin Corepack's global fallback too,
+# otherwise its shim resolves the latest pnpm instead of PNPM_VERSION.
+ENV COREPACK_DEFAULT_TO_LATEST=0
+RUN npm install --global "corepack@${COREPACK_VERSION}" \
+    && corepack enable pnpm \
+    && corepack install --global "pnpm@${PNPM_VERSION}"
 WORKDIR /app
 # Fetch only from lock/config/patch inputs. Keep the store in this ordinary
 # image layer: remote BuildKit layer caches do not export cache-mount contents.

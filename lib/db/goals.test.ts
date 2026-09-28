@@ -146,6 +146,24 @@ describe("chatGoals CRUD", () => {
     expect(emissions).toEqual([[]])
   })
 
+  it("observes goal changes after resolving the current project settings", async () => {
+    await createGoal(buildGoal({ id: "live-goal" }))
+    const statuses: string[] = []
+    const subscription = Dexie.liveQuery(() => listAllGoals()).subscribe((rows) => {
+      const goal = rows.find((row) => row.id === "live-goal")
+      if (goal) statuses.push(goal.status)
+    })
+    try {
+      await waitUntil(() => statuses.includes("active"))
+      await updateGoal("live-goal", { status: "paused" })
+      await waitUntil(() => statuses.includes("paused"))
+      await updateGoal("live-goal", { status: "stopped" })
+      await waitUntil(() => statuses.includes("stopped"))
+    } finally {
+      subscription.unsubscribe()
+    }
+  })
+
   it("updateGoal patches fields and bumps updatedAt", async () => {
     const g = await createGoal(buildGoal({ id: "g1" }))
     const t0 = g.updatedAt

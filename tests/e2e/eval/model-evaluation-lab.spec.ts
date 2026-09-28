@@ -1,26 +1,48 @@
 /**
  * Browser-owned Evaluation Lab contract.
  *
- * unlocked account / /eval → create the built-in versioned dataset and inspect
- * an intentionally blocked preflight → durable evidence and every responsive
- * shell avoid page-level overflow.
+ * The served build selects the legacy workspace or opt-in Evaluation Lab.
+ * Verify the legacy workspace explicitly when the Lab is unavailable; a Lab
+ * build must create the built-in versioned dataset and expose blocked preflight
+ * diagnostics without responsive page overflow.
  * Persisted dataset/case rows and the visible preflight issue list are the
  * diagnostics when the journey fails.
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
 
-import { ensureCogniaAccount, readDexieRows } from "../helpers/db-reset"
+import { resetCogniaDb, readDexieRows } from "../helpers/db-reset"
 
 test.describe("model evaluation lab", () => {
-  test("@critical creates reproducible starter evidence and exposes preflight diagnostics", async ({
+  test("@critical verifies the served eval variant and Lab starter/preflight contract", async ({
     page,
   }) => {
     await page.goto("/eval")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
     await page.goto("about:blank")
     await page.goto("/eval", { waitUntil: "domcontentloaded" })
-    await expect(page.getByRole("heading", { name: "Model Evaluation Lab" })).toBeVisible()
+    // Observe the served artifact, not the test runner's environment: Next
+    // embeds NEXT_PUBLIC_EVAL_LAB at build time and may enable legacy rollback.
+    const labHeading = page.getByRole("heading", { name: "Model Evaluation Lab", exact: true })
+    const legacyHeading = page.getByRole("heading", { name: "Agent Evaluation", exact: true })
+    await expect(labHeading.or(legacyHeading)).toBeVisible()
+    if (await legacyHeading.isVisible()) {
+      test.info().annotations.push({
+        type: "eval-build-variant",
+        description: "Legacy workspace verified; this artifact does not enable Evaluation Lab.",
+      })
+      await expect(page.getByRole("button", { name: "New dataset", exact: true })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Runs & compare", exact: true })).toBeVisible()
+      await expect(labHeading).toHaveCount(0)
+      await expect(page.getByRole("textbox", { name: "Project name" })).toHaveCount(0)
+      await expect(page.getByRole("button", { name: "Preflight", exact: true })).toHaveCount(0)
+      await expect(page.getByTestId("eval-lab-mobile-actions")).toHaveCount(0)
+      return
+    }
+    test
+      .info()
+      .annotations.push({ type: "eval-build-variant", description: "Evaluation Lab enabled" })
+    await expect(legacyHeading).toHaveCount(0)
     await page.getByRole("textbox", { name: "Project name" }).fill("E2E model selection")
     await page.getByRole("button", { name: "Data" }).click()
     await page.getByRole("button", { name: "Use starter" }).click()

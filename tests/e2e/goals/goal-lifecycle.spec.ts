@@ -9,14 +9,14 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, waitForTestGlobals } from "../helpers/db-reset"
+import { resetCogniaDb, waitForTestGlobals } from "../helpers/db-reset"
 
 const OBJECTIVE = "Keep the release checklist current and verifiable"
 
 test.describe("goals — product lifecycle", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
     await page.goto("about:blank")
     await page.goto("/goals", { waitUntil: "domcontentloaded" })
     await waitForTestGlobals(page, 30_000)

@@ -2,25 +2,30 @@
  * Browser E2E: operator-visible connector dead-letter recovery.
  *
  * Platform delivery remains owned by the native Tauri connector suites. This
- * spec owns the portable recovery contract: inspect persisted failure context,
+ * spec pairs a browser to an authenticated mock Host and owns the recovery contract: inspect persisted failure context,
  * explicitly confirm a bulk replay, and observe both queue + audit durability.
  */
 
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, readDexieRows, waitForTestGlobals } from "../helpers/db-reset"
+import { resetCogniaDb, setCogniaSettings, ensureAppMounted } from "../helpers/db-reset"
 
-interface OutboundJobView {
-  id: string
-  status: string
-  attempts: number
-  lastError?: string
-  lastErrorCode?: string
-}
+import type { OutboundJobRow } from "@/lib/db/connector-types"
+import { createMockCompanionServer, type MockCompanionServer } from "../mobile/mock-v2-server"
+import { createOwnerPairPayload } from "../mobile/companion-fixture"
 
-interface ConnectorAuditView {
-  kind: string
-  fields?: { jobId?: string; lastErrorCode?: string }
-}
+// The test owns the mocked event stream; Serwist must not intercept its RPC route.
+test.use({ serviceWorkers: "block" })
+
+let server: MockCompanionServer
+
+test.beforeAll(async () => {
+  server = createMockCompanionServer()
+  await server.start(0)
+})
+
+test.afterAll(async () => {
+  await server.stop()
+})
 
 const DEADLETTER_JOBS = [
   { id: "oqj_e2e_dead_1", errorCode: "platform_5xx", error: "upstream unavailable" },
@@ -29,7 +34,7 @@ const DEADLETTER_JOBS = [
 
 async function seedDeadletteredJobs(page: Page): Promise<void> {
   const now = Date.now()
-  const rows = DEADLETTER_JOBS.map((job, index) => ({
+  const rows: OutboundJobRow[] = DEADLETTER_JOBS.map((job, index) => ({
     id: job.id,
     adapterId: "e2e-telegram",
     conversationKey: `telegram:e2e-telegram:chat-${index + 1}`,
@@ -52,56 +57,54 @@ async function seedDeadletteredJobs(page: Page): Promise<void> {
     source: "manual",
   }))
 
-  const writes = await page.evaluate(async (seedRows) => {
-    let count = 0
-    for (const info of await indexedDB.databases()) {
-      if (!info.name?.startsWith("cognia-")) continue
-      count += await new Promise<number>((resolve, reject) => {
-        const request = indexedDB.open(info.name!)
-        request.onerror = () => reject(request.error)
-        request.onsuccess = () => {
-          const db = request.result
-          if (!db.objectStoreNames.contains("outboundQueue")) {
-            db.close()
-            resolve(0)
-            return
-          }
-          const tx = db.transaction("outboundQueue", "readwrite")
-          const store = tx.objectStore("outboundQueue")
-          for (const row of seedRows) store.put(row)
-          tx.oncomplete = () => {
-            db.close()
-            resolve(seedRows.length)
-          }
-          tx.onerror = () => {
-            db.close()
-            reject(tx.error)
-          }
-          tx.onabort = () => {
-            db.close()
-            reject(tx.error)
-          }
-        }
-      })
-    }
-    return count
+  await page.evaluate(async (seedRows) => {
+    if (!window.__cogniaE2EOutbound) throw new Error("Outbound fixture bridge unavailable")
+    await window.__cogniaE2EOutbound.seed(seedRows)
   }, rows)
-
-  expect(
-    writes,
-    "dead-letter jobs should be seeded into an active Cognia database"
-  ).toBeGreaterThan(0)
 }
 
 test.describe("connectors — outbound dead-letter recovery", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
+    server.reset()
+    await page.route(`${server.baseUrl}/api/_rpc/host_feature_manifest`, async (route) => {
+      const response = await route.fetch()
+      expect(response.ok()).toBe(true)
+      const body = await response.json()
+      body.result.transportCapabilities = { eventStreamReady: 1 }
+      await route.fulfill({ response, json: body })
+    })
+    await page.routeWebSocket(/\/ws\/events(?:\?|$)/, async (socket) => {
+      const ticket = new URL(socket.url()).searchParams.get("ticket")
+      const redeemed = await page.request.post(`${server.baseUrl}/__control/redeem-ticket`, {
+        data: { ticket, path: "/ws/events", audience: "events" },
+      })
+      expect(redeemed.ok()).toBe(true)
+      socket.onMessage((raw) => {
+        const frame = JSON.parse(String(raw)) as { type?: string; channels?: string[] }
+        if (frame.type === "subscribe") {
+          socket.send(JSON.stringify({ type: "subscribed", channels: frame.channels ?? [] }))
+          socket.send(JSON.stringify({ type: "stream_ready", cursor: 0 }))
+        }
+      })
+    })
+    await page.evaluate(async (invitation) => {
+      if (!window.__cogniaE2ECompanion) throw new Error("Companion fixture bridge unavailable")
+      await window.__cogniaE2ECompanion.pair(invitation)
+    }, createOwnerPairPayload(server.baseUrl))
+    await setCogniaSettings(page, {
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
     await page.goto("about:blank")
     await page.goto("/settings?section=connections&connectionsTab=outbound", {
       waitUntil: "domcontentloaded",
     })
-    await waitForTestGlobals(page, 30_000)
+    await ensureAppMounted(page)
   })
 
   test("@critical Retry all re-arms dead letters and records replay audits", async ({ page }) => {
@@ -137,7 +140,7 @@ test.describe("connectors — outbound dead-letter recovery", () => {
 
     await expect
       .poll(async () => {
-        const rows = await readDexieRows<OutboundJobView>(page, { table: "outboundQueue" })
+        const { jobs: rows } = await page.evaluate(() => window.__cogniaE2EOutbound!.read())
         return rows
           .filter((row) => DEADLETTER_JOBS.some((job) => job.id === row.id))
           .map((row) => ({
@@ -159,7 +162,7 @@ test.describe("connectors — outbound dead-letter recovery", () => {
 
     await expect
       .poll(async () => {
-        const rows = await readDexieRows<ConnectorAuditView>(page, { table: "connectorAudit" })
+        const { audit: rows } = await page.evaluate(() => window.__cogniaE2EOutbound!.read())
         return rows
           .filter((row) => row.kind === "outbound.replayed")
           .map((row) => `${row.fields?.jobId}:${row.fields?.lastErrorCode}`)

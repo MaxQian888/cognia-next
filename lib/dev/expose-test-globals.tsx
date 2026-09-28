@@ -15,6 +15,9 @@
 
 import { useEffect } from "react"
 import type { ChatSession } from "@cognia/agent-config-types"
+import type { AgentTeamExecutionConstraints } from "@/types/agent/agent-team-runtime"
+import type { OutboundJobRow, ConnectorAuditRow } from "@/lib/db/connector-types"
+import type { MobileOutboundCommand, MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
 import type { SeededWorkflowKind } from "./workflow-fixtures"
 import type { ChatPerfMediaOptions } from "./chat-perf-fixtures"
 
@@ -53,6 +56,11 @@ declare global {
     __cogniaReadSessions?: () => Promise<
       Array<Pick<ChatSession, "id" | "projectId" | "executionContext"> & { database: string }>
     >
+    /** Account-scoped encrypted fixtures for operator recovery checks. */
+    __cogniaE2EOutbound?: {
+      seed(rows: OutboundJobRow[]): Promise<void>
+      read(): Promise<{ jobs: OutboundJobRow[]; audit: ConnectorAuditRow[] }>
+    }
     __cogniaSeedCharacter?: (draft: {
       name: string
       role?: string
@@ -112,7 +120,11 @@ declare global {
       conversationKey: string
       content: string
     }) => Promise<string>
-    __cogniaEnqueueOutbound?: (job: { command: string; payload?: unknown }) => Promise<string>
+    __cogniaEnqueueOutbound?: (job: {
+      command: MobileOutboundCommand
+      payload?: Record<string, unknown>
+    }) => Promise<string>
+    __cogniaReadMobileOutbound?: () => Promise<MobileOutboundJobRow[]>
     __cogniaSeedRun?: (
       workflowId: string,
       status?: "succeeded" | "failed" | "running"
@@ -473,6 +485,20 @@ export function ExposeTestGlobals(): null {
         }))
       }
 
+      window.__cogniaE2EOutbound = {
+        async seed(rows) {
+          await getDb().outboundQueue.bulkPut(rows)
+        },
+        async read() {
+          const db = getDb()
+          const [jobs, audit] = await Promise.all([
+            db.outboundQueue.toArray(),
+            db.connectorAudit.toArray(),
+          ])
+          return { jobs, audit }
+        },
+      }
+
       window.__cogniaSeedCharacter = async (draft) => {
         const { createCharacter } = await import("@/lib/db/characters")
         const c = await createCharacter({
@@ -601,12 +627,42 @@ export function ExposeTestGlobals(): null {
       }
 
       window.__cogniaSeedSquadRun = async (draft) => {
-        const [{ createSquadRunRecords }, { getDb }, { runEventJournal, semanticRunEvent }] =
-          await Promise.all([
-            import("@/lib/ai/agent/team/squad/squad-run-records"),
-            import("@/lib/db/schema"),
-            import("@/lib/db/execution-runs"),
-          ])
+        const [
+          { createSquadRunRecords },
+          { getDb },
+          { runEventJournal, semanticRunEvent },
+          { useAgentTeamStore },
+          { AGENT_TEAM_SECURITY_CONFIG_KEYS },
+          { deriveExternalSessionPermission, teamPermissionCeiling },
+        ] = await Promise.all([
+          import("@/lib/ai/agent/team/squad/squad-run-records"),
+          import("@/lib/db/schema"),
+          import("@/lib/db/execution-runs"),
+          import("@/stores/agent/agent-team-store"),
+          import("@/types/agent/agent-team-runtime"),
+          import("@/lib/ai/agent/external/policy/permission-cascade"),
+        ])
+        const team = useAgentTeamStore.getState().getTeam(draft.teamId)
+        if (!team) throw new Error(`Cannot seed a run for missing Squad ${draft.teamId}`)
+        const permissionCeiling = deriveExternalSessionPermission(
+          {},
+          teamPermissionCeiling(team.config)
+        )
+        permissionCeiling.permissionMode ??= "default"
+        // Match the real launch seam: recovery must read the launch authority,
+        // never silently inherit later changes to the Squad's live config.
+        const executionConstraints: AgentTeamExecutionConstraints = JSON.parse(
+          JSON.stringify({
+            version: 1,
+            origin: "interactive",
+            triggeredFrom: { source: "ui" },
+            requirePlanApprovalFloor: team.config?.requirePlanApproval === true,
+            permissionCeiling,
+            teamConfig: Object.fromEntries(
+              AGENT_TEAM_SECURITY_CONFIG_KEYS.map((key) => [key, team.config?.[key]])
+            ),
+          })
+        )
         const runId = `run_team_e2e_${Date.now().toString(36)}`
         const startedAt = Date.now()
         const { executionRunId } = await createSquadRunRecords({
@@ -614,6 +670,12 @@ export function ExposeTestGlobals(): null {
           teamId: draft.teamId,
           objective: draft.objective,
           origin: "interactive",
+          executionConstraints,
+          ...(team.projectId ? { projectId: team.projectId } : {}),
+          priority: executionConstraints.teamConfig?.resourcePolicy?.priority ?? 0,
+          ...(executionConstraints.teamConfig?.environmentRef
+            ? { environmentVersionId: executionConstraints.teamConfig.environmentRef.versionId }
+            : {}),
           startedAt,
         })
         const status = draft.status ?? "running"
@@ -692,26 +754,12 @@ export function ExposeTestGlobals(): null {
       }
 
       window.__cogniaEnqueueOutbound = async (job) => {
-        // mobileOutboundQueue is the canonical table for the mobile client's
-        // queued commands; the dev path enqueues directly so specs can drive
-        // the runner without going through every UI surface.
-        const db = getDb()
-        const id = `mq_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
-        const row = {
-          id,
-          command: job.command,
-          payload: (job.payload ?? {}) as Record<string, unknown>,
-          attempts: 0,
-          nextAttemptAt: Date.now(),
-          status: "pending",
-          createdAt: Date.now(),
-          idempotencyKey: id,
-        }
-        await db.mobileOutboundQueue
-          .put(row as unknown as Parameters<typeof db.mobileOutboundQueue.put>[0])
-          .catch(() => undefined)
-        return id
+        const { enqueue } = await import("@/lib/db/mobile-outbound-queue")
+        const row = await enqueue({ command: job.command, payload: job.payload ?? {} })
+        return row.id
       }
+
+      window.__cogniaReadMobileOutbound = () => getDb().mobileOutboundQueue.toArray()
 
       window.__cogniaSeedRun = async (workflowId, status = "succeeded") => {
         const db = getDb()
@@ -952,6 +1000,7 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaSeedWorkflow
       delete window.__cogniaReadMessages
       delete window.__cogniaReadSessions
+      delete window.__cogniaE2EOutbound
       delete window.__cogniaSeedCharacter
       delete window.__cogniaSeedConversation
       delete window.__cogniaSeedTeam
@@ -959,6 +1008,7 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaSeedSquadRun
       delete window.__cogniaSeedSkill
       delete window.__cogniaSeedConnectorDraft
+      delete window.__cogniaReadMobileOutbound
       delete window.__cogniaEnqueueOutbound
       delete window.__cogniaSeedRun
       delete window.__cogniaSetMockBaseUrls

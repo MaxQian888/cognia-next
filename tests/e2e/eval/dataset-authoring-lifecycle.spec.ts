@@ -9,7 +9,7 @@
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
 
-import { ensureCogniaAccount, readDexieRows } from "../helpers/db-reset"
+import { resetCogniaDb, readDexieRows } from "../helpers/db-reset"
 
 const DATASET_NAME = "E2E Tool Reliability"
 const CAPABILITY = "chat.tool-use"
@@ -43,11 +43,9 @@ interface PersistedEvalCase {
 
 test.describe("eval — durable dataset authoring", () => {
   test("creates a versioned dataset, case, and gate and restores them", async ({ page }) => {
-    // A fresh Playwright context already provides storage isolation. Bootstrap
-    // only AccountGate so this Eval contract does not depend on the broad E2E
-    // bridge or unrelated dynamic plugin-table readiness.
+    // Feature fixtures start with an unlocked account and completed onboarding.
     await page.goto("/eval")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
     await page.goto("about:blank")
     await page.goto("/eval", { waitUntil: "domcontentloaded" })
 
@@ -88,7 +86,8 @@ test.describe("eval — durable dataset authoring", () => {
     await expect(caseList.getByRole("paragraph").filter({ hasText: CASE_INPUT })).toBeVisible()
     await expect(detail).toContainText("v2")
 
-    await detail.getByRole("button", { name: "Gate", exact: true }).click()
+    await detail.getByRole("button", { name: "More dataset actions" }).click()
+    await page.getByRole("menuitem", { name: "Gate", exact: true }).click()
     const gateDialog = page.getByRole("dialog")
     await gateDialog.getByRole("spinbutton", { name: "Min pass@1" }).fill("0.8")
     await gateDialog.getByRole("spinbutton", { name: "Max total cost (USD)" }).fill("2.5")

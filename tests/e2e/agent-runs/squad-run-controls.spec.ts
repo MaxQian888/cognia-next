@@ -19,7 +19,7 @@
 
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
-import { ensureCogniaAccount, waitForTestGlobals } from "../helpers/db-reset"
+import { resetCogniaDb, waitForTestGlobals } from "../helpers/db-reset"
 
 declare global {
   interface Window {
@@ -37,20 +37,13 @@ declare global {
 const SQUAD_NAME = "Release evidence squad"
 const OBJECTIVE = "Audit the release evidence with the whole squad"
 
-/**
- * Boot into the gated app the way the goal-control spec does: seed the account
- * registry, hop through about:blank so the shell re-reads it, then land on a
- * real route where the dev bridge is mounted. A fresh profile has no sessions,
- * which the onboarding gate reads as a first run, so the legacy dismissal
- * stamp is written first: this spec is about Squads, not onboarding.
- */
+/** Provision the account, vault and completed onboarding before entering Squads. */
 async function bootInto(page: Page, route: string): Promise<void> {
   await page.goto("/")
-  await ensureCogniaAccount(page)
+  await resetCogniaDb(page)
   await page.goto("about:blank")
   await page.goto(route, { waitUntil: "domcontentloaded" })
   await waitForTestGlobals(page)
-  await page.evaluate(() => window.__cogniaSetSettings!({ onboardingDismissedAt: Date.now() }))
 }
 
 async function seedSquad(page: Page): Promise<string> {
@@ -188,8 +181,14 @@ test.describe("squads — one runtime, one cockpit, one review contract", () => 
     await amount.fill("25000")
     await page.getByRole("button", { name: "Grant extension" }).click()
 
-    // The interrupt settles: the form is gone and the Approvals tab shows it approved.
-    await expect(page.getByTestId("squad-review-form")).toHaveCount(0)
+    // The budget decision settles, then the still-unbound Squad reaches its
+    // independent readiness gate. This new recovery must not hide approval history.
+    await expect(
+      page.locator('[data-testid="squad-review-form"][data-review-kind="budget_extension"]')
+    ).toHaveCount(0)
+    const recovery = page.getByTestId("squad-review-form")
+    await expect(recovery).toHaveAttribute("data-review-kind", "team_recovery")
+    await expect(recovery).toContainText(/missing a binding/i)
     await page.getByRole("tab", { name: /Approvals/ }).click()
     await expect(page.getByText("Approved", { exact: true }).first()).toBeVisible()
   })

@@ -6,13 +6,13 @@
 
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { createMockAnthropicServer, type MockAnthropicServer } from "../mocks/anthropic/server"
-import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
+import { resetCogniaDb, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 let anthropic: MockAnthropicServer
 
 async function configureStandaloneChat(page: Page): Promise<void> {
   await page.goto("/")
-  await ensureCogniaAccount(page)
+  await resetCogniaDb(page)
   await page.goto("about:blank")
   await page.goto("/", { waitUntil: "domcontentloaded" })
   await waitForTestGlobals(page, 30_000)
@@ -78,7 +78,7 @@ test.describe("web — main chat lifecycle", () => {
     await expect(
       page.getByText(/mock-anthropic-echo.*first browser lifecycle turn/i).first()
     ).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByRole("button", { name: "Send" }).first()).toBeVisible({
+    await expect(page.getByRole("button", { name: "Send", exact: true }).first()).toBeVisible({
       timeout: 30_000,
     })
 
@@ -87,12 +87,25 @@ test.describe("web — main chat lifecycle", () => {
     await expect(
       page.getByText(/mock-anthropic-echo.*second browser lifecycle turn/i).first()
     ).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByRole("button", { name: "Send" }).first()).toBeVisible({
+    await expect(page.getByRole("button", { name: "Send", exact: true }).first()).toBeVisible({
       timeout: 30_000,
     })
-    await expect(page.getByTestId("perf-hud-row-chat:turn:completed")).toBeVisible({
-      timeout: 10_000,
-    })
+    // The HUD row survives between turns; visibility alone only proves the
+    // first turn completed. Observe both sealed turns before testing reload.
+    await expect(
+      page.getByTestId("perf-hud-row-chat:turn:completed").getByRole("cell").nth(1)
+    ).toHaveText("2", { timeout: 10_000 })
+    const durableMessages = await page.evaluate(() => window.__cogniaReadMessages!())
+    for (const turn of ["first", "second"]) {
+      expect(durableMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: "assistant",
+            text: expect.stringContaining(`${turn} browser lifecycle turn`),
+          }),
+        ])
+      )
+    }
 
     await page.reload({ waitUntil: "domcontentloaded" })
     await expect(

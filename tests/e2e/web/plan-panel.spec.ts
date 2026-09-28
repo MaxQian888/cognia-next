@@ -10,7 +10,7 @@
 
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import {
-  ensureCogniaAccount,
+  resetCogniaDb,
   readDexieRow,
   setCogniaSettings,
   waitForTestGlobals,
@@ -35,7 +35,7 @@ const PLAN_TEXT = [
 
 async function prepareSessionWithPlans(page: Page) {
   await page.goto("/")
-  await ensureCogniaAccount(page)
+  await resetCogniaDb(page)
   await page.goto("about:blank")
   await page.goto("/", { waitUntil: "domcontentloaded" })
   await waitForTestGlobals(page, 30_000)

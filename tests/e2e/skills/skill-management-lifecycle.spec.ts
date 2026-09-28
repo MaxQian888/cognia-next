@@ -9,7 +9,7 @@
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
 
-import { ensureCogniaAccount } from "../helpers/db-reset"
+import { resetCogniaDb } from "../helpers/db-reset"
 
 const SKILL_NAME = "E2E Release Evidence"
 const INITIAL_DESCRIPTION = "Collects release verification evidence"
@@ -26,7 +26,7 @@ function skillHeading(page: import("@playwright/test").Page) {
 test.describe("skills — management lifecycle", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
     await page.goto("about:blank")
     await page.goto("/skills", { waitUntil: "domcontentloaded" })
     await expect(page.getByRole("heading", { name: "Skills" })).toBeVisible()
@@ -36,8 +36,11 @@ test.describe("skills — management lifecycle", () => {
     await page.getByRole("button", { name: "New", exact: true }).click()
 
     const createSheet = page.getByRole("dialog", { name: "Create" })
-    await createSheet.getByPlaceholder("Cite sources").fill(SKILL_NAME)
-    await createSheet.getByPlaceholder("(optional) one-line summary").fill(INITIAL_DESCRIPTION)
+    await createSheet.getByPlaceholder("Cite sources", { exact: true }).fill(SKILL_NAME)
+    await createSheet.getByPlaceholder("cite-sources", { exact: true }).fill("e2e-release-evidence")
+    await createSheet
+      .getByPlaceholder("What this skill does and when to use it")
+      .fill(INITIAL_DESCRIPTION)
     await createSheet
       .getByPlaceholder(
         "Append-only system-prompt augmentation. The user can disable this per session."
@@ -66,7 +69,7 @@ test.describe("skills — management lifecycle", () => {
     await page.getByRole("button", { name: "Skill settings", exact: true }).click()
 
     const settingsSheet = page.getByRole("dialog", { name: "Skill settings" })
-    const description = settingsSheet.getByPlaceholder("(optional) one-line summary")
+    const description = settingsSheet.getByPlaceholder("What this skill does and when to use it")
     await expect(description).toHaveValue(INITIAL_DESCRIPTION)
     await description.fill(UPDATED_DESCRIPTION)
     await settingsSheet.getByRole("button", { name: "Save", exact: true }).click()

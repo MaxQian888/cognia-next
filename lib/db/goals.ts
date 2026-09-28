@@ -90,13 +90,25 @@ export async function listAllGoals(limit = 500, projectId?: string): Promise<Goa
   // resolveScopeProjectId would auto-create Default and write settings inside
   // the liveQuery's read-only context on first boot. The project initializer
   // owns that write; until it finishes, an empty Default-scoped read is safe.
-  const pid = projectId ?? (await getSettings()).activeProjectId ?? DEFAULT_PROJECT_ID
-  return getDb()
-    .chatGoals.where("[projectId+createdAt]")
-    .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
-    .reverse()
-    .limit(limit)
-    .toArray()
+  // Preserve the liveQuery observation scope across settings' native async
+  // helpers. A native await here can drop the later goal query from that scope,
+  // leaving the console on its initial snapshot after a successful mutation.
+  const database = getDb()
+  const scope =
+    projectId === undefined
+      ? Dexie.Promise.resolve(getSettings()).then(
+          (settings) => settings.activeProjectId ?? DEFAULT_PROJECT_ID
+        )
+      : Dexie.Promise.resolve(projectId)
+  return scope.then((pid) => {
+    if (getDb() !== database) throw new Dexie.AbortError("Goal query database changed")
+    return database.chatGoals
+      .where("[projectId+createdAt]")
+      .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
+      .reverse()
+      .limit(limit)
+      .toArray()
+  })
 }
 
 export interface GoalUpdatePatch {

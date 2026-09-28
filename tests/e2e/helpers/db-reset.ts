@@ -120,63 +120,68 @@ export async function ensureCogniaAccount(page: Page): Promise<string> {
   // effect finishes the Dexie v1 upgrade. Opening the registry in that window
   // creates/observes an empty database. Poll the schema and perform the seed
   // through the SAME connection so there is no check-then-open race.
-  await page.waitForFunction(
-    async ({ accountId, databaseName }) => {
-      const exists = (await indexedDB.databases()).some((info) => info.name === databaseName)
-      if (!exists) return false
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          async ({ accountId, databaseName }) => {
+            const exists = (await indexedDB.databases()).some((info) => info.name === databaseName)
+            if (!exists) return false
 
-      const seeded = await new Promise<boolean>((resolve) => {
-        const request = indexedDB.open(databaseName)
-        request.onerror = () => resolve(false)
-        request.onsuccess = () => {
-          const database = request.result
-          if (
-            !database.objectStoreNames.contains("accounts") ||
-            !database.objectStoreNames.contains("state")
-          ) {
-            database.close()
-            resolve(false)
-            return
-          }
+            const seeded = await new Promise<boolean>((resolve) => {
+              const request = indexedDB.open(databaseName)
+              request.onerror = () => resolve(false)
+              request.onsuccess = () => {
+                const database = request.result
+                if (
+                  !database.objectStoreNames.contains("accounts") ||
+                  !database.objectStoreNames.contains("state")
+                ) {
+                  database.close()
+                  resolve(false)
+                  return
+                }
 
-          const now = Date.now()
-          const transaction = database.transaction(["accounts", "state"], "readwrite")
-          transaction.objectStore("accounts").put({
-            id: accountId,
-            displayName: "E2E",
-            passwordVerifier: {
-              algorithm: "e2e-stub",
-              salt: "e2e-salt",
-              hash: "e2e-hash",
-              params: {},
-            },
-            createdAt: now,
-            updatedAt: now,
-          })
-          transaction.objectStore("state").put({
-            id: "singleton",
-            activeAccountId: accountId,
-            updatedAt: now,
-          })
-          transaction.oncomplete = () => {
-            database.close()
-            resolve(true)
-          }
-          transaction.onerror = () => {
-            database.close()
-            resolve(false)
-          }
-          transaction.onabort = () => {
-            database.close()
-            resolve(false)
-          }
-        }
-      })
-      return seeded
-    },
-    { accountId: E2E_ACCOUNT_ID, databaseName: ACCOUNT_REGISTRY_DB_NAME },
-    { timeout: 15_000 }
-  )
+                const now = Date.now()
+                const transaction = database.transaction(["accounts", "state"], "readwrite")
+                transaction.objectStore("accounts").put({
+                  id: accountId,
+                  displayName: "E2E",
+                  passwordVerifier: {
+                    algorithm: "e2e-stub",
+                    salt: "e2e-salt",
+                    hash: "e2e-hash",
+                    params: {},
+                  },
+                  createdAt: now,
+                  updatedAt: now,
+                })
+                transaction.objectStore("state").put({
+                  id: "singleton",
+                  activeAccountId: accountId,
+                  updatedAt: now,
+                })
+                transaction.oncomplete = () => {
+                  database.close()
+                  resolve(true)
+                }
+                transaction.onerror = () => {
+                  database.close()
+                  resolve(false)
+                }
+                transaction.onabort = () => {
+                  database.close()
+                  resolve(false)
+                }
+              }
+            })
+            return seeded
+          },
+          { accountId: E2E_ACCOUNT_ID, databaseName: ACCOUNT_REGISTRY_DB_NAME }
+        ),
+      { timeout: 15_000 }
+    )
+    .toBe(true)
 
   return E2E_ACCOUNT_ID
 }
@@ -187,8 +192,8 @@ export async function ensureCogniaAccount(page: Page): Promise<string> {
  * the gated app; after seeding an account, a mobile reload can therefore stop
  * at `/welcome` before tests get a chance to call `setCogniaSettings`.
  *
- * Write the smallest valid settings singleton directly into whichever Cognia
- * app DB is active. The exported bootstrap below deliberately does not wait
+ * Write the settings singleton into the prepared account database. A legacy
+ * database may open first during boot and must not consume this seed. The exported bootstrap below deliberately does not wait
  * for the heavier dev bridge, so queue/boot specs can stay independent from
  * dynamic plugin-table upgrades.
  */
@@ -198,7 +203,7 @@ async function installMobileBootstrapMode(
   settingsPatch: Record<string, unknown> = {}
 ): Promise<void> {
   await page.addInitScript(
-    (bootstrapSettings) => {
+    ({ bootstrapSettings, accountId }) => {
       const bootstrapKey = "cognia-e2e-mobile-bootstrap-mode"
       const bootstrapSignature = JSON.stringify(bootstrapSettings)
       try {
@@ -217,7 +222,9 @@ async function installMobileBootstrapMode(
             const databases = await indexedDB.databases()
             const candidateNames = databases
               .map((info) => info.name)
-              .filter((name): name is string => Boolean(name?.startsWith("cognia-")))
+              .filter((name): name is string =>
+                Boolean(name?.startsWith(`cognia-account-${accountId}-`))
+              )
             for (const candidateName of candidateNames) {
               const seeded = await new Promise<boolean>((resolve) => {
                 const req = indexedDB.open(candidateName)
@@ -269,7 +276,7 @@ async function installMobileBootstrapMode(
         }
       })()
     },
-    { ...settingsPatch, mobileRuntimeMode: mode }
+    { bootstrapSettings: { ...settingsPatch, mobileRuntimeMode: mode }, accountId: E2E_ACCOUNT_ID }
   )
 }
 
@@ -334,7 +341,16 @@ export async function ensureAppMounted(page: Page): Promise<void> {
   // that boot instead of overwriting a verifier or aborting it with navigation.
   // Native fixtures own authentication and never receive a browser stub.
   const needsBrowserAccount = !state.native && existingAccounts.length === 0
-  if (needsBrowserAccount) await ensureCogniaAccount(page)
+  if (needsBrowserAccount) {
+    // At DOMContentLoaded the registry can appear before AccountStore.load has
+    // settled. Seeding in that window races its first-run read/provisioning;
+    // wait for the gate's settled empty-account form before changing storage.
+    await page.getByRole("form", { name: "Create local account", exact: true }).waitFor({
+      state: "visible",
+      timeout: 30_000,
+    })
+    await ensureCogniaAccount(page)
+  }
   // Re-boot through about:blank instead of page.reload(): a reload can leave
   // the OLD document (and its IndexedDB connections) alive long enough to
   // block the new boot's dynamic plugin-table schema bump — the console shows

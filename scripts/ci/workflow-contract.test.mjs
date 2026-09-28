@@ -677,7 +677,9 @@ test("every root install restores standalone npm downloads before postinstall", 
     const { jobs } = parse(await readWorkflow(workflow))
     for (const [name, job] of Object.entries(jobs)) {
       const steps = job.steps ?? []
-      const install = steps.findIndex((step) => /pnpm install/.test(step.run ?? ""))
+      const install = steps.findIndex(
+        (step) => /pnpm install/.test(step.run ?? "") && !step["working-directory"]
+      )
       if (install < 0) continue
       const cache = steps.findIndex(
         (step) => step.uses?.startsWith("actions/cache@") && step.with.path === "~/.npm"
@@ -702,4 +704,61 @@ test("every root install restores standalone npm downloads before postinstall", 
       assert.ok(!steps[install].run.includes("--ignore-scripts"))
     }
   }
+})
+
+test("workspace Rust integration tests provision media, sidecar, and sandbox prerequisites", async () => {
+  const { steps } = parse(await readWorkflow("test.yml")).jobs["cargo-test-workspace"]
+  const testIndex = steps.findIndex(
+    (step) => step.name === "Run Rust tests (all crates except src-tauri)"
+  )
+  const system = steps.find((step) => step.name === "Install system dependencies")
+  for (const dependency of ["ffmpeg", "bubblewrap", "apparmor"]) {
+    assert.match(system.run, new RegExp(`\\b${dependency}\\b`))
+  }
+  const node = steps.find((step) => step.uses === "actions/setup-node@v7")
+  assert.equal(node.with["node-version"], "26.x")
+  assert.equal(node.with.cache, "pnpm")
+  assert.equal(node.with["cache-dependency-path"], "sidecar/pnpm-lock.yaml")
+  const install = steps.findIndex((step) => step.name === "Install standalone sidecar dependencies")
+  assert.ok(
+    install > steps.findIndex((step) => step.uses === "pnpm/action-setup@v6") && install < testIndex
+  )
+  assert.equal(steps[install]["working-directory"], "sidecar")
+  assert.equal(steps[install].run, "pnpm install --frozen-lockfile --prefer-offline")
+  assert.ok(
+    !steps.some(
+      (step) =>
+        step.run === "pnpm install --frozen-lockfile --prefer-offline" && !step["working-directory"]
+    )
+  )
+  const sandbox = steps.findIndex(
+    (step) => step.name === "Enable bwrap user namespaces for sandbox tests"
+  )
+  assert.ok(sandbox >= 0 && sandbox < testIndex)
+  assert.match(steps[sandbox].run, /profile bwrap \/usr\/bin\/bwrap flags=\(unconfined\)/)
+  assert.match(steps[sandbox].run, /userns,/)
+  assert.match(steps[sandbox].run, /sudo apparmor_parser -r \/etc\/apparmor.d\/cognia-ci-bwrap/)
+  assert.match(
+    steps[sandbox].run,
+    /\/usr\/bin\/bwrap --unshare-user --unshare-net --ro-bind \/ \/ -- \/bin\/true/
+  )
+  assert.doesNotMatch(steps[sandbox].run, /sysctl|apparmor_restrict_unprivileged_userns=0/)
+})
+
+test("Windows Rust unit tests reuse the export without staging a desktop bundle", async () => {
+  const workflow = parse(await readWorkflow("test.yml"))
+  const job = workflow.jobs["cargo-test-windows"]
+  const step = job.steps.find((step) => step.run === "cargo test --locked")
+  assert.deepEqual(JSON.parse(step.env?.TAURI_CONFIG ?? "{}"), {
+    bundle: { resources: [], externalBin: [] },
+  })
+  assert.equal(job.env?.TAURI_CONFIG, undefined)
+  assert.ok(
+    job.steps.some((step) => step.with?.name === "nextjs-build" && step.with?.path === "out/")
+  )
+  const tauri = JSON.parse(
+    await readFile(new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8")
+  )
+  assert.ok(tauri.bundle.externalBin.includes("binaries/cognia-server"))
+  assert.ok(tauri.bundle.externalBin.includes("binaries/cognia-external-agent-launcher"))
 })

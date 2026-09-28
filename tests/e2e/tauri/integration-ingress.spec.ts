@@ -51,4 +51,18 @@ test.describe("tauri: generic Integration ingress IPC", () => {
     }, ROUTE_ID)
     expect(removedUrl).toBeNull()
   })
+
+  test("renders Marketplace integration management without a platform built-in", async ({
+    page,
+  }) => {
+    await page.goto("/integrations", { waitUntil: "domcontentloaded" })
+    await expect(page.getByRole("heading", { name: "Integrations", exact: true })).toBeVisible()
+    await expect(page.getByText("Integration management requires the desktop app.")).toHaveCount(0)
+    await expect(
+      page.getByText("Install an Integration-capable Marketplace plugin to begin.")
+    ).toBeVisible()
+    for (const name of ["Accounts", "Subscriptions", "Approvals and jobs", "Audit"]) {
+      await expect(page.getByRole("heading", { name, exact: true })).toBeVisible()
+    }
+  })
 })

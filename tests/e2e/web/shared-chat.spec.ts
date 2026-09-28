@@ -1,15 +1,19 @@
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
-import { installCollabScenario, GUEST_ID } from "../helpers/shared-chat"
+import { installCollabScenario, GUEST_ID, type CollabScenario } from "../helpers/shared-chat"
 import {
-  ensureCogniaAccount,
+  resetCogniaDb,
   waitForTestGlobals,
   setCogniaSettings,
   readDexieRows,
 } from "../helpers/db-reset"
 
+// Keep the mock collaboration transport owned by Playwright: the production
+// service worker otherwise forwards requests outside page.route interception.
+test.use({ serviceWorkers: "block" })
+
 async function configureStandaloneChat(page: Page) {
   await page.goto("/")
-  await ensureCogniaAccount(page)
+  await resetCogniaDb(page)
   await page.goto("about:blank")
   await page.goto("/", { waitUntil: "domcontentloaded" })
   await waitForTestGlobals(page, 30_000)
@@ -26,27 +30,58 @@ async function configureStandaloneChat(page: Page) {
   })
   await page.goto("about:blank")
   await page.goto("/", { waitUntil: "domcontentloaded" })
-  await page.getByRole("button", { name: "New chat" }).first().click()
-  const picker = page.getByRole("dialog", { name: /pick a character/i })
-  await expect(picker).toBeVisible()
-  await picker.getByRole("option").first().click()
-  await expect(page.getByRole("textbox", { name: /message/i }).first()).toBeVisible()
+  await openPrivateConversation(page)
+}
+
+async function openTaskSummary(page: Page) {
+  const summary = page.getByRole("button", { name: "Task summary", exact: true })
+  if ((await summary.getAttribute("aria-expanded")) !== "true") await summary.click()
+}
+
+async function openPrivateConversation(page: Page) {
+  await page.getByRole("button", { name: "New chat", exact: true }).first().click()
+  const composer = page.getByTestId("welcome-composer").getByRole("textbox", { name: /message/i })
+  await expect(composer).toBeVisible()
+  await composer.fill("Private history before sharing")
+  await composer.press("Enter")
+  await expect(
+    page.getByText(/mock-anthropic-echo.*Private history before sharing/i).first()
+  ).toBeVisible({ timeout: 30_000 })
+  await openTaskSummary(page)
+  // Wait for the durable assistant snapshot before importing the conversation.
+  await expect(page.getByRole("button", { name: "Send", exact: true }).first()).toBeVisible()
 }
 
 test.describe("web — shared AI chat", () => {
+  let scenario: CollabScenario
   test.beforeEach(async ({ page }) => {
-    await installCollabScenario(page)
+    scenario = await installCollabScenario(page)
     await configureStandaloneChat(page)
+  })
+
+  test.afterEach(async () => {
+    if (test.info().status !== test.info().expectedStatus) {
+      await test.info().attach("collaboration-requests", {
+        body: JSON.stringify(scenario.requests),
+        contentType: "application/json",
+      })
+    }
   })
 
   test("@critical imports full history only after explicit confirmation", async ({ page }) => {
     await page.getByRole("button", { name: "Open private conversation controls" }).click()
-    await expect(page.getByText(/0 messages and 0 attachments/i)).toBeVisible()
+    await expect(page.getByText(/2 messages and 0 attachments/i)).toBeVisible()
     await expect(page.getByText(/Everyone invited later can read the full history/i)).toBeVisible()
+    expect(scenario.session).toBeNull()
+    expect(scenario.events).toHaveLength(0)
     await page.getByRole("button", { name: /convert and share/i }).click()
+    await expect
+      .poll(() => scenario.events.filter((event) => event.kind === "message.created").length)
+      .toBe(2)
     await expect(page.getByText(/conversation is now shared/i)).toBeVisible()
 
     await page.reload({ waitUntil: "domcontentloaded" })
+    await openTaskSummary(page)
     await expect(
       page.getByRole("button", { name: "Open shared conversation controls" })
     ).toBeVisible()
@@ -57,7 +92,11 @@ test.describe("web — shared AI chat", () => {
   }) => {
     await page.getByRole("button", { name: "Open private conversation controls" }).click()
     await page.getByRole("button", { name: /convert and share/i }).click()
+    await expect(
+      page.getByRole("button", { name: "Open shared conversation controls" })
+    ).toBeVisible()
     await page.reload({ waitUntil: "domcontentloaded" })
+    await openTaskSummary(page)
 
     await page.getByRole("button", { name: "Open shared conversation controls" }).click()
     await expect(page.getByText("External Reviewer")).toBeVisible()
@@ -97,7 +136,7 @@ test("@critical ordinary Send persists once and Request AI references that messa
   await composer.press("Enter")
   await expect
     .poll(() => scenario.events.filter((event) => event.kind === "message.created").length)
-    .toBe(1)
+    .toBe(3)
   expect(
     scenario.requests.filter(
       (request) => request.method === "POST" && request.pathname.endsWith("/queue")
@@ -112,9 +151,10 @@ test("@critical ordinary Send persists once and Request AI references that messa
         ).length
     )
     .toBe(1)
-  const message = scenario.events[0].payload as { messageId: string }
+  const message = scenario.events.filter((event) => event.kind === "message.created").at(-1)!
+    .payload as { messageId: string }
   expect(scenario.queue.at(-1)?.payload).toMatchObject({ messageId: message.messageId })
-  expect(scenario.events.filter((event) => event.kind === "message.created")).toHaveLength(1)
+  expect(scenario.events.filter((event) => event.kind === "message.created")).toHaveLength(3)
 })
 
 test("@critical a second participant joins by invitation and receives the first participant's messages", async ({
@@ -131,6 +171,7 @@ test("@critical a second participant joins by invitation and receives the first 
   const otherContext = await browser.newContext({
     baseURL: new URL(page.url()).origin,
     locale: "en-US",
+    serviceWorkers: "block",
   })
   try {
     const other = await otherContext.newPage()
@@ -140,6 +181,7 @@ test("@critical a second participant joins by invitation and receives the first 
     const join = other.getByRole("dialog", { name: "Join shared conversation", exact: true })
     await join.getByLabel("Invitation token").fill("invite-secret-visible-once")
     await join.getByRole("button", { name: "Join shared conversation", exact: true }).click()
+    await openTaskSummary(other)
     await expect(
       other.getByRole("button", { name: "Open shared conversation controls" })
     ).toBeVisible()
@@ -149,17 +191,14 @@ test("@critical a second participant joins by invitation and receives the first 
     await composer.press("Enter")
     await expect
       .poll(() => scenario.events.filter((event) => event.kind === "message.created").length)
-      .toBe(1)
+      .toBe(3)
     await expect(
       other.getByText("Shared message from the first participant", { exact: true }).first()
     ).toBeVisible()
-    expect(scenario.events.filter((event) => event.kind === "message.created")).toHaveLength(1)
+    expect(scenario.events.filter((event) => event.kind === "message.created")).toHaveLength(3)
 
     // Keep the shared tab open while viewing a different local conversation.
-    await other.getByRole("button", { name: "New chat" }).first().click()
-    const picker = other.getByRole("dialog", { name: /pick a character/i })
-    await expect(picker).toBeVisible()
-    await picker.getByRole("option").first().click()
+    await openPrivateConversation(other)
     await expect(
       other.getByRole("button", { name: "Open private conversation controls" })
     ).toBeVisible()
@@ -176,7 +215,7 @@ test("@critical a second participant joins by invitation and receives the first 
         ).length
       })
       .toBe(1)
-    expect(scenario.events.filter((event) => event.kind === "message.created")).toHaveLength(2)
+    expect(scenario.events.filter((event) => event.kind === "message.created")).toHaveLength(4)
   } finally {
     if (test.info().status !== test.info().expectedStatus) {
       const other = otherContext.pages()[0]

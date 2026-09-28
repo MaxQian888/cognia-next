@@ -1,28 +1,17 @@
-/**
- * Browser E2E: the governed appearance boundary remains user-controlled and
- * durable without requiring native cursor access.
- *
- * Contract: Pet settings → disable local gaze → persisted unchecked state
- * after reload. Native cursor IPC stays in the Windows-only Tauri project.
- */
-
+/** Browser settings cannot mutate native Pet preferences; native persistence lives in tauri/pet. */
 import { expect, test } from "@/tests/e2e/fixtures/test"
+import { resetCogniaDb } from "../helpers/db-reset"
 
-import { ensureCogniaAccount } from "../helpers/db-reset"
-
-test.describe("pet — governed appearance", () => {
-  test("persists the local-only gaze preference", async ({ page }) => {
-    await page.goto("/")
-    await ensureCogniaAccount(page)
-    await page.goto("/settings?section=pet", { waitUntil: "domcontentloaded" })
-
-    const gaze = page.getByRole("switch", { name: "Follow pointer" })
-    await expect(gaze).toBeVisible()
-    await expect(gaze).toBeChecked()
-    await gaze.click()
-    await expect(gaze).not.toBeChecked()
-
-    await page.reload({ waitUntil: "domcontentloaded" })
-    await expect(page.getByRole("switch", { name: "Follow pointer" })).not.toBeChecked()
-  })
+test("browser Pet settings explain their local-desktop boundary", async ({ page }) => {
+  await page.goto("/")
+  await resetCogniaDb(page)
+  // Settings returns through browser history; enter from the completed chat shell.
+  await page.goto("/")
+  await page.goto("/settings?section=pet", { waitUntil: "domcontentloaded" })
+  await expect(page.getByRole("heading", { name: "Settings Pet", exact: true })).toBeVisible()
+  await expect(page.getByText("Desktop app only", { exact: true })).toBeVisible()
+  await expect(page.getByText(/Pairing a host does not open it/)).toBeVisible()
+  await expect(page.getByRole("switch", { name: "Follow pointer" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Back to chat", exact: true }).click()
+  await expect(page).toHaveURL(/\/$/)
 })

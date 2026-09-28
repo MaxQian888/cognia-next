@@ -12,13 +12,11 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { resetCogniaDb } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 
 test.describe("mobile — first-run onboarding", () => {
   test.beforeEach(async ({ page }) => {
     await injectCapacitor(page, { platform: "android" })
-    await resetCogniaDb(page, { onboarding: "fresh" })
   })
 
   test("@critical carries the mode fork absorbed from the old /welcome route", async ({ page }) => {

@@ -84,6 +84,8 @@ export interface InjectCapacitorOptions {
   mdnsResults?: Array<{ host: string; port: number; fingerprint?: string }>
   /** Initial native Keychain/Keystore entries, re-created for every document. */
   secureStorage?: Record<string, string>
+  /** Keep synthetic native credentials across document reloads in this test context. */
+  persistSecureStorage?: boolean
 }
 
 export async function injectCapacitor(
@@ -104,6 +106,7 @@ export async function injectCapacitor(
     shareEnabled: options.shareEnabled ?? true,
     mdnsResults: options.mdnsResults ?? [],
     secureStorage: options.secureStorage ?? {},
+    persistSecureStorage: options.persistSecureStorage ?? false,
   }
 
   await page.addInitScript((init) => {
@@ -163,6 +166,22 @@ export async function injectCapacitor(
     }
     type LocalNotification = { id: number; title: string; body: string; schedule?: { at: number } }
 
+    const secureStorageKey = "cognia.e2e.capacitor.secure-storage.v1"
+    let secureStore = { ...init.secureStorage }
+    if (init.persistSecureStorage) {
+      try {
+        const stored = window.sessionStorage.getItem(secureStorageKey)
+        if (stored !== null) secureStore = JSON.parse(stored) as Record<string, string>
+      } catch {
+        // about:blank has no storage origin; the next app document restores it.
+      }
+    }
+    const persistSecureStore = () => {
+      if (init.persistSecureStorage) {
+        window.sessionStorage.setItem(secureStorageKey, JSON.stringify(state.secureStore))
+      }
+    }
+
     const state: MockState = {
       platform: init.platform,
       network: { ...init.network },
@@ -187,7 +206,7 @@ export async function injectCapacitor(
       localNotificationActionListeners: [],
       orientationListeners: [],
       mdnsListeners: [],
-      secureStore: { ...init.secureStorage },
+      secureStore,
       fsRoot: {},
       lockedOrientation: null,
       lastShare: null,
@@ -248,6 +267,7 @@ export async function injectCapacitor(
       SecureStoragePlugin: {
         set: async ({ key, value }: { key: string; value: string }) => {
           state.secureStore[key] = value
+          persistSecureStore()
           return { value: true }
         },
         get: async ({ key }: { key: string }) => {
@@ -259,11 +279,13 @@ export async function injectCapacitor(
         },
         remove: async ({ key }: { key: string }) => {
           delete state.secureStore[key]
+          persistSecureStore()
           return { value: true }
         },
         keys: async () => ({ value: Object.keys(state.secureStore) }),
         clear: async () => {
           for (const k of Object.keys(state.secureStore)) delete state.secureStore[k]
+          persistSecureStore()
           return { value: true }
         },
       },
@@ -622,6 +644,7 @@ export async function injectCapacitor(
       },
       clearSecureStorage() {
         for (const k of Object.keys(state.secureStore)) delete state.secureStore[k]
+        persistSecureStore()
       },
       // ── New controls (Wave 2/3 surfaces) ───────────────────────────────
       setCameraResult(photo: CameraPhoto | null) {

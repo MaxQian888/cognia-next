@@ -37,6 +37,7 @@ test("the install ZIP carries a CommonJS entry that only needs the host-shared S
 
     const entry = await archive.file(manifest.main).async("string")
     assert.equal(entry, await readFile(entryPath, "utf8"))
+    assert.ok(!entry.includes(pluginRoot), "install bundle must not embed the checkout path")
     // evaluateBundle throws for any require but `@cognia/plugin-sdk`.
     const pluginModule = evaluateBundle(entry)
     assert.deepEqual(JSON.parse(JSON.stringify(pluginModule.default.manifest)), manifest)

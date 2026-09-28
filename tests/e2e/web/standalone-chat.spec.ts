@@ -7,7 +7,7 @@
  */
 
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
+import { resetCogniaDb, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 interface PersistedChatRow {
   database: string
@@ -42,7 +42,7 @@ async function readPersistedChatRows(page: Page) {
 test.describe("web — standalone chat", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
     await page.goto("about:blank")
     await page.goto("/", { waitUntil: "domcontentloaded" })
     await waitForTestGlobals(page, 30_000)
@@ -90,7 +90,7 @@ test.describe("web — standalone chat", () => {
     // The response text can render before the final Dexie transaction commits.
     // The composer returns from Stop to Send only after turnComplete has awaited
     // that durable snapshot, so this is the reload-safe terminal state.
-    await expect(page.getByRole("button", { name: "Send" }).first()).toBeVisible({
+    await expect(page.getByRole("button", { name: "Send", exact: true }).first()).toBeVisible({
       timeout: 30_000,
     })
     await expect

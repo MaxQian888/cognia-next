@@ -99,6 +99,12 @@ test.describe("mobile pair flow — cgnp3 + DPoP round-trip", () => {
     await page.getByTestId("pair-discover-skip").click()
     await page.getByTestId("pair-payload").fill(pairPayload)
 
+    // The pairing route can render before the seeded account has activated.
+    // Require the local owner scope before submitting a remote invitation.
+    await expect
+      .poll(() => page.evaluate(async () => (await window.__cogniaE2ECompanion?.runtime())?.accountId))
+      .toBe("acct_e2e_seed_account")
+
     const pairPromise = server.waitForRegistration()
     await page.getByTestId("pair-submit").click()
 

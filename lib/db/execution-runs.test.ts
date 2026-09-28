@@ -1,5 +1,7 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
+import * as schema from "./schema"
 import type { ExecutionRun } from "@/types/execution/run"
 
 import { __resetDbForTesting, getDb } from "./schema"
@@ -24,6 +26,96 @@ describe("execution run journal", () => {
   beforeEach(async () => {
     await getDb().delete()
     __resetDbForTesting()
+  })
+
+  it.each(["create", "binding", "append", "appendBatch"] as const)(
+    "does not retry %s into another account or target database",
+    async (operation) => {
+      const initial = getDb()
+      let replacement: schema.CogniaDB | undefined
+      const abortFirstAttempt = () => {
+        schema.activateAccountDatabase("acct_journal_retry_test", "other-target")
+        replacement = getDb()
+        return Promise.reject(new Dexie.DatabaseClosedError("schema closed"))
+      }
+      const run: ExecutionRun = {
+        id: "scope-run",
+        kind: "goal",
+        sourceId: "goal-1",
+        title: "Private title",
+        status: "queued",
+        currentRevision: 0,
+        startedAt: 1,
+        updatedAt: 1,
+      }
+      const event = {
+        type: "run.started" as const,
+        ts: 1,
+        visibility: "summary" as const,
+        payload: {},
+      }
+      let firstAttempt: jest.SpyInstance
+      let result: Promise<unknown>
+      if (operation === "create") {
+        firstAttempt = jest
+          .spyOn(initial.executionRuns, "add")
+          .mockImplementationOnce(abortFirstAttempt as never)
+        result = createExecutionRun(run)
+      } else if (operation === "binding") {
+        firstAttempt = jest
+          .spyOn(initial.executionRunBindings, "put")
+          .mockImplementationOnce(abortFirstAttempt as never)
+        result = putExecutionRunBinding({ id: "binding", runId: run.id } as Parameters<
+          typeof putExecutionRunBinding
+        >[0])
+      } else {
+        firstAttempt = jest
+          .spyOn(initial, "transaction")
+          .mockImplementationOnce(abortFirstAttempt as never)
+        result =
+          operation === "append"
+            ? runEventJournal.append(run.id, event)
+            : runEventJournal.appendBatch(run.id, [event])
+      }
+      try {
+        await expect(result).rejects.toThrow("Execution journal database changed")
+        expect(firstAttempt).toHaveBeenCalledTimes(1)
+        expect(await replacement!.executionRuns.count()).toBe(0)
+        expect(await replacement!.executionRunBindings.count()).toBe(0)
+        expect(await replacement!.executionRunEvents.count()).toBe(0)
+      } finally {
+        firstAttempt.mockRestore()
+        await replacement?.delete()
+        schema.clearAccountDatabaseSelection()
+      }
+    }
+  )
+
+  it("retries a schema reopen in the same database namespace", async () => {
+    const initial = getDb()
+    let replacement: schema.CogniaDB | undefined
+    const firstAttempt = jest.spyOn(initial.executionRuns, "add").mockImplementationOnce(() => {
+      __resetDbForTesting()
+      replacement = getDb()
+      return Promise.reject(new Dexie.DatabaseClosedError("schema closed")) as never
+    })
+    const run: ExecutionRun = {
+      id: "reopened-run",
+      kind: "goal",
+      sourceId: "goal-1",
+      title: "Goal",
+      status: "queued",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    }
+    try {
+      await expect(createExecutionRun(run)).resolves.toEqual(run)
+      expect(await replacement!.executionRuns.get(run.id)).toEqual(run)
+    } finally {
+      firstAttempt.mockRestore()
+      replacement?.close()
+    }
   })
 
   it("never overwrites an existing immutable run during duplicate creation", async () => {

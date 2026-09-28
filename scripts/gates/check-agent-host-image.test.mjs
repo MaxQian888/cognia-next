@@ -229,6 +229,11 @@ for (const [file, stage] of [
     const installAt = source.indexOf("RUN pnpm install --frozen-lockfile --offline")
     assert.ok(fetchAt >= 0 && installAt > fetchAt)
     const fetchInputs = source.slice(0, fetchAt)
+    // package.json is deliberately absent here: Corepack must not pick its
+    // latest global default instead of the repository's explicit pnpm pin.
+    assert.ok(fetchInputs.includes('corepack install --global "pnpm@${PNPM_VERSION}"'))
+    assert.match(fetchInputs, /corepack enable pnpm/)
+    assert.match(fetchInputs, /COREPACK_DEFAULT_TO_LATEST=0/)
     assert.match(fetchInputs, /^COPY pnpm-lock\.yaml pnpm-workspace\.yaml \.\/$/m)
     assert.match(fetchInputs, /^COPY patches \.\/patches$/m)
     assert.doesNotMatch(fetchInputs, /^COPY (?:package\.json|packages|scripts|\.) /m)

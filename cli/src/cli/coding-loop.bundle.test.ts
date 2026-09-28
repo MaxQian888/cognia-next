@@ -298,14 +298,20 @@ process.stdin.on("data", chunk => {
         res.end("data: [DONE]\n\n")
       })
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-      const outside = `${workspace}-outside`
+      // Linux provides a private writable /tmp, so a sibling of the temporary
+      // workspace would test scratch space rather than a host filesystem escape.
+      const outsideDirectory = await fs.mkdtemp(path.join(os.homedir(), "cognia-coding-boundary-"))
+      const outside = path.join(outsideDirectory, "outside.txt")
+      // Prove the host user can write here before requiring the sandbox to deny it.
+      await fs.writeFile(outside, "host-write-probe")
+      await fs.rm(outside)
       await fs.writeFile(
         path.join(workspace, "boundary.test.cjs"),
         `
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const net = require("node:net");
-assert.throws(() => fs.writeFileSync(${JSON.stringify(outside)}, "escaped"), /EPERM|EACCES|Operation not permitted/);
+assert.throws(() => fs.writeFileSync(${JSON.stringify(outside)}, "escaped"), { code: /^(EPERM|EACCES|EROFS|ENOENT)$/ });
 const socket = net.connect({ host: "127.0.0.1", port: ${(server.address() as AddressInfo).port} });
 socket.on("connect", () => { socket.destroy(); process.exitCode = 1; console.error("NETWORK_ESCAPED"); });
 socket.on("error", () => { console.log("SANDBOX_BOUNDARIES_VERIFIED"); });
@@ -664,7 +670,7 @@ socket.setTimeout(3000, () => { socket.destroy(); process.exitCode = 1; });
           server.closeAllConnections()
           await new Promise<void>((resolve) => server.close(() => resolve()))
           await fs.rm(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
-          await fs.rm(outside, { force: true })
+          await fs.rm(outsideDirectory, { recursive: true, force: true })
         }
       }
     })

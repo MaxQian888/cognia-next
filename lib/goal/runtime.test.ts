@@ -762,3 +762,28 @@ describe("GoalRuntime.recordPacingDecision", () => {
     await expect(rt.recordPacingDecision("missing-goal", { kind: "send" })).resolves.toBeUndefined()
   })
 })
+
+it("persists lifecycle transitions in an encrypted account database", async () => {
+  const { activateAccountDatabase } = await import("@/lib/db/schema")
+  const { provisionBrowserVault, deleteBrowserVault, __resetBrowserVaultForTesting } =
+    await import("@/lib/runtime/browser-vault")
+  const account = "acct_goal_cipher_regression"
+  try {
+    await provisionBrowserVault(account, "synthetic goal test passphrase")
+    activateAccountDatabase(account)
+    await whenSeeded()
+    const runtime = getGoalRuntime()
+    const goal = await runtime.createGoal({
+      sessionId: "ses_cipher",
+      rawObjective: "Check encrypted persistence",
+    })
+    expect((await runtime.pauseGoal(goal.id))?.status).toBe("paused")
+    expect((await runtime.resumeGoal(goal.id))?.status).toBe("active")
+    expect((await runtime.stopGoal(goal.id))?.status).toBe("stopped")
+  } finally {
+    await getDb().delete()
+    await deleteBrowserVault(account)
+    __resetBrowserVaultForTesting()
+    __resetDbForTesting()
+  }
+})

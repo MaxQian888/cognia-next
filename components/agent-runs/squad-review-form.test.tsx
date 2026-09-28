@@ -10,12 +10,27 @@ jest.mock("next-intl", () => ({
 
 import { SquadReviewForm, isRenderableSquadReview } from "./squad-review-form"
 import type { SquadReviewKind } from "@/types/execution/run"
+import { RECOVERY_REASONS } from "@/lib/ai/agent/team/durable/team-recovery"
+import en from "@/i18n/messages/en/agentRuns.json"
+import zh from "@/i18n/messages/zh-CN/agentRuns.json"
 
 function interrupt(reviewKind: SquadReviewKind, subject?: Record<string, unknown>) {
   return { id: "int-1", reviewKind, expiresAt: 1, ...(subject ? { subject } : {}) }
 }
 
 describe("SquadReviewForm", () => {
+  it.each(Array.from(RECOVERY_REASONS))(
+    "translates recovery reason %s in both supported locales",
+    (reason) => {
+      for (const messages of [en, zh]) {
+        expect(messages.review.recovery.reasons).toHaveProperty(reason, expect.any(String))
+        expect(
+          (messages.review.recovery.reasons as Record<string, string>)[reason].trim()
+        ).not.toBe("")
+      }
+    }
+  )
+
   it("renders nothing for an interrupt that is not a Squad review", () => {
     expect(isRenderableSquadReview({ reviewKind: undefined })).toBe(false)
     const { container } = render(

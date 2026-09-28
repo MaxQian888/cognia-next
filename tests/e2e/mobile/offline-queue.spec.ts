@@ -10,7 +10,7 @@
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
 import { injectCapacitor } from "../helpers/inject-capacitor"
-import { resetCogniaDb, waitForTestGlobals } from "../helpers/db-reset"
+import { bootstrapCogniaMobile, waitForTestGlobals } from "../helpers/db-reset"
 
 test.describe("mobile — offline banner + outbound queue", () => {
   test.beforeEach(async ({ page }) => {
@@ -19,13 +19,14 @@ test.describe("mobile — offline banner + outbound queue", () => {
       network: { connected: true, connectionType: "wifi" },
     })
     await page.goto("/")
-    await resetCogniaDb(page)
+    await bootstrapCogniaMobile(page, "standalone", {
+      onboardingProgress: { version: 2, path: "completed", completedAt: "2026-09-07T00:00:00.000Z" },
+    })
+    await expect(page.getByTestId("mobile-quick-action-newChat")).toBeVisible()
+    await waitForTestGlobals(page)
   })
 
   test("banner appears offline, hides when back online with no pending rows", async ({ page }) => {
-    await page.goto("/")
-    await waitForTestGlobals(page)
-
     // Banner hidden when online + no pending.
     await expect(page.getByTestId("offline-banner")).toHaveCount(0)
 
@@ -55,38 +56,21 @@ test.describe("mobile — offline banner + outbound queue", () => {
   test("@critical pending outbound work drives the queued state while online", async ({
     page,
   }) => {
-    await page.goto("/")
-    await waitForTestGlobals(page)
-
-    // Insert a pending row into mobileOutboundQueue via Dexie.
-    await page.evaluate(async () => {
-      const { getDb } = await import("@/lib/db/schema")
-      await getDb().mobileOutboundQueue.put({
-        id: "q_test_pending_1",
-        accountId: "acct_e2e",
-        targetId: "mobile-companion",
-        // Must be a live MOBILE_OUTBOUND_COMMANDS member — "rpc_generic" was
-        // trimmed from the command surface in the 2026-05-17 audit.
-        command: "app_settings_update",
-        payload: {},
-        idempotencyKey: "test-idem",
-        status: "pending",
-        attempts: 0,
-        createdAt: Date.now(),
-        nextAttemptAt: Date.now(),
-      })
+    const id = await page.evaluate(async () => {
+      if (!window.__cogniaEnqueueOutbound) throw new Error("Outbound fixture bridge unavailable")
+      return window.__cogniaEnqueueOutbound({ command: "app_settings_update", payload: {} })
     })
 
-    // The banner polls every 15s; force a tick by triggering a network
-    // listener which is the other update path. Easier: wait for poll.
     await expect(page.getByTestId("offline-banner")).toBeVisible({ timeout: 20_000 })
     await expect(page.getByTestId("offline-banner")).toHaveAttribute("data-offline", "false")
 
-    // Clear the queue and assert the banner hides.
-    await page.evaluate(async () => {
-      const { getDb } = await import("@/lib/db/schema")
-      await getDb().mobileOutboundQueue.clear()
-    })
+    // Withdraw through the product surface so the same scoped repository
+    // transaction and live query update the banner as for a real user.
+    await page.getByTestId("offline-banner-review").click()
+    const queueRow = page.getByTestId(`outbound-queue-row-${id}`)
+    await expect(queueRow).toHaveAttribute("data-status", "pending")
+    await queueRow.getByRole("button", { name: "Withdraw", exact: true }).click()
+    await expect(queueRow).toHaveCount(0)
     await expect(page.getByTestId("offline-banner")).toHaveCount(0, { timeout: 20_000 })
   })
 })

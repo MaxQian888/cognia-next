@@ -42,9 +42,11 @@ async function bundle(manifestBytes) {
           {
             name: "generated-manifest",
             setup(pluginBuild) {
+              // Non-file namespaces preserve their path verbatim in esbuild's
+              // output comments. Keep this virtual ID independent of checkout.
               pluginBuild.onResolve({ filter: /^\.\.\/plugin\.json$/ }, (args) =>
                 resolve(args.resolveDir, args.path) === manifestPath
-                  ? { path: manifestPath, namespace: "generated-manifest" }
+                  ? { path: "plugin.json", namespace: "generated-manifest" }
                   : undefined
               )
               pluginBuild.onLoad({ filter: /.*/, namespace: "generated-manifest" }, () => ({

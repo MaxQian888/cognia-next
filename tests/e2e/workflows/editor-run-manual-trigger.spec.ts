@@ -1,14 +1,13 @@
 /**
  * E2E: clicking Run executes the workflow + a workflowRuns row appears.
  *
- * The seeded workflow uses `ai.prompt` which calls an AI provider. We
- * monkey-patch the runtime's invokeAI hook via a window helper so the
- * test doesn't require real API keys; the run path through orchestrator +
- * run-status-bridge is exercised end-to-end either way.
+ * A manual trigger writes a variable with flow.set. The real orchestrator
+ * and run-status bridge execute without a provider or mocked run outcome.
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
+import { readLatestRun } from "../helpers/workflow-spec-helpers"
 
 test.describe("workflow editor — manual trigger run", () => {
   test.beforeEach(async ({ page }) => {
@@ -19,9 +18,9 @@ test.describe("workflow editor — manual trigger run", () => {
   test("@critical Run drives the orchestrator and persists a run row", async ({ page }) => {
     // Seed a minimal workflow that doesn't require network calls: a single
     // flow.set + manual trigger. ai.prompt would require credentials.
-    await page.evaluate(async () => {
-      const { createWorkflow } = await import("@/lib/db/workflows")
-      const wf = await createWorkflow({
+    const id = await page.evaluate(async () => {
+      if (!window.__cogniaSeedRawWorkflow) throw new Error("Workflow seed bridge unavailable")
+      return window.__cogniaSeedRawWorkflow({
         name: "E2E manual run",
         nodes: [
           {
@@ -36,43 +35,21 @@ test.describe("workflow editor — manual trigger run", () => {
             type: "flow.set",
             typeVersion: 1,
             position: { x: 320, y: 80 },
-            data: { label: "Set value", params: { key: "result", value: "ok" } },
+            data: { label: "Set value", params: { variable: "result", value: "ok" } },
           },
         ],
         edges: [{ id: "e1", source: "n_trigger", target: "n_set" }],
       })
-      ;(window as { __seededId?: string }).__seededId = wf.id
     })
-    const id = await page.evaluate(() => (window as { __seededId?: string }).__seededId)!
     await page.goto(`/workflows/editor?id=${id}`)
     await expect(page.getByTestId("workflow-canvas")).toBeVisible()
     await expect(page.getByTestId("wf-node-flow.set").first()).toBeVisible()
 
-    // Click Run; wait for the run row to land.
     await page.getByTestId("workflow-run").click()
     await expect
-      .poll(
-        async () =>
-          page.evaluate(async (workflowId: string) => {
-            const { getDb } = await import("@/lib/db/schema")
-            return getDb().workflowRuns.where("workflowId").equals(workflowId).count()
-          }, id!),
-        { timeout: 15_000 }
-      )
-      .toBeGreaterThanOrEqual(1)
-
-    // The most recent run should be terminal (succeeded or failed) — not
-    // stuck in "running". We don't pin a specific outcome because flow.set
-    // returns a defaulted record; we just confirm the orchestrator finished.
-    const status = await page.evaluate(async (workflowId: string) => {
-      const { getDb } = await import("@/lib/db/schema")
-      const rows = await getDb()
-        .workflowRuns.where("workflowId")
-        .equals(workflowId)
-        .reverse()
-        .sortBy("startedAt")
-      return rows[0]?.status
-    }, id!)
-    expect(["succeeded", "failed"]).toContain(status)
+      .poll(async () => (await readLatestRun(page, id))?.status, { timeout: 15_000 })
+      .toBe("succeeded")
+    const run = await readLatestRun(page, id)
+    expect(run?.events.some((event) => event.stepId === "n_set")).toBe(true)
   })
 })

@@ -7,7 +7,7 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
+import { resetCogniaDb, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 const SERVER_ONLY_BODY =
   "This section administers something only a Cognia server deployment runs. Pair a server that provides it, then open this section again."
@@ -15,7 +15,7 @@ const SERVER_ONLY_BODY =
 test.describe("settings — runtime environment image catalog", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
     await page.goto("about:blank")
     await page.goto("/", { waitUntil: "domcontentloaded" })
     await waitForTestGlobals(page, 30_000)

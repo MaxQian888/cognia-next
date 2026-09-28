@@ -7,7 +7,7 @@
  */
 
 import { expect, test, type Page, type WebSocketRoute } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
+import { resetCogniaDb, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 type Provider = "openai" | "google"
 
@@ -17,8 +17,8 @@ interface OpenAIMock {
   setAcceptReconnect(value: boolean): void
 }
 
-async function installBrowserAudio(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+async function installBrowserAudio(page: Page, manualFrames: boolean): Promise<void> {
+  await page.addInitScript((manualFrames) => {
     const node = () => ({ connect() {}, disconnect() {} })
     const tracks = [{ enabled: true, stop() {} }]
     const stream = {
@@ -81,7 +81,10 @@ async function installBrowserAudio(page: Page): Promise<void> {
           ...node(),
           buffer: null,
           onended: null as (() => void) | null,
-          start() {},
+          start() {
+            const state = window as unknown as { __cogniaVoiceTestPlaybackStarts?: number }
+            state.__cogniaVoiceTestPlaybackStarts = (state.__cogniaVoiceTestPlaybackStarts ?? 0) + 1
+          },
           stop() {},
         }
       }
@@ -116,15 +119,13 @@ async function installBrowserAudio(page: Page): Promise<void> {
           },
           set onmessage(next) {
             handler = next
-            if (next) {
-              setTimeout(
-                () =>
-                  next({
-                    data: { type: "frame", samples: new Float32Array(480), rms: 0.05 },
-                  }),
-                50
-              )
+            const emitFrame = () => {
+              if (!handler) return false
+              handler({ data: { type: "frame", samples: new Float32Array(480), rms: 0.05 } })
+              return true
             }
+            Object.assign(window, { __cogniaVoiceTestEmitFrame: emitFrame })
+            if (next && !manualFrames) setTimeout(emitFrame, 50)
           },
           postMessage() {},
         }
@@ -140,7 +141,7 @@ async function installBrowserAudio(page: Page): Promise<void> {
     })
     URL.createObjectURL = () => "blob:cognia-e2e-audio-worklet"
     URL.revokeObjectURL = () => undefined
-  })
+  }, manualFrames)
 }
 
 function liveVoiceSettings(providers: Provider[]) {
@@ -162,10 +163,14 @@ function liveVoiceSettings(providers: Provider[]) {
   }
 }
 
-async function configureLiveVoice(page: Page, providers: Provider[]): Promise<void> {
-  await installBrowserAudio(page)
+async function configureLiveVoice(
+  page: Page,
+  providers: Provider[],
+  manualFrames = false
+): Promise<void> {
+  await installBrowserAudio(page, manualFrames)
   await page.goto("/", { waitUntil: "domcontentloaded" })
-  await ensureCogniaAccount(page)
+  await resetCogniaDb(page)
   await page.goto("about:blank")
   await page.goto("/", { waitUntil: "domcontentloaded" })
   await waitForTestGlobals(page, 30_000)
@@ -173,7 +178,7 @@ async function configureLiveVoice(page: Page, providers: Provider[]): Promise<vo
 
   // Save through the real web keyring UI. Use the in-app route so the unlocked
   // account and the lazily loaded provider-key mirror stay in memory.
-  const openSettings = page.getByTestId("guild-open-settings")
+  const openSettings = page.getByRole("button", { name: "Settings", exact: true })
   await expect(openSettings).toBeVisible({ timeout: 30_000 })
   await openSettings.click()
   await expect(page).toHaveURL(/\/settings/)
@@ -195,9 +200,6 @@ async function configureLiveVoice(page: Page, providers: Provider[]): Promise<vo
 
 async function openNewChat(page: Page): Promise<void> {
   await page.getByRole("button", { name: "New chat" }).first().click()
-  const picker = page.getByRole("dialog", { name: /pick a character/i })
-  await expect(picker).toBeVisible({ timeout: 10_000 })
-  await picker.getByRole("option").first().click()
   await expect(page.getByRole("button", { name: "Start live voice" })).toBeVisible({
     timeout: 30_000,
   })
@@ -318,9 +320,13 @@ test.describe("web — live voice closed loop", () => {
         response: { id: "response-1", status: "completed" },
       })
     )
-    await expect(page.getByText("first realtime turn", { exact: true })).toBeVisible()
+    await expect(
+      page
+        .getByRole("dialog", { name: "Live voice" })
+        .getByText("first realtime turn", { exact: true })
+    ).toBeVisible()
     await expect(page.getByText("first realtime answer", { exact: true })).toBeVisible()
-    const composer = page.getByRole("textbox", { name: /message/i }).first()
+    const composer = page.getByRole("textbox", { name: /message/i, includeHidden: true }).first()
     await expect(composer).toHaveValue("first realtime turn")
 
     first.send(
@@ -328,8 +334,13 @@ test.describe("web — live voice closed loop", () => {
         type: "response.output_audio.delta",
         response_id: "response-2",
         item_id: "assistant-2",
-        delta: "AAAAAA==",
+        delta: Buffer.alloc(4_800).toString("base64"),
       })
+    )
+    await page.waitForFunction(
+      () =>
+        ((window as unknown as { __cogniaVoiceTestPlaybackStarts?: number })
+          .__cogniaVoiceTestPlaybackStarts ?? 0) > 0
     )
     first.send(JSON.stringify({ type: "input_audio_buffer.speech_started", item_id: "user-2" }))
     await expect
@@ -353,9 +364,17 @@ test.describe("web — live voice closed loop", () => {
         transcript: "first realtime turn",
       })
     )
-    await expect(page.getByText("first realtime turn", { exact: true })).toBeVisible()
+    await expect(
+      page
+        .getByRole("dialog", { name: "Live voice" })
+        .getByText("first realtime turn", { exact: true })
+    ).toBeVisible()
     await expect(composer).toHaveValue("first realtime turn")
-    await expect(page.getByText("first realtime turn", { exact: true })).toHaveCount(1)
+    await expect(
+      page
+        .getByRole("dialog", { name: "Live voice" })
+        .getByText("first realtime turn", { exact: true })
+    ).toHaveCount(1)
     expect(provider.sockets).toHaveLength(2)
   })
 
@@ -365,12 +384,19 @@ test.describe("web — live voice closed loop", () => {
     await mockOpenAIToken(page)
     const openai = await mockOpenAISocket(page, { closeBeforeFirstFrame: true })
     const google = await mockGoogle(page)
-    await configureLiveVoice(page, ["openai", "google"])
+    await configureLiveVoice(page, ["openai", "google"], true)
     await openNewChat(page)
 
     await page.getByRole("button", { name: "Start live voice" }).click()
-    await expect(page.getByText("Listening…", { exact: true })).toBeVisible({ timeout: 10_000 })
     await expect.poll(() => google.sockets.length).toBe(1)
+    // The first provider must fail before ANY microphone frame. Release one
+    // only after the fallback capture graph is ready, independent of CPU load.
+    await page.waitForFunction(() => {
+      const emit = (window as unknown as { __cogniaVoiceTestEmitFrame?: () => boolean })
+        .__cogniaVoiceTestEmitFrame
+      return emit?.() === true
+    })
+    await expect(page.getByText("Listening…", { exact: true })).toBeVisible({ timeout: 10_000 })
     expect(openai.sockets).toHaveLength(1)
   })
 

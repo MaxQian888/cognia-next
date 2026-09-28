@@ -282,6 +282,11 @@ A tar artifact preserves executable permissions. Only matching shards restore
 those helpers and install Bubblewrap. Their Ubuntu runner installs an exact
 `/usr/bin/bwrap` AppArmor user-namespace allowance and checks a real user/network
 namespace before the tests; it does not disable the host-wide restriction.
+The Linux Rust workspace lane uses the same scoped allowance and installs FFmpeg
+and the standalone sidecar dependencies with its own lockfile-backed pnpm cache.
+It does not install or build the frontend workspace. Windows Rust tests reuse
+the production export and disable packaging-only resources and sidecar binaries
+through a test-step configuration override; release bundle configuration stays intact.
 Ripgrep is provisioned for source-contract tests. PR planning checks out two
 commits and fetches only the exact base SHA; other jobs use shallow checkout unless
 a gate needs history.
@@ -311,7 +316,9 @@ path globs alone would not exclude a file inside an archived parent directory.
 The web and server-brain Docker builds fetch pnpm dependencies in an ordinary
 layer keyed by lockfiles, workspace configuration, and patches, then perform a
 frozen offline install after copying package manifests and sources. Source-only
-changes can reuse that fetch layer. The pnpm 11 fixture verified installation
+changes can reuse that fetch layer. Corepack's global fallback is explicitly
+pinned to the repository pnpm version, since this layer has no `package.json`
+from which to resolve a package manager. The pnpm 11 fixture verified installation
 with an unreachable registry and rejection of a stale manifest. Docker Next
 compiler caches remain inside the build layer: source changes still produce a
 cold compiler build. No compiler cache mount is added, since GHA layer-cache

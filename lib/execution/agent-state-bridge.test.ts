@@ -1,5 +1,8 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
+import * as schema from "@/lib/db/schema"
+import { waitFor } from "@testing-library/react"
 
 import type { ChatSession } from "@cognia/agent-config-types"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
@@ -8,6 +11,8 @@ import type { Goal } from "@/types/goal"
 import type { AgentPlan } from "@/types/agent/plan"
 import {
   agentStateExecutionRunId,
+  startAgentStateExecutionBridge,
+  __resetAgentStateExecutionBridgeForTesting,
   syncGoalExecutionRun,
   syncPlanExecutionRun,
 } from "./agent-state-bridge"
@@ -113,9 +118,114 @@ function plan(overrides: Partial<AgentPlan> = {}): AgentPlan {
 }
 
 describe("agent state execution bridge", () => {
+  afterEach(() => __resetAgentStateExecutionBridgeForTesting())
+
   beforeEach(async () => {
+    __resetAgentStateExecutionBridgeForTesting()
     await getDb().delete()
     __resetDbForTesting()
+  })
+
+  it("keeps local Goal projection alive until the final owner releases it", async () => {
+    const localSession = { ...session("portable-session"), platformBinding: undefined }
+    await getDb().sessions.put(localSession)
+    const first = startAgentStateExecutionBridge()
+    const second = startAgentStateExecutionBridge()
+    first()
+    first()
+    await getDb().chatGoals.put(goal({ id: "portable-goal", sessionId: localSession.id }))
+    const runId = agentStateExecutionRunId("goal", "portable-goal")
+    await waitFor(async () =>
+      expect((await getDb().executionRuns.get(runId))?.latestSnapshot?.status).toBe("running")
+    )
+    await getDb().chatGoals.update("portable-goal", {
+      status: "paused",
+      generationId: "paused-generation",
+      updatedAt: 30,
+    })
+    await waitFor(async () =>
+      expect((await getDb().executionRuns.get(runId))?.latestSnapshot?.status).toBe("paused")
+    )
+    second()
+    expect(await getDb().executionRunBindings.count()).toBe(0)
+  })
+
+  it("an old database owner's release cannot stop the new database subscription", () => {
+    const stops: jest.Mock[] = []
+    const liveQuery = jest.spyOn(Dexie, "liveQuery").mockImplementation(
+      () =>
+        ({
+          subscribe: () => {
+            const unsubscribe = jest.fn()
+            stops.push(unsubscribe)
+            return { unsubscribe, closed: false }
+          },
+        }) as never
+    )
+    try {
+      const old = startAgentStateExecutionBridge()
+      schema.activateAccountDatabase("acct_bridge_release_test", "another-target")
+      const current = startAgentStateExecutionBridge()
+      schema.clearAccountDatabaseSelection()
+      expect(stops[0]).toHaveBeenCalledTimes(1)
+      old()
+      expect(stops[1]).not.toHaveBeenCalled()
+      current()
+      expect(stops[1]).toHaveBeenCalledTimes(1)
+    } finally {
+      liveQuery.mockRestore()
+    }
+  })
+
+  it("keeps the same subscription across a schema connection replacement", async () => {
+    let query!: () => Promise<unknown>
+    const unsubscribe = jest.fn()
+    const liveQuery = jest.spyOn(Dexie, "liveQuery").mockImplementation((callback) => {
+      query = callback as () => Promise<unknown>
+      return { subscribe: () => ({ unsubscribe, closed: false }) } as never
+    })
+    try {
+      const first = startAgentStateExecutionBridge()
+      __resetDbForTesting()
+      const second = startAgentStateExecutionBridge()
+      expect(liveQuery).toHaveBeenCalledTimes(1)
+      expect(unsubscribe).not.toHaveBeenCalled()
+      const localSession = { ...session(), platformBinding: undefined }
+      await getDb().sessions.put(localSession)
+      await getDb().chatGoals.put(goal())
+      await expect(query()).resolves.toMatchObject({ goals: [{ goal: { id: "goal-1" } }] })
+      first()
+      expect(unsubscribe).not.toHaveBeenCalled()
+      second()
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
+    } finally {
+      liveQuery.mockRestore()
+    }
+  })
+
+  it("rejects a queued projection when its captured account scope is no longer active", async () => {
+    await expect(syncGoalExecutionRun(goal(), session(), () => false)).rejects.toThrow(
+      "database changed"
+    )
+    expect(await getDb().executionRuns.count()).toBe(0)
+  })
+
+  it("does not create a run if the account changes while reading the existing projection", async () => {
+    let release!: () => void
+    const pending = new Promise<undefined>((resolve) => {
+      release = () => resolve(undefined)
+    })
+    const read = jest.spyOn(getDb().executionRuns, "get").mockReturnValueOnce(pending as never)
+    let current = true
+    const projection = syncGoalExecutionRun(goal(), session(), () => current)
+    current = false
+    release()
+    try {
+      await expect(projection).rejects.toThrow("database changed")
+      expect(await getDb().executionRuns.count()).toBe(0)
+    } finally {
+      read.mockRestore()
+    }
   })
 
   it("projects a live Goal into the shared durable run and binding without objective text", async () => {

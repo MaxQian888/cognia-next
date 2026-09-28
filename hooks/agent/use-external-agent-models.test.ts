@@ -216,11 +216,26 @@ describe("useExternalAgentModels", () => {
       settle({ status: "ready", surface: SURFACE })
     })
     cachedAgentModelSurface.mockReturnValue({ status: "ready", surface: SURFACE })
+    let resolveReplacementSession: (id: string) => void = () => {}
+    resolveConversationSessionId.mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        resolveReplacementSession = resolve
+      })
+    )
     runtimeRef = { kind: "external", agentId: "pi-1" } as AgentRuntimeRef
     rerender()
 
-    await waitFor(() => expect(result.current.surface).toEqual(SURFACE))
-    expect(result.current.loading).toBe(false)
+    // The shared cache can render before this effect's session lookup settles.
+    // A cached surface alone therefore does not establish loading completion.
+    expect(result.current.surface).toEqual(SURFACE)
+    expect(result.current.loading).toBe(true)
+    await waitFor(() => expect(resolveConversationSessionId).toHaveBeenCalledTimes(2))
+    await act(async () => resolveReplacementSession("sess-1"))
+    await waitFor(() => {
+      expect(result.current.surface).toEqual(SURFACE)
+      expect(result.current.loading).toBe(false)
+    })
+    expect(loadAgentModelSurface).toHaveBeenCalledTimes(1)
   })
 
   // The host lane answered IDLE, so the picker offered no models and no

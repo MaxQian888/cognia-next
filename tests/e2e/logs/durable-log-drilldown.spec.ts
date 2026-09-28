@@ -33,10 +33,14 @@ interface PersistedLog {
 }
 
 async function seedPersistedLogs(page: Page): Promise<void> {
-  await page.waitForFunction(async () => {
-    const databases = await indexedDB.databases()
-    return databases.some((database) => database.name === "cognia-logs")
-  })
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const databases = await indexedDB.databases()
+        return databases.some((database) => database.name === "cognia-logs")
+      })
+    )
+    .toBe(true)
 
   const now = Date.now()
   const logs: PersistedLog[] = [
@@ -137,7 +141,7 @@ test.describe("logs — durable investigation", () => {
 
     await page.goto("/logs", { waitUntil: "domcontentloaded" })
     await expect(page.getByTestId("logs-page-header")).toBeVisible()
-    await expect(page.getByTestId("logs-page-header")).toHaveAttribute("data-variant", "management")
+    await expect(page.getByTestId("logs-page-header")).toHaveAttribute("data-variant", "compact")
 
     const search = page.getByRole("combobox", { name: "Search logs..." })
     await search.fill(SEARCH_TERM)
@@ -145,7 +149,7 @@ test.describe("logs — durable investigation", () => {
 
     const matchingRows = page.getByTestId("log-entry-row")
     await expect(matchingRows).toHaveCount(2)
-    await expect(page.getByTestId("logs-page-header-live-pill")).toContainText("2 /")
+    await expect(page.getByTestId("log-panel-stats-bar")).toContainText("1–2 of 2")
     await expect(matchingRows.filter({ hasText: "Background cache refresh" })).toHaveCount(0)
 
     await page.reload({ waitUntil: "domcontentloaded" })

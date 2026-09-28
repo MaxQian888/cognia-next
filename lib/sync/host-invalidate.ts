@@ -83,8 +83,10 @@ export function publishSyncInvalidate(table: SyncableTable, conversationKey?: st
     }
     return
   }
+  // Native browser timers reject the dependency object as their receiver.
+  const schedule = deps.setTimeoutFn
   const entry: PendingInvalidate = {
-    timer: deps.setTimeoutFn(() => flush(table), INVALIDATE_COALESCE_MS),
+    timer: schedule(() => flush(table), INVALIDATE_COALESCE_MS),
     conversationKey: conversationKey ?? null,
   }
   pending.set(table, entry)

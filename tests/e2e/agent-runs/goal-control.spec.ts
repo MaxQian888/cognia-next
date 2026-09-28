@@ -14,14 +14,14 @@
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
 
-import { ensureCogniaAccount } from "../helpers/db-reset"
+import { resetCogniaDb } from "../helpers/db-reset"
 
 const OBJECTIVE = "Audit the release evidence from the unified runs console"
 
 test.describe("agent runs — goal fan-in and control", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await resetCogniaDb(page)
     await page.goto("about:blank")
     await page.goto("/goals", { waitUntil: "domcontentloaded" })
     await expect(page.getByTestId("goal-console")).toBeVisible()
@@ -42,7 +42,13 @@ test.describe("agent runs — goal fan-in and control", () => {
 
     // Kind is a select now — ten kinds is too many for a tab strip, and the
     // prominent chips belong to the status filter.
-    await expect(page.getByLabel("Filter by kind")).toHaveValue("goal")
+    const kindFilter = page.getByRole("combobox", { name: "Filter by kind" })
+    await kindFilter.click()
+    await expect(page.getByRole("option", { name: /^Goal(?: \(|$)/ })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    await page.keyboard.press("Escape")
     const runRow = page.getByRole("list", { name: "Agent Runs" }).getByRole("button", {
       name: new RegExp(OBJECTIVE),
     })

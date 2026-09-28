@@ -80,6 +80,8 @@ test.describe("search — standalone cited answer", () => {
         },
       },
       searchMaxResults: 2,
+      defaultSearchProvider: "exa",
+      defaultSearchSources: ["exa"],
       searchProviders: {
         exa: {
           providerId: "exa",

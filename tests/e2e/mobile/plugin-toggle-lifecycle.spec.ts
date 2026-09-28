@@ -9,12 +9,27 @@
 
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
-import { bootstrapCogniaMobile, readDexieRow, readDexieRows } from "../helpers/db-reset"
-import { injectCapacitor } from "../helpers/inject-capacitor"
 import {
-  companionConfigSecureStorage,
-  provisionMockCompanionConfig,
-} from "./companion-fixture"
+  bootstrapCogniaMobile,
+  readDexieRow,
+  setCogniaSettings,
+  waitForTestGlobals,
+} from "../helpers/db-reset"
+import { injectCapacitor } from "../helpers/inject-capacitor"
+import { createOwnerPairPayload } from "./companion-fixture"
+
+import { createMockCompanionServer, type MockCompanionServer } from "./mock-v2-server"
+
+// The fixture owns RPC responses; service-worker caching must not intercept them.
+test.use({ serviceWorkers: "block" })
+let server: MockCompanionServer
+test.beforeAll(async () => {
+  server = createMockCompanionServer()
+  await server.start(0)
+})
+test.afterAll(async () => {
+  await server.stop()
+})
 
 const PLUGIN_ID = "plugin-e2e-release-tools"
 
@@ -23,30 +38,14 @@ interface CapturedRpc {
   body: Record<string, unknown>
 }
 
-interface PluginRow {
+interface StoredPluginRow {
   id: string
-  name: string
   enabled: boolean
-  updatedAt: number
-}
-
-interface QueueRow {
-  id: string
-  command: string
-  payload: Record<string, unknown>
-  status: string
-  lastError?: string
-}
-
-function mockV2BaseUrl(): string {
-  const baseUrl = process.env.E2E_V2_BASE_URL
-  if (!baseUrl) throw new Error("E2E_V2_BASE_URL is required for Plugin Toggle E2E")
-  return baseUrl
 }
 
 async function installPluginDesktop(page: Page): Promise<{ calls: CapturedRpc[] }> {
   const calls: CapturedRpc[] = []
-  const baseUrl = mockV2BaseUrl()
+  const baseUrl = server.baseUrl
   const now = Date.now()
   const plugin = {
     id: PLUGIN_ID,
@@ -65,28 +64,65 @@ async function installPluginDesktop(page: Page): Promise<{ calls: CapturedRpc[] 
 
   await page.route(`${baseUrl}/api/_rpc/**`, async (route) => {
     const request = route.request()
+    if (request.method() !== "POST") {
+      await route.continue()
+      return
+    }
     const command = new URL(request.url()).pathname.split("/").pop() ?? ""
     const body = (request.postDataJSON() ?? {}) as Record<string, unknown>
     calls.push({ command, body })
 
+    if (command === "host_feature_manifest") {
+      const response = await route.fetch()
+      expect(response.ok()).toBe(true)
+      const body = await response.json()
+      body.result.transportCapabilities = { eventStreamReady: 1 }
+      await route.fulfill({ response, json: body })
+      return
+    }
     if (command === "sync_pull") {
       await route.fulfill({
         contentType: "application/json",
+        headers: { "access-control-allow-origin": request.headers().origin ?? "*" },
         body: JSON.stringify({
-          rows: body.table === "plugins" && body.since === 0 ? [plugin] : [],
-          deleted_ids: [],
-          next_since: body.table === "plugins" ? now + 1 : 1,
+          requestId: "e2e-plugin-sync",
+          result: {
+            rows: body.table === "plugins" && Number(body.since) < plugin.updatedAt ? [plugin] : [],
+            deleted_ids: [],
+            next_since: body.table === "plugins" ? plugin.updatedAt + 1 : 1,
+          },
         }),
       })
       return
     }
     if (command === "plugin_set_enabled") {
-      await route.fulfill({ contentType: "application/json", body: "true" })
+      const response = await route.fetch()
+      expect(response.ok()).toBe(true)
+      expect(body.id).toBe(PLUGIN_ID)
+      expect(typeof body.enabled).toBe("boolean")
+      plugin.enabled = body.enabled as boolean
+      plugin.status = plugin.enabled ? "enabled" : "disabled"
+      plugin.updatedAt = Math.max(Date.now(), plugin.updatedAt + 2)
+      await route.fulfill({ response, json: { requestId: "e2e-plugin-toggle", result: true } })
       return
     }
-    await route.fulfill({ status: 404, contentType: "text/plain", body: "unknown command" })
+    await route.continue()
   })
 
+  await page.routeWebSocket(/\/ws\/events(?:\?|$)/, async (socket) => {
+    const ticket = new URL(socket.url()).searchParams.get("ticket")
+    const redeemed = await page.request.post(`${baseUrl}/__control/redeem-ticket`, {
+      data: { ticket, path: "/ws/events", audience: "events" },
+    })
+    expect(redeemed.ok()).toBe(true)
+    socket.onMessage((raw) => {
+      const frame = JSON.parse(String(raw)) as { type?: string; channels?: string[] }
+      if (frame.type === "subscribe") {
+        socket.send(JSON.stringify({ type: "subscribed", channels: frame.channels ?? [] }))
+        socket.send(JSON.stringify({ type: "stream_ready", cursor: 0 }))
+      }
+    })
+  })
   return { calls }
 }
 
@@ -95,35 +131,66 @@ test.describe("mobile — plugin toggle lifecycle", () => {
     page,
   }) => {
     const desktop = await installPluginDesktop(page)
-    const companionConfig = await provisionMockCompanionConfig(
-      mockV2BaseUrl(),
-      "device-e2e-plugin-toggle"
-    )
     await injectCapacitor(page, {
       platform: "android",
+      persistSecureStorage: true,
       network: { connected: true, connectionType: "wifi" },
-      secureStorage: companionConfigSecureStorage(companionConfig),
     })
     await page.goto("/onboarding")
-    await bootstrapCogniaMobile(page, "paired")
+    await bootstrapCogniaMobile(page, "paired", {
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
 
+    await waitForTestGlobals(page)
+    await expect
+      .poll(
+        async () => (await page.evaluate(() => window.__cogniaE2ECompanion!.runtime()))?.accountId
+      )
+      .toBe("acct_e2e_seed_account")
+    await page.getByTestId("pair-discover-skip").click()
+    await page.getByTestId("pair-payload").fill(createOwnerPairPayload(server.baseUrl))
+    await page.getByTestId("pair-submit").click()
+    await expect(page.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "paired")
+    await setCogniaSettings(page, {
+      mobileRuntimeMode: "paired",
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
     await page.goto("/me/plugins", { waitUntil: "domcontentloaded" })
     await expect(page.getByTestId("mobile-plugins-page")).toBeVisible()
-    await expect(page.getByTestId(`plugin-row-${PLUGIN_ID}`)).toContainText("Release Tools")
-    await expect(page.getByTestId(`plugin-row-${PLUGIN_ID}`)).toContainText("v2.4.0")
+    const pluginRow = page.getByTestId(`plugin-library-row-${PLUGIN_ID}`)
+    await expect(pluginRow).toHaveText("Release Tools")
+    await pluginRow.click()
+    await expect(page.getByTestId("plugin-detail-header")).toContainText("v2.4.0")
 
-    const pluginSwitch = page.getByTestId(`plugin-switch-${PLUGIN_ID}`)
+    const currentRuntime = await page.evaluate(() => window.__cogniaE2ECompanion!.runtime())
+    expect(currentRuntime).toMatchObject({
+      accountId: "acct_e2e_seed_account",
+      baseUrl: server.baseUrl,
+    })
+    const readStoredPlugin = () =>
+      readDexieRow<StoredPluginRow>(page, {
+        db: currentRuntime!.databaseName,
+        table: "plugins",
+        key: PLUGIN_ID,
+      })
+    const pluginSwitch = page.getByTestId("plugin-detail-enable-toggle")
     await expect(pluginSwitch).toHaveAttribute("data-state", "checked")
     await pluginSwitch.click()
     await expect(pluginSwitch).toHaveAttribute("data-state", "unchecked")
 
-    await expect
-      .poll(async () => (await readDexieRow<PluginRow>(page, { table: "plugins", key: PLUGIN_ID }))?.enabled)
-      .toBe(false)
+    await expect.poll(async () => (await readStoredPlugin())?.enabled).toBe(false)
 
     await expect
       .poll(async () => {
-        const rows = await readDexieRows<QueueRow>(page, { table: "mobileOutboundQueue" })
+        const rows = await page.evaluate(() => window.__cogniaReadMobileOutbound!())
         return rows.find((row) => row.command === "plugin_set_enabled")
       })
       .toMatchObject({
@@ -134,7 +201,7 @@ test.describe("mobile — plugin toggle lifecycle", () => {
     await expect
       .poll(
         async () => {
-          const rows = await readDexieRows<QueueRow>(page, { table: "mobileOutboundQueue" })
+          const rows = await page.evaluate(() => window.__cogniaReadMobileOutbound!())
           const row = rows.find((candidate) => candidate.command === "plugin_set_enabled")
           return row ? `${row.status}${row.lastError ? `:${row.lastError}` : ""}` : "missing"
         },
@@ -153,9 +220,7 @@ test.describe("mobile — plugin toggle lifecycle", () => {
       })
 
     await page.reload({ waitUntil: "domcontentloaded" })
-    await expect(page.getByTestId(`plugin-switch-${PLUGIN_ID}`)).toHaveAttribute(
-      "data-state",
-      "unchecked"
-    )
+    await pluginRow.click()
+    await expect(pluginSwitch).toHaveAttribute("data-state", "unchecked")
   })
 })

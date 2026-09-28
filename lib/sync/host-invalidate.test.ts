@@ -57,6 +57,30 @@ describe("publishSyncInvalidate", () => {
     ])
   })
 
+  it("calls receiver-sensitive browser timers without binding them to the dependency object", () => {
+    restore()
+    const browserTimer = function (this: unknown, callback: () => void, delay: number) {
+      if (this !== undefined && this !== window) throw new TypeError("Illegal invocation")
+      return setTimeout(callback, delay)
+    }
+    restore = __setHostInvalidateDepsForTests({
+      setTimeoutFn: browserTimer as typeof setTimeout,
+      publish: (topic, payload) => {
+        published.push({ topic, payload })
+      },
+      isRemoteHostActiveFn: () => false,
+    })
+
+    expect(() => publishSyncInvalidate("outboundQueue", "telegram:tg:1")).not.toThrow()
+    jest.advanceTimersByTime(INVALIDATE_COALESCE_MS)
+    expect(published).toEqual([
+      {
+        topic: SYNC_INVALIDATE_TOPIC,
+        payload: { table: "outboundQueue", conversationKey: "telegram:tg:1" },
+      },
+    ])
+  })
+
   it("coalesces a burst on one conversation into a single keyed frame", () => {
     // An ai-run reply touches the outbound row three times; a client only
     // needs to be told once.

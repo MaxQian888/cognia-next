@@ -524,7 +524,9 @@ mod tests {
         // the deny's lowercase `cognia` — rebuild it the way the renderer does.
         let canon_store = std::fs::canonicalize(&store).unwrap_or_else(|_| store.clone());
         let emitted_ws = canon_store.join(ws.strip_prefix(&store).expect("ws under store"));
-        let allow = format!("(subpath \"{}\")", emitted_ws.display());
+        // Match the final carve-out rule, not the earlier writable-root
+        // clause, which has the same spelling on case-sensitive filesystems.
+        let allow = format!("(allow file-read* (subpath \"{}\"))", emitted_ws.display());
         let deny_at = profile
             .find(&deny)
             .unwrap_or_else(|| panic!("store deny missing\n{profile}"));

@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
+import { __resetSearchIndexerForTesting } from "@/lib/chat/search/indexer"
 import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 
 import {
@@ -150,6 +151,7 @@ describe("HostStateService", () => {
   }, 30_000)
 
   afterEach(async () => {
+    __resetSearchIndexerForTesting()
     await getDb().delete()
     __resetDbForTesting()
   })

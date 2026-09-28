@@ -2499,9 +2499,15 @@
         "label": "Recovery choice",
         "reason": "Why: {reason}",
         "reasons": {
+          "dispatch_initialization_failed": "the Squad could not prepare to dispatch its tasks",
+          "evidence_incomplete": "required completion evidence is missing",
+          "launch_failed": "the Squad could not start this run",
           "legacy_run_not_resumable": "this run predates the durable runtime and left no checkpoint",
           "missing_checkpoint": "no checkpoint was written",
+          "missing_execution_constraints": "the saved launch permissions are missing; this run cannot safely resume",
           "recover_needs_input": "the last checkpoint needs a decision",
+          "reentry_failed": "the Squad could not resume this run",
+          "replacement_cleanup_failed": "the previous run could not be fully stopped for replacement",
           "squad_not_ready": "the Squad is missing a binding it needs to run",
           "uncertain_side_effect": "a side effect may or may not have happened"
         }

@@ -2,7 +2,8 @@
 import "fake-indexeddb/auto"
 import { render, waitFor, cleanup } from "@testing-library/react"
 import { ExposeTestGlobals } from "./expose-test-globals"
-import { activateAccountDatabase, getDb } from "@/lib/db/schema"
+import { activateAccountDatabase, getDb, __resetDbForTesting } from "@/lib/db/schema"
+import { __resetSearchIndexerForTesting } from "@/lib/chat/search/indexer"
 import {
   __resetBrowserVaultForTesting,
   deleteBrowserVault,
@@ -21,8 +22,13 @@ const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaSeedWorkflow",
   "__cogniaReadMessages",
   "__cogniaReadSessions",
+  "__cogniaE2EOutbound",
+  "__cogniaEnqueueOutbound",
+  "__cogniaReadMobileOutbound",
   "__cogniaSeedCharacter",
   "__cogniaSeedTeam",
+  "__cogniaSeedSquad",
+  "__cogniaSeedSquadRun",
   "__cogniaSeedSkill",
   "__cogniaSeedConnectorDraft",
   "__cogniaSeedRun",
@@ -48,6 +54,11 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup()
+  __resetSearchIndexerForTesting()
+  // Every test provisions a new vault key. Retaining rows encrypted with the
+  // previous key makes the next fixture fail authentication during reads.
+  await getDb().delete()
+  __resetDbForTesting()
   __setRuntimeTargetRegistrarForTests(null)
   clearActiveRuntimeTargetContext()
   await deleteBrowserVault("acct_e2e_vault").catch(() => undefined)
@@ -69,6 +80,7 @@ describe("ExposeTestGlobals", () => {
     await Promise.resolve()
     expect(window.__cogniaResetDb).toBeUndefined()
     expect(window.__cogniaReadSessions).toBeUndefined()
+    expect(window.__cogniaE2EOutbound).toBeUndefined()
     expect(window.__cogniaSeedWorkflow).toBeUndefined()
     expect(window.__cogniaSeedCharacter).toBeUndefined()
     expect(window.__cogniaSeedTeam).toBeUndefined()
@@ -91,6 +103,8 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaSeedWorkflow).toBe("function")
     expect(typeof window.__cogniaReadMessages).toBe("function")
     expect(typeof window.__cogniaReadSessions).toBe("function")
+    expect(typeof window.__cogniaE2EOutbound?.seed).toBe("function")
+    expect(typeof window.__cogniaE2EOutbound?.read).toBe("function")
     expect(typeof window.__cogniaSeedCharacter).toBe("function")
     expect(typeof window.__cogniaSeedTeam).toBe("function")
     expect(typeof window.__cogniaSeedSkill).toBe("function")
@@ -151,6 +165,77 @@ describe("ExposeTestGlobals", () => {
     // Settings writes go through the account content cipher — this is the
     // call that used to throw when the doubled name was activated instead.
     await window.__cogniaSetSettings!({ mobileRuntimeMode: "standalone" })
+  })
+
+  it("enqueues mobile work with the active target scope and preserves failures", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    await provisionBrowserVault("acct_e2e_vault", "correct horse battery staple")
+    activateAccountDatabase("acct_e2e_vault")
+    setActiveRuntimeTargetContext("acct_e2e_vault", "standalone-local")
+    render(<ExposeTestGlobals />)
+    await waitFor(() => expect(window.__cogniaTestGlobalsReady).toBe(true))
+
+    const id = await window.__cogniaEnqueueOutbound!({
+      command: "app_settings_update",
+      payload: { theme: "dark" },
+    })
+    await expect(getDb().mobileOutboundQueue.get(id)).resolves.toMatchObject({
+      accountId: "acct_e2e_vault",
+      targetId: "standalone-local",
+      command: "app_settings_update",
+      payload: { theme: "dark" },
+      status: "pending",
+    })
+    await expect(window.__cogniaReadMobileOutbound!()).resolves.toEqual([
+      expect.objectContaining({ id, payload: { theme: "dark" }, targetId: "standalone-local" }),
+    ])
+    clearActiveRuntimeTargetContext()
+    await expect(
+      window.__cogniaEnqueueOutbound!({ command: "app_settings_update" })
+    ).rejects.toThrow("Outbound queue requires an active account and runtime target.")
+  })
+
+  it("reads outbound recovery fixtures through the active target cipher", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    await provisionBrowserVault("acct_e2e_vault", "correct horse battery staple")
+    activateAccountDatabase("acct_e2e_vault", "outbound-fixture-host")
+    render(<ExposeTestGlobals />)
+    await waitFor(() => expect(window.__cogniaTestGlobalsReady).toBe(true))
+    const job = {
+      id: "outbound-fixture",
+      adapterId: "fixture-adapter",
+      conversationKey: "telegram:fixture-adapter:fixture-chat",
+      request: {
+        conversationRef: {
+          platform: "telegram" as const,
+          adapterId: "fixture-adapter",
+          chatId: "fixture-chat",
+        },
+        segments: [{ type: "text" as const, text: "Synthetic queued message" }],
+        metadata: { idempotencyKey: "outbound-fixture-key" },
+      },
+      status: "deadlettered" as const,
+      attempts: 5,
+      lastErrorCode: "network",
+      createdAt: Date.now(),
+      nextAttemptAt: Date.now(),
+      idempotencyKey: "outbound-fixture-key",
+      source: "manual" as const,
+    }
+    await window.__cogniaE2EOutbound!.seed([job])
+    const { appendAudit } = await import("@/lib/connectors/audit")
+    await appendAudit({
+      adapterId: job.adapterId,
+      kind: "outbound.replayed",
+      at: Date.now(),
+      fields: { jobId: job.id },
+    })
+    await expect(window.__cogniaE2EOutbound!.read()).resolves.toMatchObject({
+      jobs: [job],
+      audit: [expect.objectContaining({ kind: "outbound.replayed", fields: { jobId: job.id } })],
+    })
+    activateAccountDatabase("acct_e2e_vault", "other-fixture-host")
+    await expect(window.__cogniaE2EOutbound!.read()).resolves.toEqual({ jobs: [], audit: [] })
   })
 
   it("reads persisted session execution context through the active account cipher", async () => {
@@ -242,6 +327,50 @@ describe("ExposeTestGlobals", () => {
           text: "pong",
         },
       ])
+    )
+  })
+
+  it("seeds durable Squad runs with frozen launch authority from the team's security config", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    await provisionBrowserVault("acct_e2e_vault", "correct horse battery staple")
+    activateAccountDatabase("acct_e2e_vault")
+    const [{ useAgentTeamStore }, { AGENT_TEAM_SECURITY_CONFIG_KEYS }] = await Promise.all([
+      import("@/stores/agent/agent-team-store"),
+      import("@/types/agent/agent-team-runtime"),
+    ])
+    const team = useAgentTeamStore.getState().createTeam({
+      name: "Seed authority",
+      task: "Review evidence",
+      config: { allowedTools: ["Read"], disallowedTools: ["Bash"], requirePlanApproval: true },
+    })
+    render(<ExposeTestGlobals />)
+    await waitFor(() => expect(window.__cogniaTestGlobalsReady).toBe(true))
+    const { runId } = await window.__cogniaSeedSquadRun!({
+      teamId: team.id,
+      objective: team.task,
+      status: "paused",
+    })
+    const run = await getDb().agentTeamRuns.get(runId)
+    expect(run?.executionConstraints).toMatchObject({
+      version: 1,
+      origin: "interactive",
+      triggeredFrom: { source: "ui" },
+      requirePlanApprovalFloor: true,
+      permissionCeiling: {
+        permissionMode: "default",
+        allowedTools: ["Read"],
+        disallowedTools: ["Bash"],
+      },
+      teamConfig: { allowedTools: ["Read"], disallowedTools: ["Bash"], requirePlanApproval: true },
+    })
+    expect(Object.keys(run!.executionConstraints!.teamConfig!)).toEqual(
+      AGENT_TEAM_SECURITY_CONFIG_KEYS.filter((key) => team.config[key] !== undefined)
+    )
+    useAgentTeamStore.getState().updateTeam(team.id, {
+      config: { ...team.config, allowedTools: ["Read", "Bash"], requirePlanApproval: false },
+    })
+    expect((await getDb().agentTeamRuns.get(runId))?.executionConstraints).toEqual(
+      run?.executionConstraints
     )
   })
 

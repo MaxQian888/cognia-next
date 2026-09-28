@@ -43,12 +43,21 @@ function redactPayload(payload: Record<string, unknown>): Record<string, unknown
   return redactPayloadValue(payload) as Record<string, unknown>
 }
 
+/** Retry schema reopenings only within the initiating account/target database. */
+function withExecutionDatabaseRetry<T>(
+  operation: (db: ReturnType<typeof getDb>) => Promise<T>
+): Promise<T> {
+  const databaseName = getDb().name
+  return withDbReopenRetry(() => {
+    const database = getDb()
+    if (database.name !== databaseName)
+      throw new Dexie.AbortError("Execution journal database changed")
+    return operation(database)
+  })
+}
+
 export async function createExecutionRun(run: ExecutionRun): Promise<ExecutionRun> {
-  await withDbReopenRetry(() =>
-    getDb()
-      .executionRuns.add(run)
-      .then(() => undefined)
-  )
+  await withExecutionDatabaseRetry((db) => db.executionRuns.add(run).then(() => undefined))
   return run
 }
 
@@ -128,10 +137,8 @@ export async function createExecutionRunBinding(
 export async function putExecutionRunBinding(
   binding: ExecutionRunBinding
 ): Promise<ExecutionRunBinding> {
-  await withDbReopenRetry(() =>
-    getDb()
-      .executionRunBindings.put(binding)
-      .then(() => undefined)
+  await withExecutionDatabaseRetry((db) =>
+    db.executionRunBindings.put(binding).then(() => undefined)
   )
   return binding
 }
@@ -280,8 +287,7 @@ export interface RunEventJournal {
 export const runEventJournal: RunEventJournal = {
   async append(runId, input) {
     const idempotentInput = input.id ? input : { ...input, id: eventId(runId, input) }
-    return withDbReopenRetry(() => {
-      const db = getDb()
+    return withExecutionDatabaseRetry((db) => {
       return db.transaction(
         "rw",
         db.executionRuns,
@@ -296,8 +302,7 @@ export const runEventJournal: RunEventJournal = {
     const idempotentInputs = inputs.map((input) =>
       input.id ? input : { ...input, id: eventId(runId, input) }
     )
-    return withDbReopenRetry(() => {
-      const db = getDb()
+    return withExecutionDatabaseRetry((db) => {
       return db.transaction(
         "rw",
         db.executionRuns,

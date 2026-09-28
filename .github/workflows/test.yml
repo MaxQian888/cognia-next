@@ -1451,6 +1451,11 @@ jobs:
       - name: Run Rust tests
         working-directory: src-tauri
         run: cargo test --locked
+        env:
+          # Unit tests compile every Rust target but do not package desktop
+          # resources or launch bundled sidecars. Packaging stays covered by
+          # the Tauri build/E2E workflows with the unchanged production config.
+          TAURI_CONFIG: '{"bundle":{"resources":[],"externalBin":[]}}'
 
   cargo-test-workspace:
     needs: jest-plan
@@ -1478,7 +1483,33 @@ jobs:
             libgbm-dev \
             librsvg2-dev \
             patchelf \
-            libssl-dev
+            libssl-dev \
+            ffmpeg \
+            bubblewrap \
+            apparmor
+      - name: Enable bwrap user namespaces for sandbox tests
+        run: |
+          # Match the Jest sandbox lane without relaxing the host-wide policy.
+          sudo tee /etc/apparmor.d/cognia-ci-bwrap >/dev/null <<'PROFILE'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          PROFILE
+          sudo apparmor_parser -r /etc/apparmor.d/cognia-ci-bwrap
+          /usr/bin/bwrap --unshare-user --unshare-net --ro-bind / / -- /bin/true
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: pnpm
+          cache-dependency-path: sidecar/pnpm-lock.yaml
+      - name: Install standalone sidecar dependencies
+        working-directory: sidecar
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo build
@@ -1490,7 +1521,8 @@ jobs:
       # which is covered by `cargo-test-windows` above — its
       # `tauri::generate_context!()` needs the Next.js static export to exist
       # at compile time, so it cannot run without first paying for `pnpm
-      # build`. Nothing else in the workspace needs a Node toolchain.
+      # build`. Sidecar checkout tests require its standalone dependencies,
+      # installed above without building or installing the frontend workspace.
       #
       # This job replaced a `-p cognia-cli`-only step. Testing one package
       # meant ~1800 tests across the other 22 crates — cognia-automation, -subscription,
