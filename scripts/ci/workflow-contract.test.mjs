@@ -495,7 +495,7 @@ test("quality setup avoids redundant history, native packages and workspace buil
   assert.doesNotMatch(audit.run, /libgtk|libwebkit/)
   assert.equal(
     steps.find((step) => step.run === "pnpm build:packages").if,
-    "matrix.group == 'plugin-sdk'"
+    "matrix.group == 'plugin-sdk' && steps.prereq-cache.outputs.cache-hit != 'true'"
   )
   const { selectGates } = await import("../gates/check-all.mjs")
   assert.equal(selectGates({ group: "artifacts" })[0].script, "build:packages")
@@ -761,4 +761,193 @@ test("Windows Rust unit tests reuse the export without staging a desktop bundle"
   )
   assert.ok(tauri.bundle.externalBin.includes("binaries/cognia-server"))
   assert.ok(tauri.bundle.externalBin.includes("binaries/cognia-external-agent-launcher"))
+})
+
+const TRUNK = "github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master'"
+
+test("only PR runs cancel superseded work; trunk runs always complete", async () => {
+  for (const name of ["ci.yml", "quality.yml", "test.yml"]) {
+    const workflow = parse(await readWorkflow(name))
+    assert.equal(
+      workflow.concurrency["cancel-in-progress"],
+      "${{ github.event_name == 'pull_request' }}",
+      `${name}: a cancelled trunk run publishes no timings, coverage baseline or caches`
+    )
+  }
+})
+
+test("Rust caches are written only by trunk runs and restored everywhere", async () => {
+  for (const name of ["quality.yml", "test.yml"]) {
+    const { jobs } = parse(await readWorkflow(name))
+    for (const [jobName, job] of Object.entries(jobs)) {
+      for (const step of job.steps ?? []) {
+        if (step.uses !== "Swatinem/rust-cache@v2") continue
+        assert.equal(step.with["save-if"], `\${{ ${TRUNK} }}`, `${name}:${jobName}`)
+      }
+    }
+  }
+})
+
+test("every CI job bounds its runtime below the six-hour platform default", async () => {
+  for (const name of ["ci.yml", "quality.yml", "test.yml"]) {
+    const { jobs } = parse(await readWorkflow(name))
+    for (const [jobName, job] of Object.entries(jobs)) {
+      if (job.uses) continue
+      assert.ok(Number(job["timeout-minutes"]) > 0, `${name}:${jobName} declares timeout-minutes`)
+    }
+  }
+})
+
+test("lint and format results are restored on PRs and written only by cold trunk runs", async () => {
+  const packageJson = JSON.parse(
+    await readFile(new URL("../../package.json", import.meta.url), "utf8")
+  )
+  assert.match(
+    packageJson.scripts.lint,
+    /--cache --cache-strategy content --cache-location \.cache\/eslint/
+  )
+  assert.match(
+    packageJson.scripts["format:check"],
+    /--cache --cache-strategy content --cache-location \.cache\/prettier/
+  )
+  const steps = parse(await readWorkflow("quality.yml")).jobs.gates.steps
+  const restore = steps.find((step) => step.name === "Restore lint result cache")
+  const gate = steps.findIndex((step) => step.name === "Run gate group")
+  const save = steps.find((step) => step.name === "Save lint result cache")
+  assert.ok(restore.uses.startsWith("actions/cache/restore@"))
+  assert.ok(save.uses.startsWith("actions/cache/save@"))
+  assert.match(restore.if, /^github\.event_name == 'pull_request' && /)
+  assert.ok(save.if.startsWith(`github.event_name == 'push' && (${TRUNK})`))
+  assert.ok(steps.indexOf(restore) < gate && gate < steps.indexOf(save))
+  assert.equal(restore.with.path, save.with.path)
+  assert.equal(restore.with.key, save.with.key)
+  assert.equal(
+    restore.with["restore-keys"].trim(),
+    restore.with.key.replace(/\$\{\{ github\.sha \}\}$/, "")
+  )
+})
+
+test("compiled workspace prerequisites reuse only exact-source trunk builds", async () => {
+  const jobs = parse(await readWorkflow("test.yml")).jobs
+  const steps = jobs["jest-plan"].steps
+  const key = steps.find((step) => step.id === "prereq-key")
+  const restore = steps.find((step) => step.id === "prereq-cache")
+  const install = steps.findIndex((step) => step.name === "Install dependencies")
+  const build = steps.find((step) => step.name === "Build Jest runtime prerequisites once")
+  const save = steps.find((step) => step.name === "Save compiled workspace prerequisites cache")
+  // Key is taken from the pristine checkout, before install or build can write
+  // into hashed directories; the save then uses that same key.
+  assert.ok(steps.indexOf(key) < steps.indexOf(restore) && steps.indexOf(restore) < install)
+  assert.ok(steps.indexOf(build) < steps.indexOf(save))
+  assert.equal(restore.if, "github.event_name == 'pull_request'")
+  assert.ok(save.if.startsWith(`github.event_name == 'push' && (${TRUNK})`))
+  assert.equal(restore.with["restore-keys"], undefined, "a prefix match restores stale output")
+  assert.equal(restore.with.key, "${{ steps.prereq-key.outputs.key }}")
+  assert.equal(save.with.key, restore.with.key)
+  assert.equal(save.with.path, restore.with.path)
+  for (const input of [
+    "packages/**",
+    "sidecar/src/**",
+    "types/**",
+    "scripts/build/**",
+    "pnpm-lock.yaml",
+  ]) {
+    assert.ok(key.run.includes(`'${input}'`), `prerequisite key hashes ${input}`)
+  }
+  assert.match(build.run, /if \[ "\$PREREQS_CACHED" = true \]/)
+
+  const quality = parse(await readWorkflow("quality.yml")).jobs.gates.steps
+  const sdkRestore = quality.find((step) => step.id === "prereq-cache")
+  assert.equal(sdkRestore.with.path, restore.with.path)
+  assert.equal(sdkRestore.with["restore-keys"], undefined)
+  assert.equal(
+    sdkRestore.with.key,
+    key.run.match(/key=(.*)" >>/)[1],
+    "quality restores the exact entry the test planner saves"
+  )
+  assert.ok(
+    quality.indexOf(sdkRestore) <
+      quality.findIndex((step) => step.run === "pnpm install --frozen-lockfile --prefer-offline")
+  )
+})
+
+test("PRs and branch pushes plan incrementally; schedule, tags and new refs run the full suite", async () => {
+  const step = parse(await readWorkflow("test.yml")).jobs["jest-plan"].steps.find(
+    (item) => item.id === "plan"
+  )
+  const dir = await mkdtemp(join(tmpdir(), "cognia-plan-mode-"))
+  const log = join(dir, "calls.log")
+  try {
+    // `git fetch` fails for the sentinel "gone" SHA, like a force-pushed-away tip.
+    await writeFile(
+      join(dir, "git"),
+      '#!/bin/sh\nprintf "git %s\\n" "$*" >> "$CALLS"\ncase "$*" in *gone*) exit 1;; "rev-parse HEAD^") echo parent;; esac\n',
+      { mode: 0o755 }
+    )
+    await writeFile(
+      join(dir, "node"),
+      '#!/bin/sh\nprintf "node %s\\n" "$*" >> "$CALLS"\ncat >/dev/null\n',
+      {
+        mode: 0o755,
+      }
+    )
+    const plan = async (env) => {
+      await writeFile(log, "")
+      execFileSync("bash", ["-euo", "pipefail", "-c", step.run], {
+        env: {
+          PATH: `${dir}:${process.env.PATH}`,
+          CALLS: log,
+          GITHUB_SHA: "head",
+          REQUESTED_MODE: "auto",
+          PR_BASE_SHA: "",
+          PUSH_BEFORE_SHA: "",
+          ...env,
+        },
+        stdio: "pipe",
+      })
+      const call = (await readFile(log, "utf8")).split("\n").find((line) => line.includes("--plan"))
+      return {
+        mode: call.match(/--mode (\S+)/)[1],
+        base: call.match(/--base (\S+)/)[1],
+      }
+    }
+    assert.deepEqual(
+      await plan({
+        EVENT_NAME: "pull_request",
+        GITHUB_REF: "refs/pull/1/merge",
+        PR_BASE_SHA: "base",
+      }),
+      { mode: "incremental", base: "base" }
+    )
+    assert.deepEqual(
+      await plan({ EVENT_NAME: "push", GITHUB_REF: "refs/heads/dev", PUSH_BEFORE_SHA: "before" }),
+      { mode: "incremental", base: "before" },
+      "a multi-commit push diffs against the previous tip, not HEAD^"
+    )
+    assert.deepEqual(
+      await plan({
+        EVENT_NAME: "push",
+        GITHUB_REF: "refs/heads/dev",
+        PUSH_BEFORE_SHA: "0".repeat(40),
+      }),
+      { mode: "full", base: "head" }
+    )
+    assert.deepEqual(
+      await plan({ EVENT_NAME: "push", GITHUB_REF: "refs/heads/dev", PUSH_BEFORE_SHA: "gone" }),
+      { mode: "full", base: "head" }
+    )
+    for (const [EVENT_NAME, GITHUB_REF] of [
+      ["push", "refs/tags/v1.0.0"],
+      ["schedule", "refs/heads/dev"],
+      ["workflow_dispatch", "refs/heads/dev"],
+    ]) {
+      assert.deepEqual(
+        await plan({ EVENT_NAME, GITHUB_REF }),
+        { mode: "full", base: "head" },
+        EVENT_NAME
+      )
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })

@@ -4,58 +4,52 @@
 version: 2
 updates:
   # JavaScript/TypeScript dependencies (npm/pnpm)
+  #
+  # Every open Dependabot PR runs the whole CI graph, and the public-repo runner
+  # pool is shared with trunk and human PRs. Minor and patch updates therefore
+  # land as two grouped PRs per week (runtime vs tooling); only semver-major
+  # updates, which need individual review anyway, arrive one per PR. The
+  # cooldown lets a fresh release age before it is proposed, which filters out
+  # yanked or compromised versions. Security updates ignore both settings.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
     commit-message:
       prefix: "chore(deps)"
     labels:
       - "dependencies"
       - "npm"
     groups:
-      # Group minor and patch updates for production dependencies
       production-dependencies:
-        patterns:
-          - "next"
-          - "react"
-          - "react-dom"
-          - "zustand"
-          - "lucide-react"
-          - "@radix-ui/*"
-          - "class-variance-authority"
-          - "clsx"
-          - "tailwind-merge"
+        dependency-type: "production"
         update-types:
           - "minor"
           - "patch"
-      # Group all dev dependencies updates
       dev-dependencies:
-        patterns:
-          - "@types/*"
-          - "eslint*"
-          - "typescript"
-          - "tailwindcss"
-          - "@tailwindcss/*"
-          - "jest*"
-          - "@testing-library/*"
-          - "ts-jest"
-          - "ts-node"
+        dependency-type: "development"
         update-types:
           - "minor"
           - "patch"
 
-  # Rust dependencies (Cargo) for Tauri
+  # Rust dependencies. The root Cargo workspace owns the single Cargo.lock that
+  # src-tauri and every crate under crates/ resolve against.
   - package-ecosystem: "cargo"
-    directory: "/src-tauri"
+    directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "09:00"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
     commit-message:
       prefix: "chore(deps)"
     labels:
@@ -65,6 +59,12 @@ updates:
       tauri-dependencies:
         patterns:
           - "tauri*"
+        update-types:
+          - "minor"
+          - "patch"
+      rust-dependencies:
+        patterns:
+          - "*"
         update-types:
           - "minor"
           - "patch"

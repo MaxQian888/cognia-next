@@ -18,14 +18,14 @@ what to do when one goes red, and how to set up the optional integrations.
 
 ## Tiers
 
-| Tier         | Trigger                           | Runs                                                                     |
-| ------------ | --------------------------------- | ------------------------------------------------------------------------ |
-| **Hot path** | push to `dev`/`master`, any PR    | `ci.yml` → `quality.yml` + `test.yml` → stable `CI Gate`                 |
-| **Nightly**  | `nightly.yml`, 03:00 UTC + manual | full test matrix, 4-platform Tauri bundles, Tauri E2E (Windows), iOS E2E |
-| **Release**  | `v*` tag                          | `release.yml` → quality + test + signed Tauri release                    |
-| **Report**   | `workflow_run` after the hot path | `report.yml` → PR comment + job summary                                  |
-| **Services** | changes under `services/**`       | `share-server.yml`, `signaling-server.yml`, `compose-e2e.yml`            |
-| **Deploy**   | manual, opt-in                    | `deploy.yml` (see below)                                                 |
+| Tier         | Trigger                           | Runs                                                                      |
+| ------------ | --------------------------------- | ------------------------------------------------------------------------- |
+| **Hot path** | push to `dev`/`master`, any PR    | `ci.yml` → `quality.yml` + incremental `test.yml` → stable `CI Gate`      |
+| **Nightly**  | `nightly.yml`, 03:00 UTC + manual | full test matrix + coverage, 4-platform Tauri bundles, Tauri E2E, iOS E2E |
+| **Release**  | `v*` tag                          | `release.yml` → quality + test + signed Tauri release                     |
+| **Report**   | `workflow_run` after the hot path | `report.yml` → PR comment + job summary                                   |
+| **Services** | changes under `services/**`       | `share-server.yml`, `signaling-server.yml`, `compose-e2e.yml`             |
+| **Deploy**   | manual, opt-in                    | `deploy.yml` (see below)                                                  |
 
 Tauri **bundling** is deliberately off the hot path — it is the largest
 wall-clock item in the repo. The Tauri crate is compiled for affected PRs and full runs:
@@ -47,9 +47,14 @@ default branch's copy of `test.yml` had no schedule.
 ### Concurrency
 
 Every workflow that is triggered by a ref declares a `concurrency` group keyed
-on that ref. Hot-path runs use `cancel-in-progress: true` so a rapid series of
-pushes does not queue; `release.yml` and `nightly.yml` use `false`, because
-cancelling a half-built release is worse than letting it finish.
+on that ref. Hot-path PR runs cancel superseded work so a rapid series of
+pushes does not queue. Hot-path **trunk** runs (`dev`/`master` pushes) never
+cancel a run in progress: a cancelled trunk run publishes no Jest timing
+history, coverage baseline, or trunk-only cache, and a burst of merges used to
+leave `dev` without a single completed run. GitHub keeps only the newest
+pending run per group, so intermediate trunk pushes are still skipped.
+`release.yml` and `nightly.yml` use `false`, because cancelling a half-built
+release is worse than letting it finish.
 
 `build-tauri.yml` deliberately declares none. It is `workflow_call` only — it
 has no ref of its own to key on, and it runs the tagged release build, so a
@@ -130,8 +135,9 @@ Six runners, each with one owner:
 | pytest                           | `plugin-sdk/python`     | `quality.yml`, `plugin-sdk` group                                                 |
 | Agent conformance                | real sidecars + server  | `test.yml`, dedicated conformance job                                             |
 
-PRs default to **incremental tests without coverage**. The planner compares the
-exact PR base SHA with the checked-out merge SHA, selects changed, co-located,
+PRs and trunk pushes default to **incremental tests without coverage**. The
+planner compares the exact PR base SHA (or, for a push, the ref's previous tip
+`github.event.before`) with the checked-out SHA, selects changed, co-located,
 and transitively related suites, then publishes one immutable plan for every
 worker. Deleted modules include their former importers; global Jest configuration
 changes conservatively select the complete suite inventory. Dependency-only
@@ -142,7 +148,9 @@ Incremental runs use at most **8 Jest shards, 4 concurrently**. Full runs use
 at most **64 bounded coverage shards, 8 concurrently**. Both use two workers per
 shard. Large incremental selections run sequential batches of at most 150 suites
 per Jest process, retaining every batch's results without accumulating all suites
-in one parent process. Trunk pushes, scheduled and release runs retain full testing. Manual
+in one parent process. Nightly (scheduled), tagged release and manual runs
+retain full testing; a push with no fetchable predecessor (new ref, force push
+over a vanished tip) also fails safe to full. Manual
 `test.yml` runs default to full; reusable callers can choose `test-mode` as
 `auto`, `incremental`, or `full`. The plan artifact and job summary record the
 exact base/head, selected suites, shard assignment, and affected runtimes.
@@ -167,8 +175,9 @@ the Windows job builds the export first and covers it there.
 
 ## Coverage
 
-Coverage is collected only in full mode; default incremental PR runs produce
-test results without coverage. Full runs retain two levels:
+Coverage is collected only in full mode; default incremental PR and trunk-push
+runs produce test results without coverage, so coverage floors and Jest timing
+history are refreshed by the nightly run. Full runs retain two levels:
 
 - **Changed files: ≥90% per file** for lines/branches/functions — the real bar
   for anything you touch. `pnpm test:coverage:changed -- --strict`, gated on
@@ -222,7 +231,8 @@ Reporting is two-stage, and the split is load-bearing rather than stylistic.
 2. **`report.yml`** — triggered by `workflow_run`, so it executes in the base
    repository's context and may legally hold `pull-requests: write`. It
    downloads the run's artifacts, downloads the same artifacts from the trunk
-   branch's last successful run as a baseline, and upserts a single PR comment.
+   branch's latest non-cancelled Nightly run (falling back to the last green
+   pipeline run) as a baseline, and upserts a single PR comment.
 
 The main pipeline cannot post comments itself. It runs on the read-only
 default token, fork and Dependabot PRs get read-only tokens that `permissions:`
@@ -234,23 +244,25 @@ failures, **flaky specs** (passed only on retry — otherwise invisible, since
 `retries: 1` reports them green), coverage deltas, and bundle-size deltas.
 
 Nothing is persisted: no metrics branch, no committed snapshots. The trade-off
-is that trends are always "versus the trunk branch's last green run", and
+is that trends are always "versus the trunk branch's latest nightly run", and
 cross-run flake history is not available.
 
 ---
 
 ## Caching
 
-| Cached data                | Identity and restore boundary                                                 | Consumers                                                                                                                                 |
-| -------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| pnpm content store         | Root and sidecar lockfiles; quality includes all standalone pnpm locks        | Root Node installs in test, quality, Tauri/release, deploy, compose E2E and report jobs                                                   |
-| npm downloads              | OS + architecture + Node 26 + npm sidecar locks; isolated runtime manifest    | Every root workspace install; isolated DeepSeek runtime job                                                                               |
-| Root `.next/cache`         | OS + runner architecture + Node 26 + lockfiles + build configuration + commit | Separate desktop production, desktop E2E, Android, iOS, Tauri E2E and Tauri release scopes; release additionally separates target triples |
-| `docs/.next/cache`         | Same compiler identity; CI and deploy scopes separate                         | Docs verification and Pages deploy; deploy adds environment and canonical docs origin                                                     |
-| `web/.next/cache`          | Same compiler identity; CI and deploy scopes separate                         | Marketing verification and Pages deploy; deploy adds environment plus website/docs origins                                                |
-| TypeScript `*.tsbuildinfo` | OS + architecture + Node 26 + all pnpm locks and tsconfigs + commit           | Quality `types`; state remains advisory and cannot replace the compiler check                                                             |
-| Playwright browsers        | OS + lockfile                                                                 | Browser and extension E2E workers; system libraries are installed on cache hits too                                                       |
-| Cargo `target/`            | `Swatinem/rust-cache` compiler/dependency identity                            | Rust jobs, with standalone service/toolchain scopes                                                                                       |
+| Cached data                | Identity and restore boundary                                                                    | Consumers                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| pnpm content store         | Root and sidecar lockfiles; quality includes all standalone pnpm locks                           | Root Node installs in test, quality, Tauri/release, deploy, compose E2E and report jobs                                                   |
+| npm downloads              | OS + architecture + Node 26 + npm sidecar locks; isolated runtime manifest                       | Every root workspace install; isolated DeepSeek runtime job                                                                               |
+| Root `.next/cache`         | OS + runner architecture + Node 26 + lockfiles + build configuration + commit                    | Separate desktop production, desktop E2E, Android, iOS, Tauri E2E and Tauri release scopes; release additionally separates target triples |
+| `docs/.next/cache`         | Same compiler identity; CI and deploy scopes separate                                            | Docs verification and Pages deploy; deploy adds environment and canonical docs origin                                                     |
+| `web/.next/cache`          | Same compiler identity; CI and deploy scopes separate                                            | Marketing verification and Pages deploy; deploy adds environment plus website/docs origins                                                |
+| TypeScript `*.tsbuildinfo` | OS + architecture + Node 26 + all pnpm locks and tsconfigs + commit                              | Quality `types`; state remains advisory and cannot replace the compiler check                                                             |
+| Playwright browsers        | OS + lockfile                                                                                    | Browser and extension E2E workers; system libraries are installed on cache hits too                                                       |
+| Cargo `target/`            | `Swatinem/rust-cache` compiler/dependency identity                                               | Rust jobs, with standalone service/toolchain scopes                                                                                       |
+| ESLint / Prettier results  | OS + Node 26 + lockfile + lint/format/tsconfig configuration + commit                            | Quality `lint` / `format`; content-hashed per file, restored only by PRs, written only by cold trunk runs                                 |
+| Compiled workspace `dist/` | Exact hash of `packages/`, `sidecar/src`, webclone, `types/`, build scripts, lockfile, tsconfigs | Jest planner and quality `plugin-sdk`; PRs restore an exact match only (no prefix fallback), trunk always rebuilds and writes             |
 
 Compiler caches restore the latest entry within the same mode, compiler,
 dependency and configuration prefix, then save under the current commit. Source,
@@ -260,6 +272,14 @@ compiler state is cached, never `out/` or a linked `node_modules` tree. GitHub's
 cache branch rules keep fork writes out of the base branch's cache; missing or
 evicted entries fall back to normal compilation.
 
+The repository cache quota is 10 GB and was observed at 9.7 GB, with PR refs
+each holding their own 1.5 GB Windows/Linux Cargo targets. Rust caches,
+lint/format results and compiled workspace output are therefore **trunk-only
+writers** (`save-if` / `actions/cache/save` gated on `dev`/`master` pushes).
+PRs restore the base branch's entries, which GitHub allows, and never evict
+them with branch-local copies. A PR that changes `Cargo.lock` compiles those
+crates cold until it merges.
+
 Frozen installs always run with `--prefer-offline`; a cache hit never skips
 lockfile validation, workspace linking or required install scripts. The DeepSeek
 runtime is intentionally separate: its complete pinned manifest is copied to
@@ -268,7 +288,7 @@ policy, and exercised with `node --test` using loopback mock providers. Its unit
 and real-launcher smoke suites are excluded from Jest, not from CI.
 
 Compiled workspace packages and Webclone output are built once in the Jest
-planner. Its run-scoped artifact is restored before root installs by Jest shards,
+planner, or restored there on PRs from an exact-source trunk cache entry. Its run-scoped artifact is restored before root installs by Jest shards,
 Linux docs/marketing/Android builds, sidecar tests, production/E2E exports and
 browser-extension E2E. Consumers download from the same workflow run and checkout;
 when the plan contains no Jest suites, they build their own prerequisites normally.
@@ -352,7 +372,7 @@ runtime savings require subsequent runs; no speedup percentage is established.
 | `nextjs-build-e2e`    | 3 days    | `NEXT_PUBLIC_E2E=1` export consumed by the e2e jobs        |
 
 `report.yml` reads `coverage-report` and `bundle-size` from **both** this run
-and the trunk branch's last successful run — which is why their retention is
+and the trunk branch's latest nightly run — which is why their retention is
 longer than the rest.
 
 ---

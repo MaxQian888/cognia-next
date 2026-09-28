@@ -8,8 +8,8 @@ name: CI/CD Pipeline
 #
 # Tier model (see CI_CD.md):
 #
-#   PR                  quality gates · changed/related tests · affected builds
-#   push / full runs    complete tests and coverage · e2e · cargo · Next.js build
+#   PR / trunk push     quality gates · changed/related tests · affected builds
+#   nightly / tag / manual  complete tests and coverage · every lane
 #   nightly.yml            4-platform Tauri bundles · Tauri E2E · iOS E2E
 #   release.yml            tagged release, signed updater artifacts
 #
@@ -41,8 +41,13 @@ on:
       - dev
 
 concurrency:
+  # PRs cancel superseded runs. Trunk pushes never cancel a run in progress:
+  # trunk runs are the only writers of the Rust, lint-result and compiled
+  # package caches every PR restores, and a burst of pushes would otherwise
+  # leave dev with no completed signal at all. GitHub keeps only the newest
+  # pending trunk run.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Deterministic gates, fanned out one job per group. Never blocks `test`:
@@ -51,7 +56,8 @@ jobs:
     name: Quality
     uses: ./.github/workflows/quality.yml
 
-  # PRs select affected tests; trunk/full runs retain complete coverage gates.
+  # PRs and trunk pushes select affected tests; nightly.yml, tags and manual
+  # runs retain the complete suite and coverage gates.
   # Expensive builds and integration lanes follow the reusable workflow plan.
   test:
     name: Test
@@ -65,6 +71,7 @@ jobs:
     needs: [quality, test]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:

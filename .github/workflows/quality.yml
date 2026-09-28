@@ -31,13 +31,19 @@ on:
   workflow_dispatch:
 
 concurrency:
+  # PRs cancel superseded runs. Trunk pushes never cancel a run in progress:
+  # trunk runs are the only writers of the Rust, lint-result and compiled
+  # package caches every PR restores, and a burst of pushes would otherwise
+  # leave dev with no completed signal at all. GitHub keeps only the newest
+  # pending trunk run.
   group: quality-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   prepare:
     name: Gate Matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     permissions:
       contents: read
@@ -68,6 +74,7 @@ jobs:
     name: Gates (${{ matrix.group }})
     needs: prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     permissions:
       contents: read
@@ -125,6 +132,7 @@ jobs:
         if: matrix.rust
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
           workspaces: ". -> target"
 
       # cargo-deny is not a rustup component; without it the `rust:deny` gate
@@ -157,6 +165,16 @@ jobs:
           path: ~/.npm
           key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
+      - name: Restore compiled workspace prerequisites cache
+        id: prereq-cache
+        if: github.event_name == 'pull_request' && matrix.group == 'plugin-sdk'
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            packages/*/dist/
+            sidecar/webclone/dist/
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-workspace-dist-${{ hashFiles('packages/**', '!packages/*/dist/**', '!packages/*/node_modules/**', 'sidecar/src/**', 'sidecar/webclone/**', '!sidecar/webclone/dist/**', '!sidecar/webclone/node_modules/**', 'types/**', 'scripts/build/**', 'pnpm-lock.yaml', 'tsconfig*.json') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -195,8 +213,10 @@ jobs:
 
       # The artifacts group already starts with build:packages in the registry.
       # SDK consumers need that prerequisite before their separate build gates.
+      # PRs reuse the exact output trunk's test planner saved for the same
+      # sources (see test.yml `jest-plan`); any miss builds from scratch.
       - name: Build workspace package prerequisites
-        if: matrix.group == 'plugin-sdk'
+        if: matrix.group == 'plugin-sdk' && steps.prereq-cache.outputs.cache-hit != 'true'
         run: pnpm build:packages
 
       - name: Prepare the plugin Node runtime
@@ -213,8 +233,30 @@ jobs:
         if: matrix.python
         run: python -m pip install -e "plugin-sdk/python[dev]"
 
+      # ESLint and Prettier results are cached per file content
+      # (`--cache-strategy content`; mtimes are meaningless on a fresh
+      # checkout). Only PRs restore: the trunk run stays a cold, authoritative
+      # pass and is the only writer, so cross-file state that a per-file
+      # cache cannot see (typed sidecar rules, config drift) is re-proven on
+      # every trunk push and never published from an unmerged branch.
+      - name: Restore lint result cache
+        if: github.event_name == 'pull_request' && (matrix.group == 'lint' || matrix.group == 'format')
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/${{ matrix.group == 'lint' && 'eslint' || 'prettier' }}
+          key: ${{ runner.os }}-node26-${{ matrix.group }}-results-${{ hashFiles('pnpm-lock.yaml', 'eslint.config.mjs', '.prettierrc.json', '.prettierignore', 'tsconfig.json', 'sidecar/tsconfig.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-node26-${{ matrix.group }}-results-${{ hashFiles('pnpm-lock.yaml', 'eslint.config.mjs', '.prettierrc.json', '.prettierignore', 'tsconfig.json', 'sidecar/tsconfig.json') }}-
+
       # check-all.mjs runs every gate in the group, continues past failures,
       # writes a ✓/✗ table to the job summary, and exits non-zero if any
       # blocking gate failed.
       - name: Run gate group
         run: node scripts/gates/check-all.mjs --group ${{ matrix.group }}
+
+      - name: Save lint result cache
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master') && (matrix.group == 'lint' || matrix.group == 'format')
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/${{ matrix.group == 'lint' && 'eslint' || 'prettier' }}
+          key: ${{ runner.os }}-node26-${{ matrix.group }}-results-${{ hashFiles('pnpm-lock.yaml', 'eslint.config.mjs', '.prettierrc.json', '.prettierignore', 'tsconfig.json', 'sidecar/tsconfig.json') }}-${{ github.sha }}

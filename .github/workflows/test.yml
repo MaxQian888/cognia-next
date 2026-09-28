@@ -5,7 +5,7 @@ name: Test Suite
 # ============================================================================
 # Job graph:
 #   jest-plan (exact diff + affected runtimes + immutable suite assignment)
-#   test (PR: <=8 shards, no coverage; full: <=64 coverage shards) ─┐
+#   test (PR/push: <=8 shards, no coverage; full: <=64 coverage shards) ─┐
 #                                   ├─ coverage-merge (merge maps + enforce
 #   sidecar (node --test suites)    │   thresholds + publish junit)
 #   build (plain static export, bundle size)
@@ -41,7 +41,7 @@ on:
       test-mode:
         type: string
         default: auto
-        description: auto selects incremental PR tests and full tests otherwise
+        description: auto selects incremental tests for PRs and branch pushes, full tests otherwise
   workflow_dispatch:
     inputs:
       test-mode:
@@ -51,8 +51,13 @@ on:
         description: Test selection mode
 
 concurrency:
+  # PRs cancel superseded runs. Trunk pushes never cancel a run in progress:
+  # trunk runs are the only writers of the Rust, lint-result and compiled
+  # package caches every PR restores, and a burst of pushes would otherwise
+  # leave dev with no completed signal at all. GitHub keeps only the newest
+  # pending trunk run.
   group: test-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   jest-plan:
@@ -89,12 +94,45 @@ jobs:
           path: ~/.npm
           key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+      # Compiled workspace packages are a pure function of their sources, the
+      # sidecar provider tables and root types they import, the build scripts
+      # and the lockfile. The key is computed before install so the save below
+      # hashes the same pristine tree. Exact keys only: a partial match would
+      # restore output built from different sources. PRs restore; trunk always
+      # rebuilds cold and is the only writer, so a missed input can never
+      # outlive one trunk run.
+      - name: Compute workspace prerequisite cache key
+        id: prereq-key
+        run: echo "key=${{ runner.os }}-${{ runner.arch }}-node26-workspace-dist-${{ hashFiles('packages/**', '!packages/*/dist/**', '!packages/*/node_modules/**', 'sidecar/src/**', 'sidecar/webclone/**', '!sidecar/webclone/dist/**', '!sidecar/webclone/node_modules/**', 'types/**', 'scripts/build/**', 'pnpm-lock.yaml', 'tsconfig*.json') }}" >> "$GITHUB_OUTPUT"
+      - name: Restore compiled workspace prerequisites cache
+        id: prereq-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            packages/*/dist/
+            sidecar/webclone/dist/
+          key: ${{ steps.prereq-key.outputs.key }}
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build Jest runtime prerequisites once
+        env:
+          PREREQS_CACHED: ${{ steps.prereq-cache.outputs.cache-hit == 'true' }}
         run: |
-          pnpm build:packages
-          pnpm sidecar:webclone:build
+          if [ "$PREREQS_CACHED" = true ]; then
+            echo "Compiled workspace prerequisites restored from cache"
+          else
+            pnpm build:packages
+            pnpm sidecar:webclone:build
+          fi
+      - name: Save compiled workspace prerequisites cache
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master')
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            packages/*/dist/
+            sidecar/webclone/dist/
+          key: ${{ steps.prereq-key.outputs.key }}
       - name: Restore Jest suite timing history
         uses: actions/cache/restore@v6
         with:
@@ -110,10 +148,18 @@ jobs:
           REQUESTED_MODE: ${{ inputs.test-mode || 'auto' }}
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
+          # PRs and branch pushes test what changed; the complete suite with
+          # coverage belongs to nightly.yml (schedule), manual runs and tagged
+          # releases. A trunk push diffs against the ref's previous tip, so a
+          # multi-commit push is covered as a whole.
           mode="$REQUESTED_MODE"
           if [ "$mode" = auto ]; then
-            if [ "$EVENT_NAME" = pull_request ]; then mode=incremental; else mode=full; fi
+            case "$EVENT_NAME:$GITHUB_REF" in
+              pull_request:* | push:refs/heads/*) mode=incremental ;;
+              *) mode=full ;;
+            esac
           fi
           base="$GITHUB_SHA"
           if [ "$EVENT_NAME" = pull_request ]; then
@@ -121,6 +167,18 @@ jobs:
             git fetch --no-tags --depth=1 origin "$base"
           elif [ "$mode" = incremental ]; then
             base="$(git rev-parse HEAD^)"
+            if [ "$EVENT_NAME" = push ]; then
+              # A new ref or a force push whose old tip is gone has no trustworthy
+              # predecessor to diff against; fail safe to the complete plan.
+              if [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != 0000000000000000000000000000000000000000 ] \
+                && git fetch --no-tags --depth=1 origin "$PUSH_BEFORE_SHA"; then
+                base="$PUSH_BEFORE_SHA"
+              else
+                echo "::notice::Push has no fetchable predecessor; running the full test plan"
+                mode=full
+                base="$GITHUB_SHA"
+              fi
+            fi
           fi
           node scripts/test/coverage-changed.mjs --plan --base "$base" --head "$GITHUB_SHA" --mode "$mode" --output .cache/jest/plan.json > /tmp/jest-plan.json
           node --input-type=module <<'NODE'
@@ -138,6 +196,7 @@ jobs:
         if: steps.plan.outputs.native-helpers == 'true'
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
           key: jest-native-helpers
       - name: Build selected Jest native helpers once
         if: steps.plan.outputs.native-helpers == 'true'
@@ -275,6 +334,7 @@ jobs:
   coverage-merge:
     name: Coverage Merge & Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [jest-plan, test]
     if: always() && !cancelled() && needs.jest-plan.outputs.mode == 'full' && needs.test.result != 'skipped'
 
@@ -411,6 +471,7 @@ jobs:
     name: Coverage Gate (changed files)
     needs: [jest-plan, test, coverage-merge]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'pull_request' && needs.jest-plan.outputs.mode == 'full' && needs.test.result == 'success'
 
     permissions:
@@ -490,6 +551,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
           workspaces: ". -> target"
           cache-on-failure: true
       - name: Cache standalone npm downloads
@@ -767,6 +829,7 @@ jobs:
     if: fromJSON(needs.jest-plan.outputs.impacts).sidecar
     name: Sidecar Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     permissions:
       contents: read
@@ -821,6 +884,7 @@ jobs:
     if: fromJSON(needs.jest-plan.outputs.impacts).productionBuild
     name: Build Verification
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     permissions:
       contents: read
@@ -1375,6 +1439,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
           workspaces: ". -> target"
       - name: Cache Next.js compilation (tauri)
         uses: actions/cache@v6
@@ -1421,6 +1486,7 @@ jobs:
     if: fromJSON(needs.jest-plan.outputs.impacts).rust
     name: Rust Tests (Windows)
     runs-on: windows-latest
+    timeout-minutes: 90
     needs: [jest-plan, build]
 
     permissions:
@@ -1436,6 +1502,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
           # src-tauri is a member of the root Cargo workspace and writes to the
           # root target/, not src-tauri/target/.
           workspaces: ". -> target"
@@ -1462,6 +1529,7 @@ jobs:
     if: fromJSON(needs.jest-plan.outputs.impacts).rust
     name: Rust Tests (workspace)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     permissions:
       contents: read
@@ -1515,6 +1583,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
           workspaces: ". -> target"
           cache-on-failure: true
       # Every workspace member EXCEPT `cognia-next` (the src-tauri crate),
@@ -1544,6 +1613,7 @@ jobs:
     if: fromJSON(needs.jest-plan.outputs.impacts).postgres
     name: PostgreSQL RLS & tenant integrity
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     permissions:
       contents: read
@@ -1569,6 +1639,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
           workspaces: ". -> target"
           cache-on-failure: true
       - name: Create least-privilege application role
@@ -1588,6 +1659,7 @@ jobs:
     if: fromJSON(needs.jest-plan.outputs.impacts).diagnostic
     name: Rust Tests (diagnostic-server)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     permissions:
       contents: read
@@ -1604,6 +1676,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
           workspaces: "services/diagnostic-server -> target"
       - name: Run Rust tests
         working-directory: services/diagnostic-server

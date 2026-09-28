@@ -81,15 +81,26 @@ jobs:
       # Baseline for the trend: the newest successful run of the same
       # workflow on the trunk branch. Nothing is persisted anywhere — no
       # metrics branch, no committed snapshot — so there is nothing to drift.
+      # Trunk pushes run the incremental plan, so coverage and every build lane
+      # are only guaranteed on the nightly full run. Prefer its latest
+      # completed run (a red Tauri bundle does not invalidate its test
+      # artifacts); fall back to the last green pipeline run on trunk.
       - name: Locate the baseline run on the trunk branch
         id: baseline
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           run_id="$(gh run list \
-            --workflow "CI/CD Pipeline" \
+            --workflow "Nightly" \
             --branch "${{ github.event.repository.default_branch }}" \
-            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            --status completed --limit 10 --json databaseId,conclusion \
+            --jq '[.[] | select(.conclusion != "cancelled")][0].databaseId // empty')"
+          if [ -z "$run_id" ]; then
+            run_id="$(gh run list \
+              --workflow "CI/CD Pipeline" \
+              --branch "${{ github.event.repository.default_branch }}" \
+              --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          fi
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "Baseline run: ${run_id:-<none>}"
 
