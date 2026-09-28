@@ -1,5 +1,0 @@
-schema: "1.0"
-extensions:
-  - identifier: skills:skills.byted.org/aiden/report/performance-daily-report:1.0.2
-    agents: []
-    link: copy
