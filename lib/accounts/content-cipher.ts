@@ -86,7 +86,7 @@ export class AccountContentCipher implements AccountContentCipherContract {
   ): Promise<EncryptedContentEnvelope> {
     const key = this.requireKey()
     const iv = randomBytes(12)
-    const plaintext = new TextEncoder().encode(JSON.stringify(value))
+    const plaintext = new TextEncoder().encode(JSON.stringify(value, encodeBinary))
     try {
       const ciphertext = await subtle().encrypt(
         {
@@ -136,7 +136,7 @@ export class AccountContentCipher implements AccountContentCipherContract {
       this.requireKey(),
       toBufferSource(decodeBase64Url(envelope.ciphertext))
     )
-    return JSON.parse(new TextDecoder().decode(plaintext)) as T
+    return JSON.parse(new TextDecoder().decode(plaintext), reviveBinary) as T
   }
 
   lock(): void {
@@ -182,6 +182,38 @@ function contentAad(
   return new TextEncoder().encode(
     JSON.stringify(["cognia-content", databaseName, table, primaryKey, field, schemaVersion])
   )
+}
+
+/**
+ * Tag for a `Uint8Array` inside an encrypted payload. Plain `JSON.stringify`
+ * turns a typed array into `{"0":35,"1":32,…}`, which read back as an object:
+ * a composer draft's staged file bytes (`chatDrafts.attachments[].bytes`) came
+ * back as `[object Object]`, 15 bytes of nothing. Bytes are carried as
+ * base64url under this single-key tag instead and revived on decrypt. Rows
+ * written before this carried the corrupted object form; those still parse as
+ * the object they always were.
+ *
+ * Blobs remain unsupported in encrypted payloads (they cannot be read
+ * synchronously); tables that hold Blobs are not `encrypted-content`.
+ */
+export const ENCRYPTED_BYTES_TAG = "$cogniaBytes"
+
+function encodeBinary(_key: string, value: unknown): unknown {
+  if (value instanceof Uint8Array) return { [ENCRYPTED_BYTES_TAG]: encodeBase64Url(value) }
+  return value
+}
+
+function reviveBinary(_key: string, value: unknown): unknown {
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>)[ENCRYPTED_BYTES_TAG] === "string" &&
+    Object.keys(value).length === 1
+  ) {
+    return decodeBase64Url((value as Record<string, string>)[ENCRYPTED_BYTES_TAG]!)
+  }
+  return value
 }
 
 function randomBytes(length: number): Uint8Array {

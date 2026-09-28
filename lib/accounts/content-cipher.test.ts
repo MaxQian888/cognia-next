@@ -35,6 +35,38 @@ describe("AccountContentCipher", () => {
     await expect(cipher.decrypt("artifacts", "msg_1", "payload", 1, envelope)).rejects.toBeDefined()
   })
 
+  it("round-trips byte arrays, which plain JSON would turn into objects", async () => {
+    const cipher = await AccountContentCipher.createForTesting(
+      ACCOUNT_ID,
+      "cognia-account-acct_cipher"
+    )
+    // A composer draft's staged file: before the tag, `bytes` came back as
+    // `{"0":35,…}` and a revived File held "[object Object]".
+    const bytes = new TextEncoder().encode("# Design spec — 设计")
+    const value = { text: "draft", attachments: [{ name: "DESIGN.md", size: bytes.length, bytes }] }
+
+    const envelope = await cipher.encrypt("chatDrafts", "s1", "payload", 1, value)
+    const decrypted = await cipher.decrypt<typeof value>("chatDrafts", "s1", "payload", 1, envelope)
+
+    expect(decrypted.attachments[0]!.bytes).toBeInstanceOf(Uint8Array)
+    expect(new TextDecoder().decode(decrypted.attachments[0]!.bytes)).toBe("# Design spec — 设计")
+    expect(decrypted.attachments[0]!.size).toBe(bytes.length)
+  })
+
+  it("leaves objects that merely resemble the tag, and legacy rows, as they were", async () => {
+    const cipher = await AccountContentCipher.createForTesting(
+      ACCOUNT_ID,
+      "cognia-account-acct_cipher"
+    )
+    const value = {
+      notTagged: { $cogniaBytes: "AQI", extra: 1 },
+      nonString: { $cogniaBytes: 7 },
+      legacyCorrupted: { "0": 35, "1": 32 },
+    }
+    const envelope = await cipher.encrypt("chatDrafts", "s1", "payload", 1, value)
+    await expect(cipher.decrypt("chatDrafts", "s1", "payload", 1, envelope)).resolves.toEqual(value)
+  })
+
   it("rejects use after lock and cross-account envelopes", async () => {
     const cipher = await AccountContentCipher.createForTesting(
       ACCOUNT_ID,
