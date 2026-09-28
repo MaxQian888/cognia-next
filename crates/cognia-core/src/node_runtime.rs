@@ -291,6 +291,12 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    // A concurrent probe can fork while another fixture is open for writing.
+    // On Linux that inherited descriptor makes exec fail with ETXTBSY until
+    // the child closes it, even after NamedTempFile closes the parent's copy.
+    #[cfg(unix)]
+    static EXECUTABLE_SCRIPT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn parses_canonical_node_versions() {
         assert_eq!(parse_node_version("v26.3.1\n"), Some((26, 3, 1)));
@@ -334,6 +340,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn validates_the_system_node_version_boundary() {
+        let _guard = EXECUTABLE_SCRIPT_LOCK.lock().unwrap();
         let supported = executable_script("printf 'v26.0.0\\n'");
         let old = executable_script("printf 'v25.9.0\\n'");
 
@@ -352,6 +359,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn node_probe_has_a_hard_deadline() {
+        let _guard = EXECUTABLE_SCRIPT_LOCK.lock().unwrap();
         let hanging = executable_script("sleep 5");
 
         let error = probe_node_with_timeout(&hanging, Duration::from_millis(20)).unwrap_err();
@@ -362,6 +370,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn bundled_runtime_rejects_symlinks() {
+        let _guard = EXECUTABLE_SCRIPT_LOCK.lock().unwrap();
         let runtime = executable_script("printf 'v26.3.1\\n'");
         let directory = tempfile::tempdir().unwrap();
         let link = directory.path().join("node");

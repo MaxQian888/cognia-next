@@ -1182,8 +1182,8 @@ mod tests {
         assert_eq!(result.exit_code, 0, "{}", result.stderr);
     }
 
-    /// Runtime proof the process cap lands: `ulimit -u` inside the sandbox
-    /// reports the policy's `max_processes`, not the host's.
+    /// Runtime proof the kernel reports the policy's process cap inside the
+    /// sandbox. Read procfs because `ulimit -u` is unsupported by dash (/bin/sh).
     #[tokio::test]
     async fn process_cap_is_visible_as_nproc_inside_the_sandbox() {
         let backend = LinuxSandboxBackend::new(None);
@@ -1193,7 +1193,14 @@ mod tests {
         let result = backend
             .run(
                 SandboxCommand {
-                    argv: vec!["/bin/sh".into(), "-c".into(), "ulimit -u".into()],
+                    argv: vec![
+                        "/bin/sh".into(),
+                        "-c".into(),
+                        "while read -r name kind soft hard rest; do \
+                         case \"$name $kind\" in 'Max processes') printf '%s\\n' \"$soft\";; esac; \
+                         done < /proc/self/limits"
+                            .into(),
+                    ],
                     cwd: PathBuf::from("/tmp"),
                     env: BTreeMap::new(),
                     stdin: None,
