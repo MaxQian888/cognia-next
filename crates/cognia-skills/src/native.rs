@@ -233,16 +233,44 @@ pub fn skills_scan_dir(path: String) -> Result<Vec<NativeSkill>, String> {
     }
     let entries =
         std::fs::read_dir(&root).map_err(|e| format!("read_dir {}: {}", root.display(), e))?;
-    let mut out: Vec<NativeSkill> = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        if let Some(skill) = read_skill_dir(&path) {
-            out.push(skill);
-        }
-    }
+    let paths: Vec<_> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    // These reads are independent and can wait on filesystem/endpoint security
+    // I/O. Bound workers per scan; small catalogs avoid thread startup entirely.
+    let mut out = if paths.len() < 8 {
+        paths
+            .iter()
+            .filter_map(|path| read_skill_dir(path))
+            .collect()
+    } else {
+        std::thread::scope(|scope| {
+            let mut workers = Vec::new();
+            let mut out = Vec::new();
+            for chunk in paths.chunks(paths.len().div_ceil(4)) {
+                match std::thread::Builder::new().spawn_scoped(scope, move || {
+                    chunk
+                        .iter()
+                        .filter_map(|path| read_skill_dir(path))
+                        .collect::<Vec<_>>()
+                }) {
+                    Ok(worker) => workers.push(worker),
+                    // A host at its thread limit still gets the full catalog.
+                    Err(_) => out.extend(chunk.iter().filter_map(|path| read_skill_dir(path))),
+                }
+            }
+            for worker in workers {
+                out.extend(
+                    worker
+                        .join()
+                        .map_err(|_| "skill scan worker panicked".to_string())?,
+                );
+            }
+            Ok::<_, String>(out)
+        })?
+    };
     out.sort_by(|a, b| a.dir_name.cmp(&b.dir_name));
     Ok(out)
 }
@@ -364,6 +392,162 @@ mod tests {
         ));
         fs::create_dir_all(&p).expect("create temp dir");
         p
+    }
+
+    /// Filesystem-backed native IPC-boundary benchmark; never a timing CI gate.
+    #[test]
+    #[ignore = "manual performance evidence; creates private disk fixtures"]
+    fn benchmark_native_skill_catalog() {
+        use std::time::Instant;
+
+        for (name, skill_count, resource_count, bytes, extension) in [
+            ("small-text", 400, 10, 512, "md"),
+            ("binary", 32, 8, 128 * 1024, "png"),
+        ] {
+            let root = tempfile::tempdir().expect("fixture root");
+            let data: Vec<u8> = (0..bytes)
+                .map(|i| {
+                    if extension == "md" {
+                        b'x'
+                    } else {
+                        (i % 251) as u8
+                    }
+                })
+                .collect();
+            for i in 0..skill_count {
+                let dir = root.path().join(format!("skill-{i:04}"));
+                fs::create_dir_all(dir.join("assets")).unwrap();
+                fs::write(dir.join("SKILL.md"), "---\nname: fixture\n---\nbody\n").unwrap();
+                for j in 0..resource_count {
+                    fs::write(
+                        dir.join("assets")
+                            .join(format!("resource-{j:03}.{extension}")),
+                        &data,
+                    )
+                    .unwrap();
+                }
+            }
+            let mut expected_bytes = None;
+            for sample in 0..14 {
+                let start = Instant::now();
+                let skills = skills_scan_dir(root.path().to_string_lossy().into_owned()).unwrap();
+                let wire = serde_json::to_vec(&skills).unwrap();
+                let ms = start.elapsed().as_secs_f64() * 1000.0;
+                assert_eq!(skills.len(), skill_count);
+                assert!(skills
+                    .iter()
+                    .all(|skill| skill.resources.len() == resource_count));
+                if let Some(expected) = expected_bytes {
+                    assert_eq!(wire.len(), expected);
+                }
+                expected_bytes = Some(wire.len());
+                std::hint::black_box(&wire);
+                if sample >= 2 {
+                    println!(
+                        "RESOURCE_BENCH {}",
+                        serde_json::json!({ "workload": name, "sample": sample - 2, "ms": ms, "wire_bytes": wire.len() })
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parallel_catalog_scan_preserves_sort_and_skips_invalid_skills() {
+        let root = tempfile::tempdir().unwrap();
+        for i in (0..16).rev() {
+            let dir = root.path().join(format!("skill-{i:02}"));
+            fs::create_dir_all(dir.join("references")).unwrap();
+            if i % 4 != 0 {
+                fs::write(dir.join("SKILL.md"), format!("skill {i}")).unwrap();
+                fs::write(dir.join("references/note.md"), format!("resource {i}")).unwrap();
+            }
+        }
+        let path = root.path().to_string_lossy().into_owned();
+        let scan = skills_scan_dir(path.clone()).unwrap();
+        let expected: Vec<_> = (0..16)
+            .filter(|i| i % 4 != 0)
+            .map(|i| format!("skill-{i:02}"))
+            .collect();
+        assert_eq!(
+            scan.iter().map(|s| &s.dir_name).collect::<Vec<_>>(),
+            expected.iter().collect::<Vec<_>>()
+        );
+        assert!(scan.iter().all(|s| s.resources.len() == 1));
+        fs::write(root.path().join("skill-01/references/note.md"), "updated").unwrap();
+        fs::remove_dir_all(root.path().join("skill-02")).unwrap();
+        let changed = skills_scan_dir(path).unwrap();
+        assert_eq!(changed.len(), 11);
+        assert_eq!(changed[0].resources[0].content, "updated");
+    }
+
+    #[test]
+    fn scans_observe_resource_edits_deletions_and_separate_roots() {
+        let roots = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+        for (index, root) in roots.iter().enumerate() {
+            let skill = root.path().join("same-name");
+            fs::create_dir_all(skill.join("references/nested")).unwrap();
+            fs::write(skill.join("SKILL.md"), format!("root {index}")).unwrap();
+            fs::write(
+                skill.join("references/nested/file.md"),
+                format!("data {index}"),
+            )
+            .unwrap();
+        }
+        let scan = |root: &Path| skills_scan_dir(root.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(scan(roots[0].path())[0].resources[0].content, "data 0");
+        assert_eq!(scan(roots[1].path())[0].resources[0].content, "data 1");
+        let resource = roots[0].path().join("same-name/references/nested/file.md");
+        // Same-length edits must be visible; no mtime/size cache is involved.
+        fs::write(&resource, "edited").unwrap();
+        assert_eq!(scan(roots[0].path())[0].resources[0].content, "edited");
+        fs::remove_file(resource).unwrap();
+        assert!(scan(roots[0].path())[0].resources.is_empty());
+        assert_eq!(scan(roots[1].path())[0].resources[0].content, "data 1");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_skill_dir_rejects_nested_directory_and_broken_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("SKILL.md"), "fixture").unwrap();
+        fs::create_dir(root.path().join("references")).unwrap();
+        fs::write(outside.path().join("secret.md"), "outside").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("references/linked")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("missing"),
+            root.path().join("references/broken"),
+        )
+        .unwrap();
+        assert!(read_skill_dir(root.path()).unwrap().resources.is_empty());
+    }
+
+    #[test]
+    fn base64_preserves_all_byte_values_padding_and_resource_limit() {
+        use base64::Engine as _;
+        for len in [
+            0,
+            1,
+            2,
+            3,
+            4,
+            255,
+            256,
+            257,
+            1024,
+            MAX_RESOURCE_BYTES as usize,
+        ] {
+            let input: Vec<u8> = (0..len).map(|i| (i % 256) as u8).collect();
+            let encoded = base64_encode(&input);
+            assert_eq!(encoded.len(), len.div_ceil(3) * 4);
+            assert_eq!(
+                base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .unwrap(),
+                input
+            );
+        }
     }
 
     #[test]
