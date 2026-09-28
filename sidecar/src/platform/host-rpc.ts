@@ -1,3 +1,5 @@
+import { awaitPending } from "../shared/pending.ts"
+import type { PendingEntry } from "../shared/pending.ts"
 // `host_rpc` — a request/response channel from the sidecar DIRECTLY to the
 // Rust host, over the existing stdio JSON-lines protocol.
 //
@@ -60,18 +62,12 @@ export interface HostRpcClient {
   readonly isClosed: boolean
 }
 
-interface PendingCall {
-  resolve: (result: unknown) => void
-  reject: (error: Error) => void
-  timer: ReturnType<typeof setTimeout>
-}
-
 /** Create a host-RPC client bound to an `emit` function. */
 export function createHostRpc({
   emit,
   timeoutMs = DEFAULT_HOST_RPC_TIMEOUT_MS,
 }: HostRpcOptions): HostRpcClient {
-  const pending = new Map<string, PendingCall>()
+  const pending = new Map<string, PendingEntry<unknown>>()
   let seq = 0
   let closed = false
 
@@ -85,17 +81,20 @@ export function createHostRpc({
     }
     const rpcId = `rpc-${++seq}`
     const budget = options.timeoutMs ?? timeoutMs
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(rpcId)
-        reject(new Error(`host_rpc ${method} timed out after ${budget} ms`))
-      }, budget)
-      // `unref` where available so a pending call cannot hold the process open
-      // during shutdown; the drain below is what actually settles it.
-      if (typeof timer?.unref === "function") timer.unref()
-      pending.set(rpcId, { resolve, reject, timer })
-      emit({ type: "host_rpc", rpcId, method, params })
+    const promise = awaitPending(pending, rpcId, {
+      timeoutMs: budget,
+      ref: false,
+      exposeReject: true,
+      onTimeout: () => {
+        throw new Error(`host_rpc ${method} timed out after ${budget} ms`)
+      },
     })
+    try {
+      emit({ type: "host_rpc", rpcId, method, params })
+    } catch (error) {
+      pending.get(rpcId)?.reject?.(error)
+    }
+    return promise
   }
 
   function resolveResult(msg: unknown): boolean {
@@ -104,9 +103,8 @@ export function createHostRpc({
     const entry = rpcId ? pending.get(rpcId) : undefined
     if (!frame || !rpcId || !entry) return false
     pending.delete(rpcId)
-    clearTimeout(entry.timer)
     if (frame.ok === false) {
-      entry.reject(new Error(String(frame.error ?? "host_rpc failed")))
+      entry.reject?.(new Error(String(frame.error ?? "host_rpc failed")))
     } else {
       entry.resolve(frame.result)
     }
@@ -117,8 +115,7 @@ export function createHostRpc({
     closed = true
     const err = new Error(String(reason ?? "host_rpc channel closed"))
     for (const [, entry] of pending) {
-      clearTimeout(entry.timer)
-      entry.reject(err)
+      entry.reject?.(err)
     }
     pending.clear()
   }

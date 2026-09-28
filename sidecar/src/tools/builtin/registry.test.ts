@@ -174,3 +174,39 @@ test("native process jobs expose their existing output and stop controls without
     assert.ok(names.includes(name), name)
   assert.equal(new Set(names).size, names.length)
 })
+
+test("process controls precede monitor fallback and occur once when the core suite is active", () => {
+  const bgShells = {} as SessionBgShellRegistry
+  const processNames = collectCogniaToolDefs({ enabled: { process: true } }).map((d) => d.name)
+  for (const dispatchPath of ["anthropic", "ai-sdk"] as const) {
+    for (const readTracker of [undefined, fakeTracker]) {
+      const names = collectCogniaToolDefs({
+        enabled: { process: true, coreFiles: true, lsp: true, codeGraph: true },
+        dispatchPath,
+        readTracker,
+        bgShells,
+      }).map((d) => d.name)
+      assert.equal(new Set(names).size, names.length)
+      if (dispatchPath === "anthropic" || !readTracker) {
+        assert.deepEqual(names, [
+          ...processNames,
+          "bash_output",
+          "kill_shell",
+          "list_shells",
+          "Monitor",
+          "monitor_cancel",
+          "monitor_list",
+          ...(dispatchPath === "ai-sdk" ? ["exit_plan_mode"] : []),
+        ])
+      } else {
+        const coreNames = collectCogniaToolDefs({
+          enabled: { coreFiles: true },
+          dispatchPath,
+          readTracker,
+          bgShells,
+        }).map((d) => d.name)
+        assert.deepEqual(names, [...processNames, ...coreNames])
+      }
+    }
+  }
+})

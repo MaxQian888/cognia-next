@@ -271,7 +271,7 @@ function safeBaseNames(bundle: LanguageDescriptor, node: TreeNode): string[] {
  * Docstring heuristic: a preceding `comment` sibling for C-family languages, or
  * the first string literal in a Python function/class body.
  */
-function docstringFor(node: TreeNode, language: string, source: string): string | null {
+function docstringFor(node: TreeNode, language: string, _source: string): string | null {
   if (language === "python") {
     const body = node.childForFieldName?.("body")
     const first = body?.namedChildren?.[0]

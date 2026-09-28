@@ -1,3 +1,4 @@
+import { awaitPending } from "../../shared/pending.ts"
 // The approval round-trip both rails share once the ladder says "ask".
 //
 // The rail emits its own `permission_request` frame; this parks a waiter in
@@ -42,28 +43,28 @@ export const ABORTED_ANSWER: Readonly<ApprovalAnswer> = { behavior: "deny", mess
 /** Park a waiter for one permission request and resolve with the answer. */
 export function awaitApproval(request: ApprovalRequest): Promise<ApprovalAnswer> {
   const { pendingApprovals, requestId, entry, signal, onAbort, review } = request
-  return new Promise((resolve) => {
-    let abortListener: (() => void) | null = null
-    const settle = (answer: ApprovalAnswer) => {
-      // Detach from the signal once settled so listeners do not pile up on a
-      // signal that outlives many tool calls.
+  let abortListener: (() => void) | undefined
+  const promise = awaitPending(pendingApprovals, requestId, {
+    extra: entry,
+    mapAnswer: review,
+    onSettled: () => {
       if (abortListener && signal && typeof signal.removeEventListener === "function") {
         signal.removeEventListener("abort", abortListener)
       }
-      resolve(review ? review(answer) : answer)
-    }
-    pendingApprovals.set(requestId, { resolve: settle, ...entry })
-    if (signal) {
-      abortListener = () => {
-        if (pendingApprovals.delete(requestId)) {
-          onAbort?.()
-          settle({ ...ABORTED_ANSWER })
-        }
-      }
-      if (signal.aborted) abortListener()
-      else if (typeof signal.addEventListener === "function") {
-        signal.addEventListener("abort", abortListener, { once: true })
-      }
-    }
+    },
   })
+  if (signal) {
+    abortListener = () => {
+      const waiter = pendingApprovals.get(requestId)
+      if (waiter) {
+        pendingApprovals.delete(requestId)
+        onAbort?.()
+        waiter.resolve({ ...ABORTED_ANSWER })
+      }
+    }
+    if (signal.aborted) abortListener()
+    else if (typeof signal.addEventListener === "function")
+      signal.addEventListener("abort", abortListener, { once: true })
+  }
+  return promise
 }

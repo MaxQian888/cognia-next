@@ -1,3 +1,4 @@
+import { awaitPending } from "../../shared/pending.ts"
 // Synthetic `cognia-plugin-tools` in-process MCP server (M2).
 //
 // Mirrors the shape of the cognia-tools builtin server but instead of running
@@ -100,22 +101,10 @@ export function awaitPluginToolResponse(
   name: string,
   timeoutMs: number = DEFAULT_PLUGIN_TOOL_TIMEOUT_MS
 ): Promise<PluginToolResponse> {
-  return new Promise((resolve) => {
-    const noTimeout = !Number.isFinite(timeoutMs) || timeoutMs <= 0
-    const timer = noTimeout
-      ? null
-      : setTimeout(() => {
-          pending.delete(toolUseId)
-          resolve({ error: `plugin tool '${name}' timed out after ${timeoutMs}ms` })
-        }, timeoutMs)
-    if (timer && typeof timer.unref === "function") timer.unref()
-    pending.set(toolUseId, {
-      resolve: (r) => {
-        if (timer) clearTimeout(timer)
-        pending.delete(toolUseId)
-        resolve(r)
-      },
-    })
+  return awaitPending(pending, toolUseId, {
+    ...(Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+    ref: false,
+    onTimeout: () => ({ error: `plugin tool '${name}' timed out after ${timeoutMs}ms` }),
   })
 }
 

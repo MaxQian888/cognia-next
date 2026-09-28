@@ -117,7 +117,7 @@ describe("HookAgentKind", () => {
 describe("dormant handler fields", () => {
   const ROOT = join(__dirname, "../..")
   const RUNNERS = [
-    "sidecar/dispatch/agent-hooks.mjs",
+    "sidecar/src/hooks/matcher.ts",
     "crates/cognia-hooks/src/command.rs",
     "crates/cognia-hooks/src/webhook.rs",
     "crates/cognia-hooks/src/types.rs",

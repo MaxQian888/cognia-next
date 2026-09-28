@@ -543,7 +543,7 @@ export function detectEntries(file, source) {
     entries.add(`llm-client:${fn}`)
 
   for (const method of LANGUAGE_MODEL_METHODS) {
-    if (new RegExp(`\\.\\s*${method}\\s*\\(`).test(lexed.bare))
+    if (new RegExp(`\\.\\s*${method}\\s*(?:!|\\?\\.)?\\s*\\(`).test(lexed.bare))
       entries.add(`language-model:${method}`)
   }
 

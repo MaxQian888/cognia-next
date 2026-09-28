@@ -1836,7 +1836,7 @@ export interface SdkSlashCommand {
  * Per-MCP-server diagnostic line emitted by the sidecar while it connects out
  * to user-configured MCP servers (connect success/failure, `tools()` failures,
  * captured child `stderr`). Mirror of `buildMcpLogEvent` in
- * `sidecar/dispatch/mcp-log.mjs`. `server` is absent when a line can't be
+ * `sidecar/src/mcp/client/log.ts`. `server` is absent when a line can't be
  * attributed to a named server. Consumed on the GUI side by the MCP log bridge
  * (`lib/mcp/log-bridge.ts`), which forwards each into the unified logger.
  */

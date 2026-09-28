@@ -436,7 +436,7 @@ export function applySdkEvent(
       }
     }
 
-    // Mapped to canonical events by `sidecar/dispatch/sdk-canonical-events.mjs`.
+    // Mapped to canonical events by `sidecar/src/host/events/canonical/index.ts`.
     // These lifecycle/status messages render no transcript row of their own.
     case "tool_progress":
     case "auth_status":

@@ -39,7 +39,7 @@ export function assertToolCallWithinRoots(
   const bare = sandboxAliases[toolName] ?? bareToolName(toolName)
   let isWrite = WRITE_TOOLS.has(bare)
   let isRead = READ_TOOLS.has(bare)
-  let isBash = BASH_TOOLS.has(bare)
+  const isBash = BASH_TOOLS.has(bare)
   let pluginPathKeys: string[] | undefined
   if (!isWrite && !isRead && !isBash) {
     // Plugin tools opt into scope enforcement via manifest `access`; the

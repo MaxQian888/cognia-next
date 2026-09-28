@@ -51,7 +51,6 @@ test("validateShellCommand rejects empty command", () => {
 })
 
 test("validateShellCommand rejects non-string args", () => {
-  // @ts-ignore — intentionally passing a number to verify the guard.
   const r = validateShellCommand("git", [42])
   assert.equal(r.safe, false)
 })

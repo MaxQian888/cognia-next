@@ -48,6 +48,8 @@ import {
   stageBuiltinPluginAssets,
 } from "./lib/stage-builtin-plugin-assets.mjs"
 
+import { sidecarVersionDefines } from "./lib/sidecar-version-info.mjs"
+
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const cliEntry = path.join(root, "cli/src/cli/entry.ts")
 const sidecarEntry = path.join(root, "sidecar/claude-host.mjs")
@@ -293,6 +295,7 @@ console.log(`build-cli-binary: built TUI node_modules → ${path.relative(root, 
 fs.mkdirSync(sidecarOutDir, { recursive: true })
 await esbuild.build({
   entryPoints: [sidecarEntry],
+  define: sidecarVersionDefines(root),
   outfile: path.join(sidecarOutDir, "claude-host.mjs"),
   bundle: true,
   platform: "node",

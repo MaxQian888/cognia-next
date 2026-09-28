@@ -14,7 +14,7 @@ import { renderSnapcompactPng } from "./render.ts"
 import { checkReadability } from "./readability.ts"
 import { makeOpticalMessage } from "../compaction.ts"
 import type { ConversationMessage } from "../compaction.ts"
-import type { OpticalShape, ResolvedShape } from "./layout.ts"
+import type { ResolvedShape } from "./layout.ts"
 
 function stripUndefined<T extends object>(obj: T): Partial<T> {
   const out: Record<string, unknown> = {}
@@ -23,14 +23,8 @@ function stripUndefined<T extends object>(obj: T): Partial<T> {
 }
 
 /** `CompressionSettings.optical`: the shape overrides and the gates' thresholds. */
-export interface OpticalCompactionOptions extends OpticalShape {
-  size?: number
-  maxFrames?: number
-  minCoverage?: number
-  minSavings?: number
-  verify?: boolean
-  readabilityThreshold?: number
-}
+import type { OpticalCompactionOptions } from "../../shared/wire/optical-options.ts"
+export type { OpticalCompactionOptions } from "../../shared/wire/optical-options.ts"
 
 /**
  * Rides the compaction event to the renderer, which archives the frames

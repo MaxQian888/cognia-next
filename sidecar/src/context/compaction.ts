@@ -19,11 +19,8 @@
  * (or a looser record from an older session), with `content` a string or a
  * part array.
  */
-export interface ConversationMessage {
-  role: string
-  content?: unknown
-  [field: string]: unknown
-}
+import type { ConversationMessage } from "../shared/wire/conversation.ts"
+export type { ConversationMessage } from "../shared/wire/conversation.ts"
 
 /** A content part as it may appear in `ConversationMessage.content`. */
 export type ContentPart = Record<string, unknown>

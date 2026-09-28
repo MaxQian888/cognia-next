@@ -27,6 +27,8 @@ import { resolveClaudeRuntime } from "./lib/stage-claude-runtime.mjs"
 import { stageBuiltinPluginAssets } from "./lib/stage-builtin-plugin-assets.mjs"
 import { BUN_SIDECAR_PATCHES, applySidecarPatch, patchFilter } from "./lib/bun-sidecar-patches.mjs"
 
+import { sidecarVersionDefines } from "./lib/sidecar-version-info.mjs"
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const entry = path.join(root, "cli/src/cli/entry.ts")
 const hostTarget = hostTargetName(process.platform, process.arch)
@@ -267,6 +269,7 @@ const result = await Bun.build({
     identifiers: false,
   },
   define: {
+    ...sidecarVersionDefines(root),
     "process.env.NODE_ENV": JSON.stringify("production"),
     "globalThis.__COGNIA_COMPILED_HOST__": "true",
   },

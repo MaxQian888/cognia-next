@@ -1,7 +1,7 @@
 // Source patches the compiled Bun CLI applies to sidecar modules at load time.
 //
 // A `bun build --compile` executable cannot read files that sit next to a
-// sidecar module (schema.sql, package.json version metadata) or dynamically
+// sidecar module (schema.sql) or dynamically
 // import the vscode-ext-host dist by computed path, so build-cli-bun.mjs
 // rewrites those few lines while bundling. Each rewrite anchors on exact source
 // text; the table lives here, as data, so a node --test suite can prove every
@@ -29,8 +29,6 @@ export function replaceExactly(source, search, replacement, label) {
   return source.replace(search, () => replacement)
 }
 
-const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"))
-
 /**
  * @typedef {object} PatchContext
  * @property {string} root repo root
@@ -53,28 +51,6 @@ export const BUN_SIDECAR_PATCHES = [
         search: 'const SCHEMA_SQL = fs.readFileSync(path.join(HERE, "schema.sql"), "utf-8")',
         replace: ({ filePath }) =>
           `const SCHEMA_SQL = ${JSON.stringify(fs.readFileSync(path.join(path.dirname(filePath), "schema.sql"), "utf8"))}`,
-      },
-    ],
-  },
-  {
-    file: "sidecar/agent-host.mjs",
-    loader: "js",
-    edits: [
-      {
-        label: "agent host createRequire import",
-        search: 'import { createRequire } from "node:module"\n',
-        replace: () => "",
-      },
-      {
-        label: "agent host version metadata",
-        search: /const _require = createRequire\(import\.meta\.url\)\nfunction readVersionInfo\(\) \{[\s\S]*?\n\}/,
-        replace: ({ root }) => {
-          const sdkVersion = readJson(
-            path.join(root, "sidecar/node_modules/@anthropic-ai/claude-agent-sdk/package.json")
-          ).version
-          const sidecarVersion = readJson(path.join(root, "sidecar/package.json")).version
-          return `function readVersionInfo() { return ${JSON.stringify({ sdkVersion, sidecarVersion })} }`
-        },
       },
     ],
   },

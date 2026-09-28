@@ -158,7 +158,7 @@ export const ACCEPTANCE_TEST_ROOTS = [
   "crates/cognia-task-workspace",
   "crates/cognia-sandbox-runner",
   "crates/cognia-automation",
-  "sidecar/dispatch",
+  "sidecar/src",
   "tests/e2e",
 ] as const
 

@@ -51,6 +51,8 @@ export const TARGETS = [
   // `/healthz`, `whoami`, the bridge hello and the agent cards report this
   // crate's `CARGO_PKG_VERSION` (ADR-0196 P7).
   { path: "crates/cognia-companion/Cargo.toml", kind: "cargo" },
+  { path: "crates/cognia-companion-rpc/Cargo.toml", kind: "cargo" },
+  { path: "crates/cognia-sidecar/Cargo.toml", kind: "cargo" },
   { path: "cli/package.json", kind: "json" },
   { path: "sidecar/package.json", kind: "json" },
   { path: "sidecar/vscode-ext-host/package.json", kind: "json" },

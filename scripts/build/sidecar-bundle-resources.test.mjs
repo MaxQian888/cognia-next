@@ -175,7 +175,7 @@ test("packageNameOf keeps the scope and drops the subpath", () => {
 
 test("findUnstagedRequiredEntries flags a Rust entry no resource stages", () => {
   const unstaged = findUnstagedRequiredEntries(root, ["../sidecar/agent-host.mjs", "../sidecar/node_modules/**/*"])
-  assert.ok(unstaged.some((line) => line.startsWith("sidecar/dispatch is required")))
+  assert.ok(unstaged.some((line) => line.startsWith("sidecar/src is required")))
   assert.ok(!unstaged.some((line) => line.startsWith("sidecar/agent-host.mjs")))
 })
 
@@ -184,9 +184,9 @@ test("resolves resource entries relative to src-tauri/", () => {
   assert.equal(exact("sidecar/agent-host.mjs"), true)
   assert.equal(exact("sidecar/claude-host.mjs"), false)
 
-  const recursive = resourceMatcher("../sidecar/dispatch/**/*")
-  assert.equal(recursive("sidecar/dispatch/index.mjs"), true)
-  assert.equal(recursive("sidecar/dispatch/nested/deep/x.mjs"), true)
+  const recursive = resourceMatcher("../sidecar/src/**/*")
+  assert.equal(recursive("sidecar/src/index.ts"), true)
+  assert.equal(recursive("sidecar/src/nested/deep/x.ts"), true)
   assert.equal(recursive("sidecar/other/index.mjs"), false)
 
   // A single `*` stays within one path segment.

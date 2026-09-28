@@ -147,7 +147,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     hostBindings: [
       "lib/plugin/registries/skill-registry.ts",
       "lib/claude/build-options.ts",
-      "sidecar/dispatch/anthropic.mjs",
+      "sidecar/src/runtimes/claude-agent-sdk/options.ts",
     ],
     typescriptSdk: [
       "packages/plugin-sdk/src/api/skill.ts",
@@ -905,7 +905,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/native-anthropic-tool-registry.ts",
       "lib/claude/build-options.ts",
       "lib/claude/computer-use-tools.ts",
-      "sidecar/dispatch/anthropic.mjs",
+      "sidecar/src/runtimes/claude-agent-sdk/options.ts",
       "crates/cognia-automation/src/automation/commands.rs",
     ],
     typescriptSdk: [

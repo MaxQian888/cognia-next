@@ -87,6 +87,7 @@ test("TARGETS covers the app-version group and excludes independent packages", (
   assert.ok(paths.includes("src-tauri/Cargo.toml"))
   assert.ok(paths.includes("cli/package.json"))
   assert.ok(paths.includes("sidecar/package.json"))
+  assert.ok(paths.includes("crates/cognia-sidecar/Cargo.toml"))
   assert.ok(paths.includes("mobile/package.json"))
   // Independently-versioned things must NOT be swept in.
   assert.ok(!paths.some((p) => p.startsWith("services/")))

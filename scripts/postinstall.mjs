@@ -16,4 +16,5 @@ if (!fs.existsSync("sidecar/package.json")) {
 
 execSync("pnpm run sidecar:install", { stdio: "inherit" })
 execSync("node scripts/build/build-sidecar-linked-packages.mjs", { stdio: "inherit" })
+execSync("node scripts/build/build-a2ui-sidecar.mjs", { stdio: "inherit" })
 execSync("pnpm run sidecar:vscode:build", { stdio: "inherit" })

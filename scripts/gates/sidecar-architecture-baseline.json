@@ -1,6 +1,4 @@
 {
   "$comment": "Written by `pnpm audit:sidecar-architecture:baseline`. Rows are layering violations of the legacy sidecar tree; the list may only shrink (ADR-0197).",
-  "findings": [
-    "launcher-import: sidecar/claude-host.mjs imports the process entry sidecar/agent-host.mjs"
-  ]
+  "findings": []
 }

@@ -42,7 +42,7 @@ describe("plugin runtime proof audit", () => {
       expect.arrayContaining([
         "lib/plugin/registries/native-anthropic-tool-registry.ts",
         "lib/claude/build-options.ts",
-        "sidecar/dispatch/anthropic.mjs",
+        "sidecar/src/runtimes/claude-agent-sdk/options.ts",
       ])
     )
     expect(nativeTool?.typescriptSdk).toEqual(

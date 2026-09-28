@@ -152,6 +152,16 @@ test("finds provider SDKs, Agent SDK model loops and direct model calls", () => 
   ])
 })
 
+test("finds typed and optional language-model calls", () => {
+  for (const source of [
+    "model!.doGenerate!(options)",
+    "model?.doGenerate?.(options)",
+    "model.doGenerate(options)",
+  ]) {
+    assert.deepEqual(detectEntries("sidecar/src/feature.ts", source), ["language-model:doGenerate"])
+  }
+})
+
 test("tracks the raw LlmClient factory under both names and both modules", () => {
   assert.deepEqual(detectEntries("lib/a.ts", LEDGERED), ["llm-client:createLlmClient"])
   assert.deepEqual(

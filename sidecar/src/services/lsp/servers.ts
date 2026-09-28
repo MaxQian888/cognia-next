@@ -105,7 +105,6 @@ export function nearestRoot(
     const cwd = ctx.cwd ? path.resolve(ctx.cwd) : null
     const stop = cwd && isAncestor(cwd, dir) ? cwd : path.parse(resolved).root
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       if (excludeMarkers.some((m) => existsIn(dir, m))) return undefined
       if (markers.some((m) => existsIn(dir, m))) return dir

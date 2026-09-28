@@ -205,7 +205,7 @@
     "protection": "Explicit user-directed provider request; local derived data is not added here."
   },
   {
-    "file": "sidecar/dispatch/ai-sdk-mcp.mjs",
+    "file": "sidecar/src/mcp/client/tools.ts",
     "boundaries": ["@ai-sdk/mcp", "@ai-sdk/mcp/mcp-stdio"],
     "reason": "MCP transport imports are tool protocol boundaries, not model sends.",
     "protection": "No LLM or embedding payload is emitted by these imports."
@@ -223,7 +223,7 @@
     "protection": "No outbound model payload is emitted here."
   },
   {
-    "file": "sidecar/dispatch/feature-call.mjs",
+    "file": "sidecar/src/host/feature-call/index.ts",
     "boundaries": ["@ai-sdk/amazon-bedrock"],
     "reason": "Low-level sidecar feature transport constructs the Bedrock embedding model for a renderer-prepared request.",
     "protection": "Owning renderer feature boundaries redact derived payloads before dispatch; this import only constructs the provider model."
@@ -269,7 +269,7 @@
     "protection": "The imported helpers only transform in-memory audio samples and emit no network request."
   },
   {
-    "file": "sidecar/dispatch/mcp-runtime-gateway.mjs",
+    "file": "sidecar/src/mcp/client/discovery.ts",
     "boundaries": ["@ai-sdk/mcp"],
     "reason": "Creates an ephemeral MCP client for explicit server capability discovery, not an LLM or embedding send.",
     "protection": "Every remote MCP transport is created through the existing egress guard, and discovery sends only protocol capability requests to the configured server."

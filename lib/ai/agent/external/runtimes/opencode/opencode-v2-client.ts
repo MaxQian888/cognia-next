@@ -300,7 +300,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
    * The desktop delegates discovery to its sidecar because the renderer has no
    * process table; the standalone CLI owns one and has no feature-call bridge,
    * so it runs the identical `Service.discover` + `/api/status` probe
-   * in-process (the same contract `sidecar/dispatch/feature-call.mjs` serves).
+   * in-process (the same contract `sidecar/src/host/feature-call/index.ts` serves).
    */
   private async discoverService(signal: AbortSignal): Promise<OpenCodeV2Discovery> {
     if (!isCliHost()) return discoverOpenCodeV2ViaSidecar(signal)

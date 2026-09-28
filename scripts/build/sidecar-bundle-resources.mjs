@@ -233,9 +233,9 @@ export function findUncoveredResources(root, resources, entryPoints = SIDECAR_EN
 
 /** `REQUIRED_SIDECAR_ENTRIES` as declared in the Rust host. */
 export function requiredSidecarEntries(root) {
-  const source = fs.readFileSync(path.join(root, "src-tauri/src/claude/sidecar.rs"), "utf8")
+  const source = fs.readFileSync(path.join(root, "crates/cognia-sidecar/src/lib.rs"), "utf8")
   const block = source.match(/const REQUIRED_SIDECAR_ENTRIES: &\[&str\] = &\[([\s\S]*?)\];/)
-  if (!block) throw new Error("REQUIRED_SIDECAR_ENTRIES not found in src-tauri/src/claude/sidecar.rs")
+  if (!block) throw new Error("REQUIRED_SIDECAR_ENTRIES not found in crates/cognia-sidecar/src/lib.rs")
   return [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
 }
 

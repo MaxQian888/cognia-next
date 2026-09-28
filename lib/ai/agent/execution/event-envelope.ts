@@ -1,7 +1,7 @@
 // TS-side canonical envelope helpers (ADR-0090 Phase 3).
 //
 // The Claude/AI-SDK rails wrap events in the SIDECAR
-// (`sidecar/dispatch/event-envelope.mjs` — same wire shape, pinned by the
+// (`sidecar/src/host/events/envelope.ts` — same wire shape, pinned by the
 // shared fixture). This module wraps the EXTERNAL rail (ExternalAgentManager
 // events, which never pass through the sidecar) and provides the
 // capture-layer narrowing from canonical events back to the legacy

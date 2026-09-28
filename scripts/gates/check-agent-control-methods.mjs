@@ -6,8 +6,8 @@
  * Why: the same eight method names are hand-written in four files, in three
  * languages —
  *   1. `SessionControlMethod`            packages/agent-config-types/src/index.ts
- *   2. `CONTROL_METHODS`                 sidecar/dispatch/control.mjs
- *   3. `is_allowed_control_method`       src-tauri/src/claude/commands.rs
+ *   2. `CONTROL_METHODS`                 sidecar/src/host/control/control.ts
+ *   3. `is_allowed_control_method`       crates/cognia-sidecar/src/commands.rs
  *   4. `allows_only_known_control_methods` (the Rust test re-types them again)
  * — and the SDK-parity work adds 17 more. Four hand-maintained copies of a
  * growing list is four drift sources; the sibling `companion-commands.json`
@@ -39,9 +39,9 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 
 const SITES = {
   "packages/agent-config-types/src/index.ts": extractTsUnion,
-  "sidecar/dispatch/control.mjs": extractSidecarSet,
-  "src-tauri/src/claude/commands.rs": extractRustAllowlist,
-  "src-tauri/src/claude/commands.rs::test": extractRustTestList,
+  "sidecar/src/host/control/control.ts": extractSidecarSet,
+  "crates/cognia-sidecar/src/commands.rs": extractRustAllowlist,
+  "crates/cognia-sidecar/src/commands.rs::test": extractRustTestList,
 }
 
 /** `export type SessionControlMethod = | "a" | "b"` */
@@ -320,14 +320,14 @@ export function verify({
       const mapped = controlArgs[entry.name]
       if (!mapped) {
         errors.push(
-          `sidecar/dispatch/control.mjs: controlArgs has no case for \`${entry.name}\`, ` +
+          `sidecar/src/host/control/control.ts: controlArgs has no case for \`${entry.name}\`, ` +
             `so it would be invoked with no arguments`
         )
         continue
       }
       if (mapped.join(",") !== entry.args.join(",")) {
         errors.push(
-          `sidecar/dispatch/control.mjs: controlArgs(${entry.name}) passes ` +
+          `sidecar/src/host/control/control.ts: controlArgs(${entry.name}) passes ` +
             `[${mapped.join(", ")}] but the manifest declares [${entry.args.join(", ")}]`
         )
       }
@@ -338,7 +338,7 @@ export function verify({
   // `capability_error` rather than a generic `unsupported_provider`. Two
   // copies exist because the sidecar cannot import TypeScript.
   for (const [site, table] of [
-    ["sidecar/dispatch/control.mjs: CONTROL_METHOD_CAPABILITIES", controlCapabilities],
+    ["sidecar/src/host/control/control.ts: CONTROL_METHOD_CAPABILITIES", controlCapabilities],
     ["packages/agent-config-types/src/index.ts: SESSION_CONTROL_CAPABILITIES", tsCapabilities],
   ]) {
     if (!table) continue
@@ -438,16 +438,18 @@ export function verifySessionApi({
     // as a read deletes a transcript with no prompt.
     const spec = specs?.[entry.name]
     if (specs && !spec) {
-      errors.push(`sidecar/dispatch/session-api.mjs: SESSION_API_METHODS has no \`${entry.name}\``)
+      errors.push(
+        `sidecar/src/runtimes/claude-agent-sdk/session-api.ts: SESSION_API_METHODS has no \`${entry.name}\``
+      )
     } else if (spec && spec.mutates !== entry.mutates) {
       errors.push(
-        `sidecar/dispatch/session-api.mjs: SESSION_API_METHODS.${entry.name}.mutates is ` +
+        `sidecar/src/runtimes/claude-agent-sdk/session-api.ts: SESSION_API_METHODS.${entry.name}.mutates is ` +
           `${spec.mutates}, the manifest says ${entry.mutates}`
       )
     }
     if (spec && entry.store !== undefined && spec.store !== entry.store) {
       errors.push(
-        `sidecar/dispatch/session-api.mjs: SESSION_API_METHODS.${entry.name}.store is ` +
+        `sidecar/src/runtimes/claude-agent-sdk/session-api.ts: SESSION_API_METHODS.${entry.name}.store is ` +
           `${spec.store}, the manifest says ${entry.store}`
       )
     }
@@ -464,11 +466,11 @@ export function verifySessionApi({
       const mapped = args[entry.name]
       if (!mapped) {
         errors.push(
-          `sidecar/dispatch/session-api.mjs: callSessionApi has no case for \`${entry.name}\``
+          `sidecar/src/runtimes/claude-agent-sdk/session-api.ts: callSessionApi has no case for \`${entry.name}\``
         )
       } else if (mapped.join(",") !== entry.args.join(",")) {
         errors.push(
-          `sidecar/dispatch/session-api.mjs: callSessionApi(${entry.name}) passes ` +
+          `sidecar/src/runtimes/claude-agent-sdk/session-api.ts: callSessionApi(${entry.name}) passes ` +
             `[${mapped.join(", ")}] but the manifest declares [${entry.args.join(", ")}]`
         )
       }
@@ -515,9 +517,9 @@ export function loadAndVerify(read = (p) => readFileSync(resolve(REPO_ROOT, p), 
     sites[site] = extract(read(site.replace("::test", "")))
   }
 
-  const control = read("sidecar/dispatch/control.mjs")
-  const sessionApiSource = read("sidecar/dispatch/session-api.mjs")
-  const rust = read("src-tauri/src/claude/commands.rs")
+  const control = read("sidecar/src/host/control/control.ts")
+  const sessionApiSource = read("sidecar/src/runtimes/claude-agent-sdk/session-api.ts")
+  const rust = read("crates/cognia-sidecar/src/commands.rs")
 
   return [
     ...verify({
@@ -529,7 +531,7 @@ export function loadAndVerify(read = (p) => readFileSync(resolve(REPO_ROOT, p), 
       controlCapabilities: extractCapabilityMap(
         control,
         "CONTROL_METHOD_CAPABILITIES",
-        "sidecar/dispatch/control.mjs"
+        "sidecar/src/host/control/control.ts"
       ),
       tsCapabilities: extractCapabilityMap(
         contract,
@@ -542,12 +544,12 @@ export function loadAndVerify(read = (p) => readFileSync(resolve(REPO_ROOT, p), 
       sites: {
         "packages/agent-config-types/src/index.ts::SessionApiMethod":
           extractSessionApiUnion(contract),
-        "sidecar/dispatch/session-api.mjs::SESSION_API_METHODS": new Set(
+        "sidecar/src/runtimes/claude-agent-sdk/session-api.ts::SESSION_API_METHODS": new Set(
           Object.keys(extractSessionApiSpecs(sessionApiSource))
         ),
-        "src-tauri/src/claude/commands.rs::is_allowed_session_api_method":
+        "crates/cognia-sidecar/src/commands.rs::is_allowed_session_api_method":
           extractRustSessionApiAllowlist(rust),
-        "src-tauri/src/claude/commands.rs::test": extractRustSessionApiTestList(rust),
+        "crates/cognia-sidecar/src/commands.rs::test": extractRustSessionApiTestList(rust),
       },
       sdkExports: new Set(surface.surface.exports),
       capabilityIds,

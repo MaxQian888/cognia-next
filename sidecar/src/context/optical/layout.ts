@@ -18,16 +18,8 @@ const DIM_OFF_CH = String.fromCharCode(DIM_OFF)
 export type VisionFamily = "anthropic" | "openai" | "google" | "default"
 
 /** How a frame is drawn: font, ink variant and cell geometry. */
-export interface OpticalShape {
-  font?: string
-  /** "sent" (hue per sentence) or "bw"; the renderer rejects anything else. */
-  variant?: string
-  cellWidth?: number
-  cellHeight?: number
-  lineRepeat?: number
-  /** 1 (grid) or 2 (two-column doc). */
-  columns?: number
-}
+import type { OpticalShape } from "../../shared/wire/optical-options.ts"
+export type { OpticalShape } from "../../shared/wire/optical-options.ts"
 
 /** A shape resolved for a model: the family's preset plus caller overrides. */
 export interface ResolvedShape extends OpticalShape {

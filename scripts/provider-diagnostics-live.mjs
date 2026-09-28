@@ -3,7 +3,7 @@
 import { writeFile } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
 
-import { createFeatureCallHandler } from "../sidecar/dispatch/feature-call.mjs"
+import { createFeatureCallHandler } from "../sidecar/src/host/feature-call/index.ts"
 
 const PROMPT = "Reply with exactly: diagnostic-ok"
 

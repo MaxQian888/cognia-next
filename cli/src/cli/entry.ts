@@ -53,7 +53,7 @@ async function boot(): Promise<number> {
   }
   if (role === "claude-probe") {
     const { resolveEmbeddedClaudeExecutable } =
-      await import("../../../sidecar/dispatch/claude-executable.mjs")
+      await import("../../../sidecar/src/runtimes/claude-agent-sdk/executable.ts")
     const executable = resolveEmbeddedClaudeExecutable()
     if (!executable) throw new Error("embedded Claude executable is unavailable")
     const { spawnSync } = await import("node:child_process")

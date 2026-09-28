@@ -35,3 +35,27 @@ export interface ToolDefinition {
  */
 export type WrappedToolDefinition<D extends ToolDefinition> = Omit<D, "handler"> &
   Pick<ToolDefinition, "handler">
+
+/** A category contributes its definitions at one fixed registry position. */
+export interface ToolCategory<Context> {
+  readonly id: string
+  isEnabled(context: Context): boolean
+  create(context: Context): readonly ToolDefinition[]
+}
+
+/** Give static and session-bound categories the same collection interface. */
+export function defineCategory<Context>({
+  id,
+  isEnabled,
+  tools,
+}: {
+  id: string
+  isEnabled(context: Context): boolean
+  tools: readonly ToolDefinition[] | ((context: Context) => readonly ToolDefinition[])
+}): ToolCategory<Context> {
+  return {
+    id,
+    isEnabled,
+    create: typeof tools === "function" ? tools : () => tools,
+  }
+}

@@ -12,7 +12,7 @@ import {
 } from "./ai-sdk-adapter.ts"
 import type { ProviderOptionsMap } from "./ai-sdk-adapter.ts"
 import { getPath } from "./json-path-lite.ts"
-import { createEventAdapter } from "../../../dispatch/event-adapter.mjs"
+import { createEventAdapter } from "../../runtimes/ai-sdk/events.ts"
 
 /** The `streamText` arguments the adapter builds, as a fake records them. */
 interface StreamArgs {

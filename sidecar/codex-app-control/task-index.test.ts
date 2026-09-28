@@ -97,7 +97,7 @@ function seedDatabase(path: string): void {
   database.close()
 }
 
-test("task index returns UUID/title metadata with workspace, archive, and subagent filters", async (t) => {
+test("task index returns UUID/title metadata with workspace, archive, and subagent filters", async () => {
   const root = await mkdtemp(join(tmpdir(), "cognia-task-index-"))
   const databasePath = join(root, "state.sqlite")
   seedDatabase(databasePath)

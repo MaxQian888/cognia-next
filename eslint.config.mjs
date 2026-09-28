@@ -61,7 +61,12 @@ const eslintConfig = defineConfig([
     "web/next-env.d.ts",
     ".agents/**",
     ".claude/**",
-    "sidecar/**",
+    "sidecar/*.mjs",
+    "sidecar/node_modules/**",
+    "sidecar/pi-extension/**",
+    "sidecar/vscode-ext-host/**",
+    "sidecar/webclone/**",
+    "sidecar/codeserver-agent-ext/**",
     // Standalone Cloudflare worker + Vite viewer workspace with its own
     // toolchain, tsconfig, and lockfile (like sidecar/). Its src is linted
     // by its own config; its dist/ is a minified build artifact.
@@ -129,6 +134,27 @@ const eslintConfig = defineConfig([
           varsIgnorePattern: "^_",
           caughtErrorsIgnorePattern: "^_",
           destructuredArrayIgnorePattern: "^_",
+        },
+      ],
+    },
+  },
+  // Node executes these strict TypeScript sources directly (ADR-0197).
+  {
+    files: [
+      "sidecar/src/**/*.ts",
+      "sidecar/codex-app-control/**/*.ts",
+      "sidecar/test-support/**/*.ts",
+    ],
+    languageOptions: {
+      parserOptions: { project: "./sidecar/tsconfig.json", tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": [
+        "error",
+        {
+          allowForKnownSafeCalls: [
+            { from: "package", name: ["test", "it", "describe"], package: "node:test" },
+          ],
         },
       ],
     },

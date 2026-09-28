@@ -249,17 +249,17 @@
       "seam": "lib/ai/ledgered-generation-seam.ts",
       "note": "Standalone (BYOK) cited web answer. The synthesis takes the host's `resolveGenerate` seam; the app binding `lib/search/standalone-answer.ts` returns the ledgered seam from `lib/ai/ledgered-generation-seam.ts`, bound to the provider it resolved."
     },
-    "sidecar/dispatch/anthropic.mjs": {
+    "sidecar/src/runtimes/claude-agent-sdk/index.ts": {
       "reason": "ledgered-entry",
       "entries": ["agent-sdk:query"],
       "note": "Agent SDK turns: an envelope ledger stamp engages createCallLedgerGate (tracked attempts, PreToolUse budget hooks, CLAUDE_CODE_MAX_RETRIES=0, no fallbackModel). A send without the stamp (anything but a routed Tauri chat turn) runs unledgered."
     },
-    "sidecar/dispatch/feature-call.mjs": {
+    "sidecar/src/host/feature-call/index.ts": {
       "reason": "unwrapped",
       "entries": ["language-model:doGenerate", "language-model:doStream"],
       "note": "Sidecar feature calls for providers the renderer cannot execute (Bedrock, plugin protocols): model.doGenerate/doStream and adapter streams, with no ledger stamp on this path."
     },
-    "sidecar/dispatch/hook-native-executor.mjs": {
+    "sidecar/src/hooks/native-executor.ts": {
       "reason": "unwrapped",
       "entries": ["agent-sdk:query"],
       "note": "Native prompt/agent hooks: an Agent SDK query under the hook's own $0.25 budget governor, not the CallLedger."
@@ -269,7 +269,7 @@
       "entries": ["endpoint:anthropic-messages"],
       "note": "Helper for the *.live.test.* suites and the conformance suite: an in-process mock of the Anthropic Messages API; it never reaches a provider."
     },
-    "sidecar/dispatch/prewarm.mjs": {
+    "sidecar/src/runtimes/claude-agent-sdk/warm-pool.ts": {
       "reason": "not-a-provider-call",
       "entries": ["agent-sdk:startup"],
       "note": "startup() spawns and initializes a Claude Code subprocess with no prompt; the model call is the query anthropic.mjs sends on the claimed warm process."
@@ -277,7 +277,7 @@
     "sidecar/src/providers/protocol-adapters/ai-sdk-adapter.ts": {
       "reason": "ledgered-entry",
       "entries": ["ai:streamText"],
-      "seam": "sidecar/dispatch/ai-sdk.mjs",
+      "seam": "sidecar/src/runtimes/ai-sdk/index.ts",
       "note": "streamText for every sidecar AI SDK leg; for a stamped send ai-sdk.mjs reserves each leg (and compaction/optical summaries) through call-ledger-gate and passes maxRetries: 0. Unstamped sends and feature-call.mjs (its own row) are unledgered."
     }
   }

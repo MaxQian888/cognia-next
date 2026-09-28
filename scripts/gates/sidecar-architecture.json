@@ -6,7 +6,7 @@
     "sidecar/webclone/",
     "sidecar/codeserver-agent-ext/"
   ],
-  "generated": ["sidecar/cognia-mcp.mjs"],
+  "generated": ["sidecar/cognia-mcp.mjs", "sidecar/a2ui-mcp.mjs"],
   "sourceRoot": "sidecar/src/",
   "layers": {
     "shared": [],
@@ -73,7 +73,6 @@
   "launchers": [
     "sidecar/agent-host.mjs",
     "sidecar/claude-host.mjs",
-    "sidecar/a2ui-mcp.mjs",
     "sidecar/cognia-tool-bridge.mjs",
     "sidecar/mcp-oauth-helper.mjs",
     "sidecar/mcp-stdio-relay.mjs",
@@ -95,11 +94,12 @@
     "sidecar/src/providers/reasoning-effort-tables.ts"
   ],
   "public": [
-    "sidecar/a2ui-tools/tool-defs.mjs",
+    "sidecar/src/shared/wire/inbound.ts",
+    "sidecar/src/tools/a2ui/tool-defs.ts",
     "sidecar/src/tools/builtin/ast-grep/binary.ts",
     "sidecar/src/tools/builtin/run-code/sandbox-child.ts",
-    "sidecar/dispatch/claude-executable.mjs",
-    "sidecar/dispatch/feature-call.mjs",
+    "sidecar/src/runtimes/claude-agent-sdk/executable.ts",
+    "sidecar/src/host/feature-call/index.ts",
     "sidecar/pi-extension/cognia-pi-extension.ts",
     "sidecar/src/context/compaction.ts",
     "sidecar/src/platform/net/egress-guard.ts",

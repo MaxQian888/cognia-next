@@ -17,7 +17,7 @@ import {
   isA2UIBridgeRow,
   namespacedA2UIToolNames,
 } from "./mcp-tool-schemas"
-import * as sidecarDefs from "../../sidecar/a2ui-tools/tool-defs.mjs"
+import * as sidecarDefs from "../../sidecar/src/tools/a2ui/tool-defs.ts"
 
 describe("a2ui MCP tool schemas", () => {
   describe("constants", () => {
@@ -141,7 +141,7 @@ describe("a2ui MCP tool schemas", () => {
   })
 
   // Drift guard: the sidecar runtime servers build their schemas from
-  // `sidecar/a2ui-tools/tool-defs.mjs`, which cannot import this TS canonical
+  // `sidecar/src/tools/a2ui/tool-defs.ts`, which cannot import this TS canonical
   // (the sidecar is a separate Node project). This block is the cross-check
   // that prevents the two sources from silently diverging.
   describe("parity with sidecar tool-defs.mjs", () => {
