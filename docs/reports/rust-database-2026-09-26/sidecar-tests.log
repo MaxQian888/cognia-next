@@ -1,0 +1,31 @@
+✔ resuming a stored workspace keeps its namespace after cwd changes (0.753458ms)
+✔ the scope comes from the frozen spec, never from the SDK key (0.075667ms)
+✔ every call carries the scope (0.154792ms)
+✔ a send with no descriptor gets no store at all (0.080125ms)
+✔ an unknown backend turns persistence OFF rather than picking a default (0.125625ms)
+✔ a host with no host_rpc channel is reported, not silently ignored (0.061041ms)
+✔ a valid descriptor produces the full optional surface (0.1355ms)
+✔ store list and delete operations preserve scoped keys and normalize absent lists (0.210375ms)
+✔ an empty batch never reaches the host (0.097125ms)
+✔ append writes the rows and then folds the summary (0.1815ms)
+✔ a subagent batch is stored but never folded into the parent's summary (0.169833ms)
+✔ a losing CAS re-reads and re-folds instead of dropping the update (0.140917ms)
+✔ a summary that never converges is logged, not thrown (0.145417ms)
+✔ summary contention also succeeds when the host supplies no logger (0.194208ms)
+✔ concurrent appends for one session are serialised (0.121334ms)
+✔ a failed append does not poison the queue for the next one (0.282625ms)
+✔ load turns the host's null into the SDK's `never written` (0.03625ms)
+✔ listSessionSummaries strips the host-only version from SDK state (0.080792ms)
+✔ listSubkeys asks by ids, not by the whole key (0.059958ms)
+✔ sessionChainKey separates sessions but joins their subagents (0.047333ms)
+✔ serialize runs tasks in order and drops the chain when idle (4.996084ms)
+✔ serialize keeps running after a rejected task (0.219334ms)
+✔ the dispatcher actually builds the store and hands it to query() (0.648375ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 124.306833

@@ -1,0 +1,33 @@
+ Downloading crates ...
+  Downloaded eyeball-im v0.9.1
+  Downloaded imbl-sized-chunks v0.2.0
+  Downloaded ulid v3.0.0
+  Downloaded ruma-html v0.9.0
+  Downloaded ruma v0.17.0
+  Downloaded chacha20poly1305 v0.11.0
+  Downloaded ruma-macros v0.20.0
+  Downloaded x25519-dalek v3.0.0
+  Downloaded blake3 v1.8.7
+  Downloaded ruma-common v0.20.0
+  Downloaded imbl v7.0.2
+  Downloaded ruma-events v0.35.0
+  Downloaded hpke v0.14.1
+  Downloaded vodozemac v0.11.0
+  Downloaded matrix-sdk-store-encryption v0.19.1
+  Downloaded matrix-sdk-common v0.19.1
+  Downloaded matrix-sdk-base v0.19.1
+  Downloaded matrix-sdk-sqlite v0.19.1
+  Downloaded matrix-sdk-crypto v0.19.1
+  Downloaded ruma-client-api v0.25.0
+error: rustc 1.95.0 is not supported by the following packages:
+  matrix-sdk-base@0.19.1 requires rustc 1.96
+  matrix-sdk-common@0.19.1 requires rustc 1.96
+  matrix-sdk-common@0.19.1 requires rustc 1.96
+  matrix-sdk-common@0.19.1 requires rustc 1.96
+  matrix-sdk-crypto@0.19.1 requires rustc 1.96
+  matrix-sdk-sqlite@0.19.1 requires rustc 1.96
+  matrix-sdk-store-encryption@0.19.1 requires rustc 1.96
+Either upgrade rustc or select compatible dependency versions with
+`cargo update <name>@<current-ver> --precise <compatible-ver>`
+where `<compatible-ver>` is the latest version supporting rustc 1.95.0
+

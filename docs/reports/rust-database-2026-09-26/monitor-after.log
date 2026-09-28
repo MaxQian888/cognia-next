@@ -1,0 +1,45 @@
+   Compiling cognia-jobs v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-jobs)
+    Finished `release` profile [optimized + debuginfo] target(s) in 10.57s
+     Running unittests src/lib.rs (target/release/deps/cognia_jobs-3c303c025759fbfc)
+
+running 1 test
+monitor_boot_csv,0,1,17708
+monitor_boot_csv,0,2,14333
+monitor_boot_csv,0,3,13833
+monitor_boot_csv,0,4,8458
+monitor_boot_csv,0,5,7084
+monitor_boot_csv,0,6,6708
+monitor_boot_csv,0,7,15291
+monitor_boot_csv,0,8,15542
+monitor_boot_csv,0,9,10333
+monitor_boot_csv,0,10,9875
+monitor_boot_csv,0,11,12958
+monitor_boot_csv,0,12,12292
+monitor_boot_csv,16,1,41709
+monitor_boot_csv,16,2,25500
+monitor_boot_csv,16,3,21375
+monitor_boot_csv,16,4,18208
+monitor_boot_csv,16,5,19542
+monitor_boot_csv,16,6,28583
+monitor_boot_csv,16,7,29292
+monitor_boot_csv,16,8,28833
+monitor_boot_csv,16,9,24209
+monitor_boot_csv,16,10,30584
+monitor_boot_csv,16,11,27917
+monitor_boot_csv,16,12,29417
+monitor_boot_csv,100000,1,26583
+monitor_boot_csv,100000,2,45875
+monitor_boot_csv,100000,3,31667
+monitor_boot_csv,100000,4,30708
+monitor_boot_csv,100000,5,30250
+monitor_boot_csv,100000,6,35041
+monitor_boot_csv,100000,7,24000
+monitor_boot_csv,100000,8,30917
+monitor_boot_csv,100000,9,34041
+monitor_boot_csv,100000,10,26500
+monitor_boot_csv,100000,11,51541
+monitor_boot_csv,100000,12,37833
+test monitor::tests::benchmark_monitor_boot ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 81 filtered out; finished in 0.81s
+

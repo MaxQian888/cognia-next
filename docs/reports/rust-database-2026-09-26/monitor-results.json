@@ -1,0 +1,102 @@
+{
+  "0": {
+    "before": {
+      "samples_ms": [
+        0.016166, 0.035834, 0.015125, 0.011375, 0.009083, 0.029, 0.012666, 0.012125, 0.02025,
+        0.013875, 0.012583, 0.011542
+      ],
+      "n": 12,
+      "median_ms": 0.013270500000000001,
+      "mad_ms": 0.001875
+    },
+    "after": {
+      "samples_ms": [
+        0.017708, 0.014333, 0.013833, 0.008458, 0.007084, 0.006708, 0.015291, 0.015542, 0.010333,
+        0.009875, 0.012958, 0.012292
+      ],
+      "n": 12,
+      "median_ms": 0.012625,
+      "mad_ms": 0.0027080000000000003
+    },
+    "improvement_percent": 4.864172412493883
+  },
+  "16": {
+    "before": {
+      "samples_ms": [
+        0.049166, 0.048208, 0.060625, 0.065875, 0.054708, 0.043833, 0.038875, 0.036458, 0.035666,
+        0.072833, 0.044459, 0.03825
+      ],
+      "n": 12,
+      "median_ms": 0.0463335,
+      "mad_ms": 0.008229
+    },
+    "after": {
+      "samples_ms": [
+        0.041709, 0.0255, 0.021375, 0.018208, 0.019542, 0.028583, 0.029292, 0.028833, 0.024209,
+        0.030584, 0.027917, 0.029417
+      ],
+      "n": 12,
+      "median_ms": 0.02825,
+      "mad_ms": 0.002542000000000001
+    },
+    "improvement_percent": 39.028996298574455
+  },
+  "100000": {
+    "before": {
+      "samples_ms": [
+        207.347416, 218.926333, 200.872167, 224.034417, 191.065833, 162.403167, 246.358959,
+        236.024708, 233.509209, 208.694666, 172.548334, 276.500375
+      ],
+      "n": 12,
+      "median_ms": 213.8104995,
+      "mad_ms": 20.95645900000001
+    },
+    "after": {
+      "samples_ms": [
+        0.026583, 0.045875, 0.031667, 0.030708, 0.03025, 0.035041, 0.024, 0.030917, 0.034041,
+        0.0265, 0.051541, 0.037833
+      ],
+      "n": 12,
+      "median_ms": 0.031292,
+      "mad_ms": 0.004229000000000002
+    },
+    "improvement_percent": 99.98536461021644
+  },
+  "contract": {
+    "primary_metric": "MonitorRegistry::reconcile_on_boot duration in ms, including decoding and evaluator scheduling, excluding database open and Tokio runtime initialization/teardown",
+    "workloads": [
+      {
+        "terminal_rows": 0,
+        "waiting_rows": 0
+      },
+      {
+        "terminal_rows": 16,
+        "waiting_rows": 8
+      },
+      {
+        "terminal_rows": 100000,
+        "waiting_rows": 8
+      }
+    ],
+    "condition": "Upstream waiting for external completion, no expiry",
+    "db": "temporary file-backed SQLite WAL; committed fixture; checkpoint(TRUNCATE) before samples; reopen connection per sample",
+    "cache": "warm OS cache after fixture, 1 unreported warmup per workload",
+    "samples": 12,
+    "statistic": "median and median absolute deviation",
+    "minimum_improvement_percent": 10,
+    "noise_rule": "delta > twice larger MAD",
+    "guardrail": "empty/small median regression <= max(10%,0.5 ms)",
+    "build": "release workspace profile",
+    "command": "rtk proxy cargo test -p cognia-jobs --release benchmark_monitor_boot -- --ignored --nocapture",
+    "baseline_source": "original reconciliation list_monitors(None) and in-memory Waiting filter; unchanged benchmark function",
+    "after_source": "list_waiting_monitors status-index SQL query; unchanged benchmark function",
+    "shell_scope": "shared Rust crate, not real Tauri UI or host process startup",
+    "build_side_effects": "Cargo target/release and target/debug cache writes; disposable tempdir database fixtures",
+    "power_mode": "not pinned; shared workstation load; reported MAD captures observed variation",
+    "revision": "f28694466f3a1de25abe2c512385ceef54cce6de",
+    "os": "ProductName:\t\tmacOS\nProductVersion:\t\t26.5.2\nBuildVersion:\t\t25F84",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": "51539607552",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+  }
+}

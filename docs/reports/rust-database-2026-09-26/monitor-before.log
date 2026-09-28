@@ -1,0 +1,45 @@
+    Blocking waiting for file lock on artifact directory
+    Finished `release` profile [optimized + debuginfo] target(s) in 27.15s
+     Running unittests src/lib.rs (target/release/deps/cognia_jobs-3c303c025759fbfc)
+
+running 1 test
+monitor_boot_csv,0,1,16166
+monitor_boot_csv,0,2,35834
+monitor_boot_csv,0,3,15125
+monitor_boot_csv,0,4,11375
+monitor_boot_csv,0,5,9083
+monitor_boot_csv,0,6,29000
+monitor_boot_csv,0,7,12666
+monitor_boot_csv,0,8,12125
+monitor_boot_csv,0,9,20250
+monitor_boot_csv,0,10,13875
+monitor_boot_csv,0,11,12583
+monitor_boot_csv,0,12,11542
+monitor_boot_csv,16,1,49166
+monitor_boot_csv,16,2,48208
+monitor_boot_csv,16,3,60625
+monitor_boot_csv,16,4,65875
+monitor_boot_csv,16,5,54708
+monitor_boot_csv,16,6,43833
+monitor_boot_csv,16,7,38875
+monitor_boot_csv,16,8,36458
+monitor_boot_csv,16,9,35666
+monitor_boot_csv,16,10,72833
+monitor_boot_csv,16,11,44459
+monitor_boot_csv,16,12,38250
+monitor_boot_csv,100000,1,207347416
+monitor_boot_csv,100000,2,218926333
+monitor_boot_csv,100000,3,200872167
+monitor_boot_csv,100000,4,224034417
+monitor_boot_csv,100000,5,191065833
+monitor_boot_csv,100000,6,162403167
+monitor_boot_csv,100000,7,246358959
+monitor_boot_csv,100000,8,236024708
+monitor_boot_csv,100000,9,233509209
+monitor_boot_csv,100000,10,208694666
+monitor_boot_csv,100000,11,172548334
+monitor_boot_csv,100000,12,276500375
+test monitor::tests::benchmark_monitor_boot ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 78 filtered out; finished in 3.67s
+

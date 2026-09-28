@@ -387,6 +387,22 @@ impl JobStore {
         Ok(rows)
     }
 
+    /// Boot recovery only needs unsettled watches. Filter before decoding so
+    /// historical conditions cannot add work or prevent current watches from
+    /// recovering. Uses the existing status index; no schema migration needed.
+    pub fn list_waiting_monitors(&self) -> Result<Vec<MonitorRecord>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT * FROM monitors WHERE status = 'waiting' ORDER BY created_at_ms DESC")
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map([], row_to_monitor)
+            .map_err(map_sql_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_sql_err)?;
+        Ok(rows)
+    }
+
     pub fn count_waiting_monitors(&self) -> Result<usize> {
         let conn = self.conn.lock();
         let n: i64 = conn
@@ -490,6 +506,74 @@ mod tests {
         JobOwner::Session {
             session_id: id.into(),
         }
+    }
+
+    #[test]
+    fn waiting_monitors_only_decode_pending_rows_in_newest_first_order() {
+        let store = JobStore::new_in_memory().unwrap();
+        assert!(store.list_waiting_monitors().unwrap().is_empty());
+        {
+            let conn = store.conn.lock();
+            for status in ["fired", "cancelled", "expired", "unsatisfiable", "unknown"] {
+                conn.execute("INSERT INTO monitors (id, condition_json, owner_kind, status, created_at_ms) VALUES (?1, '{broken', 'app', ?1, 99)", [status])
+                    .unwrap();
+            }
+        }
+        for created_at_ms in [1, 3, 2] {
+            store
+                .insert_monitor(&MonitorRecord {
+                    id: format!("pending-{created_at_ms}"),
+                    condition: crate::types::MonitorCondition::Upstream {
+                        source: "source".into(),
+                        id: "id".into(),
+                    },
+                    owner: session("owner"),
+                    status: MonitorStatus::Waiting,
+                    created_at_ms,
+                    settled_at_ms: None,
+                    expires_at_ms: Some(12345),
+                    detail: None,
+                    label: Some("watch".into()),
+                })
+                .unwrap();
+        }
+        let rows = store.list_waiting_monitors().unwrap();
+        assert_eq!(
+            rows.iter().map(|row| row.created_at_ms).collect::<Vec<_>>(),
+            vec![3, 2, 1]
+        );
+        assert!(rows.iter().all(|row| row.owner == session("owner")
+            && row.status == MonitorStatus::Waiting
+            && row.expires_at_ms == Some(12345)
+            && row.label.as_deref() == Some("watch")));
+        // Corruption of an active watch must still fail, rather than silently
+        // discarding work the owner expects to recover.
+        store
+            .conn
+            .lock()
+            .execute(
+                "UPDATE monitors SET condition_json = '{broken' WHERE id = 'pending-2'",
+                [],
+            )
+            .unwrap();
+        assert!(store.list_waiting_monitors().is_err());
+    }
+
+    #[test]
+    fn waiting_monitor_query_uses_the_status_index() {
+        let store = JobStore::new_in_memory().unwrap();
+        let conn = store.conn.lock();
+        let mut stmt = conn.prepare("EXPLAIN QUERY PLAN SELECT * FROM monitors WHERE status = 'waiting' ORDER BY created_at_ms DESC").unwrap();
+        let plan = stmt
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("SEARCH monitors USING INDEX idx_monitors_status")),
+            "{plan:?}"
+        );
     }
 
     #[test]

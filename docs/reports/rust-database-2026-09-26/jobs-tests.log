@@ -1,0 +1,96 @@
+   Compiling cognia-jobs v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-jobs)
+    Finished `release` profile [optimized + debuginfo] target(s) in 2.66s
+     Running unittests src/lib.rs (target/release/deps/cognia_jobs-3c303c025759fbfc)
+
+running 82 tests
+test limits::tests::next_poll_interval_doubles_then_saturates_at_the_ceiling ... ok
+test limits::tests::next_poll_interval_never_returns_below_the_floor ... ok
+test limits::tests::clamp_poll_interval_bounds_both_ends ... ok
+test monitor::tests::benchmark_monitor_boot ... ignored, manual release benchmark with 100,000 historical monitors
+test limits::tests::truncation_marker_names_the_dropped_byte_count ... ok
+test limits::tests::per_session_cap_is_below_the_global_cap ... ok
+test monitor::tests::condition_descriptions_name_what_is_being_awaited ... ok
+test monitor::tests::a_second_upstream_signal_fires_nothing ... ok
+test monitor::tests::boot_reconcile_resumes_a_durable_upstream_watch ... ok
+test monitor::tests::cancel_settles_a_waiting_monitor_and_is_idempotent ... ok
+test monitor::tests::an_agent_cannot_cancel_another_sessions_monitor ... ok
+test monitor::tests::a_predicate_that_cannot_spawn_fails_fast_instead_of_retrying_forever ... ok
+test monitor::tests::fired_listeners_run_once_per_monitor ... ok
+test monitor::tests::cancelling_frees_a_slot_against_the_cap ... ok
+test monitor::tests::the_global_monitor_cap_is_enforced ... ok
+test monitor::tests::upstream_signal_fires_only_the_matching_monitors ... ok
+test output::tests::appends_are_readable_from_offset_zero ... ok
+test output::tests::empty_append_is_a_no_op ... ok
+test monitor::tests::an_invalid_pattern_is_rejected_rather_than_silently_never_matching ... ok
+test output::tests::rate_limiter_admits_up_to_the_ceiling_then_sheds_within_a_window ... ok
+test output::tests::rate_limiter_window_rolls_over_after_a_second ... ok
+test output::tests::find_match_returns_none_when_the_pattern_is_absent ... ok
+test output::tests::max_bytes_pages_without_losing_the_remainder ... ok
+test output::tests::find_match_returns_the_offset_past_the_first_hit_and_does_not_consume ... ok
+test monitor::tests::job_exit_condition_fires_immediately_for_an_already_finished_job ... ok
+test output::tests::reads_are_non_destructive_so_the_same_range_re_reads ... ok
+test output::tests::reading_past_the_end_returns_empty_not_an_error ... ok
+test output::tests::reopening_adopts_the_existing_log_so_history_survives_a_restart ... ok
+test output::tests::reopening_appends_after_the_adopted_content_rather_than_over_it ... ok
+test output::tests::history_evicted_from_the_ring_is_still_served_from_disk ... ok
+test store::tests::app_owned_rows_survive_the_null_owner_id_round_trip ... ok
+test store::tests::boot_reconcile_on_a_clean_shutdown_is_a_no_op ... ok
+test output::tests::remove_files_deletes_both_segments ... ok
+test store::tests::boot_reconcile_flips_orphaned_running_rows_to_interrupted ... ok
+test store::tests::delete_removes_the_row ... ok
+test store::tests::get_returns_none_for_an_unknown_id ... ok
+test store::tests::count_running_supports_the_per_owner_and_global_caps ... ok
+test store::tests::insert_and_get_round_trip_every_field ... ok
+test store::tests::list_by_owner_scopes_to_one_session ... ok
+test store::tests::settle_is_idempotent_so_a_race_cannot_rewrite_the_verdict ... ok
+test store::tests::output_counters_update_in_place ... ok
+test store::tests::settle_records_the_exit_and_clears_the_pid ... ok
+test store::tests::terminal_jobs_come_back_oldest_finished_first_for_lru_eviction ... ok
+test store::tests::waiting_monitor_query_uses_the_status_index ... ok
+test store::tests::waiting_monitors_only_decode_pending_rows_in_newest_first_order ... ok
+test monitor::tests::job_output_condition_reports_unsatisfiable_when_the_job_ends_unmatched ... ok
+test output::tests::ring_evicts_whole_chunks_without_copying_retained_data ... ok
+test monitor::tests::boot_reconcile_ignores_terminal_history_and_expires_overdue_watches ... ok
+test output::tests::shedding_writes_one_truncation_marker_per_burst_and_counts_drops ... ok
+test supervisor::tests::kill_by_pid_returns_none_for_a_pid_we_do_not_own ... ok
+test supervisor::tests::kill_on_an_unknown_id_is_not_found ... ok
+test output::tests::rotation_keeps_the_recent_tail_and_reports_the_lost_head ... ok
+test supervisor::tests::kill_by_pid_still_honours_owner_scoping ... ok
+test supervisor::tests::kill_by_pid_reaps_the_owning_job ... ok
+test supervisor::tests::owner_matching_is_exact_across_kinds_and_ids ... ok
+test supervisor::tests::kill_by_pid_does_not_resolve_a_recycled_pid_to_a_finished_job ... ok
+test supervisor::tests::reconcile_on_boot_clears_ghost_rows_before_the_caps_count_them ... ok
+test supervisor::tests::an_agent_cannot_kill_another_sessions_job ... ok
+test supervisor::tests::kill_marks_the_job_killed_and_is_idempotent ... ok
+test supervisor::tests::output_survives_the_live_state_being_dropped ... ok
+test supervisor::tests::kill_owned_by_reaps_one_session_and_leaves_others_alone ... ok
+test supervisor::tests::spawn_captures_output_and_records_the_real_exit_code ... ok
+test types::tests::duration_never_goes_negative_on_clock_skew ... ok
+test types::tests::duration_uses_now_while_running_and_end_once_finished ... ok
+test types::tests::only_running_is_non_terminal ... ok
+test types::tests::owner_kind_and_id_accessors_agree_with_the_variant ... ok
+test types::tests::owner_round_trips_through_json ... ok
+test types::tests::owner_serializes_tagged_camel_case_for_the_ts_mirror ... ok
+test types::tests::status_string_round_trips ... ok
+test supervisor::tests::stderr_is_captured_alongside_stdout ... ok
+test supervisor::tests::per_session_cap_rejects_the_ninth_concurrent_job ... ok
+test supervisor::tests::kill_reaps_the_whole_process_group_not_just_the_wrapper_shell ... ok
+test monitor::tests::wait_returns_a_still_waiting_record_when_the_budget_runs_out ... ok
+test monitor::tests::an_expired_monitor_settles_at_its_deadline ... ok
+test supervisor::tests::exit_listeners_fire_once_with_the_terminal_verdict ... ok
+test supervisor::tests::wait_for_output_returns_on_exit_even_with_no_output ... ok
+test monitor::tests::job_output_condition_fires_on_a_readiness_line ... ok
+test monitor::tests::job_exit_condition_fires_when_the_job_ends ... ok
+test supervisor::tests::wait_for_output_times_out_without_consuming_anything ... ok
+test supervisor::tests::wait_for_output_returns_as_soon_as_bytes_land ... ok
+test monitor::tests::shell_predicate_fires_once_the_command_succeeds ... ok
+test monitor::tests::cancelling_stops_the_predicate_from_polling ... ok
+
+test result: ok. 81 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.56s
+
+   Doc-tests cognia_jobs
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

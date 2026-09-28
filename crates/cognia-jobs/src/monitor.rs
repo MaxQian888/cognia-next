@@ -76,12 +76,7 @@ impl MonitorRegistry {
     /// settled immediately; every other watch resumes in place with the same
     /// stable id and owner.
     pub fn reconcile_on_boot(self: &Arc<Self>) -> Result<Vec<String>> {
-        let waiting: Vec<MonitorRecord> = self
-            .store
-            .list_monitors(None)?
-            .into_iter()
-            .filter(|record| record.status == MonitorStatus::Waiting)
-            .collect();
+        let waiting = self.store.list_waiting_monitors()?;
         let mut resumed = Vec::with_capacity(waiting.len());
         for record in waiting {
             if record
@@ -995,6 +990,52 @@ mod tests {
         assert!(row.detail.as_deref().unwrap_or("").contains("completed"));
     }
 
+    #[tokio::test]
+    async fn boot_reconcile_ignores_terminal_history_and_expires_overdue_watches() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("jobs.sqlite");
+        let store = JobStore::new(path.clone()).unwrap();
+        for (id, created_at_ms, expires_at_ms) in [("pending", 1, None), ("overdue", 2, Some(1))] {
+            store
+                .insert_monitor(&MonitorRecord {
+                    id: id.into(),
+                    condition: MonitorCondition::Upstream {
+                        source: "restart".into(),
+                        id: id.into(),
+                    },
+                    owner: session("durable-owner"),
+                    status: MonitorStatus::Waiting,
+                    created_at_ms,
+                    settled_at_ms: None,
+                    expires_at_ms,
+                    detail: None,
+                    label: Some("preserved label".into()),
+                })
+                .unwrap();
+        }
+        drop(store);
+        // An old terminal condition may no longer decode after schema drift or
+        // corruption. It must not prevent unrelated live watches from resuming.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute("INSERT INTO monitors (id, condition_json, owner_kind, status, created_at_ms) VALUES ('historical', '{broken', 'app', 'fired', 3)", [])
+            .unwrap();
+        drop(conn);
+        let store = Arc::new(JobStore::new(path).unwrap());
+        let sup = Arc::new(JobSupervisor::new(
+            Arc::clone(&store),
+            dir.path().join("logs"),
+        ));
+        let reg = Arc::new(MonitorRegistry::new(Arc::clone(&store), sup));
+        assert_eq!(reg.reconcile_on_boot().unwrap(), vec!["pending"]);
+        let pending = reg.get("pending").unwrap().unwrap();
+        assert_eq!(pending.owner, session("durable-owner"));
+        assert_eq!(pending.label.as_deref(), Some("preserved label"));
+        let overdue = reg.get("overdue").unwrap().unwrap();
+        assert_eq!(overdue.status, MonitorStatus::Expired);
+        assert!(overdue.settled_at_ms.is_some());
+        reg.cancel("pending", None).unwrap();
+    }
+
     #[test]
     fn condition_descriptions_name_what_is_being_awaited() {
         assert_eq!(
@@ -1009,5 +1050,83 @@ mod tests {
             .describe(),
             "scheduledTask nightly completes"
         );
+    }
+
+    /// File-backed boot benchmark, excluded from normal tests. Fixture creation,
+    /// database open and runtime teardown are outside the measured boot path.
+    /// Run with `cargo test -p cognia-jobs --release benchmark_monitor_boot -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual release benchmark with 100,000 historical monitors"]
+    fn benchmark_monitor_boot() {
+        for historical in [0, 16, 100_000] {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("jobs.sqlite");
+            drop(JobStore::new(path.clone()).unwrap());
+            let mut conn = rusqlite::Connection::open(&path).unwrap();
+            let transaction = conn.transaction().unwrap();
+            let condition = serde_json::to_string(&MonitorCondition::Upstream {
+                source: "benchmark".into(),
+                id: "completion".into(),
+            })
+            .unwrap();
+            {
+                let mut insert = transaction
+                    .prepare("INSERT INTO monitors (id, condition_json, owner_kind, status, created_at_ms) VALUES (?1, ?2, 'app', ?3, ?4)")
+                    .unwrap();
+                for row in 0..historical {
+                    insert
+                        .execute(rusqlite::params![
+                            format!("history-{row}"),
+                            condition,
+                            "fired",
+                            row
+                        ])
+                        .unwrap();
+                }
+                let waiting = if historical == 0 { 0 } else { 8 };
+                for row in 0..waiting {
+                    insert
+                        .execute(rusqlite::params![
+                            format!("waiting-{row}"),
+                            condition,
+                            "waiting",
+                            historical + row
+                        ])
+                        .unwrap();
+                }
+            }
+            transaction.commit().unwrap();
+            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+                .unwrap();
+            drop(conn);
+
+            // One warmup plus twelve samples; each sample recreates the process
+            // owners and shuts down all evaluator tasks before the next sample.
+            for sample in 0..13 {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let store = Arc::new(JobStore::new(path.clone()).unwrap());
+                let supervisor = Arc::new(JobSupervisor::new(
+                    Arc::clone(&store),
+                    dir.path().join("logs"),
+                ));
+                let registry = Arc::new(MonitorRegistry::new(store, supervisor));
+                let (elapsed, resumed) = runtime.block_on(async {
+                    let started = std::time::Instant::now();
+                    let resumed = registry.reconcile_on_boot().unwrap();
+                    (started.elapsed(), resumed)
+                });
+                assert_eq!(resumed.len(), if historical == 0 { 0 } else { 8 });
+                if sample > 0 {
+                    println!(
+                        "monitor_boot_csv,{historical},{sample},{}",
+                        elapsed.as_nanos()
+                    );
+                }
+                drop(runtime);
+            }
+        }
     }
 }

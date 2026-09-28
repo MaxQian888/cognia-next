@@ -42,7 +42,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
-use rusqlite::{params, types::Type, Connection, OptionalExtension, Row};
+use rusqlite::{
+    params, types::Type, Connection, OpenFlags, OptionalExtension, Row, TransactionBehavior,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -188,6 +190,7 @@ fn decode_acp_session_row(row: &Row<'_>) -> rusqlite::Result<AcpSessionRow> {
 
 const SCHEMA_SQL: &str = "
     PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = FULL;
     PRAGMA foreign_keys = ON;
 
     CREATE TABLE IF NOT EXISTS entries (
@@ -247,14 +250,24 @@ const SCHEMA_SQL: &str = "
 
 /// SQLite-backed session mirror.
 ///
-/// One connection behind a mutex rather than a pool: appends arrive at ~100ms
-/// cadence per active turn, which a single writer absorbs easily, and SQLite
-/// serialises writers anyway. The mutex is what makes the read-fold-write
-/// around summaries a real critical section instead of a hopeful one.
+/// One serialized writer and one serialized reader, not an unbounded pool.
+/// WAL lets a long transcript restore or backup proceed without holding up
+/// appends. Multi-statement reads use snapshots; read-modify-write transactions
+/// acquire the SQLite writer reservation before reading, including across hosts
+/// sharing the same local file. Neither connection relaxes commit durability.
 pub struct SessionStore {
     conn: Arc<Mutex<Connection>>,
+    read_conn: Arc<Mutex<Connection>>,
     path: Option<PathBuf>,
+    #[cfg(test)]
+    read_started: Mutex<Option<ReadStartSignal>>,
 }
+
+#[cfg(test)]
+type ReadStartSignal = (
+    std::sync::mpsc::SyncSender<()>,
+    Option<std::sync::mpsc::Receiver<()>>,
+);
 
 impl SessionStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Arc<Self>, String> {
@@ -263,12 +276,25 @@ impl SessionStore {
             std::fs::create_dir_all(parent).map_err(|e| format!("sessionStore: mkdir: {e}"))?;
         }
         let conn = Connection::open(&path).map_err(|e| format!("sessionStore: open: {e}"))?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| format!("sessionStore: busy timeout: {e}"))?;
         conn.execute_batch(SCHEMA_SQL)
             .map_err(|e| format!("sessionStore: schema: {e}"))?;
         restrict_permissions(&path);
+        let reader = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| format!("sessionStore: open reader: {e}"))?;
+        reader
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| format!("sessionStore: reader busy timeout: {e}"))?;
         Ok(Arc::new(Self {
             conn: Arc::new(Mutex::new(conn)),
+            read_conn: Arc::new(Mutex::new(reader)),
             path: Some(path),
+            #[cfg(test)]
+            read_started: Mutex::new(None),
         }))
     }
 
@@ -278,9 +304,12 @@ impl SessionStore {
         let conn = Connection::open_in_memory().map_err(|e| format!("sessionStore: open: {e}"))?;
         conn.execute_batch(SCHEMA_SQL)
             .map_err(|e| format!("sessionStore: schema: {e}"))?;
+        let conn = Arc::new(Mutex::new(conn));
         Ok(Arc::new(Self {
-            conn: Arc::new(Mutex::new(conn)),
+            read_conn: Arc::clone(&conn),
+            conn,
             path: None,
+            read_started: Mutex::new(None),
         }))
     }
 
@@ -332,7 +361,7 @@ impl SessionStore {
         scope: &StoreScope,
         acp_session_id: &str,
     ) -> Result<Option<AcpSessionRow>, String> {
-        self.conn
+        self.read_conn
             .lock()
             .query_row(
                 "SELECT acp_session_id, sdk_session_id, cwd, additional_directories,
@@ -353,7 +382,7 @@ impl SessionStore {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<AcpSessionRow>, String> {
-        let guard = self.conn.lock();
+        let guard = self.read_conn.lock();
         let sql = if cwd.is_some() {
             "SELECT acp_session_id, sdk_session_id, cwd, additional_directories,
                     title, created_at, updated_at, config_values, lifecycle
@@ -428,7 +457,7 @@ impl SessionStore {
         let conn = Arc::clone(&self.conn);
         let mut guard = conn.lock();
         let tx = guard
-            .transaction()
+            .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| format!("sessionStore: begin: {e}"))?;
 
         // Next sequence is read INSIDE the transaction. Reading it outside
@@ -503,7 +532,10 @@ impl SessionStore {
     pub fn load(&self, key: &SessionKey) -> Result<Option<Vec<Value>>, String> {
         key.validate()?;
         let subpath = key.subpath_column().to_string();
-        let guard = self.conn.lock();
+        let mut reader = self.read_conn.lock();
+        let guard = reader
+            .transaction()
+            .map_err(|e| format!("sessionStore: read snapshot: {e}"))?;
 
         let mut stmt = guard
             .prepare(
@@ -529,6 +561,10 @@ impl SessionStore {
         let mut out = Vec::new();
         for row in rows {
             let raw = row.map_err(|e| format!("sessionStore: row: {e}"))?;
+            #[cfg(test)]
+            if out.is_empty() {
+                self.notify_read_started();
+            }
             out.push(
                 serde_json::from_str(&raw)
                     .map_err(|e| format!("sessionStore: deserialize: {e}"))?,
@@ -562,7 +598,10 @@ impl SessionStore {
         scope: &StoreScope,
         project_key: &str,
     ) -> Result<Vec<SessionListRow>, String> {
-        let guard = self.conn.lock();
+        let mut reader = self.read_conn.lock();
+        let guard = reader
+            .transaction()
+            .map_err(|e| format!("sessionStore: list snapshot: {e}"))?;
         let query = |sql: &str| -> Result<Vec<SessionListRow>, String> {
             let mut stmt = guard
                 .prepare(sql)
@@ -654,7 +693,7 @@ impl SessionStore {
         project_key: &str,
         session_id: &str,
     ) -> Result<Vec<String>, String> {
-        let guard = self.conn.lock();
+        let guard = self.read_conn.lock();
         let mut stmt = guard
             .prepare(
                 "SELECT DISTINCT subpath FROM entries
@@ -680,7 +719,7 @@ impl SessionStore {
         project_key: &str,
         session_id: &str,
     ) -> Result<Option<SummaryRow>, String> {
-        let guard = self.conn.lock();
+        let guard = self.read_conn.lock();
         guard
             .query_row(
                 "SELECT session_id, mtime, data, version FROM summaries
@@ -691,7 +730,13 @@ impl SessionStore {
                     Ok(SummaryRow {
                         session_id: row.get(0)?,
                         mtime: row.get(1)?,
-                        data: serde_json::from_str(&raw).unwrap_or(Value::Null),
+                        data: serde_json::from_str(&raw).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                2,
+                                Type::Text,
+                                Box::new(error),
+                            )
+                        })?,
                         version: row.get(3)?,
                     })
                 },
@@ -727,7 +772,7 @@ impl SessionStore {
         let conn = Arc::clone(&self.conn);
         let mut guard = conn.lock();
         let tx = guard
-            .transaction()
+            .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| format!("sessionStore: begin: {e}"))?;
 
         let current: Option<i64> = tx
@@ -781,7 +826,7 @@ impl SessionStore {
         scope: &StoreScope,
         project_key: &str,
     ) -> Result<Vec<SummaryRow>, String> {
-        let guard = self.conn.lock();
+        let guard = self.read_conn.lock();
         let mut stmt = guard
             .prepare(
                 "SELECT session_id, mtime, data, version FROM summaries
@@ -795,7 +840,9 @@ impl SessionStore {
                 Ok(SummaryRow {
                     session_id: row.get(0)?,
                     mtime: row.get(1)?,
-                    data: serde_json::from_str(&raw).unwrap_or(Value::Null),
+                    data: serde_json::from_str(&raw).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(2, Type::Text, Box::new(error))
+                    })?,
                     version: row.get(3)?,
                 })
             })
@@ -815,7 +862,7 @@ impl SessionStore {
         let conn = Arc::clone(&self.conn);
         let mut guard = conn.lock();
         let tx = guard
-            .transaction()
+            .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| format!("sessionStore: begin: {e}"))?;
 
         let removed = match key.subpath.as_deref() {
@@ -880,7 +927,7 @@ impl SessionStore {
         let conn = Arc::clone(&self.conn);
         let mut guard = conn.lock();
         let tx = guard
-            .transaction()
+            .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| format!("sessionStore: begin: {e}"))?;
 
         // Activity in either the transcript (including subagents) or its
@@ -941,7 +988,19 @@ impl SessionStore {
             );
         }
         std::fs::create_dir_all(&backup_root).map_err(|e| format!("sessionStore: mkdir: {e}"))?;
-        let guard = self.conn.lock();
+        let mut reader = self.read_conn.lock();
+        let guard = reader
+            .transaction()
+            .map_err(|e| format!("sessionStore: backup snapshot: {e}"))?;
+        // Pin the WAL snapshot before stepping the backup. Otherwise concurrent
+        // appends can restart each backup step indefinitely on a busy host.
+        guard
+            .query_row("SELECT COUNT(*) FROM sqlite_schema", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(|e| format!("sessionStore: backup snapshot: {e}"))?;
+        #[cfg(test)]
+        self.notify_read_started();
         guard
             .backup(rusqlite::MAIN_DB, dest, None)
             .map_err(|e| format!("sessionStore: backup: {e}"))?;
@@ -951,7 +1010,10 @@ impl SessionStore {
 
     /// Row counts per table — for the settings diagnostics panel.
     pub fn stats(&self) -> Result<HashMap<String, i64>, String> {
-        let guard = self.conn.lock();
+        let mut reader = self.read_conn.lock();
+        let guard = reader
+            .transaction()
+            .map_err(|e| format!("sessionStore: stats snapshot: {e}"))?;
         let mut out = HashMap::new();
         for (label, sql) in [
             ("entries", "SELECT COUNT(*) FROM entries"),
@@ -964,6 +1026,20 @@ impl SessionStore {
             out.insert(label.to_string(), n);
         }
         Ok(out)
+    }
+
+    /// Test synchronization only: notify after SQLite establishes the snapshot,
+    /// so contention measurements never infer overlap from a scheduling sleep.
+    #[cfg(test)]
+    fn notify_read_started(&self) {
+        if let Some((started, resume)) = self.read_started.lock().take() {
+            let _ = started.send(());
+            if let Some(resume) = resume {
+                resume
+                    .recv_timeout(std::time::Duration::from_secs(30))
+                    .unwrap();
+            }
+        }
     }
 }
 
@@ -1029,6 +1105,549 @@ mod tests {
             .map(|v| v["text"].as_str().unwrap().to_string())
             .collect();
         assert_eq!(texts, ["one", "two", "three"]);
+    }
+
+    #[test]
+    fn append_waits_for_another_connection_instead_of_upgrading_a_stale_snapshot() {
+        let dir = std::env::temp_dir().join(format!(
+            "cognia-store-busy-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let path = dir.join("db.sqlite");
+        let store = SessionStore::open(&path).unwrap();
+        let mut other = Connection::open(&path).unwrap();
+        let tx = other
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        tx.execute("INSERT INTO entries VALUES ('default','default','proj','s1','',0,'first','user','{}',0)", []).unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            send.send(store.append(&key("s1"), &[entry(Some("second"), "second")]))
+                .unwrap();
+        });
+        let early = receive.recv_timeout(std::time::Duration::from_millis(100));
+        tx.commit().unwrap();
+        worker.join().unwrap();
+        assert!(
+            matches!(early, Err(std::sync::mpsc::RecvTimeoutError::Timeout)),
+            "must wait for writer: {early:?}"
+        );
+        assert_eq!(receive.recv().unwrap().unwrap(), 1);
+        drop(other);
+        let store = SessionStore::open(&path).unwrap();
+        assert_eq!(store.load(&key("s1")).unwrap().unwrap().len(), 2);
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn corrupt_summary_is_an_error_not_a_valid_null_summary() {
+        let store = SessionStore::in_memory().unwrap();
+        store
+            .conn
+            .lock()
+            .execute(
+                "INSERT INTO summaries VALUES ('default','default','proj','s1',0,'{broken',1)",
+                [],
+            )
+            .unwrap();
+        assert!(store
+            .read_summary(&StoreScope::default(), "proj", "s1")
+            .is_err());
+        assert!(store
+            .list_summaries(&StoreScope::default(), "proj")
+            .is_err());
+    }
+
+    #[test]
+    fn a_read_snapshot_does_not_block_appends_and_never_observes_a_partial_batch() {
+        let dir = std::env::temp_dir().join(format!(
+            "cognia-snapshot-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let path = dir.join("db.sqlite");
+        let store = SessionStore::open(&path).unwrap();
+        store
+            .append(&key("s1"), &[entry(Some("old"), "old")])
+            .unwrap();
+        let mut reader = store.read_conn.lock();
+        assert!(
+            reader.execute("DELETE FROM entries", []).is_err(),
+            "reader must be read-only"
+        );
+        let tx = reader.transaction().unwrap();
+        let count = |conn: &Connection| {
+            conn.query_row("SELECT COUNT(*) FROM entries", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(count(&tx), 1);
+        let writer = Arc::clone(&store);
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            send.send(writer.append(
+                &key("s1"),
+                &[entry(Some("new1"), "new1"), entry(Some("new2"), "new2")],
+            ))
+            .unwrap();
+        });
+        let result = receive.recv_timeout(std::time::Duration::from_secs(5));
+        assert_eq!(
+            count(&tx),
+            1,
+            "snapshot must stay unchanged during concurrent commit"
+        );
+        tx.commit().unwrap();
+        drop(reader);
+        worker.join().unwrap();
+        assert_eq!(
+            result.unwrap().unwrap(),
+            2,
+            "append must finish before reader releases snapshot"
+        );
+        assert_eq!(store.load(&key("s1")).unwrap().unwrap().len(), 3);
+        // Once the reader finishes there is no leaked transaction pinning WAL.
+        let checkpoint: (i64, i64, i64) = store
+            .conn
+            .lock()
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(checkpoint, (0, 0, 0));
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_batch_rolls_back_all_rows_and_can_be_retried() {
+        let store = SessionStore::in_memory().unwrap();
+        store
+            .conn
+            .lock()
+            .execute_batch(
+                "CREATE TRIGGER fail_batch BEFORE INSERT ON entries WHEN NEW.uuid = 'fail'
+             BEGIN SELECT RAISE(ABORT, 'injected disk write failure'); END;",
+            )
+            .unwrap();
+        let batch = [entry(Some("ok"), "first"), entry(Some("fail"), "second")];
+        assert!(store
+            .append(&key("s1"), &batch)
+            .unwrap_err()
+            .contains("injected disk write failure"));
+        assert!(store.load(&key("s1")).unwrap().is_none());
+        store
+            .conn
+            .lock()
+            .execute_batch("DROP TRIGGER fail_batch")
+            .unwrap();
+        assert_eq!(store.append(&key("s1"), &batch).unwrap(), 2);
+        assert_eq!(store.load(&key("s1")).unwrap().unwrap(), batch);
+    }
+
+    #[test]
+    fn sqlite_full_rolls_back_the_batch_and_preserves_previous_history() {
+        let dir =
+            std::env::temp_dir().join(format!("cognia-full-{}-{}", std::process::id(), now_ms()));
+        let path = dir.join("db.sqlite");
+        let store = SessionStore::open(&path).unwrap();
+        let original = [entry(Some("original"), "already acknowledged")];
+        store.append(&key("s1"), &original).unwrap();
+        {
+            let writer = store.conn.lock();
+            let pages: i64 = writer
+                .query_row("PRAGMA page_count", [], |r| r.get(0))
+                .unwrap();
+            writer.pragma_update(None, "max_page_count", pages).unwrap();
+        }
+        let result = store.append(
+            &key("s1"),
+            &[
+                entry(Some("small"), "part of failed batch"),
+                entry(Some("too-large"), &"x".repeat(1024 * 1024)),
+            ],
+        );
+        assert!(result.unwrap_err().contains("database or disk is full"));
+        assert_eq!(store.load(&key("s1")).unwrap().unwrap(), original);
+        // The error must not leave a transaction or lock behind.
+        store
+            .conn
+            .lock()
+            .pragma_update(None, "max_page_count", 1_000_000)
+            .unwrap();
+        assert_eq!(
+            store
+                .append(&key("s1"), &[entry(Some("small"), "retry")])
+                .unwrap(),
+            1
+        );
+        drop(store);
+        let reopened = SessionStore::open(&path).unwrap();
+        assert_eq!(reopened.load(&key("s1")).unwrap().unwrap().len(), 2);
+        drop(reopened);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn repeated_restore_write_cycles_allow_wal_to_checkpoint() {
+        let dir = std::env::temp_dir().join(format!(
+            "cognia-wal-cycles-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let path = dir.join("db.sqlite");
+        let store = SessionStore::open(&path).unwrap();
+        store
+            .conn
+            .lock()
+            .pragma_update(None, "wal_autocheckpoint", 8)
+            .unwrap();
+        for i in 0..100 {
+            store
+                .append(
+                    &key("s1"),
+                    &[entry(Some(&format!("u{i}")), &"x".repeat(4096))],
+                )
+                .unwrap();
+            assert_eq!(store.load(&key("s1")).unwrap().unwrap().len(), i + 1);
+        }
+        let (busy, frames, copied): (i64, i64, i64) = store
+            .conn
+            .lock()
+            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(busy, 0);
+        assert_eq!(
+            frames, copied,
+            "completed restores must release their WAL snapshots"
+        );
+        // A leaked read transaction would accumulate ~100 batches here.
+        assert!(
+            frames < 32,
+            "WAL frame count grew with completed restores: {frames}"
+        );
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn independent_connections_compete_on_summary_version_without_losing_writes() {
+        let dir =
+            std::env::temp_dir().join(format!("cognia-cas-{}-{}", std::process::id(), now_ms()));
+        let path = dir.join("db.sqlite");
+        let a = SessionStore::open(&path).unwrap();
+        let b = SessionStore::open(&path).unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let workers: Vec<_> = [a, b]
+            .into_iter()
+            .enumerate()
+            .map(|(i, store)| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.write_summary(
+                        &StoreScope::default(),
+                        "proj",
+                        "s1",
+                        &json!({"writer": i}),
+                        None,
+                    )
+                })
+            })
+            .collect();
+        let results: Vec<_> = workers
+            .into_iter()
+            .map(|w| w.join().unwrap().unwrap())
+            .collect();
+        assert_eq!(results.iter().filter(|r| r.is_some()).count(), 1);
+        let store = SessionStore::open(&path).unwrap();
+        assert_eq!(
+            store
+                .read_summary(&StoreScope::default(), "proj", "s1")
+                .unwrap()
+                .unwrap()
+                .version,
+            1
+        );
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    // Invoked only by the parent test in a separate process. No unsafe fork of
+    // a multithreaded SQLite runtime and no process-global environment mutation.
+    #[test]
+    fn crash_writer_child() {
+        use std::io::{Read, Write};
+        let Some(path) = std::env::var_os("COGNIA_SESSION_CRASH_FIXTURE") else {
+            return;
+        };
+        let store = SessionStore::open(path).unwrap();
+        store
+            .append(&key("s1"), &[entry(Some("committed"), "durable")])
+            .unwrap();
+        let sub = SessionKey {
+            subpath: Some("subagents/a".into()),
+            ..key("s1")
+        };
+        store
+            .append(&sub, &[entry(Some("committed"), "subagent")])
+            .unwrap();
+        let tenant = SessionKey {
+            scope: StoreScope {
+                tenant: "other".into(),
+                ..StoreScope::default()
+            },
+            ..key("s1")
+        };
+        store
+            .append(&tenant, &[entry(Some("committed"), "other tenant")])
+            .unwrap();
+        store
+            .write_summary(
+                &StoreScope::default(),
+                "proj",
+                "s1",
+                &json!({"title": "durable"}),
+                None,
+            )
+            .unwrap();
+        let mut conn = store.conn.lock();
+        conn.execute_batch("PRAGMA cache_size=10; PRAGMA wal_autocheckpoint=0;")
+            .unwrap();
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        for i in 1..1000 {
+            tx.execute(
+                "INSERT INTO entries VALUES ('default','default','proj','s1','',?1,?2,'user',?3,0)",
+                params![i, format!("partial-{i}"), "x".repeat(4096)],
+            )
+            .unwrap();
+        }
+        tx.execute("UPDATE summaries SET data='null', version=2", [])
+            .unwrap();
+        println!("COGNIA_CRASH_READY");
+        std::io::stdout().flush().unwrap();
+        // Keep the uncommitted transaction and both connections alive until kill.
+        let _ = std::io::stdin().read_exact(&mut [0_u8]);
+        panic!("parent must kill the process before it exits normally");
+    }
+
+    #[test]
+    fn killed_process_recovers_committed_wal_and_discards_partial_batch() {
+        use std::io::{BufRead, BufReader};
+        use std::process::{Command, Stdio};
+        let dir =
+            std::env::temp_dir().join(format!("cognia-kill-{}-{}", std::process::id(), now_ms()));
+        let path = dir.join("db.sqlite");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "agent_session_store::tests::crash_writer_child",
+                "--nocapture",
+            ])
+            .env("COGNIA_SESSION_CRASH_FIXTURE", &path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        let output = std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                if line.unwrap().contains("COGNIA_CRASH_READY") {
+                    let _ = send.send(());
+                    break;
+                }
+            }
+        });
+        let ready = receive.recv_timeout(std::time::Duration::from_secs(30));
+        let killed = child.kill();
+        let status = child.wait().unwrap();
+        output.join().unwrap();
+        ready.expect("child reached uncommitted transaction");
+        killed.unwrap();
+        assert!(!status.success());
+        assert!(
+            path.with_extension("sqlite-wal").exists(),
+            "kill must leave a WAL to recover"
+        );
+        for _ in 0..3 {
+            let store = SessionStore::open(&path).unwrap();
+            assert_eq!(
+                store
+                    .conn
+                    .lock()
+                    .query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+                    .unwrap(),
+                "ok"
+            );
+            let batch = [entry(Some("committed"), "durable")];
+            assert_eq!(store.load(&key("s1")).unwrap().unwrap(), batch);
+            assert_eq!(
+                store.append(&key("s1"), &batch).unwrap(),
+                0,
+                "replay after crash must be idempotent"
+            );
+            assert_eq!(
+                store
+                    .list_subkeys(&StoreScope::default(), "proj", "s1")
+                    .unwrap(),
+                ["subagents/a"]
+            );
+            assert_eq!(store.stats().unwrap()["entries"], 3);
+            let summary = store
+                .read_summary(&StoreScope::default(), "proj", "s1")
+                .unwrap()
+                .unwrap();
+            assert_eq!(summary.version, 1);
+            assert_eq!(summary.data["title"], "durable");
+            let tenant = SessionKey {
+                scope: StoreScope {
+                    tenant: "other".into(),
+                    ..StoreScope::default()
+                },
+                ..key("s1")
+            };
+            assert_eq!(
+                store.load(&tenant).unwrap().unwrap()[0]["text"],
+                "other tenant"
+            );
+            assert_eq!(store.prune(DEFAULT_RETENTION_DAYS).unwrap(), 0);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Explicit file-backed native recovery workload. No wall-clock CI gate.
+    #[test]
+    #[ignore = "explicit file-backed recovery and concurrent append measurements"]
+    fn benchmark_recovery_contention() {
+        use std::time::{Duration, Instant};
+        let dir = std::env::temp_dir().join(format!(
+            "cognia-recovery-bench-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let path = dir.join("db.sqlite");
+        let store = SessionStore::open(&path).unwrap();
+        let payload = "x".repeat(4096);
+        for batch in 0..200 {
+            let entries: Vec<_> = (0..100)
+                .map(|i| entry(Some(&format!("u{}", batch * 100 + i)), &payload))
+                .collect();
+            store.append(&key("long"), &entries).unwrap();
+        }
+        for i in 0..1000 {
+            store
+                .append(&key(&format!("short-{i}")), &[entry(Some("u"), "short")])
+                .unwrap();
+        }
+        let mut results: HashMap<&str, Vec<f64>> = HashMap::new();
+        let mut measure = |name, round, duration: Duration| {
+            if round > 0 {
+                results
+                    .entry(name)
+                    .or_default()
+                    .push(duration.as_secs_f64() * 1000.0);
+            }
+        };
+        for round in 0..11 {
+            let start = Instant::now();
+            assert_eq!(store.load(&key("long")).unwrap().unwrap().len(), 20_000);
+            measure("load", round, start.elapsed());
+            let start = Instant::now();
+            store
+                .append(
+                    &key("writer"),
+                    &[entry(Some(&format!("solo-{round}")), "write")],
+                )
+                .unwrap();
+            measure("append", round, start.elapsed());
+            let start = Instant::now();
+            assert_eq!(
+                store
+                    .list_sessions(&StoreScope::default(), "proj")
+                    .unwrap()
+                    .len(),
+                1002
+            );
+            measure("list", round, start.elapsed());
+            let start = Instant::now();
+            let reopened = SessionStore::open(&path).unwrap();
+            assert_eq!(reopened.prune(DEFAULT_RETENTION_DAYS).unwrap(), 0);
+            assert_eq!(reopened.load(&key("long")).unwrap().unwrap().len(), 20_000);
+            measure("reopen_prune_load", round, start.elapsed());
+            drop(reopened);
+            for backup in [false, true] {
+                let reader = Arc::clone(&store);
+                let dest = dir.join("backups").join("snapshot.sqlite");
+                let (send, receive) = std::sync::mpsc::sync_channel(0);
+                *store.read_started.lock() = Some((send, None));
+                let (finished, completion) = std::sync::mpsc::channel();
+                let worker = std::thread::spawn(move || {
+                    let start = Instant::now();
+                    if backup {
+                        reader.backup_to(&dest).unwrap();
+                    } else {
+                        assert_eq!(reader.load(&key("long")).unwrap().unwrap().len(), 20_000);
+                    }
+                    finished.send(start.elapsed()).unwrap();
+                });
+                receive.recv_timeout(Duration::from_secs(30)).unwrap();
+                assert!(
+                    matches!(
+                        completion.try_recv(),
+                        Err(std::sync::mpsc::TryRecvError::Empty)
+                    ),
+                    "read must still be active when append starts"
+                );
+                let start = Instant::now();
+                store
+                    .append(
+                        &key("writer"),
+                        &[entry(Some(&format!("race-{round}-{backup}")), "write")],
+                    )
+                    .unwrap();
+                measure(
+                    if backup {
+                        "append_during_backup"
+                    } else {
+                        "append_during_load"
+                    },
+                    round,
+                    start.elapsed(),
+                );
+                measure(
+                    if backup { "backup" } else { "concurrent_load" },
+                    round,
+                    completion.recv_timeout(Duration::from_secs(30)).unwrap(),
+                );
+                worker.join().unwrap();
+            }
+        }
+        for (name, values) in results {
+            let mut sorted = values.clone();
+            sorted.sort_by(f64::total_cmp);
+            let median = (sorted[4] + sorted[5]) / 2.0;
+            let mut deviations: Vec<_> = values.iter().map(|v| (v - median).abs()).collect();
+            deviations.sort_by(f64::total_cmp);
+            println!(
+                "{}",
+                json!({"metric": name, "samplesMs": values, "medianMs": median, "madMs": (deviations[4] + deviations[5])/2.0, "sqliteVersion": rusqlite::version()})
+            );
+        }
+        println!(
+            "{}",
+            json!({"databaseBytes": std::fs::metadata(&path).unwrap().len(), "walBytes": std::fs::metadata(path.with_extension("sqlite-wal")).map(|m|m.len()).unwrap_or(0)})
+        );
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -1807,6 +2426,105 @@ mod tests {
             1
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn backup_finishes_with_continuous_appends_and_restores_one_snapshot() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::time::Duration;
+        let dir = std::env::temp_dir().join(format!(
+            "cognia-live-backup-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let path = dir.join("db.sqlite");
+        let store = SessionStore::open(&path).unwrap();
+        let initial: Vec<_> = (0..2000)
+            .map(|i| entry(Some(&format!("initial-{i}")), &"x".repeat(4096)))
+            .collect();
+        store.append(&key("s1"), &initial).unwrap();
+        let dest = dir.join("backups/snapshot.sqlite");
+        let (ready, started) = std::sync::mpsc::sync_channel(0);
+        let (resume, paused) = std::sync::mpsc::channel();
+        *store.read_started.lock() = Some((ready, Some(paused)));
+        let (finished, completion) = std::sync::mpsc::channel();
+        let backup = Arc::clone(&store);
+        let backup_path = dest.clone();
+        let worker = std::thread::spawn(move || {
+            finished.send(backup.backup_to(backup_path)).unwrap();
+        });
+        started.recv_timeout(Duration::from_secs(30)).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let count = Arc::new(AtomicUsize::new(0));
+        let writer = Arc::clone(&store);
+        let writing = Arc::clone(&stop);
+        let writes = Arc::clone(&count);
+        let (committed, first_write) = std::sync::mpsc::channel();
+        let appender = std::thread::spawn(move || {
+            let mut i = 0;
+            // At least one acknowledged append; bounded to avoid filling disk
+            // even if a future regression makes the backup fail to finish.
+            while i < 100_000 && (i == 0 || !writing.load(Ordering::Acquire)) {
+                writer
+                    .append(
+                        &key("s1"),
+                        &[entry(Some(&format!("live-{i}")), "concurrent")],
+                    )
+                    .unwrap();
+                writes.fetch_add(1, Ordering::Release);
+                if i == 0 {
+                    committed.send(()).unwrap();
+                }
+                i += 1;
+            }
+        });
+        first_write.recv_timeout(Duration::from_secs(30)).unwrap();
+        // The snapshot is still pinned and backup stepping is paused. This
+        // committed append must never leak into the restored database.
+        resume.send(()).unwrap();
+        let result = completion.recv_timeout(Duration::from_secs(30));
+        let exhausted = count.load(Ordering::Acquire) == 100_000;
+        stop.store(true, Ordering::Release);
+        appender.join().unwrap();
+        result
+            .expect("backup must finish under continued writes")
+            .unwrap();
+        worker.join().unwrap();
+        assert!(
+            !exhausted,
+            "backup must finish while writes continue, not after the safety cap"
+        );
+        assert!(count.load(Ordering::Acquire) > 0);
+        let restored = SessionStore::open(&dest).unwrap();
+        assert_eq!(
+            restored.load(&key("s1")).unwrap().unwrap(),
+            initial,
+            "backup must contain the pinned snapshot, not later appends"
+        );
+        assert_eq!(
+            restored
+                .conn
+                .lock()
+                .query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+        assert_eq!(
+            store.load(&key("s1")).unwrap().unwrap().len(),
+            2000 + count.load(Ordering::Acquire)
+        );
+        let (busy, frames, copied): (i64, i64, i64) = store
+            .conn
+            .lock()
+            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(busy, 0);
+        assert_eq!(frames, copied);
+        drop(restored);
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

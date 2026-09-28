@@ -1,0 +1,53 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling shlex v2.0.1
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling find-msvc-tools v0.1.11
+   Compiling pkg-config v0.3.34
+   Compiling vcpkg v0.2.15
+   Compiling libc v0.2.189
+   Compiling serde_core v1.0.229
+   Compiling smallvec v1.15.2
+   Compiling zmij v1.0.23
+   Compiling foldhash v0.1.5
+   Compiling parking_lot_core v0.9.12
+   Compiling serde_json v1.0.151
+   Compiling cc v1.4.3
+   Compiling hashbrown v0.15.5
+   Compiling serde v1.0.229
+   Compiling scopeguard v1.2.0
+   Compiling cfg-if v1.0.4
+   Compiling lock_api v0.4.14
+   Compiling bitflags v2.13.1
+   Compiling itoa v1.0.18
+   Compiling fallible-iterator v0.3.0
+   Compiling pin-project-lite v0.2.17
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling memchr v2.8.3
+   Compiling tokio v1.53.1
+   Compiling hashlink v0.10.0
+   Compiling once_cell v1.21.4
+   Compiling log v0.4.33
+   Compiling libsqlite3-sys v0.35.0
+   Compiling syn v3.0.3
+   Compiling parking_lot v0.12.5
+   Compiling serde_derive v1.0.229
+   Compiling rusqlite v0.37.0
+   Compiling cognia-session-store-evidence v0.1.0 (/tmp/cognia-rust-db-2026-09-26/before)
+    Finished `release` profile [optimized + debuginfo] target(s) in 30.07s
+     Running unittests src/lib.rs (/tmp/cognia-rust-db-2026-09-26/target/release/deps/cognia_session_store_evidence-40f8cc7afe65740a)
+
+running 1 test
+test agent_session_store::tests::benchmark_recovery_contention ... {"madMs":0.6445624999999993,"medianMs":29.2362495,"metric":"append_during_load","samplesMs":[28.104792,29.721667,30.721709,29.388708,30.890542,28.879167000000002,28.432542,28.834625,30.206583,29.083791],"sqliteVersion":"3.50.2"}
+{"madMs":0.025875000000000037,"medianMs":0.229229,"metric":"append","samplesMs":[0.16145800000000002,0.197709,0.259375,0.228125,0.33075,0.23033299999999998,0.234167,0.217375,0.25083300000000003,0.169542],"sqliteVersion":"3.50.2"}
+{"madMs":322.08735400000006,"medianMs":835.262729,"metric":"append_during_backup","samplesMs":[616.0984579999999,919.2335419999999,1268.985333,1425.5751249999998,1009.34225,750.153583,751.291916,1316.5727089999998,410.252292,388.579583],"sqliteVersion":"3.50.2"}
+{"madMs":0.08016699999999999,"medianMs":1.8878955,"metric":"list","samplesMs":[1.889708,1.726958,1.982792,1.784209,2.0427079999999997,1.9032090000000002,1.886083,1.820166,1.92425,1.795291],"sqliteVersion":"3.50.2"}
+{"madMs":0.6775835000000008,"medianMs":32.2759795,"metric":"concurrent_load","samplesMs":[31.061292,32.922458,33.852083,32.485459,34.000541000000005,31.930209,31.567290999999997,31.83975,33.312583,32.0665],"sqliteVersion":"3.50.2"}
+{"madMs":322.05425,"medianMs":835.0920625,"metric":"backup","samplesMs":[615.975834,919.091333,1268.789916,1425.4006669999999,1009.1420840000001,749.976042,751.092792,1316.381584,410.099791,388.406834],"sqliteVersion":"3.50.2"}
+{"madMs":1.042542000000001,"medianMs":41.950604,"metric":"reopen_prune_load","samplesMs":[47.326958000000005,42.02825,45.14875,41.559958,44.8185,41.244584,40.077875,41.872958000000004,40.994958,43.080042],"sqliteVersion":"3.50.2"}
+{"madMs":0.5954999999999977,"medianMs":32.001875,"metric":"load","samplesMs":[31.676625,31.231958000000002,32.564375,32.943084,35.001040999999994,31.753207999999997,31.373375000000003,32.21875,33.310249999999996,31.785],"sqliteVersion":"3.50.2"}
+{"databaseBytes":95760384,"walBytes":4466112}
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 41 filtered out; finished in 11.33s
+

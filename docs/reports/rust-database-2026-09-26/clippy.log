@@ -1,0 +1,3 @@
+    Blocking waiting for file lock on build directory
+    Checking cognia-agent-state v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-agent-state)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.52s
