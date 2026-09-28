@@ -9,6 +9,7 @@
 import {
   ARTIFACT_RUNTIME_ADAPTERS,
   getArtifactExportFormats,
+  isPluginModelArtifact,
   getArtifactRuntimeAdapter,
   getPreferredArtifactExportFormat,
 } from "./runtime-adapters"
@@ -95,6 +96,41 @@ describe("getArtifactExportFormats", () => {
         metadata: { exportFormats: ["raw", "png", "svg"] },
       })
     ).toEqual(["raw"])
+  })
+
+  it("recognizes a plugin model by its own data, with no renderer registered", () => {
+    const plugin = {
+      kind: "cognia-office/workbook",
+      schemaVersion: 1,
+      ownerPluginId: "cognia-office",
+    }
+    const workbook = { type: "code" as const, language: "json" as const, metadata: { plugin } }
+    expect(isPluginModelArtifact(workbook)).toBe(true)
+    expect(getArtifactExportFormats(workbook)).toEqual(["raw"])
+    expect(getPreferredArtifactExportFormat(workbook)).toBe("raw")
+    // A plugin's Markdown deliverable is prose and keeps the text exporters.
+    const markdown = {
+      type: "document" as const,
+      language: "markdown" as const,
+      metadata: { plugin },
+    }
+    expect(isPluginModelArtifact(markdown)).toBe(false)
+    expect(getArtifactExportFormats(markdown)).toEqual(["raw", "pdf"])
+    // JSON that no plugin owns is ordinary code.
+    expect(isPluginModelArtifact({ language: "json", metadata: {} })).toBe(false)
+  })
+
+  it("offers only raw for plugin-owned content that declares nothing", () => {
+    expect(getArtifactExportFormats({ type: "document" }, { pluginOwnsContent: true })).toEqual([
+      "raw",
+    ])
+    // A plugin that declares more keeps what the adapter supports.
+    expect(
+      getArtifactExportFormats(
+        { type: "html", metadata: { exportFormats: ["raw", "pdf"] } },
+        { pluginOwnsContent: true }
+      )
+    ).toEqual(["raw", "pdf"])
   })
 })
 

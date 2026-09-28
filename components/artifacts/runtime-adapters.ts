@@ -101,14 +101,38 @@ export function getArtifactRuntimeAdapter(type: ArtifactType): ArtifactRuntimeAd
   return ARTIFACT_RUNTIME_ADAPTERS[type]
 }
 
+/**
+ * Whether an artifact's content is a plugin's structured model rather than
+ * prose: a plugin-owned payload stored as JSON (a cognia-office workbook, a
+ * cognia-documents document model). This reads the artifact itself, so it
+ * holds while the owning plugin is disabled or still loading and for every
+ * caller — the panel, the export workflow node, the preferred-format pick.
+ */
+export function isPluginModelArtifact(
+  artifact: Pick<Artifact, "metadata"> & { language?: Artifact["language"] }
+): boolean {
+  return Boolean(artifact.metadata?.plugin) && artifact.language === "json"
+}
+
+/**
+ * The formats the host can export an artifact as.
+ *
+ * Plugin-owned content — a plugin model (`isPluginModelArtifact`), or any
+ * artifact a registered plugin renderer draws (`pluginOwnsContent`) — is not
+ * prose, so the host's text-based exporters would print the model. Such an
+ * artifact offers only the formats it declares, and `raw` when it declares
+ * none; its native export is the plugin's own.
+ */
 export function getArtifactExportFormats(
-  artifact: Pick<Artifact, "type" | "metadata">
+  artifact: Pick<Artifact, "type" | "metadata"> & { language?: Artifact["language"] },
+  options: { pluginOwnsContent?: boolean } = {}
 ): ArtifactExportFormat[] {
   const adapterFormats = getArtifactRuntimeAdapter(artifact.type).exportFormats
   const declaredFormats = artifact.metadata?.exportFormats
+  const pluginOwned = options.pluginOwnsContent || isPluginModelArtifact(artifact)
 
   if (!declaredFormats?.length) {
-    return [...adapterFormats]
+    return pluginOwned ? ["raw"] : [...adapterFormats]
   }
 
   return declaredFormats.filter((format): format is ArtifactExportFormat =>
@@ -117,7 +141,7 @@ export function getArtifactExportFormats(
 }
 
 export function getPreferredArtifactExportFormat(
-  artifact: Pick<Artifact, "type" | "metadata">
+  artifact: Pick<Artifact, "type" | "metadata"> & { language?: Artifact["language"] }
 ): ArtifactExportFormat {
   const formats = getArtifactExportFormats(artifact)
 

@@ -1,5 +1,6 @@
 import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
-import type { WorkbookOperation } from "./model"
+import { MAX_STYLED_RANGE_CELLS, type WorkbookOperation } from "./model"
+import { DEFAULT_READ_CELLS, MAX_READ_CELLS } from "./read-range"
 import { createOfficeRuntime, type OfficePluginContext } from "./runtime"
 
 export const OFFICE_TOOL_NAMES = [
@@ -11,6 +12,9 @@ export const OFFICE_TOOL_NAMES = [
   "office_preview_workbook",
   "office_export_xlsx",
   "office_sync_lark",
+  "office_read_range",
+  "office_list_versions",
+  "office_restore_version",
 ] as const
 
 const artifactIdSchema = { type: "string", minLength: 1 } as const
@@ -28,7 +32,9 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginToolRegistrat
       definition: {
         name: OFFICE_TOOL_NAMES[0],
         description:
-          "Create a native XLSX-ready workbook artifact from deterministic workbook operations.",
+          "Create a native XLSX-ready workbook artifact from deterministic workbook operations. " +
+          "Returns a summary (sheets, used ranges, findings), not the cells; read them back with " +
+          "office_read_range.",
         parametersSchema: {
           type: "object",
           properties: {
@@ -62,7 +68,8 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginToolRegistrat
       definition: {
         name: OFFICE_TOOL_NAMES[1],
         description:
-          "Import an XLSX attachment handle, or open the user file picker when no handle is supplied.",
+          "Import an XLSX attachment handle, or open the user file picker when no handle is " +
+          "supplied. Returns a summary; read cell contents with office_read_range.",
         parametersSchema: {
           type: "object",
           properties: {
@@ -85,7 +92,8 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginToolRegistrat
       definition: {
         name: OFFICE_TOOL_NAMES[2],
         description:
-          "Inspect workbook sheets, version, populated cells, merges, and compatibility warnings.",
+          "Inspect workbook version, sheets (used range, cell/formula/merge counts, filter, " +
+          "freeze), and compatibility warnings. Use office_read_range for cell contents.",
         parametersSchema: artifactOnlySchema,
       },
       execute: async (args) => runtime.inspect((args as { artifactId: string }).artifactId),
@@ -95,7 +103,10 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginToolRegistrat
       definition: {
         name: OFFICE_TOOL_NAMES[3],
         description:
-          "Atomically apply deterministic workbook operations with optimistic version checking.",
+          "Atomically apply deterministic workbook operations with optimistic version checking. " +
+          "Structural edits (insert/delete rows or columns, rename/delete sheets) rewrite formula " +
+          "references across every sheet the way Excel does; references into deleted cells " +
+          "become #REF!.",
         parametersSchema: {
           type: "object",
           properties: {
@@ -217,8 +228,91 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginToolRegistrat
         })
       },
     }),
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[8],
+      definition: {
+        name: OFFICE_TOOL_NAMES[8],
+        description:
+          "Read workbook cell values under a cell budget. Omit sheet to read every sheet's used " +
+          'range; pass sheet (and optionally range) to read one block. format "grid" returns ' +
+          'row-major values plus a formula map; "text" returns tab-separated text per sheet. ' +
+          "truncated: true means the budget clipped the block — read the rest by range.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            artifactId: artifactIdSchema,
+            sheet: { type: "string", minLength: 1, description: "Sheet id or title." },
+            range: {
+              ...rangeSchema,
+              description: "A1 range on that sheet; defaults to its used range.",
+            },
+            maxCells: {
+              type: "integer",
+              minimum: 1,
+              maximum: MAX_READ_CELLS,
+              description: `Cell budget shared across sheets (default ${DEFAULT_READ_CELLS}).`,
+            },
+            includeFormulas: {
+              type: "boolean",
+              description: "Include formula text keyed by cell (default true).",
+            },
+            format: { enum: ["grid", "text"] },
+          },
+          required: ["artifactId"],
+          additionalProperties: false,
+        },
+      },
+      execute: async (args) => {
+        const { artifactId, ...options } = args as {
+          artifactId: string
+          sheet?: string
+          range?: string
+          maxCells?: number
+          includeFormulas?: boolean
+          format?: "grid" | "text"
+        }
+        return runtime.readRange(artifactId, options)
+      },
+    }),
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[9],
+      definition: {
+        name: OFFICE_TOOL_NAMES[9],
+        description: "List the saved version history of a workbook artifact.",
+        parametersSchema: artifactOnlySchema,
+      },
+      execute: async (args) => runtime.listVersions((args as { artifactId: string }).artifactId),
+    }),
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[10],
+      definition: {
+        name: OFFICE_TOOL_NAMES[10],
+        description:
+          "Restore a workbook artifact to a saved version (from office_list_versions). The " +
+          "restore is itself a new version, so it can be undone the same way.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            artifactId: artifactIdSchema,
+            versionId: { type: "string", minLength: 1 },
+            expectedVersion: { type: "integer", minimum: 1 },
+          },
+          required: ["artifactId", "versionId", "expectedVersion"],
+          additionalProperties: false,
+        },
+      },
+      execute: async (args) =>
+        runtime.restoreVersion(
+          args as { artifactId: string; versionId: string; expectedVersion: number }
+        ),
+    }),
   ]
 }
+
+const rangeSchema = {
+  type: "string",
+  pattern: "^[A-Za-z]{1,3}[1-9][0-9]*(:[A-Za-z]{1,3}[1-9][0-9]*)?$",
+} as const
 
 const artifactOnlySchema = {
   type: "object",
@@ -227,43 +321,45 @@ const artifactOnlySchema = {
   additionalProperties: false,
 }
 
+const styleSchema = {
+  type: "object",
+  properties: {
+    numberFormat: { type: "string", minLength: 1 },
+    font: {
+      type: "object",
+      properties: {
+        bold: { type: "boolean" },
+        italic: { type: "boolean" },
+        color: { type: "string", pattern: "^#?[0-9A-Fa-f]{6,8}$" },
+      },
+      additionalProperties: false,
+    },
+    fill: {
+      type: "object",
+      properties: { color: { type: "string", pattern: "^#?[0-9A-Fa-f]{6,8}$" } },
+      required: ["color"],
+      additionalProperties: false,
+    },
+    alignment: {
+      type: "object",
+      properties: {
+        horizontal: { enum: ["left", "center", "right"] },
+        vertical: { enum: ["top", "middle", "bottom"] },
+        wrapText: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+} as const
+
 const cellSchema = {
   type: "object",
   properties: {
     type: { enum: ["string", "number", "boolean", "date", "blank", "error"] },
     value: { anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }] },
     formula: { type: "string", minLength: 1 },
-    style: {
-      type: "object",
-      properties: {
-        numberFormat: { type: "string", minLength: 1 },
-        font: {
-          type: "object",
-          properties: {
-            bold: { type: "boolean" },
-            italic: { type: "boolean" },
-            color: { type: "string", pattern: "^#?[0-9A-Fa-f]{6,8}$" },
-          },
-          additionalProperties: false,
-        },
-        fill: {
-          type: "object",
-          properties: { color: { type: "string", pattern: "^#?[0-9A-Fa-f]{6,8}$" } },
-          required: ["color"],
-          additionalProperties: false,
-        },
-        alignment: {
-          type: "object",
-          properties: {
-            horizontal: { enum: ["left", "center", "right"] },
-            vertical: { enum: ["top", "middle", "bottom"] },
-            wrapText: { type: "boolean" },
-          },
-          additionalProperties: false,
-        },
-      },
-      additionalProperties: false,
-    },
+    style: styleSchema,
   },
   required: ["type"],
   additionalProperties: false,
@@ -446,6 +542,61 @@ const operationArraySchema = {
         required: ["op", "sheet", "column"],
         additionalProperties: false,
       })),
+      {
+        type: "object",
+        properties: {
+          ...operationBaseProperties,
+          op: { const: "clearRange" },
+          range: rangeSchema,
+          target: {
+            enum: ["all", "contents", "formats"],
+            description:
+              "all (default) removes the cells; contents keeps formatting; formats keeps values.",
+          },
+        },
+        required: ["op", "sheet", "range"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          ...operationBaseProperties,
+          op: { const: "setRangeStyle" },
+          range: {
+            ...rangeSchema,
+            description: `Range to format (at most ${MAX_STYLED_RANGE_CELLS} cells).`,
+          },
+          style: styleSchema,
+          mode: {
+            enum: ["merge", "replace"],
+            description:
+              "merge (default) layers the style over each cell's; replace overwrites it.",
+          },
+        },
+        required: ["op", "sheet", "range", "style"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          ...operationBaseProperties,
+          op: { const: "appendRows" },
+          rows: {
+            type: "array",
+            minItems: 1,
+            maxItems: 5000,
+            items: { type: "array", minItems: 1, items: cellSchema },
+            description: "Rows written below the last used row; rows may differ in length.",
+          },
+          column: {
+            type: "string",
+            pattern: "^[A-Za-z]{1,3}$",
+            description: "Column the rows start in (default A).",
+          },
+        },
+        required: ["op", "sheet", "rows"],
+        additionalProperties: false,
+      },
     ],
   },
 }

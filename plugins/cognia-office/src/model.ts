@@ -1,4 +1,13 @@
-import { decodeCell, decodeColumn, decodeRange, encodeCell, encodeColumn, encodeRange } from "./a1"
+import {
+  decodeCell,
+  decodeColumn,
+  decodeRange,
+  encodeCell,
+  encodeColumn,
+  encodeRange,
+  type RangeAddress,
+} from "./a1"
+import { rewriteWorkbookFormulas } from "./formula-refs"
 
 export const WORKBOOK_SCHEMA_VERSION = 1 as const
 export const WORKBOOK_ARTIFACT_KIND = "cognia-office/workbook"
@@ -6,6 +15,12 @@ export const WORKBOOK_ARTIFACT_KIND = "cognia-office/workbook"
 /** Excel worksheet limits (1-based): 1,048,576 rows and 16,384 columns (XFD). */
 export const WORKBOOK_MAX_ROW = 1_048_576
 export const WORKBOOK_MAX_COLUMN = 16_384
+/**
+ * Most cells one `setRangeStyle` may materialize. Styling a whole column
+ * (`A1:A1048576`) would otherwise write a million cell entries into the
+ * artifact; format the populated block instead.
+ */
+export const MAX_STYLED_RANGE_CELLS = 100_000
 
 export type WorkbookCellType = "string" | "number" | "boolean" | "date" | "blank" | "error"
 
@@ -64,6 +79,45 @@ export type WorkbookOperation =
   | { op: "deleteRows"; sheet: string; row: number; count?: number }
   | { op: "insertColumns"; sheet: string; column: string; count?: number }
   | { op: "deleteColumns"; sheet: string; column: string; count?: number }
+  | { op: "clearRange"; sheet: string; range: string; target?: WorkbookClearTarget }
+  | {
+      op: "setRangeStyle"
+      sheet: string
+      range: string
+      style: WorkbookCellStyle
+      mode?: "merge" | "replace"
+    }
+  | { op: "appendRows"; sheet: string; rows: WorkbookCell[][]; column?: string }
+
+/**
+ * What `clearRange` removes: whole cells (`all`, the default), only their
+ * values and formulas (`contents`, keeping formatting), or only formatting
+ * (`formats`, keeping values).
+ */
+export type WorkbookClearTarget = "all" | "contents" | "formats"
+
+/** The operation names, in schema order — the tool schema and tests key off this. */
+export const WORKBOOK_OPERATION_NAMES = [
+  "setCell",
+  "setRange",
+  "addSheet",
+  "deleteSheet",
+  "renameSheet",
+  "reorderSheet",
+  "merge",
+  "unmerge",
+  "setFilter",
+  "setFreeze",
+  "setRowDimension",
+  "setColumnDimension",
+  "insertRows",
+  "deleteRows",
+  "insertColumns",
+  "deleteColumns",
+  "clearRange",
+  "setRangeStyle",
+  "appendRows",
+] as const satisfies ReadonlyArray<WorkbookOperation["op"]>
 
 /**
  * The OOXML features an imported workbook can carry that this model cannot
@@ -101,10 +155,12 @@ export function unsupportedFeatureId(message: string): UnsupportedFeatureId | un
 export interface WorkbookValidationFinding {
   severity: "error" | "warning"
   code: string
+  /** English text for the model; the preview localizes through `finding.<code>` + `params`. */
   message: string
   remediation: string
   sheet?: string
   cell?: string
+  params?: Record<string, string | number>
 }
 
 export function createWorkbook(title: string, sheetTitle = "Sheet1"): WorkbookDocument {
@@ -118,13 +174,22 @@ export function createWorkbook(title: string, sheetTitle = "Sheet1"): WorkbookDo
   }
 }
 
+/**
+ * Error codes a stored workbook may still carry and be opened with. They block
+ * export and any edit that leaves them in place, but refusing to read the
+ * artifact would also refuse the edit that repairs it (an `unmerge`).
+ */
+const READABLE_ERROR_CODES = new Set(["merge.overlap"])
+
 export function parseWorkbook(content: string): WorkbookDocument {
   const parsed = JSON.parse(content) as WorkbookDocument
   if (parsed.schemaVersion !== WORKBOOK_SCHEMA_VERSION) {
     throw new Error(`unsupported workbook schema version: ${String(parsed.schemaVersion)}`)
   }
   const findings = validateWorkbook(parsed)
-  const error = findings.find((finding) => finding.severity === "error")
+  const error = findings.find(
+    (finding) => finding.severity === "error" && !READABLE_ERROR_CODES.has(finding.code)
+  )
   if (error) throw new Error(`${error.code}: ${error.message}`)
   return parsed
 }
@@ -247,6 +312,17 @@ export function validateWorkbook(workbook: WorkbookDocument): WorkbookValidation
         )
       }
     }
+    for (const [first, second] of overlappingMerges(sheet.merges)) {
+      findings.push({
+        ...error(
+          "merge.overlap",
+          `Merged ranges ${first} and ${second} overlap.`,
+          `Unmerge one of them (unmerge ${second}); Excel cannot open overlapping merges.`,
+          sheet.title
+        ),
+        params: { first, second },
+      })
+    }
     if (sheet.filter && !isRangeRef(sheet.filter)) {
       findings.push(
         error(
@@ -286,10 +362,16 @@ function applyOperation(workbook: WorkbookDocument, operation: WorkbookOperation
     case "deleteSheet":
       if (workbook.sheets.length === 1) throw new Error("cannot delete the last sheet")
       workbook.sheets.splice(sheetIndex, 1)
+      // Formulas elsewhere that read the deleted sheet now read nothing.
+      rewriteWorkbookFormulas(workbook.sheets, { kind: "deleteSheet", sheet: sheet.title })
       break
-    case "renameSheet":
+    case "renameSheet": {
+      const from = sheet.title
       sheet.title = requireText(operation.title, "sheet title")
+      if (from !== sheet.title)
+        rewriteWorkbookFormulas(workbook.sheets, { kind: "renameSheet", from, to: sheet.title })
       break
+    }
     case "reorderSheet": {
       if (
         !Number.isInteger(operation.index) ||
@@ -330,12 +412,29 @@ function applyOperation(workbook: WorkbookDocument, operation: WorkbookOperation
     case "merge": {
       const range = operation.range.toUpperCase()
       if (!isRangeRef(range)) throw new Error(`invalid merge range: ${operation.range}`)
-      if (!sheet.merges.includes(range)) sheet.merges.push(range)
+      const area = decodeRange(range)
+      if (area.s.r === area.e.r && area.s.c === area.e.c)
+        throw new Error(`merge range must span at least two cells: ${operation.range}`)
+      if (sheet.merges.includes(range)) break
+      const clash = sheet.merges.find(
+        (existing) => isRangeRef(existing) && rangesIntersect(decodeRange(existing), area)
+      )
+      if (clash)
+        throw new Error(`merge range ${range} overlaps the merged range ${clash}; unmerge it first`)
+      sheet.merges.push(range)
       break
     }
-    case "unmerge":
-      sheet.merges = sheet.merges.filter((range) => range !== operation.range.toUpperCase())
+    case "unmerge": {
+      // Like Excel's "Unmerge Cells" on a selection: every merged area the
+      // range touches is released, not only an exact match.
+      const range = operation.range.toUpperCase()
+      if (!isRangeRef(range)) throw new Error(`invalid unmerge range: ${operation.range}`)
+      const area = decodeRange(range)
+      sheet.merges = sheet.merges.filter(
+        (existing) => !isRangeRef(existing) || !rangesIntersect(decodeRange(existing), area)
+      )
       break
+    }
     case "setFilter": {
       const range = operation.range?.toUpperCase()
       if (range !== undefined && !isRangeRef(range))
@@ -343,12 +442,14 @@ function applyOperation(workbook: WorkbookDocument, operation: WorkbookOperation
       sheet.filter = range
       break
     }
-    case "setFreeze":
-      sheet.freeze = {
-        rows: nonNegative(operation.rows, WORKBOOK_MAX_ROW),
-        columns: nonNegative(operation.columns, WORKBOOK_MAX_COLUMN),
-      }
+    case "setFreeze": {
+      const rows = nonNegative(operation.rows, WORKBOOK_MAX_ROW) ?? 0
+      const columns = nonNegative(operation.columns, WORKBOOK_MAX_COLUMN) ?? 0
+      // No frozen rows or columns means no frozen pane at all.
+      if (rows === 0 && columns === 0) delete sheet.freeze
+      else sheet.freeze = { ...(rows ? { rows } : {}), ...(columns ? { columns } : {}) }
       break
+    }
     case "setRowDimension":
       rowIndex(operation.row)
       sheet.rowDimensions ??= {}
@@ -368,30 +469,213 @@ function applyOperation(workbook: WorkbookDocument, operation: WorkbookOperation
       break
     }
     case "insertRows":
-      shiftSheetAxis(sheet, "r", rowIndex(operation.row), operationCount(operation.count), "insert")
-      break
     case "deleteRows":
-      shiftSheetAxis(sheet, "r", rowIndex(operation.row), operationCount(operation.count), "delete")
-      break
     case "insertColumns":
-      shiftSheetAxis(
-        sheet,
-        "c",
-        columnIndex(operation.column),
-        operationCount(operation.count),
-        "insert"
-      )
+    case "deleteColumns": {
+      const axis = operation.op.endsWith("Rows") ? "r" : "c"
+      const at = "row" in operation ? rowIndex(operation.row) : columnIndex(operation.column)
+      const count = operationCount(operation.count)
+      const mode = operation.op.startsWith("insert") ? "insert" : "delete"
+      shiftSheetAxis(sheet, axis, at, count, mode)
+      // Formulas on every sheet that read this one follow the moved cells.
+      rewriteWorkbookFormulas(workbook.sheets, {
+        kind: "axis",
+        sheet: sheet.title,
+        axis,
+        at,
+        count,
+        mode,
+      })
       break
-    case "deleteColumns":
-      shiftSheetAxis(
-        sheet,
-        "c",
-        columnIndex(operation.column),
-        operationCount(operation.count),
-        "delete"
-      )
+    }
+    case "clearRange":
+      clearRange(sheet, requireRange(operation.range), operation.target ?? "all")
+      break
+    case "setRangeStyle":
+      setRangeStyle(sheet, requireRange(operation.range), operation.style, operation.mode)
+      break
+    case "appendRows":
+      appendRows(sheet, operation.rows, operation.column)
       break
   }
+}
+
+function requireRange(value: string): RangeAddress {
+  const ref = value.toUpperCase()
+  if (!isRangeRef(ref)) throw new Error(`invalid range: ${value}`)
+  return decodeRange(ref)
+}
+
+function inRange(ref: string, range: RangeAddress): boolean {
+  const cell = decodeCell(ref)
+  return cell.r >= range.s.r && cell.r <= range.e.r && cell.c >= range.s.c && cell.c <= range.e.c
+}
+
+function clearRange(sheet: WorkbookSheet, range: RangeAddress, target: WorkbookClearTarget): void {
+  if (target !== "all" && target !== "contents" && target !== "formats")
+    throw new Error(`invalid clear target: ${String(target)}`)
+  for (const [ref, cell] of Object.entries(sheet.cells)) {
+    if (!isCellRef(ref) || !inRange(ref, range)) continue
+    if (target === "all") {
+      delete sheet.cells[ref]
+    } else if (target === "formats") {
+      delete cell.style
+    } else if (cell.style) {
+      sheet.cells[ref] = { type: "blank", style: cell.style }
+    } else {
+      delete sheet.cells[ref]
+    }
+  }
+}
+
+function setRangeStyle(
+  sheet: WorkbookSheet,
+  range: RangeAddress,
+  style: WorkbookCellStyle,
+  mode: "merge" | "replace" = "merge"
+): void {
+  if (mode !== "merge" && mode !== "replace") throw new Error(`invalid style mode: ${String(mode)}`)
+  if (!style || typeof style !== "object") throw new Error("style must be an object")
+  const area = (range.e.r - range.s.r + 1) * (range.e.c - range.s.c + 1)
+  if (area > MAX_STYLED_RANGE_CELLS)
+    throw new Error(
+      `setRangeStyle covers ${area} cells; style at most ${MAX_STYLED_RANGE_CELLS} at a time`
+    )
+  for (let r = range.s.r; r <= range.e.r; r += 1) {
+    for (let c = range.s.c; c <= range.e.c; c += 1) {
+      const ref = encodeCell({ r, c })
+      const cell = sheet.cells[ref] ?? { type: "blank" as const }
+      const next = mode === "replace" ? structuredClone(style) : mergeStyle(cell.style, style)
+      if (Object.keys(next).length) cell.style = next
+      else delete cell.style
+      if (cell.type === "blank" && cell.value === undefined && !cell.formula && !cell.style) {
+        delete sheet.cells[ref]
+      } else {
+        sheet.cells[ref] = cell
+      }
+    }
+  }
+}
+
+/** Layer `patch` over `base`; nested font/alignment keys merge, the rest replace. */
+function mergeStyle(
+  base: WorkbookCellStyle | undefined,
+  patch: WorkbookCellStyle
+): WorkbookCellStyle {
+  const next: WorkbookCellStyle = structuredClone(base ?? {})
+  if (patch.numberFormat !== undefined) next.numberFormat = patch.numberFormat
+  if (patch.font) next.font = { ...next.font, ...patch.font }
+  if (patch.fill) next.fill = { ...patch.fill }
+  if (patch.alignment) next.alignment = { ...next.alignment, ...patch.alignment }
+  return next
+}
+
+function appendRows(sheet: WorkbookSheet, rows: WorkbookCell[][], column = "A"): void {
+  if (!Array.isArray(rows) || rows.length === 0 || rows.some((row) => !Array.isArray(row)))
+    throw new Error("appendRows needs at least one row of cells")
+  const startColumn = columnIndex(column)
+  const used = usedRangeAddress(sheet)
+  const firstRow = used ? used.e.r + 1 : 0
+  if (firstRow + rows.length > WORKBOOK_MAX_ROW)
+    throw new Error("operation pushes content beyond the worksheet bounds")
+  rows.forEach((row, rowOffset) =>
+    row.forEach((cell, columnOffset) => {
+      const c = startColumn + columnOffset
+      if (c >= WORKBOOK_MAX_COLUMN)
+        throw new Error("operation pushes content beyond the worksheet bounds")
+      sheet.cells[encodeCell({ r: firstRow + rowOffset, c })] = normalizeCell(cell)
+    })
+  )
+}
+
+/**
+ * The smallest range covering every populated cell and merge, or undefined
+ * for an empty sheet. Non-canonical keys are skipped (validation reports them).
+ */
+export function usedRangeAddress(sheet: WorkbookSheet): RangeAddress | undefined {
+  let bounds: RangeAddress | undefined
+  const include = (area: RangeAddress) => {
+    if (!bounds) {
+      bounds = { s: { ...area.s }, e: { ...area.e } }
+      return
+    }
+    bounds.s.r = Math.min(bounds.s.r, area.s.r)
+    bounds.s.c = Math.min(bounds.s.c, area.s.c)
+    bounds.e.r = Math.max(bounds.e.r, area.e.r)
+    bounds.e.c = Math.max(bounds.e.c, area.e.c)
+  }
+  for (const ref of Object.keys(sheet.cells)) {
+    if (!isCellRef(ref)) continue
+    const cell = decodeCell(ref)
+    include({ s: cell, e: cell })
+  }
+  for (const merge of sheet.merges) if (isRangeRef(merge)) include(decodeRange(merge))
+  return bounds
+}
+
+/** `usedRangeAddress` in A1 notation. */
+export function usedRange(sheet: WorkbookSheet): string | undefined {
+  const bounds = usedRangeAddress(sheet)
+  return bounds ? encodeRange(bounds) : undefined
+}
+
+/** Compact, model-facing description of a workbook — never its cell payload. */
+export interface WorkbookSummary {
+  title: string
+  sheets: Array<{
+    id: string
+    title: string
+    usedRange?: string
+    cellCount: number
+    formulaCount: number
+    merges: number
+    filter?: string
+    freeze?: WorkbookSheet["freeze"]
+  }>
+  unsupportedFeatures: string[]
+  sourceFilename?: string
+}
+
+export function summarizeWorkbook(workbook: WorkbookDocument): WorkbookSummary {
+  return {
+    title: workbook.title,
+    sheets: workbook.sheets.map((sheet) => {
+      const range = usedRange(sheet)
+      const cells = Object.values(sheet.cells)
+      return {
+        id: sheet.id,
+        title: sheet.title,
+        ...(range ? { usedRange: range } : {}),
+        cellCount: cells.length,
+        formulaCount: cells.filter((cell) => cell.formula).length,
+        merges: sheet.merges.length,
+        ...(sheet.filter ? { filter: sheet.filter } : {}),
+        ...(sheet.freeze ? { freeze: sheet.freeze } : {}),
+      }
+    }),
+    unsupportedFeatures: workbook.unsupportedFeatures,
+    ...(workbook.sourceFilename ? { sourceFilename: workbook.sourceFilename } : {}),
+  }
+}
+
+function rangesIntersect(a: RangeAddress, b: RangeAddress): boolean {
+  return a.s.r <= b.e.r && b.s.r <= a.e.r && a.s.c <= b.e.c && b.s.c <= a.e.c
+}
+
+/** Every pair of intersecting merges, found with a sort-and-sweep over rows. */
+function overlappingMerges(merges: readonly string[]): Array<[string, string]> {
+  const areas = merges
+    .filter(isRangeRef)
+    .map((ref) => ({ ref, area: decodeRange(ref) }))
+    .sort((a, b) => a.area.s.r - b.area.s.r)
+  const pairs: Array<[string, string]> = []
+  for (let i = 0; i < areas.length; i += 1) {
+    for (let j = i + 1; j < areas.length; j += 1) {
+      if (areas[j].area.s.r > areas[i].area.e.r) break
+      if (rangesIntersect(areas[i].area, areas[j].area)) pairs.push([areas[i].ref, areas[j].ref])
+    }
+  }
+  return pairs
 }
 
 /**

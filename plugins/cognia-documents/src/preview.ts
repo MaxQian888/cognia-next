@@ -1,5 +1,11 @@
 import type { Artifact, ArtifactRenderer } from "@cognia/plugin-sdk"
 import {
+  createExportController,
+  renderExportBar,
+  type ExportController,
+  type ExportOutcomeLike,
+} from "./export-control"
+import {
   normalizeFeatureId,
   parseDocument,
   validateDocument,
@@ -22,6 +28,14 @@ export interface DocumentPreviewDeps {
   ) => Promise<unknown>
   /** Called once per mount; must return a disposer. */
   onLocaleChange: (handler: () => void) => () => void
+  /**
+   * Save the artifact as `.docx` (the same path as `documents_export_docx`).
+   * The preview shows an Export button only when set.
+   */
+  exportDocument?: (
+    artifactId: string,
+    allowUnsupportedFeatureLoss: boolean
+  ) => Promise<ExportOutcomeLike>
 }
 
 const HIGHLIGHT_MS = 1600
@@ -47,6 +61,14 @@ export function createDocumentRenderer(deps: DocumentPreviewDeps): ArtifactRende
       const review: ReviewState = { pending: false, error: "" }
       const disposers: Array<() => void> = []
       const t = deps.t
+      const exportDocument = deps.exportDocument
+      const exporter: ExportController | undefined = exportDocument
+        ? createExportController({
+            run: (allowLoss) => exportDocument(current.id, allowLoss),
+            onChange: () => render(),
+            isDisposed: () => disposed,
+          })
+        : undefined
 
       const act = (operations: DocumentOperation[]) => {
         // One review write at a time: a second click would race the first
@@ -93,9 +115,9 @@ export function createDocumentRenderer(deps: DocumentPreviewDeps): ArtifactRende
         root.className = "cdoc"
         root.appendChild(buildStyles())
         try {
-          root.appendChild(
-            renderDocument(parseDocument(current.content), t, { act, showBlock }, review)
-          )
+          const model = parseDocument(current.content)
+          if (exporter) root.appendChild(renderExportBar(exporter, t, "cdoc"))
+          root.appendChild(renderDocument(model, t, { act, showBlock }, review))
         } catch (error) {
           const card = document.createElement("section")
           card.className = "cdoc-error"
@@ -142,15 +164,17 @@ function activeFocusKey(container: HTMLElement): string | undefined {
 /**
  * Every render replaces the DOM, which would drop keyboard focus onto `body`
  * after each review click or locale switch. Put it back on the control with
- * the same key — or on the review heading when that control is gone (a
- * rejected change removes its own card).
+ * the same key — or, when that control is gone, on the review heading (a
+ * rejected change removes its own card) or the Export button (the export
+ * confirmation buttons disappear once answered).
  */
 function restoreFocus(container: HTMLElement, key: string | undefined): void {
   if (!key) return
   const candidates = [...container.querySelectorAll<HTMLElement>("[data-focus-key]")]
+  const fallback = key.startsWith("export:") ? "export:run" : "review"
   const target =
     candidates.find((element) => element.dataset.focusKey === key) ??
-    candidates.find((element) => element.dataset.focusKey === "review")
+    candidates.find((element) => element.dataset.focusKey === fallback)
   target?.focus({ preventScroll: true })
 }
 
@@ -190,24 +214,33 @@ function renderDocument(
     empty.textContent = t("preview.empty")
     body.appendChild(empty)
   }
-  // Consecutive same-kind list items share one list element — real ul/ol
-  // semantics, real markers.
-  let list: HTMLUListElement | HTMLOListElement | null = null
-  let listOrdered: boolean | null = null
+  // Consecutive list items share real, nested ul/ol elements: a deeper item
+  // opens a list inside the previous item, a shallower one closes back out.
+  const lists: Array<{
+    element: HTMLUListElement | HTMLOListElement
+    ordered: boolean
+    level: number
+  }> = []
   for (const block of model.blocks) {
-    const isList = block.type === "list-item"
-    if (isList && (listOrdered !== block.ordered || !list)) {
-      list = document.createElement(block.ordered ? "ol" : "ul")
-      list.className = "cdoc-list"
-      body.appendChild(list)
-      listOrdered = block.ordered
-    } else if (!isList) {
-      list = null
-      listOrdered = null
+    if (block.type !== "list-item") {
+      lists.length = 0
+      body.appendChild(renderBlock(block, t))
+      continue
     }
-    const element = renderBlock(block, t)
-    if (isList && list) list.appendChild(element)
-    else body.appendChild(element)
+    const level = block.level ?? 0
+    while (lists.length && lists[lists.length - 1].level > level) lists.pop()
+    const top = lists[lists.length - 1]
+    if (top && top.level === level && top.ordered !== block.ordered) lists.pop()
+    let current = lists[lists.length - 1]
+    if (!current || current.level < level) {
+      const element = document.createElement(block.ordered ? "ol" : "ul")
+      element.className = "cdoc-list"
+      const parentItem = current?.element.lastElementChild
+      ;(parentItem ?? body).appendChild(element)
+      current = { element, ordered: block.ordered, level }
+      lists.push(current)
+    }
+    current.element.appendChild(renderBlock(block, t))
   }
   article.appendChild(body)
 
@@ -247,12 +280,36 @@ function renderBlock(block: DocumentBlock, t: PreviewTranslator): HTMLElement {
     return element
   }
   switch (block.type) {
-    case "heading":
-      return tagged(`h${block.level + 1}`, block.text)
+    case "heading": {
+      // The document title is the page's h1, so heading level n renders as
+      // h(n+1); HTML stops at h6, so level 6 keeps its level for assistive
+      // technology through aria-level.
+      const element = tagged(`h${Math.min(block.level + 1, 6)}`, block.text)
+      if (block.level + 1 > 6) element.setAttribute("aria-level", String(block.level + 1))
+      return element
+    }
     case "list-item":
       return tagged("li", block.text)
     case "paragraph":
       return tagged("p", block.text)
+    case "quote":
+      return tagged("blockquote", block.text)
+    case "code": {
+      // A wide listing scrolls inside itself, so it is a labelled region the
+      // keyboard can reach (tab stop) and scroll.
+      const pre = tagged("pre", "")
+      pre.setAttribute("role", "region")
+      pre.setAttribute(
+        "aria-label",
+        block.language ? t("preview.codeLanguage", { language: block.language }) : t("preview.code")
+      )
+      pre.tabIndex = 0
+      const code = document.createElement("code")
+      code.textContent = block.text
+      if (block.language) code.dataset.language = block.language
+      pre.appendChild(code)
+      return pre
+    }
     case "table": {
       const table = tagged("table", "")
       table.classList.add("cdoc-table")
@@ -508,6 +565,17 @@ function buildStyles(): HTMLStyleElement {
 .cdoc-body h3 { font-size: 1.15rem; font-weight: 650; margin: 1.2em 0 .45em; }
 .cdoc-body h4 { font-size: 1rem; font-weight: 650; margin: 1em 0 .4em; }
 .cdoc-list { margin: 0 0 .75em; padding-left: 1.5em; line-height: 1.7; }
+.cdoc-list .cdoc-list { margin: .25em 0 0; }
+.cdoc-body h5 { font-size: .95rem; font-weight: 650; margin: 1em 0 .35em; }
+.cdoc-body h6 { font-size: .9rem; font-weight: 650; margin: 1em 0 .35em; color: var(--muted-foreground); }
+.cdoc-quote { margin: 0 0 .75em; padding: 2px 0 2px 14px; border-left: 3px solid var(--border); color: var(--muted-foreground); font-style: italic; line-height: 1.7; white-space: pre-wrap; }
+.cdoc-code { margin: 0 0 1em; padding: 10px 12px; border-radius: 6px; background: var(--muted); overflow-x: auto; font-size: .82rem; line-height: 1.55; }
+.cdoc-code code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); white-space: pre; overflow-wrap: normal; }
+.cdoc-body p, .cdoc-list li { white-space: pre-wrap; }
+.cdoc-toolbar { max-width: 720px; margin: 16px auto -8px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cdoc-export-status { margin: 0; min-width: 0; font-size: .8rem; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.cdoc-export-status:empty { display: none; }
+.cdoc-export-status[role="alert"] { color: var(--destructive); }
 .cdoc-table-scroll { max-width: 100%; overflow-x: auto; margin: 0 0 1em; border-radius: 4px; }
 .cdoc-table { width: 100%; border-collapse: collapse; font-size: .9rem; overflow-wrap: normal; }
 .cdoc-table th, .cdoc-table td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; min-width: 4em; }
@@ -543,6 +611,7 @@ function buildStyles(): HTMLStyleElement {
 .cdoc-finding.is-warning { color: var(--muted-foreground); }
 .cdoc-error { color: var(--destructive); padding: 16px; }
 @container (max-width: 600px) {
+  .cdoc-toolbar { margin: 12px 16px 0; }
   .cdoc-paper { margin: 0; padding: 20px 16px; border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
   .cdoc-title { font-size: 1.4rem; }
   .cdoc-btn { min-height: 36px; padding: 6px 14px; }

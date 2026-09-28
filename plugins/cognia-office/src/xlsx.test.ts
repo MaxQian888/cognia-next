@@ -2,7 +2,12 @@ import ExcelJS from "exceljs"
 import JSZip from "jszip"
 import * as XLSX from "xlsx"
 import { applyWorkbookOperations, createWorkbook } from "./model"
-import { exportWorkbookXlsx, importDelimitedWorkbook, importWorkbookXlsx } from "./xlsx"
+import {
+  exportWorkbookXlsx,
+  importDelimitedWorkbook,
+  importWorkbookXlsx,
+  validateXlsxPackage,
+} from "./xlsx"
 
 it("writes native XLSX styles, formulas, merges, filters, freezes, and dimensions", async () => {
   const source = applyWorkbookOperations(createWorkbook("Quote", "Quote"), [
@@ -288,4 +293,41 @@ it("drops dimension entries that carry no height, width, or hidden flag", async 
   const imported = await importWorkbookXlsx(bytes, "Noise")
   expect(imported.sheets[0].rowDimensions ?? {}).toEqual({})
   expect(imported.sheets[0].columnDimensions ?? {}).toEqual({})
+})
+
+it("round-trips formulas rewritten by structural edits and a renamed sheet", async () => {
+  const edited = applyWorkbookOperations(createWorkbook("Refs", "Data"), [
+    {
+      op: "setRange",
+      sheet: "Data",
+      range: "A1:A2",
+      values: [[{ type: "number", value: 1 }], [{ type: "number", value: 2 }]],
+    },
+    { op: "addSheet", title: "Summary" },
+    {
+      op: "setCell",
+      sheet: "Summary",
+      cell: "A1",
+      value: { type: "number", value: 3, formula: "SUM(Data!A1:A2)" },
+    },
+    { op: "insertRows", sheet: "Data", row: 1 },
+    { op: "renameSheet", sheet: "Data", title: "Raw data" },
+  ])
+  expect(edited.sheets[1].cells.A1.formula).toBe("SUM('Raw data'!A2:A3)")
+  const reopened = await importWorkbookXlsx(await exportWorkbookXlsx(edited), "")
+  expect(reopened.sheets.map((sheet) => sheet.title)).toEqual(["Raw data", "Summary"])
+  expect(reopened.sheets[1].cells.A1.formula).toBe("SUM('Raw data'!A2:A3)")
+  expect(reopened.sheets[0].cells.A3).toMatchObject({ value: 2 })
+})
+
+it("recognizes a package that reopens as XLSX and rejects anything else", async () => {
+  await expect(validateXlsxPackage(await exportWorkbookXlsx(createWorkbook("Ok")))).resolves.toBe(
+    true
+  )
+  await expect(validateXlsxPackage(Uint8Array.from([1, 2, 3]))).resolves.toBe(false)
+  const zip = new JSZip()
+  zip.file("[Content_Types].xml", "<Types/>")
+  zip.file("xl/workbook.xml", "<workbook/>")
+  const noSheets = new Uint8Array(await zip.generateAsync({ type: "arraybuffer" }))
+  await expect(validateXlsxPackage(noSheets)).resolves.toBe(false)
 })

@@ -37,6 +37,33 @@ describe("createWorkTools", () => {
     expect(tools.every((tool) => !Object.hasOwn(tool, "pluginId"))).toBe(true)
   })
 
+  it("offers every deliverable kind and format, and forwards the chosen format", async () => {
+    const tools = createWorkTools({ pluginId: "cognia-work-mode" } as unknown as WorkPluginContext)
+    const schema = tools[0].definition.parametersSchema as {
+      properties: { kind: { enum: string[] }; format: { enum: string[] } }
+      required: string[]
+    }
+    expect(schema.properties.kind.enum).toEqual([
+      "document",
+      "report",
+      "spreadsheet",
+      "presentation",
+      "site",
+    ])
+    expect(schema.properties.format.enum).toEqual(["markdown", "docx", "xlsx", "html"])
+    expect(schema.required).toEqual(["kind", "title", "content"])
+    await tools[0].execute(
+      { kind: "report", format: "docx", title: "Memo", content: "# Memo" },
+      context()
+    )
+    expect(mockRuntime.createDeliverable).toHaveBeenCalledWith({
+      kind: "report",
+      format: "docx",
+      title: "Memo",
+      content: "# Memo",
+    })
+  })
+
   it("budgets the tools that run subagents past the 30 s default", () => {
     const tools = createWorkTools({ pluginId: "cognia-work-mode" } as unknown as WorkPluginContext)
     const timeouts = Object.fromEntries(tools.map((tool) => [tool.name, tool.definition.timeoutMs]))

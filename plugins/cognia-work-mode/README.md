@@ -17,8 +17,8 @@ The source comparison is documented in
 | Split independent work into specialists               | `work_parallelize` with a bounded four-task fan-out                              |
 | Reusable specialist roles                             | Researcher, analyst, and deliverable-reviewer subagents                          |
 | Explicit plan and review criteria                     | Work mode instruction contract + plan-approved team template                     |
-| Independent quality review                            | `work_review_deliverable` creates a linked review artifact                       |
-| Finished documents, reports, tables, decks, and sites | Artifact API: Markdown, a cognia-office workbook, or sandboxed HTML              |
+| Independent quality review                            | `work_review_deliverable` creates a linked review artifact with a parsed status  |
+| Finished documents, reports, tables, decks, and sites | Markdown, a cognia-documents DOCX, a cognia-office workbook, or sandboxed HTML   |
 | In-place iteration and review                         | Artifact versions, annotations, `work_update_deliverable`, and Context Workbench |
 | Local files, apps, connectors, browser, and MCP       | Existing host capabilities and permission gates; the plugin does not bypass them |
 | Sandboxed execution and approvals                     | Existing workspace confinement, OS sandbox, and approval journal                 |
@@ -34,6 +34,35 @@ The source comparison is documented in
 - Tools: `work_create_deliverable`, `work_update_deliverable`,
   `work_review_deliverable`, `work_parallelize`
 
+## Deliverable formats
+
+`work_create_deliverable` takes a `kind` and an optional `format`; the first
+format listed is the default.
+
+| Kind                   | Formats            | Written by                                                        |
+| ---------------------- | ------------------ | ----------------------------------------------------------------- |
+| `document`, `report`   | `markdown`, `docx` | this plugin (Markdown) or `cognia-documents` (`documents_create`) |
+| `spreadsheet`          | `xlsx`             | `cognia-office` (`office_create_workbook`, from CSV)              |
+| `presentation`, `site` | `html`             | this plugin (sandboxed HTML)                                      |
+
+Native formats are routed through one table (`src/deliverables.ts`): each
+entry names its owning plugin, its create/read tools, and its edit tools.
+Creating goes through the owner's create tool; `work_review_deliverable` reads
+the artifact as text through the owner's read tool (`office_read_range`,
+`documents_read_markdown`) instead of reviewing its JSON model; and
+`work_update_deliverable` refuses a native artifact and names the owner's edit
+tool. Adding a native format is one entry plus the dependency in
+`plugin.json`.
+
+`format: "docx"` builds a native Word document from the same Markdown:
+headings, nested lists, tables, quotes, and code become Word structure, while
+bold, italic, and links are flattened to plain text. The result's
+`conversionNotes` list what was flattened so the assistant can tell the user.
+
+`work_review_deliverable` returns the reviewer's verdict text plus `status`:
+`pass`, `pass-with-caveats`, `revise`, or `unknown` when the reviewer did not
+end with one of the three verdicts.
+
 ## Permissions
 
 The plugin requests `artifact:read`, `artifact:write`, `agent:dispatch`, and
@@ -42,21 +71,25 @@ The plugin requests `artifact:read`, `artifact:write`, `agent:dispatch`, and
 - `artifact:read` / `artifact:write` — create, update, open, and review Work
   artifacts;
 - `agent:dispatch` — run the researcher / analyst / reviewer subagents;
-- `agent:control` — call the `office_create_workbook` tool of its declared
-  dependency, `cognia-office`, when the deliverable is a spreadsheet.
+- `agent:control` — call the tools of its declared dependencies:
+  `cognia-office` (`office_create_workbook`, `office_read_range`) for
+  spreadsheets and `cognia-documents` (`documents_create`,
+  `documents_read_markdown`) for DOCX documents.
 
 Folder, shell, network, connector, and computer-use authority remain outside
 the plugin and continue through their existing host gates.
 
 ## Deliberate non-equivalence
 
-- Documents and reports are Markdown artifacts (exportable as DOCX/PDF);
-  presentations and sites are previewable, sandboxed HTML. Spreadsheets are
-  routed to the `cognia-office` plugin, which writes a native workbook
-  artifact; follow-up spreadsheet edits go through cognia-office's workbook
-  operations, not `work_update_deliverable`. Native PPTX authoring is a
-  separate artifact writer capability, not something this plugin emulates with
-  an unsafe private filesystem path.
+- Documents and reports are Markdown artifacts by default (exportable as
+  DOCX/PDF from the artifact panel), or native cognia-documents DOCX documents
+  with `format: "docx"`; presentations and sites are previewable, sandboxed
+  HTML. Spreadsheets are routed to the `cognia-office` plugin, which writes a
+  native workbook artifact. Follow-up edits to a workbook or DOCX document go
+  through its owner's operations (`office_apply_operations`,
+  `documents_apply_operations`), not `work_update_deliverable`. Native PPTX
+  authoring belongs to the separate `cognia-presentations` plugin; this plugin
+  does not route presentations there.
 - `work_review_deliverable` reviews at most the first 60,000 characters of a
   deliverable in one prompt; the result says `truncated: true` when a larger
   one was cut.

@@ -3,6 +3,7 @@ import {
   definePluginTool,
   type PluginToolRegistration,
 } from "@cognia/plugin-sdk"
+import { ALL_DELIVERABLE_FORMATS, DELIVERABLE_KINDS } from "./deliverables"
 import type {
   CreateDeliverableInput,
   ParallelWorkInput,
@@ -12,7 +13,6 @@ import type {
 } from "./runtime"
 import { createWorkRuntime } from "./runtime"
 
-const DELIVERABLE_KINDS = ["document", "report", "spreadsheet", "presentation", "site"]
 const SPECIALIST_ROLES = ["researcher", "analyst", "deliverable-reviewer"]
 
 export const WORK_TOOL_NAMES = [
@@ -51,14 +51,27 @@ export function createWorkTools(
       definition: {
         name: CREATE_DELIVERABLE_TOOL,
         description:
-          "Create and open a finished knowledge-work artifact: document/report (Markdown), spreadsheet (a native workbook via cognia-office), presentation, or site (HTML).",
+          "Create and open a finished knowledge-work artifact. document/report: Markdown by " +
+          'default, or format "docx" for a native Word document (cognia-documents; comments, ' +
+          "tracked changes, DOCX export) built from the same Markdown. spreadsheet: pass CSV and " +
+          "cognia-office writes a native workbook. presentation/site: sandboxed HTML.",
         timeoutMs: WORK_TOOL_TIMEOUTS_MS.create,
         parametersSchema: {
           type: "object",
           properties: {
-            kind: { type: "string", enum: DELIVERABLE_KINDS },
+            kind: { type: "string", enum: [...DELIVERABLE_KINDS] },
+            format: {
+              type: "string",
+              enum: [...ALL_DELIVERABLE_FORMATS],
+              description:
+                "document/report: markdown (default) or docx; spreadsheet: xlsx; presentation/site: html.",
+            },
             title: { type: "string", minLength: 1 },
-            content: { type: "string", minLength: 1 },
+            content: {
+              type: "string",
+              minLength: 1,
+              description: "Markdown, CSV (spreadsheet), or HTML (presentation/site).",
+            },
           },
           required: ["kind", "title", "content"],
           additionalProperties: false,
@@ -76,7 +89,9 @@ export function createWorkTools(
       definition: {
         name: UPDATE_DELIVERABLE_TOOL,
         description:
-          "Apply a complete revised title and/or content to an existing Work artifact, then open it for review.",
+          "Apply a complete revised title and/or content to an existing Markdown or HTML Work " +
+          "artifact, then open it for review. Native workbooks and DOCX documents are edited " +
+          "with their own plugin's operations; this tool names them when refused.",
         parametersSchema: {
           type: "object",
           properties: {
@@ -96,7 +111,10 @@ export function createWorkTools(
       definition: {
         name: REVIEW_DELIVERABLE_TOOL,
         description:
-          "Run an independent reviewer subagent against explicit criteria and create a linked review artifact. Very large deliverables are reviewed from their start only (the result says `truncated`).",
+          "Run an independent reviewer subagent against explicit criteria and create a linked " +
+          "review artifact. Native workbooks and documents are reviewed as their text. Returns " +
+          "status (pass | pass-with-caveats | revise | unknown) with the verdict; very large " +
+          "deliverables are reviewed from their start only (the result says `truncated`).",
         timeoutMs: WORK_TOOL_TIMEOUTS_MS.review,
         parametersSchema: {
           type: "object",

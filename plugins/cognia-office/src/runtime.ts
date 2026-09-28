@@ -1,18 +1,32 @@
 import type { PluginContext } from "@cognia/plugin-sdk"
+import { decodeCell } from "./a1"
 import { normalizeExportName, summarizeSave } from "./export-file"
 import {
   applyWorkbookOperations,
   createWorkbook,
   parseWorkbook,
+  summarizeWorkbook,
   validateWorkbook,
   WORKBOOK_ARTIFACT_KIND,
   WORKBOOK_SCHEMA_VERSION,
   type WorkbookDocument,
   type WorkbookOperation,
 } from "./model"
-import { exportWorkbookXlsx, importDelimitedWorkbook, importWorkbookXlsx, XLSX_MIME } from "./xlsx"
+import { formatWorkbookRead, readWorkbook, type ReadWorkbookOptions } from "./read-range"
+import {
+  exportWorkbookXlsx,
+  importDelimitedWorkbook,
+  importWorkbookXlsx,
+  validateXlsxPackage,
+  XLSX_MIME,
+} from "./xlsx"
 
-export type OfficePluginContext = Pick<PluginContext, "artifact" | "files" | "skills" | "i18n">
+export type OfficePluginContext = Pick<
+  PluginContext,
+  "pluginId" | "artifact" | "files" | "skills" | "i18n"
+>
+
+export type OfficeRuntime = ReturnType<typeof createOfficeRuntime>
 
 /** A `.xlsx` filename `ctx.files.save` accepts, built from a title or model-supplied name. */
 export function normalizeXlsxName(value: string | undefined): string {
@@ -25,6 +39,11 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
     if (!artifact) throw new Error(`workbook artifact not found: ${artifactId}`)
     if (artifact.metadata?.plugin?.kind !== WORKBOOK_ARTIFACT_KIND) {
       throw new Error(`artifact is not a Cognia Office workbook: ${artifactId}`)
+    }
+    // The host lets any plugin read any artifact; only this plugin's own
+    // workbooks are ones it can vouch for (and update).
+    if (artifact.metadata.plugin.ownerPluginId !== ctx.pluginId) {
+      throw new Error(`workbook artifact is not owned by ${ctx.pluginId}: ${artifactId}`)
     }
     return { artifact, workbook: parseWorkbook(artifact.content) }
   }
@@ -70,7 +89,13 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
         input.operations ?? []
       )
       const artifactId = await createArtifact(workbook, input)
-      return { ok: true as const, artifactId, workbook }
+      return {
+        ok: true as const,
+        artifactId,
+        version: 1,
+        summary: summarizeWorkbook(workbook),
+        findings: validateWorkbook(workbook),
+      }
     },
 
     importXlsx: async (input: {
@@ -90,23 +115,51 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
         ctx.i18n.t("import.untitled")
       )
       const artifactId = await createArtifact(workbook, input)
-      return { ok: true as const, artifactId, workbook, warnings: workbook.unsupportedFeatures }
+      return {
+        ok: true as const,
+        artifactId,
+        version: 1,
+        summary: summarizeWorkbook(workbook),
+        findings: validateWorkbook(workbook),
+        warnings: workbook.unsupportedFeatures,
+      }
     },
 
     inspect: (artifactId: string) => {
       const { artifact, workbook } = readArtifact(artifactId)
+      const summary = summarizeWorkbook(workbook)
       return {
         ok: true as const,
         artifactId,
         version: artifact.version,
         title: workbook.title,
-        sheets: workbook.sheets.map((sheet) => ({
-          id: sheet.id,
-          title: sheet.title,
-          cellCount: Object.keys(sheet.cells).length,
-          merges: sheet.merges.length,
-        })),
+        sheets: summary.sheets,
+        summary,
         warnings: workbook.unsupportedFeatures,
+      }
+    },
+
+    readRange: (
+      artifactId: string,
+      options: ReadWorkbookOptions & { format?: "grid" | "text" } = {}
+    ) => {
+      const { artifact, workbook } = readArtifact(artifactId)
+      const { format = "grid", ...readOptions } = options
+      if (format !== "grid" && format !== "text") throw new Error(`invalid format: ${format}`)
+      const read = readWorkbook(workbook, readOptions)
+      return {
+        ok: true as const,
+        artifactId,
+        version: artifact.version,
+        title: workbook.title,
+        truncated: read.truncated,
+        cellsReturned: read.cellsReturned,
+        ...(format === "text"
+          ? {
+              text: formatWorkbookRead(read),
+              sheets: read.sheets.map(({ rows: _rows, formulas: _formulas, ...sheet }) => sheet),
+            }
+          : { sheets: read.sheets }),
       }
     },
 
@@ -129,7 +182,47 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
         ok: true as const,
         artifactId: input.artifactId,
         version: artifact.version,
-        workbook: updated,
+        summary: summarizeWorkbook(updated),
+        findings: validateWorkbook(updated),
+      }
+    },
+
+    listVersions: (artifactId: string) => {
+      const { artifact } = readArtifact(artifactId)
+      return {
+        ok: true as const,
+        artifactId,
+        currentVersion: artifact.version,
+        versions: ctx.artifact.listVersions(artifactId).map((version) => ({
+          versionId: version.id,
+          version: version.version,
+          title: version.title,
+          createdAt: version.createdAt,
+          changeDescription: version.changeDescription,
+        })),
+      }
+    },
+
+    restoreVersion: (input: { artifactId: string; versionId: string; expectedVersion: number }) => {
+      readArtifact(input.artifactId)
+      const target = ctx.artifact
+        .listVersions(input.artifactId)
+        .find((version) => version.id === input.versionId)
+      if (!target) throw new Error(`workbook version not found: ${input.versionId}`)
+      // Refuse a snapshot this schema cannot open before it becomes current.
+      const restoredWorkbook = parseWorkbook(target.content)
+      const artifact = ctx.artifact.restoreVersion(
+        input.artifactId,
+        input.versionId,
+        input.expectedVersion
+      )
+      ctx.artifact.openArtifact(input.artifactId)
+      return {
+        ok: true as const,
+        artifactId: input.artifactId,
+        version: artifact.version,
+        summary: summarizeWorkbook(restoredWorkbook),
+        findings: validateWorkbook(restoredWorkbook),
       }
     },
 
@@ -170,6 +263,13 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
         }
       }
       const bytes = await exportWorkbookXlsx(workbook)
+      if (!(await validateXlsxPackage(bytes)))
+        return {
+          ok: false as const,
+          artifactId,
+          reason: "invalid-package" as const,
+          error: "The generated XLSX did not reopen cleanly, so nothing was saved.",
+        }
       const filename = normalizeXlsxName(suggestedName ?? workbook.title)
       const outcome = await ctx.files.save({ suggestedName: filename, mimeType: XLSX_MIME, bytes })
       return {
@@ -208,12 +308,9 @@ function sheetToValues(sheet: WorkbookDocument["sheets"][number]): unknown[][] {
   let maxRow = -1
   let maxColumn = -1
   const decoded = Object.entries(sheet.cells).flatMap(([ref, cell]) => {
-    const match = /^([A-Z]+)(\d+)$/.exec(ref)
     // Skip non-canonical refs instead of collapsing them onto A1.
-    if (!match) return []
-    const column =
-      match[1].split("").reduce((value, char) => value * 26 + char.charCodeAt(0) - 64, 0) - 1
-    const row = Number(match[2]) - 1
+    if (!/^[A-Z]+\d+$/.test(ref)) return []
+    const { r: row, c: column } = decodeCell(ref)
     maxRow = Math.max(maxRow, row)
     maxColumn = Math.max(maxColumn, column)
     return [{ row, column, cell }]

@@ -1,6 +1,12 @@
 import JSZip from "jszip"
 import { createDocument, applyDocumentOperations } from "./model"
-import { exportDocx, exportTranscriptDocx, importDocx, validateDocxRoundTrip } from "./docx"
+import {
+  exportDocx,
+  exportTranscriptDocx,
+  importDocx,
+  transcriptModel,
+  validateDocxRoundTrip,
+} from "./docx"
 
 const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 
@@ -294,4 +300,149 @@ it("writes the caller's localized labels for empty comments and missing authors"
 
 it("rejects invalid DOCX packages", async () => {
   await expect(importDocx(new Uint8Array([1, 2, 3]), "bad.docx")).rejects.toThrow()
+})
+
+it("round-trips deep headings, nested lists, quotes, and multi-line code", async () => {
+  const model = applyDocumentOperations(createDocument("Rich"), [
+    { op: "appendHeading", level: 5, text: "Level five" },
+    { op: "appendListItem", text: "outer", ordered: true },
+    { op: "appendListItem", text: "inner", ordered: true, level: 1 },
+    { op: "appendListItem", text: "bullet deep", level: 3 },
+    { op: "insertBlock", afterBlockId: "b4", block: { type: "quote", text: "Quoted words" } },
+    {
+      op: "insertBlock",
+      afterBlockId: "b5",
+      block: { type: "code", text: "def f():\n    return 1\n\nprint(f())" },
+    },
+    { op: "addComment", blockId: "b6", text: "Check output" },
+  ])
+  const bytes = await exportDocx(model)
+  const xml = await readPackageXml(bytes, "word/document.xml")
+  expect(xml).toContain('w:val="Heading5"')
+  expect(xml).toContain('w:val="Quote"')
+  expect(xml).toContain('w:val="SourceCode"')
+  const styles = await readPackageXml(bytes, "word/styles.xml")
+  expect(styles).toContain('w:styleId="Quote"')
+  expect(styles).toContain('w:styleId="SourceCode"')
+
+  const imported = await importDocx(bytes, "rich.docx")
+  expect(imported.blocks.map(({ id: _id, ...block }) => block)).toEqual([
+    { type: "heading", level: 5, text: "Level five" },
+    { type: "list-item", ordered: true, text: "outer" },
+    { type: "list-item", ordered: true, level: 1, text: "inner" },
+    { type: "list-item", ordered: false, level: 3, text: "bullet deep" },
+    { type: "quote", text: "Quoted words" },
+    { type: "code", text: "def f():\n    return 1\n\nprint(f())" },
+  ])
+  expect(imported.comments).toEqual([
+    expect.objectContaining({ blockId: imported.blocks[5].id, text: "Check output" }),
+  ])
+})
+
+it("merges consecutive Word code paragraphs into one block and maps heading outlines to 6", async () => {
+  const code = (text: string) =>
+    `<w:p><w:pPr><w:pStyle w:val="HTMLPreformatted"/></w:pPr><w:r><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
+  const bytes = await fixture({
+    "[Content_Types].xml": "<Types/>",
+    "word/document.xml": documentXml(
+      [
+        `<w:p><w:pPr><w:pStyle w:val="Code"/></w:pPr></w:p>`,
+        code("line 1"),
+        code("  line 2"),
+        `<w:p><w:pPr><w:pStyle w:val="HTMLPreformatted"/></w:pPr></w:p>`,
+        code("line 4"),
+        `<w:p><w:r><w:t>between</w:t></w:r></w:p>`,
+        code("second block"),
+        `<w:p><w:pPr><w:outlineLvl w:val="5"/></w:pPr><w:r><w:t>Outline six</w:t></w:r></w:p>`,
+        `<w:p><w:pPr><w:pStyle w:val="IntenseQuote"/></w:pPr><w:r><w:t>Intense</w:t></w:r></w:p>`,
+        `<w:p><w:pPr><w:numPr><w:ilvl w:val="12"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>clamped</w:t></w:r></w:p>`,
+      ].join("")
+    ),
+  })
+  const imported = await importDocx(bytes, "code.docx")
+  expect(imported.blocks.map(({ id: _id, ...block }) => block)).toEqual([
+    { type: "code", text: "line 1\n  line 2\n\nline 4" },
+    { type: "paragraph", text: "between" },
+    { type: "code", text: "second block" },
+    { type: "heading", level: 6, text: "Outline six" },
+    { type: "quote", text: "Intense" },
+    { type: "list-item", ordered: true, level: 8, text: "clamped" },
+  ])
+})
+
+it("turns transcript Markdown into real blocks nested under the role headings", () => {
+  const model = transcriptModel(
+    {
+      messages: [
+        { role: "user", content: "Compare **A** and B" },
+        {
+          role: "assistant",
+          content:
+            "# Verdict\n\n| Option | Score |\n| --- | --- |\n| A | 9 |\n\n- fast\n\n```sh\nrun\n```",
+        },
+        { role: "system", content: "   " },
+      ],
+    },
+    { title: "Transcript", user: "User", assistant: "Assistant", system: "System" }
+  )
+  expect(model.title).toBe("Transcript")
+  expect(model.blocks.map(({ id: _id, ...block }) => block)).toEqual([
+    { type: "heading", level: 2, text: "User" },
+    { type: "paragraph", text: "Compare A and B" },
+    { type: "heading", level: 2, text: "Assistant" },
+    { type: "heading", level: 3, text: "Verdict" },
+    {
+      type: "table",
+      rows: [
+        ["Option", "Score"],
+        ["A", "9"],
+      ],
+    },
+    { type: "list-item", ordered: false, text: "fast" },
+    { type: "code", text: "run", language: "sh" },
+  ])
+})
+
+it("writes each line break between the lines it separates, blank lines included", async () => {
+  const model = applyDocumentOperations(createDocument("Breaks", "first\n\nthird\tcol"), [
+    { op: "appendParagraph", text: "old line\nold two" },
+    { op: "replaceText", blockId: "b2", text: "new line\n\nnew three", trackChange: true },
+  ])
+  const bytes = await exportDocx(model)
+  const imported = await importDocx(bytes, "breaks.docx")
+  // Imported text drops the pending deletion and keeps the insertion.
+  expect(imported.blocks.map((block) => (block.type === "table" ? "" : block.text))).toEqual([
+    "first\n\nthird\tcol",
+    "new line\n\nnew three",
+  ])
+  const xml = await readPackageXml(bytes, "word/document.xml")
+  const deleted = [...xml.matchAll(/<w:del\b[\s\S]*?<\/w:del>/g)].map((match) => match[0]).join("")
+  expect(deleted.indexOf("old line")).toBeLessThan(deleted.indexOf("<w:br/>"))
+  expect(deleted.indexOf("<w:br/>")).toBeLessThan(deleted.indexOf("old two"))
+})
+
+it("keeps a comment on a later line of merged code on that code block", async () => {
+  const code = (inner: string) => `<w:p><w:pPr><w:pStyle w:val="SourceCode"/></w:pPr>${inner}</w:p>`
+  const bytes = await fixture({
+    "word/document.xml": documentXml(
+      [
+        `<w:p><w:r><w:t>Intro</w:t></w:r></w:p>`,
+        code(`<w:r><w:t>first()</w:t></w:r>`),
+        code(
+          `<w:commentRangeStart w:id="3"/><w:r><w:t>second()</w:t></w:r><w:commentRangeEnd w:id="3"/>`
+        ),
+        `<w:p><w:r><w:t>After</w:t></w:r></w:p>`,
+      ].join("")
+    ),
+    "word/comments.xml": `<?xml version="1.0"?>
+      <w:comments ${W}>
+        <w:comment w:id="3" w:author="Ana"><w:p><w:r><w:t>Rename second</w:t></w:r></w:p></w:comment>
+      </w:comments>`,
+  })
+  const model = await importDocx(bytes, "code.docx")
+  expect(model.blocks.map((block) => block.type)).toEqual(["paragraph", "code", "paragraph"])
+  expect(model.blocks[1]).toMatchObject({ text: "first()\nsecond()" })
+  expect(model.comments).toEqual([
+    expect.objectContaining({ blockId: model.blocks[1].id, author: "Ana", text: "Rename second" }),
+  ])
 })

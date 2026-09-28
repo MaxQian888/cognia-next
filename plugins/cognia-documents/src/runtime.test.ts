@@ -6,7 +6,7 @@ jest.mock("./docx", () => ({
 
 import type { Artifact, ExportResult } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
-import { importDocx } from "./docx"
+import { importDocx, validateDocxRoundTrip } from "./docx"
 import { createDocument, DOCUMENT_ARTIFACT_KIND } from "./model"
 import { createDocumentsRuntime, normalizeDocxName } from "./runtime"
 
@@ -247,8 +247,11 @@ it("lists and restores artifact versions", async () => {
     versionId: "v1",
     expectedVersion: 2,
   })
-  expect(restored.model.blocks[0]).toMatchObject({ text: "v1 text" })
+  expect(restored.summary.outline[0]).toMatchObject({ id: "b1", text: "v1 text" })
   expect(restored.version).toBe(3)
+  expect(() =>
+    runtime.restoreVersion({ artifactId: "d1", versionId: "missing", expectedVersion: 3 })
+  ).toThrow("version not found")
 })
 
 it("exports a session transcript through the export API and save dialog", async () => {
@@ -289,4 +292,126 @@ it("normalizes suggested filenames without duplicating .docx", () => {
   expect(normalizeDocxName("report")).toBe("report.docx")
   expect(normalizeDocxName("a/b:c")).toBe("a-b-c.docx")
   expect(normalizeDocxName("")).toBe("document.docx")
+})
+
+it("builds a document from Markdown and reports what the conversion flattened", async () => {
+  const { ctx, artifacts } = makeCtx()
+  const runtime = createDocumentsRuntime(ctx)
+  const created = await runtime.create({
+    title: "Report",
+    markdown:
+      "# Findings\n\nRevenue grew **12%** — see [the filing](https://sec.gov).\n\n- one\n- two",
+  })
+  expect(created).not.toHaveProperty("model")
+  expect(created.summary).toMatchObject({
+    blockCount: 4,
+    blockTypes: { heading: 1, paragraph: 1, "list-item": 2 },
+    outline: [
+      { id: "b1", type: "heading", level: 1, text: "Findings" },
+      { id: "b2", type: "paragraph", text: "Revenue grew 12% — see the filing (https://sec.gov)." },
+      { id: "b3", type: "list-item", text: "one" },
+      { id: "b4", type: "list-item", text: "two" },
+    ],
+  })
+  expect(created.conversionNotes).toEqual([
+    'Links were kept as "text (url)".',
+    "Bold, italic, strikethrough, and code-span markers were removed; document text is plain.",
+  ])
+  expect(
+    (ctx as { artifact: { createArtifact: jest.Mock } }).artifact.createArtifact
+  ).toHaveBeenCalledWith(
+    expect.objectContaining({ metadata: expect.objectContaining({ exportFormats: ["raw"] }) })
+  )
+
+  const applied = await runtime.apply({
+    artifactId: "d1",
+    expectedVersion: 1,
+    operations: [{ op: "appendMarkdown", markdown: "> quoted" }],
+  })
+  expect(applied).toMatchObject({ version: 2, summary: { blockTypes: { quote: 1 } } })
+  expect(applied).not.toHaveProperty("conversionNotes")
+  expect(JSON.parse(artifacts.get("d1")!.content).blocks.at(-1)).toMatchObject({
+    type: "quote",
+    text: "quoted",
+  })
+})
+
+it("reads a document back as Markdown with optional block-id markers", async () => {
+  const { ctx } = makeCtx()
+  const runtime = createDocumentsRuntime(ctx)
+  await runtime.create({
+    title: "Memo",
+    markdown: "## Scope\n\nText",
+    operations: [{ op: "addComment", blockId: "b2", text: "Cite this", author: "Ana" }],
+  })
+  const read = runtime.readMarkdown("d1")
+  expect(read).toMatchObject({
+    ok: true,
+    version: 1,
+    title: "Memo",
+    markdown: "## Scope\n\nText",
+    comments: [{ blockId: "b2", text: "Cite this", author: "Ana", resolved: false }],
+    changes: [],
+  })
+  expect(runtime.readMarkdown("d1", { blockIds: true }).markdown).toBe(
+    "<!-- block:b1 -->\n## Scope\n\n<!-- block:b2 -->\nText"
+  )
+})
+
+it("refuses a document artifact owned by another plugin", async () => {
+  const { ctx, artifacts } = makeCtx()
+  const runtime = createDocumentsRuntime(ctx)
+  await runtime.create({ title: "Doc", text: "x" })
+  const artifact = artifacts.get("d1")!
+  artifacts.set("d1", {
+    ...artifact,
+    metadata: {
+      plugin: { kind: DOCUMENT_ARTIFACT_KIND, schemaVersion: 1, ownerPluginId: "intruder" },
+    },
+  })
+  expect(() => runtime.inspect("d1")).toThrow("not owned by cognia-documents")
+})
+
+it("refuses to save a package that did not reopen, with a locale-neutral reason", async () => {
+  const { ctx, save } = makeCtx()
+  const runtime = createDocumentsRuntime(ctx)
+  await runtime.create({ title: "Doc", text: "x" })
+  ;(validateDocxRoundTrip as jest.Mock).mockResolvedValueOnce({ valid: false, text: "" })
+  await expect(runtime.exportDocx("d1")).resolves.toMatchObject({
+    ok: false,
+    reason: "invalid-package",
+    error: expect.stringContaining("did not reopen"),
+  })
+  expect(save).not.toHaveBeenCalled()
+})
+
+it("refuses to export a document with validation errors and lists them", async () => {
+  const { ctx, artifacts, save } = makeCtx()
+  const runtime = createDocumentsRuntime(ctx)
+  await runtime.create({ title: "Doc", text: "x" })
+  const artifact = artifacts.get("d1")!
+  const model = JSON.parse(artifact.content)
+  model.comments.push({ id: "m9", blockId: "gone", text: "orphan", author: "A", resolved: false })
+  artifacts.set("d1", { ...artifact, content: JSON.stringify(model) })
+  await expect(runtime.exportDocx("d1")).resolves.toMatchObject({
+    ok: false,
+    findings: [expect.objectContaining({ severity: "error", code: "comment.orphan" })],
+  })
+  expect(save).not.toHaveBeenCalled()
+})
+
+it("reports what Markdown in an edit flattened", async () => {
+  const { ctx } = makeCtx()
+  const runtime = createDocumentsRuntime(ctx)
+  await runtime.create({ title: "Doc", text: "x" })
+  await expect(
+    runtime.apply({
+      artifactId: "d1",
+      expectedVersion: 1,
+      operations: [{ op: "insertMarkdown", afterBlockId: "b1", markdown: "See ![chart](c.png)" }],
+    })
+  ).resolves.toMatchObject({
+    version: 2,
+    conversionNotes: ["Images were replaced by their alt text."],
+  })
 })

@@ -1,4 +1,12 @@
-import { createDocument, DOCX_MIME, type DocumentBlock, type DocumentModel } from "./model"
+import { MAX_LIST_LEVEL, parseMarkdownBlocks } from "./markdown"
+import {
+  createDocument,
+  DOCX_MIME,
+  materializeBlock,
+  type DocumentBlock,
+  type DocumentModel,
+  type HeadingLevel,
+} from "./model"
 
 interface ImportedCommentInfo {
   author: string
@@ -167,18 +175,52 @@ export async function exportDocx(model: DocumentModel): Promise<Uint8Array> {
           })),
         }
       : undefined,
+    styles: {
+      paragraphStyles: [
+        {
+          id: QUOTE_STYLE_ID,
+          name: "Quote",
+          basedOn: "Normal",
+          next: "Normal",
+          quickFormat: true,
+          run: { italics: true, color: "595959" },
+          paragraph: {
+            indent: { left: 720, right: 720 },
+            border: {
+              left: { style: docx.BorderStyle.SINGLE, size: 12, color: "BFBFBF", space: 8 },
+            },
+          },
+        },
+        {
+          id: CODE_STYLE_ID,
+          name: "Source Code",
+          basedOn: "Normal",
+          next: "Normal",
+          quickFormat: true,
+          run: { font: "Consolas", size: 20 },
+          paragraph: {
+            spacing: { before: 120, after: 120 },
+            shading: { type: docx.ShadingType.CLEAR, color: "auto", fill: "F2F2F2" },
+          },
+        },
+      ],
+    },
     numbering: {
       config: [
         {
           reference: "default-numbering",
-          levels: [
-            {
-              level: 0,
-              format: docx.LevelFormat.DECIMAL,
-              text: "%1.",
-              alignment: docx.AlignmentType.START,
-            },
-          ],
+          // Word cycles decimal → letter → roman as ordered lists nest.
+          levels: Array.from({ length: MAX_LIST_LEVEL + 1 }, (_, level) => ({
+            level,
+            format: [
+              docx.LevelFormat.DECIMAL,
+              docx.LevelFormat.LOWER_LETTER,
+              docx.LevelFormat.LOWER_ROMAN,
+            ][level % 3],
+            text: `%${level + 1}.`,
+            alignment: docx.AlignmentType.START,
+            style: { paragraph: { indent: { left: 720 * (level + 1), hanging: 360 } } },
+          })),
         },
       ],
     },
@@ -204,6 +246,12 @@ export async function validateDocxRoundTrip(
 // ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
+
+/** Paragraph styles the exporter defines and the importer maps back to blocks. */
+const QUOTE_STYLE_ID = "Quote"
+const CODE_STYLE_ID = "SourceCode"
+const QUOTE_STYLES = /^(quote|intensequote)$/i
+const CODE_STYLES = /^(sourcecode|code|codeblock|htmlpreformatted|plaintext|macrotext)$/i
 
 function renderBlock(
   block: DocumentBlock,
@@ -231,16 +279,25 @@ function renderBlock(
   if (block.type === "heading")
     return new Paragraph({
       children: runs,
-      heading: [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][
-        block.level - 1
-      ],
+      heading: [
+        HeadingLevel.HEADING_1,
+        HeadingLevel.HEADING_2,
+        HeadingLevel.HEADING_3,
+        HeadingLevel.HEADING_4,
+        HeadingLevel.HEADING_5,
+        HeadingLevel.HEADING_6,
+      ][block.level - 1],
     })
-  if (block.type === "list-item")
+  if (block.type === "list-item") {
+    const level = block.level ?? 0
     return new Paragraph({
       children: runs,
-      bullet: block.ordered ? undefined : { level: 0 },
-      numbering: block.ordered ? { reference: "default-numbering", level: 0 } : undefined,
+      bullet: block.ordered ? undefined : { level },
+      numbering: block.ordered ? { reference: "default-numbering", level } : undefined,
     })
+  }
+  if (block.type === "quote") return new Paragraph({ children: runs, style: QUOTE_STYLE_ID })
+  if (block.type === "code") return new Paragraph({ children: runs, style: CODE_STYLE_ID })
   return new Paragraph({ children: runs })
 }
 
@@ -250,7 +307,7 @@ function renderBlock(
  * `before`, ins = the block's current text).
  */
 function paragraphChildren(
-  block: Extract<DocumentBlock, { type: "paragraph" | "heading" | "list-item" }>,
+  block: Exclude<DocumentBlock, { type: "table" }>,
   model: DocumentModel,
   commentNumber: Map<string, number>,
   docx: typeof import("docx")
@@ -276,20 +333,21 @@ function paragraphChildren(
   ]
 }
 
+/**
+ * Runs for multi-line, tabbed text. The `docx` writer emits a run's `break`
+ * BEFORE its text, so each line after the first opens with the break — a
+ * trailing break on the previous run would push every line down by one and
+ * lose blank lines.
+ */
 function textRuns(text: string, docx: typeof import("docx")): DocxParagraphChild[] {
   const { Tab, TextRun } = docx
   const runs: DocxParagraphChild[] = []
-  const lines = splitText(text)
-  lines.forEach((line, index) => {
-    const segments = line.split("\t")
-    segments.forEach((segment, segmentIndex) => {
-      runs.push(
-        new TextRun({
-          text: segment,
-          break: segmentIndex === segments.length - 1 && index < lines.length - 1 ? 1 : undefined,
-        })
-      )
-      if (segmentIndex < segments.length - 1) runs.push(new TextRun({ children: [new Tab()] }))
+  splitText(text).forEach((line, index) => {
+    line.split("\t").forEach((segment, segmentIndex) => {
+      if (segmentIndex > 0) runs.push(new TextRun({ children: [new Tab()] }))
+      const lineBreak = index > 0 && segmentIndex === 0 ? 1 : undefined
+      if (segment || lineBreak || (index === 0 && segmentIndex === 0))
+        runs.push(new TextRun({ text: segment, break: lineBreak }))
     })
   })
   return runs
@@ -302,6 +360,7 @@ function splitText(text: string): string[] {
 type RevisionRunCtor =
   (typeof import("docx"))["InsertedTextRun"] | (typeof import("docx"))["DeletedTextRun"]
 
+/** `textRuns` for a tracked insertion or deletion; every run carries the revision. */
 function revisionRuns(
   text: string,
   Ctor: RevisionRunCtor,
@@ -314,37 +373,13 @@ function revisionRuns(
   const base = (Number.parseInt(changeId.replace(/\D+/g, ""), 10) || 0) * 10000 + salt
   const runs: DocxParagraphChild[] = []
   let runIndex = 0
-  text.split("\n").forEach((line, index, lines) => {
-    const segments = line.split("\t")
-    segments.forEach((segment, segmentIndex) => {
-      if (segment)
-        runs.push(
-          new Ctor({
-            text: segment,
-            id: base + runIndex++,
-            author: "Cognia",
-            date,
-            break: segmentIndex === segments.length - 1 && index < lines.length - 1 ? 1 : undefined,
-          })
-        )
-      else if (segmentIndex === segments.length - 1 && index < lines.length - 1)
-        runs.push(
-          new Ctor({
-            children: [new docx.CarriageReturn()],
-            id: base + runIndex++,
-            author: "Cognia",
-            date,
-          })
-        )
-      if (segmentIndex < segments.length - 1)
-        runs.push(
-          new Ctor({
-            children: [new Tab()],
-            id: base + runIndex++,
-            author: "Cognia",
-            date,
-          })
-        )
+  const revision = () => ({ id: base + runIndex++, author: "Cognia", date })
+  splitText(text).forEach((line, index) => {
+    line.split("\t").forEach((segment, segmentIndex) => {
+      if (segmentIndex > 0) runs.push(new Ctor({ children: [new Tab()], ...revision() }))
+      const lineBreak = index > 0 && segmentIndex === 0 ? 1 : undefined
+      if (segment || lineBreak)
+        runs.push(new Ctor({ text: segment, break: lineBreak, ...revision() }))
     })
   })
   return runs
@@ -494,6 +529,7 @@ function scanBody(
   const blocks: DocumentBlock[] = []
   let titleParagraph: { text: string } | undefined
   let sawContent = false
+  let previousWasCode = false
   const scanRegion = (region: string): void => {
     TOP_LEVEL_ELEMENT.lastIndex = 0
     let match: RegExpExecArray | null
@@ -507,16 +543,36 @@ function scanBody(
         if (block) {
           const leading = !sawContent
           sawContent = true
+          const previous = blocks[blocks.length - 1]
           if (leading && block.type !== "table" && isTitleParagraph(slice)) {
             titleParagraph = { text: block.text }
+          } else if (block.type === "code" && !block.text.trim() && !previousWasCode) {
+            // A blank code line only matters between code lines.
+            previousWasCode = false
+            TOP_LEVEL_ELEMENT.lastIndex = end
+            continue
+          } else if (block.type === "code" && previous?.type === "code" && previousWasCode) {
+            // Word keeps one paragraph per code line; consecutive code
+            // paragraphs are one block, and their comments anchor to it.
+            previous.text = `${previous.text}\n${block.text}`
+            const anchors = commentAnchors(slice)
+            if (anchors.length)
+              commentIdsByBlock.set(blocks.length - 1, [
+                ...(commentIdsByBlock.get(blocks.length - 1) ?? []),
+                ...anchors,
+              ])
           } else {
             const anchors = commentAnchors(slice)
             if (anchors.length) commentIdsByBlock.set(blocks.length, anchors)
             blocks.push(block)
           }
+          previousWasCode = block.type === "code"
+        } else {
+          previousWasCode = false
         }
       } else if (tag === "tbl") {
         const block = parseTable(slice, blocks.length)
+        previousWasCode = false
         if (block) {
           sawContent = true
           blocks.push(block)
@@ -529,6 +585,8 @@ function scanBody(
     }
   }
   scanRegion(body)
+  // Blank lines trailing a merged code block are layout, not content.
+  for (const block of blocks) if (block.type === "code") block.text = block.text.replace(/\n+$/, "")
   // Block ids follow document order; the consumed title paragraph shifted
   // nothing because ids are assigned from `blocks.length` at parse time.
   return { blocks, titleParagraph }
@@ -561,25 +619,32 @@ function parseParagraph(
 ): DocumentBlock | null {
   const pPr = /<w:pPr\b[^>]*>([\s\S]*?)<\/w:pPr>/.exec(xml)?.[1] ?? ""
   const text = paragraphText(xml.replace(/<w:pPr\b[\s\S]*?<\/w:pPr>/, ""))
-  if (!text.trim() && !/<w:commentRangeStart\b/.test(xml)) return null
   const id = `b${index + 1}`
-  const style = /<w:pStyle\b[^>]*?w:val="([^"]+)"/.exec(pPr)?.[1]
-  const headingMatch = /^(?:heading|title|subtitle)\s*([1-3])?$/i.exec(style ?? "")
+  const style = /<w:pStyle\b[^>]*?w:val="([^"]+)"/.exec(pPr)?.[1] ?? ""
+  // A code paragraph keeps its indentation; an empty one is a blank code line.
+  if (CODE_STYLES.test(style)) return { id, type: "code", text: text.replace(/\s+$/, "") }
+  if (!text.trim() && !/<w:commentRangeStart\b/.test(xml)) return null
+  const headingMatch = /^(?:heading|title|subtitle)\s*([1-6])?$/i.exec(style)
   const outline = /<w:outlineLvl\b[^>]*w:val="(\d+)"/.exec(pPr)?.[1]
   const numId = /<w:numId\b[^>]*w:val="(\d+)"/.exec(pPr)?.[1]
-  if (/<w:numPr\b/.test(pPr))
+  const ilvl = Number(/<w:ilvl\b[^>]*w:val="(\d+)"/.exec(pPr)?.[1] ?? "0")
+  if (/<w:numPr\b/.test(pPr)) {
+    const level = Math.min(Math.max(ilvl, 0), MAX_LIST_LEVEL)
     return {
       id,
       type: "list-item",
       ordered: numId ? numbering.get(numId) !== "bullet" : true,
+      ...(level ? { level } : {}),
       text,
     }
-  if (headingMatch && /^heading/i.test(style ?? ""))
-    return { id, type: "heading", level: Number(headingMatch[1] ?? "1") as 1 | 2 | 3, text }
-  if (headingMatch && /^(title|subtitle)$/i.test(style ?? ""))
+  }
+  if (headingMatch && /^heading/i.test(style))
+    return { id, type: "heading", level: Number(headingMatch[1] ?? "1") as HeadingLevel, text }
+  if (headingMatch && /^(title|subtitle)$/i.test(style))
     return { id, type: "heading", level: 1, text }
-  if (outline !== undefined && Number(outline) <= 2)
-    return { id, type: "heading", level: (Number(outline) + 1) as 1 | 2 | 3, text }
+  if (QUOTE_STYLES.test(style)) return { id, type: "quote", text }
+  if (outline !== undefined && Number(outline) <= 5)
+    return { id, type: "heading", level: (Number(outline) + 1) as HeadingLevel, text }
   return { id, type: "paragraph", text }
 }
 
@@ -608,7 +673,10 @@ function commentAnchors(xml: string): number[] {
  * Ordered run-level text extraction: text, tabs, soft line breaks. Field
  * instructions and deleted text never surface as content.
  */
-function paragraphText(xml: string): string {
+function paragraphText(source: string): string {
+  // Deleted (and moved-away) revisions are not current text — their breaks
+  // and tabs included, not only their `w:delText`.
+  const xml = source.replace(/<w:(del|moveFrom)\b[^>]*>[\s\S]*?<\/w:\1>/g, "")
   const out: string[] = []
   const re =
     /<w:(t|tab|br|noBreakHyphen|softHyphen|delText|instrText)\b[^>]*?(?:\/>|>([\s\S]*?)<\/w:\1>)/g
@@ -678,10 +746,23 @@ export interface TranscriptLikeData {
   messages?: TranscriptLikeMessage[]
 }
 
+/** Role headings are level 2; a message's own headings nest below them. */
+const TRANSCRIPT_ROLE_LEVEL = 2
+
 export async function exportTranscriptDocx(
   data: TranscriptLikeData,
   labels: TranscriptLabels
 ): Promise<Blob> {
+  const bytes = await exportDocx(transcriptModel(data, labels))
+  return new Blob([new Uint8Array(bytes)], { type: DOCX_MIME })
+}
+
+/**
+ * The transcript as a document: one role heading per message, and the
+ * message's Markdown (headings, lists, tables, code, quotes) as real blocks
+ * instead of paragraphs full of Markdown syntax.
+ */
+export function transcriptModel(data: TranscriptLikeData, labels: TranscriptLabels): DocumentModel {
   const model = createDocument(data.session?.title?.trim() || labels.title)
   let sequence = 1
   for (const message of data.messages ?? []) {
@@ -691,16 +772,21 @@ export async function exportTranscriptDocx(
     model.blocks.push({
       id: `b${sequence++}`,
       type: "heading",
-      level: 2,
+      level: TRANSCRIPT_ROLE_LEVEL,
       text: role === "user" ? labels.user : role === "system" ? labels.system : labels.assistant,
     })
-    for (const paragraph of text.split(/\n{2,}/)) {
-      const clean = paragraph.trim()
-      if (clean) model.blocks.push({ id: `b${sequence++}`, type: "paragraph", text: clean })
+    for (const input of parseMarkdownBlocks(text).blocks) {
+      const shifted =
+        input.type === "heading"
+          ? {
+              ...input,
+              level: Math.min(input.level + TRANSCRIPT_ROLE_LEVEL, 6) as HeadingLevel,
+            }
+          : input
+      model.blocks.push(materializeBlock(shifted, `b${sequence++}`))
     }
   }
-  const bytes = await exportDocx(model)
-  return new Blob([new Uint8Array(bytes)], { type: DOCX_MIME })
+  return model
 }
 
 function transcriptMessageText(message: TranscriptLikeMessage): string {

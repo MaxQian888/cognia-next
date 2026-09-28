@@ -1,12 +1,29 @@
 jest.mock("./docx", () => ({
   importDocx: jest.fn(async () => ({ title: "Imported" })),
   exportTranscriptDocx: jest.fn(async () => new Blob()),
+  exportDocx: jest.fn(async () => Uint8Array.from([1, 2, 3])),
+  validateDocxRoundTrip: jest.fn(async () => ({ valid: true, text: "" })),
 }))
+
+const mockRendererDeps: Array<{
+  exportDocument?: (artifactId: string, allowLoss: boolean) => Promise<unknown>
+}> = []
+jest.mock("./preview", () => {
+  const actual = jest.requireActual("./preview")
+  return {
+    ...actual,
+    createDocumentRenderer: (deps: (typeof mockRendererDeps)[number]) => {
+      mockRendererDeps.push(deps)
+      return actual.createDocumentRenderer(deps)
+    },
+  }
+})
 
 import type { CustomExporter, CustomImporter } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import { importDocx } from "./docx"
 import definition, { manifest } from "./index"
+import { createDocument } from "./model"
 import { DOCUMENT_TOOL_NAMES } from "./tools"
 
 const LOCALES = manifestJson.i18n.locales as Record<string, Record<string, string>>
@@ -20,15 +37,18 @@ function makeCtx() {
   const registerImporter = jest.fn((_registration: CustomImporter) => importerDispose)
   const exporterDispose = jest.fn()
   const registerExporter = jest.fn((_exporter: CustomExporter) => exporterDispose)
+  const cardDispose = jest.fn()
+  const registerToolResultRenderer = jest.fn((_name: string, _component: unknown) => cardDispose)
   const disposers: Array<() => void | Promise<void>> = []
   let locale = "en"
   const localeHandlers: Array<() => void> = []
   const ctx = {
     pluginId: "cognia-documents",
-    artifact: { registerRenderer },
+    artifact: { registerRenderer, openArtifact: jest.fn() },
     import: { registerImporter },
     export: { registerExporter },
     agent: { registerTool },
+    toolResult: { registerToolResultRenderer },
     lifecycle: {
       signal: new AbortController().signal,
       onDispose: (dispose: () => void) => disposers.push(dispose),
@@ -52,6 +72,8 @@ function makeCtx() {
     importerDispose,
     exporterDispose,
     toolDispose,
+    registerToolResultRenderer,
+    cardDispose,
     async dispose() {
       for (const dispose of disposers.reverse()) await dispose()
     },
@@ -81,6 +103,14 @@ it("registers the complete Documents plugin surface", async () => {
     expect.objectContaining({ id: "docx", format: "docx", extension: "docx" })
   )
   expect(env.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual(DOCUMENT_TOOL_NAMES)
+  // Every Documents tool result renders through the one document card.
+  expect(env.registerToolResultRenderer.mock.calls.map(([name]) => name)).toEqual([
+    ...DOCUMENT_TOOL_NAMES,
+  ])
+  const component = env.registerToolResultRenderer.mock.calls[0][1]
+  expect(env.registerToolResultRenderer.mock.calls.every(([, card]) => card === component)).toBe(
+    true
+  )
 })
 
 it("localizes importer and exporter labels and re-registers on locale change", async () => {
@@ -118,4 +148,42 @@ it("releases every registration through the lifecycle ledger", async () => {
   expect(env.importerDispose).toHaveBeenCalled()
   expect(env.exporterDispose).toHaveBeenCalled()
   expect(env.toolDispose).toHaveBeenCalledTimes(DOCUMENT_TOOL_NAMES.length)
+  expect(env.cardDispose).toHaveBeenCalledTimes(DOCUMENT_TOOL_NAMES.length)
+})
+
+it("wires the preview's Export button to the DOCX export with its confirmation flag", async () => {
+  const env = makeCtx()
+  const model = createDocument("Imported", "Body")
+  model.importedFeatures = ["images"]
+  const save = jest.fn(async () => ({ saved: true, platform: "web" as const }))
+  const ctx = env.ctx as unknown as Record<string, unknown>
+  ctx.artifact = {
+    ...(ctx.artifact as object),
+    getArtifact: () => ({
+      id: "d1",
+      title: "Imported",
+      content: JSON.stringify(model),
+      version: 1,
+      metadata: {
+        plugin: {
+          kind: "cognia-documents/document",
+          schemaVersion: 1,
+          ownerPluginId: "cognia-documents",
+        },
+      },
+    }),
+  }
+  ctx.files = { save }
+  mockRendererDeps.length = 0
+  await definition.activate?.(env.ctx)
+  const exportDocument = mockRendererDeps[0].exportDocument!
+  await expect(exportDocument("d1", false)).resolves.toMatchObject({
+    requiresConfirmation: true,
+  })
+  expect(save).not.toHaveBeenCalled()
+  await expect(exportDocument("d1", true)).resolves.toMatchObject({
+    ok: true,
+    filename: "Imported.docx",
+  })
+  expect(save).toHaveBeenCalledTimes(1)
 })

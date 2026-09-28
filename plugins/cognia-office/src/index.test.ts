@@ -1,4 +1,19 @@
 import manifestJson from "../plugin.json"
+
+const mockRendererDeps: Array<{
+  exportWorkbook?: (artifactId: string, allowLoss: boolean) => Promise<unknown>
+}> = []
+jest.mock("./preview", () => {
+  const actual = jest.requireActual("./preview")
+  return {
+    ...actual,
+    createWorkbookRenderer: (deps: (typeof mockRendererDeps)[number]) => {
+      mockRendererDeps.push(deps)
+      return actual.createWorkbookRenderer(deps)
+    },
+  }
+})
+
 import definition, { manifest } from "./index"
 import { createWorkbook } from "./model"
 import { OFFICE_TOOL_NAMES } from "./tools"
@@ -24,11 +39,14 @@ function makeCtx() {
   const registerTool = jest.fn((_tool: { name: string }) => toolDispose)
   const registerRenderer = jest.fn((_kind: string, _renderer: { name: string }) => rendererDispose)
   const registerImporter = jest.fn((_registration: ImporterLike) => importerDispose)
+  const cardDispose = jest.fn()
+  const registerToolResultRenderer = jest.fn((_name: string, _component: unknown) => cardDispose)
   const ctx = {
     pluginId: "cognia-office",
-    artifact: { registerRenderer },
+    artifact: { registerRenderer, openArtifact: jest.fn() },
     agent: { registerTool },
     import: { registerImporter },
+    toolResult: { registerToolResultRenderer },
     lifecycle: {
       signal: new AbortController().signal,
       onDispose: (dispose: () => void) => disposers.push(dispose),
@@ -47,6 +65,8 @@ function makeCtx() {
     registerTool,
     registerRenderer,
     registerImporter,
+    registerToolResultRenderer,
+    cardDispose,
     toolDispose,
     importerDispose,
     rendererDispose,
@@ -100,6 +120,14 @@ it("registers the workbook renderer, XLSX importer, and all Office tools", async
   expect(new Set(env.registerTool.mock.calls.map(([tool]) => tool.name))).toEqual(
     new Set(OFFICE_TOOL_NAMES)
   )
+  // Every office tool result renders through the workbook card.
+  expect(env.registerToolResultRenderer.mock.calls.map(([name]) => name)).toEqual([
+    ...OFFICE_TOOL_NAMES,
+  ])
+  const component = env.registerToolResultRenderer.mock.calls[0][1]
+  expect(env.registerToolResultRenderer.mock.calls.every(([, card]) => card === component)).toBe(
+    true
+  )
 })
 
 it("re-registers the importer with localized labels on a locale change", async () => {
@@ -122,4 +150,41 @@ it("releases every registration through the lifecycle ledger", async () => {
   expect(env.rendererDispose).toHaveBeenCalled()
   expect(env.importerDispose).toHaveBeenCalled()
   expect(env.toolDispose).toHaveBeenCalledTimes(OFFICE_TOOL_NAMES.length)
+  expect(env.cardDispose).toHaveBeenCalledTimes(OFFICE_TOOL_NAMES.length)
+})
+
+it("wires the preview's Export button to the validated XLSX export", async () => {
+  const env = makeCtx()
+  const workbook = createWorkbook("Legacy")
+  workbook.unsupportedFeatures = ["Macros are present."]
+  const save = jest.fn(async () => ({ saved: true, platform: "web" as const }))
+  Object.assign(env.ctx, {
+    artifact: {
+      ...env.ctx.artifact,
+      getArtifact: () => ({
+        id: "w1",
+        title: "Legacy",
+        content: JSON.stringify(workbook),
+        version: 1,
+        metadata: {
+          plugin: {
+            kind: "cognia-office/workbook",
+            schemaVersion: 1,
+            ownerPluginId: "cognia-office",
+          },
+        },
+      }),
+    },
+    files: { save },
+  })
+  mockRendererDeps.length = 0
+  await definition.activate?.(env.ctx as never)
+  const exportWorkbook = mockRendererDeps[0].exportWorkbook!
+  await expect(exportWorkbook("w1", false)).resolves.toMatchObject({ requiresConfirmation: true })
+  expect(save).not.toHaveBeenCalled()
+  await expect(exportWorkbook("w1", true)).resolves.toMatchObject({
+    ok: true,
+    filename: "Legacy.xlsx",
+  })
+  expect(save).toHaveBeenCalledTimes(1)
 })

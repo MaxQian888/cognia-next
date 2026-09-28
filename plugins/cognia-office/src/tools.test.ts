@@ -8,12 +8,16 @@ const mockRuntime = {
   validate: jest.fn(() => ({ ok: true, artifactId: "a1", findings: [] })),
   exportXlsx: jest.fn(async () => ({ ok: true, artifactId: "a1" })),
   syncLark: jest.fn(async () => ({ ok: true, artifactId: "a1" })),
+  readRange: jest.fn(() => ({ ok: true, artifactId: "a1" })),
+  listVersions: jest.fn(() => ({ ok: true, artifactId: "a1", versions: [] })),
+  restoreVersion: jest.fn(() => ({ ok: true, artifactId: "a1", version: 3 })),
 }
 
 jest.mock("./runtime", () => ({
   createOfficeRuntime: () => mockRuntime,
 }))
 
+import { WORKBOOK_OPERATION_NAMES } from "./model"
 import { createOfficeTools, OFFICE_TOOL_NAMES } from "./tools"
 
 const execution = {
@@ -93,6 +97,41 @@ it("executes every namespaced Office tool through the runtime", async () => {
     folderToken: "fld-1",
     signal: execution.signal,
   })
+
+  await tools[8].execute(
+    { artifactId: "a1", sheet: "Data", range: "A1:B2", maxCells: 50, format: "text" },
+    execution
+  )
+  expect(mockRuntime.readRange).toHaveBeenCalledWith("a1", {
+    sheet: "Data",
+    range: "A1:B2",
+    maxCells: 50,
+    format: "text",
+  })
+
+  await tools[9].execute({ artifactId: "a1" }, execution)
+  expect(mockRuntime.listVersions).toHaveBeenCalledWith("a1")
+
+  await tools[10].execute({ artifactId: "a1", versionId: "v1", expectedVersion: 2 }, execution)
+  expect(mockRuntime.restoreVersion).toHaveBeenCalledWith({
+    artifactId: "a1",
+    versionId: "v1",
+    expectedVersion: 2,
+  })
+})
+
+it("declares one operation schema per model operation", () => {
+  const tools = createOfficeTools(context())
+  const operations = (
+    tools[3].definition.parametersSchema as {
+      properties: {
+        operations: { items: { oneOf: Array<{ properties: { op: { const: string } } }> } }
+      }
+    }
+  ).properties.operations
+  expect(operations.items.oneOf.map((entry) => entry.properties.op.const).sort()).toEqual(
+    [...WORKBOOK_OPERATION_NAMES].sort()
+  )
 })
 
 it("returns an actionable error instead of syncing to Lark outside a session", async () => {

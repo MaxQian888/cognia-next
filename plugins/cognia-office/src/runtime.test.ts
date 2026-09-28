@@ -1,10 +1,18 @@
 import type { Artifact } from "@cognia/plugin-sdk"
 import type { PluginArtifactAPI } from "@cognia/plugin-sdk"
 import type { BuiltInSkillResult } from "@cognia/plugin-sdk"
+
+type ArtifactVersion = ReturnType<PluginArtifactAPI["listVersions"]>[number]
 import manifestJson from "../plugin.json"
+
+jest.mock("./xlsx", () => {
+  const actual = jest.requireActual("./xlsx")
+  return { ...actual, validateXlsxPackage: jest.fn(actual.validateXlsxPackage) }
+})
+
 import { createOfficeRuntime, normalizeXlsxName, type OfficePluginContext } from "./runtime"
 import { createWorkbook, WORKBOOK_ARTIFACT_KIND } from "./model"
-import { exportWorkbookXlsx, XLSX_MIME } from "./xlsx"
+import { exportWorkbookXlsx, validateXlsxPackage, XLSX_MIME } from "./xlsx"
 
 function context() {
   const artifacts = new Map<string, Artifact>()
@@ -34,9 +42,23 @@ function context() {
       return id
     }
   )
+  const versions = new Map<string, ArtifactVersion[]>()
   const updateArtifact = jest.fn(
     (id: string, update: Parameters<PluginArtifactAPI["updateArtifact"]>[1]) => {
       const source = artifacts.get(id)!
+      if (update.expectedVersion !== source.version)
+        throw new Error(`artifact version conflict for ${id}`)
+      versions.set(id, [
+        ...(versions.get(id) ?? []),
+        {
+          id: `${id}-v${source.version}`,
+          artifactId: id,
+          title: source.title,
+          content: source.content,
+          version: source.version,
+          createdAt: new Date(),
+        },
+      ])
       const next = {
         ...source,
         title: update.title ?? source.title,
@@ -47,6 +69,11 @@ function context() {
       return next
     }
   )
+  const listVersions = jest.fn((id: string) => versions.get(id) ?? [])
+  const restoreVersion = jest.fn((id: string, versionId: string, expectedVersion: number) => {
+    const snapshot = (versions.get(id) ?? []).find((version) => version.id === versionId)!
+    return updateArtifact(id, { content: snapshot.content, expectedVersion })
+  })
   const save = jest.fn(
     async (): Promise<{
       saved: boolean
@@ -75,6 +102,8 @@ function context() {
       updateArtifact,
       getArtifact: (id: string) => artifacts.get(id) ?? null,
       openArtifact: jest.fn(),
+      listVersions,
+      restoreVersion,
     },
     files: { save, open: jest.fn(), readAttachment: jest.fn() },
     skills: { invokeBuiltIn, listBuiltIns: jest.fn() },
@@ -179,9 +208,13 @@ it("creates a workbook from delimited content and chooses a safe default filenam
     title: "Quarter:One/Two",
     content: "SKU,Qty\nA-1,4",
   })
-  expect(created.workbook.sheets[0].cells).toMatchObject({
-    A1: { value: "SKU" },
-    B2: { value: 4 },
+  expect(created).not.toHaveProperty("workbook")
+  expect(created.summary.sheets[0]).toMatchObject({ usedRange: "A1:B2", cellCount: 4 })
+  expect(runtime.readRange(created.artifactId).sheets[0]).toMatchObject({
+    rows: [
+      ["SKU", "Qty"],
+      ["A-1", 4],
+    ],
   })
   await runtime.exportXlsx(created.artifactId)
   expect(save).toHaveBeenCalledWith(
@@ -234,7 +267,7 @@ it("imports from authorized attachments and from the picker, including cancellat
   ;(first.ctx.files.readAttachment as jest.Mock).mockResolvedValue(file)
   await expect(
     createOfficeRuntime(first.ctx).importXlsx({ handle: "attachment-1", title: "Named" })
-  ).resolves.toMatchObject({ ok: true, workbook: { title: "Named" } })
+  ).resolves.toMatchObject({ ok: true, summary: { title: "Named" }, findings: [] })
   expect(first.ctx.files.readAttachment).toHaveBeenCalledWith("attachment-1")
 
   const second = context()
@@ -305,4 +338,119 @@ it("returns a fail-closed Lark result and serializes formulas and sparse columns
   expect(sheets[0].values[0][0]).toBe("=1+1")
   expect(sheets[0].values[1][26]).toBe("far")
   expect(options).toEqual({ sessionId: "s1", signal: undefined })
+})
+
+it("reads cells as a grid or as text for prompts", async () => {
+  const { ctx } = context()
+  const runtime = createOfficeRuntime(ctx)
+  const created = await runtime.create({
+    title: "Read",
+    operations: [
+      {
+        op: "setRange",
+        sheet: "Sheet1",
+        range: "A1:B2",
+        values: [
+          [
+            { type: "string", value: "Qty" },
+            { type: "string", value: "Double" },
+          ],
+          [
+            { type: "number", value: 2 },
+            { type: "number", value: 4, formula: "A2*2" },
+          ],
+        ],
+      },
+    ],
+  })
+  expect(runtime.readRange(created.artifactId, { sheet: "Sheet1", range: "B2" })).toMatchObject({
+    ok: true,
+    version: 1,
+    truncated: false,
+    sheets: [{ range: "B2", rows: [[4]], formulas: { B2: "=A2*2" } }],
+  })
+  const text = runtime.readRange(created.artifactId, { format: "text" })
+  expect(text).toMatchObject({
+    text: "## Sheet1 (A1:B2)\nQty\tDouble\n2\t4\n\nFormulas:\nB2: =A2*2",
+  })
+  expect(text.sheets[0]).not.toHaveProperty("rows")
+  expect(() =>
+    runtime.readRange(created.artifactId, { format: "csv" as unknown as "text" })
+  ).toThrow("invalid format")
+})
+
+it("lists and restores workbook versions, refusing unknown snapshots", async () => {
+  const { ctx } = context()
+  const runtime = createOfficeRuntime(ctx)
+  const created = await runtime.create({ title: "History" })
+  runtime.applyOperations({
+    artifactId: created.artifactId,
+    expectedVersion: 1,
+    operations: [
+      { op: "setCell", sheet: "Sheet1", cell: "A1", value: { type: "string", value: "v2" } },
+    ],
+    changeDescription: "Fill A1",
+  })
+  const listed = runtime.listVersions(created.artifactId)
+  expect(listed).toMatchObject({
+    ok: true,
+    currentVersion: 2,
+    versions: [{ versionId: "artifact-1-v1", version: 1, title: "History" }],
+  })
+  const restored = runtime.restoreVersion({
+    artifactId: created.artifactId,
+    versionId: "artifact-1-v1",
+    expectedVersion: 2,
+  })
+  expect(restored).toMatchObject({ ok: true, version: 3, summary: { sheets: [{ cellCount: 0 }] } })
+  expect(ctx.artifact.openArtifact).toHaveBeenLastCalledWith(created.artifactId)
+  expect(() =>
+    runtime.restoreVersion({
+      artifactId: created.artifactId,
+      versionId: "nope",
+      expectedVersion: 3,
+    })
+  ).toThrow("version not found")
+})
+
+it("returns summaries and findings from edits instead of the workbook payload", async () => {
+  const { ctx } = context()
+  const runtime = createOfficeRuntime(ctx)
+  const created = await runtime.create({ title: "Edits" })
+  expect(created).toMatchObject({ version: 1, findings: [] })
+  const edited = runtime.applyOperations({
+    artifactId: created.artifactId,
+    expectedVersion: 1,
+    operations: [{ op: "merge", sheet: "Sheet1", range: "A1:B1" }],
+  })
+  expect(edited).not.toHaveProperty("workbook")
+  expect(edited.summary.sheets[0]).toMatchObject({ usedRange: "A1:B1", merges: 1 })
+})
+
+it("refuses a workbook artifact that another plugin owns", async () => {
+  const { artifacts, ctx } = context()
+  const runtime = createOfficeRuntime(ctx)
+  const created = await runtime.create({ title: "Owned" })
+  const artifact = artifacts.get(created.artifactId)!
+  artifacts.set(created.artifactId, {
+    ...artifact,
+    metadata: {
+      ...artifact.metadata,
+      plugin: { kind: WORKBOOK_ARTIFACT_KIND, schemaVersion: 1, ownerPluginId: "other" },
+    },
+  })
+  expect(() => runtime.inspect(created.artifactId)).toThrow("not owned by cognia-office")
+})
+
+it("refuses to save a generated package that does not reopen", async () => {
+  const { ctx, save } = context()
+  const runtime = createOfficeRuntime(ctx)
+  const created = await runtime.create({ title: "Broken writer" })
+  ;(validateXlsxPackage as jest.Mock).mockResolvedValueOnce(false)
+  await expect(runtime.exportXlsx(created.artifactId)).resolves.toMatchObject({
+    ok: false,
+    reason: "invalid-package",
+    error: expect.stringContaining("did not reopen"),
+  })
+  expect(save).not.toHaveBeenCalled()
 })

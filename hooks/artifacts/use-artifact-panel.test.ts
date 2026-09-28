@@ -49,6 +49,7 @@ jest.mock("@/lib/files/document-writer", () => ({
 }))
 
 import { useArtifactPanelState } from "./use-artifact-panel"
+import { registerArtifactRenderer } from "@/lib/artifacts/renderer-registry"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
 
@@ -229,6 +230,59 @@ describe("useArtifactPanelState", () => {
         mimeType: "text/html;charset=utf-8",
       })
     )
+  })
+
+  it("does not offer text exports for content a plugin renderer owns", async () => {
+    const a = makeArtifact()
+    const dispose = registerArtifactRenderer("test-plugin-renderer", {
+      id: "test-plugin-renderer",
+      kind: "test-plugin/payload",
+      mount: () => ({ dispose: () => {} }),
+    })
+    try {
+      act(() => {
+        useArtifactStore.getState().updateArtifact(a.id, {
+          metadata: {
+            ...a.metadata,
+            plugin: { kind: "test-plugin/payload", schemaVersion: 1, ownerPluginId: "test-plugin" },
+          },
+        })
+      })
+      const { result } = renderHook(() => useArtifactPanelState())
+      expect(result.current.canDownloadAsDocument).toBe(false)
+      expect(result.current.exportFormats).toEqual(["raw"])
+      await act(async () => {
+        await result.current.handleDownloadAs("docx")
+      })
+      expect(saveGeneratedDocumentMock).not.toHaveBeenCalled()
+    } finally {
+      dispose()
+    }
+  })
+
+  it("treats a plugin's JSON model as plugin-owned even when its renderer is not loaded", async () => {
+    const a = makeArtifact()
+    act(() => {
+      useArtifactStore.getState().updateArtifact(a.id, {
+        language: "json",
+        content: '{"schemaVersion":1}',
+        metadata: {
+          ...a.metadata,
+          plugin: {
+            kind: "cognia-documents/document",
+            schemaVersion: 1,
+            ownerPluginId: "cognia-documents",
+          },
+        },
+      })
+    })
+    const { result } = renderHook(() => useArtifactPanelState())
+    expect(result.current.canDownloadAsDocument).toBe(false)
+    expect(result.current.exportFormats).toEqual(["raw"])
+    await act(async () => {
+      await result.current.handleDownloadAs("pdf")
+    })
+    expect(saveGeneratedDocumentMock).not.toHaveBeenCalled()
   })
 
   it("handleDownloadAs generates a Word/PDF document via the document writer", async () => {

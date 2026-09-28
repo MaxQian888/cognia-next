@@ -1,4 +1,13 @@
-import { applyWorkbookOperations, createWorkbook, parseWorkbook, validateWorkbook } from "./model"
+import {
+  applyWorkbookOperations,
+  createWorkbook,
+  parseWorkbook,
+  summarizeWorkbook,
+  usedRange,
+  validateWorkbook,
+  WORKBOOK_OPERATION_NAMES,
+  type WorkbookOperation,
+} from "./model"
 
 it("builds a multi-sheet business workbook with formulas and layout operations", () => {
   const workbook = applyWorkbookOperations(createWorkbook("Inventory", "Stock"), [
@@ -95,11 +104,12 @@ it("supports every deterministic sheet and layout operation", () => {
     title: "Gamma",
     cells: { A1: { formula: "1+1" } },
     merges: [],
-    freeze: {},
     rowDimensions: { 2: { height: 18, hidden: true } },
     columnDimensions: { B: { width: 12, hidden: true } },
   })
   expect(workbook.sheets[0].filter).toBeUndefined()
+  // A freeze with no rows and no columns removes the frozen pane.
+  expect(workbook.sheets[0].freeze).toBeUndefined()
 })
 
 it.each([
@@ -483,4 +493,297 @@ it.each([
     { op: "setCell", sheet: "Sheet1", cell: "A1", value: { type: "string", value: "v" } },
   ])
   expect(() => applyWorkbookOperations(workbook, [operation])).toThrow(message)
+})
+
+describe("formula references follow structural edits", () => {
+  const base = () =>
+    applyWorkbookOperations(createWorkbook("Refs", "Data"), [
+      {
+        op: "setRange",
+        sheet: "Data",
+        range: "A1:B3",
+        values: [
+          [
+            { type: "number", value: 1 },
+            { type: "number", value: 10, formula: "A1*10" },
+          ],
+          [
+            { type: "number", value: 2 },
+            { type: "number", value: 20, formula: "A2*10" },
+          ],
+          [
+            { type: "number", value: 3 },
+            { type: "number", value: 60, formula: "SUM(B1:B2)" },
+          ],
+        ],
+      },
+      { op: "addSheet", title: "Summary" },
+      {
+        op: "setCell",
+        sheet: "Summary",
+        cell: "A1",
+        value: { type: "number", value: 60, formula: "Data!B3" },
+      },
+    ])
+
+  it("shifts formulas on the edited sheet and on sheets that read it", () => {
+    const inserted = applyWorkbookOperations(base(), [{ op: "insertRows", sheet: "Data", row: 2 }])
+    const data = inserted.sheets[0].cells
+    expect(data.B1.formula).toBe("A1*10")
+    expect(data.B3.formula).toBe("A3*10")
+    expect(data.B4.formula).toBe("SUM(B1:B3)")
+    expect(inserted.sheets[1].cells.A1.formula).toBe("Data!B4")
+  })
+
+  it("turns references into deleted rows into #REF!", () => {
+    const deleted = applyWorkbookOperations(base(), [{ op: "deleteRows", sheet: "Data", row: 1 }])
+    const data = deleted.sheets[0].cells
+    expect(data.B1.formula).toBe("A1*10")
+    expect(data.B2.formula).toBe("SUM(B1:B1)")
+    expect(deleted.sheets[1].cells.A1.formula).toBe("Data!B2")
+    const column = applyWorkbookOperations(base(), [
+      { op: "deleteColumns", sheet: "Data", column: "A" },
+    ])
+    expect(column.sheets[0].cells.A1.formula).toBe("#REF!*10")
+  })
+
+  it("renames and deletes sheet references across the workbook", () => {
+    const renamed = applyWorkbookOperations(base(), [
+      { op: "renameSheet", sheet: "Data", title: "Raw data" },
+    ])
+    expect(renamed.sheets[1].cells.A1.formula).toBe("'Raw data'!B3")
+    const deleted = applyWorkbookOperations(base(), [{ op: "deleteSheet", sheet: "Data" }])
+    expect(deleted.sheets[0].cells.A1.formula).toBe("#REF!")
+  })
+})
+
+describe("merges", () => {
+  it("refuses overlapping and single-cell merges and unmerges by intersection", () => {
+    const merged = applyWorkbookOperations(createWorkbook("M"), [
+      { op: "merge", sheet: "Sheet1", range: "A1:B2" },
+      { op: "merge", sheet: "Sheet1", range: "D1:E1" },
+    ])
+    expect(() =>
+      applyWorkbookOperations(merged, [{ op: "merge", sheet: "Sheet1", range: "B2:C3" }])
+    ).toThrow("overlaps the merged range A1:B2")
+    expect(() =>
+      applyWorkbookOperations(merged, [{ op: "merge", sheet: "Sheet1", range: "C5:C5" }])
+    ).toThrow("at least two cells")
+    const released = applyWorkbookOperations(merged, [
+      { op: "unmerge", sheet: "Sheet1", range: "B2" },
+    ])
+    expect(released.sheets[0].merges).toEqual(["D1:E1"])
+  })
+
+  it("reports stored overlaps as errors but still opens the workbook so it can be repaired", () => {
+    const workbook = createWorkbook("Broken")
+    workbook.sheets[0].merges = ["A1:B2", "B2:C3"]
+    expect(validateWorkbook(workbook)).toContainEqual(
+      expect.objectContaining({ severity: "error", code: "merge.overlap" })
+    )
+    const parsed = parseWorkbook(JSON.stringify(workbook))
+    expect(() =>
+      applyWorkbookOperations(parsed, [
+        { op: "setCell", sheet: "Sheet1", cell: "Z1", value: { type: "string", value: "x" } },
+      ])
+    ).toThrow("merge.overlap")
+    const repaired = applyWorkbookOperations(parsed, [
+      { op: "unmerge", sheet: "Sheet1", range: "C3" },
+    ])
+    expect(repaired.sheets[0].merges).toEqual(["A1:B2"])
+  })
+})
+
+describe("range operations", () => {
+  const seeded = () =>
+    applyWorkbookOperations(createWorkbook("Range"), [
+      {
+        op: "setRange",
+        sheet: "Sheet1",
+        range: "A1:B2",
+        values: [
+          [
+            { type: "string", value: "Item", style: { font: { bold: true } } },
+            { type: "string", value: "Qty", style: { font: { bold: true } } },
+          ],
+          [
+            { type: "string", value: "Pen" },
+            { type: "number", value: 3 },
+          ],
+        ],
+      },
+    ])
+
+  it("clears whole cells, contents only, or formats only", () => {
+    const all = applyWorkbookOperations(seeded(), [
+      { op: "clearRange", sheet: "Sheet1", range: "A1:B1" },
+    ])
+    expect(Object.keys(all.sheets[0].cells).sort()).toEqual(["A2", "B2"])
+    const contents = applyWorkbookOperations(seeded(), [
+      { op: "clearRange", sheet: "Sheet1", range: "A1:B2", target: "contents" },
+    ])
+    expect(contents.sheets[0].cells).toEqual({
+      A1: { type: "blank", style: { font: { bold: true } } },
+      B1: { type: "blank", style: { font: { bold: true } } },
+    })
+    const formats = applyWorkbookOperations(seeded(), [
+      { op: "clearRange", sheet: "Sheet1", range: "A1", target: "formats" },
+    ])
+    expect(formats.sheets[0].cells.A1).toEqual({ type: "string", value: "Item" })
+  })
+
+  it("styles a range by merging or replacing, and bounds its size", () => {
+    const styled = applyWorkbookOperations(seeded(), [
+      {
+        op: "setRangeStyle",
+        sheet: "Sheet1",
+        range: "A1:C1",
+        style: { fill: { color: "D9EAF7" }, font: { italic: true } },
+      },
+    ])
+    expect(styled.sheets[0].cells.A1.style).toEqual({
+      font: { bold: true, italic: true },
+      fill: { color: "D9EAF7" },
+    })
+    // An empty cell in the range is materialized as a styled blank.
+    expect(styled.sheets[0].cells.C1).toEqual({
+      type: "blank",
+      style: { fill: { color: "D9EAF7" }, font: { italic: true } },
+    })
+    const replaced = applyWorkbookOperations(styled, [
+      {
+        op: "setRangeStyle",
+        sheet: "Sheet1",
+        range: "A1:C1",
+        style: { numberFormat: "0.00" },
+        mode: "replace",
+      },
+    ])
+    expect(replaced.sheets[0].cells.A1.style).toEqual({ numberFormat: "0.00" })
+    // Replacing with an empty style drops blank cells that only held formatting.
+    const reset = applyWorkbookOperations(replaced, [
+      { op: "setRangeStyle", sheet: "Sheet1", range: "C1", style: {}, mode: "replace" },
+    ])
+    expect(reset.sheets[0].cells.C1).toBeUndefined()
+    expect(() =>
+      applyWorkbookOperations(seeded(), [
+        { op: "setRangeStyle", sheet: "Sheet1", range: "A1:A1048576", style: {} },
+      ])
+    ).toThrow("at most 100000")
+  })
+
+  it("appends ragged rows below the used range, from a chosen column", () => {
+    const appended = applyWorkbookOperations(seeded(), [
+      {
+        op: "appendRows",
+        sheet: "Sheet1",
+        rows: [
+          [
+            { type: "string", value: "Ink" },
+            { type: "number", value: 5 },
+          ],
+          [{ type: "string", value: "Note" }],
+        ],
+      },
+      {
+        op: "appendRows",
+        sheet: "Sheet1",
+        column: "b",
+        rows: [[{ type: "number", value: 9, formula: "=SUM(B2:B3)" }]],
+      },
+    ])
+    const cells = appended.sheets[0].cells
+    expect(cells.A3).toEqual({ type: "string", value: "Ink" })
+    expect(cells.B3).toEqual({ type: "number", value: 5 })
+    expect(cells.A4).toEqual({ type: "string", value: "Note" })
+    expect(cells.B5).toEqual({ type: "number", value: 9, formula: "SUM(B2:B3)" })
+    const empty = applyWorkbookOperations(createWorkbook("Empty"), [
+      { op: "appendRows", sheet: "Sheet1", rows: [[{ type: "string", value: "first" }]] },
+    ])
+    expect(empty.sheets[0].cells.A1).toEqual({ type: "string", value: "first" })
+  })
+})
+
+it("summarizes sheets with their used range instead of their cells", () => {
+  const workbook = applyWorkbookOperations(createWorkbook("Summary", "Data"), [
+    { op: "setCell", sheet: "Data", cell: "B2", value: { type: "number", value: 1 } },
+    {
+      op: "setCell",
+      sheet: "Data",
+      cell: "C4",
+      value: { type: "number", value: 2, formula: "B2*2" },
+    },
+    { op: "merge", sheet: "Data", range: "E1:F1" },
+    { op: "setFreeze", sheet: "Data", rows: 1 },
+    { op: "addSheet", title: "Empty" },
+  ])
+  expect(usedRange(workbook.sheets[0])).toBe("B1:F4")
+  expect(summarizeWorkbook(workbook)).toEqual({
+    title: "Summary",
+    sheets: [
+      {
+        id: "sheet-1",
+        title: "Data",
+        usedRange: "B1:F4",
+        cellCount: 2,
+        formulaCount: 1,
+        merges: 1,
+        freeze: { rows: 1 },
+      },
+      { id: "sheet-2", title: "Empty", cellCount: 0, formulaCount: 0, merges: 0 },
+    ],
+    unsupportedFeatures: [],
+  })
+})
+
+it("names every operation the model accepts", () => {
+  expect(WORKBOOK_OPERATION_NAMES).toHaveLength(new Set(WORKBOOK_OPERATION_NAMES).size)
+  expect(WORKBOOK_OPERATION_NAMES).toEqual(
+    expect.arrayContaining(["clearRange", "setRangeStyle", "appendRows"])
+  )
+})
+
+const rangeOperationErrors: Array<[string, WorkbookOperation, string]> = [
+  ["appendRows without rows", { op: "appendRows", sheet: "Sheet1", rows: [] }, "at least one row"],
+  [
+    "appendRows past the last column",
+    {
+      op: "appendRows",
+      sheet: "Sheet1",
+      column: "XFD",
+      rows: [
+        [
+          { type: "string", value: "a" },
+          { type: "string", value: "b" },
+        ],
+      ],
+    },
+    "beyond the worksheet bounds",
+  ],
+  [
+    "an unknown style mode",
+    {
+      op: "setRangeStyle",
+      sheet: "Sheet1",
+      range: "A1",
+      style: {},
+      // Deliberately outside the union: the model must reject it at runtime.
+      mode: "blend" as never,
+    },
+    "invalid style mode",
+  ],
+  [
+    "an unknown clear target",
+    { op: "clearRange", sheet: "Sheet1", range: "A1", target: "values" as never },
+    "invalid clear target",
+  ],
+  [
+    "an invalid clear range",
+    { op: "clearRange", sheet: "Sheet1", range: "B2:A1" },
+    "invalid range",
+  ],
+]
+
+it.each(rangeOperationErrors)("rejects range operation: %s", (_name, operation, message) => {
+  expect(() => applyWorkbookOperations(createWorkbook("x"), [operation])).toThrow(message)
 })

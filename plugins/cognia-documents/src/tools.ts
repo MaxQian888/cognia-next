@@ -1,5 +1,6 @@
 import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
-import type { DocumentOperation } from "./model"
+import { MAX_LIST_LEVEL } from "./markdown"
+import { MAX_HEADING_LEVEL, type DocumentOperation } from "./model"
 import { createDocumentsRuntime, type DocumentsPluginContext } from "./runtime"
 
 export const DOCUMENT_TOOL_NAMES = [
@@ -13,6 +14,7 @@ export const DOCUMENT_TOOL_NAMES = [
   "documents_list_versions",
   "documents_restore_version",
   "documents_export_transcript",
+  "documents_read_markdown",
 ] as const
 
 const artifactId = { type: "string", minLength: 1 } as const
@@ -30,6 +32,21 @@ const rows = {
   minItems: 1,
   items: { type: "array", minItems: 1, items: { type: "string" } },
 }
+const headingLevel = { type: "integer", minimum: 1, maximum: MAX_HEADING_LEVEL }
+const listLevel = {
+  type: "integer",
+  minimum: 0,
+  maximum: MAX_LIST_LEVEL,
+  description: "Nesting depth; 0 (default) is the outermost list.",
+}
+const markdown = {
+  type: "string",
+  minLength: 1,
+  description:
+    "Markdown: #–###### headings, paragraphs, -/1. lists (indent to nest), > quotes, fenced " +
+    "code, and pipe tables become blocks. Inline formatting is flattened to plain text.",
+}
+const tableIndex = { type: "integer", minimum: 0 }
 
 const blockInput = {
   type: "object",
@@ -45,7 +62,7 @@ const blockInput = {
       type: "object",
       properties: {
         type: { const: "heading" },
-        level: { type: "integer", minimum: 1, maximum: 3 },
+        level: headingLevel,
         text,
       },
       required: ["type", "level", "text"],
@@ -56,6 +73,7 @@ const blockInput = {
       properties: {
         type: { const: "list-item" },
         ordered: { type: "boolean" },
+        level: listLevel,
         text,
       },
       required: ["type", "text"],
@@ -65,6 +83,22 @@ const blockInput = {
       type: "object",
       properties: { type: { const: "table" }, rows },
       required: ["type", "rows"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: { type: { const: "quote" }, text },
+      required: ["type", "text"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        type: { const: "code" },
+        text,
+        language: { type: "string", minLength: 1, description: "e.g. ts, python, sql." },
+      },
+      required: ["type", "text"],
       additionalProperties: false,
     },
   ],
@@ -93,7 +127,7 @@ const operationSchema = {
         properties: {
           op: { const: "appendHeading" },
           text,
-          level: { type: "integer", minimum: 1, maximum: 3 },
+          level: headingLevel,
         },
         required: ["op", "text", "level"],
         additionalProperties: false,
@@ -104,6 +138,7 @@ const operationSchema = {
           op: { const: "appendListItem" },
           text,
           ordered: { type: "boolean" },
+          level: listLevel,
         },
         required: ["op", "text"],
         additionalProperties: false,
@@ -112,6 +147,26 @@ const operationSchema = {
         type: "object",
         properties: { op: { const: "appendTable" }, rows },
         required: ["op", "rows"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: { op: { const: "appendMarkdown" }, markdown },
+        required: ["op", "markdown"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          op: { const: "insertMarkdown" },
+          markdown,
+          afterBlockId: {
+            type: "string",
+            minLength: 1,
+            description: "Insert after this block; omit to insert at the start.",
+          },
+        },
+        required: ["op", "markdown"],
         additionalProperties: false,
       },
       {
@@ -126,6 +181,19 @@ const operationSchema = {
           block: blockInput,
         },
         required: ["op", "block"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          op: { const: "replaceBlock" },
+          blockId,
+          block: {
+            ...blockInput,
+            description: "New content and type; the block keeps its id and comments.",
+          },
+        },
+        required: ["op", "blockId", "block"],
         additionalProperties: false,
       },
       {
@@ -165,6 +233,22 @@ const operationSchema = {
       {
         type: "object",
         properties: {
+          op: { const: "findReplace" },
+          find: text,
+          replace: { type: "string" },
+          matchCase: { type: "boolean" },
+          wholeWord: { type: "boolean" },
+          trackChanges: {
+            type: "boolean",
+            description: "Record each edited text block as a pending tracked change.",
+          },
+        },
+        required: ["op", "find", "replace"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
           op: { const: "updateTableCell" },
           blockId,
           row: { type: "integer", minimum: 0 },
@@ -174,6 +258,30 @@ const operationSchema = {
         required: ["op", "blockId", "row", "column", "text"],
         additionalProperties: false,
       },
+      ...(["insertTableRow", "insertTableColumn"] as const).map((op) => ({
+        type: "object",
+        properties: {
+          op: { const: op },
+          blockId,
+          index: {
+            ...tableIndex,
+            description: `0-based ${op === "insertTableRow" ? "row" : "column"} to insert before.`,
+          },
+          cells: {
+            type: "array",
+            items: { type: "string" },
+            description: "New cell texts; blank cells when omitted.",
+          },
+        },
+        required: ["op", "blockId", "index"],
+        additionalProperties: false,
+      })),
+      ...(["deleteTableRow", "deleteTableColumn"] as const).map((op) => ({
+        type: "object",
+        properties: { op: { const: op }, blockId, index: tableIndex },
+        required: ["op", "blockId", "index"],
+        additionalProperties: false,
+      })),
       {
         type: "object",
         properties: {
@@ -225,12 +333,16 @@ export function createDocumentTools(ctx: DocumentsPluginContext): PluginToolRegi
       name: DOCUMENT_TOOL_NAMES[0],
       definition: {
         name: DOCUMENT_TOOL_NAMES[0],
-        description: "Create a structured native DOCX-ready document artifact.",
+        description:
+          "Create a structured native DOCX-ready document artifact. Pass the body as markdown " +
+          "(fastest), operations, or both (markdown first). Returns a summary with block ids; " +
+          "read the text back with documents_read_markdown.",
         parametersSchema: {
           type: "object",
           properties: {
             title: { type: "string", minLength: 1 },
-            text: { type: "string" },
+            text: { type: "string", description: "Optional first paragraph." },
+            markdown,
             operations: operationSchema,
           },
           required: ["title"],
@@ -239,7 +351,12 @@ export function createDocumentTools(ctx: DocumentsPluginContext): PluginToolRegi
       },
       execute: async (args, tc) =>
         runtime.create({
-          ...(args as { title: string; text?: string; operations?: DocumentOperation[] }),
+          ...(args as {
+            title: string
+            text?: string
+            markdown?: string
+            operations?: DocumentOperation[]
+          }),
           sessionId: tc.sessionId,
           messageId: tc.messageId,
         }),
@@ -275,7 +392,8 @@ export function createDocumentTools(ctx: DocumentsPluginContext): PluginToolRegi
       definition: {
         name: DOCUMENT_TOOL_NAMES[2],
         description:
-          "Inspect document blocks, comments, tracked changes, and compatibility findings.",
+          "Inspect the full document model (blocks with ids, comments, tracked changes) and " +
+          "compatibility findings. For long documents prefer documents_read_markdown.",
         parametersSchema: artifactOnly,
       },
       execute: async (args) => runtime.inspect((args as { artifactId: string }).artifactId),
@@ -285,7 +403,8 @@ export function createDocumentTools(ctx: DocumentsPluginContext): PluginToolRegi
       definition: {
         name: DOCUMENT_TOOL_NAMES[3],
         description:
-          "Apply document edits, comments, tracked changes, and review actions atomically.",
+          "Apply document edits, comments, tracked changes, and review actions atomically " +
+          "against expectedVersion. Returns the new version and a summary with block ids.",
         parametersSchema: {
           type: "object",
           properties: {
@@ -436,6 +555,28 @@ export function createDocumentTools(ctx: DocumentsPluginContext): PluginToolRegi
           { sessionId, suggestedName: i.suggestedName },
           { signal: tc.signal, reportProgress: tc.reportProgress }
         )
+      },
+    }),
+    definePluginTool({
+      name: DOCUMENT_TOOL_NAMES[10],
+      definition: {
+        name: DOCUMENT_TOOL_NAMES[10],
+        description:
+          "Read a document as Markdown, with its comments and tracked changes. Set blockIds to " +
+          "prefix each block with a <!-- block:<id> --> marker for targeting edits.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            artifactId,
+            blockIds: { type: "boolean" },
+          },
+          required: ["artifactId"],
+          additionalProperties: false,
+        },
+      },
+      execute: async (args) => {
+        const i = args as { artifactId: string; blockIds?: boolean }
+        return runtime.readMarkdown(i.artifactId, { blockIds: i.blockIds })
       },
     }),
   ]

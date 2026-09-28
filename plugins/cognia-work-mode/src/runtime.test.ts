@@ -4,6 +4,7 @@ import manifestJson from "../plugin.json"
 import {
   createWorkRuntime,
   MAX_REVIEW_CONTENT_CHARS,
+  parseReviewStatus,
   reviewPrompt,
   type WorkPluginContext,
 } from "./runtime"
@@ -95,11 +96,11 @@ function makeContext(locale: Locale = "en") {
 
 describe("WorkRuntime", () => {
   it.each([
-    ["document", "text", "markdown"],
-    ["report", "text", "markdown"],
-    ["presentation", "html", "html"],
-    ["site", "html", "html"],
-  ] as const)("creates and reveals a %s deliverable", async (kind, type, language) => {
+    ["document", "text", "markdown", "markdown"],
+    ["report", "text", "markdown", "markdown"],
+    ["presentation", "html", "html", "html"],
+    ["site", "html", "html", "html"],
+  ] as const)("creates and reveals a %s deliverable", async (kind, type, language, format) => {
     const { createArtifact, ctx, openArtifact } = makeContext()
     const runtime = createWorkRuntime(ctx)
 
@@ -111,7 +112,7 @@ describe("WorkRuntime", () => {
       messageId: "message-1",
     })
 
-    expect(result).toEqual({ ok: true, artifactId: "artifact-1", kind })
+    expect(result).toEqual({ ok: true, artifactId: "artifact-1", kind, format })
     expect(createArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Outcome",
@@ -334,7 +335,12 @@ describe("WorkRuntime", () => {
       sessionId: "session-1",
       messageId: "message-1",
     })
-    expect(result).toEqual({ ok: true, artifactId: "office-artifact-1", kind: "spreadsheet" })
+    expect(result).toEqual({
+      ok: true,
+      artifactId: "office-artifact-1",
+      kind: "spreadsheet",
+      format: "xlsx",
+    })
     expect(invokeDependencyTool).toHaveBeenCalledWith(
       "cognia-office",
       "office_create_workbook",
@@ -370,7 +376,9 @@ describe("WorkRuntime", () => {
     )
     expect(() =>
       createWorkRuntime(ctx).updateDeliverable({ artifactId: "office-1", content: "plaintext" })
-    ).toThrow("must use cognia-office workbook operations")
+    ).toThrow(
+      "this workbook belongs to cognia-office; edit it with office_apply_operations (read it with office_read_range)"
+    )
   })
 
   it("bounds parallel fan-out and validates every task", async () => {
@@ -432,5 +440,176 @@ describe("WorkRuntime", () => {
       expect.objectContaining({ text: "", error: "analysis failed" }),
       expect.objectContaining({ text: "", error: "review failed" }),
     ])
+  })
+
+  it("writes a DOCX document through cognia-documents and relays its conversion notes", async () => {
+    const { createArtifact, ctx, invokeDependencyTool } = makeContext()
+    invokeDependencyTool.mockResolvedValueOnce({
+      ok: true,
+      artifactId: "doc-1",
+      conversionNotes: ['Links were kept as "text (url)".'],
+    } as never)
+    const result = await createWorkRuntime(ctx).createDeliverable({
+      kind: "report",
+      format: "docx",
+      title: "Board memo",
+      content: "# Decision\n\nApprove [plan](https://x.dev).",
+      sessionId: "session-1",
+    })
+    expect(result).toEqual({
+      ok: true,
+      artifactId: "doc-1",
+      kind: "report",
+      format: "docx",
+      conversionNotes: ['Links were kept as "text (url)".'],
+    })
+    expect(invokeDependencyTool).toHaveBeenCalledWith(
+      "cognia-documents",
+      "documents_create",
+      { title: "Board memo", markdown: "# Decision\n\nApprove [plan](https://x.dev)." },
+      { sessionId: "session-1" }
+    )
+    expect(createArtifact).not.toHaveBeenCalled()
+  })
+
+  it("rejects a format the deliverable kind cannot be written in", async () => {
+    const { createArtifact, ctx, invokeDependencyTool } = makeContext()
+    await expect(
+      createWorkRuntime(ctx).createDeliverable({
+        kind: "spreadsheet",
+        format: "docx",
+        title: "x",
+        content: "a,b",
+      })
+    ).rejects.toThrow("a spreadsheet deliverable cannot be docx; use xlsx")
+    expect(invokeDependencyTool).not.toHaveBeenCalled()
+    expect(createArtifact).not.toHaveBeenCalled()
+  })
+
+  it("routes DOCX edits to cognia-documents instead of overwriting the model", () => {
+    const { artifacts, ctx } = makeContext()
+    artifacts.set(
+      "doc-1",
+      makeArtifact({
+        id: "doc-1",
+        metadata: {
+          plugin: {
+            kind: "cognia-documents/document",
+            schemaVersion: 1,
+            ownerPluginId: "cognia-documents",
+          },
+        },
+      })
+    )
+    expect(() =>
+      createWorkRuntime(ctx).updateDeliverable({ artifactId: "doc-1", title: "Renamed" })
+    ).toThrow("edit it with documents_apply_operations (read it with documents_read_markdown)")
+  })
+
+  it("reviews native deliverables as their dependency's text, not their JSON model", async () => {
+    const { artifacts, ctx, dispatchSubagent, invokeDependencyTool } = makeContext()
+    artifacts.set(
+      "office-1",
+      makeArtifact({
+        id: "office-1",
+        title: "Inventory",
+        content: '{"schemaVersion":1,"sheets":[]}',
+        metadata: {
+          plugin: {
+            kind: "cognia-office/workbook",
+            schemaVersion: 1,
+            ownerPluginId: "cognia-office",
+          },
+        },
+      })
+    )
+    invokeDependencyTool.mockResolvedValueOnce({
+      ok: true,
+      text: "## Stock (A1:B2)\nSKU\tQty\nA-1\t4",
+      truncated: true,
+    } as never)
+    dispatchSubagent.mockResolvedValueOnce({
+      text: "Blocking: none.\n\nPASS WITH CAVEATS",
+      channel: "text",
+      toolsAvailable: false,
+    })
+    const signal = new AbortController().signal
+    const result = await createWorkRuntime(ctx).reviewDeliverable(
+      { artifactId: "office-1" },
+      { signal }
+    )
+    expect(invokeDependencyTool).toHaveBeenCalledWith(
+      "cognia-office",
+      "office_read_range",
+      { artifactId: "office-1", format: "text", maxCells: 20_000 },
+      { signal }
+    )
+    const prompt = dispatchSubagent.mock.calls[0][1]
+    expect(prompt).toContain('Review the deliverable "Inventory" (workbook)')
+    expect(prompt).toContain("SKU\tQty")
+    expect(prompt).not.toContain("schemaVersion")
+    expect(prompt).toContain("too large to read in full")
+    expect(result).toMatchObject({ status: "pass-with-caveats", truncated: true })
+  })
+
+  it("reviews a DOCX document as Markdown", async () => {
+    const { artifacts, ctx, dispatchSubagent, invokeDependencyTool } = makeContext()
+    artifacts.set(
+      "doc-1",
+      makeArtifact({
+        id: "doc-1",
+        metadata: {
+          plugin: {
+            kind: "cognia-documents/document",
+            schemaVersion: 1,
+            ownerPluginId: "cognia-documents",
+          },
+        },
+      })
+    )
+    invokeDependencyTool.mockResolvedValueOnce({ ok: true, markdown: "# Memo\n\nBody" } as never)
+    const result = await createWorkRuntime(ctx).reviewDeliverable({ artifactId: "doc-1" })
+    expect(invokeDependencyTool).toHaveBeenCalledWith(
+      "cognia-documents",
+      "documents_read_markdown",
+      { artifactId: "doc-1" },
+      {}
+    )
+    expect(dispatchSubagent.mock.calls[0][1]).toContain("(document)")
+    expect(dispatchSubagent.mock.calls[0][1]).toContain("# Memo\n\nBody")
+    expect(result.truncated).toBe(false)
+  })
+
+  it("fails a native review clearly when the dependency returns no text", async () => {
+    const { artifacts, ctx, dispatchSubagent, invokeDependencyTool } = makeContext()
+    artifacts.set(
+      "doc-1",
+      makeArtifact({
+        id: "doc-1",
+        metadata: {
+          plugin: {
+            kind: "cognia-documents/document",
+            schemaVersion: 1,
+            ownerPluginId: "cognia-documents",
+          },
+        },
+      })
+    )
+    invokeDependencyTool.mockResolvedValueOnce({ ok: true } as never)
+    await expect(createWorkRuntime(ctx).reviewDeliverable({ artifactId: "doc-1" })).rejects.toThrow(
+      "dependency read returned no markdown"
+    )
+    expect(dispatchSubagent).not.toHaveBeenCalled()
+  })
+})
+
+describe("parseReviewStatus", () => {
+  it.each([
+    ["Findings…\n\nPASS", "pass"],
+    ["Blocking: one.\n\nREVISE", "revise"],
+    ["Earlier I considered REVISE.\n\nFinal: PASS WITH CAVEATS", "pass-with-caveats"],
+    ["These checks pass, looks fine.", "unknown"],
+  ] as const)("reads %j as %s", (text, status) => {
+    expect(parseReviewStatus(text)).toBe(status)
   })
 })

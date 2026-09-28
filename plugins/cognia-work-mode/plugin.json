@@ -18,7 +18,8 @@
   },
   "permissions": ["artifact:read", "artifact:write", "agent:dispatch", "agent:control"],
   "dependencies": {
-    "cognia-office": "^0.1.0"
+    "cognia-office": "^0.1.0",
+    "cognia-documents": "^0.1.0"
   },
   "activationEvents": ["startup"],
   "runtimeCompatibility": {

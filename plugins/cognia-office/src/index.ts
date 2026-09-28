@@ -5,9 +5,11 @@ import {
   type PluginContext,
 } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
+import { createWorkbookResultCard } from "./card"
 import { WORKBOOK_ARTIFACT_KIND, type WorkbookDocument } from "./model"
 import { createWorkbookRenderer } from "./preview"
-import { createOfficeTools } from "./tools"
+import { createOfficeRuntime } from "./runtime"
+import { createOfficeTools, OFFICE_TOOL_NAMES } from "./tools"
 import { importWorkbookXlsx, XLSX_MIME } from "./xlsx"
 
 // plugin.json is the manifest source of truth — including the `i18n.locales`
@@ -50,12 +52,19 @@ export default definePlugin({
   manifest,
   activate: async (ctx) => {
     const t: Translate = (key, params) => ctx.i18n.t(key, params)
+    const runtime = createOfficeRuntime(ctx)
     // Labels resolve through `t` at render time and the renderer re-renders on
-    // a locale switch, so a mounted workbook restyles without a remount.
+    // a locale switch, so a mounted workbook restyles without a remount. The
+    // preview's Export button runs the same validated save as office_export_xlsx.
     ctx.lifecycle.onDispose(
       ctx.artifact.registerRenderer(
         WORKBOOK_ARTIFACT_KIND,
-        createWorkbookRenderer({ t, onLocaleChange: (handler) => ctx.i18n.onLocaleChange(handler) })
+        createWorkbookRenderer({
+          t,
+          onLocaleChange: (handler) => ctx.i18n.onLocaleChange(handler),
+          exportWorkbook: (artifactId, allowUnsupportedFeatureLoss) =>
+            runtime.exportXlsx(artifactId, undefined, allowUnsupportedFeatureLoss),
+        })
       ),
       "cognia-office:renderer"
     )
@@ -74,6 +83,16 @@ export default definePlugin({
 
     for (const tool of createOfficeTools(ctx))
       ctx.lifecycle.onDispose(ctx.agent.registerTool(tool), `cognia-office:tool:${tool.name}`)
+    // The card reads its strings through `usePluginTranslations`; only the
+    // "Open" action needs this activation's context.
+    const ResultCard = createWorkbookResultCard({
+      openArtifact: (artifactId) => ctx.artifact.openArtifact(artifactId),
+    })
+    for (const name of OFFICE_TOOL_NAMES)
+      ctx.lifecycle.onDispose(
+        ctx.toolResult.registerToolResultRenderer(name, ResultCard),
+        `cognia-office:result-card:${name}`
+      )
     ctx.logger.info("cognia-office plugin activated")
   },
 })

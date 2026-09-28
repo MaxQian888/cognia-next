@@ -31,11 +31,12 @@ import { getSession } from "@/lib/db/sessions"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { saveGeneratedDocument, type DocFormat } from "@/lib/files/document-writer"
 import { writeText as clipboardWriteText } from "@/lib/capacitor/clipboard"
-import { canPreview } from "@/lib/artifacts"
+import { canPreview, resolveRegisteredArtifactRenderer } from "@/lib/artifacts"
 import { loggers } from "@cognia/logging"
 import {
   getArtifactExportFormats,
   getPreferredArtifactExportFormat,
+  isPluginModelArtifact,
 } from "@/components/artifacts/runtime-adapters"
 import {
   artifactExportFilename,
@@ -334,8 +335,23 @@ export function useArtifactPanelState() {
     }
   }
 
+  /**
+   * A plugin renderer draws this artifact, so its content is that plugin's
+   * model (e.g. a cognia-office workbook) and the plugin exports it natively.
+   * The host's text exporters and Word writer would print the model as prose.
+   */
+  const pluginOwnsContent = activeArtifact
+    ? isPluginModelArtifact(activeArtifact) ||
+      resolveRegisteredArtifactRenderer(activeArtifact) !== null
+    : false
+
   /** Every format the active artifact's adapter actually offers. */
-  const exportFormats = activeArtifact ? getArtifactExportFormats(activeArtifact) : []
+  const exportFormats = activeArtifact
+    ? getArtifactExportFormats(activeArtifact, { pluginOwnsContent })
+    : []
+
+  /** Whether "Download as Word" can turn the content into a document. */
+  const canDownloadAsDocument = Boolean(activeArtifact) && !pluginOwnsContent
 
   /**
    * Explicit "export as <format>" — the menu's path, so png / pdf / svg are
@@ -361,7 +377,7 @@ export function useArtifactPanelState() {
   // Treats the content as markdown; reuses the client-side document writer +
   // cross-platform saver, so it works on mobile WebView (unlike <a download>).
   const handleDownloadAs = async (format: DocFormat) => {
-    if (!activeArtifact) return
+    if (!activeArtifact || !canDownloadAsDocument) return
     try {
       // `pdf` goes through the artifact exporter so there is exactly one PDF
       // path (it decides text-layout vs raster by artifact type). `docx` is not
@@ -577,6 +593,7 @@ export function useArtifactPanelState() {
     handleCopy,
     handleDownload,
     handleDownloadAs,
+    canDownloadAsDocument,
     exportFormats,
     handleExportAs,
     handleOpenInNewTab,

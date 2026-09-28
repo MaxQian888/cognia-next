@@ -113,6 +113,7 @@ function setState(overrides: Record<string, unknown>) {
     handleRevealInExplorer: jest.fn(),
     handleSaveToProject: jest.fn(),
     handleDownloadAs: jest.fn(),
+    canDownloadAsDocument: true,
     exportFormats: ["raw"],
     handleExportAs: jest.fn(),
     ...overrides,
@@ -131,6 +132,20 @@ describe("ArtifactPanelContent overflow actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "dock.saveToProject" }))
 
     expect(handleSaveToProject).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers Download as Word only when the content can become a document", () => {
+    const handleDownloadAs = jest.fn()
+    setState({ overflowActions: ["saveToProject"], handleDownloadAs })
+    const { unmount } = render(<ArtifactPanelContent panelMode="desktop" />)
+    fireEvent.click(screen.getByRole("button", { name: "downloadAsWord" }))
+    expect(handleDownloadAs).toHaveBeenCalledWith("docx")
+    unmount()
+
+    // A plugin-rendered artifact (a workbook or DOCX model) exports natively.
+    setState({ overflowActions: ["saveToProject"], canDownloadAsDocument: false })
+    render(<ArtifactPanelContent panelMode="desktop" />)
+    expect(screen.queryByRole("button", { name: "downloadAsWord" })).toBeNull()
   })
 })
 

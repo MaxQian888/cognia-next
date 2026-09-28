@@ -13,7 +13,8 @@ describe("cognia-work-mode plugin", () => {
     expect(manifest.capabilities).toEqual(
       expect.arrayContaining(["tools", "modes", "skills", "subagent", "agent-team-template"])
     )
-    // agent:control is what `invokeDependencyTool` (spreadsheets → cognia-office) needs.
+    // agent:control is what `invokeDependencyTool` (workbooks → cognia-office, DOCX →
+    // cognia-documents) needs.
     expect(manifest.permissions).toEqual([
       "artifact:read",
       "artifact:write",
@@ -90,6 +91,8 @@ describe("cognia-work-mode plugin", () => {
 
     const reviewTool = tools.find((tool) => tool.name === "work_review_deliverable")!
     const run = reviewTool.execute({ artifactId: "artifact-1" }, { config: {} })
+    // The review resolves the deliverable's text before it dispatches.
+    await new Promise((resolve) => setTimeout(resolve, 0))
     const signal = dispatchSubagent.mock.calls[0][2]?.abortSignal as AbortSignal
     expect(signal.aborted).toBe(false)
 
@@ -98,10 +101,19 @@ describe("cognia-work-mode plugin", () => {
     await run
   })
 
-  it("keeps the README truthful about permissions and spreadsheets", () => {
+  it("declares both native writer plugins as dependencies", () => {
+    expect(manifest.dependencies).toEqual({
+      "cognia-office": "^0.1.0",
+      "cognia-documents": "^0.1.0",
+    })
+  })
+
+  it("keeps the README truthful about permissions and native deliverables", () => {
     const readme = readFileSync(join(__dirname, "..", "README.md"), "utf8")
     expect(readme).toContain("agent:control")
     expect(readme).toMatch(/cognia-office/)
+    expect(readme).toMatch(/cognia-documents/)
+    expect(readme).toContain('format: "docx"')
     expect(readme).not.toMatch(/spreadsheets as CSV-compatible text/)
   })
 })

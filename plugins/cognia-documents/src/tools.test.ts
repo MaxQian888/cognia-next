@@ -1,3 +1,4 @@
+import { DOCUMENT_OPERATION_NAMES } from "./model"
 import { createDocumentTools, DOCUMENT_TOOL_NAMES } from "./tools"
 
 it("exposes closed schemas for the complete Documents tool contract", () => {
@@ -51,6 +52,47 @@ it("uses discriminated per-operation schemas with required fields", () => {
   expect(heading?.required).toEqual(["op", "text", "level"])
   const move = items.oneOf.find((schema) => schema.properties.op.const === "moveBlock")
   expect(move?.required).toEqual(["op", "blockId", "toIndex"])
+  // One schema per model operation, no more and no fewer.
+  expect([...ops].sort()).toEqual([...DOCUMENT_OPERATION_NAMES].sort())
+})
+
+it("accepts Markdown on create and reads documents back as Markdown", async () => {
+  const artifacts = new Map<string, unknown>()
+  const ctx = {
+    pluginId: "cognia-documents",
+    artifact: {
+      createArtifact: jest.fn(async (input: { title: string; content: string }) => {
+        artifacts.set("d1", {
+          id: "d1",
+          title: input.title,
+          content: input.content,
+          version: 1,
+          metadata: {
+            plugin: {
+              kind: "cognia-documents/document",
+              schemaVersion: 1,
+              ownerPluginId: "cognia-documents",
+            },
+          },
+        })
+        return "d1"
+      }),
+      getArtifact: (id: string) => artifacts.get(id) ?? null,
+      openArtifact: jest.fn(),
+    },
+    i18n: { t: (key: string) => key },
+  }
+  const tools = createDocumentTools(ctx as never)
+  const create = tools.find((tool) => tool.name === "documents_create")!
+  await expect(
+    create.execute({ title: "Plan", markdown: "# Goals\n\n1. Ship" }, { config: {} } as never)
+  ).resolves.toMatchObject({ ok: true, summary: { blockCount: 2 } })
+  const read = tools.find((tool) => tool.name === "documents_read_markdown")!
+  await expect(
+    read.execute({ artifactId: "d1", blockIds: true }, { config: {} } as never)
+  ).resolves.toMatchObject({
+    markdown: "<!-- block:b1 -->\n# Goals\n\n<!-- block:b2 -->\n1. Ship",
+  })
 })
 
 it("surfaces runtime errors from tool execution", async () => {

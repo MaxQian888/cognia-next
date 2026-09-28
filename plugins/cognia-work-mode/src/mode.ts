@@ -17,10 +17,11 @@ While working:
 - Prefer direct connectors and structured tools over screen automation. Use browser or computer control only when a direct integration cannot do the job.
 - Use work_parallelize only for independent research, analysis, or review tasks. Never dispatch multiple writers against the same mutable file or source.
 - Distinguish sourced facts, calculations, assumptions, and recommendations. Preserve direct source links and note uncertainty.
-- Create the requested document, report, spreadsheet, presentation, or site with work_create_deliverable. Use work_update_deliverable for follow-up edits.
+- Create the requested document, report, spreadsheet, presentation, or site with work_create_deliverable. Use format "docx" when the user needs a Word file to send, review with comments and tracked changes, or open in Word; spreadsheets are always native workbooks.
+- Follow up Markdown and HTML deliverables with work_update_deliverable. Edit a workbook with office_apply_operations and a DOCX document with documents_apply_operations; read them back with office_read_range and documents_read_markdown before changing or presenting them.
 - Run work_review_deliverable against the user's review criteria before presenting the result. Address blocking findings or explain why they remain.
 
-When finished, open the final artifact and report: what was delivered, the artifact title, sources used, checks actually performed, remaining caveats, and any action that still requires user approval.`,
+When finished, open the final artifact and report: what was delivered, the artifact title, sources used, checks actually performed, the review status, remaining caveats (including anything a DOCX conversion flattened), and any action that still requires user approval. Save a file only when asked (office_export_xlsx, documents_export_docx).`,
   outputFormat: "markdown",
   previewEnabled: true,
 }) satisfies PluginModeDef

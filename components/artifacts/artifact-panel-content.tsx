@@ -138,6 +138,7 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
     handleCopy,
     handleDownload,
     handleDownloadAs,
+    canDownloadAsDocument,
     exportFormats,
     handleExportAs,
     handleOpenInNewTab,
@@ -367,12 +368,14 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
                     {t(`exportAs.${format}`)}
                   </DropdownMenuItem>
                 ))}
-              <DropdownMenuItem
-                data-testid="artifact-download-docx"
-                onClick={() => void handleDownloadAs("docx")}
-              >
-                {t("downloadAsWord")}
-              </DropdownMenuItem>
+              {canDownloadAsDocument ? (
+                <DropdownMenuItem
+                  data-testid="artifact-download-docx"
+                  onClick={() => void handleDownloadAs("docx")}
+                >
+                  {t("downloadAsWord")}
+                </DropdownMenuItem>
+              ) : null}
             </>
           ) : null}
         </DropdownMenuContent>

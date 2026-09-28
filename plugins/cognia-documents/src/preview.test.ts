@@ -258,3 +258,91 @@ it("counts CJK characters and latin words", () => {
   const model = createDocument("Doc", "hello world 中文测试")
   expect(wordCount(model)).toBe(6)
 })
+
+it("nests lists by level and renders quotes, code regions, and deep headings", () => {
+  const model = applyDocumentOperations(createDocument("Rich"), [
+    { op: "appendListItem", text: "top", ordered: true },
+    { op: "appendListItem", text: "child", level: 1 },
+    { op: "appendListItem", text: "grandchild", level: 2 },
+    { op: "appendListItem", text: "second", ordered: true },
+    { op: "appendHeading", level: 6, text: "Six" },
+    { op: "appendHeading", level: 4, text: "Four" },
+    { op: "insertBlock", afterBlockId: "b6", block: { type: "quote", text: "Said\nthis" } },
+    {
+      op: "insertBlock",
+      afterBlockId: "b7",
+      block: { type: "code", text: "  x()", language: "js" },
+    },
+    { op: "insertBlock", afterBlockId: "b8", block: { type: "code", text: "plain" } },
+  ])
+  const { container } = mount(model)
+  const outer = container.querySelector(".cdoc-body > ol")!
+  expect(outer.children).toHaveLength(2)
+  const child = outer.children[0].querySelector(":scope > ul")!
+  expect(child.querySelector(":scope > li")).toHaveTextContent("child")
+  expect(child.querySelector("ul > li")).toHaveTextContent("grandchild")
+  expect(outer.children[1]).toHaveTextContent("second")
+
+  const six = container.querySelector('[data-block-id="b5"]')!
+  expect(six.tagName).toBe("H6")
+  expect(six.getAttribute("aria-level")).toBe("7")
+  expect(container.querySelector('[data-block-id="b6"]')!.tagName).toBe("H5")
+  expect(container.querySelector("blockquote")).toHaveTextContent("Said this")
+
+  const [js, plain] = [...container.querySelectorAll<HTMLElement>("pre")]
+  expect(js.getAttribute("role")).toBe("region")
+  expect(js.getAttribute("aria-label")).toBe("Code · js")
+  expect(js.tabIndex).toBe(0)
+  expect(js.querySelector("code")?.textContent).toBe("  x()")
+  expect(js.querySelector("code")?.dataset.language).toBe("js")
+  expect(plain.getAttribute("aria-label")).toBe("Code")
+})
+
+describe("export button", () => {
+  it("is absent unless the host wires an export action", () => {
+    const { container } = mount(createDocument("No export", "x"))
+    expect(container.querySelector(".cdoc-toolbar")).toBeNull()
+  })
+
+  it("exports, confirms dropping imported features, and keeps focus on the toolbar", async () => {
+    const exportDocument = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        requiresConfirmation: true,
+        unsupportedFeatures: ["images", "footnotes"],
+      })
+      .mockResolvedValueOnce({ ok: true, saved: true, filename: "Brief.docx" })
+    const { container, handle } = mount(createDocument("Brief", "x"), { exportDocument })
+    const run = container.querySelector<HTMLButtonElement>('[data-focus-key="export:run"]')!
+    expect(run).toHaveTextContent("Export .docx")
+    run.focus()
+    run.click()
+    expect(container.querySelector(".cdoc-export-status")).toHaveTextContent("Exporting…")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(exportDocument).toHaveBeenLastCalledWith("d1", false)
+    expect(container.querySelector(".cdoc-export-status")).toHaveTextContent(
+      "The export will drop the imported features listed under Validation (2)."
+    )
+    const confirm = container.querySelector<HTMLButtonElement>('[data-focus-key="export:confirm"]')!
+    confirm.focus()
+    confirm.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(exportDocument).toHaveBeenLastCalledWith("d1", true)
+    expect(container.querySelector(".cdoc-export-status")).toHaveTextContent("Saved Brief.docx.")
+    expect(document.activeElement).toBe(container.querySelector('[data-focus-key="export:run"]'))
+    handle.dispose()
+  })
+
+  it("does not offer export for a document that cannot be parsed", () => {
+    const container = document.createElement("div")
+    createDocumentRenderer({
+      t,
+      applyReview: jest.fn(),
+      onLocaleChange: () => () => {},
+      exportDocument: jest.fn(),
+    }).mount({ id: "d1", version: 1, content: "{}" } as Artifact, container)
+    expect(container.querySelector(".cdoc-toolbar")).toBeNull()
+    expect(container.querySelector('[role="alert"]')).not.toBeNull()
+  })
+})

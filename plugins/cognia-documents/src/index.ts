@@ -6,11 +6,12 @@ import {
   type PluginContext,
 } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
+import { createDocumentResultCard } from "./card"
 import { exportTranscriptDocx, importDocx } from "./docx"
 import { DOCUMENT_ARTIFACT_KIND, DOCX_MIME } from "./model"
 import { createDocumentRenderer } from "./preview"
 import { createDocumentsRuntime, docxImportLabels } from "./runtime"
-import { createDocumentTools } from "./tools"
+import { createDocumentTools, DOCUMENT_TOOL_NAMES } from "./tools"
 
 // plugin.json is the manifest source of truth — including the `i18n.locales`
 // bundle the manager registers before activate() runs.
@@ -85,6 +86,9 @@ export default definePlugin({
               changeDescription: t("review.changeDescription"),
             }),
           onLocaleChange: (handler) => ctx.i18n.onLocaleChange(handler),
+          // The preview's Export button runs the same save as documents_export_docx.
+          exportDocument: (artifactId, allowUnsupportedFeatureLoss) =>
+            runtime.exportDocx(artifactId, undefined, allowUnsupportedFeatureLoss),
         })
       ),
       "cognia-documents:renderer"
@@ -108,6 +112,16 @@ export default definePlugin({
 
     for (const tool of createDocumentTools(ctx))
       ctx.lifecycle.onDispose(ctx.agent.registerTool(tool), `cognia-documents:tool:${tool.name}`)
+    // The card reads its strings through `usePluginTranslations`; only the
+    // "Open" action needs this activation's context.
+    const ResultCard = createDocumentResultCard({
+      openArtifact: (artifactId) => ctx.artifact.openArtifact(artifactId),
+    })
+    for (const name of DOCUMENT_TOOL_NAMES)
+      ctx.lifecycle.onDispose(
+        ctx.toolResult.registerToolResultRenderer(name, ResultCard),
+        `cognia-documents:result-card:${name}`
+      )
     ctx.logger.info("cognia-documents plugin activated")
   },
 })

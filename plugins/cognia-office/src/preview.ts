@@ -1,8 +1,15 @@
 import type { ArtifactRenderer } from "@cognia/plugin-sdk"
-import { decodeCell, decodeRange, encodeCell, encodeColumn } from "./a1"
+import { decodeRange, encodeCell, encodeColumn } from "./a1"
+import {
+  createExportController,
+  renderExportBar,
+  type ExportController,
+  type ExportOutcomeLike,
+} from "./export-control"
 import {
   parseWorkbook,
   unsupportedFeatureId,
+  usedRangeAddress,
   validateWorkbook,
   type WorkbookCell,
   type WorkbookDocument,
@@ -18,6 +25,14 @@ export interface WorkbookPreviewDeps {
   t: PreviewTranslator
   /** Called once per mount; must return a disposer. */
   onLocaleChange: (handler: () => void) => () => void
+  /**
+   * Validate and save the artifact as `.xlsx` (the same path as
+   * `office_export_xlsx`). The preview shows an Export button only when set.
+   */
+  exportWorkbook?: (
+    artifactId: string,
+    allowUnsupportedFeatureLoss: boolean
+  ) => Promise<ExportOutcomeLike>
 }
 
 const ROW_HEADER_WIDTH = 46
@@ -89,6 +104,16 @@ const PREVIEW_STYLES = `
 @media (pointer:coarse) { .copv-tab { min-height:36px; } }
 @media (prefers-reduced-motion:reduce) { .copv-tab { transition:none; } }
 .copv-tab[aria-selected="true"] { background:var(--background); color:var(--foreground); border-color:var(--border); font-weight:600; }
+.copv-toolbar { flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:6px 10px; border-bottom:1px solid var(--border); }
+.copv-btn { display:inline-flex; align-items:center; justify-content:center; min-height:28px; padding:3px 10px; border:1px solid var(--border); border-radius:6px; background:var(--secondary); color:var(--secondary-foreground, inherit); font:inherit; font-size:12px; cursor:pointer; transition:background-color .15s ease-out; }
+.copv-btn:focus-visible { outline:2px solid var(--ring); outline-offset:1px; }
+.copv-btn[aria-disabled="true"] { opacity:.55; cursor:progress; }
+@media (hover:hover) { .copv-btn:not([aria-disabled="true"]):hover { background:var(--accent); color:var(--accent-foreground); } }
+@media (pointer:coarse) { .copv-btn { min-height:36px; padding:6px 14px; } }
+@media (prefers-reduced-motion:reduce) { .copv-btn { transition:none; } }
+.copv-export-status { margin:0; min-width:0; font-size:12px; color:var(--muted-foreground); overflow-wrap:anywhere; }
+.copv-export-status:empty { display:none; }
+.copv-export-status[role="alert"] { color:var(--destructive); }
 .copv-chip { padding:1px 6px; border-radius:999px; background:var(--accent); color:var(--accent-foreground); font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px; }
 `
 
@@ -110,6 +135,14 @@ export function createWorkbookRenderer(deps: WorkbookPreviewDeps): ArtifactRende
       let renderedSheet = -1
       let content = artifact.content
       let loadError: string | undefined
+      const exportWorkbook = deps.exportWorkbook
+      const exporter: ExportController | undefined = exportWorkbook
+        ? createExportController({
+            run: (allowLoss) => exportWorkbook(artifact.id, allowLoss),
+            onChange: () => render(),
+            isDisposed: () => disposed,
+          })
+        : undefined
 
       const render = () => {
         const focusKey = activeFocusKey(root)
@@ -149,6 +182,7 @@ export function createWorkbookRenderer(deps: WorkbookPreviewDeps): ArtifactRende
           render()
           if (focus) focusTab(root, index)
         })
+        if (exporter) root.prepend(renderExportBar(exporter, t, "copv"))
         const next = root.querySelector<HTMLElement>(".copv-grid")
         if (next && scroll) {
           next.scrollTop = scroll.top
@@ -200,12 +234,19 @@ function activeFocusKey(root: HTMLElement): string | undefined {
   return active.dataset.focusKey
 }
 
-/** Re-renders replace the DOM; put keyboard focus back on the same control. */
+/**
+ * Re-renders replace the DOM; put keyboard focus back on the same control —
+ * or on the Export button when an export control it replaced is gone (the
+ * confirmation buttons disappear once the user answers).
+ */
 function restoreFocus(root: HTMLElement, key: string | undefined): void {
   if (!key) return
-  const target = [...root.querySelectorAll<HTMLElement>("[data-focus-key]")].find(
-    (element) => element.dataset.focusKey === key
-  )
+  const candidates = [...root.querySelectorAll<HTMLElement>("[data-focus-key]")]
+  const target =
+    candidates.find((element) => element.dataset.focusKey === key) ??
+    (key.startsWith("export:")
+      ? candidates.find((element) => element.dataset.focusKey === "export:run")
+      : undefined)
   target?.focus({ preventScroll: true })
 }
 
@@ -249,14 +290,20 @@ function renderWorkbook(
   root.appendChild(renderTabs(workbook, activeSheet, t, mountId, selectSheet))
 }
 
-/** A finding in the active locale; unrecognised text stays as the model wrote it. */
+/**
+ * A finding in the active locale. Codes with a `finding.<code>` key render
+ * through it (with the finding's params); the rest keep the English message
+ * and remediation the model sees.
+ */
 export function localizeFinding(finding: WorkbookValidationFinding, t: PreviewTranslator): string {
   if (finding.code === "feature.unsupported") {
     const id = unsupportedFeatureId(finding.message)
     const message = id ? t(`feature.${id}`) : finding.message
     return `${message} ${t("finding.featureUnsupported.remediation")}`
   }
-  return `${finding.message} ${finding.remediation}`
+  const key = `finding.${finding.code}`
+  const localized = t(key, finding.params)
+  return localized === key ? `${finding.message} ${finding.remediation}` : localized
 }
 
 function renderFindings(findings: WorkbookValidationFinding[], t: PreviewTranslator): HTMLElement {
@@ -367,22 +414,10 @@ interface SheetGeometry {
 }
 
 function sheetGeometry(sheet: WorkbookSheet): SheetGeometry {
-  let maxRow = -1
-  let maxColumn = -1
-  for (const ref of Object.keys(sheet.cells)) {
-    const match = /^([A-Z]+)(\d+)$/.exec(ref)
-    if (!match) continue
-    const cell = decodeCell(ref)
-    maxRow = Math.max(maxRow, cell.r)
-    maxColumn = Math.max(maxColumn, cell.c)
-  }
-  for (const merge of sheet.merges) {
-    const range = decodeRange(merge)
-    maxRow = Math.max(maxRow, range.e.r)
-    maxColumn = Math.max(maxColumn, range.e.c)
-  }
-  const totalRows = maxRow + 1
-  const totalColumns = maxColumn + 1
+  // The grid always starts at A1, so only the used range's far corner matters.
+  const used = usedRangeAddress(sheet)
+  const totalRows = used ? used.e.r + 1 : 0
+  const totalColumns = used ? used.e.c + 1 : 0
   const rowCount = Math.min(totalRows, MAX_PREVIEW_ROWS)
   const columnCount = Math.min(totalColumns, MAX_PREVIEW_COLUMNS)
 

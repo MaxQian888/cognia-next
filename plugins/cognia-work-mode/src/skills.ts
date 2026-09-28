@@ -46,6 +46,7 @@ const DOCUMENT_DELIVERABLE = inlineSkill(
 - Use tables only when they make exact comparison easier.
 - Keep factual claims source-linked and recommendations traceable to evidence.
 - Separate appendices and detailed methodology from the main decision path.
+- When the user needs a Word file (to send, to review with comments and tracked changes, or to finish in Word), create it with work_create_deliverable and format "docx". Its Markdown becomes native headings, nested lists, tables, quotes, and code; bold, italic, and links are flattened to plain text, and the result's conversionNotes say what was flattened — tell the user. Edit it afterwards with documents_apply_operations and save it with documents_export_docx.
 - Before delivery, check completeness, internal consistency, citations, names/dates/numbers, and whether the requested decision can be made from the document alone.`
 )
 
@@ -60,6 +61,7 @@ const SPREADSHEET_DELIVERABLE = inlineSkill(
 - Check totals, denominator choices, missing values, duplicates, outliers, and sign conventions.
 - Use formulas that are explainable and stable when rows are added.
 - Deliver it with work_create_deliverable (kind "spreadsheet"): pass clean CSV content, and cognia-office turns it into a native workbook artifact. Use an HTML table only when the user asked for an interactive page.
+- Add formulas, formatting, frozen headers, and further sheets with office_apply_operations; inserting or deleting rows, columns, or sheets keeps formulas pointing at the same data. Check the result with office_read_range before handing it over, and save it with office_export_xlsx when the user wants the file.
 - Include a compact data dictionary and validation notes with the delivery.`
 )
 

@@ -1,6 +1,7 @@
 import type { PluginContext } from "@cognia/plugin-sdk"
 import { exportDocx, importDocx, validateDocxRoundTrip, type DocxImportLabels } from "./docx"
 import { normalizeExportName, summarizeSave } from "./export-file"
+import { blocksToMarkdown, markdownConversionNotes, MARKDOWN_NOTE_MESSAGES } from "./markdown"
 import {
   applyDocumentOperations,
   createDocument,
@@ -8,12 +9,31 @@ import {
   DOCUMENT_SCHEMA_VERSION,
   DOCX_MIME,
   parseDocument,
+  summarizeDocument,
   validateDocument,
   type DocumentModel,
   type DocumentOperation,
 } from "./model"
 
-export type DocumentsPluginContext = Pick<PluginContext, "artifact" | "files" | "export" | "i18n">
+export type DocumentsPluginContext = Pick<
+  PluginContext,
+  "pluginId" | "artifact" | "files" | "export" | "i18n"
+>
+
+export type DocumentsRuntime = ReturnType<typeof createDocumentsRuntime>
+
+/**
+ * What converting the Markdown in these operations could not keep, as
+ * sentences the model can relay. Empty when nothing was lost.
+ */
+export function conversionNotesFor(operations: readonly DocumentOperation[]): string[] {
+  const sources = operations.flatMap((operation) =>
+    operation.op === "appendMarkdown" || operation.op === "insertMarkdown"
+      ? [operation.markdown]
+      : []
+  )
+  return markdownConversionNotes(sources).map((note) => MARKDOWN_NOTE_MESSAGES[note])
+}
 
 export interface DocumentProgress {
   signal?: AbortSignal
@@ -40,6 +60,10 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
     if (!artifact) throw new Error(`Document artifact not found: ${artifactId}`)
     if (artifact.metadata?.plugin?.kind !== DOCUMENT_ARTIFACT_KIND)
       throw new Error(`Artifact is not a Cognia document: ${artifactId}`)
+    // The host lets any plugin read any artifact; only this plugin's own
+    // documents are ones it can vouch for (and update).
+    if (artifact.metadata.plugin.ownerPluginId !== ctx.pluginId)
+      throw new Error(`Document artifact is not owned by ${ctx.pluginId}: ${artifactId}`)
     return { artifact, model: parseDocument(artifact.content) }
   }
   const createArtifact = async (
@@ -60,6 +84,9 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
         // Every artifact this runtime creates comes from an agent tool call.
         userInitiated: false,
         previewable: true,
+        // The content is the document model, not prose: the host's generic
+        // text/PDF exporters would print JSON. DOCX export is the plugin's own.
+        exportFormats: ["raw"],
       },
     })
     ctx.artifact.openArtifact(artifactId)
@@ -69,15 +96,27 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
     create: async (input: {
       title: string
       text?: string
+      markdown?: string
       operations?: DocumentOperation[]
       sessionId?: string
       messageId?: string
     }) => {
-      const model = applyDocumentOperations(
-        createDocument(input.title, input.text),
-        input.operations ?? []
-      )
-      return { ok: true as const, artifactId: await createArtifact(model, input), model }
+      const operations: DocumentOperation[] = [
+        ...(input.markdown?.trim()
+          ? [{ op: "appendMarkdown" as const, markdown: input.markdown }]
+          : []),
+        ...(input.operations ?? []),
+      ]
+      const model = applyDocumentOperations(createDocument(input.title, input.text), operations)
+      const conversionNotes = conversionNotesFor(operations)
+      return {
+        ok: true as const,
+        artifactId: await createArtifact(model, input),
+        version: 1,
+        summary: summarizeDocument(model),
+        findings: validateDocument(model),
+        ...(conversionNotes.length ? { conversionNotes } : {}),
+      }
     },
     importDocx: async (
       input: {
@@ -109,7 +148,13 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
       )
       assertActive(progress?.signal)
       progress?.reportProgress?.(80, t("progress.creatingArtifact"))
-      return { ok: true as const, artifactId: await createArtifact(model, input), model }
+      return {
+        ok: true as const,
+        artifactId: await createArtifact(model, input),
+        version: 1,
+        summary: summarizeDocument(model),
+        findings: validateDocument(model),
+      }
     },
     inspect: (artifactId: string) => {
       const { artifact, model } = read(artifactId)
@@ -136,11 +181,27 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
         changeDescription: input.changeDescription ?? t("history.edit"),
       })
       ctx.artifact.openArtifact(input.artifactId)
+      const conversionNotes = conversionNotesFor(input.operations)
       return {
         ok: true as const,
         artifactId: input.artifactId,
         version: artifact.version,
+        summary: summarizeDocument(updated),
         findings: validateDocument(updated),
+        ...(conversionNotes.length ? { conversionNotes } : {}),
+      }
+    },
+    readMarkdown: (artifactId: string, options: { blockIds?: boolean } = {}) => {
+      const { artifact, model } = read(artifactId)
+      return {
+        ok: true as const,
+        artifactId,
+        version: artifact.version,
+        title: model.title,
+        markdown: blocksToMarkdown(model.blocks, { blockIds: options.blockIds }),
+        comments: model.comments,
+        changes: model.changes,
+        findings: validateDocument(model),
       }
     },
     validate: async (artifactId: string, progress?: DocumentProgress) => {
@@ -189,6 +250,12 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
     },
     restoreVersion: (input: { artifactId: string; versionId: string; expectedVersion: number }) => {
       read(input.artifactId)
+      const target = ctx.artifact
+        .listVersions(input.artifactId)
+        .find((version) => version.id === input.versionId)
+      if (!target) throw new Error(`Document version not found: ${input.versionId}`)
+      // Refuse a snapshot this schema cannot open before it becomes current.
+      const restored = parseDocument(target.content)
       const artifact = ctx.artifact.restoreVersion(
         input.artifactId,
         input.versionId,
@@ -199,7 +266,8 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
         ok: true as const,
         artifactId: input.artifactId,
         version: artifact.version,
-        model: parseDocument(artifact.content),
+        summary: summarizeDocument(restored),
+        findings: validateDocument(restored),
       }
     },
     exportDocx: async (
@@ -209,6 +277,16 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
       progress?: DocumentProgress
     ) => {
       const { model } = read(artifactId)
+      // Same rule as a workbook export: a document with structural errors
+      // (duplicate ids, orphaned comments or changes) is fixed, not saved.
+      const findings = validateDocument(model)
+      if (findings.some((finding) => finding.severity === "error"))
+        return {
+          ok: false as const,
+          artifactId,
+          findings,
+          error: "The document has validation errors; fix them before exporting.",
+        }
       if (model.importedFeatures.length > 0 && !allowUnsupportedFeatureLoss) {
         return {
           ok: false as const,
@@ -228,6 +306,7 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
         return {
           ok: false as const,
           artifactId,
+          reason: "invalid-package" as const,
           error: "The generated DOCX did not reopen cleanly, so nothing was saved.",
         }
       assertActive(progress?.signal)

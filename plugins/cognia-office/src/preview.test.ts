@@ -412,3 +412,70 @@ it("keeps the grid scroll on update but resets it for a newly selected sheet", (
   container.querySelectorAll<HTMLButtonElement>(".copv-tab")[1].click()
   expect(container.querySelector<HTMLElement>(".copv-grid")!.scrollTop).toBe(0)
 })
+
+describe("export button", () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it("is absent unless the host wires an export action", () => {
+    const container = document.createElement("div")
+    createWorkbookRenderer(translator()).mount(
+      artifact(JSON.stringify(createWorkbook("No export"))),
+      container
+    )
+    expect(container.querySelector(".copv-toolbar")).toBeNull()
+  })
+
+  it("exports, asks before dropping features, and keeps focus on the toolbar", async () => {
+    const exportWorkbook = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        requiresConfirmation: true,
+        unsupportedFeatures: [UNSUPPORTED_FEATURES.macros],
+      })
+      .mockResolvedValueOnce({ ok: true, saved: true, filename: "Book.xlsx" })
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const handle = createRenderer({
+      t: translator(),
+      onLocaleChange: () => () => {},
+      exportWorkbook,
+    }).mount(artifact(JSON.stringify(createWorkbook("Book"))), container)
+
+    const run = container.querySelector<HTMLButtonElement>('[data-focus-key="export:run"]')!
+    expect(run).toHaveTextContent("Export .xlsx")
+    run.focus()
+    run.click()
+    expect(container.querySelector(".copv-export-status")).toHaveTextContent("Exporting…")
+    await flush()
+    expect(exportWorkbook).toHaveBeenLastCalledWith("a1", false)
+    expect(container.querySelector(".copv-export-status")).toHaveTextContent(
+      "The export will drop the unsupported features listed under Validation (1)."
+    )
+
+    const confirm = container.querySelector<HTMLButtonElement>('[data-focus-key="export:confirm"]')!
+    confirm.focus()
+    confirm.click()
+    await flush()
+    expect(exportWorkbook).toHaveBeenLastCalledWith("a1", true)
+    expect(container.querySelector(".copv-export-status")).toHaveTextContent("Saved Book.xlsx.")
+    // The confirm button is gone; focus falls back to the Export button.
+    expect(document.activeElement).toBe(container.querySelector('[data-focus-key="export:run"]'))
+    // The export state survives an artifact update.
+    handle.update?.(artifact(JSON.stringify(createWorkbook("Book v2"))))
+    expect(container.querySelector(".copv-export-status")).toHaveTextContent("Saved Book.xlsx.")
+    handle.dispose()
+  })
+})
+
+it("localizes the overlapping-merge finding with its ranges", () => {
+  const workbook = createWorkbook("Merges")
+  workbook.sheets[0].merges = ["A1:B2", "B2:C3"]
+  const container = document.createElement("div")
+  createWorkbookRenderer(translator({}, "zh-CN")).mount(
+    artifact(JSON.stringify(workbook)),
+    container
+  )
+  const item = container.querySelector('.copv-findings li[data-severity="error"]')
+  expect(item).toHaveTextContent("合并区域 A1:B2 与 B2:C3 重叠")
+})

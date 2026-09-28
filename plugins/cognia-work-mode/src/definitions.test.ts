@@ -14,6 +14,29 @@ describe("cognia-work-mode contributions", () => {
     expect(WORK_MODE.systemPrompt).toContain("finished deliverable")
     expect(WORK_MODE.systemPrompt).toContain("review criteria")
     expect(WORK_MODE.systemPrompt).toContain("work_create_deliverable")
+    // Native deliverables are edited and read with their owner's tools.
+    for (const tool of [
+      "office_apply_operations",
+      "office_read_range",
+      "documents_apply_operations",
+      "documents_read_markdown",
+    ])
+      expect(WORK_MODE.systemPrompt).toContain(tool)
+  })
+
+  it("points the document and spreadsheet skills at their owners' edit and export tools", () => {
+    const markdown = (id: string) => {
+      const skill = WORK_SKILLS.find((candidate) => candidate.id === `cognia-work-mode:${id}`)!
+      return skill.source.kind === "inline" ? skill.source.markdown : ""
+    }
+    expect(markdown("document-deliverable")).toContain('format "docx"')
+    expect(markdown("document-deliverable")).toContain("documents_apply_operations")
+    expect(markdown("document-deliverable")).toContain("documents_export_docx")
+    expect(markdown("spreadsheet-deliverable")).toContain("office_apply_operations")
+    expect(markdown("spreadsheet-deliverable")).toContain("office_read_range")
+    expect(markdown("spreadsheet-deliverable")).toContain("office_export_xlsx")
+    expect(WORK_MODE.systemPrompt).toContain("office_export_xlsx")
+    expect(WORK_MODE.systemPrompt).toContain("documents_export_docx")
   })
 
   it("bundles portable skills for research and the major knowledge-work outputs", () => {
