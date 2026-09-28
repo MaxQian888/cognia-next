@@ -75,7 +75,7 @@ overrides:
 # One version per AI SDK package, for the catalog references above and in the
 # root package.json. This block is the single source of truth for the family.
 catalog:
-  ai: "7.0.59"
+  ai: "7.0.114"
   "@ai-sdk/provider": "4.0.7"
   "@ai-sdk/openai": "4.0.37"
   "@ai-sdk/anthropic": "4.0.37"
