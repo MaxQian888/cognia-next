@@ -119,8 +119,8 @@ describe("RunRow", () => {
   })
 
   it("phrases relative time by magnitude", () => {
-    const { result } = renderHook(() => useRunRelativeTime())
     const now = Date.now()
+    const { result } = renderHook(() => useRunRelativeTime())
     expect(result.current(now - 10_000)).toBe("just now")
     expect(result.current(now - 3 * 60_000)).toBe("3m ago")
     expect(result.current(now - 2 * 3_600_000)).toBe("2h ago")

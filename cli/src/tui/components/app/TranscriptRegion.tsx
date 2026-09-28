@@ -148,13 +148,17 @@ export function TranscriptRegion({
           />
           <WorkflowRunPanel run={state.workflowRun} />
         </ScrollView>
-        {/* "Scrolled up" hint — only while the view isn't pinned to the bottom,
-            so a following transcript shows nothing. */}
-        {!scroll.atBottom && (
-          <Box flexShrink={0}>
-            <Text color={mutedColor} dimColor>
-              {`↑ ${scroll.hidden.below} more line${scroll.hidden.below === 1 ? "" : "s"} below${scroll.newRowsBelow > 0 ? ` · ${scroll.newRowsBelow} new` : ""} · End to jump to latest`}
-            </Text>
+        {/* Keep the hint's row while content overflows, including at the tail.
+            Otherwise PageUp shrinks the viewport by one row and PageDown
+            cannot return by the same amount. Tiny terminals need that row for
+            transcript content and omit the hint in both scroll positions. */}
+        {layout.tier !== "tiny" && (scroll.hidden.above > 0 || scroll.hidden.below > 0) && (
+          <Box flexShrink={0} height={1}>
+            {!scroll.atBottom && (
+              <Text color={mutedColor} dimColor>
+                {`↑ ${scroll.hidden.below} more line${scroll.hidden.below === 1 ? "" : "s"} below${scroll.newRowsBelow > 0 ? ` · ${scroll.newRowsBelow} new` : ""} · End to jump to latest`}
+              </Text>
+            )}
           </Box>
         )}
       </>

@@ -24,6 +24,8 @@ describe("lib/tauri/events", () => {
         cliSecondInstance: "cli://second-instance",
         deepLink: "deep-link://received",
         appCloseRequested: "app://close-requested",
+        backgroundJobExited: "jobs://exited",
+        backgroundMonitorFired: "jobs://monitor-fired",
       })
     })
   })

@@ -53,6 +53,7 @@ describe("NestingPanel", () => {
           tokenBudget: 0,
           timeoutMs: 0,
           dispatchMaxRetries: 1,
+          maxConcurrent: 0,
         },
       })
     )

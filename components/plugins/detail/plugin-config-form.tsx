@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 import { useLocalizedPluginText } from "@/hooks/plugins/use-localized-plugin-text"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
@@ -1154,6 +1155,7 @@ function SecretInput({
   a11y: FieldA11y
 }) {
   const [revealed, setRevealed] = useState(false)
+  const reveal = useSecretReveal()
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-1.5">
@@ -1173,7 +1175,10 @@ function SecretInput({
           size="icon"
           className="size-8 shrink-0 pointer-coarse:size-9"
           aria-label={revealed ? t("secretHide") : t("secretShow")}
-          onClick={() => setRevealed((prev) => !prev)}
+          onClick={() => {
+            if (revealed) setRevealed(false)
+            else void reveal(() => setRevealed(true))
+          }}
           data-testid={`config-secret-toggle-${id}`}
         >
           {revealed ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}

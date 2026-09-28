@@ -138,11 +138,10 @@ describe("write-only dormancy (Working Rule 7)", () => {
     // quietly becoming false.
     const { execFileSync } = await import("node:child_process")
     const callers = (pattern: string): string[] =>
-      execFileSync(
-        "rg",
-        ["--no-heading", "-l", pattern, "-g", "*.ts", "-g", "*.tsx", "-g", "!node_modules", "."],
-        { cwd: process.cwd(), encoding: "utf8" }
-      )
+      execFileSync("git", ["grep", "-l", "-F", pattern, "--", "*.ts", "*.tsx"], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      })
         .split("\n")
         .filter(Boolean)
         .map((line) => line.replace(/^\.\//, ""))

@@ -63,6 +63,11 @@ export async function buildProxyVsix(input) {
   for (const path of [...files.keys()].sort()) {
     zip.file(path, files.get(path), { date: FIXED_ZIP_DATE, createFolders: true })
   }
+  // JSZip's auto-created parent directories do not inherit the file date.
+  // Normalize those entries too, so rebuilds keep the same digest/signature.
+  zip.forEach((_path, entry) => {
+    entry.date = FIXED_ZIP_DATE
+  })
   const bytes = await zip.generateAsync({
     type: "nodebuffer",
     compression: "DEFLATE",

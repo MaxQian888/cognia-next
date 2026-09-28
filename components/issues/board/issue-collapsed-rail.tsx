@@ -103,7 +103,7 @@ function CollapsedRailContent({
             </span>
             <span
               data-testid={`${ctx.testIdPrefix}-column-${ctx.columnId}-count`}
-              className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground"
+              className="rounded-pill bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground"
             >
               {ctx.count}
             </span>

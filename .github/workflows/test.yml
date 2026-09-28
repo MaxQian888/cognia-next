@@ -123,11 +123,24 @@ jobs:
           node --input-type=module <<'NODE'
           import { readFileSync, appendFileSync } from 'node:fs';
           const plan = JSON.parse(readFileSync('.cache/jest/plan.json', 'utf8'));
-          for (const [key, value] of Object.entries({mode: plan.mode, matrix: JSON.stringify(plan.matrix), 'has-tests': plan.suiteCount > 0, impacts: JSON.stringify(plan.impacts)})) {
+          for (const [key, value] of Object.entries({mode: plan.mode, matrix: JSON.stringify(plan.matrix), 'has-tests': plan.suiteCount > 0, 'native-helpers': plan.testFiles.some(file => ['cli/src/cli/coding-loop.bundle.test.ts', 'cli/src/runtime/sandbox/os-sandbox-exec.test.ts'].includes(file)), impacts: JSON.stringify(plan.impacts)})) {
             appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
           }
           appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Test plan\nMode: ${plan.mode}\n\n${plan.changedFiles.length} changed paths → ${plan.suiteCount} suites / ${plan.shardCount} shards.\n\nBase: ${plan.base}\nHead: ${plan.head}\n\nCoverage is collected only in full mode.\n`);
           NODE
+      - name: Setup Rust for selected native integration tests
+        if: steps.plan.outputs.native-helpers == 'true'
+        uses: dtolnay/rust-toolchain@1.96.1
+      - name: Cache Jest native helpers
+        if: steps.plan.outputs.native-helpers == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: jest-native-helpers
+      - name: Build selected Jest native helpers once
+        if: steps.plan.outputs.native-helpers == 'true'
+        run: |
+          cargo build --locked -p cognia-exec-sandbox --bin cognia-sandbox-exec --bin cognia-external-agent-launcher -j 2
+          tar -cf .cache/jest/native-helpers.tar target/debug/cognia-sandbox-exec target/debug/cognia-external-agent-launcher
       - name: Publish immutable test plan
         uses: actions/upload-artifact@v7
         with:
@@ -141,9 +154,11 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: jest-runtime-prerequisites
+          include-hidden-files: true
           path: |
             packages/*/dist/
             sidecar/webclone/dist/
+            .cache/jest/native-helpers.tar
           if-no-files-found: error
           retention-days: 1
 
@@ -193,6 +208,24 @@ jobs:
         with:
           name: jest-test-plan
           path: .cache/jest/
+      - name: Install source contract and selected native prerequisites
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          packages=(ripgrep)
+          if node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const plan = JSON.parse(readFileSync('.cache/jest/plan.json', 'utf8'));
+          const shard = plan.shards.find(entry => entry.shard === Number(process.env.SHARD));
+          if (!shard) throw new Error(`Unknown shard: ${process.env.SHARD}`);
+          process.exit(shard.testFiles.some(file => ['cli/src/cli/coding-loop.bundle.test.ts', 'cli/src/runtime/sandbox/os-sandbox-exec.test.ts'].includes(file)) ? 0 : 1);
+          NODE
+          then
+            tar -xf .cache/jest/native-helpers.tar
+            packages+=(bubblewrap)
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "${packages[@]}"
       # The planner assigns every selected suite exactly once. Full mode keeps
       # --maxWorkers=2 and the existing merged coverage thresholds.
       - name: Run Jest planned shard

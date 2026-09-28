@@ -161,11 +161,7 @@ describe("WebhooksSection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /send a test delivery/i }))
 
-    await waitFor(() =>
-      expect(toastErrorMock).toHaveBeenCalledWith(
-        "The configured signing secret is unavailable. Delivery was blocked."
-      )
-    )
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("Signing secret unavailable"))
     expect(deliverWebhookMock).not.toHaveBeenCalled()
     expect(toastSuccessMock).not.toHaveBeenCalled()
   })

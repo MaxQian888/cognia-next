@@ -9,12 +9,17 @@ import type { ProcessPlaneAvailability } from "@/lib/ai/agent/external/capabilit
 const detectInstalledRuntimes = jest.fn()
 let plane: ProcessPlaneAvailability = { ok: true, via: "local" }
 let scope = "local"
+const planeListeners = new Set<() => void>()
 
 jest.mock("@/lib/ai/agent/external/config/installed-runtimes", () => ({
   detectInstalledRuntimes: (...args: unknown[]) => detectInstalledRuntimes(...args),
 }))
 jest.mock("@/lib/ai/agent/external/capability/process-plane", () => ({
   externalAgentProcessPlane: () => plane,
+  subscribeExternalAgentProcessPlane: (listener: () => void) => {
+    planeListeners.add(listener)
+    return () => planeListeners.delete(listener)
+  },
   externalAgentProcessPlaneScope: () => scope,
   PROCESS_PLANE_COMMANDS: { detect: "external_agent_detect_runtimes" },
 }))
@@ -35,6 +40,7 @@ describe("useInstalledAgentRuntimes", () => {
     detectInstalledRuntimes.mockReset().mockResolvedValue([CODEX])
     plane = { ok: true, via: "local" }
     scope = "local"
+    planeListeners.clear()
   })
 
   it("asks nothing until it is enabled", () => {
@@ -62,6 +68,20 @@ describe("useInstalledAgentRuntimes", () => {
     await waitFor(() => expect(result.current.unavailable).toBe("not-granted"))
     expect(detectInstalledRuntimes).not.toHaveBeenCalled()
     expect(result.current.forPreset("codex")).toBeUndefined()
+  })
+
+  it("detects runtimes when a subscribed Host finishes handshaking", async () => {
+    plane = { ok: false, reason: "manifest-missing" }
+    const { result } = renderHook(() => useInstalledAgentRuntimes(true))
+    expect(detectInstalledRuntimes).not.toHaveBeenCalled()
+    act(() => {
+      plane = { ok: true, via: "remote" }
+      scope = "remote:host-a"
+      planeListeners.forEach((listener) => listener())
+    })
+    await waitFor(() => expect(result.current.forPreset("codex-app-server")).toEqual(CODEX))
+    expect(detectInstalledRuntimes).toHaveBeenCalledTimes(1)
+    expect(result.current.unavailable).toBeNull()
   })
 
   it("clears rows when a detection fails rather than leaving a stale answer", async () => {

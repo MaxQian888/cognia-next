@@ -75,7 +75,7 @@ describe("createDiagnostic", () => {
       id: "d1",
     })
     expect(diag.actions).toEqual([
-      { kind: "open-settings", section: "providers" },
+      { kind: "open-settings", section: "ai-connections" },
       { kind: "open-settings", section: "subscription" },
     ])
   })

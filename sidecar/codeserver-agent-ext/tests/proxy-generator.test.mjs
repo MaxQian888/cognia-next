@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
+import JSZip from "jszip"
 
 import { buildProxyPackageJson, buildProxyVsix, canonicalJson } from "../src/proxy-generator.mjs"
 
@@ -86,7 +87,8 @@ test("provider-only proxies receive precise activation events with a safe fallba
   ])
 })
 
-test("buildProxyVsix is byte-for-byte deterministic and content addressed", async () => {
+test("buildProxyVsix is byte-for-byte deterministic and content addressed", async (context) => {
+  context.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2026, 8, 28) })
   const first = await buildProxyVsix({
     ...input,
     proxyBundle: Buffer.from("exports.activate = () => {};\n"),
@@ -94,6 +96,7 @@ test("buildProxyVsix is byte-for-byte deterministic and content addressed", asyn
       "media/icon.svg": Buffer.from("<svg/>"),
     },
   })
+  context.mock.timers.tick(4000)
   const second = await buildProxyVsix({
     ...input,
     assets: {
@@ -102,6 +105,11 @@ test("buildProxyVsix is byte-for-byte deterministic and content addressed", asyn
     proxyBundle: Buffer.from("exports.activate = () => {};\n"),
   })
   assert.deepEqual(first.bytes, second.bytes)
+  const archive = await JSZip.loadAsync(first.bytes)
+  assert.ok(Object.values(archive.files).some((entry) => entry.dir))
+  for (const entry of Object.values(archive.files)) {
+    assert.equal(entry.date.toISOString(), "1980-01-01T00:00:00.000Z", entry.name)
+  }
   assert.equal(first.sha256, second.sha256)
   assert.match(first.sha256, /^[a-f0-9]{64}$/)
   assert.equal(first.filename, "cognia-managed.proxy-acme-tools-2.3.4.vsix")

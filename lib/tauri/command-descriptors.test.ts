@@ -29,15 +29,12 @@ describe("companion command descriptors", () => {
     expect(getCommandDescriptor("git_status")?.target).toBe("execution")
   })
 
-  it("requires an interactive host lease for critical external-agent configuration", () => {
+  it("requires an interactive host lease for critical external-agent configuration writes", () => {
     for (const name of [
       "external_agent_config_create",
       "external_agent_config_delete",
-      "external_agent_config_get",
-      "external_agent_config_list",
       "external_agent_config_reconcile",
       "external_agent_config_update",
-      "external_agent_list",
       "external_agent_update",
     ]) {
       expect(getCommandDescriptor(name)).toMatchObject({
@@ -45,6 +42,22 @@ describe("companion command descriptors", () => {
         capability: "process.spawn",
         risk: "critical",
         approval: "interactive",
+      })
+    }
+  })
+
+  it("keeps external-agent discovery readable without a write approval lease", () => {
+    for (const name of [
+      "external_agent_config_get",
+      "external_agent_config_list",
+      "external_agent_list",
+    ]) {
+      expect(getCommandDescriptor(name)).toMatchObject({
+        target: "execution",
+        capability: "process.spawn",
+        risk: "critical",
+        operation: "read",
+        approval: "none",
       })
     }
   })

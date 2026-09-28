@@ -177,6 +177,9 @@ describe("CreateIssuePage", () => {
     expect(screen.getByTestId("create-relationships")).toBeInTheDocument()
     // Live card preview shows the identifier the chosen container will mint.
     expect(screen.getByTestId("create-card-preview")).toHaveTextContent("MERC-?")
+    expect(
+      screen.getByTestId("create-card-preview").querySelector("span.tabular-nums")
+    ).toHaveClass("rounded-pill")
     for (const testId of [
       "create-field-status",
       "create-field-priority",
@@ -680,6 +683,7 @@ describe("CreateIssuePage polish", () => {
     await user.click(await screen.findByTestId("create-field-label-l1"))
     await user.keyboard("{Escape}")
     const chips = screen.getByTestId("create-label-chips")
+    expect(chips.querySelector("span.inline-flex")).toHaveClass("rounded-pill")
     expect(chips.querySelector("[style*='#ef4444'], [style*='rgb(239, 68, 68)']")).not.toBeNull()
   })
 

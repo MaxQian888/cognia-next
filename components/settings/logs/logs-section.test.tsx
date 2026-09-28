@@ -154,14 +154,14 @@ describe("transport badge", () => {
 
     await user.click(screen.getByRole("switch", { name: "Console Output" }))
 
-    expect(screen.getByTestId("logs-nav-badge-transports")).toHaveTextContent(`${before - 1}/7`)
+    expect(screen.getByTestId("logs-nav-badge-transports")).toHaveTextContent(`${before - 1}/8`)
   })
 
   it("spells the badge out for screen readers", () => {
     renderAt("transports")
     expect(screen.getByTestId("logs-nav-badge-transports")).toHaveAttribute(
       "aria-label",
-      expect.stringMatching(/of 7 transports enabled/)
+      expect.stringMatching(/of 8 transports enabled/)
     )
   })
 })

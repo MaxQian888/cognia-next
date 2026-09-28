@@ -60,3 +60,16 @@ it("redacts a credential suffixed onto a longer variable name", () => {
 it("falls back to text redaction for a non-URL", () => {
   expect(redactCredentialUrl("password: hunter2")).toBe("password: [REDACTED]")
 })
+
+it.each(["user:pass", "user", "us%40er:pa%3Ass"])(
+  "removes URL userinfo %s before text redaction",
+  (userinfo) => {
+    const out = redactCredentialUrl(
+      `https://${userinfo}@example.com/callback?view=summary&code=secret`
+    )
+    expect(out).toContain("https://example.com/callback?")
+    expect(out).toContain("view=summary")
+    expect(out).not.toContain(userinfo)
+    expect(out).not.toContain("secret")
+  }
+)

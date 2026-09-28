@@ -23546,6 +23546,10 @@
       "imageAlt": "OCR source page"
     },
     "params": {
+      "allowLan": {
+        "description": "Allow requests to this exact private-network endpoint. Changing the endpoint requires confirmation again.",
+        "label": "Confirm private LAN access"
+      },
       "apiKey": {
         "description": "Sent as Authorization: Bearer when present. Leave empty for unauthenticated LAN servers.",
         "label": "Bearer token (optional)"

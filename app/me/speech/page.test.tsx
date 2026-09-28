@@ -121,7 +121,9 @@ beforeEach(() => {
 
 describe("MobileSpeechPage", () => {
   it("renders the TTS + STT controls inside the sub-page shell", () => {
-    render(<Page />)
+    const { container } = render(<Page />)
+    // A shared DeferredTextInput does not opt the mobile rows into desktop flattening.
+    expect(container.querySelector("[data-settings-panel]")).toBeNull()
     expect(screen.getByTestId("mobile-speech-page")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-sub-page-back")).toBeInTheDocument()
     expect(screen.getByTestId("speech-tts-enabled")).toBeInTheDocument()

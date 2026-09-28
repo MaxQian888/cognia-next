@@ -105,16 +105,27 @@ describe("persist.migrate", () => {
     expect((out.agents.ok.metadata as Record<string, unknown>).unsupported).toBeUndefined()
   })
 
-  it("does NOT flag the supported opencode protocol as unsupported", () => {
-    // Migration uses the canonical predicate (acp + opencode), not a bare
-    // "acp" literal — so a persisted opencode agent is left alone.
+  it("does NOT flag the supported opencode-v2 protocol as unsupported", () => {
+    // Migration uses the canonical predicate, preserving the current v2 adapter.
     const persisted = {
       agents: {
-        oc: baseAgent({ id: "oc", protocol: "opencode" }),
+        oc: baseAgent({ id: "oc", protocol: "opencode-v2" }),
       },
     }
     const out = persistOptions.migrate(persisted, 1) as ExternalAgentStore
     expect((out.agents.oc.metadata as Record<string, unknown>).unsupported).toBeUndefined()
+  })
+
+  it("preserves a retired OpenCode record but marks its old protocol unsupported", () => {
+    const persisted = {
+      agents: { legacy: baseAgent({ id: "legacy", protocol: "opencode" }) },
+    }
+    const out = persistOptions.migrate(persisted, 1) as ExternalAgentStore
+    expect(out.agents.legacy.protocol).toBe("opencode")
+    expect(out.agents.legacy.metadata).toMatchObject({
+      unsupported: true,
+      unsupportedProtocol: "opencode",
+    })
   })
 
   it("skips falsy agent entries in migratePersistedAgents", () => {
@@ -300,6 +311,7 @@ describe("persist.partialize", () => {
         "delegationRules",
         "enabled",
         "lastRunSnapshots",
+        "overviewBannerCollapsed",
         "showConnectionNotifications",
       ].sort()
     )

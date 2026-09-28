@@ -21,5 +21,8 @@
   },
   "engines": {
     "node": ">=26.0.0"
+  },
+  "dependencies": {
+    "@cognia/logging": "workspace:*"
   }
 }

@@ -1,10 +1,119 @@
 import assert from "node:assert/strict"
-import { readFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { execFileSync } from "node:child_process"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { test } from "node:test"
 import { parse } from "yaml"
 
 const readWorkflow = (name) =>
   readFile(new URL(`../../.github/workflows/${name}`, import.meta.url), "utf8")
+
+test("server PR image checks can read the registry cache without gaining write permissions", async () => {
+  const { jobs } = parse(await readWorkflow("images.yml"))
+  const job = jobs["cognia-server-check"]
+  assert.deepEqual(job.permissions, { contents: "read", packages: "read" })
+  const login = job.steps.find((step) => step.uses?.startsWith("docker/login-action@"))
+  assert.equal(login.if, "github.event.pull_request.head.repo.full_name == github.repository")
+  assert.equal(login.with.password, "${{ secrets.GITHUB_TOKEN }}")
+  const build = job.steps.find((step) => step.uses?.startsWith("docker/build-push-action@"))
+  assert.ok(job.steps.indexOf(login) < job.steps.indexOf(build))
+  assert.equal(build.with.push, false)
+  assert.match(build.with["cache-from"], /^type=registry,/)
+  assert.equal(build.with["cache-to"], undefined, "PRs never write the release registry cache")
+})
+
+test("agent bundles build once on each native architecture and smoke that exact image", async () => {
+  const job = parse(await readWorkflow("images.yml")).jobs["agent-bundle"]
+  assert.deepEqual(job.strategy.matrix.include, [
+    { arch: "amd64", platform: "linux/amd64", runner: "ubuntu-latest" },
+    { arch: "arm64", platform: "linux/arm64", runner: "ubuntu-24.04-arm" },
+  ])
+  assert.equal(job["runs-on"], "${{ matrix.runner }}")
+  assert.equal(job.strategy["fail-fast"], false)
+  assert.ok(!job.steps.some((step) => step.uses?.startsWith("docker/setup-qemu-action@")))
+  const builds = job.steps.filter((step) => step.uses?.startsWith("docker/build-push-action@"))
+  assert.equal(builds.length, 1, "the smoke image must not be rebuilt afterward")
+  const build = builds[0]
+  assert.equal(build.with.platforms, "${{ matrix.platform }}")
+  assert.match(build.with.outputs, /should_push == 'true'/)
+  assert.match(build.with.outputs, /push-by-digest=true,name-canonical=true,push=true/)
+  assert.match(build.with.outputs, /\|\| 'type=docker'/)
+  assert.match(build.with.tags, /\|\| 'cognia-agent-bundle:smoke'/)
+  assert.match(build.with["cache-from"], /buildcache-\$\{\{ matrix.arch \}\}/)
+  assert.match(build.with["cache-to"], /should_push == 'true'/)
+  assert.match(build.with["cache-to"], /matrix.arch/)
+  const smoke = job.steps.find((step) => step.name === "Smoke against user images")
+  assert.equal(smoke.if, undefined, "both architectures run the full smoke on PRs too")
+  assert.equal(smoke.env.DIGEST, "${{ steps.build.outputs.digest }}")
+  assert.match(smoke.run, /docker pull "\$IMAGE@\$DIGEST"/)
+  assert.match(smoke.run, /sh deploy\/bundle\/smoke.sh "\$bundle"/)
+  const upload = job.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"))
+  assert.ok(job.steps.indexOf(upload) > job.steps.indexOf(smoke))
+  assert.equal(upload.if, "needs.vars.outputs.should_push == 'true'")
+  assert.equal(upload.with["if-no-files-found"], "error")
+  assert.match(upload.with.name, /matrix.arch/)
+})
+
+test("agent bundle tags are promoted only after both native smoke jobs succeed", async () => {
+  const { jobs } = parse(await readWorkflow("images.yml"))
+  const merge = jobs["agent-bundle-manifest"]
+  assert.deepEqual(merge.needs, ["vars", "agent-bundle"])
+  assert.equal(merge.if, "needs.vars.outputs.should_push == 'true'")
+  assert.ok(!merge.steps.some((step) => step.uses?.startsWith("docker/build-push-action@")))
+  const metadata = merge.steps.find((step) => step.uses?.startsWith("docker/metadata-action@"))
+  const otherMetadata = jobs["fast-images"].steps.find((step) => step.id === "meta")
+  assert.equal(metadata.with.tags, otherMetadata.with.tags, "preserve release and SHA tag policy")
+  const download = merge.steps.find((step) => step.uses?.startsWith("actions/download-artifact@"))
+  assert.equal(download.with.pattern, "agent-bundle-digest-*")
+  assert.equal(download.with["merge-multiple"], true)
+})
+
+test("agent manifest assembly requires both valid digests and preserves every tag", async () => {
+  const job = parse(await readWorkflow("images.yml")).jobs["agent-bundle-manifest"]
+  const step = job.steps.find((item) => item.name === "Assemble tested multi-platform manifest")
+  const dir = await mkdtemp(join(tmpdir(), "cognia-agent-manifest-"))
+  const digestA = `sha256:${"a".repeat(64)}`
+  const digestB = `sha256:${"b".repeat(64)}`
+  const log = join(dir, "docker.log")
+  try {
+    await writeFile(join(dir, "amd64.txt"), `${digestA}\n`)
+    await writeFile(join(dir, "arm64.txt"), `${digestB}\n`)
+    await writeFile(join(dir, "docker"), '#!/bin/sh\nprintf "%s\\n" "$@" >> "$DOCKER_LOG"\n', {
+      mode: 0o755,
+    })
+    const run = () =>
+      execFileSync("bash", ["-euo", "pipefail", "-c", step.run], {
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          DOCKER_LOG: log,
+          DIGEST_DIR: dir,
+          IMAGE: "ghcr.io/example/cognia-agent-bundle",
+          TAGS: "ghcr.io/example/cognia-agent-bundle:1.2.3\nghcr.io/example/cognia-agent-bundle:latest",
+        },
+        stdio: "pipe",
+      })
+    run()
+    const calls = await readFile(log, "utf8")
+    assert.match(calls, /buildx\nimagetools\ncreate\n--tag\n.*:1\.2\.3\n--tag\n.*:latest\n/)
+    assert.ok(calls.includes(`ghcr.io/example/cognia-agent-bundle@${digestA}`))
+    assert.ok(calls.includes(`ghcr.io/example/cognia-agent-bundle@${digestB}`))
+    await writeFile(log, "")
+    await writeFile(join(dir, "arm64.txt"), "not-a-digest\n")
+    assert.throws(run)
+    assert.equal(await readFile(log, "utf8"), "", "invalid ARM digest must not promote AMD alone")
+    await rm(join(dir, "arm64.txt"))
+    assert.throws(run)
+    assert.equal(
+      await readFile(log, "utf8"),
+      "",
+      "missing ARM smoke artifact must block publication"
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
 
 test("all Jest waves execute one immutable plan for the exact checkout", async () => {
   const { jobs } = parse(await readWorkflow("test.yml"))
@@ -364,4 +473,44 @@ test("the signaling deployment packager stays on its verified worker-build relea
   for (const artifact of ["build/worker/shim.mjs", "build/index.js", "build/index_bg.wasm"]) {
     assert.ok(verification.run.includes(`test -s ${artifact}`))
   }
+})
+
+test("Jest shards provision ripgrep before source contract suites execute", async () => {
+  const workflow = parse(await readWorkflow("test.yml"))
+  const steps = workflow.jobs.test.steps
+  const searchIndex = steps.findIndex((step) => /packages=\(ripgrep\)/.test(step.run ?? ""))
+  const testIndex = steps.findIndex((step) => step.name === "Run Jest planned shard")
+  assert.ok(searchIndex >= 0 && searchIndex < testIndex)
+  assert.equal(steps[searchIndex].if, undefined)
+})
+
+test("Jest builds selected sandbox helpers once and preserves executable artifact modes", async () => {
+  const workflow = parse(await readWorkflow("test.yml"))
+  const prep = workflow.jobs["jest-plan"].steps
+  const plan = prep.find((step) => step.id === "plan")
+  const build = prep.find((step) => step.name === "Build selected Jest native helpers once")
+  assert.match(plan.run, /plan\.testFiles\.some/)
+  assert.match(plan.run, /coding-loop\.bundle\.test\.ts/)
+  assert.match(plan.run, /os-sandbox-exec\.test\.ts/)
+  assert.equal(build.if, "steps.plan.outputs.native-helpers == 'true'")
+  assert.match(build.run, /cargo build --locked -p cognia-exec-sandbox/)
+  assert.match(build.run, /--bin cognia-sandbox-exec --bin cognia-external-agent-launcher -j 2/)
+  assert.match(build.run, /tar -cf \.cache\/jest\/native-helpers\.tar/)
+  const upload = prep.find((step) => step.name === "Publish built Jest prerequisites")
+  assert.equal(upload.with["include-hidden-files"], true)
+  assert.match(upload.with.path, /native-helpers\.tar/)
+  const shard = workflow.jobs.test.steps
+  const restore = shard.findIndex(
+    (step) => step.name === "Install source contract and selected native prerequisites"
+  )
+  const run = shard.findIndex((step) => step.name === "Run Jest planned shard")
+  assert.ok(restore >= 0 && restore < run)
+  assert.match(shard[restore].run, /plan\.shards\.find/)
+  assert.match(shard[restore].run, /shard\.testFiles\.some/)
+  assert.match(shard[restore].run, /tar -xf/)
+  assert.match(shard[restore].run, /packages\+=\(bubblewrap\)/)
+  assert.equal(
+    shard.flatMap((step) => (step.run ?? "").match(/sudo apt-get update/g) ?? []).length,
+    1
+  )
 })

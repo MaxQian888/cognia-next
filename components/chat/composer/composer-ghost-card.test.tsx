@@ -123,6 +123,7 @@ describe("ComposerGhostCard", () => {
       const suggestion = { ...candidate("fix x"), source }
       const { unmount } = render(<ComposerGhostCard {...props({ suggestion })} />)
       expect(screen.getByTestId("composer-ghost-card-source")).toHaveTextContent(key)
+      expect(screen.getByTestId("composer-ghost-card-source")).toHaveClass("rounded-pill")
       unmount()
     }
   })

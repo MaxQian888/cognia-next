@@ -1,4 +1,5 @@
-import { listen } from "@tauri-apps/api/event"
+jest.mock("@/lib/connectors/events", () => ({ connectorListen: jest.fn() }))
+import { connectorListen as listen } from "@/lib/connectors/events"
 import { startSlackWebhookTransport } from "./transport-webhook"
 import type { SlackEventEnvelope } from "./parse"
 
@@ -20,6 +21,32 @@ function makeEnvelope(ts: string): SlackEventEnvelope {
 describe("startSlackWebhookTransport", () => {
   beforeEach(() => {
     mockListen.mockReset()
+  })
+
+  it("does not register an already-aborted subscription", async () => {
+    const ctrl = new AbortController()
+    ctrl.abort()
+    const gen = startSlackWebhookTransport({ adapterId: "sl-cancelled", signal: ctrl.signal })
+    await expect(gen.next()).resolves.toEqual({ done: true, value: undefined })
+    expect(mockListen).not.toHaveBeenCalled()
+  })
+
+  it("releases a subscription that finishes registering after abort", async () => {
+    const ctrl = new AbortController()
+    const unlisten = jest.fn()
+    let finishRegistration!: (value: () => void) => void
+    mockListen.mockImplementation(
+      () =>
+        new Promise<() => void>((resolve) => {
+          finishRegistration = resolve
+        })
+    )
+    const gen = startSlackWebhookTransport({ adapterId: "sl-race", signal: ctrl.signal })
+    const pending = gen.next()
+    ctrl.abort()
+    finishRegistration(unlisten)
+    await expect(pending).resolves.toEqual({ done: true, value: undefined })
+    expect(unlisten).toHaveBeenCalledTimes(1)
   })
 
   it("subscribes to the correct event channel", async () => {

@@ -535,7 +535,7 @@ function WorkspaceEditorBody({
                 <span className={surfaceLabelClass}>{t("review")}</span>
                 {changeCount > 0 ? (
                   <span
-                    className="min-w-4 rounded-full bg-primary/15 px-1 text-[10px] font-semibold leading-4 text-primary tabular-nums"
+                    className="min-w-4 rounded-pill bg-primary/15 px-1 text-[10px] font-semibold leading-4 text-primary tabular-nums"
                     data-testid="workspace-review-count"
                     aria-hidden
                   >

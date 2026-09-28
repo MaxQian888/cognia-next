@@ -14,6 +14,17 @@ describe("BrandIcon", () => {
     )
   })
 
+  it.each(["codex", "codex-acp", "codex-app-server"])(
+    "renders the Codex asset for %s",
+    (runtime) => {
+      render(<BrandIcon id={runtime} label="Codex" decorative={false} />)
+      expect(screen.getByRole("img", { name: "Codex" })).toHaveAttribute(
+        "src",
+        "/icons/lobe/codex-color.svg"
+      )
+    }
+  )
+
   it("normalizes provider aliases to the same brand asset", () => {
     const { rerender } = render(
       <BrandIcon id="togetherai" label="Together AI" decorative={false} />

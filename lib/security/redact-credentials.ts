@@ -70,6 +70,8 @@ export function redactCredentialText(value: string): string {
 export function redactCredentialUrl(value: string): string {
   try {
     const url = new URL(value)
+    url.username = ""
+    url.password = ""
     for (const key of url.searchParams.keys()) {
       if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) url.searchParams.set(key, "[REDACTED]")
     }

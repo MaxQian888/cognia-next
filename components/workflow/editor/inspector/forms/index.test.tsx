@@ -73,7 +73,6 @@ import {
   SubworkflowConfig,
 } from "./index"
 
-jest.mock("scheduler", () => jest.requireActual("scheduler/unstable_mock"))
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn(() => undefined) }))
 jest.mock("@/lib/db/characters", () => ({ listCharacters: jest.fn(async () => []) }))
 jest.mock("@/lib/db/teams", () => ({

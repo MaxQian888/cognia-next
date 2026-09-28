@@ -52,7 +52,10 @@ describe("DiagnosticCard", () => {
       />
     )
     fireEvent.click(screen.getByTestId("diagnostic-action-open-settings"))
-    expect(onOpenSettings).toHaveBeenCalledWith({ kind: "open-settings", section: "providers" })
+    expect(onOpenSettings).toHaveBeenCalledWith({
+      kind: "open-settings",
+      section: "ai-connections",
+    })
   })
 
   it("offers the settings shortcut from the code, with no regex on the message", () => {

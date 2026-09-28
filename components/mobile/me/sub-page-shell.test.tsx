@@ -186,7 +186,8 @@ describe("/me pages that embed a desktop settings section", () => {
     .filter(
       (page): page is { route: string; file: string; source: string } =>
         page !== null &&
-        page.source.includes('from "@/components/settings/') &&
+        // Shared form controls do not make a bespoke phone page a desktop panel.
+        /from ["']@\/components\/settings\/(?!common\/)/.test(page.source) &&
         page.source.includes("<SubPageShell")
     )
 

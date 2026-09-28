@@ -16,6 +16,14 @@ describe("workflow-fixtures", () => {
     }
   })
 
+  it("returns independent nested parameters for repeated editor seeds", () => {
+    const first = buildWorkflowFixture("action.humanInput.request")
+    const second = buildWorkflowFixture("action.humanInput.request")
+    expect(first.nodes?.[1]?.data.params).toEqual(second.nodes?.[1]?.data.params)
+    expect(first.nodes?.[1]?.data.params).not.toBe(second.nodes?.[1]?.data.params)
+    expect(first.nodes?.[1]?.data.params?.fields).not.toBe(second.nodes?.[1]?.data.params?.fields)
+  })
+
   it("throws for unknown kinds", () => {
     expect(() => buildWorkflowFixture("not-a-real-kind" as SeededWorkflowKind)).toThrow(
       /Unknown seeded workflow kind/

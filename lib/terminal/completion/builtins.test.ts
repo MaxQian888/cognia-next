@@ -114,7 +114,7 @@ describe("ensureBuiltinCompletionProviders", () => {
       },
       exeDeps: {
         isDesktop: () => true,
-        invoke: async () => ["gitk"],
+        invoke: async () => ({ items: ["gitk"] }),
       },
     })
     const pathOut = await getCompletions(
@@ -131,7 +131,7 @@ describe("ensureBuiltinCompletionProviders", () => {
 
   it("path/exe toggles gate their providers", async () => {
     const pathInvoke = jest.fn(async () => [{ name: "src", isDir: true }])
-    const exeInvoke = jest.fn(async () => ["gitk"])
+    const exeInvoke = jest.fn(async () => ({ items: ["gitk"] }))
     ensureBuiltinCompletionProviders({
       getSettings: () => ({ source: "history", path: false, exe: false, spec: false }),
       buildClient: () => null,

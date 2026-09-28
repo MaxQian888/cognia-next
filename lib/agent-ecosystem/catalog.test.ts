@@ -11,6 +11,12 @@ import {
 } from "./catalog"
 
 describe("lookups", () => {
+  it("owns the Cursor configuration root without offering a migration vendor", () => {
+    expect(findEcosystemById("cursor")).toMatchObject({
+      vendorRootKeys: ["cursorDir"],
+      migrationVendor: null,
+    })
+  })
   it("links the Devin runtime without claiming an unsupported history importer", () => {
     expect(findEcosystemByRuntimeId("devin")?.id).toBe("devin")
     expect(findEcosystemById("devin")?.sessionSourceIds).toEqual([])

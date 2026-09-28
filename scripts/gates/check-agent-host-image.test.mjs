@@ -1,6 +1,8 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
+import { dirname, relative, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { execFileSync } from "node:child_process"
 
 import {
@@ -171,4 +173,48 @@ test("server dependency cooking has the same capture linker prerequisite as fina
   const chef = dockerfile.split("FROM chef AS planner")[0]
   assert.match(chef, /\blibgbm-dev\b/)
   assert.match(dockerfile, /\blibgbm1\b/)
+})
+
+test("both server compile stages carry Rust out-of-tree embedded inputs", () => {
+  const root = fileURLToPath(new URL("../../", import.meta.url))
+  const dockerfile = readFileSync(
+    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    "utf8"
+  )
+  const rustFiles = execFileSync("git", ["ls-files", "-z", "crates", "src-tauri"], {
+    cwd: root,
+    encoding: "utf8",
+  })
+    .split("\0")
+    .filter((file) => file.endsWith(".rs"))
+  const embedded = new Set()
+  for (const file of rustFiles) {
+    const source = readFileSync(resolve(root, file), "utf8")
+    for (const match of source.matchAll(/include_(?:str|bytes)!\s*\(\s*"([^"]+)"/g)) {
+      const target = relative(root, resolve(root, dirname(file), match[1]))
+      if (!target.startsWith("crates/") && !target.startsWith("src-tauri/")) embedded.add(target)
+    }
+  }
+  // The canonical JSON parity fixture resolves from Cargo's crate root.
+  const canonical = readFileSync(resolve(root, "crates/cognia-canonical-json/src/lib.rs"), "utf8")
+  const manifestRelative = canonical.match(
+    /include_str!\(concat!\(\s*env!\("CARGO_MANIFEST_DIR"\),\s*"([^"]+)"/
+  )
+  assert.ok(manifestRelative)
+  embedded.add(
+    relative(root, resolve(root, "crates/cognia-canonical-json", `.${manifestRelative[1]}`))
+  )
+  assert.ok(embedded.has("protocol/external-agent-runtimes.json"))
+  for (const stage of ["builder", "check"]) {
+    const copies = stageText(dockerfile, stage)
+      .split("\n")
+      .filter((line) => line.startsWith("COPY ") && !line.includes("--from="))
+      .flatMap((line) => line.split(/\s+/).slice(1, -1))
+    for (const target of embedded) {
+      assert.ok(
+        copies.some((input) => target === input || target.startsWith(`${input}/`)),
+        `${stage} is missing embedded input ${target}`
+      )
+    }
+  }
 })

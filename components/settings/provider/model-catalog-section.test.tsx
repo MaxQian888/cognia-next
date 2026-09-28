@@ -20,6 +20,7 @@ const searchModels = jest.fn((..._args: unknown[]) => [
       creator: "openai",
       modalities: { input: ["text"], output: ["text"] },
       capabilities: { tools: true },
+      limits: { context: 64000 },
       lifecycle: "deprecated",
       provenance: {},
     },
@@ -76,6 +77,10 @@ jest.mock("@/lib/db/provider-catalog", () => ({
 }))
 
 import { ModelCatalogSection } from "./model-catalog-section"
+import {
+  SETTINGS_LIST_DETAIL_COLLAPSE,
+  SETTINGS_PANE_TIERS,
+} from "../common/settings-master-detail"
 
 describe("ModelCatalogSection", () => {
   beforeEach(() => {
@@ -95,6 +100,20 @@ describe("ModelCatalogSection", () => {
     expect(screen.getByText("routedId: gpt-test")).toBeInTheDocument()
     expect(screen.getByText("OpenAI")).toBeInTheDocument()
     expect(screen.getByText("openai:gpt-next")).toBeInTheDocument()
+  })
+
+  it("reveals row capabilities and context at the shared settings pane tiers", () => {
+    const { container } = render(<ModelCatalogSection />)
+    expect(
+      container.querySelector(
+        `[class*="@[${SETTINGS_LIST_DETAIL_COLLAPSE}px]/settings-pane:inline-flex"]`
+      )
+    ).not.toBeNull()
+    const context = container.querySelector(
+      `[class*="@[${SETTINGS_PANE_TIERS.compact}px]/settings-pane:inline"]`
+    )
+    expect(context).not.toBeNull()
+    expect(context?.textContent).toMatch(/64/i)
   })
 
   it("switches from recommended Certified mode to advanced catalog mode", () => {

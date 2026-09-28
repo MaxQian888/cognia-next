@@ -60,7 +60,7 @@ it("disables the import button when nothing is selected", () => {
       onImported={jest.fn()}
     />
   )
-  expect(screen.getByRole("button", { name: "importButton" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Import" })).toBeDisabled()
 })
 
 it("select-all picks only valid models and imports each, then closes", async () => {
@@ -79,14 +79,14 @@ it("select-all picks only valid models and imports each, then closes", async () 
       onImported={onImported}
     />
   )
-  await user.click(screen.getByRole("checkbox", { name: "selectAll" }))
-  expect(screen.getByText("selectedCount")).toBeInTheDocument()
+  await user.click(screen.getByRole("checkbox", { name: "Select all" }))
+  expect(screen.getByText("2 selected")).toBeInTheDocument()
 
-  await user.click(screen.getByRole("button", { name: "importButton" }))
+  await user.click(screen.getByRole("button", { name: /^Import \d/ }))
   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   expect(importModelFromEntries).toHaveBeenCalledTimes(2)
   expect(onImported).toHaveBeenCalledWith("pm_x")
-  expect(toastSuccess).toHaveBeenCalledWith("summary")
+  expect(toastSuccess).toHaveBeenCalledWith("Imported 2 models")
   expect(toastWarning).not.toHaveBeenCalled()
 })
 
@@ -101,9 +101,9 @@ it("reports partial failures via a warning toast and a counted summary", async (
       onImported={jest.fn()}
     />
   )
-  await user.click(screen.getByRole("checkbox", { name: "selectAll" }))
-  await user.click(screen.getByRole("button", { name: "importButton" }))
-  await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("summary"))
+  await user.click(screen.getByRole("checkbox", { name: "Select all" }))
+  await user.click(screen.getByRole("button", { name: /^Import \d/ }))
+  await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Imported 1 model, 1 failed"))
   expect(toastWarning).toHaveBeenCalled()
 })
 
@@ -117,10 +117,10 @@ it("toggles the whole selection off when select-all is clicked again", async () 
       onImported={jest.fn()}
     />
   )
-  await user.click(screen.getByRole("checkbox", { name: "selectAll" }))
-  expect(screen.getByText("selectedCount")).toBeInTheDocument()
-  await user.click(screen.getByRole("checkbox", { name: "selectAll" }))
-  expect(screen.getByText("selectedCount")).toBeInTheDocument()
+  await user.click(screen.getByRole("checkbox", { name: "Select all" }))
+  expect(screen.getByText("2 selected")).toBeInTheDocument()
+  await user.click(screen.getByRole("checkbox", { name: "Select all" }))
+  expect(screen.getByText("0 selected")).toBeInTheDocument()
 })
 
 it("disables select-all and import when every model is invalid", () => {
@@ -132,8 +132,8 @@ it("disables select-all and import when every model is invalid", () => {
       onImported={jest.fn()}
     />
   )
-  expect(screen.getByRole("checkbox", { name: "selectAll" })).toBeDisabled()
-  expect(screen.getByRole("button", { name: "importButton" })).toBeDisabled()
+  expect(screen.getByRole("checkbox", { name: "Select all" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Import" })).toBeDisabled()
 })
 
 it("closes without importing when cancelled", async () => {
@@ -147,7 +147,7 @@ it("closes without importing when cancelled", async () => {
       onImported={jest.fn()}
     />
   )
-  await user.click(screen.getByRole("button", { name: "cancel" }))
+  await user.click(screen.getByRole("button", { name: "Cancel" }))
   expect(onOpenChange).toHaveBeenCalledWith(false)
   expect(importModelFromEntries).not.toHaveBeenCalled()
 })
@@ -164,7 +164,7 @@ it("imports just the toggled model when not selecting all", async () => {
     />
   )
   await user.click(screen.getByRole("checkbox", { name: "B" }))
-  expect(screen.getByText("selectedCount")).toBeInTheDocument()
-  await user.click(screen.getByRole("button", { name: "importButton" }))
+  expect(screen.getByText("1 selected")).toBeInTheDocument()
+  await user.click(screen.getByRole("button", { name: /^Import \d/ }))
   await waitFor(() => expect(importModelFromEntries).toHaveBeenCalledTimes(1))
 })

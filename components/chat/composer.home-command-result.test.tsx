@@ -37,7 +37,7 @@ jest.mock("@/lib/telemetry/events/track-event", () => ({ trackEvent: jest.fn(asy
 jest.mock("./composer/voice-controls", () => ({ VoiceControls: () => null }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
 
-import { act, fireEvent, render } from "@testing-library/react"
+import { act, fireEvent, render, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
@@ -87,9 +87,6 @@ async function runCommand(textarea: HTMLTextAreaElement, value: string) {
     await new Promise((r) => setTimeout(r, 0))
   })
   fireEvent.keyDown(textarea, { key: "Enter" })
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 50))
-  })
 }
 
 beforeEach(() => {
@@ -116,7 +113,7 @@ describe("a command's text result", () => {
     const ta = document.querySelector("textarea") as HTMLTextAreaElement
     await runCommand(ta, "/acme-list")
 
-    expect(toastMessage).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(toastMessage).toHaveBeenCalledTimes(1))
     const { container } = render(toastMessage.mock.calls[0][0])
     expect(container.textContent).toBe("- alpha\n- beta")
     expect(useChatStore.getState().messages).toHaveLength(0)
@@ -135,11 +132,13 @@ describe("a command's text result", () => {
     const ta = document.querySelector("textarea") as HTMLTextAreaElement
     await runCommand(ta, "/acme-list")
 
-    expect(toastMessage).not.toHaveBeenCalled()
-    const messages = useChatStore.getState().sessions["ses_home"]?.messages ?? []
-    expect(messages.at(-1)).toMatchObject({
-      role: "system",
-      parts: [{ type: "text", text: "- alpha\n- beta" }],
+    await waitFor(() => {
+      const messages = useChatStore.getState().sessions["ses_home"]?.messages ?? []
+      expect(messages.at(-1)).toMatchObject({
+        role: "system",
+        parts: [{ type: "text", text: "- alpha\n- beta" }],
+      })
     })
+    expect(toastMessage).not.toHaveBeenCalled()
   })
 })

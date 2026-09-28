@@ -141,9 +141,8 @@ pub fn make_default_backend_with_app(app: Option<AppHandle>) -> Box<dyn Automati
         match platform::atspi::AtspiBackend::new() {
             Ok(b) => Box::new(b),
             Err(err) => {
-                let msg = format!("{err}");
-                log::warn!("atspi backend init failed ({msg}); falling back to stub backend");
-                record_init_failure(app.as_ref(), Platform::Linux, msg);
+                log::warn!("atspi backend init failed ({err}); falling back to stub backend");
+                record_init_failure(app.as_ref(), Platform::Linux, err);
                 Box::new(backend::StubBackend {
                     platform: Platform::Linux,
                 })

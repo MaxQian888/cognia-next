@@ -41,7 +41,7 @@ const instance = render(
       />
     </ThemeProvider>
   </TuiInputProvider>,
-  { stdin, stdout, exitOnCtrlC: false, incrementalRendering: false }
+  { stdin, stdout, interactive: true, exitOnCtrlC: false, incrementalRendering: false }
 )
 
 await new Promise((resolve) => setTimeout(resolve, 25))

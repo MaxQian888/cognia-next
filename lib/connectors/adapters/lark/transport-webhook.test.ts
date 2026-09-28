@@ -30,6 +30,33 @@ describe("startLarkWebhookTransport", () => {
     mockListen.mockReset()
   })
 
+  it("does not subscribe when already aborted", async () => {
+    const ctrl = new AbortController()
+    ctrl.abort()
+    const gen = startLarkWebhookTransport({ adapterId: "lark-aborted", signal: ctrl.signal })
+    await expect(gen.next()).resolves.toEqual({ done: true, value: undefined })
+    expect(mockListen).not.toHaveBeenCalled()
+  })
+
+  it("disposes a subscription that resolves after abort without hanging", async () => {
+    const ctrl = new AbortController()
+    const unlisten = jest.fn()
+    let finishRegistration!: (value: () => void) => void
+    mockListen.mockReturnValue(
+      new Promise<() => void>((resolve) => {
+        finishRegistration = resolve
+      })
+    )
+    const gen = startLarkWebhookTransport({ adapterId: "lark-pending", signal: ctrl.signal })
+    const pending = gen.next()
+    ctrl.abort()
+    finishRegistration(unlisten)
+    await expect(pending).resolves.toEqual({ done: true, value: undefined })
+    expect(unlisten).toHaveBeenCalledTimes(1)
+    ctrl.abort()
+    expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+
   it("subscribes to the correct event channel", async () => {
     const ctrl = new AbortController()
 

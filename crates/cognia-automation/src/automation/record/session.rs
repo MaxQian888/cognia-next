@@ -1093,7 +1093,7 @@ mod tests {
         fn start_with(settings: CaptureSettings) -> Self {
             let root = tempfile::tempdir().unwrap();
             let (sink, events) = EventSink::collecting();
-            let monitor = InputMonitor::default();
+            let monitor = InputMonitor::for_test();
             let id = RecordingId::new();
             let state = RecorderState::default();
             state
@@ -1408,7 +1408,7 @@ mod tests {
     async fn step_limit_breach_auto_interrupts_and_preserves_the_bundle() {
         let root = tempfile::tempdir().unwrap();
         let (sink, events) = EventSink::collecting();
-        let monitor = InputMonitor::default();
+        let monitor = InputMonitor::for_test();
         let id = RecordingId::new();
         let state = RecorderState::default();
         state
@@ -1503,7 +1503,7 @@ mod tests {
     async fn secure_focus_marks_the_run_sensitive_end_to_end() {
         let root = tempfile::tempdir().unwrap();
         let (sink, _events) = EventSink::collecting();
-        let monitor = InputMonitor::default();
+        let monitor = InputMonitor::for_test();
         let id = RecordingId::new();
         let state = RecorderState::default();
         state

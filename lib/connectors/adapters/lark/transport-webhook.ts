@@ -27,6 +27,7 @@ export interface LarkWebhookOptions {
 export async function* startLarkWebhookTransport(
   opts: LarkWebhookOptions
 ): AsyncGenerator<LarkEventEnvelope> {
+  if (opts.signal.aborted) return
   const eventName = `connectors://webhook/${opts.adapterId}`
 
   const queue: LarkEventEnvelope[] = []
@@ -34,18 +35,24 @@ export async function* startLarkWebhookTransport(
   let done = false
 
   const unlisten = await listen<LarkEventEnvelope>(eventName, (event) => {
+    if (done) return
     queue.push(event.payload)
     resolve?.()
     resolve = null
   })
 
   // Clean up on abort
-  opts.signal.addEventListener("abort", () => {
+  const onAbort = () => {
+    if (done) return
     done = true
     unlisten()
     resolve?.()
     resolve = null
-  })
+  }
+  opts.signal.addEventListener("abort", onAbort, { once: true })
+  // Registration can settle after cancellation; an already-aborted signal
+  // does not dispatch another event when its listener is attached.
+  if (opts.signal.aborted) onAbort()
 
   try {
     while (!done || queue.length > 0) {
@@ -59,6 +66,7 @@ export async function* startLarkWebhookTransport(
       }
     }
   } finally {
+    opts.signal.removeEventListener("abort", onAbort)
     if (!done) {
       unlisten()
     }

@@ -822,6 +822,9 @@ importers:
       '@types/ws':
         specifier: 8.18.1
         version: 8.18.1
+      undici:
+        specifier: ^7.28.0
+        version: 7.30.0
       ws:
         specifier: 8.22.0
         version: 8.22.0
@@ -874,6 +877,9 @@ importers:
       '@cognia/web-search':
         specifier: workspace:*
         version: link:../packages/web-search
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   docs:
     dependencies:
@@ -1083,7 +1089,11 @@ importers:
         specifier: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
         version: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
 
-  packages/error-parsers: {}
+  packages/error-parsers:
+    dependencies:
+      '@cognia/logging':
+        specifier: workspace:*
+        version: link:../logging
 
   packages/eval-core:
     dependencies:

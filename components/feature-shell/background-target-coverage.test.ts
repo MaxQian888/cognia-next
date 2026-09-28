@@ -13,6 +13,7 @@ const EXEMPT: Record<string, string> = {
   // ADR-0140 retired `/agent-teams` and `/agent-teams/workspace`. Both render
   // null and replace the URL with `/squads`, so there is nothing to paint.
   "agent-teams": "redirect-only route — renders nothing",
+  "chat-copilot": "transparent copilot overlay — owns its paint-through backdrop (ADR-0194)",
   inbox: "redirect-only route — renders nothing",
   "deep-link": "invisible handoff route, redirects immediately",
   fleet: "transparent island window — wallpaper is force-disabled there",

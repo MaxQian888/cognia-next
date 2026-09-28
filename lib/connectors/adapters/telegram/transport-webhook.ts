@@ -21,6 +21,7 @@ export interface WebhookOptions {
  * each `TelegramUpdate`. Cleans up the listener on abort.
  */
 export async function* startWebhookTransport(opts: WebhookOptions): AsyncGenerator<TelegramUpdate> {
+  if (opts.signal.aborted) return
   const eventName = `connectors://webhook/${opts.adapterId}`
 
   const queue: TelegramUpdate[] = []
@@ -28,18 +29,23 @@ export async function* startWebhookTransport(opts: WebhookOptions): AsyncGenerat
   let done = false
 
   const unlisten = await listen<TelegramUpdate>(eventName, (event) => {
+    if (done) return
     queue.push(event.payload)
     resolve?.()
     resolve = null
   })
 
   // Clean up on abort
-  opts.signal.addEventListener("abort", () => {
+  const onAbort = () => {
+    if (done) return
     done = true
     unlisten()
     resolve?.()
     resolve = null
-  })
+  }
+  opts.signal.addEventListener("abort", onAbort, { once: true })
+  // Registration may settle after cancellation, which does not replay abort.
+  if (opts.signal.aborted) onAbort()
 
   try {
     while (!done || queue.length > 0) {
@@ -53,6 +59,7 @@ export async function* startWebhookTransport(opts: WebhookOptions): AsyncGenerat
       }
     }
   } finally {
+    opts.signal.removeEventListener("abort", onAbort)
     if (!done) {
       unlisten()
     }

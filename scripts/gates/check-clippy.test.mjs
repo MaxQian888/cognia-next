@@ -11,7 +11,10 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { existsSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { spawnSync } from "node:child_process"
 
 import {
   BASELINE_FILE,
@@ -67,6 +70,37 @@ test("hard compiler errors retain their rendered locations without artifact nois
   )
   assert.equal(output, `mismatched types\n${rendered}`)
   assert.equal(renderClippyErrors(warning("example", "clippy::needless_borrow")), "")
+})
+
+test("ratchet failures print full lint names and actionable source diagnostics", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cognia-clippy-diagnostics-"))
+  try {
+    const input = join(directory, "clippy.json")
+    const rendered = "warning: redundant trim\n --> src/linux.rs:12:3\n"
+    writeFileSync(
+      input,
+      JSON.stringify({
+        reason: "compiler-message",
+        target: { name: "diagnostic_test_crate" },
+        message: {
+          level: "warning",
+          code: { code: "clippy::trim_split_whitespace" },
+          message: "redundant trim",
+          rendered,
+        },
+      })
+    )
+    const result = spawnSync(
+      process.execPath,
+      [new URL("./check-clippy.mjs", import.meta.url).pathname, "--from-file", input],
+      { encoding: "utf8" }
+    )
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /diagnostic_test_crate  clippy::trim_split_whitespace  0 → 1/)
+    assert.ok(result.stderr.includes(rendered))
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 test("clippy lints the tauri-host command shells the defaults leave out", () => {

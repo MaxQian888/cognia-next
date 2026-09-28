@@ -121,11 +121,11 @@ describe("useCapability — local OR server-backed", () => {
     expect(renderHook(() => useCapability("headless")).result.current).toBe(false)
   })
 
-  it("cloud-companion gets server-backed sidecar/shell but not local-hardware ocr", () => {
+  it("cloud-companion gets server-backed sidecar, shell and OCR without local UI automation", () => {
     process.env.NEXT_PUBLIC_COGNIA_SERVER_URL = "https://cloud.example.com"
     expect(renderHook(() => useCapability("sidecar")).result.current).toBe(true)
     expect(renderHook(() => useCapability("shell")).result.current).toBe(true)
-    expect(renderHook(() => useCapability("ocr")).result.current).toBe(false)
+    expect(renderHook(() => useCapability("ocr")).result.current).toBe(true)
     expect(renderHook(() => useCapability("uia-automation")).result.current).toBe(false)
   })
 
@@ -168,7 +168,7 @@ describe("useCapabilityChecker", () => {
     process.env.NEXT_PUBLIC_COGNIA_SERVER_URL = "https://cloud.example.com"
     const { result } = renderHook(() => useCapabilityChecker())
     expect(result.current("sidecar")).toBe(true)
-    expect(result.current("ocr")).toBe(false)
+    expect(result.current("ocr")).toBe(true)
   })
 
   it("is referentially stable until the remote-transport state changes", () => {

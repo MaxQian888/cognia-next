@@ -11,9 +11,6 @@
 //! The 5-second cache mirrors that module for the same reason: a settings screen
 //! that re-renders should not hammer a TCC lookup.
 
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-
 /// Result of a permission probe. `Unknown` is distinct from `Missing`: the
 /// preflight tells the user "we could not check" rather than sending them to a
 /// System Settings pane that may already be correct.
@@ -31,6 +28,8 @@ pub enum ProbeState {
 #[cfg(target_os = "macos")]
 mod imp {
     use super::*;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
 
     /// `kIOHIDRequestTypeListenEvent` — the access class a CGEventTap needs.
     const REQUEST_TYPE_LISTEN_EVENT: u32 = 1;

@@ -20,10 +20,6 @@ jest.mock("@/lib/native/utils", () => ({
   canUseTauriInvoke: () => canUseTauriInvokeMock(),
 }))
 
-jest.mock("@cognia/logging", () => ({
-  loggers: { plugin: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
-}))
-
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { PluginVsixInstallDialog } from "./plugin-vsix-install-dialog"
 import { installVsix } from "@/lib/plugin/vscode-shim/vsix-installer"

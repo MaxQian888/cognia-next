@@ -301,9 +301,7 @@ describe("A2UIToolbar", () => {
     createShareLink.mockResolvedValue({ code: "C", url: "https://share.test/v/C#k=K" })
     renderToolbar()
 
-    const shareButton = screen
-      .getAllByRole("button")
-      .find((b) => b.querySelector("svg.lucide-share2"))!
+    const shareButton = screen.getByRole("button", { name: "Share" })
     fireEvent.click(shareButton)
 
     fireEvent.click(await screen.findByRole("button", { name: "Create link" }))

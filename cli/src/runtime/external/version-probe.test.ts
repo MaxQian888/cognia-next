@@ -1,4 +1,7 @@
 /** @jest-environment node */
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { EventEmitter } from "node:events"
 import { PassThrough } from "node:stream"
 
@@ -83,7 +86,29 @@ describe("resolveProbeExecutable", () => {
   })
 })
 
+let probeBin: string
+
 describe("probeRuntimeVersion", () => {
+  beforeEach(() => {
+    probeBin = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-version-probe-"))
+    for (const command of ["codex", "npx"]) {
+      fs.writeFileSync(
+        path.join(probeBin, command),
+        `#!${process.execPath}\nconsole.log("codex-cli 1.2.3")\n`,
+        { mode: 0o755 }
+      )
+    }
+    const access = fs.accessSync.bind(fs)
+    jest.spyOn(fs, "accessSync").mockImplementation((file, mode) => {
+      // The resolver also searches system install roots; never probe a real agent.
+      if (!String(file).startsWith(`${probeBin}${path.sep}`)) throw new Error("ENOENT")
+      access(file, mode)
+    })
+  })
+  afterEach(() => {
+    jest.restoreAllMocks()
+    fs.rmSync(probeBin, { recursive: true, force: true })
+  })
   it("refuses an id the catalog does not govern", async () => {
     await expect(probeRuntimeVersion("not-a-runtime")).rejects.toThrow("unknown runtime")
   })
@@ -114,7 +139,7 @@ describe("probeRuntimeVersion", () => {
     const child = fakeChild()
     const probing = probeRuntimeVersion("codex-app-server", {
       ...withChild(child),
-      runtime: { ...runtime, env: { PATH: nodeDir() } },
+      runtime: { ...runtime, env: { PATH: probeBin } },
     })
 
     child.stdout.write("codex-cli ")
@@ -132,7 +157,7 @@ describe("probeRuntimeVersion", () => {
     const child = fakeChild()
     const probing = probeRuntimeVersion("codex-app-server", {
       ...withChild(child),
-      runtime: { ...runtime, env: { PATH: nodeDir() } },
+      runtime: { ...runtime, env: { PATH: probeBin } },
     })
 
     child.stderr.write("unknown flag --version\n")
@@ -148,7 +173,7 @@ describe("probeRuntimeVersion", () => {
     const child = fakeChild()
     const probing = probeRuntimeVersion("codex-app-server", {
       ...withChild(child),
-      runtime: { ...runtime, env: { PATH: nodeDir() } },
+      runtime: { ...runtime, env: { PATH: probeBin } },
     })
 
     child.emit("error", new Error("EACCES"))
@@ -163,28 +188,29 @@ describe("probeRuntimeVersion", () => {
     const child = fakeChild()
     const probing = probeRuntimeVersion("codex-acp", {
       ...withChild(child),
-      runtime: { ...runtime, env: { PATH: nodeDir() } },
+      runtime: { ...runtime, env: { PATH: probeBin } },
     })
     child.stdout.write("0.5.0\n")
     await flush()
     child.emit("close", 0)
 
-    // Resolution uses the real filesystem, so this only asserts the rule when
-    // `npx` is actually present next to node.
+    // The synthetic runner resolves regardless of host-installed CLIs.
     const probe = await probing
-    if (probe.executablePath) expect(probe.executableDigest).toBeNull()
+    expect(probe.executablePath).toBe(path.join(probeBin, "npx"))
+    expect(probe.executableDigest).toBeNull()
   })
 
   it("runs the real probe end to end against a trivial process", async () => {
     // No injected spawn: exercises the default runner, the enriched PATH and
     // the close path together.
     const probe = await probeRuntimeVersion("codex-app-server", {
-      runtime: { ...runtime, env: { PATH: nodeDir() } },
+      runtime: { ...runtime, env: { PATH: probeBin } },
       spawnFn: undefined,
     })
-    // `codex` is not installed in CI; either answer is valid, but a found
-    // command must carry a path and a missing one must not.
-    expect(probe.output === null).toBe(probe.executablePath === null)
+    // Exercise a real, isolated executable rather than an ambient installation.
+    expect(probe.output).toBe("codex-cli 1.2.3\n")
+    expect(probe.executablePath).toBe(path.join(probeBin, "codex"))
+    expect(probe.exitCode).toBe(0)
   })
 
   it("answers for every catalogued runtime, without spawning anything", async () => {
@@ -209,7 +235,3 @@ describe("probeRuntimeVersion", () => {
     expect(EXTERNAL_AGENT_RUNTIMES.length).toBeGreaterThanOrEqual(15)
   })
 })
-
-function nodeDir(): string {
-  return process.execPath.slice(0, process.execPath.lastIndexOf("/"))
-}

@@ -112,6 +112,7 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   claudecode: assets.claudeCode,
   codex: assets.codex,
   "codex-app-server": assets.codex,
+  "codex-acp": assets.codex,
   cohere: assets.cohere,
   cloudflare: assets.cloudflare,
   cursor: assets.cursor,

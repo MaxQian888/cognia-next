@@ -7,7 +7,8 @@ const mockNotFound = jest.fn(() => {
   throw new Error("NEXT_NOT_FOUND")
 })
 jest.mock("next/navigation", () => ({
-  useSearchParams: () => ({ get: mockGet }),
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  useSearchParams: () => ({ get: (key: string) => (key === "id" ? mockGet() : null) }),
   notFound: () => mockNotFound(),
 }))
 jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => false }))

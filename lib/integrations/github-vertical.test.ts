@@ -71,7 +71,10 @@ describe("GitHub Marketplace vertical", () => {
       resourceProviders: { github: github.listGithubResources },
       accountStatusProviders: { github: github.checkGithubHealth },
     })
-    expect(handlerNames).toHaveLength(13)
+    expect(new Set(handlerNames).size).toBe(handlerNames.length)
+    for (const handler of handlerNames) {
+      expect(typeof github[handler as keyof typeof github]).toBe("function")
+    }
 
     try {
       const auth = await getSession(

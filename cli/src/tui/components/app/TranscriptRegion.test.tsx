@@ -95,7 +95,7 @@ describe("TranscriptRegion", () => {
         banner={<>BANNER</>}
         identity={builtinIdentity}
         activeModel="claude-x"
-        scroll={scroll({ atBottom: true })}
+        scroll={scroll({ atBottom: true, hidden: { above: 20, below: 0 } })}
         scrollContentRef={{ current: null }}
         cursor={cursor()}
         mutedColor="gray"
@@ -107,7 +107,32 @@ describe("TranscriptRegion", () => {
     expect(text).not.toContain("BANNER")
     expect(text).not.toContain("Cognia Agent")
     expect(text).not.toContain("more line")
+    // Overflow keeps one empty hint row even at the tail. Showing the hint
+    // after PageUp must not shrink the viewport and change the page size.
+    expect(container.lastElementChild?.textContent).toBe("")
   })
+
+  it.each([true, false])(
+    "preserves the transcript row in tiny terminals atBottom=%s",
+    (atBottom) => {
+      const { container } = wrap(
+        <TranscriptRegion
+          state={makeState()}
+          fullscreen
+          banner={<>BANNER</>}
+          identity={builtinIdentity}
+          activeModel="claude-x"
+          layout={terminalLayout(20, 8)}
+          scroll={scroll({ atBottom, hidden: { above: 20, below: atBottom ? 0 : 5 } })}
+          scrollContentRef={{ current: null }}
+          cursor={cursor()}
+          mutedColor="gray"
+        />
+      )
+      expect(container.lastElementChild?.textContent).toContain("hello world")
+      expect(container.textContent).not.toContain("more line")
+    }
+  )
 
   it("shows the scrolled-up hint when not pinned to the bottom", () => {
     const { container } = wrap(

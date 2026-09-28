@@ -26,7 +26,7 @@ function runCursorProbe(): CursorProbe {
   const result = spawnSync(process.execPath, ["--import", "tsx", fixture], {
     cwd: process.cwd(),
     encoding: "utf8",
-    env: { ...process.env, FORCE_COLOR: "3" },
+    env: { ...process.env, CI: "true", GITHUB_ACTIONS: "true", FORCE_COLOR: "3" },
   })
   expect(result.status).toBe(0)
   return JSON.parse(result.stdout) as CursorProbe

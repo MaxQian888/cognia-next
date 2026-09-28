@@ -549,19 +549,19 @@ fn render_bwrap_args(
     command: &SandboxCommand,
     seccomp_fd: Option<std::os::fd::RawFd>,
 ) -> Vec<String> {
-    let mut args: Vec<String> = Vec::new();
-
     // Isolation baseline. Order matters: namespace flags first.
-    args.push("--unshare-user".into());
-    args.push("--unshare-pid".into());
-    args.push("--unshare-ipc".into());
-    args.push("--unshare-uts".into());
-    args.push("--die-with-parent".into());
-    // Detach the controlling terminal. Without it the sandboxed process keeps
-    // the caller's session and can push characters back into the terminal that
-    // launched the app with `TIOCSTI`. Nothing here is interactive (stdio are
-    // always pipes), so there is no session to lose.
-    args.push("--new-session".into());
+    let mut args: Vec<String> = vec![
+        "--unshare-user".into(),
+        "--unshare-pid".into(),
+        "--unshare-ipc".into(),
+        "--unshare-uts".into(),
+        "--die-with-parent".into(),
+        // Detach the controlling terminal. Without it the sandboxed process keeps
+        // the caller's session and can push characters back into the terminal that
+        // launched the app with `TIOCSTI`. Nothing here is interactive (stdio are
+        // always pipes), so there is no session to lose.
+        "--new-session".into(),
+    ];
     // Hand the compiled syscall filter to bwrap, which installs it on the
     // sandboxed process right before exec. See `sandbox::seccomp` for why it
     // must not be installed on bwrap itself.

@@ -117,7 +117,7 @@ export function ComposerGhostCard({
             {sourceLabel ? (
               <span
                 className={cn(
-                  "rounded-full bg-primary/10 px-1.5 py-px text-primary",
+                  "rounded-pill bg-primary/10 px-1.5 py-px text-primary",
                   streaming && "animate-pulse"
                 )}
                 data-testid="composer-ghost-card-source"

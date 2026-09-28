@@ -93,6 +93,7 @@ describe("issueCollapsedRail", () => {
     fireEvent.click(screen.getByTestId("k-column-expand-todo"))
     expect(onExpand).toHaveBeenCalled()
     expect(screen.getByTestId("k-column-todo-count")).toHaveTextContent("2")
+    expect(screen.getByTestId("k-column-todo-count")).toHaveClass("rounded-pill")
   })
 
   it("sketches each item as a priority-coloured spine dot", () => {

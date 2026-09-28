@@ -399,6 +399,7 @@ maybe("conversation: terminal behaviour", () => {
       async (session) => {
         await session.send("lots")
         await session.waitForText("line 60 of the answer")
+        await session.waitForTurnEnd(1)
         await session.press("pageUp")
         // Scrolled up: the tail is off screen and an earlier line is on it.
         await session.waitForNoText("line 60 of the answer")

@@ -18,7 +18,6 @@ describe("PlatformKind", () => {
       "kook",
       "line",
       "mattermost",
-      "github",
     ])
   })
 
@@ -30,6 +29,8 @@ describe("PlatformKind", () => {
       expect(k).toBe("telegram")
     }
     expect(isPlatformKind("nope")).toBe(false)
+    // GitHub is supplied by its plugin, not the built-in connector registry.
+    expect(isPlatformKind("github")).toBe(false)
   })
 
   it("returns false for non-string inputs", () => {

@@ -95,7 +95,7 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     runtimeIds: ["cursor-agent"],
     sessionSourceIds: ["cursor"],
     migrationVendor: null,
-    vendorRootKeys: [],
+    vendorRootKeys: ["cursorDir"],
     configRootKey: null,
     probeRootKeys: [],
     pluginEcosystem: null,

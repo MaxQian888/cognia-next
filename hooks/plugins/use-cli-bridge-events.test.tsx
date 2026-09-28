@@ -12,16 +12,6 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => true),
 }))
 
-jest.mock("@cognia/logging", () => ({
-  loggers: {
-    plugin: {
-      info: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn(),
-    },
-  },
-}))
-
 const mockScan = jest.fn(async () => undefined)
 jest.mock("@/lib/plugin/core/manager", () => ({
   getPluginManager: () => ({ scanPlugins: mockScan }),

@@ -449,10 +449,10 @@ function CatalogList({
                   </span>
                   <ModelCapabilityIcons
                     capabilities={catalogCapabilityIds(result.model.capabilities)}
-                    className="hidden shrink-0 @[520px]/settings-pane:inline-flex"
+                    className="hidden shrink-0 @[560px]/settings-pane:inline-flex"
                   />
                   {context !== undefined && (
-                    <span className="hidden w-12 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground @[640px]/settings-pane:inline">
+                    <span className="hidden w-12 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground @[620px]/settings-pane:inline">
                       {formatTokenCount(context)}
                     </span>
                   )}

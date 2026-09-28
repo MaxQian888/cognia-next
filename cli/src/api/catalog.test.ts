@@ -1,5 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
+import { parse } from "yaml"
 
 import {
   API_COMMANDS,
@@ -32,10 +33,19 @@ describe("generated command index", () => {
   })
 
   it("agrees with the OpenAPI specs on how many commands each wire carries", () => {
-    const internal = API_COMMANDS.filter((entry) => entry.wires.includes("internal"))
-    const http = API_COMMANDS.filter((entry) => entry.wires.includes("http"))
-    expect(internal).toHaveLength(700)
-    expect(http).toHaveLength(555)
+    for (const [wire, file, parameter] of [
+      ["internal", "headless-service-api.openapi.yaml", "InternalRpcName"],
+      ["http", "mobile-companion-api.openapi.yaml", "RpcName"],
+    ] as const) {
+      const spec = parse(fs.readFileSync(path.join(REPO_ROOT, "docs/api", file), "utf8"))
+      const documented: string[] = spec.components.parameters[parameter].schema.enum
+      expect(documented.length).toBeGreaterThan(0)
+      expect(
+        API_COMMANDS.filter((entry) => entry.wires.includes(wire))
+          .map((entry) => entry.name)
+          .sort()
+      ).toEqual([...documented].sort())
+    }
   })
 
   it("keeps the manifest's authority metadata verbatim", () => {

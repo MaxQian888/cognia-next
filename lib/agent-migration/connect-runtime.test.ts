@@ -9,7 +9,7 @@ describe("planRuntimeConnection", () => {
       existingAgentId: null,
     })
     expect(planRuntimeConnection({ vendor: "opencode", existingConfigs: {} })?.presetId).toBe(
-      "opencode-server"
+      "opencode-v2-service"
     )
   })
 

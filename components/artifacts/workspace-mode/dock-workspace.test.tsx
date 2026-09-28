@@ -599,6 +599,7 @@ describe("DockWorkspace", () => {
     render(<DockWorkspace activeSessionId="session-1" />)
 
     expect(screen.getByTestId("workspace-review-count")).toHaveTextContent("2")
+    expect(screen.getByTestId("workspace-review-count")).toHaveClass("rounded-pill")
     expect(screen.getByTestId("workspace-surface-review")).toHaveAttribute(
       "aria-label",
       "reviewWithCount"

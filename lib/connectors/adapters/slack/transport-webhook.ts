@@ -22,6 +22,7 @@ export interface SlackWebhookOptions {
 export async function* startSlackWebhookTransport(
   opts: SlackWebhookOptions
 ): AsyncGenerator<SlackEventEnvelope> {
+  if (opts.signal.aborted) return
   const eventName = `connectors://webhook/${opts.adapterId}`
 
   const queue: SlackEventEnvelope[] = []
@@ -29,17 +30,22 @@ export async function* startSlackWebhookTransport(
   let done = false
 
   const unlisten = await listen<SlackEventEnvelope>(eventName, (event) => {
+    if (done) return
     queue.push(event.payload)
     resolve?.()
     resolve = null
   })
 
-  opts.signal.addEventListener("abort", () => {
+  const onAbort = () => {
+    if (done) return
     done = true
     unlisten()
     resolve?.()
     resolve = null
-  })
+  }
+  opts.signal.addEventListener("abort", onAbort, { once: true })
+  // Registration may settle after cancellation, which does not replay abort.
+  if (opts.signal.aborted) onAbort()
 
   try {
     while (!done || queue.length > 0) {
@@ -52,6 +58,7 @@ export async function* startSlackWebhookTransport(
       }
     }
   } finally {
+    opts.signal.removeEventListener("abort", onAbort)
     if (!done) {
       unlisten()
     }

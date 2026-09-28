@@ -33,6 +33,13 @@ const nativeHelperEnv = Object.fromEntries(
 describe("packaged built-in coding loop", () => {
   jest.setTimeout(180_000)
   beforeAll(() => {
+    for (const key of ["COGNIA_SANDBOX_EXEC", "COGNIA_EXTERNAL_AGENT_LAUNCHER"]) {
+      if (!nativeHelperEnv[key]) {
+        throw new Error(
+          `${key} is required: build cognia-exec-sandbox helpers before this integration suite`
+        )
+      }
+    }
     const result = spawnSync(
       process.execPath,
       [path.join(ROOT, "scripts/build/build-cli.mjs"), "--js-only"],

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, act, fireEvent } from "@testing-library/react"
+import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, string>) => {
@@ -77,6 +77,16 @@ jest.mock("./artifact-renderers", () => {
     },
   }
 })
+
+jest.mock("@/lib/artifacts/react-runtime-loader", () => ({
+  loadArtifactReactRuntime: async () => ({
+    origin: "https://app.test",
+    reactRuntimeUrl: "https://app.test/artifact-runtime/react-runtime.js",
+    shellUrl: "https://app.test/artifact-runtime/artifact-shell.js",
+    reactVersion: "19.3.0",
+  }),
+  transformArtifactJsx: async (code: string) => ({ code, isModule: false }),
+}))
 
 jest.mock("./jupyter-renderer", () => ({
   JupyterRenderer: () => <div data-testid="jupyter" />,
@@ -286,31 +296,29 @@ describe("ArtifactPreview — extra coverage", () => {
     }
   })
 
-  it("iframe onLoad path posts the React render message", async () => {
-    jest.useFakeTimers()
-    try {
-      const { container } = render(
-        <ArtifactPreview
-          artifact={dummy({ type: "react", content: "function App(){return null}" })}
-        />
-      )
-      const iframe = container.querySelector("iframe")!
-      // Simulate the iframe having a contentWindow.
-      const postMessage = jest.fn()
-      Object.defineProperty(iframe, "contentWindow", {
-        value: { postMessage },
-        configurable: true,
-      })
-      act(() => {
-        fireEvent.load(iframe)
-      })
+  it("waits for the iframe bootstrap before posting the React render message", async () => {
+    const { container } = render(
+      <ArtifactPreview
+        artifact={dummy({ type: "react", content: "function App(){return null}" })}
+      />
+    )
+    const iframe = container.querySelector("iframe")!
+    await waitFor(() => expect(iframe.srcdoc).toContain("artifact-shell.js"))
+    const postMessage = jest.fn()
+    const frameWindow = iframe.contentWindow as Window
+    frameWindow.postMessage = postMessage
+    fireEvent.load(iframe)
+    expect(postMessage).not.toHaveBeenCalled()
+
+    const ready = new MessageEvent("message", { data: { type: "artifact-shell-ready" } })
+    Object.defineProperty(ready, "source", { value: frameWindow })
+    act(() => window.dispatchEvent(ready))
+    await waitFor(() =>
       expect(postMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "render-component" }),
+        expect.objectContaining({ type: "render-component", code: "function App(){return null}" }),
         "*"
       )
-    } finally {
-      jest.useRealTimers()
-    }
+    )
   })
 
   it("PreviewErrorBoundary surfaces an alert when a child throws", () => {

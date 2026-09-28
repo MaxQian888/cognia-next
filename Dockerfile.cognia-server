@@ -95,12 +95,18 @@ COPY crates ./crates
 COPY services/signaling-server/core ./services/signaling-server/core
 # Out-of-tree include_str! targets (release: browser overlay JS; the spec
 # fixtures under cli/ + docs/ are test-cfg but cheap to keep coherent).
-COPY lib/browser/overlay.injected.js ./lib/browser/overlay.injected.js
+COPY lib/browser/overlay.injected.js lib/browser/automation-core.injected.js ./lib/browser/
+COPY lib/tauri/selection-toolbar.ts ./lib/tauri/selection-toolbar.ts
+COPY lib/plugin/character-pack/__fixtures__/jcs-vectors.json ./lib/plugin/character-pack/__fixtures__/jcs-vectors.json
+COPY lib/router-fusion/gate/run-api-bridge.ts ./lib/router-fusion/gate/run-api-bridge.ts
+COPY cli/src/x/agent-launcher.ts ./cli/src/x/agent-launcher.ts
+COPY hooks/matcher-conformance.json hooks/builtin-hooks.lockstep.json ./hooks/
+COPY test-fixtures/scheduler/cron-dialect.json ./test-fixtures/scheduler/cron-dialect.json
 COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-frames.json
 COPY docs/api/mobile-companion-api.openapi.yaml docs/api/headless-service-api.openapi.yaml ./docs/api/
-COPY packages/plugin-sdk/contract/catalog.json ./packages/plugin-sdk/contract/catalog.json
+COPY packages/plugin-sdk/contract ./packages/plugin-sdk/contract
 COPY packages/logging/src/schemas/observability-event-v1.schema.json ./packages/logging/src/schemas/observability-event-v1.schema.json
-COPY protocol/companion-commands.json ./protocol/companion-commands.json
+COPY protocol ./protocol
 COPY scripts/plugin/node-plugin-host.mjs ./scripts/plugin/node-plugin-host.mjs
 # container-exec + k8s-exec (R13): the headless image ships both flavors of
 # the container backend, so COGNIA_EXEC_BACKEND=container works at T2
@@ -129,12 +135,18 @@ COPY crates ./crates
 COPY services/signaling-server/core ./services/signaling-server/core
 # Out-of-tree include_str! targets (release: browser overlay JS; the spec
 # fixtures under cli/ + docs/ are test-cfg but cheap to keep coherent).
-COPY lib/browser/overlay.injected.js ./lib/browser/overlay.injected.js
+COPY lib/browser/overlay.injected.js lib/browser/automation-core.injected.js ./lib/browser/
+COPY lib/tauri/selection-toolbar.ts ./lib/tauri/selection-toolbar.ts
+COPY lib/plugin/character-pack/__fixtures__/jcs-vectors.json ./lib/plugin/character-pack/__fixtures__/jcs-vectors.json
+COPY lib/router-fusion/gate/run-api-bridge.ts ./lib/router-fusion/gate/run-api-bridge.ts
+COPY cli/src/x/agent-launcher.ts ./cli/src/x/agent-launcher.ts
+COPY hooks/matcher-conformance.json hooks/builtin-hooks.lockstep.json ./hooks/
+COPY test-fixtures/scheduler/cron-dialect.json ./test-fixtures/scheduler/cron-dialect.json
 COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-frames.json
 COPY docs/api/mobile-companion-api.openapi.yaml docs/api/headless-service-api.openapi.yaml ./docs/api/
-COPY packages/plugin-sdk/contract/catalog.json ./packages/plugin-sdk/contract/catalog.json
+COPY packages/plugin-sdk/contract ./packages/plugin-sdk/contract
 COPY packages/logging/src/schemas/observability-event-v1.schema.json ./packages/logging/src/schemas/observability-event-v1.schema.json
-COPY protocol/companion-commands.json ./protocol/companion-commands.json
+COPY protocol ./protocol
 COPY scripts/plugin/node-plugin-host.mjs ./scripts/plugin/node-plugin-host.mjs
 RUN cargo check --release --locked --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec,otel-export
 RUN cargo check --release --locked -p cognia-cli --bin cognia

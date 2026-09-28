@@ -39,7 +39,7 @@ const RAIL_STACK =
   "[&_button]:px-0 [&_button]:text-[0px] [&_button_svg]:size-[18px] " +
   "[&_[data-slot=badge]]:text-[9px] [&_[data-testid=account-bar-button]_span]:text-[10px]"
 const PILL_CLUSTER =
-  "flex items-center gap-0.5 [&_button]:h-7 [&_button]:px-1.5 [&_button]:rounded-full [&_button]:text-[11px] [&_button_svg]:size-3.5"
+  "flex items-center gap-0.5 [&_button]:h-7 [&_button]:px-1.5 [&_button]:rounded-pill [&_button]:text-[11px] [&_button_svg]:size-3.5"
 
 interface WebStatusContextValue {
   scopes: ReturnType<typeof splitStatusBarScopes>
@@ -189,7 +189,7 @@ function CornerPill({ items }: { items: WebStatusContextValue["scopes"]["global"
     <Surface
       className={cn(
         PILL_CLUSTER,
-        "fixed z-40 rounded-full border border-border/60 bg-popover/90 px-1.5 py-1 shadow-(--elevation-2) backdrop-blur empty:hidden",
+        "fixed z-40 rounded-pill border border-border/60 bg-popover/90 px-1.5 py-1 shadow-(--elevation-2) backdrop-blur empty:hidden",
         side === "right" ? "left-3" : "right-3"
       )}
       style={{ bottom }}

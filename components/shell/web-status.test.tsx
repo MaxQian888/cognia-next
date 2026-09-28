@@ -149,7 +149,12 @@ it.each(["guildRailCollapsed", "sidebarHostsNav"])(
         : useShellColumnsStore.setState({ sidebarHostsNav: true })
     )
     expect(screen.queryByTestId("web-status-rail")).toBeNull()
-    expect(screen.getByTestId("web-status-corner-pill")).toHaveClass("left-3", "empty:hidden")
+    expect(screen.getByTestId("web-status-corner-pill")).toHaveClass(
+      "left-3",
+      "empty:hidden",
+      "rounded-pill",
+      "[&_button]:rounded-pill"
+    )
     act(() => useSettingsStore.setState({ settings: { sidebarSide: "left" } as never }))
     expect(screen.getByTestId("web-status-corner-pill")).toHaveClass("right-3")
     act(() => useUIStore.setState({ statusBarCollapsed: true }))

@@ -37,7 +37,12 @@ const ids = (items: { id: string }[]) => items.map((i) => i.id)
 describe("useBarLayout — resolution", () => {
   it("resolves the shipped default when settings hold no layout", () => {
     const { result } = renderHook(() => useBarLayout("status"))
-    expect(ids(result.current.resolved.zones.start)).toEqual(["connectivity", "branch", "sync"])
+    expect(ids(result.current.resolved.zones.start)).toEqual([
+      "connectivity",
+      "executionHost",
+      "branch",
+      "sync",
+    ])
     expect(ids(result.current.resolved.hidden)).toEqual(["terminal", "perf"])
     expect(result.current.isDefault).toBe(true)
   })
@@ -49,7 +54,12 @@ describe("useBarLayout — resolution", () => {
       } as never,
     })
     const { result } = renderHook(() => useBarLayout("status"))
-    expect(ids(result.current.resolved.zones.start)).toEqual(["branch", "sync", "terminal"])
+    expect(ids(result.current.resolved.zones.start)).toEqual([
+      "branch",
+      "executionHost",
+      "sync",
+      "terminal",
+    ])
     expect(ids(result.current.resolved.hidden)).toEqual(["connectivity"])
     expect(result.current.isDefault).toBe(false)
   })

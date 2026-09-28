@@ -274,7 +274,7 @@ describe("ownerPermits", () => {
    */
   it("matches the SQL predicate the host actually evaluates", () => {
     const rust = readFileSync(
-      join(process.cwd(), "src-tauri", "src", "companion_api", "security_store.rs"),
+      join(process.cwd(), "crates", "cognia-companion-security", "src", "security_store.rs"),
       "utf8"
     )
     const match = rust.match(/pub const OWNER_PREDICATE_SQL: &str =\s*"([^"]+)";/)

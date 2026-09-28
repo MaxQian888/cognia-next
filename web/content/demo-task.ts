@@ -108,7 +108,7 @@ export const DEMO_TASK = {
    */
   plugin: {
     id: "cognia-web-tools",
-    capabilities: ["tools"],
+    capabilities: ["tools", "configuration"],
     permissions: ["network:fetch", "agent:control"],
     denied: "secrets:read",
   },

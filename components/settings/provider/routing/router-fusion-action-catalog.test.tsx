@@ -54,7 +54,7 @@ beforeEach(() => {
 })
 
 describe("RouterFusionActionCatalog", () => {
-  it("lists the built-in actions with their mode, and labels delegate as a later release", () => {
+  it("lists all supported built-in actions with editable modes", () => {
     render(<Harness />)
     for (const id of [
       "direct_baseline",
@@ -68,12 +68,11 @@ describe("RouterFusionActionCatalog", () => {
       expect(row).toHaveTextContent("Built-in")
     }
     const delegate = screen.getByTestId("router-fusion-action-delegate_code")
-    expect(delegate).toHaveAttribute("data-dormant", "true")
-    expect(delegate).toHaveTextContent("Later release")
-    expect(delegate).toHaveTextContent("Delegate runs need a sandbox and acceptance checks")
-    expect(within(delegate).getByRole("switch")).toBeDisabled()
-    expect(within(delegate).getByRole("switch")).not.toBeChecked()
-    expect(screen.getByRole("button", { name: "Edit delegate_code" })).toBeDisabled()
+    expect(delegate).not.toHaveAttribute("data-dormant")
+    expect(delegate).not.toHaveTextContent("Later release")
+    expect(within(delegate).getByRole("switch")).toBeEnabled()
+    expect(within(delegate).getByRole("switch")).toBeChecked()
+    expect(screen.getByRole("button", { name: "Edit delegate_code" })).toBeEnabled()
     expect(screen.getByTestId("router-fusion-action-panel_review")).toHaveTextContent(
       "Panel member A: fast · Panel member B: balanced · Judge: powerful · Synthesizer: powerful"
     )
@@ -229,13 +228,14 @@ describe("RouterFusionActionCatalog", () => {
     expect(screen.queryByTestId("router-fusion-action-my_panel")).toBeNull()
   })
 
-  it("does not offer delegate for an action of the user's own", async () => {
+  it("persists a delegate action of the user's own", async () => {
     const user = userEvent.setup()
     render(<Harness />)
-    await user.click(screen.getByRole("combobox", { name: "Mode" }))
-    expect(await screen.findByRole("option", { name: "Delegate" })).toHaveAttribute(
-      "aria-disabled",
-      "true"
-    )
+    await user.type(screen.getByLabelText("Action id"), "my_delegate")
+    await choose(user, "Mode", "Delegate")
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    expect(store.saved.customActions).toEqual([
+      expect.objectContaining({ id: "my_delegate", mode: "delegate", enabled: true }),
+    ])
   })
 })

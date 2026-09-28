@@ -144,7 +144,7 @@ describe("declarative context panels, manifest to rendered panel", () => {
     // Reaching the rail proves `appliesTo` matched the session resource and
     // the permission gate cleared; reaching the body proves the entry module's
     // export is what the workbench actually renders.
-    expect(screen.getByRole("button", { name: "Session Notes" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Session Notes", selected: true })).toBeInTheDocument()
     expect(screen.getByText("notes-panel-body")).toBeInTheDocument()
   })
 
@@ -192,7 +192,7 @@ describe("declarative context panels, manifest to rendered panel", () => {
     // The session resource above declares no capabilities.
     expect(contextPanelRegistry.resolve(sessionResource)).toEqual([])
     renderWorkbench()
-    expect(screen.queryByRole("button", { name: "Session Notes" })).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Session Notes" })).toBeNull()
   })
 })
 

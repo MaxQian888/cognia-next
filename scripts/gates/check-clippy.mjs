@@ -52,7 +52,7 @@ export const CARGO_ARGS = [
  * Extract clippy warnings from `cargo --message-format=json` NDJSON. Pure.
  *
  * @param {string} ndjson
- * @returns {Array<{ target: string, lint: string }>}
+ * @returns {Array<{ target: string, lint: string, rendered: string }>}
  */
 export function parseClippyWarnings(ndjson) {
   const warnings = []
@@ -71,7 +71,11 @@ export function parseClippyWarnings(ndjson) {
     // double-count everything it summarizes.
     const lint = diagnostic.code?.code
     if (!lint) continue
-    warnings.push({ target: msg.target?.name ?? "unknown", lint })
+    warnings.push({
+      target: msg.target?.name ?? "unknown",
+      lint,
+      rendered: diagnostic.rendered || diagnostic.message,
+    })
   }
   return warnings
 }
@@ -186,7 +190,8 @@ export async function main(argv = []) {
   const ndjson =
     fromFileIndex === -1 ? await runClippy() : readFileSync(argv[fromFileIndex + 1], "utf8")
 
-  const counts = tally(parseClippyWarnings(ndjson))
+  const warnings = parseClippyWarnings(ndjson)
+  const counts = tally(warnings)
 
   if (argv.includes("--write-baseline")) {
     writeBaseline(counts)
@@ -212,8 +217,11 @@ export async function main(argv = []) {
     const added = regressions.reduce((n, r) => n + (r.to - r.from), 0)
     console.error(`[clippy] ${added} new warning(s) across ${regressions.length} lint(s):`)
     for (const r of regressions) {
-      const [target, lint] = r.key.split("::")
-      console.error(`  ${target}  ${lint}  ${r.from} → ${r.to}`)
+      console.error(`  ${r.key.replace("::", "  ")}  ${r.from} → ${r.to}`)
+    }
+    const regressedPairs = new Set(regressions.map(({ key }) => key))
+    for (const warning of warnings) {
+      if (regressedPairs.has(`${warning.target}::${warning.lint}`)) console.error(warning.rendered)
     }
     console.error(
       "\n  Fix the new warnings. The baseline records pre-existing debt only\n" +

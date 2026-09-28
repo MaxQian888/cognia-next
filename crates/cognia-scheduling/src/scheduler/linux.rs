@@ -2,8 +2,6 @@
 //!
 //! Uses systemd user services and timers for task scheduling.
 
-#![cfg(target_os = "linux")]
-
 use async_trait::async_trait;
 use log::{debug, error, info};
 use regex::Regex;
@@ -72,8 +70,8 @@ impl LinuxScheduler {
 
     fn parse_effective_uid(status: &str) -> Option<u32> {
         status.lines().find_map(|line| {
-            let fields = line.strip_prefix("Uid:")?.split_whitespace();
-            fields.skip(1).next()?.parse().ok()
+            let mut fields = line.strip_prefix("Uid:")?.split_whitespace();
+            fields.nth(1)?.parse().ok()
         })
     }
 
@@ -200,7 +198,7 @@ Description=Timer for Cognia Task: {}
 
     /// Convert cron expression to systemd calendar format
     fn cron_to_calendar(expression: &str) -> Result<String> {
-        let parts: Vec<&str> = expression.trim().split_whitespace().collect();
+        let parts: Vec<&str> = expression.split_whitespace().collect();
         if parts.len() != 5 {
             return Err(SchedulerError::InvalidCron(format!(
                 "Expected 5 parts, got {}",
@@ -256,9 +254,9 @@ Description=Timer for Cognia Task: {}
 
     /// Expand cron field (handle */n syntax)
     fn expand_cron_field(field: &str) -> String {
-        if field.starts_with("*/") {
+        if let Some(step) = field.strip_prefix("*/") {
             // Convert */5 to 0/5 for systemd
-            format!("0/{}", &field[2..])
+            format!("0/{step}")
         } else {
             field.to_string()
         }
@@ -983,15 +981,10 @@ mod tests {
     #[test]
     fn parses_effective_uid_from_proc_status() {
         assert_eq!(
-            LinuxScheduler::parse_effective_uid(
-                "Name:\\tcognia\\nUid:\\t1000\\t0\\t1000\\t1000\\n"
-            ),
+            LinuxScheduler::parse_effective_uid("Name:\tcognia\nUid:\t1000\t0\t1000\t1000\n"),
             Some(0)
         );
-        assert_eq!(
-            LinuxScheduler::parse_effective_uid("Name:\\tcognia\\n"),
-            None
-        );
+        assert_eq!(LinuxScheduler::parse_effective_uid("Name:\tcognia\n"), None);
     }
 
     #[test]

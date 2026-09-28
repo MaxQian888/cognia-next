@@ -66,10 +66,12 @@ import { ArtifactPanel } from "./artifact-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useChatStore } from "@/stores/chat"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
 beforeEach(() => {
   localStorage.clear()
   mobileViewportRef.current = false
+  useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "tabs" })
   // Tabs and the active artifact are bucketed per conversation, so the panel
   // only resolves one once a conversation is on screen.
   useChatStore.setState({ activeSessionId: "s" })
@@ -107,16 +109,21 @@ function makeArtifact(type: "code" | "html" = "code") {
 }
 
 describe("ArtifactPanel", () => {
-  it("hosts the session workbench when no artifact is active", () => {
+  it("hosts the session workbench when no artifact is active", async () => {
     render(<ArtifactPanel />)
 
     // The empty state used to be a plain Sheet that could only show the
     // artifact list, leaving the browser/comments/metadata panels unreachable
     // on a phone. It is the same workbench shell as everything else now.
     expect(screen.getByTestId("context-workbench-mobile-sheet")).toBeInTheDocument()
-    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    expect(screen.getByRole("tablist")).toBeInTheDocument()
+    expect(screen.queryByTestId("context-workbench-activity-rail")).not.toBeInTheDocument()
     expect(screen.getByTestId("list")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "browser.title" })).toBeInTheDocument()
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "contextWorkbench.navigation.openPanel" }),
+      { button: 0, ctrlKey: false }
+    )
+    expect(await screen.findByRole("menuitem", { name: "browser.title" })).toBeInTheDocument()
   })
 
   it("takes its visibility from mobileSheetOpen, not from panelOpen", () => {
@@ -131,14 +138,14 @@ describe("ArtifactPanel", () => {
     // a visibility flag. It used to gate this Sheet, and because `createArtifact`
     // and `setActiveArtifact` raise it unconditionally, every new artifact threw
     // a 92dvh modal over the conversation — `userDismissed` never got a say.
-    useArtifactStore.setState({ panelOpen: false })
+    act(() => useArtifactStore.setState({ panelOpen: false }))
     rerender(<ArtifactPanel />)
     expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
       "data-state",
       "open"
     )
 
-    useArtifactDockLayoutStore.setState({ mobileSheetOpen: false })
+    act(() => useArtifactDockLayoutStore.setState({ mobileSheetOpen: false }))
     rerender(<ArtifactPanel />)
     // vaul owns its own exit animation and then drops the surface, so "closed"
     // is an absence rather than a `data-state` on a still-mounted node.
@@ -162,7 +169,7 @@ describe("ArtifactPanel", () => {
   it("renders the active artifact's identity row", () => {
     makeArtifact()
     render(<ArtifactPanel />)
-    expect(screen.getByText("MyCode")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "MyCode" })).toHaveAttribute("aria-selected", "true")
   })
 
   it("clicking the edit action mounts the Monaco editor", () => {

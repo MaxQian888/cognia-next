@@ -23,6 +23,10 @@ jest.mock("@/components/desktop/desktop-app-shell", () => ({
 jest.mock("@/components/account/cloud-sign-in-gate", () => ({
   CloudSignInGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
+jest.mock("@/components/providers/onboarding-gate", () => ({
+  OnboardingGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
 // Records the `guestView` the layout hands the gate, so the share viewer's
 // no-account branch can be asserted without booting the account store.
 let mockAccountGateGuestView: React.ReactNode = undefined
@@ -62,8 +66,8 @@ import RootLayout, { metadata } from "./layout"
 describe("RootLayout", () => {
   it("exports metadata used by Next.js", () => {
     expect(metadata).toMatchObject({
-      title: "Cognia · Claude Code",
-      description: "Claude Code web client built on top of the Claude Agent SDK",
+      title: "Cognia",
+      description: "Local-first AI companion — chat, workflows, twin, and connectors.",
     })
   })
 

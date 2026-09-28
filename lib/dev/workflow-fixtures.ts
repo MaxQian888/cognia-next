@@ -1410,13 +1410,291 @@ const FIXTURES = {
   }),
 } satisfies Record<string, WorkflowFixtureFactory>
 
-export type SeededWorkflowKind = keyof typeof FIXTURES
+/** Editor seeds for the later node families. Parameters are explicit examples,
+ * not generated from schemas: schema changes must still break the fixture
+ * contract and require a reviewed example. Resource IDs are synthetic, as in
+ * the older fixtures; executing them requires the harness to seed resources.
+ */
+const NODE_FIXTURE_PARAMS = {
+  "trigger.connector.system": {
+    adapterId: "adapter_fixture",
+    kinds: ["reaction_added"],
+  },
+  "action.issue.create": {
+    title: "Review fixture change",
+  },
+  "action.issue.get": {
+    issue: "ISS-1",
+  },
+  "action.issue.list": {},
+  "action.issue.update": {
+    issue: "ISS-1",
+    title: "Updated fixture",
+  },
+  "action.issue.assign": {
+    issue: "ISS-1",
+    assigneeKind: "none",
+  },
+  "action.issue.comment": {
+    issue: "ISS-1",
+    body: "Fixture review complete",
+  },
+  "action.issue.label": {
+    issue: "ISS-1",
+    add: ["fixture"],
+  },
+  "knowledge.source": {
+    knowledgeBaseId: "kb_fixture",
+    sourceMode: "text",
+    content: "Fixture reference text",
+    title: "Fixture reference",
+  },
+  "knowledge.parse": {
+    sourceId: "source_fixture",
+  },
+  "knowledge.retrieve": {
+    knowledgeBaseIds: ["kb_fixture"],
+    query: "What does the fixture describe?",
+  },
+  "action.humanInput.request": {
+    title: "Review fixture",
+    fields: [
+      {
+        id: "feedback",
+        type: "short-text",
+        label: "Feedback",
+      },
+    ],
+    actions: [
+      {
+        id: "approve",
+        label: "Approve",
+      },
+    ],
+    assignees: [
+      {
+        kind: "initiator",
+      },
+    ],
+    completionPolicy: {
+      mode: "any",
+    },
+  },
+  "action.media.probe": {
+    sourcePath: "fixture.mp4",
+  },
+  "action.media.frame": {
+    sourcePath: "fixture.mp4",
+    timeSeconds: 0,
+  },
+  "action.media.trim": {
+    sourcePath: "fixture.mp4",
+    endSeconds: 1,
+  },
+  "action.media.concat": {
+    sourcePaths: ["first.mp4", "second.mp4"],
+  },
+  "action.browser.open": {
+    url: "https://example.com",
+  },
+  "action.browser.act": {
+    action: "click",
+    ref: "button_fixture",
+  },
+  "action.browser.fillForm": {
+    fields: [
+      {
+        ref: "input_fixture",
+        value: "Example",
+      },
+    ],
+  },
+  "action.browser.waitFor": {
+    text: "Ready",
+  },
+  "action.browser.replayFlow": {
+    recordingId: "recording_fixture",
+  },
+  "action.search.query": {
+    query: "fixture reference",
+  },
+  "action.search.messages": {
+    query: "fixture message",
+  },
+  "action.session.create": {
+    title: "Fixture conversation",
+  },
+  "action.session.appendMessage": {
+    sessionId: "sess_fixture",
+    text: "Fixture message",
+  },
+  "action.notify.send": {
+    title: "Fixture complete",
+  },
+  "action.notify.resolve": {
+    notificationId: "notification_fixture",
+  },
+  "action.fs.read": {
+    relPath: "notes.txt",
+  },
+  "action.fs.write": {
+    relPath: "notes.txt",
+    content: "Fixture notes",
+  },
+  "action.fs.stat": {
+    relPath: "notes.txt",
+  },
+  "action.fs.search": {
+    query: "fixture",
+  },
+  "action.fs.mkdir": {
+    relPath: "fixture-dir",
+  },
+  "action.fs.move": {
+    fromRelPath: "notes.txt",
+    toRelPath: "archive/notes.txt",
+  },
+  "action.fs.copy": {
+    fromRelPath: "notes.txt",
+    toRelPath: "notes-copy.txt",
+  },
+  "action.fs.delete": {
+    relPath: "notes-copy.txt",
+  },
+  "action.artifact.create": {
+    title: "Fixture artifact",
+    type: "text",
+    content: "Fixture content",
+  },
+  "action.artifact.update": {
+    artifactId: "artifact_fixture",
+    content: "Updated fixture",
+  },
+  "action.artifact.get": {
+    artifactId: "artifact_fixture",
+  },
+  "action.artifact.export": {
+    artifactId: "artifact_fixture",
+  },
+  "action.canvas.create": {
+    title: "Fixture canvas",
+    language: "markdown",
+  },
+  "action.canvas.get": {
+    documentId: "document_fixture",
+  },
+  "action.stack.parent": {
+    branch: "feature/fixture",
+  },
+  "action.editor.open": {
+    path: "notes.txt",
+  },
+  "action.editor.reveal": {
+    path: "notes.txt",
+  },
+  "action.editor.showDiff": {
+    path: "notes.txt",
+    content: "Updated fixture notes",
+  },
+  "action.editor.applyEdit": {
+    path: "notes.txt",
+    line: 1,
+    column: 1,
+  },
+  "trigger.file.watch": {
+    root: "fixture-dir",
+  },
+  "io.answer": {
+    text: "Fixture answer",
+  },
+  "knowledge.transform": {
+    artifactId: "artifact_fixture",
+  },
+  "knowledge.chunk": {
+    artifactId: "artifact_fixture",
+  },
+  "knowledge.embed": {
+    artifactId: "artifact_fixture",
+  },
+  "knowledge.index": {
+    artifactId: "artifact_fixture",
+  },
+  "knowledge.publish": {
+    artifactId: "artifact_fixture",
+  },
+  "action.image.info": {
+    blobRef: "blob_fixture",
+  },
+  "action.image.transform": {
+    blobRef: "blob_fixture",
+  },
+  "action.image.adjust": {
+    blobRef: "blob_fixture",
+  },
+  "action.image.convert": {
+    blobRef: "blob_fixture",
+    format: "png",
+  },
+  "action.browser.snapshot": {},
+  "action.browser.readPage": {},
+  "action.browser.screenshot": {},
+  "action.browser.diagnostics": {},
+  "action.session.get": {
+    sessionId: "sess_fixture",
+  },
+  "action.session.list": {},
+  "action.session.update": {
+    sessionId: "sess_fixture",
+  },
+  "action.session.archive": {
+    sessionId: "sess_fixture",
+  },
+  "action.session.export": {
+    sessionId: "sess_fixture",
+  },
+  "action.notify.list": {},
+  "action.fs.list": {},
+  "action.site.build": {
+    siteId: "site_fixture",
+  },
+  "action.site.deploy": {
+    siteId: "site_fixture",
+  },
+  "action.site.rollback": {
+    siteId: "site_fixture",
+  },
+  "action.site.status": {
+    siteId: "site_fixture",
+  },
+  "action.stack.list": {},
+  "action.stack.validate": {},
+  "action.stack.restack": {},
+  "action.stack.push": {},
+  "action.editor.readActive": {},
+  "action.editor.saveAll": {},
+  "trigger.issue.event": {},
+  "trigger.plan.event": {},
+  "trigger.scheduler.taskCompleted": {},
+  "trigger.capture.item": {},
+  "trigger.memory.written": {},
+} satisfies Partial<Record<WorkflowNodeKind, Params>>
 
-export const SEEDED_WORKFLOW_KINDS = Object.keys(FIXTURES) as SeededWorkflowKind[]
+export type SeededWorkflowKind = keyof typeof FIXTURES | keyof typeof NODE_FIXTURE_PARAMS
+
+export const SEEDED_WORKFLOW_KINDS = [
+  ...Object.keys(FIXTURES),
+  ...Object.keys(NODE_FIXTURE_PARAMS),
+] as SeededWorkflowKind[]
 
 /** Build the canonical fixture draft for the given seed kind. */
 export function buildWorkflowFixture(kind: SeededWorkflowKind): WorkflowDraft {
-  const factory = FIXTURES[kind]
+  if (Object.hasOwn(NODE_FIXTURE_PARAMS, kind)) {
+    const type = kind as keyof typeof NODE_FIXTURE_PARAMS
+    const params = structuredClone(NODE_FIXTURE_PARAMS[type])
+    if (type.startsWith("trigger.")) return triggerOnly(`E2E ${type}`, type, type, params)
+    return single(`E2E ${type}`, { id: "n_action", type, label: type, params })
+  }
+  const factory = FIXTURES[kind as keyof typeof FIXTURES]
   if (!factory) throw new Error(`Unknown seeded workflow kind: ${kind}`)
   return factory()
 }

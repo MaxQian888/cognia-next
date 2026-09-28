@@ -58,6 +58,27 @@ caller (`release.yml`) owns the concurrency decision.
 
 ---
 
+## Container image verification
+
+`images.yml` builds `cognia-agent-bundle` on two native runners: `linux/amd64`
+on `ubuntu-latest` and `linux/arm64` on `ubuntu-24.04-arm`. Each architecture
+builds once and runs the complete `deploy/bundle/smoke.sh` against the bare
+Debian, Python, Alpine and BusyBox images, including unsupported-libc and
+non-root-workspace refusal checks. QEMU is not used for this matrix.
+
+PRs and manual runs with `push=false` load the image locally and do not publish.
+Publishing runs stage untagged platform digests in GHCR and smoke those exact
+digests. Only after both native jobs succeed does a separate job assemble the
+multi-platform manifest with the existing semver, SHA and version-tag `latest`
+tags. Missing or invalid digest artifacts block publication. Agent bundle
+registry caches are architecture-scoped, and PRs only read them.
+
+The `cognia-server-check` PR job uses a read-only package token to import its
+registry cache for same-repository PRs. Fork PRs use anonymous cache access.
+If the cache has not been published or is inaccessible, BuildKit falls back to
+a cold build; neither path writes the release registry cache. The large Cargo
+layers remain outside the shared GitHub Actions cache budget.
+
 ## Quality gates
 
 The gate list lives in exactly one place: **`scripts/gates/check-all.mjs`**.
@@ -233,6 +254,11 @@ Frozen installs always run, using `--prefer-offline` to reuse cached downloads
 without skipping lockfile validation or workspace linking. Jest package and
 Webclone outputs are built once in the planner and shared as a run-scoped
 artifact; each shard installs its standalone dependencies after restoring them.
+When selected tests exercise the real OS sandbox or bundled coding loop, the
+planner also builds `cognia-sandbox-exec` and `cognia-external-agent-launcher`
+once. A tar artifact preserves executable permissions. Only shards containing
+those tests restore the native helpers and install Bubblewrap; other shards
+avoid the native setup. Ripgrep is provisioned for source-contract tests.
 PR planning checks out two commits and fetches only the exact base SHA. Other
 test and quality jobs use shallow checkout unless a gate needs history.
 

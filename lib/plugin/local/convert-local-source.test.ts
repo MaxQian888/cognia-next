@@ -79,22 +79,28 @@ describe("inspectLocalPluginSource", () => {
       "/p",
       fakeFs({
         "/p/.claude-plugin/plugin.json": CLAUDE_MANIFEST,
-        "/p/hooks/pre-tool-use.sh": "#!/bin/sh\n",
+        "/p/hooks/hooks.json": JSON.stringify({
+          hooks: {
+            PostMarketplace: [{ hooks: [{ type: "command", command: "echo unsupported" }] }],
+          },
+        }),
       })
     )
     expect(result.convertible).toBe(false)
     expect(result.manifest).toBeUndefined()
     expect(result.report.blocking.length).toBeGreaterThan(0)
-    expect(result.report.blocking.map((issue) => issue.capability)).toContain("hooks")
+    expect(result.report.blocking.map((issue) => issue.capability)).toContain("commandHooks")
   })
 
   it("distinguishes an unreadable directory from a directory without a plugin", async () => {
-    await expect(inspectLocalPluginSource("/nope", fakeFs({}))).rejects.toThrow(/no readable files/)
+    await expect(inspectLocalPluginSource("/nope", fakeFs({}))).rejects.toThrow(
+      /cannot read plugin source directory \/nope:.*ENOENT/
+    )
   })
 
   it("reports malformed native JSON the way the GitHub path does", async () => {
     await expect(
       inspectLocalPluginSource("/p", fakeFs({ "/p/plugin.json": "{ not json" }))
-    ).rejects.toThrow("plugin.json is not valid JSON")
+    ).rejects.toThrow("could not parse plugin.json:")
   })
 })

@@ -9,13 +9,14 @@ import {
 } from "./plugin-host-tools"
 
 describe("author-callable host tool allowlist", () => {
-  it("admits exactly the two promoted web tools", () => {
-    expect([...PLUGIN_AUTHOR_CALLABLE_HOST_TOOLS]).toEqual(["web_search", "web_fetch"])
+  it("admits exactly the three promoted web tools", () => {
+    expect([...PLUGIN_AUTHOR_CALLABLE_HOST_TOOLS]).toEqual(["web_search", "web_fetch", "web_clone"])
   })
 
   it("accepts the promoted names", () => {
     expect(isAuthorCallableHostTool("web_search")).toBe(true)
     expect(isAuthorCallableHostTool("web_fetch")).toBe(true)
+    expect(isAuthorCallableHostTool("web_clone")).toBe(true)
   })
 
   it("refuses host-private tool names", () => {

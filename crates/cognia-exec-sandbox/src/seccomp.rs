@@ -29,8 +29,6 @@
 // backend proceeds with namespaces only and records a warning rather than
 // failing the command — the namespace isolation still holds.
 
-#![cfg(target_os = "linux")]
-
 use std::convert::TryInto;
 use std::os::fd::{FromRawFd, RawFd};
 

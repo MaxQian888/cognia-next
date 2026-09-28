@@ -15,7 +15,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSend
 mod hook_mac;
 #[cfg(target_os = "macos")]
 use hook_mac::HookGuard;
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(any(test, not(any(target_os = "windows", target_os = "macos"))))]
 mod hook_stub;
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use hook_stub::HookGuard;
@@ -174,10 +174,16 @@ struct ActiveMonitor {
 pub struct InputMonitor {
     hub: Arc<SubscriberHub>,
     active: Arc<Mutex<Option<ActiveMonitor>>>,
+    #[cfg(test)]
+    synthetic: bool,
 }
 
 impl InputMonitor {
     fn ensure_active(&self) -> Result<(), String> {
+        #[cfg(test)]
+        if self.synthetic {
+            return Ok(());
+        }
         let mut active = self.active.lock();
         if active.is_none() {
             let (tx, mut rx) = mpsc::unbounded_channel::<InputEvent>();
@@ -216,6 +222,14 @@ impl InputMonitor {
     }
 
     #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self {
+            synthetic: true,
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn inject_for_test(&self, event: InputEvent) {
         self.hub.publish(event);
     }
@@ -229,6 +243,33 @@ impl InputMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn synthetic_monitor_subscribes_without_a_native_hook() {
+        let monitor = InputMonitor::for_test();
+        let mut subscription = monitor.subscribe(1).unwrap();
+        let mut receiver = subscription.take_receiver();
+        let event = InputEvent::MouseMoved {
+            x: 1,
+            y: 2,
+            ts_ms: 3,
+        };
+        monitor.inject_for_test(event);
+        assert_eq!(receiver.recv().await, Some(event));
+        assert!(monitor.active.lock().is_none());
+        drop(subscription);
+        assert!(monitor.hub.subscribers.lock().is_empty());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[test]
+    fn default_monitor_still_rejects_unsupported_native_recording() {
+        let monitor = InputMonitor::default();
+        assert!(monitor.subscribe(1).is_err());
+        assert!(monitor.subscribe_safety().is_err());
+        assert!(monitor.hub.subscribers.lock().is_empty());
+        assert!(monitor.active.lock().is_none());
+    }
 
     #[tokio::test]
     async fn hub_fans_out_and_drop_unsubscribes() {

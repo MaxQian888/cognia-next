@@ -1,7 +1,39 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { RoutingPresetPreviewDialog } from "./routing-preset-preview-dialog"
-import { BUDGET_PRESET } from "@cognia/provider-routing/built-in-presets"
+import {
+  BUDGET_PRESET,
+  setPresetCatalogRepository,
+} from "@cognia/provider-routing/built-in-presets"
+
+import type { CatalogRepository } from "@cognia/provider-core/providers/catalog-repository"
+
+const repository = {
+  searchModels: () => [
+    {
+      model: {
+        id: "creator:model",
+        name: "Model",
+        creator: "creator",
+        modalities: { input: ["text"], output: ["text"] },
+        capabilities: { streaming: true, tools: true, reasoning: true },
+        lifecycle: "active",
+        provenance: {},
+      },
+      offerings: ["groq", "deepseek", "openai"].map((providerRef) => ({
+        id: `${providerRef}:model`,
+        providerRef,
+        deploymentRef: providerRef,
+        modelRef: "creator:model",
+        upstreamId: "model",
+        endpointType: "chat-completions",
+        lifecycle: "active",
+        available: true,
+        source: { kind: "bundled", id: "test" },
+      })),
+    },
+  ],
+} as CatalogRepository
 
 const activateRoutingPreset = jest.fn().mockResolvedValue(undefined)
 const stateRef: { current: Record<string, unknown> } = { current: {} }
@@ -17,7 +49,10 @@ function setProviders(providerSettings: Record<string, unknown>) {
   }
 }
 
-beforeEach(() => activateRoutingPreset.mockClear())
+beforeEach(() => {
+  activateRoutingPreset.mockClear()
+  setPresetCatalogRepository(repository)
+})
 
 describe("RoutingPresetPreviewDialog", () => {
   it("shows the adapted chains and applies with merge by default", async () => {

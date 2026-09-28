@@ -23,7 +23,7 @@ describe("preset resolution", () => {
   })
 
   it("returns every preset an ecosystem can launch", () => {
-    expect(presetIdsForEcosystem("codex")).toEqual(["codex", "codex-app-server"])
+    expect(presetIdsForEcosystem("codex")).toEqual(["codex", "codex-acp", "codex-app-server"])
   })
 
   it("expands the DeepSeek runtime's three presets", () => {
@@ -32,7 +32,7 @@ describe("preset resolution", () => {
 
   it("maps a session source to its ecosystem's presets", () => {
     expect(presetIdsForSessionSource("cursor")).toEqual(["cursor-cli"])
-    expect(presetIdsForSessionSource("codex")).toEqual(["codex", "codex-app-server"])
+    expect(presetIdsForSessionSource("codex")).toEqual(["codex", "codex-acp", "codex-app-server"])
   })
 
   it("returns an empty list for a history-only source rather than throwing", () => {

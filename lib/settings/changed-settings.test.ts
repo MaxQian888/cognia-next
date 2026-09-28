@@ -1,5 +1,6 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 import { DEFAULTS } from "@/lib/db/settings"
+import { SETTINGS_NAV } from "@/components/settings/settings-nav-config"
 import {
   valuesEqual,
   diffFromDefaults,
@@ -94,10 +95,14 @@ describe("groupChangedBySection", () => {
     }
     const groups = groupChangedBySection(diffFromDefaults(settings))
     const sectionIds = groups.map((g) => g.sectionId)
-    // appearance precedes speech in the nav, so it groups first.
-    expect(sectionIds).toContain("appearance")
-    expect(sectionIds).toContain("speech")
-    expect(sectionIds.indexOf("appearance")).toBeLessThan(sectionIds.indexOf("speech"))
+    const expectedOrder = SETTINGS_NAV.map((section) => section.id).filter(
+      (id) => id === "appearance" || id === "speech"
+    )
+    expect(expectedOrder).toHaveLength(2)
+    expect(sectionIds).toEqual(expectedOrder)
+    expect(
+      groupChangedBySection(diffFromDefaults(settings).reverse()).map((group) => group.sectionId)
+    ).toEqual(expectedOrder)
   })
 
   it("puts unowned keys in a trailing group", () => {

@@ -148,8 +148,9 @@ test(
       ? false
       : "cognia-server binary missing — run `pnpm conformance:prepare` (CI always must)",
   },
-  async () => {
+  async (t) => {
     const { server, baseUrl } = await createConformanceServer(SCENARIOS["text-sse"]())
+    t.after(() => server.close())
     const gateway = await startGatewayLeg({ conformanceBaseUrl: baseUrl })
     try {
       const { events, reply } = await runTurn({
@@ -168,7 +169,6 @@ test(
       assert.ok(!hits.some((h) => h.apiKey === gateway.gatewayKey))
     } finally {
       await gateway.close()
-      await server.close()
     }
   }
 )
@@ -181,8 +181,9 @@ test(
       ? false
       : "cognia-server binary missing — run `pnpm conformance:prepare` (CI always must)",
   },
-  async () => {
+  async (t) => {
     const { server, baseUrl } = await createConformanceServer(SCENARIOS["model-binding"]())
+    t.after(() => server.close())
     const gateway = await startGatewayLeg({ conformanceBaseUrl: baseUrl })
     const sidecar = spawnSidecar({ baseUrl: gateway.gatewayBaseUrl, apiKey: gateway.gatewayKey })
     try {
@@ -205,7 +206,6 @@ test(
     } finally {
       await sidecar.close()
       await gateway.close()
-      await server.close()
     }
   }
 )
@@ -218,8 +218,9 @@ test(
       ? false
       : "cognia-server binary missing — run `pnpm conformance:prepare` (CI always must)",
   },
-  async () => {
+  async (t) => {
     const { server, baseUrl } = await createConformanceServer(SCENARIOS["upstream-5xx"]())
+    t.after(() => server.close())
     const gateway = await startGatewayLeg({ conformanceBaseUrl: baseUrl })
     try {
       const sidecar = spawnSidecar({ baseUrl: gateway.gatewayBaseUrl, apiKey: gateway.gatewayKey })
@@ -242,7 +243,6 @@ test(
       }
     } finally {
       await gateway.close()
-      await server.close()
     }
   }
 )
@@ -255,8 +255,9 @@ test(
       ? false
       : "cognia-server binary missing — run `pnpm conformance:prepare` (CI always must)",
   },
-  async () => {
+  async (t) => {
     const { server, baseUrl } = await createConformanceServer(SCENARIOS["text-sse"]())
+    t.after(() => server.close())
     const gateway = await startGatewayLeg({ conformanceBaseUrl: baseUrl })
     try {
       // Claude Code sizes its context window with this call before every
@@ -270,7 +271,7 @@ test(
           messages: [{ role: "user", content: "how many tokens is this?" }],
         }),
       })
-      assert.equal(resp.status, 200, await resp.text())
+      assert.equal(resp.status, 200, await resp.clone().text())
       const body = await resp.json()
       assert.equal(body.input_tokens, 42)
 
@@ -279,7 +280,6 @@ test(
       assert.ok(hits.every((h) => h.apiKey === UPSTREAM_KEY))
     } finally {
       await gateway.close()
-      await server.close()
     }
   }
 )

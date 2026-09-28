@@ -174,7 +174,7 @@ describe("bus help/welcome wiring", () => {
     expect(routeHandler).not.toHaveBeenCalled()
     const jobs = await getDb().outboundQueue.toArray()
     expect(jobs).toHaveLength(1)
-    expect(jobs[0].request.segments[0].type).toBe("text")
+    expect(jobs[0].request.segments[0]).toMatchObject({ type: "card" })
     const audit = await getDb().connectorAudit.toArray()
     expect(audit.some((r) => r.kind === "command.applied")).toBe(true)
   })

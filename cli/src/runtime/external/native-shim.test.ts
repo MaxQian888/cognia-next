@@ -36,6 +36,35 @@ describe("CLI native external-agent shim", () => {
     expect(listenMock).toHaveBeenCalledWith("external-agent://stdout", handler)
   })
 
+  it("does not require the Darwin-only spawn helper for a Linux PTY", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!
+    Object.defineProperty(process, "platform", { ...platform, value: "linux" })
+    const chmod = jest.fn()
+    const spawn = jest.fn(() => ({
+      onData: jest.fn(() => ({ dispose: jest.fn() })),
+      onExit: jest.fn(() => ({ dispose: jest.fn() })),
+      kill: jest.fn(),
+    }))
+    try {
+      jest.doMock("node:fs", () => ({ ...jest.requireActual("node:fs"), chmodSync: chmod }))
+      jest.doMock("node-pty", () => ({ spawn }))
+      await jest.isolateModulesAsync(async () => {
+        const shim = await import("./native-shim")
+        const id = await shim.acpTerminalCreate("linux-session", "/bin/sh")
+        try {
+          expect(spawn).toHaveBeenCalled()
+          expect(chmod).not.toHaveBeenCalled()
+        } finally {
+          await shim.acpTerminalRelease(id)
+        }
+      })
+    } finally {
+      Object.defineProperty(process, "platform", platform)
+      jest.dontMock("node:fs")
+      jest.dontMock("node-pty")
+    }
+  })
+
   it("retains PTY output and truncates its tail on complete UTF-8 boundaries", async () => {
     if (process.platform === "win32") return
 

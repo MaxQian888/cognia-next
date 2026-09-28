@@ -6,6 +6,10 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type React from "react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
+jest.mock("@/hooks/use-secret-reveal", () => ({ useSecretReveal: jest.fn() }))
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
+const mockReveal = jest.fn()
+
 let mockPlugin: PluginRow | undefined
 const setPluginConfigMock = jest.fn(async (_id: string, _cfg: Record<string, unknown>) => undefined)
 
@@ -109,6 +113,11 @@ const configComponentPlugin: PluginRow = {
 }
 
 beforeEach(() => {
+  mockReveal.mockReset().mockImplementation(async (reveal: () => void) => {
+    reveal()
+    return "revealed"
+  })
+  jest.mocked(useSecretReveal).mockReturnValue(mockReveal)
   mockPlugin = schemaPlugin
   mockConfigComponentResult = null
   jest.mocked(toast.success).mockClear()
@@ -531,6 +540,30 @@ describe("PluginConfigFormContent", () => {
       expect(
         (screen.getByTestId("config-secret-plugin-config-apiKey") as HTMLInputElement).type
       ).toBe("text")
+    })
+
+    it("keeps a stored secret masked when the reveal gate refuses", () => {
+      mockPlugin = { ...secretPlugin(), config: { apiKey: "synthetic-stored-secret" } }
+      mockReveal.mockResolvedValue("blocked")
+      renderForm()
+      fireEvent.click(screen.getByRole("button", { name: "secretShow" }))
+      expect(mockReveal).toHaveBeenCalledTimes(1)
+      expect(screen.getByTestId("config-secret-plugin-config-apiKey")).toHaveAttribute(
+        "type",
+        "password"
+      )
+    })
+
+    it("hides a revealed secret without asking the gate again", () => {
+      mockPlugin = secretPlugin()
+      renderForm()
+      fireEvent.click(screen.getByRole("button", { name: "secretShow" }))
+      fireEvent.click(screen.getByRole("button", { name: "secretHide" }))
+      expect(mockReveal).toHaveBeenCalledTimes(1)
+      expect(screen.getByTestId("config-secret-plugin-config-apiKey")).toHaveAttribute(
+        "type",
+        "password"
+      )
     })
 
     // Masking without saying where the value goes would imply keyring-grade

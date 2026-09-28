@@ -226,7 +226,7 @@ it("routes wheel and click-to-focus through real Ink in a PTY", () => {
     render(React.createElement(TuiInputProvider,null,React.createElement(SkillFilesOverlay,{
       title:'Scroll test',root:'/skill',files:[{relPath:'SKILL.md',absPath:'/skill/SKILL.md'}],columns:120,viewportRows:16,onClose:()=>process.exit(0),
       readFile:async()=>({body:Array.from({length:100},(_,i)=>'row-'+(i+1)).join('\\n'),format:'text'})
-    })),{exitOnCtrlC:false});`
+    })),{exitOnCtrlC:false,interactive:true});`
   try {
     const output = execFileSync(
       process.execPath,

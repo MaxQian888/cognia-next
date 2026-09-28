@@ -1036,11 +1036,16 @@ describe("outbound-runner — event-driven loop", () => {
     // ~1 s later. The retry landing well under the cap proves peekNextWakeAt
     // drives the sleep, i.e. the loop is event-driven, not polling.
     let attempts = 0
+    let reportRetry!: (at: number) => void
+    const retried = new Promise<number>((resolve) => {
+      reportRetry = resolve
+    })
     const send = jest.fn<Promise<OutboundResult>, []>(async () => {
       attempts++
       if (attempts === 1) {
         return { ok: false, error: { code: "network", message: "boom", retryable: true } }
       }
+      reportRetry(Date.now())
       return { ok: true }
     })
     const adapters = new Map<string, PlatformAdapter>([["tg-retry", makeAdapter("tg-retry", send)]])
@@ -1053,18 +1058,23 @@ describe("outbound-runner — event-driven loop", () => {
       signal: controller.signal,
       jitter: () => 0,
     })
-    let secondAt = 0
-    for (let i = 0; i < 120; i++) {
-      await new Promise((r) => setTimeout(r, 50))
-      if (send.mock.calls.length >= 2) {
-        secondAt = Date.now()
-        break
-      }
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      // Observe delivery directly instead of sampling it for only six seconds
+      // while asserting a ten-second deadline. Always stop the runner on failure.
+      const secondAt = await Promise.race([
+        retried,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("Retry missed the 10s deadline")), 10_000)
+        }),
+      ])
+      expect(send).toHaveBeenCalledTimes(2)
+      expect(secondAt - start).toBeLessThan(10_000)
+    } finally {
+      clearTimeout(timeout)
+      controller.abort()
+      await promise
     }
-    expect(send).toHaveBeenCalledTimes(2)
-    expect(secondAt - start).toBeLessThan(10_000)
-    controller.abort()
-    await promise
   })
 
   it("wakes and delivers promptly on enqueue despite a long idle cap", async () => {

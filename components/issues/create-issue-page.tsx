@@ -1580,7 +1580,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
                 <div className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[11px] font-medium text-muted-foreground">
                   <IssueStatusIcon status={form.form.status} />
                   {t(`status.${form.form.status}`)}
-                  <span className="rounded-full bg-background px-1.5 tabular-nums">1</span>
+                  <span className="rounded-pill bg-background px-1.5 tabular-nums">1</span>
                 </div>
                 <div className="pointer-events-none">
                   <IssueCardVisual
@@ -1650,7 +1650,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
                         {previewLabels.map((label) => (
                           <span
                             key={label.id}
-                            className="inline-flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[11px]"
+                            className="inline-flex items-center gap-1 rounded-pill bg-accent px-2 py-0.5 text-[11px]"
                           >
                             {label.color ? (
                               <span

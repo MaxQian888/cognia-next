@@ -63,7 +63,7 @@ describe("ProjectSearchPanel", () => {
     expect(screen.getByTestId("search-hit-src/b.ts-4")).toBeInTheDocument()
     const groupA = screen.getByText("src/a.ts").parentElement
     const groupB = screen.getByText("src/b.ts").parentElement
-    expect(groupA && within(groupA).getByText("2")).toBeInTheDocument()
+    expect(groupA && within(groupA).getByText("2")).toHaveClass("rounded-pill")
     expect(groupB && within(groupB).getByText("1")).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("search-hit-src/b.ts-4"))

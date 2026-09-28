@@ -291,7 +291,7 @@ export function ProjectSearchPanel({
                     className="size-3.5 shrink-0"
                   />
                   <span className="min-w-0 flex-1 truncate">{relPath}</span>
-                  <span className="shrink-0 rounded-full bg-muted px-1.5 text-[10px] leading-4 tabular-nums">
+                  <span className="shrink-0 rounded-pill bg-muted px-1.5 text-[10px] leading-4 tabular-nums">
                     {fileMatches.length}
                   </span>
                 </div>

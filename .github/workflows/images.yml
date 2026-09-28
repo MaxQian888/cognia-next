@@ -194,15 +194,25 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,scope={0},mode=max', matrix.name) || '' }}
 
-  # ADR-0183: the agent bundle. Built for amd64 and arm64 (QEMU), and walked
-  # through real user images (deploy/bundle/smoke.sh) before anything is
-  # pushed. Its layers run to several GB per architecture, so it caches in the
-  # registry like cognia-server, never in the shared GHA budget; PRs only read.
+  # ADR-0183: build and smoke each architecture natively, once. PRs load the
+  # result locally; publishing runs stage untagged digests and smoke those exact
+  # images. Release tags are assembled only after BOTH native smoke jobs pass.
+  # Multi-GB layers use architecture-scoped registry caches; PRs only read.
   agent-bundle:
-    name: cognia-agent-bundle
+    name: cognia-agent-bundle (${{ matrix.arch }})
     needs: vars
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
 
@@ -212,8 +222,6 @@ jobs:
 
       - name: Check bundle pins
         run: node scripts/build/bundle-agent-versions.mjs check
-
-      - uses: docker/setup-qemu-action@v4
 
       - uses: docker/setup-buildx-action@v4
 
@@ -234,32 +242,103 @@ jobs:
             type=sha
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-      - name: Build amd64 for the smoke test
+      - name: Build native bundle once
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/bundle/Dockerfile
-          platforms: linux/amd64
-          load: true
-          tags: cognia-agent-bundle:smoke
-          build-args: BUNDLE_RELEASE_TAG=${{ github.ref_name }}
-          cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle:buildcache
-
-      - name: Smoke against user images
-        run: sh deploy/bundle/smoke.sh cognia-agent-bundle:smoke
-
-      - name: Build amd64 + arm64
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: deploy/bundle/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: ${{ needs.vars.outputs.should_push == 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
+          # type=docker loads the single native platform for local PR smoke.
+          # Publish by digest only: no release tag can point at an untested image.
+          outputs: ${{ needs.vars.outputs.should_push == 'true' && 'type=image,push-by-digest=true,name-canonical=true,push=true' || 'type=docker' }}
+          tags: ${{ needs.vars.outputs.should_push == 'true' && format('ghcr.io/{0}/cognia-agent-bundle', needs.vars.outputs.owner) || 'cognia-agent-bundle:smoke' }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: BUNDLE_RELEASE_TAG=${{ github.ref_name }}
-          cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle:buildcache
-          cache-to: ${{ needs.vars.outputs.should_push == 'true' && format('type=registry,ref=ghcr.io/{0}/cognia-agent-bundle:buildcache,mode=max', needs.vars.outputs.owner) || '' }}
+          cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle:buildcache-${{ matrix.arch }}
+          cache-to: ${{ needs.vars.outputs.should_push == 'true' && format('type=registry,ref=ghcr.io/{0}/cognia-agent-bundle:buildcache-{1},mode=max', needs.vars.outputs.owner, matrix.arch) || '' }}
+
+      - name: Smoke against user images
+        env:
+          SHOULD_PUSH: ${{ needs.vars.outputs.should_push }}
+          IMAGE: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          bundle=cognia-agent-bundle:smoke
+          if [ "$SHOULD_PUSH" = true ]; then
+            docker pull "$IMAGE@$DIGEST"
+            bundle="$IMAGE@$DIGEST"
+          fi
+          sh deploy/bundle/smoke.sh "$bundle"
+
+      - name: Record tested platform digest
+        if: needs.vars.outputs.should_push == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/agent-bundle-digests"
+          printf '%s\n' "$DIGEST" > "$RUNNER_TEMP/agent-bundle-digests/$ARCH.txt"
+
+      - uses: actions/upload-artifact@v7
+        if: needs.vars.outputs.should_push == 'true'
+        with:
+          name: agent-bundle-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/agent-bundle-digests/${{ matrix.arch }}.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  agent-bundle-manifest:
+    name: cognia-agent-bundle (publish manifest)
+    needs: [vars, agent-bundle]
+    if: needs.vars.outputs.should_push == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: agent-bundle-digest-*
+          path: ${{ runner.temp }}/agent-bundle-digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Assemble tested multi-platform manifest
+        env:
+          IMAGE: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST_DIR: ${{ runner.temp }}/agent-bundle-digests
+        run: |
+          digests=()
+          for arch in amd64 arm64; do
+            digest=$(cat "$DIGEST_DIR/$arch.txt")
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::Invalid tested digest for $arch"
+              exit 1
+            fi
+            digests+=("$IMAGE@$digest")
+          done
+          tags=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then tags+=(--tag "$tag"); fi
+          done <<< "$TAGS"
+          [ "${#tags[@]}" -gt 0 ]
+          docker buildx imagetools create "${tags[@]}" "${digests[@]}"
 
   cognia-server-check:
     name: cognia-server (cargo check in Docker)
@@ -267,10 +346,23 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
+
+      # Same-repository PRs can read the private registry cache with their
+      # read-only token. Forks use anonymous access; an absent or inaccessible
+      # cache falls back to a cold build, without granting package write access.
+      - uses: docker/login-action@v4
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/build-push-action@v7
         with:

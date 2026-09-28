@@ -52,11 +52,11 @@ describe("ExternalAgentCapabilityMatrix", () => {
   })
 
   it("explains a refusal with the reason the profile recorded", () => {
-    const profile = negotiateCapabilityProfile({ protocol: "opencode", liveFacts: {} })
+    const profile = negotiateCapabilityProfile({ protocol: "a2a", liveFacts: {} })
     expect(screen.queryByTestId("capability-mcp")).not.toBeInTheDocument()
     render(wrap(<ExternalAgentCapabilityMatrix profile={profile} />))
     expect(screen.getByTestId("capability-mcp")).toHaveTextContent(
-      "the agent protocol has no per-session MCP channel"
+      "the agent protocol has no equivalent"
     )
   })
 
@@ -99,8 +99,8 @@ describe("ExternalAgentCapabilityMatrix", () => {
     expect(screen.getByText("Negotiated")).toBeInTheDocument()
   })
 
-  it("can hide the unsupported majority", () => {
-    const profile = negotiateCapabilityProfile({ protocol: "opencode", liveFacts: {} })
+  it("hides unsupported capabilities while retaining unverified ones", () => {
+    const profile = negotiateCapabilityProfile({ protocol: "a2a", liveFacts: {} })
     render(wrap(<ExternalAgentCapabilityMatrix profile={profile} onlyAvailable />))
     expect(screen.queryByTestId("capability-mcp")).not.toBeInTheDocument()
     expect(screen.getByTestId("capability-streaming")).toBeInTheDocument()

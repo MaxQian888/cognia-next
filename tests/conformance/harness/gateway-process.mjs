@@ -7,7 +7,7 @@
 //   2. mints a gateway API key via `gateway key-create`,
 //   3. writes gateway-config.json (enabled, ephemeral port) and `serve`s with
 //      COGNIA_GATEWAY=1,
-//   4. parses the bound gateway port from stdout.
+//   4. parses the bound gateway port from its readiness log.
 //
 // The sidecar leg then points ANTHROPIC_BASE_URL at the gateway, which
 // serves from the profile-store projection (authority: profile-store) —
@@ -122,61 +122,113 @@ export async function startGatewayLeg({ conformanceBaseUrl }) {
   )
 
   // 4. Serve (companion HTTPS on an ephemeral port too; no brain).
-  const child = spawn(serverBinaryPath(), ["serve", "--port", "0"], {
-    env: { ...adminEnv(dataDir), COGNIA_GATEWAY: "1" },
-    stdio: ["ignore", "pipe", "pipe"],
-  })
-
-  let stdout = ""
-  let stderr = ""
-  child.stdout.on("data", (d) => {
-    stdout += d.toString()
-  })
-  child.stderr.on("data", (d) => {
-    stderr += d.toString()
-  })
-
-  const gatewayPort = await new Promise((resolve, reject) => {
-    const deadline = setTimeout(() => {
-      reject(
-        new Error(`gateway port not observed in time.\nstdout:\n${stdout}\nstderr:\n${stderr}`)
-      )
-    }, 60_000)
-    const poll = setInterval(() => {
-      const match = stdout.match(/LLM gateway listening on port Some\((\d+)\)/)
-      if (match) {
-        clearTimeout(deadline)
-        clearInterval(poll)
-        resolve(Number(match[1]))
-      }
-      if (child.exitCode !== null) {
-        clearTimeout(deadline)
-        clearInterval(poll)
-        reject(new Error(`cognia-server exited early (${child.exitCode}).\n${stderr}\n${stdout}`))
-      }
-    }, 100)
+  const processHandle = await startGatewayProcess({
+    env: { ...adminEnv(dataDir), COGNIA_GATEWAY: "1", COGNIA_LOG: "info", NO_COLOR: "1" },
   })
 
   return {
     // Plain origin — ANTHROPIC_BASE_URL consumers append /v1/* themselves.
-    gatewayBaseUrl: `http://127.0.0.1:${gatewayPort}`,
+    gatewayBaseUrl: `http://127.0.0.1:${processHandle.gatewayPort}`,
     gatewayKey,
     dataDir,
     get logs() {
-      return { stdout, stderr }
+      return processHandle.logs
     },
-    async close() {
-      child.kill("SIGINT")
-      await new Promise((resolve) => {
-        const t = setTimeout(() => {
-          child.kill("SIGKILL")
-          resolve()
-        }, 5_000)
-        child.once("exit", () => {
-          clearTimeout(t)
-          resolve()
-        })
+    close: processHandle.close,
+  }
+}
+
+/** Spawn boundary shared with hermetic subprocess lifecycle regressions. */
+export async function startGatewayProcess({
+  binaryPath = serverBinaryPath(),
+  args = ["serve", "--port", "0", "--bind-loopback"],
+  env = process.env,
+  startupTimeoutMs = 60_000,
+  shutdownTimeoutMs = 5_000,
+} = {}) {
+  const detached = process.platform !== "win32"
+  const child = spawn(binaryPath, args, {
+    env,
+    detached,
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  let stdout = ""
+  let stderr = ""
+  let closed = false
+  const exited = new Promise((resolve) =>
+    child.once("close", () => {
+      closed = true
+      resolve()
+    })
+  )
+  function signalChild(signal) {
+    if (!child.pid || closed) return
+    try {
+      // The headless server owns a sidecar too; stop the isolated group so
+      // inherited pipe handles cannot keep the test runner alive.
+      if (detached) process.kill(-child.pid, signal)
+      else child.kill(signal)
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error
+    }
+  }
+  let closing
+  function close() {
+    closing ??= (async () => {
+      if (closed) return
+      const force = setTimeout(() => signalChild("SIGKILL"), shutdownTimeoutMs)
+      try {
+        signalChild("SIGINT")
+        await exited
+      } finally {
+        clearTimeout(force)
+      }
+    })()
+    return closing
+  }
+
+  try {
+    const gatewayPort = await new Promise((resolve, reject) => {
+      const deadline = setTimeout(() => fail("gateway port not observed in time"), startupTimeoutMs)
+      const diagnostics = () => `\nstdout:\n${stdout}\nstderr:\n${stderr}`
+      const cleanup = () => {
+        clearTimeout(deadline)
+        child.off("error", onError)
+        child.off("exit", onExit)
+      }
+      const fail = (message) => {
+        cleanup()
+        reject(new Error(message + diagnostics()))
+      }
+      const onError = (error) => fail(`cognia-server failed to spawn: ${error.message}`)
+      const onExit = (code, signal) => fail(`cognia-server exited early (${signal ?? code})`)
+      child.once("error", onError)
+      child.once("exit", onExit)
+      const checkReady = () => {
+        const match = `${stdout}\n${stderr}`.match(/LLM gateway listening on port Some\((\d+)\)/)
+        if (match && Number(match[1]) > 0 && Number(match[1]) <= 65535) {
+          cleanup()
+          resolve(Number(match[1]))
+        }
+      }
+      child.stdout.on("data", (data) => {
+        stdout += data.toString()
+        checkReady()
       })
-    },
+      child.stderr.on("data", (data) => {
+        stderr += data.toString()
+        checkReady()
+      })
+    })
+    return {
+      gatewayPort,
+      close,
+      get logs() {
+        return { stdout, stderr }
+      },
+    }
+  } catch (error) {
+    await close()
+    throw error
   }
 }

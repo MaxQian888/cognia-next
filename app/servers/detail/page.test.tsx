@@ -57,7 +57,7 @@ const server = {
 
 const base = (): ServerOpsValue =>
   ({
-    accountId: "account-1",
+    localAccountId: "account-1",
     connection: { controllerUrl: "https://ops.example.com", profileId: "production" },
     connected: true,
     transport: "tauri",

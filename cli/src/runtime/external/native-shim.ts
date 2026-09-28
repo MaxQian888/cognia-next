@@ -117,7 +117,8 @@ function assertPtyHost(): void {
 }
 
 function ensurePtyHelperExecutable(): void {
-  if (ptyHelperReady || process.platform === "win32") return
+  // Linux forks directly in the native addon and ships no spawn-helper.
+  if (ptyHelperReady || process.platform !== "darwin") return
   const resolvedEntry = import.meta.resolve("node-pty")
   const entry = resolvedEntry.startsWith("file:") ? fileURLToPath(resolvedEntry) : resolvedEntry
   const packageRoot = path.dirname(path.dirname(entry))

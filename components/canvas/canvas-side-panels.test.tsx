@@ -14,6 +14,12 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
 }
 
+async function openPanel(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+  await user.click(screen.getByRole("button", { name: "Open panel" }))
+  await user.click(screen.getByRole("menuitem", { name }))
+  expect(screen.getByRole("tab", { name, selected: true })).toBeInTheDocument()
+}
+
 // Stub the heavy host components so the test isolates the tab-bar / store wiring.
 jest.mock("./suggestions-panel", () => ({
   SuggestionsPanel: () => <div data-testid="host-suggestions" />,
@@ -120,14 +126,14 @@ describe("CanvasSidePanels", () => {
     ).toBeInTheDocument()
   })
 
-  it("uses the Context Workbench activity rail when the surface flag is enabled", async () => {
+  it("opens a labeled Workbench tab and persists the selected panel", async () => {
     seedDocument("doc-1")
     const activeId = useArtifactStore.getState().activeCanvasId
     const user = userEvent.setup()
     renderWithProviders(<CanvasSidePanels />)
 
-    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: /History/i }))
+    expect(screen.getByRole("tablist", { name: "Labeled tabs" })).toBeInTheDocument()
+    await openPanel(user, /History/i)
     expect(
       Object.entries(useContextWorkbenchStore.getState().layouts).find(([key]) =>
         key.endsWith(`::canvas:${activeId}`)
@@ -154,9 +160,9 @@ describe("CanvasSidePanels", () => {
     seedDocument("doc-1")
     renderWithProviders(<CanvasSidePanels />)
 
-    expect(screen.getByTestId("context-workbench-activity-rail")).not.toHaveAttribute(
-      "data-rail-only"
-    )
+    expect(screen.queryByTestId("context-workbench-activity-rail")).not.toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /Suggestions/i, selected: true })).toBeInTheDocument()
+    expect(screen.getByText(/No suggestions yet/i)).toBeInTheDocument()
   })
 
   it("resets the canvas shell layout from the Context Workbench layout menu", async () => {
@@ -190,10 +196,10 @@ describe("CanvasSidePanels", () => {
     const user = userEvent.setup()
     renderWithProviders(<CanvasSidePanels />)
 
-    await user.click(screen.getByRole("button", { name: /Document properties/i }))
+    await openPanel(user, /Document properties/i)
     expect(screen.getByTestId("canvas-language-select")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Bold" })).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: /Preview/i }))
+    await openPanel(user, /^Preview$/i)
     expect(screen.getByTestId("canvas-export-trigger")).toBeInTheDocument()
   })
 
@@ -206,13 +212,13 @@ describe("CanvasSidePanels", () => {
     const user = userEvent.setup()
     renderWithProviders(<CanvasSidePanels />)
 
-    await user.click(screen.getByRole("tab", { name: /AI actions/i }))
+    await openPanel(user, /AI actions/i)
     await user.click(screen.getByRole("button", { name: /^Review$/i }))
     expect(actionListener).toHaveBeenCalledWith(
       expect.objectContaining({ detail: { type: "review", proposalFirst: true } })
     )
 
-    await user.click(screen.getByRole("button", { name: /Document properties/i }))
+    await openPanel(user, /Document properties/i)
     await user.click(screen.getByRole("button", { name: "Bold" }))
     expect(formatListener).toHaveBeenCalledWith(
       expect.objectContaining({ detail: { action: "bold" } })

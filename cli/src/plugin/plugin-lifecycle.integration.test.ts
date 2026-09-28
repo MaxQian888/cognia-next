@@ -40,7 +40,11 @@ function installFetch(getTree: () => Record<string, Node>): void {
       return {
         status: 200,
         ok: true,
-        json: async () => ({ type: "file", content: Buffer.from(node).toString("base64") }),
+        json: async () => ({
+          type: "file",
+          encoding: "base64",
+          content: Buffer.from(node).toString("base64"),
+        }),
       } as unknown as Response
     }
     return { status: 200, ok: true, json: async () => node } as unknown as Response
