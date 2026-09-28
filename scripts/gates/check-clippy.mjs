@@ -76,6 +76,23 @@ export function parseClippyWarnings(ndjson) {
   return warnings
 }
 
+/** Preserve compiler errors captured on stdout when cargo uses JSON output. */
+export function renderClippyErrors(ndjson) {
+  const errors = []
+  for (const line of ndjson.split("\n")) {
+    let msg
+    try {
+      msg = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (msg.reason === "compiler-message" && msg.message?.level === "error") {
+      errors.push(msg.message.rendered || msg.message.message)
+    }
+  }
+  return errors.join("\n")
+}
+
 /**
  * Count warnings per (target, lint) pair. Pure.
  * @param {Array<{ target: string, lint: string }>} warnings
@@ -156,6 +173,8 @@ async function runClippy() {
   // A non-zero exit means clippy hit a hard ERROR (not a warning) — the code
   // does not compile. That is never something to baseline.
   if (res.status !== 0) {
+    const errors = renderClippyErrors(res.stdout ?? "")
+    if (errors) console.error(errors)
     console.error("[clippy] cargo clippy failed to complete — see the errors above.")
     process.exit(res.status ?? 1)
   }

@@ -81,7 +81,7 @@ const NAMED_ENTITIES: Record<string, string> = {
 /** Decode decimal `&#39;`, hexadecimal `&#x27;`, and named entities. Unknown
  * named entities are left untouched so we don't invent characters. */
 export function decodeHtmlEntities(text: string): string {
-  return text.replace(
+  const decoded = text.replace(
     /&(?:#(\d+)|#x([0-9a-fA-F]+)|([a-zA-Z][a-zA-Z0-9]*));/g,
     (_, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
       if (dec || hex) {
@@ -94,6 +94,9 @@ export function decodeHtmlEntities(text: string): string {
       return NAMED_ENTITIES[name ?? ""] ?? `&${name};`
     }
   )
+  // Marked can decode an entity before handing us its text token. Sanitize
+  // that decoded result as well, while keeping ordinary tabs and newlines.
+  return decoded.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "")
 }
 
 /** 1→i, 4→iv, 9→ix — lowercase Roman numerals for deeper ordered markers. */

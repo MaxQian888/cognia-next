@@ -261,7 +261,7 @@ export function ProjectEnvironmentRuntime({
                   </SelectItem>
                 ))}
                 {draft.source.kind === "catalog" &&
-                !catalog?.entries.some(
+                !catalog?.entries?.some(
                   (entry) =>
                     draft.source.kind === "catalog" && entry.id === draft.source.catalogEntryId
                 ) ? (
@@ -359,7 +359,7 @@ export function ProjectEnvironmentRuntime({
               <Select
                 value={draft.bundlePin?.digest ?? DEFAULT}
                 onValueChange={(value) => {
-                  const pinned = catalog.bundle?.retained.find((bundle) => bundle.digest === value)
+                  const pinned = catalog.bundle?.retained?.find((bundle) => bundle.digest === value)
                   update({
                     bundlePin: pinned
                       ? { digest: pinned.digest, releaseTag: pinned.releaseTag }

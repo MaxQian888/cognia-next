@@ -341,7 +341,9 @@ export async function reportGovernanceProjectionFailure(
   try {
     await recordProvenanceEnvelope({
       contractVersion: GOVERNANCE_CONTRACT_VERSION,
-      eventId: `governance-gap:${input.producer}:${input.operation}:${governanceRefKey(input.subjectRef)}:${input.occurredAt}`,
+      // Decimal millisecond timestamps sometimes pass Luhn. Keep this opaque
+      // identity deterministic without making metadata look like card data.
+      eventId: `governance-gap:${input.producer}:${input.operation}:${governanceRefKey(input.subjectRef)}:t${input.occurredAt.toString(36)}`,
       eventType: "governance.projection.failed",
       source: `cognia://governance/${input.producer}`,
       subjectRef: input.subjectRef,

@@ -65,6 +65,8 @@ RUN node bundle-agent-versions.mjs fetch-tool --pins agent-versions.json --tool 
 # ── glibc tree ───────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-bookworm-slim AS glibc
 ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends patchelf libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=pins /build /build
 COPY deploy/bundle/npm/package.json deploy/bundle/npm/package-lock.json /opt/cognia/glibc/lib/agents/
 RUN cd /opt/cognia/glibc/lib/agents \

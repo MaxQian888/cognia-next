@@ -146,6 +146,9 @@ const instance = render(
   </TuiInputProvider>,
   {
     exitOnCtrlC: false,
+    // The PTY is interactive even on GitHub Actions. Ink otherwise buffers
+    // every frame until unmount when CI is set, leaving the driver blind.
+    interactive: true,
     incrementalRendering: false,
     isScreenReaderEnabled: config.screenReader ?? false,
   }

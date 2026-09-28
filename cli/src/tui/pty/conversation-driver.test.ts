@@ -8,9 +8,10 @@ const maybe = available ? describe : describe.skip
 maybe("runConversation", () => {
   jest.setTimeout(120_000)
 
-  it("streams a reply into the transcript", async () => {
+  it("streams a reply into the transcript even on a CI host", async () => {
     const result = await runConversation(
       {
+        env: { CI: "true", GITHUB_ACTIONS: "true" },
         scenario: {
           turns: [{ steps: [{ kind: "text", delta: "hello from the scenario" }] }],
         },

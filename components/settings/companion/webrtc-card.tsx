@@ -131,6 +131,7 @@ export function WebRtcCard() {
   const t = useTranslations("mobile.companion.webrtc")
   const [form, setForm] = useState<FormState>(INITIAL)
   const [busy, setBusy] = useState(false)
+  const [hydrating, setHydrating] = useState(true)
   const [status, setStatus] = useState<SignalingStatusSnapshot | null>(null)
   const [devices, setDevices] = useState<DeviceTierEntry[] | null>(null)
   const [pollFailureCount, setPollFailureCount] = useState(0)
@@ -177,6 +178,8 @@ export function WebRtcCard() {
         })
       } catch {
         // Dexie unavailable (SSR / first load) — keep INITIAL.
+      } finally {
+        if (!cancelled) setHydrating(false)
       }
     })()
     return () => {
@@ -218,6 +221,7 @@ export function WebRtcCard() {
   }, [])
 
   const onSave = useCallback(async () => {
+    if (hydrating) return
     const url = form.signalingUrl.trim()
     if (!/^wss?:\/\//i.test(url)) {
       toast.error(t("invalidUrl"))
@@ -292,9 +296,10 @@ export function WebRtcCard() {
     } finally {
       setBusy(false)
     }
-  }, [form, t])
+  }, [form, hydrating, t])
 
   const onTestProvider = useCallback(async () => {
+    if (hydrating) return
     const kind = form.turnProviderKind
     if (kind === "none") return
     const token = form.turnProviderToken.trim()
@@ -325,7 +330,7 @@ export function WebRtcCard() {
     } finally {
       setBusy(false)
     }
-  }, [form, t])
+  }, [form, hydrating, t])
 
   const showPollBanner = pollFailureCount >= POLL_FAILURE_BANNER_THRESHOLD
 
@@ -337,6 +342,7 @@ export function WebRtcCard() {
       action={
         <Switch
           checked={form.enabled}
+          disabled={busy || hydrating}
           onCheckedChange={(v) => setForm((prev) => ({ ...prev, enabled: v }))}
           aria-label={t("enableLabel")}
           data-testid="webrtc-enable-toggle"
@@ -357,7 +363,7 @@ export function WebRtcCard() {
           value={form.signalingUrl}
           onChange={(e) => setForm((prev) => ({ ...prev, signalingUrl: e.target.value }))}
           placeholder={t("signalingUrlPlaceholder")}
-          disabled={busy}
+          disabled={busy || hydrating}
           className="font-mono text-xs"
         />
         <p className="text-[10px] text-muted-foreground">{t("signalingUrlHelp")}</p>
@@ -371,7 +377,7 @@ export function WebRtcCard() {
           id="webrtc-ice-servers"
           value={form.iceServersText}
           onChange={(e) => setForm((prev) => ({ ...prev, iceServersText: e.target.value }))}
-          disabled={busy}
+          disabled={busy || hydrating}
           className="min-h-16 font-mono text-xs"
         />
         <p className="text-[10px] text-muted-foreground">{t("iceServersHelp")}</p>
@@ -385,7 +391,7 @@ export function WebRtcCard() {
           id="webrtc-turn-servers"
           value={form.turnServersText}
           onChange={(e) => setForm((prev) => ({ ...prev, turnServersText: e.target.value }))}
-          disabled={busy}
+          disabled={busy || hydrating}
           className="min-h-16 font-mono text-xs"
           placeholder={t("turnServersPlaceholder")}
         />
@@ -405,7 +411,7 @@ export function WebRtcCard() {
               turnProviderKind: e.target.value as TurnProviderKind,
             }))
           }
-          disabled={busy}
+          disabled={busy || hydrating}
           className="text-xs"
           wrapperClassName="w-full"
           data-testid="webrtc-turn-provider-kind"
@@ -424,7 +430,7 @@ export function WebRtcCard() {
             value={form.turnProviderKeyId}
             onChange={(e) => setForm((prev) => ({ ...prev, turnProviderKeyId: e.target.value }))}
             placeholder={t("turnProviderKeyIdLabel")}
-            disabled={busy}
+            disabled={busy || hydrating}
             className="font-mono text-xs"
             data-testid="webrtc-turn-cf-keyid"
           />
@@ -435,7 +441,7 @@ export function WebRtcCard() {
             value={form.turnProviderSid}
             onChange={(e) => setForm((prev) => ({ ...prev, turnProviderSid: e.target.value }))}
             placeholder={t("turnProviderSidLabel")}
-            disabled={busy}
+            disabled={busy || hydrating}
             className="font-mono text-xs"
             data-testid="webrtc-turn-twilio-sid"
           />
@@ -458,7 +464,7 @@ export function WebRtcCard() {
                     ? t("turnProviderAuthTokenLabel")
                     : t("turnProviderTokenLabel")
               }
-              disabled={busy}
+              disabled={busy || hydrating}
               className="font-mono text-xs"
               data-testid="webrtc-turn-token"
             />
@@ -467,7 +473,7 @@ export function WebRtcCard() {
               value={form.turnProviderTtl}
               onChange={(e) => setForm((prev) => ({ ...prev, turnProviderTtl: e.target.value }))}
               placeholder={t("turnProviderTtlLabel")}
-              disabled={busy}
+              disabled={busy || hydrating}
               inputMode="numeric"
               className="font-mono text-xs"
               data-testid="webrtc-turn-ttl"
@@ -476,7 +482,7 @@ export function WebRtcCard() {
               size="sm"
               variant="outline"
               onClick={onTestProvider}
-              disabled={busy}
+              disabled={busy || hydrating}
               data-testid="webrtc-turn-test"
             >
               {t("turnTestButton")}
@@ -485,7 +491,7 @@ export function WebRtcCard() {
         ) : null}
       </div>
 
-      <Button size="sm" onClick={onSave} disabled={busy} data-testid="webrtc-save">
+      <Button size="sm" onClick={onSave} disabled={busy || hydrating} data-testid="webrtc-save">
         {busy ? t("savingButton") : t("saveButton")}
       </Button>
 

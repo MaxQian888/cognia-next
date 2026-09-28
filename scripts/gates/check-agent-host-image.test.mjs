@@ -162,3 +162,13 @@ test("all literal server Docker COPY inputs exist in a fresh checkout", () => {
     }
   }
 })
+
+test("server dependency cooking has the same capture linker prerequisite as final builds", () => {
+  const dockerfile = readFileSync(
+    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    "utf8"
+  )
+  const chef = dockerfile.split("FROM chef AS planner")[0]
+  assert.match(chef, /\blibgbm-dev\b/)
+  assert.match(dockerfile, /\blibgbm1\b/)
+})

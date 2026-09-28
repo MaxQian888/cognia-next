@@ -1,5 +1,9 @@
-// Only the generation is faked; everything else in the AI SDK stays real.
-jest.mock("ai", () => ({ ...jest.requireActual("ai"), generateText: jest.fn() }))
+// RAG may resolve another pnpm peer instance of the SDK than the root app.
+// Fake generation at the package's own boundary; keep query expansion real.
+jest.mock(
+  require.resolve("ai", { paths: [require.resolve("@cognia/rag/query-expansion")] }),
+  () => ({ ...jest.requireActual("ai"), generateText: jest.fn() })
+)
 jest.mock("@/lib/router-fusion/gate/current-settings", () => ({
   currentRouterFusionGateSettings: jest.fn(async () => null),
 }))
@@ -40,7 +44,6 @@ const loadMock = getProjectChunksByVectorDocIds as jest.Mock
 const filterMock = filterByGrade as jest.Mock
 const hydeMock = generateHypotheticalAnswer as jest.Mock
 
-import { generateText } from "ai"
 import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
 import { loadRouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
 import { getTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
@@ -48,7 +51,9 @@ import { __resetBreakerForTesting } from "@/lib/router-fusion/gate/breaker"
 import type { RouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
 import type { BeginLedgeredUtilityCallInput } from "@/lib/router-fusion/gate/utility-ledger"
 
-const mockedGenerateText = generateText as jest.Mock
+const mockedGenerateText = jest.requireMock(
+  require.resolve("ai", { paths: [require.resolve("@cognia/rag/query-expansion")] })
+).generateText as jest.Mock
 const gateSettingsMock = currentRouterFusionGateSettings as jest.Mock
 const loadHostMock = loadRouterFusionHost as jest.Mock
 const twinSettingsMock = getTwinRuntimeSettings as jest.Mock

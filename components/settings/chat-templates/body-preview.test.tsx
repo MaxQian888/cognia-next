@@ -4,6 +4,7 @@
 // alone, three states (empty/filled/unresolved) readable at a glance.
 
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, string>) =>
@@ -53,6 +54,22 @@ describe("ChatTemplateBodyPreview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "fillSlot:module" }))
     expect(onParamClick).toHaveBeenCalledWith("module")
+  })
+
+  it("activates a slot by keyboard without submitting its containing form", async () => {
+    const user = userEvent.setup()
+    const onParamClick = jest.fn()
+    const onSubmit = jest.fn((event) => event.preventDefault())
+    render(
+      <form onSubmit={onSubmit}>
+        <ChatTemplateBodyPreview body="review {{module}}" onParamClick={onParamClick} />
+      </form>
+    )
+    await user.tab()
+    expect(screen.getByRole("button", { name: "fillSlot:module" })).toHaveFocus()
+    await user.keyboard("{Enter}")
+    expect(onParamClick).toHaveBeenCalledWith("module")
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 
   it("reads in the composer's pill language: dashed empty, primary filled, amber unresolved", () => {

@@ -7,6 +7,7 @@ import "fake-indexeddb/auto"
 import type { MediaResponse } from "@/lib/headless/types"
 import { messageRepository } from "@/lib/db"
 import { getDb } from "@/lib/db/schema"
+import { __resetSearchIndexerForTesting } from "@/lib/chat/search/indexer"
 import * as messageMedia from "@/lib/db/message-media"
 import { putMessageMedia } from "@/lib/db/message-media"
 
@@ -19,6 +20,10 @@ jest.mock("@/lib/db/message-media", () => {
 })
 
 const mockGetMessageMedia = jest.mocked(messageMedia.getMessageMedia)
+
+// Persistence schedules a trailing search-index drain. Do not let one test's
+// timer run against another test's deliberately bounded cursor fixtures.
+afterEach(__resetSearchIndexerForTesting)
 
 import {
   __resetInstalledForTests,

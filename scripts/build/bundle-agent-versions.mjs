@@ -645,6 +645,14 @@ export async function stage({
       nodeBin,
     ])
     log(`musl: node runs on the bundled ${loader}`)
+  } else {
+    // Official Node builds need libatomic, absent in plain Debian images.
+    // Keep using the host glibc/C++ runtime; only carry this additional library.
+    const lib = join(nodeDir, "lib")
+    const atomicDir = systemLib.atomicDir ?? `/usr/lib/${MUSL_MACHINE[arch]}-linux-gnu`
+    mkdirSync(lib, { recursive: true })
+    copyFileSync(realpathSync(join(atomicDir, "libatomic.so.1")), join(lib, "libatomic.so.1"))
+    runChecked(run, "patchelf", ["--set-rpath", "$ORIGIN/../lib", nodeBin])
   }
   runChecked(run, nodeBin, ["--version"], { env: { PATH: "/usr/bin:/bin" } })
 

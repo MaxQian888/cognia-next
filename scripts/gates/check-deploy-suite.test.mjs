@@ -129,6 +129,22 @@ test("a Rust base behind the toolchain pin is a problem", () => {
   assert.match(problems[0], /pins 1\.95/)
 })
 
+test("a stale Rust toolchain override cannot hide behind an upgraded base image", () => {
+  const dockerfile = "FROM rust:1.96.1-bookworm AS chef\nENV RUSTUP_TOOLCHAIN=1.95.0\n"
+  const problems = checkRustBases({ dockerfiles: { chef: dockerfile }, channel: "1.96" })
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /RUSTUP_TOOLCHAIN.*1\.95/)
+  assert.deepEqual(
+    checkRustBases({
+      dockerfiles: {
+        chef: dockerfile.replace("RUSTUP_TOOLCHAIN=1.95.0", "RUSTUP_TOOLCHAIN=1.96.1"),
+      },
+      channel: "1.96",
+    }),
+    []
+  )
+})
+
 test("a patch-level rust tag on the same channel is fine", () => {
   assert.deepEqual(
     checkRustBases({ dockerfiles: { d: "FROM rust:1.95.0-slim\n" }, channel: "1.95" }),

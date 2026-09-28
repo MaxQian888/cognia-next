@@ -168,7 +168,11 @@ describe("RightSidebar", () => {
   beforeEach(() => {
     mockInspectorMountEffect.mockReset()
     window.localStorage.clear()
-    useContextWorkbenchStore.setState({ layouts: {}, sessionOverrides: {} })
+    useContextWorkbenchStore.setState({
+      layouts: {},
+      sessionOverrides: {},
+      navigationStyle: "rail",
+    })
   })
 
   it("renders the shared activity rail and opens on Chat with an empty selection", async () => {

@@ -96,7 +96,9 @@ export function ProviderOnboardingBanner({
               variant="outline"
               className="cursor-pointer bg-background text-xs transition-colors hover:bg-brand-action/10"
             >
-              <button
+              <Button
+                variant="ghost"
+                className="h-auto p-0 text-xs"
                 type="button"
                 onClick={() => {
                   highlightProviderRow(id)
@@ -104,7 +106,7 @@ export function ProviderOnboardingBanner({
                 }}
               >
                 {t(id)}
-              </button>
+              </Button>
             </Badge>
           ))}
           {/* Quiet catalog refresh — silent on failure, detail in the title. */}

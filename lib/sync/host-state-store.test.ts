@@ -818,7 +818,7 @@ describe("HostState draft replacement and template bindings", () => {
     })
 
     await acquireWritableLease()
-    await commitHostStateAction({
+    const result = await commitHostStateAction({
       action: draftAction({
         action: { kind: "draft.replace", text: "review {{module}} today", attachments: [] },
       }),
@@ -830,6 +830,12 @@ describe("HostState draft replacement and template bindings", () => {
         revision: 1,
       },
       now: 1,
+    })
+
+    expect(result.event.outcome).toBe("applied")
+    expect(result.snapshot.state).toMatchObject({
+      title: "Session",
+      draft: { text: "review {{module}} today", revision: 1 },
     })
 
     await expect(getDb().chatDrafts.get("session-1")).resolves.toMatchObject({

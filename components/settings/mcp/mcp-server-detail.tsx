@@ -391,7 +391,7 @@ export function McpServerDetail({
 
         <Card>
           <CardHeader className="pb-3">
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="space-y-1">
                 <CardTitle className="text-sm">{t("logsTitle")}</CardTitle>
                 <CardDescription className="text-xs">{t("logsSubtitle")}</CardDescription>

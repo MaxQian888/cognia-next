@@ -1,9 +1,68 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import { test } from "node:test"
+import { parse } from "yaml"
 
 const readWorkflow = (name) =>
   readFile(new URL(`../../.github/workflows/${name}`, import.meta.url), "utf8")
+
+test("all Jest waves use one immutable timing manifest", async () => {
+  const { jobs } = parse(await readWorkflow("test.yml"))
+  assert.equal(jobs.test.needs, "jest-plan")
+  assert.ok(jobs["jest-plan"].steps.some((step) => step.uses?.startsWith("actions/cache/restore@")))
+  assert.ok(!jobs.test.steps.some((step) => step.uses?.startsWith("actions/cache/restore@")))
+  const publish = jobs["jest-plan"].steps.find((step) =>
+    step.uses?.startsWith("actions/upload-artifact@")
+  )
+  const consume = jobs.test.steps.find((step) => step.name === "Download frozen Jest timing input")
+  assert.equal(publish.with.name, consume.with.name)
+  assert.equal(publish.with["if-no-files-found"], "error")
+  assert.equal(publish.with["include-hidden-files"], true)
+  assert.equal(publish.with.path, `${consume.with.path}timings.json`)
+  assert.ok(
+    jobs.test.steps.indexOf(consume) <
+      jobs.test.steps.findIndex((step) => step.name === "Run Jest shard with coverage")
+  )
+})
+
+test("bundle gate tests provision the release Bun version and build webclone first", async () => {
+  const quality = parse(await readWorkflow("quality.yml"))
+  const release = parse(await readWorkflow("release.yml"))
+  const steps = quality.jobs.gates.steps
+  const bun = steps.find((step) => step.uses?.startsWith("oven-sh/setup-bun@"))
+  const releaseBun = Object.values(release.jobs)
+    .flatMap((job) => job.steps ?? [])
+    .find((step) => step.uses?.startsWith("oven-sh/setup-bun@"))
+  assert.ok(bun, "gate tests execute the real Bun bundler")
+  assert.equal(bun.if, "matrix.group == 'gate-tests'")
+  assert.equal(bun.with["bun-version"], releaseBun.with["bun-version"])
+  const buildIndex = steps.findIndex((step) => step.run === "pnpm sidecar:webclone:build")
+  const gateIndex = steps.findIndex((step) => step.name === "Run gate group")
+  assert.ok(buildIndex >= 0 && buildIndex < gateIndex, "bundle tests consume built webclone output")
+  assert.equal(steps[buildIndex].if, "matrix.group == 'gate-tests'")
+  assert.ok(steps.indexOf(bun) < buildIndex, "Bun is ready before bundle prerequisites")
+})
+
+test("Jest builds the workspace and standalone engine before running shipped bundle fixtures", async () => {
+  const workflow = parse(await readWorkflow("test.yml"))
+  const job = Object.values(workflow.jobs).find((job) =>
+    job.steps?.some((step) => step.run?.includes("Run Jest") || step.name?.includes("Run Jest"))
+  )
+  assert.ok(job)
+  const prerequisiteIndex = job.steps.findIndex(
+    (step) => step.name === "Build Jest runtime prerequisites"
+  )
+  const testIndex = job.steps.findIndex((step) => step.name?.includes("Run Jest"))
+  assert.ok(prerequisiteIndex >= 0 && prerequisiteIndex < testIndex)
+  assert.match(job.steps[prerequisiteIndex].run, /pnpm build:packages/)
+  assert.match(job.steps[prerequisiteIndex].run, /pnpm sidecar:webclone:build/)
+  assert.deepEqual(
+    job.strategy.matrix.shard,
+    Array.from({ length: 64 }, (_, index) => index + 1)
+  )
+  assert.equal(job.strategy["max-parallel"], 16)
+  assert.match(job.steps[testIndex].run, /--shard=\$\{\{ matrix\.shard \}\}\/64\b/)
+})
 
 test("CI workflows provision their clean-checkout prerequisites", async () => {
   const [quality, report, testWorkflow] = await Promise.all([
@@ -97,4 +156,48 @@ test("every waived advisory is justified where the reason can be written down", 
     )
   }
   assert.match(auditConfig, /reviewAfter:/, "waivers must carry a review date")
+})
+
+test("every Linux desktop compile installs the capture backend's native libraries", async () => {
+  for (const name of ["test.yml", "quality.yml", "build-tauri.yml"]) {
+    const workflow = parse(await readWorkflow(name))
+    const nativeInstalls = Object.values(workflow.jobs)
+      .flatMap((job) => job.steps ?? [])
+      .map((step) => step.run)
+      .filter((run) => typeof run === "string" && run.includes("libgtk-3-dev"))
+    assert.ok(nativeInstalls.length > 0, `${name} has native build prerequisites`)
+    for (const run of nativeInstalls) {
+      assert.match(run, /\blibgbm-dev\b/, `${name} must link GBM for libwayshot-xcap`)
+      assert.match(run, /\blibpipewire-0\.3-dev\b/, `${name} must compile PipeWire capture`)
+    }
+  }
+})
+
+test("headless conformance compilation does not stage a desktop bundle", async () => {
+  const workflow = parse(await readWorkflow("test.yml"))
+  const step = workflow.jobs.conformance.steps.find(
+    (step) => step.run === "pnpm conformance:prepare"
+  )
+  assert.deepEqual(JSON.parse(step.env.TAURI_CONFIG), {
+    bundle: { resources: [], externalBin: [] },
+  })
+  assert.equal(workflow.jobs.conformance.env?.TAURI_CONFIG, undefined)
+})
+
+test("the update Worker runs in its Cloudflare Vitest pool, outside root Jest", async () => {
+  const config = await readFile(new URL("../../jest.config.ts", import.meta.url), "utf8")
+  assert.match(config, /"\/services\/update-server\/worker\/"/)
+  const pkg = JSON.parse(
+    await readFile(
+      new URL("../../services/update-server/worker/package.json", import.meta.url),
+      "utf8"
+    )
+  )
+  assert.equal(pkg.scripts.test, "vitest run")
+  const workflow = parse(await readWorkflow("share-server.yml"))
+  const job = Object.values(workflow.jobs).find((job) =>
+    job.strategy?.matrix?.service?.includes("update-server")
+  )
+  assert.ok(job, "the excluded Worker still has its own CI job")
+  assert.ok(job.steps.some((step) => step.run?.includes("pnpm test")))
 })

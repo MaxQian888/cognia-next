@@ -77,7 +77,7 @@ function configuredProxy(env) {
   return (env.AGENT_PROXY_URL || "").trim()
 }
 
-function parseProxy(raw) {
+export function parseProxy(raw) {
   if (!raw) {
     throw new UsageError(
       "No proxy configured. Set AGENT_PROXY_URL, for example http://127.0.0.1:7890."
@@ -115,7 +115,7 @@ function redactedProxy(proxy) {
   return safe.toString().replace(/\/$/, "")
 }
 
-function proxyEnvironment(env, proxyUrl) {
+export function proxyEnvironment(env, proxyUrl) {
   return {
     ...env,
     HTTP_PROXY: proxyUrl,
@@ -153,7 +153,7 @@ function connectSocket(proxy, timeoutMs) {
   })
 }
 
-function parseCheckTarget(raw = "example.com:443") {
+export function parseCheckTarget(raw = "example.com:443") {
   let url
   try {
     url = new URL(`tcp://${raw}`)
@@ -180,7 +180,7 @@ function parseCheckTarget(raw = "example.com:443") {
   return { authority, host }
 }
 
-async function probeTunnel(proxy, target) {
+export async function probeTunnel(proxy, target) {
   let socket
   let tunnel
   try {
@@ -351,14 +351,14 @@ async function main() {
 
   const cli = parseCli(process.argv.slice(2))
   if (!cli) return
+  const proxy = parseProxy(configuredProxy(process.env))
+  const checkTarget = parseCheckTarget(process.env.AGENT_PROXY_CHECK_TARGET)
   if (process.platform !== "darwin") {
     throw new UsageError(
       "Fail-closed proxy launching currently requires macOS Seatbelt; this command will not fall back to environment variables alone"
     )
   }
 
-  const proxy = parseProxy(configuredProxy(process.env))
-  const checkTarget = parseCheckTarget(process.env.AGENT_PROXY_CHECK_TARGET)
   const launcher = await findLauncher()
   const args = cli.command ? launcherArgs(proxy.port, cli.command, cli.commandArgs) : undefined
   if (cli.dryRun) {
@@ -395,8 +395,9 @@ async function main() {
   process.exitCode = result.code ?? 1
 }
 
-main().catch((error) => {
-  const prefix = error instanceof UsageError ? "Usage error" : "Preflight error"
-  process.stderr.write(`${prefix}: ${error.message}\n`)
-  process.exitCode = error instanceof UsageError ? EXIT_USAGE : EXIT_PREFLIGHT
-})
+if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath)
+  main().catch((error) => {
+    const prefix = error instanceof UsageError ? "Usage error" : "Preflight error"
+    process.stderr.write(`${prefix}: ${error.message}\n`)
+    process.exitCode = error instanceof UsageError ? EXIT_USAGE : EXIT_PREFLIGHT
+  })

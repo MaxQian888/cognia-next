@@ -1,4 +1,6 @@
 import type { UIMessage } from "ai"
+import Dexie from "dexie"
+import { loggers } from "@cognia/logging"
 import {
   applyReactionChange,
   type MessageReaction,
@@ -126,6 +128,10 @@ function enqueueTranscriptWrite<T>(
   write: () => Promise<T>,
   stream?: PendingStream
 ): Promise<T> {
+  // An enclosing acceptance/settlement transaction already serializes these
+  // stores. Chaining onto a promise created by an earlier write leaves its
+  // Dexie zone and lets the transcript commit independently of its receipt.
+  if (Dexie.currentTransaction) return write()
   const databaseName = getDb().name
   let sessions = pendingWrites.get(databaseName)
   if (!sessions) {
@@ -608,6 +614,8 @@ async function commitMessageDeltaNow(
   sessionId: string,
   { upserts = [], deleteIds = [] }: MessageDelta
 ): Promise<void> {
+  let enclosingTransaction = Dexie.currentTransaction
+  while (enclosingTransaction?.parent) enclosingTransaction = enclosingTransaction.parent
   const db = getDb()
   const session = await db.sessions.get(sessionId)
   assertSessionWritable(session, "send-message")
@@ -700,20 +708,36 @@ async function commitMessageDeltaNow(
     publishedRevision = await bumpTranscriptRevision(db, sessionId)
   })
 
-  assertDatabaseScope(db.name)
-  invalidatePersistSnapshot(sessionId)
-  if (orphanCandidates.size > 0) {
-    await collectUnreferencedMessageMedia(orphanCandidates)
+  const finalize = async () => {
+    assertDatabaseScope(db.name)
+    invalidatePersistSnapshot(sessionId)
+    if (orphanCandidates.size > 0) {
+      await collectUnreferencedMessageMedia(orphanCandidates)
+    }
+    if (publishedRevision !== null) {
+      await publishTranscriptRevision(sessionId, publishedRevision)
+    }
+    if (newUserMessageIds.length > 0) {
+      void dispatchChatMessageTriggers(sessionId, newUserMessageIds, session?.characterId).catch(
+        () => {}
+      )
+    }
+    markSessionDirty(sessionId)
   }
-  if (publishedRevision !== null) {
-    await publishTranscriptRevision(sessionId, publishedRevision)
+  if (enclosingTransaction) {
+    // A nested transaction resolving is not a durable commit. Publish and
+    // collect media only after the outer acceptance/settlement commits.
+    enclosingTransaction.on("complete", () => {
+      void Dexie.ignoreTransaction(finalize).catch((error: unknown) => {
+        loggers.store.warn("committed transcript finalization failed", {
+          sessionId,
+          error: String(error),
+        })
+      })
+    })
+  } else {
+    await finalize()
   }
-  if (newUserMessageIds.length > 0) {
-    void dispatchChatMessageTriggers(sessionId, newUserMessageIds, session?.characterId).catch(
-      () => {}
-    )
-  }
-  markSessionDirty(sessionId)
 }
 
 /**

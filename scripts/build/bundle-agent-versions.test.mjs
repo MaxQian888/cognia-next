@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
   symlinkSync,
   writeFileSync,
@@ -357,9 +358,9 @@ describe("stage", () => {
     ],
   }
 
-  function fixture() {
+  function fixture(libc = "musl") {
     const root = tempDir()
-    const tree = join(root, "opt/cognia/musl")
+    const tree = join(root, "opt/cognia", libc)
     const agents = join(tree, "lib/agents/node_modules")
     mkdirSync(join(agents, "@scope/js-cli/dist"), { recursive: true })
     writeFileSync(
@@ -379,6 +380,8 @@ describe("stage", () => {
     writeFileSync(join(system, "usr/lib/libstdc++.so.6.0.33"), "c++")
     symlinkSync("libstdc++.so.6.0.33", join(system, "usr/lib/libstdc++.so.6"))
     writeFileSync(join(system, "usr/lib/libgcc_s.so.1"), "gcc")
+    writeFileSync(join(system, "usr/lib/libatomic.so.1.2.0"), "atomic")
+    symlinkSync("libatomic.so.1.2.0", join(system, "usr/lib/libatomic.so.1"))
     writeFileSync(join(system, "node"), "node binary")
 
     const injection = join(root, "cognia")
@@ -441,6 +444,29 @@ describe("stage", () => {
       ["<root>/musl/bin/native", "--version"],
       ["<root>/musl/bin/vendor", "--version"],
     ])
+  })
+
+  it("bundles the glibc Node atomic runtime without replacing the host glibc or C++ runtime", async () => {
+    const { tree, system, injection } = fixture("glibc")
+    const calls = []
+    await stage({
+      pins: PINS,
+      libc: "glibc",
+      arch: "amd64",
+      tree,
+      run: (command, args) => { calls.push({ command, args }); return { status: 0 } },
+      execPath: join(system, "node"),
+      systemLib: { atomicDir: join(system, "usr/lib") },
+      injectionRoot: injection,
+      log: () => {},
+    })
+    assert.equal(readFileSync(join(tree, "node/lib/libatomic.so.1"), "utf8"), "atomic")
+    assert.deepEqual(readdirSync(join(tree, "node/lib")), ["libatomic.so.1"])
+    assert.deepEqual(calls[0], {
+      command: "patchelf",
+      args: ["--set-rpath", "$ORIGIN/../lib", join(tree, "node/bin/node")],
+    })
+    assert.deepEqual(calls[1], { command: join(tree, "node/bin/node"), args: ["--version"] })
   })
 
   it("refuses a tree the injection root does not reach, a bad checksum and a failing smoke", async () => {

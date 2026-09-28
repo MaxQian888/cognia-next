@@ -77,7 +77,7 @@ export function ImageCatalogSection() {
   return (
     <div className="space-y-4" data-testid="image-catalog-section">
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
           <div className="space-y-1.5">
             <CardTitle className="flex items-center gap-2">
               <ContainerIcon className="size-5" aria-hidden="true" />
@@ -149,7 +149,7 @@ export function ImageCatalogSection() {
       {status === "ready" && facts ? (
         <>
           <Card>
-            <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+            <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
               <div className="space-y-1.5">
                 <CardTitle>{t("entries.title")}</CardTitle>
                 <CardDescription>{t("entries.description")}</CardDescription>

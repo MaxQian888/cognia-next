@@ -31,9 +31,11 @@
  */
 
 import { fileURLToPath } from "node:url"
+import path from "node:path"
 import { Command, CommanderError } from "commander"
 import { execaSync } from "execa"
 import { z } from "zod"
+import { checkGroup, mergeCoverageFiles } from "./merge-coverage.mjs"
 
 /** Directories whose files are coverage-collected (mirrors jest.config.ts). */
 const COLLECTED_ROOTS = [
@@ -56,7 +58,15 @@ const COLLECTED_ROOTS = [
  * happens to catch the web copy too, but these patterns are anchored at the
  * repo root and would not.
  */
-const EXCLUDED = [/^components\/ui\//, /^components\/ai-elements\//, /^web\/components\/ui\//]
+const EXCLUDED = [
+  /^components\/ui\//,
+  /^components\/ai-elements\//,
+  /^web\/components\/ui\//,
+  // Explicit type-only and PTY-driver exclusions documented in jest.config.ts.
+  /^lib\/claude\/agents\/subagents\/types\.ts$/,
+  /^packages\/agent-config-types\/src\/lsp-config\.ts$/,
+  /^cli\/src\/tui\/pty\/tui-app-fixture\.tsx$/,
+]
 
 const SOURCE_EXT = /\.(ts|tsx|js|jsx)$/
 const NON_SOURCE = /\.(test|spec|stories)\.[^/]+$/
@@ -64,6 +74,7 @@ const NON_SOURCE = /\.(test|spec|stories)\.[^/]+$/
 const cliSchema = z.object({
   base: z.string().trim().min(1, "--base requires a ref").default("origin/dev"),
   strict: z.boolean().default(false),
+  coverageMap: z.string().trim().min(1).optional(),
 })
 
 function createProgram() {
@@ -75,6 +86,10 @@ function createProgram() {
     .exitOverride()
     .option("--base <ref>", "Git ref used to find the merge base.", "origin/dev")
     .option("--strict", "Enforce 90% coverage on the changed files.")
+    .option(
+      "--coverage-map <file>",
+      "Check an existing complete coverage map instead of rerunning tests."
+    )
 }
 
 export function parseArgs(argv) {
@@ -107,10 +122,7 @@ export function filterCoverageTargets(files) {
  */
 export function buildJestArgs(files, { strict = false } = {}) {
   const coverageFrom = files.length === 1 ? files[0] : `{${files.join(",")}}`
-  const perFileThreshold = { branches: 90, functions: 90, lines: 90, statements: 90 }
-  const threshold = strict
-    ? Object.fromEntries(files.map((file) => [`./${file}`, perFileThreshold]))
-    : {}
+  const threshold = strict ? changedFileThresholds(files) : {}
   return [
     "--coverage",
     `--collectCoverageFrom=${coverageFrom}`,
@@ -118,6 +130,22 @@ export function buildJestArgs(files, { strict = false } = {}) {
     "--findRelatedTests",
     ...files,
   ]
+}
+
+export function changedFileThresholds(files) {
+  return Object.fromEntries(
+    files.map((file) => [`./${file}`, { branches: 90, functions: 90, lines: 90, statements: 90 }])
+  )
+}
+
+export function checkChangedCoverage(map, files, { strict = false, cwd = process.cwd() } = {}) {
+  if (!strict) return []
+  const covered = new Map(map.files().map((file) => [path.resolve(cwd, file), file]))
+  return Object.entries(changedFileThresholds(files)).flatMap(([file, thresholds]) => {
+    const exact = covered.get(path.resolve(cwd, file))
+    if (!exact) return [`Coverage data for ${file} was not found.`]
+    return checkGroup(file, thresholds, map.fileCoverageFor(exact).toSummary())
+  })
 }
 
 /** Changed files vs the merge-base with `base`, plus untracked files. */
@@ -143,6 +171,11 @@ function main() {
     `[coverage-changed] ${targets.length} changed file(s) vs ${args.base}:\n` +
       targets.map((f) => `  - ${f}`).join("\n")
   )
+  if (args.coverageMap) {
+    const errors = checkChangedCoverage(mergeCoverageFiles([args.coverageMap]), targets, args)
+    for (const error of errors) console.error(`[coverage-changed] ${error}`)
+    return errors.length === 0 ? 0 : 1
+  }
   const result = execaSync("pnpm", ["exec", "jest", ...buildJestArgs(targets, args)], {
     stdio: "inherit",
     env: { ...process.env, JEST_COVERAGE: "1" },

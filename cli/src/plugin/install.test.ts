@@ -122,6 +122,7 @@ describe("installFromGithubRef", () => {
           json: async () => ({
             type: "file",
             content: Buffer.from(MANIFEST).toString("base64"),
+            encoding: "base64",
           }),
         } as unknown as Response
       }
@@ -139,7 +140,11 @@ describe("installFromGithubRef", () => {
         return {
           status: 200,
           ok: true,
-          json: async () => ({ type: "file", content: binary.toString("base64") }),
+          json: async () => ({
+            type: "file",
+            content: binary.toString("base64"),
+            encoding: "base64",
+          }),
         } as unknown as Response
       }
       return { status: 404, ok: false, json: async () => ({}) } as unknown as Response
@@ -251,6 +256,7 @@ describe("installFromGithubRef", () => {
           json: async () => ({
             type: "file",
             content: Buffer.from(MANIFEST).toString("base64"),
+            encoding: "base64",
           }),
         } as unknown as Response
       }
@@ -271,7 +277,7 @@ describe("installFromGithubRef", () => {
 
     await expect(
       installFromGithubRef("owner/repo", { home: "/home/u", fs: fakeFs() })
-    ).rejects.toThrow(/not a file: vanished\.js/)
+    ).rejects.toThrow(/could not be read completely: vanished\.js/)
   })
 
   it("rejects a non-frontend plugin as unsupported in CLI", async () => {
@@ -307,21 +313,23 @@ describe("installFromGithubRef", () => {
     )
   })
 
-  it("skips missing dirs and malformed listing entries", async () => {
-    installGlobalFetch({
-      "plugin.json": MANIFEST,
-      "": [
-        { type: "file", path: "plugin.json" },
-        { type: "dir", path: "ghost" }, // listing 404s → skipped
-        { type: "file" } as unknown as { type: "file"; path: string }, // no path → skipped
-      ],
-      // "ghost" key intentionally absent → 404 → null → not an array → return
-    })
-    const fs = fakeFs()
-    const result = await installFromGithubRef("owner/repo", { home: "/home/u", fs })
-    expect(result.id).toBe("demo.plugin")
-    expect([...fs.writes.keys()].some((k) => k.endsWith("plugin.json"))).toBe(true)
-  })
+  it.each([
+    { listing: [{ type: "dir", path: "ghost" }], error: /GitHub API 404.*directory ghost/ },
+    { listing: [{ type: "file" }], error: /unsupported or invalid entry/ },
+  ])(
+    "rejects incomplete repository snapshots before writing: $error",
+    async ({ listing, error }) => {
+      installGlobalFetch({
+        "plugin.json": MANIFEST,
+        "": listing as Node,
+      })
+      const fs = fakeFs()
+      await expect(installFromGithubRef("owner/repo", { home: "/home/u", fs })).rejects.toThrow(
+        error
+      )
+      expect(fs.writes.size).toBe(0)
+    }
+  )
 
   it("writes through the real default fs when none is injected", async () => {
     installGlobalFetch({

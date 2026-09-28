@@ -7,6 +7,7 @@ import tls from "node:tls"
 import { spawn, spawnSync } from "node:child_process"
 import { afterEach, test } from "node:test"
 import { fileURLToPath } from "node:url"
+import { parseProxy, parseCheckTarget, probeTunnel, proxyEnvironment } from "./agent-proxy.mjs"
 
 const script = fileURLToPath(new URL("./agent-proxy.mjs", import.meta.url))
 const cleanup = []
@@ -139,6 +140,12 @@ function run(args = [], env = {}) {
   })
 }
 
+function assertUnsupportedPlatform(result) {
+  assert.equal(result.code, 2)
+  assert.match(result.stderr, /requires macOS Seatbelt/)
+  assert.doesNotMatch(result.stdout, /"args"|ready/i)
+}
+
 test("fails closed when no proxy is configured", async () => {
   const result = await run(["--check"])
 
@@ -174,6 +181,11 @@ test("refuses to launch when the proxy cannot establish the configured tunnel", 
     AGENT_PROXY_URL: `http://127.0.0.1:${port}`,
   })
 
+  await assert.rejects(
+    probeTunnel(parseProxy(`http://127.0.0.1:${port}`), parseCheckTarget()),
+    /CONNECT.*407/i
+  )
+  if (process.platform !== "darwin") return assertUnsupportedPlatform(result)
   assert.equal(result.code, 3)
   assert.match(result.stderr, /CONNECT.*407/i)
   assert.doesNotMatch(result.stdout, /"args"/)
@@ -185,6 +197,11 @@ test("rejects a proxy that returns CONNECT 200 but cannot carry tunnel traffic",
     AGENT_PROXY_URL: `http://127.0.0.1:${port}`,
   })
 
+  await assert.rejects(
+    probeTunnel(parseProxy(`http://127.0.0.1:${port}`), parseCheckTarget()),
+    /TLS|tunnel|socket|closed|reset/i
+  )
+  if (process.platform !== "darwin") return assertUnsupportedPlatform(result)
   assert.equal(result.code, 3)
   assert.match(result.stderr, /TLS|tunnel|socket|closed|reset/i)
 })
@@ -199,6 +216,12 @@ test("launches any agent command through the pinned proxy with bypass variables 
     no_proxy: "localhost",
   })
 
+  const environment = proxyEnvironment({ NO_PROXY: "*", no_proxy: "localhost" }, proxyUrl)
+  assert.equal(environment.HTTP_PROXY, proxyUrl)
+  assert.equal(environment.HTTPS_PROXY, proxyUrl)
+  assert.equal(environment.NO_PROXY, "")
+  assert.equal(environment.no_proxy, "")
+  if (process.platform !== "darwin") return assertUnsupportedPlatform(result)
   assert.equal(result.code, 0, result.stderr)
   const capture = JSON.parse(result.stdout.trim().split("\n").at(-1))
   assert.deepEqual(capture.args, ["--mode", "safe"])
@@ -223,6 +246,8 @@ test("check mode validates the proxy and sandbox without requiring an agent comm
     AGENT_PROXY_LAUNCHER: "/usr/bin/false",
   })
 
+  await probeTunnel(parseProxy(`http://127.0.0.1:${port}`), parseCheckTarget())
+  if (process.platform !== "darwin") return assertUnsupportedPlatform(result)
   assert.equal(result.code, 0, result.stderr)
   assert.match(result.stdout, /ready/i)
   assert.doesNotMatch(result.stdout, /"args"/)
@@ -236,8 +261,10 @@ test("check mode tunnels to a caller-selected generic target", async () => {
     AGENT_PROXY_CHECK_TARGET: "api.openai.com:443",
   })
 
-  assert.equal(result.code, 0, result.stderr)
+  await probeTunnel(parseProxy(`http://127.0.0.1:${port}`), parseCheckTarget("api.openai.com:443"))
   assert.match(request, /^CONNECT api\.openai\.com:443 HTTP\/1\.1\r\n/)
+  if (process.platform !== "darwin") return assertUnsupportedPlatform(result)
+  assert.equal(result.code, 0, result.stderr)
 })
 
 test("rejects check targets with non-authority URL components", async () => {

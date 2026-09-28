@@ -80,7 +80,7 @@ export function RemoteAccessSummary({ isHost, relay, tunnel, mesh }: RemoteAcces
   const t = useTranslations("settings.connectivity.remoteAccess")
   const tMesh = useTranslations("settings.connectivity.mesh")
   const meshPick = preferredMeshAddress(mesh.status)
-  const meshInstalled = mesh.status?.networks.find(
+  const meshInstalled = mesh.status?.networks?.find(
     (network) => meshProviderState(network) === "installed"
   )
   const tunnelExposesHost = Boolean(

@@ -599,19 +599,27 @@ describe("createExternalAgentSession", () => {
     const dispatch = (action: Parameters<typeof tuiReducer>[1]) => {
       state = tuiReducer(state, action)
     }
-    const gate = createGateController((req) =>
+    let notifyOverlayOpened!: () => void
+    const overlayOpened = new Promise<void>((resolve) => {
+      notifyOverlayOpened = resolve
+    })
+    const gate = createGateController((req) => {
       dispatch({
         type: "OVERLAY_OPEN",
         overlay: { kind: "permission", req, choices: DEFAULT_PERMISSION_CHOICES, index: 0 },
       })
-    )
+      notifyOverlayOpened()
+    })
 
     const turn = runTurn({ session, prompt: "edit", dispatch, gate: gate.responder })
-    // The turn now resolves the whole Cognia context before it reaches the
-    // agent, so wait for the overlay rather than counting ticks.
-    for (let i = 0; i < 200 && state.overlay.kind !== "permission"; i++) {
-      await new Promise((resolve) => setImmediate(resolve))
-    }
+    // Context assembly can await filesystem work; an event-loop tick budget
+    // races that work on CI. Observe the actual permission request instead.
+    await Promise.race([
+      overlayOpened,
+      turn.then(() => {
+        throw new Error("The turn completed without requesting permission")
+      }),
+    ])
     expect(state.overlay).toMatchObject({
       kind: "permission",
       req: { toolName: "edit", input: { path: "a.ts" } },

@@ -71,18 +71,23 @@ function balanceWeightedTests(tests, shardCount) {
     throw new Error("shardCount must be a positive integer")
   }
   const shards = Array.from({ length: shardCount }, () => ({ tests: [], weight: 0 }))
+  // The Jest parent retains each suite's coverage map. Duration balancing
+  // alone can leave one shard holding thousands of short suites.
+  const capacity = Math.ceil(tests.length / shardCount)
   const longestFirst = [...tests].sort(
     (left, right) => right.weight - left.weight || left.id.localeCompare(right.id)
   )
 
   for (const test of longestFirst) {
-    const target = shards.reduce((best, shard) => {
-      if (shard.weight !== best.weight) return shard.weight < best.weight ? shard : best
-      if (shard.tests.length !== best.tests.length) {
-        return shard.tests.length < best.tests.length ? shard : best
-      }
-      return best
-    })
+    const target = shards
+      .filter((shard) => shard.tests.length < capacity)
+      .reduce((best, shard) => {
+        if (shard.weight !== best.weight) return shard.weight < best.weight ? shard : best
+        if (shard.tests.length !== best.tests.length) {
+          return shard.tests.length < best.tests.length ? shard : best
+        }
+        return best
+      })
     target.tests.push(test)
     target.weight += test.weight
   }

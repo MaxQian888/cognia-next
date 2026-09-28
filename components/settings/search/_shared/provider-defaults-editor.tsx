@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronDown, ChevronUp } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -97,9 +98,10 @@ export function ProviderDefaultsEditor({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
-        <button
+        <Button
+          variant="ghost"
           type="button"
-          className="flex w-full items-center justify-between text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="flex h-auto w-full items-center justify-between p-0 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           <span className="flex items-center gap-1.5">
             {t("overrides.title")}
@@ -110,7 +112,7 @@ export function ProviderDefaultsEditor({
             )}
           </span>
           {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-        </button>
+        </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="space-y-2 pt-2">

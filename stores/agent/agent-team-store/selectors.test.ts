@@ -417,7 +417,7 @@ describe("agent-team-store store-level config", () => {
     // Tracks `PERSIST_VERSION`. This said 6 for as long as the suite could not
     // load, which is what a dark test costs: the bump to 7 landed with nothing
     // watching.
-    expect(parsed.version).toBe(8)
+    expect(parsed.version).toBe(9)
     expect(parsed.state.displayMode).toBe("compact")
     // partialize keeps templates / defaultConfig / displayMode / workspaceTab /
     // lastAdapterSyncVersion. Squad templates stay here because they are

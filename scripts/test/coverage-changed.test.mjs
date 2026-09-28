@@ -7,12 +7,19 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import path from "node:path"
+import { readFileSync } from "node:fs"
+import libCoverage from "istanbul-lib-coverage"
+import ts from "typescript"
+import { parse as parseYaml } from "yaml"
+import { filterCollectedSources } from "./merge-coverage.mjs"
 
 import {
   parseArgs,
   filterCoverageTargets,
   buildJestArgs,
   listChangedFiles,
+  checkChangedCoverage,
 } from "./coverage-changed.mjs"
 
 test("parseArgs defaults, overrides, and rejects unknown flags", () => {
@@ -22,6 +29,172 @@ test("parseArgs defaults, overrides, and rejects unknown flags", () => {
   assert.deepEqual(parseArgs(["--base", "dev", "--strict"]), { base: "dev", strict: true })
   assert.throws(() => parseArgs(["--nope"]), /unknown option/i)
   assert.throws(() => parseArgs(["--base"]), /argument missing/i)
+  assert.equal(
+    parseArgs(["--coverage-map", "coverage/coverage-final.json"]).coverageMap,
+    "coverage/coverage-final.json"
+  )
+})
+
+test("merged coverage enforces the same per-file floors and rejects missing data", () => {
+  const filename = path.resolve("lib/coverage-fixture.ts")
+  const map = libCoverage.createCoverageMap({
+    [filename]: {
+      path: filename,
+      statementMap: { 0: { start: { line: 1, column: 0 }, end: { line: 1, column: 1 } } },
+      fnMap: {},
+      branchMap: {},
+      s: { 0: 1 },
+      f: {},
+      b: {},
+    },
+  })
+  assert.deepEqual(checkChangedCoverage(map, ["lib/coverage-fixture.ts"], { strict: true }), [])
+  map.fileCoverageFor(filename).data.s[0] = 0
+  assert.ok(
+    checkChangedCoverage(map, ["lib/coverage-fixture.ts"], { strict: true }).some((error) =>
+      error.includes("90%")
+    )
+  )
+  assert.ok(
+    checkChangedCoverage(map, ["lib/missing.ts"], { strict: true }).some((error) =>
+      error.includes("not found")
+    )
+  )
+  assert.deepEqual(checkChangedCoverage(map, ["lib/coverage-fixture.ts"]), [])
+})
+
+test("changed files cannot borrow coverage from a file with a matching path prefix", () => {
+  const filename = path.resolve("lib/exact.ts")
+  const neighbor = `${filename}x`
+  const map = libCoverage.createCoverageMap({})
+  for (const [file, count, hit] of [
+    [filename, 1, 0],
+    [neighbor, 10, 1],
+  ]) {
+    const statementMap = {},
+      s = {}
+    for (let index = 0; index < count; index++) {
+      statementMap[index] = {
+        start: { line: index + 1, column: 0 },
+        end: { line: index + 1, column: 1 },
+      }
+      s[index] = hit
+    }
+    map.addFileCoverage({ path: file, statementMap, fnMap: {}, branchMap: {}, s, f: {}, b: {} })
+  }
+  assert.ok(
+    checkChangedCoverage(map, ["lib/exact.ts"], { strict: true }).some((error) =>
+      error.includes("(0%)")
+    )
+  )
+  map.filter((file) => file !== filename)
+  assert.deepEqual(checkChangedCoverage(map, ["lib/exact.ts"], { strict: true }), [
+    "Coverage data for ./lib/exact.ts was not found.",
+  ])
+})
+
+test("strict merged checks retain function and branch floors as well as lines", () => {
+  const filename = path.resolve("lib/metrics.ts")
+  const loc = { start: { line: 1, column: 0 }, end: { line: 1, column: 1 } }
+  const map = libCoverage.createCoverageMap({
+    [filename]: {
+      path: filename,
+      statementMap: { 0: loc },
+      fnMap: { 0: { name: "fn", decl: loc, loc, line: 1 } },
+      branchMap: { 0: { type: "if", line: 1, loc, locations: [loc, loc] } },
+      s: { 0: 1 },
+      f: { 0: 0 },
+      b: { 0: [1, 0] },
+    },
+  })
+  const errors = checkChangedCoverage(map, ["lib/metrics.ts"], { strict: true })
+  assert.equal(errors.length, 2)
+  assert.ok(errors.some((error) => error.includes("functions (0%)")))
+  assert.ok(errors.some((error) => error.includes("branches (50%)")))
+})
+
+test("moved runtime obligations exist in the complete map while type-only and test drivers do not", () => {
+  const runtime = [
+    "packages/agent-config-types/src/claude-agent-sdk-options.ts",
+    "packages/agent-config-types/src/runtime-versions.ts",
+    "packages/companion-client/src/browser-enrollment-payload.ts",
+    "packages/companion-client/src/session.ts",
+    "packages/plugin-ui/src/live-query.ts",
+    "packages/provider-types/src/provider.ts",
+  ]
+  const excluded = [
+    "lib/claude/agents/subagents/types.ts",
+    "packages/agent-config-types/src/lsp-config.ts",
+    "cli/src/tui/pty/tui-app-fixture.tsx",
+  ]
+  assert.deepEqual(filterCoverageTargets([...runtime, ...excluded]), runtime)
+  const map = libCoverage.createCoverageMap({})
+  for (const file of [...runtime, ...excluded]) {
+    map.addFileCoverage({
+      path: path.resolve(file),
+      statementMap: {},
+      fnMap: {},
+      branchMap: {},
+      s: {},
+      f: {},
+      b: {},
+    })
+  }
+  filterCollectedSources(map)
+  assert.deepEqual(map.files().sort(), runtime.map((file) => path.resolve(file)).sort())
+})
+
+test("the exact type-only exclusions cannot acquire runtime statements silently", () => {
+  const emittedRuntime = (source) =>
+    ts
+      .transpileModule(source, {
+        compilerOptions: {
+          module: ts.ModuleKind.ESNext,
+          target: ts.ScriptTarget.ESNext,
+          removeComments: true,
+        },
+      })
+      .outputText.trim()
+      .replace(/^export\s*\{\s*\};?$/, "")
+  for (const file of [
+    "lib/claude/agents/subagents/types.ts",
+    "packages/agent-config-types/src/lsp-config.ts",
+  ]) {
+    assert.equal(
+      emittedRuntime(readFileSync(new URL(`../../${file}`, import.meta.url), "utf8")),
+      "",
+      `${file} now contains runtime code; collect it instead of retaining the type-only exemption`
+    )
+  }
+  assert.notEqual(emittedRuntime("export const requiredAtRuntime = true"), "")
+  assert.notEqual(emittedRuntime('import "./side-effect"; export interface Contract {}'), "")
+})
+
+test("CI changed coverage consumes only a successful complete merge", () => {
+  const workflow = parseYaml(
+    readFileSync(new URL("../../.github/workflows/test.yml", import.meta.url), "utf8")
+  )
+  const changed = workflow.jobs["coverage-changed"]
+  assert.ok(changed.needs.includes("test"))
+  assert.ok(changed.needs.includes("coverage-merge"))
+  assert.match(changed.if, /needs\.test\.result == 'success'/)
+  const download = changed.steps.findIndex(
+    (step) =>
+      step.uses?.startsWith("actions/download-artifact@") && step.with?.name === "coverage-report"
+  )
+  const check = changed.steps.findIndex((step) =>
+    step.run?.includes("scripts/test/coverage-changed.mjs")
+  )
+  assert.ok(download >= 0 && check > download)
+  assert.match(changed.steps[check].run, /--strict/)
+  assert.match(changed.steps[check].run, /--coverage-map coverage\/coverage-final\.json/)
+  assert.ok(
+    workflow.jobs["coverage-merge"].steps.some(
+      (step) =>
+        step.run?.includes("merge-coverage.mjs --check") &&
+        step.if === "needs.test.result == 'success'"
+    )
+  )
 })
 
 test("filterCoverageTargets keeps collected sources only", () => {

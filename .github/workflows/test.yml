@@ -4,7 +4,7 @@ name: Test Suite
 # Test Suite & Build Verification
 # ============================================================================
 # Job graph:
-#   test (jest, 4 coverage shards) ─┐
+#   test (jest, 64 bounded coverage shards) ─┐
 #                                   ├─ coverage-merge (merge maps + enforce
 #   sidecar (node --test suites)    │   thresholds + publish junit)
 #   build (plain static export, bundle size)
@@ -43,8 +43,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  jest-plan:
+    name: Freeze Jest shard timing input
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Restore Jest suite timing history
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/jest/timings.json
+          key: ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-
+
+      - name: Initialize missing history
+        run: |
+          mkdir -p .cache/jest
+          if [ ! -f .cache/jest/timings.json ]; then
+            printf '%s\n' '{"version":1,"tests":{}}' > .cache/jest/timings.json
+          fi
+      - name: Publish immutable timing input
+        uses: actions/upload-artifact@v7
+        with:
+          name: jest-timing-input
+          path: .cache/jest/timings.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
   test:
-    name: Jest (shard ${{ matrix.shard }}/4)
+    needs: jest-plan
+    name: Jest (shard ${{ matrix.shard }}/64)
     runs-on: ubuntu-latest
 
     permissions:
@@ -52,8 +84,75 @@ jobs:
 
     strategy:
       fail-fast: false
+      max-parallel: 16
       matrix:
-        shard: [1, 2, 3, 4]
+        shard:
+          [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+          ]
 
     steps:
       - name: Checkout code
@@ -73,28 +172,29 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # All four shards must restore the same completed-run manifest. Letting
-      # matrix jobs save independently would produce different assignments and
-      # risk duplicate/missing suites, so only coverage-merge saves the unified
-      # history after it has downloaded every shard result.
-      - name: Restore Jest suite timing history
-        uses: actions/cache/restore@v6
+      - name: Build Jest runtime prerequisites
+        run: |
+          pnpm build:packages
+          pnpm sidecar:webclone:build
+
+      # Every wave consumes the same snapshot, even if another branch updates
+      # the cross-run cache while this matrix is still running.
+      - name: Download frozen Jest timing input
+        uses: actions/download-artifact@v8
         with:
-          path: .cache/jest/timings.json
-          key: ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-
+          name: jest-timing-input
+          path: .cache/jest/
 
       # Thresholds are intentionally disabled per shard (see header comment);
       # the json reporter emits the raw istanbul map for the merge job.
       - name: Run Jest shard with coverage
         run: >-
-          pnpm exec jest --coverage --shard=${{ matrix.shard }}/4
+          pnpm exec jest --coverage --silent --shard=${{ matrix.shard }}/64
           --coverageReporters=json --coverageThreshold='{}' --maxWorkers=2
         env:
-          # The parent retains the shard's coverage map and exceeded 3 GB even
-          # with worker recycling. Two workers keep peak RSS bounded while
-          # allowing the parent enough heap to emit the complete JSON map.
+          # V8 retains per-suite coverage in the parent: 250 suites exceeded
+          # 6 GB despite worker recycling. Bound each process to ~160 of the
+          # 10,000 suites, with 16 concurrent jobs and unchanged merged gates.
           NODE_OPTIONS: "--max-old-space-size=6144"
           JEST_COVERAGE: "1"
           JEST_JUNIT_OUTPUT_NAME: junit-shard-${{ matrix.shard }}.xml
@@ -240,8 +340,9 @@ jobs:
   # would be theatre. Direct pushes are still covered by the merged gate.
   coverage-changed:
     name: Coverage Gate (changed files)
+    needs: [test, coverage-merge]
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && needs.test.result == 'success'
 
     permissions:
       contents: read
@@ -265,11 +366,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Download complete coverage map
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-report
+          path: coverage/
+
+      # Reuse the complete, bounded-shard result instead of launching another
+      # unbounded V8 coverage process for all transitively related tests.
       # `--base` is always explicit here: the script's default (origin/dev)
       # serves local runs, but CI must gate against the branch the PR actually
       # targets.
       - name: Enforce 90% coverage on changed files
-        run: node scripts/test/coverage-changed.mjs --base "origin/${{ github.base_ref }}" --strict
+        run: node scripts/test/coverage-changed.mjs --base "origin/${{ github.base_ref }}" --strict --coverage-map coverage/coverage-final.json
 
   # ADR-0090's compatibility contract is executable, not documentary. Keep it
   # in a dedicated job because it builds and launches the real headless server
@@ -310,12 +419,15 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             libpipewire-0.3-dev \
+            libgbm-dev \
             librsvg2-dev \
             patchelf \
             libssl-dev
       - name: Build sidecars
         run: pnpm sidecars:install && pnpm sidecars:build
       - name: Build the conformance server
+        env:
+          TAURI_CONFIG: '{"bundle":{"resources":[],"externalBin":[]}}'
         run: pnpm conformance:prepare
       - name: Run the conformance suite
         run: pnpm test:conformance
@@ -1012,6 +1124,7 @@ jobs:
             libappindicator3-dev \
             libglib2.0-dev \
             libpipewire-0.3-dev \
+            libgbm-dev \
             librsvg2-dev \
             patchelf \
             libssl-dev

@@ -708,6 +708,7 @@ mod tests {
                     network: NetworkPolicy::Off,
                     max_cpu_seconds: 0,
                     max_memory_mb: 0,
+                    max_processes: 0,
                 },
             )
             .await

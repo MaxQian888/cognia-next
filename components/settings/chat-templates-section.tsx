@@ -548,7 +548,7 @@ export function ChatTemplatesSection({ mobile = false }: ChatTemplatesSectionPro
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="chat-templates-section">
-      <input
+      <Input
         ref={fileInputRef}
         type="file"
         accept=".md,.mdx,text/markdown"
@@ -901,12 +901,13 @@ function TemplateGroup({
         ) : null}
       </div>
       {items.map((item) => (
-        <button
+        <Button
+          variant="ghost"
           key={item.row.id}
           type="button"
           onClick={() => onSelect(item)}
           className={cn(
-            "flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-accent",
+            "h-auto items-stretch whitespace-normal flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-accent",
             selectedId === item.row.id && "bg-accent"
           )}
         >
@@ -914,7 +915,7 @@ function TemplateGroup({
           <span className="truncate font-mono text-[10px] text-muted-foreground">
             {item.row.body.split("\n")[0]}
           </span>
-        </button>
+        </Button>
       ))}
     </div>
   )

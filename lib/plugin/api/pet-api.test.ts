@@ -32,6 +32,18 @@ import { PermissionError } from "@/lib/plugin/security/permission-guard"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
 import type { PetEvent, PetProfile } from "@/types/pet"
 
+let mockPlatform: "tauri" | "web" = "tauri"
+let mockPetEnabled = true
+jest.mock("@/lib/platform/detect", () => ({
+  detectPlatform: () => mockPlatform,
+  isTauri: () => mockPlatform === "tauri",
+}))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: {
+    getState: () => ({ settings: { petSettings: { enabled: mockPetEnabled } } }),
+  },
+}))
+
 // --- mock the Dexie data layer ------------------------------------------
 let profileValue: PetProfile | undefined
 let ownedItems: Set<string>
@@ -82,6 +94,8 @@ function grantedApi() {
 }
 
 beforeEach(() => {
+  mockPlatform = "tauri"
+  mockPetEnabled = true
   jest.clearAllMocks()
   subscribers.clear()
   resetPermissionGuard()
@@ -94,6 +108,25 @@ beforeEach(() => {
 })
 
 describe("capability gate", () => {
+  it.each(["web", "disabled"])("does not award or spend inventory when %s", async (reason) => {
+    mockPlatform = reason === "web" ? "web" : "tauri"
+    mockPetEnabled = reason !== "disabled"
+    const api = grantedApi()
+    await expect(api.interact("fed", { itemId: "berry" })).resolves.toEqual({
+      grantedXp: 0,
+      grantedCoins: 0,
+    })
+    await expect(api.emitEvent("fed", { xp: 5 })).resolves.toEqual({
+      grantedXp: 0,
+      grantedCoins: 0,
+    })
+    expect(emitPetEvent).not.toHaveBeenCalled()
+    expect(ownedItems.has("berry")).toBe(true)
+    expect(api.getRemainingBudget()).toEqual({
+      xp: PET_DAILY_XP_BUDGET,
+      coins: PET_DAILY_COIN_BUDGET,
+    })
+  })
   it("is a warn-once no-op without the 'pet' capability", async () => {
     getPermissionGuard().registerPlugin(PLUGIN, ["pet:read", "pet:interact"])
     const api = createPetAPI({ pluginId: PLUGIN, capabilities: [] })

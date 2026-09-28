@@ -874,7 +874,7 @@ function KnowledgeBaseSubsection({ knowledgeBases }: { knowledgeBases: Knowledge
           </AlertDialogHeader>
           {(pendingDelete?.references.length ?? 0) > 0 && (
             <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-              {pendingDelete?.references.map((reference) => (
+              {pendingDelete?.references?.map((reference) => (
                 <li key={`${reference.kind}:${reference.id}`}>{reference.name}</li>
               ))}
             </ul>

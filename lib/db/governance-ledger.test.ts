@@ -356,6 +356,23 @@ describe("governance ledger", () => {
     expect(JSON.stringify(gaps)).not.toContain("alice@example.com")
   })
 
+  it("records and deduplicates audit gaps when the timestamp digits pass the card checksum", async () => {
+    // This genuine Unix millisecond timestamp passes Luhn. It is metadata,
+    // but embedding its decimal digits in an ID looks like a card to the gate.
+    const input = {
+      producer: "workflow-branch",
+      operation: "record",
+      subjectRef: ref("workflow-step", "run_safe:n_branch"),
+      occurredAt: 1790570540000,
+    }
+    await reportGovernanceProjectionFailure(input, new Error("ledger unavailable"))
+    await reportGovernanceProjectionFailure(input, new Error("ledger unavailable"))
+    const gaps = await listRecentGovernanceAuditGaps()
+    expect(gaps).toHaveLength(1)
+    expect(gaps[0]).toMatchObject({ occurredAt: input.occurredAt, subjectRef: input.subjectRef })
+    expect(gaps[0].eventId).not.toContain(String(input.occurredAt))
+  })
+
   it("keeps workflow correlation on projection audit gaps", async () => {
     await reportGovernanceProjectionFailure(
       {

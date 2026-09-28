@@ -135,6 +135,8 @@ const baseTestPathIgnorePatterns = [
   // Jest's CJS loader can't resolve. Run them via the share-server workspace's
   // own `vitest` / `wrangler` scripts, not the root Jest suite.
   "/share-server/",
+  // This Worker uses its own Vitest pool with the Cloudflare runtime too.
+  "/services/update-server/worker/",
   // `tmp/` is gitignored (see .gitignore) — a local-only vendored clone of
   // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.
   "/tmp/",
@@ -491,8 +493,9 @@ const globalConfig: Config = {
     "web/hooks/**/*.{ts,tsx}",
     "web/lib/**/*.{ts,tsx}",
     // Extracted provider workspace packages. provider-core originated from
-    // lib/ai/providers (coverage-gated), so keep it collected. provider-types is
-    // NOT listed — it came from types/, which was never coverage-collected.
+    // lib/ai/providers (coverage-gated), so keep it collected. The runtime
+    // catalog in provider-types is collected too; its interfaces are erased.
+    "packages/provider-types/src/provider.ts",
     "packages/provider-core/src/**/*.{ts,tsx}",
     "packages/provider-embedding/src/**/*.{ts,tsx}",
     "packages/provider-routing/src/**/*.{ts,tsx}",
@@ -573,6 +576,14 @@ const globalConfig: Config = {
     // lsp-config/compression/pet-settings leaves came from types/**, which
     // was never coverage-collected (provider-types precedent).
     "packages/agent-config-types/src/index.ts",
+    // These extracted runtime entry points remain changed-file obligations.
+    "packages/agent-config-types/src/claude-agent-sdk-options.ts",
+    "packages/agent-config-types/src/runtime-versions.ts",
+    "packages/companion-client/src/browser-enrollment-payload.ts",
+    "packages/companion-client/src/session.ts",
+    "packages/plugin-ui/src/live-query.ts",
+    // Portable interfaces only, with no emitted runtime statements.
+    "!packages/agent-config-types/src/lsp-config.ts",
     "!packages/plugin-sdk/src/context/**/*.ts",
     "!packages/plugin-sdk/src/hooks/index.ts",
     "!packages/plugin-sdk/src/permissions/index.ts",
@@ -581,6 +592,8 @@ const globalConfig: Config = {
     "!packages/**/dist/**",
     // Standalone agent CLI (lives in the main TS graph so it reuses lib/claude/*).
     "cli/src/**/*.ts",
+    // Executable PTY test driver, not shipped application code.
+    "!cli/src/tui/pty/tui-app-fixture.tsx",
     "!cli/src/cli/entry.ts", // thin executable wrapper — no unit test
     "!cli/src/**/*.test.ts",
     // Type-only TUI modules — TS strips them at runtime so V8 reports 0%, even

@@ -39,6 +39,37 @@ test("balanceWeightedTests distributes long suites across shards without gaps or
   )
 })
 
+test("skewed durations cannot overload a shard with thousands of tiny suites", () => {
+  const weighted = Array.from({ length: 10_001 }, (_, index) => ({
+    id: `suite-${String(index).padStart(5, "0")}.test.ts`,
+    weight: index < 63 ? 1_000_000 : 1,
+  }))
+  const shards = balanceWeightedTests(weighted, 64)
+  const capacity = Math.ceil(weighted.length / 64)
+  assert.ok(shards.every((shard) => shard.tests.length <= capacity))
+  assert.deepEqual(
+    shards.flatMap((shard) => shard.tests.map((item) => item.id)).sort(),
+    weighted.map((item) => item.id).sort()
+  )
+  // Equal weights use stable ids, independent of filesystem traversal order.
+  assert.deepEqual(balanceWeightedTests([...weighted].reverse(), 64), shards)
+  assert.ok(shards.slice(0, 63).every((shard) => shard.tests[0].weight === 1_000_000))
+})
+
+test("capacity handles empty input and more shards than suites", () => {
+  assert.deepEqual(balanceWeightedTests([], 2), [
+    { tests: [], weight: 0 },
+    { tests: [], weight: 0 },
+  ])
+  const weighted = [{ id: "only.test.ts", weight: 1 }]
+  const shards = balanceWeightedTests(weighted, 3)
+  assert.deepEqual(
+    shards.map((shard) => shard.tests.length),
+    [1, 0, 0]
+  )
+  assert.deepEqual(shards[0].tests, weighted)
+})
+
 test("estimateTestWeights uses history and a bounded file-size fallback for new suites", () => {
   const tests = [
     { id: "known.test.ts", size: 100 },

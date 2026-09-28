@@ -102,6 +102,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Setup Bun for release bundle tests
+        if: matrix.group == 'gate-tests'
+        uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.0
+
       - name: Setup uv
         if: matrix.python
         uses: astral-sh/setup-uv@v10.2.0
@@ -169,6 +175,7 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             libpipewire-0.3-dev \
+            libgbm-dev \
             librsvg2-dev \
             patchelf \
             libssl-dev
@@ -182,6 +189,12 @@ jobs:
       - name: Prepare the plugin Node runtime
         if: matrix.group == 'artifacts'
         run: pnpm plugin-node:prepare
+
+      # Bundle tests exercise both release bundlers against the real engine,
+      # whose dependencies and compiled analyzer are outside the workspace.
+      - name: Build webclone for release bundle tests
+        if: matrix.group == 'gate-tests'
+        run: pnpm sidecar:webclone:build
 
       - name: Install the Python plugin SDK
         if: matrix.python

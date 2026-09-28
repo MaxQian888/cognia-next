@@ -81,6 +81,7 @@
       "ignoreDependencies": [
         "@agentclientprotocol/sdk",
         "@types/json-schema",
+        "@xyflow/react",
         "ai",
         "class-variance-authority",
         "clsx",

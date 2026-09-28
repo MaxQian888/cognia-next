@@ -100,6 +100,14 @@ export function checkRustBases({ dockerfiles, channel }) {
         )
       }
     }
+    for (const [, environment] of text.replace(/\\\r?\n/g, " ").matchAll(/^\s*ENV\s+([^\n]+)/gm)) {
+      const override = environment.match(/\bRUSTUP_TOOLCHAIN(?:=|\s+)["']?(\d+\.\d+)(?:\.\d+)?/)
+      if (override && override[1] !== channel) {
+        problems.push(
+          `${rel}: RUSTUP_TOOLCHAIN selects ${override[1]} but rust-toolchain.toml pins ${channel}. The environment overrides both the base image compiler and workspace toolchain.`
+        )
+      }
+    }
   }
   return problems
 }

@@ -65,7 +65,7 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
       <h3 className="text-sm font-semibold">{t("sections.connection")}</h3>
       <Card>
         <CardHeader className="pb-2 pt-3">
-          <CardTitle className="flex items-center justify-between text-sm font-medium">
+          <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium">
             <span>{row.displayName}</span>
             <Button
               type="button"

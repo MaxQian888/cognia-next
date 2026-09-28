@@ -1,4 +1,5 @@
 import { defineConfig } from "tsup"
+// static-export-exempt: Node-only tsup build configuration; never imported by app or SDK runtime code.
 import { fileURLToPath } from "node:url"
 
 const local = (path: string) => fileURLToPath(new URL(path, import.meta.url))

@@ -223,9 +223,10 @@ export function ChatTemplateEditor({
 
       <Collapsible open={paramsOpen} onOpenChange={setParamsOpen}>
         <CollapsibleTrigger asChild>
-          <button
+          <Button
+            variant="ghost"
             type="button"
-            className="flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+            className="flex h-auto w-full items-center justify-start gap-1.5 p-0 text-xs font-medium text-muted-foreground hover:text-foreground"
           >
             <ChevronRightIcon
               className={cn("size-3.5 transition-transform", paramsOpen && "rotate-90")}
@@ -246,7 +247,7 @@ export function ChatTemplateEditor({
             ) : (
               <span className="text-muted-foreground/70">· {t("noParameters")}</span>
             )}
-          </button>
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 space-y-2">
           <p className="text-xs text-muted-foreground">{t("paramsHint")}</p>

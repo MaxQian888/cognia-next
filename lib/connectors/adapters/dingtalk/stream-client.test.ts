@@ -4,6 +4,8 @@
  * message and assert ACKs + the yielded frame.
  */
 
+import { setImmediate as nextTurn } from "node:timers/promises"
+
 import { listen } from "@tauri-apps/api/event"
 import {
   connectorsHttpRequest,
@@ -48,7 +50,12 @@ function createFakeWsSession() {
   })
   return {
     listenImpl,
-    waitForListeners: () => ready,
+    waitForListeners: async () => {
+      await ready
+      // The async connector listener wrapper must finish registering cleanup
+      // before an event can be delivered, as the native event loop guarantees.
+      await nextTurn()
+    },
     push: (frame: unknown) => messageHandler?.({ payload: JSON.stringify(frame) }),
     pushRaw: (raw: string) => messageHandler?.({ payload: raw }),
     triggerClose: () => closeHandler?.(),

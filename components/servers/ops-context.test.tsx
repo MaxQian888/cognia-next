@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { Operation, ServerDetail, ServerSummary } from "@/lib/server-ops/client"
@@ -468,3 +468,33 @@ it("clears the keyring entry and every cached view on disconnect", async () => {
   expect(localStorage.getItem("cognia.server-ops.connection.v1.account-1")).toBeNull()
   await waitFor(() => expect(screen.getByTestId("servers")).toBeEmptyDOMElement())
 })
+
+it.each(["resolve", "reject"] as const)(
+  "does not restore fleet state when an old refresh %ss after disconnect",
+  async (outcome) => {
+    const user = userEvent.setup()
+    await renderConnected()
+    await waitFor(() => expect(screen.getByTestId("servers")).toHaveTextContent("staging"))
+    let resolve!: (value: ServerSummary[]) => void
+    let reject!: (reason: Error) => void
+    const pending = new Promise<ServerSummary[]>((yes, no) => {
+      resolve = yes
+      reject = no
+    })
+    client.listServers.mockReturnValue(pending)
+    ;(loadCachedServerList as jest.Mock).mockReturnValue([summary])
+    await user.click(screen.getByRole("button", { name: "refresh" }))
+    await user.click(screen.getByRole("button", { name: "disconnect" }))
+    await waitFor(() => expect(screen.getByTestId("connected")).toHaveTextContent("false"))
+    ;(saveCachedServerList as jest.Mock).mockClear()
+    await act(async () => {
+      if (outcome === "resolve") resolve([summary])
+      else reject(new Error("old connection failed"))
+      await pending.catch(() => {})
+    })
+    expect(screen.getByTestId("servers")).toBeEmptyDOMElement()
+    expect(screen.getByTestId("operations")).toBeEmptyDOMElement()
+    expect(screen.getByTestId("offline")).toHaveTextContent("false")
+    expect(saveCachedServerList).not.toHaveBeenCalled()
+  }
+)

@@ -726,10 +726,11 @@ async function materializeInitialState(
       })),
     }
   }
-  const [session, draft] = await Promise.all([
-    db.sessions.get(base.sessionId),
-    db.chatDrafts.get(base.sessionId),
-  ])
+  // Both rows require WebCrypto decryption. Resolve each hold before starting
+  // the next: overlapping Dexie.waitFor holds in one transaction can deadlock
+  // when both the session and draft already contain encrypted content.
+  const session = await db.sessions.get(base.sessionId)
+  const draft = await db.chatDrafts.get(base.sessionId)
   return {
     ...base,
     ...(session?.title ? { title: session.title } : {}),

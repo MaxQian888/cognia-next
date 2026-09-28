@@ -140,12 +140,22 @@ describe("startTeamRunFromIM", () => {
 
     const busy = harness()
     busy.deps.findLiveRun = async () => ({ id: "run_team_open" })
+    // IM supplies an explicit id for the approval delegate. The primitive
+    // defers this case to transactional record creation so replays can resolve
+    // their existing receipt even while another run is live.
+    busy.deps.createRunRecords = async () => {
+      throw Object.assign(new Error("Squad already has a live run"), {
+        name: "SquadRunConflictError",
+        runId: "run_team_open",
+      })
+    }
     await expect(
       startTeamRunFromIM(
         { teamId: "team_x", goal: "hi", adapterId: "tg-1", conversationKey: "k" },
         busy.deps
       )
     ).resolves.toEqual({ started: false, reason: "already_running", runId: "run_team_open" })
+    expect(busy.runCalls).toHaveLength(0)
   })
 
   it("seeds the objective and launches the lifecycle with the IM trigger", async () => {

@@ -20,6 +20,7 @@ import {
   diffTally,
   parseClippyWarnings,
   readBaseline,
+  renderClippyErrors,
   tally,
 } from "./check-clippy.mjs"
 
@@ -52,6 +53,21 @@ const NDJSON = [
   "not json at all",
   "",
 ].join("\n")
+
+test("hard compiler errors retain their rendered locations without artifact noise", () => {
+  const rendered = "error[E0063]: missing field `max_processes`\n --> src/linux.rs:710:17\n"
+  const output = renderClippyErrors(
+    [
+      NDJSON,
+      JSON.stringify({
+        reason: "compiler-message",
+        message: { level: "error", message: "missing field", rendered },
+      }),
+    ].join("\n")
+  )
+  assert.equal(output, `mismatched types\n${rendered}`)
+  assert.equal(renderClippyErrors(warning("example", "clippy::needless_borrow")), "")
+})
 
 test("clippy lints the tauri-host command shells the defaults leave out", () => {
   assert.deepEqual(clippyArgs([]), CARGO_ARGS)

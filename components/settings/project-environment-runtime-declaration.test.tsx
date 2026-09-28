@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { ProjectEnvironmentRuntimeDeclaration } from "./project-environment-runtime-declaration"
 import type { ApprovalRecord } from "@/lib/project-environment/environment-client"
@@ -177,7 +178,8 @@ it("shows build status and disables approval until an image is ready", () => {
   expect(onBuild).toHaveBeenCalledTimes(1)
 })
 
-it("shows merged Feature runtime fields for review and refuses unsupported metadata", () => {
+it("shows merged Feature runtime fields for review and refuses unsupported metadata", async () => {
+  const user = userEvent.setup()
   const parsed = parseDevcontainer('{"build":{"dockerfile":"Dockerfile"}}', ".devcontainer.json")
   if (!parsed.ok) throw new Error("fixture")
   const declaration: EnvironmentDeclarationVerdict = {
@@ -205,7 +207,15 @@ it("shows merged Feature runtime fields for review and refuses unsupported metad
   }
   renderCard({ declaration, build: { jobId: "j", projectId: "p", status: "succeeded", record } })
   expect(screen.getByTestId("runtime-declaration-approve")).toBeEnabled()
-  expect(screen.getByText(/FROM_FEATURE/)).toBeInTheDocument()
+  const disclosure = screen.getByRole("button", { name: en.runtime.declaration.effectiveRuntime })
+  expect(disclosure).toHaveAttribute("aria-expanded", "false")
+  expect(screen.queryByText(/FROM_FEATURE/)).not.toBeInTheDocument()
+  await user.click(disclosure)
+  expect(disclosure).toHaveAttribute("aria-expanded", "true")
+  expect(screen.getByText(/FROM_FEATURE/)).toBeVisible()
+  await user.keyboard("{Enter}")
+  expect(disclosure).toHaveAttribute("aria-expanded", "false")
+  expect(screen.queryByText(/FROM_FEATURE/)).not.toBeInTheDocument()
   cleanup()
   renderCard({
     declaration,

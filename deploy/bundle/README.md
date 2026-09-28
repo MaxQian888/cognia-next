@@ -23,7 +23,7 @@ Staging happens in two steps, because the libc tree can only be chosen after the
 
 ## Why it is built this way
 
-- **glibc tree.** Node is the official build and uses the image's glibc (2.28 or newer) and its `libstdc++`. The probe refuses images that lack either. Bundling a newer `libstdc++` would demand a newer glibc than many images have.
+- **glibc tree.** Node is the official build and uses the image's glibc (2.28 or newer) and its `libstdc++`. The probe refuses images that lack either. Bundling a newer `libstdc++` would demand a newer glibc than many images have. Node’s additional `libatomic` dependency is bundled beside Node and resolved through its relative runtime library path.
 - **musl tree.** Node is patched (`patchelf`) to load the bundled musl loader and C++ runtime from `/cognia/musl/node/lib`. It therefore runs on Alpine base images, which ship no `libstdc++`, whatever musl release they have. Vendor musl binaries are not patched, because some carry payloads that patching would corrupt.
 - **Shims.** JavaScript commands get a shell shim that names the bundled Node by absolute path, so `#!/usr/bin/env node` never picks up the project's own Node. Native commands are relative symlinks.
 - **Install scripts.** `npm ci --ignore-scripts` runs first. Only the packages listed under `installScripts` in `agent-versions.json` are then rebuilt, each with a stated reason.

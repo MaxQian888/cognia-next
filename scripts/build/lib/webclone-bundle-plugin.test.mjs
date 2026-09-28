@@ -23,6 +23,7 @@ console.log(JSON.stringify({
 
 const env = { PATH: process.env.PATH, HOME: directory, NODE_PATH: "" }
 function assertAnalysis(result) {
+  assert.ifError(result.error)
   assert.equal(result.status, 0, result.stderr)
   const output = JSON.parse(result.stdout)
   assert.deepEqual(output.analysis.todos, [])
@@ -52,6 +53,7 @@ const result = await Bun.build({ entrypoints: [${JSON.stringify(entry)}],
 if (!result.success) { console.error(result.logs); process.exit(1); }
 `)
   const buildResult = spawnSync("bun", [runner], { cwd: directory, env, encoding: "utf8" })
+  assert.ifError(buildResult.error)
   assert.equal(buildResult.status, 0, buildResult.stderr)
   assertAnalysis(spawnSync("bun", [outfile], { cwd: directory, env, encoding: "utf8" }))
 })

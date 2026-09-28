@@ -240,30 +240,49 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
+  // Invalidate pending requests when their connection is replaced or removed.
+  // Disconnect also advances this synchronously before React runs cleanup.
+  const connectionGeneration = useRef(0)
+  const activeClient = useRef<OpsClient | null>(null)
+  useEffect(() => {
+    activeClient.current = client
+    return () => {
+      activeClient.current = null
+      connectionGeneration.current += 1
+    }
+  }, [client])
+
   const refresh = useCallback(async () => {
-    if (!client || !localAccountId || !connection) return
+    if (!client || activeClient.current !== client || !localAccountId || !connection) return
+    const generation = connectionGeneration.current
+    const isCurrent = () =>
+      activeClient.current === client && generation === connectionGeneration.current
     setLoading(true)
     try {
       const summaries = await client.listServers()
+      if (!isCurrent()) return
       // One request per server, in parallel: the controller has no bulk detail
       // endpoint, and serially this grew linearly with fleet size.
       const details = await Promise.all(summaries.map((summary) => client.getServer(summary.id)))
+      if (!isCurrent()) return
       setServers(details)
       // History comes from the controller, so a reload — or another operator's
       // work — is visible rather than lost with the tab that queued it. Merged
       // rather than replaced so an operation queued a moment ago, which the
       // controller may not have returned in this page, is not dropped.
       const history = await client.listOperations({ limit: 100 }).catch(() => null)
+      if (!isCurrent()) return
       if (history) mergeOperations(history)
       saveCachedServerList(localStorage, localAccountId, connection.profileId, summaries)
       setOffline(false)
     } catch (error) {
+      if (!isCurrent()) return
       const cached = loadCachedServerList(localStorage, localAccountId, connection.profileId)
       setServers(cached.map(cachedDetail))
       setOffline(true)
       toast.error(t("errors.refresh"), { description: localizedOpsError(t, error) })
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [localAccountId, client, connection, mergeOperations, t])
 
@@ -380,6 +399,8 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
       toast.error(t("connection.disconnectFailed"), { description: localizedOpsError(t, error) })
       return
     }
+    activeClient.current = null
+    connectionGeneration.current += 1
     localStorage.removeItem(connectionKey(localAccountId))
     setConnection(null)
     setConnected(false)
@@ -388,6 +409,7 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
     setServers([])
     setOperations([])
     setOffline(false)
+    setLoading(false)
     toast.success(t("connection.disconnected"))
   }, [localAccountId, connection, t])
 

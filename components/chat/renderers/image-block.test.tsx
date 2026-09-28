@@ -306,15 +306,17 @@ describe("ImageBlock", () => {
       expect(screen.getByText("200%")).toBeInTheDocument()
     })
 
-    it("clamps pinch zoom to the 50%–300% range", () => {
+    it("clamps pinch zoom to the 50%–400% range", () => {
       renderBlock()
       const stage = openFullscreen()
 
       firePointer(stage, "pointerdown", { pointerId: 1, clientX: 100, clientY: 100 })
       firePointer(stage, "pointerdown", { pointerId: 2, clientX: 200, clientY: 100 })
-      // 10× spread would be 1000% — clamped to 300%.
+      // 10× spread would be 1000% — clamped to 400%.
       firePointer(stage, "pointermove", { pointerId: 2, clientX: 1100, clientY: 100 })
-      expect(screen.getByText("300%")).toBeInTheDocument()
+      expect(screen.getByText("400%")).toBeInTheDocument()
+      firePointer(stage, "pointermove", { pointerId: 2, clientX: 101, clientY: 100 })
+      expect(screen.getByText("50%")).toBeInTheDocument()
     })
 
     it("double-tap toggles between 100% and 200%", () => {

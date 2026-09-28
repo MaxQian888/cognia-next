@@ -21,6 +21,7 @@ import { CheckIcon, FileWarningIcon, ShieldAlertIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import type {
   ApprovalRecord,
   EnvironmentBuildStatus,
@@ -198,23 +199,29 @@ export function ProjectEnvironmentRuntimeDeclaration({
                 </ul>
               ) : null}
               {effective?.ok ? (
-                <details className="text-[11px]">
-                  <summary>{t("effectiveRuntime")}</summary>
-                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">
-                    {JSON.stringify(
-                      {
-                        containerEnv: effective.declaration.containerEnv,
-                        remoteEnv: effective.declaration.remoteEnv,
-                        user: effective.declaration.user,
-                        lifecycleCommands: effective.declaration.lifecycleCommands,
-                        forwardPorts: effective.declaration.forwardPorts,
-                        workspaceFolder: effective.declaration.workspaceFolder,
-                      },
-                      null,
-                      2
-                    )}
-                  </pre>
-                </details>
+                <Collapsible className="text-[11px]">
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" size="sm">
+                      {t("effectiveRuntime")}
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">
+                      {JSON.stringify(
+                        {
+                          containerEnv: effective.declaration.containerEnv,
+                          remoteEnv: effective.declaration.remoteEnv,
+                          user: effective.declaration.user,
+                          lifecycleCommands: effective.declaration.lifecycleCommands,
+                          forwardPorts: effective.declaration.forwardPorts,
+                          workspaceFolder: effective.declaration.workspaceFolder,
+                        },
+                        null,
+                        2
+                      )}
+                    </pre>
+                  </CollapsibleContent>
+                </Collapsible>
               ) : null}
               {canApprove && onBuild ? (
                 <Button size="sm" variant="outline" disabled={busy} onClick={onBuild}>

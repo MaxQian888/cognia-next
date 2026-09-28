@@ -256,7 +256,7 @@ describe("WebRtcCard — form & i18n", () => {
     const { toast } = await import("sonner")
     renderCard()
     const input = await screen.findByLabelText(/Signaling server/i)
-    await waitFor(() => expect(input).not.toHaveValue(""))
+    await waitFor(() => expect(input).toBeEnabled())
     await userEvent.clear(input)
     await userEvent.type(input, "http://no-wss.example")
     await userEvent.click(screen.getByTestId("webrtc-save"))
@@ -439,6 +439,37 @@ describe("WebRtcCard — TURN credential keyring", () => {
     __resetDbForTesting()
   })
 
+  it("prevents editing or saving defaults until stored credentials finish hydrating", async () => {
+    const knownKeyId = "delayed-key"
+    await saveSettings({
+      signalingUrl: "wss://saved.example/signaling",
+      turnServers: [
+        { urls: "turn:saved.example", credential: `${KEYRING_CREDENTIAL_PREFIX}${knownKeyId}` },
+      ],
+    })
+    let finishRead!: (value: { username: string; credential: string }) => void
+    const read = jest.spyOn(turnStore, "load").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRead = resolve
+        })
+    )
+    renderCard()
+    await waitFor(() => expect(read).toHaveBeenCalledWith(knownKeyId))
+    expect(screen.getByLabelText(/Signaling server/i)).toBeDisabled()
+    expect(screen.getByLabelText(/TURN servers/i)).toBeDisabled()
+    expect(screen.getByTestId("webrtc-enable-toggle")).toBeDisabled()
+    expect(screen.getByTestId("webrtc-save")).toBeDisabled()
+    await act(async () => {
+      finishRead({ username: "saved", credential: "synthetic-secret" })
+    })
+    await waitFor(() => expect(screen.getByTestId("webrtc-save")).toBeEnabled())
+    expect(screen.getByLabelText(/Signaling server/i)).toHaveValue("wss://saved.example/signaling")
+    expect(screen.getByLabelText(/TURN servers/i)).toHaveValue(
+      "turn:saved.example|saved|synthetic-secret"
+    )
+  })
+
   it("silently migrates legacy plaintext TURN entries on hydrate", async () => {
     // Seed Dexie with a legacy plaintext credential.
     await saveSettings({
@@ -480,7 +511,7 @@ describe("WebRtcCard — TURN credential keyring", () => {
   it("save() writes new TURN credentials to keyring, not Dexie", async () => {
     renderCard()
     const ta = await screen.findByLabelText(/TURN servers/i)
-    await waitFor(() => expect(ta).toBeInTheDocument())
+    await waitFor(() => expect(ta).toBeEnabled())
     await userEvent.clear(ta)
     await userEvent.type(ta, "turn:turn.example.com:3478|alice|s3cret")
     await userEvent.click(screen.getByTestId("webrtc-save"))

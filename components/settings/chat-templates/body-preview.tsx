@@ -17,6 +17,7 @@
 import { Surface } from "@/components/surface/surface"
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
+import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { ChatTemplateParamValue } from "@/lib/chat/template/binding"
@@ -120,8 +121,14 @@ function ParamChip({
   )
   if (!onClick) return chip
   return (
-    <button type="button" aria-label={t("fillSlot", { id })} onClick={() => onClick(id)}>
+    <Button
+      variant="ghost"
+      className="h-auto p-0"
+      type="button"
+      aria-label={t("fillSlot", { id })}
+      onClick={() => onClick(id)}
+    >
       {chip}
-    </button>
+    </Button>
   )
 }

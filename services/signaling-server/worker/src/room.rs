@@ -557,7 +557,7 @@ impl RoomDurableObject {
     fn record_hot(&self, attach: &mut Attachment, event: &str, role: Option<&str>, fanout: f64) {
         let n = self.ae_sample_n().max(1);
         attach.sample_n = attach.sample_n.wrapping_add(1);
-        if attach.sample_n % n == 0 {
+        if attach.sample_n.is_multiple_of(n) {
             self.record(event, role, n as f64, fanout);
         }
     }

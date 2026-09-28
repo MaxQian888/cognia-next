@@ -137,7 +137,7 @@ export function LocalProviderSetupWizard({
   const renderStepIndicator = () => (
     <div className="mb-6">
       <Progress value={progress} className="h-1 mb-4" />
-      <div className="flex justify-between">
+      <div className="flex flex-wrap justify-between gap-2">
         {steps.map((step, index) => {
           const isActive = index === currentStepIndex
           const isCompleted = index < currentStepIndex
@@ -250,7 +250,7 @@ export function LocalProviderSetupWizard({
               </div>
             )}
 
-            <div className="flex justify-between">
+            <div className="flex flex-wrap justify-between gap-2">
               <Button variant="outline" onClick={() => setCurrentStep("download")}>
                 {t("back")}
               </Button>
@@ -306,7 +306,7 @@ export function LocalProviderSetupWizard({
               </Button>
             </div>
 
-            <div className="flex justify-between">
+            <div className="flex flex-wrap justify-between gap-2">
               <Button variant="outline" onClick={() => setCurrentStep("install")}>
                 {t("back")}
               </Button>
@@ -358,7 +358,7 @@ export function LocalProviderSetupWizard({
               </div>
             )}
 
-            <div className="flex justify-between">
+            <div className="flex flex-wrap justify-between gap-2">
               <Button variant="outline" onClick={() => setCurrentStep("configure")}>
                 {t("back")}
               </Button>

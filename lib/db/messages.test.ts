@@ -29,6 +29,12 @@ import {
 } from "@/lib/chat/image-edit/version"
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { putSessionAsset, getSessionAsset, persistMessageSessionAssets } from "./session-assets"
+import * as revisionEvents from "@/lib/chat/transcript/revision-events"
+
+jest.mock("@/lib/chat/transcript/revision-events", () => {
+  const actual = jest.requireActual("@/lib/chat/transcript/revision-events")
+  return { ...actual, publishTranscriptRevision: jest.fn(actual.publishTranscriptRevision) }
+})
 
 jest.mock("./session-assets", () => {
   const actual = jest.requireActual("./session-assets")
@@ -155,6 +161,62 @@ describe("persistMessages + listMessages", () => {
       })
     ).rejects.toThrow("duplicate upsert ids")
     expect(await listMessages("duplicates")).toEqual([])
+  })
+
+  it("keeps a delta in its caller's transaction after a prior queued write", async () => {
+    const db = getDb()
+    await putSession("atomic-delta")
+    await commitMessageDelta("atomic-delta", { upserts: [msg("prior", "assistant", "kept")] })
+    await expect(
+      db.transaction(
+        "rw",
+        [db.messages, db.messageMedia, db.messageMediaRefs, db.sessions, db.settings, db.projects],
+        async () => {
+          await commitMessageDelta("atomic-delta", {
+            upserts: [msg("rolled-back", "user", "discard")],
+          })
+          throw new Error("acceptance failed")
+        }
+      )
+    ).rejects.toThrow("acceptance failed")
+    expect(await db.messages.get("rolled-back")).toBeUndefined()
+    expect(await db.messages.get("prior")).toBeDefined()
+  })
+
+  it("publishes a nested delta only after its outer transaction commits", async () => {
+    const db = getDb()
+    await putSession("atomic-events")
+    const publish = jest.spyOn(revisionEvents, "publishTranscriptRevision").mockResolvedValue()
+    const tables = [
+      db.messages,
+      db.messageMedia,
+      db.messageMediaRefs,
+      db.sessions,
+      db.settings,
+      db.projects,
+    ]
+    try {
+      await expect(
+        db.transaction("rw", tables, async () => {
+          await commitMessageDelta("atomic-events", {
+            upserts: [msg("aborted-event", "assistant", "discard")],
+          })
+          expect(publish).not.toHaveBeenCalled()
+          throw new Error("rollback")
+        })
+      ).rejects.toThrow("rollback")
+      expect(publish).not.toHaveBeenCalled()
+      await db.transaction("rw", tables, async () => {
+        await commitMessageDelta("atomic-events", {
+          upserts: [msg("committed-event", "assistant", "keep")],
+        })
+        expect(publish).not.toHaveBeenCalled()
+      })
+      expect(publish).toHaveBeenCalledTimes(1)
+      expect(publish).toHaveBeenCalledWith("atomic-events", 1)
+    } finally {
+      publish.mockRestore()
+    }
   })
 
   it("recovers a streaming row deleted out of band and persists its media ledger", async () => {

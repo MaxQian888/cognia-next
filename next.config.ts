@@ -347,6 +347,10 @@ const nextConfig: NextConfig = {
   // both Tauri and Capacitor consume. `lucide-react`/`date-fns` are already in
   // Next's built-in default list, so they are intentionally omitted here.
   experimental: {
+    // Hosted builds repeatedly lost their runner at static generation with
+    // three workers. Each loads the full client graph; serialize pages on CI
+    // so its memory use is bounded independently of the machine's CPU count.
+    ...(process.env.CI === "true" ? { cpus: 1, staticGenerationMaxConcurrency: 1 } : {}),
     optimizePackageImports: ["radix-ui", "motion", "recharts"],
     // Disable Turbopack's persistent FileSystem dev cache (default-on since
     // Next 16.1). Its LSM store (`.next/dev/cache/turbopack/`) has an upstream
