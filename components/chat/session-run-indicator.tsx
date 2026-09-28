@@ -15,7 +15,8 @@
  * exactly such a live region.
  */
 
-import { CircleAlertIcon, Loader2Icon, ShieldQuestionIcon } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+import { CircleAlertIcon, ShieldQuestionIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 import { cn } from "@/lib/utils"
@@ -31,10 +32,10 @@ export function SessionRunIndicator({ status, testIdPrefix, className }: Session
   const t = useTranslations("chat.sessionRun")
   if (status === "streaming") {
     return (
-      <Loader2Icon
+      <Spinner
         role="img"
-        aria-label={t("streaming")}
-        className={cn("size-3 shrink-0 animate-spin text-muted-foreground", className)}
+        label={t("streaming")}
+        className={cn("size-3 shrink-0 text-muted-foreground", className)}
         data-testid={`${testIdPrefix}-streaming`}
       />
     )

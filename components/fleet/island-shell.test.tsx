@@ -269,7 +269,7 @@ describe("presentations", () => {
     render(<IslandShell />)
     await act(async () => {})
     expect(screen.getByTestId("island-attention-ring").style.top).toBe("37px")
-    expect(screen.getByTestId("island-attention-ring").className).toContain("rounded-2xl")
+    expect(screen.getByTestId("island-attention-ring").className).toContain("rounded-stage")
   })
 
   it("grows the expanded card down out of the housing", async () => {

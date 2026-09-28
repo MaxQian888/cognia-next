@@ -27,8 +27,9 @@ const version = {
 const enforceable = () => ({ preflight: () => ({ ok: true, missing: [] }) }) as never
 
 describe("projectRepositoryCandidate", () => {
-  it("prefers rootDir, then the single primary root", () => {
-    expect(projectRepositoryCandidate(project)).toBe("/repo")
+  it("uses the single primary root and ignores the deprecated root mirror", () => {
+    expect(projectRepositoryCandidate({ ...project, rootDir: "/stale" })).toBe("/repo")
+    expect(projectRepositoryCandidate({ ...project, roots: [] })).toBeUndefined()
     expect(
       projectRepositoryCandidate({
         ...project,

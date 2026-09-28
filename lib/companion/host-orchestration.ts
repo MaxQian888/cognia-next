@@ -43,12 +43,12 @@ import { restartWebHostBindings } from "./web-host-binding-lifecycle"
 export type CompanionClientPlatform = Extract<Platform, "web" | "mobile">
 
 interface HostRuntimeTargetRegistry {
-  getActiveTarget(accountId: string): Promise<RuntimeTargetRecord | null>
-  listTargets(accountId: string): Promise<RuntimeTargetRecord[]>
+  getActiveTarget(localAccountId: string): Promise<RuntimeTargetRecord | null>
+  listTargets(localAccountId: string): Promise<RuntimeTargetRecord[]>
   upsertCompanionTarget(input: UpsertCompanionTargetInput): Promise<RuntimeTargetRecord>
-  activateTarget(accountId: string, targetId: string): Promise<RuntimeTargetRecord>
-  deleteTarget(accountId: string, targetId: string): Promise<void>
-  deleteActiveTarget(accountId: string, targetId: string): Promise<void>
+  activateTarget(localAccountId: string, targetId: string): Promise<RuntimeTargetRecord>
+  deleteTarget(localAccountId: string, targetId: string): Promise<void>
+  deleteActiveTarget(localAccountId: string, targetId: string): Promise<void>
 }
 
 export interface HostOrchestrationDependencies {
@@ -62,8 +62,8 @@ export interface HostOrchestrationDependencies {
       toTargetId: string
     }
   ): Promise<void>
-  activateDatabase(accountId: string, targetId: string): void
-  setContext(accountId: string, targetId: string): void
+  activateDatabase(localAccountId: string, targetId: string): void
+  setContext(localAccountId: string, targetId: string): void
   reloadTransport(): Promise<CompanionConfig | null>
   negotiateHost(config: CompanionConfig, record: CompanionHostRecord): Promise<HostRuntimeSnapshot>
   authoritativeSync(): Promise<void>
@@ -241,13 +241,13 @@ export async function pairAndActivateCompanionHost(
  * restores a standalone target on the next boot.
  */
 async function discardRuntimeTarget(
-  accountId: string,
+  localAccountId: string,
   targetId: string,
   deps: HostOrchestrationDependencies
 ): Promise<void> {
-  const active = await deps.registry.getActiveTarget(accountId)
-  if (active?.id === targetId) await deps.registry.deleteActiveTarget(accountId, targetId)
-  else await deps.registry.deleteTarget(accountId, targetId)
+  const active = await deps.registry.getActiveTarget(localAccountId)
+  if (active?.id === targetId) await deps.registry.deleteActiveTarget(localAccountId, targetId)
+  else await deps.registry.deleteTarget(localAccountId, targetId)
 }
 
 /** Run one leg of pairing, tagging whatever it throws with that leg's name. */

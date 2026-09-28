@@ -3,7 +3,11 @@ import { join } from "node:path"
 
 import packageJson from "@/packages/plugin-sdk/package.json"
 
-import { PLUGIN_SDK_SUBPATH_LOADERS } from "./sdk-subpath-loaders"
+import {
+  loadEffortSurfaceModule,
+  loadPluginI18nModule,
+  PLUGIN_SDK_SUBPATH_LOADERS,
+} from "./sdk-subpath-loaders"
 
 // `testing` is published for plugin test suites and must never ship in a
 // runtime bundle, so the loader deliberately refuses it.
@@ -24,4 +28,22 @@ describe("PLUGIN_SDK_SUBPATH_LOADERS", () => {
     const unresolvable = published.filter((specifier) => !tsconfig.includes(`"${specifier}"`))
     expect(unresolvable).toEqual([])
   })
+})
+
+jest.mock("@/lib/ai/effort-surface-session", () => ({
+  effortSurfaceForSession: jest.fn(() => ({ marker: "host-snapshot" })),
+  subscribeEffortSurface: jest.fn(() => () => undefined),
+}))
+jest.mock("@/lib/plugin/api/use-plugin-translations", () => ({
+  usePluginTranslations: jest.fn(() => (key: string) => `host:${key}`),
+}))
+
+test("host loaders bind runtime ports before publishing only author exports", async () => {
+  const effort = await loadEffortSurfaceModule()
+  expect(effort.effortSurfaceForSession({ id: "fixture" })).toEqual({ marker: "host-snapshot" })
+  expect(effort).not.toHaveProperty("bindEffortSurfaceHost")
+  const i18n = await loadPluginI18nModule()
+  expect(i18n.usePluginTranslations("fixture")("hello")).toBe("host:hello")
+  expect(i18n).not.toHaveProperty("bindPluginTranslationsHost")
+  expect(typeof i18n.registerPluginI18n).toBe("function")
 })

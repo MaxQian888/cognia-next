@@ -32,6 +32,7 @@
  * edits.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useId, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -39,7 +40,6 @@ import {
   ChevronDownIcon,
   CodeIcon,
   ListIcon,
-  Loader2Icon,
   MoreHorizontalIcon,
   PanelRightOpenIcon,
   SparklesIcon,
@@ -262,7 +262,7 @@ export function PlanApprovalCard({
                 className="inline-flex shrink-0 items-center gap-1 text-foreground/80 animate-in fade-in-0"
                 data-testid="plan-approval-refining"
               >
-                <Loader2Icon className="size-3 motion-safe:animate-spin" />
+                <Spinner className="size-3 " />
                 {t("approval.refining")}
               </span>
             )}

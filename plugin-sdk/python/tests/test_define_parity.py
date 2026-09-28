@@ -26,6 +26,7 @@ _DEFINE_REL = Path("packages/plugin-sdk/src/define")
 # fetch-read-write methods). These have NO declarative manifest form a pure /
 # hybrid Python plugin can construct, so they are intentionally not mirrored.
 JS_RUNTIME_ONLY: dict[str, str] = {
+    "interceptors": "carries JavaScript handler() functions executed by the host interceptor chain",
     "plugin": "carries JavaScript activate/deactivate callbacks in a PluginDefinition",
     "plugin-tool": "carries a JavaScript execute() callback for ctx.agent.registerTool()",
     "extension": "loads a React component from extensions[].entry",
@@ -73,6 +74,8 @@ PYTHON_MIRRORS: dict[str, str] = {
     "webview": "WebviewDef",
     "workspace-backend": "WorkspaceBackendDef",
     "session-importer": "SessionImporterDef",
+    "link-matcher": "LinkMatcherDef",
+    "subscription-provider": "define_subscription_provider",
     # external-agent (merged into cognia)
     "external-agent-preset": "define_external_agent_preset",
     "external-agent-adapter": "define_external_agent_adapter",

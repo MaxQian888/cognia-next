@@ -270,7 +270,7 @@ impl AcpConnection {
     ) -> Result<Value, String> {
         let principal = DeviceContext {
             device_id: self.device_id.clone(),
-            account_id: self.account_id.clone().unwrap_or_default(),
+            tenant_id: self.account_id.clone().unwrap_or_default(),
             scope: "device".to_string(),
             granted_scopes: Vec::new(),
             authorization_capabilities: self.authorization_capabilities.clone(),

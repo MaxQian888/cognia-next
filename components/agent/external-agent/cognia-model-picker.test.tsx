@@ -189,7 +189,7 @@ it("discovers account-specific models transiently and exposes their capabilities
   await screen.findByText("Account model information updated.")
   expect(discoveryMock).toHaveBeenCalledWith({
     definition,
-    accountId: "account-a",
+    providerAccountId: "account-a",
     signal: expect.any(AbortSignal),
   })
   fireEvent.click(screen.getByRole("button", { name: "live-model" }))

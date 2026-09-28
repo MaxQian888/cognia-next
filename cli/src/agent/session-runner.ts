@@ -353,14 +353,17 @@ function restoreRuntimeHistory(options: SendOptions, tail: TranscriptTail) {
   if (!Array.isArray(saved.messages) || saved.messages.length === 0)
     fail("the provider message snapshot is missing")
   const calls = new Set<string>()
+  const messages: NonNullable<SendOptions["initialConversation"]> = []
   for (const raw of saved.messages) {
     if (!raw || typeof raw !== "object") fail("a saved message is malformed")
     const message = raw as { role?: string; content?: unknown }
     if (
-      !["system", "user", "assistant", "tool"].includes(message.role ?? "") ||
+      typeof message.role !== "string" ||
+      !["system", "user", "assistant", "tool"].includes(message.role) ||
       !(typeof message.content === "string" || Array.isArray(message.content))
     )
       fail("a saved message has an incompatible format")
+    messages.push({ ...message, role: message.role })
     if (!Array.isArray(message.content)) continue
     for (const part of message.content) {
       if (!part || typeof part !== "object" || typeof part.type !== "string")
@@ -375,7 +378,7 @@ function restoreRuntimeHistory(options: SendOptions, tail: TranscriptTail) {
     }
   }
   if (calls.size) fail("the saved turn has unresolved tool calls")
-  options.initialConversation = saved.messages
+  options.initialConversation = messages
 }
 
 export function createAgentSession(params: AgentSessionParams): AgentSession {

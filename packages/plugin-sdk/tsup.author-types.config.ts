@@ -1,4 +1,7 @@
 import { defineConfig } from "tsup"
+import { fileURLToPath } from "node:url"
+
+const local = (path: string) => fileURLToPath(new URL(path, import.meta.url))
 
 /**
  * A second, author-facing declaration build.
@@ -19,16 +22,16 @@ import { defineConfig } from "tsup"
  * `contract.rs` already follows.
  */
 export default defineConfig({
-  entry: { "cognia-plugin-sdk": "src/index.ts" },
-  outDir: ".tsup-author-types",
+  entry: { "cognia-plugin-sdk": local("./src/index.ts") },
+  tsconfig: local("./tsconfig.json"),
+  outDir: local("./.tsup-author-types"),
   target: "es2022",
   platform: "neutral",
   format: ["esm"],
-  // `resolve` alone is not enough: tsup marks every `dependencies` /
-  // `peerDependencies` entry external by default, and the provider packages are
-  // dependencies — so their types stayed as bare imports. `noExternal` opts them
-  // back in, and `resolve` then inlines the declarations it pulls.
+  // The generator runs this cwd-independent config from the verified root:
+  // tsup 8 marks cwd production dependencies external even with noExternal.
+  // Absolute source paths/baseUrl preserve resolution when cwd changes.
   noExternal: [/^@cognia\//],
-  dts: { only: true, resolve: [/^@cognia\//] },
+  dts: { only: true, resolve: [/^@cognia\//], compilerOptions: { baseUrl: local("./") } },
   clean: true,
 })

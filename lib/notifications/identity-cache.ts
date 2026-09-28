@@ -30,14 +30,14 @@ export function setNotificationIdentity(identity: NotificationIdentity): void {
  * Synchronous namespace+account prime — called by `activateAccountDatabase`
  * (and `clearAccountDatabaseSelection`) the instant the active DB is known.
  * This is what makes the journal's synchronous `cachedNotificationScopeKey`
- * correct before any run write: namespaceId = the live DB name, accountId =
+ * correct before any run write: namespaceId = the live DB name, localAccountId =
  * the account that owns it. `authorityHostId` (the device id) still resolves
  * async — it is not part of the scopeKey — so it keeps its prior/default value.
  */
-export function setNotificationNamespaceAccount(namespaceId: string, accountId: string): void {
+export function setNotificationNamespaceAccount(namespaceId: string, localAccountId: string): void {
   _identity = {
     namespaceId,
-    accountId,
+    accountId: localAccountId,
     authorityHostId: _identity?.authorityHostId ?? "unknown",
   }
 }

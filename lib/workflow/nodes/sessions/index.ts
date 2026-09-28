@@ -45,7 +45,6 @@ import { nonRetryable } from "../shared/executor-support"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 /** Cap on messages a single node may pull into a step output. */
-const MESSAGE_LIMIT_DEFAULT = 50
 const MESSAGE_LIMIT_CEILING = 500
 
 function params(ctx: StepExecutionContext): Record<string, unknown> {

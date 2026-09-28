@@ -94,6 +94,9 @@ pub fn log_dir() -> Option<std::path::PathBuf> {
 mod tests {
     #[test]
     fn all_hosts_share_the_existing_log_directory() {
-        assert_eq!(super::log_dir(), dirs::data_local_dir().map(|dir| dir.join("Cognia").join("logs")));
+        assert_eq!(
+            super::log_dir(),
+            dirs::data_local_dir().map(|dir| dir.join("Cognia").join("logs"))
+        );
     }
 }

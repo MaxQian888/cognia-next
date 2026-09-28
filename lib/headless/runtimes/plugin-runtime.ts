@@ -11,11 +11,9 @@ import { registerHeadlessRuntime } from "../registry"
 function parsePluginChange(payload: unknown): HeadlessPluginChange | null {
   if (!payload || typeof payload !== "object") return null
   const value = payload as Record<string, unknown>
-  if (
-    value.action !== "installed" &&
-    value.action !== "restored" &&
-    value.action !== "uninstalled"
-  ) {
+  // A committed staged update follows the same disk rediscovery as install.
+  const action = value.action === "updated" ? "installed" : value.action
+  if (action !== "installed" && action !== "restored" && action !== "uninstalled") {
     return null
   }
   if (typeof value.pluginId !== "string" || !value.pluginId.trim()) return null
@@ -27,7 +25,7 @@ function parsePluginChange(payload: unknown): HeadlessPluginChange | null {
     return null
   }
   return {
-    action: value.action,
+    action,
     pluginId: value.pluginId,
     accountId: value.accountId as string | null | undefined,
   }
@@ -48,6 +46,9 @@ registerHeadlessRuntime({
     const { installPackWarningRefreshWiring } =
       await import("@/lib/plugin/character-pack/warning-refresh-wiring")
     const disposePackWarnings = installPackWarningRefreshWiring()
+    const { installPluginRuntimeLogBridge } =
+      await import("@/lib/plugin/devtools/plugin-log-bridge")
+    const disposePluginLogs = installPluginRuntimeLogBridge()
 
     let pending = Promise.resolve()
     const unsubscribe = transport.subscribe<unknown>("plugin://runtime-changed", (payload) => {
@@ -72,6 +73,7 @@ registerHeadlessRuntime({
     return async () => {
       unsubscribe()
       disposePackWarnings()
+      disposePluginLogs()
       await pending
       emitSystemBusEvent(SystemEvents.APP_CLOSING, {})
       try {

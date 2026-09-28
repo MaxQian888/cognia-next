@@ -289,8 +289,9 @@ async fn execute_template(
             .redirect(reqwest::redirect::Policy::none())
             .timeout(MAX_WALL_TIME)
             .resolve_to_addrs(host, &addresses);
-        let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, current.as_str())
-            .map_err(|error| error.to_string())?;
+        let (builder, _) =
+            cognia_net::proxy_config::apply_reqwest_policy(builder, current.as_str())
+                .map_err(|error| error.to_string())?;
         let client = builder
             .build()
             .map_err(|error| format!("HTTP client failed: {error}"))?;

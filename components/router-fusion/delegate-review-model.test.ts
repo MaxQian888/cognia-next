@@ -1,9 +1,19 @@
+const mockCurrentFusionStore = jest.fn()
+jest.mock("@/lib/router-fusion/chat/store-provider", () => ({
+  currentFusionStore: () => mockCurrentFusionStore(),
+}))
+jest.mock("@/lib/router-fusion/db/delegate-store", () => ({
+  listRunPatchSets: jest.fn(async () => []),
+  listRunApprovals: jest.fn(async () => []),
+}))
+
 import {
   delegateAcceptanceFrom,
   delegateApprovalFrom,
   delegatePatchView,
   delegateProgressFrom,
   loadDelegateReview,
+  readDelegateReviewSources,
   parseDelegatePatchDocument,
   type DelegateApprovalRecord,
   type DelegatePatchSetRecord,
@@ -329,5 +339,27 @@ describe("delegateApprovalFrom", () => {
       createdAt: 20,
       decidedAt: null,
     })
+  })
+})
+
+describe("readDelegateReviewSources", () => {
+  it("exposes the stored patch document to the review loader", async () => {
+    const getArtifact = jest.fn(async (id: string) =>
+      id === "artifact-1" ? { content: PATCH_DOCUMENT } : null
+    )
+    mockCurrentFusionStore.mockResolvedValue({
+      getRun: async () => ({
+        runId: "run-1",
+        mode: "delegate",
+        status: "waiting_for_approval",
+        workspaceRoot: null,
+      }),
+      artifactStore: () => ({ get: getArtifact }),
+      db: { fusionRunEvents: { where: () => ({ equals: () => ({ sortBy: async () => [] }) }) } },
+    })
+    const result = await readDelegateReviewSources("run-1")
+    expect(await result.readArtifact("artifact-1")).toBe(PATCH_DOCUMENT)
+    expect(await result.readArtifact("missing")).toBeNull()
+    expect(getArtifact).toHaveBeenCalledWith("artifact-1")
   })
 })

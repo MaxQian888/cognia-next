@@ -24,5 +24,5 @@ pub mod build;
 pub mod command;
 pub mod docker;
 pub mod probe_cache;
-pub mod status;
 pub mod runtime;
+pub mod status;

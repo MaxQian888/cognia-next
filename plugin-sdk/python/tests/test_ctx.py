@@ -94,14 +94,15 @@ def test_callback_methods_are_named_but_refused():
     # A namespace is open to python as a whole; a method that hands the host a
     # function is not, in either direction. Refusing by name beats a confusing
     # host-side failure after a round trip.
-    assert CALLBACK_HOST_METHODS["chat"] == {"use"}
+    assert CALLBACK_HOST_METHODS["chat"] == {"use", "registerLinkMatcher"}
     assert CALLBACK_HOST_METHODS["a2ui"] == {"registerComponent", "registerTemplate"}
     assert "register" in CALLBACK_HOST_METHODS["contextPanels"]
 
-    with pytest.raises(AttributeError) as excinfo:
-        cognia.ctx.chat.use
-    assert "registers a host-side callback" in str(excinfo.value)
-    assert "plugin.json" in str(excinfo.value)
+    for method in CALLBACK_HOST_METHODS["chat"]:
+        with pytest.raises(AttributeError) as excinfo:
+            getattr(cognia.ctx.chat, method)
+        assert "registers a host-side callback" in str(excinfo.value)
+        assert "plugin.json" in str(excinfo.value)
 
 
 def test_callback_methods_are_derived_from_the_contract_not_a_local_list():

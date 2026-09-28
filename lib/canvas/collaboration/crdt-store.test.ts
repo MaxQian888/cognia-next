@@ -4,7 +4,7 @@
  */
 
 import "fake-indexeddb/auto"
-import { CanvasCRDTStore, crdtStore, type CRDTOperation } from "./crdt-store"
+import { CanvasCRDTStore, crdtStore } from "./crdt-store"
 import type { Participant, ContentUpdate } from "@/types/canvas/collaboration"
 import * as canvasSessionsDb from "@/lib/db/canvas-sessions"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"

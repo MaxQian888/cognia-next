@@ -90,7 +90,7 @@ export function StatusBarUsage() {
               <MeterRow
                 key={meter.id}
                 meter={meter}
-                accountId={s.accountId ?? s.provider}
+                meterScopeId={s.accountId ?? s.provider}
                 now={now}
               />
             ))}

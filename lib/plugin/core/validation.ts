@@ -1,7 +1,5 @@
-import {
-  validateSubscriptionProvider,
-  isValidSubscriptionProviderId,
-} from "@/lib/subscription/core/provider-registry"
+import { validateSubscriptionProvider } from "@/types/subscription/provider-definition"
+import { isValidSubscriptionProviderId } from "@/types/subscription/credential"
 import type { PluginSubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
 import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
 /**
@@ -60,7 +58,7 @@ import { PLUGIN_MODAL_SIZES, PLUGIN_MODAL_VARIANTS } from "@/types/plugin/plugin
 import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/core/plugin-path"
 import { IdeManifestError, normalizeIdeManifest } from "@/lib/plugin/ide/manifest"
 import { validateTemplateDefinition } from "@/lib/templates/contracts"
-import { validateTemplatePackageManifest } from "@/lib/templates/package"
+import { validateTemplatePackageManifest } from "@/lib/templates/package-manifest"
 import { isValidLinkMatcherPattern } from "@/lib/plugin/api/link-matchers"
 import {
   AUTHOR_CAPABILITY_CONTRACTS,

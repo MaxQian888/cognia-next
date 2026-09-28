@@ -84,16 +84,16 @@ fn parse(expression: &str) -> Result<Vec<Segment>, String> {
             return Err(format!("--query `{expression}` has an empty key"));
         }
         while let Some(after) = rest.strip_prefix('[') {
-            let close = after.find(']').ok_or_else(|| {
-                format!("--query `{expression}` has an unclosed `[`")
-            })?;
+            let close = after
+                .find(']')
+                .ok_or_else(|| format!("--query `{expression}` has an unclosed `[`"))?;
             let inner = &after[..close];
             if inner == "*" || inner.is_empty() {
                 segments.push(Segment::Each);
             } else {
-                let index: usize = inner.parse().map_err(|_| {
-                    format!("--query `{expression}` has a non-numeric array index")
-                })?;
+                let index: usize = inner
+                    .parse()
+                    .map_err(|_| format!("--query `{expression}` has a non-numeric array index"))?;
                 segments.push(Segment::Index(index));
             }
             rest = &after[close + 1..];

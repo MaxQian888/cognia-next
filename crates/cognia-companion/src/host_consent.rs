@@ -73,8 +73,8 @@ pub struct ConsentRequest {
     pub id: String,
     pub code: String,
     pub device_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub account_id: Option<String>,
+    #[serde(rename = "accountId", skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
     pub operations: Vec<String>,
     pub state: ConsentState,
     pub requested_at: u64,
@@ -129,7 +129,7 @@ fn same_operations(a: &[String], b: &[String]) -> bool {
 /// rows with different codes.
 pub fn request(
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     operations: Vec<String>,
 ) -> ConsentRequest {
     let now = now_ms();
@@ -148,7 +148,7 @@ pub fn request(
         id: Uuid::new_v4().to_string(),
         code: short_code(),
         device_id: device_id.to_string(),
-        account_id: account_id.map(str::to_string),
+        tenant_id: tenant_id.map(str::to_string),
         operations,
         state: ConsentState::Pending,
         requested_at: now,
@@ -296,6 +296,29 @@ pub fn reset_for_tests() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tenant_identity_preserves_the_consent_wire_key() {
+        let request = super::ConsentRequest {
+            id: "request".into(),
+            code: "code".into(),
+            device_id: "device".into(),
+            tenant_id: Some("tenant".into()),
+            operations: vec!["read".into()],
+            state: super::ConsentState::Pending,
+            requested_at: 1,
+            expires_at: 2,
+        };
+        let serialized = serde_json::to_value(&request).unwrap();
+        assert_eq!(serialized["accountId"], "tenant");
+        assert!(serialized.get("tenantId").is_none());
+        let absent = serde_json::to_value(super::ConsentRequest {
+            tenant_id: None,
+            ..request
+        })
+        .unwrap();
+        assert!(absent.get("accountId").is_none());
+    }
+
     use super::*;
 
     static TEST_REQUESTS_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));

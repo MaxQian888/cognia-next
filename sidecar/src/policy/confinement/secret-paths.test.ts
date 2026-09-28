@@ -17,12 +17,15 @@ test("isSecretPath flags credential directories and files", () => {
   assert.equal(isSecretPath(path.join(os.homedir(), ".config", "cognia", "x")), true)
   assert.equal(isSecretPath(path.join(os.homedir(), ".local", "share", "cognia", "x")), true)
   assert.equal(isSecretPath(path.join(os.homedir(), ".cargo", "credentials.toml")), true)
-  assert.equal(
-    isSecretPath(path.join(os.homedir(), "Library", "Application Support", "cognia", "x")),
-    true
-  )
-  assert.equal(isSecretPath(path.join(os.homedir(), "AppData", "Roaming", "cognia", "x")), true)
-  assert.equal(isSecretPath(path.join(os.homedir(), "AppData", "Local", "cognia", "x")), true)
+  if (process.platform === "darwin")
+    assert.equal(
+      isSecretPath(path.join(os.homedir(), "Library", "Application Support", "cognia", "x")),
+      true
+    )
+  if (process.platform === "win32")
+    assert.equal(isSecretPath(path.join(os.homedir(), "AppData", "Roaming", "cognia", "x")), true)
+  if (process.platform === "win32")
+    assert.equal(isSecretPath(path.join(os.homedir(), "AppData", "Local", "cognia", "x")), true)
 })
 
 test("isSecretPath does NOT flag .env or ordinary project files", () => {

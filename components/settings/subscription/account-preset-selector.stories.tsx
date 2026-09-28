@@ -13,7 +13,7 @@ const meta = {
   component: AccountPresetSelector,
   args: {
     provider: "anthropic",
-    accountId: "acc-anthropic-1",
+    providerAccountId: "acc-anthropic-1",
   },
   parameters: { layout: "padded" },
 } satisfies Meta<typeof AccountPresetSelector>
@@ -24,9 +24,9 @@ type Story = StoryObj<typeof meta>
 export const Anthropic: Story = {}
 
 export const Codex: Story = {
-  args: { provider: "codex", accountId: "acc-codex-1" },
+  args: { provider: "codex", providerAccountId: "acc-codex-1" },
 }
 
 export const OpenCode: Story = {
-  args: { provider: "opencode", accountId: "acc-opencode-1" },
+  args: { provider: "opencode", providerAccountId: "acc-opencode-1" },
 }

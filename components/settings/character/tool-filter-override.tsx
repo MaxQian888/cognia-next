@@ -12,6 +12,7 @@
  * this is a controlled twin over the agent's own value.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { SearchIcon } from "lucide-react"
@@ -89,7 +90,7 @@ export function ToolFilterOverride({ value, onChange }: ToolFilterOverrideProps)
         onChange={(mode) => onChange(mode === undefined ? undefined : { ...value, mode })}
       />
       {filtering && (
-        <div className="space-y-2 rounded-md border bg-background p-2">
+        <Surface className="space-y-2 rounded-md border bg-background p-2">
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <SearchIcon className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -133,7 +134,7 @@ export function ToolFilterOverride({ value, onChange }: ToolFilterOverrideProps)
               </ul>
             </ScrollArea>
           )}
-        </div>
+        </Surface>
       )}
     </div>
   )

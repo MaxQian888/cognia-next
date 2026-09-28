@@ -58,100 +58,107 @@ export function RecentList({
   }
   return (
     <ul className="space-y-1.5" data-testid="recent-list">
-      {items.map((item) => (
-        <li key={item.submissionId}>
-          <Card>
-            <CardContent className="space-y-1 px-2.5 py-2.5">
-              <div className="flex items-start justify-between gap-2">
-                <p className="line-clamp-2 min-w-0 shrink text-xs font-medium">{item.title}</p>
-                <StatusPill api={api} status={item.status} />
-              </div>
-              {failureCodes[item.submissionId] ? (
-                <p
-                  className="text-[11px] text-muted-foreground"
-                  data-testid={`recent-reason-${item.submissionId}`}
-                >
-                  {failureReasonMessage(failureCodes[item.submissionId], api.message)}
-                </p>
-              ) : null}
-              {expanded.includes(item.submissionId) && hasTranscript(item) ? (
-                <div className="space-y-1" data-testid={`recent-answer-${item.submissionId}`}>
-                  {answers[item.submissionId]?.text ? (
-                    // `whitespace-pre-wrap` because an assistant answer carries
-                    // its own line breaks, and `break-words` because it may
-                    // carry a URL longer than this panel is wide.
-                    <p className="whitespace-pre-wrap break-words text-xs">
-                      {answers[item.submissionId]?.text}
-                    </p>
-                  ) : (
-                    <p className="text-[11px] text-muted-foreground">
-                      {api.message("resultPending")}
-                    </p>
-                  )}
-                  {answers[item.submissionId]?.truncated ? (
-                    <p className="text-[11px] text-muted-foreground">
-                      {api.message("resultTruncated")}
-                    </p>
-                  ) : null}
+      {items.map((item) => {
+        const failureCode = failureCodes[item.submissionId]
+        return (
+          <li key={item.submissionId}>
+            <Card>
+              <CardContent className="space-y-1 px-2.5 py-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="line-clamp-2 min-w-0 shrink text-xs font-medium">{item.title}</p>
+                  <StatusPill api={api} status={item.status} />
                 </div>
-              ) : null}
-              {/* Wraps rather than squeezes. A side panel can be 320px wide,
+                {failureCode ? (
+                  <p
+                    className="text-[11px] text-muted-foreground"
+                    data-testid={`recent-reason-${item.submissionId}`}
+                  >
+                    {failureReasonMessage(failureCode, api.message)}
+                  </p>
+                ) : null}
+                {expanded.includes(item.submissionId) && hasTranscript(item) ? (
+                  <div className="space-y-1" data-testid={`recent-answer-${item.submissionId}`}>
+                    {answers[item.submissionId]?.text ? (
+                      // `whitespace-pre-wrap` because an assistant answer carries
+                      // its own line breaks, and `break-words` because it may
+                      // carry a URL longer than this panel is wide.
+                      <p className="whitespace-pre-wrap break-words text-xs">
+                        {answers[item.submissionId]?.text}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">
+                        {api.message("resultPending")}
+                      </p>
+                    )}
+                    {answers[item.submissionId]?.truncated ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        {api.message("resultTruncated")}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                {/* Wraps rather than squeezes. A side panel can be 320px wide,
                   and three localized buttons beside a hostname do not fit on
                   one line there — a `shrink-0` group pushed the row past the
                   card edge. The host takes what is left and truncates; the
                   buttons wrap onto a second line, right-aligned, when they
                   must. */}
-              <div
-                className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
-                data-testid={`recent-actions-${item.submissionId}`}
-              >
-                <span
-                  className="min-w-0 flex-1 basis-24 truncate font-mono text-[11px] text-muted-foreground"
-                  title={item.sourceHost}
+                <div
+                  className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
+                  data-testid={`recent-actions-${item.submissionId}`}
                 >
-                  {item.sourceHost}
-                </span>
-                <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1">
-                  {/* Only a conversation has a turn to stop or a transcript to
+                  <span
+                    className="min-w-0 flex-1 basis-24 truncate font-mono text-[11px] text-muted-foreground"
+                    title={item.sourceHost}
+                  >
+                    {item.sourceHost}
+                  </span>
+                  <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1">
+                    {/* Only a conversation has a turn to stop or a transcript to
                       read. A filed issue and a queued agent task have neither,
                       and offering controls that would refuse is worse than
                       offering none. */}
-                  {onStop && hasTranscript(item) && STOPPABLE_STATUSES.includes(item.status) ? (
+                    {onStop && hasTranscript(item) && STOPPABLE_STATUSES.includes(item.status) ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onStop(item.submissionId)}
+                        disabled={stopping === item.submissionId}
+                        data-testid={`recent-stop-${item.submissionId}`}
+                      >
+                        {stopping === item.submissionId
+                          ? api.message("stopping")
+                          : api.message("stop")}
+                      </Button>
+                    ) : null}
+                    {onToggleAnswer && hasTranscript(item) ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onToggleAnswer(item.submissionId)}
+                        data-testid={`recent-answer-toggle-${item.submissionId}`}
+                      >
+                        {expanded.includes(item.submissionId)
+                          ? api.message("resultHide")
+                          : api.message("resultShow")}
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => onStop(item.submissionId)}
-                      disabled={stopping === item.submissionId}
-                      data-testid={`recent-stop-${item.submissionId}`}
+                      onClick={() => void api.openUrl(item.deepLink)}
                     >
-                      {stopping === item.submissionId
-                        ? api.message("stopping")
-                        : api.message("stop")}
+                      {item.status === "needs_input"
+                        ? api.message("continueInCognia")
+                        : api.message("openInCognia")}
                     </Button>
-                  ) : null}
-                  {onToggleAnswer && hasTranscript(item) ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onToggleAnswer(item.submissionId)}
-                      data-testid={`recent-answer-toggle-${item.submissionId}`}
-                    >
-                      {expanded.includes(item.submissionId)
-                        ? api.message("resultHide")
-                        : api.message("resultShow")}
-                    </Button>
-                  ) : null}
-                  <Button size="sm" variant="ghost" onClick={() => void api.openUrl(item.deepLink)}>
-                    {item.status === "needs_input"
-                      ? api.message("continueInCognia")
-                      : api.message("openInCognia")}
-                  </Button>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        </li>
-      ))}
+              </CardContent>
+            </Card>
+          </li>
+        )
+      })}
     </ul>
   )
 }

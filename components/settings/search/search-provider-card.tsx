@@ -214,11 +214,7 @@ export function SearchProviderCard({
                         row.ok ? "text-green-600" : "text-destructive"
                       )}
                     >
-                      {row.ok ? (
-                        <Check className="h-3 w-3" />
-                      ) : (
-                        <AlertCircle className="h-3 w-3" />
-                      )}
+                      {row.ok ? <Check className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
                       {row.index === 0 ? t("keyPrimary") : t("keyBackup", { n: row.index })}
                       <span className="text-muted-foreground">…{row.keyHint}</span>
                     </p>

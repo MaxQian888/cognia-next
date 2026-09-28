@@ -13,6 +13,7 @@
  * The raw arguments stay one click away.
  */
 
+import { Skeleton } from "@/components/ui/skeleton"
 import { useLocale, useTranslations } from "next-intl"
 import { AlertTriangleIcon } from "lucide-react"
 
@@ -148,7 +149,7 @@ function TaskRow({ taskId, task }: { taskId: string; task: ScheduledTask | null 
   const t = useTranslations("chat.scheduleTools")
   const tTypes = useTranslations("scheduler.taskTypes")
   if (task === undefined) {
-    return <div className="h-9 animate-pulse rounded-md bg-muted/60" aria-hidden="true" />
+    return <Skeleton className="h-9 rounded-md bg-muted/60" aria-hidden="true" />
   }
   if (task === null) {
     return (

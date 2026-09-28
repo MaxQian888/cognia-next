@@ -9,8 +9,9 @@
 // flight in the conversation, which is always the case while Router + Fusion
 // chat is off.
 
+import { Surface } from "@/components/surface/surface"
+import { Spinner } from "@/components/ui/spinner"
 import { useTranslations } from "next-intl"
-import { Loader2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -29,13 +30,13 @@ export function RouterFusionProgressCard({ sessionId }: { sessionId: string | nu
   const title = entry.mode === "panel" ? t("runningPanel") : t("runningCascade")
 
   return (
-    <div
+    <Surface
       role="status"
       aria-live="polite"
       data-testid="router-fusion-progress"
       className="mb-2 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs"
     >
-      <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+      <Spinner className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <div className="min-w-0 flex-1">
         <p className="truncate">
           <span className="font-medium">{title}</span>
@@ -72,6 +73,6 @@ export function RouterFusionProgressCard({ sessionId }: { sessionId: string | nu
           </PopoverContent>
         </Popover>
       ) : null}
-    </div>
+    </Surface>
   )
 }

@@ -3,7 +3,7 @@ import test from "node:test"
 
 import { ACP_V1_CONTRACT, validateAcpV1Coverage } from "./lib/acp-v1-contract.mjs"
 
-test("pins the stable and preview ACP v1.21 schema plus SDK 1.4 artifacts", () => {
+test("pins the stable and preview ACP v1.21 schema plus SDK 1.5 artifacts", () => {
   assert.equal(ACP_V1_CONTRACT.protocolVersion, 1)
   assert.equal(ACP_V1_CONTRACT.schema.stable.version, "1.21.0")
   assert.equal(
@@ -14,7 +14,7 @@ test("pins the stable and preview ACP v1.21 schema plus SDK 1.4 artifacts", () =
     ACP_V1_CONTRACT.schema.preview.sha256,
     "7f77702b34e0a0558e77220e9007bf8ee161a976bb8ac5021aba1b7e7b2c5708"
   )
-  assert.equal(ACP_V1_CONTRACT.sdk.version, "1.4.0")
+  assert.equal(ACP_V1_CONTRACT.sdk.version, "1.5.0")
   assert.equal(
     ACP_V1_CONTRACT.sdk.integrity,
     "sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg=="

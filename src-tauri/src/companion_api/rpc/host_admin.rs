@@ -69,10 +69,10 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let _ = (device_id, account_id, scope);
+    let _ = (device_id, tenant_id, scope);
     match name {
         // ── Relay / signaling ──────────────────────────────────────────────
         "companion_signaling_status" => to_json(hub(name)?.status()),

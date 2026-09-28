@@ -27,7 +27,7 @@ import type { ProviderId } from "@/types/subscription"
 
 export interface QuotaFailoverInput {
   provider: ProviderId
-  accountId: string
+  providerAccountId: string
   /** The snapshot's `error` string, or the value a rejected query threw. */
   error: unknown
   /** Epoch ms. */
@@ -83,7 +83,7 @@ export async function runQuotaFailover(input: QuotaFailoverInput): Promise<Failo
   try {
     return await handleSubscriptionFailure({
       provider: input.provider,
-      accountId: input.accountId,
+      providerAccountId: input.providerAccountId,
       failure,
       failoverEnabled,
       // The coalescer's record step already armed the block for this exact

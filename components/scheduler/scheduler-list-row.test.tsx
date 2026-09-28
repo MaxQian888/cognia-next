@@ -21,6 +21,7 @@ function item(overrides: Partial<UnifiedScheduledItem> = {}): UnifiedScheduledIt
 }
 
 const baseProps = {
+  signal: null,
   selected: false,
   checked: false,
   onSelect: jest.fn(),

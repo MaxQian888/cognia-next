@@ -1878,9 +1878,9 @@ async fn run_serve(
     let mut brain_supervisor: Option<Arc<brain::BrainSupervisor>> = None;
     match resolve_brain_entry() {
         Some(entry) => {
-            let account_id = local_account_id.clone();
+            let brain_local_account_id = local_account_id.clone();
             let account_content_key =
-                app_lib::headless::get_or_create_account_content_key(&account_id)
+                app_lib::headless::get_or_create_account_content_key(&brain_local_account_id)
                     .map_err(|error| format!("account content key: {error}"))?;
             let config = brain::BrainConfig::for_port(
                 entry,
@@ -1891,7 +1891,7 @@ async fn run_serve(
                 // *namespace* — deliberately not the tenant. Read back from the
                 // binding rather than threaded through, so there is one answer
                 // to "which account does this host serve".
-                account_id,
+                brain_local_account_id,
                 account_content_key,
                 headless_services()
                     .map(|services| services.code_server.host_id().to_string())

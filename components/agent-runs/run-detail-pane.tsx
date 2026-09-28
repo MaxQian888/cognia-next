@@ -247,7 +247,7 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
           unless the run is a delegation and Router + Fusion is switched on —
           it reads that behind the gate — so every other run keeps this pane
           exactly as it was. */}
-      {row.kind === "fusion" && (
+      {row.kind === "fusion" && row.runId && (
         <DelegateReviewPane
           runId={row.runId}
           interrupt={pendingFusionApproval ?? null}

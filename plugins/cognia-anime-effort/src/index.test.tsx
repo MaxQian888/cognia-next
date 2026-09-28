@@ -27,6 +27,7 @@ let wakeSurface: (() => void) | null = null
 jest.mock("@cognia/plugin-sdk/api/effort-surface", () => {
   const actual = jest.requireActual("@cognia/plugin-sdk/api/effort-surface")
   return {
+    ...actual,
     effortSurfaceForSession: (session: unknown) =>
       surfaceOverride ?? actual.effortSurfaceForSession(session),
     subscribeEffortSurface: (_sessionId: unknown, listener: () => void) => {

@@ -20,13 +20,13 @@
  * surface and had never been called.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useEffect, useMemo, useState } from "react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   CopyIcon,
   KeyRoundIcon,
-  Loader2Icon,
   LockIcon,
   PencilIcon,
   PlusIcon,
@@ -506,9 +506,7 @@ export function GatewayKeysCard({
                                 disabled={busy}
                                 onClick={() => void onDelete(k.id)}
                               >
-                                {busy ? (
-                                  <Loader2Icon className="size-3.5 animate-spin" aria-hidden />
-                                ) : null}
+                                {busy ? <Spinner className="size-3.5 " aria-hidden /> : null}
                                 {t("deleteKey")}
                               </Button>
                               <Button
@@ -578,9 +576,7 @@ export function GatewayKeysCard({
                                 disabled={busy}
                                 onClick={() => void onSaveEdit(k.id)}
                               >
-                                {busy ? (
-                                  <Loader2Icon className="size-3.5 animate-spin" aria-hidden />
-                                ) : null}
+                                {busy ? <Spinner className="size-3.5 " aria-hidden /> : null}
                                 {t("save")}
                               </Button>
                               <Button size="sm" variant="ghost" onClick={closeEdit}>
@@ -618,7 +614,7 @@ export function GatewayKeysCard({
           <div className="@lg/gateway-pane:col-span-2">
             <Button size="sm" disabled={creating || accountLocked} onClick={() => void onCreate()}>
               {creating ? (
-                <Loader2Icon className="size-4 animate-spin" aria-hidden />
+                <Spinner className="size-4 " aria-hidden />
               ) : (
                 <PlusIcon className="size-4" aria-hidden />
               )}

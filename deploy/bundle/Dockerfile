@@ -45,7 +45,7 @@ COPY deploy/bundle/agent-versions.json scripts/build/bundle-agent-versions.mjs .
 
 # ── static git (with a minimal static libcurl) ───────────────────────────────
 FROM pins AS git
-RUN apk add --no-cache build-base binutils gnupg linux-headers openssl-dev \
+RUN apk add --no-cache build-base binutils cargo gnupg linux-headers openssl-dev \
       openssl-libs-static perl pkgconf tar xz zlib-dev zlib-static
 COPY deploy/bundle/build-static-git.sh /build/
 RUN node bundle-agent-versions.mjs fetch-tool --pins agent-versions.json --tool curl --out /tmp/curl.tar.xz \

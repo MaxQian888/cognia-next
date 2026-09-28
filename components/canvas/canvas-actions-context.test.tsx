@@ -2,10 +2,8 @@
 import { act, render, screen } from "@testing-library/react"
 
 const runMock = jest.fn(async () => "ok")
-let instances = 0
 jest.mock("@/hooks/canvas/use-canvas-actions", () => ({
   useCanvasActions: () => {
-    instances += 1
     return {
       running: false,
       actionType: null,
@@ -36,7 +34,6 @@ function Consumer({ label }: { label: string }) {
 
 beforeEach(() => {
   runMock.mockClear()
-  instances = 0
 })
 
 describe("useSharedCanvasActions", () => {

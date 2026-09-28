@@ -21,8 +21,8 @@
 // respective CLIs; we discover read-only and copy into our own keyring.
 
 pub mod active;
-pub mod api_key;
 pub mod anthropic;
+pub mod api_key;
 pub mod codex;
 pub mod commandcode;
 pub mod migration;

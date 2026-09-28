@@ -14,9 +14,11 @@
 // button is still the commit point, so a bad generation costs an edit, not a
 // template.
 
+import { Surface } from "@/components/surface/surface"
+import { Spinner } from "@/components/ui/spinner"
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronRightIcon, Loader2Icon, SparklesIcon } from "lucide-react"
+import { ChevronRightIcon, SparklesIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -168,11 +170,11 @@ export function ChatTemplateEditor({
           the composer keeps its own actions. The running op's chip becomes the
           stop button. */}
       <div>
-        <div
+        <Surface
           className={cn(
-            "rounded-2xl border border-border/70 bg-background/85 px-3 pb-2 pt-0.5 shadow-sm",
+            "rounded-stage border border-border/70 bg-background/85 px-3 pb-2 pt-0.5 shadow-(--elevation-1)",
             "transition-[border-color,box-shadow,background-color] duration-200 motion-reduce:transition-none",
-            "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
+            "focus-within:border-primary/40 focus-within:shadow-(--elevation-2) focus-within:ring-2 focus-within:ring-ring/15"
           )}
         >
           <Input
@@ -193,7 +195,7 @@ export function ChatTemplateEditor({
               disabled={!isRunning("generate") && (!intent.trim() || assist.running)}
               onClick={() => (isRunning("generate") ? assist.cancel() : void runGenerate())}
             >
-              {isRunning("generate") ? <Loader2Icon className="size-3 animate-spin" /> : null}
+              {isRunning("generate") ? <Spinner className="size-3 " /> : null}
               {isRunning("generate") ? t("cancel") : t("aiGenerate")}
             </Button>
             <Button
@@ -202,7 +204,7 @@ export function ChatTemplateEditor({
               disabled={!isRunning("improve") && (!body.trim() || assist.running)}
               onClick={() => (isRunning("improve") ? assist.cancel() : void runImprove())}
             >
-              {isRunning("improve") ? <Loader2Icon className="size-3 animate-spin" /> : null}
+              {isRunning("improve") ? <Spinner className="size-3 " /> : null}
               {isRunning("improve") ? t("cancel") : t("aiImprove")}
             </Button>
             <Button
@@ -211,11 +213,11 @@ export function ChatTemplateEditor({
               disabled={!isRunning("suggest") && (params.length === 0 || assist.running)}
               onClick={() => (isRunning("suggest") ? assist.cancel() : void runSuggest())}
             >
-              {isRunning("suggest") ? <Loader2Icon className="size-3 animate-spin" /> : null}
+              {isRunning("suggest") ? <Spinner className="size-3 " /> : null}
               {isRunning("suggest") ? t("cancel") : t("aiSuggestSlots")}
             </Button>
           </div>
-        </div>
+        </Surface>
         <p className="mt-1.5 px-1 text-[11px] text-muted-foreground">{t("aiAssistHint")}</p>
       </div>
 

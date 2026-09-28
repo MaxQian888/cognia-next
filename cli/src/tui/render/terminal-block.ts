@@ -36,7 +36,7 @@ const OSC = /\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g
 const STRING_ESCAPE = /\u001b[P_^][\s\S]*?(?:\u0007|\u001b\\)/g
 const CSI = /\u001b\[[0-?]*[ -/]*[@-~]/g
 const ESCAPE = /\u001b(?:[@-_]|[ -/]+[@-~])/g
-const C0 = /[\u0000-\u0008\u000b\u000c\u000e-\u001a\u001c-\u001f\u007f]/g
+const C0 = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g
 
 /** Remove every terminal control sequence from untrusted model/tool text. */
 export function sanitizeTerminalText(text: string): string {

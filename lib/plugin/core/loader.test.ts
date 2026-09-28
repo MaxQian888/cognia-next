@@ -8,6 +8,17 @@ import { PluginLoader } from "./loader"
 import { createTestPluginContext } from "@cognia/plugin-sdk/testing"
 import type { Plugin, PluginManifest, PluginDefinition } from "@/types/plugin"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
+import * as builtinRegistry from "./browser-builtin-registry"
+import * as sharedModules from "./shared-modules"
+
+jest.mock("./shared-modules", () => ({
+  __esModule: true,
+  ...jest.requireActual("./shared-modules"),
+}))
+jest.mock("./browser-builtin-registry", () => ({
+  __esModule: true,
+  ...jest.requireActual("./browser-builtin-registry"),
+}))
 
 jest.mock("./wasm-loader", () => ({
   __esModule: true,
@@ -226,6 +237,43 @@ describe("PluginLoader", () => {
       plugin.manifest.main = undefined
 
       await expect(loader.load(plugin)).rejects.toThrow("missing 'main' entry point")
+    })
+
+    it("binds shared host modules before a direct built-in loader consumes them", async () => {
+      const plugin = {
+        ...createMockPlugin("direct-builtin"),
+        path: "builtin://direct-builtin" as const,
+      }
+      const definition = { manifest: plugin.manifest, activate: jest.fn() }
+      let finishBinding!: () => void
+      const binding = new Promise<void>((resolve) => {
+        finishBinding = resolve
+      })
+      const prime = jest.spyOn(sharedModules, "primeSharedModules").mockReturnValue(binding)
+      const load = jest.fn(async () => definition)
+      const registry = jest
+        .spyOn(builtinRegistry, "getBrowserBuiltinRegistryEntry")
+        .mockReturnValue({
+          manifest: plugin.manifest,
+          path: plugin.path,
+          compatibilityDiagnostics: [],
+          load,
+        })
+      try {
+        const loading = loader.load(plugin)
+        await jest.advanceTimersByTimeAsync(0)
+        expect(prime).toHaveBeenCalledWith([
+          "@cognia/plugin-sdk/api/effort-surface",
+          "@cognia/plugin-sdk/api/i18n",
+        ])
+        expect(load).not.toHaveBeenCalled()
+        finishBinding()
+        await expect(loading).resolves.toBe(definition)
+        expect(load).toHaveBeenCalledTimes(1)
+      } finally {
+        prime.mockRestore()
+        registry.mockRestore()
+      }
     })
 
     it("fetches and evaluates a migrated builtin asset once", async () => {

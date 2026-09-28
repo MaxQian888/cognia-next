@@ -466,5 +466,5 @@ it("clears the keyring entry and every cached view on disconnect", async () => {
   await waitFor(() => expect(screen.getByTestId("connected")).toHaveTextContent("false"))
   expect(tokenStore.delete).toHaveBeenCalledWith("account-1:production:access-token")
   expect(localStorage.getItem("cognia.server-ops.connection.v1.account-1")).toBeNull()
-  expect(screen.getByTestId("servers")).toHaveTextContent("")
+  await waitFor(() => expect(screen.getByTestId("servers")).toBeEmptyDOMElement())
 })

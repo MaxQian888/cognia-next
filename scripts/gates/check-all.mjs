@@ -286,6 +286,7 @@ const REGISTRY = [
   // of its assertions are a usage error rather than a test without it.
   { script: "scripts:test:ci", group: "gate-tests", runtime: "rust", resource: "cargo" },
   { script: "artifact-runtime:test", group: "gate-tests" },
+  { script: "compose:smoke:runtime-environment:test", group: "gate-tests" },
   { script: "support:docs:test", group: "gate-tests" },
   { script: "tauri:debug:agent:test", group: "gate-tests" },
   { script: "agent:sdk:test", group: "gate-tests" },

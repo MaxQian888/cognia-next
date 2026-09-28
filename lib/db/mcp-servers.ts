@@ -1,3 +1,4 @@
+import type { McpServerWireConfig } from "@cognia/agent-config-types/claude-agent-sdk-options"
 import type {
   AgentId,
   McpServer,
@@ -11,6 +12,7 @@ import { MCP_AGENT_ADAPTERS } from "@/lib/claude/agents"
 import { externalizeMcpSecrets, hasMcpSecretRefs, resolveMcpSecrets } from "@/lib/mcp/credentials"
 import {
   assertUniqueMcpNamespace,
+  assertMcpWireConfig,
   fingerprintMcpDefinition,
   normalizeMcpNamespace,
   toMcpServerSummary,
@@ -363,8 +365,8 @@ function wakeSyncCoordinator(): void {
  * turns — unstable key order silently breaks provider prompt-cache prefix
  * matching.
  */
-export function buildMcpServerMap(servers: McpServer[]): Record<string, Record<string, unknown>> {
-  const out: Record<string, Record<string, unknown>> = {}
+export function buildMcpServerMap(servers: McpServer[]): Record<string, McpServerWireConfig> {
+  const out: Record<string, McpServerWireConfig> = {}
   const namespaces = new Set<string>()
   const sorted = [...servers].sort((a, b) => a.name.localeCompare(b.name))
   for (const s of sorted) {
@@ -399,7 +401,18 @@ export function buildMcpServerMap(servers: McpServer[]): Record<string, Record<s
         continue
       }
     }
-    out[s.name] = { type: s.transport, ...s.config }
+    const config = { ...s.config, type: s.transport }
+    try {
+      assertMcpWireConfig(config)
+      out[s.name] = config
+    } catch (error) {
+      mcpLog.warn("Excluded MCP server from this turn: invalid send config", {
+        server: s.name,
+        transport: s.transport,
+        reason: error instanceof Error ? error.message : String(error),
+      })
+      namespaces.delete(normalized)
+    }
   }
   return out
 }
@@ -487,7 +500,7 @@ export async function buildMcpServerMapResolved(
   resolveConfig: (
     config: McpServer["config"]
   ) => Promise<Record<string, unknown>> = resolveMcpSecrets
-): Promise<Record<string, Record<string, unknown>>> {
+): Promise<Record<string, McpServerWireConfig>> {
   return buildMcpServerMap(await resolveMcpServerDefinitions(servers, resolveConfig))
 }
 
@@ -523,7 +536,7 @@ export interface BuildMcpAuthDeps {
 export async function buildMcpServerMapWithAuth(
   servers: McpServer[],
   deps: BuildMcpAuthDeps
-): Promise<Record<string, Record<string, unknown>>> {
+): Promise<Record<string, McpServerWireConfig>> {
   const resolvedServers = await resolveMcpServerDefinitions(
     servers,
     deps.resolveConfig ?? resolveMcpSecrets
@@ -535,7 +548,7 @@ export async function buildMcpServerMapWithAuth(
   const entries = await Promise.all(
     Object.entries(base).map(async ([name, cfg]) => {
       const server = byName.get(name)
-      if (!server || server.transport === "stdio") {
+      if (!server || server.transport === "stdio" || !("url" in cfg)) {
         return [name, cfg] as const
       }
       let entry: McpAuthInjection | undefined
@@ -549,7 +562,7 @@ export async function buildMcpServerMapWithAuth(
         entry = undefined
       }
       if (entry?.accessToken) {
-        const existing = (cfg.headers as Record<string, string> | undefined) ?? {}
+        const existing = cfg.headers ?? {}
         return [
           name,
           { ...cfg, headers: { ...existing, Authorization: `Bearer ${entry.accessToken}` } },

@@ -28,5 +28,35 @@
  * re-render counter) tracks the same answer the composer's own hook does.
  */
 
-export { effortSurfaceForSession, subscribeEffortSurface } from "@/lib/ai/effort-surface-session"
+import type * as HostEffortSurface from "@/lib/ai/effort-surface-session"
+import { PluginAdapterError } from "../errors/adapter-error"
+
+type EffortSurfaceHost = Pick<
+  typeof HostEffortSurface,
+  "effortSurfaceForSession" | "subscribeEffortSurface"
+>
+let host: EffortSurfaceHost | undefined
+
+/** Host loader seam; never exposed through the evaluated plugin module. */
+export function bindEffortSurfaceHost(runtime: EffortSurfaceHost): void {
+  host = runtime
+}
+
+function requireHost(): EffortSurfaceHost {
+  if (!host) {
+    throw new PluginAdapterError(
+      "DEPENDENCY_MISSING",
+      "Effort surface requires the Cognia host runtime"
+    )
+  }
+  return host
+}
+
+export const effortSurfaceForSession: EffortSurfaceHost["effortSurfaceForSession"] = (session) =>
+  requireHost().effortSurfaceForSession(session)
+
+export const subscribeEffortSurface: EffortSurfaceHost["subscribeEffortSurface"] = (
+  sessionId,
+  listener
+) => requireHost().subscribeEffortSurface(sessionId, listener)
 export type { EffortSurface, EffortSurfaceInput } from "@/lib/ai/effort-surface"

@@ -8,7 +8,6 @@
 
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 

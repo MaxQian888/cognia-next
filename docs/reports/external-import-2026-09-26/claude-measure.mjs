@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { access, mkdir, mkdtemp, readFile, readdir, stat, writeFile, rm } from "node:fs/promises"
 import { tmpdir, cpus } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { dirname, join } from "node:path"
 import { createRequire } from "node:module"
 import { performance } from "node:perf_hooks"
 

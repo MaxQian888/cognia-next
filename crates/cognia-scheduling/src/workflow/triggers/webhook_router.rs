@@ -1488,12 +1488,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             "x-pagerduty-signature",
-            format!(
-                "v1={},v1={good}",
-                "00".repeat(32)
-            )
-            .parse()
-            .unwrap(),
+            format!("v1={},v1={good}", "00".repeat(32)).parse().unwrap(),
         );
         assert!(verify_integration_request(&verification, &body, &headers));
 

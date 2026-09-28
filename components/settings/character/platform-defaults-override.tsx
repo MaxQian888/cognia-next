@@ -19,6 +19,7 @@
  * silence the bot the moment it is saved.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
 
 import { Label } from "@/components/ui/label"
@@ -118,14 +119,14 @@ export function PlatformDefaultsOverride({ value, onChange }: PlatformDefaultsOv
         })}
       </div>
       {anyPart && (
-        <div className="rounded-md border bg-background p-2">
+        <Surface className="rounded-md border bg-background p-2">
           <TriggerPolicyEditor
             idPrefix="agent-platform-trigger"
             value={toTriggerPolicyDraft(effective)}
             onChange={(draft) => emitTrigger(fromTriggerPolicyDraft(draft), currentParts)}
             sections={currentParts}
           />
-        </div>
+        </Surface>
       )}
     </div>
   )

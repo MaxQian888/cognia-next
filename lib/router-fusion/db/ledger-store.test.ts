@@ -615,16 +615,16 @@ describe("FusionLedgerStore (fake-indexeddb)", () => {
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1))
   })
 
-  it("[ACC:REC-05] keeps the original deadline across a resume and stops calls after it", async () => {
+  it("[ACC:REC-05] preserves the active work budget across a human pause and stops calls after it", async () => {
     const { store, clock } = harness()
     const token = await running(store, "run-1", { deadlineMs: 10_000 })
     const deadlineAt = (await store.getRun("run-1"))!.deadlineAt
     expect(await store.pauseRun("run-1", token, "waiting_for_input")).toEqual({ ok: true })
     clock.t += 9_000
     const resumed = await store.resumeRun("run-1")
-    expect(resumed.ok && resumed.run.deadlineAt).toBe(deadlineAt)
+    expect(resumed.ok && resumed.run.deadlineAt).toBe(deadlineAt + 9_000)
     await store.startRun("run-1", token)
-    clock.t += 2_000
+    clock.t += 11_000
     await expect(
       store.prepareCall("run-1", token, {
         logicalStepId: "after-deadline",

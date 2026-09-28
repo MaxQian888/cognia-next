@@ -6,10 +6,34 @@
     "protection": "Gated upstream, not here: a chat fusion transcript is checked with hasNoLeakingPiiDeep before any run exists (lib/router-fusion/chat/chat-fusion-turn.ts, PII_BLOCKED); workspace evidence is checked with hasNoLeakingPii after the read (lib/router-fusion/tools/workspace-read.ts, CONTENT_SENSITIVE). Run API and compat input is the external caller's own content, like passthrough (ADR-0188 B3 PII decision)."
   },
   {
-    "file": "hooks/canvas/use-canvas-actions.ts",
+    "file": "cli/src/agent/session-context.ts",
     "boundaries": ["ai"],
-    "reason": "User explicitly requests canvas generation.",
-    "protection": "User-directed provider request; derived-data review remains in the PII auditor."
+    "reason": "The sole AI SDK reference is the inline import type UIMessage parts for attachmentParts.",
+    "protection": "Type-only import is erased by TypeScript; it does not load an SDK client or emit a provider request."
+  },
+  {
+    "file": "cli/src/agent/transcript.ts",
+    "boundaries": ["ai"],
+    "reason": "Inline UIMessage parts and metadata imports describe the local JSONL transcript shape.",
+    "protection": "Both SDK references are erased types; this module persists and reads local transcript files without sending data to a model."
+  },
+  {
+    "file": "cli/src/handoff/client.ts",
+    "boundaries": ["ai"],
+    "reason": "Inline UIMessage parts and metadata imports describe the CLI-to-desktop handoff payload.",
+    "protection": "Both SDK references are erased types; the runtime hands the transcript to the authenticated local desktop bridge, not an AI provider."
+  },
+  {
+    "file": "lib/voice/live/token.ts",
+    "boundaries": ["@ai-sdk/provider"],
+    "reason": "Imports UnsupportedFunctionalityError and realtime types for token minting.",
+    "protection": "mintLiveToken screens instructions with screenLiveVoiceText and checks the complete sessionConfig with assertLiveVoicePayloadPiiSafe from reducer.ts before creating an adapter or calling doCreateClientSecret. token.test.ts pins rejection before adapter or host-fetch construction."
+  },
+  {
+    "file": "lib/voice/live/transport.ts",
+    "boundaries": ["@ai-sdk/provider"],
+    "reason": "The only runtime SDK import is UnsupportedFunctionalityError; other imports are realtime protocol types. The transport serializes caller-prepared events.",
+    "protection": "controller.ts checks session updates with assertLiveVoicePayloadPiiSafe; context.ts and reducer.ts screen transcript text before replay; tool-runtime.ts receives results through handlePluginToolExec's assertSafePluginToolResult boundary. Live microphone audio is an explicit user-selected send. This import adds no provider client or derived content."
   },
   {
     "file": "hooks/canvas/use-canvas-suggestions.ts",

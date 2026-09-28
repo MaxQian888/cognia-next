@@ -595,6 +595,7 @@ export async function readDelegateReviewSources(runId: string): Promise<Delegate
       createdAt: row.createdAt,
       decidedAt: row.decidedAt,
     })),
+    readArtifact,
     acceptance: await readSealedAcceptance(run.resultRecordArtifactId ?? null, readArtifact),
     comparison: await openWorkspaceComparison(run.workspaceRoot ?? null),
   }

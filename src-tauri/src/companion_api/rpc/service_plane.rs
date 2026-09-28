@@ -98,8 +98,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "app_settings_update",
 ];
 
-fn langfuse_account(account_id: Option<&str>) -> Result<&str, (StatusCode, Json<RpcError>)> {
-    account_id.ok_or_else(|| RpcError::forbidden("Langfuse requires an authenticated account"))
+fn langfuse_account(tenant_id: Option<&str>) -> Result<&str, (StatusCode, Json<RpcError>)> {
+    tenant_id.ok_or_else(|| RpcError::forbidden("Langfuse requires an authenticated account"))
 }
 
 fn map_langfuse_ingest_error(detail: String) -> (StatusCode, Json<RpcError>) {
@@ -151,12 +151,12 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     use tauri::Manager as _;
 
-    let _ = (state, host, device_id, account_id, scope);
+    let _ = (state, host, device_id, tenant_id, scope);
     let result = match name {
         // ── Headless external-agent execution plane (ADR-0059 R11) ───────────
         // Service-scope only (gated above + in rpc_handler); every decision
@@ -1552,7 +1552,7 @@ pub(super) async fn dispatch(
         // authenticated principal determines the account; callers cannot
         // select another namespace or supply export headers at ingest time.
         "langfuse_credentials_set" => {
-            let account = langfuse_account(account_id)?;
+            let account = langfuse_account(tenant_id)?;
             let enabled: bool = required(&args, "enabled")?;
             let base_url: String = required_aliased(&args, "base_url", "baseUrl")?;
             let public_key: String = required_aliased(&args, "public_key", "publicKey")?;
@@ -1583,7 +1583,7 @@ pub(super) async fn dispatch(
         }
 
         "langfuse_credentials_status" => {
-            let account = langfuse_account(account_id)?;
+            let account = langfuse_account(tenant_id)?;
             let status = crate::companion_api::langfuse::credentials_status_for_account_async(
                 account.to_string(),
             )
@@ -1593,7 +1593,7 @@ pub(super) async fn dispatch(
         }
 
         "langfuse_credentials_clear" => {
-            let account = langfuse_account(account_id)?;
+            let account = langfuse_account(tenant_id)?;
             crate::companion_api::langfuse::credentials_clear_for_account_async(
                 account.to_string(),
             )
@@ -1606,7 +1606,7 @@ pub(super) async fn dispatch(
         }
 
         "langfuse_connection_test" => {
-            let account = langfuse_account(account_id)?;
+            let account = langfuse_account(tenant_id)?;
             let status = crate::companion_api::langfuse::connection_test_for_account(account)
                 .await
                 .map_err(RpcError::internal)?;
@@ -1614,7 +1614,7 @@ pub(super) async fn dispatch(
         }
 
         "langfuse_trace_ingest" => {
-            let account = langfuse_account(account_id)?;
+            let account = langfuse_account(tenant_id)?;
             let batch: crate::companion_api::langfuse::AgentTraceBatchV1 =
                 required(&args, "batch")?;
             let result = crate::companion_api::langfuse::trace_ingest_for_account(account, batch)

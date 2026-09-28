@@ -62,7 +62,7 @@ export function HeaderAccountSwitcher({
   const accounts = testAccounts ?? live.accounts
   const [sessionSelection, setSessionSelection] = useState({
     sessionId: session?.id,
-    accountId: session?.accountId,
+    providerAccountId: session?.accountId,
     authoritativeAccountId: session?.accountId,
   })
   const [savingSessionId, setSavingSessionId] = useState<string | null>(null)
@@ -72,14 +72,14 @@ export function HeaderAccountSwitcher({
   ) {
     setSessionSelection({
       sessionId: session?.id,
-      accountId: session?.accountId,
+      providerAccountId: session?.accountId,
       authoritativeAccountId: session?.accountId,
     })
   }
   const sessionAccountId =
     sessionSelection.sessionId === session?.id &&
     sessionSelection.authoritativeAccountId === session?.accountId
-      ? sessionSelection.accountId
+      ? sessionSelection.providerAccountId
       : session?.accountId
 
   const inheritedAccountId = useMemo(
@@ -122,17 +122,17 @@ export function HeaderAccountSwitcher({
   )
     return null
 
-  const saveSessionAccount = async (accountId: string | undefined, label: string) => {
-    if (!session || sessionAccountId === accountId || savingSessionId === session.id) return
+  const saveSessionAccount = async (providerAccountId: string | undefined, label: string) => {
+    if (!session || sessionAccountId === providerAccountId || savingSessionId === session.id) return
     setSavingSessionId(session.id)
     try {
-      await updateSession(session.id, { accountId })
+      await updateSession(session.id, { accountId: providerAccountId })
       setSessionSelection({
         sessionId: session.id,
-        accountId,
+        providerAccountId,
         authoritativeAccountId: session.accountId,
       })
-      toast.success(accountId ? t("toast", { label }) : t("inheritedToast", { label }))
+      toast.success(providerAccountId ? t("toast", { label }) : t("inheritedToast", { label }))
     } catch (cause) {
       toast.error(
         t("switchFailed", { error: cause instanceof Error ? cause.message : String(cause) })

@@ -21,9 +21,7 @@ export function SearchReliabilitySettings() {
   const t = useTranslations("searchReliability")
 
   const settings = useSettingsStore((s) => s.settings)
-  const setSearchProviderHealthSettings = useSettingsStore(
-    (s) => s.setSearchProviderHealthSettings
-  )
+  const setSearchProviderHealthSettings = useSettingsStore((s) => s.setSearchProviderHealthSettings)
 
   // Normalize so a partially-populated persisted row still yields valid slider
   // values (the store re-normalizes on write, this only guards the read path).

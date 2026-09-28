@@ -26,7 +26,7 @@ export interface SendOptions {
     manifestPath?: string
     timeoutMs?: unknown
   }[]
-  ledger?: { mode?: string; runId?: string; envelopeMaxBudgetUsd?: number; [key: string]: unknown }
+  ledger?: { mode?: string; runId?: string; envelopeMaxBudgetUsd?: number }
   claudeAgentSdk?: ClaudeAgentSdkOptionsV1
   execution?: {
     identity?: { runId?: string; attemptId?: string; parentRunId?: string }
@@ -91,6 +91,7 @@ export interface SendOptions {
     useAISummarization?: boolean
     maxSummaryTokens?: number
     enableUndo?: boolean
+    captureUndoSnapshot?: boolean
     summarizeToolResults?: boolean
     preserveToolCallMetadata?: boolean
     summary?: {
@@ -101,7 +102,6 @@ export interface SendOptions {
       protocolAdapterSpec?: CodeAdapterSpec | OpenAiCompatibleVariantSpec
     }
     optical?: import("./optical-options.ts").OpticalCompactionOptions
-    [key: string]: unknown
   }
   toolSearchEnabled?: boolean
   alwaysLoadServers?: string[]

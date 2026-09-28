@@ -1,3 +1,4 @@
+import type { McpServerWireConfig } from "@cognia/agent-config-types/claude-agent-sdk-options"
 import type {
   McpConfigValue,
   McpServer,
@@ -97,6 +98,60 @@ export function validateMcpConfig(
     throw new McpDefinitionError("allowPrivateNetwork must be a boolean")
   }
   return config
+}
+
+/** Validate the resolved send boundary; secret references cannot cross this wire. */
+export function assertMcpWireConfig(
+  config: Record<string, unknown>
+): asserts config is Record<string, unknown> & McpServerWireConfig {
+  const strings = (value: unknown) =>
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value).every((entry) => typeof entry === "string")
+  const optional = (key: string, check: (value: unknown) => boolean) =>
+    config[key] === undefined || check(config[key])
+  let valid =
+    optional("timeout", (value) => typeof value === "number" && Number.isFinite(value)) &&
+    optional("alwaysLoad", (value) => typeof value === "boolean") &&
+    optional("cwd", (value) => typeof value === "string") &&
+    optional("allowPrivateNetwork", (value) => typeof value === "boolean")
+  if (config.type === "stdio") {
+    valid =
+      valid &&
+      typeof config.command === "string" &&
+      config.command.trim().length > 0 &&
+      optional(
+        "args",
+        (value) => Array.isArray(value) && value.every((arg) => typeof arg === "string")
+      ) &&
+      optional("env", strings)
+  } else if (config.type === "http" || config.type === "sse") {
+    valid =
+      valid &&
+      typeof config.url === "string" &&
+      config.url.length > 0 &&
+      optional("headers", strings) &&
+      optional(
+        "tools",
+        (value) =>
+          Array.isArray(value) &&
+          value.every(
+            (tool) =>
+              tool !== null &&
+              typeof tool === "object" &&
+              typeof tool.name === "string" &&
+              (tool.permission_policy === undefined ||
+                ["always_allow", "always_ask", "always_deny"].includes(tool.permission_policy)) &&
+              (tool.org_max_permission === undefined ||
+                ["allow", "ask", "blocked"].includes(tool.org_max_permission))
+          )
+      )
+  } else valid = false
+  if (!valid)
+    throw new McpDefinitionError(
+      "MCP send config must contain a valid transport and resolved credential values"
+    )
 }
 
 export function validateMcpDefinition<T extends Pick<McpServer, "name" | "transport" | "config">>(

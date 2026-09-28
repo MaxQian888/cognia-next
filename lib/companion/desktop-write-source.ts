@@ -760,13 +760,13 @@ async function importThreadHandoffSession(
     { ...payload, runtimeTargetId: active?.targetId },
     bridge
   )
-  const accountId = payload.callerAccountId
+  const localAccountId = payload.callerAccountId
   const hostId = payload.authoritativeHostId
   const deviceId = payload.callerDeviceId
   const ticket = payload.ticket as { ticketId?: unknown } | undefined
   if (
     !active ||
-    typeof accountId !== "string" ||
+    typeof localAccountId !== "string" ||
     typeof hostId !== "string" ||
     typeof deviceId !== "string" ||
     typeof ticket?.ticketId !== "string"
@@ -777,7 +777,7 @@ async function importThreadHandoffSession(
   const now = Date.now()
   const action: HostStateAction = {
     channel: sessionStateChannel(active.targetId, sessionId),
-    accountId,
+    accountId: localAccountId,
     runtimeTargetId: active.targetId,
     hostId,
     hostGeneration: status.hostGeneration,
@@ -789,7 +789,7 @@ async function importThreadHandoffSession(
     action: { kind: "session.import", envelope: JSON.parse(canonicalHostStateJson(envelope)) },
   }
   const response = await service.submit(
-    { accountId, runtimeTargetId: active.targetId, actions: [action] },
+    { accountId: localAccountId, runtimeTargetId: active.targetId, actions: [action] },
     hostStateCaller(payload)
   )
   const receipt = response.results[0]

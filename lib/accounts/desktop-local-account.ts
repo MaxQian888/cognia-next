@@ -3,7 +3,7 @@
  * prompt, held in the native encrypted secret store (ADR-0054).
  *
  * Two shapes share one keyring slot per profile
- * (`desktop-local-account` / `<accountId>`):
+ * (`desktop-local-account` / `<localAccountId>`):
  *
  *  - **Device-managed** (`protection: "device"`). Only the reserved
  *    `acct_desktop_local_workspace` a fresh desktop install creates. Its
@@ -29,8 +29,8 @@ export const DESKTOP_LOCAL_ACCOUNT_ID = "acct_desktop_local_workspace"
 const SECRET_NAMESPACE = "desktop-local-account"
 
 /** The keyring slot holding one profile's device unlock secret. */
-export function deviceUnlockSecretRef(accountId: string): KeyringRef {
-  return { namespace: SECRET_NAMESPACE, key: accountId }
+export function deviceUnlockSecretRef(localAccountId: string): KeyringRef {
+  return { namespace: SECRET_NAMESPACE, key: localAccountId }
 }
 
 const RECOVERY_REF: KeyringRef = {
@@ -69,8 +69,8 @@ export function isDeviceManagedAccount(
  * profile. Keyed on the reserved id and on `next dev`, so a release build and
  * any profile created by hand keep the real first run.
  */
-export function isDevDesktopWorkspace(accountId: string | null | undefined): boolean {
-  if (accountId !== DESKTOP_LOCAL_ACCOUNT_ID) return false
+export function isDevDesktopWorkspace(localAccountId: string | null | undefined): boolean {
+  if (localAccountId !== DESKTOP_LOCAL_ACCOUNT_ID) return false
   return isTauri() && isDevLocalAccountEnabled()
 }
 
@@ -101,23 +101,26 @@ export function unlocksWithoutPrompt(account: LocalAccountRecord | null | undefi
  * because absence is what licenses provisioning a fresh credential, and a
  * locked store must never be mistaken for permission to replace one.
  */
-export async function readDeviceUnlockSecret(accountId: string): Promise<string | null> {
+export async function readDeviceUnlockSecret(localAccountId: string): Promise<string | null> {
   if (!isTauri()) return null
-  return getSecret(deviceUnlockSecretRef(accountId), { strict: true })
+  return getSecret(deviceUnlockSecretRef(localAccountId), { strict: true })
 }
 
 /** Store the secret a profile will open with. Desktop only. */
-export async function saveDeviceUnlockSecret(accountId: string, secret: string): Promise<void> {
+export async function saveDeviceUnlockSecret(
+  localAccountId: string,
+  secret: string
+): Promise<void> {
   if (!isTauri()) {
     throw new Error("Automatic unlock requires the desktop credential store.")
   }
   if (!secret) throw new Error("A device unlock secret cannot be empty.")
-  await setSecret(deviceUnlockSecretRef(accountId), secret)
+  await setSecret(deviceUnlockSecretRef(localAccountId), secret)
 }
 
 /** Forget a profile's device unlock secret. Idempotent, strict on failure. */
-export async function clearDeviceUnlockSecret(accountId: string): Promise<void> {
-  if (isTauri()) await clearSecret(deviceUnlockSecretRef(accountId), { strict: true })
+export async function clearDeviceUnlockSecret(localAccountId: string): Promise<void> {
+  if (isTauri()) await clearSecret(deviceUnlockSecretRef(localAccountId), { strict: true })
 }
 
 /** Only fresh profile provisioning may mint a secret; resume must never replace one. */

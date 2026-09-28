@@ -31,6 +31,8 @@
  *   pnpm audit:surfaces -- --write-baseline # after paying debt down
  */
 
+import ts from "typescript"
+
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
@@ -54,7 +56,7 @@ const EXCLUDED_DIRS = ["components/ui/", "components/ai-elements/"]
 const EXCLUDED_FILE = /\.(test|stories)\.(ts|tsx)$/
 
 /** Radius steps that do not track `--radius`, and the elevation bypass. */
-const UNTRACKED_RADIUS = /\brounded-(?:2xl|3xl|4xl)\b|\brounded-\[[^\]]+\]/g
+const UNTRACKED_RADIUS = /\brounded-(?:2xl|3xl|4xl)\b|\brounded-\[(?!inherit\])[^\]]+\]/g
 const RAW_SHADOW = /\bshadow-(xs|sm|md|lg|xl|2xl|inner)\b/g
 
 /**
@@ -99,13 +101,140 @@ function stripComments(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1")
 }
 
+/** Resolve only local constants; parameters and mutable bindings still shadow them. */
+function classBindings(tree) {
+  const scopes = new WeakMap()
+  const root = { parent: null, functionScope: true, bindings: new Map() }
+  function bind(name, scope, initializer = null) {
+    if (ts.isIdentifier(name)) scope.bindings.set(name.text, initializer)
+    else
+      for (const element of name.elements) {
+        if (ts.isBindingElement(element)) bind(element.name, scope)
+      }
+  }
+  function index(node, parentScope) {
+    if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name) {
+      bind(node.name, parentScope)
+    }
+    const isFunction = ts.isFunctionLike(node)
+    const scope =
+      isFunction ||
+      ts.isBlock(node) ||
+      ts.isCaseBlock(node) ||
+      ts.isCatchClause(node) ||
+      ts.isForStatement(node) ||
+      ts.isForOfStatement(node) ||
+      ts.isForInStatement(node)
+        ? { parent: parentScope, functionScope: isFunction, bindings: new Map() }
+        : parentScope
+    scopes.set(node, scope)
+    if (isFunction && node.name && ts.isIdentifier(node.name)) bind(node.name, scope)
+    if (ts.isParameter(node)) bind(node.name, scope)
+    if (ts.isVariableDeclaration(node)) {
+      const list = node.parent
+      const isList = ts.isVariableDeclarationList(list)
+      let owner = scope
+      if (isList && !(list.flags & ts.NodeFlags.BlockScoped)) {
+        while (!owner.functionScope && owner.parent) owner = owner.parent
+      }
+      bind(node.name, owner, isList && list.flags & ts.NodeFlags.Const ? node.initializer : null)
+    }
+    if (ts.isImportClause(node) && node.name) bind(node.name, scope)
+    if (ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) bind(node.name, scope)
+    ts.forEachChild(node, (child) => index(child, scope))
+  }
+  index(tree, root)
+  return (identifier) => {
+    for (let scope = scopes.get(identifier); scope; scope = scope.parent) {
+      if (scope.bindings.has(identifier.text)) return scope.bindings.get(identifier.text)
+    }
+    return null
+  }
+}
+
+function hasVisiblePanelBorder(classes) {
+  if (!/\bborder-0\b/.test(classes)) return true
+  // A responsive/state variant can restore the width removed at the base.
+  // A colour utility (border-red-500) alone cannot do that.
+  return classes
+    .split(/\s+/)
+    .some((token) => /(?:^|:)border(?:-[xytrblse])?(?:-(?:[1-9]\d*|\[[^\]]+\]))?$/.test(token))
+}
+
 /** Count violations per file. Exported for the test beside this script. */
 export function scanSource(rawSrc) {
   const src = stripComments(rawSrc)
   let barePanels = 0
-  for (const m of src.matchAll(/"([^"\n]{0,600})"/g)) {
-    if (isBarePanel(m[1])) barePanels += 1
+  const tree = ts.createSourceFile(
+    "surface.tsx",
+    src,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  )
+  const resolveClassBinding = classBindings(tree)
+  const containers = new Set(["div", "section", "aside", "article", "header", "footer", "main"])
+  function visit(node) {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const tag = node.tagName.getText(tree)
+      const parentElement = ts.isJsxOpeningElement(node) ? node.parent.parent : node.parent
+      const adopted =
+        ts.isJsxElement(parentElement) &&
+        parentElement.openingElement.tagName.getText(tree) === "Surface" &&
+        parentElement.openingElement.attributes.properties.some(
+          (entry) =>
+            ts.isJsxAttribute(entry) &&
+            entry.name.getText(tree) === "asChild" &&
+            (!entry.initializer || entry.initializer.getText(tree) === "{true}")
+        )
+      if (containers.has(tag) && !adopted) {
+        const attribute = node.attributes.properties.find(
+          (entry) => ts.isJsxAttribute(entry) && entry.name.getText(tree) === "className"
+        )
+        if (attribute?.initializer) {
+          const seen = new Set()
+          function classes(value) {
+            if (!value || seen.has(value)) return
+            seen.add(value)
+            if (ts.isIdentifier(value)) {
+              classes(resolveClassBinding(value))
+            } else if (ts.isStringLiteral(value) || ts.isTemplateLiteralToken(value)) {
+              if (isBarePanel(value.text) && hasVisiblePanelBorder(value.text)) barePanels++
+            } else if (ts.isPropertyAccessExpression(value)) {
+              // Follow only the selected own property of a local object constant.
+              // Scanning the whole object would count unrelated class presets.
+              let object = value.expression
+              const aliases = new Set()
+              while (object && !aliases.has(object)) {
+                aliases.add(object)
+                if (ts.isIdentifier(object)) object = resolveClassBinding(object)
+                else if (
+                  ts.isAsExpression(object) ||
+                  ts.isSatisfiesExpression(object) ||
+                  ts.isParenthesizedExpression(object) ||
+                  ts.isTypeAssertionExpression(object)
+                ) {
+                  object = object.expression
+                } else break
+              }
+              if (object && ts.isObjectLiteralExpression(object)) {
+                const property = object.properties.find(
+                  (entry) =>
+                    ts.isPropertyAssignment(entry) &&
+                    (ts.isIdentifier(entry.name) || ts.isStringLiteral(entry.name)) &&
+                    entry.name.text === value.name.text
+                )
+                if (property) classes(property.initializer)
+              }
+            } else if (!ts.isFunctionLike(value)) ts.forEachChild(value, classes)
+          }
+          classes(attribute.initializer)
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
   }
+  visit(tree)
   const untrackedRadius = (src.match(UNTRACKED_RADIUS) ?? []).length
   const rawShadow = (src.match(RAW_SHADOW) ?? []).length
   return barePanels + untrackedRadius + rawShadow

@@ -262,7 +262,6 @@ fn resolve_mcp_sidecar_path_from(
     current_dir.join("sidecar").join("cognia-mcp.mjs")
 }
 
-
 #[cfg(test)]
 mod host_paths_tests {
     use super::*;
@@ -288,5 +287,4 @@ mod host_paths_tests {
             std::path::PathBuf::from("/repo/sidecar/cognia-mcp.mjs")
         );
     }
-
 }

@@ -588,6 +588,7 @@ const schemas = {
     gitRef: z.string().min(1).optional(),
     subdir: z.string().min(1).optional(),
     generatedFiles: z.record(z.string(), z.string()).optional(),
+    deferCommit: z.boolean().optional(),
   }),
   plugin_set_network_allowlist: z.object({
     pluginId: z.string().min(1),

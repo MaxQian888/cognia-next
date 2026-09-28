@@ -1,12 +1,12 @@
 //! Shared sidecar adapters used by the companion RPC and server.
+use async_trait::async_trait;
+use cognia_companion::event_bus::EventBus;
+use cognia_secrets::api_key::ApiKeyState;
+pub use cognia_sidecar::host::SidecarHost;
+use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
-use async_trait::async_trait;
-use serde_json::Value;
 use tokio::process::Command;
-use cognia_secrets::api_key::ApiKeyState;
-use cognia_companion::event_bus::EventBus;
-pub use cognia_sidecar::host::SidecarHost;
 
 /// Shared provider-env injection over an [`ApiKeyState`]. Auth precedence:
 ///
@@ -112,7 +112,6 @@ impl SidecarHost for HeadlessSidecarHost {
     }
 }
 
-
 pub fn report_sidecar_failure() {
     use cognia_observability::recovery::{ChildAction, RecoverySubsystem};
 
@@ -167,18 +166,18 @@ pub async fn dispatch_runtime_rpc(method: &str, params: &Value) -> Result<Value,
 mod tests {
     #[test]
     fn host_rpc_routes_session_store_before_the_jobs_dispatcher() {
-        assert!(cognia_agent_state::agent_session_store::is_session_store_method(
-            "sessionStore.append"
-        ));
-        assert!(cognia_agent_state::agent_session_store::is_session_store_method(
-            "sessionStore.listSessions"
-        ));
-        assert!(!cognia_agent_state::agent_session_store::is_session_store_method(
-            "jobs.spawn"
-        ));
-        assert!(!cognia_agent_state::agent_session_store::is_session_store_method(
-            "jobs.sessionStore"
-        ));
+        assert!(
+            cognia_agent_state::agent_session_store::is_session_store_method("sessionStore.append")
+        );
+        assert!(
+            cognia_agent_state::agent_session_store::is_session_store_method(
+                "sessionStore.listSessions"
+            )
+        );
+        assert!(!cognia_agent_state::agent_session_store::is_session_store_method("jobs.spawn"));
+        assert!(
+            !cognia_agent_state::agent_session_store::is_session_store_method("jobs.sessionStore")
+        );
     }
 
     use super::*;

@@ -27,7 +27,11 @@ async function manifestBlock(): Promise<{ raw: string; permissions: string[] }> 
   return {
     raw,
     permissions: [...raw.matchAll(/"(sidePanel|storage|activeTab|scripting|contextMenus)"/g)].map(
-      (match) => match[1]
+      (match) => {
+        const permission = match[1]
+        if (!permission) throw new Error("Missing permission capture")
+        return permission
+      }
     ),
   }
 }

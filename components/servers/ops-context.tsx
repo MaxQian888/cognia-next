@@ -66,7 +66,7 @@ export interface ConnectInput extends ControllerConnection {
 export type AdminOperationKind = "restore" | "rollback" | "rotate-key"
 
 export interface ServerOpsValue {
-  accountId: string | null
+  localAccountId: string | null
   connection: ControllerConnection | null
   connected: boolean
   transport: OpsTransportKind
@@ -106,12 +106,12 @@ const ServerOpsContext = createContext<ServerOpsValue | null>(null)
 const tokenStore = createKeyringStore("server-ops-oidc")
 const CONNECTION_PREFIX = "cognia.server-ops.connection.v1"
 
-function connectionKey(accountId: string): string {
-  return `${CONNECTION_PREFIX}.${encodeURIComponent(accountId)}`
+function connectionKey(localAccountId: string): string {
+  return `${CONNECTION_PREFIX}.${encodeURIComponent(localAccountId)}`
 }
 
-function tokenKey(accountId: string, profileId: string): string {
-  return `${accountId}:${profileId}:access-token`
+function tokenKey(localAccountId: string, profileId: string): string {
+  return `${localAccountId}:${profileId}:access-token`
 }
 
 /**
@@ -161,7 +161,7 @@ export function localizedOpsError(
 
 export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations("servers")
-  const accountId = useAccountStore((state) => state.unlockedAccountId)
+  const localAccountId = useAccountStore((state) => state.unlockedAccountId)
   const [connection, setConnection] = useState<ControllerConnection | null>(null)
   const [connected, setConnected] = useState(false)
   const [connecting, setConnecting] = useState(false)
@@ -176,23 +176,23 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
   const liveEvents = useMemo(() => supportsLiveOperationEvents(), [])
 
   useEffect(() => {
-    if (!accountId) return
+    if (!localAccountId) return
     let cancelled = false
-    const raw = localStorage.getItem(connectionKey(accountId))
+    const raw = localStorage.getItem(connectionKey(localAccountId))
     if (!raw) return
     let parsed: Partial<ControllerConnection>
     try {
       parsed = JSON.parse(raw) as Partial<ControllerConnection>
     } catch {
-      localStorage.removeItem(connectionKey(accountId))
+      localStorage.removeItem(connectionKey(localAccountId))
       return
     }
     if (typeof parsed.controllerUrl !== "string" || typeof parsed.profileId !== "string") {
-      localStorage.removeItem(connectionKey(accountId))
+      localStorage.removeItem(connectionKey(localAccountId))
       return
     }
     const next = { controllerUrl: parsed.controllerUrl, profileId: parsed.profileId }
-    void tokenStore.load(tokenKey(accountId, next.profileId)).then((token) => {
+    void tokenStore.load(tokenKey(localAccountId, next.profileId)).then((token) => {
       if (cancelled) return
       // Only surface a connection whose token actually survived: a stored URL
       // with a purged keyring entry would render a connected shell that fails
@@ -203,12 +203,12 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [accountId])
+  }, [localAccountId])
 
   const client = useMemo(() => {
-    if (!connection || !accountId || !connected) return null
+    if (!connection || !localAccountId || !connected) return null
     const accessToken = async () =>
-      (await tokenStore.load(tokenKey(accountId, connection.profileId))) ?? ""
+      (await tokenStore.load(tokenKey(localAccountId, connection.profileId))) ?? ""
     try {
       return new OpsClient({
         baseUrl: connection.controllerUrl,
@@ -223,7 +223,7 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
       // the HTTPS rule (an app upgrade tightening it, a hand-edited entry).
       return null
     }
-  }, [accountId, connected, connection])
+  }, [localAccountId, connected, connection])
 
   /**
    * Fold a page of controller history into the list, newest first.
@@ -241,7 +241,7 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const refresh = useCallback(async () => {
-    if (!client || !accountId || !connection) return
+    if (!client || !localAccountId || !connection) return
     setLoading(true)
     try {
       const summaries = await client.listServers()
@@ -255,17 +255,17 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
       // controller may not have returned in this page, is not dropped.
       const history = await client.listOperations({ limit: 100 }).catch(() => null)
       if (history) mergeOperations(history)
-      saveCachedServerList(localStorage, accountId, connection.profileId, summaries)
+      saveCachedServerList(localStorage, localAccountId, connection.profileId, summaries)
       setOffline(false)
     } catch (error) {
-      const cached = loadCachedServerList(localStorage, accountId, connection.profileId)
+      const cached = loadCachedServerList(localStorage, localAccountId, connection.profileId)
       setServers(cached.map(cachedDetail))
       setOffline(true)
       toast.error(t("errors.refresh"), { description: localizedOpsError(t, error) })
     } finally {
       setLoading(false)
     }
-  }, [accountId, client, connection, mergeOperations, t])
+  }, [localAccountId, client, connection, mergeOperations, t])
 
   useEffect(() => {
     if (!client) return
@@ -343,7 +343,7 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
 
   const connect = useCallback(
     async (input: ConnectInput) => {
-      if (!accountId) return false
+      if (!localAccountId) return false
       setConnecting(true)
       try {
         const candidate = new OpsClient({
@@ -355,8 +355,8 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
         // before anything is persisted.
         const nextCapabilities = await candidate.capabilities()
         const next = { controllerUrl: input.controllerUrl, profileId: input.profileId }
-        await tokenStore.save(tokenKey(accountId, input.profileId), input.accessToken)
-        localStorage.setItem(connectionKey(accountId), JSON.stringify(next))
+        await tokenStore.save(tokenKey(localAccountId, input.profileId), input.accessToken)
+        localStorage.setItem(connectionKey(localAccountId), JSON.stringify(next))
         setConnection(next)
         setCapabilities(nextCapabilities)
         setConnected(true)
@@ -369,18 +369,18 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
         setConnecting(false)
       }
     },
-    [accountId, t]
+    [localAccountId, t]
   )
 
   const disconnect = useCallback(async () => {
-    if (!accountId || !connection) return
+    if (!localAccountId || !connection) return
     try {
-      await tokenStore.delete(tokenKey(accountId, connection.profileId))
+      await tokenStore.delete(tokenKey(localAccountId, connection.profileId))
     } catch (error) {
       toast.error(t("connection.disconnectFailed"), { description: localizedOpsError(t, error) })
       return
     }
-    localStorage.removeItem(connectionKey(accountId))
+    localStorage.removeItem(connectionKey(localAccountId))
     setConnection(null)
     setConnected(false)
     setCapabilities(null)
@@ -389,7 +389,7 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
     setOperations([])
     setOffline(false)
     toast.success(t("connection.disconnected"))
-  }, [accountId, connection, t])
+  }, [localAccountId, connection, t])
 
   /** Queue one operation, recording it and reporting the outcome once. */
   const run = useCallback(
@@ -436,7 +436,7 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
       }
     }
     return {
-      accountId,
+      localAccountId,
       connection,
       connected: Boolean(client),
       transport,
@@ -542,7 +542,7 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
       listOperationEvents: client ? client.listOperationEvents.bind(client) : null,
     }
   }, [
-    accountId,
+    localAccountId,
     capabilities,
     client,
     connect,

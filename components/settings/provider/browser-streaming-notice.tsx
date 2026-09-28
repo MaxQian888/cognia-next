@@ -14,6 +14,7 @@
  * whether or not it has ever been paired.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { AlertTriangle, Zap } from "lucide-react"
 import { useTranslations } from "next-intl"
 
@@ -44,7 +45,7 @@ export function BrowserStreamingNotice({ providerId, baseURL }: BrowserStreaming
   const key = custom ? "gateway" : supported ? "supported" : "unsupported"
 
   return (
-    <div
+    <Surface
       data-testid="browser-streaming-notice"
       data-tone={tone}
       className={
@@ -78,6 +79,6 @@ export function BrowserStreamingNotice({ providerId, baseURL }: BrowserStreaming
           {t(`${key}Description`)}
         </p>
       </div>
-    </div>
+    </Surface>
   )
 }

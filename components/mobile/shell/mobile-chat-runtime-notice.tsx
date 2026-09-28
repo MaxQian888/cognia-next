@@ -7,6 +7,7 @@
  * laid out for a phone: the action button spans the width at the 44px floor.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
@@ -32,7 +33,7 @@ export function MobileChatRuntimeNotice({
   const { availability, recovery, connecting } = gate
   const offline = availability.state === "offline"
   return (
-    <div
+    <Surface
       className="flex flex-col gap-3 rounded-xl border border-border/70 bg-muted/20 p-4 text-sm"
       role="status"
       data-testid="chat-runtime-notice"
@@ -61,6 +62,6 @@ export function MobileChatRuntimeNotice({
           {t(availability.state === "requires-pairing" ? "actions.pair" : "actions.connectionSettings")}
         </Button>
       ) : null}
-    </div>
+    </Surface>
   )
 }

@@ -375,3 +375,19 @@ def test_ensure_serializable_passes_and_raises():
     assert ensure_serializable({"a": 1}, "ctx") == {"a": 1}
     with pytest.raises(TypeError, match="non-JSON-serializable"):
         ensure_serializable(object(), "tool 'x'")
+
+
+def test_link_matcher_manifest_serializes_optional_fields():
+    definition = cognia.LinkMatcherDef(
+        id="pull-request", patterns=["github.com/*/*/pull/*"],
+        entry="links.js", export="PullRequest", label="Pull request", priority=10,
+    )
+    assert definition.to_dict() == {
+        "id": "pull-request", "patterns": ["github.com/*/*/pull/*"],
+        "entry": "links.js", "export": "PullRequest", "label": "Pull request", "priority": 10,
+    }
+    minimal = cognia.LinkMatcherDef(id="link", patterns=["example.com/*"], entry="links.js", export="Link")
+    assert "label" not in minimal.to_dict()
+    assert "priority" not in minimal.to_dict()
+    minimal.to_dict()["patterns"].append("other.com/*")
+    assert minimal.patterns == ["example.com/*"]

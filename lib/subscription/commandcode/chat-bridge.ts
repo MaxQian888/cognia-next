@@ -14,9 +14,10 @@ export async function resolveCommandcodeVaultCredential(
 ): Promise<{ apiKey: string; baseURL: string; headers?: Record<string, string> } | null> {
   if (providerId !== "commandcode" || !isTauri()) return null
   try {
-    const accountId = selectedAccountId || (await getActiveAccount("commandcode")).activeAccountId
-    if (!accountId) return null
-    const account = await getAccount("commandcode", accountId)
+    const providerAccountId =
+      selectedAccountId || (await getActiveAccount("commandcode")).activeAccountId
+    if (!providerAccountId) return null
+    const account = await getAccount("commandcode", providerAccountId)
     if (account?.credential.provider !== "commandcode") return null
     const apiKey = account.credential.accessToken.trim()
     if (!apiKey) return null

@@ -250,7 +250,7 @@ describe("WorkflowEditorCanvas", () => {
     })
   })
 
-  it("warns and refreshes publication state when a saved import changes the contract", async () => {
+  it("saves an imported draft without invalidating its immutable published version", async () => {
     const originalSchema = {
       type: "object",
       properties: { topic: { type: "string" } },
@@ -304,8 +304,14 @@ describe("WorkflowEditorCanvas", () => {
     await waitFor(() => expect(screen.getByText("Unsaved changes")).toBeInTheDocument())
     fireEvent.click(screen.getByTestId("workflow-save"))
 
-    await waitFor(async () => expect((await getWorkflow(wf.id))?.published).toBeUndefined())
-    expect(toast.warning).toHaveBeenCalled()
+    await waitFor(async () => {
+      const saved = await getWorkflow(wf.id)
+      expect(saved?.nodes[0]?.data.params).toMatchObject({
+        inputSchema: { type: "object", properties: { url: { type: "string" } } },
+      })
+      expect(saved?.published).toEqual(published.published)
+    })
+    expect(toast.warning).not.toHaveBeenCalled()
   }, 10_000)
 
   it("renders an empty state when the workflow has no nodes", async () => {

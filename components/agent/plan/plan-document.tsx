@@ -27,6 +27,7 @@
  * host's (`bg-inherit` down the chain), so hosts set one on `className`.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { FocusEvent, KeyboardEvent } from "react"
 import { useTranslations } from "next-intl"
@@ -35,7 +36,6 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CheckIcon,
-  Loader2Icon,
   PlusIcon,
   XIcon,
 } from "lucide-react"
@@ -527,7 +527,7 @@ export function PlanDocument({
       {saveState !== "idle" && (
         <span className="inline-flex items-center gap-1 animate-in fade-in-0 duration-200">
           {saveState === "edited" && <span className="size-1.5 rounded-full bg-amber-500" />}
-          {saveState === "saving" && <Loader2Icon className="size-3 motion-safe:animate-spin" />}
+          {saveState === "saving" && <Spinner className="size-3 " />}
           {saveState === "saved" && <CheckIcon className="size-3" />}
           {saveState === "error" && <AlertCircleIcon className="size-3" />}
           {t(`document.save.${saveState}`)}

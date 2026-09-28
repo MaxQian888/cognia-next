@@ -4,6 +4,21 @@ import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { buildMessageShareContent, writeMessageToClipboard } from "./message-share"
 
 describe("buildMessageShareContent", () => {
+  it("materializes files from an immutable transcript without mutating its parts", () => {
+    const parts: UIMessage["parts"] = [
+      {
+        type: "file" as const,
+        url: "data:image/png;base64,YQ==",
+        mediaType: "image/png",
+        filename: "image.png",
+      },
+    ]
+    Object.freeze(parts)
+    const content = buildMessageShareContent({ id: "immutable", role: "assistant", parts })
+    expect(content.shareFiles).toHaveLength(1)
+    expect(content.shareFiles[0].name).toBe("image.png")
+    expect(parts).toHaveLength(1)
+  })
   it("does not decode screenshots while rendering action availability", () => {
     const decode = jest.spyOn(globalThis, "atob")
     try {

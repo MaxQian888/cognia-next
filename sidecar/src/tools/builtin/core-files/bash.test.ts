@@ -15,6 +15,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   MAX_TIMEOUT_MS,
 } from "./bash.ts"
+import { findDangerousShellFragment } from "../../../policy/shell/ast-scan.ts"
 import { createBgShellRegistry } from "../../state/background-shells.ts"
 import { resolveShellDescriptor, activeShellDescriptor } from "../../../platform/process/shell.ts"
 import type { SessionBgShellRegistry } from "../../state/host-background-shells.ts"
@@ -94,11 +95,14 @@ test("bash hard-rejects destructive chaining patterns", async () => {
 
 test("bash allows safe device sinks and quoted shell-looking text", async () => {
   const tool = asCallable(createBashTool({ cwd: os.tmpdir(), shell: legacyShell }))
+  // Linux cannot reopen Node socket-backed stderr through /dev/stderr.
+  // Test that path at the policy seam; duplicate fd 2 for execution below.
+  assert.equal(findDangerousShellFragment("printf safe > /dev/stderr"), null)
   for (const command of [
     "printf safe >/dev/null && printf ok",
     "printf safe 2>/dev/null",
     "printf safe &>/dev/null",
-    "printf safe > /dev/stderr",
+    "printf safe >&2",
     "printf '%s' '>/dev/sda'",
     'printf "%s" "&& rm -rf /"',
   ]) {

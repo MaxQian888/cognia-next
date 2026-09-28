@@ -121,13 +121,6 @@ jest.mock("@/components/settings/subscription/add-account-dialog/anthropic", () 
 jest.mock("@/components/settings/subscription/add-account-dialog/codex", () => ({
   CodexAddAccountDialog: dialogStub("codex"),
 }))
-jest.mock("@/components/settings/subscription/add-account-dialog/opencode", () => ({
-  OpencodeAddAccountDialog: dialogStub("opencode"),
-}))
-
-jest.mock("@/components/settings/subscription/add-account-dialog/commandcode", () => ({
-  CommandcodeAddAccountDialog: dialogStub("commandcode"),
-}))
 
 jest.mock("../provider-picker", () => ({
   ProviderPicker: ({ value, onChange }: { value: string; onChange: (id: string) => void }) => (

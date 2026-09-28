@@ -134,7 +134,7 @@ export function createCompanionSession({
  */
 function readJwtId(accessToken: string): string {
   const segments = accessToken.split(".")
-  if (segments.length !== 3) throw new Error("access token is malformed")
+  if (segments.length !== 3 || !segments[1]) throw new Error("access token is malformed")
   // `base64UrlToText`, not a local `atob`: `atob` yields one char per byte, so
   // any non-ASCII claim in the payload is mangled before `JSON.parse` sees it.
   // Only `jti` is read today and a UUID is ASCII, but a second hand-rolled copy

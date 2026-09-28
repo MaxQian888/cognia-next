@@ -188,7 +188,7 @@ export interface LspServerStatus {
  * cannot import `lib/` or `@/types`, so the renderer resolves the merged
  * server list and serialises it here.
  */
-export interface LspSendOptions {
+export type LspSendOptions = {
   enabled: boolean
   servers: ResolvedLspServer[]
   /** Allow the agent runtime's install ladder to npm-install missing servers. */

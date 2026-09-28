@@ -9,11 +9,7 @@ jest.mock("motion/react", () => ({
 import { DEMO_TASK } from "@web/content/demo-task"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
-import {
-  GRAPH_PHASE_DELAYS,
-  GRAPH_REJECT_PHASE,
-  WorkflowGraphReconstruction,
-} from "./workflow-graph-reconstruction"
+import { GRAPH_PHASE_DELAYS, WorkflowGraphReconstruction } from "./workflow-graph-reconstruction"
 
 describe("WorkflowGraphReconstruction", () => {
   it("carries the reconstruction marker", () => {

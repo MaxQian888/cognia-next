@@ -59,12 +59,13 @@ describe("environment spec digests", () => {
       base.specDigest
     )
     await expect(environmentRuntimeFieldsDigest({ ...base, remoteEnv: {} })).resolves.toBe(digest)
-    for (const added of [
+    const additions: Partial<EnvironmentSpec>[] = [
       { remoteEnv: { IMAGE_SETTING: null } },
       { remoteEnv: { PATH: "${containerEnv:PATH}:/custom/bin" } },
       { workspaceFolder: "/workspace/app" },
       { lifecycleTimeoutMs: 1000 },
-    ]) {
+    ]
+    for (const added of additions) {
       const changed = { ...base, ...added }
       await expect(computeEnvironmentSpecDigest(changed)).resolves.not.toBe(base.specDigest)
       await expect(environmentRuntimeFieldsDigest(changed)).resolves.not.toBe(digest)
@@ -83,6 +84,7 @@ describe("environment spec digests", () => {
       await environmentRuntimeFieldsDigest(base)
     )
 
+    if (base.image.kind === "build") throw new Error("Expected registry image fixture")
     const otherImage: EnvironmentSpec = {
       ...base,
       image: { ...base.image, repository: "acme/other" },

@@ -90009,6 +90009,8 @@ paths:
                   additionalProperties:
                     type: string
                   example: {}
+                deferCommit:
+                  type: boolean
               required:
                 - repo
               additionalProperties: false
@@ -91393,7 +91395,8 @@ paths:
                             propertyNames:
                               type: string
                             additionalProperties:
-                              $ref: "#/$defs/__schema0"
+                              $ref: "#/paths/~1internal~1_rpc~1plugin_media_add_transition/post/requestBody/content/application~1json/schema/$defs/__\
+                                schema0"
                             example: {}
                         required:
                           - id
@@ -91413,7 +91416,8 @@ paths:
                               propertyNames:
                                 type: string
                               additionalProperties:
-                                $ref: "#/$defs/__schema1"
+                                $ref: "#/paths/~1internal~1_rpc~1plugin_media_add_transition/post/requestBody/content/application~1json/schema/$defs/__\
+                                  schema1"
                               example: {}
                           required:
                             - type
@@ -91458,7 +91462,8 @@ paths:
                             propertyNames:
                               type: string
                             additionalProperties:
-                              $ref: "#/$defs/__schema0"
+                              $ref: "#/paths/~1internal~1_rpc~1plugin_media_add_transition/post/requestBody/content/application~1json/schema/$defs/__\
+                                schema0"
                             example: {}
                         required:
                           - id
@@ -91478,7 +91483,8 @@ paths:
                               propertyNames:
                                 type: string
                               additionalProperties:
-                                $ref: "#/$defs/__schema1"
+                                $ref: "#/paths/~1internal~1_rpc~1plugin_media_add_transition/post/requestBody/content/application~1json/schema/$defs/__\
+                                  schema1"
                               example: {}
                           required:
                             - type
@@ -91506,7 +91512,8 @@ paths:
                       propertyNames:
                         type: string
                       additionalProperties:
-                        $ref: "#/$defs/__schema1"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_add_transition/post/requestBody/content/application~1json/schema/$defs/__\
+                          schema1"
                       example: {}
                   required:
                     - type
@@ -91526,12 +91533,14 @@ paths:
                     - type: "null"
                     - type: array
                       items:
-                        $ref: "#/$defs/__schema0"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_add_transition/post/requestBody/content/application~1json/schema/$defs/__\
+                          schema0"
                     - type: object
                       propertyNames:
                         type: string
                       additionalProperties:
-                        $ref: "#/$defs/__schema0"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_add_transition/post/requestBody/content/application~1json/schema/$defs/__\
+                          schema0"
                       example: {}
                 __schema1:
                   anyOf:
@@ -91541,12 +91550,14 @@ paths:
                     - type: "null"
                     - type: array
                       items:
-                        $ref: "#/$defs/__schema1"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_add_transition/post/requestBody/content/application~1json/schema/$defs/__\
+                          schema1"
                     - type: object
                       propertyNames:
                         type: string
                       additionalProperties:
-                        $ref: "#/$defs/__schema1"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_add_transition/post/requestBody/content/application~1json/schema/$defs/__\
+                          schema1"
                       example: {}
       responses:
         "200":
@@ -91723,7 +91734,8 @@ paths:
                       propertyNames:
                         type: string
                       additionalProperties:
-                        $ref: "#/$defs/__schema0"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_apply_video_effect/post/requestBody/content/application~1json/schema/$def\
+                          s/__schema0"
                       example: {}
                   required:
                     - id
@@ -91741,12 +91753,14 @@ paths:
                     - type: "null"
                     - type: array
                       items:
-                        $ref: "#/$defs/__schema0"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_apply_video_effect/post/requestBody/content/application~1json/schema/$def\
+                          s/__schema0"
                     - type: object
                       propertyNames:
                         type: string
                       additionalProperties:
-                        $ref: "#/$defs/__schema0"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_apply_video_effect/post/requestBody/content/application~1json/schema/$def\
+                          s/__schema0"
                       example: {}
       responses:
         "200":
@@ -92113,7 +92127,8 @@ paths:
                               propertyNames:
                                 type: string
                               additionalProperties:
-                                $ref: "#/$defs/__schema0"
+                                $ref: "#/paths/~1internal~1_rpc~1plugin_media_concatenate_videos/post/requestBody/content/application~1json/schema/$def\
+                                  s/__schema0"
                               example: {}
                           required:
                             - id
@@ -92133,7 +92148,8 @@ paths:
                                 propertyNames:
                                   type: string
                                 additionalProperties:
-                                  $ref: "#/$defs/__schema1"
+                                  $ref: "#/paths/~1internal~1_rpc~1plugin_media_concatenate_videos/post/requestBody/content/application~1json/schema/$def\
+                                    s/__schema1"
                                 example: {}
                             required:
                               - type
@@ -92159,12 +92175,14 @@ paths:
                     - type: "null"
                     - type: array
                       items:
-                        $ref: "#/$defs/__schema0"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_concatenate_videos/post/requestBody/content/application~1json/schema/$def\
+                          s/__schema0"
                     - type: object
                       propertyNames:
                         type: string
                       additionalProperties:
-                        $ref: "#/$defs/__schema0"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_concatenate_videos/post/requestBody/content/application~1json/schema/$def\
+                          s/__schema0"
                       example: {}
                 __schema1:
                   anyOf:
@@ -92174,12 +92192,14 @@ paths:
                     - type: "null"
                     - type: array
                       items:
-                        $ref: "#/$defs/__schema1"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_concatenate_videos/post/requestBody/content/application~1json/schema/$def\
+                          s/__schema1"
                     - type: object
                       propertyNames:
                         type: string
                       additionalProperties:
-                        $ref: "#/$defs/__schema1"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_concatenate_videos/post/requestBody/content/application~1json/schema/$def\
+                          s/__schema1"
                       example: {}
       responses:
         "200":
@@ -92385,7 +92405,8 @@ paths:
                               propertyNames:
                                 type: string
                               additionalProperties:
-                                $ref: "#/$defs/__schema0"
+                                $ref: "#/paths/~1internal~1_rpc~1plugin_media_export_video/post/requestBody/content/application~1json/schema/$defs/__sc\
+                                  hema0"
                               example: {}
                           required:
                             - id
@@ -92405,7 +92426,8 @@ paths:
                                 propertyNames:
                                   type: string
                                 additionalProperties:
-                                  $ref: "#/$defs/__schema1"
+                                  $ref: "#/paths/~1internal~1_rpc~1plugin_media_export_video/post/requestBody/content/application~1json/schema/$defs/__sc\
+                                    hema1"
                                 example: {}
                             required:
                               - type
@@ -92436,9 +92458,9 @@ paths:
                       type: string
                       minLength: 1
                     codec:
-                      anyOf:
-                        - type: string
-                        - type: "null"
+                      type:
+                        - string
+                        - "null"
                     audioBitrate:
                       anyOf:
                         - type: integer
@@ -92475,12 +92497,14 @@ paths:
                     - type: "null"
                     - type: array
                       items:
-                        $ref: "#/$defs/__schema0"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_export_video/post/requestBody/content/application~1json/schema/$defs/__sc\
+                          hema0"
                     - type: object
                       propertyNames:
                         type: string
                       additionalProperties:
-                        $ref: "#/$defs/__schema0"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_export_video/post/requestBody/content/application~1json/schema/$defs/__sc\
+                          hema0"
                       example: {}
                 __schema1:
                   anyOf:
@@ -92490,12 +92514,14 @@ paths:
                     - type: "null"
                     - type: array
                       items:
-                        $ref: "#/$defs/__schema1"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_export_video/post/requestBody/content/application~1json/schema/$defs/__sc\
+                          hema1"
                     - type: object
                       propertyNames:
                         type: string
                       additionalProperties:
-                        $ref: "#/$defs/__schema1"
+                        $ref: "#/paths/~1internal~1_rpc~1plugin_media_export_video/post/requestBody/content/application~1json/schema/$defs/__sc\
+                          hema1"
                       example: {}
       responses:
         "200":
@@ -109776,9 +109802,9 @@ paths:
                       items:
                         type: string
                     endAt:
-                      anyOf:
-                        - type: string
-                        - type: "null"
+                      type:
+                        - string
+                        - "null"
                     onSuccessTaskIds:
                       type: array
                       items:
@@ -146112,9 +146138,9 @@ paths:
                           maximum: 9007199254740991
                         - type: "null"
                     deduplicate:
-                      anyOf:
-                        - type: boolean
-                        - type: "null"
+                      type:
+                        - boolean
+                        - "null"
                     duplicateThreshold:
                       anyOf:
                         - type: number

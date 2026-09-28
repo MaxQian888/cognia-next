@@ -318,8 +318,8 @@ describe("durable AgentTeam coordinator", () => {
     const coordinator = createDurableTeamCoordinator({ globalConcurrency: 1 })
     await coordinator.prepareRun(team(), "run-admission")
     await register(coordinator, "first")
-    const failRunning = (patch: Record<string, unknown>) => {
-      if (patch.status === "running") throw new Error("injected DB failure")
+    const failRunning = (patch: object) => {
+      if ("status" in patch && patch.status === "running") throw new Error("injected DB failure")
     }
     getDb().agentTeamChildRuns.hook("updating", failRunning)
     await expect(coordinator.withChildAdmission("first", jest.fn())).rejects.toThrow(

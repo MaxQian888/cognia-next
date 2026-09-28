@@ -13,6 +13,7 @@
  * after approval reads as "changed", and needs approving again.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useMemo } from "react"
 import { builtEnvironmentDeclaration } from "@/lib/project-environment/devcontainer"
 import { useTranslations } from "next-intl"
@@ -87,7 +88,7 @@ export function ProjectEnvironmentRuntimeDeclaration({
       : undefined
 
   return (
-    <div
+    <Surface
       className="space-y-2 rounded-md border bg-background/40 p-3"
       data-testid="project-environment-runtime-declaration"
       data-state={current ? "approved" : stale ? "changed" : declaration.kind}
@@ -293,6 +294,6 @@ export function ProjectEnvironmentRuntimeDeclaration({
           ))}
         </ul>
       ) : null}
-    </div>
+    </Surface>
   )
 }

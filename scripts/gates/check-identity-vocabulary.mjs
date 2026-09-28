@@ -38,7 +38,8 @@
  * `\baccountId\b` does not match `localAccountId`, `cogniaAccountId`,
  * `providerAccountId` or any other prefixed form, because there is no word
  * boundary in the middle of an identifier. Qualifying the name is therefore the
- * whole fix — no allowlist to maintain.
+ * fix for internal identifiers. Fixed wire keys require exact, reviewed entries
+ * in `identity-wire-exceptions.json`; an entry never exempts a whole file.
  *
  * Usage:
  *   pnpm audit:identity-vocabulary
@@ -52,6 +53,7 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, "../..")
 export const BASELINE_FILE = join(__dirname, "identity-vocabulary-baseline.json")
+export const WIRE_EXCEPTIONS_FILE = join(__dirname, "identity-wire-exceptions.json")
 
 /**
  * The rules. Structured as a table so ADR-0149's later batches can add one
@@ -184,7 +186,105 @@ export function diffAgainstBaseline(current, baselineEntries) {
   return problems
 }
 
-export function scanRepository({ root = REPO_ROOT } = {}) {
+/**
+ * Public/persisted keys cannot be renamed as local vocabulary cleanup. Each
+ * exception binds one exact source line to a named contract and regression
+ * test. Changed, duplicated or vanished lines fail closed instead of buying
+ * room for another bare identifier elsewhere in the file.
+ */
+export function applyWireExceptions(current, exceptions, readSource) {
+  const adjusted = structuredClone(current)
+  const problems = []
+  const seen = new Set()
+  const scopes = new Set([
+    "local-profile",
+    "provider-account",
+    "connector-account",
+    "cloud-account",
+  ])
+  if (!Array.isArray(exceptions))
+    return { current: adjusted, problems: ["wire exceptions must be an array"] }
+  for (const entry of exceptions) {
+    const label = `${entry?.file ?? "<missing>"}: ${entry?.field ?? "<missing>"}`
+    const rule = RULES.find((rule) => rule.id === entry?.rule)
+    const token = entry?.rule === "bareAccountIdRust" ? "account_id" : "accountId"
+    const validPath = (path) =>
+      typeof path === "string" &&
+      path.length > 0 &&
+      !path.startsWith("/") &&
+      !path.split("/").includes("..")
+    if (
+      !entry ||
+      !rule ||
+      !validPath(entry.file) ||
+      !rule.extensions.some((ext) => entry.file.endsWith(ext)) ||
+      !scopes.has(entry.scope) ||
+      typeof entry.field !== "string" ||
+      !entry.field.endsWith(`.${token}`) ||
+      !validPath(entry.contract) ||
+      !validPath(entry.test) ||
+      typeof entry.reason !== "string" ||
+      entry.reason.trim().length < 20 ||
+      typeof entry.source !== "string" ||
+      !entry.source.trim() ||
+      entry.source.includes("\n") ||
+      !Number.isInteger(entry.occurrences) ||
+      entry.occurrences < 1
+    ) {
+      problems.push(
+        `${label}: invalid wire exception; scope, field, exact source, count, contract, test and reason are required`
+      )
+      continue
+    }
+    const key = `${entry.file}\0${entry.rule}\0${entry.source.trim()}`
+    if (seen.has(key)) {
+      problems.push(`${label}: duplicate wire exception`)
+      continue
+    }
+    seen.add(key)
+    const source = readSource(entry.file)
+    const contract = readSource(entry.contract)
+    const test = readSource(entry.test)
+    if (source === null || contract === null || test === null) {
+      problems.push(`${label}: stale wire exception; source, contract or test no longer exists`)
+      continue
+    }
+    if (
+      !/\baccountId\b|\baccount_id\b/.test(contract) ||
+      !(
+        /\.(test|spec)\.[cm]?[jt]sx?$/.test(entry.test) ||
+        (entry.test.endsWith(".rs") && /#\[cfg\(test\)\]|#\[test\]/.test(test))
+      )
+    ) {
+      problems.push(
+        `${label}: contract must declare the wire key and test must identify executable regression coverage`
+      )
+      continue
+    }
+    // Local declarations have no compatibility obligation. Alias these first.
+    if (/\b(?:const|let|var)\s+(?:mut\s+)?account(?:Id|_id)\b/.test(entry.source)) {
+      problems.push(`${label}: a local declaration must be qualified, not wire-exempted`)
+      continue
+    }
+    const matches = source.split(/\r?\n/).filter((line) => line.trim() === entry.source.trim())
+    const count = matches.reduce(
+      (total, line) => total + (line.match(rule.pattern)?.length ?? 0),
+      0
+    )
+    if (count !== entry.occurrences || (adjusted[entry.file]?.[entry.rule] ?? 0) < count) {
+      problems.push(
+        `${label}: stale wire exception; expected ${entry.occurrences} exact occurrence(s), found ${count}`
+      )
+      continue
+    }
+    adjusted[entry.file][entry.rule] -= count
+    if (!adjusted[entry.file][entry.rule]) delete adjusted[entry.file][entry.rule]
+    if (!Object.keys(adjusted[entry.file]).length) delete adjusted[entry.file]
+  }
+  return { current: adjusted, problems }
+}
+
+export function scanRepository({ root = REPO_ROOT, wireExceptions } = {}) {
   const current = {}
   for (const scanRoot of SCAN_ROOTS) {
     const absolute = join(root, scanRoot)
@@ -201,7 +301,18 @@ export function scanRepository({ root = REPO_ROOT } = {}) {
       if (counts) current[relPath] = counts
     }
   }
-  return current
+  const readSource = (path) => {
+    try {
+      return readFileSync(join(root, path), "utf8")
+    } catch {
+      return null
+    }
+  }
+  const manifest =
+    wireExceptions ?? JSON.parse(readFileSync(WIRE_EXCEPTIONS_FILE, "utf8")).exceptions
+  const result = applyWireExceptions(current, manifest, readSource)
+  if (result.problems.length) throw new Error(result.problems.join("\n"))
+  return result.current
 }
 
 function readBaseline() {

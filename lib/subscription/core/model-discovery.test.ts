@@ -57,7 +57,7 @@ beforeEach(() => {
 })
 
 it("uses saved vault credentials and returns metadata without storing credentials", async () => {
-  const result = await discoverSubscriptionModels({ definition, accountId: "selected" })
+  const result = await discoverSubscriptionModels({ definition, providerAccountId: "selected" })
   expect(result.models[0].contextLength).toBe(256000)
   expect(credential).toHaveBeenCalledWith(definition, "selected")
   const input = list.mock.calls[0][0]
@@ -81,7 +81,7 @@ it("honors creation and existing-account preset bindings ahead of preview overri
   })
   await discoverSubscriptionModels({
     definition,
-    accountId: "saved",
+    providerAccountId: "saved",
     preview: { apiKey: "replacement", baseUrl: "https://override.example/v1" },
   })
   expect(account).toHaveBeenCalledWith(definition.id, "saved")

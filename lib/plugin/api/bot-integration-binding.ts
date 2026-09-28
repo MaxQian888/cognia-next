@@ -30,8 +30,10 @@ export async function resolveBotIntegrationBinding(
     throw new Error("Bot integration definition is unavailable or changed")
   }
   const slot = definition.requires?.credentials?.find((candidate) => candidate.id === ref.slotId)
-  const accountId = installation.credentialBindings[ref.slotId]?.integrationAccountId
-  const account = accountId ? await getDb().integrationAccounts.get(accountId) : undefined
+  const connectorAccountId = installation.credentialBindings[ref.slotId]?.integrationAccountId
+  const account = connectorAccountId
+    ? await getDb().integrationAccounts.get(connectorAccountId)
+    : undefined
   if (!slot?.integration || !account?.enabled) throw new Error("Bot credential slot is not bound")
   const integration = getRegisteredIntegration(account.pluginId, account.integrationId)?.definition
   if (!integration || ![account.pluginId, account.integrationId].includes(slot.integration)) {

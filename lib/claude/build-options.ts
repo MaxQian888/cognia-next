@@ -245,19 +245,19 @@ function buildProtocolAdapterSpec(
 async function resolveSubscriptionBackedSummaryCredentials(
   providerId: string,
   resolved?: { apiKey?: string; baseURL?: string },
-  accountId?: string | null,
+  providerAccountId?: string | null,
   appSettings?: AppSettings
 ): Promise<SummaryCredentials | null> {
   const definition = getSubscriptionProvider(providerId, appSettings?.customProviders)
   if (!resolved?.apiKey && definition?.authMode === "api-key" && !definition.legacyCredentialKind) {
-    return resolveManagedSubscriptionCredential(definition, accountId)
+    return resolveManagedSubscriptionCredential(definition, providerAccountId)
   }
   if (providerId === "commandcode" && !resolved?.apiKey) {
-    return resolveCommandcodeVaultCredential(providerId, accountId)
+    return resolveCommandcodeVaultCredential(providerId, providerAccountId)
   }
 
   if (isOpencodeChatProviderId(providerId) && !resolved?.apiKey) {
-    const vaultCred = await resolveOpencodeVaultCredential(providerId, accountId)
+    const vaultCred = await resolveOpencodeVaultCredential(providerId, providerAccountId)
     if (!vaultCred) return null
     return {
       apiKey: vaultCred.apiKey,
@@ -267,7 +267,7 @@ async function resolveSubscriptionBackedSummaryCredentials(
   }
 
   if (isCodexChatProviderId(providerId)) {
-    const vaultCred = await resolveCodexVaultCredential(providerId, accountId)
+    const vaultCred = await resolveCodexVaultCredential(providerId, providerAccountId)
     if (!vaultCred) return null
     if (!resolved?.apiKey) {
       return {
@@ -302,7 +302,7 @@ async function resolveSummaryProviderForCompaction(args: {
     !args.appSettings.customProviders?.some((provider) => provider.id === args.providerId)
   )
     return null
-  const accountId = resolveAccountId(args.providerId, null, null, args.appSettings)
+  const providerAccountId = resolveAccountId(args.providerId, null, null, args.appSettings)
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: args.appSettings.defaultProvider,
     providerSettings: args.appSettings.providerSettings as
@@ -325,7 +325,7 @@ async function resolveSummaryProviderForCompaction(args: {
     const vaultCredentials = await resolveSubscriptionBackedSummaryCredentials(
       args.providerId,
       { apiKey: r.apiKey, baseURL: r.baseURL },
-      accountId,
+      providerAccountId,
       args.appSettings
     )
     const credentials: SummaryCredentials = vaultCredentials ?? {
@@ -367,7 +367,7 @@ async function resolveSummaryProviderForCompaction(args: {
     const credentials = await resolveSubscriptionBackedSummaryCredentials(
       args.providerId,
       undefined,
-      accountId,
+      providerAccountId,
       args.appSettings
     )
     if (!credentials) return null
@@ -1799,7 +1799,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         ...(ctx.externalRuntimeId ? { teammateRuntime: ctx.externalRuntimeId } : {}),
       })
 
-  const accountId = resolveAccountId(
+  const providerAccountId = resolveAccountId(
     providerId,
     session ?? null,
     character ?? null,
@@ -1820,8 +1820,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // here and only here: the send path picks it several hundred lines
       // later, by which point this resolver has already thrown.
       ctx.externalRuntimeId
-        ? resolveAccountEnvForExternalRuntime(providerId, accountId)
-        : resolveAccountEnv(providerId, accountId),
+        ? resolveAccountEnvForExternalRuntime(providerId, providerAccountId)
+        : resolveAccountEnv(providerId, providerAccountId),
       resolveProxyEnv(session?.id ?? null),
     ])
   }
@@ -1833,7 +1833,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       const attemptOptions = await resolveProviderAttemptOptions(
         providerId,
         appSettings,
-        accountId,
+        providerAccountId,
         Boolean(session?.accountId || character?.accountIdOverride),
         opts.model
       )
@@ -5144,7 +5144,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         ).prepareExternalAgentGatewayRoute({
           providerId: providerId!,
           modelId: opts.model ?? spec.modelBindings.primary,
-          accountId,
+          accountId: providerAccountId,
           sessionId: session?.id ?? ctx.executionIdentity?.sessionId ?? crypto.randomUUID(),
           executionFingerprint: spec.executionFingerprint,
           ingressProtocol: "anthropic",

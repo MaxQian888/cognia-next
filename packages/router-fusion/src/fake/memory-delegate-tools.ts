@@ -24,8 +24,7 @@ import {
   type DelegateToolContext,
   type DelegateToolRuntime,
 } from "../workflows/delegate-ports"
-import type { ToolDescriptor, ToolIntent, ToolReceipt } from "../workflows/ports"
-import type { MemoryArtifactStore } from "./memory-artifacts"
+import type { ArtifactStore, ToolDescriptor, ToolIntent, ToolReceipt } from "../workflows/ports"
 import type { MemoryWorkspace } from "./memory-workspace"
 
 export interface MemoryDelegateToolOptions {
@@ -48,7 +47,7 @@ export class MemoryDelegateToolRuntime implements DelegateToolRuntime {
 
   constructor(
     private readonly workspace: MemoryWorkspace,
-    private readonly store: MemoryArtifactStore,
+    private readonly store: ArtifactStore,
     private readonly options: MemoryDelegateToolOptions = {}
   ) {}
 

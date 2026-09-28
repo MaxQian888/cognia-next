@@ -33,7 +33,7 @@ export class WorkflowBlobError extends Error {
 }
 
 export interface StoreWorkflowBlobInput {
-  accountId: string
+  localAccountId: string
   runId: string
   stepId: string
   bytes: Uint8Array
@@ -65,7 +65,7 @@ export function workflowBlobId(ref: string): string {
 export async function storeWorkflowBlob(
   input: StoreWorkflowBlobInput
 ): Promise<WorkflowBlobHandle> {
-  if (!input.accountId) {
+  if (!input.localAccountId) {
     throw new WorkflowBlobError("no-account", "A run without an account cannot store a blob")
   }
   if (input.bytes.byteLength === 0) {
@@ -81,16 +81,21 @@ export async function storeWorkflowBlob(
 
   const now = input.now ?? Date.now()
   const id = `wfb_${now.toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-  const key = await loadOrCreateAccountArtifactKey(input.accountId, "workflow-blob")
+  const key = await loadOrCreateAccountArtifactKey(input.localAccountId, "workflow-blob")
   const envelope = await encryptAccountArtifactBytes(
     key,
     input.bytes,
-    additionalData({ accountId: input.accountId, runId: input.runId, stepId: input.stepId, id })
+    additionalData({
+      accountId: input.localAccountId,
+      runId: input.runId,
+      stepId: input.stepId,
+      id,
+    })
   )
 
   const row: WorkflowBlobRow = {
     id,
-    accountId: input.accountId,
+    accountId: input.localAccountId,
     runId: input.runId,
     stepId: input.stepId,
     mediaType: input.mediaType,

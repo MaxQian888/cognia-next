@@ -42,8 +42,8 @@ use serde::Serialize;
 use tauri::State;
 use url::Url;
 
-use super::VscodeExtensionState;
 use super::commands::VscodeCommandError;
+use super::VscodeExtensionState;
 
 /// Byte ceiling for a **marketplace-sourced** `.vsix`.
 ///

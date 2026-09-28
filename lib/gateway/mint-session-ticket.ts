@@ -203,20 +203,20 @@ export async function prepareExternalAgentGatewayRoute(
   const hasManualCredential = Boolean(
     configured?.apiKey?.trim() || configured?.apiKeys?.some((key) => key.trim())
   )
-  let accountId = input.accountId
-  if (accountId === undefined) {
-    if (hasManualCredential) accountId = null
+  let providerAccountId = input.accountId
+  if (providerAccountId === undefined) {
+    if (hasManualCredential) providerAccountId = null
     else if (definition && definition.authMode !== "anthropic-oauth") {
       const { getActiveAccount } = await import("@/lib/subscription/core/transport")
-      accountId =
+      providerAccountId =
         settings.defaultAccountIds?.[definition.id] ??
         (settings.defaultProvider === input.providerId || settings.defaultProvider === definition.id
           ? settings.defaultAccountId
           : undefined) ??
         (await getActiveAccount(definition.id)).activeAccountId
-    } else accountId = null
+    } else providerAccountId = null
   }
-  if (!accountId && !hasManualCredential && !allowsUnauthenticated)
+  if (!providerAccountId && !hasManualCredential && !allowsUnauthenticated)
     throw new Error("The selected Cognia model has no usable gateway credential")
   const assertCurrent = () => {
     input.signal?.throwIfAborted()
@@ -250,11 +250,11 @@ export async function prepareExternalAgentGatewayRoute(
   if (!provider || provider.credentialFallbackAllowed === false)
     throw new Error("The selected Cognia provider is unavailable or disabled")
   let upstream = { ...provider }
-  if (accountId) {
+  if (providerAccountId) {
     const credential = await resolveSubscriptionProviderCredential(
       input.providerId,
       settings,
-      accountId
+      providerAccountId
     )
     assertCurrent()
     if (!credential) throw new Error("The selected Cognia subscription account is unavailable")
@@ -306,7 +306,7 @@ export async function prepareExternalAgentGatewayRoute(
   // Resolve selected-account facts transiently, without changing the picker or
   // another task's metadata. Unknown limits fall back to the declaration only.
   let metadataSettings = settings
-  if (accountId) {
+  if (providerAccountId) {
     metadataSettings = {
       ...settings,
       providerSettings: {
@@ -327,7 +327,7 @@ export async function prepareExternalAgentGatewayRoute(
     if (definition?.modelApi?.list || definition?.modelApi?.retrieve) {
       const detail = await getSubscriptionModel({
         definition,
-        accountId,
+        providerAccountId,
         model: input.modelId,
         signal: input.signal,
       })
@@ -419,7 +419,7 @@ export async function prepareExternalAgentGatewayRoute(
       binding: {
         providerId: input.providerId,
         modelId: input.modelId,
-        accountId: accountId ?? null,
+        accountId: providerAccountId ?? null,
       },
     }
   } catch (error) {

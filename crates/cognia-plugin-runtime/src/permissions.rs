@@ -27,7 +27,7 @@ fn open_ledger_dir(
     create: bool,
 ) -> Result<Option<Dir>> {
     let plugin_id = crate::validate_plugin_id_path_component(plugin_id)?;
-    let account_id = state.active_account_id()?;
+    let local_account_id = state.active_account_id()?;
     fs::create_dir_all(&state.plugin_install_dir)?;
     let install = Dir::open_ambient_dir(&state.plugin_install_dir, ambient_authority())?;
     if create {
@@ -55,13 +55,13 @@ fn open_ledger_dir(
         Err(error) => return Err(error.into()),
     };
     if create {
-        match accounts.create_dir(&account_id) {
+        match accounts.create_dir(&local_account_id) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.into()),
         }
     }
-    let account = match accounts.open_dir_nofollow(&account_id) {
+    let account = match accounts.open_dir_nofollow(&local_account_id) {
         Ok(dir) => dir,
         Err(error) if !create && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
@@ -304,13 +304,11 @@ mod tests {
         revoke_permission_for_state(&state, "demo".into(), "filesystem:read".into()).unwrap();
 
         assert!(read_ledger(&state, "demo").unwrap().is_empty());
-        assert!(
-            state
-                .permissions
-                .read()
-                .get("demo")
-                .is_some_and(Vec::is_empty)
-        );
+        assert!(state
+            .permissions
+            .read()
+            .get("demo")
+            .is_some_and(Vec::is_empty));
     }
 
     #[cfg(unix)]
@@ -334,11 +332,9 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!state.has_permission("demo", "filesystem:write"));
-        assert!(
-            !attacker
-                .join("accounts/acct_test/demo/permissions.json")
-                .exists()
-        );
+        assert!(!attacker
+            .join("accounts/acct_test/demo/permissions.json")
+            .exists());
     }
 
     #[test]
@@ -346,14 +342,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = make_state(&tmp);
         assert!(read_ledger(&state, ".host-state").is_err());
-        assert!(
-            revoke_permission_for_state(
-                &state,
-                "_marketplace_cache".into(),
-                "filesystem:read".into()
-            )
-            .is_err()
-        );
+        assert!(revoke_permission_for_state(
+            &state,
+            "_marketplace_cache".into(),
+            "filesystem:read".into()
+        )
+        .is_err());
     }
 
     #[test]
@@ -375,16 +369,14 @@ mod tests {
         write_ledger(&state, "demo", &[grant]).unwrap();
         assert!(read_ledger(&state, "demo").is_err());
 
-        assert!(
-            grant_permission_for_state(
-                &state,
-                "demo".into(),
-                "unknown:permission".into(),
-                "attacker".into(),
-                None,
-            )
-            .is_err()
-        );
+        assert!(grant_permission_for_state(
+            &state,
+            "demo".into(),
+            "unknown:permission".into(),
+            "attacker".into(),
+            None,
+        )
+        .is_err());
         assert!(state.permissions.read().is_empty());
     }
 
@@ -405,11 +397,9 @@ mod tests {
 
         state.activate_account("acct_b").unwrap();
         assert!(!state.has_permission("demo", "filesystem:read"));
-        assert!(
-            list_permissions_for_state(&state, "demo".into())
-                .unwrap()
-                .is_empty()
-        );
+        assert!(list_permissions_for_state(&state, "demo".into())
+            .unwrap()
+            .is_empty());
 
         state.activate_account("acct_a").unwrap();
         assert!(state.has_permission("demo", "filesystem:read"));

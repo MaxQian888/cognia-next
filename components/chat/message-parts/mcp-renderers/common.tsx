@@ -78,7 +78,7 @@ export function SourceFavicon({ src, host }: { src?: string; host: string }) {
         aria-hidden
         loading="lazy"
         referrerPolicy="no-referrer"
-        className="size-3.5 shrink-0 rounded-[3px]"
+        className="size-3.5 shrink-0 rounded-control"
         onError={() => setFailed(true)}
       />
     )
@@ -89,7 +89,7 @@ export function SourceFavicon({ src, host }: { src?: string; host: string }) {
     <span
       aria-hidden
       className={cn(
-        "inline-flex size-3.5 shrink-0 items-center justify-center rounded-[3px] text-[9px] font-semibold text-white",
+        "inline-flex size-3.5 shrink-0 items-center justify-center rounded-control text-[9px] font-semibold text-white",
         FAVICON_PALETTE[hash % FAVICON_PALETTE.length]
       )}
     >

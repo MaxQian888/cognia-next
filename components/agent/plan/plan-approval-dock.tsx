@@ -35,6 +35,7 @@
  * asks the host to resume the chat turn via `onResume`.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -358,7 +359,7 @@ export function PlanApprovalDock({
   if (visible && plan && resumeFailure) {
     const failure = resumeFailure
     content = (
-      <div
+      <Surface
         role="alert"
         className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2"
       >
@@ -366,7 +367,7 @@ export function PlanApprovalDock({
         <Button size="sm" disabled={busy} onClick={() => void handleRetryResume(plan, failure)}>
           {t("tracker.resume")}
         </Button>
-      </div>
+      </Surface>
     )
   } else if (visible && plan) {
     content = (

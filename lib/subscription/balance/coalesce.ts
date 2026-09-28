@@ -8,7 +8,7 @@
 // failed. A provider that answered 429 was asked again on the next mount.
 //
 // This is the limits coalescer's contract applied to balance readings, keyed by
-// (provider, accountId) and sharing the SAME credential ledger. That sharing is
+// (provider, providerAccountId) and sharing the SAME credential ledger. That sharing is
 // the point: quota and balance are two reads against one credential, and a
 // block earned by either has to stop both.
 
@@ -35,15 +35,15 @@ interface BalanceEntry {
 
 const entries = new Map<string, BalanceEntry>()
 
-function keyOf(provider: ProviderId, accountId: string): string {
-  return `${provider} ${accountId}`
+function keyOf(provider: ProviderId, providerAccountId: string): string {
+  return `${provider} ${providerAccountId}`
 }
 
 export interface CoalesceBalanceOptions {
   /** Bypass the normal throttle after the hard cooldown. Still coalesces in-flight. */
   force?: boolean
   now?: () => number
-  run?: (provider: ProviderId, accountId: string) => Promise<BalanceSnapshot | null>
+  run?: (provider: ProviderId, providerAccountId: string) => Promise<BalanceSnapshot | null>
   breaker?: SubscriptionBreaker
   random?: () => number
 }
@@ -55,13 +55,13 @@ export interface CoalesceBalanceOptions {
  */
 export function queryAccountBalanceCoalesced(
   provider: ProviderId,
-  accountId: string,
+  providerAccountId: string,
   options: CoalesceBalanceOptions = {}
 ): Promise<BalanceSnapshot | null> {
   const now = options.now ?? Date.now
   const run = options.run ?? queryAccountBalance
   const breaker = options.breaker ?? getSubscriptionBreaker()
-  const key = keyOf(provider, accountId)
+  const key = keyOf(provider, providerAccountId)
   const entry = entries.get(key) ?? {
     inflight: null,
     lastAttemptAt: 0,
@@ -73,7 +73,7 @@ export function queryAccountBalanceCoalesced(
   if (entry.inflight) return entry.inflight
 
   const currentTime = now()
-  const ledgerKey = limitsBreakerKey(provider, accountId)
+  const ledgerKey = limitsBreakerKey(provider, providerAccountId)
 
   // The shared block outranks everything, an explicit refresh included.
   if (!breaker.shouldAttempt(ledgerKey, currentTime).allowed) {
@@ -89,7 +89,7 @@ export function queryAccountBalanceCoalesced(
 
   const request = (async () => {
     try {
-      const result = await run(provider, accountId)
+      const result = await run(provider, providerAccountId)
       if (result && !result.error) {
         entry.lastSuccessfulResult = result
         breaker.recordSuccess(ledgerKey)

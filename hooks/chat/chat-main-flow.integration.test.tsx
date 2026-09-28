@@ -186,7 +186,7 @@ jest.mock("@/lib/ai/generation/run-title-task", () => ({
 }))
 
 // Real imports AFTER the mocks.
-import { useClaudeChat } from "@/hooks/chat/use-claude-chat"
+import { ClaudeChatRuntimeProvider, useClaudeChat } from "@/hooks/chat/use-claude-chat"
 import { useChatStore, useSessionMessages, useSessionStatus } from "@/stores/chat"
 import type { UIMessage } from "ai"
 
@@ -300,7 +300,7 @@ async function settle() {
 describe("chat main flow (integration)", () => {
   it("send routes the prompt to the sidecar and optimistically renders the user bubble", async () => {
     const user = userEvent.setup()
-    render(<ChatHarness />)
+    render(<ChatHarness />, { wrapper: ClaudeChatRuntimeProvider })
 
     await user.type(screen.getByLabelText("message"), "Hello from the user")
     await clickSend(user)
@@ -315,16 +315,13 @@ describe("chat main flow (integration)", () => {
 
     // 2. real makeUserMessage → real store → user bubble rendered.
     expect(screen.getByTestId("bubble-user")).toHaveTextContent("Hello from the user")
-    // Real-behavior note: `send` sets "streaming" then immediately clears any
-    // prior error with `setSessionError(id, null)`, which `statusPatch` lands at
-    // "idle" (chat-store.ts:563-568). "streaming" is minted by the FIRST SDK
-    // event, not by the synchronous send — so post-send the status is "idle".
-    expect(screen.getByTestId("transcript")).toHaveAttribute("data-status", "idle")
+    // The send owns the session until the SDK result seals the turn.
+    expect(screen.getByTestId("transcript")).toHaveAttribute("data-status", "streaming")
   })
 
   it("folds an injected assistant stream event into a rendered assistant bubble", async () => {
     const user = userEvent.setup()
-    render(<ChatHarness />)
+    render(<ChatHarness />, { wrapper: ClaudeChatRuntimeProvider })
 
     await user.type(screen.getByLabelText("message"), "ping")
     await clickSend(user)
@@ -364,7 +361,7 @@ describe("chat main flow (integration)", () => {
   // experience the user sees, which the single-assistant-event test above skips.
   it("accumulates streamed text deltas into a growing assistant bubble", async () => {
     const user = userEvent.setup()
-    render(<ChatHarness />)
+    render(<ChatHarness />, { wrapper: ClaudeChatRuntimeProvider })
 
     await user.type(screen.getByLabelText("message"), "tell me a story")
     await clickSend(user)
@@ -419,7 +416,7 @@ describe("chat main flow (integration)", () => {
   // exchanges in order — proving messages accumulate across turns, not reset.
   it("continues the conversation across a second turn", async () => {
     const user = userEvent.setup()
-    render(<ChatHarness />)
+    render(<ChatHarness />, { wrapper: ClaudeChatRuntimeProvider })
 
     // Turn 1: prompt → reply.
     await user.type(screen.getByLabelText("message"), "first question")
@@ -442,6 +439,27 @@ describe("chat main flow (integration)", () => {
     await waitFor(() => {
       expect(screen.getByTestId("bubble-assistant")).toHaveTextContent("first answer")
     })
+
+    await dispatchSidecar({
+      type: "event",
+      sessionId: SID,
+      event: {
+        type: "result",
+        subtype: "success",
+        session_id: SID,
+        uuid: "result-1",
+        is_error: false,
+        result: "first answer",
+        usage: { input_tokens: 1, output_tokens: 1 },
+        total_cost_usd: 0,
+        duration_ms: 1,
+        duration_api_ms: 1,
+        num_turns: 1,
+      },
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("transcript")).toHaveAttribute("data-status", "idle")
+    )
 
     // Turn 2: a fresh prompt on the same session.
     await user.clear(screen.getByLabelText("message"))
@@ -490,7 +508,7 @@ describe("chat main flow (integration)", () => {
   // This is the seam the earlier tests stop short of (`result` was "increment 2").
   it("seals a full streamed turn: canonical message replaces the preview, result records usage", async () => {
     const user = userEvent.setup()
-    render(<ChatHarness />)
+    render(<ChatHarness />, { wrapper: ClaudeChatRuntimeProvider })
 
     await user.type(screen.getByLabelText("message"), "say hi")
     await clickSend(user)
@@ -607,7 +625,7 @@ describe("plugin tool hooks (W3.1 integration)", () => {
   it("onPreToolUse deny blocks the tool before any approval flow", async () => {
     const onPreToolUse = jest.fn().mockResolvedValue({ action: "deny", reason: "firewalled" })
     seedHookPlugin({ onPreToolUse })
-    render(<ChatHarness />)
+    render(<ChatHarness />, { wrapper: ClaudeChatRuntimeProvider })
     await waitFor(() => expect(messageCallback).not.toBeNull())
 
     await dispatchSidecar({
@@ -642,7 +660,7 @@ describe("plugin tool hooks (W3.1 integration)", () => {
       .fn()
       .mockResolvedValue({ action: "modify", modifiedArgs: { command: "ls" } })
     seedHookPlugin({ onPreToolUse })
-    render(<ChatHarness />)
+    render(<ChatHarness />, { wrapper: ClaudeChatRuntimeProvider })
     await waitFor(() => expect(messageCallback).not.toBeNull())
 
     await dispatchSidecar({
@@ -672,7 +690,7 @@ describe("plugin tool hooks (W3.1 integration)", () => {
   it("onPostToolUse rewrite reaches the tool_result_review decision", async () => {
     const onPostToolUse = jest.fn().mockResolvedValue({ modifiedResult: "REDACTED" })
     seedHookPlugin({ onPostToolUse })
-    render(<ChatHarness />)
+    render(<ChatHarness />, { wrapper: ClaudeChatRuntimeProvider })
     await waitFor(() => expect(messageCallback).not.toBeNull())
 
     // Seed the call correlation the same way the pump does (permission ask).
@@ -726,7 +744,7 @@ describe("plugin message pipeline (W3.3 integration)", () => {
       onMessageSend: async (m: { content: string }) => ({ ...m, content: `${m.content} [signed]` }),
     })
     const user = userEvent.setup()
-    render(<ChatHarness />)
+    render(<ChatHarness />, { wrapper: ClaudeChatRuntimeProvider })
     await waitFor(() => expect(messageCallback).not.toBeNull())
     await user.type(screen.getByLabelText("message"), "hello there")
     await clickSend(user)
@@ -743,7 +761,7 @@ describe("plugin message pipeline (W3.3 integration)", () => {
       onMessageReceive: async (m: { content: string }) => ({ ...m, content: "REWRITTEN" }),
     })
     const user = userEvent.setup()
-    render(<ChatHarness />)
+    render(<ChatHarness />, { wrapper: ClaudeChatRuntimeProvider })
     await waitFor(() => expect(messageCallback).not.toBeNull())
     await user.type(screen.getByLabelText("message"), "say hi")
     await clickSend(user)

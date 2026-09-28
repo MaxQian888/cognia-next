@@ -28,7 +28,6 @@ export interface BindingCandidateDeps {
 /** The workspace's primary root, when it has exactly one. */
 export function projectRepositoryCandidate(project: Project | undefined): string | undefined {
   if (!project) return undefined
-  if (project.rootDir) return project.rootDir
   const primaries = (project.roots ?? []).filter((root) => root.isPrimary)
   return primaries.length === 1 ? primaries[0]!.path : undefined
 }

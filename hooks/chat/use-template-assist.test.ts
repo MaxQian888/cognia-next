@@ -23,6 +23,10 @@ jest.mock("@/lib/ai/generation/template-assist", () => ({
     }
   },
 }))
+const ledgerSeamMock = jest.fn((_input: unknown) => undefined as unknown)
+jest.mock("@/lib/ai/ledgered-generation-seam", () => ({
+  ledgeredGenerationSeam: (input: unknown) => ledgerSeamMock(input),
+}))
 let settingsValue: { apiKey?: string } | null = null
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (sel: (s: { settings: unknown }) => unknown) =>
@@ -57,6 +61,7 @@ beforeEach(() => {
   resolveMock.mockClear().mockReturnValue({ kind: "unresolved" })
   settingsValue = null
   providerModelMock.mockClear()
+  ledgerSeamMock.mockReset().mockReturnValue(undefined)
 })
 
 describe("useTemplateAssist", () => {
@@ -114,6 +119,7 @@ describe("useTemplateAssist", () => {
     expect(out).toEqual({ ok: true, value: "merged" })
     expect(suggestParamsMock).toHaveBeenCalledWith(expect.anything(), "body {{m}}", {
       abortSignal: expect.any(AbortSignal),
+      generate: undefined,
     })
     expect(applySuggestionsMock).toHaveBeenCalledWith("body {{m}}", [], [{ id: "m" }])
   })
@@ -171,6 +177,7 @@ describe("useTemplateAssist", () => {
     expect(improveBodyMock).toHaveBeenCalledWith(expect.anything(), "body", {
       instruction: "be terse",
       abortSignal: expect.any(AbortSignal),
+      generate: undefined,
     })
   })
 
@@ -251,3 +258,31 @@ describe("useTemplateAssist", () => {
     )
   })
 })
+
+it.each(["resolved", "unresolved"])(
+  "binds the %s provider to the same ledger seam as the model",
+  async (kind) => {
+    const seam = jest.fn()
+    ledgerSeamMock.mockReturnValue(seam)
+    resolveMock.mockReturnValue({ kind, providerId: "custom-provider", protocol: "openai" })
+    generateDraftMock.mockResolvedValue({ name: "N", body: "b" })
+    const { result } = renderHook(() => useTemplateAssist())
+    await act(async () => {
+      await result.current.generate("draft")
+    })
+    expect(ledgerSeamMock).toHaveBeenCalledWith({
+      settings: null,
+      binding: {
+        surface: "utilityLedger",
+        origin: "utility",
+        featureId: "template-assist",
+        providerId: kind === "resolved" ? "custom-provider" : "anthropic",
+        workspaceId: null,
+      },
+    })
+    expect(generateDraftMock).toHaveBeenCalledWith(expect.anything(), "draft", {
+      abortSignal: expect.any(AbortSignal),
+      generate: seam,
+    })
+  }
+)

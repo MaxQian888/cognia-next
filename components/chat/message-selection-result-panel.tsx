@@ -10,16 +10,9 @@
  * referenced into the conversation, which is the point of producing it here.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useTranslations } from "next-intl"
-import {
-  CheckIcon,
-  CopyIcon,
-  Loader2Icon,
-  QuoteIcon,
-  RotateCcwIcon,
-  SquareIcon,
-  XIcon,
-} from "lucide-react"
+import { CheckIcon, CopyIcon, QuoteIcon, RotateCcwIcon, SquareIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -118,7 +111,7 @@ export function MessageSelectionResultPanel({
           <MarkdownRenderer content={text} isStreaming={running} />
         ) : running ? (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2Icon className="size-3.5 animate-spin" aria-hidden />
+            <Spinner className="size-3.5 " aria-hidden />
             {t("working")}
           </p>
         ) : null}

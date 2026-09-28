@@ -33,14 +33,8 @@ pub const RUN_API_BRIDGE_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum BridgeOutcome {
-    Ok {
-        ok: bool,
-        value: Value,
-    },
-    Err {
-        ok: bool,
-        error: BridgeErrorBody,
-    },
+    Ok { ok: bool, value: Value },
+    Err { ok: bool, error: BridgeErrorBody },
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,8 +156,8 @@ mod tests {
 
     #[test]
     fn a_refusal_with_no_code_still_names_something() {
-        let error = interpret(json!({ "ok": false, "error": { "status": 500 } }))
-            .expect_err("a refusal");
+        let error =
+            interpret(json!({ "ok": false, "error": { "status": 500 } })).expect_err("a refusal");
         match error {
             BrainBridgeError::Refused { code, status, .. } => {
                 assert_eq!(code, "BRAIN_ERROR");

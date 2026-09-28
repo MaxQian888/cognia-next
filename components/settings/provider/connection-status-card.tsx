@@ -10,6 +10,7 @@
  * form and its dependency graph in for about a hundred lines of markup.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { AlertTriangle, Check, X } from "lucide-react"
 import { useTranslations } from "next-intl"
 
@@ -55,7 +56,7 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
 
   if (result.success && result.outcome !== "limited") {
     return (
-      <div className="flex items-center gap-3 rounded-md border border-green-200 bg-green-50 px-3 py-2.5 dark:border-green-900 dark:bg-green-950/30">
+      <Surface className="flex items-center gap-3 rounded-md border border-green-200 bg-green-50 px-3 py-2.5 dark:border-green-900 dark:bg-green-950/30">
         <Check className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-green-700 dark:text-green-400">
@@ -75,7 +76,7 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
             </p>
           )}
         </div>
-      </div>
+      </Surface>
     )
   }
 
@@ -88,7 +89,7 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
   // which does not exist, so next-intl rendered the raw key path here.
   if (result.outcome === "limited") {
     return (
-      <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900 dark:bg-amber-950/30">
+      <Surface className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900 dark:bg-amber-950/30">
         <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
@@ -103,13 +104,13 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
             </p>
           )}
         </div>
-      </div>
+      </Surface>
     )
   }
 
   if (result.outcome === "stale") {
     return (
-      <div
+      <Surface
         className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900 dark:bg-amber-950/30"
         data-testid="connection-status-stale"
       >
@@ -127,12 +128,12 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
             </p>
           )}
         </div>
-      </div>
+      </Surface>
     )
   }
 
   return (
-    <div className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
+    <Surface className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
       <X className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-destructive">{t("configTab.connectionFailed")}</p>
@@ -145,6 +146,6 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
           </p>
         )}
       </div>
-    </div>
+    </Surface>
   )
 }

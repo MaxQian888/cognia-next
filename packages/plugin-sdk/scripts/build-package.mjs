@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { createRequire } from "node:module"
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const repoRoot = resolve(packageRoot, "../..")
@@ -20,7 +21,10 @@ const facadeEntries = {
 }
 
 function runTsup() {
-  execFileSync("pnpm", ["exec", "tsup"], {
+  const require = createRequire(import.meta.url)
+  const tsupPackagePath = require.resolve("tsup/package.json")
+  const tsupPackage = JSON.parse(readFileSync(tsupPackagePath, "utf8"))
+  execFileSync(process.execPath, [resolve(dirname(tsupPackagePath), tsupPackage.bin.tsup)], {
     cwd: packageRoot,
     stdio: "inherit",
     env: {

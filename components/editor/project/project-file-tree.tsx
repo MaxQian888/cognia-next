@@ -21,6 +21,7 @@
 // connections are ordinary. `lib/files/file-tree-failure.ts` owns the
 // vocabulary so both backends explain themselves the same way.
 
+import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
@@ -37,7 +38,6 @@ import {
   FolderPlusIcon,
   FolderSearchIcon,
   ListCollapseIcon,
-  Loader2Icon,
   MessageSquarePlusIcon,
   RefreshCwIcon,
   ScissorsIcon,
@@ -1231,7 +1231,7 @@ export function ProjectFileTree({
                   role="status"
                   data-testid="tree-loading"
                 >
-                  <Loader2Icon className="size-3 animate-spin" />
+                  <Spinner className="size-3 " />
                   {t("treeLoading")}
                 </div>
               ) : null}

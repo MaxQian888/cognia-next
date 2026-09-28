@@ -405,7 +405,9 @@ mod tests {
             "pruneReason": null,
             "isMain": false,
         }]);
-        assert!(contract.validate_output("git_worktree_list", &managed).is_ok());
+        assert!(contract
+            .validate_output("git_worktree_list", &managed)
+            .is_ok());
 
         // The main worktree, plus a detached/prunable row: the Options are
         // explicit nulls, never absent.
@@ -431,7 +433,9 @@ mod tests {
                 "isMain": false,
             },
         ]);
-        assert!(contract.validate_output("git_worktree_list", &mixed).is_ok());
+        assert!(contract
+            .validate_output("git_worktree_list", &mixed)
+            .is_ok());
 
         // The pre-fix shape is now the one that fails: a row missing the
         // ownership fields is not what any arm sends, and accepting it would
@@ -442,7 +446,9 @@ mod tests {
             "head": "deadbeef",
             "isMain": true,
         }]);
-        assert!(contract.validate_output("git_worktree_list", &truncated).is_err());
+        assert!(contract
+            .validate_output("git_worktree_list", &truncated)
+            .is_err());
     }
 
     #[test]

@@ -12,6 +12,9 @@ mod tests {
         assert!(
             include_str!("../startup/services.rs").contains("crate::codeserver::install_host()")
         );
-        assert!(include_str!("../../../crates/cognia-companion-rpc/src/headless.rs").contains("crate::codeserver_host::install_host()"));
+        assert!(
+            include_str!("../../../crates/cognia-companion-rpc/src/headless.rs")
+                .contains("crate::codeserver_host::install_host()")
+        );
     }
 }

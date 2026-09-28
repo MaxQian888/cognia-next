@@ -8,7 +8,7 @@ sees the decryption key (that rides in the URL `#fragment`) and the payload's
 `kind`/`mime` live inside the ciphertext, so the server is blind to content.
 
 This is a standalone Node project (own `package.json` + lockfile), **not** part
-of the app's pnpm workspace — install with `pnpm install --ignore-workspace`.
+of the app's pnpm workspace — install with `pnpm install`.
 
 ## API
 
@@ -33,7 +33,7 @@ when the creator omits `ttlSeconds`.
 ## Develop & test
 
 ```bash
-pnpm install --ignore-workspace
+pnpm install
 pnpm test          # vitest + miniflare (R2/KV/Durable Objects local; no account needed)
 pnpm typecheck
 pnpm dev           # wrangler dev (local)

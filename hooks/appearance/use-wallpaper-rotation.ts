@@ -39,7 +39,6 @@ const MAX_TIMEOUT_MS = 60 * 60 * 1000
 
 export function useWallpaperRotation(): void {
   const background = useSettingsStore((s) => s.background)
-  const wallpapers = useSettingsStore((s) => s.wallpapers)
   const setBackground = useSettingsStore((s) => s.setBackground)
 
   // `launch` fires once per process, so the hook needs to know whether this is

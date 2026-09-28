@@ -136,13 +136,13 @@ export function ProjectFileFallback({
           <img
             src={preview.url}
             alt={name}
-            className="max-h-72 max-w-full rounded-md border object-contain shadow-sm"
+            className="max-h-72 max-w-full rounded-md border object-contain shadow-(--elevation-1)"
             data-testid="fallback-image-preview"
           />
         ) : (
           <div
             className={cn(
-              "flex size-16 items-center justify-center rounded-2xl bg-muted",
+              "flex size-16 items-center justify-center rounded-stage bg-muted",
               density === "touch" && "size-20"
             )}
           >

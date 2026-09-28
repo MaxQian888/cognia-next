@@ -28,7 +28,7 @@ const MAX_BACKOFF_SECS: i64 = 15 * 60;
 
 #[derive(Debug, Clone)]
 struct ActiveAccountSecuritySession {
-    account_id: String,
+    local_account_id: String,
     verifier_digest: String,
 }
 
@@ -83,16 +83,16 @@ impl AccountSecuritySession {
         self.data_dir.as_deref()
     }
 
-    fn activate(&self, account_id: &str, verifier_digest: String) {
+    fn activate(&self, local_account_id: &str, verifier_digest: String) {
         let mut active = self.active.write();
         if let Some((gateway, app)) = self.gateway.lock().as_ref() {
-            gateway.activate_account(account_id);
+            gateway.activate_account(local_account_id);
             if let Some(app) = app {
                 let _ = app.emit("gateway://snapshot-invalidated", ());
             }
         }
         *active = Some(ActiveAccountSecuritySession {
-            account_id: account_id.to_owned(),
+            local_account_id: local_account_id.to_owned(),
             verifier_digest,
         });
     }
@@ -115,20 +115,23 @@ impl AccountSecuritySession {
             .ok_or_else(|| "the local account is locked".to_owned())
     }
 
-    fn require_account(&self, account_id: &str) -> Result<ActiveAccountSecuritySession, String> {
+    fn require_account(
+        &self,
+        local_account_id: &str,
+    ) -> Result<ActiveAccountSecuritySession, String> {
         let active = self.require_active()?;
-        if active.account_id != account_id {
+        if active.local_account_id != local_account_id {
             return Err("the requested account is not the unlocked account".into());
         }
         Ok(active)
     }
 
-    fn assert_unlock_target(&self, account_id: &str) -> Result<(), String> {
+    fn assert_unlock_target(&self, local_account_id: &str) -> Result<(), String> {
         if self
             .active
             .read()
             .as_ref()
-            .is_some_and(|active| active.account_id != account_id)
+            .is_some_and(|active| active.local_account_id != local_account_id)
         {
             return Err(
                 "the current account must be locked before another account can be unlocked".into(),
@@ -137,16 +140,16 @@ impl AccountSecuritySession {
         Ok(())
     }
 
-    fn before_password_attempt(&self, account_id: &str, now: i64) -> Result<(), String> {
+    fn before_password_attempt(&self, local_account_id: &str, now: i64) -> Result<(), String> {
         let mut throttle = self.throttle.lock();
         if throttle
-            .get(account_id)
+            .get(local_account_id)
             .is_some_and(|record| now.saturating_sub(record.last_failure_at) >= FAILURE_RESET_SECS)
         {
-            throttle.remove(account_id);
+            throttle.remove(local_account_id);
             self.persist_throttle(&throttle)?;
         }
-        if let Some(record) = throttle.get(account_id) {
+        if let Some(record) = throttle.get(local_account_id) {
             if record.blocked_until > now {
                 return Err(format!(
                     "too many password attempts; retry in {} seconds",
@@ -157,9 +160,9 @@ impl AccountSecuritySession {
         Ok(())
     }
 
-    fn record_password_failure(&self, account_id: &str, now: i64) -> Result<(), String> {
+    fn record_password_failure(&self, local_account_id: &str, now: i64) -> Result<(), String> {
         let mut throttle = self.throttle.lock();
-        let record = throttle.entry(account_id.to_owned()).or_default();
+        let record = throttle.entry(local_account_id.to_owned()).or_default();
         if now.saturating_sub(record.last_failure_at) >= FAILURE_RESET_SECS {
             *record = PasswordThrottleRecord::default();
         }
@@ -175,20 +178,20 @@ impl AccountSecuritySession {
         self.persist_throttle(&throttle)
     }
 
-    fn record_password_success(&self, account_id: &str) -> Result<(), String> {
+    fn record_password_success(&self, local_account_id: &str) -> Result<(), String> {
         let mut throttle = self.throttle.lock();
-        throttle.remove(account_id);
+        throttle.remove(local_account_id);
         self.persist_throttle(&throttle)
     }
 
-    /// Assert that `account_id` is the account currently unlocked.
+    /// Assert that `local_account_id` is the account currently unlocked.
     ///
     /// Stronger than [`Self::assert_unlock_target`], which only refuses a
     /// DIFFERENT account. Enrolling a quick-unlock method mints a new way into
     /// an account, so it requires that account to be open right now, not
     /// merely that no other one is.
-    pub fn assert_unlocked_account(&self, account_id: &str) -> Result<(), String> {
-        self.require_account(account_id).map(|_| ())
+    pub fn assert_unlocked_account(&self, local_account_id: &str) -> Result<(), String> {
+        self.require_account(local_account_id).map(|_| ())
     }
 
     /// Throttle gate for a quick-unlock attempt.
@@ -223,18 +226,18 @@ impl AccountSecuritySession {
     /// and the quick verifier is what was actually proven.
     pub fn activate_quick_unlock(
         &self,
-        account_id: &str,
+        local_account_id: &str,
         password_verifier: &AccountPasswordVerifier,
         plugin_state: &cognia_plugin_runtime::PluginRuntimeState,
     ) -> Result<(), String> {
-        self.assert_unlock_target(account_id)?;
+        self.assert_unlock_target(local_account_id)?;
         validate_verifier_metadata(password_verifier)?;
-        bind_host_to_account(account_id, password_verifier)?;
-        if let Err(error) = plugin_state.activate_account(account_id) {
+        bind_host_to_account(local_account_id, password_verifier)?;
+        if let Err(error) = plugin_state.activate_account(local_account_id) {
             crate::companion_api::host_identity::unbind_local_account();
             return Err(error.to_string());
         }
-        self.activate(account_id, verifier_digest_of(password_verifier));
+        self.activate(local_account_id, verifier_digest_of(password_verifier));
         Ok(())
     }
 
@@ -313,7 +316,7 @@ pub fn account_password_create_verifier(
 /// and the verifier. See `companion_api::host_identity` for exactly what that
 /// does and does not prove.
 ///
-/// `account_id` is optional so the browser/web callers, which have no companion
+/// `local_account_id` is optional so the browser/web callers, which have no companion
 /// host to bind, keep working unchanged.
 #[tauri::command]
 pub fn account_password_verify(
@@ -323,11 +326,12 @@ pub fn account_password_verify(
     verifier: AccountPasswordVerifier,
     account_id: Option<String>,
 ) -> Result<bool, String> {
+    let local_account_id = account_id;
     let plugin_state = app.state::<cognia_plugin_runtime::PluginRuntimeState>();
     account_password_verify_inner(
         password,
         verifier,
-        account_id,
+        local_account_id,
         Some(&plugin_state),
         Some(&security_session),
         unix_time_secs(),
@@ -337,7 +341,7 @@ pub fn account_password_verify(
 fn account_password_verify_inner(
     password: String,
     verifier: AccountPasswordVerifier,
-    account_id: Option<String>,
+    local_account_id: Option<String>,
     plugin_state: Option<&cognia_plugin_runtime::PluginRuntimeState>,
     security_session: Option<&AccountSecuritySession>,
     now: i64,
@@ -345,19 +349,19 @@ fn account_password_verify_inner(
     validate_password(&password)?;
     validate_verifier_metadata(&verifier)?;
     // Throttle EVERY attempt, not just the ones that name an account.
-    // `account_id` is optional on the wire, so gating the backoff on it meant a
+    // `local_account_id` is optional on the wire, so gating the backoff on it meant a
     // caller could simply omit it and get an unlimited, unthrottled oracle
     // against the very same verifier. When it is absent the verifier's own
     // digest is the stable stand-in key: it identifies the credential being
     // guessed just as well, and cannot be varied by the caller without
     // changing which verifier they are attacking.
-    let throttle_key = match account_id.as_deref() {
-        Some(account_id) => account_id.to_owned(),
+    let throttle_key = match local_account_id.as_deref() {
+        Some(local_account_id) => local_account_id.to_owned(),
         None => format!("verifier:{}", verifier_digest_of(&verifier)),
     };
     if let Some(security_session) = security_session {
-        if let Some(account_id) = account_id.as_deref() {
-            security_session.assert_unlock_target(account_id)?;
+        if let Some(local_account_id) = local_account_id.as_deref() {
+            security_session.assert_unlock_target(local_account_id)?;
         }
         security_session.before_password_attempt(&throttle_key, now)?;
     }
@@ -374,16 +378,16 @@ fn account_password_verify_inner(
         if let Some(security_session) = security_session {
             security_session.record_password_success(&throttle_key)?;
         }
-        if let Some(account_id) = account_id.as_deref() {
-            bind_host_to_account(account_id, &verifier)?;
+        if let Some(local_account_id) = local_account_id.as_deref() {
+            bind_host_to_account(local_account_id, &verifier)?;
             if let Some(plugin_state) = plugin_state {
-                if let Err(error) = plugin_state.activate_account(account_id) {
+                if let Err(error) = plugin_state.activate_account(local_account_id) {
                     crate::companion_api::host_identity::unbind_local_account();
                     return Err(error.to_string());
                 }
             }
             if let Some(security_session) = security_session {
-                security_session.activate(account_id, verifier_digest_of(&verifier));
+                security_session.activate(local_account_id, verifier_digest_of(&verifier));
             }
         }
     } else if let Some(security_session) = security_session {
@@ -429,9 +433,10 @@ pub fn account_password_rotate(
     new_password: String,
     new_verifier: Option<AccountPasswordVerifier>,
 ) -> Result<AccountPasswordVerifier, String> {
+    let local_account_id = account_id;
     account_password_rotate_inner(
         &security_session,
-        account_id,
+        local_account_id,
         current_password,
         current_verifier,
         new_password,
@@ -442,20 +447,20 @@ pub fn account_password_rotate(
 
 fn account_password_rotate_inner(
     security_session: &AccountSecuritySession,
-    account_id: String,
+    local_account_id: String,
     current_password: String,
     current_verifier: AccountPasswordVerifier,
     new_password: String,
     new_verifier: Option<AccountPasswordVerifier>,
     now: i64,
 ) -> Result<AccountPasswordVerifier, String> {
-    let active = security_session.require_account(&account_id)?;
+    let active = security_session.require_account(&local_account_id)?;
     if active.verifier_digest != verifier_digest_of(&current_verifier) {
         return Err("the current verifier does not match the unlocked session".into());
     }
-    security_session.before_password_attempt(&account_id, now)?;
+    security_session.before_password_attempt(&local_account_id, now)?;
     if !verify_password_material(&current_password, &current_verifier)? {
-        security_session.record_password_failure(&account_id, now)?;
+        security_session.record_password_failure(&local_account_id, now)?;
         return Err("current password is invalid".into());
     }
     let verifier = match new_verifier {
@@ -467,9 +472,9 @@ fn account_password_rotate_inner(
         }
         None => account_password_create_verifier(new_password)?,
     };
-    rebind_host_verifier(&account_id, &verifier)?;
-    security_session.record_password_success(&account_id)?;
-    security_session.activate(&account_id, verifier_digest_of(&verifier));
+    rebind_host_verifier(&local_account_id, &verifier)?;
+    security_session.record_password_success(&local_account_id)?;
+    security_session.activate(&local_account_id, verifier_digest_of(&verifier));
     Ok(verifier)
 }
 
@@ -556,7 +561,7 @@ pub async fn account_bind_person(
         .transpose()?;
 
     match bind_person(
-        &active.account_id,
+        &active.local_account_id,
         &user_id,
         org_id.as_deref(),
         canonical_user_id.as_deref(),
@@ -567,7 +572,7 @@ pub async fn account_bind_person(
             // claimed belong to whoever just proved they hold it. Best-effort —
             // a failure here leaves the binding standing, because the person is
             // the fact that matters and the attribution can be redone.
-            adopt_unowned_devices(&active.account_id)
+            adopt_unowned_devices(&active.local_account_id)
                 .map(|_| ())
                 .map_err(|error| {
                     format!("person bound but device adoption must be retried: {error}")
@@ -587,7 +592,7 @@ pub fn account_unbind_person(
     use crate::companion_api::host_identity::{unbind_person, HostIdentityError};
 
     let active = security_session.require_active()?;
-    match unbind_person(&active.account_id) {
+    match unbind_person(&active.local_account_id) {
         Ok(()) => Ok(()),
         Err(HostIdentityError::StoreUnavailable) => Ok(()),
         Err(error) => Err(error.to_string()),
@@ -603,7 +608,7 @@ pub fn account_person(
     use crate::companion_api::host_identity::{person, HostIdentityError};
 
     let active = security_session.require_active()?;
-    match person(&active.account_id) {
+    match person(&active.local_account_id) {
         Ok(found) => Ok(Some(found)),
         // No security database, or a profile this host has never seen unlocked:
         // both mean "nothing recorded", which is an answer, not a failure.
@@ -671,12 +676,12 @@ pub fn account_clear_cloud_deployment(
 }
 
 fn bind_host_to_account(
-    account_id: &str,
+    local_account_id: &str,
     verifier: &AccountPasswordVerifier,
 ) -> Result<(), String> {
     use crate::companion_api::host_identity::{bind_local_account, HostIdentityError};
 
-    match bind_local_account(account_id, &verifier_digest_of(verifier)) {
+    match bind_local_account(local_account_id, &verifier_digest_of(verifier)) {
         Ok(_) => Ok(()),
         // A host with no security database (no companion server has ever run
         // here) is a normal desktop state, not an unlock failure.
@@ -690,12 +695,12 @@ fn bind_host_to_account(
 }
 
 fn rebind_host_verifier(
-    account_id: &str,
+    local_account_id: &str,
     verifier: &AccountPasswordVerifier,
 ) -> Result<(), String> {
     use crate::companion_api::host_identity::{rebind_verifier, HostIdentityError};
 
-    match rebind_verifier(account_id, &verifier_digest_of(verifier)) {
+    match rebind_verifier(local_account_id, &verifier_digest_of(verifier)) {
         Ok(()) | Err(HostIdentityError::StoreUnavailable) => Ok(()),
         Err(error) => Err(error.to_string()),
     }
@@ -863,9 +868,9 @@ mod tests {
     fn account_password_verify(
         password: String,
         verifier: AccountPasswordVerifier,
-        account_id: Option<String>,
+        local_account_id: Option<String>,
     ) -> Result<bool, String> {
-        account_password_verify_inner(password, verifier, account_id, None, None, 0)
+        account_password_verify_inner(password, verifier, local_account_id, None, None, 0)
     }
 
     #[test]
@@ -1088,9 +1093,9 @@ mod tests {
         );
     }
 
-    /// Omitting the optional `account_id` must not buy an unthrottled oracle.
+    /// Omitting the optional `local_account_id` must not buy an unthrottled oracle.
     ///
-    /// The backoff used to be gated on `account_id` being present, so a caller
+    /// The backoff used to be gated on `local_account_id` being present, so a caller
     /// could drop one field and guess against the same Argon2id verifier
     /// forever. Without an account id the verifier's own digest is the key.
     #[test]
@@ -1168,7 +1173,10 @@ mod tests {
         let session = AccountSecuritySession::new(None);
         session.activate("acct_one", "digest".into());
         assert_eq!(
-            session.require_account("acct_one").unwrap().account_id,
+            session
+                .require_account("acct_one")
+                .unwrap()
+                .local_account_id,
             "acct_one"
         );
         assert!(session.require_account("acct_two").is_err());

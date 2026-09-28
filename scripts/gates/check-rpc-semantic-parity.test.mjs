@@ -203,7 +203,7 @@ pub async fn dispatch_sftp(
     }
 }
 `
-  const arms = extractDispatchArms(source, "src-tauri/src/sftp_service.rs")
+  const arms = extractDispatchArms(source, "crates/cognia-terminal/src/sftp_service.rs")
   assert.deepEqual(
     arms.flatMap((a) => a.names),
     ["sftp_list_dir"]
@@ -252,14 +252,14 @@ pub async fn dispatch_sftp(
     }
 }
 `
-  const arms = extractDispatchArms(source, "src-tauri/src/sftp_service.rs")
+  const arms = extractDispatchArms(source, "crates/cognia-terminal/src/sftp_service.rs")
   assert.deepEqual(
     arms.flatMap((a) => a.names),
     ["sftp_list_dir", "sftp_stat", "sftp_download"]
   )
   assert.deepEqual(
     arms.map((a) => a.file),
-    ["src-tauri/src/sftp_service.rs", "src-tauri/src/sftp_service.rs"]
+    ["crates/cognia-terminal/src/sftp_service.rs", "crates/cognia-terminal/src/sftp_service.rs"]
   )
   assert.match(arms[0].body, /profileId/)
 })
@@ -273,9 +273,9 @@ test("selectArmFiles adds the delegated sources and drops test modules", () => {
   )
   assert.deepEqual(selected, [
     "src-tauri/src/companion_api/rpc/chat.rs",
-    "src-tauri/src/sftp_service.rs",
+    "crates/cognia-terminal/src/sftp_service.rs",
   ])
-  assert.deepEqual(DELEGATED_ARM_FILES, ["src-tauri/src/sftp_service.rs"])
+  assert.deepEqual(DELEGATED_ARM_FILES, ["crates/cognia-terminal/src/sftp_service.rs"])
 })
 
 test("selectArmFiles skips a tracked file that is no longer on disk", () => {
@@ -290,8 +290,10 @@ test("selectArmFiles skips a tracked file that is no longer on disk", () => {
 })
 
 test("selectArmFiles scans a delegated file once even if git already listed it", () => {
-  const selected = selectArmFiles(["src-tauri/src/sftp_service.rs"], { exists: () => true })
-  assert.deepEqual(selected, ["src-tauri/src/sftp_service.rs"])
+  const selected = selectArmFiles(["crates/cognia-terminal/src/sftp_service.rs"], {
+    exists: () => true,
+  })
+  assert.deepEqual(selected, ["crates/cognia-terminal/src/sftp_service.rs"])
 })
 
 test("armReadFields covers every field-reader spelling, aliases included", () => {

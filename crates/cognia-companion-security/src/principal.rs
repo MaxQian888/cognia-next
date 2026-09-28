@@ -2,7 +2,7 @@
 #[derive(Clone, Debug)]
 pub struct DeviceContext {
     pub device_id: String,
-    pub account_id: String,
+    pub tenant_id: String,
     /// Scope string from the JWT claims (`"device"`).  Reserved for M2.5+
     /// handlers that may need to inspect the scope.
     #[allow(dead_code)]
@@ -24,7 +24,7 @@ mod tests {
     fn empty_snapshot_is_distinct_from_unloaded_authorization() {
         let context = super::DeviceContext {
             device_id: "d".into(),
-            account_id: "a".into(),
+            tenant_id: "a".into(),
             scope: "device".into(),
             granted_scopes: vec![],
             authorization_capabilities: Some(vec![]),

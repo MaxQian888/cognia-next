@@ -60,10 +60,10 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let _ = (state, host, device_id, account_id, scope);
+    let _ = (state, host, device_id, tenant_id, scope);
     let result = match name {
         // ── Native OCR service plane ────────────────────────────────────────
         //
@@ -438,7 +438,7 @@ pub(super) async fn dispatch(
         "host_admin_lease_issue" => {
             let operations: Vec<String> = required(&args, "operations")?;
             let ttl_seconds: Option<u64> = optional_aliased(&args, "ttl_seconds", "ttlSeconds")?;
-            let owner_authorized = host_admin_authorized(device_id, account_id, scope);
+            let owner_authorized = host_admin_authorized(device_id, tenant_id, scope);
 
             // `confirmed` is deliberately NOT read from the arguments any more.
             // It was a bool the caller sent and the host checked, which is not
@@ -462,13 +462,13 @@ pub(super) async fn dispatch(
                 // whole change removes. So it is trusted, and every non-Owner
                 // device is not — which is also decision L23: configuring a
                 // connector is administrator work.
-                _ if is_owner_device(device_id, account_id) => true,
+                _ if is_owner_device(device_id, tenant_id) => true,
                 _ => super::super::host_consent::take_approved(device_id, &operations),
             };
 
             if !confirmed {
                 let ask =
-                    super::super::host_consent::request(device_id, account_id, operations.clone());
+                    super::super::host_consent::request(device_id, tenant_id, operations.clone());
                 host.publish_host_event(
                     super::super::host_consent::CONSENT_CHANNEL,
                     serde_json::to_value(&ask).unwrap_or(Value::Null),
@@ -507,7 +507,7 @@ pub(super) async fn dispatch(
         // lease, because a lease is the thing being approved and requiring one
         // to grant one is a loop with no entry.
         "host_consent_pending" => {
-            if !host_admin_authorized(device_id, account_id, scope) {
+            if !host_admin_authorized(device_id, tenant_id, scope) {
                 return Err(external_bridge_rpc_error(
                     "REMOTE_SCOPE_DENIED: listing escalation requests requires host.admin".into(),
                 ));
@@ -529,7 +529,7 @@ pub(super) async fn dispatch(
         }
 
         "host_consent_respond" => {
-            if !host_admin_authorized(device_id, account_id, scope) {
+            if !host_admin_authorized(device_id, tenant_id, scope) {
                 return Err(external_bridge_rpc_error(
                     "REMOTE_SCOPE_DENIED: answering an escalation request requires host.admin"
                         .into(),
@@ -648,53 +648,53 @@ pub(super) async fn dispatch(
             serde_json::to_value(status).map_err(|e| RpcError::internal(e.to_string()))
         }
         "mcp_oauth_status" => {
-            let account_id = account_id.ok_or_else(|| {
+            let tenant_id = tenant_id.ok_or_else(|| {
                 RpcError::forbidden("MCP OAuth requires an account-bound service principal")
             })?;
             let server_name: String = required_aliased(&args, "server_name", "serverName")?;
-            crate::mcp_oauth::headless_status(account_id, &server_name)
+            crate::mcp_oauth::headless_status(tenant_id, &server_name)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "mcp_oauth_load_entry" => {
-            let account_id = account_id.ok_or_else(|| {
+            let tenant_id = tenant_id.ok_or_else(|| {
                 RpcError::forbidden("MCP OAuth requires an account-bound service principal")
             })?;
             let server_name: String = required_aliased(&args, "server_name", "serverName")?;
-            crate::mcp_oauth::headless_load_entry(account_id, &server_name)
+            crate::mcp_oauth::headless_load_entry(tenant_id, &server_name)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "mcp_oauth_authenticate" => {
-            let account_id = account_id.ok_or_else(|| {
+            let tenant_id = tenant_id.ok_or_else(|| {
                 RpcError::forbidden("MCP OAuth requires an account-bound service principal")
             })?;
             let server_name: String = required_aliased(&args, "server_name", "serverName")?;
             let server: Value = required(&args, "server")?;
-            crate::mcp_oauth::headless_authenticate(account_id, &server_name, server)
+            crate::mcp_oauth::headless_authenticate(tenant_id, &server_name, server)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "mcp_oauth_refresh" => {
-            let account_id = account_id.ok_or_else(|| {
+            let tenant_id = tenant_id.ok_or_else(|| {
                 RpcError::forbidden("MCP OAuth requires an account-bound service principal")
             })?;
             let server_name: String = required_aliased(&args, "server_name", "serverName")?;
             let server: Value = required(&args, "server")?;
-            crate::mcp_oauth::headless_refresh(account_id, &server_name, server)
+            crate::mcp_oauth::headless_refresh(tenant_id, &server_name, server)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "mcp_oauth_clear" => {
-            let account_id = account_id.ok_or_else(|| {
+            let tenant_id = tenant_id.ok_or_else(|| {
                 RpcError::forbidden("MCP OAuth requires an account-bound service principal")
             })?;
             let server_name: String = required_aliased(&args, "server_name", "serverName")?;
-            crate::mcp_oauth::headless_clear(account_id, &server_name)
+            crate::mcp_oauth::headless_clear(tenant_id, &server_name)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
@@ -711,11 +711,11 @@ pub(super) async fn dispatch(
 /// else is a paired device and needs `host.admin` granted to it explicitly,
 /// which is what keeps a multi-tenant member device out of the escalation path
 /// entirely (decision L23).
-fn host_admin_authorized(device_id: &str, account_id: Option<&str>, scope: Option<&str>) -> bool {
+fn host_admin_authorized(device_id: &str, tenant_id: Option<&str>, scope: Option<&str>) -> bool {
     if scope == Some("owner") || scope == Some("service") {
         return true;
     }
-    account_id
+    tenant_id
         .zip(super::super::security_store::security_store())
         .is_some_and(|(tenant_id, security)| {
             security
@@ -729,8 +729,8 @@ fn host_admin_authorized(device_id: &str, account_id: Option<&str>, scope: Optio
 /// Separate from [`host_admin_authorized`] on purpose: `host.admin` is a
 /// capability an Owner may grant to a member, and a member holding it still
 /// needs someone to approve its escalations. Only the Owner is the root.
-fn is_owner_device(device_id: &str, account_id: Option<&str>) -> bool {
-    account_id
+fn is_owner_device(device_id: &str, tenant_id: Option<&str>) -> bool {
+    tenant_id
         .zip(super::super::security_store::security_store())
         .is_some_and(|(tenant_id, security)| {
             security

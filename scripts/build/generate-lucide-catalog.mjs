@@ -13,11 +13,17 @@ const outputPath = path.join(repoRoot, "lib/icons/lucide-catalog.generated.json"
 
 function readCatalogEntry(name, component) {
   const element = component.render({}, null)
-  const iconNode = element?.props?.iconNode
+  const icon = element?.props?.icon
+  const iconNode = icon?.node ?? element?.props?.iconNode
   if (!Array.isArray(iconNode)) {
     throw new Error(`Lucide export ${name} did not expose iconNode data`)
   }
-  return { className: element.props.className, iconNode }
+  const className = icon
+    ? [...new Set([icon.name, ...(icon.aliases ?? [])]
+        .filter((value) => typeof value === "string" && value.trim() !== "")
+        .map((value) => `lucide-${value}`))].join(" ")
+    : element.props.className
+  return { className, iconNode }
 }
 
 export function buildLucideCatalog(iconExports, moduleExports = iconExports) {

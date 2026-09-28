@@ -8,6 +8,7 @@
  * mono target + meta + chevron", and every consumer composes it the same way.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { memo, type ReactNode } from "react"
 import { CheckIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
@@ -258,7 +259,7 @@ export function ToolRowBlock({
   children: React.ReactNode
 }) {
   return (
-    <div
+    <Surface
       className={cn(
         "mt-0.5 mb-1 overflow-hidden rounded-md border border-l-2 bg-muted/40 text-xs",
         error && "border-destructive/40",
@@ -283,6 +284,6 @@ export function ToolRowBlock({
         ) : null}
       </div>
       <div className="max-h-56 overflow-auto">{children}</div>
-    </div>
+    </Surface>
   )
 }

@@ -464,7 +464,10 @@ describe("createLlmClient.stream with the real AI SDK (webview runtime)", () => 
     ;(createOpenAI as jest.Mock).mockImplementationOnce(() =>
       Object.assign(() => model, { chat: () => model, responses: () => model })
     )
-    return createLlmClient({ provider: "openai", model: "gpt-test", apiKey: "k" })
+    const client = createLlmClient({ provider: "openai", model: "gpt-test", apiKey: "k" })
+    if (!client.stream || !client.getUsageSnapshot)
+      throw new Error("Expected streaming usage client")
+    return { ...client, stream: client.stream, getUsageSnapshot: client.getUsageSnapshot }
   }
 
   it("ends a stream cut off mid-response without leaking an unhandled rejection", async () => {

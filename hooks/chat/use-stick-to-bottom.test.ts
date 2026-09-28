@@ -261,7 +261,7 @@ describe("useStickToBottom", () => {
     const { result } = setup(box, content)
     box.writes.length = 0
     act(() => {
-      result.current.handleContentClick({ target: button } as React.MouseEvent<HTMLElement>)
+      result.current.handleContentClick({ target: button })
       box.setHeight(1800)
       observers.fire(content)
     })
@@ -271,7 +271,7 @@ describe("useStickToBottom", () => {
     button.setAttribute("aria-haspopup", "menu")
     box.writes.length = 0
     act(() => {
-      result.current.handleContentClick({ target: button } as React.MouseEvent<HTMLElement>)
+      result.current.handleContentClick({ target: button })
       box.setHeight(2200)
       observers.fire(content)
     })

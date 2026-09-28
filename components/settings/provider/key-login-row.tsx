@@ -23,9 +23,10 @@
 // limited says nothing about the key, and reporting either one as the other is
 // how a working key gets thrown away or a typo gets accepted.
 
+import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Check, ExternalLink, Loader2, ShieldQuestion, TriangleAlert } from "lucide-react"
+import { Check, ExternalLink, ShieldQuestion, TriangleAlert } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { openUrl } from "@/lib/native/opener"
@@ -93,11 +94,7 @@ export function KeyLoginRow({ providerId, apiKey, validate }: KeyLoginRowProps) 
           disabled={!apiKey || checking}
           data-testid="key-login-verify"
         >
-          {checking ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Check className="h-3.5 w-3.5" />
-          )}
+          {checking ? <Spinner className="h-3.5 w-3.5 " /> : <Check className="h-3.5 w-3.5" />}
           {t("verify")}
         </Button>
       ) : null}

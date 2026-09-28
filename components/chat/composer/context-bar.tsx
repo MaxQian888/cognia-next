@@ -24,6 +24,7 @@
  *     pushed through `notifyConversationOverIM` by `ImNotifyInitializer`.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { WebSessionStatus } from "@/components/shell/web-status"
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -767,7 +768,7 @@ export function ContextBar({ execution, onExecutionChange, project }: ContextBar
 [data-ctxbar-scope]:has([data-ctxbar-fused]) [data-composer-skin]>[class*="self-start"]:not(:has([data-chip-flow]>:not([id^="Dnd"]))){display:none}
 [data-ctxbar-scope]:focus-within [data-ctxbar-fused]{border-color:color-mix(in oklab,var(--primary) 40%,transparent)}
 `}</style>
-      <div
+      <Surface
         data-testid="context-bar"
         data-ctxbar-fused
         data-tonality="translucent"
@@ -840,7 +841,7 @@ export function ContextBar({ execution, onExecutionChange, project }: ContextBar
             </PopoverContent>
           </Popover>
         </div>
-      </div>
+      </Surface>
     </>
   )
 }

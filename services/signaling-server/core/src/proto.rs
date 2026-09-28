@@ -319,8 +319,7 @@ mod tests {
     fn relay_frame_without_lane_field_reads_as_signal() {
         // What every peer shipped before the data lane existed sends.
         let decoded: ClientFrame =
-            serde_json::from_str(r#"{"kind":"relay","rendezvousId":"r1","payload":"x"}"#)
-                .unwrap();
+            serde_json::from_str(r#"{"kind":"relay","rendezvousId":"r1","payload":"x"}"#).unwrap();
         match decoded {
             ClientFrame::Relay { lane, .. } => assert_eq!(lane, RelayLane::Signal),
             _ => panic!("unexpected variant"),

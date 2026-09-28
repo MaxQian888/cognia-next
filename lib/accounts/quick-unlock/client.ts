@@ -173,7 +173,7 @@ function isNotEnrolled(error: unknown): boolean {
 
 /** Forget a method. Every other method and the password are untouched. */
 export async function removeQuickUnlock(
-  accountId: string,
+  localAccountId: string,
   method: QuickUnlockMethod
 ): Promise<void> {
   if (isTauri()) {
@@ -182,7 +182,7 @@ export async function removeQuickUnlock(
     // is that step.
     return
   }
-  await removeBrowserVaultQuickUnlock(accountId, method)
+  await removeBrowserVaultQuickUnlock(localAccountId, method)
 }
 
 /**
@@ -191,11 +191,11 @@ export async function removeQuickUnlock(
  * Called after the LAST method is removed, and when an account is deleted.
  * Every verifier that material produced stops matching, which is the point.
  */
-export async function clearQuickUnlockDeviceMaterial(accountId: string): Promise<void> {
+export async function clearQuickUnlockDeviceMaterial(localAccountId: string): Promise<void> {
   if (isTauri()) {
-    await transport.call<void>(QUICK_UNLOCK_CLEAR_COMMAND, { accountId })
+    await transport.call<void>(QUICK_UNLOCK_CLEAR_COMMAND, { accountId: localAccountId })
     return
   }
   const { clearDeviceKey } = await import("./device-pepper")
-  await clearDeviceKey(accountId)
+  await clearDeviceKey(localAccountId)
 }

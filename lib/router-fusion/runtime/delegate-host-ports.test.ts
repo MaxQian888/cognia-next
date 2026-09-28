@@ -232,7 +232,7 @@ function localSandbox(
           cwd,
           encoding: "utf8",
           timeout: spec.limits.timeoutMs,
-          env: spec.env,
+          env: { ...spec.env, NODE_ENV: process.env.NODE_ENV },
         })
       } catch (error) {
         exitCode = (error as { status?: number }).status ?? 1

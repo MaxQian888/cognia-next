@@ -233,10 +233,10 @@ export function buildMarkdownAgents(files: MarkdownAgentFile[]): MarkdownAgentRe
  */
 export function markdownAgentsToSdkMap(
   agents: Record<string, AgentDefinition>
-): Record<string, Record<string, unknown>> {
-  const out: Record<string, Record<string, unknown>> = {}
+): Record<string, AgentDefinition> {
+  const out: Record<string, AgentDefinition> = {}
   for (const [id, def] of Object.entries(agents)) {
-    out[id] = def as unknown as Record<string, unknown>
+    out[id] = def
   }
   return out
 }

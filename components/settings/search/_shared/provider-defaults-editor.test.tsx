@@ -16,9 +16,7 @@ function renderEditor(
   providerId: Parameters<typeof ProviderDefaultsEditor>[0]["providerId"] = "tavily"
 ) {
   const onChange = jest.fn()
-  render(
-    <ProviderDefaultsEditor providerId={providerId} value={value} onChange={onChange} />
-  )
+  render(<ProviderDefaultsEditor providerId={providerId} value={value} onChange={onChange} />)
   return onChange
 }
 
@@ -48,9 +46,9 @@ describe("ProviderDefaultsEditor", () => {
     // Tavily supports general/news but not academic/images/videos.
     renderEditor(undefined, "tavily")
     const label = screen.getByText("searchType")
-    const options = Array.from(
-      label.parentElement!.querySelectorAll('[role="option"]')
-    ).map((el) => el.getAttribute("data-value"))
+    const options = Array.from(label.parentElement!.querySelectorAll('[role="option"]')).map((el) =>
+      el.getAttribute("data-value")
+    )
     expect(options).toContain("__inherit__")
     expect(options).toContain("general")
     expect(options).toContain("news")

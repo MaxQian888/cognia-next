@@ -668,7 +668,7 @@ describe("executeFusionRun: cascade and panel (B3)", () => {
     )
   })
 
-  it("refuses a delegate run this build does not execute, sending nothing", async () => {
+  it("refuses a delegate run without an authorized workspace, sending nothing", async () => {
     const { store } = harness()
     await store.createRun(
       runInput("run-delegate", {
@@ -681,9 +681,9 @@ describe("executeFusionRun: cascade and panel (B3)", () => {
       runId: "run-delegate",
       messages: MESSAGES,
     })
-    expect(outcome).toMatchObject({ kind: "failed", code: "MODE_NOT_AVAILABLE" })
+    expect(outcome).toMatchObject({ kind: "failed", code: "WORKSPACE_REQUIRED" })
     expect(executor.call).not.toHaveBeenCalled()
-    expect((await store.getRun("run-delegate"))?.error?.code).toBe("MODE_NOT_AVAILABLE")
+    expect((await store.getRun("run-delegate"))?.error?.code).toBe("WORKSPACE_REQUIRED")
   })
 
   it("[ACC:AUTH-07] refuses a call the account stopped allowing, before it is sent", async () => {

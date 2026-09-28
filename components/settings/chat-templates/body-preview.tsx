@@ -14,6 +14,7 @@
 // is the same `TemplateParamPopover` a send would open, so rehearsing here
 // teaches the real interaction.
 
+import { Surface } from "@/components/surface/surface"
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
@@ -61,7 +62,7 @@ export function ChatTemplateBodyPreview({
 }) {
   const pieces = useMemo(() => splitBody(body), [body])
   return (
-    <div
+    <Surface
       className={cn(
         "whitespace-pre-wrap rounded-md border bg-muted/30 p-3 font-mono text-xs leading-6",
         className
@@ -81,7 +82,7 @@ export function ChatTemplateBodyPreview({
           />
         )
       )}
-    </div>
+    </Surface>
   )
 }
 

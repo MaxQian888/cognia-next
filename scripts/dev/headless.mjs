@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { constants as fsConstants, readFileSync, rmSync } from "node:fs"
-import { access, chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { access, chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises"
 import { createDecipheriv, randomBytes } from "node:crypto"
 import path from "node:path"
 import { fileURLToPath } from "node:url"

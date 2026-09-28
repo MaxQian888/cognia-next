@@ -420,7 +420,7 @@ pub(crate) async fn whoami_handler(Extension(context): Extension<DeviceContext>)
         StatusCode::OK,
         Json(json!({
             "deviceId": context.device_id,
-            "accountId": context.account_id,
+            "accountId": context.tenant_id,
             "serverVersion": env!("CARGO_PKG_VERSION"),
             "tlsFingerprint": super::tls_fingerprint(),
             "contractVersion": super::command_manifest::CONTRACT_VERSION,
@@ -495,7 +495,7 @@ fn authenticate_owner_request(
     consume_device_proof(&access.tenant_id, &access.sub, &verified_proof)?;
     Ok(DeviceContext {
         device_id: access.sub,
-        account_id: access.tenant_id,
+        tenant_id: access.tenant_id,
         scope: "owner".to_string(),
         granted_scopes: Vec::new(),
         authorization_capabilities: Some(snapshot.capabilities),
@@ -512,7 +512,7 @@ pub(crate) async fn devices_handler(
     Extension(context): Extension<DeviceContext>,
 ) -> ApiResult<DevicesResponse> {
     let devices = store()?
-        .list_devices(&context.account_id)
+        .list_devices(&context.tenant_id)
         .map_err(store_error)?;
     Ok(Json(DevicesResponse { devices }))
 }
@@ -538,7 +538,7 @@ pub(crate) async fn replace_device_capabilities_handler(
     let request = parse_public_json(body)?;
     let capabilities = store()?
         .replace_device_capabilities(
-            &context.account_id,
+            &context.tenant_id,
             &context.device_id,
             &device_id,
             &request.capabilities,
@@ -586,7 +586,7 @@ pub(crate) async fn worker_enrollment_handler(
     }
     let enrollment = store()?
         .create_worker_enrollment(
-            &context.account_id,
+            &context.tenant_id,
             &context.device_id,
             unix_time_secs(),
             ttl,
@@ -620,7 +620,7 @@ pub(crate) async fn invitation_handler(
     }
     let invitation = store()?
         .create_owner_invitation(
-            &context.account_id,
+            &context.tenant_id,
             &context.device_id,
             unix_time_secs(),
             ttl,
@@ -728,7 +728,7 @@ fn apply_lifecycle(
         // last owner device and lock the deployment out of its own API. The
         // local operator can, through the CLI.
         &super::device_lifecycle::LifecycleActor::owner_device(
-            &context.account_id,
+            &context.tenant_id,
             &context.device_id,
         ),
         device_id,
@@ -763,7 +763,7 @@ pub(crate) async fn operation_handler(
 ) -> Response {
     match store().and_then(|store| {
         store
-            .operation(&context.account_id, &context.device_id, &operation_id)
+            .operation(&context.tenant_id, &context.device_id, &operation_id)
             .map_err(store_error)
     }) {
         Ok(Some(operation)) => (
@@ -797,7 +797,7 @@ fn internal_operation_response(
 ) -> Response {
     match store.and_then(|store| {
         store
-            .operation(&context.account_id, &context.device_id, &operation_id)
+            .operation(&context.tenant_id, &context.device_id, &operation_id)
             .map_err(store_error)
     }) {
         Ok(Some(operation)) => (
@@ -840,7 +840,7 @@ pub(crate) async fn policies_handler(
     Extension(context): Extension<DeviceContext>,
 ) -> ApiResult<PoliciesResponse> {
     let policies = store()?
-        .list_host_policies(&context.account_id, unix_time_secs())
+        .list_host_policies(&context.tenant_id, unix_time_secs())
         .map_err(store_error)?;
     Ok(Json(PoliciesResponse { policies }))
 }
@@ -858,7 +858,7 @@ pub(crate) async fn create_policy_handler(
     });
     let created = store()?
         .create_host_policy(
-            &context.account_id,
+            &context.tenant_id,
             &context.device_id,
             &request.capability,
             &policy,
@@ -1246,7 +1246,7 @@ fn authenticate_device_request(
     consume_device_proof(&access.tenant_id, &access.sub, &verified_proof)?;
     Ok(DeviceContext {
         device_id: access.sub,
-        account_id: access.tenant_id,
+        tenant_id: access.tenant_id,
         scope: "device".to_string(),
         granted_scopes: Vec::new(),
         authorization_capabilities: Some(snapshot.capabilities),
@@ -2969,7 +2969,7 @@ mod tests {
             Path("not_registered".into()),
             Extension(DeviceContext {
                 device_id: super::super::jwt::SERVICE_DEVICE_ID.into(),
-                account_id: "local_acct_a".into(),
+                tenant_id: "local_acct_a".into(),
                 scope: "service".into(),
                 granted_scopes: Vec::new(),
                 authorization_capabilities: None,
@@ -3029,7 +3029,7 @@ mod tests {
             .unwrap();
         let context = DeviceContext {
             device_id: "service-a".into(),
-            account_id: "tenant-a".into(),
+            tenant_id: "tenant-a".into(),
             scope: "service".into(),
             granted_scopes: Vec::new(),
             authorization_capabilities: None,
@@ -3079,7 +3079,7 @@ mod tests {
 
         let service = DeviceContext {
             device_id: super::super::jwt::SERVICE_DEVICE_ID.into(),
-            account_id: "local_acct_a".into(),
+            tenant_id: "local_acct_a".into(),
             scope: "service".into(),
             granted_scopes: Vec::new(),
             authorization_capabilities: None,
@@ -3366,7 +3366,7 @@ mod tests {
             .unwrap();
         let owner = || DeviceContext {
             device_id: "owner-a".to_string(),
-            account_id: "tenant-a".to_string(),
+            tenant_id: "tenant-a".to_string(),
             scope: "owner".to_string(),
             granted_scopes: Vec::new(),
             authorization_capabilities: None,
@@ -3426,7 +3426,7 @@ mod tests {
     async fn whoami_names_the_command_contract() {
         let context = DeviceContext {
             device_id: "device-a".to_string(),
-            account_id: "local_acct_a".to_string(),
+            tenant_id: "local_acct_a".to_string(),
             scope: "device".to_string(),
             granted_scopes: Vec::new(),
             authorization_capabilities: None,

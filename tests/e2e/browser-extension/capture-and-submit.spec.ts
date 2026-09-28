@@ -72,9 +72,8 @@ async function captureFixturePage(
 
   const tabId = await tabIdOf(serviceWorker, `${pageUrl}${query}`)
   await requestCapture(serviceWorker, tabId, mode)
-  // Reopening is what a context-menu click does: the worker records the
-  // request and opens the panel, which reads it on mount.
-  await panel.reload()
+  // The open panel consumes storage changes immediately. Reloading here
+  // destroys its in-memory capture after the one-shot request was consumed.
   await expect(panel.getByTestId("capture-preview")).toBeVisible()
   return { pageUrl, content }
 }

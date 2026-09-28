@@ -31,6 +31,24 @@
       "note": "Reads a staged attachment's blob:/data:/file URI to turn it into a File or a base64 block, the same conversion components/chat/composer.tsx does. Never a network origin."
     },
     {
+      "file": "crates/cognia-codeserver/src/process.rs",
+      "kind": "no-proxy",
+      "reason": "loopback",
+      "note": "Talks to the code-server process this app spawned on loopback."
+    },
+    {
+      "file": "crates/cognia-codeserver/src/remote.rs",
+      "kind": "no-proxy",
+      "reason": "loopback",
+      "note": "Talks to the loopback relay endpoint the IDE bridge owns."
+    },
+    {
+      "file": "crates/cognia-companion/src/backup.rs",
+      "kind": "no-proxy",
+      "reason": "server-side",
+      "note": "Runs in the headless brain, where the process proxy environment is the policy."
+    },
+    {
       "file": "crates/cognia-gateway/src/server.rs",
       "kind": "reqwest-client-new",
       "reason": "server-side",
@@ -53,12 +71,6 @@
       "kind": "websocket",
       "reason": "companion-pinned",
       "note": "The Remote Browser companion channel, which carries its own pairing and transport guarantees."
-    },
-    {
-      "file": "lib/canvas/collaboration/websocket-provider.ts",
-      "kind": "websocket",
-      "reason": "loopback",
-      "note": "Collaboration sessions target a loopback or LAN peer the user paired with directly."
     },
     {
       "file": "lib/collab/shared-chat-conversion.ts",
@@ -124,7 +136,7 @@
       "file": "lib/plugin/bridge/plugin-file-path.ts",
       "kind": "fetch",
       "reason": "resource-read",
-      "note": "Reads a browser built-in's own text asset (e.g. an icon-theme JSON) from its /plugins/<id>/ public mirror. Always a root-relative, same-origin static file from the export (out/) — never a network origin — and the URL is built by publicBuiltinAssetUrl from the caller's plugin id and a traversal-checked path."
+      "note": "Reads a browser built-in's own text asset (e.g. an icon-theme JSON) from its /plugins/<id>/ public mirror. Always a root-relative, same-origin static file from the export (out/) \u2014 never a network origin \u2014 and the URL is built by publicBuiltinAssetUrl from the caller's plugin id and a traversal-checked path."
     },
     {
       "file": "lib/plugin/core/context.ts",
@@ -187,6 +199,12 @@
       "note": "The remote-terminal socket, reached through the same paired-host channel."
     },
     {
+      "file": "lib/workflow/nodes/shared/image-source.ts",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Reads only data: URLs after an explicit scheme guard; remote image URLs go through proxyFetch. Regression tests reject network URLs in the local field."
+    },
+    {
       "file": "packages/companion-client/src/session.ts",
       "kind": "fetch",
       "reason": "companion-pinned",
@@ -197,12 +215,6 @@
       "kind": "fetch",
       "reason": "server-side",
       "note": "Log shipping runs in the Node hosts (headless brain, CLI, sidecar) where the process proxy environment applies."
-    },
-    {
-      "file": "packages/provider-core/src/providers/oauth.ts",
-      "kind": "fetch",
-      "reason": "resource-read",
-      "note": "Posts to the same-origin relative path /api/oauth/<id>/refresh, which CSP allows as 'self'."
     },
     {
       "file": "packages/provider-core/src/providers/ollama-pull.ts",
@@ -241,28 +253,10 @@
       "note": "Probes http://127.0.0.1:<browser-port>/healthz before minting a browser enrollment; routing a liveness check of this machine's own listener through a proxy would answer for the wrong host."
     },
     {
-      "file": "crates/cognia-codeserver/src/process.rs",
-      "kind": "no-proxy",
-      "reason": "loopback",
-      "note": "Talks to the code-server process this app spawned on loopback."
-    },
-    {
-      "file": "crates/cognia-codeserver/src/remote.rs",
-      "kind": "no-proxy",
-      "reason": "loopback",
-      "note": "Talks to the loopback relay endpoint the IDE bridge owns."
-    },
-    {
       "file": "src-tauri/src/companion_api/commands.rs",
       "kind": "no-proxy",
       "reason": "loopback",
       "note": "Self-connectivity check against this host's own companion listener."
-    },
-    {
-      "file": "crates/cognia-companion/src/backup.rs",
-      "kind": "no-proxy",
-      "reason": "server-side",
-      "note": "Runs in the headless brain, where the process proxy environment is the policy."
     }
   ]
 }

@@ -385,7 +385,8 @@ pub fn wrap_with_sandbox(
         .ok_or_else(|| SandboxError::LauncherUnavailable(config.command.clone()))?;
     let host_home = host.home().ok_or(SandboxError::MissingHome)?;
     let home = crate::gateway_task::task_home(&config.env, &host_home)
-        .map_err(|_| SandboxError::MissingHome)?.unwrap_or_else(|| host_home.clone());
+        .map_err(|_| SandboxError::MissingHome)?
+        .unwrap_or_else(|| host_home.clone());
     let cwd = config
         .cwd
         .clone()
@@ -404,27 +405,92 @@ pub fn wrap_with_sandbox(
 
     let bot_isolation = config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1");
     let mut args = if bot_isolation {
-        let state = config.env.get("COGNIA_BOT_STATE_DIR").filter(|value| Path::new(value).is_absolute()).ok_or(SandboxError::MissingCwd)?;
+        let state = config
+            .env
+            .get("COGNIA_BOT_STATE_DIR")
+            .filter(|value| Path::new(value).is_absolute())
+            .ok_or(SandboxError::MissingCwd)?;
         host.ensure_dir(Path::new(state));
-        vec!["--cwd".into(), cwd.clone(), "--writable".into(), state.clone(), "--writable".into(), tool_host_dir.to_string_lossy().into_owned(), "--network".into(), "--".into(), config.command.clone()]
-            .into_iter().chain(config.args.clone()).collect()
+        vec![
+            "--cwd".into(),
+            cwd.clone(),
+            "--writable".into(),
+            state.clone(),
+            "--writable".into(),
+            tool_host_dir.to_string_lossy().into_owned(),
+            "--network".into(),
+            "--".into(),
+            config.command.clone(),
+        ]
+        .into_iter()
+        .chain(config.args.clone())
+        .collect()
     } else {
         build_sandbox_launcher_args(&config.command, &config.args, &cwd, &home, &tool_host_dir)
     };
     if bot_isolation {
         // The launcher owns env/keychain confinement too. An old launcher
         // rejects this flag instead of silently running with a weaker policy.
-        args.splice(0..0, ["--bot-isolation".to_string(), "--deny-readable".to_string(), host_home.to_string_lossy().into_owned()]);
-        for relative in [".nvm", ".local/bin", ".local/share/pnpm", ".local/share/devin/cli/_versions", ".bun/bin", ".cargo/bin", ".rustup/toolchains", "Library/pnpm"] {
-            args.splice(0..0, ["--readable".to_string(), host_home.join(relative).to_string_lossy().into_owned()]);
+        args.splice(
+            0..0,
+            [
+                "--bot-isolation".to_string(),
+                "--deny-readable".to_string(),
+                host_home.to_string_lossy().into_owned(),
+            ],
+        );
+        for relative in [
+            ".nvm",
+            ".local/bin",
+            ".local/share/pnpm",
+            ".local/share/devin/cli/_versions",
+            ".bun/bin",
+            ".cargo/bin",
+            ".rustup/toolchains",
+            "Library/pnpm",
+        ] {
+            args.splice(
+                0..0,
+                [
+                    "--readable".to_string(),
+                    host_home.join(relative).to_string_lossy().into_owned(),
+                ],
+            );
         }
     }
     if config.env.contains_key(crate::gateway_task::PAYLOAD_ENV) {
         // All runtime state lives under this task root, not the user's roots.
-        args.splice(0..0, ["--writable".to_string(), home.to_string_lossy().into_owned()]);
-        args.splice(0..0, ["--readable".to_string(), host_home.to_string_lossy().into_owned()]);
-        for relative in [".codex", ".claude", ".claude.json", ".pi", ".qwen", ".config/opencode", ".local/share/opencode", ".local/share/cognia-agent-tasks"] {
-            args.splice(0..0, ["--deny-readable".to_string(), host_home.join(relative).to_string_lossy().into_owned()]);
+        args.splice(
+            0..0,
+            [
+                "--writable".to_string(),
+                home.to_string_lossy().into_owned(),
+            ],
+        );
+        args.splice(
+            0..0,
+            [
+                "--readable".to_string(),
+                host_home.to_string_lossy().into_owned(),
+            ],
+        );
+        for relative in [
+            ".codex",
+            ".claude",
+            ".claude.json",
+            ".pi",
+            ".qwen",
+            ".config/opencode",
+            ".local/share/opencode",
+            ".local/share/cognia-agent-tasks",
+        ] {
+            args.splice(
+                0..0,
+                [
+                    "--deny-readable".to_string(),
+                    host_home.join(relative).to_string_lossy().into_owned(),
+                ],
+            );
         }
     }
 
@@ -699,25 +765,52 @@ mod tests {
     fn bot_launch_hides_home_and_uses_owned_state() {
         let host = FakeHost::new("macos");
         let mut original = config("devin", &["acp"], Some("/work/project"));
-        original.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
-        original.env.insert("COGNIA_BOT_STATE_DIR".into(), "/work/state".into());
+        original
+            .env
+            .insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+        original
+            .env
+            .insert("COGNIA_BOT_STATE_DIR".into(), "/work/state".into());
         original.env.insert("TMPDIR".into(), "/ambient/tmp".into());
-        original.env.insert("pnpm_config_store_dir".into(), "/ambient/store".into());
+        original
+            .env
+            .insert("pnpm_config_store_dir".into(), "/ambient/store".into());
         let wrapped = wrap_with_sandbox(original, &host).unwrap();
         assert!(wrapped.args.iter().any(|arg| arg == "--bot-isolation"));
-        assert!(wrapped.args.windows(2).any(|pair| pair == ["--deny-readable", "/home/dev"]));
-        assert!(!wrapped.args.windows(2).any(|pair| pair == ["--readable", "/home/dev"]));
-        assert!(!wrapped.args.windows(2).any(|pair| pair == ["--writable", "/home/dev/.local/share/devin"]));
+        assert!(wrapped
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--deny-readable", "/home/dev"]));
+        assert!(!wrapped
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--readable", "/home/dev"]));
+        assert!(!wrapped
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--writable", "/home/dev/.local/share/devin"]));
         assert_eq!(wrapped.env["XDG_DATA_HOME"], "/work/state/data");
         for key in ["TMPDIR", "TMP", "TEMP"] {
             assert_eq!(wrapped.env[key], "/work/state/tmp");
         }
         assert_eq!(wrapped.env["npm_config_cache"], "/work/state/cache/npm");
-        assert_eq!(wrapped.env["npm_config_store_dir"], "/work/state/cache/pnpm-store");
-        assert_eq!(wrapped.env["pnpm_config_store_dir"], "/work/state/cache/pnpm-store");
-        assert_eq!(wrapped.env["pnpm_config_cache_dir"], "/work/state/cache/pnpm");
+        assert_eq!(
+            wrapped.env["npm_config_store_dir"],
+            "/work/state/cache/pnpm-store"
+        );
+        assert_eq!(
+            wrapped.env["pnpm_config_store_dir"],
+            "/work/state/cache/pnpm-store"
+        );
+        assert_eq!(
+            wrapped.env["pnpm_config_cache_dir"],
+            "/work/state/cache/pnpm"
+        );
         for directory in ["tmp", "cache/npm", "cache/pnpm-store", "cache/pnpm"] {
-            assert!(host.dirs.borrow().contains(&PathBuf::from("/work/state").join(directory)));
+            assert!(host
+                .dirs
+                .borrow()
+                .contains(&PathBuf::from("/work/state").join(directory)));
         }
     }
 
@@ -725,7 +818,9 @@ mod tests {
     fn wrap_attests_devin_configuration_after_policy_even_for_custom_launcher_paths() {
         let host = FakeHost::new("macos");
         let mut original = config("devin", &["acp"], Some("/work/project"));
-        original.env.insert(crate::devin_mcp_config::PAYLOAD_ENV.into(), "[]".into());
+        original
+            .env
+            .insert(crate::devin_mcp_config::PAYLOAD_ENV.into(), "[]".into());
         let wrapped = wrap_with_sandbox(original, &host).unwrap();
         assert_eq!(wrapped.command, "/opt/launcher");
         assert_eq!(wrapped.env[crate::devin_mcp_config::WRAPPED_ENV], "1");

@@ -7,10 +7,7 @@ import {
   makeConfiguredProviders,
   makeSearchAppSettings,
 } from "@/lib/storybook/fixtures/settings-search"
-import {
-  getProviderHealth,
-  resetProviderHealth,
-} from "@cognia/web-search/provider-health"
+import { getProviderHealth, resetProviderHealth } from "@cognia/web-search/provider-health"
 
 // `SearchProviderHealthPanel` reads the in-memory ProviderHealth singleton —
 // stories seed it with recorded results so healthy/degraded/open rows show —

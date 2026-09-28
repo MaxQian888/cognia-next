@@ -5,12 +5,30 @@ import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
 import os from "node:os"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import * as pty from "node-pty"
 import { TerminalScreen } from "../tui/pty/terminal-screen"
 import { nodePtyAvailable } from "../tui/pty/node-pty-harness"
+import { defaultNativeCandidates, findNativeBinary } from "../runtime/native-binary"
 
 const ROOT = path.resolve(__dirname, "../../..")
 const BUNDLE = path.join(ROOT, "cli/dist/cognia-agent.mjs")
+const nativeHelperEnv = Object.fromEntries(
+  [
+    ["cognia-sandbox-exec", "COGNIA_SANDBOX_EXEC"],
+    ["cognia-external-agent-launcher", "COGNIA_EXTERNAL_AGENT_LAUNCHER"],
+  ].flatMap(([base, envVar]) => {
+    const binary = findNativeBinary(
+      defaultNativeCandidates({
+        base,
+        envVar,
+        moduleUrl: pathToFileURL(BUNDLE).href,
+        cwd: ROOT,
+      })
+    )
+    return binary ? [[envVar, binary]] : []
+  })
+)
 
 describe("packaged built-in coding loop", () => {
   jest.setTimeout(180_000)
@@ -130,9 +148,20 @@ process.stdin.on("data", chunk => {
             : messageText.includes("FOLLOWUP_REQUEST")
               ? "FOLLOWUP_COMPLETE"
               : "CODING_LOOP_COMPLETE"
-        const command = auxiliary
+        let command = auxiliary
           ? undefined
           : (terminalOnly ? terminalCommands : commands)[activeRequests.length - 1]
+        // PTY output arrives asynchronously; a read can legitimately return only
+        // the echoed input. Keep reading until the fixture's program has replied.
+        if (
+          terminalOnly &&
+          command?.name === "terminal_repl_kill" &&
+          !messageText.includes("TERMINAL_EXECUTED")
+        ) {
+          const read = terminalCommands.find((entry) => entry.name === "terminal_repl_read")!
+          terminalCommands.splice(activeRequests.length - 1, 0, read)
+          command = read
+        }
         if (command?.input.shellId === "BACKGROUND" || command?.input.sessionId === "TERMINAL") {
           const messages = payload.messages ?? []
           const outputs =
@@ -365,9 +394,7 @@ socket.setTimeout(3000, () => { socket.destroy(); process.exitCode = 1; });
               HOME: workspace,
               COGNIA_HOME: home,
               NO_COLOR: "1",
-              ...(process.env.COGNIA_SANDBOX_EXEC
-                ? { COGNIA_SANDBOX_EXEC: process.env.COGNIA_SANDBOX_EXEC }
-                : {}),
+              ...nativeHelperEnv,
             },
             stdio: ["ignore", "pipe", "pipe"],
           })
@@ -451,9 +478,7 @@ socket.setTimeout(3000, () => { socket.destroy(); process.exitCode = 1; });
                 COGNIA_HOME: home,
                 TERM: "xterm-256color",
                 NO_COLOR: "1",
-                ...(process.env.COGNIA_SANDBOX_EXEC
-                  ? { COGNIA_SANDBOX_EXEC: process.env.COGNIA_SANDBOX_EXEC }
-                  : {}),
+                ...nativeHelperEnv,
               },
             })
             terminal.onData((data) => {

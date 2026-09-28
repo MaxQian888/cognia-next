@@ -182,7 +182,7 @@ describe("AcpClientAdapter — prompt deadlines and host response envelopes", ()
 
   it("releases listeners, approvals, and terminals when disconnect follows a process crash", async () => {
     const { adapter } = await connectedAdapter()
-    const listeners = [...listenerBag(adapter)]
+    const listeners = await Promise.all(mockListen.mock.results.map((result) => result.value))
     const pending = callPermission(adapter, {
       sessionId: "s",
       kind: "execute",

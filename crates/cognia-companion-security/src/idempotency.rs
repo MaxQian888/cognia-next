@@ -268,7 +268,11 @@ impl IdempotencyCache {
         let inner = self.inner.lock();
         if let Some(database) = inner.database.as_ref() {
             return database
-                .query_row("SELECT COUNT(*) FROM rpc_idempotency", [], |row| row.get(0))
+                .query_row("SELECT COUNT(*) FROM rpc_idempotency", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .ok()
+                .and_then(|count| usize::try_from(count).ok())
                 .unwrap_or(0);
         }
         inner.memory.len()
@@ -351,7 +355,14 @@ fn enforce_database_capacity(
     database: &Connection,
     capacity: usize,
 ) -> Result<(), IdempotencyError> {
-    let count: usize =
+    if capacity == 0 {
+        return Err(IdempotencyError::Capacity);
+    }
+    let Ok(capacity) = i64::try_from(capacity) else {
+        // SQLite cannot contain more rows than its signed integer range.
+        return Ok(());
+    };
+    let count: i64 =
         database.query_row("SELECT COUNT(*) FROM rpc_idempotency", [], |row| row.get(0))?;
     if count >= capacity {
         let remove_count = count - capacity + 1;
@@ -365,7 +376,7 @@ fn enforce_database_capacity(
              )",
             [remove_count],
         )?;
-        if removed < remove_count {
+        if i64::try_from(removed).unwrap_or(i64::MAX) < remove_count {
             return Err(IdempotencyError::Capacity);
         }
     }
@@ -463,6 +474,59 @@ mod tests {
             cache.begin("dev", "write", "k1", &json!({})).unwrap(),
             IdempotencyDecision::Indeterminate
         );
+    }
+
+    #[test]
+    fn persistent_capacity_evicts_completed_entries_and_preserves_pending() {
+        let cache = IdempotencyCache::from_connection(
+            Connection::open_in_memory().unwrap(),
+            2,
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        cache
+            .begin("dev", "write", "completed", &json!({}))
+            .unwrap();
+        cache
+            .complete("dev", "write", "completed", &json!(1))
+            .unwrap();
+        cache.begin("dev", "write", "pending", &json!({})).unwrap();
+        assert_eq!(
+            cache
+                .begin("dev", "write", "replacement", &json!({}))
+                .unwrap(),
+            IdempotencyDecision::Execute
+        );
+        assert_eq!(
+            cache.begin("dev", "write", "pending", &json!({})).unwrap(),
+            IdempotencyDecision::Indeterminate
+        );
+        let inner = cache.inner.lock();
+        let retained: Vec<String> = inner
+            .database
+            .as_ref()
+            .unwrap()
+            .prepare("SELECT idempotency_key FROM rpc_idempotency ORDER BY idempotency_key")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(retained, ["pending", "replacement"]);
+    }
+
+    #[test]
+    fn persistent_zero_capacity_rejects_reservations() {
+        let cache = IdempotencyCache::from_connection(
+            Connection::open_in_memory().unwrap(),
+            0,
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        assert!(matches!(
+            cache.begin("dev", "write", "key", &json!({})),
+            Err(IdempotencyError::Capacity)
+        ));
     }
 
     #[test]

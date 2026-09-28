@@ -57,12 +57,8 @@ fn locate_from(
 /// Everything `agent-host.mjs` needs on disk before it can boot. The static
 /// imports at the top of that file plus the dependency tree; a directory that
 /// has the entry but not these is a torn copy, not a sidecar.
-pub const REQUIRED_SIDECAR_ENTRIES: &[&str] = &[
-    "agent-host.mjs",
-    "package.json",
-    "src",
-    "node_modules",
-];
+pub const REQUIRED_SIDECAR_ENTRIES: &[&str] =
+    &["agent-host.mjs", "package.json", "src", "node_modules"];
 
 /// The first required entry `dir` lacks, or `None` when the directory is a
 /// complete sidecar.

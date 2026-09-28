@@ -1468,7 +1468,11 @@ fn lint_cli_tools(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic
             // `plugin_cli_exec` kills the child at 600s — a larger declared
             // value is dead config that only inflates the resilience/relay
             // budgets.
-            if !timeout.as_f64().map(|t| t > 0.0 && t <= 600_000.0).unwrap_or(false) {
+            if !timeout
+                .as_f64()
+                .map(|t| t > 0.0 && t <= 600_000.0)
+                .unwrap_or(false)
+            {
                 out.push(Diagnostic {
                     severity: Severity::Error,
                     field: format!("{field}.timeoutMs"),

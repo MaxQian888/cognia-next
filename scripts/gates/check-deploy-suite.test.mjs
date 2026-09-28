@@ -1,5 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import { parse as parseYaml } from "yaml"
 
 import {
   COMPOSE_BASE,
@@ -260,4 +262,53 @@ test("a workflow pnpm pin that differs from packageManager is a problem", () => 
   assert.equal(problems.length, 1)
   assert.match(problems[0], /10\.28\.2/)
   assert.match(problems[0], /job "j"/)
+})
+
+test("diagnostics builds MinIO server and client from pinned official sources", () => {
+  const root = new URL("../../", import.meta.url)
+  const compose = parseYaml(
+    readFileSync(new URL("services/diagnostic-server/deploy/compose.yaml", root), "utf8")
+  )
+  for (const [name, target] of [
+    ["minio", "server"],
+    ["minio-init", "client"],
+  ]) {
+    const service = compose.services[name]
+    assert.equal(service.image, undefined, "must not pull retired community registry images")
+    assert.equal(service.build.context, ".")
+    assert.equal(service.build.dockerfile, "Dockerfile.minio")
+    assert.equal(service.build.target, target)
+  }
+  const dockerfile = readFileSync(
+    new URL("services/diagnostic-server/deploy/Dockerfile.minio", root),
+    "utf8"
+  )
+  assert.match(dockerfile, /MINIO_VERSION=v0\.0\.0-20251015172955-9e49d5e7a648/)
+  assert.match(dockerfile, /MC_VERSION=v0\.0\.0-20250813083541-7394ce0dd2a8/)
+  assert.match(dockerfile, /github\.com\/minio\/minio@\$\{MINIO_VERSION\}/)
+  assert.match(dockerfile, /github\.com\/minio\/mc@\$\{MC_VERSION\}/)
+  assert.doesNotMatch(dockerfile, /@latest|GOSUMDB=off/)
+})
+
+test("workspace runtime installs patched dependencies without relocating pnpm links", () => {
+  const source = readFileSync(
+    new URL("../../services/workspace-runtime/Dockerfile", import.meta.url),
+    "utf8"
+  )
+  const manifest = JSON.parse(
+    readFileSync(new URL("../../services/workspace-runtime/package.json", import.meta.url), "utf8")
+  )
+  assert.ok(
+    source.includes(
+      `mcr.microsoft.com/playwright:v${manifest.dependencies["playwright-core"]}-noble`
+    )
+  )
+  assert.match(source, /FROM node:26-bookworm-slim AS node/)
+  assert.match(source, /COPY --from=node \/usr\/local\/bin\/node \/usr\/local\/bin\/node/)
+  assert.match(source, /COPY patches \/opt\/cognia-runtime-root\/patches/)
+  assert.match(source, /pnpm install[^\n]*--ignore-scripts/)
+  assert.match(
+    source,
+    /ln -s \/opt\/cognia-runtime-root\/services\/workspace-runtime\/node_modules \/opt\/cognia-runtime\/node_modules/
+  )
 })

@@ -1,5 +1,6 @@
 /** Headless account setup consumes a fixed encrypted reference, never a token-bearing RPC. */
 import { z } from "zod"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { createKeyringStore } from "@/lib/credentials/keyring-store"
 import { createIntegrationAccount, listIntegrationAccounts } from "@/lib/db/integrations"
@@ -63,7 +64,7 @@ async function connect(input: z.infer<typeof inputSchema>): Promise<SetupResult>
     accountId: staging.accountId ?? `setup:${input.operationId}`,
     origin: "https://api.github.com",
   })
-  const response = await fetch("https://api.github.com/user", {
+  const response = await proxyFetch("https://api.github.com/user", {
     headers: {
       authorization: `Bearer ${credential.accessToken}`,
       accept: "application/vnd.github+json",

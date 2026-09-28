@@ -84,7 +84,7 @@ export function decodeBrowserEnrollmentPayload(
   now: number = Date.now()
 ): BrowserEnrollmentDecodeOutcome {
   const match = /^cgnb(\d+)\|(.+)$/.exec(raw.trim())
-  if (!match) return { kind: "wrong_format" }
+  if (!match?.[1] || !match[2]) return { kind: "wrong_format" }
   const version = Number.parseInt(match[1], 10)
   if (version !== PAYLOAD_VERSION) return { kind: "version_mismatch", got: version }
   try {

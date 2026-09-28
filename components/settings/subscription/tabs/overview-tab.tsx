@@ -221,7 +221,7 @@ export function SubscriptionOverviewTab({
             <MeterRow
               key={meter.id}
               meter={meter}
-              accountId={activeAccountId ?? "active"}
+              meterScopeId={activeAccountId ?? "active"}
               now={now}
             />
           ))}

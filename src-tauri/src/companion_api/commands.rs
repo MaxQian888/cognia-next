@@ -24,8 +24,6 @@ use super::{
     BindMode, CompanionServerState, CompanionState, SharedState,
 };
 
-
-
 // ---------------------------------------------------------------------------
 // Tauri command
 // ---------------------------------------------------------------------------
@@ -1019,8 +1017,6 @@ pub async fn companion_server_stop(state: State<'_, CompanionServerState>) -> Re
     Ok(())
 }
 
-
-
 /// Live status snapshot for the settings UI.
 #[tauri::command]
 pub fn companion_server_status(state: State<'_, CompanionServerState>) -> CompanionServerStatus {
@@ -1038,18 +1034,12 @@ pub fn companion_server_status(state: State<'_, CompanionServerState>) -> Compan
     }
 }
 
-
-
-
-
 fn browser_access_summary(
     state: &State<'_, CompanionServerState>,
     config: browser_access::BrowserAccessConfig,
 ) -> BrowserAccessSummary {
     browser_access_summary_from(config, state.browser_port())
 }
-
-
 
 /// Read the browser-access configuration and its live binding.
 #[tauri::command]
@@ -1290,10 +1280,6 @@ pub async fn companion_create_owner_invitation(
         "local-trust-root",
     )
 }
-
-
-
-
 
 // ---------------------------------------------------------------------------
 // TLS / mDNS / Tunnel commands (Wave 1.4 / 1.5 / 1.6)
@@ -1678,22 +1664,6 @@ pub fn companion_tunnel_clear_named(state: State<'_, CompanionServerState>) -> R
 // Push delivery configuration (Phase B2 / B3)
 // ---------------------------------------------------------------------------
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /// Fan out a Notification Center record to configured APNs/FCM dispatchers.
 /// Only offline devices receive provider pushes; foreground devices keep using
 /// the authenticated realtime channel and avoid a duplicate native alert.
@@ -1714,8 +1684,6 @@ pub async fn companion_push_notification(
     )
     .await
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Connection diagnostics (Phase C2)
@@ -1797,12 +1765,6 @@ pub async fn companion_test_local_reachability(
     Ok(out)
 }
 
-
-
-
-
-
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1821,10 +1783,6 @@ mod tests {
 
     #[test]
     fn commands_module_compiles() {}
-
-
-
-
 
     /// The lifecycle commands are desktop-local and must stay off the wire.
     ///
@@ -1907,7 +1865,7 @@ mod tests {
         let _scope = store_scope();
         let store = security_store::SecurityStore::in_memory().expect("in-memory store");
         security_store::install_security_store(Some(store.clone()));
-        super::host_identity::unbind_local_account();
+        crate::companion_api::host_identity::unbind_local_account();
 
         let tenant = paired_tenant_id();
         let now = unix_time_secs();
@@ -1949,7 +1907,8 @@ mod tests {
         let store = install_store_with_device(device);
         let before = paired_tenant_id();
 
-        super::host_identity::bind_local_account("acct_late", "digest-late").expect("bind");
+        crate::companion_api::host_identity::bind_local_account("acct_late", "digest-late")
+            .expect("bind");
 
         let after = paired_tenant_id();
         assert_eq!(before, after, "adoption must keep the unclaimed tenant");
@@ -1960,7 +1919,7 @@ mod tests {
                 .is_some(),
             "the device paired before the unlock must remain addressable"
         );
-        super::host_identity::unbind_local_account();
+        crate::companion_api::host_identity::unbind_local_account();
     }
 
     /// Holds the store lock and leaves the process-global store empty again.
@@ -1990,7 +1949,7 @@ mod tests {
     fn install_store_with_device(device_id: &str) -> std::sync::Arc<security_store::SecurityStore> {
         let store = security_store::SecurityStore::in_memory().expect("in-memory store");
         security_store::install_security_store(Some(store.clone()));
-        super::host_identity::unbind_local_account();
+        crate::companion_api::host_identity::unbind_local_account();
         // Resolve the tenant the way the commands do, *after* installing the
         // store. Enrolling under a literal would silently stop exercising the
         // binding these commands now read.
@@ -2483,10 +2442,6 @@ mod tests {
         assert_eq!(data.get("runId").and_then(|v| v.as_str()), Some("run-1"));
     }
 
-
-
-
-
     #[test]
     fn detect_lan_ip_returns_string_or_none() {
         // Whatever the host returns, the result must be `Option<String>`.
@@ -2494,7 +2449,10 @@ mod tests {
         // assert the call doesn't panic and that returned strings parse as
         // `IpAddr` (so the QR base_url is well-formed).
         if let Some(ip) = detect_lan_ip() {
-            assert!(ip.parse::<std::net::IpAddr>().is_ok(), "detect_lan_ip returned {ip}");
+            assert!(
+                ip.parse::<std::net::IpAddr>().is_ok(),
+                "detect_lan_ip returned {ip}"
+            );
         }
     }
 

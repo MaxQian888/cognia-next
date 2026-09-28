@@ -16,10 +16,12 @@ on:
     branches: [master, dev]
     paths:
       - "services/share-server/**"
+      - "services/update-server/worker/**"
       - ".github/workflows/share-server.yml"
   pull_request:
     paths:
       - "services/share-server/**"
+      - "services/update-server/worker/**"
       - ".github/workflows/share-server.yml"
   workflow_dispatch:
 
@@ -82,13 +84,17 @@ jobs:
 
   # ==========================================================================
   # Cloudflare Worker (ADR-0037) — standalone TypeScript project with its own
-  # lockfile (installed with --ignore-workspace, like sidecar/). Its specs run
+  # lockfile (installed as a standalone workspace, like sidecar/). Its specs run
   # inside workerd via @cloudflare/vitest-pool-workers so R2 + KV bindings
   # behave like production. Type-checked and tested here; it is never part of
   # the root Jest suite.
   # ==========================================================================
   worker:
-    name: Worker (typecheck + vitest)
+    name: ${{ matrix.service }} Worker (typecheck + vitest)
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [share-server, update-server]
     runs-on: ubuntu-latest
 
     permissions:
@@ -96,7 +102,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: services/share-server/worker
+        working-directory: services/${{ matrix.service }}/worker
 
     steps:
       - name: Checkout code
@@ -110,10 +116,10 @@ jobs:
         with:
           node-version: 26
           cache: pnpm
-          cache-dependency-path: services/share-server/worker/pnpm-lock.yaml
+          cache-dependency-path: services/${{ matrix.service }}/worker/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --ignore-workspace --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Typecheck
         run: pnpm typecheck

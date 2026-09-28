@@ -121,8 +121,8 @@ it("mounts into the reserved region on demand without changing the full dock wid
   )
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   expect(screen.getByTestId("session-summary-card")).toHaveClass(
-    "rounded-2xl",
-    "shadow-lg",
+    "rounded-stage",
+    "shadow-(--elevation-3)",
     "max-h-full"
   )
   expect(screen.getByTestId("session-summary-card")).not.toHaveClass("h-full")

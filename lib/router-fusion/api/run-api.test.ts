@@ -295,26 +295,28 @@ describe("createRunFromApi", () => {
     })
   })
 
-  it("accepts cascade and panel, and refuses delegate rather than quietly running another mode", async () => {
-    const { deps, started } = harness()
-    for (const mode of ["cascade", "panel"]) {
-      await expect(
-        createRunFromApi(deps, { actor: KEY_A, body: body({ mode, allowed_modes: [mode] }) })
-      ).resolves.toMatchObject({ ok: true })
+  it("accepts each executable mode without substituting another mode", async () => {
+    const { deps, started, created } = harness({
+      policy: () => ({
+        ...POLICY,
+        workspaceAuthorized: () => true,
+        acceptanceProfileExists: (id) => id === "tests",
+      }),
+    })
+    for (const mode of ["cascade", "panel", "delegate"] as const) {
+      const outcome = await createRunFromApi(deps, {
+        actor: KEY_A,
+        body: body({
+          mode,
+          allowed_modes: [mode],
+          workspace_id: uuidFromName("workspace:api"),
+          acceptance_profile_id: "tests",
+        }),
+      })
+      if (!outcome.ok) throw new Error(JSON.stringify(outcome.error))
+      expect(created.at(-1)?.request).toMatchObject({ mode, allowed_modes: [mode] })
     }
-    const delegate = await createRunFromApi(deps, {
-      actor: KEY_A,
-      body: body({ mode: "auto", allowed_modes: ["delegate"] }),
-    })
-    expect(delegate).toMatchObject({
-      ok: false,
-      error: {
-        status: 422,
-        code: "MODE_NOT_AVAILABLE",
-        details: { available: ["direct", "cascade", "panel"] },
-      },
-    })
-    expect(started).toHaveLength(2)
+    expect(started).toHaveLength(3)
   })
 
   it("[ACC:API-02] replays the run of a repeated Idempotency-Key instead of buying a second one", async () => {

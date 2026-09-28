@@ -32,20 +32,14 @@ impl cognia_codeserver::host::CodeServerHost for CompanionCodeServerHost {
         port: u16,
         request: axum::extract::Request,
     ) -> axum::response::Response {
-        cognia_companion::environment_ports::local_relay(
-            project_id,
-            container_id,
-            port,
-            request,
-        )
-        .await
+        cognia_companion::environment_ports::local_relay(project_id, container_id, port, request)
+            .await
     }
 }
 
 pub fn install_host() {
     cognia_codeserver::host::HOST.set(std::sync::Arc::new(CompanionCodeServerHost));
 }
-
 
 #[cfg(test)]
 mod tests {

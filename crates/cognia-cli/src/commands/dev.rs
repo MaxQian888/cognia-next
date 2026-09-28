@@ -24,11 +24,11 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use notify::{EventKind, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use url::Url;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{mpsc, Arc, OnceLock};
 use std::time::{Duration, Instant};
+use url::Url;
 
 use crate::commands::acp::is_loopback_host;
 use crate::engine::bridge_client::{
@@ -116,12 +116,12 @@ pub fn run(
 
     let (reload_endpoint, reload_warning) =
         match resolve_reload_endpoint(reload_url.as_deref(), endpoint_file) {
-        Ok(resolved) => resolved,
-        Err(err) if ui.flags.json => {
-            return emit_json_input_failure(&crate_root, once, err.to_string());
-        }
-        Err(err) => return Err(err),
-    };
+            Ok(resolved) => resolved,
+            Err(err) if ui.flags.json => {
+                return emit_json_input_failure(&crate_root, once, err.to_string());
+            }
+            Err(err) => return Err(err),
+        };
     if let Some(warning) = reload_warning {
         if !ui.flags.quiet {
             eprintln!("{}{}", style::warn_prefix(), warning);

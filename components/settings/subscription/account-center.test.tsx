@@ -103,7 +103,6 @@ jest.mock("./account-preset-selector", () => ({
 }))
 jest.mock("./add-account-dialog/anthropic", () => ({ AnthropicAddAccountDialog: () => null }))
 jest.mock("./add-account-dialog/codex", () => ({ CodexAddAccountDialog: () => null }))
-jest.mock("./add-account-dialog/opencode", () => ({ OpencodeAddAccountDialog: () => null }))
 
 jest.mock("./add-account-dialog/subscription", () => ({
   SubscriptionAccountDialog: ({ providerId }: { providerId?: string }) => (

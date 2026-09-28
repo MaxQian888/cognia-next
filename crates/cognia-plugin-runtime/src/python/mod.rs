@@ -23,8 +23,8 @@ pub mod venv;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
@@ -32,7 +32,7 @@ use serde_json::Value;
 
 use discover::Interpreter;
 use events::{EventSink, HostRequestSink};
-use protocol::{CALL_TIMEOUT, HostOptions, PluginHost};
+use protocol::{HostOptions, PluginHost, CALL_TIMEOUT};
 
 use crate::{PluginError, Result};
 
@@ -450,14 +450,18 @@ mod tests {
         let state = PythonRuntimeState::new(PathBuf::from("/tmp/python"));
         state.hosts.write().insert("demo".into(), lazy_entry(0));
 
-        assert!(
-            commands::plugin_python_assert_generation_for_state(&state, "demo", "test-generation")
-                .is_ok()
-        );
-        assert!(
-            commands::plugin_python_assert_generation_for_state(&state, "demo", "stale-generation")
-                .is_err()
-        );
+        assert!(commands::plugin_python_assert_generation_for_state(
+            &state,
+            "demo",
+            "test-generation"
+        )
+        .is_ok());
+        assert!(commands::plugin_python_assert_generation_for_state(
+            &state,
+            "demo",
+            "stale-generation"
+        )
+        .is_err());
     }
 
     #[test]
@@ -480,11 +484,13 @@ mod tests {
         let state = PythonRuntimeState::new(PathBuf::from("/tmp/python"));
         state.hosts.write().insert("demo".into(), lazy_entry(0));
 
-        assert!(
-            commands::plugin_python_unload_generation_for_state(&state, "demo", "stale-generation")
-                .await
-                .is_err()
-        );
+        assert!(commands::plugin_python_unload_generation_for_state(
+            &state,
+            "demo",
+            "stale-generation"
+        )
+        .await
+        .is_err());
         assert_eq!(state.generation("demo").as_deref(), Some("test-generation"));
 
         commands::plugin_python_unload_generation_for_state(&state, "demo", "test-generation")

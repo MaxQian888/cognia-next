@@ -62,14 +62,14 @@ function harness(accounts: AccountSummary[], activeId: string | null = "a"): Har
     deps: {
       listAccounts: async () => accounts,
       getActiveAccountId: async () => activeId,
-      setActiveAccount: async (provider, accountId) => {
-        activated.push([provider, accountId])
+      setActiveAccount: async (provider, providerAccountId) => {
+        activated.push([provider, providerAccountId])
       },
       breaker,
       now: () => NOW,
       random: noJitter,
-      onSwitched: (provider, accountId) => {
-        switched.push([provider, accountId])
+      onSwitched: (provider, providerAccountId) => {
+        switched.push([provider, providerAccountId])
       },
     },
   }
@@ -80,7 +80,7 @@ describe("handleSubscriptionFailure", () => {
     const h = harness([account("a"), account("b")])
     const outcome = await handleSubscriptionFailure({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       failure: quota,
       failoverEnabled: true,
       deps: h.deps,
@@ -97,7 +97,7 @@ describe("handleSubscriptionFailure", () => {
     const h = harness([account("a"), account("b")])
     const outcome = await handleSubscriptionFailure({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       failure: throttle,
       failoverEnabled: true,
       deps: h.deps,
@@ -110,7 +110,7 @@ describe("handleSubscriptionFailure", () => {
     const h = harness([account("a"), account("b")])
     const outcome = await handleSubscriptionFailure({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       failure: quota,
       failoverEnabled: false,
       deps: h.deps,
@@ -128,7 +128,7 @@ describe("handleSubscriptionFailure", () => {
     const h = harness([account("a"), account("b")], "a")
     const outcome = await handleSubscriptionFailure({
       provider: "anthropic",
-      accountId: "b",
+      providerAccountId: "b",
       failure: quota,
       failoverEnabled: true,
       deps: h.deps,
@@ -141,7 +141,7 @@ describe("handleSubscriptionFailure", () => {
     const h = harness([account("a")])
     const outcome = await handleSubscriptionFailure({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       failure: quota,
       failoverEnabled: true,
       deps: h.deps,
@@ -159,7 +159,7 @@ describe("handleSubscriptionFailure", () => {
     )
     const outcome = await handleSubscriptionFailure({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       failure: quota,
       failoverEnabled: true,
       deps: h.deps,
@@ -172,7 +172,7 @@ describe("handleSubscriptionFailure", () => {
     const h = harness([account("a"), account("b")])
     const outcome = await handleSubscriptionFailure({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       failure: revoked,
       failoverEnabled: true,
       deps: h.deps,
@@ -192,7 +192,7 @@ describe("handleSubscriptionFailure", () => {
     const state = createRotationState()
     const outcome = await handleSubscriptionFailure({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       failure: quota,
       failoverEnabled: true,
       rotationState: state,
@@ -206,16 +206,16 @@ describe("handleSubscriptionFailure", () => {
     const accounts = [account("a"), account("b"), account("c")]
     const h = harness(accounts, "a")
     const state = createRotationState("a")
-    const run = (accountId: string) =>
+    const run = (providerAccountId: string) =>
       handleSubscriptionFailure({
         provider: "anthropic",
-        accountId,
+        providerAccountId,
         failure: quota,
         failoverEnabled: true,
         rotationState: state,
         deps: {
           ...h.deps,
-          getActiveAccountId: async () => accountId,
+          getActiveAccountId: async () => providerAccountId,
         },
       })
 
@@ -248,7 +248,7 @@ describe("recordBlock: false", () => {
 
     const outcome = await handleSubscriptionFailure({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       failure: quota,
       failoverEnabled: true,
       recordBlock: false,
@@ -268,7 +268,7 @@ describe("recordBlock: false", () => {
     const armed = h.breaker.recordFailure(key, throttle, NOW, noJitter)
     const outcome = await handleSubscriptionFailure({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       failure: throttle,
       failoverEnabled: true,
       recordBlock: false,

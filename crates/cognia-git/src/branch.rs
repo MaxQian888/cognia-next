@@ -342,7 +342,11 @@ mod tests {
     fn carries_the_lock_through_to_the_branch() {
         let out = annotate_placements(
             vec![branch("agent/run_a/alice/t1", false)],
-            &[worktree("/repo/wt/run-a", Some("agent/run_a/alice/t1"), true)],
+            &[worktree(
+                "/repo/wt/run-a",
+                Some("agent/run_a/alice/t1"),
+                true,
+            )],
         );
         assert_eq!(out[0].checked_out_in.as_deref(), Some("/repo/wt/run-a"));
         assert!(out[0].checkout_locked);

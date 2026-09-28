@@ -56,6 +56,9 @@ export async function resolveImageSource(
 
   const dataUrl = str(params, "dataUrl")
   if (dataUrl) {
+    if (!/^data:/i.test(dataUrl)) {
+      throw nonRetryable(`${kind}: dataUrl must be a data URL; use url for network images`)
+    }
     const response = await fetch(dataUrl)
     const blob = await response.blob()
     return { buffer: await decodeBlobToPixelBuffer(blob), sourceMediaType: blob.type || undefined }

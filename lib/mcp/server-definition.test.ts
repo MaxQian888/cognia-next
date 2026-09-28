@@ -1,3 +1,4 @@
+import { assertMcpWireConfig } from "./server-definition"
 import type { McpServer } from "@cognia/agent-config-types"
 
 import {
@@ -84,5 +85,46 @@ describe("MCP server definitions", () => {
       trustState: "pending",
       updatedAt: 2,
     })
+  })
+})
+
+describe("resolved MCP send configs", () => {
+  it("retains valid transport metadata and SDK tool policies", () => {
+    const config = {
+      type: "http",
+      url: "https://example.test/mcp",
+      headers: { Authorization: "fixture" },
+      tools: [{ name: "read", permission_policy: "always_ask" }],
+      timeout: 2000,
+      alwaysLoad: true,
+    }
+    expect(() => assertMcpWireConfig(config)).not.toThrow()
+    expect(config.tools).toEqual([{ name: "read", permission_policy: "always_ask" }])
+    expect(() =>
+      assertMcpWireConfig({
+        type: "stdio",
+        command: "node",
+        args: ["server.js"],
+        env: { MODE: "test" },
+      })
+    ).not.toThrow()
+  })
+  it("rejects unresolved secrets, missing transport fields and invalid tool policies", () => {
+    for (const config of [
+      { type: "stdio", command: "node", env: { TOKEN: { secretRef: "vault" } } },
+      { type: "stdio", args: [] },
+      {
+        type: "http",
+        url: "https://example.test",
+        headers: { Authorization: { secretRef: "vault" } },
+      },
+      {
+        type: "http",
+        url: "https://example.test",
+        tools: [{ name: "read", permission_policy: "anything" }],
+      },
+      { type: "sdk", name: "unserializable" },
+    ])
+      expect(() => assertMcpWireConfig(config)).toThrow(McpDefinitionError)
   })
 })

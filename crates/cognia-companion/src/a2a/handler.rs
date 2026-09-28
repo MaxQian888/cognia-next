@@ -420,7 +420,7 @@ mod tests {
     fn test_ctx() -> DeviceContext {
         DeviceContext {
             device_id: "dev-1".into(),
-            account_id: "acct-1".into(),
+            tenant_id: "acct-1".into(),
             scope: "device".into(),
             granted_scopes: Vec::new(),
             authorization_capabilities: None,

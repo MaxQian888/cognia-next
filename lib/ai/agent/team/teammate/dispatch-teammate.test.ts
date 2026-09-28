@@ -1727,12 +1727,17 @@ describe("dispatchTeammate — team permission ceiling", () => {
         makeTeammate({ config: { runtime: "codex", sandboxEnabled: false } }),
         constraint === "sandbox" ? { sandboxEnabled: true } : {}
       )
-      if (constraint === "allow-list") ctx.parentPermissionCeiling = { allowedTools: [] }
-      if (constraint === "unsupported-mode") {
-        ctx.parentPermissionCeiling = { permissionMode: "plan" }
-        externalProtocolMock = "http"
+      const constrained = {
+        ...ctx,
+        parentPermissionCeiling:
+          constraint === "allow-list"
+            ? { allowedTools: [] }
+            : constraint === "unsupported-mode"
+              ? { permissionMode: "plan" as const }
+              : ctx.parentPermissionCeiling,
       }
-      await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "work" })).rejects.toThrow(
+      if (constraint === "unsupported-mode") externalProtocolMock = "http"
+      await expect(dispatchTeammate(constrained, { taskId: "t1", prompt: "work" })).rejects.toThrow(
         "cannot enforce"
       )
       expect(externalExecuteMock).not.toHaveBeenCalled()
@@ -1742,8 +1747,11 @@ describe("dispatchTeammate — team permission ceiling", () => {
   it("refuses an external runtime that cannot enforce an inherited deny policy", async () => {
     resolveExternalMock.mockResolvedValue("agent-1")
     const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
-    ctx.parentPermissionCeiling = { permissionMode: "plan", disallowedTools: ["Write"] }
-    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "work" })).rejects.toThrow(
+    const constrained = {
+      ...ctx,
+      parentPermissionCeiling: { permissionMode: "plan" as const, disallowedTools: ["Write"] },
+    }
+    await expect(dispatchTeammate(constrained, { taskId: "t1", prompt: "work" })).rejects.toThrow(
       "cannot enforce"
     )
     expect(externalExecuteMock).not.toHaveBeenCalled()

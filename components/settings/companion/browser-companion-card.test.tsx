@@ -26,7 +26,7 @@ import { localTransport, transport } from "@/lib/tauri"
 import { decodeBrowserEnrollmentPayload } from "@cognia/companion-client"
 
 import { getDb } from "@/lib/db/schema"
-import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { createRecreatedDbTestFixture } from "@/lib/db/test-fixture"
 import { putBrowserSubmission } from "@/lib/db/browser-submissions"
 
 import { BrowserCompanionCard, type BrowserEnrollmentIssue } from "./browser-companion-card"
@@ -385,7 +385,7 @@ describe("BrowserCompanionCard", () => {
 })
 
 describe("BrowserCompanionCard history, against the real table", () => {
-  const dbFixture = createDbTestFixture()
+  const dbFixture = createRecreatedDbTestFixture()
   beforeAll(dbFixture.initialize)
   beforeEach(async () => {
     await dbFixture.restore()

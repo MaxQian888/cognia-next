@@ -141,15 +141,13 @@ mod tests {
             "first",
         )
         .unwrap();
-        assert!(
-            copy_with_budget(
-                &mut std::io::Cursor::new(vec![2_u8; 5]),
-                &mut output,
-                &mut total,
-                8,
-                "second",
-            )
-            .is_err()
-        );
+        assert!(copy_with_budget(
+            &mut std::io::Cursor::new(vec![2_u8; 5]),
+            &mut output,
+            &mut total,
+            8,
+            "second",
+        )
+        .is_err());
     }
 }

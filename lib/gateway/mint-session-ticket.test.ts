@@ -419,7 +419,7 @@ describe("required external agent gateway leases", () => {
     ])
     expect(modelDetailMock).toHaveBeenCalledWith({
       definition,
-      accountId: "limited-account",
+      providerAccountId: "limited-account",
       model: input.modelId,
       signal: undefined,
     })

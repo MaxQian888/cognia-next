@@ -501,6 +501,50 @@ export function checkAnnotations(census, annotations, fileExists = undefined) {
   return { missing: missing.sort(), invalid: [...new Set(invalid)].sort(), stale: stale.sort() }
 }
 
+/**
+ * Physical desktop contracts remain visible without being counted as missing
+ * headless implementations. Each exact command must still have its desktop
+ * guard, a native implementation, and a rejection regression in source.
+ */
+export function classifyDesktopContracts(findings, contracts, io) {
+  const known = new Set(findings)
+  const classified = []
+  const errors = []
+  for (const [command, contract] of Object.entries(contracts)) {
+    const key = `C:${command}:desktop-only`
+    if (
+      !/^[a-z][a-z0-9_]*$/.test(command) ||
+      contract.classification !== "physically-impossible" ||
+      contract.side !== "desktop-only" ||
+      !contract.reason?.trim()
+    ) {
+      errors.push(`${command}: invalid desktop contract`)
+      continue
+    }
+    if (!known.has(key)) {
+      errors.push(`${command}: stale or mismatched desktop guard`)
+      continue
+    }
+    const implementation = io.read(contract.implementation)
+    const tests = io.read(contract.test)
+    const regression = tests.split(`fn ${contract.testName}(`)[1]?.split("\n}")[0] ?? ""
+    if (
+      !implementation.includes(`fn ${command}(`) ||
+      !implementation.includes("AutomationState") ||
+      !implementation.includes('#[cfg(feature = "tauri-host")]') ||
+      !regression.includes(`"${command}"`) ||
+      !regression.includes('"headless_unsupported"') ||
+      !regression.includes(".expect_err(")
+    ) {
+      errors.push(`${command}: missing native implementation or headless rejection regression`)
+      continue
+    }
+    classified.push(key)
+  }
+  const intentional = new Set(classified)
+  return { findings: findings.filter((key) => !intentional.has(key)), classified, errors }
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -592,21 +636,34 @@ export function main(argv = []) {
     },
   }
   const files = trackedFiles()
-  const { findings, census, remotelyReachable } = collect(files, io)
+  const { findings: collectedFindings, census, remotelyReachable } = collect(files, io)
+  const annotationDocument = JSON.parse(io.read("scripts/gates/host-parity-annotations.json"))
+  const { findings, classified, errors } = classifyDesktopContracts(
+    collectedFindings,
+    annotationDocument.desktopContracts ?? {},
+    io
+  )
+  if (errors.length) {
+    for (const error of errors) console.error(`[host-parity] ${error}`)
+    return 1
+  }
+  if (classified.length) {
+    console.log(`[host-parity] ${classified.length} verified physical desktop contracts:`)
+    for (const key of classified) console.log(`    ${key}`)
+  }
 
   if (argv.includes("--write-baseline")) {
+    const { added } = diffAgainstBaseline(findings, readBaseline().findings)
+    if (added.length) {
+      console.error(`[host-parity] refusing to baseline new debt: ${added.join(", ")}`)
+      return 1
+    }
     const payload = writeBaseline(findings)
     console.log(`[host-parity] baseline written: ${payload.findings.length} known gap(s)`)
     return 0
   }
 
-  const annotations = (() => {
-    try {
-      return JSON.parse(io.read("scripts/gates/host-parity-annotations.json")).subsystems ?? {}
-    } catch {
-      return {}
-    }
-  })()
+  const annotations = annotationDocument.subsystems ?? {}
   const annotationStatus = checkAnnotations(census, annotations)
 
   if (argv.includes("--report")) {

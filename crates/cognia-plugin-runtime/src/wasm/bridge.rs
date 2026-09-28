@@ -34,7 +34,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::errors::{WasmErrorCode, coded};
+use super::errors::{coded, WasmErrorCode};
 
 /// Event the host emits carrying one renderer-backed request.
 pub const REQUEST_EVENT: &str = "plugin-wasm://renderer-request";

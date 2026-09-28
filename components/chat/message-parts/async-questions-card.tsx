@@ -11,6 +11,7 @@
  * `data.answers` so a transcript reload doesn't re-offer a settled question.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { MessageCircleQuestion, SendHorizontal } from "lucide-react"
@@ -183,7 +184,7 @@ export function AsyncQuestionsCard({
   }
 
   return (
-    <div
+    <Surface
       data-slot="async-questions-card"
       className="border-border/60 bg-muted/30 space-y-3 rounded-lg border p-3"
     >
@@ -257,6 +258,6 @@ export function AsyncQuestionsCard({
           </div>
         )
       })}
-    </div>
+    </Surface>
   )
 }

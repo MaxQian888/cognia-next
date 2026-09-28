@@ -78,7 +78,9 @@ enum FireDecision {
     Skip,
     /// The token bucket refused it.
     OverBudget,
-    Fire { suppressed: u64 },
+    Fire {
+        suppressed: u64,
+    },
 }
 
 fn now_ms() -> i64 {
@@ -424,35 +426,37 @@ impl FileWatchDaemon {
         let filter_root = config.root.clone();
         let filter_config = config.clone();
         let filter_shared = shared.clone();
-        let mut watcher = notify::recommended_watcher(
-            move |res: notify::Result<notify::Event>| {
-                let Ok(event) = res else { return };
-                let kind = event_kind_name(&event.kind);
-                if !filter_config.events.is_empty()
-                    && !filter_config.events.iter().any(|e| e == kind)
-                {
-                    return;
-                }
-                let matched = event.paths.iter().any(|p| {
-                    path_matches(&filter_root, &filter_config, gitignore.as_ref(), p, p.is_dir())
-                });
-                if !matched {
-                    return;
-                }
-                // Stamped on EVERY matching event, muted or not: the settle
-                // check is "quiet since the last change", and a muted run
-                // writing files has to keep pushing that horizon out.
-                let mut state = filter_shared.lock();
-                state.last_event_at = now_ms();
-                if state.phase == WatchPhase::Muted {
-                    state.suppressed = state.suppressed.saturating_add(1);
-                    return;
-                }
-                state.phase = WatchPhase::Debouncing;
-                drop(state);
-                let _ = tx.send(kind.to_string());
-            },
-        )
+        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            let Ok(event) = res else { return };
+            let kind = event_kind_name(&event.kind);
+            if !filter_config.events.is_empty() && !filter_config.events.iter().any(|e| e == kind) {
+                return;
+            }
+            let matched = event.paths.iter().any(|p| {
+                path_matches(
+                    &filter_root,
+                    &filter_config,
+                    gitignore.as_ref(),
+                    p,
+                    p.is_dir(),
+                )
+            });
+            if !matched {
+                return;
+            }
+            // Stamped on EVERY matching event, muted or not: the settle
+            // check is "quiet since the last change", and a muted run
+            // writing files has to keep pushing that horizon out.
+            let mut state = filter_shared.lock();
+            state.last_event_at = now_ms();
+            if state.phase == WatchPhase::Muted {
+                state.suppressed = state.suppressed.saturating_add(1);
+                return;
+            }
+            state.phase = WatchPhase::Debouncing;
+            drop(state);
+            let _ = tx.send(kind.to_string());
+        })
         .map_err(|e| format!("trigger.file.watch: notify init failed: {e}"))?;
 
         let mode = if config.recursive {
@@ -513,7 +517,7 @@ impl FileWatchDaemon {
                             "trigger.file.watch {trigger_id}: over {} fires/minute, dropping a batch",
                             task_config.max_fires_per_minute
                         );
-                        continue
+                        continue;
                     }
                     FireDecision::Fire { suppressed } => suppressed,
                 };
@@ -562,7 +566,7 @@ impl FileWatchDaemon {
                                     "trigger.file.watch {trigger_id}: mute timed out without an ack, re-arming"
                                 );
                             }
-                            break
+                            break;
                         }
                     }
                 }
@@ -777,16 +781,40 @@ mod tests {
         let root = PathBuf::from("/repo");
         let cfg = config(root.clone());
         // `.git` churns on every command and is never what an author means.
-        assert!(!path_matches(&root, &cfg, None, Path::new("/repo/.git/index"), false));
-        assert!(!path_matches(&root, &cfg, None, Path::new("/repo/.git"), true));
-        assert!(path_matches(&root, &cfg, None, Path::new("/repo/src/a.ts"), false));
+        assert!(!path_matches(
+            &root,
+            &cfg,
+            None,
+            Path::new("/repo/.git/index"),
+            false
+        ));
+        assert!(!path_matches(
+            &root,
+            &cfg,
+            None,
+            Path::new("/repo/.git"),
+            true
+        ));
+        assert!(path_matches(
+            &root,
+            &cfg,
+            None,
+            Path::new("/repo/src/a.ts"),
+            false
+        ));
     }
 
     #[test]
     fn a_path_outside_the_root_is_not_ours() {
         let root = PathBuf::from("/repo");
         let cfg = config(root.clone());
-        assert!(!path_matches(&root, &cfg, None, Path::new("/elsewhere/a.ts"), false));
+        assert!(!path_matches(
+            &root,
+            &cfg,
+            None,
+            Path::new("/elsewhere/a.ts"),
+            false
+        ));
         // The root itself is not a change under the root.
         assert!(!path_matches(&root, &cfg, None, Path::new("/repo"), true));
     }
@@ -797,9 +825,27 @@ mod tests {
         let mut cfg = config(root.clone());
         cfg.globs = vec!["src/**/*.ts".into()];
         cfg.ignore_globs = vec!["src/**/*.test.ts".into()];
-        assert!(path_matches(&root, &cfg, None, Path::new("/repo/src/a.ts"), false));
-        assert!(!path_matches(&root, &cfg, None, Path::new("/repo/src/a.test.ts"), false));
-        assert!(!path_matches(&root, &cfg, None, Path::new("/repo/docs/a.md"), false));
+        assert!(path_matches(
+            &root,
+            &cfg,
+            None,
+            Path::new("/repo/src/a.ts"),
+            false
+        ));
+        assert!(!path_matches(
+            &root,
+            &cfg,
+            None,
+            Path::new("/repo/src/a.test.ts"),
+            false
+        ));
+        assert!(!path_matches(
+            &root,
+            &cfg,
+            None,
+            Path::new("/repo/docs/a.md"),
+            false
+        ));
     }
 
     #[test]
@@ -866,13 +912,22 @@ mod tests {
     fn event_kinds_map_to_the_authored_vocabulary() {
         use notify::event::{CreateKind, ModifyKind, RemoveKind, RenameMode};
         use notify::EventKind;
-        assert_eq!(event_kind_name(&EventKind::Create(CreateKind::File)), "created");
-        assert_eq!(event_kind_name(&EventKind::Remove(RemoveKind::File)), "removed");
+        assert_eq!(
+            event_kind_name(&EventKind::Create(CreateKind::File)),
+            "created"
+        );
+        assert_eq!(
+            event_kind_name(&EventKind::Remove(RemoveKind::File)),
+            "removed"
+        );
         assert_eq!(
             event_kind_name(&EventKind::Modify(ModifyKind::Name(RenameMode::Both))),
             "renamed"
         );
-        assert_eq!(event_kind_name(&EventKind::Modify(ModifyKind::Any)), "modified");
+        assert_eq!(
+            event_kind_name(&EventKind::Modify(ModifyKind::Any)),
+            "modified"
+        );
     }
 
     #[test]
@@ -938,8 +993,7 @@ mod tests {
         // is ZERO, not "fewer": that difference is what makes the self-feed
         // guarantee structural rather than statistical.
         for i in 0..5 {
-            std::fs::write(dir.join(format!("run-{i}.txt")), "written by the run")
-                .expect("write");
+            std::fs::write(dir.join(format!("run-{i}.txt")), "written by the run").expect("write");
         }
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert_eq!(recorder.fired.lock().len(), 1);
@@ -988,7 +1042,9 @@ mod tests {
 
         let mut disabled = input(&dir);
         disabled.enabled = false;
-        daemon.upsert(&disabled, Arc::new(recorder)).expect("disable");
+        daemon
+            .upsert(&disabled, Arc::new(recorder))
+            .expect("disable");
         assert_eq!(daemon.len(), 0);
 
         let _ = std::fs::remove_dir_all(&dir);

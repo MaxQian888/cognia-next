@@ -72,7 +72,7 @@ import { composerSkinVars, type ResolvedComposerSkin } from "@/lib/chat/composer
  * width.
  */
 const BOX_BASE =
-  "relative flex flex-wrap items-end border shadow-sm transition-[border-color,box-shadow,background-color] duration-200 motion-reduce:transition-none focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
+  "relative flex flex-wrap items-end border shadow-(--elevation-1) transition-[border-color,box-shadow,background-color] duration-200 motion-reduce:transition-none focus-within:border-primary/40 focus-within:shadow-(--elevation-2) focus-within:ring-2 focus-within:ring-ring/15"
 
 /** Verbatim from the pre-skin composer. Pinned by the parity test. */
 const CLASSIC_BOX = "gap-2 rounded-2xl border-input/60 bg-background/70 px-2 py-2"

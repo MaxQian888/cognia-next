@@ -116,11 +116,14 @@ export async function listSubscriptionProviderIds(allowInteraction = false): Pro
   })
 }
 
-export async function getAccount(provider: ProviderId, accountId: string): Promise<Account | null> {
+export async function getAccount(
+  provider: ProviderId,
+  providerAccountId: string
+): Promise<Account | null> {
   const got = await transport.call<Account | null>("subscription_get_account", {
     provider,
     ...subscriptionScope(),
-    accountId,
+    accountId: providerAccountId,
   })
   return got ?? null
 }
@@ -128,12 +131,12 @@ export async function getAccount(provider: ProviderId, accountId: string): Promi
 /** Safe settings projection; unlike `getAccount`, this cannot expose secrets. */
 export async function getAccountDetail(
   provider: ProviderId,
-  accountId: string
+  providerAccountId: string
 ): Promise<AccountDetail | null> {
   const got = await transport.call<AccountDetail | null>("subscription_get_account_detail", {
     provider,
     ...subscriptionScope(),
-    accountId,
+    accountId: providerAccountId,
   })
   return got ?? null
 }
@@ -146,21 +149,21 @@ export async function saveAccount(provider: ProviderId, account: Account): Promi
 
 export async function replaceAccountCredential(
   provider: ProviderId,
-  accountId: string,
+  providerAccountId: string,
   credential: ProviderCredential
 ): Promise<AccountDetail> {
   const scope = subscriptionScope()
   const detail = await transport.call<AccountDetail>("subscription_replace_account_credential", {
     provider,
     ...scope,
-    accountId,
+    accountId: providerAccountId,
     credential,
   })
   // Re-authenticating is the user action that lifts a permanent block. A
   // revoked refresh token latches so the app stops re-exchanging it, and
   // nothing else clears that latch, so without this a re-login would leave the
   // account looking dead until the next restart.
-  clearCredentialBlocks(provider, accountId)
+  clearCredentialBlocks(provider, providerAccountId)
   await vaultConnectionMutated(provider, scope.localAccountId)
   return detail
 }
@@ -168,7 +171,7 @@ export async function replaceAccountCredential(
 /** Persist a refresh only while its original account and credential still exist. */
 export async function refreshAnthropicAccountCredential(
   localAccountId: string,
-  accountId: string,
+  providerAccountId: string,
   expected: AnthropicCredentialData,
   credential: AnthropicCredentialData
 ): Promise<AccountDetail> {
@@ -176,7 +179,7 @@ export async function refreshAnthropicAccountCredential(
   const detail = await transport.call<AccountDetail>("subscription_replace_account_credential", {
     provider: "anthropic",
     localAccountId,
-    accountId,
+    accountId: providerAccountId,
     expectedCredential: { ...expected, provider: "anthropic" },
     credential: { ...credential, provider: "anthropic" },
     backgroundRefresh: true,
@@ -189,14 +192,14 @@ export async function refreshAnthropicAccountCredential(
 
 export async function deleteAccount(
   provider: ProviderId,
-  accountId: string,
+  providerAccountId: string,
   replacementAccountId: string | null = null
 ): Promise<void> {
   const scope = subscriptionScope()
   await transport.call("subscription_delete_account", {
     provider,
     ...scope,
-    accountId,
+    accountId: providerAccountId,
     replacementAccountId,
   })
   await vaultConnectionMutated(provider, scope.localAccountId)
@@ -204,13 +207,13 @@ export async function deleteAccount(
 
 export async function renameAccount(
   provider: ProviderId,
-  accountId: string,
+  providerAccountId: string,
   label: string | null
 ): Promise<void> {
   await transport.call("subscription_rename_account", {
     provider,
     ...subscriptionScope(),
-    accountId,
+    accountId: providerAccountId,
     label,
   })
   vaultMutated()
@@ -230,13 +233,17 @@ export async function renameAccount(
  */
 export async function setActiveAccount(
   provider: ProviderId,
-  accountId: string | null
+  providerAccountId: string | null
 ): Promise<void> {
   const scope = subscriptionScope()
-  await transport.call("subscription_set_active", { provider, ...scope, accountId })
+  await transport.call("subscription_set_active", {
+    provider,
+    ...scope,
+    accountId: providerAccountId,
+  })
   await vaultConnectionMutated(provider, scope.localAccountId)
   const definition = getSubscriptionProvider(provider)
-  if (accountId && definition?.source === "plugin") {
+  if (providerAccountId && definition?.source === "plugin") {
     const { useSettingsStore } = await import("@/stores/settings/settings-store")
     if (useAccountStore.getState().unlockedAccountId !== scope.localAccountId) return
     const store = useSettingsStore.getState()
@@ -577,12 +584,14 @@ export async function codexOauthCancelDeviceCode(flowGeneration: number): Promis
   })
 }
 
-export async function refreshManagedCodexAccount(accountId: string): Promise<CodexCredentialData> {
+export async function refreshManagedCodexAccount(
+  providerAccountId: string
+): Promise<CodexCredentialData> {
   const credential = await transport.call<CodexCredentialData>(
     "subscription_refresh_codex_account",
     {
       ...subscriptionScope(),
-      accountId,
+      accountId: providerAccountId,
     }
   )
   vaultMutated()
@@ -590,12 +599,12 @@ export async function refreshManagedCodexAccount(accountId: string): Promise<Cod
 }
 
 export async function reauthenticateManagedCodexAccount(
-  accountId: string,
+  providerAccountId: string,
   credential: CodexCredentialData
 ): Promise<AccountDetail> {
   const detail = await transport.call<AccountDetail>("subscription_reauthenticate_codex_account", {
     ...subscriptionScope(),
-    accountId,
+    accountId: providerAccountId,
     credential,
   })
   vaultMutated()
@@ -639,12 +648,12 @@ export async function opencodeOauthDiscover(): Promise<DiscoveredOpencodeAuth | 
  */
 export async function opencodeAdoptDiscovered(
   subProvider: string,
-  accountId: string | null = null
+  providerAccountId: string | null = null
 ): Promise<AccountSummary> {
   const account = await transport.call<AccountSummary>("opencode_adopt_discovered", {
     ...subscriptionScope(),
     subProvider,
-    accountId,
+    accountId: providerAccountId,
   })
   vaultMutated()
   return account

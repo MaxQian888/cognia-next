@@ -147,6 +147,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Knip loads standalone Worker configs; their plugin imports must resolve
+      # even though these packages intentionally sit outside the root workspace.
+      - name: Install standalone Worker dependencies
+        if: matrix.group == 'types'
+        run: |
+          pnpm --dir services/share-server/worker install --frozen-lockfile
+          pnpm --dir services/update-server/worker install --frozen-lockfile
+
       # Gate scripts must be runnable from a clean GitHub image. Audit scripts
       # invoke ripgrep directly, while Rust-backed groups compile GTK/GLib and
       # PipeWire crates that require their pkg-config development packages.

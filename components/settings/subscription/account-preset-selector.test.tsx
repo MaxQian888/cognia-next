@@ -69,25 +69,27 @@ describe("providerSupportsPresets", () => {
 describe("AccountPresetSelector", () => {
   it("renders nothing when there are no presets", async () => {
     listPresetsMock.mockResolvedValue([])
-    const { container } = render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    const { container } = render(
+      <AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />
+    )
     await waitFor(() => expect(listPresetsMock).toHaveBeenCalled())
     expect(container.querySelector("[role='combobox']")).toBeNull()
   })
 
   it("renders the selector defaulting to Use default when account has no binding", async () => {
-    render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
     expect(await screen.findByText("useDefault")).toBeInTheDocument()
   })
 
   it("reflects an existing binding from the account", async () => {
     getAccountMock.mockResolvedValue({ ...ACCOUNT, presetId: "b" })
-    render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
     expect(await screen.findByText("Azure")).toBeInTheDocument()
   })
 
   it("binds a preset: fetches full account, sets presetId, saves", async () => {
     const user = userEvent.setup()
-    render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
     await screen.findByText("useDefault")
 
     await user.click(screen.getByRole("combobox"))
@@ -102,7 +104,7 @@ describe("AccountPresetSelector", () => {
   it("clears the binding when switching back to Use default", async () => {
     getAccountMock.mockResolvedValue({ ...ACCOUNT, presetId: "a" })
     const user = userEvent.setup()
-    render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
     await screen.findByText("Bedrock")
 
     await user.click(screen.getByRole("combobox"))
@@ -116,7 +118,7 @@ describe("AccountPresetSelector", () => {
 
   it("does not touch transport outside Tauri", async () => {
     isTauriMock.mockReturnValue(false)
-    render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
     // No load attempt, nothing renders (presets stay empty).
     await waitFor(() => expect(listPresetsMock).not.toHaveBeenCalled())
   })
@@ -125,7 +127,7 @@ describe("AccountPresetSelector", () => {
     const user = userEvent.setup()
     // Present at mount, gone at change time.
     getAccountMock.mockResolvedValueOnce({ ...ACCOUNT }).mockResolvedValueOnce(null)
-    render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
     await screen.findByText("useDefault")
     await user.click(screen.getByRole("combobox"))
     await user.click(await screen.findByText("Bedrock"))
@@ -147,7 +149,7 @@ function deferred<T>() {
 describe("AccountPresetSelector lifecycle", () => {
   it("reports a failed account/library load and hides the selector", async () => {
     listPresetsMock.mockRejectedValueOnce(new Error("vault locked"))
-    render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
     expect(await screen.findByRole("alert")).toHaveTextContent("loadFailed")
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "retry" }))
@@ -157,7 +159,7 @@ describe("AccountPresetSelector lifecycle", () => {
   it("reports failed writes and retains the saved binding so a retry can succeed", async () => {
     const user = userEvent.setup()
     saveAccountMock.mockRejectedValueOnce(new Error("write failed"))
-    render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
     await user.click(await screen.findByRole("combobox"))
     await user.click(await screen.findByText("Bedrock"))
     expect(await screen.findByRole("alert")).toHaveTextContent("saveFailed")
@@ -170,14 +172,14 @@ describe("AccountPresetSelector lifecycle", () => {
 
   it("clears the previous binding during account switches and ignores stale loads", async () => {
     const slow = deferred<Account | null>()
-    const view = render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    const view = render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
     await screen.findByRole("combobox")
     getAccountMock.mockReturnValueOnce(slow.promise)
-    view.rerender(<AccountPresetSelector provider="codex" accountId="acc-2" />)
+    view.rerender(<AccountPresetSelector provider="codex" providerAccountId="acc-2" />)
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
     expect(screen.getByRole("status")).toHaveTextContent("loading")
     getAccountMock.mockResolvedValueOnce({ ...ACCOUNT, id: "acc-3", presetId: "b" })
-    view.rerender(<AccountPresetSelector provider="opencode" accountId="acc-3" />)
+    view.rerender(<AccountPresetSelector provider="opencode" providerAccountId="acc-3" />)
     expect(await screen.findByRole("combobox")).toHaveTextContent("Azure")
     await act(async () => slow.resolve({ ...ACCOUNT, id: "acc-2", presetId: "a" }))
     expect(screen.getByRole("combobox")).toHaveTextContent("Azure")
@@ -186,12 +188,12 @@ describe("AccountPresetSelector lifecycle", () => {
   it("does not save an old selection after its credential load finishes late", async () => {
     const user = userEvent.setup()
     const slow = deferred<Account | null>()
-    const view = render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+    const view = render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
     await screen.findByRole("combobox")
     getAccountMock.mockReturnValueOnce(slow.promise)
     await user.click(screen.getByRole("combobox"))
     await user.click(await screen.findByText("Bedrock"))
-    view.rerender(<AccountPresetSelector provider="codex" accountId="acc-2" />)
+    view.rerender(<AccountPresetSelector provider="codex" providerAccountId="acc-2" />)
     await screen.findByRole("combobox")
     await act(async () => slow.resolve(ACCOUNT))
     expect(saveAccountMock).not.toHaveBeenCalled()
@@ -204,11 +206,11 @@ describe("AccountPresetSelector lifecycle", () => {
       const user = userEvent.setup()
       const slow = deferred<void>()
       saveAccountMock.mockReturnValueOnce(slow.promise)
-      const view = render(<AccountPresetSelector provider="anthropic" accountId="acc-1" />)
+      const view = render(<AccountPresetSelector provider="anthropic" providerAccountId="acc-1" />)
       await user.click(await screen.findByRole("combobox"))
       await user.click(await screen.findByText("Bedrock"))
       await waitFor(() => expect(saveAccountMock).toHaveBeenCalled())
-      view.rerender(<AccountPresetSelector provider="codex" accountId="acc-2" />)
+      view.rerender(<AccountPresetSelector provider="codex" providerAccountId="acc-2" />)
       await screen.findByRole("combobox")
       await act(async () =>
         outcome === "resolve" ? slow.resolve() : slow.reject(new Error("write failed"))

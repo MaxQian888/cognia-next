@@ -37,6 +37,10 @@ jest.mock("@/hooks/sandbox/use-project-runtime-environment", () => {
         revoke,
         grantEgress: jest.fn(),
         reload: jest.fn(),
+        buildEnvironment: jest.fn(),
+        cancelBuild: jest.fn(),
+        openPort: jest.fn(),
+        closePort: jest.fn(),
       }
     },
   }
@@ -126,6 +130,7 @@ function state(over: Partial<ProjectRuntimeEnvironmentState> = {}): ProjectRunti
     declaration: { kind: "absent" },
     approvals: [],
     busy: false,
+    portsAvailable: false,
     ...over,
   }
 }

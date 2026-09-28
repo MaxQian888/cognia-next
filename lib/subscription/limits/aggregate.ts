@@ -30,7 +30,7 @@ export interface AggregateDeps extends Partial<LimitsRunnerDeps> {
   /** Currently-active provider (CLI config / desktop selection) — pinned first. */
   activeProvider?: ProviderId
   /** Test seam: override the per-account runner. */
-  runAccount?: (provider: ProviderId, accountId: string) => Promise<ProviderLimits | null>
+  runAccount?: (provider: ProviderId, providerAccountId: string) => Promise<ProviderLimits | null>
   /** User-defined custom sources to query alongside the vault accounts. */
   listCustomSources?: () => CustomLimitsSource[]
 }
@@ -54,7 +54,8 @@ export async function queryAllConfiguredLimits(
   const getActiveAccount = deps.getActiveAccount ?? defaultGetActiveAccount
   const runAccount =
     deps.runAccount ??
-    ((provider: ProviderId, accountId: string) => queryAccountLimits(provider, accountId, deps))
+    ((provider: ProviderId, providerAccountId: string) =>
+      queryAccountLimits(provider, providerAccountId, deps))
 
   // Enumerate targets across every provider, tagging the active one.
   const targets: Target[] = []

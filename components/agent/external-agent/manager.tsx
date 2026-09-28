@@ -21,12 +21,12 @@
  * the analytics hook + health badge are local stubs that no-op gracefully.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   ChevronDown,
   ExternalLink,
-  Loader2,
   Plus,
   Power,
   PowerOff,
@@ -287,7 +287,7 @@ function AgentCard({
                   }
                 >
                   {isConnecting ? (
-                    <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                    <Spinner className="size-4 " />
                   ) : isConnected ? (
                     <PowerOff className="h-4 w-4 text-destructive" />
                   ) : (

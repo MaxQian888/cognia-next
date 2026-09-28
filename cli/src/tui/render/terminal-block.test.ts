@@ -36,6 +36,14 @@ describe("TerminalBlock", () => {
     expect(wrapTerminalText("你好ab", 4)).toEqual(["你好", "ab"])
   })
 
+  it("removes lone and incomplete streaming escape bytes", () => {
+    for (const text of ["before\u001b", "before\u001b[", "before\u001b]title"]) {
+      expect(buildTerminalBlock({ id: "stream", text, width: 40 }).plainText).not.toContain(
+        "\u001b"
+      )
+    }
+  })
+
   it("removes untrusted ANSI, OSC links, screen controls, and C0 bytes", () => {
     const hostile =
       "safe\u001b[31mred\u001b[0m\u001b]8;;https://evil.test\u0007link\u001b]8;;\u0007\u001b[2J\u0000end"

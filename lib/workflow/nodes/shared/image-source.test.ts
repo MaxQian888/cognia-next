@@ -29,6 +29,14 @@ import { IMAGE_SOURCE_FIELDS, resolveImageSource } from "./image-source"
 beforeEach(() => jest.clearAllMocks())
 
 describe("resolveImageSource", () => {
+  it("rejects network URLs supplied through the local data URL field", async () => {
+    await expect(resolveImageSource({ dataUrl: "https://cdn.test/a.gif" }, "k")).rejects.toThrow(
+      /data URL/
+    )
+    expect(proxyFetch).not.toHaveBeenCalled()
+    expect(decodeBlobToPixelBuffer).not.toHaveBeenCalled()
+  })
+
   it("reads a run-scoped blob reference", async () => {
     const result = await resolveImageSource({ blobRef: "cognia-workflow-blob:b1" }, "k")
     expect(openWorkflowBlob).toHaveBeenCalledWith("cognia-workflow-blob:b1")

@@ -17,8 +17,6 @@
 import { readDir, readTextFile } from "@tauri-apps/plugin-fs"
 import { detectPlatform, isTauri } from "@/lib/platform/detect"
 import { getSettings } from "@/lib/db/settings"
-import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
-import { ledgerUtilityCalls } from "@/lib/router-fusion/gate/utility-ledger"
 import { createLlmClient, type LlmClient, type LlmConfig } from "@/lib/twin/distill/llm"
 import {
   rebuildWiki,

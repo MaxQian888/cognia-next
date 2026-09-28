@@ -1,11 +1,11 @@
 //! Desktop command shells for the shared sidecar command core.
-use std::sync::Arc;
-use serde_json::{json, Value};
-use tauri::{AppHandle, State};
-use tracing::Instrument as _;
 use super::host::TauriSidecarHost;
 use super::sidecar::{spawn as spawn_sidecar, SidecarState};
 pub use cognia_sidecar::commands::*;
+use serde_json::{json, Value};
+use std::sync::Arc;
+use tauri::{AppHandle, State};
+use tracing::Instrument as _;
 
 /// Old-vs-new command telemetry: quantifies the remaining migration surface
 /// (plan Phase 6 验收 / Phase 9 retirement evidence).
@@ -760,5 +760,4 @@ mod tests {
         assert_eq!(error, "sidecar not running");
         assert!(!active_reasons().contains(&reason));
     }
-
 }

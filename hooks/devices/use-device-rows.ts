@@ -355,7 +355,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
   const liveSshProbes = useMemo(() => {
     const live = new Map<string, { online: boolean; at: number }>()
     for (const profile of sshHosts ?? []) {
-      const record = readSshProbe(profile.id, sshProbeTarget(profile), now)
+      const record = readSshProbe(profile.id, sshProbeTarget(profile), now, sshProbes)
       if (record) live.set(profile.id, { online: record.online, at: record.at })
     }
     return live

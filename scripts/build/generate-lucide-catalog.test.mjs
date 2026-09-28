@@ -1,5 +1,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import * as lucideExports from "lucide-react"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 
 import { buildLucideCatalog, serializeLucideCatalog } from "./generate-lucide-catalog.mjs"
 
@@ -28,4 +31,17 @@ test("buildLucideCatalog rejects exports without iconNode", () => {
     () => buildLucideCatalog({ Broken: { render: () => ({ props: {} }) } }),
     /did not expose iconNode data/
   )
+})
+
+
+test("buildLucideCatalog preserves installed Lucide icon geometry and alias classes", () => {
+  const catalog = buildLucideCatalog(lucideExports.icons, lucideExports)
+  for (const [name, component] of Object.entries(lucideExports.icons)) {
+    const props = component.render({}, null).props
+    assert.deepEqual(catalog.entries[name].iconNode, props.icon.node, name)
+    const html = renderToStaticMarkup(createElement(component))
+    const classes = html.match(/class="([^"]+)"/)[1].split(" ").filter((v) => v !== "lucide")
+    assert.deepEqual(catalog.entries[name].className.split(" "), classes, name)
+  }
+  assert.equal(catalog.exportNames.AlarmCheck, catalog.exportNames.AlarmClockCheck)
 })

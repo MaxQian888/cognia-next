@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url"
 import { Command, CommanderError } from "commander"
 import { execaSync } from "execa"
 import { globSync } from "glob"
+import { createRequire } from "node:module"
 import writeFileAtomic from "write-file-atomic"
 import { z } from "zod"
 
@@ -37,7 +38,17 @@ const packagesRoot = join(repoRoot, "packages")
 const outputPath = join(repoRoot, "crates/cognia-cli/assets/author-types.json")
 
 function run(args, cwd, env = {}) {
-  execaSync("pnpm", args, { cwd, stdio: "inherit", env: { ...process.env, ...env } })
+  const options = { cwd, stdio: "inherit", env: { ...process.env, ...env } }
+  if (args[0] === "exec" && args[1] === "tsup") {
+    const require = createRequire(join(cwd, "package.json"))
+    execaSync(
+      process.execPath,
+      [require.resolve("tsup/dist/cli-default.js"), ...args.slice(2)],
+      options
+    )
+  } else {
+    execaSync("pnpm", args, options)
+  }
 }
 
 /** Every `.d.ts` under `dir`, recursively. `.d.cts` is skipped — the scaffold is ESM. */
@@ -51,7 +62,24 @@ function posixRelative(from, to) {
   return relative(from, to).split(sep).join("/")
 }
 
+/** tsup DTS uses cwd dependencies as unconditional externals, ignoring noExternal. */
+export function assertAuthorBuildRoot(manifest) {
+  const internal = Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies }).filter(
+    (name) => name.startsWith("@cognia/")
+  )
+  if (internal.length)
+    throw new Error(`Author declaration build root must not externalize ${internal.join(", ")}`)
+}
+
+export function assertStandaloneDeclaration(content) {
+  const source = content.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+  if (/\b(?:from|import)\s*\(?["'](?:@\/|@cognia\/|\/|[A-Za-z]:[\\/])/.test(source)) {
+    throw new Error("Author declarations must flatten internal imports and contain no host paths")
+  }
+}
+
 function build() {
+  assertAuthorBuildRoot(JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")))
   // provider-types and provider-core are normal standalone builds; both are in
   // `pnpm build:packages`, which is what guarantees they stay `@/`-free.
   run(
@@ -63,8 +91,10 @@ function build() {
   // see `packages/plugin-sdk/tsup.author-types.config.ts` for why the published
   // `dist/` cannot be reused directly.
   run(
-    ["exec", "tsup", "--config", "tsup.author-types.config.ts"],
-    join(packagesRoot, "plugin-sdk"),
+    // tsup DTS unconditionally externalizes production dependencies of cwd.
+    // The root owns no @cognia runtime edges, so internal types are flattened.
+    ["exec", "tsup", "--config", join(packagesRoot, "plugin-sdk/tsup.author-types.config.ts")],
+    repoRoot,
     {
       NODE_OPTIONS: "--max-old-space-size=16384",
     }
@@ -81,10 +111,14 @@ function assemble() {
     ["plugin-ui/.tsup-author-types/cognia-plugin-ui.d.ts", "types/cognia-plugin-ui.d.ts"],
   ]
   for (const [from, to] of single) {
-    const full = join(packagesRoot, from)
+    // tsup names ESM declarations .d.mts when the build cwd is CommonJS.
+    // The scaffold package is ESM, so its stable public name remains .d.ts.
+    const ordinary = join(packagesRoot, from)
+    const full = existsSync(ordinary) ? ordinary : ordinary.replace(/\.d\.ts$/, ".d.mts")
     if (!existsSync(full))
       throw new Error(`missing generated declaration: ${from} — run without --check first`)
     files[to] = readFileSync(full, "utf8")
+    if (from.startsWith("plugin-sdk/")) assertStandaloneDeclaration(files[to])
   }
 
   const trees = [

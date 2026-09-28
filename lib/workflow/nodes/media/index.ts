@@ -155,14 +155,14 @@ registerNodeExecutor({
     const encoded = headless
       ? { bytes: raw, mediaType: "image/png" }
       : await encodePixelBuffer(buffer as PixelBuffer, { format: "png" })
-    const accountId = getActiveAccountId()
-    if (!accountId) {
+    const localAccountId = getActiveAccountId()
+    if (!localAccountId) {
       throw nonRetryable(
         "action.media.frame: no unlocked account, so there is nowhere to put the frame."
       )
     }
     const handle = await storeWorkflowBlob({
-      accountId,
+      localAccountId,
       runId: ctx.runId,
       stepId: ctx.stepId,
       bytes: encoded.bytes,

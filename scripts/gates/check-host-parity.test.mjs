@@ -8,6 +8,7 @@ import {
   stripComments,
   censusRuntimeGuards,
   checkAnnotations,
+  classifyDesktopContracts,
   diffAgainstBaseline,
   findCapabilityMisreports,
   findDesktopOnlySections,
@@ -361,5 +362,71 @@ describe("stripComments", () => {
 
   it("does not eat the scheme in a url inside code", () => {
     assert.equal(stripComments('const u = "https://x.dev"').includes("https://x.dev"), true)
+  })
+})
+
+describe("exact physical desktop contracts", () => {
+  const contract = {
+    classification: "physically-impossible",
+    side: "desktop-only",
+    reason: "OS input engine",
+    implementation: "native.rs",
+    test: "tests.rs",
+    testName: "rejects_headless",
+  }
+  const source = io({
+    "native.rs": '#[cfg(feature = "tauri-host")] fn automation_status(state: AutomationState) {}',
+    "tests.rs":
+      'fn rejects_headless() { dispatch("automation_status").expect_err("headless_unsupported");\n}',
+  })
+  it("classifies only the verified exact desktop command", () => {
+    const result = classifyDesktopContracts(
+      ["C:automation_status:desktop-only", "C:other_command:desktop-only"],
+      { automation_status: contract },
+      source
+    )
+    assert.deepEqual(result.findings, ["C:other_command:desktop-only"])
+    assert.deepEqual(result.classified, ["C:automation_status:desktop-only"])
+    assert.deepEqual(result.errors, [])
+  })
+  it("keeps an unclassified command as new debt even when other debt shrinks", () => {
+    const result = classifyDesktopContracts(["C:other_command:desktop-only"], {}, source)
+    assert.deepEqual(
+      diffAgainstBaseline(result.findings, ["C:old_one:desktop-only", "C:old_two:desktop-only"])
+        .added,
+      ["C:other_command:desktop-only"]
+    )
+  })
+  it("rejects stale contracts and guards whose host direction changed", () => {
+    for (const findings of [[], ["C:automation_status:headless-only"]]) {
+      const result = classifyDesktopContracts(findings, { automation_status: contract }, source)
+      assert.match(result.errors[0], /stale or mismatched/)
+      assert.deepEqual(result.classified, [])
+    }
+  })
+  it("rejects broad names, wrong classifications and missing rejection evidence", () => {
+    for (const change of [
+      { side: "headless-only" },
+      { classification: "unmigrated" },
+      { reason: "" },
+      { implementation: "missing.rs" },
+      { testName: "missing_test" },
+    ]) {
+      const result = classifyDesktopContracts(
+        ["C:automation_status:desktop-only"],
+        { automation_status: { ...contract, ...change } },
+        source
+      )
+      assert.equal(result.errors.length, 1)
+      assert.deepEqual(result.findings, ["C:automation_status:desktop-only"])
+    }
+    assert.equal(
+      classifyDesktopContracts(
+        ["C:automation_*:desktop-only"],
+        { "automation_*": contract },
+        source
+      ).errors.length,
+      1
+    )
   })
 })

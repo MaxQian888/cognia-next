@@ -251,7 +251,7 @@ pub async fn create_run_handler(
         }
     };
     let payload = json!({
-        "accountId": context.account_id,
+        "accountId": context.tenant_id,
         "deploymentId": deployment_id,
         "caller": caller(&context),
         "scopes": effective_scopes(&context),
@@ -298,7 +298,7 @@ pub async fn get_run_handler(
         return error.into_response();
     }
     let payload = json!({
-        "accountId": context.account_id,
+        "accountId": context.tenant_id,
         "runId": run_id,
         "scopes": effective_scopes(&context),
     });
@@ -342,7 +342,7 @@ pub async fn cancel_run_handler(
         return error.into_response();
     }
     let payload = json!({
-        "accountId": context.account_id,
+        "accountId": context.tenant_id,
         "runId": run_id,
         "caller": caller(&context),
         "scopes": effective_scopes(&context),
@@ -409,7 +409,7 @@ async fn load_events(
         state,
         "workflow_api_events_list",
         json!({
-            "accountId": context.account_id,
+            "accountId": context.tenant_id,
             "runId": run_id,
             "scopes": effective_scopes(context),
             "afterSequence": after_sequence,
@@ -599,7 +599,7 @@ mod tests {
     fn context(scope: &str, granted_scopes: &[&str]) -> DeviceContext {
         DeviceContext {
             device_id: "caller-1".to_string(),
-            account_id: "account-1".to_string(),
+            tenant_id: "account-1".to_string(),
             scope: scope.to_string(),
             granted_scopes: granted_scopes
                 .iter()

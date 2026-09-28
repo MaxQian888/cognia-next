@@ -109,8 +109,8 @@ class BrowserVaultDB extends Dexie {
 export class BrowserVaultRepository {
   constructor(private readonly db: BrowserVaultDB = new BrowserVaultDB()) {}
 
-  get(accountId: string): Promise<BrowserVaultRecord | undefined> {
-    return this.db.vaults.get(assertAccountId(accountId))
+  get(localAccountId: string): Promise<BrowserVaultRecord | undefined> {
+    return this.db.vaults.get(assertAccountId(localAccountId))
   }
 
   async put(record: BrowserVaultRecord): Promise<void> {
@@ -118,16 +118,16 @@ export class BrowserVaultRepository {
     await this.db.vaults.put(record)
   }
 
-  async delete(accountId: string): Promise<void> {
-    const normalized = assertAccountId(accountId)
+  async delete(localAccountId: string): Promise<void> {
+    const normalized = assertAccountId(localAccountId)
     await this.db.transaction("rw", this.db.vaults, this.db.secrets, async () => {
       await this.db.vaults.delete(normalized)
       await this.db.secrets.where("accountId").equals(normalized).delete()
     })
   }
 
-  getSecret(accountId: string, name: string): Promise<BrowserVaultSecretRecord | undefined> {
-    return this.db.secrets.get([assertAccountId(accountId), assertSecretName(name)])
+  getSecret(localAccountId: string, name: string): Promise<BrowserVaultSecretRecord | undefined> {
+    return this.db.secrets.get([assertAccountId(localAccountId), assertSecretName(name)])
   }
 
   async putSecret(record: BrowserVaultSecretRecord): Promise<void> {
@@ -139,8 +139,8 @@ export class BrowserVaultRepository {
     await this.db.secrets.put(normalized)
   }
 
-  async deleteSecret(accountId: string, name: string): Promise<void> {
-    await this.db.secrets.delete([assertAccountId(accountId), assertSecretName(name)])
+  async deleteSecret(localAccountId: string, name: string): Promise<void> {
+    await this.db.secrets.delete([assertAccountId(localAccountId), assertSecretName(name)])
   }
 
   close(): void {
@@ -159,7 +159,7 @@ export class BrowserVaultSession {
   }
 
   static async create(
-    accountId: string,
+    localAccountId: string,
     password: string,
     now = Date.now()
   ): Promise<{
@@ -167,7 +167,7 @@ export class BrowserVaultSession {
     recoveryKey: string
     session: BrowserVaultSession
   }> {
-    assertAccountId(accountId)
+    assertAccountId(localAccountId)
     assertPassword(password)
     const masterBytes = randomBytes(32)
     const recoveryBytes = randomBytes(32)
@@ -178,12 +178,12 @@ export class BrowserVaultSession {
         importAesKey(recoveryBytes, ["encrypt", "decrypt"]),
       ])
       const [passwordWrap, recoveryWrap, masterKey] = await Promise.all([
-        wrapMasterKey(masterBytes, passwordKek, wrapAad(accountId, "password")),
-        wrapMasterKey(masterBytes, recoveryKek, wrapAad(accountId, "recovery")),
+        wrapMasterKey(masterBytes, passwordKek, wrapAad(localAccountId, "password")),
+        wrapMasterKey(masterBytes, recoveryKek, wrapAad(localAccountId, "recovery")),
         importAesKey(masterBytes, ["encrypt", "decrypt"]),
       ])
       const record: BrowserVaultRecord = {
-        accountId,
+        accountId: localAccountId,
         version: 2,
         passwordKdf: {
           algorithm: "Argon2id",
@@ -202,7 +202,7 @@ export class BrowserVaultSession {
       return {
         record,
         recoveryKey: encodeBase64Url(recoveryBytes),
-        session: new BrowserVaultSession(accountId, masterKey),
+        session: new BrowserVaultSession(localAccountId, masterKey),
       }
     } finally {
       zeroBytes(masterBytes)
@@ -337,11 +337,11 @@ let activeBrowserVaultSession: BrowserVaultSession | null = null
 let browserVaultRepository: BrowserVaultRepository | null = null
 
 export async function provisionBrowserVault(
-  accountId: string,
+  localAccountId: string,
   password: string,
   activate = true
 ): Promise<string> {
-  const created = await BrowserVaultSession.create(accountId, password)
+  const created = await BrowserVaultSession.create(localAccountId, password)
   await repository().put(created.record)
   if (activate) {
     activeBrowserVaultSession?.lock()
@@ -352,8 +352,8 @@ export async function provisionBrowserVault(
   return created.recoveryKey
 }
 
-export async function browserVaultExists(accountId: string): Promise<boolean> {
-  return (await repository().get(accountId)) !== undefined
+export async function browserVaultExists(localAccountId: string): Promise<boolean> {
+  return (await repository().get(localAccountId)) !== undefined
 }
 
 /**
@@ -412,22 +412,22 @@ export async function enrollBrowserVaultQuickUnlock(args: {
   pepper: Uint8Array
   now?: number
 }): Promise<QuickUnlockWrap> {
-  const { accountId, method, password, canonicalSecret, pepper } = args
+  const { accountId: localAccountId, method, password, canonicalSecret, pepper } = args
   const now = args.now ?? Date.now()
-  const record = await repository().get(accountId)
+  const record = await repository().get(localAccountId)
   if (!record) throw new Error("Browser Vault is not provisioned for this account.")
 
   const passwordKey = await derivePasswordKeyForRecord(record, password)
   const masterBytes = await unwrapMasterKey(
     record.passwordWrap,
     passwordKey,
-    wrapAad(accountId, "password")
+    wrapAad(localAccountId, "password")
   )
   const salt = randomBytes(16)
   try {
     const parameters = { ...activeArgon2Parameters }
     const kek = await deriveQuickUnlockKey(canonicalSecret, pepper, salt, parameters)
-    const wrap = await wrapMasterKey(masterBytes, kek, wrapAad(accountId, method))
+    const wrap = await wrapMasterKey(masterBytes, kek, wrapAad(localAccountId, method))
     const entry: QuickUnlockWrap = {
       salt: encodeBase64Url(salt),
       memoryKiB: parameters.memoryKiB,
@@ -460,8 +460,8 @@ export async function unlockBrowserVaultWithQuickSecret(args: {
   canonicalSecret: string
   pepper: Uint8Array
 }): Promise<void> {
-  const { accountId, method, canonicalSecret, pepper } = args
-  const record = await repository().get(accountId)
+  const { accountId: localAccountId, method, canonicalSecret, pepper } = args
+  const record = await repository().get(localAccountId)
   if (!record) throw new Error("Browser Vault is not provisioned for this account.")
   validateRecord(record)
 
@@ -478,10 +478,10 @@ export async function unlockBrowserVaultWithQuickSecret(args: {
       timeCost: entry.timeCost,
       parallelism: entry.parallelism,
     })
-    const masterBytes = await unwrapMasterKey(entry.wrap, kek, wrapAad(accountId, method))
+    const masterBytes = await unwrapMasterKey(entry.wrap, kek, wrapAad(localAccountId, method))
     try {
       const session = new BrowserVaultSession(
-        accountId,
+        localAccountId,
         await importAesKey(masterBytes, ["encrypt", "decrypt"])
       )
       activeBrowserVaultSession?.lock()
@@ -496,11 +496,11 @@ export async function unlockBrowserVaultWithQuickSecret(args: {
 
 /** Drop one enrolled method. The vault and every other method are untouched. */
 export async function removeBrowserVaultQuickUnlock(
-  accountId: string,
+  localAccountId: string,
   method: QuickUnlockMethod,
   now = Date.now()
 ): Promise<void> {
-  const record = await repository().get(accountId)
+  const record = await repository().get(localAccountId)
   if (!record?.quickWraps?.[method]) return
   const next = { ...record.quickWraps }
   delete next[method]
@@ -509,15 +509,15 @@ export async function removeBrowserVaultQuickUnlock(
 
 /** Which methods currently have a wrap on this account. */
 export async function listBrowserVaultQuickUnlockMethods(
-  accountId: string
+  localAccountId: string
 ): Promise<QuickUnlockMethod[]> {
-  const record = await repository().get(accountId)
+  const record = await repository().get(localAccountId)
   if (!record?.quickWraps) return []
   return Object.keys(record.quickWraps) as QuickUnlockMethod[]
 }
 
-export async function unlockBrowserVault(accountId: string, password: string): Promise<void> {
-  const record = await repository().get(accountId)
+export async function unlockBrowserVault(localAccountId: string, password: string): Promise<void> {
+  const record = await repository().get(localAccountId)
   if (!record) throw new Error("Browser Vault is not provisioned for this account.")
   const session = await BrowserVaultSession.unlockWithPassword(record, password)
   activeBrowserVaultSession?.lock()
@@ -525,10 +525,10 @@ export async function unlockBrowserVault(accountId: string, password: string): P
 }
 
 export async function verifyBrowserVaultPassword(
-  accountId: string,
+  localAccountId: string,
   password: string
 ): Promise<boolean> {
-  const record = await repository().get(accountId)
+  const record = await repository().get(localAccountId)
   if (!record) throw new Error("Browser Vault is not provisioned for this account.")
   try {
     const verificationSession = await BrowserVaultSession.unlockWithPassword(record, password)
@@ -540,18 +540,18 @@ export async function verifyBrowserVaultPassword(
 }
 
 export async function changeBrowserVaultPassword(
-  accountId: string,
+  localAccountId: string,
   currentPassword: string,
   newPassword: string,
   now = Date.now()
 ): Promise<void> {
-  const current = await repository().get(accountId)
+  const current = await repository().get(localAccountId)
   if (!current) throw new Error("Browser Vault is not provisioned for this account.")
   const currentPasswordKey = await derivePasswordKeyForRecord(current, currentPassword)
   const masterBytes = await unwrapMasterKey(
     current.passwordWrap,
     currentPasswordKey,
-    wrapAad(accountId, "password")
+    wrapAad(localAccountId, "password")
   )
   const nextSalt = randomBytes(16)
   try {
@@ -559,10 +559,10 @@ export async function changeBrowserVaultPassword(
     const passwordWrap = await wrapMasterKey(
       masterBytes,
       nextPasswordKey,
-      wrapAad(accountId, "password")
+      wrapAad(localAccountId, "password")
     )
     const session = new BrowserVaultSession(
-      accountId,
+      localAccountId,
       await importAesKey(masterBytes, ["encrypt", "decrypt"])
     )
     try {
@@ -609,12 +609,12 @@ export async function changeBrowserVaultPassword(
  * Rotating it is a separate, explicit act.
  */
 export async function resetBrowserVaultPasswordWithRecoveryKey(
-  accountId: string,
+  localAccountId: string,
   recoveryKey: string,
   newPassword: string,
   now = Date.now()
 ): Promise<void> {
-  const current = await repository().get(accountId)
+  const current = await repository().get(localAccountId)
   if (!current) throw new Error("Browser Vault is not provisioned for this account.")
   assertPassword(newPassword)
   // Proves the recovery key before anything is written, and normalizes a
@@ -627,14 +627,14 @@ export async function resetBrowserVaultPasswordWithRecoveryKey(
     const masterBytes = await unwrapMasterKey(
       current.recoveryWrap,
       recoveryKek,
-      wrapAad(accountId, "recovery")
+      wrapAad(localAccountId, "recovery")
     )
     try {
       const nextPasswordKey = await deriveArgon2PasswordKey(newPassword, nextSalt)
       const passwordWrap = await wrapMasterKey(
         masterBytes,
         nextPasswordKey,
-        wrapAad(accountId, "password")
+        wrapAad(localAccountId, "password")
       )
       await repository().put({
         ...current,
@@ -674,9 +674,9 @@ export function lockBrowserVault(): void {
   activeBrowserVaultSession = null
 }
 
-export async function deleteBrowserVault(accountId: string): Promise<void> {
-  if (activeBrowserVaultSession?.accountId === accountId) lockBrowserVault()
-  await repository().delete(accountId)
+export async function deleteBrowserVault(localAccountId: string): Promise<void> {
+  if (activeBrowserVaultSession?.accountId === localAccountId) lockBrowserVault()
+  await repository().delete(localAccountId)
 }
 
 function repository(): BrowserVaultRepository {
@@ -705,14 +705,14 @@ export function __resetBrowserVaultForTesting(): void {
  * green.
  */
 export async function __createLegacyPbkdf2VaultRecordForTesting(
-  accountId: string,
+  localAccountId: string,
   password: string,
   now = Date.now()
 ): Promise<BrowserVaultRecord> {
   if (process.env.NODE_ENV !== "test") {
     throw new Error("Legacy vault record minting is test-only.")
   }
-  assertAccountId(accountId)
+  assertAccountId(localAccountId)
   const masterBytes = randomBytes(32)
   const recoveryBytes = randomBytes(32)
   const passwordSalt = randomBytes(16)
@@ -720,7 +720,7 @@ export async function __createLegacyPbkdf2VaultRecordForTesting(
     const passwordKek = await derivePasswordKey(password, passwordSalt)
     const recoveryKek = await importAesKey(recoveryBytes, ["encrypt", "decrypt"])
     return {
-      accountId,
+      accountId: localAccountId,
       version: 1,
       passwordKdf: {
         algorithm: "PBKDF2",
@@ -728,8 +728,16 @@ export async function __createLegacyPbkdf2VaultRecordForTesting(
         iterations: BROWSER_VAULT_PBKDF2_ITERATIONS,
         salt: encodeBase64Url(passwordSalt),
       },
-      passwordWrap: await wrapMasterKey(masterBytes, passwordKek, wrapAad(accountId, "password")),
-      recoveryWrap: await wrapMasterKey(masterBytes, recoveryKek, wrapAad(accountId, "recovery")),
+      passwordWrap: await wrapMasterKey(
+        masterBytes,
+        passwordKek,
+        wrapAad(localAccountId, "password")
+      ),
+      recoveryWrap: await wrapMasterKey(
+        masterBytes,
+        recoveryKek,
+        wrapAad(localAccountId, "recovery")
+      ),
       createdAt: now,
       updatedAt: now,
     }
@@ -887,13 +895,13 @@ async function unwrapMasterKey(
   return new Uint8Array(plaintext)
 }
 
-function wrapAad(accountId: string, kind: WrapKind): Uint8Array {
-  return new TextEncoder().encode(`cognia-vault:v1:${accountId}:${kind}`)
+function wrapAad(localAccountId: string, kind: WrapKind): Uint8Array {
+  return new TextEncoder().encode(`cognia-vault:v1:${localAccountId}:${kind}`)
 }
 
-function secretAad(accountId: string, name: string): Uint8Array {
+function secretAad(localAccountId: string, name: string): Uint8Array {
   const normalized = assertSecretName(name)
-  return new TextEncoder().encode(`cognia-vault-secret:v1:${accountId}:${normalized}`)
+  return new TextEncoder().encode(`cognia-vault-secret:v1:${localAccountId}:${normalized}`)
 }
 
 function assertSecretName(name: string): string {

@@ -1,5 +1,5 @@
 import unittest
-from cognia.types import define_subscription_provider
+from cognia import define_subscription_provider
 from cognia import VALID_CAPABILITIES, MANIFEST_CONTRIBUTIONS, PLUGIN_POINT_CONTRACTS
 
 

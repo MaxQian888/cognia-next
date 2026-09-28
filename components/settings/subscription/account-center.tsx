@@ -460,9 +460,9 @@ function AccountDetailPanel({
           </SettingsAlert>
         )}
 
-        <AccountUsageChips accountId={account.id} usage={usage} />
+        <AccountUsageChips providerAccountId={account.id} usage={usage} />
         {capabilities.bindPreset && (
-          <AccountPresetSelector provider={account.provider} accountId={account.id} />
+          <AccountPresetSelector provider={account.provider} providerAccountId={account.id} />
         )}
 
         {detailLoading ? (

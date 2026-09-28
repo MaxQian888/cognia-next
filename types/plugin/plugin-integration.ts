@@ -451,15 +451,15 @@ export interface PluginIntegrationsAPI {
   listAccounts(integrationId?: string): Promise<IntegrationAccount[]>
   createAccount(input: IntegrationAccountInput): Promise<IntegrationAccount>
   updateAccount(
-    accountId: string,
+    connectorAccountId: string,
     patch: Partial<Pick<IntegrationAccount, "label" | "enabled">>
   ): Promise<IntegrationAccount>
-  removeAccount(accountId: string): Promise<void>
-  listSubscriptions(accountId?: IntegrationAccountRef): Promise<IntegrationSubscription[]>
+  removeAccount(connectorAccountId: string): Promise<void>
+  listSubscriptions(connectorAccountId?: IntegrationAccountRef): Promise<IntegrationSubscription[]>
   listResources(
     query: Omit<IntegrationResourceQuery, "accountId"> & { accountId: IntegrationAccountRef }
   ): Promise<IntegrationResourcePage>
-  checkAccountHealth(accountId: IntegrationAccountRef): Promise<IntegrationAccountStatus>
+  checkAccountHealth(connectorAccountId: IntegrationAccountRef): Promise<IntegrationAccountStatus>
   createSubscription(input: IntegrationSubscriptionInput): Promise<IntegrationSubscription>
   removeSubscription(subscriptionId: string): Promise<void>
   publishEvent(event: IntegrationEventEnvelope): Promise<{ inserted: boolean }>
@@ -467,18 +467,22 @@ export interface PluginIntegrationsAPI {
   getActionJob(jobId: string): Promise<IntegrationActionJob | undefined>
   cancelAction(jobId: string): Promise<IntegrationActionJob>
   authenticatedRequest<T = unknown>(
-    accountId: IntegrationAccountRef,
+    connectorAccountId: IntegrationAccountRef,
     input: string,
     init?: IntegrationRequestInit
   ): Promise<{ status: number; headers: Record<string, string>; data: T }>
   getIngressPublicUrl(subscriptionId: string): Promise<string | undefined>
-  listIngressDeadletters(accountId: string): Promise<IntegrationIngressDeadLetter[]>
+  listIngressDeadletters(connectorAccountId: string): Promise<IntegrationIngressDeadLetter[]>
   getIngressDeadletter(
-    accountId: string,
+    connectorAccountId: string,
     routeId: string,
     deliveryId: string
   ): Promise<IntegrationIngressDeadLetterDetail | undefined>
-  requeueIngressDeadletter(accountId: string, routeId: string, deliveryId: string): Promise<boolean>
+  requeueIngressDeadletter(
+    connectorAccountId: string,
+    routeId: string,
+    deliveryId: string
+  ): Promise<boolean>
   migrateLegacy(plan: IntegrationMigrationPlan): Promise<IntegrationMigrationResult>
   rollbackMigration(migrationId: string): Promise<void>
 }

@@ -410,7 +410,9 @@ impl AccountSummary {
                     "file",
                     true,
                 ),
-                ProviderCredential::ApiKey(_) => (None, None, 0, "api-key", "api_key", "managed", false),
+                ProviderCredential::ApiKey(_) => {
+                    (None, None, 0, "api-key", "api_key", "managed", false)
+                }
                 ProviderCredential::Commandcode(_) => {
                     (None, None, 0, "commandcode", "api_key", "managed", false)
                 }
@@ -640,19 +642,19 @@ impl ProviderVault {
 
     /// Remove an account by id. Returns `true` if anything was removed. If the
     /// removed account was the active pointer, clears it.
-    pub fn remove_account(&mut self, account_id: &str) -> bool {
+    pub fn remove_account(&mut self, provider_account_id: &str) -> bool {
         let before = self.accounts.len();
-        self.accounts.retain(|a| a.id != account_id);
+        self.accounts.retain(|a| a.id != provider_account_id);
         let removed = self.accounts.len() != before;
-        if removed && self.active_account_id.as_deref() == Some(account_id) {
+        if removed && self.active_account_id.as_deref() == Some(provider_account_id) {
             self.active_account_id = None;
         }
         removed
     }
 
     /// Find an account by id.
-    pub fn find_account(&self, account_id: &str) -> Option<&Account> {
-        self.accounts.iter().find(|a| a.id == account_id)
+    pub fn find_account(&self, provider_account_id: &str) -> Option<&Account> {
+        self.accounts.iter().find(|a| a.id == provider_account_id)
     }
 
     /// Returns `true` if `active_account_id` is `Some` but no account in
@@ -1076,8 +1078,8 @@ mod tests {
     fn committed_account_vault_writes_notify_host_consumers() {
         let changes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let observer_changes = changes.clone();
-        install_commit_observer(std::sync::Arc::new(move |account_id, _| {
-            if account_id == "gateway-observer-test" {
+        install_commit_observer(std::sync::Arc::new(move |local_account_id, _| {
+            if local_account_id == "gateway-observer-test" {
                 observer_changes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
         }));

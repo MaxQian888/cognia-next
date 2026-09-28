@@ -15,11 +15,11 @@ import {
 } from "./ingest-media"
 import { getMessageMedia, parseMediaRef } from "@/lib/db/message-media"
 import { getDb } from "@/lib/db/schema"
-import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { createRecreatedDbTestFixture } from "@/lib/db/test-fixture"
 
 jest.setTimeout(30_000)
 
-const dbFixture = createDbTestFixture()
+const dbFixture = createRecreatedDbTestFixture()
 
 beforeAll(dbFixture.initialize)
 beforeEach(async () => {

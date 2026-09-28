@@ -618,7 +618,7 @@ async fn handle_inbound(
         .ok_or_else(|| "registered device principal unavailable".to_string())?;
     let principal = DeviceContext {
         device_id: device_id.to_string(),
-        account_id: tenant_id,
+        tenant_id,
         scope: "device".to_string(),
         granted_scopes: Vec::new(),
         authorization_capabilities: None,

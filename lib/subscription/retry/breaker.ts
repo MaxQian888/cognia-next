@@ -166,8 +166,12 @@ export class SubscriptionBreaker {
  * same credential, such as the quota endpoint and the token endpoint. A block
  * on one must not silently gate the other, because they have different limits.
  */
-export function credentialKey(provider: string, accountId: string, scope = "default"): string {
-  return `${provider} ${accountId} ${scope}`
+export function credentialKey(
+  provider: string,
+  providerAccountId: string,
+  scope = "default"
+): string {
+  return `${provider} ${providerAccountId} ${scope}`
 }
 
 /** Scope names in use, kept together so a typo cannot silently split a budget. */

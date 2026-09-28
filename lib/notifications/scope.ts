@@ -4,7 +4,7 @@
 // durable authorization domain. Producers pass a `scopeHint` (what they
 // already know — a bound session's account, a scheduler's workspace); the
 // resolver fills the rest from the live context: namespace = the active
-// account database name, accountId = the registry's active account,
+// account database name, localAccountId = the registry's active account,
 // authorityHostId = this install's device id.
 //
 // The resolver NEVER fabricates a field it cannot source: a missing account
@@ -63,18 +63,18 @@ export function __setNotificationNamespaceForTesting(name: string | null): void 
  * covers the pre-connection window (a producer resolving scope before the
  * first getDb()).
  */
-function activeNamespaceId(accountId: string | null): string {
+function activeNamespaceId(localAccountId: string | null): string {
   if (_resolvedNamespace) return _resolvedNamespace
   try {
     return getDb().name
   } catch {
     // No live connection (SSR / pre-open) — derive from the account id.
   }
-  if (accountId && accountId !== "local") {
+  if (localAccountId && localAccountId !== "local") {
     // The vault-backed account db is the encrypted variant when the install
     // uses content encryption; both share the `cognia-account-<id>` prefix
     // so the namespace prefix is stable either way.
-    return encryptedAccountDatabaseName(accountId)
+    return encryptedAccountDatabaseName(localAccountId)
   }
   return LEGACY_COGNIA_DB_NAME
 }
@@ -86,12 +86,12 @@ function activeNamespaceId(accountId: string | null): string {
 export async function resolveNotificationScope(
   hint: NotificationScopeHint = {}
 ): Promise<NotificationScope> {
-  const accountId = hint.accountId ?? (await safeAccountId()) ?? "local"
+  const localAccountId = hint.accountId ?? (await safeAccountId()) ?? "local"
   const authorityHostId = hint.authorityHostId ?? (await getDeviceId()) ?? "unknown"
-  const namespaceId = hint.namespaceId ?? activeNamespaceId(hint.accountId ?? accountId)
+  const namespaceId = hint.namespaceId ?? activeNamespaceId(hint.accountId ?? localAccountId)
   return {
     namespaceId,
-    accountId,
+    accountId: localAccountId,
     authorityHostId,
     ...(hint.executionHostId ? { executionHostId: hint.executionHostId } : {}),
     ...(hint.runtimeId ? { runtimeId: hint.runtimeId } : {}),
@@ -141,11 +141,11 @@ export type { NotificationIdentity } from "./identity-cache"
  * any account/host transition; safe to call repeatedly (re-resolves).
  */
 export async function primeNotificationScope(): Promise<NotificationIdentity> {
-  const accountId = (await safeAccountId()) ?? "local"
+  const localAccountId = (await safeAccountId()) ?? "local"
   const authorityHostId = (await getDeviceId()) ?? "unknown"
   const identity: NotificationIdentity = {
-    namespaceId: activeNamespaceId(accountId),
-    accountId,
+    namespaceId: activeNamespaceId(localAccountId),
+    accountId: localAccountId,
     authorityHostId,
   }
   setNotificationIdentity(identity)

@@ -624,6 +624,24 @@ describe("buildMcpServerMap", () => {
     expect(out.alpha).toMatchObject({ type: "stdio", command: "x" })
   })
 
+  it("excludes unresolved send configs without dropping another valid server", async () => {
+    const healthy = await createReviewed({
+      name: "healthy",
+      transport: "stdio",
+      config: { command: "node" },
+      enabled: true,
+    })
+    const unresolved = {
+      ...healthy,
+      id: "unresolved",
+      name: "unresolved",
+      config: { command: "node", env: { TOKEN: { secretRef: "vault:fixture" } } },
+    }
+    const result = buildMcpServerMap([unresolved, healthy])
+    expect(Object.keys(result)).toEqual(["healthy"])
+    expect(result.healthy).toMatchObject({ type: "stdio", command: "node" })
+  })
+
   it("forwards http transport with url + headers verbatim", async () => {
     const row = await createReviewed({
       name: "wiki",
@@ -702,12 +720,9 @@ describe("buildMcpServerMap", () => {
       config: { url: "https://example.com/sse", headers: { Authorization: "Bearer x" } },
     })
     const out = buildMcpServerMap([row])
-    expect(out.stream).toMatchObject({
-      type: "sse",
-      url: "https://example.com/sse",
-      headers: {
-        Authorization: { secretRef: expect.stringMatching(/\/headers\/Authorization$/) },
-      },
+    expect(out.stream).toBeUndefined()
+    expect(row.config.headers).toEqual({
+      Authorization: { secretRef: expect.stringMatching(/\/headers\/Authorization$/) },
     })
   })
 
@@ -769,7 +784,7 @@ describe("buildMcpServerMapWithAuth", () => {
     const out = await buildMcpServerMapWithAuth([row], {
       loadEntry: async () => ({ accessToken: "abc" }),
     })
-    expect(out.remote.headers).toEqual({ "X-Trace": "1", Authorization: "Bearer abc" })
+    expect(out.remote).toHaveProperty("headers", { "X-Trace": "1", Authorization: "Bearer abc" })
   })
 
   it("leaves stdio servers and tokenless remotes untouched", async () => {
@@ -790,6 +805,23 @@ describe("buildMcpServerMapWithAuth", () => {
     expect(out.beta).not.toHaveProperty("headers")
   })
 
+  it("does not load OAuth for a stdio config carrying an unrelated URL extension", async () => {
+    const row = await createReviewed({
+      name: "local",
+      transport: "stdio",
+      config: { command: "node", url: "https://extension.example" },
+    })
+    const loadEntry = jest.fn(async () => ({ accessToken: "unused-token" }))
+    const out = await buildMcpServerMapWithAuth([row], { loadEntry })
+    expect(loadEntry).not.toHaveBeenCalled()
+    expect(out.local).toMatchObject({
+      type: "stdio",
+      command: "node",
+      url: "https://extension.example",
+    })
+    expect(out.local).not.toHaveProperty("headers")
+  })
+
   it("refreshes a near-expiry token before injecting it", async () => {
     const row = await createReviewed({
       name: "remote",
@@ -803,7 +835,7 @@ describe("buildMcpServerMapWithAuth", () => {
       now: () => 900, // 1000 - 900 = 100ms left < 60s skew
     })
     expect(refresh).toHaveBeenCalledWith("remote")
-    expect(out.remote.headers).toEqual({ Authorization: "Bearer fresh" })
+    expect(out.remote).toHaveProperty("headers", { Authorization: "Bearer fresh" })
   })
 
   it("does not refresh a token that is comfortably valid", async () => {
@@ -819,7 +851,7 @@ describe("buildMcpServerMapWithAuth", () => {
       now: () => 0,
     })
     expect(refresh).not.toHaveBeenCalled()
-    expect(out.remote.headers).toEqual({ Authorization: "Bearer ok" })
+    expect(out.remote).toHaveProperty("headers", { Authorization: "Bearer ok" })
   })
 
   it("falls back to the un-authed config when the auth lookup throws", async () => {

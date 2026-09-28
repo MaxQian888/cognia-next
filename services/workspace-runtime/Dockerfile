@@ -1,5 +1,8 @@
 # syntax=docker/dockerfile:1.7
-FROM mcr.microsoft.com/playwright:v1.61.1-noble
+FROM node:26-bookworm-slim AS node
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
+# Keep the browser image and playwright-core aligned while honoring engines.node.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
 
 ENV NODE_ENV=production \
     COGNIA_WORKSPACE_ROOT=/workspace \
@@ -18,10 +21,11 @@ RUN apt-get update \
 
 WORKDIR /opt/cognia-runtime
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json /opt/cognia-runtime-root/
+COPY patches /opt/cognia-runtime-root/patches
 COPY services/workspace-runtime/package.json /opt/cognia-runtime-root/services/workspace-runtime/package.json
 RUN cd /opt/cognia-runtime-root \
-    && pnpm install --filter @cognia/workspace-runtime --prod --frozen-lockfile \
-    && cp -a services/workspace-runtime/node_modules /opt/cognia-runtime/node_modules
+    && pnpm install --filter @cognia/workspace-runtime --prod --frozen-lockfile --ignore-scripts \
+    && ln -s /opt/cognia-runtime-root/services/workspace-runtime/node_modules /opt/cognia-runtime/node_modules
 
 COPY services/workspace-runtime/src ./src
 COPY lib/browser/overlay.injected.js ./src/overlay.injected.js

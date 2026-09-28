@@ -1,5 +1,6 @@
 "use client"
 
+import { Surface } from "@/components/surface/surface"
 import { useMemo } from "react"
 import { Background, Controls, MarkerType, Position, ReactFlow } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
@@ -82,32 +83,34 @@ export function RunGraph({
     }
   }, [workflow, events, startedAt, completedAt, selectedStepId, t])
   return (
-    <section aria-label={t("title")} className="mb-6 overflow-hidden rounded-xl border bg-card">
-      <div className="border-b px-4 py-3">
-        <h2 className="text-sm font-semibold">{t("title")}</h2>
-        <p className="text-xs text-muted-foreground">{t("hint")}</p>
-      </div>
-      <div className="h-[420px]">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          fitView
-          nodesDraggable={false}
-          nodesConnectable={false}
-          edgesReconnectable={false}
-          onNodeClick={(_, node) => onSelectStep(node.id)}
-          minZoom={0.1}
-          maxZoom={2}
-          ariaLabelConfig={{
-            "controls.zoomIn.ariaLabel": t("zoomIn"),
-            "controls.zoomOut.ariaLabel": t("zoomOut"),
-            "controls.fitView.ariaLabel": t("fit"),
-          }}
-        >
-          <Background />
-          <Controls showInteractive={false} />
-        </ReactFlow>
-      </div>
-    </section>
+    <Surface asChild>
+      <section aria-label={t("title")} className="mb-6 overflow-hidden rounded-xl border bg-card">
+        <div className="border-b px-4 py-3">
+          <h2 className="text-sm font-semibold">{t("title")}</h2>
+          <p className="text-xs text-muted-foreground">{t("hint")}</p>
+        </div>
+        <div className="h-[420px]">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            fitView
+            nodesDraggable={false}
+            nodesConnectable={false}
+            edgesReconnectable={false}
+            onNodeClick={(_, node) => onSelectStep(node.id)}
+            minZoom={0.1}
+            maxZoom={2}
+            ariaLabelConfig={{
+              "controls.zoomIn.ariaLabel": t("zoomIn"),
+              "controls.zoomOut.ariaLabel": t("zoomOut"),
+              "controls.fitView.ariaLabel": t("fit"),
+            }}
+          >
+            <Background />
+            <Controls showInteractive={false} />
+          </ReactFlow>
+        </div>
+      </section>
+    </Surface>
   )
 }

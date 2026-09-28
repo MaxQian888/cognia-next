@@ -124,12 +124,8 @@ async fn health_handler() -> &'static str {
 // ---------------------------------------------------------------------------
 
 /// Content types Feishu accepts for an app avatar.
-const STAGED_AVATAR_CONTENT_TYPES: [&str; 4] = [
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "image/gif",
-];
+const STAGED_AVATAR_CONTENT_TYPES: [&str; 4] =
+    ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -169,8 +165,7 @@ async fn lark_app_avatar_stage(
             .into_response();
     }
     use base64::Engine;
-    let bytes = match base64::engine::general_purpose::STANDARD.decode(body.bytes_b64.as_bytes())
-    {
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(body.bytes_b64.as_bytes()) {
         Ok(bytes) => bytes,
         Err(_) => return (StatusCode::BAD_REQUEST, "bytesB64 is not valid base64").into_response(),
     };
@@ -2919,10 +2914,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(
-            resp.headers().get("content-type").unwrap(),
-            "image/webp"
-        );
+        assert_eq!(resp.headers().get("content-type").unwrap(), "image/webp");
         assert_eq!(
             resp.headers().get("x-content-type-options").unwrap(),
             "nosniff"

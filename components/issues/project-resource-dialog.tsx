@@ -133,7 +133,7 @@ export function ProjectResourceDialog({
 
   // Lark: the connected accounts, and what the pickers loaded from them.
   const [accounts, setAccounts] = useState<LarkAccountOption[]>([])
-  const [accountId, setAccountId] = useState("")
+  const [connectorAccountId, setConnectorAccountId] = useState("")
   const [tasklists, setTasklists] = useState<LarkTasklistSummary[] | null>(null)
   const [tasklistGuid, setTasklistGuid] = useState("")
   const [bitableInput, setBitableInput] = useState("")
@@ -183,7 +183,7 @@ export function ProjectResourceDialog({
     setSyncMode("mirror")
     setProjectV2("")
     setRootId("")
-    setAccountId("")
+    setConnectorAccountId("")
     setTasklists(null)
     setTasklistGuid("")
     setBitableInput("")
@@ -203,7 +203,7 @@ export function ProjectResourceDialog({
   const projectV2Invalid =
     projectV2Number !== undefined && (!Number.isInteger(projectV2Number) || projectV2Number <= 0)
   const selectedRootId = rootId || (availableRoots[0]?.id ?? "")
-  const selectedAccountId = accountId || (accounts[0]?.id ?? "")
+  const selectedAccountId = connectorAccountId || (accounts[0]?.id ?? "")
   const appToken = parseBitableAppToken(bitableInput)
   const bitableInvalid = bitableInput.trim().length > 0 && appToken === null
   const selectedTasklist = tasklists?.find((row) => row.guid === tasklistGuid)
@@ -461,7 +461,7 @@ export function ProjectResourceDialog({
                   {t("projects.noLarkAccounts")}
                 </p>
               ) : (
-                <Select value={selectedAccountId} onValueChange={setAccountId}>
+                <Select value={selectedAccountId} onValueChange={setConnectorAccountId}>
                   <SelectTrigger id="resource-lark-account" data-testid="resource-lark-account">
                     <SelectValue />
                   </SelectTrigger>

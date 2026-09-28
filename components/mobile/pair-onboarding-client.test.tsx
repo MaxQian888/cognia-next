@@ -170,11 +170,11 @@ jest.mock("next/navigation", () => ({
 
 /** Stand in for the Navigation API: `canGoBack` is what the Back gate reads. */
 function withInAppHistory(canGoBack: boolean): () => void {
-  const win = window as Window & { navigation?: unknown }
-  const previous = win.navigation
-  win.navigation = { canGoBack }
+  const previous = Object.getOwnPropertyDescriptor(window, "navigation")
+  Object.defineProperty(window, "navigation", { configurable: true, value: { canGoBack } })
   return () => {
-    win.navigation = previous
+    if (previous) Object.defineProperty(window, "navigation", previous)
+    else Reflect.deleteProperty(window, "navigation")
   }
 }
 

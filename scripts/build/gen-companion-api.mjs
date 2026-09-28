@@ -3031,8 +3031,27 @@ function buildHeadlessSpec(
   })
 }
 
+// Request schemas are also consumed standalone by runtime validation. Only the
+// published document needs their local references scoped to its schema path.
+export function scopeEmbeddedSchemaReferences(value, pointer = "", schemaPointer = "") {
+  if (Array.isArray(value)) {
+    return value.map((child, index) =>
+      scopeEmbeddedSchemaReferences(child, `${pointer}/${index}`, schemaPointer)
+    )
+  }
+  if (!value || typeof value !== "object") return value
+  const scope = value.$defs ? pointer : schemaPointer
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => {
+    if (key === "$ref" && typeof child === "string" && child.startsWith("#/$defs/")) {
+      return [key, `#${scope}${child.slice(1)}`]
+    }
+    const escaped = key.replaceAll("~", "~0").replaceAll("/", "~1")
+    return [key, scopeEmbeddedSchemaReferences(child, `${pointer}/${escaped}`, scope)]
+  }))
+}
+
 function renderSpec(spec) {
-  return stringify(spec, { indent: 2, lineWidth: 120, sortMapEntries: false })
+  return stringify(scopeEmbeddedSchemaReferences(spec), { indent: 2, lineWidth: 120, sortMapEntries: false })
 }
 
 export function buildHeadlessAsyncApi(contract, catalog, bridgeFixture) {

@@ -2,7 +2,7 @@
   "name": "@cognia/ocr",
   "version": "0.0.0",
   "private": true,
-  "description": "Cognia OCR core: the dependency-injected extract() pipeline, provider registry and auto-router, 18 cloud/local provider adapters, PDF routing and streaming, confidence escalation, and the hOCR/citation output layer — framework-agnostic, zero app imports.",
+  "description": "Cognia OCR core: the dependency-injected extract() pipeline, provider registry and auto-router, 18 cloud/local provider adapters, PDF routing and streaming, confidence escalation, and the hOCR/citation output layer \u2014 framework-agnostic, zero app imports.",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -20,6 +20,13 @@
       "import": "./dist/*.js",
       "require": "./dist/*.cjs",
       "default": "./dist/*.js"
+    },
+    "./types": {
+      "cognia-source": "./src/types/index.ts",
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js",
+      "require": "./dist/types/index.cjs",
+      "default": "./dist/types/index.js"
     }
   },
   "files": [

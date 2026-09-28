@@ -46,31 +46,32 @@ export interface EnsureHeadlessAccountOptions {
  * the account id for convenience.
  */
 export async function ensureHeadlessAccount(
-  accountId: string = HEADLESS_LOCAL_ACCOUNT_ID,
+  localAccountId: string = HEADLESS_LOCAL_ACCOUNT_ID,
   opts: EnsureHeadlessAccountOptions = {}
 ): Promise<string> {
   const registry = opts.registry ?? new LocalAccountRegistry()
   const accounts = await registry.listAccounts()
-  if (!accounts.some((account) => account.id === accountId)) {
+  if (!accounts.some((account) => account.id === localAccountId)) {
     await registry.createAccount({
-      id: accountId,
+      id: localAccountId,
       displayName: "Headless brain",
       passwordVerifier: hostOwnedVerifier(),
       activate: true,
     })
   } else {
-    await registry.setActiveAccountId(accountId)
+    await registry.setActiveAccountId(localAccountId)
   }
   const accountState = useAccountStore.getState()
-  if (!accountState.locked && accountState.unlockedAccountId === accountId) return accountId
+  if (!accountState.locked && accountState.unlockedAccountId === localAccountId)
+    return localAccountId
   const ownsAccountContentKey = opts.accountContentKey === undefined
   const accountContentKey = opts.accountContentKey ?? decodeHeadlessAccountContentKey()
   try {
-    await unlockAccountForHost(accountId, accountContentKey)
+    await unlockAccountForHost(localAccountId, accountContentKey)
   } finally {
     if (ownsAccountContentKey) accountContentKey.fill(0)
   }
-  return accountId
+  return localAccountId
 }
 
 function decodeHeadlessAccountContentKey(): Uint8Array {

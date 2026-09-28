@@ -122,12 +122,12 @@ export interface MarkLegacyMigrationCompletedInput {
   completedAt: number
 }
 
-export function accountDatabaseName(accountId: string): string {
-  return `${ACCOUNT_DB_PREFIX}${assertAccountId(accountId)}`
+export function accountDatabaseName(localAccountId: string): string {
+  return `${ACCOUNT_DB_PREFIX}${assertAccountId(localAccountId)}`
 }
 
-export function encryptedAccountDatabaseName(accountId: string): string {
-  return `${accountDatabaseName(accountId)}-encrypted-v1`
+export function encryptedAccountDatabaseName(localAccountId: string): string {
+  return `${accountDatabaseName(localAccountId)}-encrypted-v1`
 }
 
 export class LocalAccountRegistry {
@@ -181,17 +181,17 @@ export class LocalAccountRegistry {
   }
 
   async renameAccount(
-    accountId: string,
+    localAccountId: string,
     displayName: string,
     now = Date.now()
   ): Promise<LocalAccountRecord> {
-    assertAccountId(accountId)
+    assertAccountId(localAccountId)
     const normalized = normalizeAccountDisplayName(displayName)
     let updated: LocalAccountRecord | undefined
 
     await this.db.transaction("rw", this.db.accounts, async () => {
-      const account = await this.db.accounts.get(accountId)
-      if (!account) throw accountNotFound(accountId)
+      const account = await this.db.accounts.get(localAccountId)
+      if (!account) throw accountNotFound(localAccountId)
       updated = {
         ...account,
         displayName: normalized,
@@ -204,17 +204,17 @@ export class LocalAccountRegistry {
   }
 
   async updatePasswordVerifier(
-    accountId: string,
+    localAccountId: string,
     passwordVerifier: PasswordVerifierRecord,
     now = Date.now(),
     protection?: LocalAccountRecord["protection"]
   ): Promise<LocalAccountRecord> {
-    assertAccountId(accountId)
+    assertAccountId(localAccountId)
     let updated: LocalAccountRecord | undefined
 
     await this.db.transaction("rw", this.db.accounts, async () => {
-      const account = await this.db.accounts.get(accountId)
-      if (!account) throw accountNotFound(accountId)
+      const account = await this.db.accounts.get(localAccountId)
+      if (!account) throw accountNotFound(localAccountId)
       updated = {
         ...account,
         passwordVerifier: clonePasswordVerifier(passwordVerifier),
@@ -235,16 +235,16 @@ export class LocalAccountRegistry {
    * opted in carries no trace of the option.
    */
   async updateRememberOnDevice(
-    accountId: string,
+    localAccountId: string,
     enabled: boolean,
     now = Date.now()
   ): Promise<LocalAccountRecord> {
-    assertAccountId(accountId)
+    assertAccountId(localAccountId)
     let updated: LocalAccountRecord | undefined
 
     await this.db.transaction("rw", this.db.accounts, async () => {
-      const account = await this.db.accounts.get(accountId)
-      if (!account) throw accountNotFound(accountId)
+      const account = await this.db.accounts.get(localAccountId)
+      if (!account) throw accountNotFound(localAccountId)
       const next: LocalAccountRecord = {
         ...account,
         updatedAt: nextTimestamp(now, account.updatedAt),
@@ -262,16 +262,16 @@ export class LocalAccountRegistry {
   }
 
   async updateAvatar(
-    accountId: string,
+    localAccountId: string,
     avatarDataUrl: string | null,
     now = Date.now()
   ): Promise<LocalAccountRecord> {
-    assertAccountId(accountId)
+    assertAccountId(localAccountId)
     let updated: LocalAccountRecord | undefined
 
     await this.db.transaction("rw", this.db.accounts, async () => {
-      const account = await this.db.accounts.get(accountId)
-      if (!account) throw accountNotFound(accountId)
+      const account = await this.db.accounts.get(localAccountId)
+      if (!account) throw accountNotFound(localAccountId)
       const next: LocalAccountRecord = {
         ...account,
         updatedAt: nextTimestamp(now, account.updatedAt),
@@ -302,16 +302,16 @@ export class LocalAccountRegistry {
    * version bump, exactly as `avatarDataUrl` did.
    */
   async updateQuickUnlock(
-    accountId: string,
+    localAccountId: string,
     enrollments: QuickUnlockEnrollment[],
     now = Date.now()
   ): Promise<LocalAccountRecord> {
-    assertAccountId(accountId)
+    assertAccountId(localAccountId)
     let updated: LocalAccountRecord | undefined
 
     await this.db.transaction("rw", this.db.accounts, async () => {
-      const account = await this.db.accounts.get(accountId)
-      if (!account) throw accountNotFound(accountId)
+      const account = await this.db.accounts.get(localAccountId)
+      if (!account) throw accountNotFound(localAccountId)
       const next: LocalAccountRecord = {
         ...account,
         updatedAt: nextTimestamp(now, account.updatedAt),
@@ -328,27 +328,27 @@ export class LocalAccountRegistry {
     return updated as LocalAccountRecord
   }
 
-  async setActiveAccountId(accountId: string, now = Date.now()): Promise<void> {
-    assertAccountId(accountId)
+  async setActiveAccountId(localAccountId: string, now = Date.now()): Promise<void> {
+    assertAccountId(localAccountId)
     await this.db.transaction("rw", this.db.accounts, this.db.state, async () => {
-      const account = await this.db.accounts.get(accountId)
-      if (!account) throw accountNotFound(accountId)
+      const account = await this.db.accounts.get(localAccountId)
+      if (!account) throw accountNotFound(localAccountId)
       const state = await this.ensureState()
       await this.db.state.put({
         ...state,
-        activeAccountId: accountId,
+        activeAccountId: localAccountId,
         updatedAt: nextTimestamp(now, state.updatedAt),
       })
     })
   }
 
-  async deleteAccount(accountId: string, options: DeleteAccountOptions = {}): Promise<void> {
-    assertAccountId(accountId)
+  async deleteAccount(localAccountId: string, options: DeleteAccountOptions = {}): Promise<void> {
+    assertAccountId(localAccountId)
     const now = options.now ?? Date.now()
 
     await this.db.transaction("rw", this.db.accounts, this.db.state, async () => {
-      const account = await this.db.accounts.get(accountId)
-      if (!account) throw accountNotFound(accountId)
+      const account = await this.db.accounts.get(localAccountId)
+      if (!account) throw accountNotFound(localAccountId)
 
       const count = await this.db.accounts.count()
       if (count <= 1) {
@@ -357,8 +357,8 @@ export class LocalAccountRegistry {
 
       const state = await this.ensureState()
       let nextActiveAccountId = state.activeAccountId
-      if (state.activeAccountId === accountId) {
-        if (!options.replacementAccountId || options.replacementAccountId === accountId) {
+      if (state.activeAccountId === localAccountId) {
+        if (!options.replacementAccountId || options.replacementAccountId === localAccountId) {
           throw new AccountRegistryError(
             "replacement-required",
             "Deleting the active account requires a different replacement account."
@@ -370,7 +370,7 @@ export class LocalAccountRegistry {
         nextActiveAccountId = replacement.id
       }
 
-      await this.db.accounts.delete(accountId)
+      await this.db.accounts.delete(localAccountId)
       if (nextActiveAccountId !== state.activeAccountId) {
         await this.db.state.put({
           ...state,
@@ -414,8 +414,11 @@ export class LocalAccountRegistry {
   }
 }
 
-function accountNotFound(accountId: string): AccountRegistryError {
-  return new AccountRegistryError("account-not-found", `Local account ${accountId} does not exist.`)
+function accountNotFound(localAccountId: string): AccountRegistryError {
+  return new AccountRegistryError(
+    "account-not-found",
+    `Local account ${localAccountId} does not exist.`
+  )
 }
 
 function nextTimestamp(candidate: number, previous: number): number {

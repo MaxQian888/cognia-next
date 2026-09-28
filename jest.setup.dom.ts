@@ -143,3 +143,12 @@ try {
 // Testing Library's 1s default. Keep the existing safety margin until the
 // post-migration worker benchmark proves a lower global timeout is stable.
 configureTestingLibrary({ asyncUtilTimeout: 5000 })
+
+// In-process plugin component tests skip PluginLoader; bind the same real host
+// ports before they render, including after a suite resets the module registry.
+beforeEach(async () => {
+  if (!expect.getState().testPath?.replaceAll("\\", "/").includes("/plugins/")) return
+  const { loadEffortSurfaceModule, loadPluginI18nModule } =
+    await import("./lib/plugin/core/sdk-subpath-loaders")
+  await Promise.all([loadEffortSurfaceModule(), loadPluginI18nModule()])
+})

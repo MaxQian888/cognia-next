@@ -57,8 +57,8 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   // `/onboarding` itself stays reachable below for a deliberate visit. The
   // workspace `pnpm tauri dev` provisions is the desktop twin of that account.
   const devLocalAccount = useAccountStore((state) => {
-    const accountId = state.unlockedAccountId ?? state.activeAccountId
-    return isDevLocalAccount(accountId) || isDevDesktopWorkspace(accountId)
+    const localAccountId = state.unlockedAccountId ?? state.activeAccountId
+    return isDevLocalAccount(localAccountId) || isDevDesktopWorkspace(localAccountId)
   })
 
   useEffect(() => {

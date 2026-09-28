@@ -34,9 +34,9 @@ function run(command, args, cwd = repoRoot, env = {}) {
 
 try {
   run("cargo", ["build", "--quiet", "-p", "cognia-cli"])
-  const cli = join(
+  const cli = resolve(
     repoRoot,
-    "target",
+    process.env.CARGO_TARGET_DIR || "target",
     "debug",
     process.platform === "win32" ? "cognia.exe" : "cognia"
   )

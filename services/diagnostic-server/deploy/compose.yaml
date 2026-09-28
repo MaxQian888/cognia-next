@@ -54,7 +54,10 @@ services:
     networks: [backend]
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
+    build:
+      context: .
+      dockerfile: Dockerfile.minio
+      target: server
     command: server /data --console-address :9001
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-diagnostics-minio}
@@ -69,7 +72,10 @@ services:
     networks: [backend]
 
   minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-07-21T05-28-08Z
+    build:
+      context: .
+      dockerfile: Dockerfile.minio
+      target: client
     depends_on:
       minio: { condition: service_healthy }
     entrypoint: ["/bin/sh", "-ec"]

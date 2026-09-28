@@ -32,7 +32,7 @@ const USE_DEFAULT = "__default__"
 
 interface AccountPresetSelectorProps {
   provider: ProviderId
-  accountId: string
+  providerAccountId: string
 }
 
 export type PresetCapableProvider = ProviderId
@@ -41,18 +41,18 @@ export function providerSupportsPresets(provider: ProviderId): provider is Prese
   return /^[a-z][a-z0-9_.:-]{0,127}$/.test(provider)
 }
 
-export function AccountPresetSelector({ provider, accountId }: AccountPresetSelectorProps) {
+export function AccountPresetSelector({ provider, providerAccountId }: AccountPresetSelectorProps) {
   if (!isTauri()) return null
   return (
     <AccountPresetBinding
-      key={`${provider}:${accountId}`}
+      key={`${provider}:${providerAccountId}`}
       provider={provider}
-      accountId={accountId}
+      providerAccountId={providerAccountId}
     />
   )
 }
 
-function AccountPresetBinding({ provider, accountId }: AccountPresetSelectorProps) {
+function AccountPresetBinding({ provider, providerAccountId }: AccountPresetSelectorProps) {
   const t = useTranslations("subscription.common.accountPreset")
   const [presets, setPresets] = useState<ProviderPreset[]>([])
   const [presetId, setPresetId] = useState<string | null>(null)
@@ -75,7 +75,7 @@ function AccountPresetBinding({ provider, accountId }: AccountPresetSelectorProp
       try {
         const [library, account] = await Promise.all([
           listPresets(provider),
-          getAccount(provider, accountId),
+          getAccount(provider, providerAccountId),
         ])
         if (!alive) return
         setPresets(library)
@@ -89,14 +89,14 @@ function AccountPresetBinding({ provider, accountId }: AccountPresetSelectorProp
     return () => {
       alive = false
     }
-  }, [provider, accountId, loadAttempt])
+  }, [provider, providerAccountId, loadAttempt])
 
   const onChange = async (value: string) => {
     const nextPresetId = value === USE_DEFAULT ? null : value
     setBusy(true)
     setError(null)
     try {
-      const account = await getAccount(provider, accountId)
+      const account = await getAccount(provider, providerAccountId)
       if (!mounted.current) return
       if (!account) {
         setError("saveFailed")

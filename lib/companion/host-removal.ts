@@ -37,12 +37,12 @@ export interface HostRemovalDependencies {
     hostId: string
     platform: CompanionClientPlatform
   }): Promise<unknown>
-  switchWebStandalone(accountId: string): Promise<unknown>
-  quiesceSoleMobile(accountId: string, hostId: string): Promise<void>
+  switchWebStandalone(localAccountId: string): Promise<unknown>
+  quiesceSoleMobile(localAccountId: string, hostId: string): Promise<void>
   revoke: typeof revokeCompanionDevice
-  activeRuntimeTargetId(accountId: string): Promise<string | null>
-  deleteRuntimeTarget(accountId: string, hostId: string): Promise<void>
-  deleteActiveRuntimeTarget(accountId: string, hostId: string): Promise<void>
+  activeRuntimeTargetId(localAccountId: string): Promise<string | null>
+  deleteRuntimeTarget(localAccountId: string, hostId: string): Promise<void>
+  deleteActiveRuntimeTarget(localAccountId: string, hostId: string): Promise<void>
   deleteDatabase(name: string): Promise<void>
   databaseExists(name: string): Promise<boolean>
   removeRecentAlias(baseUrl: string): void
@@ -166,19 +166,23 @@ function productionDependencies(registry: RuntimeTargetRegistry): HostRemovalDep
   return {
     book: companionCredentialBook(),
     switchHost: switchCompanionHost,
-    switchWebStandalone: (accountId) =>
-      switchAccountRuntimeTarget(accountId, DEFAULT_STANDALONE_TARGET_ID),
-    quiesceSoleMobile: async (accountId, hostId) => {
-      const transition = { accountId, fromTargetId: hostId, toTargetId: "mobile-unpaired" }
+    switchWebStandalone: (localAccountId) =>
+      switchAccountRuntimeTarget(localAccountId, DEFAULT_STANDALONE_TARGET_ID),
+    quiesceSoleMobile: async (localAccountId, hostId) => {
+      const transition = {
+        accountId: localAccountId,
+        fromTargetId: hostId,
+        toTargetId: "mobile-unpaired",
+      }
       await runRuntimeTargetTransitionPhase("finalize-captures", transition)
       await runRuntimeTargetTransitionPhase("release-subscriptions", transition)
     },
     revoke: revokeCompanionDevice,
-    activeRuntimeTargetId: async (accountId) =>
-      (await registry.getActiveTarget(accountId))?.id ?? null,
-    deleteRuntimeTarget: (accountId, hostId) => registry.deleteTarget(accountId, hostId),
-    deleteActiveRuntimeTarget: (accountId, hostId) =>
-      registry.deleteActiveTarget(accountId, hostId),
+    activeRuntimeTargetId: async (localAccountId) =>
+      (await registry.getActiveTarget(localAccountId))?.id ?? null,
+    deleteRuntimeTarget: (localAccountId, hostId) => registry.deleteTarget(localAccountId, hostId),
+    deleteActiveRuntimeTarget: (localAccountId, hostId) =>
+      registry.deleteActiveTarget(localAccountId, hostId),
     deleteDatabase: (name) => Dexie.delete(name),
     databaseExists: (name) => Dexie.exists(name),
     removeRecentAlias: removeRecentServer,

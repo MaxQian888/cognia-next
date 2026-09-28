@@ -11,6 +11,7 @@
  * app settings, hence this controlled wrapper over the agent's own value.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
 
 import { Label } from "@/components/ui/label"
@@ -47,7 +48,7 @@ export function ToolSearchOverride({ value, onChange }: ToolSearchOverrideProps)
         }
       />
       {value?.enabled && (
-        <div className="space-y-3 rounded-md border bg-background p-2">
+        <Surface className="space-y-3 rounded-md border bg-background p-2">
           <div className="space-y-1">
             <Label className="text-xs">{tCard("serversLabel")}</Label>
             <p className="text-[10px] text-muted-foreground">{tCard("serversHelp")}</p>
@@ -76,7 +77,7 @@ export function ToolSearchOverride({ value, onChange }: ToolSearchOverrideProps)
               removeLabel={t("remove")}
             />
           </div>
-        </div>
+        </Surface>
       )}
     </div>
   )

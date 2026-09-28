@@ -1,7 +1,7 @@
 import Dexie from "dexie"
 
 import { getDb } from "@/lib/db/schema"
-import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { createRecreatedDbTestFixture } from "@/lib/db/test-fixture"
 import { setDraftDebounced, clearDraft } from "@/lib/db/chat-drafts"
 import { loggers } from "@cognia/logging"
 import { putSessionAsset, listSessionAssets, putLibraryAsset } from "@/lib/db/session-assets"
@@ -12,7 +12,7 @@ import { clearTables, clearAll } from "./clear"
 jest.mock("@/lib/browser/preview-data", () => ({ clearBrowserPreviewData: jest.fn() }))
 const clearPreview = clearBrowserPreviewData as jest.Mock
 
-const fixture = createDbTestFixture({ seeded: false })
+const fixture = createRecreatedDbTestFixture({ seeded: false })
 beforeAll(fixture.initialize)
 beforeEach(fixture.restore)
 afterAll(fixture.dispose)

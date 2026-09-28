@@ -39,7 +39,11 @@ import type {
   SessionCompressionOverrides,
 } from "./compression"
 import type { AgentCapabilityId, AgentExecutionSendSpec } from "./agent-execution"
-import type { ClaudeAgentSdkOptionsV1 } from "./claude-agent-sdk-options"
+import type {
+  AgentDefinition,
+  ClaudeAgentSdkOptionsV1,
+  McpServerWireConfig,
+} from "./claude-agent-sdk-options"
 import type { OnboardingProfile, OnboardingProgress } from "./onboarding"
 
 export * from "./transcript"
@@ -149,7 +153,7 @@ export interface ResolvedCompaction {
  * `query()`. See `lib/settings/builtin-tools.ts` for the mapping from each
  * id to concrete tools.
  */
-export interface BuiltinToolsConfig {
+export type BuiltinToolsConfig = {
   /** Advanced FS ops the SDK's Read/Write/Glob/Grep don't cover (hash, diff, content_search, …). */
   fileExtras: boolean
   /**
@@ -259,7 +263,7 @@ export const AGENT_PERMISSION_MODES: readonly AgentPermissionMode[] = [
   "bypassPermissions",
 ]
 
-export interface SendOptions {
+export type SendOptions = {
   /** Standalone hosts use the existing session-owned process supervisor. */
   backgroundProcessHost?: "sidecar" | "host"
   /**
@@ -402,7 +406,7 @@ export interface SendOptions {
   claudeAgentSdk?: ClaudeAgentSdkOptionsV1
   env?: Record<string, string>
   /** Per-name MCP server configs forwarded to the SDK. */
-  mcpServers?: Record<string, Record<string, unknown>>
+  mcpServers?: Record<string, McpServerWireConfig>
   /**
    * Per-server `declared_by` locators for hook `tool_provenance`, keyed by the
    * same server name `mcpServers` uses: the config file path for file-loaded
@@ -482,7 +486,7 @@ export interface SendOptions {
     enhanced?: boolean
   }
   /** Dynamic subagent definitions keyed by name. */
-  agents?: Record<string, Record<string, unknown>>
+  agents?: Record<string, AgentDefinition>
   /**
    * Run THIS turn's main thread AS the named subagent (its system prompt, tool
    * restrictions, and model). Must be a key present in {@link agents}. Equivalent
@@ -530,7 +534,7 @@ export interface SendOptions {
    */
   maxThinkingTokens?: number
   /** Validated provider-neutral history restored by a CLI session restart. */
-  initialConversation?: unknown[]
+  initialConversation?: Array<{ role: string; content?: unknown; [field: string]: unknown }>
   /** Resume an existing SDK session by id. Mutually exclusive with `forkFromSessionId`. */
   resumeSessionId?: string
   /** Fork a new branch from an existing SDK session id. */

@@ -54,7 +54,7 @@ export function PairedOnly({ children, testid }: PairedOnlyProps) {
         data-testid={testid ?? "paired-only-placeholder"}
       >
         <EmptyHeader>
-          <EmptyMedia variant="icon" className="size-12 rounded-2xl">
+          <EmptyMedia variant="icon" className="size-12 rounded-stage">
             <MonitorSmartphoneIcon className="size-6" aria-hidden />
           </EmptyMedia>
           <h2 className="text-lg font-medium tracking-tight">{t("title")}</h2>

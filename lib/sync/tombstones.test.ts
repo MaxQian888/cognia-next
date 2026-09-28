@@ -5,7 +5,7 @@
 import "fake-indexeddb/auto"
 
 import { getDb } from "@/lib/db/schema"
-import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { createRecreatedDbTestFixture } from "@/lib/db/test-fixture"
 
 import {
   recordTombstones,
@@ -14,7 +14,7 @@ import {
   TOMBSTONE_RETENTION_MS,
 } from "./tombstones"
 
-const fixture = createDbTestFixture()
+const fixture = createRecreatedDbTestFixture()
 beforeAll(fixture.initialize)
 beforeEach(fixture.restore)
 afterAll(fixture.dispose)

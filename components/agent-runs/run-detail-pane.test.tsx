@@ -724,6 +724,13 @@ describe("RunDetailPane", () => {
     })
   })
 
+  it("does not load delegate artifacts for a fusion row without a run id", () => {
+    render(
+      <RunDetailPane row={row({ kind: "fusion", runId: undefined })} actions={makeActions()} />
+    )
+    expect(screen.queryByTestId("delegate-review-pane")).not.toBeInTheDocument()
+  })
+
   it("mounts no delegate review for a run of another kind", () => {
     render(<RunDetailPane row={row()} actions={makeActions()} />)
     expect(screen.queryByTestId("delegate-review-pane")).not.toBeInTheDocument()
@@ -816,7 +823,7 @@ describe("RunDetailPane", () => {
 it("formats past start and completion timestamps as elapsed time", () => {
   render(
     <RunDetailPane
-      row={row({ startedAt: 1_000, endedAt: 61_000, status: "completed" })}
+      row={row({ startedAt: 1_000, endedAt: 61_000, status: "done" })}
       actions={makeActions()}
     />
   )

@@ -356,7 +356,7 @@ export interface ProviderConnectionParams {
  * `advancedParams`, attached to `SendOptions.modelParams`, and spread into
  * the sidecar's `streamText` call on the non-Anthropic path (ADR-0043).
  */
-export interface ModelInferenceParams {
+export type ModelInferenceParams = {
   temperature?: number
   maxOutputTokens?: number
   topP?: number

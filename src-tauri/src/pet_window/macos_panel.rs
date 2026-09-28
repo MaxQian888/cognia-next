@@ -482,7 +482,9 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
         }
     };
     panel.set_collection_behavior(behavior.into());
-    panel.set_style_mask(style.into());
+    panel
+        .set_style_mask(style.into())
+        .map_err(|error| format!("overlay panel style mask failed: {error:?}"))?;
     panel.set_floating_panel(true);
     panel.set_hides_on_deactivate(role.hides_on_deactivate());
     panel.set_works_when_modal(role.works_when_modal());

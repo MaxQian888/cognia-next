@@ -13,11 +13,11 @@
  * (see `resolveTwinEmbeddingConfig`).
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { Loader2Icon } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -288,7 +288,7 @@ export function TwinEmbeddingCard({ twinId }: { twinId: string }) {
             >
               {rebuilding ? (
                 <>
-                  <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+                  <Spinner className="mr-1.5 size-3.5 " aria-hidden />
                   {t("rebuilding")}
                 </>
               ) : (
@@ -324,7 +324,7 @@ export function TwinEmbeddingCard({ twinId }: { twinId: string }) {
         >
           {saving ? (
             <>
-              <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+              <Spinner className="mr-1.5 size-3.5 " aria-hidden />
               {t("saving")}
             </>
           ) : (

@@ -20,6 +20,7 @@
  * `asleep`, so the picker is disabled then and says so.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useMemo, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { CheckIcon, UsersIcon, XIcon } from "lucide-react"
@@ -203,7 +204,7 @@ export function RoomTargetChip({ bare = false }: RoomTargetChipProps = {}) {
   if (targets.length > 0 && hint !== "asleep") {
     const names = targets.map((id) => members.find((member) => member.id === id)?.name ?? id)
     chip = (
-      <div
+      <Surface
         className="flex min-w-0 items-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-2 py-1 text-xs"
         title={names.join(", ")}
         data-testid="composer-room-target-chip"
@@ -222,7 +223,7 @@ export function RoomTargetChip({ bare = false }: RoomTargetChipProps = {}) {
         >
           <XIcon className="size-3" />
         </Button>
-      </div>
+      </Surface>
     )
   } else if (hint) {
     chip = (

@@ -320,7 +320,9 @@ fn is_public_site_cookie(cookie_domain: &str) -> bool {
 /// The preview shares its website data store with the main window, so any
 /// webview reaches the same cookies; the preview need not be open.
 #[tauri::command]
-pub async fn browser_cookie_clear_all(app: tauri::AppHandle) -> Result<CookieClearAllResult, String> {
+pub async fn browser_cookie_clear_all(
+    app: tauri::AppHandle,
+) -> Result<CookieClearAllResult, String> {
     let webview = app
         .get_webview(EMBED_LABEL)
         .or_else(|| app.get_webview("main"))
@@ -369,9 +371,15 @@ mod tests {
         assert!(cookie_belongs_to_site("example.com", "example.com"));
         assert!(cookie_belongs_to_site(".example.com", "example.com"));
         assert!(cookie_belongs_to_site("www.example.com", "example.com"));
-        assert!(cookie_belongs_to_site(".Accounts.Example.com", "example.com"));
+        assert!(cookie_belongs_to_site(
+            ".Accounts.Example.com",
+            "example.com"
+        ));
         assert!(!cookie_belongs_to_site("notexample.com", "example.com"));
-        assert!(!cookie_belongs_to_site("example.com.evil.io", "example.com"));
+        assert!(!cookie_belongs_to_site(
+            "example.com.evil.io",
+            "example.com"
+        ));
         assert!(!cookie_belongs_to_site("", "example.com"));
         assert!(!cookie_belongs_to_site(".", "example.com"));
     }

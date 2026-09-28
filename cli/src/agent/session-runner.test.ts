@@ -1503,7 +1503,11 @@ describe("durable runtime history", () => {
             },
           ],
         },
-        { role: "assistant", content: "fixed" },
+        {
+          role: "assistant",
+          content: "fixed",
+          providerOptions: { fixture: { reasoningId: "saved-reasoning" } },
+        },
       ]
       const capture = jest.fn(async () => ({
         ...result("fixed"),

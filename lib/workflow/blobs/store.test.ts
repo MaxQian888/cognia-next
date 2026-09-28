@@ -29,7 +29,7 @@ beforeEach(async () => {
 describe("storeWorkflowBlob", () => {
   it("round-trips the bytes and the dimensions", async () => {
     const handle = await storeWorkflowBlob({
-      accountId: "acc1",
+      localAccountId: "acc1",
       runId: "run1",
       stepId: "s1",
       bytes,
@@ -47,7 +47,7 @@ describe("storeWorkflowBlob", () => {
 
   it("uses the workflow-blob key domain rather than borrowing another one", async () => {
     await storeWorkflowBlob({
-      accountId: "acc1",
+      localAccountId: "acc1",
       runId: "run1",
       stepId: "s1",
       bytes,
@@ -59,7 +59,7 @@ describe("storeWorkflowBlob", () => {
   it("refuses an oversized artifact and says where it belongs instead", async () => {
     await expect(
       storeWorkflowBlob({
-        accountId: "acc1",
+        localAccountId: "acc1",
         runId: "run1",
         stepId: "s1",
         bytes: new Uint8Array(WORKFLOW_BLOB_MAX_BYTES + 1),
@@ -71,7 +71,7 @@ describe("storeWorkflowBlob", () => {
   it("refuses an empty blob and a run with no account", async () => {
     await expect(
       storeWorkflowBlob({
-        accountId: "acc1",
+        localAccountId: "acc1",
         runId: "r",
         stepId: "s",
         bytes: new Uint8Array(0),
@@ -79,7 +79,13 @@ describe("storeWorkflowBlob", () => {
       })
     ).rejects.toBeInstanceOf(WorkflowBlobError)
     await expect(
-      storeWorkflowBlob({ accountId: "", runId: "r", stepId: "s", bytes, mediaType: "image/png" })
+      storeWorkflowBlob({
+        localAccountId: "",
+        runId: "r",
+        stepId: "s",
+        bytes,
+        mediaType: "image/png",
+      })
     ).rejects.toThrow(/without an account/)
   })
 })
@@ -89,7 +95,7 @@ describe("openWorkflowBlob", () => {
     // The AAD binds the ciphertext to its exact run, step and id, so a row
     // relabelled by hand does not read back as content.
     const handle = await storeWorkflowBlob({
-      accountId: "acc1",
+      localAccountId: "acc1",
       runId: "run1",
       stepId: "s1",
       bytes,
@@ -105,7 +111,7 @@ describe("openWorkflowBlob", () => {
     await expect(openWorkflowBlob("cognia-workflow-blob:nope")).rejects.toThrow(/No workflow blob/)
 
     const handle = await storeWorkflowBlob({
-      accountId: "acc1",
+      localAccountId: "acc1",
       runId: "run1",
       stepId: "s1",
       bytes,
@@ -123,7 +129,7 @@ describe("openWorkflowBlob", () => {
 describe("pruneWorkflowBlobs", () => {
   it("removes only rows past their expiry", async () => {
     await storeWorkflowBlob({
-      accountId: "acc1",
+      localAccountId: "acc1",
       runId: "old",
       stepId: "s",
       bytes,
@@ -131,7 +137,7 @@ describe("pruneWorkflowBlobs", () => {
       now: 1000,
     })
     await storeWorkflowBlob({
-      accountId: "acc1",
+      localAccountId: "acc1",
       runId: "new",
       stepId: "s",
       bytes,
@@ -146,7 +152,7 @@ describe("pruneWorkflowBlobs", () => {
 
   it("is a no-op when nothing has expired", async () => {
     await storeWorkflowBlob({
-      accountId: "acc1",
+      localAccountId: "acc1",
       runId: "r",
       stepId: "s",
       bytes,

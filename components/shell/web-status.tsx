@@ -1,5 +1,6 @@
 "use client"
 
+import { Surface } from "@/components/surface/surface"
 import {
   createContext,
   useCallback,
@@ -185,16 +186,16 @@ function CornerPill({ items }: { items: WebStatusContextValue["scopes"]["global"
   const side = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
   const bottom = useBottomDockClearance()
   return (
-    <div
+    <Surface
       className={cn(
         PILL_CLUSTER,
-        "fixed z-40 rounded-full border border-border/60 bg-popover/90 px-1.5 py-1 shadow-md backdrop-blur empty:hidden",
+        "fixed z-40 rounded-full border border-border/60 bg-popover/90 px-1.5 py-1 shadow-(--elevation-2) backdrop-blur empty:hidden",
         side === "right" ? "left-3" : "right-3"
       )}
       style={{ bottom }}
       data-testid="web-status-corner-pill"
     >
       <StatusBarZone items={items} />
-    </div>
+    </Surface>
   )
 }

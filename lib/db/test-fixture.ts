@@ -205,3 +205,15 @@ export function createDbTestFixture(options: DbTestFixtureOptions = {}): DbTestF
     },
   }
 }
+
+/** Full database isolation for suites that exercise generated keys or account selection. */
+export function createRecreatedDbTestFixture(options: DbTestFixtureOptions = {}): DbTestFixture {
+  const fixture = createDbTestFixture(options)
+  return {
+    ...fixture,
+    async restore() {
+      await fixture.dispose()
+      await fixture.initialize()
+    },
+  }
+}

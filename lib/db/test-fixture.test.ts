@@ -1,6 +1,10 @@
 import Dexie from "dexie"
 import { getDb } from "./schema"
-import { createDbTestFixture, DB_TEST_TIMEOUT_MS } from "./test-fixture"
+import {
+  createDbTestFixture,
+  createRecreatedDbTestFixture,
+  DB_TEST_TIMEOUT_MS,
+} from "./test-fixture"
 
 /** The first value a liveQuery emits, with the subscription closed behind it. */
 function firstEmission<T>(query: () => Promise<T>): Promise<T> {
@@ -262,5 +266,26 @@ describe("createDbTestFixture", () => {
         expect(await getDb().table("settings").get("cross-test-leak")).toBeUndefined()
       })
     })
+  })
+})
+
+describe("createRecreatedDbTestFixture", () => {
+  it("resets generated keys and drains registered cleanup before reopening", async () => {
+    const fixture = createRecreatedDbTestFixture({ seeded: false })
+    await fixture.initialize()
+    try {
+      const table = getDb().tables.find((candidate) => candidate.schema.primKey.auto)
+      expect(table).toBeDefined()
+      const tableName = table!.name
+      const firstKey = await getDb().table(tableName).add({ fixture: "first" })
+      const cleanup = jest.fn()
+      fixture.registerCleanup(cleanup)
+      await fixture.restore()
+      expect(cleanup).toHaveBeenCalledTimes(1)
+      expect(await getDb().table(tableName).count()).toBe(0)
+      expect(await getDb().table(tableName).add({ fixture: "next" })).toBe(firstKey)
+    } finally {
+      await fixture.dispose()
+    }
   })
 })

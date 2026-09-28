@@ -5,8 +5,8 @@ use comfy_table::{presets::UTF8_FULL, ContentArrangement, Table};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::bridge_client::{get_json, load_endpoint_from, EndpointFile};
-use std::path::Path;
 use crate::ui::{style, RuntimeUi};
+use std::path::Path;
 
 const LIST_PATH: &str = "/api/dev/plugins/installed";
 

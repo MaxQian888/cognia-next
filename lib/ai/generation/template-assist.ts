@@ -16,6 +16,11 @@
 
 import { generateObject, generateText, type LanguageModel } from "ai"
 import { z } from "zod"
+import {
+  generateThroughSeam,
+  modelIdOf,
+  type GenerationSeam,
+} from "@cognia/provider-embedding/generation-seam"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { deriveParams, paramKindChange, type ChatTemplateParam } from "@/lib/chat/template/template"
 import { RESOURCE_PARAM_KINDS, type ResourceParamKind } from "@/lib/chat/template/resource-kinds"
@@ -134,37 +139,69 @@ function assertSendable(system: string, prompt: string): void {
 export async function generateTemplateDraft(
   model: LanguageModel,
   intent: string,
-  options?: { abortSignal?: AbortSignal }
+  options?: { abortSignal?: AbortSignal; generate?: GenerationSeam }
 ): Promise<TemplateDraft> {
   const prompt = `Template request: ${intent.trim()}`
   assertSendable(GENERATE_SYSTEM, prompt)
-  const { object } = await generateObject({
-    model,
-    schema: DRAFT_SCHEMA,
-    system: GENERATE_SYSTEM,
-    prompt,
-    temperature: 0.7,
-    abortSignal: options?.abortSignal,
-  })
-  return normalizeDraft(object)
+  const text = await generateThroughSeam(
+    options?.generate,
+    {
+      stage: "generate",
+      modelId: modelIdOf(model),
+      system: GENERATE_SYSTEM,
+      prompt,
+      temperature: 0.7,
+      abortSignal: options?.abortSignal,
+    },
+    async (overrides) => {
+      const result = await generateObject({
+        model,
+        schema: DRAFT_SCHEMA,
+        system: GENERATE_SYSTEM,
+        prompt,
+        temperature: 0.7,
+        abortSignal: options?.abortSignal,
+        ...overrides,
+      })
+      return {
+        text: JSON.stringify(result.object),
+        usage: result.usage,
+        providerMetadata: result.providerMetadata,
+      }
+    }
+  )
+  return normalizeDraft(DRAFT_SCHEMA.parse(JSON.parse(text)))
 }
 
 /** Rewrite a body for clarity. Tokens are contract — they must survive verbatim. */
 export async function improveTemplateBody(
   model: LanguageModel,
   body: string,
-  options?: { instruction?: string; abortSignal?: AbortSignal }
+  options?: { instruction?: string; abortSignal?: AbortSignal; generate?: GenerationSeam }
 ): Promise<string> {
   const instruction = options?.instruction?.trim()
   const prompt = instruction ? `${body}\n\nInstruction: ${instruction}` : body
   assertSendable(IMPROVE_SYSTEM, prompt)
-  const { text } = await generateText({
-    model,
-    system: IMPROVE_SYSTEM,
-    prompt,
-    temperature: 0.4,
-    abortSignal: options?.abortSignal,
-  })
+  const text = await generateThroughSeam(
+    options?.generate,
+    {
+      stage: "improve",
+      modelId: modelIdOf(model),
+      system: IMPROVE_SYSTEM,
+      prompt,
+      temperature: 0.4,
+      abortSignal: options?.abortSignal,
+    },
+    (overrides) =>
+      generateText({
+        model,
+        system: IMPROVE_SYSTEM,
+        prompt,
+        temperature: 0.4,
+        abortSignal: options?.abortSignal,
+        ...overrides,
+      })
+  )
   return text.trim()
 }
 
@@ -177,18 +214,37 @@ export async function improveTemplateBody(
 export async function suggestTemplateParams(
   model: LanguageModel,
   body: string,
-  options?: { abortSignal?: AbortSignal }
+  options?: { abortSignal?: AbortSignal; generate?: GenerationSeam }
 ): Promise<TemplateParamSuggestion[]> {
   assertSendable(SUGGEST_PARAMS_SYSTEM, body)
-  const { object } = await generateObject({
-    model,
-    schema: SUGGESTIONS_SCHEMA,
-    system: SUGGEST_PARAMS_SYSTEM,
-    prompt: body,
-    temperature: 0.3,
-    abortSignal: options?.abortSignal,
-  })
-  return object.suggestions
+  const text = await generateThroughSeam(
+    options?.generate,
+    {
+      stage: "suggest",
+      modelId: modelIdOf(model),
+      system: SUGGEST_PARAMS_SYSTEM,
+      prompt: body,
+      temperature: 0.3,
+      abortSignal: options?.abortSignal,
+    },
+    async (overrides) => {
+      const result = await generateObject({
+        model,
+        schema: SUGGESTIONS_SCHEMA,
+        system: SUGGEST_PARAMS_SYSTEM,
+        prompt: body,
+        temperature: 0.3,
+        abortSignal: options?.abortSignal,
+        ...overrides,
+      })
+      return {
+        text: JSON.stringify(result.object),
+        usage: result.usage,
+        providerMetadata: result.providerMetadata,
+      }
+    }
+  )
+  return SUGGESTIONS_SCHEMA.parse(JSON.parse(text)).suggestions
 }
 
 /**

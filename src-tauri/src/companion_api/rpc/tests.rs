@@ -29,7 +29,7 @@ async fn dispatch(
     state: &SharedState,
     host: &crate::companion_api::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     super::dispatch(
@@ -38,7 +38,7 @@ async fn dispatch(
         state,
         host,
         device_id,
-        account_id,
+        tenant_id,
         scope,
         crate::companion_api::remote_execution::ExecutionPlane::Network,
     )
@@ -561,7 +561,7 @@ async fn service_scope_startup_burst_does_not_consume_device_quota() {
     let state = test_state();
     let context = DeviceContext {
         device_id: crate::companion_api::jwt::SERVICE_DEVICE_ID.to_string(),
-        account_id: ACCOUNT_ID.to_string(),
+        tenant_id: ACCOUNT_ID.to_string(),
         scope: "service".to_string(),
         granted_scopes: Vec::new(),
         authorization_capabilities: None,
@@ -614,11 +614,11 @@ fn headless_host() -> super::super::dispatch_host::DispatchHost {
     )
 }
 
-fn headless_host_for_account(account_id: &str) -> super::super::dispatch_host::DispatchHost {
+fn headless_host_for_account(local_account_id: &str) -> super::super::dispatch_host::DispatchHost {
     let services = crate::headless::HeadlessServices::stub_for_tests();
     services
         .plugin_runtime
-        .activate_account(account_id)
+        .activate_account(local_account_id)
         .expect("activate the same plugin account production binds at boot");
     super::super::dispatch_host::DispatchHost::Headless(services)
 }
@@ -4919,7 +4919,10 @@ fn router_fusion_companion_commands_are_classified_and_bound_to_the_device() {
     ];
     for command in reads.iter().chain(writes.iter()) {
         assert!(KNOWN_COMMANDS.contains(command), "{command} must be known");
-        assert!(data_sync::COMMANDS.contains(command), "{command} is bridged");
+        assert!(
+            data_sync::COMMANDS.contains(command),
+            "{command} is bridged"
+        );
         assert!(
             CALLER_DEVICE_ID_COMMANDS.contains(command),
             "{command} must bind callerDeviceId"

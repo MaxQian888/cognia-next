@@ -3,7 +3,6 @@ import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
 import { AttachmentsPanel, type AttachmentRow } from "./AttachmentsPanel"
-import { absoluteTopLeft } from "../../input/element-position"
 
 jest.mock("../../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
 

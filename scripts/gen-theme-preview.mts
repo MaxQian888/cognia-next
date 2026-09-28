@@ -27,7 +27,7 @@ for (const t of BUILT_IN_VSCODE_THEMES) {
 
 function varsFor(c: ThemeColors): string {
   return THEME_TOKEN_CATALOG.map((d) => {
-    const v = (c as Record<string, string | undefined>)[d.key]
+    const v = c[d.key]
     return v ? `${d.cssVar}:${v};` : ""
   }).join("")
 }

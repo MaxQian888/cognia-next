@@ -71,6 +71,8 @@ const eslintConfig = defineConfig([
     // toolchain, tsconfig, and lockfile (like sidecar/). Its src is linted
     // by its own config; its dist/ is a minified build artifact.
     "services/share-server/**",
+    "services/update-server/worker/dist/**",
+    "services/update-server/worker/.wrangler/**",
     // Standalone Cloudflare worker (workers-rs / Rust) with its own toolchain.
     // Its build/ and .wrangler/ dirs are minified JS bundles emitted by wrangler,
     // never authored here (same rationale as services/share-server/**).

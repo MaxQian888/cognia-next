@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import {
+  ALLOWLIST,
   SCANNED_PATHS,
   SIDECAR_EXECUTION_PATHS,
   resolveScanPaths,
@@ -32,4 +33,15 @@ test("refuses to go blind: no sidecar path, or a vanished non-sidecar path, is a
     () => resolveScanPaths({ exists: everyPathBut("lib/gateway") }),
     /lib\/gateway — update SCANNED_PATHS/
   )
+})
+
+test("allows provider ids in the specific dispatch fixtures, never their implementations", () => {
+  for (const file of [
+    "sidecar/src/runtimes/ai-sdk/index.test.ts",
+    "sidecar/src/providers/protocol-adapters/ai-sdk-adapter.test.ts",
+  ]) {
+    assert.ok(ALLOWLIST.some((pattern) => pattern.test(file)))
+    assert.ok(!ALLOWLIST.some((pattern) => pattern.test(file.replace(".test.ts", ".ts"))))
+  }
+  assert.ok(!ALLOWLIST.some((pattern) => pattern.test("sidecar/src/host/dispatch.test.ts")))
 })

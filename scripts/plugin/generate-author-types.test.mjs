@@ -4,7 +4,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
 
-import { collectDeclarations, driftKey, parseArgs } from "./generate-author-types.mjs"
+import {
+  assertAuthorBuildRoot,
+  assertStandaloneDeclaration,
+  collectDeclarations,
+  driftKey,
+  parseArgs,
+} from "./generate-author-types.mjs"
 
 test("parseArgs supports check mode and rejects unknown options", () => {
   assert.deepEqual(parseArgs([]), { check: false })
@@ -31,4 +37,27 @@ test("driftKey ignores declaration and quoted-union ordering only", () => {
   const right = 'type B = string\ntype A = "a" | "z"\n'
   assert.equal(driftKey(left), driftKey(right))
   assert.notEqual(driftKey(left), driftKey(`${right}type C = number\n`))
+})
+
+test("author build rejects internal externals and escaped host imports", () => {
+  assert.doesNotThrow(() => assertAuthorBuildRoot({ dependencies: { react: "19" } }))
+  assert.throws(
+    () => assertAuthorBuildRoot({ dependencies: { "@cognia/agent": "workspace:*" } }),
+    /must not externalize/
+  )
+  assert.throws(
+    () => assertAuthorBuildRoot({ peerDependencies: { "@cognia/agent": "*" } }),
+    /must not externalize/
+  )
+  assert.doesNotThrow(() => assertStandaloneDeclaration('import { ReactNode } from "react"'))
+  for (const specifier of ["@/types/plugin", "@cognia/agent-config-types", "/private/repo/types"]) {
+    assert.throws(
+      () => assertStandaloneDeclaration(`import { Value } from "${specifier}"`),
+      /flatten internal imports/
+    )
+    assert.throws(
+      () => assertStandaloneDeclaration(`type Value = import("${specifier}").Value`),
+      /flatten internal imports/
+    )
+  }
 })

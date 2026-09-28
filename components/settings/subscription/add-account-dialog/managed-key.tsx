@@ -1,9 +1,9 @@
 "use client"
 
+import { Spinner } from "@/components/ui/spinner"
 import { useEffect, useId, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { Loader2Icon } from "lucide-react"
 
 import {
   Dialog,
@@ -122,7 +122,7 @@ export function ManagedKeyAccountDialog({
     setModelError(null)
     const input = {
       definition: provider,
-      accountId: existingAccount?.id,
+      providerAccountId: existingAccount?.id,
       preview: { apiKey: accessToken, baseUrl: baseUrl.trim() || selectedPlan?.baseUrl, presetId },
       signal: controller.signal,
     }
@@ -515,7 +515,7 @@ export function ManagedKeyAccountDialog({
                     }
                     onClick={() => void loadModels()}
                   >
-                    {modelBusy && <Loader2Icon className="mr-1 size-3 animate-spin" />}
+                    {modelBusy && <Spinner className="mr-1 size-3 " />}
                     {t("fetchModels")}
                   </Button>
                 )}
@@ -571,7 +571,7 @@ export function ManagedKeyAccountDialog({
             onClick={() => void onSubmit()}
             disabled={!accessToken.trim() || busy || provider?.available === false}
           >
-            {busy && <Loader2Icon className="mr-2 size-4 animate-spin" />}
+            {busy && <Spinner className="mr-2 size-4 " />}
             {t("save")}
           </Button>
         </DialogFooter>

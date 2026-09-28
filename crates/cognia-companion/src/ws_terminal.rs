@@ -104,8 +104,34 @@ fn device_allowed_for_terminal(
             .unwrap_or(false)
 }
 
-fn spawn_terminal_dc_writer(
-    channel: std::sync::Arc<dyn DataChannel>,
+// The upstream DataChannel trait is sealed. Keep the terminal's small I/O
+// boundary local so timeout and overflow tests can exercise the real pumps.
+#[async_trait::async_trait]
+trait TerminalDataChannel: Send + Sync {
+    async fn send(&self, data: bytes::BytesMut) -> webrtc::error::Result<()>;
+    async fn try_send(&self, data: bytes::BytesMut) -> webrtc::error::Result<()>;
+    async fn poll(&self) -> Option<DataChannelEvent>;
+    async fn close(&self) -> webrtc::error::Result<()>;
+}
+
+#[async_trait::async_trait]
+impl<T: DataChannel + ?Sized> TerminalDataChannel for T {
+    async fn send(&self, data: bytes::BytesMut) -> webrtc::error::Result<()> {
+        DataChannel::send(self, data).await
+    }
+    async fn try_send(&self, data: bytes::BytesMut) -> webrtc::error::Result<()> {
+        DataChannel::try_send(self, data).await
+    }
+    async fn poll(&self) -> Option<DataChannelEvent> {
+        DataChannel::poll(self).await
+    }
+    async fn close(&self) -> webrtc::error::Result<()> {
+        DataChannel::close(self).await
+    }
+}
+
+fn spawn_terminal_dc_writer<C: TerminalDataChannel + ?Sized + 'static>(
+    channel: std::sync::Arc<C>,
     timeout: Duration,
 ) -> (
     tokio::sync::mpsc::Sender<Vec<u8>>,
@@ -136,8 +162,8 @@ fn spawn_terminal_dc_writer(
     (outbound_tx, writer_done_rx, writer_pump)
 }
 
-fn spawn_terminal_dc_event_pump(
-    channel: std::sync::Arc<dyn DataChannel>,
+fn spawn_terminal_dc_event_pump<C: TerminalDataChannel + ?Sized + 'static>(
+    channel: std::sync::Arc<C>,
     capacity: usize,
 ) -> (
     tokio::sync::mpsc::Receiver<DataChannelEvent>,
@@ -156,7 +182,7 @@ fn spawn_terminal_dc_event_pump(
     (event_rx, event_pump)
 }
 
-async fn close_terminal_data_channel(channel: &dyn DataChannel) {
+async fn close_terminal_data_channel<C: TerminalDataChannel + ?Sized>(channel: &C) {
     if tokio::time::timeout(TERMINAL_DC_CLOSE_TIMEOUT, channel.close())
         .await
         .is_err()
@@ -437,6 +463,8 @@ pub(crate) async fn proxy_terminal_datachannel(
                         | DataChannelEvent::OnBufferedAmountLow
                         | DataChannelEvent::OnBufferedAmountHigh,
                     ) => {}
+                    // New informational events do not alter terminal framing.
+                    Some(_) => {}
                 }
             }
         }
@@ -449,8 +477,8 @@ pub(crate) async fn proxy_terminal_datachannel(
     host_writer_pump.abort();
 }
 
-async fn send_datachannel_protocol_error(
-    channel: &dyn DataChannel,
+async fn send_datachannel_protocol_error<C: TerminalDataChannel + ?Sized>(
+    channel: &C,
     code: TerminalErrorCode,
     message: &str,
 ) -> Result<(), String> {
@@ -486,7 +514,6 @@ async fn send_protocol_error(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use webrtc::data_channel::{RTCDataChannelId, RTCDataChannelState};
 
     struct BlockedDataChannel {
         closed: AtomicBool,
@@ -514,54 +541,9 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl DataChannel for BlockedDataChannel {
-        async fn label(&self) -> webrtc::error::Result<String> {
-            Ok("cognia.terminal".into())
-        }
-        async fn ordered(&self) -> webrtc::error::Result<bool> {
-            Ok(true)
-        }
-        async fn max_packet_life_time(&self) -> webrtc::error::Result<Option<u16>> {
-            Ok(None)
-        }
-        async fn max_retransmits(&self) -> webrtc::error::Result<Option<u16>> {
-            Ok(None)
-        }
-        async fn protocol(&self) -> webrtc::error::Result<String> {
-            Ok(String::new())
-        }
-        async fn negotiated(&self) -> webrtc::error::Result<bool> {
-            Ok(false)
-        }
-        fn id(&self) -> RTCDataChannelId {
-            0
-        }
-        async fn ready_state(&self) -> webrtc::error::Result<RTCDataChannelState> {
-            Ok(RTCDataChannelState::Open)
-        }
-        async fn buffered_amount_high_threshold(&self) -> webrtc::error::Result<u32> {
-            Ok(u32::MAX)
-        }
-        async fn set_buffered_amount_high_threshold(
-            &self,
-            _threshold: u32,
-        ) -> webrtc::error::Result<()> {
-            Ok(())
-        }
-        async fn buffered_amount_low_threshold(&self) -> webrtc::error::Result<u32> {
-            Ok(0)
-        }
-        async fn set_buffered_amount_low_threshold(
-            &self,
-            _threshold: u32,
-        ) -> webrtc::error::Result<()> {
-            Ok(())
-        }
+    impl TerminalDataChannel for BlockedDataChannel {
         async fn send(&self, _data: bytes::BytesMut) -> webrtc::error::Result<()> {
             std::future::pending().await
-        }
-        async fn send_text(&self, _text: &str) -> webrtc::error::Result<()> {
-            Ok(())
         }
         async fn try_send(&self, data: bytes::BytesMut) -> webrtc::error::Result<()> {
             self.immediate_sends.lock().unwrap().push(data.to_vec());

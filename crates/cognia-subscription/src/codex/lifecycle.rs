@@ -26,9 +26,9 @@ impl CodexLifecycleManager {
     pub async fn lock_account(
         &self,
         local_account_id: &str,
-        account_id: &str,
+        provider_account_id: &str,
     ) -> OwnedMutexGuard<()> {
-        let key = format!("{local_account_id}/{account_id}");
+        let key = format!("{local_account_id}/{provider_account_id}");
         let lock = {
             let mut locks = self.account_locks.lock().await;
             // Reap entries nobody is holding or waiting on before adding one.

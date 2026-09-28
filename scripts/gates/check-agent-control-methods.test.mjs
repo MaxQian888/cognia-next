@@ -664,3 +664,24 @@ export const CONTROL_METHOD_CAPABILITIES = {
   })
   assert.throws(() => extractCapabilityMap(source, "NOPE", "f.mjs"), /f\.mjs: could not locate/)
 })
+
+test("extractSessionApiArgs reads the complete typed destructured signature", () => {
+  assert.deepEqual(
+    extractSessionApiArgs(`
+export async function callSessionApi({
+  method,
+  params,
+  api = DEFAULT_SESSION_API,
+}: SessionApiCall) {
+  const p = params ?? {}
+  switch (method) {
+    case "renameSession":
+      return api.renameSession(p.sessionId, p.title, options)
+    default:
+      throw new Error("unknown_method")
+  }
+}
+`),
+    { renameSession: ["sessionId", "title"] }
+  )
+})

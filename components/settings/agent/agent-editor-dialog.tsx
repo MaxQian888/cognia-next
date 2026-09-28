@@ -10,6 +10,7 @@
  * server auth, Pi extension policy, managed DeepSeek Harness).
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
@@ -754,7 +755,7 @@ export function AgentEditorDialog({
               defaultOpen
               dataTestId="opencode-options-section"
             >
-              <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+              <Surface className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
                 <div className="space-y-0.5">
                   <Label htmlFor="opencode-auto-spawn" className="cursor-pointer text-sm">
                     {tManager("autoSpawnServer")}
@@ -767,7 +768,7 @@ export function AgentEditorDialog({
                   onCheckedChange={(v) => setFormData({ ...formData, opencodeAutoSpawn: v })}
                   aria-label={tManager("autoSpawnServer")}
                 />
-              </div>
+              </Surface>
               {formData.opencodeAutoSpawn ? (
                 <>
                   <div className="grid gap-2">

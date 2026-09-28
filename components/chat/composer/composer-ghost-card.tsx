@@ -18,6 +18,7 @@
  * suggestion anchors — see `composer-ghost-text.tsx`.
  */
 
+import { Skeleton } from "@/components/ui/skeleton"
 import { AnimatePresence, motion } from "motion/react"
 import { AlertCircleIcon, RotateCcwIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -109,7 +110,7 @@ export function ComposerGhostCard({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 4, scale: 0.99 }}
           transition={{ duration: 0.16, ease: "easeOut" }}
-          className="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-xl border border-border/60 bg-popover/95 shadow-lg backdrop-blur-sm"
+          className="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-xl border border-border/60 bg-popover/95 shadow-(--elevation-3) backdrop-blur-sm"
           data-testid="composer-ghost-card"
         >
           <div className="flex items-center gap-2 border-b border-border/50 px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -158,7 +159,7 @@ export function ComposerGhostCard({
                 {streaming ? (
                   <span
                     aria-hidden
-                    className="ms-px inline-block h-[1em] w-[7px] translate-y-[0.15em] animate-pulse rounded-[1px] bg-primary/70"
+                    className="ms-px inline-block h-[1em] w-[7px] translate-y-[0.15em] animate-pulse rounded-control bg-primary/70"
                   />
                 ) : null}
               </>
@@ -171,7 +172,7 @@ export function ComposerGhostCard({
                 {t("ghostCardFailed")}
               </span>
             ) : (
-              <span aria-hidden className="inline-block h-4 w-2/3 animate-pulse rounded bg-muted" />
+              <Skeleton aria-hidden className="inline-block h-4 w-2/3 rounded" />
             )}
           </div>
 

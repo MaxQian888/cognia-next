@@ -1,5 +1,6 @@
 "use client"
 
+import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
 import { AlertCircleIcon, CheckCircle2Icon, Clock3Icon, MinusCircleIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -127,17 +128,17 @@ export function PerfSourceHealth({
           </div>
         </dl>
         {contended && (
-          <div
+          <Surface
             role="status"
             className="rounded-md border border-sky-500/30 bg-sky-500/5 p-2 text-xs"
             title={t("issue.detail", { detail: contended.detail })}
             data-testid="perf-source-health-contended"
           >
             {issueMessage}
-          </div>
+          </Surface>
         )}
         {gaps.length > 0 && (
-          <div
+          <Surface
             role="status"
             className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs"
           >
@@ -146,7 +147,7 @@ export function PerfSourceHealth({
               start: new Date(gaps.at(-1)!.wallStartMs).toLocaleTimeString(),
               end: new Date(gaps.at(-1)!.wallEndMs).toLocaleTimeString(),
             })}
-          </div>
+          </Surface>
         )}
       </CardContent>
     </Card>

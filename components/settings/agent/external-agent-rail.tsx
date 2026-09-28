@@ -16,10 +16,10 @@
  * trigger does for nav rails in `SettingsMasterDetail`.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import {
   Boxes,
   LayoutDashboard,
-  Loader2,
   Plus,
   Power,
   PowerOff,
@@ -201,7 +201,7 @@ function AgentRow({
         onClick={onPower}
       >
         {connecting ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="h-3.5 w-3.5 " />
         ) : connected ? (
           <PowerOff className="h-3.5 w-3.5" />
         ) : (

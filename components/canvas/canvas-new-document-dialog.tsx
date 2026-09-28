@@ -14,9 +14,10 @@
  * or lose information, so it reports both before anything is created.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangle, FileUp, Loader2 } from "lucide-react"
+import { AlertTriangle, FileUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -239,7 +240,7 @@ export function CanvasNewDocumentDialog({
               data-testid="canvas-new-choose-file"
             >
               {importing ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
+                <Spinner className="mr-2 size-4 " />
               ) : (
                 <FileUp className="mr-2 size-4" />
               )}

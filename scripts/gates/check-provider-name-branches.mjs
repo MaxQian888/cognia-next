@@ -40,6 +40,9 @@ export const ALLOWLIST = [
   // Migration fixtures/tests reference legacy relay ids as DATA.
   /legacy-mapping\.test\.ts$/,
   /resolve-agent-execution-spec\.test\.ts$/,
+  // Provider ids are fixture input to these protocol-neutral dispatch tests.
+  /^sidecar\/src\/runtimes\/ai-sdk\/index\.test\.ts$/,
+  /^sidecar\/src\/providers\/protocol-adapters\/ai-sdk-adapter\.test\.ts$/,
   // The legacy-mapping implementation embeds the vendor names ONLY inside
   // comments/tests guards; its own test asserts the code is table-free.
 ]

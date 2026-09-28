@@ -29,6 +29,10 @@
     "components/chat": {
       "classification": "ui-assumption"
     },
+    "components/connectivity": {
+      "classification": "ui-assumption",
+      "note": "add-host-form selects mDNS versus loopback discovery from isTauri(); paired-step uses usePlatform for mobile local-profile fallback and sign-out platform context. Pairing itself already uses the shared host registry and transports."
+    },
     "components/connectors": {
       "classification": "ui-assumption"
     },
@@ -144,6 +148,10 @@
     "hooks/codeserver": {
       "classification": "ui-assumption"
     },
+    "hooks/connectivity": {
+      "classification": "seam-infrastructure",
+      "note": "use-remote-access selects localTransport on Tauri for companion_signaling_status, otherwise the current transport. This makes desktop settings inspect their local host instead of an active remote workspace."
+    },
     "hooks/connectors": {
       "classification": "ui-assumption"
     },
@@ -181,6 +189,10 @@
     },
     "hooks/recovery": {
       "classification": "ui-assumption"
+    },
+    "hooks/sandbox": {
+      "classification": "ui-assumption",
+      "note": "use-project-runtime-environment reports portsAvailable and allows openPort only on Tauri. Environment port RPCs exist on the companion plane; the renderer still keys availability on the shell rather than the selected host capability."
     },
     "hooks/scheduler": {
       "classification": "ui-assumption"
@@ -309,11 +321,19 @@
       "classification": "unmigrated",
       "note": "The git RPC arms carry NO host gate at all \u2014 they are host-neutral and work headless today. host-feature-manifest.ts still declares source-control.git as tauri-only (class E finding)."
     },
+    "lib/global-search": {
+      "classification": "ui-assumption",
+      "note": "headless-context records detectPlatform/isTauri and derives canBrowseHostFolders from isTauri while clearing UI-only navigation state. Host-folder browsing availability should eventually follow the execution host capability, not the renderer platform."
+    },
     "lib/goal": {
       "classification": "unmigrated"
     },
     "lib/integrations": {
       "classification": "unmigrated"
+    },
+    "lib/island": {
+      "classification": "physically-impossible",
+      "note": "client emitToWindow/listenHere guard Tauri inter-window events for the local island overlay. A headless process has no desktop overlay window to receive or display these events."
     },
     "lib/keyring": {
       "classification": "seam-infrastructure",
@@ -365,6 +385,10 @@
       "classification": "unmigrated",
       "note": "The clearest case in the repo: rpc/plugins.rs has 52 headless-only arms and 12 desktop-only ones. The subsystem is split in half with neither side complete."
     },
+    "lib/power": {
+      "classification": "seam-infrastructure",
+      "note": "screen-wake-lock selects native power_screen_holds_set on Tauri or the browser Screen Wake Lock API elsewhere. Availability is native support or the actual browser request method; acquisition failures do not mark holds as active."
+    },
     "lib/project-environment": {
       "classification": "unmigrated"
     },
@@ -374,11 +398,23 @@
     "lib/rag": {
       "classification": "unmigrated"
     },
+    "lib/reply-copilot": {
+      "classification": "physically-impossible",
+      "note": "screen/overlay-client guards the local nonactivating chat-copilot desktop window, its placement and inter-window events. Clipboard writes have a browser fallback; the guarded overlay requires a visible OS desktop."
+    },
+    "lib/router-fusion": {
+      "classification": "unmigrated",
+      "note": "verify/acceptance-profiles defaults onWeb to !isTauri before evaluating workspace trust. The host is injectable, but a headless host should not inherently be treated as a browser; this remains a default-host capability migration."
+    },
     "lib/scheduler": {
       "classification": "unmigrated"
     },
     "lib/session-import": {
       "classification": "unmigrated"
+    },
+    "lib/sftp": {
+      "classification": "physically-impossible",
+      "note": "The one `isTauri()` here decides whether an interactive approval is needed at all, and that is not a capability question. ADR-0162 puts the approval on the two transfer opens so a REMOTE device asks a human at the host; the desktop is that host, so there is nobody else to ask and a lease would be a permission with no grantor. Every other call in this module is transport-neutral and reaches the same implementation through `invoke` or `_rpc`."
     },
     "lib/shell": {
       "classification": "unmigrated",
@@ -394,10 +430,6 @@
     },
     "lib/sites": {
       "classification": "unmigrated"
-    },
-    "lib/sftp": {
-      "classification": "physically-impossible",
-      "note": "The one `isTauri()` here decides whether an interactive approval is needed at all, and that is not a capability question. ADR-0162 puts the approval on the two transfer opens so a REMOTE device asks a human at the host; the desktop is that host, so there is nobody else to ask and a lease would be a permission with no grantor. Every other call in this module is transport-neutral and reaches the same implementation through `invoke` or `_rpc`."
     },
     "lib/skills": {
       "classification": "unmigrated"
@@ -438,6 +470,10 @@
     "lib/twin": {
       "classification": "unmigrated"
     },
+    "lib/updates": {
+      "classification": "unmigrated",
+      "note": "runtime restricts browser-extension and CLI update adapters to Tauri, while desktop/mobile installers have separate adapters. CLI presence and updates can also exist on a headless execution host; that adapter support still needs capability-based selection."
+    },
     "lib/usage-dock": {
       "classification": "physically-impossible",
       "note": "OS overlay window (ADR-0165 Phase 2). The Capacity Dock is a second Tauri window, label \"usage-dock\", opened from the main window and driven from inside itself. The nine guards in lib/usage-dock/client.ts are what let the browser and mobile shells import the module without a guard at every call site; a host with no second window to place has nothing to migrate here."
@@ -476,10 +512,6 @@
     "packages/vector": {
       "classification": "unmigrated"
     },
-    "plugins/impeccable": {
-      "classification": "unmigrated",
-      "confidence": "low"
-    },
     "stores/account": {
       "classification": "unmigrated"
     },
@@ -497,6 +529,40 @@
     },
     "stores/settings": {
       "classification": "unmigrated"
+    }
+  },
+  "desktopContracts": {
+    "automation_audit_snapshot": {
+      "classification": "physically-impossible",
+      "side": "desktop-only",
+      "reason": "Reads the local desktop AutomationState audit trail of OS input automation. There is no OS automation engine or corresponding audit state on a headless host.",
+      "implementation": "crates/cognia-automation/src/automation/commands.rs",
+      "test": "src-tauri/src/companion_api/rpc/tests.rs",
+      "testName": "headless_dispatch_rejects_desktop_automation_consent_commands"
+    },
+    "automation_kill_switch": {
+      "classification": "physically-impossible",
+      "side": "desktop-only",
+      "reason": "Stops the local desktop automation engine via kill_switch::engage and AppHandle, including pending OS input and desktop consent. A remote device may halt its paired desktop, but a headless host has no such engine.",
+      "implementation": "crates/cognia-automation/src/automation/commands.rs",
+      "test": "src-tauri/src/companion_api/rpc/tests.rs",
+      "testName": "headless_dispatch_rejects_desktop_automation_consent_commands"
+    },
+    "automation_kill_switch_engaged": {
+      "classification": "physically-impossible",
+      "side": "desktop-only",
+      "reason": "Reads the desktop OS automation emergency-stop gate. Returning false on a headless host would invent the state of an engine that does not exist there.",
+      "implementation": "crates/cognia-automation/src/automation/commands.rs",
+      "test": "src-tauri/src/companion_api/rpc/tests.rs",
+      "testName": "headless_dispatch_rejects_desktop_automation_consent_commands"
+    },
+    "automation_settings_get": {
+      "classification": "physically-impossible",
+      "side": "desktop-only",
+      "reason": "Reads the desktop AutomationState permission gate for accessibility/input automation. Headless hosts have no desktop automation permission surface to configure.",
+      "implementation": "crates/cognia-automation/src/automation/commands.rs",
+      "test": "src-tauri/src/companion_api/rpc/tests.rs",
+      "testName": "headless_dispatch_rejects_desktop_automation_consent_commands"
     }
   }
 }

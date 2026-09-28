@@ -94,7 +94,7 @@ export function extractControlArgs(source) {
   const body = source.match(
     /export function controlArgs\(method\b[^,]*,\s*params\b[^)]*\)[^{]*\{([\s\S]*?)\n\}/
   )?.[1]
-  if (!body) throw new Error("control.mjs: could not locate `controlArgs`")
+  if (!body) throw new Error("control.ts: could not locate `controlArgs`")
   /** @type {Record<string, string[]>} */
   const out = {}
   // Each block runs from one `case "x":` to the next `case`/`default`.
@@ -124,7 +124,7 @@ export function extractSessionApiSpecs(source) {
   const body = source.match(
     /export const SESSION_API_METHODS(?::[^=]*)?\s*=\s*\{([\s\S]*?)\n\}/
   )?.[1]
-  if (!body) throw new Error("session-api.mjs: could not locate `SESSION_API_METHODS`")
+  if (!body) throw new Error("session-api.ts: could not locate `SESSION_API_METHODS`")
   /** @type {Record<string, { mutates: boolean, store: boolean }>} */
   const out = {}
   for (const [, name, spec] of body.matchAll(/(\w+):\s*\{([^}]*)\}/g)) {
@@ -160,10 +160,12 @@ export function extractRustSessionApiTestList(source) {
  * from the manifest is calling the SDK with the wrong shape.
  */
 export function extractSessionApiArgs(source) {
-  const body = source.match(/export async function callSessionApi\([\s\S]*?\n\}/)?.[0]
-  if (!body) throw new Error("session-api.mjs: could not locate `callSessionApi`")
+  const body = source.match(
+    /export async function callSessionApi\([\s\S]*?\n\}(?=\s*(?:\n|$))/
+  )?.[0]
+  if (!body) throw new Error("session-api.ts: could not locate `callSessionApi`")
   const sw = body.match(/switch \(method\) \{([\s\S]*)/)?.[1]
-  if (!sw) throw new Error("session-api.mjs: `callSessionApi` has no method switch")
+  if (!sw) throw new Error("session-api.ts: `callSessionApi` has no method switch")
   /** @type {Record<string, string[]>} */
   const out = {}
   const blocks = [...sw.matchAll(/case "([A-Za-z_]\w*)":([\s\S]*?)(?=\n {4}(?:case |default:))/g)]

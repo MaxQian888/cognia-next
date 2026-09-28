@@ -10,6 +10,7 @@
  * had collapsed into the same missing button.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useId } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
@@ -19,7 +20,6 @@ import {
   CopyIcon,
   GitBranchIcon,
   HistoryIcon,
-  Loader2Icon,
   MonitorUpIcon,
   MoreHorizontalIcon,
   PauseIcon,
@@ -82,7 +82,7 @@ export interface ItemHeroProps {
 /** A spinner in place of an action's icon while that action is in flight. */
 function ActionIcon({ pending, icon: Icon }: { pending: boolean; icon: typeof PlayIcon }) {
   return pending ? (
-    <Loader2Icon className="size-3.5 animate-spin" aria-hidden="true" />
+    <Spinner className="size-3.5 " aria-hidden="true" />
   ) : (
     <Icon className="size-3.5" aria-hidden="true" />
   )

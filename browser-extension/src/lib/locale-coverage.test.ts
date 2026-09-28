@@ -27,21 +27,28 @@ async function sourceFiles(dir: string): Promise<string[]> {
  * table values too is what makes "every key is used" and "every used key
  * exists" both checkable.
  */
+function requiredCapture(match: RegExpMatchArray): string {
+  const value = match[1]
+  if (value === undefined) throw new Error("Missing locale key capture")
+  return value
+}
+
 async function referencedKeys(): Promise<Set<string>> {
   const files = await sourceFiles(SRC)
   const keys = new Set<string>()
   for (const file of files) {
     const text = await readFile(file, "utf8")
     for (const match of text.matchAll(/(?:message|getMessage)\("([a-zA-Z]+)"/g)) {
-      keys.add(match[1])
+      keys.add(requiredCapture(match))
     }
     // Lookup tables: `queued: "statusQueued",` and friends.
     for (const match of text.matchAll(/:\s*"(status[A-Z]\w*|capture(?:Mode)[A-Z]\w*)"/g)) {
-      keys.add(match[1])
+      keys.add(requiredCapture(match))
     }
   }
   const manifestSource = await readFile("browser-extension/wxt.config.ts", "utf8")
-  for (const match of manifestSource.matchAll(/__MSG_([a-zA-Z]+)__/g)) keys.add(match[1])
+  for (const match of manifestSource.matchAll(/__MSG_([a-zA-Z]+)__/g))
+    keys.add(requiredCapture(match))
   return keys
 }
 
@@ -91,7 +98,9 @@ describe("extension locales", () => {
         message: string
         placeholders?: Record<string, unknown>
       }>(messages)) {
-        const used = [...value.message.matchAll(/\$([A-Z_]+)\$/g)].map((m) => m[1].toLowerCase())
+        const used = [...value.message.matchAll(/\$([A-Z_]+)\$/g)].map((m) =>
+          requiredCapture(m).toLowerCase()
+        )
         for (const name of used) {
           expect(Object.keys(value.placeholders ?? {})).toContain(name)
         }

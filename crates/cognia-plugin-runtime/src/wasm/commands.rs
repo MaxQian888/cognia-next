@@ -22,13 +22,13 @@ use serde::Serialize;
 use tauri::State;
 
 use super::super::PluginRuntimeState;
-use super::WasmPluginState;
 use super::bridge::{CancelReason, WasmRendererResponse};
 use super::host::{
     ActivateOutcome, ActivatedPlugin, WasmManifestSlice, WasmPluginHost, WasmPluginSnapshot,
 };
-use super::store::{HostState, deadline_from_timeout_ms};
+use super::store::{deadline_from_timeout_ms, HostState};
 use super::wit::since_v0_2;
+use super::WasmPluginState;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

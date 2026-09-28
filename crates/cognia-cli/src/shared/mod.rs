@@ -28,10 +28,8 @@ pub(crate) fn print_json_projected<T: serde::Serialize>(
     query: Option<&str>,
 ) -> anyhow::Result<()> {
     let value = match query {
-        Some(expression) => {
-            json_path::project(&serde_json::to_value(payload)?, expression)
-                .map_err(anyhow::Error::msg)?
-        }
+        Some(expression) => json_path::project(&serde_json::to_value(payload)?, expression)
+            .map_err(anyhow::Error::msg)?,
         None => serde_json::to_value(payload)?,
     };
     println!("{}", serde_json::to_string_pretty(&value)?);

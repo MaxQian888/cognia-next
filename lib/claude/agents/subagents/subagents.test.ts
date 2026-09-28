@@ -1,3 +1,4 @@
+import type { SendOptions } from "@cognia/agent-config-types"
 import {
   workflowDesignerAgent,
   workflowDebuggerAgent,
@@ -75,7 +76,7 @@ describe("workflow subagent definitions", () => {
   })
 
   it("workflowEditorSubagents() returns all four keyed for SDK consumption", () => {
-    const map = workflowEditorSubagents()
+    const map: NonNullable<SendOptions["agents"]> = workflowEditorSubagents()
     expect(Object.keys(map).sort()).toEqual([
       "workflow-debugger",
       "workflow-designer",

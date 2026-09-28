@@ -69,14 +69,18 @@ export interface DelegateAcceptanceProfilesProps {
 
 const KNOWN_STATUSES = new Set(["approved", "unapproved", "changed"])
 const KNOWN_SOURCES = new Set(["repository", "project"])
-const KNOWN_REASONS = new Set([
+const KNOWN_REASONS = [
   "project_not_found",
   "absent",
   "restricted",
   "invalid",
   "approval_pending",
   "fault",
-])
+] as const
+
+function isKnownReason(reason: string): reason is (typeof KNOWN_REASONS)[number] {
+  return KNOWN_REASONS.some((known) => known === reason)
+}
 const KNOWN_CODES = new Set([
   "ACCEPTANCE_PROFILE_MISSING",
   "ACCEPTANCE_PROFILE_CHANGED",
@@ -269,8 +273,8 @@ export function DelegateAcceptanceProfiles({
                   className="text-[11px] text-muted-foreground"
                   data-testid="router-fusion-acceptance-unavailable"
                 >
-                  {KNOWN_REASONS.has(listing.reason)
-                    ? t(`unavailable.${listing.reason}` as never, {
+                  {isKnownReason(listing.reason)
+                    ? t(`unavailable.${listing.reason}`, {
                         message: listing.message ?? "",
                       })
                     : listing.reason}

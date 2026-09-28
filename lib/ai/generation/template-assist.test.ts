@@ -23,8 +23,9 @@ import {
   TemplateAssistPiiBlockedError,
 } from "./template-assist"
 import type { LanguageModel } from "ai"
+import type { GenerationSeam } from "@cognia/provider-embedding/generation-seam"
 
-const model = { id: "test-model" } as unknown as LanguageModel
+const model: LanguageModel = "test-model"
 
 beforeEach(() => {
   generateObjectMock.mockReset()
@@ -188,5 +189,70 @@ describe("normalizeDraft", () => {
 
   it("falls back to a name when the model returned whitespace", () => {
     expect(normalizeDraft({ name: "  ", body: "b" }).name).toBe("Untitled template")
+  })
+})
+
+describe("template assist ledger seam", () => {
+  it.each(["generate", "improve", "suggest"])(
+    "reserves %s before sending and reports actual usage",
+    async (stage) => {
+      const usage = { inputTokens: 11, outputTokens: 7 }
+      const providerMetadata = { provider: { cachedTokens: 2 } }
+      const abortSignal = new AbortController().signal
+      generateObjectMock.mockResolvedValue({
+        object:
+          stage === "generate"
+            ? { name: "Draft", body: "{{module}}" }
+            : { suggestions: [{ id: "module", label: "Module", required: true, kind: "string" }] },
+        usage,
+        providerMetadata,
+      })
+      generateTextMock.mockResolvedValue({ text: "Better {{module}}", usage, providerMetadata })
+      const generate: GenerationSeam = async (request, send) => {
+        expect(request).toMatchObject({ stage, modelId: "test-model", abortSignal })
+        expect(generateObjectMock).not.toHaveBeenCalled()
+        expect(generateTextMock).not.toHaveBeenCalled()
+        const result = await send({ maxOutputTokens: 128, maxRetries: 0 })
+        expect(result.usage).toBe(usage)
+        expect(result.providerMetadata).toBe(providerMetadata)
+        return result.text
+      }
+      const options = { generate, abortSignal }
+      if (stage === "generate")
+        await expect(generateTemplateDraft(model, "a draft", options)).resolves.toEqual({
+          name: "Draft",
+          body: "{{module}}",
+        })
+      else if (stage === "improve")
+        await expect(improveTemplateBody(model, "{{module}}", options)).resolves.toBe(
+          "Better {{module}}"
+        )
+      else
+        await expect(suggestTemplateParams(model, "{{module}}", options)).resolves.toHaveLength(1)
+      const call = stage === "improve" ? generateTextMock : generateObjectMock
+      expect(call).toHaveBeenCalledTimes(1)
+      expect(call.mock.calls[0][0]).toMatchObject({
+        model,
+        abortSignal,
+        maxOutputTokens: 128,
+        maxRetries: 0,
+      })
+      if (stage !== "improve") expect(call.mock.calls[0][0].schema).toBeDefined()
+    }
+  )
+
+  it("rejects PII before reaching the ledger and never bypasses a ledger refusal", async () => {
+    const generate = jest.fn(async () => {
+      throw new Error("budget_refused")
+    })
+    piiMock.mockReturnValue(false)
+    await expect(generateTemplateDraft(model, "private", { generate })).rejects.toBeInstanceOf(
+      TemplateAssistPiiBlockedError
+    )
+    expect(generate).not.toHaveBeenCalled()
+    piiMock.mockReturnValue(true)
+    await expect(improveTemplateBody(model, "safe", { generate })).rejects.toThrow("budget_refused")
+    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(generateObjectMock).not.toHaveBeenCalled()
   })
 })

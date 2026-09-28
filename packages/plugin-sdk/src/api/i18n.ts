@@ -28,5 +28,23 @@ export type { LocaleCode, PluginI18nBundle } from "@/lib/i18n/plugin-i18n-regist
  * keys, same locale → English → key fallback, and it re-renders on a language
  * switch or when the plugin's bundle registers.
  */
-export { usePluginTranslations } from "@/lib/plugin/api/use-plugin-translations"
+import type { usePluginTranslations as HostUsePluginTranslations } from "@/lib/plugin/api/use-plugin-translations"
+import { PluginAdapterError } from "../errors/adapter-error"
+
+let hostTranslate: typeof HostUsePluginTranslations | undefined
+
+/** Host loader seam; excluded from the evaluated plugin module. */
+export function bindPluginTranslationsHost(hook: typeof HostUsePluginTranslations): void {
+  hostTranslate = hook
+}
+
+export const usePluginTranslations: typeof HostUsePluginTranslations = (pluginId) => {
+  if (!hostTranslate) {
+    throw new PluginAdapterError(
+      "DEPENDENCY_MISSING",
+      "Plugin translations require the Cognia host runtime"
+    )
+  }
+  return hostTranslate(pluginId)
+}
 export type { PluginTranslate } from "@/lib/plugin/api/use-plugin-translations"

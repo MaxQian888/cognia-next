@@ -87,7 +87,7 @@ beforeEach(() => {
   useAgentTeamStore.getState().upsertTeam(team)
   useProjectStore.setState({
     activeProjectId: "ws-1",
-    projects: [{ id: "ws-1", name: "Work", rootDir: "/repo" }],
+    projects: [{ id: "ws-1", name: "Work", roots: [{ path: "/repo", isPrimary: true }] }],
   } as never)
   environments = []
   jest.clearAllMocks()

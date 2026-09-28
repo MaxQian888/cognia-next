@@ -1218,7 +1218,9 @@ pub fn fs_walk_workspace(
                 .flatten()
                 .and_then(|t| t.file_name().map(|n| n.to_string_lossy().into_owned()));
             if name.as_deref().is_some_and(is_sensitive_workspace_file)
-                || target_name.as_deref().is_some_and(is_sensitive_workspace_file)
+                || target_name
+                    .as_deref()
+                    .is_some_and(is_sensitive_workspace_file)
             {
                 skipped_sensitive += 1;
                 continue;
@@ -1701,8 +1703,16 @@ pub fn slash_commands_scan(cwd: Option<String>) -> Result<Vec<SlashCommandFile>,
     let mut out: Vec<SlashCommandFile> = Vec::new();
     if let Some(cwd) = cwd.as_ref() {
         let project = PathBuf::from(cwd);
-        collect_command_files(&project.join(".cognia").join("commands"), "project", &mut out);
-        collect_command_files(&project.join(".claude").join("commands"), "project", &mut out);
+        collect_command_files(
+            &project.join(".cognia").join("commands"),
+            "project",
+            &mut out,
+        );
+        collect_command_files(
+            &project.join(".claude").join("commands"),
+            "project",
+            &mut out,
+        );
     }
     if let Some(home) = dirs::home_dir() {
         let user_root = home.join(".claude").join("commands");
@@ -2503,12 +2513,10 @@ mod tests {
 
         let report = fs_workspace_roots();
         assert_eq!(report.roots.len(), roots.len());
-        assert!(
-            report
-                .roots
-                .iter()
-                .all(|root| root.source == WORKSPACE_ROOT_SOURCE_DESKTOP)
-        );
+        assert!(report
+            .roots
+            .iter()
+            .all(|root| root.source == WORKSPACE_ROOT_SOURCE_DESKTOP));
         assert!(report.roots.iter().any(|root| root.path == present_key));
 
         let _ = std::fs::remove_dir_all(&present);
@@ -3260,12 +3268,7 @@ mod tests {
         std::fs::write(cognia.join("zz-notes.txt"), "ignored").unwrap();
 
         let found = slash_commands_scan(Some(root.to_string_lossy().to_string())).unwrap();
-        let by_name = |name: &str| {
-            found
-                .iter()
-                .filter(|f| f.name == name)
-                .collect::<Vec<_>>()
-        };
+        let by_name = |name: &str| found.iter().filter(|f| f.name == name).collect::<Vec<_>>();
 
         let shadowed = by_name("zz-shadowed");
         assert_eq!(shadowed.len(), 1, "one name resolves to exactly one file");
@@ -3281,10 +3284,7 @@ mod tests {
 
         let nested = by_name("nested/zz-claude-only");
         assert_eq!(nested.len(), 1, "nested .claude command is discovered");
-        assert_eq!(
-            nested[0].origin_dir,
-            claude.to_string_lossy().to_string()
-        );
+        assert_eq!(nested[0].origin_dir, claude.to_string_lossy().to_string());
 
         assert_eq!(by_name("zz-cognia-only").len(), 1);
         assert!(

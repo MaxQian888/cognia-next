@@ -4887,7 +4887,11 @@ fn completions_bash_prints_a_script() {
         stdout.contains("cognia"),
         "completion script should reference the binary: {stdout}"
     );
-    assert!(stdout.len() > 500, "script looks truncated: {} bytes", stdout.len());
+    assert!(
+        stdout.len() > 500,
+        "script looks truncated: {} bytes",
+        stdout.len()
+    );
 }
 
 #[test]
@@ -4917,7 +4921,10 @@ fn open_print_emits_the_deeplink_without_launching() {
     // A non-cognia URL must be rejected before any launch attempt.
     let (code, _, stderr) = run_cognia(&["open", "https://evil.example", "--print"]);
     assert_ne!(code, Some(0), "foreign scheme should fail");
-    assert!(stderr.contains("cognia://"), "stderr should explain: {stderr}");
+    assert!(
+        stderr.contains("cognia://"),
+        "stderr should explain: {stderr}"
+    );
 }
 
 #[test]

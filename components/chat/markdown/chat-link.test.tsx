@@ -162,7 +162,7 @@ describe("ChatLink", () => {
     register(
       lazy(
         () =>
-          new Promise((done) => {
+          new Promise<{ default: ComponentType<LinkMatcherProps> }>((done) => {
             resolve = done
           })
       )

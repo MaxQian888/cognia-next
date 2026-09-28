@@ -79,15 +79,15 @@ async function emitBuffer(
     ...(quality !== undefined ? { quality: Math.min(Math.max(quality, 0), 100) / 100 } : {}),
   })
 
-  const accountId = getActiveAccountId()
-  if (!accountId) {
+  const localAccountId = getActiveAccountId()
+  if (!localAccountId) {
     throw nonRetryable(
       "action.image: no unlocked account, so there is nowhere to put the result. " +
         "Image nodes need an account to encrypt run artifacts with."
     )
   }
   const handle = await storeWorkflowBlob({
-    accountId,
+    localAccountId,
     runId: ctx.runId,
     stepId: ctx.stepId,
     bytes: encoded.bytes,

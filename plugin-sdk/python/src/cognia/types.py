@@ -369,6 +369,31 @@ class ToolRendererDef:
 
 
 @dataclass(frozen=True)
+class LinkMatcherDef:
+    """Lazy React link renderer metadata (``manifest.linkMatchers``)."""
+
+    id: str
+    patterns: List[str]
+    entry: str
+    export: str
+    label: Optional[str] = None
+    priority: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "patterns": list(self.patterns),
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.label is not None:
+            out["label"] = self.label
+        if self.priority is not None:
+            out["priority"] = self.priority
+        return out
+
+
+@dataclass(frozen=True)
 class DensityPresetContribution:
     """A density preset contribution (``manifest.densityPresets``)."""
 

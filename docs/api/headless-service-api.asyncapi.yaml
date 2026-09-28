@@ -3,7 +3,7 @@ info:
   title: Cognia Headless Service Event and Bridge API
   version: "3"
   description: Generated WebSocket contract for the existing Headless event stream and Brain data-plane bridge.
-  x-cognia-catalog-hash: fa6e58fc8577ddcb5a2f8d178156c77ef0b769077ba69b9353f39599381885d0
+  x-cognia-catalog-hash: 706f93be043fac71ec484a1ea1bc824d67090833f77dce8a2018cf3d4d15acff
 servers:
   loopback:
     host: 127.0.0.1:{port}
@@ -260,7 +260,7 @@ components:
           - catalogHash
           - contractVersion
         properties:
-          v: &a1
+          v:
             type: integer
             const: 3
           type:
@@ -282,7 +282,7 @@ components:
               type: string
           catalogHash:
             type: string
-            const: fa6e58fc8577ddcb5a2f8d178156c77ef0b769077ba69b9353f39599381885d0
+            const: 706f93be043fac71ec484a1ea1bc824d67090833f77dce8a2018cf3d4d15acff
           contractVersion:
             type: integer
             const: 3
@@ -300,7 +300,9 @@ components:
           - catalogHash
           - contractVersion
         properties:
-          v: *a1
+          v:
+            type: integer
+            const: 3
           type:
             type: string
             const: hello_ack
@@ -313,7 +315,7 @@ components:
             type: string
           catalogHash:
             type: string
-            const: fa6e58fc8577ddcb5a2f8d178156c77ef0b769077ba69b9353f39599381885d0
+            const: 706f93be043fac71ec484a1ea1bc824d67090833f77dce8a2018cf3d4d15acff
           contractVersion:
             type: integer
             const: 3
@@ -328,7 +330,9 @@ components:
           - event
           - payload
         properties:
-          v: *a1
+          v:
+            type: integer
+            const: 3
           type:
             type: string
             const: event
@@ -346,7 +350,9 @@ components:
           - command
           - payload
         properties:
-          v: *a1
+          v:
+            type: integer
+            const: 3
           type:
             type: string
             const: respond
@@ -364,7 +370,9 @@ components:
           - type
           - ts
         properties:
-          v: *a1
+          v:
+            type: integer
+            const: 3
           type:
             type: string
             const: ping
@@ -383,7 +391,9 @@ components:
           - rssBytes
           - lastFlushAt
         properties:
-          v: *a1
+          v:
+            type: integer
+            const: 3
           type:
             type: string
             const: pong
@@ -406,7 +416,9 @@ components:
           - type
           - token
         properties:
-          v: *a1
+          v:
+            type: integer
+            const: 3
           type:
             type: string
             const: token_refresh
@@ -425,7 +437,9 @@ components:
           - hostRef
           - manifest
         properties:
-          v: *a1
+          v:
+            type: integer
+            const: 3
           type:
             type: string
             const: worker_attach
@@ -448,7 +462,9 @@ components:
           - connectionId
           - frame
         properties:
-          v: *a1
+          v:
+            type: integer
+            const: 3
           type:
             type: string
             const: worker_frame
@@ -469,7 +485,9 @@ components:
           - hostRef
           - reason
         properties:
-          v: *a1
+          v:
+            type: integer
+            const: 3
           type:
             type: string
             const: worker_detach

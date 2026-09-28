@@ -175,14 +175,14 @@ export async function enqueueHostStateIntentIfAvailable(
 export async function enqueue(input: EnqueueInput): Promise<MobileOutboundJobRow> {
   const now = input.nowMs ?? Date.now()
   const activeScope = getActiveRuntimeTargetContext()
-  const accountId = input.accountId ?? activeScope?.accountId
+  const localAccountId = input.accountId ?? activeScope?.accountId
   const targetId = input.targetId ?? activeScope?.targetId
-  if (!accountId || !targetId) {
+  if (!localAccountId || !targetId) {
     throw new Error("Outbound queue requires an active account and runtime target.")
   }
   const row: MobileOutboundJobRow = {
     id: input.id ?? nanoid(),
-    accountId,
+    accountId: localAccountId,
     targetId,
     command: input.command,
     payload: input.payload,
@@ -212,9 +212,9 @@ export async function enqueue(input: EnqueueInput): Promise<MobileOutboundJobRow
 export async function enqueueCollabMutation(
   input: EnqueueCollabMutationInput
 ): Promise<MobileOutboundJobRow> {
-  const accountId = input.accountId ?? getActiveAccountId()
+  const localAccountId = input.accountId ?? getActiveAccountId()
   const targetId = input.targetId ?? "collab-plane"
-  if (!accountId) {
+  if (!localAccountId) {
     throw new Error("Collaboration queue requires an active account.")
   }
   const now = input.nowMs ?? Date.now()
@@ -228,7 +228,7 @@ export async function enqueueCollabMutation(
       .filter(
         (row) =>
           row.protocol === "collab-v1" &&
-          row.accountId === accountId &&
+          row.accountId === localAccountId &&
           row.targetId === targetId &&
           row.channel === channel
       )
@@ -236,7 +236,7 @@ export async function enqueueCollabMutation(
     const clientSeq = rows.reduce((highest, row) => Math.max(highest, row.clientSeq ?? 0), 0) + 1
     const row: MobileOutboundJobRow = {
       id: operationId,
-      accountId,
+      accountId: localAccountId,
       targetId,
       command: input.command,
       payload: { ...input.payload, orgId: input.orgId, operationId },

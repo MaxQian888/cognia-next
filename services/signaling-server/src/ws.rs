@@ -520,7 +520,9 @@ async fn handle_frame(
                 }
             }
             state.metrics.frame_relayed(fanout);
-            state.metrics.lane_relayed(lane, payload_bytes.saturating_mul(fanout));
+            state
+                .metrics
+                .lane_relayed(lane, payload_bytes.saturating_mul(fanout));
         }
         ClientFrame::Ping => {
             let _ = tx.send(ServerFrame::Pong).await;
@@ -554,13 +556,13 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cognia_signaling_core::proto::RelayLane;
     use crate::{
         ip_limits::IpLimits,
         metrics::Metrics,
         room::{RoomRegistry, PEER_OUTBOUND_BUFFER},
     };
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use cognia_signaling_core::proto::RelayLane;
     use cognia_signaling_core::{
         proto::{RoomDescriptor, SubscribeProof},
         protocol::{derive_room_id, subscribe_proof_bytes},

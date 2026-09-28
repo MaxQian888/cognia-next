@@ -43,7 +43,7 @@ export interface LimitsRunnerDeps {
   authedGet: (url: string, headers?: Record<string, string>) => Promise<string>
   /** POST-capable passthrough (`subscription_authed_request`) for Connect-RPC sources. */
   authedRequest: NonNullable<LimitsSourceContext["authedRequest"]>
-  getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
+  getAccount: (provider: ProviderId, providerAccountId: string) => Promise<Account | null>
   listPresets: (provider: ProviderId) => Promise<ProviderPreset[]>
   getProviderPreset: (provider: ProviderId) => Promise<ProviderPreset | null>
   now: () => number
@@ -54,7 +54,7 @@ export interface LimitsRunnerDeps {
    * token (the primary cause of "Claude 额度刷新无效"). Returns `null` when
    * refresh isn't possible. Defaults to the real vault-backed implementation.
    */
-  refreshAnthropicToken: (accountId: string) => Promise<string | null>
+  refreshAnthropicToken: (providerAccountId: string) => Promise<string | null>
   /** Freshness predicate for an Anthropic credential. Injected for tests. */
   isCredentialFresh: (credential: AnthropicCredentialData, now: number) => boolean
   /**
@@ -64,7 +64,7 @@ export interface LimitsRunnerDeps {
    * panel silently froze the same way "Claude 额度刷新无效" did. `reactivate:
    * false`: a quota poll must never flip the active-account pointer.
    */
-  refreshCodexToken: (accountId: string) => Promise<string | null>
+  refreshCodexToken: (providerAccountId: string) => Promise<string | null>
   /** Freshness predicate for a Codex credential. Injected for tests. */
   isCodexFresh: (credential: CodexCredentialData, now: number) => boolean
 }
@@ -83,13 +83,13 @@ const DEFAULT_DEPS: LimitsRunnerDeps = {
   getProviderPreset: defaultGetProviderPreset,
   now: () => Date.now(),
   getLocalAccountId: () => useAccountStore.getState().unlockedAccountId,
-  refreshAnthropicToken: async (accountId) => {
-    const merged = await refreshAndPersistAnthropicAccount(accountId, { reactivate: false })
+  refreshAnthropicToken: async (providerAccountId) => {
+    const merged = await refreshAndPersistAnthropicAccount(providerAccountId, { reactivate: false })
     return merged?.accessToken ?? null
   },
   isCredentialFresh: (credential, now) => isAnthropicCredentialFresh(credential, now),
-  refreshCodexToken: async (accountId) => {
-    const fresh = await refreshCodexAccountIfStale(accountId, { reactivate: false })
+  refreshCodexToken: async (providerAccountId) => {
+    const fresh = await refreshCodexAccountIfStale(providerAccountId, { reactivate: false })
     return fresh?.accessToken ?? null
   },
   isCodexFresh: (credential, now) => isCodexCredentialFresh(credential, now),
@@ -107,7 +107,7 @@ const DEFAULT_DEPS: LimitsRunnerDeps = {
  */
 export async function queryAccountLimits(
   provider: ProviderId,
-  accountId: string,
+  providerAccountId: string,
   deps: Partial<LimitsRunnerDeps> = {}
 ): Promise<ProviderLimits | null> {
   const {
@@ -135,7 +135,7 @@ export async function queryAccountLimits(
     }
     if (lifecycleError) throw lifecycleError
   }
-  const account = await getAccount(provider, accountId)
+  const account = await getAccount(provider, providerAccountId)
   assertScope()
   if (!account) return null
   if (account.credential.provider === "codex") assertCodexAccountLifecycleReady(account)
@@ -165,9 +165,9 @@ export async function queryAccountLimits(
       : null
 
   const runRefresh: (() => Promise<string | null>) | undefined = anthropicCred
-    ? () => refreshAnthropicToken(accountId)
+    ? () => refreshAnthropicToken(providerAccountId)
     : codexCred
-      ? () => refreshCodexToken(accountId)
+      ? () => refreshCodexToken(providerAccountId)
       : undefined
   let refreshAttempt: Promise<string | null> | null = null
   const refreshBearer: (() => Promise<string | null>) | undefined = runRefresh
@@ -212,7 +212,7 @@ export async function queryAccountLimits(
 
   const ctx: LimitsSourceContext = {
     provider,
-    accountId,
+    accountId: providerAccountId,
     accountLabel: account.label,
     token,
     credential: account.credential,
@@ -264,7 +264,7 @@ export async function queryAccountLimits(
         ...snapshot,
         sourceId: snapshot.sourceId ?? snapshot.provider,
         provider,
-        accountId,
+        accountId: providerAccountId,
         accountLabel: account.label,
       }
     }

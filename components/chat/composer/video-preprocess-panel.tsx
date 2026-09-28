@@ -16,10 +16,11 @@
  * a team room.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useId, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Slider as SliderPrimitive } from "radix-ui"
-import { AlertTriangleIcon, Loader2Icon, RotateCcwIcon } from "lucide-react"
+import { AlertTriangleIcon, RotateCcwIcon } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -242,7 +243,7 @@ export function VideoPreprocessPanel({
             <SliderPrimitive.Thumb
               key={label}
               aria-label={label}
-              className="block size-4 shrink-0 rounded-pill border border-primary bg-background shadow-sm ring-ring/50 transition-[color,box-shadow] hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden"
+              className="block size-4 shrink-0 rounded-pill border border-primary bg-background shadow-(--elevation-1) ring-ring/50 transition-[color,box-shadow] hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden"
             />
           ))}
         </SliderPrimitive.Root>
@@ -279,7 +280,7 @@ export function VideoPreprocessPanel({
           disabled={!canApply}
           onClick={() => onApply(normalizeVideoSettings(draft, duration))}
         >
-          {processing ? <Loader2Icon className="size-3.5 animate-spin" aria-hidden /> : null}
+          {processing ? <Spinner className="size-3.5 " aria-hidden /> : null}
           {processing ? t("applying") : t("apply")}
         </Button>
         <Button

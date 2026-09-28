@@ -26,11 +26,11 @@ export interface AccountSwitchController {
   error: string | null
   submitting: boolean
   /**
-   * Begin switching to `accountId`. Resolves `true` when the switch completed
+   * Begin switching to `localAccountId`. Resolves `true` when the switch completed
    * synchronously (active → no-op, or unlocked → passwordless); resolves
    * `false` when a password prompt was opened (`pendingId` set).
    */
-  begin: (accountId: string) => Promise<boolean>
+  begin: (localAccountId: string) => Promise<boolean>
   /** Confirm the pending switch using the entered password. */
   confirm: () => Promise<boolean>
   /** Dismiss the password prompt and reset transient state. */
@@ -39,7 +39,7 @@ export interface AccountSwitchController {
 
 export interface UseAccountSwitchOptions {
   /** Called after a successful switch/unlock with the target account id. */
-  onSwitched?: (accountId: string) => void
+  onSwitched?: (localAccountId: string) => void
   /** Fallback message shown for non-Error throwables. */
   operationFailedLabel?: string
 }
@@ -61,13 +61,13 @@ export function useAccountSwitch(options: UseAccountSwitchOptions = {}): Account
     setError(null)
   }
 
-  const finish = async (accountId: string, pw?: string): Promise<boolean> => {
+  const finish = async (localAccountId: string, pw?: string): Promise<boolean> => {
     setSubmitting(true)
     setError(null)
     try {
-      await switchAccount(accountId, pw)
+      await switchAccount(localAccountId, pw)
       reset()
-      options.onSwitched?.(accountId)
+      options.onSwitched?.(localAccountId)
       return true
     } catch (err) {
       setError(toMessage(err, options.operationFailedLabel))
@@ -77,21 +77,21 @@ export function useAccountSwitch(options: UseAccountSwitchOptions = {}): Account
     }
   }
 
-  const begin = async (accountId: string): Promise<boolean> => {
+  const begin = async (localAccountId: string): Promise<boolean> => {
     setError(null)
     setPassword("")
-    if (accountId === activeAccountId) {
+    if (localAccountId === activeAccountId) {
       setPendingId(null)
       return true
     }
     if (
-      accountId === unlockedAccountId ||
-      unlocksWithoutPrompt(accounts?.find((account) => account.id === accountId))
+      localAccountId === unlockedAccountId ||
+      unlocksWithoutPrompt(accounts?.find((account) => account.id === localAccountId))
     ) {
       // Verified earlier this session → activate without re-prompting.
-      return finish(accountId)
+      return finish(localAccountId)
     }
-    setPendingId(accountId)
+    setPendingId(localAccountId)
     return false
   }
 

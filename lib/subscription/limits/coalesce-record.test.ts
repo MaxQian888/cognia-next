@@ -40,7 +40,7 @@ beforeEach(() => {
   breaker = new SubscriptionBreaker()
   options = {
     provider: "anthropic",
-    accountId: "acc-1",
+    providerAccountId: "acc-1",
     now: () => NOW,
     breaker,
     random: () => 0,

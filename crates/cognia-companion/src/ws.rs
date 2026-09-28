@@ -143,7 +143,7 @@ pub async fn internal_ws_handler(
     upgrade_events_ws(
         ws,
         params.since,
-        Some(context.account_id),
+        Some(context.tenant_id),
         context.device_id,
         ConnectionScope::from_claim(&context.scope),
         state,

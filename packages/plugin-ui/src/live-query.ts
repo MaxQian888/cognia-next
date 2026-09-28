@@ -10,4 +10,16 @@
  * the host's own module graph at load time, so the hook shares the host's
  * Dexie.
  */
-export { useLiveQuery } from "dexie-react-hooks"
+import { useLiveQuery as hostUseLiveQuery } from "dexie-react-hooks"
+
+// Keep the host function identity while publishing only this hook's types.
+// Re-exporting the upstream barrel leaks unrelated useDocument dependencies
+// into every standalone author project importing the UI declaration bundle.
+export const useLiveQuery: {
+  <T>(querier: () => Promise<T> | T, deps?: unknown[]): T | undefined
+  <T, TDefault>(
+    querier: () => Promise<T> | T,
+    deps: unknown[],
+    defaultResult: TDefault
+  ): T | TDefault
+} = hostUseLiveQuery

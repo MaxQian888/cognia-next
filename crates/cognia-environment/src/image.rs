@@ -358,9 +358,10 @@ mod tests {
     /// different image on the other.
     #[test]
     fn protocol_fixtures_parse_identically_to_the_typescript_parser() {
-        let fixtures: serde_json::Value =
-            serde_json::from_str(include_str!("../../../protocol/image-reference-fixtures.json"))
-                .unwrap();
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../protocol/image-reference-fixtures.json"
+        ))
+        .unwrap();
         let cases = fixtures["cases"].as_array().unwrap();
         assert!(cases.len() >= 20, "fixture file lost its cases");
         for case in cases {
@@ -369,8 +370,16 @@ mod tests {
                 (Ok(reference), Some(expected)) => {
                     assert_eq!(reference.registry, expected["registry"], "{input}");
                     assert_eq!(reference.repository, expected["repository"], "{input}");
-                    assert_eq!(reference.tag.as_deref(), expected["tag"].as_str(), "{input}");
-                    assert_eq!(reference.digest.as_deref(), expected["digest"].as_str(), "{input}");
+                    assert_eq!(
+                        reference.tag.as_deref(),
+                        expected["tag"].as_str(),
+                        "{input}"
+                    );
+                    assert_eq!(
+                        reference.digest.as_deref(),
+                        expected["digest"].as_str(),
+                        "{input}"
+                    );
                     assert_eq!(reference.canonical(), expected["canonical"], "{input}");
                 }
                 (Err(error), None) => {

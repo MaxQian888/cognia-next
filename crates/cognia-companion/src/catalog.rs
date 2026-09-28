@@ -162,7 +162,7 @@ mod tests {
     fn principal(scope: &str, capabilities: Option<Vec<&str>>) -> DeviceContext {
         DeviceContext {
             device_id: "device-a".to_string(),
-            account_id: ACCOUNT_ID.to_string(),
+            tenant_id: ACCOUNT_ID.to_string(),
             scope: scope.to_string(),
             granted_scopes: Vec::new(),
             authorization_capabilities: capabilities

@@ -2633,7 +2633,7 @@ export function ProjectEditorFileWorkbench({
       className="flex h-full flex-1 flex-col items-center justify-center gap-5 p-6"
       data-testid="editor-empty"
     >
-      <div className="flex size-14 items-center justify-center rounded-2xl bg-muted/60">
+      <div className="flex size-14 items-center justify-center rounded-stage bg-muted/60">
         <FileIcon className="size-6 text-muted-foreground" />
       </div>
       <p className="text-center text-sm text-muted-foreground">{t("emptyEditor")}</p>

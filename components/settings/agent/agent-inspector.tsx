@@ -20,9 +20,11 @@
  * manager holding the old configuration.
  */
 
+import { Surface } from "@/components/surface/surface"
+import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Copy, Edit, Loader2, Power, PowerOff, Trash2 } from "lucide-react"
+import { Copy, Edit, Power, PowerOff, Trash2 } from "lucide-react"
 
 import { toast } from "@/components/ui/sonner"
 import { Badge } from "@/components/ui/badge"
@@ -324,7 +326,7 @@ export function AgentInspector({
     setDraft((current) => ({ ...current, [key]: value }))
 
   const dirtyBar = dirty ? (
-    <div
+    <Surface
       className="flex items-center justify-end gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2"
       data-testid="inspector-dirty-bar"
     >
@@ -335,10 +337,10 @@ export function AgentInspector({
         {tCommon("cancel")}
       </Button>
       <Button size="sm" onClick={() => void saveDraft()} disabled={saving}>
-        {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+        {saving ? <Spinner className="mr-1 h-3.5 w-3.5 " /> : null}
         {tCommon("save")}
       </Button>
-    </div>
+    </Surface>
   ) : null
 
   return (
@@ -395,7 +397,7 @@ export function AgentInspector({
               }
             >
               {isConnecting ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                <Spinner className="mr-1 h-4 w-4 " />
               ) : (
                 <Power className="mr-1 h-4 w-4" />
               )}
@@ -428,7 +430,7 @@ export function AgentInspector({
 
       {/* Readiness strip — the same pipeline the overview row shows, plus the
           reason and the one action that would move the agent forward. */}
-      <div
+      <Surface
         className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/20 px-3 py-2"
         data-testid="inspector-readiness"
       >
@@ -459,7 +461,7 @@ export function AgentInspector({
             {tReadiness(INSPECTOR_ACTION_KEY[readiness.nextAction])}
           </Button>
         ) : null}
-      </div>
+      </Surface>
 
       <Tabs defaultValue="overview" className="w-full">
         <TabsList>

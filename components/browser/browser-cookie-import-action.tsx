@@ -1,5 +1,6 @@
 "use client"
 
+import { Surface } from "@/components/surface/surface"
 import { CookieIcon } from "lucide-react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
@@ -260,7 +261,7 @@ export function BrowserCookieImportAction({
             <p className="text-xs text-muted-foreground">{t("description")}</p>
           </div>
           {importBlocker ? (
-            <div
+            <Surface
               role="status"
               data-testid="browser-cookie-import-blocked"
               className="flex flex-col items-start gap-2 rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground"
@@ -273,7 +274,7 @@ export function BrowserCookieImportAction({
                   </Link>
                 </Button>
               )}
-            </div>
+            </Surface>
           ) : !consented ? (
             <div className="grid gap-2 rounded-md border p-3">
               <p className="text-sm font-medium">{t("consent.title")}</p>

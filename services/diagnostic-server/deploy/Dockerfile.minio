@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1.12
+# Community MinIO is source-only; its former registry images now reject pulls.
+# Official release commits, resolved through the Go proxy and checksum database:
+# https://github.com/minio/minio/releases/tag/RELEASE.2025-10-15T17-29-55Z
+# https://github.com/minio/mc/releases/tag/RELEASE.2025-08-13T08-35-41Z
+FROM golang:1.26.8-alpine3.24 AS source
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOBIN=/out
+
+FROM source AS server-build
+ARG MINIO_VERSION=v0.0.0-20251015172955-9e49d5e7a648
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go install -trimpath -ldflags="-s -w" "github.com/minio/minio@${MINIO_VERSION}" \
+    && cp "/go/pkg/mod/github.com/minio/minio@${MINIO_VERSION}/LICENSE" /out/LICENSE
+
+FROM source AS client-build
+ARG MC_VERSION=v0.0.0-20250813083541-7394ce0dd2a8
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go install -trimpath -ldflags="-s -w" "github.com/minio/mc@${MC_VERSION}" \
+    && cp "/go/pkg/mod/github.com/minio/mc@${MC_VERSION}/LICENSE" /out/LICENSE
+
+FROM alpine:3.24 AS runtime
+RUN apk add --no-cache ca-certificates curl
+
+FROM runtime AS server
+COPY --from=server-build /out/minio /usr/local/bin/minio
+COPY --from=server-build /out/LICENSE /usr/share/licenses/minio/LICENSE
+EXPOSE 9000 9001
+ENTRYPOINT ["minio"]
+CMD ["server", "/data", "--console-address", ":9001"]
+
+FROM runtime AS client
+COPY --from=client-build /out/mc /usr/local/bin/mc
+COPY --from=client-build /out/LICENSE /usr/share/licenses/mc/LICENSE
+ENTRYPOINT ["mc"]

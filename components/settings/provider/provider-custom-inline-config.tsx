@@ -12,8 +12,9 @@
  * component that rendered it in one slot.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useState } from "react"
-import { Eye, EyeOff, Key, Loader2, PlugZap, Settings, Sparkles } from "lucide-react"
+import { Eye, EyeOff, Key, PlugZap, Settings, Sparkles } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import {
@@ -127,11 +128,7 @@ export function CustomProviderInlineConfig({
               disabled={isTesting || canTestConnection === false}
               data-testid="custom-provider-test"
             >
-              {isTesting ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <PlugZap className="h-3 w-3" />
-              )}
+              {isTesting ? <Spinner className="h-3 w-3 " /> : <PlugZap className="h-3 w-3" />}
               {t("testConnection")}
             </Button>
             <Button

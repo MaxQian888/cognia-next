@@ -36,6 +36,7 @@
 // off disk arrived from somewhere too, and a permission mode is not something a
 // file gets to raise.
 
+import { Surface } from "@/components/surface/surface"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
@@ -572,158 +573,164 @@ export function ChatTemplatesSection({ mobile = false }: ChatTemplatesSectionPro
           chooseLabel={t("chooseTemplate")}
         />
 
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
-          {creating ? (
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <div className="mx-auto max-w-2xl">
-                <h3 className="mb-1 text-sm font-semibold">{t("newTemplateTitle")}</h3>
-                <p className="mb-4 text-xs text-muted-foreground">{t("newTemplateHint")}</p>
-                <ChatTemplateEditor
-                  mobile={mobile}
-                  onCancel={() => setCreating(false)}
-                  onSaved={(row) => {
-                    setCreating(false)
-                    reload()
-                    setSelectedId(row.id)
-                  }}
-                />
-              </div>
-            </div>
-          ) : selected ? (
-            <>
-              <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    {selected.source === "repo" ? (
-                      <GitBranchIcon className="size-4 shrink-0 text-muted-foreground" />
-                    ) : (
-                      <FileCode2Icon className="size-4 shrink-0 text-muted-foreground" />
-                    )}
-                    <h3 className="truncate text-sm font-semibold">{selected.row.name}</h3>
-                    {selected.source === "repo" ? (
-                      <Badge variant="outline" className="gap-1 text-[10px]">
-                        {t("repoReadOnly")}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {selected.row.description ??
-                      (selected.source === "repo" ? selected.row.sourcePath : "")}
-                  </p>
-                  {launchSpecSummary(selected.row.launchSpec) ? (
-                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                      {t("suggestsSetup", {
-                        summary: launchSpecSummary(selected.row.launchSpec) ?? "",
-                      })}
-                    </p>
-                  ) : null}
-                </div>
-                <DetailActions
-                  item={selected}
-                  onUseInChat={() => void openInChat(selected.row)}
-                  onCopy={() => void copyMessage(selected.row)}
-                  onEdit={() => {
-                    setFilling(null)
-                    setEditing(true)
-                  }}
-                  onAdopt={() => selected.source === "repo" && void adopt(selected.row)}
-                  onDuplicate={() => selected.source === "personal" && void duplicate(selected.row)}
-                  onExport={() => selected.source === "personal" && exportOne(selected.row)}
-                  onSaveToRepo={() =>
-                    selected.source === "personal" && void saveToRepo(selected.row)
-                  }
-                  onDelete={() => selected.source === "personal" && setDeleting(selected.row)}
-                />
-              </header>
+        <Surface asChild>
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
+            {creating ? (
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                {editing && selected.source === "personal" ? (
-                  <div className="mx-auto max-w-2xl">
-                    <ChatTemplateEditor
-                      key={selected.row.id}
-                      row={selected.row}
-                      mobile={mobile}
-                      onCancel={() => setEditing(false)}
-                      onSaved={() => {
-                        setEditing(false)
-                        reload()
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="mx-auto max-w-2xl space-y-5">
-                    <div>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                          {t("messagePreview")}
-                        </p>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "text-[10px]",
-                            missing === 0
-                              ? "border-emerald-500/40 text-emerald-600"
-                              : "border-amber-500/40 text-amber-600"
-                          )}
-                        >
-                          {missing === 0 ? t("readyToSend") : t("requiredLeft", { count: missing })}
+                <div className="mx-auto max-w-2xl">
+                  <h3 className="mb-1 text-sm font-semibold">{t("newTemplateTitle")}</h3>
+                  <p className="mb-4 text-xs text-muted-foreground">{t("newTemplateHint")}</p>
+                  <ChatTemplateEditor
+                    mobile={mobile}
+                    onCancel={() => setCreating(false)}
+                    onSaved={(row) => {
+                      setCreating(false)
+                      reload()
+                      setSelectedId(row.id)
+                    }}
+                  />
+                </div>
+              </div>
+            ) : selected ? (
+              <>
+                <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      {selected.source === "repo" ? (
+                        <GitBranchIcon className="size-4 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <FileCode2Icon className="size-4 shrink-0 text-muted-foreground" />
+                      )}
+                      <h3 className="truncate text-sm font-semibold">{selected.row.name}</h3>
+                      {selected.source === "repo" ? (
+                        <Badge variant="outline" className="gap-1 text-[10px]">
+                          {t("repoReadOnly")}
                         </Badge>
-                      </div>
-                      <div ref={setPreviewBox}>
-                        <ChatTemplateBodyPreview
-                          body={selected.row.body}
-                          values={tryValues}
-                          onParamClick={(id) => setFilling(id)}
-                          isResolvable={isResourceResolvable}
-                        />
-                      </div>
-                      {selected.row.params.length > 0 ? (
-                        <p className="mt-2 text-[11px] text-muted-foreground">
-                          {t("clickSlotHint")}
-                        </p>
                       ) : null}
                     </div>
-                    <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <SlashSquareIcon className="size-3.5 shrink-0" />
-                        <span className="truncate">
-                          {t("useHint", { name: selected.row.name })}
-                        </span>
-                      </span>
-                      <span className="shrink-0 tabular-nums">
-                        {selected.source === "repo"
-                          ? selected.row.sourcePath
-                          : t("used", { count: selected.row.usageCount })}
-                      </span>
-                    </div>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {selected.row.description ??
+                        (selected.source === "repo" ? selected.row.sourcePath : "")}
+                    </p>
+                    {launchSpecSummary(selected.row.launchSpec) ? (
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                        {t("suggestsSetup", {
+                          summary: launchSpecSummary(selected.row.launchSpec) ?? "",
+                        })}
+                      </p>
+                    ) : null}
                   </div>
-                )}
+                  <DetailActions
+                    item={selected}
+                    onUseInChat={() => void openInChat(selected.row)}
+                    onCopy={() => void copyMessage(selected.row)}
+                    onEdit={() => {
+                      setFilling(null)
+                      setEditing(true)
+                    }}
+                    onAdopt={() => selected.source === "repo" && void adopt(selected.row)}
+                    onDuplicate={() =>
+                      selected.source === "personal" && void duplicate(selected.row)
+                    }
+                    onExport={() => selected.source === "personal" && exportOne(selected.row)}
+                    onSaveToRepo={() =>
+                      selected.source === "personal" && void saveToRepo(selected.row)
+                    }
+                    onDelete={() => selected.source === "personal" && setDeleting(selected.row)}
+                  />
+                </header>
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  {editing && selected.source === "personal" ? (
+                    <div className="mx-auto max-w-2xl">
+                      <ChatTemplateEditor
+                        key={selected.row.id}
+                        row={selected.row}
+                        mobile={mobile}
+                        onCancel={() => setEditing(false)}
+                        onSaved={() => {
+                          setEditing(false)
+                          reload()
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="mx-auto max-w-2xl space-y-5">
+                      <div>
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            {t("messagePreview")}
+                          </p>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px]",
+                              missing === 0
+                                ? "border-emerald-500/40 text-emerald-600"
+                                : "border-amber-500/40 text-amber-600"
+                            )}
+                          >
+                            {missing === 0
+                              ? t("readyToSend")
+                              : t("requiredLeft", { count: missing })}
+                          </Badge>
+                        </div>
+                        <div ref={setPreviewBox}>
+                          <ChatTemplateBodyPreview
+                            body={selected.row.body}
+                            values={tryValues}
+                            onParamClick={(id) => setFilling(id)}
+                            isResolvable={isResourceResolvable}
+                          />
+                        </div>
+                        {selected.row.params.length > 0 ? (
+                          <p className="mt-2 text-[11px] text-muted-foreground">
+                            {t("clickSlotHint")}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <SlashSquareIcon className="size-3.5 shrink-0" />
+                          <span className="truncate">
+                            {t("useHint", { name: selected.row.name })}
+                          </span>
+                        </span>
+                        <span className="shrink-0 tabular-nums">
+                          {selected.source === "repo"
+                            ? selected.row.sourcePath
+                            : t("used", { count: selected.row.usageCount })}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+                <FileCode2Icon className="size-8 text-muted-foreground/50" />
+                <div className="max-w-md space-y-1">
+                  <p className="text-sm font-medium">{t("emptyTitle")}</p>
+                  <p className="text-xs text-muted-foreground">{t("empty")}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" className="gap-1" onClick={() => setCreating(true)}>
+                    <PlusIcon className="size-3.5" />
+                    {t("emptyCreate")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <FileUpIcon className="size-3.5" />
+                    {t("importAction")}
+                  </Button>
+                </div>
               </div>
-            </>
-          ) : (
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
-              <FileCode2Icon className="size-8 text-muted-foreground/50" />
-              <div className="max-w-md space-y-1">
-                <p className="text-sm font-medium">{t("emptyTitle")}</p>
-                <p className="text-xs text-muted-foreground">{t("empty")}</p>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" className="gap-1" onClick={() => setCreating(true)}>
-                  <PlusIcon className="size-3.5" />
-                  {t("emptyCreate")}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <FileUpIcon className="size-3.5" />
-                  {t("importAction")}
-                </Button>
-              </div>
-            </div>
-          )}
-        </section>
+            )}
+          </section>
+        </Surface>
       </SettingsListDetail>
 
       {/*

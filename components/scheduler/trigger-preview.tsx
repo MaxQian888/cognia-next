@@ -11,6 +11,7 @@
  * (`projectTriggerFireTimes`), so the three cannot disagree.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useMemo } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import { CalendarClockIcon } from "lucide-react"
@@ -91,7 +92,7 @@ export function TriggerPreview({
   if (state.kind === "empty") return null
 
   return (
-    <div
+    <Surface
       className={cn("rounded-md border bg-muted/30 px-3 py-2 text-xs", className)}
       data-testid="trigger-preview"
       data-state={state.kind}
@@ -117,6 +118,6 @@ export function TriggerPreview({
           {t(state.kind)}
         </p>
       )}
-    </div>
+    </Surface>
   )
 }

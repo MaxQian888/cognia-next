@@ -48,7 +48,7 @@ export function NewSiteDialog({
   const [projectId, setProjectId] = useState(activeProjectId ?? "")
   const [siteName, setSiteName] = useState("")
   const [sourceSubpath, setSourceSubpath] = useState("")
-  const [accountId, setAccountId] = useState("")
+  const [providerAccountId, setProviderAccountId] = useState("")
   const [workerName, setWorkerName] = useState("")
   const [zoneId, setZoneId] = useState("")
   const [accessTeamName, setAccessTeamName] = useState("")
@@ -74,7 +74,7 @@ export function NewSiteDialog({
         executionTarget: { kind: "local" },
         provider: "cloudflare",
         providerConfig: {
-          accountId,
+          accountId: providerAccountId,
           workerName,
           ...(zoneId.trim() ? { zoneId: zoneId.trim() } : {}),
           ...(accessTeamName.trim() ? { accessTeamName: accessTeamName.trim() } : {}),
@@ -89,7 +89,7 @@ export function NewSiteDialog({
       onCreated(site.id)
       setSiteName("")
       setSourceSubpath("")
-      setAccountId("")
+      setProviderAccountId("")
       setWorkerName("")
       setZoneId("")
       setAccessTeamName("")
@@ -161,8 +161,8 @@ export function NewSiteDialog({
             <Input
               id="site-accountId"
               className="mt-1"
-              value={accountId}
-              onChange={(event) => setAccountId(event.target.value)}
+              value={providerAccountId}
+              onChange={(event) => setProviderAccountId(event.target.value)}
             />
           </div>
           <div>
@@ -197,7 +197,7 @@ export function NewSiteDialog({
         <DialogFooter>
           <Button
             onClick={() => void create()}
-            disabled={busy || !siteName || !accountId || !workerName}
+            disabled={busy || !siteName || !providerAccountId || !workerName}
           >
             {busy ? t("actions.creating") : t("actions.create")}
           </Button>

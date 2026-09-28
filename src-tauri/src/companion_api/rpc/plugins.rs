@@ -105,7 +105,6 @@ pub(super) async fn dispatch(
     scope: Option<&str>,
     plane: super::super::remote_execution::ExecutionPlane,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-
     let _ = (state, host, device_id, account_id, scope);
     let result = match name {
         // ── Plugins ──────────────────────────────────────────────────────────
@@ -183,6 +182,7 @@ pub(super) async fn dispatch(
             let subdir: Option<String> = optional(&args, "subdir")?;
             let generated_files: Option<std::collections::BTreeMap<String, String>> =
                 optional(&args, "generatedFiles")?;
+            let defer_commit: bool = optional(&args, "deferCommit")?.unwrap_or(false);
             if let Some(services) = host.headless() {
                 let result =
                     crate::plugin_api::github::installer::plugin_install_from_github_for_state(
@@ -191,17 +191,20 @@ pub(super) async fn dispatch(
                         git_ref,
                         subdir,
                         generated_files.unwrap_or_default(),
+                        defer_commit,
                     )
                     .await
                     .map_err(RpcError::internal)?;
-                services.event_bus.publish(
-                    "plugin://runtime-changed".to_string(),
-                    serde_json::json!({
-                        "action": "installed",
-                        "pluginId": result.manifest.get("id").and_then(Value::as_str),
-                        "accountId": account_id,
-                    }),
-                );
+                if result.transaction_id.is_none() {
+                    services.event_bus.publish(
+                        "plugin://runtime-changed".to_string(),
+                        serde_json::json!({
+                            "action": "installed",
+                            "pluginId": result.manifest.get("id").and_then(Value::as_str),
+                            "accountId": account_id,
+                        }),
+                    );
+                }
                 return to_json(result);
             }
             let st = host.plugin_runtime();
@@ -211,6 +214,7 @@ pub(super) async fn dispatch(
                 git_ref,
                 subdir,
                 generated_files.unwrap_or_default(),
+                defer_commit,
             )
             .await
             .map_err(RpcError::internal)

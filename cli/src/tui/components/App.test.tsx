@@ -866,11 +866,15 @@ describe("App", () => {
     const create: CreateSession = () => ({
       sessionId: "ses-tool",
       async send(_prompt, opts) {
-        opts.onEvent?.({ type: "tool-call", toolName: "bash", input: { command: "ls" } })
+        opts.onEvent?.({
+          type: "tool-call",
+          toolName: "bash",
+          input: { command: "mv a.txt b.txt" },
+        })
         opts.onEvent?.({
           type: "tool-result",
           toolName: "bash",
-          input: { command: "ls" },
+          input: { command: "mv a.txt b.txt" },
           result: "SENTINEL_TOOL_PREVIEW\nSENTINEL_TOOL_DETAIL",
         })
         return result("done")
@@ -878,7 +882,7 @@ describe("App", () => {
       close: jest.fn(),
     })
     const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
-    type("run ls")
+    type("move the file")
     await act(async () => {
       submit()
       await Promise.resolve()

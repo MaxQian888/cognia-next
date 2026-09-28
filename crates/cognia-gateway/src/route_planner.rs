@@ -805,7 +805,9 @@ mod tests {
     fn candidates_for_model_mirrors_the_renderer_twin() {
         let snap = ticket_snapshot();
         let ids = |v: Vec<TicketCandidate>| -> Vec<(String, String)> {
-            v.into_iter().map(|c| (c.deployment_id, c.model_id)).collect()
+            v.into_iter()
+                .map(|c| (c.deployment_id, c.model_id))
+                .collect()
         };
         assert_eq!(
             ids(candidates_for_model(&snap, "fast")),

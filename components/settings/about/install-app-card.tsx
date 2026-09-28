@@ -1,8 +1,9 @@
 "use client"
 
+import { Spinner } from "@/components/ui/spinner"
 import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckCircle2Icon, DownloadIcon, Loader2Icon, ShareIcon } from "lucide-react"
+import { CheckCircle2Icon, DownloadIcon, ShareIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useInstallPrompt } from "@/hooks/use-install-prompt"
@@ -61,7 +62,7 @@ export function InstallAppCard() {
           data-testid="install-app-action"
         >
           {installing ? (
-            <Loader2Icon aria-hidden className="size-4 animate-spin" />
+            <Spinner aria-hidden className="size-4 " />
           ) : (
             <DownloadIcon aria-hidden className="size-4" />
           )}

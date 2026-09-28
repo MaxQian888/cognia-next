@@ -63,10 +63,39 @@ import {
   extractCommandArgumentSchemas,
   extractRuntimeRoutes,
   inspectCommittedContract,
+  scopeEmbeddedSchemaReferences,
   reconcileRpcPaths,
   validateCommandCoverage,
   validateRouteContract,
 } from "./gen-companion-api.mjs"
+
+test("published recursive schemas retain local scope without changing runtime schemas", () => {
+  const schema = {
+    $defs: { json: { anyOf: [{ type: "string" }, { type: "array", items: { $ref: "#/$defs/json" } }] } },
+    $ref: "#/$defs/json",
+  }
+  const input = { paths: { "/api/~example": { schema } } }
+  const published = scopeEmbeddedSchemaReferences(input)
+  const ref = "#/paths/~1api~1~0example/schema/$defs/json"
+  assert.equal(published.paths["/api/~example"].schema.$ref, ref)
+  assert.equal(published.paths["/api/~example"].schema.$defs.json.anyOf[1].items.$ref, ref)
+  assert.equal(schema.$ref, "#/$defs/json")
+  const validate = new Ajv2020({ strict: false }).compile({ ...published, $ref: ref })
+  assert.ok(validate(["text", ["nested"]]))
+  assert.equal(validate([42]), false)
+})
+
+test("GitHub plugin installs preserve explicit deferred activation on both API planes", () => {
+  const inspected = inspectCommittedContract()
+  for (const [spec, prefix] of [[inspected.desiredPublicSpec, "/api"], [inspected.desiredHeadlessSpec, "/internal"]]) {
+    const schema = spec.paths[`${prefix}/_rpc/plugin_install_from_github`].post.requestBody.content["application/json"].schema
+    const validate = new Ajv2020({ strict: false }).compile(schema)
+    assert.ok(validate({ repo: "example/plugin", deferCommit: true }))
+    assert.ok(validate({ repo: "example/plugin", deferCommit: false }))
+    assert.ok(validate({ repo: "example/plugin" }))
+    assert.equal(validate({ repo: "example/plugin", deferCommit: "true" }), false)
+  }
+})
 
 test("classifies host commands into one stable domain", () => {
   assert.equal(classifyHostCommand("session_list"), "sessions")

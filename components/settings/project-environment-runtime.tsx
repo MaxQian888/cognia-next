@@ -25,6 +25,7 @@
  * does not start one yet.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
@@ -153,20 +154,20 @@ export function ProjectEnvironmentRuntime({
 
   if (!environment) {
     return (
-      <div
+      <Surface
         className="rounded-md border bg-background/40 p-3"
         data-testid="project-environment-runtime"
       >
         <p className="text-xs font-medium">{t("title")}</p>
         <p className="text-[10px] text-muted-foreground">{t("noEnvironment")}</p>
-      </div>
+      </Surface>
     )
   }
 
   const available = new Set(driver?.availableTiers ?? [])
 
   return (
-    <div
+    <Surface
       className="space-y-3 rounded-md border bg-background/40 p-3"
       data-testid="project-environment-runtime"
       data-pool={state.loading ? "loading" : state.poolEnabled ? "on" : "off"}
@@ -508,7 +509,7 @@ export function ProjectEnvironmentRuntime({
       >
         {t("save")}
       </Button>
-    </div>
+    </Surface>
   )
 }
 

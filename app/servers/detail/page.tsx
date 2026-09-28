@@ -99,7 +99,7 @@ function ServerDetailRoute() {
     // hammer the controller while a deploy streams.
   }, [listBackups, listLogs, offline, serverId, t])
 
-  if (!ops.accountId) {
+  if (!ops.localAccountId) {
     return (
       <div className="grid h-full w-full place-items-center p-6 text-sm text-muted-foreground">
         {t("connection.unlockAccount")}

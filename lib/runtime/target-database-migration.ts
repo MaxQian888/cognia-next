@@ -40,8 +40,8 @@ class TargetMigrationJournalDB extends Dexie {
 export class TargetDatabaseMigrationJournal {
   constructor(private readonly db = new TargetMigrationJournalDB()) {}
 
-  get(accountId: string, targetId: string): Promise<TargetMigrationJournalRecord | undefined> {
-    return this.db.journals.get([accountId, targetId])
+  get(localAccountId: string, targetId: string): Promise<TargetMigrationJournalRecord | undefined> {
+    return this.db.journals.get([localAccountId, targetId])
   }
 
   put(record: TargetMigrationJournalRecord): Promise<[string, string]> {
@@ -203,13 +203,13 @@ export async function migrateAccountDatabaseToTarget(
 }
 
 export async function markTargetDatabaseMigrationCompleted(
-  accountId: string,
+  localAccountId: string,
   targetId: string,
   now = Date.now(),
   journal = new TargetDatabaseMigrationJournal()
 ): Promise<void> {
   try {
-    const existing = await journal.get(accountId, targetId)
+    const existing = await journal.get(localAccountId, targetId)
     if (!existing || existing.stage !== "verified") {
       throw new Error("Runtime target migration cannot complete before verification.")
     }

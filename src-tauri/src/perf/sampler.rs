@@ -878,10 +878,18 @@ mod tests {
     fn the_same_client_reopening_its_purpose_reclaims_its_own_lease() {
         let handle = SamplerHandle::default();
         let first = handle
-            .open(request("device-a", PerfLeasePurpose::Live, 1000), false, 1000)
+            .open(
+                request("device-a", PerfLeasePurpose::Live, 1000),
+                false,
+                1000,
+            )
             .lease
             .unwrap();
-        let reopened = handle.open(request("device-a", PerfLeasePurpose::Live, 500), false, 1400);
+        let reopened = handle.open(
+            request("device-a", PerfLeasePurpose::Live, 500),
+            false,
+            1400,
+        );
         assert!(reopened.accepted, "{:?}", reopened.code);
         let second = reopened.lease.unwrap();
         assert_ne!(second.lease_id, first.lease_id);
@@ -900,12 +908,20 @@ mod tests {
     fn a_refused_reopen_leaves_the_existing_lease_in_place() {
         let handle = SamplerHandle::default();
         let own = handle
-            .open(request("device-a", PerfLeasePurpose::Live, 1000), true, 1000)
+            .open(
+                request("device-a", PerfLeasePurpose::Live, 1000),
+                true,
+                1000,
+            )
             .lease
             .unwrap();
         assert!(
             handle
-                .open(request("device-b", PerfLeasePurpose::Live, 1000), true, 1000)
+                .open(
+                    request("device-b", PerfLeasePurpose::Live, 1000),
+                    true,
+                    1000
+                )
                 .accepted
         );
         let mut elsewhere = request("device-a", PerfLeasePurpose::Live, 1000);
@@ -921,7 +937,11 @@ mod tests {
         let handle = SamplerHandle::default();
         assert!(
             handle
-                .open(request("device-a", PerfLeasePurpose::Live, 1000), true, 1000)
+                .open(
+                    request("device-a", PerfLeasePurpose::Live, 1000),
+                    true,
+                    1000
+                )
                 .accepted
         );
         let mut next_window = request("device-a", PerfLeasePurpose::Live, 1000);

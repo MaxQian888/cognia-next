@@ -871,7 +871,9 @@ it("blocks cached Claude requests even when a source catches its refresh failure
         expect(() =>
           ctx.authedGet("https://example.invalid", { Authorization: "Bearer cached" })
         ).toThrow("external_login_unavailable")
-        expect(() => ctx.authedRequest({} as never)).toThrow("external_login_unavailable")
+        const request = ctx.authedRequest
+        if (!request) throw new Error("Authenticated request must be available")
+        expect(() => request({} as never)).toThrow("external_login_unavailable")
         return null
       },
     },

@@ -136,7 +136,7 @@ export function NotificationDeliveryPanel() {
     mutate(async () => {
       if (!scope || !tLabel.trim() || !tEndpoint.trim()) return
       const now = Date.now()
-      const accountId = scope.accountId
+      const localAccountId = scope.accountId
       await upsertNotificationTarget({
         scope,
         label: tLabel.trim(),
@@ -150,7 +150,7 @@ export function NotificationDeliveryPanel() {
         consent: {
           mode: "proactive",
           grantRef: "settings:notifications",
-          grantedBy: accountId,
+          grantedBy: localAccountId,
           grantedAt: now,
         },
         disclosureProfileId: tDisclosure,

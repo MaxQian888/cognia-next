@@ -99,7 +99,13 @@ function addFinding(findings, file, node, rule, message) {
 export function auditSource(source, file = "unknown.ts") {
   const ast = parse(source, {
     sourceType: "module",
-    plugins: ["jsx", "typescript", "decorators-legacy", "importAttributes"],
+    sourceFilename: file,
+    plugins: [
+      ...(/\.[jt]sx$/.test(file) ? ["jsx"] : []),
+      "typescript",
+      "decorators-legacy",
+      "importAttributes",
+    ],
   })
   const findings = []
   const normalizedFile = file.replaceAll("\\", "/")

@@ -28,6 +28,12 @@ jest.mock("@/lib/plugin/character-pack/warning-refresh-wiring", () => ({
 
 const mockSubscribe = transport.subscribe as jest.Mock
 
+const mockDisposePluginLogs = jest.fn()
+const mockInstallPluginRuntimeLogBridge = jest.fn(() => mockDisposePluginLogs)
+jest.mock("@/lib/plugin/devtools/plugin-log-bridge", () => ({
+  installPluginRuntimeLogBridge: () => mockInstallPluginRuntimeLogBridge(),
+}))
+
 beforeAll(async () => {
   __resetHeadlessRuntimesForTesting()
   await import("./plugin-runtime")
@@ -72,9 +78,11 @@ it("starts once, serializes same-account changes, and tears down the adapter", a
 
   expect(result.failed).toEqual([])
   expect(adapter.start).toHaveBeenCalledTimes(1)
+  expect(mockInstallPluginRuntimeLogBridge).toHaveBeenCalledTimes(1)
   expect(mockSubscribe).toHaveBeenCalledWith("plugin://runtime-changed", expect.any(Function))
 
   onChange?.({ action: "installed", pluginId: "demo", accountId: "account-a" })
+  onChange?.({ action: "updated", pluginId: "demo", accountId: "account-a" })
   onChange?.({ action: "restored", pluginId: "demo", accountId: "other-account" })
   onChange?.({ action: "unknown", pluginId: "demo" })
   await result.stop()
@@ -84,10 +92,16 @@ it("starts once, serializes same-account changes, and tears down the adapter", a
     pluginId: "demo",
     accountId: "account-a",
   })
-  expect(adapter.reconcile).toHaveBeenCalledTimes(1)
+  expect(adapter.reconcile).toHaveBeenCalledTimes(2)
+  expect(adapter.reconcile).toHaveBeenNthCalledWith(2, {
+    action: "installed",
+    pluginId: "demo",
+    accountId: "account-a",
+  })
   expect(logs).toContainEqual(["warn", "plugin runtime ignored a malformed change event"])
   expect(unsubscribe).toHaveBeenCalledTimes(1)
   expect(adapter.stop).toHaveBeenCalledTimes(1)
+  expect(mockDisposePluginLogs).toHaveBeenCalledTimes(1)
   expect(mockEmitSystemBusEvent).toHaveBeenCalledWith("app:closing", {})
   expect(mockDisposeMicrovmAdapters).toHaveBeenCalledTimes(1)
 })

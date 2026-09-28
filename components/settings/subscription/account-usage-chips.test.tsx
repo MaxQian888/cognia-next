@@ -28,7 +28,7 @@ import { AccountUsageChips, useAccountUsageIndex } from "./account-usage-chips"
 
 function Harness({ accountId }: { accountId: string }) {
   const index = useAccountUsageIndex()
-  return <AccountUsageChips accountId={accountId} usage={index.get(accountId)} />
+  return <AccountUsageChips providerAccountId={accountId} usage={index.get(accountId)} />
 }
 
 function setDb(characters: unknown[], sessions: unknown[]) {

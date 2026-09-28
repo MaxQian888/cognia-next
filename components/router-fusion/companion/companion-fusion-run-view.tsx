@@ -15,10 +15,12 @@
 // The client is loaded with a dynamic import, so nothing Router + Fusion loads
 // on this device until a run exists to show.
 
+import { Surface } from "@/components/surface/surface"
+import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
-import { ChevronDownIcon, Loader2, SquareIcon, XIcon } from "lucide-react"
+import { ChevronDownIcon, SquareIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -162,128 +164,132 @@ export function CompanionFusionRunView({
   }, [client, follow?.lastSeq, runId, t])
 
   return (
-    <section
-      className="rounded-lg border bg-card p-3 text-xs"
-      data-testid="companion-fusion-run"
-      data-stage={stage}
-      data-run-id={runId ?? undefined}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          {!dismissable ? <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden /> : null}
-          <span className="truncate font-medium">{t("title", { mode: modeLabel })}</span>
-          {status ? (
-            <Badge
-              variant="outline"
-              className="shrink-0 text-[10px]"
-              data-testid="companion-fusion-run-status"
-            >
-              {KNOWN_RUN_STATUSES.has(status)
-                ? tCard(`statusValue.${status}` as never)
-                : tCard("statusValue.unknown", { status })}
-            </Badge>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {runId && !terminal ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 px-2"
-              disabled={stopping || !client}
-              onClick={() => void stop()}
-              aria-label={t("stopAria")}
-              data-testid="companion-fusion-run-stop"
-            >
-              <SquareIcon className="size-3" aria-hidden />
-              {t("stop")}
-            </Button>
-          ) : null}
-          {dismissable ? (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="size-7"
-              onClick={() => onDismiss(run.rowId)}
-              aria-label={t("dismissAria")}
-              data-testid="companion-fusion-run-dismiss"
-            >
-              <XIcon className="size-3.5" aria-hidden />
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="mt-2 space-y-2 text-muted-foreground">
-        {stage === "queued" ? <p data-testid="companion-fusion-run-queued">{t("queued")}</p> : null}
-        {stage === "undelivered" ? (
-          <p className="text-destructive" data-testid="companion-fusion-run-undelivered">
-            {t("undelivered", { reason: row?.lastError ?? tReason("unknownDelivery") })}
-          </p>
-        ) : null}
-        {stage === "starting" ? <p>{t("starting")}</p> : null}
-        {stage === "refused" && refusal ? (
-          <p className="text-destructive" data-testid="companion-fusion-run-refused">
-            {t("refused", { reason: reasonText(refusal.code) })}
-          </p>
-        ) : null}
-        {stage === "following" && !terminal ? (
-          follow?.error ? (
-            <p data-testid="companion-fusion-run-retrying">
-              {t("retrying", { seq: follow.lastSeq + 1 })}
-            </p>
-          ) : (
-            <p>{t("running")}</p>
-          )
-        ) : null}
-        {follow?.historyExpired ? (
-          <p
-            className="text-amber-600 dark:text-amber-400"
-            data-testid="companion-fusion-run-history-expired"
-          >
-            {t("historyExpired")}
-          </p>
-        ) : null}
-        {terminal && follow?.error ? (
-          <p className="text-destructive" data-testid="companion-fusion-run-refused">
-            {t("refused", { reason: reasonText(follow.error.code) })}
-          </p>
-        ) : null}
-        {terminal && summary?.status === "succeeded" ? (
-          <div className="space-y-1 text-foreground">
-            <p className="font-medium">{t("answer")}</p>
-            {answer ? (
-              <p
-                className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words"
-                data-testid="companion-fusion-run-answer"
+    <Surface asChild>
+      <section
+        className="rounded-lg border bg-card p-3 text-xs"
+        data-testid="companion-fusion-run"
+        data-stage={stage}
+        data-run-id={runId ?? undefined}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {!dismissable ? <Spinner className="size-3.5 shrink-0 " aria-hidden /> : null}
+            <span className="truncate font-medium">{t("title", { mode: modeLabel })}</span>
+            {status ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 text-[10px]"
+                data-testid="companion-fusion-run-status"
               >
-                {answer}
+                {KNOWN_RUN_STATUSES.has(status)
+                  ? tCard(`statusValue.${status}` as never)
+                  : tCard("statusValue.unknown", { status })}
+              </Badge>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {runId && !terminal ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1 px-2"
+                disabled={stopping || !client}
+                onClick={() => void stop()}
+                aria-label={t("stopAria")}
+                data-testid="companion-fusion-run-stop"
+              >
+                <SquareIcon className="size-3" aria-hidden />
+                {t("stop")}
+              </Button>
+            ) : null}
+            {dismissable ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                onClick={() => onDismiss(run.rowId)}
+                aria-label={t("dismissAria")}
+                data-testid="companion-fusion-run-dismiss"
+              >
+                <XIcon className="size-3.5" aria-hidden />
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-2 space-y-2 text-muted-foreground">
+          {stage === "queued" ? (
+            <p data-testid="companion-fusion-run-queued">{t("queued")}</p>
+          ) : null}
+          {stage === "undelivered" ? (
+            <p className="text-destructive" data-testid="companion-fusion-run-undelivered">
+              {t("undelivered", { reason: row?.lastError ?? tReason("unknownDelivery") })}
+            </p>
+          ) : null}
+          {stage === "starting" ? <p>{t("starting")}</p> : null}
+          {stage === "refused" && refusal ? (
+            <p className="text-destructive" data-testid="companion-fusion-run-refused">
+              {t("refused", { reason: reasonText(refusal.code) })}
+            </p>
+          ) : null}
+          {stage === "following" && !terminal ? (
+            follow?.error ? (
+              <p data-testid="companion-fusion-run-retrying">
+                {t("retrying", { seq: follow.lastSeq + 1 })}
               </p>
             ) : (
-              <p className="text-muted-foreground">
-                {follow?.resultExpired ? t("answerExpired") : t("noAnswer")}
-              </p>
-            )}
-          </div>
-        ) : null}
-        {summary ? (
-          <Collapsible>
-            <CollapsibleTrigger
-              className="flex items-center gap-1 text-[11px] underline-offset-2 hover:underline"
-              data-testid="companion-fusion-run-details-toggle"
+              <p>{t("running")}</p>
+            )
+          ) : null}
+          {follow?.historyExpired ? (
+            <p
+              className="text-amber-600 dark:text-amber-400"
+              data-testid="companion-fusion-run-history-expired"
             >
-              <ChevronDownIcon className="size-3" aria-hidden />
-              {t("details")}
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pt-2 text-[11px]">
-              <FusionRunDetails summary={summary} />
-            </CollapsibleContent>
-          </Collapsible>
-        ) : null}
-      </div>
-    </section>
+              {t("historyExpired")}
+            </p>
+          ) : null}
+          {terminal && follow?.error ? (
+            <p className="text-destructive" data-testid="companion-fusion-run-refused">
+              {t("refused", { reason: reasonText(follow.error.code) })}
+            </p>
+          ) : null}
+          {terminal && summary?.status === "succeeded" ? (
+            <div className="space-y-1 text-foreground">
+              <p className="font-medium">{t("answer")}</p>
+              {answer ? (
+                <p
+                  className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words"
+                  data-testid="companion-fusion-run-answer"
+                >
+                  {answer}
+                </p>
+              ) : (
+                <p className="text-muted-foreground">
+                  {follow?.resultExpired ? t("answerExpired") : t("noAnswer")}
+                </p>
+              )}
+            </div>
+          ) : null}
+          {summary ? (
+            <Collapsible>
+              <CollapsibleTrigger
+                className="flex items-center gap-1 text-[11px] underline-offset-2 hover:underline"
+                data-testid="companion-fusion-run-details-toggle"
+              >
+                <ChevronDownIcon className="size-3" aria-hidden />
+                {t("details")}
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-2 text-[11px]">
+                <FusionRunDetails summary={summary} />
+              </CollapsibleContent>
+            </Collapsible>
+          ) : null}
+        </div>
+      </section>
+    </Surface>
   )
 }
 

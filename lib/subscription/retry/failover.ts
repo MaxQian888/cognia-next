@@ -33,7 +33,7 @@ import type { AccountSummary, ProviderId } from "@/types/subscription"
 
 export interface FailoverDeps {
   listAccounts: (provider: ProviderId) => Promise<AccountSummary[]>
-  setActiveAccount: (provider: ProviderId, accountId: string) => Promise<void>
+  setActiveAccount: (provider: ProviderId, providerAccountId: string) => Promise<void>
   /** Active account id for the provider, or `null` when none is pinned. */
   getActiveAccountId: (provider: ProviderId) => Promise<string | null>
   breaker?: SubscriptionBreaker
@@ -41,7 +41,7 @@ export interface FailoverDeps {
   /** Deterministic jitter source for the recorded backoff. */
   random?: () => number
   /** Told after the pointer moves so the chat header and badges re-read auth. */
-  onSwitched?: (provider: ProviderId, accountId: string) => void
+  onSwitched?: (provider: ProviderId, providerAccountId: string) => void
 }
 
 /**
@@ -62,7 +62,7 @@ export type FailoverOutcome =
 
 export interface HandleFailureInput {
   provider: ProviderId
-  accountId: string
+  providerAccountId: string
   failure: SubscriptionFailure
   /** The per-provider opt-in. Failover never happens without an explicit yes. */
   failoverEnabled: boolean
@@ -92,12 +92,12 @@ export interface HandleFailureInput {
 export async function handleSubscriptionFailure(
   input: HandleFailureInput
 ): Promise<FailoverOutcome> {
-  const { provider, accountId, failure, failoverEnabled, deps } = input
+  const { provider, providerAccountId, failure, failoverEnabled, deps } = input
   const breaker = deps.breaker ?? getSubscriptionBreaker()
   const now = deps.now ?? Date.now
   const at = now()
 
-  const key = credentialKey(provider, accountId, BREAKER_SCOPES.usage)
+  const key = credentialKey(provider, providerAccountId, BREAKER_SCOPES.usage)
   const blockedUntil =
     input.recordBlock === false
       ? breaker.peek(key).blockedUntil
@@ -107,13 +107,13 @@ export async function handleSubscriptionFailure(
   if (!failoverEnabled) return { kind: "failover-disabled", blockedUntil }
 
   const activeId = await deps.getActiveAccountId(provider)
-  if (activeId !== accountId) return { kind: "not-active", blockedUntil }
+  if (activeId !== providerAccountId) return { kind: "not-active", blockedUntil }
 
   const candidates = await deps.listAccounts(provider)
-  const state = input.rotationState ?? createRotationState(accountId)
+  const state = input.rotationState ?? createRotationState(providerAccountId)
   // A caller-supplied state may not have seen this account yet, and selecting
   // the account that just failed would be an immediate loop.
-  state.attempted.add(accountId)
+  state.attempted.add(providerAccountId)
 
   const selected = selectNextAccount({
     provider,
@@ -130,7 +130,7 @@ export async function handleSubscriptionFailure(
   deps.onSwitched?.(provider, target.id)
   return {
     kind: "switched",
-    fromAccountId: accountId,
+    fromAccountId: providerAccountId,
     toAccountId: target.id,
     remaining: selected.selection.remaining,
   }
@@ -139,10 +139,10 @@ export async function handleSubscriptionFailure(
 /** Clear every block on a credential after the user re-authenticates it. */
 export function clearCredentialBlocks(
   provider: string,
-  accountId: string,
+  providerAccountId: string,
   breaker: SubscriptionBreaker = getSubscriptionBreaker()
 ): void {
   for (const scope of Object.values(BREAKER_SCOPES)) {
-    breaker.clear(credentialKey(provider, accountId, scope))
+    breaker.clear(credentialKey(provider, providerAccountId, scope))
   }
 }

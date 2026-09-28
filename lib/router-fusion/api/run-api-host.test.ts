@@ -139,6 +139,9 @@ function selected(overrides: Partial<Extract<RunRoute, { kind: "selected" }>> = 
     deadlineMs: 120_000,
     task: "research.synthesis",
     acceptanceProfile: "evidence_review",
+    projectId: null,
+    workspaceRoot: null,
+    acceptanceProfileId: null,
     dataClass: "internal",
     ...overrides,
   }
@@ -183,9 +186,8 @@ describe("runRequestPolicyOf", () => {
     expect(policy.maxRunCapMicrousd("direct")).toBe(400_000)
     expect(policy.maxRunCapMicrousd("panel")).toBe(2_500_000)
     // Auto may land on any executable mode; the route applies the chosen one's cap.
-    expect(policy.maxRunCapMicrousd("auto")).toBe(2_500_000)
-    // Workspaces and acceptance profiles arrive with delegate (B4), so nothing
-    // is authorized yet rather than optimistically waved through.
+    expect(policy.maxRunCapMicrousd("auto")).toBe(5_000_000)
+    // Missing workspace authorization must fail closed even with delegate enabled.
     expect(policy.workspaceAuthorized("ws-1")).toBe(false)
     expect(policy.acceptanceProfileExists("p")).toBe(false)
     expect(policy.degradeAllowed).toBe(true)
@@ -329,7 +331,7 @@ describe("createRoutedRun", () => {
       jsonSchema: schema,
       sessionId: "session-1",
       webToolsAvailable: false,
-      executableModes: ["direct", "cascade", "panel"],
+      executableModes: ["direct", "cascade", "panel", "delegate"],
       messages: [
         { role: "system", content: "json" },
         { role: "user", content: "q" },
@@ -399,9 +401,9 @@ describe("createRoutedRun", () => {
 })
 
 describe("runApiDeps", () => {
-  it("validates against the snapshot it was given, and says so when there is none", () => {
-    expect(runApiDeps(APP).policy().trackedBudgetEnabled).toBe(true)
-    expect(() => runApiDeps(null).policy()).toThrow("no settings")
+  it("validates against the snapshot it was given, and says so when there is none", async () => {
+    expect((await runApiDeps(APP).policy()).trackedBudgetEnabled).toBe(true)
+    await expect(runApiDeps(null).policy()).rejects.toThrow("no settings")
   })
 
   it("creates its runs on the lane it was built for", async () => {

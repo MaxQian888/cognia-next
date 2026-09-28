@@ -1,5 +1,6 @@
 "use client"
 
+import { Surface } from "@/components/surface/surface"
 import { createContext, useContext, useEffect, useRef, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import {
@@ -88,7 +89,7 @@ export function SessionSummaryPopover({ session, onManage }: Props) {
     onManage()
   }
   const content = (
-    <div
+    <Surface
       ref={contentRef}
       tabIndex={-1}
       data-testid="session-summary-card"
@@ -97,12 +98,12 @@ export function SessionSummaryPopover({ session, onManage }: Props) {
         desktop
           ? // The aside around this clips while it grows, so the card slides out
             // from the window edge on its own; only the fade is added here.
-            `max-h-full w-full overflow-y-auto rounded-2xl border border-border/60 bg-popover p-2.5 shadow-lg animate-in fade-in-0 ${SHELL_DOCK_TIMING_CLASS}`
+            `max-h-full w-full overflow-y-auto rounded-stage border border-border/60 bg-popover p-2.5 shadow-(--elevation-3) animate-in fade-in-0 ${SHELL_DOCK_TIMING_CLASS}`
           : "h-full overflow-y-auto p-2.5"
       )}
     >
       <SessionSummaryContent session={session} onNavigate={navigate} onManage={manage} />
-    </div>
+    </Surface>
   )
   return (
     <>

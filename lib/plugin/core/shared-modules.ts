@@ -20,7 +20,7 @@
 
 import { loggers } from "@cognia/logging"
 
-import { PLUGIN_SDK_SUBPATH_LOADERS } from "./sdk-subpath-loaders"
+import { loadEffortSurfaceModule, PLUGIN_SDK_SUBPATH_LOADERS } from "./sdk-subpath-loaders"
 
 const sharedModuleLogger = loggers.plugin.child("shared-modules")
 
@@ -89,7 +89,7 @@ const sharedModuleLoaders: Record<(typeof PLUGIN_SHARED_MODULES)[number], () => 
     "react/jsx-runtime": () => import("react/jsx-runtime"),
     "react/jsx-dev-runtime": () => import("react/jsx-dev-runtime"),
     "@cognia/plugin-sdk": () => import("@cognia/plugin-sdk"),
-    "@cognia/plugin-sdk/api/effort-surface": () => import("@cognia/plugin-sdk/api/effort-surface"),
+    "@cognia/plugin-sdk/api/effort-surface": loadEffortSurfaceModule,
     "@cognia/plugin-ui": () => import("@cognia/plugin-ui"),
     "lucide-react": () =>
       import("@/lib/icons/lucide-require-compat").then((module) => module.lucideRequireCompat),

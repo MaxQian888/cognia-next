@@ -1,6 +1,6 @@
 //! Desktop command adapters for the shared SFTP dispatcher.
-use serde_json::{json, Value};
 pub use cognia_terminal::sftp_service::*;
+use serde_json::{json, Value};
 
 pub async fn dispatch_sftp(
     app: Option<&tauri::AppHandle>,
@@ -10,7 +10,8 @@ pub async fn dispatch_sftp(
 ) -> Result<Value, SftpFailure> {
     use tauri::Manager as _;
     let resource_dir = app.and_then(|app| app.path().resource_dir().ok());
-    cognia_terminal::sftp_service::dispatch_sftp(resource_dir.as_deref(), name, args, device_id).await
+    cognia_terminal::sftp_service::dispatch_sftp(resource_dir.as_deref(), name, args, device_id)
+        .await
 }
 
 #[cfg(test)]
@@ -18,11 +19,11 @@ mod tests {
     #[tokio::test]
     async fn desktop_dispatch_preserves_the_attribution_gate() {
         let error = super::dispatch_sftp(None, "sftp_list_dir", &serde_json::json!({}), "")
-            .await.expect_err("missing device must fail before connecting");
+            .await
+            .expect_err("missing device must fail before connecting");
         assert_eq!(error.code, "sftp_device_unidentified");
     }
 }
-
 
 /// The desktop renderer's door onto the same implementation.
 ///

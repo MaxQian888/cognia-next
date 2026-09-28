@@ -274,7 +274,7 @@ export function bindingHintFields(raw: Record<string, unknown> | undefined): {
     !Array.isArray(raw.bindingPayload)
       ? (raw.bindingPayload as Record<string, unknown>)
       : undefined
-  const accountId =
+  const connectorAccountId =
     typeof raw.bindingAccountId === "string" && raw.bindingAccountId.length > 0
       ? raw.bindingAccountId
       : undefined
@@ -309,7 +309,7 @@ export function bindingHintFields(raw: Record<string, unknown> | undefined): {
   return {
     ...(kind ? { kind } : {}),
     ...(payload ? { payload } : {}),
-    ...(accountId ? { accountId } : {}),
+    ...(connectorAccountId ? { accountId: connectorAccountId } : {}),
     ...(actorScope ? { actorScope } : {}),
     ...(allowedActions && allowedActions.length > 0 ? { allowedActions } : {}),
     ...(expiresAt !== undefined ? { expiresAt } : {}),

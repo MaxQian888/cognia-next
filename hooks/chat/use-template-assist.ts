@@ -18,6 +18,7 @@ import {
   TemplateAssistPiiBlockedError,
   type TemplateDraft,
 } from "@/lib/ai/generation/template-assist"
+import { ledgeredGenerationSeam } from "@/lib/ai/ledgered-generation-seam"
 import { getProviderModel } from "@cognia/provider-core/core/client"
 import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-provider"
@@ -79,19 +80,30 @@ export function useTemplateAssist(): UseTemplateAssistResult {
   // The user's own configured provider, resolved the same way the standalone
   // chat path resolves it; the legacy single-key Anthropic fallback covers
   // subscription/OAuth setups whose key never entered `providerSettings`.
-  const buildModel = useCallback(() => {
+  const buildGeneration = useCallback(() => {
     const resolution = resolveStandaloneProvider(settings)
-    if (resolution.kind === "resolved") {
-      return createFeatureProviderModel(resolution, {
-        fetch: getStreamingFetch(),
-        headers: browserDirectHeaders(resolution.protocol),
-      })
-    }
-    return getProviderModel({
-      provider: "anthropic",
-      model: "claude-sonnet-4-5",
-      apiKey: settings?.apiKey ?? undefined,
+    const model =
+      resolution.kind === "resolved"
+        ? createFeatureProviderModel(resolution, {
+            fetch: getStreamingFetch(),
+            headers: browserDirectHeaders(resolution.protocol),
+          })
+        : getProviderModel({
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            apiKey: settings?.apiKey ?? undefined,
+          })
+    const generate = ledgeredGenerationSeam({
+      settings,
+      binding: {
+        surface: "utilityLedger",
+        origin: "utility",
+        featureId: "template-assist",
+        providerId: resolution.kind === "resolved" ? resolution.providerId : "anthropic",
+        workspaceId: null,
+      },
     })
+    return { model, generate }
   }, [settings])
 
   const execute = useCallback(
@@ -136,32 +148,37 @@ export function useTemplateAssist(): UseTemplateAssistResult {
 
   const generate = useCallback(
     (intent: string) =>
-      execute("generate", (signal) =>
-        generateTemplateDraft(buildModel(), intent, { abortSignal: signal })
-      ),
-    [buildModel, execute]
+      execute("generate", (signal) => {
+        const { model, generate } = buildGeneration()
+        return generateTemplateDraft(model, intent, { abortSignal: signal, generate })
+      }),
+    [buildGeneration, execute]
   )
 
   const improve = useCallback(
     (body: string, instruction?: string) =>
-      execute("improve", (signal) =>
-        improveTemplateBody(buildModel(), body, {
+      execute("improve", (signal) => {
+        const { model, generate } = buildGeneration()
+        return improveTemplateBody(model, body, {
+          generate,
           ...(instruction ? { instruction } : {}),
           abortSignal: signal,
         })
-      ),
-    [buildModel, execute]
+      }),
+    [buildGeneration, execute]
   )
 
   const suggest = useCallback(
     async (body: string, existing: readonly ChatTemplateParam[]) =>
       execute("suggest", async (signal) => {
-        const suggestions = await suggestTemplateParams(buildModel(), body, {
+        const { model, generate } = buildGeneration()
+        const suggestions = await suggestTemplateParams(model, body, {
+          generate,
           abortSignal: signal,
         })
         return applyParamSuggestions(body, existing, suggestions)
       }),
-    [buildModel, execute]
+    [buildGeneration, execute]
   )
 
   const cancel = useCallback(() => abortRef.current?.abort(), [])

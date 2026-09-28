@@ -374,7 +374,11 @@ mod tests {
         std::env::remove_var(var);
         assert!(result.available, "pinned path must probe ok: {result:?}");
         assert!(
-            result.version.as_deref().unwrap_or_default().starts_with("rustc"),
+            result
+                .version
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with("rustc"),
             "pinned binary should be rustc, got {result:?}"
         );
         assert!(

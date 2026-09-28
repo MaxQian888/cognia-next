@@ -100,7 +100,7 @@ pub fn authorize_provider_command(
 pub fn provider_admin_principal() -> DeviceContext {
     DeviceContext {
         device_id: PROVIDER_ADMIN_DEVICE_ID.to_string(),
-        account_id: PROVIDER_ADMIN_ACCOUNT_ID.to_string(),
+        tenant_id: PROVIDER_ADMIN_ACCOUNT_ID.to_string(),
         scope: "service".to_string(),
         granted_scopes: Vec::new(),
         authorization_capabilities: None,

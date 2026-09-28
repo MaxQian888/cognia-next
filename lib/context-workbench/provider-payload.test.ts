@@ -32,13 +32,18 @@ describe("Context Workbench provider payload PII gate", () => {
     const source = {
       content: "jane@example.com",
       messages: [{ content: "jane@example.com" }],
-      sendOptions: { env: { TOKEN: "jane@example.com" }, mcpServers: { local: { token: "abc" } } },
+      sendOptions: {
+        env: { TOKEN: "jane@example.com" },
+        mcpServers: { local: { command: "node", env: { TOKEN: "abc" } } },
+      },
     }
     const gated = gateWorkbenchProviderPayload(source)
     expect(source.content).toBe("jane@example.com")
     expect(gated).not.toBe(source)
     expect(gated.sendOptions.env).toEqual({ TOKEN: "jane@example.com" })
-    expect(gated.sendOptions.mcpServers).toEqual({ local: { token: "abc" } })
+    expect(gated.sendOptions.mcpServers).toEqual({
+      local: { command: "node", env: { TOKEN: "abc" } },
+    })
   })
 
   it("fails closed when the final provider-visible payload does not pass verification", () => {

@@ -85,6 +85,7 @@ const resolveProviderAttemptOptionsMock = jest.fn().mockResolvedValue({
   providerCredentials: { apiKey: "fallback-key", protocol: "openai" },
 })
 jest.mock("@/lib/claude/provider-attempt-options", () => ({
+  ...jest.requireActual("@/lib/claude/provider-attempt-options"),
   resolveProviderAttemptOptions: (...args: unknown[]) => resolveProviderAttemptOptionsMock(...args),
 }))
 
@@ -1173,7 +1174,13 @@ describe("useTeamChat — send coverage", () => {
     })
 
     expect(sendPromptMock).toHaveBeenCalledTimes(2)
-    expect(resolveProviderAttemptOptionsMock).toHaveBeenCalledWith("openai", settingsState.settings)
+    expect(resolveProviderAttemptOptionsMock).toHaveBeenCalledWith(
+      "openai",
+      settingsState.settings,
+      undefined,
+      false,
+      "gpt-5.6"
+    )
     expect(sendPromptMock.mock.calls[1]?.[2]).toEqual(
       expect.objectContaining({
         provider: "openai",

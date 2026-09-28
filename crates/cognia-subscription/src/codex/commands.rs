@@ -98,8 +98,11 @@ pub async fn subscription_refresh_codex_account(
     lifecycle: State<'_, CodexLifecycleManager>,
     active_state: State<'_, ActiveAccountState>,
 ) -> Result<CodexCredentialData, String> {
+    let provider_account_id = account_id;
     vault::service_name_for_account(&local_account_id)?;
-    let _account_guard = lifecycle.lock_account(&local_account_id, &account_id).await;
+    let _account_guard = lifecycle
+        .lock_account(&local_account_id, &provider_account_id)
+        .await;
     let current = {
         let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
         let provider_vault = vault::load_for_account(&local_account_id, ProviderId::Codex)?
@@ -107,7 +110,7 @@ pub async fn subscription_refresh_codex_account(
         let account = provider_vault
             .accounts
             .iter()
-            .find(|account| account.id == account_id)
+            .find(|account| account.id == provider_account_id)
             .ok_or_else(|| "codex account no longer exists".to_string())?;
         let ProviderCredential::Codex(current) = &account.credential else {
             return Err("account is not a Codex credential".into());
@@ -134,7 +137,7 @@ pub async fn subscription_refresh_codex_account(
                 let account = provider_vault
                     .accounts
                     .iter_mut()
-                    .find(|account| account.id == account_id)
+                    .find(|account| account.id == provider_account_id)
                     .ok_or_else(|| "codex account no longer exists".to_string())?;
                 let now_ms = current_unix_ms();
                 let metadata = account
@@ -155,7 +158,7 @@ pub async fn subscription_refresh_codex_account(
     let account = provider_vault
         .accounts
         .iter_mut()
-        .find(|account| account.id == account_id)
+        .find(|account| account.id == provider_account_id)
         .ok_or_else(|| "codex account no longer exists".to_string())?;
     let now_ms = current_unix_ms();
     let mut fresh = current;
@@ -183,7 +186,7 @@ pub async fn subscription_refresh_codex_account(
         metadata.codex_identity = vault::derive_codex_identity(&fresh.id_token_raw, &fresh);
     }
     vault::save_for_account(&local_account_id, ProviderId::Codex, &provider_vault)?;
-    refresh_active_projection(&provider_vault, &account_id, &active_state).await;
+    refresh_active_projection(&provider_vault, &provider_account_id, &active_state).await;
     Ok(fresh)
 }
 
@@ -197,8 +200,11 @@ pub async fn subscription_reauthenticate_codex_account(
     lifecycle: State<'_, CodexLifecycleManager>,
     active_state: State<'_, ActiveAccountState>,
 ) -> Result<AccountDetail, String> {
+    let provider_account_id = account_id;
     vault::service_name_for_account(&local_account_id)?;
-    let _account_guard = lifecycle.lock_account(&local_account_id, &account_id).await;
+    let _account_guard = lifecycle
+        .lock_account(&local_account_id, &provider_account_id)
+        .await;
     if credential.auth_mode != "chatgpt" || credential.access_token.trim().is_empty() {
         return Err("targeted Codex reauthentication requires a ChatGPT credential".into());
     }
@@ -208,7 +214,7 @@ pub async fn subscription_reauthenticate_codex_account(
     let account = provider_vault
         .accounts
         .iter_mut()
-        .find(|account| account.id == account_id)
+        .find(|account| account.id == provider_account_id)
         .ok_or_else(|| "codex account no longer exists".to_string())?;
     let ProviderCredential::Codex(current) = &account.credential else {
         return Err("account is not a Codex credential".into());
@@ -243,27 +249,30 @@ pub async fn subscription_reauthenticate_codex_account(
     metadata.last_credential_rotation_at_ms = Some(now_ms);
     let detail = AccountDetail::from_account(account);
     vault::save_for_account(&local_account_id, ProviderId::Codex, &provider_vault)?;
-    refresh_active_projection(&provider_vault, &account_id, &active_state).await;
+    refresh_active_projection(&provider_vault, &provider_account_id, &active_state).await;
     Ok(detail)
 }
 
-fn active_projection_for(vault: &ProviderVault, account_id: &str) -> Option<ActiveSnapshot> {
-    if vault.active_account_id.as_deref() != Some(account_id) {
+fn active_projection_for(
+    vault: &ProviderVault,
+    provider_account_id: &str,
+) -> Option<ActiveSnapshot> {
+    if vault.active_account_id.as_deref() != Some(provider_account_id) {
         return None;
     }
-    let account = vault.find_account(account_id)?;
+    let account = vault.find_account(provider_account_id)?;
     Some(ActiveSnapshot {
-        active_account_id: Some(account_id.to_string()),
+        active_account_id: Some(provider_account_id.to_string()),
         env: CodexProvider.env_for_sidecar(account, vault.resolve_preset(account)),
     })
 }
 
 async fn refresh_active_projection(
     vault: &ProviderVault,
-    account_id: &str,
+    provider_account_id: &str,
     active_state: &ActiveAccountState,
 ) {
-    if let Some(snapshot) = active_projection_for(vault, account_id) {
+    if let Some(snapshot) = active_projection_for(vault, provider_account_id) {
         active_state.set(ProviderId::Codex, snapshot).await;
     }
 }
@@ -322,10 +331,10 @@ mod tests {
 
     #[test]
     fn active_projection_uses_the_latest_codex_credential() {
-        let account_id = "codex-active".to_string();
+        let provider_account_id = "codex-active".to_string();
         let mut provider_vault = ProviderVault::empty();
         provider_vault.upsert_account(Account {
-            id: account_id.clone(),
+            id: provider_account_id.clone(),
             label: None,
             credential: ProviderCredential::Codex(CodexCredentialData {
                 access_token: "rotated-access-token".into(),
@@ -338,14 +347,14 @@ mod tests {
             preset_id: None,
             auth_metadata: None,
         });
-        provider_vault.active_account_id = Some(account_id.clone());
+        provider_vault.active_account_id = Some(provider_account_id.clone());
 
-        let snapshot = active_projection_for(&provider_vault, &account_id)
+        let snapshot = active_projection_for(&provider_vault, &provider_account_id)
             .expect("active Codex account should project");
 
         assert_eq!(
             snapshot.active_account_id.as_deref(),
-            Some(account_id.as_str())
+            Some(provider_account_id.as_str())
         );
         assert!(snapshot
             .env

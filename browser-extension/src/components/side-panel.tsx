@@ -646,9 +646,10 @@ export function SidePanel({ api, makeClient = createHostClient, now = systemNow 
       ...(declaredParams.length > 0
         ? {
             targetParams: Object.fromEntries(
-              declaredParams
-                .filter((param) => (targetParams[param.id] ?? "").length > 0)
-                .map((param) => [param.id, targetParams[param.id]])
+              declaredParams.flatMap((param) => {
+                const value = targetParams[param.id]
+                return value ? [[param.id, value]] : []
+              })
             ),
           }
         : {}),

@@ -38,10 +38,10 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let _ = (state, account_id, scope);
+    let _ = (state, tenant_id, scope);
     // A headless host has no `AppHandle`, and the bridge does not need one:
     // it reaches or starts the terminal host from the endpoint on disk.
     let app = match host {

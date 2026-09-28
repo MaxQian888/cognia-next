@@ -15,12 +15,12 @@ test("CI workflows provision their clean-checkout prerequisites", async () => {
   assert.match(quality, /sudo apt-get install -y[\s\S]*ripgrep/)
   assert.match(quality, /matrix\.group == 'artifacts'[\s\S]*pnpm plugin-node:prepare/)
   assert.match(report, /pnpm\/action-setup@[\w.-]+[\s\S]*pnpm install --frozen-lockfile/)
-  // 3 GB, not 16. NODE_OPTIONS is per process and the shard runs
-  // `--maxWorkers=4`, so a 16 GB ceiling let four workers outgrow a 16 GB
-  // runner before V8 collected and the OOM killer took one. Pinned here so
-  // raising it back has to be a deliberate edit in two places.
-  assert.match(testWorkflow, /NODE_OPTIONS: "--max-old-space-size=3072"/)
-  assert.match(testWorkflow, /--maxWorkers=4/)
+  // Each worker needs the larger current type graph, while two workers and
+  // recycling idle workers keep the total below the hosted runner's memory.
+  assert.match(testWorkflow, /NODE_OPTIONS: "--max-old-space-size=6144"/)
+  assert.match(testWorkflow, /--maxWorkers=2/)
+  const jestConfig = await readFile(new URL("../../jest.config.ts", import.meta.url), "utf8")
+  assert.match(jestConfig, /workerIdleMemoryLimit: isCoverage \? "768MB"/)
   assert.match(testWorkflow, /sidecars:build[\s\S]*sidecars:test/)
   assert.match(testWorkflow, /sidecars:test[\s\S]*sidecar:test:live/)
   assert.match(testWorkflow, /libpipewire-0\.3-dev/)

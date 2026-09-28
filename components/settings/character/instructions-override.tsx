@@ -16,6 +16,7 @@
  * not show (`fileNames`, byte / file caps) survive untouched.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
 
 import { Input } from "@/components/ui/input"
@@ -70,7 +71,7 @@ export function InstructionsOverride({ value, onChange }: InstructionsOverridePr
         onChange={(choice) => onChange(choice === undefined ? undefined : { ...value })}
       />
       {value !== undefined && (
-        <div className="space-y-3 rounded-md border bg-background p-2">
+        <Surface className="space-y-3 rounded-md border bg-background p-2">
           <div className="flex items-center justify-between gap-3">
             <div className="space-y-0.5">
               <Label htmlFor="agent-instructions-enabled" className="text-xs">
@@ -177,7 +178,7 @@ export function InstructionsOverride({ value, onChange }: InstructionsOverridePr
             />
             <p className="text-[10px] text-muted-foreground">{tApp("extraPathsHint")}</p>
           </div>
-        </div>
+        </Surface>
       )}
     </div>
   )

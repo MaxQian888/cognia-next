@@ -7,7 +7,7 @@
  *
  *   • `RUNTIME_CAPABILITIES` — `lib/ai/agent/execution/resolve-agent-execution-spec.ts`.
  *     Frozen into each `ResolvedAgentExecutionSpec.capabilities.effective`.
- *   • `ADAPTER_CAPABILITIES` — `sidecar/dispatch/runtime-adapter.mjs`. Consulted
+ *   • `ADAPTER_CAPABILITIES` — `sidecar/src/runtimes/capabilities.ts`. Consulted
  *     at command time, and its own comment calls itself a mirror of the first.
  *
  * They were not in fact mirrors, and the way that surfaced is worth recording:
@@ -40,8 +40,8 @@ const TS_PATH = join(
   "execution",
   "resolve-agent-execution-spec.ts"
 )
-const SIDECAR_PATH = join(REPO_ROOT, "sidecar", "dispatch", "runtime-adapter.mjs")
-const CONTROL_PATH = join(REPO_ROOT, "sidecar", "dispatch", "control.mjs")
+const SIDECAR_PATH = join(REPO_ROOT, "sidecar", "src", "runtimes", "capabilities.ts")
+const CONTROL_PATH = join(REPO_ROOT, "sidecar", "src", "host", "control", "control.ts")
 const CONTRACT_PATH = join(REPO_ROOT, "packages", "agent-config-types", "src", "agent-execution.ts")
 
 /** Adapters both tables describe. `external` has no sidecar dispatcher. */
@@ -79,7 +79,7 @@ export function extractAdapterCapabilities(source) {
   const body = source.match(
     /export const ADAPTER_CAPABILITIES(?::[^=]*)?\s*=\s*\{([\s\S]*?)\n\}/
   )?.[1]
-  if (!body) throw new Error("runtime-adapter.mjs: `ADAPTER_CAPABILITIES` not found")
+  if (!body) throw new Error("capabilities.ts: `ADAPTER_CAPABILITIES` not found")
   return parseAdapterBlocks(
     body,
     /(?:"([^"]+)"|(\w[\w-]*)):\s*new Set(?:<[^>(]*>)?\(\[([\s\S]*?)\n {2}\]\)/g
@@ -102,7 +102,7 @@ export function extractCommandCapabilities(source) {
   const body = source.match(
     /export const COMMAND_CAPABILITIES(?::[^=]*)?\s*=\s*\{([\s\S]*?)\n\}/
   )?.[1]
-  if (!body) throw new Error("runtime-adapter.mjs: `COMMAND_CAPABILITIES` not found")
+  if (!body) throw new Error("capabilities.ts: `COMMAND_CAPABILITIES` not found")
   return Object.fromEntries([...body.matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]))
 }
 
@@ -212,7 +212,7 @@ export function verify({ runtime, adapter, commands, capabilityIds, controlCapab
 /** `CONTROL_METHOD_CAPABILITIES` as `{ method: capability }`. */
 export function extractControlCapabilities(source) {
   const body = source.match(/export const CONTROL_METHOD_CAPABILITIES = \{([\s\S]*?)\n\}/)?.[1]
-  if (!body) throw new Error("control.mjs: `CONTROL_METHOD_CAPABILITIES` not found")
+  if (!body) throw new Error("control.ts: `CONTROL_METHOD_CAPABILITIES` not found")
   return Object.fromEntries(
     [...body.matchAll(/(?:"([^"]+)"|([A-Za-z_]\w*)):\s*"([^"]+)"/g)].map((m) => [
       m[1] ?? m[2],

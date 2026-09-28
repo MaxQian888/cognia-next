@@ -152,7 +152,6 @@
       "keyring_secrets.rs",
       "lib.rs",
       "main.rs",
-      "mcp_oauth",
       "menu.rs",
       "node_runtime.rs",
       "ollama",

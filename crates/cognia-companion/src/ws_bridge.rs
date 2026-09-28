@@ -572,7 +572,7 @@ pub async fn ws_bridge_handler(
 
     ws.max_message_size(MAX_BRIDGE_FRAME_BYTES)
         .max_frame_size(MAX_BRIDGE_FRAME_BYTES)
-        .on_upgrade(move |socket| handle_socket(socket, state, ctx.account_id))
+        .on_upgrade(move |socket| handle_socket(socket, state, ctx.tenant_id))
 }
 
 /// Send a close frame with `code`/`reason`, ignoring transport errors.

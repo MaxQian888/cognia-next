@@ -1,7 +1,7 @@
 //! Fleet projection adapter backed by the companion connection registries.
-use std::sync::Arc;
 use cognia_fleet::companion::{FleetCompanion, COMPANION};
 use cognia_fleet::registry::FleetHost;
+use std::sync::Arc;
 /// The companion core's side of a Fleet snapshot: the connected brain and the
 /// tenant's worker hosts.
 struct CompanionFleetView;
@@ -23,12 +23,14 @@ pub fn install_companion_view() {
     COMPANION.set(Arc::new(CompanionFleetView));
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn projects_the_same_active_brain_account() {
-        assert_eq!(CompanionFleetView.brain_account_id(), crate::ws_bridge::current_brain_account_id());
+        assert_eq!(
+            CompanionFleetView.brain_account_id(),
+            crate::ws_bridge::current_brain_account_id()
+        );
     }
 }

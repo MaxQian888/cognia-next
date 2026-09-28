@@ -11,6 +11,7 @@
  * every backend reads as "its own default" per field.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
 
 import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
@@ -35,13 +36,13 @@ export function SandboxPolicyOverride({ value, onChange }: SandboxPolicyOverride
         onChange={(choice) => onChange(choice === undefined ? undefined : {})}
       />
       {value !== undefined && (
-        <div className="rounded-md border bg-background p-2">
+        <Surface className="rounded-md border bg-background p-2">
           <SandboxPolicyFields
             policy={value}
             onChange={onChange}
             testIdPrefix="agent-sandbox-policy"
           />
-        </div>
+        </Surface>
       )}
     </div>
   )

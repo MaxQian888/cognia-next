@@ -90,7 +90,9 @@ export function buildMessageShareContent(message: UIMessage): MessageShareConten
   }
 }
 
-function materializeMessageShareContent(parts: UIMessage["parts"]): MessageShareContent {
+function materializeMessageShareContent(
+  parts: readonly UIMessage["parts"][number][]
+): MessageShareContent {
   const plainParts: string[] = []
   const nativeShareParts: string[] = []
   const htmlParts: string[] = []

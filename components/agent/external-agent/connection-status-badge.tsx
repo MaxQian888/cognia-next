@@ -9,8 +9,9 @@
  * `className`.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useTranslations } from "next-intl"
-import { Activity, AlertCircle, Loader2 } from "lucide-react"
+import { Activity, AlertCircle } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
@@ -68,7 +69,7 @@ export function ConnectionStatusBadge({
   return (
     <Badge variant={config.variant} className={cn("text-xs font-normal", config.tint, className)}>
       {withIcon && (status === "connecting" || status === "reconnecting") && (
-        <Loader2 className="mr-1 size-3 animate-spin motion-reduce:animate-none" />
+        <Spinner className="mr-1 size-3 " />
       )}
       {withIcon && status === "connected" && <Activity className="mr-1 size-3" />}
       {withIcon && status === "error" && <AlertCircle className="mr-1 size-3" />}

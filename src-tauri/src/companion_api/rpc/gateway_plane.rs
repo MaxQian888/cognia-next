@@ -154,11 +154,11 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     use tauri::Manager as _;
-    let _ = (device_id, account_id, scope);
+    let _ = (device_id, tenant_id, scope);
     match name {
         "gateway_status" => with_gateway(state, host, |gateway, host_kind| {
             let status = gateway.status();

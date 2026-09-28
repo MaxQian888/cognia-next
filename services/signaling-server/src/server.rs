@@ -100,9 +100,7 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn healthz(
-    axum::extract::State(state): axum::extract::State<AppState>,
-) -> impl IntoResponse {
+async fn healthz(axum::extract::State(state): axum::extract::State<AppState>) -> impl IntoResponse {
     let stats = state.registry.stats();
     let mut body = json!({
         "ok": true,

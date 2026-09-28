@@ -24,7 +24,8 @@
           "children": {
             "verifier": {}
           }
-        }
+        },
+        "cloud_deployment": {}
       }
     },
     "acp": {
@@ -103,7 +104,11 @@
         "monitor": {}
       }
     },
-    "backup": {},
+    "backup": {
+      "children": {
+        "stream": {}
+      }
+    },
     "bot": {
       "children": {
         "delivery": {},
@@ -112,7 +117,9 @@
           "children": {
             "armed": {}
           }
-        }
+        },
+        "installation": {},
+        "console": {}
       }
     },
     "browser": {
@@ -486,7 +493,9 @@
         "egress_grant": {},
         "image": {},
         "probe": {},
-        "spec": {}
+        "spec": {},
+        "build": {},
+        "ports": {}
       }
     },
     "execution": {
@@ -507,7 +516,8 @@
         "run": {},
         "runtime": {},
         "session": {},
-        "turn": {}
+        "turn": {},
+        "gateway_task": {}
       }
     },
     "external_bridge": {
@@ -642,7 +652,8 @@
             "deadletter": {},
             "url": {}
           }
-        }
+        },
+        "account": {}
       }
     },
     "issue": {
@@ -986,7 +997,8 @@
           "children": {
             "message": {}
           }
-        }
+        },
+        "history": {}
       }
     },
     "sftp": {
@@ -1043,7 +1055,8 @@
           "children": {
             "usage": {}
           }
-        }
+        },
+        "provider": {}
       }
     },
     "sync": {
@@ -1226,6 +1239,17 @@
     "workspace": {
       "children": {
         "trusted": {}
+      }
+    },
+    "room": {},
+    "power": {
+      "children": {
+        "screen_holds": {}
+      }
+    },
+    "chat": {
+      "children": {
+        "copilot": {}
       }
     }
   }

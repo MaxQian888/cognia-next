@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { cancelJob, createTwinJob, getTwinJob, pauseJob } from "./twin-jobs"
 import {
   __resetActiveTwinJobsForTesting,
@@ -10,11 +10,12 @@ import {
   throwIfTwinJobInterrupted,
 } from "@/lib/twin/job-control"
 
+const fixture = createDbTestFixture()
+beforeAll(fixture.initialize)
+afterAll(fixture.dispose)
+
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await fixture.restore()
   __resetActiveTwinJobsForTesting()
 })
 

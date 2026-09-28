@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react"
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { EvalDashboard } from "./eval-dashboard"
@@ -21,7 +22,7 @@ const meta = {
 } satisfies Meta<typeof EvalDashboard>
 
 export default meta
-type Story = StoryObj<typeof meta>
+type Story = StoryObj<NonNullable<ComponentProps<typeof EvalDashboard>>>
 
 export const Populated: Story = {
   beforeEach: async () => {

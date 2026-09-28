@@ -1,7 +1,13 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { evaluate, hasFireSite, parseContract, runAudit } from "./check-plugin-hooks.mjs"
+import {
+  evaluate,
+  hasFireSite,
+  parseContract,
+  parseNormalizedHookPoints,
+  runAudit,
+} from "./check-plugin-hooks.mjs"
 
 const CONTRACT_FIXTURE = `
 export const CANONICAL_HOOK_POINTS = [
@@ -87,4 +93,35 @@ test("the real repo passes, and the virtual set is not empty", () => {
   // Guards the gate against being trivially satisfied by an empty virtual set:
   // the ten dormant hooks this gate was written for must still be labelled.
   assert.ok(report.virtual > 0)
+})
+
+test("normalized hooks require a mapping and a live semantic dispatch", () => {
+  const mapping = parseNormalizedHookPoints(`
+const LEGACY_HOOK_POINTS: Readonly<Record<NormalizedLegacyHook, string>> = Object.freeze({
+  onPostToolUse: "tool.result.project",
+})
+`)
+  assert.deepEqual(mapping, { onPostToolUse: "tool.result.project" })
+  const base = {
+    hooks: ["onPostToolUse"],
+    virtual: [],
+    binding: "hooks-system.ts",
+    normalizedHookPoints: mapping,
+  }
+  assert.equal(
+    evaluate({ ...base, bindingSource: 'dispatchTransform("tool.result.project", value)' }).ok,
+    true
+  )
+  assert.equal(
+    evaluate({ ...base, bindingSource: 'dispatchTransform("tool.other", value)' }).ok,
+    false
+  )
+  assert.equal(
+    evaluate({
+      ...base,
+      bindingSource: 'dispatchTransform("tool.result.project", value)',
+      virtual: ["onPostToolUse"],
+    }).ok,
+    false
+  )
 })

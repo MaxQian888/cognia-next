@@ -29,12 +29,12 @@ import {
 } from "./target-registry"
 
 interface AccountRuntimeTargetRegistry {
-  getActiveTarget(accountId: string): Promise<RuntimeTargetRecord | null>
-  ensureStandaloneTarget(accountId: string): Promise<RuntimeTargetRecord>
-  activateTarget(accountId: string, targetId: string): Promise<RuntimeTargetRecord>
-  listTargets(accountId: string): Promise<RuntimeTargetRecord[]>
-  deleteTarget(accountId: string, targetId: string): Promise<void>
-  deleteAccountTargets(accountId: string): Promise<void>
+  getActiveTarget(localAccountId: string): Promise<RuntimeTargetRecord | null>
+  ensureStandaloneTarget(localAccountId: string): Promise<RuntimeTargetRecord>
+  activateTarget(localAccountId: string, targetId: string): Promise<RuntimeTargetRecord>
+  listTargets(localAccountId: string): Promise<RuntimeTargetRecord[]>
+  deleteTarget(localAccountId: string, targetId: string): Promise<void>
+  deleteAccountTargets(localAccountId: string): Promise<void>
 }
 
 interface PrepareDependencies {
@@ -43,7 +43,7 @@ interface PrepareDependencies {
     accountId: string
     targetId: string
   }): Promise<{ stage: "verified"; tables: unknown[] }>
-  markCompleted(accountId: string, targetId: string): Promise<void>
+  markCompleted(localAccountId: string, targetId: string): Promise<void>
   /**
    * Is there still a plaintext database left to fold into the encrypted
    * target? Injected so the steady-state skip is testable without Dexie.
@@ -60,8 +60,8 @@ interface RemoveDependencies {
 interface SwitchDependencies {
   registry: AccountRuntimeTargetRegistry
   hasRunningStandaloneTurn(): boolean
-  activateDatabase(accountId: string, targetId: string): void
-  setContext(accountId: string, targetId: string): void
+  activateDatabase(localAccountId: string, targetId: string): void
+  setContext(localAccountId: string, targetId: string): void
   assertCredentialAvailable(target: RuntimeTargetRecord): Promise<void>
   finalizeCaptures?(context: {
     accountId: string
@@ -74,8 +74,8 @@ interface SwitchDependencies {
 
 interface DetachDependencies {
   registry: AccountRuntimeTargetRegistry
-  activateDatabase(accountId: string, targetId: string): void
-  setContext(accountId: string, targetId: string): void
+  activateDatabase(localAccountId: string, targetId: string): void
+  setContext(localAccountId: string, targetId: string): void
   finalizeCaptures?(context: {
     accountId: string
     fromTargetId: string | null
@@ -88,8 +88,8 @@ interface DetachDependencies {
 interface RegisterDependencies {
   registry: Pick<RuntimeTargetRegistry, "upsertAndActivateCompanionTarget">
   getContext(): RuntimeTargetScope | null
-  activateDatabase(accountId: string, targetId: string): void
-  setContext(accountId: string, targetId: string): void
+  activateDatabase(localAccountId: string, targetId: string): void
+  setContext(localAccountId: string, targetId: string): void
 }
 
 const runtimeTargetRegistry = new RuntimeTargetRegistry()
@@ -154,49 +154,49 @@ export interface CompanionRuntimeConfigMetadata {
 }
 
 export async function prepareAccountRuntimeTarget(
-  accountId: string,
+  localAccountId: string,
   dependencies: PrepareDependencies = {
     registry: runtimeTargetRegistry,
     migrate: migrateEncryptedRuntimeTarget,
     markCompleted: markTargetDatabaseMigrationCompleted,
   }
 ): Promise<RuntimeTargetRecord> {
-  const active = await dependencies.registry.getActiveTarget(accountId)
+  const active = await dependencies.registry.getActiveTarget(localAccountId)
   if (active) {
     const pending = await (dependencies.hasPendingMigration ?? plaintextSourceExists)({
-      accountId,
+      accountId: localAccountId,
       targetId: active.id,
     })
     if (pending) {
-      await dependencies.migrate({ accountId, targetId: active.id })
-      await dependencies.markCompleted(accountId, active.id)
+      await dependencies.migrate({ accountId: localAccountId, targetId: active.id })
+      await dependencies.markCompleted(localAccountId, active.id)
     }
     return active
   }
 
-  const target = await dependencies.registry.ensureStandaloneTarget(accountId)
-  await dependencies.migrate({ accountId, targetId: target.id })
-  const activated = await dependencies.registry.activateTarget(accountId, target.id)
-  await dependencies.markCompleted(accountId, target.id)
+  const target = await dependencies.registry.ensureStandaloneTarget(localAccountId)
+  await dependencies.migrate({ accountId: localAccountId, targetId: target.id })
+  const activated = await dependencies.registry.activateTarget(localAccountId, target.id)
+  await dependencies.markCompleted(localAccountId, target.id)
   return activated
 }
 
 export async function removeAccountRuntimeTargets(
-  accountId: string,
+  localAccountId: string,
   dependencies: RemoveDependencies = {
     registry: runtimeTargetRegistry,
     deleteDatabase: (name) => Dexie.delete(name),
   }
 ): Promise<RuntimeTargetDeletionResult> {
-  const targets = await dependencies.registry.listTargets(accountId)
+  const targets = await dependencies.registry.listTargets(localAccountId)
   const deletedDatabases: string[] = []
   for (const target of targets) {
     const databaseExists = dependencies.databaseExists ?? ((name: string) => Dexie.exists(name))
     for (const databaseName of [
-      runtimeTargetDatabaseName(accountId, target.id),
+      runtimeTargetDatabaseName(localAccountId, target.id),
       // The encrypted target database is the one a window runs against, so it
       // is the one with a Router + Fusion ledger beside it.
-      ...withFusionDatabase(encryptedRuntimeTargetDatabaseName(accountId, target.id)),
+      ...withFusionDatabase(encryptedRuntimeTargetDatabaseName(localAccountId, target.id)),
     ]) {
       await dependencies.deleteDatabase(databaseName)
       if (await databaseExists(databaseName)) {
@@ -205,15 +205,15 @@ export async function removeAccountRuntimeTargets(
       deletedDatabases.push(databaseName)
     }
   }
-  await dependencies.registry.deleteAccountTargets(accountId)
-  const remainingTargets = await dependencies.registry.listTargets(accountId)
+  await dependencies.registry.deleteAccountTargets(localAccountId)
+  const remainingTargets = await dependencies.registry.listTargets(localAccountId)
   if (remainingTargets.length > 0) {
     throw new Error(
-      `Runtime target registry deletion could not be verified for ${accountId}: ${remainingTargets.length} row(s) remain.`
+      `Runtime target registry deletion could not be verified for ${localAccountId}: ${remainingTargets.length} row(s) remain.`
     )
   }
   return {
-    accountId,
+    accountId: localAccountId,
     targetIds: targets.map((target) => target.id),
     deletedDatabases,
     registryRowsDeleted: targets.length,
@@ -249,13 +249,13 @@ export async function registerCompanionRuntimeTarget(
   isCurrent?: () => boolean
 ): Promise<RuntimeTargetRecord | null> {
   const scope = dependencies.getContext()
-  const accountId = config.accountId ?? scope?.accountId
-  if (!accountId) return null
+  const localAccountId = config.accountId ?? scope?.accountId
+  if (!localAccountId) return null
   const targetId = config.targetId ?? (await deriveCompanionRuntimeTargetId(config))
   if (isCurrent && !isCurrent()) return null
   const hostname = new URL(config.baseUrl).hostname
   const input = {
-    accountId,
+    accountId: localAccountId,
     id: targetId,
     label: hostname,
     hostKind:
@@ -264,19 +264,19 @@ export async function registerCompanionRuntimeTarget(
     deviceId: config.deviceId,
     serverVersion: config.serverVersion,
     serverFingerprint: config.serverFingerprint,
-    credentialRef: `companion-host:${encodeURIComponent(accountId)}:${encodeURIComponent(targetId)}:device-private-jwk`,
+    credentialRef: `companion-host:${encodeURIComponent(localAccountId)}:${encodeURIComponent(targetId)}:device-private-jwk`,
   }
   const activated = isCurrent
     ? await dependencies.registry.upsertAndActivateCompanionTarget(input, isCurrent)
     : await dependencies.registry.upsertAndActivateCompanionTarget(input)
   if (isCurrent && !isCurrent()) return null
-  dependencies.activateDatabase(accountId, activated.id)
-  dependencies.setContext(accountId, activated.id)
+  dependencies.activateDatabase(localAccountId, activated.id)
+  dependencies.setContext(localAccountId, activated.id)
   return activated
 }
 
 export async function switchAccountRuntimeTarget(
-  accountId: string,
+  localAccountId: string,
   targetId: string,
   dependencies: SwitchDependencies = {
     registry: runtimeTargetRegistry,
@@ -301,7 +301,7 @@ export async function switchAccountRuntimeTarget(
     stopSubscriptions: async () => {
       const scope = getActiveRuntimeTargetContext()
       await runRuntimeTargetTransitionPhase("release-subscriptions", {
-        accountId: scope?.accountId ?? accountId,
+        accountId: scope?.accountId ?? localAccountId,
         fromTargetId: scope?.targetId ?? null,
         // The destination is this call's `targetId`. `toTargetId` is the field
         // name on `RuntimeTargetTransitionContext`, not a binding in scope —
@@ -322,34 +322,34 @@ export async function switchAccountRuntimeTarget(
   if (dependencies.hasRunningStandaloneTurn()) {
     throw new Error("A standalone chat turn must stop or finish before switching runtime targets.")
   }
-  const previous = await dependencies.registry.getActiveTarget(accountId)
-  const target = (await dependencies.registry.listTargets(accountId)).find(
+  const previous = await dependencies.registry.getActiveTarget(localAccountId)
+  const target = (await dependencies.registry.listTargets(localAccountId)).find(
     (candidate) => candidate.id === targetId
   )
   if (!target) {
-    throw new Error(`Runtime target ${targetId} does not exist for account ${accountId}.`)
+    throw new Error(`Runtime target ${targetId} does not exist for account ${localAccountId}.`)
   }
   if (previous?.id === target.id) return target
   await dependencies.assertCredentialAvailable(target)
 
   const transition = {
-    accountId,
+    accountId: localAccountId,
     fromTargetId: previous?.id ?? null,
     toTargetId: target.id,
   }
   await dependencies.finalizeCaptures?.(transition)
   await dependencies.stopSubscriptions()
-  const activated = await dependencies.registry.activateTarget(accountId, target.id)
-  dependencies.activateDatabase(accountId, activated.id)
-  dependencies.setContext(accountId, activated.id)
+  const activated = await dependencies.registry.activateTarget(localAccountId, target.id)
+  dependencies.activateDatabase(localAccountId, activated.id)
+  dependencies.setContext(localAccountId, activated.id)
   try {
     await dependencies.reloadTransport()
     return activated
   } catch (error) {
     if (previous) {
-      await dependencies.registry.activateTarget(accountId, previous.id)
-      dependencies.activateDatabase(accountId, previous.id)
-      dependencies.setContext(accountId, previous.id)
+      await dependencies.registry.activateTarget(localAccountId, previous.id)
+      dependencies.activateDatabase(localAccountId, previous.id)
+      dependencies.setContext(localAccountId, previous.id)
       await dependencies.reloadTransport().catch(() => {})
     }
     throw error

@@ -541,9 +541,6 @@ importers:
       tone:
         specifier: ^15.1.22
         version: 15.1.22
-      unbash:
-        specifier: 4.0.11
-        version: 4.0.11
       untitled-pixi-live2d-engine:
         specifier: ^1.4.0
         version: 1.4.0(@pixi/sound@6.0.1(pixi.js@8.21.0))(pixi.js@8.21.0)
@@ -1179,6 +1176,9 @@ importers:
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
+      '@xyflow/react':
+        specifier: ^12.12.0
+        version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.18)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       ai:
         specifier: 7.0.116
         version: 7.0.116(zod@4.6.5)

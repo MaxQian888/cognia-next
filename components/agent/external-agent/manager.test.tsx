@@ -151,8 +151,9 @@ const baseHookValue = () => ({
 describe("ExternalAgentManager", () => {
   it("does not relist sessions when an unchanged runtime is projected into a new array", async () => {
     const agent = makeAgent({
-      protocol: "opencode",
+      protocol: "acp",
       transport: "http",
+      process: undefined,
       network: { endpoint: "http://localhost:4096" },
     })
     agent.connectionStatus = "connected"
@@ -170,8 +171,9 @@ describe("ExternalAgentManager", () => {
   it("shows immediate progress and prevents duplicate connect clicks", async () => {
     const connect = jest.fn(() => new Promise<void>(() => {}))
     const agent = makeAgent({
-      protocol: "opencode",
+      protocol: "acp",
       transport: "http",
+      process: undefined,
       network: { endpoint: "http://localhost:4096" },
     })
     mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent], connect })
@@ -881,15 +883,15 @@ describe("ExternalAgentManager", () => {
     ).toBe(true)
   })
 
-  it("adds an OpenCode auto-spawn agent from the preset (carries metadata)", async () => {
+  it("adds an OpenCode ACP agent from the preset (carries metadata)", async () => {
     const hook = baseHookValue()
     mockUseExternalAgent.mockReturnValue(hook)
     render(wrap(<ExternalAgentManager />))
     fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
 
-    // Pick the OpenCode (auto-spawn) preset from the quick-start selector.
+    // Pick the supported OpenCode ACP preset from the quick-start selector.
     fireEvent.click(screen.getAllByRole("combobox")[0])
-    fireEvent.click(await screen.findByRole("option", { name: /OpenCode \(auto-spawn\)/i }))
+    fireEvent.click(await screen.findByRole("option", { name: /OpenCode \(ACP\)/i }))
 
     const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
     await act(async () => {
@@ -898,9 +900,10 @@ describe("ExternalAgentManager", () => {
 
     expect(hook.addAgent).toHaveBeenCalledWith(
       expect.objectContaining({
-        protocol: "opencode",
-        process: expect.objectContaining({ command: "opencode" }),
-        metadata: expect.objectContaining({ autoSpawnServer: true }),
+        protocol: "acp",
+        transport: "stdio",
+        process: expect.objectContaining({ command: "opencode", args: ["acp"] }),
+        metadata: expect.objectContaining({ preset: "opencode-acp" }),
       })
     )
   })
@@ -962,7 +965,7 @@ describe("ExternalAgentManager", () => {
     render(wrap(<ExternalAgentManager />))
     fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
     fireEvent.click(screen.getAllByRole("combobox")[0])
-    fireEvent.click(await screen.findByRole("option", { name: /OpenCode \(auto-spawn\)/i }))
+    fireEvent.click(await screen.findByRole("option", { name: /OpenCode \(ACP\)/i }))
     fireEvent.click(screen.getByRole("button", { name: "Select Cognia fixture" }))
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.addAgent }))
@@ -1022,17 +1025,20 @@ describe("ExternalAgentManager", () => {
     )
   })
 
-  it("requires an endpoint for a remote OpenCode agent (no auto-spawn)", async () => {
+  it("requires an endpoint for a remote A2A agent", async () => {
     ;(toast.error as jest.Mock).mockClear()
     const hook = baseHookValue()
     mockUseExternalAgent.mockReturnValue(hook)
     render(wrap(<ExternalAgentManager />))
     fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
 
-    fireEvent.click(screen.getAllByRole("combobox")[0])
-    fireEvent.click(await screen.findByRole("option", { name: /OpenCode \(remote server\)/i }))
+    fireEvent.click(screen.getAllByRole("combobox")[1])
+    fireEvent.click(await screen.findByRole("option", { name: /^A2A/ }))
+    fireEvent.change(screen.getByLabelText(en.externalAgent.manager.name), {
+      target: { value: "Remote A2A" },
+    })
 
-    // Clear the preset's default endpoint so validation fails.
+    // Leave the remote endpoint empty so validation fails.
     const endpoint = screen.getByLabelText(en.externalAgent.settings.endpoint) as HTMLInputElement
     fireEvent.change(endpoint, { target: { value: "" } })
     endpoint.removeAttribute("required")

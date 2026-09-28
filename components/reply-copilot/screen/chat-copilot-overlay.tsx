@@ -11,6 +11,7 @@
  * nothing here can type into the other app.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ShieldAlertIcon, SparklesIcon, XIcon } from "lucide-react"
@@ -287,10 +288,10 @@ export function ChatCopilotOverlay() {
       : null
 
   return (
-    <div
+    <Surface
       ref={panelRef}
       style={{ width: CHAT_COPILOT_PANEL_WIDTH }}
-      className="max-h-[80vh] overflow-y-auto rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg"
+      className="max-h-[80vh] overflow-y-auto rounded-xl border bg-popover p-3 text-popover-foreground shadow-(--elevation-3)"
       aria-label={t("title")}
       role="dialog"
     >
@@ -314,6 +315,6 @@ export function ChatCopilotOverlay() {
       </div>
       <Body view={view} />
       <p className="mt-3 text-[11px] text-muted-foreground">{t("footer")}</p>
-    </div>
+    </Surface>
   )
 }

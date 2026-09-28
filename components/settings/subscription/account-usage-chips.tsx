@@ -40,11 +40,11 @@ export function useAccountUsageIndex(): Map<string, AccountUsage> {
 
   return useMemo(() => {
     const index = new Map<string, AccountUsage>()
-    const entry = (accountId: string): AccountUsage => {
-      let e = index.get(accountId)
+    const entry = (providerAccountId: string): AccountUsage => {
+      let e = index.get(providerAccountId)
       if (!e) {
         e = { characters: [], sessions: [] }
-        index.set(accountId, e)
+        index.set(providerAccountId, e)
       }
       return e
     }
@@ -70,12 +70,12 @@ export function useAccountUsageIndex(): Map<string, AccountUsage> {
 }
 
 export interface AccountUsageChipsProps {
-  accountId: string
+  providerAccountId: string
   /** This account's slice of {@link useAccountUsageIndex}. */
   usage: AccountUsage | undefined
 }
 
-export function AccountUsageChips({ accountId, usage }: AccountUsageChipsProps) {
+export function AccountUsageChips({ providerAccountId, usage }: AccountUsageChipsProps) {
   const t = useTranslations("subscription.common.accountList")
 
   const characterRefs = usage?.characters ?? []
@@ -89,7 +89,10 @@ export function AccountUsageChips({ accountId, usage }: AccountUsageChipsProps) 
   const hidden = total - visibleCharacters.length - visibleSessions.length
 
   return (
-    <div className="mt-1 flex flex-wrap gap-1" data-testid={`account-usage-chips-${accountId}`}>
+    <div
+      className="mt-1 flex flex-wrap gap-1"
+      data-testid={`account-usage-chips-${providerAccountId}`}
+    >
       {visibleCharacters.map((char) => (
         <Badge
           key={`char-${char.id}`}
@@ -114,7 +117,7 @@ export function AccountUsageChips({ accountId, usage }: AccountUsageChipsProps) 
         <Badge
           variant="outline"
           className="text-[10px]"
-          data-testid={`account-usage-more-${accountId}`}
+          data-testid={`account-usage-more-${providerAccountId}`}
         >
           {t("inUseMore", { count: hidden })}
         </Badge>

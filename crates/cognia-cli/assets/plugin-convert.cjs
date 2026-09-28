@@ -302,9 +302,9 @@ var require_section_matter = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/common.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/common.js
 var require_common = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/common.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/common.js"(exports2, module2) {
     "use strict";
     function isNothing(subject) {
       return typeof subject === "undefined" || subject === null;
@@ -347,9 +347,9 @@ var require_common = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/exception.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/exception.js
 var require_exception = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/exception.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/exception.js"(exports2, module2) {
     "use strict";
     function YAMLException(reason, mark) {
       Error.call(this);
@@ -377,9 +377,9 @@ var require_exception = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/mark.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/mark.js
 var require_mark = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/mark.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/mark.js"(exports2, module2) {
     "use strict";
     var common = require_common();
     function Mark(name, buffer, position, line, column) {
@@ -435,9 +435,9 @@ var require_mark = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type.js
 var require_type = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type.js"(exports2, module2) {
     "use strict";
     var YAMLException = require_exception();
     var TYPE_CONSTRUCTOR_OPTIONS = [
@@ -494,9 +494,9 @@ var require_type = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema.js
 var require_schema = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema.js"(exports2, module2) {
     "use strict";
     var common = require_common();
     var YAMLException = require_exception();
@@ -582,9 +582,9 @@ var require_schema = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/str.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/str.js
 var require_str = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/str.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/str.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     module2.exports = new Type("tag:yaml.org,2002:str", {
@@ -596,9 +596,9 @@ var require_str = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/seq.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/seq.js
 var require_seq = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/seq.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/seq.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     module2.exports = new Type("tag:yaml.org,2002:seq", {
@@ -610,9 +610,9 @@ var require_seq = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/map.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/map.js
 var require_map = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/map.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/map.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     module2.exports = new Type("tag:yaml.org,2002:map", {
@@ -624,9 +624,9 @@ var require_map = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema/failsafe.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema/failsafe.js
 var require_failsafe = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema/failsafe.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema/failsafe.js"(exports2, module2) {
     "use strict";
     var Schema = require_schema();
     module2.exports = new Schema({
@@ -639,9 +639,9 @@ var require_failsafe = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/null.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/null.js
 var require_null = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/null.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/null.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     function resolveYamlNull(data) {
@@ -679,9 +679,9 @@ var require_null = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/bool.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/bool.js
 var require_bool = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/bool.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/bool.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     function resolveYamlBoolean(data) {
@@ -716,9 +716,9 @@ var require_bool = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/int.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/int.js
 var require_int = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/int.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/int.js"(exports2, module2) {
     "use strict";
     var common = require_common();
     var Type = require_type();
@@ -849,9 +849,9 @@ var require_int = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/float.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/float.js
 var require_float = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/float.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/float.js"(exports2, module2) {
     "use strict";
     var common = require_common();
     var Type = require_type();
@@ -944,9 +944,9 @@ var require_float = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema/json.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema/json.js
 var require_json = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema/json.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema/json.js"(exports2, module2) {
     "use strict";
     var Schema = require_schema();
     module2.exports = new Schema({
@@ -963,9 +963,9 @@ var require_json = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema/core.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema/core.js
 var require_core = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema/core.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema/core.js"(exports2, module2) {
     "use strict";
     var Schema = require_schema();
     module2.exports = new Schema({
@@ -976,9 +976,9 @@ var require_core = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/timestamp.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/timestamp.js
 var require_timestamp = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/timestamp.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/timestamp.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     var YAML_DATE_REGEXP = new RegExp(
@@ -1037,9 +1037,9 @@ var require_timestamp = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/merge.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/merge.js
 var require_merge = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/merge.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/merge.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     function resolveYamlMerge(data) {
@@ -1052,9 +1052,9 @@ var require_merge = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/binary.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/binary.js
 var require_binary = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/binary.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/binary.js"(exports2, module2) {
     "use strict";
     var NodeBuffer;
     try {
@@ -1145,9 +1145,9 @@ var require_binary = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/omap.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/omap.js
 var require_omap = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/omap.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/omap.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     var _hasOwnProperty = Object.prototype.hasOwnProperty;
@@ -1182,9 +1182,9 @@ var require_omap = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/pairs.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/pairs.js
 var require_pairs = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/pairs.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/pairs.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     var _toString = Object.prototype.toString;
@@ -1220,9 +1220,9 @@ var require_pairs = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/set.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/set.js
 var require_set = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/set.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/set.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     var _hasOwnProperty = Object.prototype.hasOwnProperty;
@@ -1247,9 +1247,9 @@ var require_set = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema/default_safe.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema/default_safe.js
 var require_default_safe = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema/default_safe.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema/default_safe.js"(exports2, module2) {
     "use strict";
     var Schema = require_schema();
     module2.exports = new Schema({
@@ -1270,9 +1270,9 @@ var require_default_safe = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/js/undefined.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/js/undefined.js
 var require_undefined = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/js/undefined.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/js/undefined.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     function resolveJavascriptUndefined() {
@@ -1297,9 +1297,9 @@ var require_undefined = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/js/regexp.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/js/regexp.js
 var require_regexp = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/js/regexp.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/js/regexp.js"(exports2, module2) {
     "use strict";
     var Type = require_type();
     function resolveJavascriptRegExp(data) {
@@ -1341,9 +1341,9 @@ var require_regexp = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/js/function.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/js/function.js
 var require_function = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/type/js/function.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/type/js/function.js"(exports2, module2) {
     "use strict";
     var esprima;
     try {
@@ -1396,9 +1396,9 @@ var require_function = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema/default_full.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema/default_full.js
 var require_default_full = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/schema/default_full.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/schema/default_full.js"(exports2, module2) {
     "use strict";
     var Schema = require_schema();
     module2.exports = Schema.DEFAULT = new Schema({
@@ -1414,9 +1414,9 @@ var require_default_full = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/loader.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/loader.js
 var require_loader = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/loader.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/loader.js"(exports2, module2) {
     "use strict";
     var common = require_common();
     var YAMLException = require_exception();
@@ -1604,17 +1604,22 @@ var require_loader = __commonJS({
         state.result += _result;
       }
     }
+    function chargeMergeWork(state) {
+      state.totalMergeKeys += 1;
+      if (state.maxTotalMergeKeys !== -1 && state.totalMergeKeys > state.maxTotalMergeKeys) {
+        throwError(state, "merge keys exceeded maxTotalMergeKeys (" + state.maxTotalMergeKeys + ")");
+      }
+    }
     function mergeMappings(state, destination, source, overridableKeys) {
       var sourceKeys, key, index, quantity;
       if (!common.isObject(source)) {
         throwError(state, "cannot merge mappings; the provided source object is unacceptable");
       }
+      chargeMergeWork(state);
       sourceKeys = Object.keys(source);
       for (index = 0, quantity = sourceKeys.length; index < quantity; index += 1) {
         key = sourceKeys[index];
-        if (state.maxTotalMergeKeys !== -1 && ++state.totalMergeKeys > state.maxTotalMergeKeys) {
-          throwError(state, "merge keys exceeded maxTotalMergeKeys (" + state.maxTotalMergeKeys + ")");
-        }
+        chargeMergeWork(state);
         if (!_hasOwnProperty.call(destination, key)) {
           setProperty2(destination, key, source[key]);
           overridableKeys[key] = true;
@@ -1643,6 +1648,9 @@ var require_loader = __commonJS({
       }
       if (keyTag === "tag:yaml.org,2002:merge") {
         if (Array.isArray(valueNode)) {
+          if (valueNode.length > 100) {
+            throwError(state, "abnormal merge sequence size");
+          }
           for (index = 0, quantity = valueNode.length; index < quantity; index += 1) {
             mergeMappings(state, _result, valueNode[index], overridableKeys);
           }
@@ -2538,9 +2546,9 @@ var require_loader = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/dumper.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/dumper.js
 var require_dumper = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml/dumper.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml/dumper.js"(exports2, module2) {
     "use strict";
     var common = require_common();
     var YAMLException = require_exception();
@@ -3086,9 +3094,9 @@ var require_dumper = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml.js
 var require_js_yaml = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/lib/js-yaml.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/lib/js-yaml.js"(exports2, module2) {
     "use strict";
     var loader = require_loader();
     var dumper = require_dumper();
@@ -3121,9 +3129,9 @@ var require_js_yaml = __commonJS({
   }
 });
 
-// node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/index.js
+// node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/index.js
 var require_js_yaml2 = __commonJS({
-  "node_modules/.pnpm/js-yaml@3.15.1/node_modules/js-yaml/index.js"(exports2, module2) {
+  "node_modules/.pnpm/js-yaml@3.15.2/node_modules/js-yaml/index.js"(exports2, module2) {
     "use strict";
     var yaml2 = require_js_yaml();
     module2.exports = yaml2;
@@ -4246,15 +4254,15 @@ function visit(text, visitor, options2 = ParseOptions.DEFAULT) {
       }
     }
   }
-  function handleError(error, skipUntilAfter = [], skipUntil2 = []) {
+  function handleError(error, skipUntilAfter = [], skipUntil = []) {
     onError(error);
-    if (skipUntilAfter.length + skipUntil2.length > 0) {
+    if (skipUntilAfter.length + skipUntil.length > 0) {
       let token = _scanner.getToken();
       while (token !== 17) {
         if (skipUntilAfter.indexOf(token) !== -1) {
           scanNext();
           break;
-        } else if (skipUntil2.indexOf(token) !== -1) {
+        } else if (skipUntil.indexOf(token) !== -1) {
           break;
         }
         token = scanNext();
@@ -4314,7 +4322,7 @@ function visit(text, visitor, options2 = ParseOptions.DEFAULT) {
     if (_scanner.getToken() === 6) {
       onSeparator(":");
       scanNext();
-      if (!parseValue2()) {
+      if (!parseValue()) {
         handleError(4, [], [
           2,
           5
@@ -4392,7 +4400,7 @@ function visit(text, visitor, options2 = ParseOptions.DEFAULT) {
       } else {
         _jsonPath[_jsonPath.length - 1]++;
       }
-      if (!parseValue2()) {
+      if (!parseValue()) {
         handleError(4, [], [
           4,
           5
@@ -4415,7 +4423,7 @@ function visit(text, visitor, options2 = ParseOptions.DEFAULT) {
     }
     return true;
   }
-  function parseValue2() {
+  function parseValue() {
     switch (_scanner.getToken()) {
       case 3:
         return parseArray2();
@@ -4435,7 +4443,7 @@ function visit(text, visitor, options2 = ParseOptions.DEFAULT) {
     handleError(4, [], []);
     return false;
   }
-  if (!parseValue2()) {
+  if (!parseValue()) {
     handleError(4, [], []);
     return false;
   }
@@ -5337,35 +5345,203 @@ var MCP_AGENT_ADAPTERS = [
 ];
 var ADAPTERS_BY_ID = new Map(MCP_AGENT_ADAPTERS.map((a) => [a.id, a]));
 
-// node_modules/.pnpm/smol-toml@1.8.0/node_modules/smol-toml/dist/date.js
-var DATE_TIME_RE = /^(\d{4}-\d{2}-\d{2})?[T ]?(?:(\d{2}):\d{2}(?::\d{2}(?:\.\d+)?)?)?(Z|[-+]\d{2}:\d{2})?$/i;
+// node_modules/.pnpm/smol-toml@1.9.0/node_modules/smol-toml/dist/error.js
+function getLineColFromPtr(string, ptr) {
+  let lines = string.slice(0, ptr).split(/\r?\n/);
+  return [lines.length, lines.pop().length + 1];
+}
+function makeCodeBlock(string, line, column) {
+  let lines = string.split(/\r?\n/);
+  let codeblock = "";
+  let numberLen = (Math.log10(line + 1) | 0) + 1;
+  for (let i = line - 1; i <= line + 1; i++) {
+    let l = lines[i - 1];
+    if (!l)
+      continue;
+    codeblock += i.toString().padEnd(numberLen, " ");
+    codeblock += ":  ";
+    codeblock += l;
+    codeblock += "\n";
+    if (i === line) {
+      codeblock += " ".repeat(numberLen + column + 2);
+      codeblock += "^\n";
+    }
+  }
+  return codeblock;
+}
+var TomlError = class _TomlError extends Error {
+  line;
+  column;
+  codeblock;
+  constructor(message, options2) {
+    const [line, column] = getLineColFromPtr(options2.toml, options2.ptr);
+    const codeblock = makeCodeBlock(options2.toml, line, column);
+    super(`Invalid TOML document: ${message}
+
+${codeblock}`, options2);
+    this.line = line;
+    this.column = column;
+    this.codeblock = codeblock;
+  }
+  /** @internal */
+  static x(message, ctx, ptr) {
+    throw new _TomlError(message, { toml: ctx.s, ptr: ptr ?? ctx.p });
+  }
+};
+
+// node_modules/.pnpm/smol-toml@1.9.0/node_modules/smol-toml/dist/primitive.js
+function parseString(ctx) {
+  let startPtr = ctx.p;
+  let c = ctx.s.charCodeAt(ctx.p++);
+  let first = c;
+  let isLiteral = c === 39;
+  let isMultiline = c === ctx.s.charCodeAt(ctx.p) && c === ctx.s.charCodeAt(ctx.p + 1);
+  if (isMultiline) {
+    if ((c = ctx.s.charCodeAt(ctx.p += 2)) === 10)
+      ctx.p++;
+    else if (c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10)
+      ctx.p += 2;
+  }
+  let parsed = "";
+  let sliceStart = ctx.p;
+  let state = 0;
+  for (; ctx.p < ctx.s.length; ctx.p++) {
+    c = ctx.s.charCodeAt(ctx.p);
+    if (isMultiline && (c === 10 || c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10)) {
+      state = state && 3;
+    } else if (c < 32 && c !== 9 || c === 127) {
+      TomlError.x("control characters are not allowed in strings", ctx);
+    } else if ((!state || state === 3) && c === first && (!isMultiline || ctx.s.charCodeAt(ctx.p + 1) === first && ctx.s.charCodeAt(ctx.p + 2) === first)) {
+      if (isMultiline) {
+        if (ctx.s.charCodeAt(ctx.p + 3) === first)
+          ctx.p++;
+        if (ctx.s.charCodeAt(ctx.p + 3) === first)
+          ctx.p++;
+      }
+      if (!state) {
+        let s = ctx.s.slice(sliceStart, ctx.p);
+        parsed = parsed ? parsed + s : s;
+      }
+      ctx.p += isMultiline ? 3 : 1;
+      return parsed;
+    } else if (!state) {
+      if (!isLiteral && c === 92) {
+        parsed += ctx.s.slice(sliceStart, sliceStart = ctx.p);
+        state = 1;
+      }
+    } else if (state === 1) {
+      if (c === 120 || c === 117 || c === 85) {
+        let errPtr = ctx.p++ - 1;
+        let value = 0;
+        let len = c === 120 ? 2 : c === 117 ? 4 : 8;
+        for (let j = 0; j < len; j++, ctx.p++) {
+          let hex = ctx.s.charCodeAt(ctx.p);
+          let digit = (
+            /* 0-9 */
+            hex >= 48 && hex <= 57 ? hex - 48 : (
+              /* A-F */
+              hex >= 65 && hex <= 70 ? hex - 65 + 10 : (
+                /* a-f */
+                hex >= 97 && hex <= 102 ? hex - 97 + 10 : -1
+              )
+            )
+          );
+          if (digit < 0)
+            TomlError.x("invalid non-hex character in unicode escape", ctx);
+          value = value << 4 | digit;
+        }
+        if (value < 0 || value > 1114111 || value >= 55296 && value <= 57343) {
+          TomlError.x("invalid unicode escape", ctx, errPtr);
+        }
+        parsed += String.fromCodePoint(value);
+        sliceStart = ctx.p--;
+        state = 0;
+      } else if (isMultiline && (c === 32 || c === 9)) {
+        state = 2;
+      } else {
+        if (c === 98)
+          parsed += "\b";
+        else if (c === 116)
+          parsed += "	";
+        else if (c === 110)
+          parsed += "\n";
+        else if (c === 102)
+          parsed += "\f";
+        else if (c === 114)
+          parsed += "\r";
+        else if (c === 101)
+          parsed += "\x1B";
+        else if (c === 34)
+          parsed += '"';
+        else if (c === 92)
+          parsed += "\\";
+        else
+          TomlError.x("unrecognised escape sequence", ctx);
+        sliceStart = ctx.p + 1;
+        state = 0;
+      }
+    } else if (c !== 32 && c !== 9) {
+      if (state === 2)
+        TomlError.x("invalid escape: only line-ending whitespace may be escaped", ctx, sliceStart);
+      state = !isLiteral && c === 92 ? 1 : 0;
+      sliceStart = ctx.p;
+    }
+  }
+  TomlError.x("unfinished string", ctx, startPtr);
+}
+
+// node_modules/.pnpm/smol-toml@1.9.0/node_modules/smol-toml/dist/date.js
+var DATE_TIME_RE = /^(\d{4}-\d{2}-\d{2})?[Tt ]?(?:(\d{2}):\d{2}(?::\d{2}(?:\.\d+)?)?)?(Z|z|[-+]\d{2}:\d{2})?$/i;
 var TomlDate = class _TomlDate extends Date {
   #hasDate = false;
   #hasTime = false;
   #offset = null;
-  constructor(date) {
+  constructor(date, fasttype, unsafeDelim) {
     let hasDate = true;
     let hasTime = true;
     let offset = "Z";
+    let c;
     if (typeof date === "string") {
-      let match = date.match(DATE_TIME_RE);
-      if (match) {
-        if (!match[1]) {
-          hasDate = false;
-          date = `0000-01-01T${date}`;
+      if (fasttype)
+        prep: {
+          if (fasttype < 3) {
+            if (+date.slice(11, 13) > 23) {
+              date = "";
+              break prep;
+            }
+            if (fasttype === 2) {
+              offset = null;
+              date += "Z";
+            } else if ((c = date.charCodeAt(date.length - 1)) !== 90 && c !== 122) {
+              offset = date.slice(date.length - 6);
+            }
+            if (unsafeDelim)
+              date = date.slice(0, 10) + "T" + date.slice(11);
+          } else if (fasttype === 4) {
+            date = +date.slice(0, 2) > 23 ? "" : `0000-01-01T${date}Z`;
+          }
+          hasDate = fasttype !== 4;
+          hasTime = fasttype !== 3;
         }
-        hasTime = !!match[2];
-        hasTime && date[10] === " " && (date = date.replace(" ", "T"));
-        if (match[2] && +match[2] > 23) {
-          date = "";
+      else {
+        let match = date.match(DATE_TIME_RE);
+        if (match) {
+          if (!match[1]) {
+            hasDate = false;
+            date = `0000-01-01T${date}`;
+          }
+          hasTime = !!match[2];
+          hasTime && date[10] === " " && (date = date.replace(" ", "T"));
+          if (match[2] && +match[2] > 23) {
+            date = "";
+          } else {
+            offset = match[3] || null;
+            if (!offset && hasTime)
+              date += "Z";
+          }
         } else {
-          offset = match[3] || null;
-          date = date.toUpperCase();
-          if (!offset && hasTime)
-            date += "Z";
+          date = "";
         }
-      } else {
-        date = "";
       }
     }
     super(date);
@@ -5398,7 +5574,7 @@ var TomlDate = class _TomlDate extends Date {
       return iso.slice(11, 23);
     if (this.#offset === null)
       return iso.slice(0, -1);
-    if (this.#offset === "Z")
+    if (this.#offset === "Z" || this.#offset === "z")
       return iso;
     let offset = +this.#offset.slice(1, 3) * 60 + +this.#offset.slice(4, 6);
     offset = this.#offset[0] === "-" ? offset : -offset;
@@ -5429,53 +5605,215 @@ var TomlDate = class _TomlDate extends Date {
   }
 };
 
-// node_modules/.pnpm/smol-toml@1.8.0/node_modules/smol-toml/dist/error.js
-function getLineColFromPtr(string, ptr) {
-  let lines = string.slice(0, ptr).split(/\r\n|\n|\r/g);
-  return [lines.length, lines.pop().length + 1];
+// node_modules/.pnpm/smol-toml@1.9.0/node_modules/smol-toml/dist/extract.js
+function isDigit2(char, base = 10) {
+  return base === 16 ? char > 47 && char < 58 || char > 64 && char < 71 || char > 96 && char < 103 : char > 47 && char < 48 + base;
 }
-function makeCodeBlock(string, line, column) {
-  let lines = string.split(/\r\n|\n|\r/g);
-  let codeblock = "";
-  let numberLen = (Math.log10(line + 1) | 0) + 1;
-  for (let i = line - 1; i <= line + 1; i++) {
-    let l = lines[i - 1];
-    if (!l)
-      continue;
-    codeblock += i.toString().padEnd(numberLen, " ");
-    codeblock += ":  ";
-    codeblock += l;
-    codeblock += "\n";
-    if (i === line) {
-      codeblock += " ".repeat(numberLen + column + 2);
-      codeblock += "^\n";
+function isEndOfValue(char, delim) {
+  return char === 32 || char === 9 || char === 10 || char === 13 || // Structure end or next value delimiter
+  delim && (char === delim || char === 44) || // Comment
+  char === 35;
+}
+function extractValue(ctx, end) {
+  let errPtr = ctx.p;
+  let c = ctx.s.charCodeAt(ctx.p);
+  if (c === 91 || c === 123) {
+    ctx.d-- || TomlError.x("document contains excessively nested structures. aborting.", ctx);
+    let value = c === 91 ? parseArray(ctx) : parseInlineTable(ctx);
+    ctx.d++;
+    return value;
+  }
+  if (c === 34 || c === 39) {
+    return parseString(ctx);
+  }
+  if (c === 116) {
+    if (ctx.s.charCodeAt(++ctx.p) !== 114 || ctx.s.charCodeAt(++ctx.p) !== 117 || ctx.s.charCodeAt(++ctx.p) !== 101)
+      TomlError.x("invalid value", ctx, errPtr);
+    return ctx.p++, true;
+  }
+  if (c === 102) {
+    if (ctx.s.charCodeAt(++ctx.p) !== 97 || ctx.s.charCodeAt(++ctx.p) !== 108 || ctx.s.charCodeAt(++ctx.p) !== 115 || ctx.s.charCodeAt(++ctx.p) !== 101)
+      TomlError.x("invalid value", ctx, errPtr);
+    return ctx.p++, false;
+  }
+  if (c === 43 || c === 45) {
+    return parseNumber(ctx, ctx.p, ctx.s.charCodeAt(++ctx.p), 44 - c, end);
+  }
+  if (ctx.s.charCodeAt(ctx.p + 4) === 45 && ctx.s.charCodeAt(ctx.p + 7) === 45) {
+    return parseDate(ctx, c, end);
+  }
+  if (ctx.s.charCodeAt(ctx.p + 2) === 58) {
+    return parseTime(ctx, c, end);
+  }
+  return parseNumber(ctx, ctx.p, c, 0, end);
+}
+function parseNumber(ctx, startPtr, startChr, sign, endChr) {
+  let c = startChr;
+  let state = 0;
+  let hasUnderscores = false;
+  if (c === 105) {
+    if (ctx.s.charCodeAt(++ctx.p) !== 110 || ctx.s.charCodeAt(++ctx.p) !== 102)
+      TomlError.x("invalid value", ctx, startPtr);
+    return ctx.p++, (sign || 1) / 0;
+  }
+  if (c === 110) {
+    if (ctx.s.charCodeAt(++ctx.p) !== 97 || ctx.s.charCodeAt(++ctx.p) !== 110)
+      TomlError.x("invalid value", ctx, startPtr);
+    return ctx.p++, NaN;
+  }
+  if (c === 48) {
+    if (++ctx.p >= ctx.s.length || isEndOfValue(c = ctx.s.charCodeAt(ctx.p), endChr))
+      return ctx.bi === true ? 0n : 0;
+    if (!sign) {
+      if (c === 120)
+        return parseIntegerBaseN(ctx, startPtr, 16, endChr);
+      else if (c === 98)
+        return parseIntegerBaseN(ctx, startPtr, 2, endChr);
+      else if (c === 111)
+        return parseIntegerBaseN(ctx, startPtr, 8, endChr);
+    }
+    if (c === 46)
+      state = 2;
+    else if (c === 101 || c === 69)
+      state = 4;
+    else
+      TomlError.x("illegal leading zero", ctx, startPtr);
+  } else if (!isDigit2(c))
+    TomlError.x("invalid value", ctx, startPtr);
+  while (++ctx.p < ctx.s.length && (c = ctx.s.charCodeAt(ctx.p), !isEndOfValue(c, endChr))) {
+    if (!state)
+      state = 1;
+    if (c === 95) {
+      if (!(state & 1))
+        TomlError.x("illegal underscore", ctx);
+      state += 11;
+      hasUnderscores = true;
+    } else if (state === 1 && c === 46)
+      state = 2;
+    else if ((state === 1 || state === 3) && (c === 101 || c === 69))
+      state = 4;
+    else if (state === 4 && (c === 43 || c === 45)) {
+    } else if (!isDigit2(c))
+      TomlError.x(`illegal character in numeric literal`, ctx);
+    else if (state > 9)
+      state -= 11;
+    else if (!(state & 1))
+      state++;
+  }
+  if (!state) {
+    let val = (startChr - 48) * (sign || 1);
+    return ctx.bi === true ? BigInt(val) : val;
+  }
+  if (!(state & 1))
+    TomlError.x("unfinished numeric value", ctx, startPtr);
+  let str2 = ctx.s.slice(startPtr, ctx.p);
+  if (hasUnderscores)
+    str2 = str2.replaceAll("_", "");
+  return state > 1 ? parseFloat(str2) : parseInteger(ctx, str2, 10, startPtr);
+}
+function parseIntegerBaseN(ctx, startPtr, base, endChr) {
+  let c, underscore = 1;
+  while (++ctx.p < ctx.s.length && (c = ctx.s.charCodeAt(ctx.p), !isEndOfValue(c, endChr))) {
+    if (c === 95) {
+      if (underscore & 1)
+        TomlError.x("illegal underscore", ctx);
+      underscore = 3;
+    } else if (!isDigit2(c, base))
+      TomlError.x(`illegal character in numeric literal`, ctx);
+    else if (underscore & 1)
+      underscore--;
+  }
+  if (underscore & 1)
+    TomlError.x("unfinished numeric value", ctx);
+  let str2 = ctx.s.slice(startPtr + 2, ctx.p);
+  if (underscore)
+    str2 = str2.replaceAll("_", "");
+  return parseInteger(ctx, str2, base, startPtr);
+}
+function parseInteger(ctx, str2, base, startPtr) {
+  if (ctx.bi !== true)
+    int: {
+      let val = parseInt(str2, base);
+      if (!Number.isSafeInteger(val)) {
+        if (ctx.bi)
+          break int;
+        TomlError.x("integer value cannot be represented losslessly", ctx, startPtr);
+      }
+      return val;
+    }
+  return base === 10 ? BigInt(str2) : BigInt((base === 2 ? "0b" : base === 8 ? "0o" : "0x") + str2);
+}
+function parseDate(ctx, c, endChr) {
+  let startPtr = ctx.p++, unsafeSeparator;
+  if (!isDigit2(c) || !isDigit2(ctx.s.charCodeAt(ctx.p++)) || !isDigit2(ctx.s.charCodeAt(ctx.p++)) || !isDigit2(ctx.s.charCodeAt(ctx.p++))) {
+    return parseNumber(ctx, ctx.p = startPtr, c, 0, endChr);
+  }
+  ctx.p += 5;
+  if (!isDigit2(ctx.s.charCodeAt(ctx.p++)))
+    TomlError.x("invalid date-time: date part is malformed", ctx, startPtr);
+  if (ctx.p >= ctx.s.length || ((c = ctx.s.charCodeAt(ctx.p)) !== 32 || (unsafeSeparator = true, !isDigit2(ctx.s.charCodeAt(ctx.p + 1)))) && c !== 84 && c !== 116) {
+    let t2 = ctx.s.slice(startPtr, ctx.p);
+    return readDate(ctx, t2, 3, false, startPtr);
+  }
+  if (ctx.s.charCodeAt(ctx.p += 3) !== 58)
+    TomlError.x("invalid date-time: time part is malformed", ctx, startPtr);
+  if (ctx.s.charCodeAt(ctx.p += 3) === 58)
+    ctx.p += 3;
+  if (ctx.s.charCodeAt(ctx.p) === 46)
+    while (isDigit2(ctx.s.charCodeAt(++ctx.p)))
+      ;
+  if (c = ctx.s.charCodeAt(ctx.p)) {
+    if (c === 90 || c === 122) {
+      let t2 = ctx.s.slice(startPtr, ++ctx.p);
+      return readDate(ctx, t2, 1, unsafeSeparator, startPtr, "[+00:00]");
+    }
+    if (c === 43 || c === 45) {
+      let t2 = ctx.s.slice(startPtr, ctx.p += 6);
+      return readDate(ctx, t2, 1, unsafeSeparator, startPtr, !ctx.ld && "[" + ctx.s.slice(ctx.p - 6, ctx.p) + "]");
     }
   }
-  return codeblock;
+  let t = ctx.s.slice(startPtr, ctx.p);
+  return readDate(ctx, t, 2, unsafeSeparator, startPtr);
 }
-var TomlError = class extends Error {
-  line;
-  column;
-  codeblock;
-  constructor(message, options2) {
-    const [line, column] = getLineColFromPtr(options2.toml, options2.ptr);
-    const codeblock = makeCodeBlock(options2.toml, line, column);
-    super(`Invalid TOML document: ${message}
-
-${codeblock}`, options2);
-    this.line = line;
-    this.column = column;
-    this.codeblock = codeblock;
+function parseTime(ctx, c, endChr) {
+  let start = ctx.p;
+  if (!isDigit2(c) || !isDigit2(ctx.s.charCodeAt(++ctx.p))) {
+    return parseNumber(ctx, --ctx.p, c, 0, endChr);
   }
-};
-
-// node_modules/.pnpm/smol-toml@1.8.0/node_modules/smol-toml/dist/util.js
-function indexOfNewline(str2, start = 0) {
-  let idx = str2.indexOf("\n", start);
-  if (str2.charCodeAt(idx - 1) === 13)
-    idx--;
-  return idx;
+  if (ctx.s.charCodeAt(ctx.p += 4) === 58)
+    ctx.p += 3;
+  if (ctx.s.charCodeAt(ctx.p) === 46)
+    while (isDigit2(ctx.s.charCodeAt(++ctx.p)))
+      ;
+  let t = ctx.s.slice(start, ctx.p);
+  return readDate(ctx, t, 4, false, start);
 }
+function readDate(ctx, str2, type, unsafeDelim, errPtr, temporalSuffix) {
+  if (ctx.ld) {
+    let date = new TomlDate(str2, type, unsafeDelim);
+    if (!date.isValid())
+      TomlError.x("invalid date", ctx, errPtr);
+    return date;
+  }
+  try {
+    if (temporalSuffix)
+      str2 += temporalSuffix;
+    switch (type) {
+      case 1:
+        return Temporal.ZonedDateTime.from(str2);
+      case 2:
+        return Temporal.PlainDateTime.from(str2);
+      case 3:
+        return Temporal.PlainDate.from(str2);
+      case 4:
+        return Temporal.PlainTime.from(str2);
+    }
+  } catch (e) {
+    TomlError.x(e instanceof Error ? e.message : "" + e, ctx, errPtr);
+  }
+}
+
+// node_modules/.pnpm/smol-toml@1.9.0/node_modules/smol-toml/dist/util.js
 function skipComment(ctx) {
   for (; ctx.p < ctx.s.length; ctx.p++) {
     let c = ctx.s.charCodeAt(ctx.p);
@@ -5486,304 +5824,66 @@ function skipComment(ctx) {
       break;
     }
     if (c < 32 && c !== 9 || c === 127) {
-      throw new TomlError("control characters are not allowed in comments", {
-        toml: ctx.s,
-        ptr: ctx.p
-      });
+      TomlError.x("control characters are not allowed in comments", ctx);
     }
   }
 }
 function skipVoid(ctx, banNewLines, banComments) {
   let c;
-  while (1) {
-    while ((c = ctx.s.charCodeAt(ctx.p)) === 32 || c === 9 || !banNewLines && (c === 10 || c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10))
+  while (ctx.p < ctx.s.length) {
+    while (ctx.p < ctx.s.length && ((c = ctx.s.charCodeAt(ctx.p)) === 32 || c === 9 || !banNewLines && (c === 10 || c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10)))
       ctx.p++;
     if (banComments || c !== 35)
       break;
     skipComment(ctx);
   }
 }
-function skipUntil(ctx, sep, end) {
-  let ptr = ctx.p;
-  if (!end) {
-    ptr = indexOfNewline(ctx.s, ptr);
-    ctx.p = ptr < 0 ? ctx.s.length : ptr;
-    return;
-  }
-  for (; ctx.p < ctx.s.length; ctx.p++) {
-    let c = ctx.s.charCodeAt(ctx.p);
-    if (c === 35) {
-      skipComment(ctx);
-    } else if (c === end || c === sep) {
-      return;
-    }
-  }
-  throw new TomlError("cannot find end of structure", {
-    toml: ctx.s,
-    ptr
-  });
-}
 
-// node_modules/.pnpm/smol-toml@1.8.0/node_modules/smol-toml/dist/primitive.js
-var INT_REGEX = /^((0x[0-9a-fA-F](_?[0-9a-fA-F])*)|(([+-]|0[ob])?\d(_?\d)*))$/;
-var FLOAT_REGEX = /^[+-]?\d(_?\d)*(\.\d(_?\d)*)?([eE][+-]?\d(_?\d)*)?$/;
-var LEADING_ZERO = /^[+-]?0[0-9_]/;
-function parseString(ctx) {
-  let start = ctx.p;
-  let c = ctx.s.charCodeAt(ctx.p++);
-  let first = c;
-  let isLiteral = c === 39;
-  let isMultiline = c === ctx.s.charCodeAt(ctx.p) && c === ctx.s.charCodeAt(ctx.p + 1);
-  if (isMultiline) {
-    if ((c = ctx.s.charCodeAt(ctx.p += 2)) === 10)
-      ctx.p++;
-    else if (c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10)
-      ctx.p += 2;
-  }
-  let parsed = "";
-  let sliceStart = ctx.p;
+// node_modules/.pnpm/smol-toml@1.9.0/node_modules/smol-toml/dist/struct.js
+function parseKey(ctx, end = 61) {
+  let startPtr;
   let state = 0;
-  for (; ctx.p < ctx.s.length; ctx.p++) {
-    c = ctx.s.charCodeAt(ctx.p);
-    if (isMultiline && (c === 10 || c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10)) {
-      state = state && 3;
-    } else if (c < 32 && c !== 9 || c === 127) {
-      throw new TomlError("control characters are not allowed in strings", {
-        toml: ctx.s,
-        ptr: ctx.p
-      });
-    } else if ((!state || state === 3) && c === first && (!isMultiline || ctx.s.charCodeAt(ctx.p + 1) === first && ctx.s.charCodeAt(ctx.p + 2) === first)) {
-      if (isMultiline) {
-        if (ctx.s.charCodeAt(ctx.p + 3) === first)
-          ctx.p++;
-        if (ctx.s.charCodeAt(ctx.p + 3) === first)
-          ctx.p++;
-      }
+  let parsed = [];
+  let sliceStart;
+  let c = ctx.s.charCodeAt(startPtr = ctx.p);
+  do {
+    if (c === end) {
       if (!state)
-        parsed += ctx.s.slice(sliceStart, ctx.p);
-      ctx.p += isMultiline ? 3 : 1;
-      return parsed;
-    } else if (!state) {
-      if (!isLiteral && c === 92) {
-        parsed += ctx.s.slice(sliceStart, sliceStart = ctx.p);
-        state = 1;
-      }
-    } else if (state === 1) {
-      if (c === 120 || c === 117 || c === 85) {
-        let value = 0;
-        let len = c === 120 ? 2 : c === 117 ? 4 : 8;
-        for (let j = 0; j < len; j++, ctx.p++) {
-          let hex = ctx.s.charCodeAt(ctx.p + 1);
-          let digit = (
-            /* 0-9 */
-            hex >= 48 && hex <= 57 ? hex - 48 : (
-              /* A-F */
-              hex >= 65 && hex <= 70 ? hex - 65 + 10 : (
-                /* a-f */
-                hex >= 97 && hex <= 102 ? hex - 97 + 10 : -1
-              )
-            )
-          );
-          if (digit < 0)
-            throw new TomlError("invalid non-hex character in unicode escape", { toml: ctx.s, ptr: ctx.p + 1 });
-          value = value << 4 | digit;
-        }
-        if (value < 0 || value > 1114111 || value >= 55296 && value <= 57343) {
-          throw new TomlError("invalid unicode escape", { toml: ctx.s, ptr: ctx.p });
-        }
-        parsed += String.fromCodePoint(value);
-        sliceStart = ctx.p + 1;
-        state = 0;
-      } else if (c === 32 || c === 9) {
+        TomlError.x("unexpected end of key", ctx);
+      if (state === 1)
+        parsed.push(ctx.s.slice(sliceStart, ctx.p));
+      return ctx.p++, parsed;
+    } else if (c === 46) {
+      if (!state)
+        TomlError.x("illegal empty bare key", ctx);
+      if (state === 1)
+        parsed.push(ctx.s.slice(sliceStart, ctx.p));
+      state = 0;
+    } else if (!state && (c === 34 || c === 39)) {
+      if (c === ctx.s.charCodeAt(ctx.p + 1) && c === ctx.s.charCodeAt(ctx.p + 2))
+        TomlError.x("illegal quoted key: multiline strings are not allowed", ctx);
+      parsed.push(parseString(ctx));
+      state = 2;
+      ctx.p--;
+    } else if (c === 32 || c === 9) {
+      if (state === 1) {
+        parsed.push(ctx.s.slice(sliceStart, ctx.p));
         state = 2;
-      } else {
-        if (c === 98)
-          parsed += "\b";
-        else if (c === 116)
-          parsed += "	";
-        else if (c === 110)
-          parsed += "\n";
-        else if (c === 102)
-          parsed += "\f";
-        else if (c === 114)
-          parsed += "\r";
-        else if (c === 101)
-          parsed += "\x1B";
-        else if (c === 34)
-          parsed += '"';
-        else if (c === 92)
-          parsed += "\\";
-        else
-          throw new TomlError("unrecognized escape sequence", { toml: ctx.s, ptr: ctx.p });
-        sliceStart = ctx.p + 1;
-        state = 0;
       }
-    } else if (c !== 32 && c !== 9) {
-      if (state === 2) {
-        throw new TomlError("invalid escape: only line-ending whitespace may be escaped", {
-          toml: ctx.s,
-          ptr: sliceStart
-        });
-      }
-      state = !isLiteral && c === 92 ? 1 : 0;
+    } else if (state === 2 || c < 48 && c !== 45 || c > 57 && c < 65 || c > 90 && c < 97 && c !== 95 || c > 122) {
+      TomlError.x("illegal character in key", ctx);
+    } else if (!state) {
+      state = 1;
       sliceStart = ctx.p;
     }
-  }
-  throw new TomlError("unfinished string", { toml: ctx.s, ptr: start });
+  } while (c = ctx.s.charCodeAt(++ctx.p));
+  TomlError.x("incomplete key-value: cannot find end of key", ctx, startPtr);
 }
-function sliceAndTrimEndOf(ctx, start, end) {
-  let value = ctx.s.slice(start, end);
-  let commentIdx = value.indexOf("#");
-  if (commentIdx > 0) {
-    skipComment({ s: value, p: commentIdx, d: 0 });
-    value = value.slice(0, commentIdx);
-  }
-  return value.trimEnd();
-}
-function parseValue(ctx, integersAsBigInt, end) {
-  let ptr = ctx.p;
-  let err = { toml: ctx.s, ptr };
-  skipUntil(ctx, 44, end);
-  let value = sliceAndTrimEndOf(ctx, ptr, ctx.p);
-  if (!value)
-    throw new TomlError("incomplete declaration: value expected", err);
-  if (value === "-inf")
-    return -Infinity;
-  if (value === "inf" || value === "+inf")
-    return Infinity;
-  if (value === "nan" || value === "+nan" || value === "-nan")
-    return NaN;
-  if (value === "-0")
-    return integersAsBigInt ? 0n : 0;
-  let isInt = INT_REGEX.test(value);
-  if (isInt || FLOAT_REGEX.test(value)) {
-    if (LEADING_ZERO.test(value)) {
-      throw new TomlError("leading zeroes are not allowed", err);
-    }
-    value = value.replace(/_/g, "");
-    let numeric = +value;
-    if (isNaN(numeric)) {
-      throw new TomlError("invalid number", err);
-    }
-    if (isInt) {
-      if ((isInt = !Number.isSafeInteger(numeric)) && !integersAsBigInt) {
-        throw new TomlError("integer value cannot be represented losslessly", err);
-      }
-      if (isInt || integersAsBigInt === true)
-        numeric = BigInt(value);
-    }
-    return numeric;
-  }
-  const date = new TomlDate(value);
-  if (!date.isValid())
-    throw new TomlError("invalid value", err);
-  return date;
-}
-
-// node_modules/.pnpm/smol-toml@1.8.0/node_modules/smol-toml/dist/extract.js
-function extractValue(ctx, end, integersAsBigInt) {
-  let ptr = ctx.p;
-  let c = ctx.s.charCodeAt(ptr);
-  if (c === 91 || c === 123) {
-    if (!ctx.d--) {
-      throw new TomlError("document contains excessively nested structures. aborting.", {
-        toml: ctx.s,
-        ptr
-      });
-    }
-    let value = c === 91 ? parseArray(ctx, integersAsBigInt) : parseInlineTable(ctx, integersAsBigInt);
-    ctx.d++;
-    return value;
-  }
-  if (c === 34 || c === 39) {
-    return parseString(ctx);
-  }
-  if (c === 116) {
-    if (ctx.s.charCodeAt(++ctx.p) !== 114 || ctx.s.charCodeAt(++ctx.p) !== 117 || ctx.s.charCodeAt(++ctx.p) !== 101)
-      throw new TomlError("invalid value", { toml: ctx.s, ptr });
-    ctx.p++;
-    return true;
-  }
-  if (c === 102) {
-    if (ctx.s.charCodeAt(++ctx.p) !== 97 || ctx.s.charCodeAt(++ctx.p) !== 108 || ctx.s.charCodeAt(++ctx.p) !== 115 || ctx.s.charCodeAt(++ctx.p) !== 101)
-      throw new TomlError("invalid value", { toml: ctx.s, ptr });
-    ctx.p++;
-    return false;
-  }
-  return parseValue(ctx, integersAsBigInt, end);
-}
-
-// node_modules/.pnpm/smol-toml@1.8.0/node_modules/smol-toml/dist/struct.js
-var KEY_PART_RE = /^[a-zA-Z0-9-_]+[ \t]*$/;
-function parseKey(ctx, end = "=") {
-  let start = ctx.p;
-  let dot = start - 1;
-  let parsed = [];
-  let endPtr = ctx.s.indexOf(end, start);
-  if (endPtr < 0) {
-    throw new TomlError("incomplete key-value: cannot find end of key", {
-      toml: ctx.s,
-      ptr: start
-    });
-  }
-  do {
-    let c = ctx.s.charCodeAt(ctx.p = ++dot);
-    if (c !== 32 && c !== 9) {
-      if (c === 34 || c === 39) {
-        if (c === ctx.s.charCodeAt(ctx.p + 1) && c === ctx.s.charCodeAt(ctx.p + 2)) {
-          throw new TomlError("multiline strings are not allowed in keys", {
-            toml: ctx.s,
-            ptr: ctx.p
-          });
-        }
-        let part = parseString(ctx);
-        dot = ctx.s.indexOf(".", ctx.p);
-        let strEnd = ctx.s.slice(ctx.p, dot < 0 || dot > endPtr ? endPtr : dot);
-        let newLine = indexOfNewline(strEnd);
-        if (newLine > -1) {
-          throw new TomlError("newlines are not allowed in keys", {
-            toml: ctx.s,
-            ptr: newLine
-          });
-        }
-        if (strEnd.trimStart()) {
-          throw new TomlError("found extra tokens after the string part", {
-            toml: ctx.s,
-            ptr: ctx.p
-          });
-        }
-        if (endPtr < ctx.p) {
-          endPtr = ctx.s.indexOf(end, ctx.p);
-          if (endPtr < 0) {
-            throw new TomlError("incomplete key-value: cannot find end of key", {
-              toml: ctx.s,
-              ptr: start
-            });
-          }
-        }
-        parsed.push(part);
-      } else {
-        dot = ctx.s.indexOf(".", ctx.p);
-        let part = ctx.s.slice(ctx.p, dot < 0 || dot > endPtr ? endPtr : dot);
-        if (!KEY_PART_RE.test(part)) {
-          throw new TomlError("only letter, numbers, dashes and underscores are allowed in keys", {
-            toml: ctx.s,
-            ptr: ctx.p
-          });
-        }
-        parsed.push(part.trimEnd());
-      }
-    }
-  } while (dot + 1 && dot < endPtr);
-  ctx.p = endPtr + 1;
-  skipVoid(ctx, true, true);
-  return parsed;
-}
-function parseInlineTable(ctx, integersAsBigInt) {
-  let res = {};
+function parseInlineTable(ctx) {
+  let startPtr = ctx.p++;
+  let res = /* @__PURE__ */ Object.create(null);
   let seen = /* @__PURE__ */ new Set();
   let c;
-  ctx.p++;
   while (ctx.p < ctx.s.length) {
     skipVoid(ctx);
     if ((c = ctx.s.charCodeAt(ctx.p)) === 125) {
@@ -5793,70 +5893,71 @@ function parseInlineTable(ctx, integersAsBigInt) {
     let k;
     let t = res;
     let hasOwn = false;
-    let p = ctx.p;
+    let errPtr = ctx.p;
     let key = parseKey(ctx);
     for (let i = 0; i < key.length; i++) {
       if (i)
-        t = hasOwn ? t[k] : t[k] = {};
+        t = hasOwn ? t[k] : t[k] = /* @__PURE__ */ Object.create(null);
       k = key[i];
       if ((hasOwn = Object.hasOwn(t, k)) && (typeof t[k] !== "object" || seen.has(t[k]))) {
-        throw new TomlError("trying to redefine an already defined value", {
-          toml: ctx.s,
-          ptr: p
-        });
+        TomlError.x("trying to redefine an already defined value", ctx, errPtr);
       }
-      if (!hasOwn && k === "__proto__") {
+      let unsafe = k === "__proto__";
+      if (ctx.uk && (unsafe || k === "constructor")) {
+        t = ctx.uk !== 1 && TomlError.x("document contains an unsafe property", ctx, errPtr);
+        break;
+      }
+      if (!hasOwn && unsafe) {
         Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
       }
     }
     if (hasOwn) {
-      throw new TomlError("trying to redefine an already defined value", {
-        toml: ctx.s,
-        ptr: ctx.p
-      });
+      TomlError.x("trying to redefine an already defined value", ctx, errPtr);
     }
-    let value = extractValue(ctx, 125, integersAsBigInt);
-    seen.add(t[k] = value);
+    skipVoid(ctx, true, true);
+    let value = extractValue(
+      ctx,
+      125
+      /* } */
+    );
+    if (t && typeof (t[k] = value) === "object")
+      seen.add(value);
     skipVoid(ctx);
     if ((c = ctx.s.charCodeAt(ctx.p++)) === 125) {
       return res;
     }
-    if (c !== 44) {
-      throw new TomlError("expected comma or end of structure", { toml: ctx.s, ptr: ctx.p - 1 });
-    }
+    if (c !== 44)
+      TomlError.x("expected comma or end of structure", ctx, ctx.p - 1);
   }
-  throw new TomlError("unfinished table encountered", {
-    toml: ctx.s,
-    ptr: ctx.p
-  });
+  TomlError.x("unfinished table", ctx, startPtr);
 }
-function parseArray(ctx, integersAsBigInt) {
+function parseArray(ctx) {
+  let startPtr = ctx.p++;
   let res = [];
   let c;
-  ctx.p++;
   while (ctx.p < ctx.s.length) {
     skipVoid(ctx);
     if ((c = ctx.s.charCodeAt(ctx.p)) === 93) {
       ctx.p++;
       return res;
     }
-    res.push(extractValue(ctx, 93, integersAsBigInt));
+    res.push(extractValue(
+      ctx,
+      93
+      /* ] */
+    ));
     skipVoid(ctx);
     if ((c = ctx.s.charCodeAt(ctx.p++)) === 93) {
       return res;
     }
-    if (c !== 44) {
-      throw new TomlError("expected comma or end of structure", { toml: ctx.s, ptr: ctx.p - 1 });
-    }
+    if (c !== 44)
+      TomlError.x("expected comma or end of structure", ctx, ctx.p - 1);
   }
-  throw new TomlError("unfinished array encountered", {
-    toml: ctx.s,
-    ptr: ctx.p
-  });
+  TomlError.x("unfinished array", ctx, startPtr);
 }
 
-// node_modules/.pnpm/smol-toml@1.8.0/node_modules/smol-toml/dist/parse.js
-function peekTable(key, table, meta, type) {
+// node_modules/.pnpm/smol-toml@1.9.0/node_modules/smol-toml/dist/parse.js
+function peekTable(ctx, key, table, meta, type) {
   let t = table;
   let m = meta;
   let k;
@@ -5864,7 +5965,7 @@ function peekTable(key, table, meta, type) {
   let state;
   for (let i = 0; i < key.length; i++) {
     if (i) {
-      t = hasOwn ? t[k] : t[k] = {};
+      t = hasOwn ? t[k] : t[k] = /* @__PURE__ */ Object.create(null);
       m = (state = m[k]).c;
       if (type === 0 && (state.t === 1 || state.t === 2)) {
         return null;
@@ -5880,7 +5981,10 @@ function peekTable(key, table, meta, type) {
       return null;
     }
     if (!hasOwn) {
-      if (k === "__proto__") {
+      let unsafe = k === "__proto__";
+      if (ctx.uk && (unsafe || k === "constructor"))
+        return false;
+      if (unsafe) {
         Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
         Object.defineProperty(m, k, { enumerable: true, configurable: true, writable: true });
       }
@@ -5888,7 +5992,7 @@ function peekTable(key, table, meta, type) {
         t: i < key.length - 1 && type === 2 ? 3 : type,
         d: false,
         i: 0,
-        c: {}
+        c: /* @__PURE__ */ Object.create(null)
       };
     }
   }
@@ -5901,43 +6005,60 @@ function peekTable(key, table, meta, type) {
       state.d = true;
       t[k] = [];
     }
-    t[k].push(t = {});
-    state.c[state.i++] = state = { t: 1, d: false, i: 0, c: {} };
+    t[k].push(t = /* @__PURE__ */ Object.create(null));
+    state.c[state.i++] = state = { t: 1, d: false, i: 0, c: /* @__PURE__ */ Object.create(null) };
   }
   if (state.d) {
     return null;
   }
   state.d = true;
   if (type === 1) {
-    t = hasOwn ? t[k] : t[k] = {};
+    t = hasOwn ? t[k] : t[k] = /* @__PURE__ */ Object.create(null);
   } else if (type === 0 && hasOwn) {
     return null;
   }
   return [k, t, state.c];
 }
-function parse18(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
-  let ctx = { s: toml, p: 0, d: maxDepth };
-  let res = {};
-  let meta = {};
+function validateTablePeek(ctx, peek, ptr) {
+  if (peek === null || ctx.uk === 2)
+    TomlError.x(peek === null ? "trying to redefine an already defined table or value" : "document contains an unsafe property", ctx, ptr);
+}
+function parse18(toml, options2 = {}) {
+  let ctx = {
+    s: toml,
+    p: 0,
+    d: options2.maxDepth ?? 1e3,
+    bi: options2.integersAsBigInt ?? false,
+    ld: options2.useLegacyDate ?? true,
+    uk: options2.unsafeKeyBehaviour === "throw" ? 2 : options2.unsafeKeyBehaviour === "drop" ? 1 : 0
+  };
+  let res = /* @__PURE__ */ Object.create(null);
+  let meta = /* @__PURE__ */ Object.create(null);
   let tmp;
+  let skipping = false;
   let tbl = res;
   let m = meta;
+  if (toml.charCodeAt(0) === 65279)
+    ctx.p++;
   skipVoid(ctx);
   while (ctx.p < toml.length) {
     if (toml.charCodeAt(ctx.p) === 91) {
       let isTableArray = toml.charCodeAt(++ctx.p) === 91;
       tmp = ctx.p += +isTableArray;
-      let k = parseKey(ctx, "]");
+      skipping = false;
+      let k = parseKey(
+        ctx,
+        93
+        /* ] */
+      );
       if (isTableArray) {
-        if (toml.charCodeAt(ctx.p - 1) !== 93) {
-          throw new TomlError("expected end of table declaration", {
-            toml,
-            ptr: ctx.p - 1
-          });
+        if (toml.charCodeAt(ctx.p) !== 93) {
+          TomlError.x("expected end of table array declaration", ctx);
         }
         ctx.p++;
       }
       let p = peekTable(
+        ctx,
         k,
         res,
         meta,
@@ -5945,42 +6066,41 @@ function parse18(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
         /* Type.EXPLICIT */
       );
       if (!p) {
-        throw new TomlError("trying to redefine an already defined table or value", {
-          toml,
-          ptr: tmp
-        });
+        validateTablePeek(ctx, p, tmp);
+        skipping = true;
+      } else {
+        m = p[2];
+        tbl = p[1];
       }
-      m = p[2];
-      tbl = p[1];
     } else {
       tmp = ctx.p;
       let k = parseKey(ctx);
       let p = peekTable(
+        ctx,
         k,
         tbl,
         m,
         0
         /* Type.DOTTED */
       );
-      if (!p) {
-        throw new TomlError("trying to redefine an already defined table or value", {
-          toml,
-          ptr: tmp
-        });
-      }
-      p[1][p[0]] = extractValue(ctx, void 0, integersAsBigInt);
+      if (!p && !skipping)
+        validateTablePeek(ctx, p, tmp);
+      skipVoid(ctx, true, true);
+      let v = extractValue(ctx, void 0);
+      if (p && !skipping)
+        p[1][p[0]] = v;
     }
     skipVoid(ctx, true);
-    if (ctx.p < toml.length && (tmp = toml.charCodeAt(ctx.p)) !== 10 && tmp !== 13) {
-      throw new TomlError("each key-value declaration must be followed by an end-of-line", {
-        toml,
-        ptr: ctx.p
-      });
+    if (ctx.p < toml.length && (tmp = toml.charCodeAt(ctx.p)) !== 10 && (tmp !== 13 || toml.charCodeAt(ctx.p + 1) !== 10)) {
+      TomlError.x("each key-value declaration must be followed by an end-of-line", ctx);
     }
     skipVoid(ctx);
   }
   return res;
 }
+
+// node_modules/.pnpm/smol-toml@1.9.0/node_modules/smol-toml/dist/stringify.js
+var HAS_WELLFORMED = !!"".isWellFormed;
 
 // lib/plugin/convert/secrets.ts
 var SECRET_MARKERS = [
@@ -8217,7 +8337,9 @@ function collectSkillMarkdownFiles(files, declared) {
 }
 function rootSkillFiles(files, runtimeEntry) {
   return [...files.keys()].filter(
-    (path) => path !== runtimeEntry && !isPluginEnvironmentFile(path) && !/^(?:\.(?:claude|codex|cursor|kimi|devin)-plugin\/|\.github\/|\.opencode\/|(?:skills|agents|commands|hooks|policies|output-styles|workflows)\/|(?:plugin|kimi\.plugin|gemini-extension|mcp|\.mcp|hooks|settings|opencode)\.jsonc?$)/.test(path)
+    (path) => path !== runtimeEntry && !isPluginEnvironmentFile(path) && !/^(?:\.(?:claude|codex|cursor|kimi|devin)-plugin\/|\.github\/|\.opencode\/|(?:skills|agents|commands|hooks|policies|output-styles|workflows)\/|(?:plugin|kimi\.plugin|gemini-extension|mcp|\.mcp|hooks|settings|opencode)\.jsonc?$)/.test(
+      path
+    )
   );
 }
 function convertSkillFiles(args) {
@@ -8313,12 +8435,13 @@ function convertMcpDocuments(args) {
     }
     if (declaredServers && typeof declaredServers === "object" && !Array.isArray(declaredServers)) {
       for (const name of Object.keys(declaredServers)) {
-        if (!drafts.some((draft) => draft.name === name)) args.report.blocking.push({
-          capability: "mcpServers",
-          path: `${document.path}.${name}`,
-          message: "Declared MCP server could not be parsed; conversion cannot silently omit it",
-          blocking: true
-        });
+        if (!drafts.some((draft) => draft.name === name))
+          args.report.blocking.push({
+            capability: "mcpServers",
+            path: `${document.path}.${name}`,
+            message: "Declared MCP server could not be parsed; conversion cannot silently omit it",
+            blocking: true
+          });
       }
     }
     if (args.output.has(document.path)) args.output.set(document.path, "{}\n");
@@ -8331,13 +8454,21 @@ function convertMcpDocuments(args) {
     for (const path of args.output.keys())
       if (isPluginEnvironmentFile(path)) args.output.set(path, "\n");
     for (const draft of drafts) {
-      const hostFields = ["excludeTools", "includeTools", "disabled", "enabled", "trust", "autoApprove"].filter((field) => draft.config[field] !== void 0);
-      if (hostFields.length) args.report.blocking.push({
-        capability: "mcpServers",
-        path: `${document.path}.${draft.name}`,
-        message: `Host-specific MCP policy requires an enforcement adapter: ${hostFields.join(", ")}`,
-        blocking: true
-      });
+      const hostFields = [
+        "excludeTools",
+        "includeTools",
+        "disabled",
+        "enabled",
+        "trust",
+        "autoApprove"
+      ].filter((field) => draft.config[field] !== void 0);
+      if (hostFields.length)
+        args.report.blocking.push({
+          capability: "mcpServers",
+          path: `${document.path}.${draft.name}`,
+          message: `Host-specific MCP policy requires an enforcement adapter: ${hostFields.join(", ")}`,
+          blocking: true
+        });
       const sanitized = sanitizeMcpConfig(draft.transport, draft.config);
       const env = draft.config.env;
       for (const [key, value] of Object.entries(env ?? {})) {
@@ -8625,18 +8756,22 @@ function detectPluginEcosystem(files) {
   const candidates = markers.filter(([path]) => files.has(path));
   const active = candidates.filter(([path]) => !/^\s*\{\s*\}\s*$/.test(files.get(path)));
   const formats = [...new Set((active.length ? active : candidates).map(([, format2]) => format2))];
-  if (formats.length > 1) throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle");
+  if (formats.length > 1)
+    throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle");
   const platformFiles = new Map(files);
-  for (const [path] of candidates) if (!active.some(([entry]) => entry === path)) platformFiles.delete(path);
+  for (const [path] of candidates)
+    if (!active.some(([entry]) => entry === path)) platformFiles.delete(path);
   const platform = detectPlatformBundle(platformFiles);
   if (platform) {
-    if (formats.length && formats[0] !== platform) throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle");
+    if (formats.length && formats[0] !== platform)
+      throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle");
     return platform;
   }
   if (formats.length) return formats[0];
   if (rootText !== void 0) {
     const root = parseJsonObject(rootText, "plugin.json");
-    if (root.$schema) throw new Error("plugin.json schema is not a recognized Cognia or Agent Plugins format");
+    if (root.$schema)
+      throw new Error("plugin.json schema is not a recognized Cognia or Agent Plugins format");
     return "cognia";
   }
   throw new Error(
@@ -9396,19 +9531,34 @@ function exportMcpServers(args) {
       }
       if (field.placement === "env" && !field.secret || binding) {
         if (field.placement === "url") config.url = original;
-        else config[container] = { ...config[container] ?? {}, [field.key]: original };
+        else
+          config[container] = {
+            ...config[container] ?? {},
+            [field.key]: original
+          };
         continue;
       }
       if (typeof original === "string" && original) args.removedValues.add(original);
-      if (!fields.some((existing) => existing.key === field.key && existing.placement === field.placement)) fields.push(field);
+      if (!fields.some(
+        (existing) => existing.key === field.key && existing.placement === field.placement
+      ))
+        fields.push(field);
     }
-    const hostFields = ["excludeTools", "includeTools", "disabled", "enabled", "trust", "autoApprove"].filter((field) => config[field] !== void 0);
-    if (hostFields.length) args.report.blocking.push({
-      capability: "mcp-server-preset",
-      path: `mcpServerPresets.${preset.id}`,
-      message: `Host-specific MCP policy requires a target enforcement adapter: ${hostFields.join(", ")}`,
-      blocking: true
-    });
+    const hostFields = [
+      "excludeTools",
+      "includeTools",
+      "disabled",
+      "enabled",
+      "trust",
+      "autoApprove"
+    ].filter((field) => config[field] !== void 0);
+    if (hostFields.length)
+      args.report.blocking.push({
+        capability: "mcp-server-preset",
+        path: `mcpServerPresets.${preset.id}`,
+        message: `Host-specific MCP policy requires a target enforcement adapter: ${hostFields.join(", ")}`,
+        blocking: true
+      });
     if (preset.defaultDisallowedTools?.length || preset.toolRiskRules?.length || preset.provisioning?.mode === "managed" || preset.runtime && preset.runtime !== "both") {
       args.report.blocking.push({
         capability: "mcp-server-preset",
@@ -9565,14 +9715,17 @@ function exportRuntimeResources(args) {
   const payloadPaths = new Set(args.files.keys());
   for (const path of args.files.keys()) {
     const segments = path.split("/");
-    for (let length = 1; length < segments.length; length++) payloadPaths.add(segments.slice(0, length).join("/"));
+    for (let length = 1; length < segments.length; length++)
+      payloadPaths.add(segments.slice(0, length).join("/"));
   }
   const candidates = [...payloadPaths].sort((a, b) => b.length - a.length);
   const references = [];
   for (const value of strings) {
     for (const match of value.matchAll(/\$\{COGNIA_PLUGIN_ROOT\}\//g)) {
       const suffix = value.slice(match.index + match[0].length);
-      const known = candidates.find((path) => suffix.startsWith(path) && (!suffix[path.length] || /[\s"'`;)]/.test(suffix[path.length])));
+      const known = candidates.find(
+        (path) => suffix.startsWith(path) && (!suffix[path.length] || /[\s"'`;)]/.test(suffix[path.length]))
+      );
       references.push(known ?? suffix.split(/["'`\r\n]/)[0]);
     }
   }
@@ -9686,12 +9839,13 @@ function convertCogniaPlugin(files, target, options2) {
     binaryPaths: options2.binaryPaths
   });
   for (const [path, text] of output2) {
-    if ([...removedValues].some((value) => text.includes(value))) report.blocking.push({
-      capability: "secrets",
-      path,
-      message: "A removed MCP credential is also present in an exported resource",
-      blocking: true
-    });
+    if ([...removedValues].some((value) => text.includes(value)))
+      report.blocking.push({
+        capability: "secrets",
+        path,
+        message: "A removed MCP credential is also present in an exported resource",
+        blocking: true
+      });
   }
   if (report.blocking.length > 0) {
     report.fidelity = "unsupported";
@@ -9784,7 +9938,11 @@ function convertPluginBundle(files, target, options2 = {}) {
   const finish = (result) => {
     result.source = source;
     result.target = target;
-    result.report.delivery = assessPluginDelivery({ manifest: canonical?.manifest ?? result.manifest, report: result.report, target });
+    result.report.delivery = assessPluginDelivery({
+      manifest: canonical?.manifest ?? result.manifest,
+      report: result.report,
+      target
+    });
     return result;
   };
   try {
@@ -9794,12 +9952,13 @@ function convertPluginBundle(files, target, options2 = {}) {
     else if (source === "gemini-cli") canonical = convertGeminiPlugin(files, options2);
     else {
       const normalized = normalizePlatformBundle(files, source);
-      if (normalized.blocking.length) throw new UnsupportedPluginConversionError(source, target, {
-        fidelity: "unsupported",
-        converted: [],
-        warnings: normalized.warnings,
-        blocking: normalized.blocking
-      });
+      if (normalized.blocking.length)
+        throw new UnsupportedPluginConversionError(source, target, {
+          fidelity: "unsupported",
+          converted: [],
+          warnings: normalized.warnings,
+          blocking: normalized.blocking
+        });
       canonical = convertClaudePlugin(normalized.files, options2);
       canonical.report.warnings.unshift(...normalized.warnings);
     }

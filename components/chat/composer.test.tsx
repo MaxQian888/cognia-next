@@ -103,9 +103,6 @@ jest.mock("@/lib/telemetry/events/track-event", () => ({
 jest.mock("./composer/voice-controls", () => ({
   VoiceControls: () => null,
 }))
-jest.mock("./use-resolved-connector-mode", () => ({
-  useResolvedConnectorMode: () => "auto",
-}))
 jest.mock("@/components/inbox/canned-response-picker", () => ({
   CannedResponsePicker: () => <button type="button" data-testid="canned-response-trigger" />,
 }))
@@ -386,7 +383,7 @@ describe("Composer — data-hooks integration", () => {
     expect(footer.className).toContain("flex-nowrap")
     expect(screen.getByTestId("canned-response-trigger")).toBeInTheDocument()
     expect(footer).not.toContainElement(screen.getByTestId("canned-response-trigger"))
-    expect(screen.getByRole("button", { name: "AI draft reply" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Reply copilot" })).toBeInTheDocument()
     // The wide footer holds the execution controls inline — there is no "⋯" to
     // fold them into at this width.
     expect(footer).toContainElement(screen.getByTestId("composer-execution-controls"))

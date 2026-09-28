@@ -39,7 +39,6 @@ function makePlan(id: string, status: AgentPlan["status"], title = id): AgentPla
     steps: [
       {
         id: `${id}-s1`,
-        planId: id,
         order: 0,
         title: "Do the thing",
         kind: "agent_turn",
@@ -54,7 +53,7 @@ function makePlan(id: string, status: AgentPlan["status"], title = id): AgentPla
     metadata: {},
     createdAt: id === "p-new" ? 2 : 1,
     updatedAt: 1,
-  } as AgentPlan
+  }
 }
 
 /** First useLiveQuery call serves plans (dep = sessionId), second serves

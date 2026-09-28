@@ -152,7 +152,7 @@ describe("action.image.transform", () => {
       unknown
     >
     expect(storeWorkflowBlob).toHaveBeenCalledWith(
-      expect.objectContaining({ accountId: "acc1", runId: "run1", stepId: "s1", width: 50 })
+      expect.objectContaining({ localAccountId: "acc1", runId: "run1", stepId: "s1", width: 50 })
     )
     expect(out).toMatchObject({ blobRef: "cognia-workflow-blob:b1", byteLength: 3 })
     expect(JSON.stringify(out)).not.toContain("data:")

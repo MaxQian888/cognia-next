@@ -3219,7 +3219,7 @@
       "to": "subscription.init"
     },
     "subscription_list_provider_ids": {
-      "to": "subscription.provider.list"
+      "to": "subscription.provider.discover"
     },
     "subscription_list_accounts": {
       "to": "subscription.account.list"

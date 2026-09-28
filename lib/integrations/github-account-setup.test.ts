@@ -27,6 +27,9 @@ let value: string | null
 const store = { load: jest.fn(), save: jest.fn(), delete: jest.fn() }
 const resolve = jest.fn()
 const request = jest.fn()
+jest.mock("@/lib/network/proxy-fetch", () => ({
+  proxyFetch: (...args: unknown[]) => request(...args),
+}))
 const account = {
   id: "account",
   authSessionId: "session",
@@ -57,7 +60,6 @@ beforeEach(() => {
   jest.mocked(checkIntegrationAccountHealth).mockResolvedValue({ health: "healthy" } as never)
   resolve.mockResolvedValue({ accessToken: secret })
   request.mockResolvedValue({ ok: true, json: async () => ({ login: "MaxQian888" }) })
-  global.fetch = request
 })
 
 it("consumes only the encrypted reference, verifies identity, checkpoints and scrubs the receipt", async () => {

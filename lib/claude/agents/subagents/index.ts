@@ -17,6 +17,7 @@ export { workflowDebuggerAgent } from "./workflow-debugger"
 export { workflowRefactorerAgent } from "./workflow-refactorer"
 export { workflowDocWriterAgent } from "./workflow-doc-writer"
 export type { AgentDefinition } from "./types"
+import type { AgentDefinition } from "./types"
 
 import {
   BUILTIN_AGENT_IDS,
@@ -31,22 +32,22 @@ import type { SubAgentTemplate } from "@/types/agent/sub-agent"
 /**
  * Single map keyed by the dispatcher-agent name (lowercase-with-dashes)
  * so the build-options branch can spread it directly into
- * `SendOptions.agents` (typed `Record<string, Record<string, unknown>>`
- * upstream by claude-agent-sdk).
+ * `SendOptions.agents` (typed `Record<string, AgentDefinition>`
+ * by the shared wire contract).
  *
  * Used by the workflow-editor session injection in `resolveSendOptions`.
  */
-export function workflowEditorSubagents(): Record<string, Record<string, unknown>> {
+export function workflowEditorSubagents(): Record<string, AgentDefinition> {
   return nativeAgentsForSurface("workflow-editor")
 }
 
 /** The catalog entries one session surface injects, as an SDK agents map. */
 function nativeAgentsForSurface(
   surface: "workflow-editor" | "team"
-): Record<string, Record<string, unknown>> {
-  const out: Record<string, Record<string, unknown>> = {}
+): Record<string, AgentDefinition> {
+  const out: Record<string, AgentDefinition> = {}
   for (const entry of builtinAgentsForSurface(surface)) {
-    out[entry.id] = builtinAgentDefinition(entry) as unknown as Record<string, unknown>
+    out[entry.id] = builtinAgentDefinition(entry)
   }
   return out
 }
@@ -60,8 +61,8 @@ function projectPluginSubagent(entry: {
   id: string
   entry: PluginSubagentDef
   pluginId?: string
-}): { id: string; def: Record<string, unknown> } {
-  const def: Record<string, unknown> = {
+}): { id: string; def: AgentDefinition } {
+  const def: AgentDefinition = {
     description: entry.entry.description,
     prompt: entry.entry.prompt,
   }
@@ -116,9 +117,9 @@ function projectedTemplateId(name: string): string {
  */
 function projectSubagentTemplate(tpl: SubAgentTemplate): {
   id: string
-  def: Record<string, unknown>
+  def: AgentDefinition
 } {
-  const def: Record<string, unknown> = {
+  const def: AgentDefinition = {
     description: tpl.description,
     prompt: tpl.config.systemPrompt ?? tpl.taskTemplate ?? tpl.description,
   }
@@ -167,9 +168,9 @@ function isNativeDelegationEligible(def: {
 
 export function resolveAllSubagents(opts: {
   context: "workflow-editor" | "team" | "direct"
-}): Record<string, Record<string, unknown>> {
+}): Record<string, AgentDefinition> {
   if (opts.context === "direct") {
-    const result: Record<string, Record<string, unknown>> = {}
+    const result: Record<string, AgentDefinition> = {}
     for (const entry of listSubagentEntries()) {
       if (entry.entry.disabled) continue
       if (!isNativeDelegationEligible(entry.entry)) continue
@@ -188,7 +189,7 @@ export function resolveAllSubagents(opts: {
     return nativeAgentsForSurface("workflow-editor")
   }
   // Team context: the catalog's team surface, unioned with plugin entries.
-  const result: Record<string, Record<string, unknown>> = nativeAgentsForSurface("team")
+  const result: Record<string, AgentDefinition> = nativeAgentsForSurface("team")
   for (const entry of listSubagentEntries()) {
     if (entry.entry.disabled) continue
     if (!isNativeDelegationEligible(entry.entry)) continue

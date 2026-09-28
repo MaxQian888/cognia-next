@@ -328,7 +328,7 @@ describe("durable AgentTeam runtime persistence", () => {
 
   it("stores trajectory bytes and reference in one transaction", async () => {
     const event = await appendAgentTeamTrajectory(
-      { runId: "run", kind: "model_turn_completed", createdAt: 1 },
+      { runId: "run", correlationId: "turn-1", kind: "model_turn_completed", createdAt: 1 },
       { data: "result", mimeType: "text/plain" }
     )
     expect(event.contentHash).toMatch(/^sha256:/)

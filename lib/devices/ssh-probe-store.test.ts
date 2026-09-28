@@ -68,6 +68,16 @@ describe("ssh probe store", () => {
   })
 
   /** `useSyncExternalStore` re-reads on every render and loops on a fresh identity. */
+  it("reads the supplied render snapshot even after a newer probe arrives", () => {
+    recordSshProbe("s1", { online: true, at: 1_000, target: TARGET })
+    const snapshot = getSshProbes()
+    recordSshProbe("s1", { online: false, at: 1_100, target: TARGET })
+    expect(readSshProbe("s1", TARGET, 1_500, snapshot)?.online).toBe(true)
+    expect(readSshProbe("s1", TARGET, 1_500)?.online).toBe(false)
+    expect(readSshProbe("s1", TARGET, 1_000 + SSH_PROBE_TTL_MS, snapshot)).toBeUndefined()
+    expect(readSshProbe("s1", "different-target", 1_500, snapshot)).toBeUndefined()
+  })
+
   it("keeps a stable snapshot identity between writes", () => {
     const first = getSshProbes()
     expect(getSshProbes()).toBe(first)

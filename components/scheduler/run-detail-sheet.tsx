@@ -10,6 +10,7 @@
  * fraction is shown when the executor reported one.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, SquareIcon } from "lucide-react"
@@ -254,46 +255,48 @@ export function RunDetailSheet({
           ) : null}
 
           {approval ? (
-            <section
-              className="space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-xs"
-              data-testid="run-sheet-approval"
-            >
-              <div>
-                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
-                  {tApproval("sheetTitle")}
-                </h3>
-                <p className="mt-1 text-muted-foreground">{tApproval("sheetBody")}</p>
-                {approval.tools.length === 0 &&
-                approval.untrustedRoots.length === 0 &&
-                run.error?.message ? (
-                  <p className="mt-1 font-mono text-[11px]">{run.error.message}</p>
+            <Surface asChild>
+              <section
+                className="space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-xs"
+                data-testid="run-sheet-approval"
+              >
+                <div>
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                    {tApproval("sheetTitle")}
+                  </h3>
+                  <p className="mt-1 text-muted-foreground">{tApproval("sheetBody")}</p>
+                  {approval.tools.length === 0 &&
+                  approval.untrustedRoots.length === 0 &&
+                  run.error?.message ? (
+                    <p className="mt-1 font-mono text-[11px]">{run.error.message}</p>
+                  ) : null}
+                </div>
+                {approval.tools.length > 0 ? (
+                  <div data-testid="run-sheet-approval-tools">
+                    <p className="font-medium">{tApproval("deniedTools")}</p>
+                    <p className="mt-0.5 font-mono text-[11px]">{approval.tools.join(", ")}</p>
+                    <p className="mt-0.5 text-muted-foreground">{tApproval("hintTools")}</p>
+                  </div>
                 ) : null}
-              </div>
-              {approval.tools.length > 0 ? (
-                <div data-testid="run-sheet-approval-tools">
-                  <p className="font-medium">{tApproval("deniedTools")}</p>
-                  <p className="mt-0.5 font-mono text-[11px]">{approval.tools.join(", ")}</p>
-                  <p className="mt-0.5 text-muted-foreground">{tApproval("hintTools")}</p>
-                </div>
-              ) : null}
-              {approval.untrustedRoots.length > 0 ? (
-                <div data-testid="run-sheet-approval-roots">
-                  <p className="font-medium">
-                    {approval.unverified
-                      ? tApproval("unverifiedRoots")
-                      : tApproval("untrustedRoots")}
-                  </p>
-                  <ul className="mt-0.5 font-mono text-[11px]">
-                    {approval.untrustedRoots.map((root) => (
-                      <li key={root} className="break-all">
-                        {root}
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="mt-0.5 text-muted-foreground">{tApproval("hintTrust")}</p>
-                </div>
-              ) : null}
-            </section>
+                {approval.untrustedRoots.length > 0 ? (
+                  <div data-testid="run-sheet-approval-roots">
+                    <p className="font-medium">
+                      {approval.unverified
+                        ? tApproval("unverifiedRoots")
+                        : tApproval("untrustedRoots")}
+                    </p>
+                    <ul className="mt-0.5 font-mono text-[11px]">
+                      {approval.untrustedRoots.map((root) => (
+                        <li key={root} className="break-all">
+                          {root}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-0.5 text-muted-foreground">{tApproval("hintTrust")}</p>
+                  </div>
+                ) : null}
+              </section>
+            </Surface>
           ) : null}
 
           {showResult ? (

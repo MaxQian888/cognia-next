@@ -407,8 +407,9 @@ pub async fn plugin_install_from_github_for_state(
     git_ref: Option<String>,
     subdir: Option<String>,
     generated_files: BTreeMap<String, String>,
+    defer_commit: bool,
 ) -> Result<GithubInstallResult, String> {
-    install_from_github_inner(state, repo, git_ref, subdir, generated_files, false).await
+    install_from_github_inner(state, repo, git_ref, subdir, generated_files, defer_commit).await
 }
 
 async fn install_from_github_inner(

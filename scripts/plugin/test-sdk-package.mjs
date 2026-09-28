@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { assertStandaloneDeclaration } from "./generate-author-types.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const packageRoot = join(repoRoot, "packages/plugin-sdk")
@@ -60,6 +61,7 @@ try {
   if (/\b(?:from|import)\s*\(?["']@\//.test(declarationsWithoutComments)) {
     throw new Error("packed declarations contain a monorepo @/ import")
   }
+  assertStandaloneDeclaration(declarationsWithoutComments)
   const packedManifest = JSON.parse(readFileSync(join(packedPackage, "package.json"), "utf8"))
   const cogniaDependencies = Object.keys(packedManifest.dependencies || {}).filter((dependency) =>
     dependency.startsWith("@cognia/")
@@ -90,15 +92,17 @@ try {
       {
         type: "module",
         private: true,
-        packageManager: "pnpm@10.30.3",
+        packageManager: JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"))
+          .packageManager,
         // Only this project's own direct edges. The edge that actually matters
         // — `@cognia/plugin-sdk` -> these three — is rewritten by the
         // `overrides` in the pnpm-workspace.yaml written below.
-        dependencies: {
-          "@cognia/provider-core": `link:${join(repoRoot, "packages/provider-core")}`,
-          "@cognia/provider-routing": `link:${join(repoRoot, "packages/provider-routing")}`,
-          "@cognia/provider-types": `link:${join(repoRoot, "packages/provider-types")}`,
-        },
+        dependencies: Object.fromEntries(
+          cogniaDependencies.map((name) => [
+            name,
+            `link:${join(repoRoot, "packages", name.slice("@cognia/".length))}`,
+          ])
+        ),
       },
       null,
       2
@@ -116,8 +120,8 @@ try {
     [
       "packages: []",
       "overrides:",
-      ...["provider-core", "provider-routing", "provider-types"].map(
-        (name) => `  "@cognia/${name}": "link:${join(repoRoot, "packages", name)}"`
+      ...cogniaDependencies.map(
+        (name) => `  "${name}": "link:${join(repoRoot, "packages", name.slice("@cognia/".length))}"`
       ),
       "",
     ].join("\n")

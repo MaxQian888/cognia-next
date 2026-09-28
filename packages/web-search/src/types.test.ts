@@ -223,9 +223,7 @@ describe("research source types", () => {
 
 describe("normalizeSearchProviderHealthSettings", () => {
   it("returns the defaults for absent/empty input", () => {
-    expect(normalizeSearchProviderHealthSettings()).toEqual(
-      DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS
-    )
+    expect(normalizeSearchProviderHealthSettings()).toEqual(DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS)
     expect(normalizeSearchProviderHealthSettings(null)).toEqual(
       DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS
     )
@@ -246,9 +244,7 @@ describe("normalizeSearchProviderHealthSettings", () => {
   })
 
   it("clamps out-of-range values to the published limits", () => {
-    expect(
-      normalizeSearchProviderHealthSettings({ failureThreshold: 0, cooldownMs: 1 })
-    ).toEqual({
+    expect(normalizeSearchProviderHealthSettings({ failureThreshold: 0, cooldownMs: 1 })).toEqual({
       enabled: true,
       failureThreshold: SEARCH_PROVIDER_HEALTH_LIMITS.failureThreshold.min,
       cooldownMs: SEARCH_PROVIDER_HEALTH_LIMITS.cooldownMs.min,

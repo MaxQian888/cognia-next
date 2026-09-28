@@ -159,14 +159,13 @@ mod tests {
 
     #[test]
     fn a_broken_entry_is_skipped_while_the_rest_enumerate() {
-        let listed = list_configured_providers(&["openai", "google", "xai"], |provider| {
-            match provider {
+        let listed =
+            list_configured_providers(&["openai", "google", "xai"], |provider| match provider {
                 "openai" => Ok(Some("key".into())),
                 "google" => Err("legacy keyring read: denied".into()),
                 _ => Ok(None),
-            }
-        })
-        .unwrap();
+            })
+            .unwrap();
         assert_eq!(listed, vec!["openai".to_string()]);
     }
 

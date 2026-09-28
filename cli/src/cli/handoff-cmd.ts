@@ -153,7 +153,7 @@ async function externalHandoffSummaryClient(
   const selected = config.providers[config.provider]
   const model = selected?.model?.trim()
   const { isRoutingPlaceholderModel } = await import("@/lib/ai/routing/auto-model-resolution")
-  if (!selected?.apiKey?.trim() || !model || isRoutingPlaceholderModel(model)) {
+  if (!selected?.apiKey?.trim() || !model || isRoutingPlaceholderModel(model, undefined)) {
     throw new Error(
       "handoff_context_summary_unavailable: external backend cannot enforce tool-free summarization; configure an explicit provider API key and model for summarization"
     )

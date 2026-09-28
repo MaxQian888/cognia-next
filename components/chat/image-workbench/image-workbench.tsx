@@ -14,6 +14,7 @@
  * crop rect, the unsent prompt, the brush settings.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
@@ -187,7 +188,7 @@ export function ImageWorkbench({
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : requestClose())}>
       <DialogContent
-        className="h-[min(94dvh,940px)] w-[min(96vw,1500px)] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden border-0 bg-black p-0 shadow-2xl"
+        className="h-[min(94dvh,940px)] w-[min(96vw,1500px)] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden border-0 bg-black p-0 shadow-(--elevation-3)"
         showCloseButton={false}
       >
         <DialogHeader className="flex-row items-center gap-2 border-b border-white/10 bg-black/60 px-3 py-2 text-left">
@@ -488,7 +489,7 @@ export function ImageWorkbench({
             ) : null}
 
             {confirmingDiscard ? (
-              <div
+              <Surface
                 role="alertdialog"
                 aria-label={t("discard.title")}
                 data-testid="workbench-discard"
@@ -503,7 +504,7 @@ export function ImageWorkbench({
                     {t("discard.cancel")}
                   </Button>
                 </div>
-              </div>
+              </Surface>
             ) : null}
           </aside>
         </div>

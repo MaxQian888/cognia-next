@@ -113,9 +113,8 @@ fn build_deeplink(args: &OpenArgs) -> Result<Url> {
             url.query_pairs_mut().append_pair("text", text);
         }
         if let Some(shared_url) = &args.url {
-            Url::parse(shared_url).with_context(|| {
-                format!("--url expects a valid URL (got `{shared_url}`)")
-            })?;
+            Url::parse(shared_url)
+                .with_context(|| format!("--url expects a valid URL (got `{shared_url}`)"))?;
             url.query_pairs_mut().append_pair("url", shared_url);
         }
         return Ok(url);
@@ -133,7 +132,9 @@ fn push_segment(url: &mut Url, segment: &str) -> Result<()> {
     }
     let cannot_extend = url.cannot_be_a_base();
     url.path_segments_mut()
-        .map_err(|_| anyhow::anyhow!("cannot append a path segment (cannot_be_a_base={cannot_extend})"))?
+        .map_err(|_| {
+            anyhow::anyhow!("cannot append a path segment (cannot_be_a_base={cannot_extend})")
+        })?
         .push(segment);
     Ok(())
 }
@@ -190,12 +191,10 @@ fn spawn_opener(url: &str) -> Result<std::process::ExitStatus> {
 #[cfg(all(unix, not(target_os = "macos")))]
 fn spawn_opener(url: &str) -> Result<std::process::ExitStatus> {
     match std::process::Command::new("xdg-open").arg(url).status() {
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            std::process::Command::new("gio")
-                .args(["open", url])
-                .status()
-                .with_context(|| "could not launch `xdg-open` or `gio open`")
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => std::process::Command::new("gio")
+            .args(["open", url])
+            .status()
+            .with_context(|| "could not launch `xdg-open` or `gio open`"),
         other => other.with_context(|| "could not launch `xdg-open`"),
     }
 }
@@ -242,32 +241,27 @@ mod tests {
 
     #[test]
     fn session_flag_builds_session_route() {
-        let url = build_deeplink(&with(|s| s.session = Some("abc-123".into())))
-        .unwrap();
+        let url = build_deeplink(&with(|s| s.session = Some("abc-123".into()))).unwrap();
         assert_eq!(url.as_str(), "cognia://session/abc-123");
     }
 
     #[test]
     fn settings_flag_appends_tab_query() {
-        let url = build_deeplink(&with(|s| s.settings = Some("plugins".into())))
-        .unwrap();
+        let url = build_deeplink(&with(|s| s.settings = Some("plugins".into()))).unwrap();
         assert_eq!(url.as_str(), "cognia://settings?tab=plugins");
 
-        let bare = build_deeplink(&with(|s| s.settings = Some(String::new())))
-        .unwrap();
+        let bare = build_deeplink(&with(|s| s.settings = Some(String::new()))).unwrap();
         assert_eq!(bare.as_str(), "cognia://settings");
     }
 
     #[test]
     fn workflow_run_requires_workflow_and_run_ids() {
-        let url = build_deeplink(&with(|s| s.workflow_run = Some("wf-1/run-9".into())))
-        .unwrap();
+        let url = build_deeplink(&with(|s| s.workflow_run = Some("wf-1/run-9".into()))).unwrap();
         assert_eq!(url.as_str(), "cognia://workflow-run/wf-1/run-9");
 
         for bad in ["wf-1", "/run-9", "wf-1/"] {
             assert!(
-                build_deeplink(&with(|s| s.workflow_run = Some(bad.into())))
-                .is_err(),
+                build_deeplink(&with(|s| s.workflow_run = Some(bad.into()))).is_err(),
                 "expected `{bad}` to be rejected"
             );
         }
@@ -275,26 +269,22 @@ mod tests {
 
     #[test]
     fn scheduler_task_builds_task_route() {
-        let url = build_deeplink(&with(|s| s.scheduler_task = Some("task-42".into())))
-        .unwrap();
+        let url = build_deeplink(&with(|s| s.scheduler_task = Some("task-42".into()))).unwrap();
         assert_eq!(url.as_str(), "cognia://scheduler/task/task-42");
     }
 
     #[test]
     fn im_flag_builds_conversation_key_query() {
-        let bare = build_deeplink(&with(|s| s.im = Some(String::new())))
-        .unwrap();
+        let bare = build_deeplink(&with(|s| s.im = Some(String::new()))).unwrap();
         assert_eq!(bare.as_str(), "cognia://im");
 
-        let keyed = build_deeplink(&with(|s| s.im = Some("conv-7".into())))
-        .unwrap();
+        let keyed = build_deeplink(&with(|s| s.im = Some("conv-7".into()))).unwrap();
         assert_eq!(keyed.as_str(), "cognia://im?conversationKey=conv-7");
     }
 
     #[test]
     fn pair_flag_builds_payload_query() {
-        let url = build_deeplink(&with(|s| s.pair = Some("p@y load".into())))
-        .unwrap();
+        let url = build_deeplink(&with(|s| s.pair = Some("p@y load".into()))).unwrap();
         assert_eq!(url.as_str(), "cognia://pair?payload=p%40y+load");
     }
 
@@ -316,12 +306,10 @@ mod tests {
 
     #[test]
     fn positional_accepts_full_deeplink_or_path() {
-        let url = build_deeplink(&with(|s| s.target = Some("cognia://session/x1".into())))
-        .unwrap();
+        let url = build_deeplink(&with(|s| s.target = Some("cognia://session/x1".into()))).unwrap();
         assert_eq!(url.as_str(), "cognia://session/x1");
 
-        let url = build_deeplink(&with(|s| s.target = Some("/tmp/ws".into())))
-        .unwrap();
+        let url = build_deeplink(&with(|s| s.target = Some("/tmp/ws".into()))).unwrap();
         assert_eq!(url.as_str(), "cognia://workspace?path=%2Ftmp%2Fws");
     }
 

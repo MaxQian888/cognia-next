@@ -60,11 +60,11 @@ function trimAmount(n: number): string {
  *  meter presentation instead of duplicating it. */
 export function MeterRow({
   meter,
-  accountId,
+  meterScopeId,
   now,
 }: {
   meter: LimitsMeter
-  accountId: string
+  meterScopeId: string
   now: number
 }) {
   const t = useTranslations("subscription.limits")
@@ -99,7 +99,7 @@ export function MeterRow({
   // reads as a caption for the NEXT meter's title, which is exactly how a
   // stack of three windows became unparseable.
   return (
-    <div className="space-y-1" data-testid={`limits-meter-${accountId}-${meter.id}`}>
+    <div className="space-y-1" data-testid={`limits-meter-${meterScopeId}-${meter.id}`}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="min-w-0 truncate text-sm font-medium">{label}</span>
         <span className="flex shrink-0 items-baseline gap-2 text-xs text-muted-foreground">
@@ -171,7 +171,7 @@ export function LimitsMetersCard({
         ) : (
           <div className="space-y-3">
             {meters.map((m) => (
-              <MeterRow key={m.id} meter={m} accountId={accountId} now={now} />
+              <MeterRow key={m.id} meter={m} meterScopeId={accountId} now={now} />
             ))}
           </div>
         )}

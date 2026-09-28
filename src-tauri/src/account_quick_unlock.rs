@@ -103,8 +103,8 @@ fn validate_secret(secret: &str) -> Result<(), String> {
 ///
 /// Minting on first use rather than at account creation keeps the keyring
 /// clean for the many users who never enroll a quick method.
-fn pepper_for(account_id: &str) -> Result<Vec<u8>, String> {
-    if let Some(existing) = crate::keyring_secrets::get(PEPPER_NAMESPACE, account_id)? {
+fn pepper_for(local_account_id: &str) -> Result<Vec<u8>, String> {
+    if let Some(existing) = crate::keyring_secrets::get(PEPPER_NAMESPACE, local_account_id)? {
         let decoded = STANDARD_NO_PAD
             .decode(existing.as_bytes())
             .map_err(|_| "stored quick unlock pepper is malformed".to_owned())?;
@@ -119,7 +119,7 @@ fn pepper_for(account_id: &str) -> Result<Vec<u8>, String> {
     rand::fill(&mut pepper[..]);
     crate::keyring_secrets::set(
         PEPPER_NAMESPACE,
-        account_id,
+        local_account_id,
         &STANDARD_NO_PAD.encode(&pepper),
     )?;
     Ok(pepper)
@@ -129,8 +129,8 @@ fn pepper_for(account_id: &str) -> Result<Vec<u8>, String> {
 ///
 /// Called when the account is deleted and when the last quick method is
 /// removed.
-pub fn clear_pepper(account_id: &str) -> Result<(), String> {
-    crate::keyring_secrets::clear(PEPPER_NAMESPACE, account_id)
+pub fn clear_pepper(local_account_id: &str) -> Result<(), String> {
+    crate::keyring_secrets::clear(PEPPER_NAMESPACE, local_account_id)
 }
 
 /// Hash input: the method-prefixed secret followed by the pepper.
@@ -190,13 +190,14 @@ pub fn account_quick_unlock_create_verifier(
     method: String,
     secret: String,
 ) -> Result<QuickUnlockVerifier, String> {
+    let local_account_id = account_id;
     validate_method(&method)?;
     validate_secret(&secret)?;
     // Enrolling a new way into an account is an account-scoped act, so it
     // requires the account it names to be the one currently unlocked.
-    security_session.assert_unlocked_account(&account_id)?;
+    security_session.assert_unlocked_account(&local_account_id)?;
 
-    let pepper = pepper_for(&account_id)?;
+    let pepper = pepper_for(&local_account_id)?;
     let mut salt = [0_u8; SALT_LEN];
     rand::fill(&mut salt);
     let hash = derive(&secret, &pepper, &salt)?;
@@ -228,16 +229,17 @@ pub fn account_quick_unlock_verify(
     password_verifier: AccountPasswordVerifier,
     secret: String,
 ) -> Result<bool, String> {
+    let local_account_id = account_id;
     validate_method(&verifier.method)?;
     validate_secret(&secret)?;
     if verifier.algorithm != ALGORITHM {
         return Err("unsupported quick unlock verifier".into());
     }
 
-    let throttle_key = format!("quick:{account_id}:{}", verifier.method);
+    let throttle_key = format!("quick:{local_account_id}:{}", verifier.method);
     security_session.before_quick_attempt(&throttle_key)?;
 
-    let pepper = pepper_for(&account_id)?;
+    let pepper = pepper_for(&local_account_id)?;
     let salt = STANDARD_NO_PAD
         .decode(verifier.salt.as_bytes())
         .map_err(|_| "quick unlock verifier salt is malformed".to_owned())?;
@@ -256,7 +258,11 @@ pub fn account_quick_unlock_verify(
         // Same authority as a password unlock, and no more. Binding here is
         // what makes a quick unlock a real unlock rather than a UI gesture.
         let plugin_state = app.state::<cognia_plugin_runtime::PluginRuntimeState>();
-        security_session.activate_quick_unlock(&account_id, &password_verifier, &plugin_state)?;
+        security_session.activate_quick_unlock(
+            &local_account_id,
+            &password_verifier,
+            &plugin_state,
+        )?;
     } else {
         security_session.record_quick_failure(&throttle_key)?;
     }
@@ -269,8 +275,9 @@ pub fn account_quick_unlock_clear(
     security_session: tauri::State<'_, AccountSecuritySession>,
     account_id: String,
 ) -> Result<(), String> {
-    security_session.assert_unlocked_account(&account_id)?;
-    clear_pepper(&account_id)
+    let local_account_id = account_id;
+    security_session.assert_unlocked_account(&local_account_id)?;
+    clear_pepper(&local_account_id)
 }
 
 #[cfg(test)]

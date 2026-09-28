@@ -101,12 +101,12 @@ export function notificationAccountScopePrefix(fields: {
 
 /** Decode a `scopeKey` back to its stable fields (diagnostics only). */
 export function parseNotificationScopeKey(key: string): NotificationScopeKeyFields {
-  const [namespaceId = "", accountId = "", workspaceId = "", businessProjectId = ""] = key
+  const [namespaceId = "", localAccountId = "", workspaceId = "", businessProjectId = ""] = key
     .split(SEP)
     .map((part) => decodeURIComponent(part))
   return {
     namespaceId,
-    accountId,
+    accountId: localAccountId,
     ...(workspaceId ? { workspaceId } : {}),
     ...(businessProjectId ? { businessProjectId } : {}),
   }

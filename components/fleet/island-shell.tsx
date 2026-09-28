@@ -52,6 +52,7 @@
  * the shared clock, like the force-expand below.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 
@@ -534,10 +535,13 @@ export function IslandShell() {
             notch
               ? // The housing grown wider: true black so it reads as one shape
                 // with the camera, square at the screen edge, rounded below.
-                cn("bg-black", expanded ? "rounded-b-[22px] shadow-2xl" : "rounded-b-xl")
+                cn(
+                  "bg-black",
+                  expanded ? "rounded-b-[22px] shadow-(--elevation-3)" : "rounded-b-xl"
+                )
               : // The flat card paints nothing itself; its surface is the child
                 // below, which starts under any inset strip.
-                "rounded-2xl"
+                "rounded-stage"
           )}
           style={{
             width,
@@ -557,11 +561,11 @@ export function IslandShell() {
                * The flat card's painted surface: below any inset strip, as
                * glass, or black when an inset exists so it joins the strip.
                */}
-              <div
+              <Surface
                 aria-hidden
                 data-testid="island-surface"
                 className={cn(
-                  "absolute inset-x-0 bottom-0 -z-10 rounded-2xl border border-white/10 shadow-2xl",
+                  "absolute inset-x-0 bottom-0 -z-10 rounded-stage border border-white/10 shadow-(--elevation-3)",
                   topInset > 0 ? "bg-black" : "bg-black/85 backdrop-blur-xl"
                 )}
                 style={{ top: topInset }}
@@ -733,7 +737,7 @@ export function IslandShell() {
               style={{ top: notch ? 0 : topInset }}
               className={cn(
                 "pointer-events-none absolute inset-0",
-                notch ? (expanded ? "rounded-b-[22px]" : "rounded-b-xl") : "rounded-2xl",
+                notch ? (expanded ? "rounded-b-[22px]" : "rounded-b-xl") : "rounded-stage",
                 severity === "permission"
                   ? "island-attention-ring--danger"
                   : "island-attention-ring"

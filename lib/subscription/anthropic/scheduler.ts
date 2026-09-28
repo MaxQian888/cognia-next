@@ -102,8 +102,8 @@ export function startUsageScheduler(
     try {
       const cfg = settings()
       if (!cfg.probeEnabled) return
-      const accountId = (await deps.getAccountId?.()) ?? ACTIVE_ACCOUNT_KEY
-      const key = credentialKey("anthropic", accountId, BREAKER_SCOPES.probe)
+      const providerAccountId = (await deps.getAccountId?.()) ?? ACTIVE_ACCOUNT_KEY
+      const key = credentialKey("anthropic", providerAccountId, BREAKER_SCOPES.probe)
       // Every probe costs real tokens, so a blocked credential is skipped
       // before the request is built rather than after it is rejected.
       if (!breaker.shouldAttempt(key, now()).allowed) return

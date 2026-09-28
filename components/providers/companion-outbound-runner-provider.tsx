@@ -132,18 +132,18 @@ export function CompanionOutboundRunnerProvider({
     platform === "tauri" ||
     (platform === "mobile" && mobilePaired) ||
     (platform === "web" && hasWebTarget)
-  const accountId = platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : unlockedAccountId
+  const localAccountId = platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : unlockedAccountId
   const collabBaseUrl = useSyncExternalStore(
     subscribeCollabConnection,
-    () => (accountId ? (loadCollabConnection(accountId)?.baseUrl ?? "") : ""),
+    () => (localAccountId ? (loadCollabConnection(localAccountId)?.baseUrl ?? "") : ""),
     () => ""
   )
   const collabScope = useMemo<RuntimeTargetScope | null>(
     () =>
-      accountId && collabBaseUrl
-        ? { accountId, targetId: "collab-plane", routingGeneration: 0 }
+      localAccountId && collabBaseUrl
+        ? { accountId: localAccountId, targetId: "collab-plane", routingGeneration: 0 }
         : null,
-    [accountId, collabBaseUrl]
+    [localAccountId, collabBaseUrl]
   )
   // The snapshot's target id names a *surface*; this provider installs it as
   // the routing context, which is what `companionStorage().load()` resolves a
@@ -160,17 +160,17 @@ export function CompanionOutboundRunnerProvider({
   const targetId = resolvedTargetId ?? (platform === "tauri" ? "local-host" : null)
   const scope = useMemo(() => {
     if (scopeOverride) return scopeOverride
-    if (!accountId || !targetId) return null
+    if (!localAccountId || !targetId) return null
     const activeScope = getActiveRuntimeTargetContext()
     return {
-      accountId,
+      accountId: localAccountId,
       targetId,
       routingGeneration:
-        activeScope?.accountId === accountId && activeScope.targetId === targetId
+        activeScope?.accountId === localAccountId && activeScope.targetId === targetId
           ? activeScope.routingGeneration
           : 0,
     }
-  }, [accountId, scopeOverride, targetId])
+  }, [localAccountId, scopeOverride, targetId])
 
   useEffect(() => {
     if (!enabled || !scope) return

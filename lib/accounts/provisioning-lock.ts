@@ -46,7 +46,7 @@ function lockManager(): LockManager | undefined {
 }
 
 /**
- * Run `critical` while holding the provisioning lock for `accountId`.
+ * Run `critical` while holding the provisioning lock for `localAccountId`.
  *
  * Resolves with whatever `critical` returns and rejects with whatever it
  * throws, because the lock is a mutex and never an error boundary. It is
@@ -60,10 +60,10 @@ function lockManager(): LockManager | undefined {
  * through rather than queueing behind the outer holder, which would deadlock.
  */
 export async function withAccountProvisioningLock<T>(
-  accountId: string,
+  localAccountId: string,
   critical: () => Promise<T>
 ): Promise<T> {
-  const name = `${LOCK_PREFIX}:${accountId}`
+  const name = `${LOCK_PREFIX}:${localAccountId}`
   if (held.has(name)) return critical()
 
   const enter = async (): Promise<T> => {

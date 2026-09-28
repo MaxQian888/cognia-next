@@ -16,13 +16,6 @@
       "reviewAfter": "2026-10-31"
     },
     {
-      "file": "tests/e2e/mobile/composer-plus/voice.spec.ts",
-      "rule": "arbitrary-timeout",
-      "occurrences": 1,
-      "reason": "The mocked recorder exposes no completion event after the minimum voice capture duration, so the stop button's readiness cannot be awaited. Reviewed 2026-09-04: still true. The seam this needs is a resolved state on the mock recorder that the stop control reflects, at which point the sleep becomes an ordinary toBeEnabled().",
-      "reviewAfter": "2026-12-31"
-    },
-    {
       "file": "tests/e2e/mobile/chat-render-perf.spec.ts",
       "rule": "runtime-skip",
       "occurrences": 1,
@@ -98,6 +91,20 @@
       "occurrences": 1,
       "reason": "The action.twin.rag executor is not implemented; the suite currently proves editor persistence only.",
       "reviewAfter": "2026-09-30"
+    },
+    {
+      "file": "tests/e2e/mobile/remote-session-control.spec.ts",
+      "rule": "runtime-skip",
+      "occurrences": 1,
+      "reason": "Opt-in remote streaming performance benchmark requires CHAT_PERF_BENCH=1; functional remote session-control cases still run in the deterministic browser suite.",
+      "reviewAfter": "2026-12-31"
+    },
+    {
+      "file": "tests/e2e/share/public-share-view.spec.ts",
+      "rule": "runtime-skip",
+      "occurrences": 2,
+      "reason": "Guest account isolation is asserted against PLAYWRIGHT_STATIC=1 production exports. Development mode intentionally provisions a disposable local account, so these two guest-only assertions cannot represent shipped behavior there; the remaining share tests run in both modes.",
+      "reviewAfter": "2026-12-31"
     }
   ]
 }

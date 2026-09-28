@@ -74,9 +74,9 @@ export interface RefreshCodexDeps {
   /** Deterministic jitter source for the recorded backoff. */
   random?: () => number
   refreshCodexToken: (refreshToken: string) => Promise<TokenResponse>
-  getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
+  getAccount: (provider: ProviderId, providerAccountId: string) => Promise<Account | null>
   saveAccount: (provider: ProviderId, account: Account) => Promise<void>
-  setActiveAccount: (provider: ProviderId, accountId: string | null) => Promise<void>
+  setActiveAccount: (provider: ProviderId, providerAccountId: string | null) => Promise<void>
   now: () => number
   /** Re-read the CLI-owned credential for accounts adopted via Reuse. */
   discoverLocalCredential: () => Promise<CodexCredentialData | null>
@@ -89,7 +89,7 @@ export interface RefreshCodexDeps {
    */
   reactivate: boolean
   /** Host-owned atomic refresh. Tests may omit it to exercise the pure seam. */
-  refreshManagedAccount: (accountId: string) => Promise<CodexCredentialData>
+  refreshManagedAccount: (providerAccountId: string) => Promise<CodexCredentialData>
 }
 
 const DEFAULT_DEPS: RefreshCodexDeps = {
@@ -113,15 +113,16 @@ const DEFAULT_DEPS: RefreshCodexDeps = {
 const managedRefreshes = new Map<string, Promise<CodexCredentialData>>()
 
 function refreshManagedOnce(
-  accountId: string,
-  refresh: (accountId: string) => Promise<CodexCredentialData>
+  providerAccountId: string,
+  refresh: (providerAccountId: string) => Promise<CodexCredentialData>
 ): Promise<CodexCredentialData> {
-  const existing = managedRefreshes.get(accountId)
+  const existing = managedRefreshes.get(providerAccountId)
   if (existing) return existing
-  const pending = refresh(accountId).finally(() => {
-    if (managedRefreshes.get(accountId) === pending) managedRefreshes.delete(accountId)
+  const pending = refresh(providerAccountId).finally(() => {
+    if (managedRefreshes.get(providerAccountId) === pending)
+      managedRefreshes.delete(providerAccountId)
   })
-  managedRefreshes.set(accountId, pending)
+  managedRefreshes.set(providerAccountId, pending)
   return pending
 }
 
@@ -139,10 +140,10 @@ function refreshManagedOnce(
  * must not fall back to a stored credential after a lifecycle error.
  */
 export async function refreshCodexAccountIfStale(
-  accountId: string,
+  providerAccountId: string,
   deps: Partial<RefreshCodexDeps> = {}
 ): Promise<CodexCredentialData | null> {
-  const account = await (deps.getAccount ?? DEFAULT_DEPS.getAccount)("codex", accountId)
+  const account = await (deps.getAccount ?? DEFAULT_DEPS.getAccount)("codex", providerAccountId)
   if (!account || account.credential.provider !== "codex") return null
   assertCodexAccountLifecycleReady(account)
   const credential = account.credential
@@ -171,20 +172,23 @@ export async function refreshCodexAccountIfStale(
       try {
         // Reuse the host's locked identity check and update. Generic save
         // would allow a CLI account swap or resurrect a concurrently deleted row.
-        await (deps.reauthenticateAccount ?? DEFAULT_DEPS.reauthenticateAccount)(accountId, synced)
+        await (deps.reauthenticateAccount ?? DEFAULT_DEPS.reauthenticateAccount)(
+          providerAccountId,
+          synced
+        )
       } catch {
         throw new CodexReauthenticationRequiredError("external_login_unverified")
       }
     }
     if (deps.reactivate) {
-      await (deps.setActiveAccount ?? DEFAULT_DEPS.setActiveAccount)("codex", accountId)
+      await (deps.setActiveAccount ?? DEFAULT_DEPS.setActiveAccount)("codex", providerAccountId)
     }
     return synced
   }
 
   const breaker = deps.breaker ?? getSubscriptionBreaker()
   const now = deps.now ?? DEFAULT_DEPS.now
-  const key = credentialKey("codex", accountId, BREAKER_SCOPES.refresh)
+  const key = credentialKey("codex", providerAccountId, BREAKER_SCOPES.refresh)
   // A refresh that just failed will fail the same way until something changes,
   // and the ChatGPT token endpoint is far tighter than the usage endpoint.
   // Without this, an account whose grant was revoked was re-exchanged on every
@@ -208,7 +212,7 @@ async function runRefreshCodexAccountIfStale(
   credential: CodexCredentialData,
   deps: Partial<RefreshCodexDeps>
 ): Promise<CodexCredentialData | null> {
-  const accountId = account.id
+  const providerAccountId = account.id
   const useHostLifecycle =
     deps.refreshManagedAccount !== undefined ||
     (deps.refreshCodexToken === undefined &&
@@ -236,11 +240,11 @@ async function runRefreshCodexAccountIfStale(
   if (useHostLifecycle) {
     let fresh: CodexCredentialData
     try {
-      fresh = await refreshManagedOnce(accountId, refreshManagedAccount)
+      fresh = await refreshManagedOnce(providerAccountId, refreshManagedAccount)
     } catch (cause) {
       throw normalizeCodexLifecycleError(cause)
     }
-    if (reactivate) await setActiveAccount("codex", accountId)
+    if (reactivate) await setActiveAccount("codex", providerAccountId)
     return fresh
   }
 
@@ -256,7 +260,7 @@ async function runRefreshCodexAccountIfStale(
     credential: toProviderCredential(fresh),
     lastUsedAtMs: now(),
   })
-  if (reactivate) await setActiveAccount("codex", accountId)
+  if (reactivate) await setActiveAccount("codex", providerAccountId)
 
   return fresh
 }

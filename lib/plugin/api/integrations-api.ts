@@ -71,19 +71,21 @@ export function createIntegrationsAPI(
       }
       return createIntegrationAccount(pluginId, input)
     },
-    async updateAccount(accountId, patch) {
+    async updateAccount(connectorAccountId, patch) {
       requirePermission(hasPermission, "integrations:manage", "ctx.integrations.updateAccount")
-      return updateIntegrationAccount(pluginId, accountId, patch)
+      return updateIntegrationAccount(pluginId, connectorAccountId, patch)
     },
-    async removeAccount(accountId) {
+    async removeAccount(connectorAccountId) {
       requirePermission(hasPermission, "integrations:manage", "ctx.integrations.removeAccount")
       const { deleteIntegrationAccount } = await import("@/lib/integrations/ingress-client")
-      await deleteIntegrationAccount(pluginId, accountId)
+      await deleteIntegrationAccount(pluginId, connectorAccountId)
     },
-    async listSubscriptions(accountId?: IntegrationAccountRef): Promise<IntegrationSubscription[]> {
+    async listSubscriptions(
+      connectorAccountId?: IntegrationAccountRef
+    ): Promise<IntegrationSubscription[]> {
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.listSubscriptions")
-      if (accountId && typeof accountId !== "string") {
-        const binding = await resolveBotIntegrationBinding(pluginId, accountId)
+      if (connectorAccountId && typeof connectorAccountId !== "string") {
+        const binding = await resolveBotIntegrationBinding(pluginId, connectorAccountId)
         const subscriptions = await listIntegrationSubscriptions(
           binding.account.pluginId,
           binding.account.id
@@ -98,7 +100,7 @@ export function createIntegrationsAPI(
             )
           : subscriptions
       }
-      return listIntegrationSubscriptions(pluginId, accountId)
+      return listIntegrationSubscriptions(pluginId, connectorAccountId)
     },
     async listResources(query) {
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.listResources")
@@ -119,13 +121,13 @@ export function createIntegrationsAPI(
       }
       return listIntegrationResources(pluginId, { ...query, accountId: query.accountId })
     },
-    async checkAccountHealth(accountId) {
+    async checkAccountHealth(connectorAccountId) {
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.checkAccountHealth")
-      if (typeof accountId !== "string") {
-        const binding = await resolveBotIntegrationBinding(pluginId, accountId)
+      if (typeof connectorAccountId !== "string") {
+        const binding = await resolveBotIntegrationBinding(pluginId, connectorAccountId)
         return checkIntegrationAccountHealth(binding.account.pluginId, binding.account.id)
       }
-      return checkIntegrationAccountHealth(pluginId, accountId)
+      return checkIntegrationAccountHealth(pluginId, connectorAccountId)
     },
     async createSubscription(
       input: IntegrationSubscriptionInput
@@ -177,7 +179,7 @@ export function createIntegrationsAPI(
       return cancelIntegrationActionJob(jobId)
     },
     async authenticatedRequest<T>(
-      accountId: IntegrationAccountRef,
+      connectorAccountId: IntegrationAccountRef,
       input: string,
       init?: IntegrationRequestInit
     ) {
@@ -186,8 +188,8 @@ export function createIntegrationsAPI(
         "integrations:execute",
         "ctx.integrations.authenticatedRequest"
       )
-      if (typeof accountId !== "string") {
-        const binding = await resolveBotIntegrationBinding(pluginId, accountId)
+      if (typeof connectorAccountId !== "string") {
+        const binding = await resolveBotIntegrationBinding(pluginId, connectorAccountId)
         if ((init?.method ?? "GET").toUpperCase() !== "GET" || init?.body !== undefined) {
           throw new Error(
             "Bot binding authenticated requests are read-only; use executeAction for writes"
@@ -238,9 +240,9 @@ export function createIntegrationsAPI(
           } as T,
         }
       }
-      const account = await getIntegrationAccount(pluginId, accountId)
-      if (!account) throw new Error(`Integration account "${accountId}" was not found`)
-      return authenticatedIntegrationRequest<T>(pluginId, accountId, input, init)
+      const account = await getIntegrationAccount(pluginId, connectorAccountId)
+      if (!account) throw new Error(`Integration account "${connectorAccountId}" was not found`)
+      return authenticatedIntegrationRequest<T>(pluginId, connectorAccountId, input, init)
     },
     async getIngressPublicUrl(subscriptionId) {
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.getIngressPublicUrl")
@@ -253,7 +255,7 @@ export function createIntegrationsAPI(
       const { getIntegrationIngressPublicUrl } = await import("@/lib/integrations/ingress-client")
       return getIntegrationIngressPublicUrl(endpoint.routeId)
     },
-    async listIngressDeadletters(accountId) {
+    async listIngressDeadletters(connectorAccountId) {
       requirePermission(
         hasPermission,
         "integrations:read",
@@ -261,14 +263,14 @@ export function createIntegrationsAPI(
       )
       const { listIntegrationIngressDeadletters } =
         await import("@/lib/integrations/ingress-client")
-      return listIntegrationIngressDeadletters(pluginId, accountId)
+      return listIntegrationIngressDeadletters(pluginId, connectorAccountId)
     },
-    async getIngressDeadletter(accountId, routeId, deliveryId) {
+    async getIngressDeadletter(connectorAccountId, routeId, deliveryId) {
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.getIngressDeadletter")
       const { getIntegrationIngressDeadletter } = await import("@/lib/integrations/ingress-client")
-      return getIntegrationIngressDeadletter(pluginId, accountId, routeId, deliveryId)
+      return getIntegrationIngressDeadletter(pluginId, connectorAccountId, routeId, deliveryId)
     },
-    async requeueIngressDeadletter(accountId, routeId, deliveryId) {
+    async requeueIngressDeadletter(connectorAccountId, routeId, deliveryId) {
       requirePermission(
         hasPermission,
         "integrations:manage",
@@ -276,7 +278,7 @@ export function createIntegrationsAPI(
       )
       const { requeueIntegrationIngressDeadletter } =
         await import("@/lib/integrations/ingress-client")
-      return requeueIntegrationIngressDeadletter(pluginId, accountId, routeId, deliveryId)
+      return requeueIntegrationIngressDeadletter(pluginId, connectorAccountId, routeId, deliveryId)
     },
     async migrateLegacy(plan) {
       requirePermission(hasPermission, "integrations:manage", "ctx.integrations.migrateLegacy")

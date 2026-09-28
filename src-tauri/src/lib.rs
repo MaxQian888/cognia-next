@@ -102,8 +102,8 @@ pub fn init_structured_tracing() -> bool {
 
 // Native local-video pipeline lives in its own subsystem crate; the app crate
 // only re-exports it for generate_handler! command registration.
-pub use cognia_media as media;
 pub use cognia_companion_rpc::mcp_oauth;
+pub use cognia_media as media;
 mod node_runtime;
 // ADR-0067 follow-up — extracted to `crates/cognia-mcp-server`; re-aliased so
 // `mcp_server::…` (generate_handler! + .manage()) resolves unchanged.
@@ -129,13 +129,13 @@ pub use cognia_plugin_runtime as plugin_api;
 // performance panel's "Managed Processes" tab and the graceful teardown arm.
 mod power_assertion;
 mod process_registry;
-pub use cognia_companion_rpc::project_environment;
 /// ADR-0090 Phase 1 — headless Provider Profile Store (SQLite mirror of the
 /// renderer's Dexie v121 tables).
 // ADR-0067 Tier C — extracted to `crates/cognia-agent-state`; re-aliased so
 // `crate::provider_profiles::…` and the `app_lib::provider_profiles::…`
 // paths that `bin/cognia-server.rs` uses resolve unchanged.
 pub use cognia_agent_state::provider_profiles;
+pub use cognia_companion_rpc::project_environment;
 mod proxy_config;
 pub use cognia_net::proxy_config::{
     apply_current as apply_current_proxy_config,
@@ -1840,10 +1840,7 @@ pub fn run() {
 mod tests {
     #[test]
     fn session_history_filesystem_command_remains_registered() {
-        let production_source = include_str!("lib.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .unwrap();
+        let production_source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
         assert!(production_source.contains("session_import::session_import_fs,"));
     }
 

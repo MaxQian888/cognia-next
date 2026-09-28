@@ -79,7 +79,7 @@ export async function loadSupport(directory) {
         'export { TerminalScreen } from "./cli/src/tui/pty/terminal-screen.ts";',
         'export { loadConfig, resolveConfig } from "./cli/src/config/load.ts";',
         'export { cliConfigFileSchema } from "./cli/src/config/schema.ts";',
-        'export { BUILTIN_EXECUTABLE_PRESET_IDS } from "./lib/ai/agent/external/presets.ts";',
+        'export { BUILTIN_EXECUTABLE_PRESET_IDS } from "./lib/ai/agent/external/config/presets.ts";',
       ].join("\n"),
       resolveDir: REPO_ROOT,
     },

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process"
+import { createRequire } from "node:module"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -50,8 +51,10 @@ export function withDevResourceEnv(args, env) {
 
 export async function runTauri(args, { env = process.env } = {}) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
-  const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
-  const child = spawn(pnpm, ["exec", "tauri", ...withFailFastDev(args)], {
+  const require = createRequire(import.meta.url)
+  const tauriCli = require.resolve("@tauri-apps/cli/tauri.js")
+  // The wrapper runs the installed CLI; launching must not trigger pnpm's implicit install.
+  const child = spawn(process.execPath, [tauriCli, ...withFailFastDev(args)], {
     cwd: root,
     env: withDevResourceEnv(args, env),
     stdio: "inherit",

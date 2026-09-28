@@ -110,7 +110,7 @@ pub struct BrowserRuntimeStatus {
 
 #[derive(Clone, Debug)]
 pub struct EnsureBrowserSession {
-    pub account_id: String,
+    pub tenant_id: String,
     pub device_id: String,
     pub chat_session_id: String,
     pub parent_chat_session_id: Option<String>,
@@ -142,7 +142,7 @@ struct LeaseState {
 }
 
 struct BrowserSessionRecord {
-    account_id: String,
+    tenant_id: String,
     device_id: String,
     summary: BrowserSessionSummary,
     viewers: usize,
@@ -204,7 +204,7 @@ impl BrowserGateway {
             .unwrap_or(&input.chat_session_id);
         let chat_key = format!(
             "{}\0{}\0{}",
-            input.account_id, input.workspace_id, owner_chat
+            input.tenant_id, input.workspace_id, owner_chat
         );
         let existing_id = self.session_ids_by_chat.lock().get(&chat_key).cloned();
         if let Some(id) = existing_id {
@@ -234,7 +234,7 @@ impl BrowserGateway {
             .lock()
             .values()
             .filter(|record| {
-                record.account_id == input.account_id
+                record.tenant_id == input.tenant_id
                     && record.summary.workspace_id == input.workspace_id
                     && !matches!(record.summary.state.as_str(), "closed" | "failed")
             })
@@ -248,7 +248,7 @@ impl BrowserGateway {
         if let Some(profile_id) = input.profile_id.as_deref() {
             let profile_key = format!(
                 "{}\0{}\0{}",
-                input.account_id, input.workspace_id, profile_id
+                input.tenant_id, input.workspace_id, profile_id
             );
             if self.profile_owners.lock().contains_key(&profile_key) {
                 return Err(BrowserGatewayError::new(
@@ -287,7 +287,7 @@ impl BrowserGateway {
         self.sessions.lock().insert(
             id.clone(),
             BrowserSessionRecord {
-                account_id: input.account_id.clone(),
+                tenant_id: input.tenant_id.clone(),
                 device_id: input.device_id,
                 summary: summary.clone(),
                 viewers: 0,
@@ -301,7 +301,7 @@ impl BrowserGateway {
             self.profile_owners.lock().insert(
                 format!(
                     "{}\0{}\0{}",
-                    input.account_id, input.workspace_id, profile_id
+                    input.tenant_id, input.workspace_id, profile_id
                 ),
                 id,
             );
@@ -312,10 +312,10 @@ impl BrowserGateway {
     /// Whether a live session of this account holds `profile_id` in
     /// `workspace_id`. A profile's saved data must not be erased from under a
     /// browser that has it open.
-    pub fn profile_in_use(&self, account_id: &str, workspace_id: &str, profile_id: &str) -> bool {
+    pub fn profile_in_use(&self, tenant_id: &str, workspace_id: &str, profile_id: &str) -> bool {
         self.profile_owners
             .lock()
-            .contains_key(&format!("{account_id}\0{workspace_id}\0{profile_id}"))
+            .contains_key(&format!("{tenant_id}\0{workspace_id}\0{profile_id}"))
     }
 
     pub fn set_ready(
@@ -387,11 +387,11 @@ impl BrowserGateway {
 
     pub fn close_session(
         &self,
-        account_id: &str,
+        tenant_id: &str,
         device_id: &str,
         session_id: &str,
     ) -> Result<(), BrowserGatewayError> {
-        self.session_for_principal(account_id, device_id, session_id)?;
+        self.session_for_principal(tenant_id, device_id, session_id)?;
         self.remove_session(session_id).ok_or_else(|| {
             BrowserGatewayError::new("browser_session_not_found", "browser session not found")
         })?;
@@ -441,14 +441,14 @@ impl BrowserGateway {
 
     pub fn session_for_account(
         &self,
-        account_id: &str,
+        tenant_id: &str,
         session_id: &str,
     ) -> Result<BrowserSessionSummary, BrowserGatewayError> {
         let sessions = self.sessions.lock();
         let record = sessions.get(session_id).ok_or_else(|| {
             BrowserGatewayError::new("browser_session_not_found", "browser session not found")
         })?;
-        if record.account_id != account_id {
+        if record.tenant_id != tenant_id {
             return Err(BrowserGatewayError::new(
                 "browser_session_forbidden",
                 "browser session belongs to another account",
@@ -459,7 +459,7 @@ impl BrowserGateway {
 
     pub fn session_for_principal(
         &self,
-        account_id: &str,
+        tenant_id: &str,
         device_id: &str,
         session_id: &str,
     ) -> Result<BrowserSessionSummary, BrowserGatewayError> {
@@ -467,7 +467,7 @@ impl BrowserGateway {
         let record = sessions.get(session_id).ok_or_else(|| {
             BrowserGatewayError::new("browser_session_not_found", "browser session not found")
         })?;
-        if record.account_id != account_id || record.device_id != device_id {
+        if record.tenant_id != tenant_id || record.device_id != device_id {
             return Err(BrowserGatewayError::new(
                 "browser_session_forbidden",
                 "browser session belongs to another principal",
@@ -1125,7 +1125,7 @@ fn browser_operation_refreshes_pages(name: &str) -> bool {
 pub async fn dispatch_browser_rpc(
     name: &str,
     args: Value,
-    account_id: &str,
+    tenant_id: &str,
     device_id: &str,
 ) -> Result<Value, BrowserGatewayError> {
     if name == "browser_runtime_status" {
@@ -1175,7 +1175,7 @@ pub async fn dispatch_browser_rpc(
             .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>())
             .unwrap_or_default();
         let summary = gateway().ensure_session(EnsureBrowserSession {
-            account_id: account_id.to_string(),
+            tenant_id: tenant_id.to_string(),
             device_id: device_id.to_string(),
             chat_session_id: required_string(&args, "chatSessionId")?,
             parent_chat_session_id: args
@@ -1244,7 +1244,7 @@ pub async fn dispatch_browser_rpc(
         // the profile on the client without this left all of it on the server.
         let workspace_id = required_string(&args, "workspaceId")?;
         let profile_id = required_string(&args, "profileId")?;
-        if gateway().profile_in_use(account_id, &workspace_id, &profile_id) {
+        if gateway().profile_in_use(tenant_id, &workspace_id, &profile_id) {
             return Err(BrowserGatewayError::new(
                 "browser_profile_in_use",
                 "browser profile is in use",
@@ -1261,11 +1261,11 @@ pub async fn dispatch_browser_rpc(
     }
 
     let session_id = required_string(&args, "browserSessionId")?;
-    let summary = gateway().session_for_principal(account_id, device_id, &session_id)?;
+    let summary = gateway().session_for_principal(tenant_id, device_id, &session_id)?;
     gateway().touch_session(&session_id);
     if name == "browser_session_get" {
         return serde_json::to_value(gateway().session_for_principal(
-            account_id,
+            tenant_id,
             device_id,
             &session_id,
         )?)
@@ -1279,7 +1279,7 @@ pub async fn dispatch_browser_rpc(
                 json!({ "sessionId": session_id }),
             )
             .await;
-        gateway().close_session(account_id, device_id, &session_id)?;
+        gateway().close_session(tenant_id, device_id, &session_id)?;
         runtime_close?;
         return Ok(json!({ "closed": true }));
     }
@@ -1622,7 +1622,7 @@ mod tests {
         let unique = uuid::Uuid::new_v4().to_string();
         let session = gateway()
             .ensure_session(EnsureBrowserSession {
-                account_id: format!("acct-{unique}"),
+                tenant_id: format!("acct-{unique}"),
                 device_id: format!("device-{unique}"),
                 chat_session_id: format!("chat-{unique}"),
                 parent_chat_session_id: None,
@@ -1684,7 +1684,7 @@ mod tests {
                 std::thread::spawn(move || {
                     barrier.wait();
                     gateway.ensure_session(EnsureBrowserSession {
-                        account_id: "acct-1".into(),
+                        tenant_id: "acct-1".into(),
                         device_id: format!("device-{index}"),
                         chat_session_id: format!("chat-{index}"),
                         parent_chat_session_id: None,
@@ -1717,7 +1717,7 @@ mod tests {
         assert!(!gateway.profile_in_use("acct-1", "workspace-1", "profile-1"));
         let summary = gateway
             .ensure_session(EnsureBrowserSession {
-                account_id: "acct-1".into(),
+                tenant_id: "acct-1".into(),
                 device_id: "device-1".into(),
                 chat_session_id: "chat-1".into(),
                 parent_chat_session_id: None,
@@ -1754,7 +1754,7 @@ mod tests {
                 std::thread::spawn(move || {
                     barrier.wait();
                     gateway.ensure_session(EnsureBrowserSession {
-                        account_id: "acct-1".into(),
+                        tenant_id: "acct-1".into(),
                         device_id: "device-shared".into(),
                         chat_session_id: "chat-shared".into(),
                         parent_chat_session_id: None,
@@ -1780,7 +1780,7 @@ mod tests {
         let (gateway, _) = fixture();
         let session = gateway
             .ensure_session(EnsureBrowserSession {
-                account_id: "acct-1".into(),
+                tenant_id: "acct-1".into(),
                 device_id: "device-1".into(),
                 chat_session_id: "chat-1".into(),
                 parent_chat_session_id: None,
@@ -1813,7 +1813,7 @@ mod tests {
         let (gateway, _) = fixture();
         let session = gateway
             .ensure_session(EnsureBrowserSession {
-                account_id: "acct-1".into(),
+                tenant_id: "acct-1".into(),
                 device_id: "device-1".into(),
                 chat_session_id: "chat-1".into(),
                 parent_chat_session_id: None,
@@ -1823,7 +1823,7 @@ mod tests {
             })
             .unwrap();
         let reused = gateway.ensure_session(EnsureBrowserSession {
-            account_id: "acct-1".into(),
+            tenant_id: "acct-1".into(),
             device_id: "device-2".into(),
             chat_session_id: "chat-1".into(),
             parent_chat_session_id: None,
@@ -1847,7 +1847,7 @@ mod tests {
         let (gateway, now) = fixture();
         let session = gateway
             .ensure_session(EnsureBrowserSession {
-                account_id: "acct-1".into(),
+                tenant_id: "acct-1".into(),
                 device_id: "device-1".into(),
                 chat_session_id: "chat-1".into(),
                 parent_chat_session_id: None,
@@ -1881,7 +1881,7 @@ mod tests {
     fn parent_chat_reuses_binding_and_workspace_quota_is_enforced() {
         let (gateway, _) = fixture();
         let base = EnsureBrowserSession {
-            account_id: "acct-1".into(),
+            tenant_id: "acct-1".into(),
             device_id: "device-1".into(),
             chat_session_id: "chat-parent".into(),
             parent_chat_session_id: None,
@@ -1923,7 +1923,7 @@ mod tests {
     fn runtime_failure_releases_profile_and_parent_binding() {
         let (gateway, _) = fixture();
         let input = EnsureBrowserSession {
-            account_id: "acct-1".into(),
+            tenant_id: "acct-1".into(),
             device_id: "device-1".into(),
             chat_session_id: "chat-1".into(),
             parent_chat_session_id: None,
@@ -1943,7 +1943,7 @@ mod tests {
         let (gateway, now) = fixture();
         let session = gateway
             .ensure_session(EnsureBrowserSession {
-                account_id: "acct-1".into(),
+                tenant_id: "acct-1".into(),
                 device_id: "device-1".into(),
                 chat_session_id: "chat-1".into(),
                 parent_chat_session_id: None,
@@ -1965,7 +1965,7 @@ mod tests {
 
         let replacement = gateway
             .ensure_session(EnsureBrowserSession {
-                account_id: "acct-1".into(),
+                tenant_id: "acct-1".into(),
                 device_id: "device-1".into(),
                 chat_session_id: "chat-1".into(),
                 parent_chat_session_id: None,

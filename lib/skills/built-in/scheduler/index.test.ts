@@ -29,20 +29,15 @@ jest.mock("@/lib/scheduler/write-authority", () => ({
 }))
 
 import { getSharedBuiltInSkillRegistry } from "../registry"
-import type { BuiltInSkill, BuiltInSkillContext } from "../types"
+import type { BuiltInSkill } from "../types"
 import "./index"
 
 const registry = getSharedBuiltInSkillRegistry()
-const ctx = { sessionId: "sess-1" } as BuiltInSkillContext
 
 function skill(id: string): BuiltInSkill {
   const found = registry.list().find((entry) => entry.id === id)
   if (!found) throw new Error(`skill not registered: ${id}`)
   return found
-}
-
-function run(id: string, args: unknown): Promise<unknown> {
-  return skill(id).execute(args as never, ctx)
 }
 
 function task(overrides: Record<string, unknown> = {}) {

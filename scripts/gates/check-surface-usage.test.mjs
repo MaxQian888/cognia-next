@@ -9,6 +9,105 @@ describe("scanSource", () => {
     assert.equal(scanSource('<div className="rounded-lg border bg-card p-3" />'), 1)
   })
 
+  test("does not mistake controls, media, or adopted surfaces for bare panels", () => {
+    for (const tag of ["button", "input", "video", "SelectTrigger", "Surface"]) {
+      assert.equal(scanSource(`<${tag} className="rounded-md border bg-card" />`), 0)
+    }
+    assert.equal(
+      scanSource('<Surface asChild><section className="rounded-md border bg-card" /></Surface>'),
+      0
+    )
+    assert.equal(
+      scanSource('<Surface><section className="rounded-md border bg-card" /></Surface>'),
+      1
+    )
+    assert.equal(scanSource('<div className="rounded-md border-0 bg-transparent" />'), 0)
+  })
+
+  test("checks container classes inside conditional expressions", () => {
+    assert.equal(
+      scanSource('<section className={cn(active ? "rounded-lg border bg-card" : "p-2")} />'),
+      1
+    )
+  })
+
+  test("resolves local class constants without crossing lexical shadows", () => {
+    const panel = 'const panel = "rounded-lg border bg-card";'
+    assert.equal(scanSource(`${panel} const View = () => <div className={panel} />;`), 1)
+    assert.equal(
+      scanSource(
+        `${panel} const alias = panel; const View = () => <div className={cn(alias, alias)} />;`
+      ),
+      1
+    )
+    assert.equal(
+      scanSource(`${panel} function View(panel: string) { return <div className={panel} />; }`),
+      0
+    )
+    assert.equal(
+      scanSource(`${panel} function View({panel}: Props) { return <div className={panel} />; }`),
+      0
+    )
+    assert.equal(
+      scanSource(
+        `${panel} function View() { const panel = "p-2"; return <div className={panel} />; }`
+      ),
+      0
+    )
+    assert.equal(
+      scanSource(
+        `${panel} function View() { { const panel = "p-2"; } return <div className={panel} />; }`
+      ),
+      1
+    )
+    assert.equal(
+      scanSource(
+        `${panel} function View() { switch (kind) { case 1: const panel = "p-2"; } return <div className={panel} />; }`
+      ),
+      1
+    )
+    assert.equal(
+      scanSource(
+        'const presets = {panel: "rounded-lg border bg-card", plain: "p-2"}; const View = () => <div className={presets.plain} />;'
+      ),
+      0
+    )
+    assert.equal(
+      scanSource(
+        'const presets = {panel: "rounded-lg border bg-card", plain: "p-2"} as const; const View = () => <div className={presets.panel} />;'
+      ),
+      1
+    )
+    assert.equal(
+      scanSource("const one = two; const two = one; const View = () => <div className={one} />;"),
+      0
+    )
+  })
+
+  test("checks static fragments of interpolated templates", () => {
+    assert.equal(
+      scanSource('<div className={`rounded-lg border bg-card ${active ? "p-2" : "p-3"}`} />'),
+      1
+    )
+    assert.equal(scanSource("<div className={`${space} rounded-lg border bg-card`} />"), 1)
+    assert.equal(
+      scanSource(
+        "const panel = `rounded-lg border bg-card ${space}`; const View = () => <div className={panel} />;"
+      ),
+      1
+    )
+  })
+
+  test("does not let border-0 hide borders restored by a variant", () => {
+    assert.equal(scanSource('<div className="rounded-lg border-0 md:border bg-card" />'), 1)
+    assert.equal(scanSource('<div className="rounded-lg border-0 hover:border-2 bg-card" />'), 1)
+    assert.equal(scanSource('<div className="rounded-lg border-0 border-red-500 bg-card" />'), 0)
+  })
+
+  test("accepts inherited radius and the shared elevation variables", () => {
+    assert.equal(scanSource('className="rounded-[inherit] shadow-(--elevation-2)"'), 0)
+  })
+
   test("ignores a container missing any one of the three", () => {
     assert.equal(scanSource('<div className="rounded-lg border p-3" />'), 0)
     assert.equal(scanSource('<div className="rounded-lg bg-card p-3" />'), 0)

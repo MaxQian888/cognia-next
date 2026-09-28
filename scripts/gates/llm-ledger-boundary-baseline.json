@@ -279,6 +279,12 @@
       "entries": ["ai:streamText"],
       "seam": "sidecar/src/runtimes/ai-sdk/index.ts",
       "note": "streamText for every sidecar AI SDK leg; for a stamped send ai-sdk.mjs reserves each leg (and compaction/optical summaries) through call-ledger-gate and passes maxRetries: 0. Unstamped sends and feature-call.mjs (its own row) are unledgered."
+    },
+    "lib/ai/generation/template-assist.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["ai:generateObject", "ai:generateText"],
+      "seam": "lib/ai/ledgered-generation-seam.ts",
+      "note": "All three template operations use generateThroughSeam. hooks/chat/use-template-assist.ts binds ledgeredGenerationSeam to the actually resolved provider (including Anthropic fallback); PII checks precede reservation, SDK calls retain schema and abort with the reserved output bound and no hidden retries."
     }
   }
 }

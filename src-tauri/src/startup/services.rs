@@ -65,9 +65,9 @@ pub(crate) fn gateway_session(app: &App) {
     let gateway_for_vault = gateway_state.inner().clone();
     let app_for_vault = app.handle().clone();
     crate::subscription::vault::install_commit_observer(std::sync::Arc::new(
-        move |account_id, provider| {
+        move |local_account_id, provider| {
             if leases_gateway_access(&provider)
-                && gateway_for_vault.invalidate_account_snapshot(account_id)
+                && gateway_for_vault.invalidate_account_snapshot(local_account_id)
             {
                 let _ = app_for_vault.emit("gateway://snapshot-invalidated", ());
             }

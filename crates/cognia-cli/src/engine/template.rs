@@ -58,6 +58,8 @@ pub mod wasm {
 
 // ── TS template files (new) ─────────────────────────────────────────────────
 pub mod ts {
+    pub const PNPM_WORKSPACE: &str =
+        include_str!("../../../cognia-plugin-template-ts/pnpm-workspace.yaml");
     pub const PACKAGE_JSON: &str = include_str!("../../../cognia-plugin-template-ts/package.json");
     pub const TSCONFIG_JSON: &str =
         include_str!("../../../cognia-plugin-template-ts/tsconfig.json");
@@ -199,6 +201,10 @@ pub fn files_for(kind: TemplateKind, plugin_name: &str) -> Vec<TemplateFile> {
                 TemplateFile {
                     rel_path: PathBuf::from("package.json"),
                     content: substitute_ts_name(ts::PACKAGE_JSON, plugin_name),
+                },
+                TemplateFile {
+                    rel_path: PathBuf::from("pnpm-workspace.yaml"),
+                    content: ts::PNPM_WORKSPACE.into(),
                 },
                 TemplateFile {
                     rel_path: PathBuf::from("tsconfig.json"),
@@ -757,6 +763,15 @@ mod tests {
         assert!(pj.content.contains(r#""id": "my-plugin""#));
         let pkg = find_file(&files, "package.json");
         assert!(pkg.content.contains(r#""name": "my-plugin""#));
+        let workspace = find_file(&files, "pnpm-workspace.yaml");
+        assert!(workspace.content.contains("allowBuilds:"));
+        for dependency in [
+            "esbuild: true",
+            "unrs-resolver: true",
+            "'@parcel/watcher': true",
+        ] {
+            assert!(workspace.content.contains(dependency));
+        }
     }
 
     #[test]

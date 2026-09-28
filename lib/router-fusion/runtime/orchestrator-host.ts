@@ -42,7 +42,6 @@ import {
   WorkflowError,
   type CompiledAction,
   type CompiledFusionConfig,
-  type DelegateDelivery,
   type DelegatePendingApproval,
   type DelegateRunOutcome,
   type Message,

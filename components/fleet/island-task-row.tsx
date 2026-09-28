@@ -15,6 +15,7 @@
  * moves. Nothing sensitive is held in the projection this row receives.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
@@ -344,12 +345,12 @@ export function IslandTaskRow({
               </p>
             ) : null}
             {detail.plan ? (
-              <div
+              <Surface
                 data-testid="island-plan"
                 className="ml-3.5 line-clamp-3 whitespace-pre-wrap rounded-lg border border-sky-400/20 bg-sky-500/10 px-2 py-1.5 text-[10px] leading-snug text-sky-100/85"
               >
                 {detail.plan}
-              </div>
+              </Surface>
             ) : null}
             {detail.errorDetail ? (
               <p

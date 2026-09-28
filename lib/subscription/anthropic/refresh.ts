@@ -28,16 +28,16 @@ export class AnthropicReauthenticationRequiredError extends Error {
 
 export interface RefreshAnthropicDeps {
   refreshAccessToken: typeof defaultRefreshAccessToken
-  getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
+  getAccount: (provider: ProviderId, providerAccountId: string) => Promise<Account | null>
   /** The host compares the old credential under the vault mutation lock. */
   persistCredential: (
     localAccountId: string,
-    accountId: string,
+    providerAccountId: string,
     expected: AnthropicCredentialData,
     credential: AnthropicCredentialData
   ) => Promise<unknown>
   getLocalAccountId: () => string | null
-  setActiveAccount: (provider: ProviderId, accountId: string | null) => Promise<void>
+  setActiveAccount: (provider: ProviderId, providerAccountId: string | null) => Promise<void>
   now: () => number
   discoverLocalCredential: () => Promise<AnthropicCredentialData | null>
   /** Only the explicit Account-tab refresh reactivates the account. */
@@ -78,7 +78,7 @@ const refreshesInFlight = new Map<string, RefreshInFlight>()
  * a legitimate CLI rotation: guessing would silently switch users.
  */
 export function refreshAndPersistAnthropicAccount(
-  accountId: string,
+  providerAccountId: string,
   deps: Partial<RefreshAnthropicDeps> = {}
 ): Promise<AnthropicCredentialData | null> {
   const resolved = { ...DEFAULT_DEPS, ...deps }
@@ -86,7 +86,7 @@ export function refreshAndPersistAnthropicAccount(
   if (!localAccountId) {
     return Promise.reject(new AnthropicReauthenticationRequiredError("local_account_locked"))
   }
-  const flightKey = JSON.stringify([localAccountId, accountId])
+  const flightKey = JSON.stringify([localAccountId, providerAccountId])
   const existing = refreshesInFlight.get(flightKey)
   if (existing) {
     if (resolved.reactivate) existing.reactivateRequested = true
@@ -98,7 +98,7 @@ export function refreshAndPersistAnthropicAccount(
   }
   entry.promise = runRefresh(
     localAccountId,
-    accountId,
+    providerAccountId,
     resolved,
     () => entry.reactivateRequested
   ).finally(() => {
@@ -114,7 +114,7 @@ export function __resetAnthropicRefreshInFlightForTesting(): void {
 
 async function runRefresh(
   localAccountId: string,
-  accountId: string,
+  providerAccountId: string,
   deps: RefreshAnthropicDeps,
   shouldReactivate: () => boolean
 ): Promise<AnthropicCredentialData | null> {
@@ -125,7 +125,7 @@ async function runRefresh(
   }
   let account: Account | null
   try {
-    account = await deps.getAccount("anthropic", accountId)
+    account = await deps.getAccount("anthropic", providerAccountId)
   } catch {
     assertScope()
     throw new AnthropicReauthenticationRequiredError("account_unavailable")
@@ -158,7 +158,7 @@ async function runRefresh(
     updated = discovered
   } else {
     const { breaker, now } = deps
-    const key = credentialKey("anthropic", accountId, BREAKER_SCOPES.refresh)
+    const key = credentialKey("anthropic", providerAccountId, BREAKER_SCOPES.refresh)
     if (!breaker.shouldAttempt(key, now()).allowed) return null
     try {
       updated = await deps.refreshAccessToken({
@@ -189,14 +189,14 @@ async function runRefresh(
   // and re-fire every subscription listener on each limits query.
   if (!sameCredential(merged, credential)) {
     try {
-      await deps.persistCredential(localAccountId, accountId, credential, merged)
+      await deps.persistCredential(localAccountId, providerAccountId, credential, merged)
     } catch {
       // A deleted row must not be recreated by an old refresh response. A lost
       // compare-and-swap is different: the stored credential changed while
       // this refresh was in flight (the configdir watcher saving a CLI
       // rotation, a reimport), and that newer credential is the account's
       // truth — adopt it instead of calling a healthy account unauthenticated.
-      const current = await deps.getAccount("anthropic", accountId).catch(() => null)
+      const current = await deps.getAccount("anthropic", providerAccountId).catch(() => null)
       const stored = current?.credential.provider === "anthropic" ? current.credential : null
       if (!stored || sameCredential(stored, credential)) {
         throw new AnthropicReauthenticationRequiredError("credential_update_rejected")
@@ -206,7 +206,7 @@ async function runRefresh(
   }
   assertScope()
   if (shouldReactivate()) {
-    await deps.setActiveAccount("anthropic", accountId)
+    await deps.setActiveAccount("anthropic", providerAccountId)
     assertScope()
   }
   return result

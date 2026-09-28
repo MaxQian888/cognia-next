@@ -153,3 +153,11 @@ test("structural trust rules can never be exempted", () => {
     assert.ok(result.violations.some((violation) => /cannot be exempted/.test(violation.message)))
   }
 })
+
+test("parses TypeScript angle assertions without treating them as JSX", () => {
+  assert.deepEqual(
+    auditSource(`const getValue = <T>(value: unknown) => <T>value`, "tests/e2e/helper.ts"),
+    []
+  )
+  assert.deepEqual(auditSource(`const view = <button>Continue</button>`, "tests/e2e/view.tsx"), [])
+})

@@ -43,7 +43,7 @@ import { ServersMobileBody } from "./servers-mobile-body"
 
 function ops(overrides: Record<string, unknown> = {}) {
   return {
-    accountId: "acc-1",
+    localAccountId: "acc-1",
     connected: true,
     connection: { controllerUrl: "https://ops.example.com", profileId: "prod" },
     servers: [],
@@ -73,7 +73,7 @@ beforeEach(() => {
  * empty fleet instead would invent a third.
  */
 it("keeps the locked-account gate rather than showing an empty fleet", () => {
-  opsState = ops({ accountId: null })
+  opsState = ops({ localAccountId: null })
   render(<ServersMobileBody />)
   expect(screen.queryByTestId("servers-mobile-body")).not.toBeInTheDocument()
   expect(screen.getByText("servers.connection.unlockAccount")).toBeInTheDocument()

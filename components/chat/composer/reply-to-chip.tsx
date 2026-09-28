@@ -10,6 +10,7 @@
  * the other.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
 import { CornerUpLeftIcon, XIcon } from "lucide-react"
 
@@ -32,7 +33,7 @@ export function ReplyToChip({ bare = false }: ReplyToChipProps = {}) {
   if (!replyTo) return null
   const preview = replyTo.preview.trim() || t("emptyPreview")
   const chip = (
-    <div
+    <Surface
       className={cn(
         "flex min-w-0 items-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-2 py-1 text-xs"
       )}
@@ -53,7 +54,7 @@ export function ReplyToChip({ bare = false }: ReplyToChipProps = {}) {
       >
         <XIcon className="size-3" />
       </Button>
-    </div>
+    </Surface>
   )
   if (bare) return chip
   return <div className="flex flex-wrap gap-1.5 px-2 pt-2">{chip}</div>

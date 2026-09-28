@@ -79,7 +79,7 @@ async fn authorized(context: &DeviceContext, project: &str) -> bool {
         && super::workspace_access::require_approval_authority(
             "environment_port_access",
             project,
-            Some(&context.account_id),
+            Some(&context.tenant_id),
         )
         .await
         .is_ok()

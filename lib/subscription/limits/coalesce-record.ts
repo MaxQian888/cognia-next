@@ -41,7 +41,7 @@ export interface RecordCoalescedOptions {
   /** Provider id, or `custom` for a user-defined source. */
   provider: string
   /** Vault account id, or the custom source id. */
-  accountId: string
+  providerAccountId: string
   now: () => number
   /** Defaults to the process-wide ledger. Injected in tests. */
   breaker?: SubscriptionBreaker
@@ -50,8 +50,8 @@ export interface RecordCoalescedOptions {
 }
 
 /** Ledger key one limits entry blocks under. */
-export function limitsBreakerKey(provider: string, accountId: string): string {
-  return credentialKey(provider, accountId, BREAKER_SCOPES.usage)
+export function limitsBreakerKey(provider: string, providerAccountId: string): string {
+  return credentialKey(provider, providerAccountId, BREAKER_SCOPES.usage)
 }
 
 /**
@@ -66,7 +66,7 @@ export function applyCoalescedResult(
   options: RecordCoalescedOptions
 ): ProviderLimits | null {
   const breaker = options.breaker ?? getSubscriptionBreaker()
-  const key = limitsBreakerKey(options.provider, options.accountId)
+  const key = limitsBreakerKey(options.provider, options.providerAccountId)
 
   let displayResult = result
   if (result && !result.error) {
@@ -98,7 +98,7 @@ export function recordCoalescedThrow(
   const breaker = options.breaker ?? getSubscriptionBreaker()
   const failure = classifyThrownFailure(error, options.now())
   breaker.recordFailure(
-    limitsBreakerKey(options.provider, options.accountId),
+    limitsBreakerKey(options.provider, options.providerAccountId),
     failure,
     options.now(),
     options.random

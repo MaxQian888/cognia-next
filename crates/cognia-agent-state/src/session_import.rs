@@ -909,7 +909,7 @@ mod tests {
             session_history_fs(
                 SessionHistoryFsOperation::Stat,
                 &absent_root,
-                &[absent_root.clone()]
+                std::slice::from_ref(&absent_root)
             ),
             Ok(SessionHistoryFsResult::Stat { exists: false, .. })
         ));
@@ -985,7 +985,7 @@ mod tests {
         let result = session_history_fs(
             SessionHistoryFsOperation::ReadDir,
             &root.0,
-            &[root.0.clone()],
+            std::slice::from_ref(&root.0),
         )
         .unwrap();
         assert_eq!(
@@ -1002,7 +1002,7 @@ mod tests {
         let error = session_history_fs(
             SessionHistoryFsOperation::ReadText,
             &directory,
-            &[root.0.clone()],
+            std::slice::from_ref(&root.0),
         )
         .unwrap_err();
         assert!(error.contains("regular file"));
@@ -1027,7 +1027,7 @@ mod tests {
         let error = session_history_fs(
             SessionHistoryFsOperation::ReadText,
             &socket,
-            &[root.0.clone()],
+            std::slice::from_ref(&root.0),
         )
         .unwrap_err();
         assert!(error.contains("regular file"));

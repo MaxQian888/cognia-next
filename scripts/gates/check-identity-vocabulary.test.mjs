@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { test } from "node:test"
 
 import {
+  applyWireExceptions,
   BASELINE_FILE,
   RULES,
   countOffenders,
@@ -94,5 +95,51 @@ test("the baseline is non-trivial, so a broken scan cannot pass as clean", () =>
       (sum, counts) => sum + Object.values(counts).reduce((inner, n) => inner + n, 0),
       0
     )
+  )
+})
+
+const wireEntry = {
+  file: "lib/envelope.ts",
+  rule: "bareAccountId",
+  scope: "local-profile",
+  field: "EncryptedEnvelope.accountId",
+  contract: "types/envelope.ts",
+  test: "lib/envelope.test.ts",
+  source: "accountId: localAccountId,",
+  occurrences: 1,
+  reason: "Persisted encrypted envelope key must remain readable without a data migration.",
+}
+const wireSources = {
+  "lib/envelope.ts": "accountId: localAccountId,\nconst accountId = legacy()",
+  "types/envelope.ts": "interface EncryptedEnvelope { accountId: string }",
+  "lib/envelope.test.ts": "test('reads the persisted envelope', () => {})",
+}
+const readWireFixture = (file) => wireSources[file] ?? null
+
+test("wire exceptions subtract only the exact reviewed key and keep local debt", () => {
+  assert.deepEqual(
+    applyWireExceptions({ "lib/envelope.ts": { bareAccountId: 2 } }, [wireEntry], readWireFixture),
+    {
+      current: { "lib/envelope.ts": { bareAccountId: 1 } },
+      problems: [],
+    }
+  )
+})
+
+test("wire exceptions fail closed on changed source, duplicate, absent evidence and local declarations", () => {
+  const current = { "lib/envelope.ts": { bareAccountId: 2 } }
+  for (const entry of [
+    { ...wireEntry, source: "accountId: otherScope," },
+    { ...wireEntry, occurrences: 2 },
+    { ...wireEntry, contract: "missing.ts" },
+    { ...wireEntry, test: "types/envelope.ts" },
+    { ...wireEntry, source: "const accountId = legacy()" },
+    { ...wireEntry, scope: "unknown" },
+    { ...wireEntry, reason: "legacy" },
+  ])
+    assert.ok(applyWireExceptions(current, [entry], readWireFixture).problems.length > 0)
+  assert.match(
+    applyWireExceptions(current, [wireEntry, wireEntry], readWireFixture).problems.join("\n"),
+    /duplicate/
   )
 })

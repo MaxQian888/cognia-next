@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use cognia_sidecar::supervisor::SidecarState;
 use cognia_companion::event_bus::EventBus;
+use cognia_sidecar::supervisor::SidecarState;
 
 struct HeadlessWorkflowEmitter(Arc<EventBus>);
 
@@ -73,36 +73,38 @@ pub use crate::mcp_oauth::{resolve_mcp_sidecar_path, MCP_SIDECAR_PATH_ENV};
 // Re-exports for the `cognia-server` binary (the `api_key` / `claude` /
 // `secret_store` modules are crate-private; this module is the headless
 // boot surface). The `pub use` also brings the names into scope here.
-pub use cognia_secrets::api_key::ApiKeyState;
 pub use crate::sidecar_runtime::{HeadlessSidecarHost, SidecarHost, SIDECAR_SCRIPT_ENV};
-pub use cognia_sidecar::supervisor::kill_sidecar;
-pub use cognia_sidecar::supervisor::spawn as spawn_sidecar;
 pub use cognia_connectors::state::ConnectorsState;
 pub use cognia_external_agent::container_backend::exec_backend_from_env;
 pub use cognia_external_agent::presets::SpawnPolicy;
+pub use cognia_secrets::api_key::ApiKeyState;
 pub use cognia_secrets::secret_store::{
     generate_master_key, init_headless as init_secret_store, parse_master_key,
     resolve_master_key_from_env, rotate_master_key, MASTER_KEY_ENV, MASTER_KEY_FILE_ENV,
 };
+pub use cognia_sidecar::supervisor::kill_sidecar;
+pub use cognia_sidecar::supervisor::spawn as spawn_sidecar;
 
 const ACCOUNT_CONTENT_KEY_SERVICE: &str = "com.cognia.account-content";
 
 /// Resolve the stable DEK injected into the headless brain. The value lives in
 /// the server's encrypted secret store, so rotating the store master key
 /// re-wraps this key without changing the content-encryption identity.
-pub fn get_or_create_account_content_key(account_id: &str) -> Result<String, String> {
-    let account_id = account_id.trim();
-    if account_id.is_empty() {
+pub fn get_or_create_account_content_key(local_account_id: &str) -> Result<String, String> {
+    let local_account_id = local_account_id.trim();
+    if local_account_id.is_empty() {
         return Err("account content key requires a non-empty account id".to_string());
     }
-    if let Some(stored) = cognia_secrets::secret_store::get(ACCOUNT_CONTENT_KEY_SERVICE, account_id)? {
+    if let Some(stored) =
+        cognia_secrets::secret_store::get(ACCOUNT_CONTENT_KEY_SERVICE, local_account_id)?
+    {
         parse_master_key(&stored)
             .map_err(|error| format!("stored account content key is invalid: {error}"))?;
         return Ok(stored);
     }
 
     let encoded = hex::encode(generate_master_key());
-    cognia_secrets::secret_store::set(ACCOUNT_CONTENT_KEY_SERVICE, account_id, &encoded)?;
+    cognia_secrets::secret_store::set(ACCOUNT_CONTENT_KEY_SERVICE, local_account_id, &encoded)?;
     Ok(encoded)
 }
 
@@ -264,7 +266,8 @@ impl HeadlessServices {
             match serde_json::to_value(request) {
                 Ok(payload) => {
                     python_host_request_bus.publish(
-                        cognia_plugin_runtime::python::events::PYTHON_HOST_REQUEST_EVENT.to_string(),
+                        cognia_plugin_runtime::python::events::PYTHON_HOST_REQUEST_EVENT
+                            .to_string(),
                         payload,
                     );
                 }
@@ -309,9 +312,9 @@ impl HeadlessServices {
                     // An in-memory SQLite that will not open means the process
                     // is out of memory or the driver is broken; reporting that
                     // beats aborting from inside a degradation path.
-                    cognia_agent_state::provider_profiles::SqliteProfileStore::in_memory().map_err(|error| {
-                        format!("open in-memory provider profile store: {error}")
-                    })?
+                    cognia_agent_state::provider_profiles::SqliteProfileStore::in_memory().map_err(
+                        |error| format!("open in-memory provider profile store: {error}"),
+                    )?
                 }
             };
         Ok(Arc::new(Self {
@@ -654,7 +657,6 @@ mod tests {
             _ => panic!("subscribe failed"),
         }
     }
-
 
     #[tokio::test]
     async fn ocr_registry_is_lazy_and_reports_compiled_backends() {

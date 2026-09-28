@@ -165,12 +165,15 @@ export function useSubscriptionAccounts() {
         providers.map((provider) => {
           const run = async (
             action: NonNullable<UseAccountsResult["pendingAction"]>,
-            accountId: string,
+            providerAccountId: string,
             operation: () => Promise<unknown>
           ) => {
             if (scope.current !== localAccountId || !localAccountId)
               throw new Error("Local account changed")
-            setPending((value) => ({ ...value, [provider.id]: { action, accountId } }))
+            setPending((value) => ({
+              ...value,
+              [provider.id]: { action, accountId: providerAccountId },
+            }))
             try {
               await operation()
               // Mutating transport calls publish subscriptionChanged; that listener
@@ -240,11 +243,11 @@ export interface UseAccountsResult {
   /** Re-read the vault from the keyring. */
   reload: () => Promise<void>
   /** Set or clear the active account; triggers sidecar restart for Anthropic. */
-  setActive: (accountId: string | null) => Promise<void>
+  setActive: (providerAccountId: string | null) => Promise<void>
   /** Rename an account; `null` clears the label. */
-  rename: (accountId: string, label: string | null) => Promise<void>
+  rename: (providerAccountId: string, label: string | null) => Promise<void>
   /** Delete an account; if active, clears the active pointer. */
-  remove: (accountId: string, replacementAccountId?: string | null) => Promise<void>
+  remove: (providerAccountId: string, replacementAccountId?: string | null) => Promise<void>
 }
 
 export function useAccounts(provider: ProviderId): UseAccountsResult {
@@ -322,11 +325,11 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
   const runAction = useCallback(
     async <T>(
       action: NonNullable<UseAccountsResult["pendingAction"]>,
-      accountId: string,
+      providerAccountId: string,
       operation: () => Promise<T>
     ): Promise<T> => {
       setPendingAction(action)
-      setPendingAccountId(accountId)
+      setPendingAccountId(providerAccountId)
       setError(null)
       try {
         return await operation()
@@ -342,21 +345,21 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
   )
 
   const setActive = useCallback(
-    async (accountId: string | null) => {
-      await runAction("activate", accountId ?? "", async () => {
-        await setActiveAccount(provider, accountId)
-        setActiveAccountId(accountId)
+    async (providerAccountId: string | null) => {
+      await runAction("activate", providerAccountId ?? "", async () => {
+        await setActiveAccount(provider, providerAccountId)
+        setActiveAccountId(providerAccountId)
       })
     },
     [provider, runAction]
   )
 
   const rename = useCallback(
-    async (accountId: string, label: string | null) => {
-      await runAction("rename", accountId, async () => {
-        await renameAccount(provider, accountId, label)
+    async (providerAccountId: string, label: string | null) => {
+      await runAction("rename", providerAccountId, async () => {
+        await renameAccount(provider, providerAccountId, label)
         setAccounts((prev) =>
-          prev.map((a) => (a.id === accountId ? { ...a, label: label ?? undefined } : a))
+          prev.map((a) => (a.id === providerAccountId ? { ...a, label: label ?? undefined } : a))
         )
       })
     },
@@ -364,11 +367,15 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
   )
 
   const remove = useCallback(
-    async (accountId: string, replacementAccountId: string | null = null) => {
-      await runAction("delete", accountId, async () => {
-        await deleteProviderAccount({ provider, accountId, replacementAccountId })
-        setAccounts((prev) => prev.filter((a) => a.id !== accountId))
-        if (activeAccountId === accountId) {
+    async (providerAccountId: string, replacementAccountId: string | null = null) => {
+      await runAction("delete", providerAccountId, async () => {
+        await deleteProviderAccount({
+          provider,
+          accountId: providerAccountId,
+          replacementAccountId,
+        })
+        setAccounts((prev) => prev.filter((a) => a.id !== providerAccountId))
+        if (activeAccountId === providerAccountId) {
           setActiveAccountId(replacementAccountId)
         }
       })

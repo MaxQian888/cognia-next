@@ -51,7 +51,7 @@ export function ServersMobileBody() {
    * same two facts here, and a phone that showed an empty fleet instead would
    * be inventing a third.
    */
-  if (!ops.accountId) {
+  if (!ops.localAccountId) {
     return (
       <div className="grid h-full w-full place-items-center p-6 text-center text-sm text-muted-foreground">
         {t("connection.unlockAccount")}

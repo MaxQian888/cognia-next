@@ -9554,6 +9554,10 @@
         "subdir": {
           "type": "string",
           "nullable": true
+        },
+        "deferCommit": {
+          "type": "boolean",
+          "nullable": true
         }
       },
       "additionalProperties": false

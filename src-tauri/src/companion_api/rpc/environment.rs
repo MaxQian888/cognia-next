@@ -90,8 +90,8 @@ fn served(name: &str, error: EnvironmentServiceError) -> (StatusCode, Json<RpcEr
 
 /// The user id to stamp on a record. Falls back to the device that asked so
 /// an audit row is never anonymous.
-fn stamped_actor(name: &str, account_id: Option<&str>, device_id: &str) -> String {
-    acting_person(name, account_id)
+fn stamped_actor(name: &str, tenant_id: Option<&str>, device_id: &str) -> String {
+    acting_person(name, tenant_id)
         .ok()
         .and_then(|person| person.canonical_user_id.or(person.user_id))
         .unwrap_or_else(|| format!("device:{device_id}"))
@@ -134,7 +134,7 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let _ = state;
@@ -204,14 +204,14 @@ pub(super) async fn dispatch(
 
         "environment_build_start" => {
             let mut request: pool::BuildRequest = required(&args, "request")?;
-            require_approval_authority(name, &request.project_id, account_id).await?;
+            require_approval_authority(name, &request.project_id, tenant_id).await?;
             request.cwd =
                 authorize_workspace_root(host, request.cwd.to_string_lossy().into_owned())?.into();
             to_json(pool::start_build(&services, request).map_err(|error| served(name, error))?)
         }
         "environment_build_get" => {
             let project_id: String = required(&args, "projectId")?;
-            require_environment_authority(name, &project_id, account_id, false).await?;
+            require_environment_authority(name, &project_id, tenant_id, false).await?;
             let job_id: Option<String> = optional(&args, "jobId")?;
             let build_key: Option<String> = optional(&args, "buildKey")?;
             to_json(
@@ -226,13 +226,13 @@ pub(super) async fn dispatch(
         }
         "environment_build_cancel" => {
             let project_id: String = required(&args, "projectId")?;
-            require_approval_authority(name, &project_id, account_id).await?;
+            require_approval_authority(name, &project_id, tenant_id).await?;
             let job_id: String = required(&args, "jobId")?;
             to_json(pool::cancel_build(&project_id, &job_id).map_err(|error| served(name, error))?)
         }
         "environment_ports_list" => {
             let project_id: String = required(&args, "projectId")?;
-            require_approval_authority(name, &project_id, account_id).await?;
+            require_approval_authority(name, &project_id, tenant_id).await?;
             let runtime = services.runtime.as_ref().ok_or_else(|| {
                 served(
                     name,
@@ -289,9 +289,9 @@ pub(super) async fn dispatch(
         "environment_approval_approve" => {
             let mut request: ApprovalRequest = required(&args, "approval")?;
             request.normalized_remote = canonical_remote(name, &request.normalized_remote)?;
-            let via = require_approval_authority(name, &request.project_id, account_id).await?;
+            let via = require_approval_authority(name, &request.project_id, tenant_id).await?;
             let record = request.into_record(
-                stamped_actor(name, account_id, device_id),
+                stamped_actor(name, tenant_id, device_id),
                 via,
                 unix_time_secs(),
             );
@@ -333,8 +333,8 @@ pub(super) async fn dispatch(
                         },
                     )
                 })?;
-            require_approval_authority(name, &existing.project_id, account_id).await?;
-            let revoked_by = stamped_actor(name, account_id, device_id);
+            require_approval_authority(name, &existing.project_id, tenant_id).await?;
+            let revoked_by = stamped_actor(name, tenant_id, device_id);
             let record = services
                 .admission
                 .with_store(|store| store.revoke_approval(&id, &revoked_by, unix_time_secs()))
@@ -358,9 +358,9 @@ pub(super) async fn dispatch(
         // ── Egress grants ──────────────────────────────────────────────────
         "environment_egress_grant_create" => {
             let request: EgressGrantRequest = required(&args, "grant")?;
-            require_approval_authority(name, &request.project_id, account_id).await?;
+            require_approval_authority(name, &request.project_id, tenant_id).await?;
             let grant =
-                request.into_grant(stamped_actor(name, account_id, device_id), unix_time_secs());
+                request.into_grant(stamped_actor(name, tenant_id, device_id), unix_time_secs());
             services
                 .admission
                 .with_store(|store| store.record_egress_grant(&grant))
@@ -400,7 +400,7 @@ pub(super) async fn dispatch(
                         },
                     )
                 })?;
-            require_approval_authority(name, &existing.project_id, account_id).await?;
+            require_approval_authority(name, &existing.project_id, tenant_id).await?;
             let grant = services
                 .admission
                 .with_store(|store| store.revoke_egress_grant(&id, unix_time_secs()))

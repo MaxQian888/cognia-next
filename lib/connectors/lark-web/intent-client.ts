@@ -239,18 +239,18 @@ export async function resolveLarkWorkbench(
   if (submitted.kind !== "accepted") return submitted
   const settled = await pollLarkIntent({ ...options, requestId: submitted.requestId })
   if (settled.kind === "error") return settled
-  const { mode, userId, accountId, serverId } = settled.result
+  const { mode, userId, accountId: localAccountId, serverId } = settled.result
   if (
     (mode !== "personal" && mode !== "team" && mode !== "both") ||
     typeof userId !== "string" ||
     !userId ||
-    typeof accountId !== "string" ||
-    !accountId ||
+    typeof localAccountId !== "string" ||
+    !localAccountId ||
     typeof serverId !== "string" ||
     !serverId
   )
     return { kind: "error", code: "workbench_unavailable" }
-  return { kind: "ready", context: { mode, userId, accountId, serverId } }
+  return { kind: "ready", context: { mode, userId, accountId: localAccountId, serverId } }
 }
 
 export type LarkWorkbenchAccessError =
@@ -268,13 +268,13 @@ export async function checkLarkPersonalHost(
 ): Promise<LarkWorkbenchAccessError | null> {
   if (context.mode === "team") return "mode_forbidden"
   try {
-    let invoke = call
-    if (!invoke) {
+    let callHost = call
+    if (!callHost) {
       const { transport } = await import("@/lib/tauri")
-      invoke = <T>(name: string) => transport.call<T>(name)
+      callHost = <T>(name: string) => transport.call<T>(name)
     }
-    const endpoints = await invoke<{ serverId?: string }>("companion_endpoints")
-    const manifest = await invoke<{ hostStateScope?: { accountId?: string } }>(
+    const endpoints = await callHost<{ serverId?: string }>("companion_endpoints")
+    const manifest = await callHost<{ hostStateScope?: { accountId?: string } }>(
       "host_feature_manifest"
     )
     return endpoints?.serverId === context.serverId &&

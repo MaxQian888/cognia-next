@@ -31,7 +31,7 @@ const lastPersistedAt = new Map<string, number>()
 
 export interface CodexProbeDeps {
   /** Resolve + fetch the account's limits. Defaults to the unified runner. */
-  query?: (accountId: string) => Promise<ProviderLimits | null>
+  query?: (providerAccountId: string) => Promise<ProviderLimits | null>
   /** Persist a non-empty snapshot. Defaults to the Dexie store. */
   persist?: (snapshot: ProviderLimits) => Promise<unknown>
 }
@@ -48,16 +48,16 @@ export interface CodexProbeDeps {
  * caps the table, so a persistently failing endpoint can't grow it unbounded.
  */
 export async function probeCodexUsage(
-  accountId: string,
+  providerAccountId: string,
   deps: CodexProbeDeps = {}
 ): Promise<ProviderLimits | null> {
   const query = deps.query ?? ((id: string) => queryAccountLimitsCoalesced("codex", id))
   const persist = deps.persist ?? recordLimitsSnapshot
 
-  const snapshot = await query(accountId)
+  const snapshot = await query(providerAccountId)
   if (snapshot && (snapshot.meters.length > 0 || snapshot.error)) {
-    if (lastPersistedAt.get(accountId) !== snapshot.fetchedAt) {
-      lastPersistedAt.set(accountId, snapshot.fetchedAt)
+    if (lastPersistedAt.get(providerAccountId) !== snapshot.fetchedAt) {
+      lastPersistedAt.set(providerAccountId, snapshot.fetchedAt)
       await persist(snapshot)
     }
   }

@@ -16,6 +16,7 @@
 // `anthropic_oauth_save_pkce_result`, and the caller decides whether to make
 // it active (via `subscription_set_active`).
 
+import { Surface } from "@/components/surface/surface"
 import { useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
@@ -238,7 +239,7 @@ export function AnthropicAddAccountDialog({
 
         {step === "choose-mode" && (
           <div className="space-y-4 py-2">
-            <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+            <Surface className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
               <p>{t("login.apiKeySetupHint")}</p>
               <Link
                 href="/settings?section=providers"
@@ -247,7 +248,7 @@ export function AnthropicAddAccountDialog({
               >
                 {t("login.apiKeySetupAction")}
               </Link>
-            </div>
+            </Surface>
             {!existingAccount && (
               <NewAccountPresetSelector
                 provider="anthropic"
@@ -360,10 +361,10 @@ export function AnthropicAddAccountDialog({
         )}
 
         {error && (
-          <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
+          <Surface className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
             <ShieldQuestionIcon className="mt-0.5 size-3.5 shrink-0" />
             <span>{error}</span>
-          </div>
+          </Surface>
         )}
 
         <DialogFooter>

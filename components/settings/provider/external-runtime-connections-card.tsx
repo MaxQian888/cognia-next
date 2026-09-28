@@ -16,8 +16,9 @@
  * providers.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import Link from "next/link"
-import { ArrowRightIcon, BotIcon, Loader2Icon } from "lucide-react"
+import { ArrowRightIcon, BotIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { AgentCredentialBadge } from "@/components/agent/external-agent/credential-status-badge"
@@ -71,7 +72,7 @@ function RuntimeRow({ row }: { row: ExternalRuntimeConnection }) {
           className={cn("gap-1 font-normal", STATE_BADGE_CLASS[row.state])}
           data-testid={`external-runtime-state-${row.key}`}
         >
-          {busy && <Loader2Icon className="size-3 animate-spin" aria-hidden />}
+          {busy && <Spinner className="size-3 " aria-hidden />}
           {tStates(row.state)}
         </Badge>
         {/* The Pi sign-in probe. Renders nothing for agents without one, which

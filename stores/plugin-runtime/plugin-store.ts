@@ -205,9 +205,9 @@ const initialState: PluginStoreState & {
 
 const LEGACY_PLUGIN_STORAGE_KEY = "cognia-plugins"
 
-export function pluginAccountStorageKey(accountId: string): string {
-  if (!accountId.trim()) throw new Error("Plugin account storage requires an account id.")
-  return `cognia-account-${accountId}:plugins`
+export function pluginAccountStorageKey(localAccountId: string): string {
+  if (!localAccountId.trim()) throw new Error("Plugin account storage requires an account id.")
+  return `cognia-account-${localAccountId}:plugins`
 }
 
 /**
@@ -1223,9 +1223,9 @@ export const usePluginStore = create<PluginState>()(
  * snapshot is adopted once, with every remembered grant removed and every
  * third-party plugin disabled so an upgrade cannot silently inherit authority.
  */
-export function activatePluginAccountStorage(accountId: string): void {
+export function activatePluginAccountStorage(localAccountId: string): void {
   if (typeof window === "undefined") return
-  const storageKey = pluginAccountStorageKey(accountId)
+  const storageKey = pluginAccountStorageKey(localAccountId)
   if (window.localStorage.getItem(storageKey) === null) {
     const legacy = window.localStorage.getItem(LEGACY_PLUGIN_STORAGE_KEY)
     if (legacy) {
@@ -1242,9 +1242,9 @@ export function clearPluginAccountStorage(): void {
   usePluginStore.setState({ ...initialState, eventListeners: new Map() })
 }
 
-export function purgePluginAccountStorage(accountId: string): void {
+export function purgePluginAccountStorage(localAccountId: string): void {
   if (typeof window === "undefined") return
-  window.localStorage.removeItem(pluginAccountStorageKey(accountId))
+  window.localStorage.removeItem(pluginAccountStorageKey(localAccountId))
 }
 
 function readPluginAccountState(storageKey: string): Partial<PluginState> {

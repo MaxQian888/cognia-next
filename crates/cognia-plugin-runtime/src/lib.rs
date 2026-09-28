@@ -256,14 +256,14 @@ impl PluginRuntimeState {
 
     /// Select the only LocalProfile whose plugin grants may be read. Changing
     /// profiles drops the in-memory cache before any ledger lookup can occur.
-    pub fn activate_account(&self, account_id: &str) -> Result<()> {
-        let account_id = validate_plugin_id_path_component(account_id)?;
+    pub fn activate_account(&self, local_account_id: &str) -> Result<()> {
+        let local_account_id = validate_plugin_id_path_component(local_account_id)?;
         let mut active = self.active_account.write();
-        if active.as_deref() != Some(account_id.as_str()) {
+        if active.as_deref() != Some(local_account_id.as_str()) {
             self.permissions.write().clear();
             self.db_connections.write().clear();
             self.managed_ide_connections.write().clear();
-            *active = Some(account_id);
+            *active = Some(local_account_id);
         }
         Ok(())
     }
@@ -421,7 +421,7 @@ pub async fn teardown_account_runtimes(
     wasm: &wasm::WasmPluginState,
     vscode: &vscode::VscodeExtensionState,
 ) -> Result<()> {
-    use tokio::time::{Duration, timeout};
+    use tokio::time::{timeout, Duration};
 
     // Revoke authorization before awaiting any child process.
     plugins.clear_account();

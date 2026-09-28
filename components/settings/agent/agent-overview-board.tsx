@@ -10,7 +10,9 @@
  * the agent's inspector.
  */
 
-import { ChevronDown, ChevronUp, Loader2, Plus } from "lucide-react"
+import { Surface } from "@/components/surface/surface"
+import { Spinner } from "@/components/ui/spinner"
+import { ChevronDown, ChevronUp, Plus } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
@@ -91,7 +93,7 @@ export function AgentOverviewBoard({
             </Button>
           </div>
         ) : (
-          <div
+          <Surface
             className="rounded-lg border bg-muted/20 px-4 py-3"
             data-testid="fleet-banner-expanded"
           >
@@ -116,7 +118,7 @@ export function AgentOverviewBoard({
                 <ChevronUp className="h-3.5 w-3.5" />
               </Button>
             </div>
-          </div>
+          </Surface>
         )
       ) : (
         <Empty className="flex-1 border" data-testid="overview-empty">
@@ -196,10 +198,7 @@ export function AgentOverviewBoard({
                     {tReadiness(ACTION_LABEL_KEY[action])}
                   </Button>
                 ) : readiness.state === "connecting" ? (
-                  <Loader2
-                    className="h-4 w-4 shrink-0 animate-spin text-muted-foreground"
-                    aria-hidden
-                  />
+                  <Spinner className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
                 ) : (
                   <Badge variant="outline" className="shrink-0 font-normal">
                     {tReadiness("states.ready")}

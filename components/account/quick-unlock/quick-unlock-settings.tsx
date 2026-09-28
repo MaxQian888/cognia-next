@@ -61,8 +61,12 @@ export interface QuickUnlockSettingsProps {
     password: string
     verifier?: Record<string, unknown>
   }) => Promise<void>
-  onRemove: (accountId: string, method: QuickUnlockMethod) => Promise<void>
-  onClearLockout: (accountId: string, method: QuickUnlockMethod, password: string) => Promise<void>
+  onRemove: (localAccountId: string, method: QuickUnlockMethod) => Promise<void>
+  onClearLockout: (
+    localAccountId: string,
+    method: QuickUnlockMethod,
+    password: string
+  ) => Promise<void>
 }
 
 const METHOD_ICON: Record<QuickUnlockMethod, typeof KeyRoundIcon> = {

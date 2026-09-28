@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react"
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { EvalWorkspace } from "./eval-workspace"
@@ -25,6 +26,6 @@ const meta = {
 } satisfies Meta<typeof EvalWorkspace>
 
 export default meta
-type Story = StoryObj<typeof meta>
+type Story = StoryObj<NonNullable<ComponentProps<typeof EvalWorkspace>>>
 
 export const Default: Story = {}

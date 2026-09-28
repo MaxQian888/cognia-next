@@ -3,7 +3,7 @@ jest.mock("@/hooks/pet/use-action-cooldown", () => ({
   useActionCooldown: () => ({ remaining: (kind: string) => remainingMs[kind] ?? 0 }),
 }))
 
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 
 import { PetActionGrid } from "./pet-action-grid"
 import { usePetStore } from "@/stores/pet/pet-store"

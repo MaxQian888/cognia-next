@@ -1,8 +1,5 @@
 import { act, render, screen, fireEvent } from "@testing-library/react"
-import {
-  getProviderHealth,
-  resetProviderHealth,
-} from "@cognia/web-search/provider-health"
+import { getProviderHealth, resetProviderHealth } from "@cognia/web-search/provider-health"
 
 const resetStoreMock = jest.fn()
 

@@ -55,10 +55,10 @@ static CALLERS: once_cell::sync::Lazy<
     >,
 > = once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
 
-fn caller(state: &SharedState, account_id: Option<&str>, device_id: &str) -> Arc<MediaCaller> {
+fn caller(state: &SharedState, tenant_id: Option<&str>, device_id: &str) -> Arc<MediaCaller> {
     let key = (
         opaque_host_id(state),
-        account_id.unwrap_or_default().to_string(),
+        tenant_id.unwrap_or_default().to_string(),
         device_id.to_string(),
     );
     let mut callers = CALLERS.lock();
@@ -242,10 +242,10 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     _scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let caller = caller(state, account_id, device_id);
+    let caller = caller(state, tenant_id, device_id);
     let registry = &caller.sources;
     match name {
         "video_get_info" => {

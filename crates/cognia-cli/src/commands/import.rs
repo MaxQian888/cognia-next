@@ -140,7 +140,9 @@ pub fn run(args: ImportArgs, json: bool, ui: &mut RuntimeUi) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(details)?);
             }
         }
-        bail!(output.error.unwrap_or_else(|| "conversion failed without a reason".to_string()));
+        bail!(output
+            .error
+            .unwrap_or_else(|| "conversion failed without a reason".to_string()));
     }
     let report = finish(args, output, ui)?;
 

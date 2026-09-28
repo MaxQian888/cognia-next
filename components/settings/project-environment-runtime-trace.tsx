@@ -13,6 +13,7 @@
  * shown on the run itself (`SandboxPlacementBadge`), and the card says so.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
 import { BanIcon, BoxIcon, CircleSlashIcon, TriangleAlertIcon } from "lucide-react"
 
@@ -80,7 +81,7 @@ export function ProjectEnvironmentRuntimeTrace({ preview, catalog }: Props) {
   const notices = preview.kind === "off" ? [] : preview.notices
 
   return (
-    <div
+    <Surface
       className="space-y-2 rounded-md border bg-background/40 p-3"
       data-testid="project-environment-runtime-trace"
       data-outcome={preview.kind}
@@ -122,7 +123,7 @@ export function ProjectEnvironmentRuntimeTrace({ preview, catalog }: Props) {
           ))}
         </ul>
       ) : null}
-    </div>
+    </Surface>
   )
 }
 

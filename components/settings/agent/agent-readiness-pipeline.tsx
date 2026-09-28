@@ -13,7 +13,8 @@
  * `externalAgent.readiness` i18n namespace so lib stays locale-free.
  */
 
-import { Check, CircleSlash, Loader2, X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+import { Check, CircleSlash, X } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
@@ -68,7 +69,7 @@ export function AgentStatePill({
       data-testid={`agent-state-${readiness.state}`}
     >
       {readiness.state === "connecting" || readiness.blockTransient ? (
-        <Loader2 className="size-3 animate-spin" aria-hidden />
+        <Spinner className="size-3 " aria-hidden />
       ) : null}
       {label}
     </Badge>
@@ -82,7 +83,7 @@ function stepIcon(state: AgentReadinessStepState) {
     case "failed":
       return <X className="size-3" aria-hidden />
     case "current":
-      return <Loader2 className="size-3 animate-spin" aria-hidden />
+      return <Spinner className="size-3 " aria-hidden />
     case "off":
       return <CircleSlash className="size-3" aria-hidden />
     default:

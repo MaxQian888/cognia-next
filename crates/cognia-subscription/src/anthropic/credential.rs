@@ -8,10 +8,10 @@
 // multi-account sessions would silently drift toward forced re-login as
 // the vault's refresh_token goes stale.
 //
-// `watch_configdir_credentials(account_id, configdir)` opens a debounced
+// `watch_configdir_credentials(provider_account_id, configdir)` opens a debounced
 // `notify` watcher over `<configdir>/.credentials.json`. On mtime change
 // it reparses the file, diffs the refresh token against the vault entry
-// for `account_id`, and (on diff) calls
+// for `provider_account_id`, and (on diff) calls
 // `vault::update_anthropic_refresh_token` so the next sidecar spawn
 // picks up the rotation. Burst writes are coalesced via a 500 ms debounce
 // so a single rotation doesn't fire the writeback twice.
@@ -58,7 +58,7 @@ pub struct ClaudeConfigCredentials {
 pub struct WatcherHandle {
     _watcher: RecommendedWatcher,
     pub local_account_id: String,
-    pub account_id: String,
+    pub provider_account_id: String,
     pub configdir: PathBuf,
     /// Diagnostic counter, useful for tests and the Diagnostics tab.
     pub events_observed: Arc<AtomicU64>,
@@ -72,7 +72,7 @@ pub trait CredentialSink: Send + Sync + 'static {
     fn update(
         &self,
         local_account_id: &str,
-        account_id: &str,
+        provider_account_id: &str,
         fresh: &ClaudeConfigCredentials,
     ) -> Result<(), String>;
 }
@@ -87,7 +87,7 @@ impl CredentialSink for VaultSink {
     fn update(
         &self,
         local_account_id: &str,
-        account_id: &str,
+        provider_account_id: &str,
         fresh: &ClaudeConfigCredentials,
     ) -> Result<(), String> {
         // notify invokes this sink on its filesystem worker, outside Tokio.
@@ -99,7 +99,7 @@ impl CredentialSink for VaultSink {
                 Some(v) => v,
                 None => return Ok(()),
             };
-        let changed = apply_owned_rotation(&mut vault_value, account_id, fresh);
+        let changed = apply_owned_rotation(&mut vault_value, provider_account_id, fresh);
         if changed {
             vault::save_for_account(local_account_id, ProviderId::Anthropic, &vault_value)?;
         }
@@ -111,13 +111,13 @@ impl CredentialSink for VaultSink {
 /// Claude Code credential remains owned by its original file / Keychain.
 fn apply_owned_rotation(
     vault_value: &mut vault::ProviderVault,
-    account_id: &str,
+    provider_account_id: &str,
     fresh: &ClaudeConfigCredentials,
 ) -> bool {
     let Some(account) = vault_value
         .accounts
         .iter_mut()
-        .find(|account| account.id == account_id)
+        .find(|account| account.id == provider_account_id)
     else {
         return false;
     };
@@ -144,12 +144,12 @@ fn apply_owned_rotation(
 /// Build a watcher with the production `VaultSink`.
 pub fn watch_configdir_credentials(
     local_account_id: String,
-    account_id: String,
+    provider_account_id: String,
     configdir: PathBuf,
 ) -> Result<WatcherHandle, String> {
     watch_configdir_with(
         local_account_id,
-        account_id,
+        provider_account_id,
         configdir,
         Arc::new(VaultSink),
         DEFAULT_DEBOUNCE_MS,
@@ -159,7 +159,7 @@ pub fn watch_configdir_credentials(
 /// Build a watcher with an injected sink + debounce. Used by tests.
 pub fn watch_configdir_with<S: CredentialSink + 'static>(
     local_account_id: String,
-    account_id: String,
+    provider_account_id: String,
     configdir: PathBuf,
     sink: Arc<S>,
     debounce_ms: u64,
@@ -182,7 +182,7 @@ pub fn watch_configdir_with<S: CredentialSink + 'static>(
     ));
 
     let local_account_clone = local_account_id.clone();
-    let account_clone = account_id.clone();
+    let account_clone = provider_account_id.clone();
     let path_clone = credentials_path.clone();
     let observed_clone = Arc::clone(&events_observed);
     let applied_clone = Arc::clone(&rotations_applied);
@@ -240,7 +240,7 @@ pub fn watch_configdir_with<S: CredentialSink + 'static>(
     Ok(WatcherHandle {
         _watcher: watcher,
         local_account_id,
-        account_id,
+        provider_account_id,
         configdir,
         events_observed,
         rotations_applied,
@@ -283,24 +283,24 @@ impl WatcherRegistry {
     pub fn ensure_watching(
         &self,
         local_account_id: &str,
-        account_id: &str,
+        provider_account_id: &str,
         configdir: PathBuf,
     ) -> Result<(), String> {
         let mut guard = self.inner.lock();
-        let key = watcher_key(local_account_id, account_id);
+        let key = watcher_key(local_account_id, provider_account_id);
         if guard.contains_key(&key) {
             return Ok(());
         }
         let handle = watch_configdir_credentials(
             local_account_id.to_string(),
-            account_id.to_string(),
+            provider_account_id.to_string(),
             configdir,
         )?;
         let total_watchers = guard.len() + 1;
         log::info!(
             "credential watcher started for local_account={} account={} configdir={:?} (total watchers={})",
             handle.local_account_id,
-            handle.account_id,
+            handle.provider_account_id,
             handle.configdir,
             total_watchers
         );
@@ -308,11 +308,11 @@ impl WatcherRegistry {
         Ok(())
     }
 
-    /// Stop watching `account_id` if a watcher is registered. No-op
+    /// Stop watching `provider_account_id` if a watcher is registered. No-op
     /// otherwise.
-    pub fn stop_watching(&self, local_account_id: &str, account_id: &str) {
+    pub fn stop_watching(&self, local_account_id: &str, provider_account_id: &str) {
         let mut guard = self.inner.lock();
-        if let Some(handle) = guard.remove(&watcher_key(local_account_id, account_id)) {
+        if let Some(handle) = guard.remove(&watcher_key(local_account_id, provider_account_id)) {
             let obs = handle.events_observed.load(Ordering::SeqCst);
             let rot = handle.rotations_applied.load(Ordering::SeqCst);
             let remaining = guard.len();
@@ -320,7 +320,7 @@ impl WatcherRegistry {
             log::info!(
                 "credential watcher stopped for local_account={} account={} (observed={} rotations={} remaining={} empty={})",
                 handle.local_account_id,
-                handle.account_id,
+                handle.provider_account_id,
                 obs,
                 rot,
                 remaining,
@@ -358,8 +358,8 @@ impl WatcherRegistry {
     }
 }
 
-fn watcher_key(local_account_id: &str, account_id: &str) -> String {
-    format!("{local_account_id}\0{account_id}")
+fn watcher_key(local_account_id: &str, provider_account_id: &str) -> String {
+    format!("{local_account_id}\0{provider_account_id}")
 }
 
 #[cfg(test)]
@@ -378,11 +378,14 @@ mod tests {
         fn update(
             &self,
             local_account_id: &str,
-            account_id: &str,
+            provider_account_id: &str,
             fresh: &ClaudeConfigCredentials,
         ) -> Result<(), String> {
             let mut guard = self.records.lock().unwrap();
-            guard.push((format!("{local_account_id}/{account_id}"), fresh.clone()));
+            guard.push((
+                format!("{local_account_id}/{provider_account_id}"),
+                fresh.clone(),
+            ));
             Ok(())
         }
     }

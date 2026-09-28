@@ -21,7 +21,8 @@
  * `VIRTUAL_HOOK_POINTS`, and the contract keeps telling plugin authors the
  * hook is dead while it is quietly working.
  *
- * A "fire site" is a mention of the hook name in the binding file. That is a
+ * A "fire site" names the hook in the binding file or dispatches its canonical
+ * interceptor point through the legacy normalizer mapping. That is a
  * weaker test than proving the call is reachable, but it is sufficient for the
  * defect this gate exists to catch: a hook name that appears nowhere in the
  * host cannot possibly fire.
@@ -77,7 +78,15 @@ export function hasFireSite(bindingSource, hook) {
   return new RegExp(`\\b${hook}\\b`).test(bindingSource)
 }
 
-export function evaluate({ hooks, virtual, bindingSource, binding }) {
+export function parseNormalizedHookPoints(source) {
+  const block = source.match(/const LEGACY_HOOK_POINTS[^=]*= Object\.freeze\(\{([\s\S]*?)\n\}\)/)
+  if (!block) throw new Error("LEGACY_HOOK_POINTS not found in interceptor normalizer")
+  return Object.fromEntries(
+    [...block[1].matchAll(/(on[A-Za-z0-9]+): "([^"]+)"/g)].map((match) => [match[1], match[2]])
+  )
+}
+
+export function evaluate({ hooks, virtual, bindingSource, binding, normalizedHookPoints = {} }) {
   const virtualSet = new Set(virtual)
   const errors = []
 
@@ -89,15 +98,21 @@ export function evaluate({ hooks, virtual, bindingSource, binding }) {
   }
 
   for (const hook of hooks) {
-    const fires = hasFireSite(bindingSource, hook)
+    const semanticPoint = normalizedHookPoints[hook]
+    const fires =
+      hasFireSite(bindingSource, hook) ||
+      (semanticPoint !== undefined &&
+        new RegExp(
+          `dispatchTransform(?:<[^>]+>)?\\s*\\(\\s*["']${semanticPoint.replaceAll(".", "\\.")}["']`
+        ).test(bindingSource))
     if (virtualSet.has(hook) && fires) {
       errors.push(
-        `[virtual-but-fired] "${hook}" is marked virtual but ${binding} mentions it. ` +
+        `[virtual-but-fired] "${hook}" is marked virtual but ${binding} has a fire site for it. ` +
           `If the hook is wired now, remove it from VIRTUAL_HOOK_POINTS so the contract stops telling plugin authors it is dead.`
       )
     } else if (!virtualSet.has(hook) && !fires) {
       errors.push(
-        `[implemented-never-fired] "${hook}" is contracted as implemented but ${binding} never mentions it, ` +
+        `[implemented-never-fired] "${hook}" is contracted as implemented but ${binding} has no direct or normalized fire site for it, ` +
           `so a plugin handler registered for it can never run. Either fire it, or add it to VIRTUAL_HOOK_POINTS.`
       )
     }
@@ -115,7 +130,10 @@ export function runAudit(repoRoot = REPO_ROOT) {
   const source = readFileSync(join(repoRoot, CONTRACT_FILE), "utf8")
   const { hooks, virtual, binding } = parseContract(source)
   const bindingSource = readFileSync(join(repoRoot, binding), "utf8")
-  return evaluate({ hooks, virtual, bindingSource, binding })
+  const normalizedHookPoints = parseNormalizedHookPoints(
+    readFileSync(join(repoRoot, "lib/plugin/interceptors/normalize.ts"), "utf8")
+  )
+  return evaluate({ hooks, virtual, bindingSource, binding, normalizedHookPoints })
 }
 
 function main() {

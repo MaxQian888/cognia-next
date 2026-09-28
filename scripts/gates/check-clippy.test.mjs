@@ -11,8 +11,10 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { existsSync } from "node:fs"
 
 import {
+  BASELINE_FILE,
   CARGO_ARGS,
   clippyArgs,
   diffTally,
@@ -142,11 +144,14 @@ test("diffTally reports a shrinking pair as an improvement, never a failure", ()
   assert.deepEqual(improvements, [{ key: "a::clippy::x", from: 4, to: 1 }])
 })
 
-test("the committed baseline has the expected shape and a non-trivial debt", () => {
+test("the committed baseline records consistent non-negative debt, including zero", () => {
+  assert.ok(existsSync(BASELINE_FILE), "the ratchet baseline must remain committed")
   const baseline = readBaseline()
   assert.equal(baseline.version, 1)
-  assert.equal(typeof baseline.total, "number")
-  assert.ok(baseline.total > 0, "the workspace had never been linted; the debt is real")
+  assert.ok(Number.isSafeInteger(baseline.total) && baseline.total >= 0)
+  for (const [pair, count] of Object.entries(baseline.pairs)) {
+    assert.ok(Number.isSafeInteger(count) && count > 0, `${pair} must carry positive debt`)
+  }
   assert.equal(
     baseline.total,
     Object.values(baseline.pairs).reduce((a, b) => a + b, 0),

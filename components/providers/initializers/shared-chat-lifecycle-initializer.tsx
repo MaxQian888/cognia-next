@@ -22,7 +22,7 @@ import { useProjectStore } from "@/stores/project/project-store"
 
 /** Own collaboration independently of whether the conversation settings are open. */
 export function SharedChatLifecycleInitializer() {
-  const accountId = useAccountStore((state) => state.unlockedAccountId)
+  const localAccountId = useAccountStore((state) => state.unlockedAccountId)
   const workspaceId = useProjectStore((state) => state.activeProjectId)
   const enabled = useSharedChatEnabled()
   const sessionIdsKey = useChatStore((state) =>
@@ -40,20 +40,20 @@ export function SharedChatLifecycleInitializer() {
   const [endpointRevision, setEndpointRevision] = useState(0)
   const registry = useMemo(() => new UserBindingRegistry(), [])
   const identity = useLiveQuery(
-    () => (accountId ? registry.get(accountId) : undefined),
-    [accountId, registry]
+    () => (localAccountId ? registry.get(localAccountId) : undefined),
+    [localAccountId, registry]
   )
   const identityRevision = identity
     ? `${identity.userId}:${identity.orgId}:${identity.updatedAt}`
     : ""
   const sessions = useLiveQuery(
-    () => (accountId ? getDb().sessions.bulkGet(JSON.parse(sessionIdsKey) as string[]) : []),
-    [sessionIdsKey, accountId]
+    () => (localAccountId ? getDb().sessions.bulkGet(JSON.parse(sessionIdsKey) as string[]) : []),
+    [sessionIdsKey, localAccountId]
   )
 
   useEffect(
     () => () => suspendSharedSessionRuns(),
-    [accountId, identityRevision, endpointRevision, enabled]
+    [localAccountId, identityRevision, endpointRevision, enabled]
   )
 
   useEffect(() => {
@@ -77,13 +77,13 @@ export function SharedChatLifecycleInitializer() {
   }, [])
 
   useEffect(() => {
-    if (!accountId || !workspaceId || !enabled || !navigator.onLine) return
+    if (!localAccountId || !workspaceId || !enabled || !navigator.onLine) return
     const abort = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const discover = async () => {
       try {
         if (!navigator.onLine || document.visibilityState === "hidden") return
-        const context = await resolveCurrentCollabContext({ localAccountId: accountId })
+        const context = await resolveCurrentCollabContext({ localAccountId })
         if (!context || abort.signal.aborted) return
         const sessions = await listAndCacheSharedSessions(
           context.client,
@@ -118,9 +118,9 @@ export function SharedChatLifecycleInitializer() {
       abort.abort()
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [accountId, workspaceId, connectionRevision, identityRevision, enabled])
+  }, [localAccountId, workspaceId, connectionRevision, identityRevision, enabled])
 
-  if (!accountId || !enabled) return null
+  if (!localAccountId || !enabled) return null
   const bindings = new Map<
     string,
     { localSessionId: string; orgId: string; sharedSessionId: string; endpoint?: string }
@@ -143,7 +143,7 @@ export function SharedChatLifecycleInitializer() {
         <SharedSessionLifecycle
           key={key}
           {...binding}
-          accountId={accountId}
+          localAccountId={localAccountId}
           connectionRevision={connectionRevision}
           identityRevision={identityRevision}
         />
@@ -154,7 +154,7 @@ export function SharedChatLifecycleInitializer() {
 
 /** A retained pane owns its connection even when another tab is active. */
 function SharedSessionLifecycle({
-  accountId,
+  localAccountId,
   localSessionId,
   orgId,
   sharedSessionId,
@@ -162,7 +162,7 @@ function SharedSessionLifecycle({
   connectionRevision,
   identityRevision,
 }: {
-  accountId: string
+  localAccountId: string
   localSessionId: string
   orgId: string
   sharedSessionId: string
@@ -174,7 +174,7 @@ function SharedSessionLifecycle({
     const abort = new AbortController()
     let close: (() => void) | undefined
     void (async () => {
-      const context = await resolveCurrentCollabContext({ localAccountId: accountId })
+      const context = await resolveCurrentCollabContext({ localAccountId })
       if (
         !context ||
         context.orgId !== orgId ||
@@ -199,7 +199,7 @@ function SharedSessionLifecycle({
       close?.()
     }
   }, [
-    accountId,
+    localAccountId,
     localSessionId,
     orgId,
     sharedSessionId,

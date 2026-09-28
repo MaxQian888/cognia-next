@@ -27,7 +27,7 @@ import {
 
 type AuthenticatedRequestExecutor = <T>(
   pluginId: string,
-  accountId: string,
+  connectorAccountId: string,
   input: string,
   init?: {
     method?: string
@@ -105,7 +105,7 @@ function integrationErrorDetail(error: unknown): Record<string, unknown> {
 
 async function defaultAuthenticatedRequest<T>(
   pluginId: string,
-  accountId: string,
+  connectorAccountId: string,
   input: string,
   init: {
     method?: string
@@ -113,9 +113,9 @@ async function defaultAuthenticatedRequest<T>(
     body?: string
   } = {}
 ): Promise<{ status: number; headers: Record<string, string>; data: T }> {
-  const account = await getIntegrationAccount(pluginId, accountId)
+  const account = await getIntegrationAccount(pluginId, connectorAccountId)
   if (!account || !account.enabled)
-    throw new Error(`Integration account "${accountId}" is disabled`)
+    throw new Error(`Integration account "${connectorAccountId}" is disabled`)
   const registered = getRegisteredIntegration(pluginId, account.integrationId)
   if (!registered) throw new Error(`Integration "${account.integrationId}" is not registered`)
   const url = new URL(input)
@@ -141,8 +141,8 @@ async function defaultAuthenticatedRequest<T>(
   const sessions = await provider.getSessions(undefined, { silent: true })
   const session = sessions.find((candidate) => candidate.id === account.authSessionId)
   if (!session) {
-    await updateIntegrationAccount(pluginId, accountId, { health: "revoked" })
-    throw new Error(`Credential handle for account "${accountId}" is unavailable`)
+    await updateIntegrationAccount(pluginId, connectorAccountId, { health: "revoked" })
+    throw new Error(`Credential handle for account "${connectorAccountId}" is unavailable`)
   }
 
   const strategy = registered.definition.authStrategies.find(
@@ -155,7 +155,7 @@ async function defaultAuthenticatedRequest<T>(
   const requestAuth = strategy.requestAuth ?? { type: "bearer" as const }
   const credential = provider.resolveRequestCredential
     ? await provider.resolveRequestCredential(session.id, {
-        accountId,
+        accountId: connectorAccountId,
         origin: url.origin,
       })
     : { accessToken: session.accessToken }
@@ -170,7 +170,7 @@ async function defaultAuthenticatedRequest<T>(
     body: init.body,
   })
   const responseHeaders = Object.fromEntries(response.headers.entries())
-  await updateIntegrationAccount(pluginId, accountId, {
+  await updateIntegrationAccount(pluginId, connectorAccountId, {
     health: response.status === 401 || response.status === 403 ? "degraded" : "healthy",
   })
   const contentType = response.headers.get("content-type") ?? ""
@@ -182,7 +182,7 @@ async function defaultAuthenticatedRequest<T>(
 
 async function authenticatedRequest<T>(
   pluginId: string,
-  accountId: string,
+  connectorAccountId: string,
   input: string,
   init?: {
     method?: string
@@ -201,13 +201,18 @@ async function authenticatedRequest<T>(
       "Integration authenticated request blocked by the PII gate; redact identifiers and retry."
     )
   }
-  return (requestOverride ?? defaultAuthenticatedRequest)<T>(pluginId, accountId, input, init)
+  return (requestOverride ?? defaultAuthenticatedRequest)<T>(
+    pluginId,
+    connectorAccountId,
+    input,
+    init
+  )
 }
 
 /** Host-owned authenticated fetch boundary used by `ctx.integrations`. */
 export async function authenticatedIntegrationRequest<T>(
   pluginId: string,
-  accountId: string,
+  connectorAccountId: string,
   input: string,
   init?: {
     method?: string
@@ -215,7 +220,7 @@ export async function authenticatedIntegrationRequest<T>(
     body?: string
   }
 ): Promise<{ status: number; headers: Record<string, string>; data: T }> {
-  return authenticatedRequest<T>(pluginId, accountId, input, init)
+  return authenticatedRequest<T>(pluginId, connectorAccountId, input, init)
 }
 
 async function assertApprovedPublicationHead(

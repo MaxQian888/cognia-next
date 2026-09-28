@@ -64,7 +64,7 @@ export async function runCustomLimitsSource(
   }
   const ctx: LimitsSourceContext = {
     // The vault `provider` field is irrelevant for a self-contained source; we
-    // pin a harmless value and identify the source by `accountId`/`accountLabel`.
+    // pin a harmless value and identify the source by `providerAccountId`/`accountLabel`.
     provider: "opencode",
     accountId: src.id,
     accountLabel: src.name,
@@ -106,7 +106,7 @@ async function runCustomLimitsSourceCoalesced(
 
   const recordOptions = {
     provider: CUSTOM_BREAKER_PROVIDER,
-    accountId: src.id,
+    providerAccountId: src.id,
     now: deps.now,
     breaker,
     random: deps.random,

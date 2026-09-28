@@ -13,7 +13,6 @@ import {
   settleAfterSignIn,
   signInWithDeployment,
 } from "./cloud-sign-in-flow"
-import { rememberPendingInvitation } from "./pending-invitation"
 import type { LinkSignedInIdentitiesReport } from "./link-signed-in-identities"
 
 const deployment: ReadyDeployment = {

@@ -12,8 +12,9 @@
  * three, fed by `GatewayStatus.pendingRestartFields`.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useFormatter, useTranslations } from "next-intl"
-import { Loader2Icon, RotateCwIcon } from "lucide-react"
+import { RotateCwIcon } from "lucide-react"
 
 import { MotionCollapse } from "@/components/chat/motion/motion-reveal"
 import { Button } from "@/components/ui/button"
@@ -79,7 +80,7 @@ export function GatewayRestartBanner({
             data-testid="gateway-restart-listener"
           >
             {restarting ? (
-              <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+              <Spinner className="mr-1.5 size-3.5 " aria-hidden />
             ) : (
               <RotateCwIcon className="mr-1.5 size-3.5" aria-hidden />
             )}

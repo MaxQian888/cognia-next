@@ -299,7 +299,7 @@ async fn authenticate_request(
         }
         request.extensions_mut().insert(DeviceContext {
             device_id: SERVICE_DEVICE_ID.to_string(),
-            account_id: host_identity::current_tenant_or_unbound(),
+            tenant_id: host_identity::current_tenant_or_unbound(),
             scope: "service".to_string(),
             granted_scopes: Vec::new(),
             authorization_capabilities: None,
@@ -316,7 +316,7 @@ async fn authenticate_request(
             match authn.authenticate(&token).await {
                 Ok(claims) => {
                     let ctx = oidc_device_context(&claims);
-                    if state.deny_list.is_revoked(&ctx.account_id, &ctx.device_id) {
+                    if state.deny_list.is_revoked(&ctx.tenant_id, &ctx.device_id) {
                         return error_response("device_revoked", "this device has been revoked");
                     }
                     request.extensions_mut().insert(ctx);
@@ -432,7 +432,7 @@ async fn authenticate_request(
     // ── 5. Inject context ───────────────────────────────────────────────────
     request.extensions_mut().insert(DeviceContext {
         device_id: device_id.clone(),
-        account_id: account_id.clone(),
+        tenant_id: account_id.clone(),
         scope: claims.scope.clone(),
         granted_scopes: Vec::new(),
         authorization_capabilities: None,
@@ -486,7 +486,7 @@ fn error_response(code: &str, message: &str) -> Response {
 fn oidc_device_context(claims: &oidc::OidcClaims) -> DeviceContext {
     DeviceContext {
         device_id: claims.sub.clone(),
-        account_id: claims
+        tenant_id: claims
             .organization_id
             .clone()
             .unwrap_or_else(|| claims.sub.clone()),
@@ -607,7 +607,7 @@ mod tests {
     async fn echo_device(Extension(ctx): Extension<DeviceContext>) -> impl IntoResponse {
         Json(json!({
             "device_id": ctx.device_id,
-            "account_id": ctx.account_id,
+            "account_id": ctx.tenant_id,
             "scope": ctx.scope,
         }))
     }
@@ -1146,7 +1146,7 @@ mod tests {
         };
         let ctx = oidc_device_context(&claims);
         assert_eq!(ctx.device_id, "user_x");
-        assert_eq!(ctx.account_id, "org_y");
+        assert_eq!(ctx.tenant_id, "org_y");
         assert_eq!(ctx.scope, "oidc");
     }
 
@@ -1160,7 +1160,7 @@ mod tests {
             exp: 0,
         };
         let ctx = oidc_device_context(&claims);
-        assert_eq!(ctx.account_id, "user_x");
+        assert_eq!(ctx.tenant_id, "user_x");
     }
 
     #[tokio::test]

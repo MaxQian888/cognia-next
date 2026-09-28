@@ -17,7 +17,7 @@ export class SubscriptionModelDiscoveryError extends Error {
 
 export interface SubscriptionModelDiscoveryInput {
   definition: SubscriptionProviderDefinition
-  accountId?: string
+  providerAccountId?: string
   /** Preview inputs stay in memory; the plugin never receives the key. */
   preview?: { apiKey: string; baseUrl?: string; presetId?: string | null }
   signal?: AbortSignal
@@ -56,8 +56,8 @@ async function resolve(input: SubscriptionModelDiscoveryInput): Promise<Resolved
     const apiKey = preview.apiKey.trim()
     if (!apiKey || /\s/.test(apiKey))
       throw new SubscriptionModelDiscoveryError("credentialsRequired")
-    const boundId = input.accountId
-      ? (await getAccount(definition.id, input.accountId))?.presetId
+    const boundId = input.providerAccountId
+      ? (await getAccount(definition.id, input.providerAccountId))?.presetId
       : preview.presetId
     const bound = boundId
       ? (await listPresets(definition.id)).find((entry) => entry.id === boundId)
@@ -88,7 +88,7 @@ async function resolve(input: SubscriptionModelDiscoveryInput): Promise<Resolved
       apiFlavor: definition.apiFlavor,
     }
   } else {
-    credentials = await resolveManagedSubscriptionCredential(definition, input.accountId)
+    credentials = await resolveManagedSubscriptionCredential(definition, input.providerAccountId)
     if (!credentials) throw new SubscriptionModelDiscoveryError("credentialsRequired")
   }
   assertAvailable(input)
@@ -114,9 +114,9 @@ async function sessionIdentity(input: SubscriptionModelDiscoveryInput) {
   return {
     unlockedAccountId: useAccountStore.getState().unlockedAccountId,
     activeAccountId:
-      !input.preview && !input.accountId
+      !input.preview && !input.providerAccountId
         ? (await getActiveAccount(input.definition.id)).activeAccountId
-        : input.accountId,
+        : input.providerAccountId,
   }
 }
 

@@ -808,30 +808,33 @@ fn run_call(
 
     if dry_run {
         let body_hash = hex::encode(Sha256::digest(&body_bytes));
-        return print_projected(&json!({
-            "schemaVersion": 1,
-            "ok": true,
-            "action": "call",
-            "rpcCommand": name,
-            "state": "dry-run",
-            "request": {
-                "method": "POST",
-                "path": format!("/internal/_rpc/{name}"),
-                "bodyBytes": body_bytes.len(),
-                "bodySha256": body_hash,
-                "bodyShape": redact_values(&body),
-            },
-            "meta": {
-                "category": command.category,
-                "resource": command.resource,
-                "risk": command.risk,
-                "approval": command.approval,
-                "confirmationRequired": command.risk != "low",
-                "idempotency": command.idempotency,
-                "idempotencyKeyGenerated": command.idempotency == "required" && explicit_idempotency_key.is_none(),
-                "outputTyped": command.output_typed,
-            }
-        }), query);
+        return print_projected(
+            &json!({
+                "schemaVersion": 1,
+                "ok": true,
+                "action": "call",
+                "rpcCommand": name,
+                "state": "dry-run",
+                "request": {
+                    "method": "POST",
+                    "path": format!("/internal/_rpc/{name}"),
+                    "bodyBytes": body_bytes.len(),
+                    "bodySha256": body_hash,
+                    "bodyShape": redact_values(&body),
+                },
+                "meta": {
+                    "category": command.category,
+                    "resource": command.resource,
+                    "risk": command.risk,
+                    "approval": command.approval,
+                    "confirmationRequired": command.risk != "low",
+                    "idempotency": command.idempotency,
+                    "idempotencyKeyGenerated": command.idempotency == "required" && explicit_idempotency_key.is_none(),
+                    "outputTyped": command.output_typed,
+                }
+            }),
+            query,
+        );
     }
 
     require_confirmation(command, ui)?;
@@ -1171,9 +1174,8 @@ fn build_request_body(
             }
         }
     }
-    let bytes = serde_json::to_vec(&body).map_err(|error| {
-        HostFailure::new("server", "serialize_body", error.to_string())
-    })?;
+    let bytes = serde_json::to_vec(&body)
+        .map_err(|error| HostFailure::new("server", "serialize_body", error.to_string()))?;
     if bytes.len() > MAX_REQUEST_BYTES {
         return Err(HostFailure::validation(
             "request_body_too_large",
@@ -3307,12 +3309,9 @@ mod tests {
     fn build_request_body_merges_fields_into_data_object() {
         // `run_call` relies on this when `--data` and field flags are
         // combined programmatically (clap blocks it at the CLI).
-        let (body, _) = build_request_body(
-            Some(r#"{"keep": true}"#),
-            &["extra=x".to_string()],
-            &[],
-        )
-        .expect("merged");
+        let (body, _) =
+            build_request_body(Some(r#"{"keep": true}"#), &["extra=x".to_string()], &[])
+                .expect("merged");
         assert_eq!(body, json!({"keep": true, "extra": "x"}));
     }
 

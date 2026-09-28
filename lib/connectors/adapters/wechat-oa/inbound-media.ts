@@ -48,7 +48,7 @@ export async function enrichWechatInboundMedia(
   )
 
   const read = deps.readAttachment ?? connectorsAttachmentRead
-  const fetch = deps.fetchAttachment ?? connectorsAttachmentFetch
+  const fetchAttachment = deps.fetchAttachment ?? connectorsAttachmentFetch
   const http = deps.httpRequest ?? connectorsHttpRequest
   for (const segment of event.segments) {
     if (segment.type !== "voice" && segment.type !== "video") continue
@@ -69,7 +69,7 @@ export async function enrichWechatInboundMedia(
         // The token only goes to the configured API host. Video downloads
         // carry no credentials and must pass the shared public-URL guard.
         if (!isPublicHttpUrl(url)) continue
-        await fetch(event.adapterId, ref, url)
+        await fetchAttachment(event.adapterId, ref, url)
         bytes = await read(event.adapterId, ref, cap)
       }
       if (!bytes) continue

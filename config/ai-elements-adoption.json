@@ -232,7 +232,11 @@
     {
       "name": "tool",
       "status": "adopted",
-      "consumers": ["components/chat/message-renderer.tsx"]
+      "consumers": [
+        "components/chat/message-parts/mcp-tool-card.tsx",
+        "components/chat/message-parts/file-tool-part.tsx",
+        "components/chat/message-parts/tool-detail-body.tsx"
+      ]
     },
     {
       "name": "toolbar",

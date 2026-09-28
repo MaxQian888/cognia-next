@@ -2232,42 +2232,53 @@ impl PgStore {
     }
 
     async fn migrate(&self) -> anyhow::Result<()> {
-        let client = self.pool.get().await?;
-        client
+        let mut client = self.pool.get().await?;
+        let transaction = client.transaction().await?;
+        // Concurrent service replicas may bootstrap the same empty database.
+        // IF NOT EXISTS alone does not serialize PostgreSQL catalog writes.
+        transaction
+            .batch_execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended('cognia.collab.migrations', 0))",
+            )
+            .await?;
+        transaction
             .batch_execute(include_str!("../migrations/0001_collab.sql"))
             .await?;
-        client
+        transaction
             .batch_execute(include_str!("../migrations/0002_workspaces.sql"))
             .await?;
-        client
+        transaction
             .batch_execute(include_str!("../migrations/0003_plans_runs.sql"))
             .await?;
-        client
+        transaction
             .batch_execute(include_str!("../migrations/0004_write_concurrency.sql"))
             .await?;
-        client
+        transaction
             .batch_execute(include_str!("../migrations/0005_shared_chat.sql"))
             .await?;
-        client
+        transaction
             .batch_execute(include_str!("../migrations/0006_tenant_integrity.sql"))
             .await?;
-        client
+        transaction
             .batch_execute(include_str!(
                 "../migrations/0007_membership_control_plane.sql"
             ))
             .await?;
-        client
+        transaction
             .batch_execute(include_str!("../migrations/0008_shared_chat_control.sql"))
             .await?;
-        client
+        transaction
             .batch_execute(include_str!("../migrations/0009_account_bootstrap.sql"))
             .await?;
-        client
+        transaction
             .batch_execute(include_str!("../migrations/0010_canvas.sql"))
             .await?;
-        client
-            .batch_execute(include_str!("../migrations/0011_chat_run_queue_binding.sql"))
+        transaction
+            .batch_execute(include_str!(
+                "../migrations/0011_chat_run_queue_binding.sql"
+            ))
             .await?;
+        transaction.commit().await?;
         Ok(())
     }
 

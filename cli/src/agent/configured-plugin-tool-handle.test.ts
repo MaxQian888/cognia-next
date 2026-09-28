@@ -30,7 +30,10 @@ describe("makeConfiguredCliPluginToolHandle", () => {
       toolUseId: request.toolUseId,
       result: await deps?.resolveAttachmentToolDeps?.(),
     })
-    const handle = makeConfiguredCliPluginToolHandle(DEFAULT_RESOLVED_CONFIG, execute)
+    const handle = makeConfiguredCliPluginToolHandle(
+      { ...DEFAULT_RESOLVED_CONFIG, cwd: "/workspace" },
+      execute
+    )
     expect(mockEnsureCliDb).not.toHaveBeenCalled()
     await handle({
       type: "plugin_tool_exec",

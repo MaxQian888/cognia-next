@@ -90,16 +90,12 @@ jobs:
       - name: Run Jest shard with coverage
         run: >-
           pnpm exec jest --coverage --shard=${{ matrix.shard }}/4
-          --coverageReporters=json --coverageThreshold='{}' --maxWorkers=4
+          --coverageReporters=json --coverageThreshold='{}' --maxWorkers=2
         env:
-          # PER PROCESS, not per step: NODE_OPTIONS is inherited by every Jest
-          # worker, so `--maxWorkers=4` multiplies whatever is set here by four.
-          # A 16384 ceiling on a 16 GB runner let all four workers grow past the
-          # machine before V8 considered collecting, and the OOM killer took one
-          # first. That surfaces as an opaque "Jest worker process exited"
-          # instead of the heap error the flag exists to prevent. 4 x 3 GB
-          # leaves the parent process and the OS room to finish the shard.
-          NODE_OPTIONS: "--max-old-space-size=3072"
+          # The parent retains the shard's coverage map and exceeded 3 GB even
+          # with worker recycling. Two workers keep peak RSS bounded while
+          # allowing the parent enough heap to emit the complete JSON map.
+          NODE_OPTIONS: "--max-old-space-size=6144"
           JEST_COVERAGE: "1"
           JEST_JUNIT_OUTPUT_NAME: junit-shard-${{ matrix.shard }}.xml
           JEST_TIMING_OUTPUT: coverage/jest-timings.json

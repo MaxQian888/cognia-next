@@ -15,6 +15,30 @@
  * subpaths a bundle actually references (`sharedModulesReferencedBy`).
  */
 
+/** Bind the host singleton before any plugin can read or subscribe to its surface. */
+export async function loadEffortSurfaceModule() {
+  const [facade, runtime] = await Promise.all([
+    import("@cognia/plugin-sdk/api/effort-surface"),
+    import("@/lib/ai/effort-surface-session"),
+  ])
+  facade.bindEffortSurfaceHost(runtime)
+  return {
+    effortSurfaceForSession: facade.effortSurfaceForSession,
+    subscribeEffortSurface: facade.subscribeEffortSurface,
+  }
+}
+
+/** Keep the locale reader in the host while shipping a neutral author facade. */
+export async function loadPluginI18nModule() {
+  const [facade, runtime] = await Promise.all([
+    import("@cognia/plugin-sdk/api/i18n"),
+    import("@/lib/plugin/api/use-plugin-translations"),
+  ])
+  facade.bindPluginTranslationsHost(runtime.usePluginTranslations)
+  const { bindPluginTranslationsHost: _bindHost, ...publicModule } = facade
+  return publicModule
+}
+
 export const PLUGIN_SDK_SUBPATH_LOADERS: Readonly<Record<string, () => Promise<unknown>>> = {
   "@cognia/plugin-sdk/api/abort": () => import("@cognia/plugin-sdk/api/abort"),
   "@cognia/plugin-sdk/api/agent-team-template": () =>
@@ -35,7 +59,7 @@ export const PLUGIN_SDK_SUBPATH_LOADERS: Readonly<Record<string, () => Promise<u
     import("@cognia/plugin-sdk/api/decision-provider"),
   "@cognia/plugin-sdk/api/download": () => import("@cognia/plugin-sdk/api/download"),
   "@cognia/plugin-sdk/api/editor": () => import("@cognia/plugin-sdk/api/editor"),
-  "@cognia/plugin-sdk/api/effort-surface": () => import("@cognia/plugin-sdk/api/effort-surface"),
+  "@cognia/plugin-sdk/api/effort-surface": loadEffortSurfaceModule,
   "@cognia/plugin-sdk/api/eval": () => import("@cognia/plugin-sdk/api/eval"),
   "@cognia/plugin-sdk/api/external-agent-adapter": () =>
     import("@cognia/plugin-sdk/api/external-agent-adapter"),
@@ -43,7 +67,7 @@ export const PLUGIN_SDK_SUBPATH_LOADERS: Readonly<Record<string, () => Promise<u
     import("@cognia/plugin-sdk/api/external-agent-preset"),
   "@cognia/plugin-sdk/api/host-environment": () =>
     import("@cognia/plugin-sdk/api/host-environment"),
-  "@cognia/plugin-sdk/api/i18n": () => import("@cognia/plugin-sdk/api/i18n"),
+  "@cognia/plugin-sdk/api/i18n": loadPluginI18nModule,
   "@cognia/plugin-sdk/api/integration": () => import("@cognia/plugin-sdk/api/integration"),
   "@cognia/plugin-sdk/api/issues": () => import("@cognia/plugin-sdk/api/issues"),
   "@cognia/plugin-sdk/api/message-renderer": () =>

@@ -29,6 +29,8 @@
       // Loaded from CSS, dynamic imports, or as providers for workspace peer dependencies.
       "ignoreDependencies": [
         "@ai-sdk/react",
+        // Host provides the router-fusion workspace peer dependency.
+        "@xmldom/xmldom",
         "@hookform/resolvers",
         "@radix-ui/react-slot",
         "@tauri-apps/plugin-shell",
@@ -68,7 +70,10 @@
         "src/**/fixtures/**/*.{ts,tsx}",
       ],
     },
-    "docs": {},
+    "docs": {
+      // Archived measurements are evidence artifacts, not docs application entries.
+      "ignore": ["reports/**"],
+    },
     "crates/cognia-plugin-template-ts": {
       // The template intentionally predeclares the host libraries available to
       // third-party plugin authors; its starter module need not import all of
@@ -131,6 +136,8 @@
       // scripts/test/run-sidecar-tests.mjs, which knip cannot see through).
       "entry": [
         "*.mjs",
+        // Standalone stdio entry built by scripts/build/build-a2ui-sidecar.mjs.
+        "src/entry/a2ui-mcp.ts",
         "codex-app-control/*.mjs",
         "pi-extension/cognia-pi-extension.ts",
         "**/*.test.{mjs,ts}",
@@ -149,7 +156,7 @@
     "sidecar/codeserver-agent-ext": {
       "entry": ["src/{extension,proxy-extension}.mjs"],
     },
-    "sidecar/webclone": {},
+    "sidecar/webclone": { "entry": ["src/runner.ts"] },
   },
   "ignoreDependencies": [
     // Imported inside a template-literal bundle entry that only esbuild sees

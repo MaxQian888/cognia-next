@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Provider-initializer runtime effects the headless brain must NOT run (ADR-0059). Rows name SYMBOLS, never whole files: one initializer routinely mixes brain work with a genuinely renderer-bound effect, and a file-level excuse would silence both. Every reason must say WHY the brain is the wrong host \u2014 a physical boundary, or a host-split pair whose brain half is registered in lib/headless/runtimes/. 'Not ported yet' is not a reason; that is debt, and it belongs in the registry instead.",
+  "note": "Provider-initializer runtime effects the headless brain must NOT run (ADR-0059). Rows name SYMBOLS, never whole files: one initializer routinely mixes brain work with a genuinely renderer-bound effect, and a file-level excuse would silence both. Every reason must say WHY the brain is the wrong host — a physical boundary, or a host-split pair whose brain half is registered in lib/headless/runtimes/. 'Not ported yet' is not a reason; that is debt, and it belongs in the registry instead.",
   "initializers": {
     "components/providers/initializers/anthropic-usage-scheduler-initializer.tsx": {
       "symbols": ["startUsageScheduler"],
@@ -8,7 +8,7 @@
     },
     "components/providers/initializers/code-adoption-tracker-initializer.tsx": {
       "symbols": ["startCodeAdoptionTracker"],
-      "reason": "The tracker persists through lib/code-adoption/client.ts, whose code_adoption_turn_begin / code_adoption_turn_end are target:client, capability:client.local, transports:[\"internal\"] in the command manifest and local-only in the dispositions ledger \u2014 write attribution is measured against the local working tree the desktop edits. Wiring the brain to it would first require reclassifying those two commands, which is a protocol decision (D7 makes the manifest authoritative), not a registration."
+      "reason": "The tracker persists through lib/code-adoption/client.ts, whose code_adoption_turn_begin / code_adoption_turn_end are target:client, capability:client.local, transports:[\"internal\"] in the command manifest and local-only in the dispositions ledger — write attribution is measured against the local working tree the desktop edits. Wiring the brain to it would first require reclassifying those two commands, which is a protocol decision (D7 makes the manifest authoritative), not a registration."
     },
     "components/providers/initializers/codex-usage-scheduler-initializer.tsx": {
       "symbols": ["startCodexUsageScheduler"],
@@ -16,7 +16,7 @@
     },
     "components/providers/initializers/deferred-boot-initializers-impl.tsx": {
       "symbols": ["startRendererWorkOutbox"],
-      "reason": "The renderer half of ADR-0125 durable work submission: it drains the browser-local queue of work this client originated. The brain is the receiving authority, not a submitter, and runs the server half \u2014 registered as `work-submission-outbox` in lib/headless/runtimes/initializers.ts. Running both in one process would have the brain drain its own inbox back into itself."
+      "reason": "The renderer half of ADR-0125 durable work submission: it drains the browser-local queue of work this client originated. The brain is the receiving authority, not a submitter, and runs the server half — registered as `work-submission-outbox` in lib/headless/runtimes/initializers.ts. Running both in one process would have the brain drain its own inbox back into itself."
     },
     "components/providers/initializers/issue-tracker-initializer.tsx": {
       "symbols": ["installCollabRefreshScheduler", "installIssueNotificationCommands"],
@@ -24,7 +24,7 @@
     },
     "components/providers/initializers/managed-ide-broker-initializer.tsx": {
       "symbols": ["attachManagedIdeBroker"],
-      "reason": "The Tauri-event-bound entry point; the brain uses the sibling attachManagedIdeBrokerTransport (lib/plugin/ide/broker-runtime.ts:1184) with the companion transport plus content upload/redeem, registered as `managed-ide-broker` in lib/headless/runtimes/managed-ide-broker.ts. One subsystem, two host-specific attach points \u2014 not a gap."
+      "reason": "The Tauri-event-bound entry point; the brain uses the sibling attachManagedIdeBrokerTransport (lib/plugin/ide/broker-runtime.ts:1184) with the companion transport plus content upload/redeem, registered as `managed-ide-broker` in lib/headless/runtimes/managed-ide-broker.ts. One subsystem, two host-specific attach points — not a gap."
     },
     "components/providers/initializers/online-eval-initializer.tsx": {
       "symbols": ["startOnlineEvalScheduler"],
@@ -32,7 +32,7 @@
     },
     "components/providers/initializers/remote-notification-initializer.tsx": {
       "symbols": ["installRemoteNotificationListener"],
-      "reason": "The CLIENT side of `notification://remote` \u2014 it ingests frames a headless server publishes into this device's Notification Center. The brain is the publisher (lib/notifications/runtime.ts -> remote_notification_publish) and must not subscribe to itself. Already recorded in the roster doc at lib/headless/runtimes/index.ts."
+      "reason": "The CLIENT side of `notification://remote` — it ingests frames a headless server publishes into this device's Notification Center. The brain is the publisher (lib/notifications/runtime.ts -> remote_notification_publish) and must not subscribe to itself. Already recorded in the roster doc at lib/headless/runtimes/index.ts."
     },
     "components/providers/initializers/router-fusion-initializer.tsx": {
       "symbols": ["startBreakerPersistence"],
@@ -44,7 +44,7 @@
     },
     "components/providers/initializers/selection-toolbar-restore-initializer.tsx": {
       "symbols": ["startSelectionToolbar"],
-      "reason": "Restores the always-on-top native selection-toolbar window (ADR-0093). A recorded physical boundary in ADR-0059 D7 \u2014 the brain has no window server to place an overlay on."
+      "reason": "Restores the always-on-top native selection-toolbar window (ADR-0093). A recorded physical boundary in ADR-0059 D7 — the brain has no window server to place an overlay on."
     },
     "components/providers/initializers/session-import-watch-initializer.tsx": {
       "symbols": ["startSessionImportWatch"],
@@ -65,6 +65,18 @@
     "components/providers/initializers/worker-runtime-initializer.tsx": {
       "symbols": ["attachTauriWorkerRuntime"],
       "reason": "The desktop half attaches a @tauri-apps/api/core Channel to companion_worker_attach_channel. The brain half is the bridge-owned WorkerRpcPool created only after the authenticated bridge connects in cli/src/serve/serve-command.ts, where installRemoteWorkerRuntime is paired with bridge and pool teardown. lib/headless/runtimes/index.ts records this dependency-bound bootstrap exception; a registry import cannot construct that live bridge channel."
+    },
+    "components/providers/initializers/pwa-badge-initializer.tsx": {
+      "symbols": ["subscribeUnreadSessions"],
+      "reason": "This subscription paints navigator.setAppBadge for the installed browser window and starts only while its display-mode media query is standalone. A headless process has no PWA icon or window media query to update."
+    },
+    "components/providers/initializers/pwa-lifecycle-initializer.tsx": {
+      "symbols": ["attachInstallListeners"],
+      "reason": "Captures browser beforeinstallprompt/appinstalled events and service-worker controller changes for the interactive PWA install/update UI. These window and navigator events do not exist in the headless brain."
+    },
+    "components/providers/initializers/shared-chat-lifecycle-initializer.tsx": {
+      "symbols": ["subscribeCollabConnection"],
+      "reason": "Owns the paired renderer client: subscriptions track its visible/open chat panes, local Dexie cache, window focus and document visibility, and restart when that client changes its paired endpoint. The authoritative collab service owns shared sessions and run queues; a headless brain has no pane selection or browser endpoint to mirror and must not duplicate the renderer stream owner."
     }
   }
 }

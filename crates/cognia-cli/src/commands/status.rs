@@ -6,8 +6,8 @@ use serde::Serialize;
 use crate::engine::bridge_client::{
     endpoint_file_path_for, load_endpoint_from, probe_health, EndpointFile,
 };
-use std::path::Path;
 use crate::ui::{style, RuntimeUi};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct BridgeStatusReport {
@@ -62,11 +62,7 @@ pub(crate) fn probe_bridge_status_at(path: Option<&Path>) -> BridgeStatusReport 
     let endpoint_file = endpoint_file_path_for(path)
         .ok()
         .map(|path| path.to_string_lossy().into_owned());
-    build_status_report(
-        endpoint_file,
-        || load_endpoint_from(path),
-        probe_health,
-    )
+    build_status_report(endpoint_file, || load_endpoint_from(path), probe_health)
 }
 
 fn build_status_report<Load, Health>(
@@ -152,10 +148,7 @@ struct OverviewReport {
 #[derive(Debug, Serialize)]
 struct OverviewBridgeSection {
     running: bool,
-    #[serde(
-        rename = "endpointFile",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "endpointFile", skip_serializing_if = "Option::is_none")]
     endpoint_file: Option<String>,
     #[serde(rename = "baseUrl", skip_serializing_if = "Option::is_none")]
     base_url: Option<String>,

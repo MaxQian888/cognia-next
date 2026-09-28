@@ -35,7 +35,10 @@ const catalogHash = `sha256:${createHash("sha256")
   )
   .digest("hex")}`
 const catalog = { ...source, contributionSchemaHash, catalogHash }
-const brokerProtocolPath = resolve(repositoryRoot, "src-tauri/src/codeserver/broker_protocol.rs")
+const brokerProtocolPath = resolve(
+  repositoryRoot,
+  "crates/cognia-codeserver/src/broker_protocol.rs"
+)
 const brokerExtensionPath = resolve(
   repositoryRoot,
   "sidecar/codeserver-agent-ext/src/extension.mjs"

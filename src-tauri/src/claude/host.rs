@@ -30,10 +30,12 @@ use tokio::process::Command;
 
 use crate::api_key::ApiKeyState;
 
-pub use cognia_companion_rpc::sidecar_runtime::SidecarHost;
 #[cfg(test)]
 pub use cognia_companion_rpc::sidecar_runtime::HeadlessSidecarHost;
-use cognia_companion_rpc::sidecar_runtime::{inject_provider_env, inject_runtime_env, report_sidecar_failure, dispatch_runtime_rpc};
+pub use cognia_companion_rpc::sidecar_runtime::SidecarHost;
+use cognia_companion_rpc::sidecar_runtime::{
+    dispatch_runtime_rpc, inject_provider_env, inject_runtime_env, report_sidecar_failure,
+};
 
 // ---------------------------------------------------------------------------
 // Desktop host
@@ -187,12 +189,14 @@ pub(crate) mod test_support {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     #[test]
     fn the_desktop_adapter_forwards_canonical_agent_events() {
-        let source = include_str!("host.rs").split("#[cfg(test)]").next().unwrap();
+        let source = include_str!("host.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
         assert!(source.contains("crate::cli_bridge::canonical_agent_envelope(payload)"));
         assert!(source.contains("event_bus.publish(channel.to_string(), payload.clone())"));
     }

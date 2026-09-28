@@ -207,8 +207,8 @@
       "path": "builtin://cognia-office",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-office/5f9edfef17e3e63bb5422ae60f7b47f5d51e9ed728b98603e514ba792e7010f4.cjs",
-        "sha256": "5f9edfef17e3e63bb5422ae60f7b47f5d51e9ed728b98603e514ba792e7010f4",
+        "url": "/_cognia/builtin-plugins/cognia-office/4cff7e58e9cdf6c22d3ceee1c791888fccd0e3680437855d628bffb50efb0692.cjs",
+        "sha256": "4cff7e58e9cdf6c22d3ceee1c791888fccd0e3680437855d628bffb50efb0692",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/i18n",
@@ -330,8 +330,8 @@
       "path": "builtin://cognia-pdf",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-pdf/fa4f841cc538ce8814e4491eb5eb12fd947ac1eb22296a0a117d2e9ef56de16b.cjs",
-        "sha256": "fa4f841cc538ce8814e4491eb5eb12fd947ac1eb22296a0a117d2e9ef56de16b",
+        "url": "/_cognia/builtin-plugins/cognia-pdf/722c9855b40ebec6604a7c9edd580afbeeac4df1ce09bcbb764e7df95b3da4c9.cjs",
+        "sha256": "722c9855b40ebec6604a7c9edd580afbeeac4df1ce09bcbb764e7df95b3da4c9",
         "sharedModules": [
           "@cognia/plugin-sdk"
         ]
@@ -606,8 +606,8 @@
       "path": "builtin://cognia-documents",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-documents/881359d4d3cd80e82080c439d726da0093c481b57ae369ad8c3f0000f9ebde7e.cjs",
-        "sha256": "881359d4d3cd80e82080c439d726da0093c481b57ae369ad8c3f0000f9ebde7e",
+        "url": "/_cognia/builtin-plugins/cognia-documents/4a3ec3800ea9ebec2689f50749b37ad3b26f0b42d22bdc6dce3106362ec52d5d.cjs",
+        "sha256": "4a3ec3800ea9ebec2689f50749b37ad3b26f0b42d22bdc6dce3106362ec52d5d",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/i18n",
@@ -730,8 +730,8 @@
       "path": "builtin://cognia-presentations",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-presentations/f0e28e5421ad71eff89d61e922e8d73125fc1fb53ece079b408c9b33e66b9558.cjs",
-        "sha256": "f0e28e5421ad71eff89d61e922e8d73125fc1fb53ece079b408c9b33e66b9558",
+        "url": "/_cognia/builtin-plugins/cognia-presentations/fe3fab95363a40b24f88b29ad9ff871fcd7356966303218dbafdfcc4148ba249.cjs",
+        "sha256": "fe3fab95363a40b24f88b29ad9ff871fcd7356966303218dbafdfcc4148ba249",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/i18n",

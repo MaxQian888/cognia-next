@@ -38,7 +38,7 @@ import {
 import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
 import { getDb } from "./schema"
-import { createDbTestFixture } from "./test-fixture"
+import { createRecreatedDbTestFixture } from "./test-fixture"
 import { createLoop, getLoop, listLoopsBySession } from "./loops"
 import { createGoal, listGoalsBySession } from "./goals"
 import {
@@ -84,7 +84,7 @@ jest.mock("@/lib/sandbox/session-runtime", () => ({
   sandboxSessionRuntime: { releaseSession: (id: string) => releaseSandboxSessionMock(id) },
 }))
 
-const dbFixture = createDbTestFixture()
+const dbFixture = createRecreatedDbTestFixture()
 
 const deleteExternalSessionMock = jest.fn(async (_agentId: string, _sessionId: string) => undefined)
 jest.mock("@/lib/ai/agent/external/manager", () => ({

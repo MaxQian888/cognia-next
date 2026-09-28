@@ -100,10 +100,6 @@ const CHANNEL_TYPE = /^(?:tauri::)?(?:ipc::)?Channel\s*</
  * gate failure, so this list cannot quietly outlive its subject.
  */
 export const HOST_CHOSEN_PARAMS = {
-  "mcp_oauth_authenticate.helper_path":
-    "path to an OAuth helper binary that run_helper() executes (src-tauri/src/mcp_oauth.rs:166); the headless path picks it host-side",
-  "mcp_oauth_refresh.helper_path":
-    "same helper binary as mcp_oauth_authenticate, executed by run_helper()",
   "mcp_server_start.sidecar_path":
     "filesystem path to the Node sidecar script the host spawns (crates/cognia-mcp-server/src/commands.rs:20)",
   "mcp_server_restart.sidecar_path": "same sidecar script path as mcp_server_start",

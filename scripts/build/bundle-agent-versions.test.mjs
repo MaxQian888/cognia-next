@@ -97,7 +97,7 @@ describe("check against the repository", () => {
 
     const version = clone(inputs)
     byId(version.pins, "gemini-cli").version = "0.58.0"
-    assert.match(validatePins(version).join("\n"), /gemini-cli: version 0\.58\.0 is not @google\/gemini-cli@0\.59\.0/)
+    assert.ok(validatePins(version).some((problem) => problem.includes(`gemini-cli: version 0.58.0 is not @google/gemini-cli@${inputs.packageJson.dependencies["@google/gemini-cli"]}`)))
 
     const conflict = clone(inputs)
     byId(conflict.pins, "opencode-acp").commands[0].smoke = "syntax"
@@ -493,4 +493,13 @@ describe("parseArgs", () => {
     assert.throws(() => parseArgs(["stage", "--libc"]), /--libc needs a value/)
     assert.throws(() => parseArgs(["stage", "musl"]), /unexpected argument musl/)
   })
+})
+
+
+it("static Git has Cargo for the pinned Git release's Rust core", () => {
+  const source = readFileSync(new URL("../../deploy/bundle/Dockerfile", import.meta.url), "utf8")
+  const stage = source.split("FROM pins AS git")[1].split(/^FROM /m)[0]
+  assert.match(stage, /apk add[^]*?\bcargo\b/)
+  const script = readFileSync(new URL("../../deploy/bundle/build-static-git.sh", import.meta.url), "utf8")
+  assert.doesNotMatch(script, /NO_RUST=/)
 })

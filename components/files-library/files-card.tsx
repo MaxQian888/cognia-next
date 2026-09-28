@@ -7,6 +7,7 @@
  * library surfaces.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useFormatter, useTranslations } from "next-intl"
 import { StarIcon } from "lucide-react"
 
@@ -34,7 +35,7 @@ export function FilesCard({ entry, actions, selected }: FilesCardProps) {
   const badgeTone = isImage ? "border-white/50 bg-black/40 text-white" : undefined
 
   return (
-    <div
+    <Surface
       role="button"
       tabIndex={0}
       aria-label={t("card.open", { title })}
@@ -120,6 +121,6 @@ export function FilesCard({ entry, actions, selected }: FilesCardProps) {
           )}
         />
       </div>
-    </div>
+    </Surface>
   )
 }

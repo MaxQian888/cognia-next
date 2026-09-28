@@ -20,6 +20,8 @@
  * `blockedBy`, `status`). Submit on ⌘↵ / Ctrl+Enter.
  */
 
+import { Surface } from "@/components/surface/surface"
+import { Spinner } from "@/components/ui/spinner"
 import {
   BoldIcon,
   CalendarIcon,
@@ -31,7 +33,6 @@ import {
   ListIcon,
   ListOrderedIcon,
   ListTodoIcon,
-  Loader2Icon,
   QuoteIcon,
   SparklesIcon,
   StrikethroughIcon,
@@ -1328,7 +1329,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
                         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
                       >
                         {aiBusy ? (
-                          <Loader2Icon className="size-3.5 animate-spin" />
+                          <Spinner className="size-3.5 " />
                         ) : (
                           <SparklesIcon className="size-3.5" />
                         )}
@@ -1415,8 +1416,8 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
                     />
                   </div>
                   {refPanelOpen ? (
-                    <div
-                      className="absolute right-2 top-2 z-10 w-64 overflow-hidden rounded-md border bg-popover shadow-md"
+                    <Surface
+                      className="absolute right-2 top-2 z-10 w-64 overflow-hidden rounded-md border bg-popover shadow-(--elevation-2)"
                       data-testid="issue-ref-panel"
                       role="listbox"
                       aria-label={t("create.issueRef")}
@@ -1442,7 +1443,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
                           <span className="truncate">{issue.title}</span>
                         </button>
                       ))}
-                    </div>
+                    </Surface>
                   ) : null}
                 </div>
               )}
@@ -1533,7 +1534,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
             ) : null}
 
             {duplicateIds.length > 0 ? (
-              <div
+              <Surface
                 className="flex flex-wrap items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs"
                 data-testid="create-ai-duplicates"
               >
@@ -1560,7 +1561,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
                 >
                   <XIcon className="size-3" />
                 </button>
-              </div>
+              </Surface>
             ) : null}
 
             {form.error ? (
@@ -1575,7 +1576,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
             <PageFieldRow label={t("create.cardPreview")} testId="create-card-preview">
               {/* Framed as a mini board column — the card reads as "how this
                   will look on the board", not a floating orphan. */}
-              <div className="rounded-lg border bg-muted/40 p-2">
+              <Surface className="rounded-lg border bg-muted/40 p-2">
                 <div className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[11px] font-medium text-muted-foreground">
                   <IssueStatusIcon status={form.form.status} />
                   {t(`status.${form.form.status}`)}
@@ -1590,7 +1591,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
                     }
                   />
                 </div>
-              </div>
+              </Surface>
             </PageFieldRow>
 
             {form.sharedOrgId && props.projects.length > 0 ? (

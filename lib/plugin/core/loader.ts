@@ -357,6 +357,10 @@ export class PluginLoader {
         return definition
       }
       if (builtinRegistryEntry?.load) {
+        await primeSharedModules([
+          "@cognia/plugin-sdk/api/effort-surface",
+          "@cognia/plugin-sdk/api/i18n",
+        ])
         const definition = await builtinRegistryEntry.load()
         this.loadedModules.set(manifest.id, {
           definition,

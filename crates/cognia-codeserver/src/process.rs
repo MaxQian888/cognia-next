@@ -1015,12 +1015,12 @@ fn prepare_session_socket_dir_at(directory: &Path) -> Result<(), String> {
         use std::os::unix::fs::DirBuilderExt;
         builder.mode(0o700);
     }
-    match builder.create(&directory) {
+    match builder.create(directory) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(format!("create code-server socket directory: {error}")),
     }
-    let metadata = std::fs::symlink_metadata(&directory)
+    let metadata = std::fs::symlink_metadata(directory)
         .map_err(|error| format!("inspect code-server socket directory: {error}"))?;
     if !metadata.is_dir() {
         return Err("code-server socket directory must be a private directory".to_string());

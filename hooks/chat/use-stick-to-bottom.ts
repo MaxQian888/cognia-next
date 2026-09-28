@@ -73,7 +73,7 @@ export interface StickToBottom {
   /** `onScroll` handler for the viewport. Stable identity. */
   handleScroll: () => void
   /** Read a disclosure in place; reaching the physical foot re-arms following. */
-  handleContentClick: (event: MouseEvent<HTMLElement>) => void
+  handleContentClick: (event: Pick<MouseEvent<HTMLElement>, "target">) => void
   /**
    * Pin now, honouring the enabled/at-bottom gate. For callers that
    * change the transcript's geometry outside a render (re-measuring a
@@ -159,7 +159,7 @@ export function useStickToBottom({
   }, [scrollRef, thresholdPx])
 
   const handleContentClick = useCallback(
-    (event: MouseEvent<HTMLElement>) => {
+    (event: Pick<MouseEvent<HTMLElement>, "target">) => {
       const target = event.target
       if (!(target instanceof Element)) return
       const disclosure = target.closest(

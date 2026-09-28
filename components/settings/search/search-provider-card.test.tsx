@@ -57,10 +57,7 @@ jest.mock("@/components/ui/select", () => ({
     value?: string
     onValueChange?: (v: string) => void
   }) => (
-    <select
-      value={value}
-      onChange={(e) => onValueChange?.(e.target.value)}
-    >
+    <select value={value} onChange={(e) => onValueChange?.(e.target.value)}>
       {children}
     </select>
   ),

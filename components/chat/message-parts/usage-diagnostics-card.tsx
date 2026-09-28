@@ -326,14 +326,14 @@ function PlanLimitsSection({
       ) : (
         <div className="space-y-2.5">
           {meters.map((m) => (
-            <MeterRow key={m.id} meter={m} accountId="usage" now={now} />
+            <MeterRow key={m.id} meter={m} meterScopeId="usage" now={now} />
           ))}
         </div>
       )}
       {extras.length > 0 ? (
         <div className="space-y-2.5 border-t pt-2" data-testid="usage-extras">
           {extras.map((m) => (
-            <MeterRow key={m.id} meter={m} accountId="usage-extra" now={now} />
+            <MeterRow key={m.id} meter={m} meterScopeId="usage-extra" now={now} />
           ))}
         </div>
       ) : null}

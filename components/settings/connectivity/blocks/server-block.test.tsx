@@ -17,7 +17,7 @@ jest.mock("@/lib/connectivity/reachability-prefs", () => ({
   loadReachabilityPrefs: async () => prefs,
   patchReachabilityPrefs: (p: unknown) => patch(p),
 }))
-const defaultCall = async (name: string) => {
+const defaultCall = async (name: string): Promise<unknown> => {
   if (name === "companion_server_status")
     return { running: false, bindMode: "none", boundPort: null }
   if (name === "companion_tls_paths")

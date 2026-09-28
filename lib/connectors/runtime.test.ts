@@ -1217,7 +1217,7 @@ describe("installRuntime — ai-run (PII embed gate covers the fallback legs)", 
     const clean = memoryDepsWithEmbedSpy()
     tryBuildMemoryDepsImpl = jest.fn(async () => clean.deps)
     await callHandler(makeEvent({ conversationKey: "telegram:adapter_1:chat_mem_c" }), "ai-run")
-    expect(clean.embed).toHaveBeenCalledWith("hello runtime")
+    expect(clean.embed).toHaveBeenCalledWith("hello runtime", { signal: expect.any(AbortSignal) })
 
     const leaky = memoryDepsWithEmbedSpy()
     tryBuildMemoryDepsImpl = jest.fn(async () => leaky.deps)

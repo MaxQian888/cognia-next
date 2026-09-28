@@ -872,8 +872,8 @@ export function createIncidentResponder(context: PluginContext): BotHandlerV1 {
     }
     // The broker resolves the account from the run's credential binding and
     // refuses a mismatch; the event's own binding names that same account.
-    const accountId = run.event.binding?.integrationAccountId
-    if (!accountId) {
+    const connectorAccountId = run.event.binding?.integrationAccountId
+    if (!connectorAccountId) {
       throw new Error("Incident event did not arrive on a PagerDuty account binding")
     }
     run.signal.throwIfAborted()
@@ -881,7 +881,7 @@ export function createIncidentResponder(context: PluginContext): BotHandlerV1 {
     const posted = await run.step.run("post-note", async () => {
       const job = await context.integrations.executeAction({
         integrationId: "pagerduty",
-        accountId,
+        accountId: connectorAccountId,
         binding: { runId: run.runId, slotId: "pagerduty" },
         approval: { interruptId: decision.approvalId as string },
         actionId: "addIncidentNote",

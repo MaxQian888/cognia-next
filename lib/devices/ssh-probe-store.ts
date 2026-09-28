@@ -94,9 +94,10 @@ export function getSshProbes(): SshProbeMap {
 export function readSshProbe(
   hostId: string,
   target: string,
-  now: number
+  now: number,
+  snapshot: SshProbeMap = probes
 ): SshProbeRecord | undefined {
-  const record = probes.get(hostId)
+  const record = snapshot.get(hostId)
   if (!record) return undefined
   if (record.target !== target) return undefined
   if (now - record.at >= SSH_PROBE_TTL_MS) return undefined

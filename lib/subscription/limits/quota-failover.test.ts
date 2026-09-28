@@ -44,8 +44,8 @@ function deps(accounts: AccountSummary[], activeId: string | null) {
   const partial: Partial<FailoverDeps> = {
     listAccounts: async () => accounts,
     getActiveAccountId: async () => activeId,
-    setActiveAccount: async (provider, accountId) => {
-      activated.push([provider, accountId])
+    setActiveAccount: async (provider, providerAccountId) => {
+      activated.push([provider, providerAccountId])
     },
     breaker: new SubscriptionBreaker(),
     random: () => 0,
@@ -89,7 +89,7 @@ describe("runQuotaFailover", () => {
     const d = deps([account("a"), account("b")], "a")
     const outcome = await runQuotaFailover({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       error: "429: usage_limit_reached",
       now: NOW,
       isEnabled: () => true,
@@ -103,7 +103,7 @@ describe("runQuotaFailover", () => {
     const d = deps([account("a"), account("b")], "a")
     await runQuotaFailover({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       error: "429: usage_limit_reached",
       now: NOW,
       isEnabled: () => true,
@@ -117,7 +117,7 @@ describe("runQuotaFailover", () => {
     const d = deps([account("a"), account("b")], "a")
     const outcome = await runQuotaFailover({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       error: "429: 5 requests per minute",
       now: NOW,
       isEnabled: () => true,
@@ -131,7 +131,7 @@ describe("runQuotaFailover", () => {
     const d = deps([account("a"), account("b")], "a")
     const outcome = await runQuotaFailover({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       error: "429: usage_limit_reached",
       now: NOW,
       isEnabled: () => false,
@@ -146,7 +146,7 @@ describe("runQuotaFailover", () => {
     const d = deps([account("a"), account("b")], "a")
     const outcome = await runQuotaFailover({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       error: "429: usage_limit_reached",
       now: NOW,
       deps: d.partial,
@@ -158,7 +158,7 @@ describe("runQuotaFailover", () => {
     const d = deps([account("a"), account("b")], "a")
     const outcome = await runQuotaFailover({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       error: "429: usage_limit_reached",
       now: NOW,
       isEnabled: () => true,
@@ -185,7 +185,7 @@ describe("runQuotaFailover", () => {
     )
     await runQuotaFailover({
       provider: "anthropic",
-      accountId: "a",
+      providerAccountId: "a",
       error: "429: usage_limit_reached",
       now: NOW,
       isEnabled: () => true,

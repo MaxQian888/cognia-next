@@ -360,66 +360,65 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
     }
   }, [loaded, locked, localAccountId, ungated, discoveryEpoch])
 
-  const driversFor = useCallback(
-    (
-      deployment: ReadyDeployment
-    ): { drivers: LogtoDrivers; redirectUri: string; clientKind: "web" | "native" } => {
-      // The Capacitor WebView cannot pop a window and has no https origin to
-      // land on, so it is asked before the popup test that would otherwise
-      // claim it: the in-app browser plus the native deep link is its path.
-      if ((deps.isCapacitor ?? detectCapacitor)()) {
-        return {
-          drivers: createLogtoCapacitorDrivers(),
-          redirectUri: NATIVE_CALLBACK_URI,
-          clientKind: "native",
-        }
-      }
-      const profile = deps.profile ?? detectHostProfile()
-      const popupCapable =
-        profile !== "desktop" && typeof window !== "undefined" && typeof window.open === "function"
-      if (popupCapable) {
-        return {
-          drivers: createLogtoWebPopupDrivers(),
-          redirectUri: `${window.location.origin}/logto/callback`,
-          clientKind: "web",
-        }
-      }
-      // The desktop has no popup: the system browser is sent to the deep link
-      // registered on the native application. The OS hands that link back to
-      // the running app, which resolves the wait on its own; pasting the
-      // address stays available for a browser that never comes back.
+  const driversFor = useCallback((): {
+    drivers: LogtoDrivers
+    redirectUri: string
+    clientKind: "web" | "native"
+  } => {
+    // The Capacitor WebView cannot pop a window and has no https origin to
+    // land on, so it is asked before the popup test that would otherwise
+    // claim it: the in-app browser plus the native deep link is its path.
+    if ((deps.isCapacitor ?? detectCapacitor)()) {
       return {
-        drivers: {
-          openUrl: (url) => {
-            void openUrl(url)
-          },
-          waitForCode: ({ state }) => {
-            pendingState.current = state
-            setView({ kind: "awaiting-code" })
-            deepLinkWait.current?.abort()
-            const controller = new AbortController()
-            deepLinkWait.current = controller
-            const pasted = new Promise<{ code: string; state: string }>((resolve, reject) => {
-              codeResolver.current = resolve
-              codeRejecter.current = reject
-            })
-            const delivered = waitForLogtoDeepLinkCallback({ state, signal: controller.signal })
-            return Promise.race([pasted, delivered]).finally(() => controller.abort())
-          },
-        },
+        drivers: createLogtoCapacitorDrivers(),
         redirectUri: NATIVE_CALLBACK_URI,
         clientKind: "native",
       }
-    },
-    [deps.profile, deps.isCapacitor]
-  )
+    }
+    const profile = deps.profile ?? detectHostProfile()
+    const popupCapable =
+      profile !== "desktop" && typeof window !== "undefined" && typeof window.open === "function"
+    if (popupCapable) {
+      return {
+        drivers: createLogtoWebPopupDrivers(),
+        redirectUri: `${window.location.origin}/logto/callback`,
+        clientKind: "web",
+      }
+    }
+    // The desktop has no popup: the system browser is sent to the deep link
+    // registered on the native application. The OS hands that link back to
+    // the running app, which resolves the wait on its own; pasting the
+    // address stays available for a browser that never comes back.
+    return {
+      drivers: {
+        openUrl: (url) => {
+          void openUrl(url)
+        },
+        waitForCode: ({ state }) => {
+          pendingState.current = state
+          setView({ kind: "awaiting-code" })
+          deepLinkWait.current?.abort()
+          const controller = new AbortController()
+          deepLinkWait.current = controller
+          const pasted = new Promise<{ code: string; state: string }>((resolve, reject) => {
+            codeResolver.current = resolve
+            codeRejecter.current = reject
+          })
+          const delivered = waitForLogtoDeepLinkCallback({ state, signal: controller.signal })
+          return Promise.race([pasted, delivered]).finally(() => controller.abort())
+        },
+      },
+      redirectUri: NATIVE_CALLBACK_URI,
+      clientKind: "native",
+    }
+  }, [deps.profile, deps.isCapacitor])
 
   const runSignIn = async (method: CloudSignInMethod) => {
     const deployment = deploymentRef.current
     if (!deployment || !localAccountId) return
     setError(null)
     setBusy(true)
-    const { drivers, redirectUri, clientKind } = driversFor(deployment)
+    const { drivers, redirectUri, clientKind } = driversFor()
     setView({ kind: "signing-in" })
     try {
       const session = await (deps.signIn ?? signInWithDeployment)(

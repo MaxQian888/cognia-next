@@ -970,7 +970,7 @@ function ViewTabs({
               // hit area to the 44px floor on a touch screen.
               "touch-hit flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
               checked
-                ? "bg-background text-foreground shadow-xs"
+                ? "bg-background text-foreground shadow-(--elevation-1)"
                 : "text-muted-foreground active:bg-background/60"
             )}
           >

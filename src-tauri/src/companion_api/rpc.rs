@@ -354,6 +354,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // stays single-sourced in `lib/platform/capabilities.ts`.
     "host_capabilities",
     "host_feature_manifest",
+    "integration_github_account_connect_from_secret",
     "host_state_snapshot",
     "host_state_submit",
     "host_state_status",
@@ -2106,7 +2107,7 @@ fn inject_caller_device_grants(
     mut args: Value,
     state: &SharedState,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
 ) -> Value {
     if !CALLER_DEVICE_GRANTS_COMMANDS.contains(&name) {
         return args;
@@ -2120,7 +2121,7 @@ fn inject_caller_device_grants(
                 Value::String(opaque_host_id(state)),
             );
         }
-        let grants = account_id
+        let grants = tenant_id
             .and_then(|tenant_id| {
                 super::security_store::security_store().map(|store| (tenant_id, store))
             })
@@ -2725,7 +2726,7 @@ pub async fn rpc_handler(
         &state,
         &host,
         &ctx.device_id,
-        Some(&ctx.account_id),
+        Some(&ctx.tenant_id),
         Some(&ctx.scope),
         // This handler is test-only and is not behind the loopback listener,
         // so it gets the plane that discloses nothing.
@@ -2771,7 +2772,7 @@ pub(super) async fn dispatch_canonical(
         state,
         &host,
         &ctx.device_id,
-        Some(&ctx.account_id),
+        Some(&ctx.tenant_id),
         Some(&ctx.scope),
         plane,
     )
@@ -3227,7 +3228,7 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
     plane: super::remote_execution::ExecutionPlane,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
@@ -3267,10 +3268,10 @@ pub(super) async fn dispatch(
     }
 
     if super::browser_gateway::is_browser_rpc(name) {
-        let account_id = account_id.ok_or_else(|| {
+        let tenant_id = tenant_id.ok_or_else(|| {
             RpcError::forbidden("browser RPC requires an account-bound device token")
         })?;
-        return super::browser_gateway::dispatch_browser_rpc(name, args, account_id, device_id)
+        return super::browser_gateway::dispatch_browser_rpc(name, args, tenant_id, device_id)
             .await
             .map_err(|error| {
                 let status = match error.code.as_str() {
@@ -3289,70 +3290,68 @@ pub(super) async fn dispatch(
     }
 
     if chat::COMMANDS.contains(&name) {
-        return chat::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return chat::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if codex_app::COMMANDS.contains(&name) {
-        return codex_app::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return codex_app::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if media::COMMANDS.contains(&name) {
-        return media::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return media::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if native_tools::COMMANDS.contains(&name) {
-        return native_tools::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return native_tools::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if data_sync::COMMANDS.contains(&name) {
-        return data_sync::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return data_sync::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if service_plane::COMMANDS.contains(&name) {
-        return service_plane::dispatch(name, args, state, host, device_id, account_id, scope)
-            .await;
+        return service_plane::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if gateway_plane::COMMANDS.contains(&name) {
-        return gateway_plane::dispatch(name, args, state, host, device_id, account_id, scope)
-            .await;
+        return gateway_plane::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if host_admin::COMMANDS.contains(&name) {
-        return host_admin::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return host_admin::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if source_control::COMMANDS.contains(&name) {
-        return source_control::dispatch(name, args, state, host, device_id, account_id, scope)
+        return source_control::dispatch(name, args, state, host, device_id, tenant_id, scope)
             .await;
     }
 
     if filesystem::COMMANDS.contains(&name) {
-        return filesystem::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return filesystem::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if terminal::COMMANDS.contains(&name) {
-        return terminal::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return terminal::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if environment::COMMANDS.contains(&name) {
-        return environment::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return environment::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if sftp::COMMANDS.contains(&name) {
-        return sftp::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return sftp::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if plugins::COMMANDS.contains(&name) {
         // Only this sub-dispatcher takes the plane. The other nine have no
         // command that discloses anything a same-machine caller may see and an
         // off-box one may not, and widening their signatures would invite one.
-        return plugins::dispatch(name, args, state, host, device_id, account_id, scope, plane)
+        return plugins::dispatch(name, args, state, host, device_id, tenant_id, scope, plane)
             .await;
     }
 
     if diagnostics::COMMANDS.contains(&name) {
-        return diagnostics::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        return diagnostics::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     Err(RpcError::unknown_command(name))

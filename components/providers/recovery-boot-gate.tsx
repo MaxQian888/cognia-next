@@ -68,7 +68,7 @@ export function RecoveryBootGate({ children }: { children: ReactNode }) {
     <>
       {children}
       {secretStoreNotice(
-        "fixed inset-x-4 bottom-4 z-50 mx-auto max-w-xl shadow-lg sm:inset-x-auto sm:right-4"
+        "fixed inset-x-4 bottom-4 z-50 mx-auto max-w-xl shadow-(--elevation-3) sm:inset-x-auto sm:right-4"
       )}
     </>
   )

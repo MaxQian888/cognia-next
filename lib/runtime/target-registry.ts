@@ -74,24 +74,27 @@ export class RuntimeTargetRegistry {
     this.db.close()
   }
 
-  async listTargets(accountId: string): Promise<RuntimeTargetRecord[]> {
-    assertAccountId(accountId)
-    return this.db.targets.where("accountId").equals(accountId).sortBy("lastUsedAt")
+  async listTargets(localAccountId: string): Promise<RuntimeTargetRecord[]> {
+    assertAccountId(localAccountId)
+    return this.db.targets.where("accountId").equals(localAccountId).sortBy("lastUsedAt")
   }
 
-  async getActiveTarget(accountId: string): Promise<RuntimeTargetRecord | null> {
-    assertAccountId(accountId)
-    const pointer = await this.db.activeTargets.get(accountId)
+  async getActiveTarget(localAccountId: string): Promise<RuntimeTargetRecord | null> {
+    assertAccountId(localAccountId)
+    const pointer = await this.db.activeTargets.get(localAccountId)
     if (!pointer) return null
-    return (await this.db.targets.get([accountId, pointer.targetId])) ?? null
+    return (await this.db.targets.get([localAccountId, pointer.targetId])) ?? null
   }
 
-  async ensureStandaloneTarget(accountId: string, now = Date.now()): Promise<RuntimeTargetRecord> {
-    assertAccountId(accountId)
-    const existing = await this.db.targets.get([accountId, DEFAULT_STANDALONE_TARGET_ID])
+  async ensureStandaloneTarget(
+    localAccountId: string,
+    now = Date.now()
+  ): Promise<RuntimeTargetRecord> {
+    assertAccountId(localAccountId)
+    const existing = await this.db.targets.get([localAccountId, DEFAULT_STANDALONE_TARGET_ID])
     if (existing) return existing
     return this.addTarget({
-      accountId,
+      accountId: localAccountId,
       id: DEFAULT_STANDALONE_TARGET_ID,
       kind: "standalone",
       label: "This browser",
@@ -100,12 +103,12 @@ export class RuntimeTargetRegistry {
   }
 
   async addTarget(input: AddRuntimeTargetInput): Promise<RuntimeTargetRecord> {
-    const accountId = assertAccountId(input.accountId)
+    const localAccountId = assertAccountId(input.accountId)
     const id = assertTargetId(input.id)
     validateTargetShape(input.kind, input.hostKind)
     const now = input.now ?? Date.now()
     const row: RuntimeTargetRecord = {
-      accountId,
+      accountId: localAccountId,
       id,
       kind: input.kind,
       label: normalizeLabel(input.label),
@@ -119,12 +122,12 @@ export class RuntimeTargetRegistry {
   }
 
   async upsertCompanionTarget(input: UpsertCompanionTargetInput): Promise<RuntimeTargetRecord> {
-    const accountId = assertAccountId(input.accountId)
+    const localAccountId = assertAccountId(input.accountId)
     const id = assertTargetId(input.id)
     const now = input.now ?? Date.now()
-    const existing = await this.db.targets.get([accountId, id])
+    const existing = await this.db.targets.get([localAccountId, id])
     const row: RuntimeTargetRecord = {
-      accountId,
+      accountId: localAccountId,
       id,
       kind: "companion",
       label: normalizeLabel(input.label),
@@ -147,16 +150,16 @@ export class RuntimeTargetRegistry {
     input: UpsertCompanionTargetInput,
     isCurrent?: () => boolean
   ): Promise<RuntimeTargetRecord> {
-    const accountId = assertAccountId(input.accountId)
+    const localAccountId = assertAccountId(input.accountId)
     const id = assertTargetId(input.id)
     const now = input.now ?? Date.now()
     let activated: RuntimeTargetRecord | undefined
     await this.db.transaction("rw", this.db.targets, this.db.activeTargets, async () => {
-      const existing = await this.db.targets.get([accountId, id])
+      const existing = await this.db.targets.get([localAccountId, id])
       if (isCurrent && !isCurrent()) throw new Error("Runtime target activation cancelled")
-      activated = companionTargetRow(input, accountId, id, now, existing)
+      activated = companionTargetRow(input, localAccountId, id, now, existing)
       await this.db.targets.put(activated)
-      await this.db.activeTargets.put({ accountId, targetId: id, updatedAt: now })
+      await this.db.activeTargets.put({ accountId: localAccountId, targetId: id, updatedAt: now })
       // Throwing within the transaction rolls both writes back together.
       if (isCurrent && !isCurrent()) throw new Error("Runtime target activation cancelled")
     })
@@ -164,44 +167,44 @@ export class RuntimeTargetRegistry {
   }
 
   async activateTarget(
-    accountId: string,
+    localAccountId: string,
     targetId: string,
     now = Date.now()
   ): Promise<RuntimeTargetRecord> {
-    assertAccountId(accountId)
+    assertAccountId(localAccountId)
     assertTargetId(targetId)
     let activated: RuntimeTargetRecord | undefined
     await this.db.transaction("rw", this.db.targets, this.db.activeTargets, async () => {
-      const target = await this.db.targets.get([accountId, targetId])
+      const target = await this.db.targets.get([localAccountId, targetId])
       if (!target) {
-        throw new Error(`Runtime target ${targetId} does not exist for account ${accountId}.`)
+        throw new Error(`Runtime target ${targetId} does not exist for account ${localAccountId}.`)
       }
       activated = { ...target, updatedAt: now, lastUsedAt: now }
       await this.db.targets.put(activated)
-      await this.db.activeTargets.put({ accountId, targetId, updatedAt: now })
+      await this.db.activeTargets.put({ accountId: localAccountId, targetId, updatedAt: now })
     })
     return activated as RuntimeTargetRecord
   }
 
   async ensureDefaultActiveTarget(
-    accountId: string,
+    localAccountId: string,
     now = Date.now()
   ): Promise<RuntimeTargetRecord> {
-    const active = await this.getActiveTarget(accountId)
+    const active = await this.getActiveTarget(localAccountId)
     if (active) return active
-    const standalone = await this.ensureStandaloneTarget(accountId, now)
-    return this.activateTarget(accountId, standalone.id, now)
+    const standalone = await this.ensureStandaloneTarget(localAccountId, now)
+    return this.activateTarget(localAccountId, standalone.id, now)
   }
 
-  async deleteTarget(accountId: string, targetId: string): Promise<void> {
-    assertAccountId(accountId)
+  async deleteTarget(localAccountId: string, targetId: string): Promise<void> {
+    assertAccountId(localAccountId)
     assertTargetId(targetId)
     await this.db.transaction("rw", this.db.targets, this.db.activeTargets, async () => {
-      const active = await this.db.activeTargets.get(accountId)
+      const active = await this.db.activeTargets.get(localAccountId)
       if (active?.targetId === targetId) {
         throw new Error("The active runtime target must be switched before it can be removed.")
       }
-      await this.db.targets.delete([accountId, targetId])
+      await this.db.targets.delete([localAccountId, targetId])
     })
   }
 
@@ -210,37 +213,37 @@ export class RuntimeTargetRegistry {
    * Normal target removal must use `deleteTarget`; this escape hatch exists
    * for Mobile's verified sole-Host revocation, which transitions to unpaired.
    */
-  async deleteActiveTarget(accountId: string, targetId: string): Promise<void> {
-    assertAccountId(accountId)
+  async deleteActiveTarget(localAccountId: string, targetId: string): Promise<void> {
+    assertAccountId(localAccountId)
     assertTargetId(targetId)
     await this.db.transaction("rw", this.db.targets, this.db.activeTargets, async () => {
-      const active = await this.db.activeTargets.get(accountId)
+      const active = await this.db.activeTargets.get(localAccountId)
       if (active?.targetId !== targetId) {
         throw new Error(`Runtime target ${targetId} is not the active runtime target.`)
       }
-      await this.db.activeTargets.delete(accountId)
-      await this.db.targets.delete([accountId, targetId])
+      await this.db.activeTargets.delete(localAccountId)
+      await this.db.targets.delete([localAccountId, targetId])
     })
   }
 
-  async deleteAccountTargets(accountId: string): Promise<void> {
-    assertAccountId(accountId)
+  async deleteAccountTargets(localAccountId: string): Promise<void> {
+    assertAccountId(localAccountId)
     await this.db.transaction("rw", this.db.targets, this.db.activeTargets, async () => {
-      await this.db.targets.where("accountId").equals(accountId).delete()
-      await this.db.activeTargets.delete(accountId)
+      await this.db.targets.where("accountId").equals(localAccountId).delete()
+      await this.db.activeTargets.delete(localAccountId)
     })
   }
 }
 
 function companionTargetRow(
   input: UpsertCompanionTargetInput,
-  accountId: string,
+  localAccountId: string,
   id: string,
   now: number,
   existing?: RuntimeTargetRecord
 ): RuntimeTargetRecord {
   return {
-    accountId,
+    accountId: localAccountId,
     id,
     kind: "companion",
     label: normalizeLabel(input.label),
@@ -256,12 +259,15 @@ function companionTargetRow(
   }
 }
 
-export function runtimeTargetDatabaseName(accountId: string, targetId: string): string {
-  return `cognia-account-${assertAccountId(accountId)}-target-${assertTargetId(targetId)}`
+export function runtimeTargetDatabaseName(localAccountId: string, targetId: string): string {
+  return `cognia-account-${assertAccountId(localAccountId)}-target-${assertTargetId(targetId)}`
 }
 
-export function encryptedRuntimeTargetDatabaseName(accountId: string, targetId: string): string {
-  return `${runtimeTargetDatabaseName(accountId, targetId)}-encrypted-v1`
+export function encryptedRuntimeTargetDatabaseName(
+  localAccountId: string,
+  targetId: string
+): string {
+  return `${runtimeTargetDatabaseName(localAccountId, targetId)}-encrypted-v1`
 }
 
 function assertTargetId(targetId: string): string {

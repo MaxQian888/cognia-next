@@ -100,6 +100,4 @@ mod tests {
         assert!(desktop.contains("crate::fleet::install_companion_view()"));
         assert!(headless.contains("cognia_companion::fleet_view::install_companion_view()"));
     }
-
-
 }

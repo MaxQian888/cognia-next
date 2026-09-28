@@ -6,9 +6,10 @@
 // open, the same contract the file tree uses). The filename itself is the
 // non-interactive current page, as breadcrumbs convention has it.
 
+import { Spinner } from "@/components/ui/spinner"
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon, Loader2Icon } from "lucide-react"
+import { ChevronRightIcon, FileIcon, FolderIcon, FolderOpenIcon } from "lucide-react"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -185,7 +186,7 @@ function BreadcrumbEntries({
   if (state.status === "loading") {
     return (
       <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-        <Loader2Icon className="size-3 animate-spin" />
+        <Spinner className="size-3 " />
         {t("breadcrumbs.loading")}
       </div>
     )

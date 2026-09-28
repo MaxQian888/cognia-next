@@ -17,13 +17,13 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 #[cfg(feature = "tauri-host")]
 use tauri::State;
 
+use super::discover::{discover_interpreter, Interpreter};
+use super::protocol::{PluginHost, CALL_TIMEOUT, CONTROL_TIMEOUT};
 use super::PythonRuntimeState;
-use super::discover::{Interpreter, discover_interpreter};
-use super::protocol::{CALL_TIMEOUT, CONTROL_TIMEOUT, PluginHost};
 use crate::{PluginError, PluginRuntimeState, Result};
 
 /// Embedded host script, written to `<python_dir>/host.py` at initialize.
@@ -2374,11 +2374,9 @@ def rewrite(payload):
             assert_eq!(chunks[0].data, json!("a"));
             assert!(chunks[0].call_id.is_some());
             assert!(events.iter().any(|e| e.kind == "chunk_end"));
-            assert!(
-                events
-                    .iter()
-                    .any(|e| e.kind == "progress" && e.data["message"] == "starting")
-            );
+            assert!(events
+                .iter()
+                .any(|e| e.kind == "progress" && e.data["message"] == "starting"));
         }
 
         // Non-string chunks come back as a list.
@@ -2572,7 +2570,9 @@ def rewrite(payload):
 
         // Decision provider (ADR-0194): descriptor + typed answers. The host
         // passes exactly one argument — the request — over the RPC.
-        let described = dispatch("echo-decision", "describe", json!([])).await.unwrap();
+        let described = dispatch("echo-decision", "describe", json!([]))
+            .await
+            .unwrap();
         assert_eq!(described["locality"], "local");
         assert_eq!(described["calibrated"], false);
         let decided = dispatch(

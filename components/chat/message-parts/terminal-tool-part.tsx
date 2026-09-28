@@ -20,6 +20,7 @@
  * echo + output + run-in-dock affordance with no second collapse.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { memo, useCallback, useMemo, useState } from "react"
 import type { ToolUIPart } from "ai"
 import { useTranslations } from "next-intl"
@@ -114,7 +115,7 @@ const BashOutputView = memo(function BashOutputView({
   if (!command && !io.text && !isError) return null
 
   return (
-    <div
+    <Surface
       className="mt-0.5 mb-1 overflow-hidden rounded-md border border-l-2 bg-muted/40 font-mono text-xs"
       data-testid="terminal-tool-output"
       data-streaming={streaming || undefined}
@@ -155,7 +156,7 @@ const BashOutputView = memo(function BashOutputView({
           <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-foreground/70 align-middle" />
         ) : null}
       </div>
-    </div>
+    </Surface>
   )
 })
 

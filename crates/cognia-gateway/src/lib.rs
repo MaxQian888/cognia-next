@@ -220,13 +220,13 @@ impl GatewayState {
         self.invalidate_locked(&mut account);
     }
 
-    pub fn activate_account(&self, account_id: &str) {
+    pub fn activate_account(&self, local_account_id: &str) {
         let mut account = self.account.write();
-        if account.owner_account_id.as_deref() == Some(account_id) {
+        if account.owner_account_id.as_deref() == Some(local_account_id) {
             return;
         }
         account.required = true;
-        account.owner_account_id = Some(account_id.to_owned());
+        account.owner_account_id = Some(local_account_id.to_owned());
         self.invalidate_locked(&mut account);
     }
 
@@ -236,9 +236,9 @@ impl GatewayState {
         self.invalidate_locked(&mut account);
     }
 
-    pub fn lock_matching_account(&self, account_id: &str) -> bool {
+    pub fn lock_matching_account(&self, local_account_id: &str) -> bool {
         let mut account = self.account.write();
-        if account.owner_account_id.as_deref() != Some(account_id) {
+        if account.owner_account_id.as_deref() != Some(local_account_id) {
             return false;
         }
         account.owner_account_id = None;
@@ -247,9 +247,9 @@ impl GatewayState {
     }
 
     /// Called after a committed vault mutation, including with no renderer.
-    pub fn invalidate_account_snapshot(&self, account_id: &str) -> bool {
+    pub fn invalidate_account_snapshot(&self, local_account_id: &str) -> bool {
         let mut account = self.account.write();
-        if account.owner_account_id.as_deref() != Some(account_id) {
+        if account.owner_account_id.as_deref() != Some(local_account_id) {
             return false;
         }
         self.invalidate_locked(&mut account);

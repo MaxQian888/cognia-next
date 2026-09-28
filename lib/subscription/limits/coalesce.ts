@@ -60,8 +60,8 @@ interface CoalesceEntry {
 
 const entries = new Map<string, CoalesceEntry>()
 
-function keyOf(provider: ProviderId, accountId: string): string {
-  return `${provider} ${accountId}`
+function keyOf(provider: ProviderId, providerAccountId: string): string {
+  return `${provider} ${providerAccountId}`
 }
 
 export interface CoalesceLimitsOptions {
@@ -70,7 +70,7 @@ export interface CoalesceLimitsOptions {
   /** Injected clock for tests. Defaults to `Date.now`. */
   now?: () => number
   /** Injected runner for tests. Defaults to the real `queryAccountLimits`. */
-  run?: (provider: ProviderId, accountId: string) => Promise<ProviderLimits | null>
+  run?: (provider: ProviderId, providerAccountId: string) => Promise<ProviderLimits | null>
   /** Injected credential ledger for tests. Defaults to the shared one. */
   breaker?: SubscriptionBreaker
   /** Deterministic jitter source for the recorded backoff. */
@@ -91,14 +91,14 @@ export interface CoalesceLimitsOptions {
  */
 export function queryAccountLimitsCoalesced(
   provider: ProviderId,
-  accountId: string,
+  providerAccountId: string,
   options: CoalesceLimitsOptions = {}
 ): Promise<ProviderLimits | null> {
   const now = options.now ?? Date.now
   const run = options.run ?? queryAccountLimits
   const breaker = options.breaker ?? getSubscriptionBreaker()
   const failover = options.failover ?? runQuotaFailover
-  const key = keyOf(provider, accountId)
+  const key = keyOf(provider, providerAccountId)
   const entry = entries.get(key) ?? {
     inflight: null,
     lastAttemptAt: 0,
@@ -115,7 +115,7 @@ export function queryAccountLimitsCoalesced(
   // A provider-imposed block outranks everything, including an explicit user
   // refresh. This is the gate that a `force` click must not be able to open:
   // the whole point is that the server told us to stop.
-  const decision = breaker.shouldAttempt(limitsBreakerKey(provider, accountId), currentTime)
+  const decision = breaker.shouldAttempt(limitsBreakerKey(provider, providerAccountId), currentTime)
   if (!decision.allowed) return Promise.resolve(entry.lastResult)
 
   // Throttle: within the floor, replay the last result with no network hit.
@@ -126,13 +126,13 @@ export function queryAccountLimitsCoalesced(
     return Promise.resolve(entry.lastResult)
   }
 
-  const recordOptions = { provider, accountId, now, breaker, random: options.random }
+  const recordOptions = { provider, providerAccountId, now, breaker, random: options.random }
   const request = (async () => {
     try {
-      const result = await run(provider, accountId)
+      const result = await run(provider, providerAccountId)
       const display = applyCoalescedResult(entry, result, recordOptions)
       if (result?.error) {
-        await failover({ provider, accountId, error: result.error, now: now() })
+        await failover({ provider, providerAccountId, error: result.error, now: now() })
       }
       return display
     } catch (error) {
@@ -142,7 +142,7 @@ export function queryAccountLimitsCoalesced(
       // transport failure from a `null` "no source applied", and quietly
       // collapsing the two would hide an outage behind an empty panel.
       recordCoalescedThrow(error, recordOptions)
-      await failover({ provider, accountId, error, now: now() })
+      await failover({ provider, providerAccountId, error, now: now() })
       throw error
     } finally {
       // Stamp the attempt even on failure so a throwing query still waits out

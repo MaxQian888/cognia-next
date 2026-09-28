@@ -123,8 +123,8 @@ export function isDevLocalAccountEnabled(): boolean {
  * Consumers use it to relax first-run surfaces for this account only, rather
  * than for development at large. See `components/providers/onboarding-gate.tsx`.
  */
-export function isDevLocalAccount(accountId: string | null | undefined): boolean {
-  if (!accountId) return false
+export function isDevLocalAccount(localAccountId: string | null | undefined): boolean {
+  if (!localAccountId) return false
   if (!isDevLocalAccountEnabled()) return false
-  return accountId === DEV_LOCAL_ACCOUNT_ID
+  return localAccountId === DEV_LOCAL_ACCOUNT_ID
 }

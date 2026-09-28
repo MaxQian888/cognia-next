@@ -145,7 +145,7 @@ pub(crate) fn derive_protocol_request_uuid(
     let wire_request_id = serde_json::to_vec(wire_request_id).unwrap_or_default();
     let mut hasher = Sha256::new();
     for part in [
-        principal.account_id.as_bytes(),
+        principal.tenant_id.as_bytes(),
         principal.device_id.as_bytes(),
         protocol.as_bytes(),
         purpose.as_bytes(),
@@ -439,7 +439,7 @@ async fn execute_inner(
     let now = unix_time_secs();
     let operation_id = match store
         .begin_idempotent_operation(
-            &request.principal.account_id,
+            &request.principal.tenant_id,
             &request.principal.device_id,
             &local_host_id(),
             idempotency_key,
@@ -461,7 +461,7 @@ async fn execute_inner(
         IdempotencyDecision::Started { operation_id } => operation_id,
     };
     store
-        .mark_operation_running(&request.principal.account_id, &operation_id, now)
+        .mark_operation_running(&request.principal.tenant_id, &operation_id, now)
         .map_err(|error| map_store_error(&request.request_id, error))?;
 
     match dispatch(state, &request).await {
@@ -476,7 +476,7 @@ async fn execute_inner(
                 let receipt = json!({ "httpStatus": error.status, "error": error });
                 store
                     .complete_idempotent_operation(
-                        &request.principal.account_id,
+                        &request.principal.tenant_id,
                         &request.principal.device_id,
                         idempotency_key,
                         &receipt.to_string(),
@@ -490,7 +490,7 @@ async fn execute_inner(
             let receipt = json!({ "httpStatus": 200, "result": result });
             store
                 .complete_idempotent_operation(
-                    &request.principal.account_id,
+                    &request.principal.tenant_id,
                     &request.principal.device_id,
                     idempotency_key,
                     &receipt.to_string(),
@@ -509,7 +509,7 @@ async fn execute_inner(
             let receipt = json!({ "httpStatus": error.status, "error": error });
             store
                 .complete_idempotent_operation(
-                    &request.principal.account_id,
+                    &request.principal.tenant_id,
                     &request.principal.device_id,
                     idempotency_key,
                     &receipt.to_string(),
@@ -640,7 +640,7 @@ pub(super) fn capability_granted(
         Some(granted) => Ok(granted),
         None => security_store()
             .ok_or_else(|| store_unavailable(request_id))?
-            .has_capability(&principal.account_id, &principal.device_id, capability)
+            .has_capability(&principal.tenant_id, &principal.device_id, capability)
             .map_err(|error| map_store_error(request_id, error)),
     }
 }
@@ -771,7 +771,7 @@ fn authorize_approval(
             let policy = security_store()
                 .ok_or_else(|| store_unavailable(&request.request_id))?
                 .authorize_host_policy(
-                    &request.principal.account_id,
+                    &request.principal.tenant_id,
                     policy_id,
                     &descriptor.capability,
                     &request.command,
@@ -924,7 +924,7 @@ mod tests {
             json!({}),
             DeviceContext {
                 device_id: "device-a".to_string(),
-                account_id: "tenant-a".to_string(),
+                tenant_id: "tenant-a".to_string(),
                 scope: scope.to_string(),
                 granted_scopes: Vec::new(),
                 authorization_capabilities: capabilities,
@@ -1109,7 +1109,7 @@ mod tests {
             json!({ "input": { "type": "agent" } }),
             DeviceContext {
                 device_id: "device-a".to_string(),
-                account_id: "tenant-a".to_string(),
+                tenant_id: "tenant-a".to_string(),
                 scope: "device".to_string(),
                 granted_scopes: Vec::new(),
                 authorization_capabilities: Some(vec!["scheduler.manage".to_string()]),

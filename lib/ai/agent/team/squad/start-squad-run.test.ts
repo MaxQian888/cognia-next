@@ -33,7 +33,7 @@ function harness(
     recordsCreated?: boolean
     projectId?: string
   } = {}
-): Harness {
+) {
   const runCalls: Harness["runCalls"] = []
   const updates: Harness["updates"] = []
   const seeds: SquadRunRecordsSeed[] = []
@@ -79,7 +79,7 @@ function harness(
     resolveSessionCwd: async () => "/work",
     now: () => 1_000,
   }
-  return { runCalls, updates, seeds, bindings, deps }
+  return { runCalls, updates, seeds, bindings, deps, store }
 }
 
 const chatTrigger: WorkflowTriggeredFrom = { source: "chat", sessionId: "s1" }
@@ -436,14 +436,17 @@ describe("startSquadRun: launching", () => {
   it("freezes effective team restrictions and environment without copying credentials", async () => {
     const h = harness()
     const store = await h.deps.loadStore!()
-    const team = store.getTeam("squad-1")!
-    team.config = {
-      ...team.config,
-      defaultApiKey: "private-key",
-      defaultPermissionMode: "plan",
-      disallowedTools: ["Write"],
-      requirePlanApproval: true,
-      workingDir: "/original",
+    const baseTeam = h.store.getTeam("squad-1")!
+    const team = {
+      ...baseTeam,
+      config: {
+        ...baseTeam.config,
+        defaultApiKey: "private-key",
+        defaultPermissionMode: "plan",
+        disallowedTools: ["Write"],
+        requirePlanApproval: true,
+        workingDir: "/original",
+      },
     }
     h.deps.loadStore = async () => ({ ...store, getTeam: () => team })
     await start(h, { permissionCeiling: { permissionMode: "acceptEdits" } })

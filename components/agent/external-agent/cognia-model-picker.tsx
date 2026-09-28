@@ -114,7 +114,7 @@ export function CogniaModelPicker({
     try {
       const input = {
         definition: subscription,
-        accountId: value.accountId,
+        providerAccountId: value.accountId,
         signal: controller.signal,
       }
       const models = detail
@@ -330,15 +330,15 @@ function CogniaModelAccount({
       <Label htmlFor={id}>{t("account")}</Label>
       <Select
         value={value.accountId === null ? "__manual__" : (value.accountId ?? "__default__")}
-        onValueChange={(accountId) =>
+        onValueChange={(providerAccountId) =>
           onChange({
             ...value,
             accountId:
-              accountId === "__default__"
+              providerAccountId === "__default__"
                 ? undefined
-                : accountId === "__manual__"
+                : providerAccountId === "__manual__"
                   ? null
-                  : accountId,
+                  : providerAccountId,
           })
         }
         disabled={loading}

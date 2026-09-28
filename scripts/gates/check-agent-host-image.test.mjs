@@ -1,5 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
 
 import {
   LAYOUT_BUILD_SCRIPTS,
@@ -116,4 +118,47 @@ test("runChecks reports the two shipped defects it was written to catch", () => 
 
   assert.match(problems, /bubblewrap is not installed/)
   assert.match(problems, /stagePiExtension\(\)/)
+})
+
+test("headless Rust stages omit desktop bundle staging and retain the real brain layout", () => {
+  const dockerfile = readFileSync(
+    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    "utf8"
+  )
+  for (const stage of ["builder", "check"]) {
+    const source = stageText(dockerfile, stage)
+    const config = source.match(/^ENV TAURI_CONFIG='([^']+)'$/m)
+    assert.ok(config, `${stage} must explicitly disable desktop-only resource staging`)
+    assert.deepEqual(JSON.parse(config[1]).bundle, { resources: [], externalBin: [] })
+    assert.doesNotMatch(source, /COPY sidecar\//)
+    assert.doesNotMatch(source, /echo placeholder/)
+  }
+  const runtime = stageText(dockerfile, "runtime-slim")
+  assert.match(
+    runtime,
+    /COPY --from=brain-builder \/work\/cli\/dist\/bin\/cognia-agent-layout \/app\/brain/
+  )
+  assert.match(runtime, /COGNIA_SIDECAR_SCRIPT=\/app\/brain\/sidecar\/claude-host\.mjs/)
+})
+
+test("all literal server Docker COPY inputs exist in a fresh checkout", () => {
+  const dockerfile = readFileSync(
+    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    "utf8"
+  )
+  const tracked = execFileSync("git", ["ls-files", "-z"], {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+    cwd: new URL("../../", import.meta.url),
+  }).split("\0")
+  for (const line of dockerfile.split("\n")) {
+    if (!line.startsWith("COPY ") || line.includes("--from=")) continue
+    for (const input of line.split(/\s+/).slice(1, -1)) {
+      if (input === ".") continue
+      assert.ok(
+        tracked.some((file) => file === input || file.startsWith(`${input}/`)),
+        `${input} is not tracked`
+      )
+    }
+  }
 })

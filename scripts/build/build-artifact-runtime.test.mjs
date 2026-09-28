@@ -170,6 +170,14 @@ test("the committed jsx bundle transforms JSX and downlevels ESM artifact code",
   assert.ok(classic.code.includes("React.createElement"))
   assert.ok(!classic.code.includes("<div"))
 
+  const value = "first  \nsecond\t\n"
+  const template = sandbox.CogniaArtifactJsx.transform(
+    "globalThis.artifactText = `" + value + "`"
+  )
+  vm.runInContext(template.code, sandbox)
+  assert.equal(sandbox.artifactText, value, "upstream string contents must be preserved")
+  assert.ok(!/[\t ]+$/m.test(bundle.toString("utf8")), "generated bundle has no trailing whitespace")
+
   const esm = sandbox.CogniaArtifactJsx.transform(
     'import React from "react"\nexport default function App() { return <p>hi</p> }'
   )

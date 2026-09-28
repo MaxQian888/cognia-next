@@ -22,16 +22,11 @@
  * with, not a second implementation.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useEffect, useMemo, useState } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import {
-  ChevronRightIcon,
-  DownloadIcon,
-  Loader2Icon,
-  ScrollTextIcon,
-  Trash2Icon,
-} from "lucide-react"
+import { ChevronRightIcon, DownloadIcon, ScrollTextIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { estimateCallCostUsd } from "@cognia/provider-core/providers/model-pricing"
@@ -234,7 +229,7 @@ export function GatewayLogViewer() {
                 disabled={clearing}
                 onClick={() => void onClear()}
               >
-                {clearing ? <Loader2Icon className="size-3.5 animate-spin" aria-hidden /> : null}
+                {clearing ? <Spinner className="size-3.5 " aria-hidden /> : null}
                 {t("clearLogConfirmAction")}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setConfirmClear(false)}>

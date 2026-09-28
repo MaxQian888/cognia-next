@@ -2,9 +2,10 @@
 
 // Browser workbench lifecycle; shared hooks route editor operations to its host.
 
+import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon, RotateCwIcon } from "lucide-react"
+import { RotateCwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { CodeServerWebFrame } from "./code-server-web-frame"
@@ -194,7 +195,7 @@ function WebWorkbenchSession({ root, profile = "managed", beforeOpen }: Props) {
         className="flex h-full w-full flex-col items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
         data-testid="code-server-web-loading"
       >
-        <Loader2Icon className="size-5 animate-spin" />
+        <Spinner className="size-5 " />
         <span>{t("proIde.starting")}</span>
       </div>
     )

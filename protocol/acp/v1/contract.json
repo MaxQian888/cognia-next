@@ -18,7 +18,7 @@
   },
   "sdk": {
     "package": "@agentclientprotocol/sdk",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "integrity": "sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg=="
   },
   "stable": {

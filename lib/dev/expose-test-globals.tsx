@@ -355,7 +355,7 @@ export function ExposeTestGlobals(): null {
         if (prevName.startsWith(ACCOUNT_DB_PREFIX)) {
           // prevName is the PHYSICAL database name — `cognia-account-<id>`,
           // `…<id>-encrypted-v1`, or `…<id>-target-<targetId>-encrypted-v1` —
-          // but activateAccountDatabase takes the bare accountId and re-appends
+          // but activateAccountDatabase takes the bare localAccountId and re-appends
           // the encryption suffix itself. Passing the whole slug produced
           // `…-encrypted-v1-encrypted-v1`, a different database whose content
           // cipher was never unlocked, so the re-seed below intermittently

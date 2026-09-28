@@ -8,7 +8,8 @@ import type { ThemeColors } from "../types/plugin/plugin"
 const toOklch = converter("oklch")
 
 function oklch(hex: string): { l: number; c: number; h: number } {
-  const p = toOklch(parse(hex) as never)
+  const parsed = parse(hex)
+  const p = parsed ? toOklch(parsed) : undefined
   return { l: p?.l ?? 0, c: p?.c ?? 0, h: p?.h ?? 0 }
 }
 

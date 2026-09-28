@@ -64,7 +64,7 @@ export function TrackerTabs({ active, compact, className }: TrackerTabsProps) {
               "focus-visible:ring-ring/50 inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-[3px]",
               compact && "flex-1",
               current
-                ? "bg-background text-foreground shadow-xs"
+                ? "bg-background text-foreground shadow-(--elevation-1)"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >

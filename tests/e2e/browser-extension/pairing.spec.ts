@@ -83,6 +83,10 @@ test.describe("pairing a browser", () => {
     // the second attempt is this panel disconnecting and redeeming the same
     // code again — which is exactly what a user pasting a copy would do.
     await panel.getByTestId("disconnect").click()
+    await panel
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Disconnect this browser" })
+      .click()
     await expect(panel.getByLabel("Paste the pairing code")).toBeVisible()
     await pairThroughPanel(panel, code)
 

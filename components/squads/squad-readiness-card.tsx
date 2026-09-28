@@ -19,10 +19,11 @@
  * the retired workspace.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
-import { AlertTriangleIcon, CheckCircle2Icon, ExternalLinkIcon, Loader2Icon } from "lucide-react"
+import { AlertTriangleIcon, CheckCircle2Icon, ExternalLinkIcon } from "lucide-react"
 import { nanoid } from "nanoid"
 import { toast } from "sonner"
 
@@ -190,7 +191,7 @@ export function SquadReadinessCard({ squadId, className }: SquadReadinessCardPro
         <p className="font-medium">{t("title")}</p>
         {readiness.loading ? (
           <Badge variant="outline" className="gap-1">
-            <Loader2Icon aria-hidden className="size-3 animate-spin" />
+            <Spinner aria-hidden className="size-3 " />
             {t("loading")}
           </Badge>
         ) : readiness.ready ? (

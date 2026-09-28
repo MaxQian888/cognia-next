@@ -10,6 +10,7 @@
  * order is the query's: most recently touched first.
  */
 
+import { Surface } from "@/components/surface/surface"
 import { useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { SearchIcon, XIcon } from "lucide-react"
@@ -120,11 +121,11 @@ export function BotListPane({
             the rail reaching for search rather than swapping bars. It stretches
             the full content height (inset-y matches the row's padding) instead
             of pinning h-8, so a taller control underneath can never peek out. */}
-        <div
+        <Surface
           className={cn(
             "absolute inset-y-2.5 left-2.5 z-10 flex items-center overflow-hidden rounded-md transition-[width,border-color,box-shadow] ease-out [transition-duration:calc(200ms*var(--motion-duration-scale,1))]",
             expanded
-              ? "w-[calc(100%-1.25rem)] border bg-background shadow-xs"
+              ? "w-[calc(100%-1.25rem)] border bg-background shadow-(--elevation-1)"
               : "w-8 border-transparent"
           )}
         >
@@ -185,7 +186,7 @@ export function BotListPane({
               <XIcon className="size-3.5" aria-hidden />
             </Button>
           ) : null}
-        </div>
+        </Surface>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">

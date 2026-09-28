@@ -213,12 +213,12 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     use tauri::Manager as _;
 
-    let _ = (state, host, device_id, account_id, scope);
+    let _ = (state, host, device_id, tenant_id, scope);
     let result = match name {
         // ── Sync down (M4.7) ──────────────────────────────────────────────────
 
@@ -354,7 +354,7 @@ pub(super) async fn dispatch(
                 return Err(RpcError::malformed("sync cursor exceeds 4096 bytes".into()));
             }
             validate_content_protocol(&table, content_protocol_version)?;
-            let account_id = account_id.ok_or_else(|| {
+            let tenant_id = tenant_id.ok_or_else(|| {
         RpcError::forbidden("sync_pull requires an account-bound device principal")
             })?;
             // Wave 3.5 — table allowlist now lives on the declarative
@@ -372,13 +372,13 @@ pub(super) async fn dispatch(
             // degraded-store path.
             let transport = super::super::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
-            // The principal's `account_id` is a *tenant*; the responder on the
+            // The principal's `tenant_id` is a *tenant*; the responder on the
             // far side (`desktop-sync-source`) checks it against its unlocked
             // local account id and refuses a mismatch. Translating here is the
             // same fix applied to `companion://device-paired`: two id spaces
             // that only matched while the tenant was a hardcoded literal.
             let account_namespace =
-                crate::companion_api::host_identity::event_namespace_for_tenant(account_id);
+                crate::companion_api::host_identity::event_namespace_for_tenant(tenant_id);
             bridge
                 .pull(
                     transport.as_ref(),
@@ -952,7 +952,7 @@ pub(super) async fn dispatch(
             // client-sent value) so a device can never spoof another's id.
             let args = inject_caller_device_id(name, args, device_id);
             let args = inject_caller_event_streams(name, args, device_id);
-            let args = inject_caller_device_grants(name, args, state, device_id, account_id);
+            let args = inject_caller_device_grants(name, args, state, device_id, tenant_id);
             // Browser Companion joins the HostState binding because its submit
             // arm reaches the same authority: it needs the verified account and
             // this Host's opaque id to construct the `message.enqueue` it
@@ -961,7 +961,7 @@ pub(super) async fn dispatch(
             let args = if super::host_state::COMMANDS.contains(&name)
                 || super::BROWSER_COMPANION_COMMANDS.contains(&name)
             {
-                super::host_state::bind_authority(args, state, account_id, device_id)?
+                super::host_state::bind_authority(args, state, tenant_id, device_id)?
             } else {
                 args
             };
@@ -990,7 +990,7 @@ pub(super) async fn dispatch(
         | "thread_handoff_commit"
         | "thread_handoff_abort"
         | "thread_handoff_status" => {
-            let args = super::host_state::bind_authority(args, state, account_id, device_id)?;
+            let args = super::host_state::bind_authority(args, state, tenant_id, device_id)?;
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             let transport = super::super::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;

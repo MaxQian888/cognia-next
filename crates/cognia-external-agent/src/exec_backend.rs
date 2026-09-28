@@ -271,7 +271,11 @@ pub async fn spawn_with_events(
     // A sandboxed agent runs in a container even when the host's own path is
     // local processes, so it gets none of the local-only payloads.
     let runs_locally = config.sandbox.is_none() && backend.kind() == "local-process";
-    if config.env.contains_key(crate::devin_mcp_config::PAYLOAD_ENV) && !runs_locally {
+    if config
+        .env
+        .contains_key(crate::devin_mcp_config::PAYLOAD_ENV)
+        && !runs_locally
+    {
         return Err("Isolated Devin MCP configuration requires a local process backend".into());
     }
     if config.env.contains_key(crate::gateway_task::PAYLOAD_ENV) && !runs_locally {
@@ -411,31 +415,66 @@ mod tests {
         struct Remote;
         #[async_trait]
         impl ExecBackend for Remote {
-            async fn spawn(&self, _: ExternalAgentSpawnConfig, _: Arc<dyn ExternalAgentEventSink>) -> Result<String, String> { panic!("remote spawn must not be reached") }
-            async fn send(&self, _: &str, _: &str) -> Result<(), String> { unreachable!() }
-            async fn kill(&self, _: &str) -> Result<(), String> { unreachable!() }
-            async fn kill_all(&self) -> Result<(), String> { unreachable!() }
-            async fn status(&self, _: &str) -> Option<ExternalAgentProcessState> { unreachable!() }
-            async fn list(&self) -> Vec<String> { unreachable!() }
-            async fn is_running(&self, _: &str) -> Result<bool, String> { unreachable!() }
-            async fn get_info(&self, _: &str) -> Result<Value, String> { unreachable!() }
-            async fn set_running(&self, _: &str) -> Result<(), String> { unreachable!() }
-            async fn set_failed(&self, _: &str) -> Result<(), String> { unreachable!() }
-            fn kind(&self) -> &'static str { "container" }
+            async fn spawn(
+                &self,
+                _: ExternalAgentSpawnConfig,
+                _: Arc<dyn ExternalAgentEventSink>,
+            ) -> Result<String, String> {
+                panic!("remote spawn must not be reached")
+            }
+            async fn send(&self, _: &str, _: &str) -> Result<(), String> {
+                unreachable!()
+            }
+            async fn kill(&self, _: &str) -> Result<(), String> {
+                unreachable!()
+            }
+            async fn kill_all(&self) -> Result<(), String> {
+                unreachable!()
+            }
+            async fn status(&self, _: &str) -> Option<ExternalAgentProcessState> {
+                unreachable!()
+            }
+            async fn list(&self) -> Vec<String> {
+                unreachable!()
+            }
+            async fn is_running(&self, _: &str) -> Result<bool, String> {
+                unreachable!()
+            }
+            async fn get_info(&self, _: &str) -> Result<Value, String> {
+                unreachable!()
+            }
+            async fn set_running(&self, _: &str) -> Result<(), String> {
+                unreachable!()
+            }
+            async fn set_failed(&self, _: &str) -> Result<(), String> {
+                unreachable!()
+            }
+            fn kind(&self) -> &'static str {
+                "container"
+            }
         }
         let config = ExternalAgentSpawnConfig {
-            id: "devin".into(), command: "devin".into(), args: vec!["acp".into()],
+            id: "devin".into(),
+            command: "devin".into(),
+            args: vec!["acp".into()],
             env: HashMap::from([(crate::devin_mcp_config::PAYLOAD_ENV.into(), "[]".into())]),
-            cwd: None, framing: Default::default(), sandbox: None,
+            cwd: None,
+            framing: Default::default(),
+            sandbox: None,
         };
         let result = spawn_with_events(&Remote, RecordingAgentEmitter::new(), config).await;
-        assert!(result.unwrap_err().contains("requires a local process backend"));
+        assert!(result
+            .unwrap_err()
+            .contains("requires a local process backend"));
     }
 
     #[test]
     fn the_placement_payload_shape() {
         assert_eq!(
-            placement_payload("a1", &json!({ "kind": "fallback", "code": "c", "message": "m" })),
+            placement_payload(
+                "a1",
+                &json!({ "kind": "fallback", "code": "c", "message": "m" })
+            ),
             json!({ "agentId": "a1", "placement": { "kind": "fallback", "code": "c", "message": "m" } })
         );
     }
@@ -448,10 +487,12 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
-            sandbox: Some(crate::sandbox_routing_backend::SandboxPlacement::Container {
-                spec: json!({}),
-                isolation_mandatory,
-            }),
+            sandbox: Some(
+                crate::sandbox_routing_backend::SandboxPlacement::Container {
+                    spec: json!({}),
+                    isolation_mandatory,
+                },
+            ),
         }
     }
 

@@ -5,6 +5,82 @@ const APP_ROLE: &str = "cognia_rls_app";
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL instance"]
+async fn concurrent_bootstrap_waits_for_migration_lock_and_completes() {
+    use std::time::Duration;
+
+    let url = std::env::var("COLLAB_RLS_ADMIN_DATABASE_URL").unwrap();
+    let (cluster_admin, cluster_connection) = tokio_postgres::connect(&url, NoTls).await.unwrap();
+    let cluster_task = tokio::spawn(async move { cluster_connection.await.unwrap() });
+    let database = format!("migration_test_{}", uuid::Uuid::new_v4().simple());
+    cluster_admin
+        .batch_execute(&format!("CREATE DATABASE {database}"))
+        .await
+        .unwrap();
+    let separator = if url.contains('?') { '&' } else { '?' };
+    let isolated_url = format!("{url}{separator}dbname={database}&application_name={database}");
+    let (admin, connection) = tokio_postgres::connect(&isolated_url, NoTls).await.unwrap();
+    let connection_task = tokio::spawn(async move { connection.await.unwrap() });
+    admin
+        .batch_execute("SELECT pg_advisory_lock(hashtextextended('cognia.collab.migrations', 0))")
+        .await
+        .unwrap();
+    let first_url = isolated_url.clone();
+    let first = tokio::spawn(async move { PgStore::connect(&first_url, 2).await });
+    let second = tokio::spawn(async move { PgStore::connect(&isolated_url, 2).await });
+
+    // Observe both connections waiting at the migration barrier, rather than
+    // relying on scheduler timing to reproduce a catalog-write collision.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let waiting: i64 = admin
+                .query_one(
+                    "SELECT count(*) FROM pg_stat_activity \
+                     WHERE application_name = $1 AND wait_event = 'advisory'",
+                    &[&database],
+                )
+                .await
+                .unwrap()
+                .get(0);
+            if waiting == 2 {
+                break;
+            }
+            assert!(!first.is_finished() && !second.is_finished());
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("both bootstrap connections must wait for the migration lock");
+
+    admin
+        .batch_execute("SELECT pg_advisory_unlock(hashtextextended('cognia.collab.migrations', 0))")
+        .await
+        .unwrap();
+    let (first, second) = tokio::time::timeout(Duration::from_secs(20), async {
+        tokio::join!(first, second)
+    })
+    .await
+    .expect("both serialized migrations must finish");
+    let first = first.unwrap().expect("first bootstrap succeeds");
+    let second = second.unwrap().expect("second bootstrap succeeds");
+    let exists: bool = admin
+        .query_one("SELECT to_regclass('public.users') IS NOT NULL", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert!(exists, "the schema is committed after bootstrap");
+    drop((first, second));
+    drop(admin);
+    connection_task.await.unwrap();
+    cluster_admin
+        .batch_execute(&format!("DROP DATABASE {database} WITH (FORCE)"))
+        .await
+        .unwrap();
+    drop(cluster_admin);
+    cluster_task.await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
 async fn shared_chat_claim_is_atomic_and_survives_pool_reconnect() {
     use cognia_collab_server::chat::{SessionRole, SessionStatus};
     use cognia_collab_server::chat_store::{

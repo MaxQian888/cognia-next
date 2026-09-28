@@ -65,7 +65,7 @@ test("the manifest version matches what the host installs", () => {
   // The host skips the side-load when its marker already records this version,
   // so a bumped extension that forgot the Rust constant never reaches anyone.
   const rust = readFileSync(
-    join(EXT_DIR, "..", "..", "src-tauri", "src", "codeserver", "process.rs"),
+    join(EXT_DIR, "..", "..", "crates", "cognia-codeserver", "src", "process.rs"),
     "utf8"
   )
   const declared = /const BROKER_EXT_VERSION: &str = "([^"]+)"/.exec(rust)?.[1]

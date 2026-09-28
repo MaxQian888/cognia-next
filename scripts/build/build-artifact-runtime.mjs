@@ -47,11 +47,10 @@ export const ARTIFACT_SHELL_FILE = "artifact-shell.js"
 export const MANIFEST_FILE = "manifest.json"
 
 /**
- * Bumped to 2 when the sentinel moved from a single `shellEntrySha` to the
- * recorded `shellSources` set, so every manifest written by the old scheme is
- * stale exactly once and rebuilds itself into the new one.
+ * Schema 3 rebuilds bundles with escaped string literals, preserving upstream
+ * template contents without embedding whitespace-sensitive multiline strings.
  */
-export const MANIFEST_SCHEMA = 2
+export const MANIFEST_SCHEMA = 3
 
 /**
  * The shell bundle's entry source.
@@ -296,6 +295,7 @@ async function main() {
       platform: "browser",
       target: ["es2022"],
       minify: true,
+      supported: { "template-literal": false },
       legalComments: "none",
       // The CDN tags loaded react.development.js; the production define is
       // what turns this into the build a preview should actually run.

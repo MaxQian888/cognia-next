@@ -88,8 +88,13 @@ describe("plugin contract generator", () => {
   test("projects every callable API into generated author documentation", () => {
     const docs = renderApiReference(catalog)
     const methods = catalog.apiNamespaces.flatMap((namespace) => namespace.methods)
-    assert.equal(catalog.apiNamespaces.length, 77)
-    assert.equal(methods.length, 764)
+    assert.ok(catalog.apiNamespaces.length > 0)
+    for (const namespace of catalog.apiNamespaces) {
+      assert.ok(docs.includes(`\`ctx.${namespace.id}\``), `missing namespace ${namespace.id}`)
+    }
+    for (const method of methods) {
+      assert.ok(docs.includes(`\`${method.id}\``), `missing method ${method.id}`)
+    }
     assert.match(docs, /`ctx\.session`/)
     assert.match(docs, /`session\.listSessions`/)
     assert.match(docs, /`templates\.instantiate`/)
@@ -104,7 +109,10 @@ describe("plugin contract generator", () => {
         .map((method) => [method.id, method.resourceEffect])
     )
 
-    assert.equal(methods.size, 764)
+    assert.equal(
+      methods.size,
+      catalog.apiNamespaces.reduce((count, namespace) => count + namespace.methods.length, 0)
+    )
     assert.deepEqual(methods.get("webview.create"), {
       kind: "returned-handle",
       disposeMethod: "dispose",

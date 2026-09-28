@@ -109,7 +109,7 @@ async function issueRetry(
         const sameSelectionFamily =
           subscriptionAccountProviderFor(selectionProvider ?? "", settings.customProviders) ===
           nextAccountProvider
-        const accountId = resolveAccountId(
+        const providerAccountId = resolveAccountId(
           nextEntry.providerId,
           sameSelectionFamily ? session : null,
           sameSelectionFamily ? character : null,
@@ -120,7 +120,7 @@ async function issueRetry(
         attemptOptions = await resolveProviderAttemptOptions(
           nextEntry.providerId,
           settings,
-          accountId,
+          providerAccountId,
           explicitAccount,
           nextEntry.modelId
         )

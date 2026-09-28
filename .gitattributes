@@ -1,0 +1,3 @@
+# Monaco assets are copied verbatim from the installed upstream package.
+# Whitespace inside its bundled strings is data, not authored source formatting.
+public/monaco/vs/**/*.js -whitespace

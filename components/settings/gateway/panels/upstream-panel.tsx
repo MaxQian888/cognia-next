@@ -16,9 +16,10 @@
  * provider id, but only the restore-everything form was ever reachable.
  */
 
+import { Spinner } from "@/components/ui/spinner"
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon, RefreshCwIcon, ShieldIcon } from "lucide-react"
+import { RefreshCwIcon, ShieldIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { MotionReveal } from "@/components/chat/motion/motion-reveal"
@@ -214,9 +215,7 @@ export function GatewayUpstreamPanel({
               disabled={cooldownAction !== null || cooldowns.length === 0}
               onClick={() => void runCooldownAction(RESET_ALL)}
             >
-              {cooldownAction === RESET_ALL && (
-                <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
-              )}
+              {cooldownAction === RESET_ALL && <Spinner className="mr-1.5 size-3.5 " aria-hidden />}
               {t(cooldownAction === RESET_ALL ? "cooldownsResetting" : "cooldownsReset")}
             </Button>
           </div>
@@ -251,7 +250,7 @@ export function GatewayUpstreamPanel({
                         aria-label={t("cooldownsRestoreProviderAria", { provider: providerId })}
                       >
                         {cooldownAction === action ? (
-                          <Loader2Icon className="size-3 animate-spin" aria-hidden />
+                          <Spinner className="size-3 " aria-hidden />
                         ) : null}
                         {t("cooldownsRestoreProvider")}
                       </Button>
