@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri_plugin_log::{Target, TargetKind};
 
-const APP_LOG_DIR_NAME: &str = "Cognia";
+use super::APP_LOG_DIR_NAME;
+pub use super::log_dir;
 const LOG_FILE_NAME: &str = "cognia";
 const READY_TARGETS_FULL: [&str; 3] = ["stdout", "folder", "webview"];
 const READY_TARGETS_FALLBACK: [&str; 2] = ["stdout", "webview"];
@@ -124,12 +125,6 @@ fn set_native_logging_readiness(next: NativeLoggingReadiness) {
     }
 }
 
-/// Resolve the persistent log directory (`<data_local_dir>/Cognia/logs`)
-/// without creating it. Returns `None` when the platform data dir is
-/// unavailable. Used by the startup rotated-log prune.
-pub fn log_dir() -> Option<PathBuf> {
-    Some(dirs::data_local_dir()?.join(APP_LOG_DIR_NAME).join("logs"))
-}
 
 fn prepare_persistent_log_target() -> Result<PathBuf, String> {
     let local_data =

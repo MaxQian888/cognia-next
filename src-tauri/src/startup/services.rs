@@ -10,6 +10,26 @@ use tauri::{App, Emitter, Manager};
 
 use crate::subscription::provider::ProviderId;
 
+/// Resolve resources before any subsystem can spawn a sidecar.
+pub(crate) fn sidecar_location(app: &App) {
+    crate::codeserver::install_host();
+    let resource_dir = app.path().resource_dir().ok();
+    let force_checkout =
+        cfg!(feature = "agent-debug") && std::env::var_os("COGNIA_AGENT_DEBUG").is_some();
+    match cognia_sidecar::locate(
+        resource_dir.as_deref(),
+        cfg!(debug_assertions),
+        force_checkout,
+    ) {
+        Ok(directory) => {
+            if let Err(error) = cognia_sidecar::SIDECAR.install(directory) {
+                log::warn!("install sidecar directory: {error}");
+            }
+        }
+        Err(error) => log::error!("resolve sidecar directory: {error}"),
+    }
+}
+
 /// Where the app keeps its own state under the platform app-data dir. Existing
 /// installs keep their data here: moving any of these strands it.
 fn cognia_data_dir(app_data_dir: &Path) -> PathBuf {

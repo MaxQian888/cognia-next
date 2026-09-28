@@ -623,6 +623,8 @@ impl Default for CompanionServerState {
 // Tests
 // ---------------------------------------------------------------------------
 
+pub mod fleet_view;
+
 #[cfg(test)]
 mod tests {
     use super::*;

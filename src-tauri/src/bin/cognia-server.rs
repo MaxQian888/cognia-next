@@ -37,7 +37,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use app_lib::companion_api::{
-    CompanionState, SharedState,
     data_plane::install_headless_store,
     deny_list::DenyList,
     desktop_messages_bridge::DesktopMessagesBridge,
@@ -50,19 +49,19 @@ use app_lib::companion_api::{
     push_creds::{self, FilePushCredStore},
     rate_limit::RateLimiter,
     secret,
-    security_store::{SecurityStore, install_security_store},
+    security_store::{install_security_store, SecurityStore},
     server, set_advertised_port, set_tls_fingerprint,
-    signaling::{self, SignalingHub, registration_store::SignalingRegistrationStore},
-    store::{AppStore, sqlite::SqliteAppStore},
+    signaling::{self, registration_store::SignalingRegistrationStore, SignalingHub},
+    store::{sqlite::SqliteAppStore, AppStore},
     sync_bridge::SyncBridge,
     sync_registry::SyncTableRegistry,
-    tls,
+    tls, CompanionState, SharedState,
 };
 use app_lib::headless::{
-    ApiKeyState, HeadlessServices, HeadlessSidecarHost, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
-    SpawnPolicy, backup, brain, exec_backend_from_env, generate_master_key, headless_services,
+    backup, brain, exec_backend_from_env, generate_master_key, headless_services,
     init_secret_store, install_headless_services, kill_sidecar, parse_master_key,
-    resolve_master_key_from_env, rotate_master_key, spawn_sidecar,
+    resolve_master_key_from_env, rotate_master_key, spawn_sidecar, ApiKeyState, HeadlessServices,
+    HeadlessSidecarHost, SpawnPolicy, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
 };
 use parking_lot::RwLock;
 
@@ -394,7 +393,7 @@ enum ProfilesCommand {
 /// than dying — the bus is bursty under a sync storm and a push is
 /// best-effort by contract.
 fn spawn_headless_push_triggers(shared: app_lib::companion_api::SharedState) {
-    use app_lib::companion_api::commands::{PUSH_TRIGGER_CHANNELS, fan_out_push};
+    use app_lib::companion_api::commands::{fan_out_push, PUSH_TRIGGER_CHANNELS};
     use app_lib::companion_api::event_bus::SubscribeResult;
 
     let now = chrono::Utc::now().timestamp_millis();
@@ -1169,7 +1168,7 @@ fn run_profiles(
     command: ProfilesCommand,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use app_lib::provider_profiles::{
-        ProviderProfileStore, SqliteProfileStore, headless_store_path,
+        headless_store_path, ProviderProfileStore, SqliteProfileStore,
     };
     let store = SqliteProfileStore::open(headless_store_path(data_dir))?;
     match command {
@@ -1380,7 +1379,7 @@ fn encode_running_pair_invitation(
         }
         _ => 3,
     };
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     Some(format!(
         "cgnp{version}|{}",
         URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes())
@@ -1411,7 +1410,7 @@ fn encode_pair_invitation_payload(
     if let Some(invitation) = invitation {
         payload["invitation"] = serde_json::Value::String(invitation.to_string());
     }
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     format!(
         "cgnp3|{}",
         URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes())
@@ -1634,6 +1633,11 @@ async fn run_serve(
         log::warn!("no sidecar script found (set {SIDECAR_SCRIPT_ENV}); claude_send will fail");
         PathBuf::from("claude-host.mjs")
     });
+    if let Some(directory) = sidecar_script.parent() {
+        if let Err(error) = cognia_sidecar::SIDECAR.install(directory.to_path_buf()) {
+            log::warn!("install headless sidecar directory: {error}");
+        }
+    }
     let sidecar_host = Arc::new(HeadlessSidecarHost::new(
         sidecar_script,
         Arc::clone(&shared.event_bus),
@@ -1985,11 +1989,12 @@ async fn run_serve(
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, CliCommand, DevicesCommand, agent_session_store_path, browser_plane_base_url,
-        color_enabled, encode_pair_invitation_payload, encode_running_pair_invitation,
-        format_log_line, lark_entry, plugin_storage_dir, report_lark_env, run_devices_admin,
+        agent_session_store_path, browser_plane_base_url, color_enabled,
+        encode_pair_invitation_payload, encode_running_pair_invitation, format_log_line,
+        lark_entry, plugin_storage_dir, report_lark_env, run_devices_admin, Cli, CliCommand,
+        DevicesCommand,
     };
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use clap::Parser;
     use std::path::Path;
 
@@ -2097,13 +2102,11 @@ mod tests {
             fatal: false,
             message: "points at loopback".into(),
         };
-        assert!(
-            report_lark_env(
-                &mut |level, message| warned.push((level, message)),
-                std::slice::from_ref(&warning)
-            )
-            .is_ok()
-        );
+        assert!(report_lark_env(
+            &mut |level, message| warned.push((level, message)),
+            std::slice::from_ref(&warning)
+        )
+        .is_ok());
         // A non-fatal issue reports at WARN, so the shared sink colours it as
         // one instead of spelling the severity into the message text.
         assert_eq!(
@@ -2429,7 +2432,7 @@ mod tests {
     #[tokio::test]
     async fn the_devices_cli_cannot_grant_a_browser_device_anything_outside_its_class() {
         use app_lib::companion_api::security_store::{
-            SecurityStore, SecurityStoreError, install_security_store,
+            install_security_store, SecurityStore, SecurityStoreError,
         };
         let store = SecurityStore::in_memory().expect("in-memory store");
         install_security_store(Some(store.clone()));
@@ -2487,11 +2490,9 @@ mod tests {
                 "{flag}: {error}"
             );
         }
-        assert!(
-            !store
-                .has_capability("tenant-a", "browser-a", "terminal.open")
-                .unwrap()
-        );
+        assert!(!store
+            .has_capability("tenant-a", "browser-a", "terminal.open")
+            .unwrap());
         assert_eq!(class(), vec!["browser.read-own", "browser.submit"]);
 
         // Revoking writes the browser's own class back, which must still work.
@@ -2513,11 +2514,9 @@ mod tests {
         devices(&["grant", "owner-a", "--terminal", "--tenant-id", "tenant-a"])
             .await
             .expect("grant on an owner device");
-        assert!(
-            store
-                .has_capability("tenant-a", "owner-a", "terminal.open")
-                .unwrap()
-        );
+        assert!(store
+            .has_capability("tenant-a", "owner-a", "terminal.open")
+            .unwrap());
 
         install_security_store(None);
     }

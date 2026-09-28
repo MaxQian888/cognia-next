@@ -19,6 +19,7 @@ pub mod idempotency;
 pub mod jwt;
 pub mod oidc;
 pub mod operations;
+pub mod principal;
 pub mod rate_limit;
 pub mod replay_cache;
 pub mod secret;

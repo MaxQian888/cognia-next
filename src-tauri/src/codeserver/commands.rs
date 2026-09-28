@@ -4,7 +4,6 @@
 //! errors on unsupported hosts (Windows / exotic arch), and `codeserver_supported`
 //! lets the frontend gate the toggle before attempting a spawn.
 
-use std::io::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
@@ -21,32 +20,7 @@ use crate::cli_bridge::detect;
 /// an app-managed copy and the cache are reused.
 const LOCAL_VSCODE_BIN: &str = "code";
 
-pub fn read_text_or_empty(path: &Path) -> Result<String, String> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => Ok(text),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(format!("read {}: {error}", path.display())),
-    }
-}
-
-pub fn atomic_write_text(path: &Path, contents: &str) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("write {}: path has no parent", path.display()))?;
-    let mut staged = tempfile::Builder::new()
-        .prefix(".cognia-code-server-")
-        .suffix(".tmp")
-        .tempfile_in(parent)
-        .map_err(|error| format!("write {}: {error}", path.display()))?;
-    staged
-        .write_all(contents.as_bytes())
-        .and_then(|()| staged.as_file().sync_all())
-        .map_err(|error| format!("write {}: {error}", staged.path().display()))?;
-    staged
-        .persist(path)
-        .map(|_| ())
-        .map_err(|error| format!("replace {}: {}", path.display(), error.error))
-}
+pub use cognia_codeserver::profile::{atomic_write_text, read_text_or_empty};
 
 /// Whether this host has a prebuilt code-server standalone binary (macOS/Linux
 /// on amd64/arm64). The frontend disables the Pro IDE toggle when false.

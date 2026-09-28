@@ -241,13 +241,13 @@
       "note": "Probes http://127.0.0.1:<browser-port>/healthz before minting a browser enrollment; routing a liveness check of this machine's own listener through a proxy would answer for the wrong host."
     },
     {
-      "file": "src-tauri/src/codeserver/process.rs",
+      "file": "crates/cognia-codeserver/src/process.rs",
       "kind": "no-proxy",
       "reason": "loopback",
       "note": "Talks to the code-server process this app spawned on loopback."
     },
     {
-      "file": "src-tauri/src/codeserver/remote.rs",
+      "file": "crates/cognia-codeserver/src/remote.rs",
       "kind": "no-proxy",
       "reason": "loopback",
       "note": "Talks to the loopback relay endpoint the IDE bridge owns."

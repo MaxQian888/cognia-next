@@ -182,7 +182,7 @@ pub struct HeadlessCallbackQuery {
 }
 
 pub async fn headless_callback_handler(
-    State(state): State<crate::companion_api::SharedState>,
+    State(state): State<cognia_companion::SharedState>,
     Query(query): Query<HeadlessCallbackQuery>,
 ) -> Response {
     if std::env::var("COGNIA_MCP_OAUTH_CALLBACK_ENABLED")
@@ -311,7 +311,7 @@ fn callback_page(status: StatusCode, message: &str) -> Response {
 }
 
 fn headless_helper_path() -> Result<String, String> {
-    let path = crate::headless::resolve_mcp_sidecar_path().with_file_name("mcp-oauth-helper.mjs");
+    let path = super::resolve_mcp_sidecar_path().with_file_name("mcp-oauth-helper.mjs");
     if !path.is_file() {
         return Err("packaged MCP OAuth helper is unavailable".to_string());
     }

@@ -24,6 +24,10 @@ pub(crate) struct Step {
 /// Every boot step, in the order `run` executes them.
 pub(crate) const STEPS: &[Step] = &[
     Step {
+        name: "sidecar_location",
+        run: services::sidecar_location,
+    },
+    Step {
         name: "gateway_session",
         run: services::gateway_session,
     },
@@ -209,6 +213,7 @@ mod tests {
         assert_eq!(
             names,
             [
+                "sidecar_location",
                 "gateway_session",
                 "companion_reachability",
                 "node_runtime",

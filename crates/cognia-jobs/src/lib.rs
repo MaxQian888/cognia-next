@@ -33,6 +33,7 @@
 //!   └─ JobOutput  (in-memory ring for the live tail + append-only disk log)
 //! ```
 
+pub mod host;
 pub mod limits;
 pub mod monitor;
 pub mod output;

@@ -201,10 +201,17 @@ tests with and without `tauri-host`, `cargo check -p cognia-next`,
 | P0–P3 | All of it: setup fixed and split into steps, workspace governance and the gates, the layering fixes, `tauri-host` on every library crate, and observability's tauri-free `tracing-host` (trace-context propagation) | The rest of `desktop-host`'s logging for `cognia-server` (P9) |
 | P4 | `cognia-companion-connectivity`, `-bus`, `-contract`, `-security` | — |
 | P5 | `RendererPort`; `CompanionRuntime` (dispatch and the app's routes) and the headless slots; `RpcError`, the payload capability gate and the approval-authority check in the core; `cognia-power` and Wake-on-LAN out of the app | `RpcHost` (P5.3, with P8), the `commands.rs` split |
-| P6 | `cognia-codex-app`, `cognia-browser-cookies`, `cognia-hooks`, `cognia-fleet`, `cognia-task-workspace-host`, `cognia-terminal::host_client` and `::host_bridge`, GitHub workspace and repo import into `cognia-git` | The sidecar locator, codeserver, the setup binaries, `jobs` |
+| P6 | `cognia-codex-app`, `cognia-browser-cookies`, `cognia-hooks`, `cognia-fleet`, `cognia-task-workspace-host`, `cognia-terminal::host_client` and `::host_bridge`, GitHub workspace and repo import into `cognia-git`; `cognia-elevated-setup`; the job supervisor host/RPC runtime in `cognia-jobs::host`; `cognia-sidecar` locator, supervisor, Langfuse, Pi integrity verifier and command core; `cognia-codeserver`; `cognia-terminal::sftp_service` | — |
+| P8 | `cognia-companion-rpc` project environment, shell execution and shared command services | RPC families, host adapter and headless registry |
 | P7 | `cognia-companion`: the core (51 files, 44k lines); `companion_api` is a facade plus the dispatch table, command shells and `wiring` | — |
 
 Where the plan met the code:
+
+- **P6h and the jobs host were extracted on 2026-09-27.** The sandbox and VDD
+  setup binaries keep their executable names in `cognia-elevated-setup`. Their
+  Windows-only `dirs` and `chrono` dependencies remain; neither binary depends
+  on Tauri. `cognia-jobs::host` now owns supervisor installation and host RPC
+  dispatch; the desktop keeps the existing command shells and registrations.
 
 - **`cognia-task-workspace-host` is a crate, not a module of
   `cognia-task-workspace`.** That crate is deliberately sync (no tokio), and
@@ -248,8 +255,18 @@ Where the plan met the code:
 - **`cognia-power` is its own crate.** The keep-awake assertion is held by the
   sidecar, the companion worker and the desktop screen-hold command, so it
   sits below all three rather than in connectivity as planned.
-- **The sidecar locator waits for `lib.rs`.** The plugin runtime's resolver is
-  installed there, and that file has had other work in flight throughout.
+- **The sidecar locator and supervisor are now a platform crate.** Desktop
+  installs the directory before other startup steps, and headless installs it
+  beside its resolved script. Plugin runtime reads the same `Installed` slot.
+  The existing `SidecarHost` now supplies recovery decisions, telemetry
+  injection and host RPC dispatch, keeping domain services out of the crate.
+  Process-group cleanup moved unchanged into `cognia-exec-sandbox` and is
+  re-exported by `cognia-external-agent`. Pi extension integrity verification
+  moved alongside the locator; the app retains only its command shell.
+  Account-scoped Langfuse validation, credentials and export also live there;
+  the five Tauri command shells stay registered at their existing paths.
+  Its release version joins the app version-sync group. Legacy telemetry
+  secret cleanup is shared through `cognia-secrets`, without a desktop link.
 
 ## Consequences
 

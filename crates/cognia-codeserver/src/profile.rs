@@ -5,6 +5,7 @@
 //! user data and extension directories physically separate and never issue
 //! broker credentials to the native profile.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -184,7 +185,7 @@ pub fn synchronize_portable_preferences(native: &Path, managed: &Path) -> Result
 /// the same way the original implementation did.
 fn read_jsonc(path: &Path) -> Option<Value> {
     let raw = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str::<Value>(&crate::agents::io::strip_jsonc(&raw)).ok()
+    serde_json::from_str::<Value>(&cognia_agents::io::strip_jsonc(&raw)).ok()
 }
 
 fn write_json_pretty(path: &Path, value: &Value) -> Result<(), String> {
@@ -192,7 +193,7 @@ fn write_json_pretty(path: &Path, value: &Value) -> Result<(), String> {
         .map_err(|error| format!("encode {}: {error}", path.display()))?;
     // Reuses the writer the settings command already goes through, so VS Code's
     // file watcher never observes a half-written document.
-    super::commands::atomic_write_text(path, &text)
+    atomic_write_text(path, &text)
 }
 
 /// Union the seeded bindings with whatever the managed profile already had,
@@ -282,6 +283,33 @@ fn filter_synchronized_keybindings(value: &Value) -> Value {
             .cloned()
             .collect(),
     )
+}
+
+pub fn read_text_or_empty(path: &Path) -> Result<String, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(format!("read {}: {error}", path.display())),
+    }
+}
+
+pub fn atomic_write_text(path: &Path, contents: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("write {}: path has no parent", path.display()))?;
+    let mut staged = tempfile::Builder::new()
+        .prefix(".cognia-code-server-")
+        .suffix(".tmp")
+        .tempfile_in(parent)
+        .map_err(|error| format!("write {}: {error}", path.display()))?;
+    staged
+        .write_all(contents.as_bytes())
+        .and_then(|()| staged.as_file().sync_all())
+        .map_err(|error| format!("write {}: {error}", staged.path().display()))?;
+    staged
+        .persist(path)
+        .map(|_| ())
+        .map_err(|error| format!("replace {}: {}", path.display(), error.error))
 }
 
 #[cfg(test)]

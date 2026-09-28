@@ -2,9 +2,8 @@
 # module (~15k LOC). Isolates wasmtime/cranelift — the heaviest single
 # dependency in the tree — plus the WASM capability surface, python/vscode
 # plugin hosts, marketplace, signature verification and plugin lifecycle.
-# Re-aliased as `crate::plugin_api`. The one upward edge (claude::sidecar's
-# dir resolver, used by the vscode LSP host) is inverted via
-# `vscode::commands::set_sidecar_dir_resolver`, registered in run().
+# Re-aliased as `crate::plugin_api`. Sidecar paths come from the shared
+# `cognia-sidecar` directory installed by the host at boot.
 [package]
 name = "cognia-plugin-runtime"
 version = "0.1.0"
@@ -33,6 +32,7 @@ tauri-host = [
 
 [dependencies]
 cognia-core = { path = "../cognia-core" }
+cognia-sidecar = { path = "../cognia-sidecar" }
 # Plugin `commandHooks` merge into the hooks runtime's settings shape
 # (`command_hooks`), and the headless server's hooks host.
 cognia-hooks = { path = "../cognia-hooks" }

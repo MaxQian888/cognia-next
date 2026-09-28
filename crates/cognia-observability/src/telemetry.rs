@@ -6,9 +6,8 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
-const TELEMETRY_SECRET_NAMESPACE: &str = "telemetry";
+use cognia_secrets::telemetry::{LANGFUSE_SECRET_KEY, TELEMETRY_SECRET_NAMESPACE};
 const GRAFANA_API_TOKEN_KEY: &str = "grafana-cloud-api-token";
-const LANGFUSE_SECRET_KEY: &str = "langfuse-secret-key";
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(15);
 static TELEMETRY_EXPORT_CANCELLATIONS: Lazy<
     cognia_net::request_cancellation::RequestCancellationRegistry,
@@ -307,7 +306,7 @@ fn build_headers_with_secret(
     Ok(out)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop-host", tauri::command)]
 pub async fn telemetry_secret_set(kind: TelemetrySecretKind, value: String) -> Result<(), String> {
     if value.is_empty() {
         return Err("telemetry secret must not be empty".to_string());
@@ -315,12 +314,12 @@ pub async fn telemetry_secret_set(kind: TelemetrySecretKind, value: String) -> R
     cognia_secrets::secret_store::set(TELEMETRY_SECRET_NAMESPACE, kind.key(), &value)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop-host", tauri::command)]
 pub async fn telemetry_secret_has(kind: TelemetrySecretKind) -> Result<bool, String> {
     Ok(cognia_secrets::secret_store::get(TELEMETRY_SECRET_NAMESPACE, kind.key())?.is_some())
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop-host", tauri::command)]
 pub async fn telemetry_secret_clear(kind: TelemetrySecretKind) -> Result<(), String> {
     cognia_secrets::secret_store::delete(TELEMETRY_SECRET_NAMESPACE, kind.key())
 }
@@ -328,15 +327,15 @@ pub async fn telemetry_secret_clear(kind: TelemetrySecretKind) -> Result<(), Str
 /// Read the pre-v4 Langfuse secret only for the account-scoped Host migration.
 /// It is never exposed through a command or serialized back to the renderer.
 pub fn legacy_langfuse_secret() -> Result<Option<String>, String> {
-    cognia_secrets::secret_store::get(TELEMETRY_SECRET_NAMESPACE, LANGFUSE_SECRET_KEY)
+    cognia_secrets::telemetry::legacy_langfuse_secret()
 }
 
 /// Remove the pre-v4 secret after it has been committed to the account store.
 pub fn clear_legacy_langfuse_secret() -> Result<(), String> {
-    cognia_secrets::secret_store::delete(TELEMETRY_SECRET_NAMESPACE, LANGFUSE_SECRET_KEY)
+    cognia_secrets::telemetry::clear_legacy_langfuse_secret()
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop-host", tauri::command)]
 pub async fn telemetry_otlp_export(
     request_id: String,
     endpoint: String,
@@ -387,9 +386,9 @@ pub async fn telemetry_otlp_export(
         request = request.header("traceparent", value);
     }
     let (generation, cancelled) = TELEMETRY_EXPORT_CANCELLATIONS.register(&request_id);
-    let request_task = tauri::async_runtime::spawn(async move { request.send().await });
-    let abort_handle = request_task.inner().abort_handle();
-    let cancellation_task = tauri::async_runtime::spawn(async move {
+    let request_task = cognia_core::rt::spawn(async move { request.send().await });
+    let abort_handle = request_task.abort_handle();
+    let cancellation_task = cognia_core::rt::spawn(async move {
         if cancelled.await.is_ok() {
             abort_handle.abort();
         }
@@ -407,7 +406,7 @@ pub async fn telemetry_otlp_export(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop-host", tauri::command)]
 pub fn telemetry_otlp_cancel(request_id: String) -> bool {
     TELEMETRY_EXPORT_CANCELLATIONS.cancel(&request_id)
 }
@@ -538,7 +537,7 @@ pub use native_otel::{configure_exporter, disable_exporter, init_tracer};
 // with these exact named keys, so collapsing them into a struct would change
 // the payload shape rather than simplify anything.
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
+#[cfg_attr(feature = "desktop-host", tauri::command)]
 pub async fn telemetry_configure_sidecar(
     enabled: bool,
     endpoint: String,

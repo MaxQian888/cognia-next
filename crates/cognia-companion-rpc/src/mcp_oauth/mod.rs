@@ -61,11 +61,11 @@ impl McpAuthEntry {
 pub fn save(server_name: &str, entry: &McpAuthEntry) -> Result<(), String> {
     let blob =
         serde_json::to_string(entry).map_err(|error| format!("serialize failed: {error}"))?;
-    crate::secret_store::set(SERVICE, server_name, &blob)
+    cognia_secrets::secret_store::set(SERVICE, server_name, &blob)
 }
 
 pub fn load(server_name: &str) -> Result<Option<McpAuthEntry>, String> {
-    match crate::secret_store::get(SERVICE, server_name)? {
+    match cognia_secrets::secret_store::get(SERVICE, server_name)? {
         Some(blob) => serde_json::from_str(&blob)
             .map(Some)
             .map_err(|error| format!("parse failed: {error}")),
@@ -74,7 +74,7 @@ pub fn load(server_name: &str) -> Result<Option<McpAuthEntry>, String> {
 }
 
 pub fn clear(server_name: &str) -> Result<(), String> {
-    crate::secret_store::delete(SERVICE, server_name)
+    cognia_secrets::secret_store::delete(SERVICE, server_name)
 }
 
 #[derive(Serialize)]
@@ -111,7 +111,7 @@ pub struct AuthResultOut {
     pub message: String,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn mcp_oauth_status(server_name: String) -> Result<StatusOut, String> {
     let entry = load(&server_name)?;
     Ok(match entry {
@@ -132,17 +132,17 @@ pub async fn mcp_oauth_status(server_name: String) -> Result<StatusOut, String> 
     })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn mcp_oauth_load_entry(server_name: String) -> Result<Option<ProjectionOut>, String> {
     Ok(load(&server_name)?.map(|entry| ProjectionOut::from_entry(&entry)))
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn mcp_oauth_clear(server_name: String) -> Result<(), String> {
     clear(&server_name)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn mcp_oauth_authenticate(
     server_name: String,
     server: Value,
@@ -153,7 +153,7 @@ pub async fn mcp_oauth_authenticate(
         .map(|(result, _)| result)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn mcp_oauth_refresh(
     server_name: String,
     server: Value,
@@ -234,4 +234,59 @@ mod tests {
         assert!(load(name).unwrap().is_none());
         clear(name).unwrap();
     }
+}
+
+pub const MCP_SIDECAR_PATH_ENV: &str = "COGNIA_MCP_SIDECAR_PATH";
+
+pub fn resolve_mcp_sidecar_path() -> std::path::PathBuf {
+    resolve_mcp_sidecar_path_from(
+        std::env::var_os(MCP_SIDECAR_PATH_ENV),
+        std::env::var_os("COGNIA_BRAIN_ENTRY"),
+        std::env::current_dir().unwrap_or_default(),
+    )
+}
+
+fn resolve_mcp_sidecar_path_from(
+    explicit: Option<std::ffi::OsString>,
+    brain_entry: Option<std::ffi::OsString>,
+    current_dir: std::path::PathBuf,
+) -> std::path::PathBuf {
+    if let Some(explicit) = explicit {
+        return explicit.into();
+    }
+    if let Some(brain_entry) = brain_entry {
+        if let Some(parent) = std::path::Path::new(&brain_entry).parent() {
+            return parent.join("sidecar").join("cognia-mcp.mjs");
+        }
+    }
+    current_dir.join("sidecar").join("cognia-mcp.mjs")
+}
+
+
+#[cfg(test)]
+mod host_paths_tests {
+    use super::*;
+    #[test]
+    fn mcp_sidecar_path_prefers_override_then_packaged_brain_layout() {
+        let explicit = resolve_mcp_sidecar_path_from(
+            Some("/srv/custom/mcp.mjs".into()),
+            Some("/srv/layout/cli.mjs".into()),
+            "/work".into(),
+        );
+        assert_eq!(explicit, std::path::PathBuf::from("/srv/custom/mcp.mjs"));
+
+        let packaged =
+            resolve_mcp_sidecar_path_from(None, Some("/srv/layout/cli.mjs".into()), "/work".into());
+        assert_eq!(
+            packaged,
+            std::path::PathBuf::from("/srv/layout/sidecar/cognia-mcp.mjs")
+        );
+
+        let source_tree = resolve_mcp_sidecar_path_from(None, None, "/repo".into());
+        assert_eq!(
+            source_tree,
+            std::path::PathBuf::from("/repo/sidecar/cognia-mcp.mjs")
+        );
+    }
+
 }

@@ -10,7 +10,7 @@
 // command runs this via `Start-Process -Verb RunAs`), matching how the sandbox
 // setup binary is elevated. The bundled, Microsoft-signed parsec-vdd driver
 // (.inf/.sys/.cat) lives next to the executable under `vdd/` — vendored at
-// packaging time (see `resources/vdd/README.md`).
+// packaging time (see `src-tauri/resources/vdd/README.md`).
 
 // The marker/driver-INF helpers and their imports feed only the
 // `#[cfg(target_os = "windows")]` install/uninstall paths; the non-Windows
@@ -103,4 +103,34 @@ fn install() -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 fn uninstall() -> Result<(), String> {
     Err("cognia-vdd-setup runs on Windows only".into())
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn unsupported_platform_cannot_install_or_uninstall() {
+        assert_eq!(
+            super::install().unwrap_err(),
+            "cognia-vdd-setup runs on Windows only"
+        );
+        assert_eq!(
+            super::uninstall().unwrap_err(),
+            "cognia-vdd-setup runs on Windows only"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn bundled_driver_is_resolved_beside_the_executable() {
+        let executable = std::env::current_exe().unwrap();
+        assert_eq!(
+            super::driver_inf(),
+            executable
+                .parent()
+                .unwrap()
+                .join("vdd")
+                .join("parsec-vdd.inf")
+        );
+    }
 }

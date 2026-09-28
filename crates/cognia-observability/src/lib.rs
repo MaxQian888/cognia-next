@@ -12,9 +12,9 @@
 // tokio, reqwest or the minidump stack.
 #[cfg(feature = "desktop-host")]
 pub mod crash;
-#[cfg(feature = "desktop-host")]
+#[cfg(feature = "runtime-host")]
 pub mod logging;
-#[cfg(feature = "desktop-host")]
+#[cfg(feature = "runtime-host")]
 pub mod telemetry;
 // ADR-0196 E3b — inbound W3C trace context, without the desktop host.
 #[cfg(feature = "tracing-host")]

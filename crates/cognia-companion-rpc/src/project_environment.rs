@@ -1,5 +1,5 @@
-use crate::sandbox::types::{NetworkPolicy, SandboxCommand, SandboxPolicy};
 use crate::shell::{shell_exec_with_env, ShellResult};
+use cognia_exec_sandbox::types::{NetworkPolicy, SandboxCommand, SandboxPolicy};
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
@@ -227,9 +227,9 @@ async fn execute_on_host(
             network: sandbox_network(effective.network),
             max_cpu_seconds: timeout.min(u32::MAX as u64) as u32,
             max_memory_mb: 2048,
-            max_processes: crate::sandbox::policy::BASH_DEFAULT_MAX_PROCESSES,
+            max_processes: cognia_exec_sandbox::policy::BASH_DEFAULT_MAX_PROCESSES,
         };
-        match crate::sandbox::run_confined(command, sandbox_policy).await {
+        match cognia_exec_sandbox::run_confined(command, sandbox_policy).await {
             Ok(result) => ShellResult {
                 stdout: result.stdout,
                 stderr: result.stderr,
@@ -238,7 +238,7 @@ async fn execute_on_host(
                 stdout_truncated: false,
                 stderr_truncated: false,
             },
-            Err(crate::sandbox::types::SandboxError::Timeout { .. }) => ShellResult {
+            Err(cognia_exec_sandbox::types::SandboxError::Timeout { .. }) => ShellResult {
                 stdout: String::new(),
                 stderr: String::new(),
                 exit_code: None,
@@ -257,7 +257,7 @@ async fn execute_on_host(
 /// Executes a project environment on the local desktop host. The shared
 /// implementation also backs Companion/headless RPC; secret values never
 /// cross the renderer or remote transport boundary.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn project_environment_execute(
     script: EnvironmentScript,
     cwd: String,

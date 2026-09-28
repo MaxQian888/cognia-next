@@ -49,7 +49,7 @@ export const COMPANION_SOURCES = Object.freeze({
    * The headless server's routes (the MCP OAuth callback, the IDE content
    * broker), handed to the core through `HeadlessRuntime`.
    */
-  headlessServices: "src-tauri/src/headless/mod.rs",
+  headlessServices: "crates/cognia-companion-rpc/src/headless.rs",
   /** Written by `gen-settings-sync.mjs`. */
   settingsSyncGenerated: `${COMPANION_CONTRACT_DIR}/settings_sync_generated.rs`,
   /** Written by `gen-companion-api.mjs`. */
@@ -61,7 +61,7 @@ export const COMPANION_SOURCES = Object.freeze({
    * the desktop's own `#[tauri::command]` wrappers share, so the SFTP arms
    * live here.
    */
-  sftpService: "src-tauri/src/sftp_service.rs",
+  sftpService: "crates/cognia-terminal/src/sftp_service.rs",
 })
 
 /** The dispatch file of one RPC family, e.g. `rpcFamilyFile("chat")`. */

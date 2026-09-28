@@ -258,10 +258,11 @@ pub struct AgentChannel {
     /// Set on the first `register_instance`, so pushed editor events can be
     /// re-emitted to the renderer. `None` in unit tests (and before any spawn),
     /// where an event simply has nowhere to go.
+    #[cfg(feature = "tauri-host")]
     app: Mutex<Option<tauri::AppHandle>>,
     /// Headless companion equivalent of `app`: broker callbacks are published
     /// onto the authenticated companion event stream and answered through RPC.
-    event_bus: Mutex<Option<Arc<crate::companion_api::event_bus::EventBus>>>,
+    event_bus: Mutex<Option<Arc<cognia_companion_bus::event_bus::EventBus>>>,
 }
 
 impl AgentChannel {
@@ -274,6 +275,7 @@ impl AgentChannel {
             pending: Mutex::new(HashMap::new()),
             next_request_id: AtomicU64::new(1),
             next_conn_id: AtomicU64::new(1),
+            #[cfg(feature = "tauri-host")]
             app: Mutex::new(None),
             event_bus: Mutex::new(None),
         }
@@ -385,6 +387,7 @@ impl AgentChannel {
     /// Separate from [`Self::register_instance`] rather than a parameter of it so the
     /// registry, framing and correlation logic stay drivable from unit tests, which
     /// have no `AppHandle` to hand over.
+    #[cfg(feature = "tauri-host")]
     pub fn attach_app(&self, app: &tauri::AppHandle) {
         let mut slot = self.app.lock().unwrap_or_else(|p| p.into_inner());
         if slot.is_none() {
@@ -394,7 +397,7 @@ impl AgentChannel {
 
     /// Attach the no-Tauri companion event stream. Unlike editor snapshots,
     /// broker requests must fail when neither runtime surface is attached.
-    pub fn attach_event_bus(&self, event_bus: Arc<crate::companion_api::event_bus::EventBus>) {
+    pub fn attach_event_bus(&self, event_bus: Arc<cognia_companion_bus::event_bus::EventBus>) {
         let mut slot = self.event_bus.lock().unwrap_or_else(|p| p.into_inner());
         *slot = Some(event_bus);
     }
@@ -848,16 +851,19 @@ impl AgentChannel {
     /// handle yet, no listener, a closing window) is superseded by the next one and
     /// is never worth failing the connection over.
     fn forward_event(&self, root: &str, name: String, payload: Option<Value>) {
+        #[cfg(feature = "tauri-host")]
         use tauri::Emitter as _;
         let event = CodeServerEditorEvent {
             root: root.to_string(),
             name,
             payload: payload.unwrap_or(Value::Null),
         };
+        #[cfg(feature = "tauri-host")]
         let app = {
             let slot = self.app.lock().unwrap_or_else(|p| p.into_inner());
             slot.clone()
         };
+        #[cfg(feature = "tauri-host")]
         if let Some(app) = app {
             let _ = app.emit(CODESERVER_EDITOR_EVENT, event.clone());
         }
@@ -881,6 +887,7 @@ impl AgentChannel {
         method: String,
         params: Value,
     ) -> Result<(), String> {
+        #[cfg(feature = "tauri-host")]
         use tauri::Emitter as _;
         let request = CodeServerBrokerRequest {
             root: root.to_string(),
@@ -889,10 +896,12 @@ impl AgentChannel {
             method,
             params,
         };
+        #[cfg(feature = "tauri-host")]
         let app = {
             let slot = self.app.lock().unwrap_or_else(|p| p.into_inner());
             slot.clone()
         };
+        #[cfg(feature = "tauri-host")]
         if let Some(app) = app {
             return app
                 .emit(CODESERVER_BROKER_REQUEST_EVENT, request)
@@ -917,6 +926,7 @@ impl AgentChannel {
         method: String,
         params: Value,
     ) -> Result<(), String> {
+        #[cfg(feature = "tauri-host")]
         use tauri::Emitter as _;
         let notification = CodeServerBrokerNotification {
             root: root.to_string(),
@@ -924,10 +934,12 @@ impl AgentChannel {
             method,
             params,
         };
+        #[cfg(feature = "tauri-host")]
         let app = {
             let slot = self.app.lock().unwrap_or_else(|p| p.into_inner());
             slot.clone()
         };
+        #[cfg(feature = "tauri-host")]
         if let Some(app) = app {
             return app
                 .emit(CODESERVER_BROKER_NOTIFICATION_EVENT, notification)

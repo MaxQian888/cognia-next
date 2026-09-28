@@ -100,14 +100,10 @@ pub fn init_structured_tracing() -> bool {
     logging::tracing_setup::init()
 }
 
-// Process-wide rustls `CryptoProvider` init — owned by cognia-net so every
-// outbound Rust call site installs the same provider exactly once.
-pub(crate) use cognia_net::proxy_config::ensure_crypto_provider;
-
 // Native local-video pipeline lives in its own subsystem crate; the app crate
 // only re-exports it for generate_handler! command registration.
 pub use cognia_media as media;
-mod mcp_oauth;
+pub use cognia_companion_rpc::mcp_oauth;
 mod node_runtime;
 // ADR-0067 follow-up — extracted to `crates/cognia-mcp-server`; re-aliased so
 // `mcp_server::…` (generate_handler! + .manage()) resolves unchanged.
@@ -133,7 +129,7 @@ pub use cognia_plugin_runtime as plugin_api;
 // performance panel's "Managed Processes" tab and the graceful teardown arm.
 mod power_assertion;
 mod process_registry;
-mod project_environment;
+pub use cognia_companion_rpc::project_environment;
 /// ADR-0090 Phase 1 — headless Provider Profile Store (SQLite mirror of the
 /// renderer's Dexie v121 tables).
 // ADR-0067 Tier C — extracted to `crates/cognia-agent-state`; re-aliased so
@@ -171,7 +167,7 @@ mod server_ops;
 mod session_import;
 mod session_import_watch;
 mod settings;
-mod shell;
+pub use cognia_companion_rpc::shell;
 // Route Ctrl+C / SIGTERM through the graceful `RunEvent` teardown instead of
 // letting the kernel hard-kill the process (which orphans children and leaves
 // the crash sentinel dirty). Desktop-only — mobile has no terminal signals.
@@ -345,10 +341,6 @@ pub fn run() {
     // managed-download registry; hand it the snapshot provider before any
     // terminal can spawn.
     terminal::commands::set_managed_cli_dirs_provider(cli_bridge::detect::managed_dirs_snapshot);
-
-    // ADR-0067 Tier B — the extracted plugin runtime can't reach
-    // claude::sidecar; hand its vscode LSP host the sidecar-dir resolver.
-    plugin_api::vscode::commands::set_sidecar_dir_resolver(claude::sidecar::sidecar_dir);
 
     let task_workspace_data_dir = dirs::data_dir()
         .map(|dir| dir.join("cognia"))

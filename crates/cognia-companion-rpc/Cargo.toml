@@ -1,0 +1,58 @@
+[package]
+name = "cognia-companion-rpc"
+version = "0.1.0"
+description = "Host-neutral companion command dispatch and execution services"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+test-support = ["cognia-companion/test-support", "cognia-secrets/test-inmemory"]
+tauri-host = ["dep:tauri"]
+
+[dependencies]
+cognia-codeserver = { path = "../cognia-codeserver" }
+cognia-scheduling = { path = "../cognia-scheduling" }
+cognia-mcp-server = { path = "../cognia-mcp-server" }
+cognia-ocr = { path = "../cognia-ocr" }
+cognia-plugin-runtime = { path = "../cognia-plugin-runtime" }
+cognia-external-agent = { path = "../cognia-external-agent" }
+cognia-gateway = { path = "../cognia-gateway" }
+cognia-terminal = { path = "../cognia-terminal" }
+cognia-hooks = { path = "../cognia-hooks" }
+chrono.workspace = true
+cognia-core = { path = "../cognia-core" }
+axum.workspace = true
+parking_lot.workspace = true
+once_cell.workspace = true
+sha2.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+rand.workspace = true
+hex.workspace = true
+url.workspace = true
+cognia-agent-state = { path = "../cognia-agent-state" }
+cognia-jobs = { path = "../cognia-jobs" }
+cognia-sidecar = { path = "../cognia-sidecar" }
+cognia-secrets = { path = "../cognia-secrets" }
+cognia-observability = { path = "../cognia-observability", features = ["runtime-host"] }
+async-trait.workspace = true
+log.workspace = true
+cognia-companion = { path = "../cognia-companion" }
+serde_json.workspace = true
+local-ip-address = "0.6"
+cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
+cognia-connectors = { path = "../cognia-connectors" }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["rt", "process", "macros"] }
+wait-timeout = "0.2"
+tauri = { workspace = true, optional = true }
+
+[dev-dependencies]
+cognia-companion = { path = "../cognia-companion", features = ["test-support"] }
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

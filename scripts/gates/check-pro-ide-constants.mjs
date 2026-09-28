@@ -27,11 +27,11 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
 const FILES = {
   catalogJson: "packages/plugin-sdk/contract/code-1.128-ide.json",
-  brokerProtocol: "src-tauri/src/codeserver/broker_protocol.rs",
+  brokerProtocol: "crates/cognia-codeserver/src/broker_protocol.rs",
   extension: "sidecar/codeserver-agent-ext/src/extension.mjs",
-  process: "src-tauri/src/codeserver/process.rs",
+  process: "crates/cognia-codeserver/src/process.rs",
   extManifest: "sidecar/codeserver-agent-ext/package.json",
-  proxy: "src-tauri/src/codeserver/proxy.rs",
+  proxy: "crates/cognia-codeserver/src/proxy.rs",
 }
 
 const read = (key) => readFileSync(join(REPO_ROOT, FILES[key]), "utf8")

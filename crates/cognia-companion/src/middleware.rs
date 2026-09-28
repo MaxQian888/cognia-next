@@ -68,24 +68,7 @@ enum PrincipalRequirement {
 
 /// Identity of the authenticated device.  Injected by [`require_device_jwt`]
 /// and read by protected handlers via `request.extensions().get::<DeviceContext>()`.
-#[derive(Clone, Debug)]
-pub struct DeviceContext {
-    pub device_id: String,
-    pub account_id: String,
-    /// Scope string from the JWT claims (`"device"`).  Reserved for M2.5+
-    /// handlers that may need to inspect the scope.
-    #[allow(dead_code)]
-    pub scope: String,
-    /// OAuth/OIDC permission scopes granted to this caller. Legacy paired
-    /// device/service tokens leave this empty and use their existing device
-    /// permission gate; OIDC routes enforce these values explicitly.
-    pub granted_scopes: Vec<String>,
-    /// Canonical remote-command capabilities loaded by the authenticating
-    /// adapter. `Some`, including `Some(Vec::new())`, is an authoritative
-    /// authorization snapshot. `None` lets adapters that have not yet loaded
-    /// a snapshot fall back to the shared security store.
-    pub authorization_capabilities: Option<Vec<String>>,
-}
+pub use cognia_companion_security::principal::DeviceContext;
 
 // ---------------------------------------------------------------------------
 // Query extractor (for WS upgrade path)

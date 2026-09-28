@@ -559,7 +559,7 @@ impl RemoteCodeServerState {
         let root = self.code_server_root();
         tokio::task::spawn_blocking(move || {
             let path = super::process::user_settings_path_at(&root, profile)?;
-            super::commands::read_text_or_empty(&path)
+            super::profile::read_text_or_empty(&path)
         })
         .await
         .map_err(|error| format!("read code-server settings task: {error}"))?
@@ -573,7 +573,7 @@ impl RemoteCodeServerState {
         let root = self.code_server_root();
         tokio::task::spawn_blocking(move || {
             let path = super::process::user_settings_path_at(&root, profile)?;
-            super::commands::atomic_write_text(&path, &contents)
+            super::profile::atomic_write_text(&path, &contents)
         })
         .await
         .map_err(|error| format!("write code-server settings task: {error}"))?
@@ -583,7 +583,7 @@ impl RemoteCodeServerState {
         let root = self.code_server_root();
         tokio::task::spawn_blocking(move || {
             let path = super::process::runtime_args_path_at(&root, profile)?;
-            super::commands::read_text_or_empty(&path)
+            super::profile::read_text_or_empty(&path)
         })
         .await
         .map_err(|error| format!("read code-server runtime args task: {error}"))?
@@ -597,7 +597,7 @@ impl RemoteCodeServerState {
         let root = self.code_server_root();
         tokio::task::spawn_blocking(move || {
             let path = super::process::runtime_args_path_at(&root, profile)?;
-            super::commands::atomic_write_text(&path, &contents)
+            super::profile::atomic_write_text(&path, &contents)
         })
         .await
         .map_err(|error| format!("write code-server runtime args task: {error}"))?
@@ -669,7 +669,7 @@ fn running_status(profile: IdeProfile, relay_id: &str) -> RemoteCodeServerStatus
 /// loopback plaintext plane still receives the real port, through
 /// `DispatchHost::ide_loopback_port` — that is how a browser running on this
 /// same machine embeds the workbench directly.
-pub(crate) fn desktop_running_status(profile: IdeProfile) -> RemoteCodeServerStatus {
+pub fn desktop_running_status(profile: IdeProfile) -> RemoteCodeServerStatus {
     RemoteCodeServerStatus {
         running: true,
         port: None,
@@ -679,7 +679,7 @@ pub(crate) fn desktop_running_status(profile: IdeProfile) -> RemoteCodeServerSta
     }
 }
 
-pub(crate) fn stopped_status() -> RemoteCodeServerStatus {
+pub fn stopped_status() -> RemoteCodeServerStatus {
     RemoteCodeServerStatus {
         running: false,
         port: None,
@@ -1106,16 +1106,19 @@ async fn relay_request(relay_id: String, tail: String, request: Request) -> Resp
     let request = Request::from_parts(parts, body);
     let device_id = request
         .extensions()
-        .get::<crate::companion_api::middleware::DeviceContext>()
+        .get::<cognia_companion_security::principal::DeviceContext>()
         .map(|context| context.device_id.clone())
         .unwrap_or_default();
-    let Some(services) = crate::headless::headless_services() else {
+    let Some(remote) = crate::host::HOST
+        .try_get()
+        .and_then(|host| host.remote_state())
+    else {
         return (StatusCode::SERVICE_UNAVAILABLE, "headless IDE unavailable").into_response();
     };
-    if !crate::companion_api::rpc::device_can_control(&device_id) {
+    if !crate::host::device_can_control(&device_id) {
         return (StatusCode::FORBIDDEN, "remote control grant required").into_response();
     }
-    let Some(port) = services.code_server.relay_port(&relay_id, &device_id).await else {
+    let Some(port) = remote.relay_port(&relay_id, &device_id).await else {
         return (StatusCode::NOT_FOUND, "managed IDE relay unavailable").into_response();
     };
     if let Some(ws) = ws {
@@ -1222,12 +1225,12 @@ async fn relay_websocket(
     let (mut upstream_tx, mut upstream_rx) = upstream.split();
     let mut authorization_tick = tokio::time::interval(Duration::from_secs(2));
     loop {
-        if !crate::companion_api::rpc::device_can_control(&device_id) {
+        if !crate::host::device_can_control(&device_id) {
             break;
         }
         tokio::select! {
             _ = authorization_tick.tick() => {
-                if !crate::companion_api::rpc::device_can_control(&device_id) { break; }
+                if !crate::host::device_can_control(&device_id) { break; }
             }
             message = downstream.recv() => {
                 let Some(Ok(message)) = message else { break };

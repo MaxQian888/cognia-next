@@ -133,9 +133,9 @@ impl DesktopRelayState {
         container_id: String,
         port: u16,
     ) -> Result<DesktopRelayStatus, String> {
-        let runtime = crate::companion_api::environment_pool::installed()
-            .and_then(|pool| pool.runtime)
-            .ok_or("runtime environment service is unavailable")?;
+        let runtime = crate::host::HOST
+            .get()
+            .map_err(|_| "runtime environment service is unavailable")?;
         if !runtime
             .port_allowed(&project_id, &container_id, port)
             .await
@@ -166,13 +166,15 @@ impl DesktopRelayState {
                 let project_id = project_id.clone();
                 let container_id = container_id.clone();
                 async move {
-                    crate::companion_api::environment_ports::local_relay(
-                        project_id,
-                        container_id,
-                        container_port,
-                        request,
-                    )
-                    .await
+                    let Ok(host) = crate::host::HOST.get() else {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "runtime environment service is unavailable",
+                        )
+                            .into_response();
+                    };
+                    host.local_relay(project_id, container_id, container_port, request)
+                        .await
                 }
             }))
             .layer(from_fn_with_state(port, loopback_guard));
@@ -428,8 +430,11 @@ impl ServerCertVerifier for PinnedSpkiVerifier {
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, RustlsError> {
-        let actual = crate::companion_api::tls::spki_fingerprint_from_der(end_entity.as_ref())
-            .map_err(|_| RustlsError::InvalidCertificate(rustls::CertificateError::BadEncoding))?;
+        let actual =
+            cognia_companion_connectivity::tls::spki_fingerprint_from_der(end_entity.as_ref())
+                .map_err(|_| {
+                    RustlsError::InvalidCertificate(rustls::CertificateError::BadEncoding)
+                })?;
         if subtle::ConstantTimeEq::ct_eq(actual.as_bytes(), self.expected.as_bytes()).into() {
             Ok(ServerCertVerified::assertion())
         } else {
@@ -777,7 +782,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        crate::companion_api::api::verify_relay_device_proof(
+        cognia_companion::api::verify_relay_device_proof(
             &pem,
             headers["dpop"].to_str().unwrap(),
             nonce,
@@ -929,7 +934,7 @@ mod tests {
             .as_secs() as i64;
         let (bearer, first) = target.request_auth("POST", path).await.unwrap();
         assert_eq!(bearer, token);
-        let verify = crate::companion_api::api::verify_relay_device_proof;
+        let verify = cognia_companion::api::verify_relay_device_proof;
         let first_id = verify(&pem, &first, "first-jti", "POST", path, now).unwrap();
         for (nonce, method, bound_path) in [
             ("other", "POST", path),
@@ -959,7 +964,8 @@ mod tests {
     async fn real_pinned_websocket_uses_upstream_protocol_and_preserves_application_headers() {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let directory = tempfile::tempdir().unwrap();
-        let material = crate::companion_api::tls::ensure_certificate(directory.path()).unwrap();
+        let material =
+            cognia_companion_connectivity::tls::ensure_certificate(directory.path()).unwrap();
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(
             &material.cert_pem_path,
             &material.key_pem_path,
@@ -1074,7 +1080,8 @@ mod tests {
     async fn pinned_http_streams_sse_frames_and_preserves_application_response_headers() {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let directory = tempfile::tempdir().unwrap();
-        let material = crate::companion_api::tls::ensure_certificate(directory.path()).unwrap();
+        let material =
+            cognia_companion_connectivity::tls::ensure_certificate(directory.path()).unwrap();
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(
             &material.cert_pem_path,
             &material.key_pem_path,
@@ -1178,9 +1185,10 @@ mod tests {
     #[test]
     fn pinned_verifier_accepts_only_the_paired_spki() {
         let directory = tempfile::tempdir().unwrap();
-        let material = crate::companion_api::tls::ensure_certificate(directory.path()).unwrap();
+        let material =
+            cognia_companion_connectivity::tls::ensure_certificate(directory.path()).unwrap();
         let pem = std::fs::read_to_string(material.cert_pem_path).unwrap();
-        let der = crate::companion_api::tls::pem_to_der(&pem).unwrap();
+        let der = cognia_companion_connectivity::tls::pem_to_der(&pem).unwrap();
         let algorithms = rustls::crypto::ring::default_provider().signature_verification_algorithms;
         let server_name = ServerName::IpAddress(IpAddr::V4([127, 0, 0, 1].into()));
         let verifier = PinnedSpkiVerifier {

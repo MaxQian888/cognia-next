@@ -17,3 +17,5 @@ pub mod api_key;
 pub mod keychain_access;
 pub mod keyring_secrets;
 pub mod secret_store;
+
+pub mod telemetry;

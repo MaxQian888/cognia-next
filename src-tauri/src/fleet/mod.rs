@@ -13,8 +13,7 @@ pub mod island_window;
 
 use std::sync::Arc;
 
-use cognia_fleet::companion::{FleetCompanion, COMPANION};
-use cognia_fleet::registry::{FleetHost, FleetSnapshot};
+use cognia_fleet::registry::FleetSnapshot;
 use tauri::Emitter as _;
 
 /// Emits every Fleet snapshot to the island webview.
@@ -26,26 +25,7 @@ impl FleetUpdateSink for IslandUpdateSink {
     }
 }
 
-/// The companion core's side of a Fleet snapshot: the connected brain and the
-/// tenant's worker hosts.
-struct CompanionFleetView;
-
-impl FleetCompanion for CompanionFleetView {
-    fn brain_account_id(&self) -> Option<String> {
-        crate::companion_api::ws_bridge::current_brain_account_id()
-    }
-
-    fn hosts(&self, tenant_id: &str) -> Vec<FleetHost> {
-        crate::companion_api::ws_worker::fleet_hosts(tenant_id)
-    }
-}
-
-/// Give Fleet snapshots the companion view. Desktop boot and the headless
-/// services install call this; a process that skips it projects no brain and
-/// lists no worker hosts.
-pub(crate) fn install_companion_view() {
-    COMPANION.set(Arc::new(CompanionFleetView));
-}
+pub use cognia_companion::fleet_view::install_companion_view;
 
 // ---------------------------------------------------------------------------
 // Tauri commands
@@ -110,24 +90,16 @@ pub async fn fleet_monitor_status(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     /// Both binaries give Fleet its companion view at boot; without it a
     /// snapshot silently drops the brain gate and every worker host.
     #[test]
     fn both_binaries_install_the_companion_view() {
         let desktop = include_str!("../startup/telemetry.rs");
-        let headless = include_str!("../headless/mod.rs");
+        let headless = include_str!("../../../crates/cognia-companion-rpc/src/headless.rs");
         assert!(desktop.contains("crate::fleet::install_companion_view()"));
-        assert!(headless.contains("crate::fleet::install_companion_view()"));
+        assert!(headless.contains("cognia_companion::fleet_view::install_companion_view()"));
     }
 
-    #[test]
-    fn the_companion_view_reads_the_companion_core() {
-        let view = CompanionFleetView;
-        assert_eq!(
-            view.brain_account_id(),
-            crate::companion_api::ws_bridge::current_brain_account_id()
-        );
-    }
+
 }

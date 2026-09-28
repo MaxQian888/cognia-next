@@ -17,10 +17,14 @@
 //!      tarball's leading `code-server-<ver>-<os>-<arch>/` component) and
 //!      chmod +x the launcher on unix.
 
-use ::anyhow::{anyhow, Context, Result};
+#[cfg(any(feature = "tauri-host", test))]
+use ::anyhow::Context;
+use ::anyhow::{anyhow, Result};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+#[cfg(any(feature = "tauri-host", test))]
 use std::sync::Arc;
+#[cfg(feature = "tauri-host")]
 use tauri::{Emitter, Manager};
 use tokio::sync::Notify;
 
@@ -68,6 +72,7 @@ pub struct InstallInfo {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "tauri-host")]
 struct ProgressEvent {
     stage: String,
     /// Bytes written so far (download stage).
@@ -77,6 +82,7 @@ struct ProgressEvent {
     message: String,
 }
 
+#[cfg(feature = "tauri-host")]
 fn emit_progress(
     app: &tauri::AppHandle,
     stage: &str,
@@ -163,6 +169,7 @@ pub fn binary_path_in(install_dir: &Path) -> PathBuf {
 
 /// Root under which every pinned version is installed:
 /// `<app_data>/cognia/code-server`.
+#[cfg(feature = "tauri-host")]
 pub fn code_server_root(app: &tauri::AppHandle) -> Result<PathBuf> {
     Ok(app
         .path()
@@ -173,12 +180,14 @@ pub fn code_server_root(app: &tauri::AppHandle) -> Result<PathBuf> {
 }
 
 /// Install dir for the pinned version: `<root>/<version>`.
+#[cfg(feature = "tauri-host")]
 pub fn install_dir_for(app: &tauri::AppHandle) -> Result<PathBuf> {
     Ok(code_server_root(app)?.join(CODE_SERVER_VERSION))
 }
 
 /// Sibling directories of the version installs that hold code-server's own
 /// state (`process::state_subdir`), never reclaimable as "old versions".
+#[cfg(any(feature = "tauri-host", test))]
 const STATE_DIRS: [&str; 2] = ["user-data", "extensions"];
 
 /// Install + disk state for the Pro IDE settings card.
@@ -200,6 +209,7 @@ pub struct CodeServerDiskUsage {
 
 /// Recursive size of `path`, following no symlinks (a code-server tarball ships
 /// them, and following would both double-count and risk a loop).
+#[cfg(any(feature = "tauri-host", test))]
 fn dir_size(path: &Path) -> u64 {
     let Ok(entries) = std::fs::read_dir(path) else {
         return 0;
@@ -224,6 +234,7 @@ fn dir_size(path: &Path) -> u64 {
 /// Paths under the root that a cleanup may delete: installs of other versions
 /// and leftover partial downloads. The pinned install and the state dirs are
 /// never included.
+#[cfg(any(feature = "tauri-host", test))]
 fn reclaimable_paths(root: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return Vec::new();
@@ -246,6 +257,7 @@ fn reclaimable_paths(root: &Path) -> Vec<PathBuf> {
 
 /// Snapshot the install for the settings card. Never fails on a missing root —
 /// "nothing installed yet" is a normal state, reported as zeroes.
+#[cfg(feature = "tauri-host")]
 pub fn disk_usage(app: &tauri::AppHandle) -> Result<CodeServerDiskUsage> {
     let root = code_server_root(app)?;
     let reclaimable = reclaimable_paths(&root);
@@ -266,6 +278,7 @@ pub fn disk_usage(app: &tauri::AppHandle) -> Result<CodeServerDiskUsage> {
 /// Delete non-pinned installs and partial downloads, or — when `everything` —
 /// the whole code-server root including the pinned install and user data.
 /// Returns the bytes freed.
+#[cfg(feature = "tauri-host")]
 pub fn uninstall(app: &tauri::AppHandle, everything: bool) -> Result<u64> {
     let root = code_server_root(app)?;
     if !root.exists() {
@@ -279,6 +292,7 @@ pub fn uninstall(app: &tauri::AppHandle, everything: bool) -> Result<u64> {
     remove_paths(reclaimable_paths(&root))
 }
 
+#[cfg(any(feature = "tauri-host", test))]
 fn remove_paths(paths: impl IntoIterator<Item = PathBuf>) -> Result<u64> {
     let mut freed = 0;
     for path in paths {
@@ -297,6 +311,7 @@ fn remove_paths(paths: impl IntoIterator<Item = PathBuf>) -> Result<u64> {
 /// Strip the leading path component (the `code-server-<ver>-<os>-<arch>/`
 /// wrapper dir) and reject anything that would escape via `..`. Returns `None`
 /// for entries to skip (the bare wrapper dir, or a traversal attempt).
+#[cfg(any(feature = "tauri-host", test))]
 fn safe_stripped_path(path: &Path) -> Option<PathBuf> {
     let stripped: PathBuf = path.components().skip(1).collect();
     if stripped.as_os_str().is_empty() {
@@ -314,6 +329,7 @@ fn safe_stripped_path(path: &Path) -> Option<PathBuf> {
 /// Extract a gzip tarball at `archive` into `dest`, stripping the leading path
 /// component so the launcher lands at `<dest>/bin/code-server`. Traversal
 /// entries are skipped (belt-and-suspenders on top of `tar`'s own guard).
+#[cfg(any(feature = "tauri-host", test))]
 fn extract_tar_gz_strip1(archive: &Path, dest: &Path) -> Result<()> {
     use flate2::read::GzDecoder;
     use tar::Archive;
@@ -340,6 +356,7 @@ fn extract_tar_gz_strip1(archive: &Path, dest: &Path) -> Result<()> {
 
 /// Ensure the pinned code-server is installed, downloading + verifying it on
 /// first use. Idempotent: a present install short-circuits with no network.
+#[cfg(feature = "tauri-host")]
 pub async fn ensure_code_server(
     app: &tauri::AppHandle,
     cancel: Option<Arc<DownloadCancel>>,
@@ -430,6 +447,7 @@ pub async fn ensure_code_server(
 /// code-server policy: the user agent, and where progress is emitted. No byte
 /// ceiling: the asset is a pinned release whose digest is baked in, so its
 /// size is known-good rather than attacker-chosen.
+#[cfg(feature = "tauri-host")]
 async fn stream_to_file(
     app: &tauri::AppHandle,
     url: &str,
@@ -437,7 +455,7 @@ async fn stream_to_file(
     cancel: Option<Arc<DownloadCancel>>,
 ) -> Result<String> {
     let builder = reqwest::Client::builder().user_agent("cognia-desktop");
-    let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, url)
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, url)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let client = builder.build().context("build http client")?;
 

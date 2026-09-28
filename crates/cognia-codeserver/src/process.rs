@@ -13,10 +13,14 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(any(feature = "tauri-host", test))]
+use std::time::Instant;
 
 use serde::Serialize;
-use serde_json::{json, Value};
+#[cfg(feature = "tauri-host")]
+use serde_json::json;
+use serde_json::Value;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -28,8 +32,10 @@ use super::profile::{IdeProfile, ProfilePaths};
 pub const CODESERVER_EXITED_EVENT: &str = "codeserver://instance-exited";
 
 /// How often the watchdog probes a healthy instance.
+#[cfg(feature = "tauri-host")]
 const WATCHDOG_INTERVAL: Duration = Duration::from_secs(5);
 /// Consecutive probe failures before we declare the instance gone.
+#[cfg(feature = "tauri-host")]
 const WATCHDOG_FAILURES: u8 = 2;
 
 /// Payload of [`CODESERVER_EXITED_EVENT`]. `port` is the match key the frontend
@@ -101,6 +107,7 @@ impl RunningInstance {
 #[derive(Default)]
 pub struct CodeServerState {
     instances: Mutex<HashMap<String, RunningInstance>>,
+    #[cfg(feature = "tauri-host")]
     operation_lock: Mutex<()>,
     /// Shared cancel handle for whichever first-run download is in flight.
     /// One per app rather than per root: the install is version-global, and
@@ -131,6 +138,7 @@ impl CodeServerState {
 
     /// Ensure a healthy code-server is serving `root`, returning its loopback
     /// port. Downloads + installs code-server on first use.
+    #[cfg(feature = "tauri-host")]
     pub async fn ensure(&self, app: &tauri::AppHandle, root: &str) -> Result<u16, String> {
         self.ensure_profile(app, root, IdeProfile::Managed).await
     }
@@ -138,6 +146,7 @@ impl CodeServerState {
     /// Ensure a healthy code-server is serving `root` in exactly one trust
     /// domain. Switching profile retires the existing process before starting
     /// the other one, so two extension hosts never touch one workspace at once.
+    #[cfg(feature = "tauri-host")]
     pub async fn ensure_profile(
         &self,
         app: &tauri::AppHandle,
@@ -308,6 +317,7 @@ impl CodeServerState {
     /// Install the pinned code-server without spawning it. Serialized with
     /// ensure/uninstall so the shared partial archive and install tree cannot
     /// be concurrently replaced or deleted.
+    #[cfg(feature = "tauri-host")]
     pub async fn download(&self, app: &tauri::AppHandle) -> Result<download::InstallInfo, String> {
         let _guard = self.operation_lock.lock().await;
         download::ensure_code_server(app, Some(self.download_cancel.clone()))
@@ -324,6 +334,7 @@ impl CodeServerState {
     /// Install a freshly generated proxy into a live managed profile. With no
     /// live managed instance the verified artifact remains staged and the next
     /// launch installs it before code-server starts.
+    #[cfg(feature = "tauri-host")]
     pub async fn install_proxy_artifact(
         &self,
         app: &tauri::AppHandle,
@@ -419,6 +430,7 @@ impl CodeServerState {
     /// Stop all children and reclaim code-server files as one serialized
     /// operation. Holding the lock through deletion prevents an overlapping
     /// ensure/download from recreating or reading a half-removed tree.
+    #[cfg(feature = "tauri-host")]
     pub async fn uninstall(&self, app: tauri::AppHandle, everything: bool) -> Result<u64, String> {
         let _guard = self.operation_lock.lock().await;
         self.stop_all().await;
@@ -617,6 +629,7 @@ impl CodeServerState {
         ))
     }
 
+    #[cfg(any(feature = "tauri-host", test))]
     async fn live_port(&self, canonical: &str, profile: IdeProfile) -> Option<u16> {
         let mut map = self.instances.lock().await;
         match map.get_mut(canonical) {
@@ -638,6 +651,7 @@ impl CodeServerState {
     }
 }
 
+#[cfg(feature = "tauri-host")]
 fn proxy_handshake(artifact: &super::proxy::ProxyArtifact) -> Value {
     json!({
         "pluginId": artifact.plugin_id,
@@ -648,6 +662,7 @@ fn proxy_handshake(artifact: &super::proxy::ProxyArtifact) -> Value {
     })
 }
 
+#[cfg(feature = "tauri-host")]
 async fn activate_managed_proxy(
     channel: &super::agent_channel::AgentChannel,
     roots: &[String],
@@ -679,6 +694,7 @@ async fn activate_managed_proxy(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 async fn restart_managed_extension_hosts(
     channel: &super::agent_channel::AgentChannel,
     roots: &[String],
@@ -698,6 +714,7 @@ async fn restart_managed_extension_hosts(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 async fn restart_and_verify_proxies(
     channel: &super::agent_channel::AgentChannel,
     roots: &[String],
@@ -738,6 +755,7 @@ fn canonicalize_root(root: &str) -> Result<String, String> {
 
 /// `<app_data>/cognia/code-server/<name>` — isolated code-server state dirs so
 /// user-data / extensions don't leak into `~/.local/share/code-server`.
+#[cfg(feature = "tauri-host")]
 fn profile_paths(app: &tauri::AppHandle, profile: IdeProfile) -> Result<ProfilePaths, String> {
     let root =
         download::code_server_root(app).map_err(|e| format!("resolve code-server root: {e:#}"))?;
@@ -747,6 +765,7 @@ fn profile_paths(app: &tauri::AppHandle, profile: IdeProfile) -> Result<ProfileP
 /// `<user-data>/User/settings.json` — the file VS Code hot-watches, and so the
 /// only channel that can repaint a *running* workbench. Creating the directory
 /// here is safe: it is the same one `--user-data-dir` points code-server at.
+#[cfg(feature = "tauri-host")]
 pub fn user_settings_path_for_profile(
     app: &tauri::AppHandle,
     profile: IdeProfile,
@@ -780,6 +799,7 @@ pub fn user_settings_path_at(
 ///
 /// Same directory as {@link user_settings_path_for_profile}, which is the one
 /// `--user-data-dir` points code-server at.
+#[cfg(feature = "tauri-host")]
 pub fn runtime_args_path_for_profile(
     app: &tauri::AppHandle,
     profile: IdeProfile,
@@ -808,7 +828,7 @@ pub fn runtime_args_path_at(
 /// writes (the file it generates is comment-heavy), and a blank / absent locale,
 /// both of which mean "no display-language pack needed".
 pub fn locale_from_runtime_args(raw: &str) -> Option<String> {
-    let cleaned = crate::agents::io::strip_jsonc(raw);
+    let cleaned = cognia_agents::io::strip_jsonc(raw);
     let value: serde_json::Value = serde_json::from_str(&cleaned).ok()?;
     let locale = value.get("locale")?.as_str()?.trim();
     if locale.is_empty() {
@@ -910,6 +930,7 @@ pub async fn install_language_pack(
 /// telemetry is disabled. The managed profile runs with full workspace access:
 /// its bundled Cognia broker is part of the editor contract and must activate
 /// on startup. The native third-party-extension profile retains Workspace Trust.
+#[cfg(any(feature = "tauri-host", test))]
 fn code_server_args(
     root: &str,
     port: u16,
@@ -1056,6 +1077,7 @@ pub(super) fn resolve_open_target(
 
 /// Pick an ephemeral loopback port by binding :0 and releasing it. A tiny
 /// TOCTOU window exists before code-server grabs it, acceptable on loopback.
+#[cfg(any(feature = "tauri-host", test))]
 fn pick_free_loopback_port() -> Result<u16, String> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("reserve loopback port: {e}"))?;
@@ -1070,13 +1092,16 @@ fn pick_free_loopback_port() -> Result<u16, String> {
 /// `sidecar/codeserver-agent-ext/package.json` `version` so an upgrade triggers a
 /// reinstall (the marker below stores the installed version).
 /// `pnpm audit:pro-ide-constants` fails when the two drift.
+#[cfg(any(feature = "tauri-host", test))]
 const BROKER_EXT_VERSION: &str = "1.1.0";
 /// Stable filename of the bundled `.vsix` (see the extension's `build.mjs`).
+#[cfg(feature = "tauri-host")]
 const BROKER_EXT_VSIX: &str = "cognia-managed-broker.vsix";
 
 /// Whether a stored install-marker value means the current extension version is
 /// already installed (so the reinstall can be skipped). Pure, so the version-gate
 /// contract is unit-tested without spawning code-server.
+#[cfg(any(feature = "tauri-host", test))]
 fn broker_ext_install_up_to_date(marker: Option<&str>) -> bool {
     marker == Some(BROKER_EXT_VERSION)
 }
@@ -1085,8 +1110,9 @@ fn broker_ext_install_up_to_date(marker: Option<&str>) -> bool {
 /// per version. Best-effort: a missing vsix or a failed install only degrades the
 /// Pro IDE agent-drive features (open/reveal falls back to the CLI, edits to a disk
 /// reload) — it must never block a code-server spawn, so every failure just logs.
+#[cfg(feature = "tauri-host")]
 async fn install_broker_extension(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     binary: &str,
     extensions_dir: &Path,
     user_data_dir: &Path,
@@ -1098,7 +1124,7 @@ async fn install_broker_extension(
     if broker_ext_install_up_to_date(existing.as_deref()) {
         return;
     }
-    let vsix = match crate::claude::sidecar::sidecar_dir(app) {
+    let vsix = match cognia_sidecar::directory() {
         Ok(dir) => dir.join("codeserver-agent-ext").join(BROKER_EXT_VSIX),
         Err(e) => {
             log::warn!("code-server managed broker: sidecar dir unresolved: {e}");
@@ -1144,6 +1170,7 @@ async fn install_broker_extension(
 /// Install every locally generated proxy that still passes signature and
 /// content-hash verification. A broken proxy is isolated: it is logged and
 /// skipped while base code-server remains available.
+#[cfg(feature = "tauri-host")]
 async fn install_managed_proxy_extensions(
     app: &tauri::AppHandle,
     binary: &str,
@@ -1184,6 +1211,7 @@ async fn install_managed_proxy_extensions(
     }
 }
 
+#[cfg(feature = "tauri-host")]
 async fn install_one_managed_proxy(
     binary: &str,
     extensions_dir: &Path,
@@ -1223,6 +1251,7 @@ async fn install_one_managed_proxy(
         .map_err(|error| format!("proxy {} marker write failed: {error}", artifact.plugin_id))
 }
 
+#[cfg(any(feature = "tauri-host", test))]
 fn managed_proxy_marker(extensions_dir: &Path, plugin_id: &str) -> PathBuf {
     extensions_dir.join(format!(
         ".cognia-proxy-{}",
@@ -1237,6 +1266,7 @@ fn managed_proxy_marker(extensions_dir: &Path, plugin_id: &str) -> PathBuf {
     ))
 }
 
+#[cfg(feature = "tauri-host")]
 async fn uninstall_managed_proxy(
     binary: &str,
     extensions_dir: &Path,
@@ -1276,6 +1306,7 @@ async fn uninstall_managed_proxy(
     }
 }
 
+#[cfg(feature = "tauri-host")]
 fn spawn_child(binary: &str, args: &[String], envs: &[(&str, String)]) -> Result<Child, String> {
     prepare_session_socket_dir()?;
     let mut cmd = Command::new(binary);
@@ -1304,6 +1335,7 @@ fn spawn_child(binary: &str, args: &[String], envs: &[(&str, String)]) -> Result
     Ok(child)
 }
 
+#[cfg(feature = "tauri-host")]
 fn drain_pipe<R>(pipe: Option<R>, tag: &'static str)
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
@@ -1327,6 +1359,7 @@ where
 /// self-reference); it flips the shared `unhealthy` flag instead, which is what
 /// makes the prune paths — `live_port`, `status`, `open_file` — retire the
 /// instance rather than hand it out again to a caller that is retrying.
+#[cfg(feature = "tauri-host")]
 fn spawn_watchdog(
     app: tauri::AppHandle,
     root: String,
@@ -1335,7 +1368,7 @@ fn spawn_watchdog(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         use tauri::Emitter as _;
-        crate::ensure_crypto_provider();
+        cognia_net::proxy_config::ensure_crypto_provider();
         let Ok(client) = reqwest::Client::builder()
             .timeout(Duration::from_secs(2))
             .no_proxy()
@@ -1374,8 +1407,9 @@ fn spawn_watchdog(
 
 /// Poll `http://127.0.0.1:<port>/healthz` until it answers 200 or `budget`
 /// elapses. code-server exposes `/healthz` once its HTTP server is up.
+#[cfg(any(feature = "tauri-host", test))]
 async fn wait_healthy(port: u16, budget: Duration) -> Result<(), String> {
-    crate::ensure_crypto_provider();
+    cognia_net::proxy_config::ensure_crypto_provider();
     let url = format!("http://127.0.0.1:{port}/healthz");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))

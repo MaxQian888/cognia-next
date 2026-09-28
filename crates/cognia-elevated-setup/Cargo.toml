@@ -1,0 +1,23 @@
+[package]
+name = "cognia-elevated-setup"
+version = "0.1.0"
+description = "Standalone Windows sandbox and virtual-display setup helpers"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "cognia-sandbox-setup"
+path = "src/bin/cognia-sandbox-setup.rs"
+
+[[bin]]
+name = "cognia-vdd-setup"
+path = "src/bin/cognia-vdd-setup.rs"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+chrono.workspace = true
+dirs.workspace = true
+
+[lints]
+workspace = true

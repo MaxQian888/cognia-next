@@ -46,6 +46,7 @@ pub mod replay;
 pub mod serial;
 pub mod session;
 pub mod sftp;
+pub mod sftp_service;
 pub mod ssh;
 pub mod ssh_forward;
 // ADR-0067 Tier C — the durable terminal-host service moved in from

@@ -43,7 +43,7 @@ fn context(headers: &HeaderMap) -> Result<ContentContext, Response> {
 
 #[allow(clippy::result_large_err)]
 fn require_service(
-    identity: &crate::companion_api::middleware::DeviceContext,
+    identity: &cognia_companion_security::principal::DeviceContext,
 ) -> Result<(), Response> {
     if identity.scope == "service" {
         Ok(())
@@ -53,7 +53,7 @@ fn require_service(
 }
 
 pub async fn upload_content(
-    Extension(identity): Extension<crate::companion_api::middleware::DeviceContext>,
+    Extension(identity): Extension<cognia_companion_security::principal::DeviceContext>,
     headers: HeaderMap,
     request: Request,
 ) -> Response {
@@ -68,7 +68,7 @@ pub async fn upload_content(
         Ok(bytes) => bytes,
         Err(_) => return (StatusCode::PAYLOAD_TOO_LARGE, "content exceeds limit").into_response(),
     };
-    match crate::codeserver::agent_channel::global().create_content_handle(
+    match crate::agent_channel::global().create_content_handle(
         &context.root,
         context.generation,
         &context.plugin_id,
@@ -85,7 +85,7 @@ pub async fn upload_content(
 }
 
 pub async fn redeem_content(
-    Extension(identity): Extension<crate::companion_api::middleware::DeviceContext>,
+    Extension(identity): Extension<cognia_companion_security::principal::DeviceContext>,
     Path(handle_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
@@ -96,7 +96,7 @@ pub async fn redeem_content(
         Ok(context) => context,
         Err(response) => return response,
     };
-    match crate::codeserver::agent_channel::global().redeem_content_handle(
+    match crate::agent_channel::global().redeem_content_handle(
         &context.root,
         context.generation,
         &context.plugin_id,

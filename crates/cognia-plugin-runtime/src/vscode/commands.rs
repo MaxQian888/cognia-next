@@ -36,8 +36,8 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
@@ -46,9 +46,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 
-use super::VscodeExtensionState;
 use super::host::{InboundFrame, Sidecar, SpawnRequest};
-use super::installer::{InstallError, InstallResult, install_vsix};
+use super::installer::{install_vsix, InstallError, InstallResult};
+use super::VscodeExtensionState;
 use crate::PluginRuntimeState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -338,7 +338,7 @@ pub async fn plugin_load_vscode(
 ) -> Result<VscodeLoadResult, VscodeCommandError> {
     let script = match sidecar_script {
         Some(path) => PathBuf::from(path),
-        None => resolve_lsp_host_script(&app_handle)
+        None => resolve_lsp_host_script()
             .map_err(|error| VscodeCommandError::new("host_script_missing", error))?,
     };
     let node_binary = host_node_binary(node_binary)?;
@@ -523,32 +523,9 @@ fn lsp_host_script_path(sidecar_dir: &Path) -> PathBuf {
 }
 
 #[cfg(feature = "tauri-host")]
-/// ADR-0067 Tier-B inversion: the sidecar-directory resolver lives app-side
-/// in `claude::sidecar` (it owns the resource-dir vs manifest-walk split).
-/// The app shell registers it at startup, before any `plugin_load_vscode` /
-/// LSP-host spawn can run.
-type SidecarDirResolver = fn(&AppHandle) -> Result<PathBuf, String>;
-
-#[cfg(feature = "tauri-host")]
-static SIDECAR_DIR_RESOLVER: std::sync::OnceLock<SidecarDirResolver> = std::sync::OnceLock::new();
-
-#[cfg(feature = "tauri-host")]
-/// Register the app-side sidecar-directory resolver. First registration wins;
-/// later calls are no-ops.
-pub fn set_sidecar_dir_resolver(resolver: fn(&AppHandle) -> Result<PathBuf, String>) {
-    let _ = SIDECAR_DIR_RESOLVER.set(resolver);
-}
-
-#[cfg(feature = "tauri-host")]
-/// Resolve the absolute path to `sidecar/vscode-ext-host/dist/host.js` in
-/// both dev and release builds. Delegates to the registered app-side
-/// resolver (`claude::sidecar::sidecar_dir`), which already handles the
-/// resource-dir (release) vs manifest-walk (dev) split.
-fn resolve_lsp_host_script(app: &AppHandle) -> Result<PathBuf, String> {
-    let resolver = SIDECAR_DIR_RESOLVER
-        .get()
-        .ok_or_else(|| "sidecar dir resolver not registered".to_string())?;
-    let dir = resolver(app)?;
+/// Resolve the LSP entry using the shared directory installed at host boot.
+fn resolve_lsp_host_script() -> Result<PathBuf, String> {
+    let dir = cognia_sidecar::directory()?;
     let candidate = lsp_host_script_path(&dir);
     if candidate.exists() {
         return Ok(candidate);
@@ -572,7 +549,7 @@ pub async fn ensure_system_lsp_host(
     app_handle: AppHandle,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<(), VscodeCommandError> {
-    let script = resolve_lsp_host_script(&app_handle)
+    let script = resolve_lsp_host_script()
         .map_err(|e| VscodeCommandError::new("lsp_host_script_missing", e))?;
     let app_for_events = app_handle.clone();
     state.configure_host(

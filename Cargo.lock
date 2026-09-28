@@ -2002,6 +2002,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-codeserver"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "axum-server",
+ "base64 0.23.1",
+ "cognia-agents",
+ "cognia-companion",
+ "cognia-companion-bus",
+ "cognia-companion-connectivity",
+ "cognia-companion-security",
+ "cognia-core",
+ "cognia-net",
+ "cognia-secrets",
+ "cognia-sidecar",
+ "ed25519-dalek 3.0.0",
+ "flate2",
+ "futures-util",
+ "hex",
+ "hmac 0.13.0",
+ "libc",
+ "log",
+ "once_cell",
+ "p256 0.14.0",
+ "rand 0.10.2",
+ "reqwest 0.13.4",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "tar",
+ "tauri",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-tungstenite",
+ "tower",
+ "url",
+ "uuid",
+ "zip 8.6.0",
+]
+
+[[package]]
 name = "cognia-codex-app"
 version = "0.1.0"
 dependencies = [
@@ -2198,6 +2244,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-companion-rpc"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "chrono",
+ "cognia-agent-state",
+ "cognia-codeserver",
+ "cognia-companion",
+ "cognia-connectors",
+ "cognia-core",
+ "cognia-exec-sandbox",
+ "cognia-external-agent",
+ "cognia-gateway",
+ "cognia-hooks",
+ "cognia-jobs",
+ "cognia-mcp-server",
+ "cognia-observability",
+ "cognia-ocr",
+ "cognia-plugin-runtime",
+ "cognia-scheduling",
+ "cognia-secrets",
+ "cognia-sidecar",
+ "cognia-terminal",
+ "hex",
+ "local-ip-address",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "rand 0.10.2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tauri",
+ "tempfile",
+ "tokio",
+ "url",
+ "uuid",
+ "wait-timeout",
+]
+
+[[package]]
 name = "cognia-companion-security"
 version = "0.1.0"
 dependencies = [
@@ -2328,6 +2416,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-elevated-setup"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs 6.0.0",
+]
+
+[[package]]
 name = "cognia-environment"
 version = "0.1.0"
 dependencies = [
@@ -2372,6 +2468,7 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "bollard",
+ "cognia-exec-sandbox",
  "cognia-net",
  "futures-util",
  "hex",
@@ -2633,11 +2730,13 @@ dependencies = [
  "cognia-automation",
  "cognia-browser-cookies",
  "cognia-ccswitch",
+ "cognia-codeserver",
  "cognia-codex-app",
  "cognia-companion",
  "cognia-companion-bus",
  "cognia-companion-connectivity",
  "cognia-companion-contract",
+ "cognia-companion-rpc",
  "cognia-companion-security",
  "cognia-connectors",
  "cognia-core",
@@ -2664,6 +2763,7 @@ dependencies = [
  "cognia-sandbox-pool",
  "cognia-scheduling",
  "cognia-secrets",
+ "cognia-sidecar",
  "cognia-signaling-core",
  "cognia-skills",
  "cognia-subscription",
@@ -2882,6 +2982,7 @@ dependencies = [
  "cognia-hooks",
  "cognia-net",
  "cognia-secrets",
+ "cognia-sidecar",
  "cognia-terminal",
  "dirs 6.0.0",
  "ed25519-dalek 3.0.0",
@@ -3057,6 +3158,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-sidecar"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "cognia-companion-security",
+ "cognia-core",
+ "cognia-exec-sandbox",
+ "cognia-hooks",
+ "cognia-instrument",
+ "cognia-net",
+ "cognia-power",
+ "cognia-secrets",
+ "hex",
+ "libc",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "cognia-signaling-core"
 version = "0.1.0"
 dependencies = [
@@ -3184,6 +3313,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "chrono",
+ "cognia-companion-contract",
  "cognia-exec-sandbox",
  "cognia-instrument",
  "cognia-problem",

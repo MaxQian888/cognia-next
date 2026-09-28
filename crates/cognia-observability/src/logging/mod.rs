@@ -13,14 +13,20 @@
 //! - `commands` — six Tauri commands the frontend invokes for readiness
 //!   queries, log-directory access, and platform-logging config
 
+#[cfg(feature = "desktop-host")]
 pub mod commands;
+#[cfg(feature = "desktop-host")]
 pub mod native_bootstrap;
+#[cfg(feature = "desktop-host")]
 pub mod platform;
 pub mod query;
 pub mod tracing_setup;
 
+#[cfg(feature = "desktop-host")]
 use crate::crash::retention::LOG_MAX_FILE_SIZE;
+#[cfg(feature = "desktop-host")]
 use tauri::App;
+#[cfg(feature = "desktop-host")]
 use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy};
 
 /// Bootstrap native logging. Plans the active targets, installs the
@@ -31,6 +37,7 @@ use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy};
 /// Run unconditionally (release + debug). The bootstrap planner downgrades
 /// to a `Fallback` (stdout + webview only) if the persistent log directory
 /// can't be prepared, and to `Disabled` if `should_register` is false.
+#[cfg(feature = "desktop-host")]
 pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let plan = native_bootstrap::plan_native_logging_bootstrap(true);
 
@@ -74,4 +81,19 @@ pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+const APP_LOG_DIR_NAME: &str = "Cognia";
+
+/// Resolve the existing persistent log directory without creating it.
+pub fn log_dir() -> Option<std::path::PathBuf> {
+    Some(dirs::data_local_dir()?.join(APP_LOG_DIR_NAME).join("logs"))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn all_hosts_share_the_existing_log_directory() {
+        assert_eq!(super::log_dir(), dirs::data_local_dir().map(|dir| dir.join("Cognia").join("logs")));
+    }
 }

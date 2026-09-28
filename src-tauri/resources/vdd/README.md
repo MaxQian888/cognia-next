@@ -9,7 +9,7 @@ than mirrored here.
 ## Required files
 
 Place the signed driver package here (filenames must match what
-`src/bin/cognia-vdd-setup.rs` and `automation::virtual_display::parsec_vdd`
+`crates/cognia-elevated-setup/src/bin/cognia-vdd-setup.rs` and `automation::virtual_display::parsec_vdd`
 expect):
 
 ```

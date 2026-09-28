@@ -1,0 +1,44 @@
+[package]
+name = "cognia-sidecar"
+version = "0.1.0"
+description = "Shared sidecar resource location and process runtime"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+cognia-hooks = { path = "../cognia-hooks" }
+cognia-instrument = { path = "../cognia-instrument" }
+cognia-core = { path = "../cognia-core" }
+log.workspace = true
+cognia-secrets = { path = "../cognia-secrets" }
+cognia-companion-security = { path = "../cognia-companion-security" }
+base64.workspace = true
+once_cell.workspace = true
+url.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2"] }
+cognia-net = { path = "../cognia-net" }
+cognia-power = { path = "../cognia-power" }
+cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
+async-trait.workspace = true
+parking_lot.workspace = true
+serde_json.workspace = true
+serde = { workspace = true, features = ["derive"] }
+sha2.workspace = true
+hex.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "sync", "time", "io-util"] }
+
+[dev-dependencies]
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+cognia-power = { path = "../cognia-power", features = ["test-support"] }
+tempfile.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true
+
+[lints]
+workspace = true

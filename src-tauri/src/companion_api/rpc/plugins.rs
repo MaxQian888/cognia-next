@@ -105,7 +105,6 @@ pub(super) async fn dispatch(
     scope: Option<&str>,
     plane: super::super::remote_execution::ExecutionPlane,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    use tauri::Manager as _;
 
     let _ = (state, host, device_id, account_id, scope);
     let result = match name {
@@ -122,9 +121,8 @@ pub(super) async fn dispatch(
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json);
             }
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
-            crate::plugin_api::lifecycle::plugin_get_all(st)
+            let st = host.plugin_runtime();
+            crate::plugin_api::lifecycle::plugin_get_all_for_state(st)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -140,9 +138,8 @@ pub(super) async fn dispatch(
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json);
             }
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
-            crate::plugin_api::lifecycle::plugin_runtime_snapshot(st, plugin_id)
+            let st = host.plugin_runtime();
+            crate::plugin_api::lifecycle::plugin_runtime_snapshot_for_state(st, plugin_id)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -174,9 +171,8 @@ pub(super) async fn dispatch(
                 );
                 return to_json(snapshot);
             }
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
-            crate::plugin_api::lifecycle::plugin_install(st, plugin_id, source, payload)
+            let st = host.plugin_runtime();
+            crate::plugin_api::lifecycle::plugin_install_for_state(st, plugin_id, source, payload)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -208,15 +204,13 @@ pub(super) async fn dispatch(
                 );
                 return to_json(result);
             }
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
-            crate::plugin_api::github::installer::plugin_install_from_github(
+            let st = host.plugin_runtime();
+            crate::plugin_api::github::installer::plugin_install_from_github_for_state(
                 st,
                 repo,
                 git_ref,
                 subdir,
-                generated_files,
-                None,
+                generated_files.unwrap_or_default(),
             )
             .await
             .map_err(RpcError::internal)
@@ -241,9 +235,8 @@ pub(super) async fn dispatch(
                 );
                 return Ok(Value::Null);
             }
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
-            crate::plugin_api::lifecycle::plugin_uninstall(st, plugin_id)
+            let st = host.plugin_runtime();
+            crate::plugin_api::lifecycle::plugin_uninstall_for_state(st, plugin_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -271,10 +264,9 @@ pub(super) async fn dispatch(
                 .map_err(|error| RpcError::internal(error.to_string()))
                 .and_then(to_json);
             }
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
+            let state = host.plugin_runtime();
             crate::plugin_api::marketplace::plugin_stage_version_for_state(
-                state.inner(),
+                state,
                 plugin_id,
                 version,
                 download_url,
@@ -307,10 +299,9 @@ pub(super) async fn dispatch(
                 );
                 return to_json(committed);
             }
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
+            let state = host.plugin_runtime();
             crate::plugin_api::marketplace::commit_staged_update_for_state(
-                state.inner(),
+                state,
                 &plugin_id,
                 &transaction_id,
             )
@@ -329,10 +320,9 @@ pub(super) async fn dispatch(
                 .map(|_| Value::Null)
                 .map_err(|error| RpcError::internal(error.to_string()));
             }
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
+            let state = host.plugin_runtime();
             crate::plugin_api::marketplace::discard_staged_update_for_state(
-                state.inner(),
+                state,
                 &plugin_id,
                 &transaction_id,
             )
@@ -351,10 +341,9 @@ pub(super) async fn dispatch(
                 .map(|_| Value::Null)
                 .map_err(|error| RpcError::internal(error.to_string()));
             }
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
+            let state = host.plugin_runtime();
             crate::plugin_api::marketplace::finalize_staged_update_for_state(
-                state.inner(),
+                state,
                 &plugin_id,
                 &transaction_id,
             )
@@ -374,9 +363,8 @@ pub(super) async fn dispatch(
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json);
             }
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
-            crate::plugin_api::backup::plugin_backup_create(st, plugin_id, label)
+            let st = host.plugin_runtime();
+            crate::plugin_api::backup::plugin_backup_create_for_state(st, plugin_id, label)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -402,9 +390,8 @@ pub(super) async fn dispatch(
                 );
                 return Ok(Value::Null);
             }
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
-            crate::plugin_api::backup::plugin_backup_restore(st, plugin_id, backup_id)
+            let st = host.plugin_runtime();
+            crate::plugin_api::backup::plugin_backup_restore_for_state(st, plugin_id, backup_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -422,9 +409,8 @@ pub(super) async fn dispatch(
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()));
             }
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
-            crate::plugin_api::backup::plugin_backup_delete(st, plugin_id, backup_id)
+            let st = host.plugin_runtime();
+            crate::plugin_api::backup::plugin_backup_delete_for_state(st, plugin_id, backup_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))

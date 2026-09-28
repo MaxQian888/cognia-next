@@ -37,6 +37,10 @@ members = [
   # and none of them depends on cognia-core.
   "crates/cognia-problem",
   "crates/cognia-sandbox-runner",
+  # ADR-0196 P6h — Windows elevation helpers build without the desktop app.
+  "crates/cognia-elevated-setup",
+  "crates/cognia-sidecar",
+  "crates/cognia-codeserver",
   # ADR-0067 Tier-A decomposition — subsystem library crates extracted from the
   # monolithic `app_lib` so an edit recompiles ~2–15k LOC + a relink instead of
   # the whole 170k-LOC tree.
@@ -72,6 +76,7 @@ members = [
   # ADR-0196 P7. The companion core: state, listener, auth, canonical remote
   # execution, WebSocket planes, signaling, A2A and ACP.
   "crates/cognia-companion",
+  "crates/cognia-companion-rpc",
   # ADR-0196 P6c — the settings-hook runtime (`.claude/settings.json` hooks,
   # built-ins, trust, webhook/command handlers) and the settings readers, out
   # of `app_lib`.

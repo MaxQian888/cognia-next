@@ -906,10 +906,10 @@
     "src-tauri/src/headless/brain.rs": {
       "bareAccountIdRust": 6
     },
-    "src-tauri/src/mcp_oauth/headless_store.rs": {
+    "crates/cognia-companion-rpc/src/mcp_oauth/headless_store.rs": {
       "bareAccountIdRust": 33
     },
-    "src-tauri/src/mcp_oauth/headless.rs": {
+    "crates/cognia-companion-rpc/src/mcp_oauth/headless.rs": {
       "bareAccountIdRust": 29
     },
     "src-tauri/src/subscription/commands.rs": {

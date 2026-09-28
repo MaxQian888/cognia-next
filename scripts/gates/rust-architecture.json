@@ -16,6 +16,7 @@
     "cognia-power": "foundation",
 
     "cognia-jobs": "platform",
+    "cognia-sidecar": "platform",
     "cognia-environment": "platform",
     "cognia-agents": "platform",
     "cognia-files": "platform",
@@ -51,19 +52,26 @@
     "cognia-agent-state": "domain",
     "cognia-sandbox-pool": "domain",
     "cognia-codex-app": "domain",
+    "cognia-codeserver": "domain",
 
     "cognia-companion": "companion",
+    "cognia-companion-rpc": "companion",
 
     "cognia-cli": "service",
     "cognia-collab-server": "service",
     "cognia-ops-controller": "service",
     "cognia-deploy-agent": "service",
     "cognia-sandbox-runner": "service",
+    "cognia-elevated-setup": "service",
 
     "cognia-next": "app"
   },
   "allowedSameLayer": [
     "cognia-core -> cognia-problem",
+    "cognia-companion-rpc -> cognia-companion",
+    "cognia-sidecar -> cognia-exec-sandbox",
+    "cognia-sidecar -> cognia-hooks",
+    "cognia-sidecar -> cognia-companion-security",
     "cognia-secrets -> cognia-core",
     "cognia-companion-contract -> cognia-headless-contract",
     "cognia-companion-contract -> cognia-problem",
@@ -114,7 +122,7 @@
   "appShell": {
     "package": "cognia-next",
     "srcDir": "src-tauri/src",
-    "maxLoc": 100100,
+    "maxLoc": 83000,
     "locSlack": 4000,
     "locBlocking": false,
     "modules": [
@@ -145,7 +153,6 @@
       "lib.rs",
       "main.rs",
       "mcp_oauth",
-      "mcp_oauth.rs",
       "menu.rs",
       "node_runtime.rs",
       "ollama",
@@ -156,7 +163,6 @@
       "pi_sessions.rs",
       "power_assertion.rs",
       "process_registry",
-      "project_environment.rs",
       "provider_diagnostics.rs",
       "proxy_config",
       "recorder_window",
@@ -167,7 +173,6 @@
       "session_import_watch.rs",
       "settings.rs",
       "sftp_service.rs",
-      "shell.rs",
       "shortcuts",
       "shutdown.rs",
       "startup",

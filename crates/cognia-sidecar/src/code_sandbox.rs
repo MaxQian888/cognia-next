@@ -16,11 +16,11 @@
 //! Code fail closed.
 //!
 //! Pure (no spawning, no policy evaluation) so every branch is unit-testable on
-//! any OS, matching how `cognia_automation::sandbox::launcher` is tested.
+//! any OS, matching how `cognia_exec_sandbox::launcher` is tested.
 
 use std::path::Path;
 
-use cognia_automation::sandbox::launcher::LaunchScope;
+use cognia_exec_sandbox::launcher::LaunchScope;
 
 /// Env var the sidecar's `src/tools/builtin/run-code/supervisor.ts` reads.
 pub const CODE_SANDBOX_LAUNCHER_ENV: &str = "COGNIA_CODE_SANDBOX_LAUNCHER";
@@ -61,7 +61,7 @@ pub fn code_sandbox_scope(scratch: &Path, node_root: &Path, sidecar_root: &Path)
 /// a bad path simply grants nothing that matches, which fails closed — whereas
 /// panicking or dropping the entry silently would be worse.
 fn canonical_for_policy(path: &Path) -> String {
-    cognia_automation::sandbox::paths::safe_canonicalize(path)
+    cognia_exec_sandbox::paths::safe_canonicalize(path)
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
         .to_string()
@@ -88,7 +88,7 @@ pub fn encode_launcher(prefix: &[String]) -> Option<String> {
 /// leaving the env var unset is what disables Code.
 #[cfg(target_os = "macos")]
 pub fn render_code_sandbox_launcher(scope: &LaunchScope) -> Option<Vec<String>> {
-    use cognia_automation::sandbox::launcher::sandbox_exec_prefix;
+    use cognia_exec_sandbox::launcher::sandbox_exec_prefix;
     if !Path::new("/usr/bin/sandbox-exec").is_file() {
         return None;
     }
@@ -97,7 +97,7 @@ pub fn render_code_sandbox_launcher(scope: &LaunchScope) -> Option<Vec<String>> 
 
 #[cfg(target_os = "linux")]
 pub fn render_code_sandbox_launcher(scope: &LaunchScope) -> Option<Vec<String>> {
-    use cognia_automation::sandbox::launcher::bwrap_prefix;
+    use cognia_exec_sandbox::launcher::bwrap_prefix;
     let bwrap = find_on_path("bwrap")?;
     // Shared with the other sandboxed surfaces; bound over secret stores so the
     // child can neither read nor create them.

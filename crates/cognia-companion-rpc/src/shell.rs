@@ -33,7 +33,7 @@ pub struct ShellResult {
 /// Spawn `cmd` via the platform shell inside `cwd` and capture stdout+stderr
 /// up to the configured cap. Times out after `timeout_secs` (default 30, hard
 /// max 5 minutes) — the child is killed and `timed_out` is set.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn shell_exec(
     cmd: String,
     cwd: String,

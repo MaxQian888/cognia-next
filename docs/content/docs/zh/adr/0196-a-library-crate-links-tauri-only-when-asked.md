@@ -136,10 +136,13 @@ headless 服务端移到 `crates/cognia-server`（lib + bin），不链接 Tauri
 | P0–P3 | 全部：修复并拆分 setup、工作区治理与门禁、分层修正、每个库 crate 的 `tauri-host`，以及 observability 不依赖 Tauri 的 `tracing-host`（trace context 传播） | `desktop-host` 中其余供 `cognia-server` 使用的日志部分（P9） |
 | P4 | `cognia-companion-connectivity`、`-bus`、`-contract`、`-security` | — |
 | P5 | `RendererPort`；`CompanionRuntime`（分发与应用的路由）及 headless 槽位；`RpcError`、payload 能力门禁与审批权限检查移入核心；`cognia-power` 与 Wake-on-LAN 移出应用 | `RpcHost`（P5.3，随 P8）、拆分 `commands.rs` |
-| P6 | `cognia-codex-app`、`cognia-browser-cookies`、`cognia-hooks`、`cognia-fleet`、`cognia-task-workspace-host`、`cognia-terminal::host_client` 与 `::host_bridge`，GitHub 工作区与仓库导入并入 `cognia-git` | sidecar 定位器、codeserver、安装辅助二进制、`jobs` |
+| P6 | `cognia-codex-app`、`cognia-browser-cookies`、`cognia-hooks`、`cognia-fleet`、`cognia-task-workspace-host`、`cognia-terminal::host_client` 与 `::host_bridge`，GitHub 工作区与仓库导入并入 `cognia-git`；`cognia-elevated-setup`；`cognia-jobs::host` 的 supervisor/host RPC；`cognia-sidecar` 定位器、supervisor、Langfuse、Pi 完整性校验与命令核心；`cognia-codeserver`；`cognia-terminal::sftp_service` | — |
+| P8 | `cognia-companion-rpc` 的 project environment、shell 与共享命令服务 | RPC 族、宿主适配器与 headless registry |
 | P7 | `cognia-companion`：核心（51 个文件、4.4 万行）；`companion_api` 成为门面，外加分发表、命令外壳与 `wiring` | — |
 
 计划与代码相遇之处：
+
+- **2026-09-27 已完成 P6h 与 jobs host 拆分。** 两个 setup 二进制移入 `cognia-elevated-setup`，可执行文件名称保持不变。Windows 的 `dirs` 与 `chrono` 依赖保留，两者均不链接 Tauri。`cognia-jobs::host` 承载 supervisor 安装与 host RPC 分发；桌面侧保留原命令外壳和注册路径。
 
 - **`cognia-task-workspace-host` 是独立 crate，而不是 `cognia-task-workspace` 的模块。** 后者刻意保持同步（不引入 tokio），而宿主层的每个函数体都跑在异步运行时上。
 - **终端桥分两步迁出。** `cognia-terminal::commands` 仍保留持久终端宿主出现之前的同名 `terminal_*` 命令（未注册），而 `#[tauri::command]` 会导出 crate 级的全局 `__cmd__*` 宏，因此在删除旧命令之前，桥无法并入该 crate。旧命令删除后，桥命令及其状态位于 `tauri-host` 之后的 `cognia_terminal::host_bridge`；`src-tauri/src/terminal_host_bridge.rs` 改为 glob 重导出（这种写法会带上那些宏），`lib.rs` 中的 `generate_handler!` 无需改动。只有 `terminal_host_service` 的命令外壳留在应用中：它的 LAN URL 兜底要读取 companion 服务端的状态，因此由外壳以闭包形式传给 crate 中的 `run_terminal_host_service`。
@@ -149,7 +152,7 @@ headless 服务端移到 `crates/cognia-server`（lib + bin），不链接 Tauri
 - **WebView 适配器留在应用中。** `TauriRenderer` 需要 bus 的 WebView 传输，而它位于 bus 的 `tauri-host` 之后；crate 不得开启其他 crate 的宿主 feature，且只有应用代码需要取回 `AppHandle`，因此它是 `src-tauri` 中的 `companion_api::host`。
 - **核心中所有 `cfg(test)` 分叉都改为 `test-support` 分叉**，理由与 Fleet 相同：应用的测试一直以 `cfg(test)` 编译核心（bridge 的 hello 超时、bridge 槽位归属）。有两个测试在旧 crate 中只是靠测试顺序通过（OIDC 中间件测试依赖另一个测试安装的代理策略），现在各自准备所需环境。
 - **`cognia-power` 是独立 crate。** 保持唤醒的断言同时被 sidecar、companion worker 和桌面端的屏幕常亮命令持有，因此位于三者之下，而不是按计划放进 connectivity。
-- **sidecar 定位器等待 `lib.rs`。** 插件运行时的解析器在该文件中安装，而它一直有其他会话的改动。
+- **sidecar 定位器与 supervisor 已移入 platform crate。** 桌面端在其他启动步骤前安装目录，headless 在解析入口脚本后安装同一个 `Installed` 槽位，plugin runtime 直接读取它。现有 `SidecarHost` 提供 recovery、telemetry 注入与 host RPC，保持 domain 服务位于宿主侧。进程组清理原样移入 `cognia-exec-sandbox`，`cognia-external-agent` 保留重导出。Pi 完整性校验与账户级 Langfuse 校验、凭据和导出一并移入，应用保留命令外壳。sidecar crate 加入 app version-sync 组；旧 telemetry secret 清理由 `cognia-secrets` 共享，无需链接桌面宿主。
 
 ## 影响
 

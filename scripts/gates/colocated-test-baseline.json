@@ -312,8 +312,6 @@
     "lib/workflow/diagnostics/diagnostic-id.ts",
     "lib/workflow/runtime/idempotency.ts",
     "lib/workflow/runtime/secret-resolver.ts",
-    "src-tauri/src/bin/cognia-sandbox-setup.rs",
-    "src-tauri/src/bin/cognia-vdd-setup.rs",
     "src-tauri/src/main.rs",
     "src-tauri/src/perf/mod.rs",
     "src-tauri/src/shortcuts/commands.rs",

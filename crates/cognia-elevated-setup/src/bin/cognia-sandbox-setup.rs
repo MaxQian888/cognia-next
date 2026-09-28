@@ -259,3 +259,25 @@ fn remove_marker() -> Result<(), SetupError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn setup_error_preserves_the_operating_system_diagnostic() {
+        let error = super::SetupError("net user spawn failed: access denied".into());
+        assert_eq!(error.to_string(), "net user spawn failed: access denied");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn unsupported_platform_cannot_install_or_uninstall() {
+        assert_eq!(
+            super::install_all().unwrap_err().to_string(),
+            "cognia-sandbox-setup runs on Windows only"
+        );
+        assert_eq!(
+            super::uninstall_all().unwrap_err().to_string(),
+            "cognia-sandbox-setup --uninstall runs on Windows only"
+        );
+    }
+}

@@ -32,7 +32,7 @@ use tracing_subscriber::registry::Registry;
 #[cfg(feature = "otel-export")]
 use tracing_subscriber::reload;
 
-use crate::logging::native_bootstrap;
+use crate::logging::log_dir;
 
 const STRUCTURED_LOG_FILE: &str = "cognia-structured.log";
 
@@ -178,7 +178,7 @@ impl<'a> MakeWriter<'a> for SharedFileWriter {
 }
 
 fn structured_log_path() -> Option<PathBuf> {
-    let dir = native_bootstrap::log_dir()?;
+    let dir = log_dir()?;
     if create_dir_all(&dir).is_err() {
         return None;
     }

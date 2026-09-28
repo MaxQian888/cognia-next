@@ -84,13 +84,14 @@ pub(super) fn activation_marker_selects(
     marker_contents.map(str::trim) == Some(artifact.sha256.as_str())
 }
 
+#[cfg(feature = "tauri-host")]
 pub fn build_proxy(
     app: &tauri::AppHandle,
     request: ProxyBuildRequest,
 ) -> Result<ProxyArtifact, String> {
     let root = super::download::code_server_root(app)
         .map_err(|error| format!("resolve code-server root: {error:#}"))?;
-    let broker_vsix = crate::claude::sidecar::sidecar_dir(app)
+    let broker_vsix = cognia_sidecar::directory()
         .map_err(|error| format!("resolve broker VSIX: {error}"))?
         .join("codeserver-agent-ext")
         .join("cognia-managed-broker.vsix");
@@ -141,6 +142,7 @@ pub fn build_proxy_at_root(
     Ok(artifact)
 }
 
+#[cfg(feature = "tauri-host")]
 pub fn verify_artifact(app: &tauri::AppHandle, artifact: &ProxyArtifact) -> Result<(), String> {
     let trusted_root = super::download::code_server_root(app)
         .map_err(|error| format!("resolve code-server root: {error:#}"))?;
@@ -262,6 +264,7 @@ pub fn verify_artifact_at_root(
     Ok(())
 }
 
+#[cfg(feature = "tauri-host")]
 pub fn list_artifacts(app: &tauri::AppHandle) -> Result<Vec<ProxyArtifact>, String> {
     let root = super::download::code_server_root(app)
         .map_err(|error| format!("resolve code-server root: {error:#}"))?;

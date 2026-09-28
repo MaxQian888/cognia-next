@@ -23,7 +23,7 @@ ocr-paddle = []
 # for `diagnostic_package` / `diagnostic_submit`, and it is a deliberately lean
 # binary (ureq over reqwest, no tokio, no tracing). `src-tauri` turns it on.
 desktop-host = [
-  "tracing-host",
+  "runtime-host",
   "dep:tauri",
   "dep:tauri-plugin-log",
   "dep:tauri-plugin-opener",
@@ -51,11 +51,25 @@ desktop-host = [
 # headless server need on their own: W3C trace-context propagation
 # (`trace_context`). `desktop-host` implies it.
 tracing-host = ["dep:tracing"]
+# Shared tracing files, queries and telemetry configuration/export, without a UI runtime.
+runtime-host = [
+  "tracing-host",
+  "dep:tracing-subscriber",
+  "dep:once_cell",
+  "dep:base64",
+  "dep:url",
+  "dep:reqwest",
+  "dep:cognia-core",
+  "cognia-core/rt",
+  "dep:cognia-instrument",
+  "dep:cognia-net",
+  "dep:cognia-secrets",
+]
 # ADR-0073 — native OTLP trace/metric export stays opt-in so the OpenTelemetry
-# graph does not slow normal desktop development. `src-tauri` forwards its own
-# `otel-export` here. Implies `desktop-host`: the only consumer is `telemetry`.
+# graph does not slow normal desktop development. Both binaries forward their
+# `otel-export` feature here; exporters do not require a desktop host.
 otel-export = [
-  "desktop-host",
+  "runtime-host",
   "dep:opentelemetry",
   "dep:opentelemetry_sdk",
   "dep:opentelemetry-otlp",
@@ -125,6 +139,7 @@ libsystemd = { version = "0.7", optional = true }
 syslog = { version = "7", optional = true }
 
 [dev-dependencies]
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
 # `telemetry`'s OTLP export tests stand up a loopback TCP listener. tokio is
 # test-only here: the production paths use `tauri::async_runtime`.
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "net"] }

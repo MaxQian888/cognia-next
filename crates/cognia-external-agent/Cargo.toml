@@ -34,6 +34,7 @@ workspace-runtime-exec = ["dep:reqwest", "dep:cognia-net"]
 test-support = []
 
 [dependencies]
+cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
 tauri = { workspace = true, optional = true }
 url.workspace = true
 serde = { workspace = true, features = ["derive"] }

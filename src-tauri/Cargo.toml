@@ -28,14 +28,8 @@ crate-type = ["rlib"]
 name = "cognia-server"
 path = "src/bin/cognia-server.rs"
 
-# ADR-0028 Phase 4.2 / Phase 13 — Windows sandbox setup binary.
-# UAC-elevated. Creates the two synthetic users and installs per-SID
-# Firewall rules. `--uninstall` cleans up; called by the WiX/NSIS
-# uninstall hook.
-[[bin]]
-name = "cognia-sandbox-setup"
-path = "src/bin/cognia-sandbox-setup.rs"
-required-features = []
+# ADR-0196 P6h — the sandbox and VDD setup binaries now live in
+# `crates/cognia-elevated-setup`; their executable names are unchanged.
 
 # ADR-0028 Phase 4 — the Windows sandbox runner moved to its own workspace
 # member crate (`crates/cognia-sandbox-runner`) so the security-sensitive
@@ -43,15 +37,6 @@ required-features = []
 # isolation (`cargo check -p cognia-sandbox-runner`) instead of recompiling the
 # whole Tauri tree. It still emits `cognia-sandbox-runner.exe` into the shared
 # workspace `target/`, so bundling is unchanged.
-
-# ADR-0020 follow-up — screen-off Computer Use virtual-display driver
-# installer. UAC-elevated (launched via Start-Process -Verb RunAs by the
-# renderer's `virtual_display_setup` command). `pnputil /add-driver` the
-# bundled, Microsoft-signed parsec-vdd payload; writes a success marker.
-[[bin]]
-name = "cognia-vdd-setup"
-path = "src/bin/cognia-vdd-setup.rs"
-required-features = []
 
 # ADR-0021 — WebRTC pair-test harness (`pnpm webrtc:pair`). A headless desktop
 # answerer that drives the PRODUCTION signaling client + webrtc-rs peer against
@@ -113,6 +98,9 @@ cognia-companion-security = { path = "../crates/cognia-companion-security" }
 cognia-companion = { path = "../crates/cognia-companion", features = ["tauri-host"] }
 # Keep-awake assertions; `power_assertion.rs` is its facade (ADR-0196).
 cognia-power = { path = "../crates/cognia-power" }
+cognia-sidecar = { path = "../crates/cognia-sidecar" }
+cognia-companion-rpc = { path = "../crates/cognia-companion-rpc", features = ["tauri-host"] }
+cognia-codeserver = { path = "../crates/cognia-codeserver", features = ["tauri-host"] }
 # ADR-0196 P6c — the settings-hook runtime and the Claude settings readers;
 # `hooks` and `settings` re-export it at their old paths. `tauri-host` adds the
 # command attributes and the three writers that emit through the `AppHandle`.
@@ -527,6 +515,8 @@ keyring = { version = "4", features = ["zbus-secret-service-keyring-store"] }
 # filter) moved to `crates/cognia-automation`.
 
 [dev-dependencies]
+cognia-companion-rpc = { path = "../crates/cognia-companion-rpc", features = ["test-support"] }
+cognia-sidecar = { path = "../crates/cognia-sidecar", features = ["test-support"] }
 # Keep app_lib's own test suite hermetic: the secret store's file+keyring
 # global becomes in-memory when tests build (dev-dep feature unification);
 # production builds never see the feature.
