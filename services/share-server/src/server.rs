@@ -216,7 +216,7 @@ fn build_grant_verifier(hex: &str) -> anyhow::Result<Option<Arc<GrantVerifier>>>
     if hex.is_empty() {
         return Ok(None);
     }
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         anyhow::bail!("SHARE_GRANT_KEY must be hex, so it must have an even number of characters");
     }
     let mut key = Vec::with_capacity(hex.len() / 2);

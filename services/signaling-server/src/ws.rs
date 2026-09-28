@@ -634,7 +634,7 @@ mod tests {
         let desktop = identity(PeerRole::Desktop);
         let mobile = identity(PeerRole::Mobile);
         let encode = |key: &SigningKey| {
-            URL_SAFE_NO_PAD.encode(key.verifying_key().to_encoded_point(false).as_bytes())
+            URL_SAFE_NO_PAD.encode(key.verifying_key().to_sec1_point(false).as_bytes())
         };
         let mut descriptor = RoomDescriptor {
             v: 2,
@@ -664,7 +664,7 @@ mod tests {
             issued_at: now_ms(),
             challenge: challenge.into(),
             ecdh_public_key: URL_SAFE_NO_PAD
-                .encode(ephemeral.verifying_key().to_encoded_point(false).as_bytes()),
+                .encode(ephemeral.verifying_key().to_sec1_point(false).as_bytes()),
             signature: String::new(),
         };
         let signature: Signature = identity(role).sign(&subscribe_proof_bytes(&proof));

@@ -57,6 +57,7 @@ pub struct AlertDispatcher {
 
 impl AlertDispatcher {
     pub fn from_config(config: &ServerConfig) -> anyhow::Result<Self> {
+        crate::ensure_crypto_provider();
         Ok(Self {
             http: reqwest::Client::builder()
                 .timeout(config.alert_timeout)

@@ -26,3 +26,23 @@ pub use privacy::{PrivacyGate, PrivacyScan};
 pub use retention::RetentionWorker;
 pub use storage::ArtifactStore;
 pub use worker::{build_processor, DiagnosticProcessor};
+
+/// Initialize TLS for callers that construct service clients without running `main`.
+/// Keep an existing process-wide provider when the embedding host installed one.
+pub fn ensure_crypto_provider() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tls_clients_can_be_built_without_binary_startup() {
+        super::ensure_crypto_provider();
+        reqwest::Client::builder().build().unwrap();
+        super::ensure_crypto_provider();
+        reqwest::Client::builder().build().unwrap();
+    }
+}

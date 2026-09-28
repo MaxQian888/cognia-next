@@ -4,6 +4,8 @@
 allowBuilds:
   "@ast-grep/cli": false
   better-sqlite3: true
+  # Optional msgpackr acceleration; keep the portable JavaScript decoder.
+  msgpackr-extract: false
   node-pty: true
   protobufjs: false
 minimumReleaseAgeExclude:

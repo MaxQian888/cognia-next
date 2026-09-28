@@ -22,6 +22,7 @@ impl ArtifactStore {
         config: &ServerConfig,
         repository: DiagnosticRepository,
     ) -> anyhow::Result<Self> {
+        crate::ensure_crypto_provider();
         let inner: Arc<dyn ObjectStore> = if let Some(root) = &config.object_store_local_dir {
             std::fs::create_dir_all(root).context("create local artifact directory")?;
             Arc::new(LocalFileSystem::new_with_prefix(root)?)

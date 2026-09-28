@@ -47,6 +47,7 @@ impl AwsKmsClient {
         if endpoint.query().is_some() || endpoint.host_str().is_none() {
             anyhow::bail!("KMS endpoint must be an absolute URL without a query");
         }
+        crate::ensure_crypto_provider();
         Ok(Self {
             client: reqwest::Client::builder().timeout(timeout).build()?,
             endpoint,

@@ -55,7 +55,7 @@ fn identity(role: PeerRole) -> SigningKey {
 
 fn descriptor(seed: u8) -> RoomDescriptor {
     let encode = |key: &SigningKey| {
-        URL_SAFE_NO_PAD.encode(key.verifying_key().to_encoded_point(false).as_bytes())
+        URL_SAFE_NO_PAD.encode(key.verifying_key().to_sec1_point(false).as_bytes())
     };
     let mut descriptor = RoomDescriptor {
         v: 2,
@@ -87,7 +87,7 @@ async fn subscribe(client: &mut WsClient, descriptor: &RoomDescriptor, role: Pee
             .as_millis() as i64,
         challenge,
         ecdh_public_key: URL_SAFE_NO_PAD
-            .encode(ephemeral.verifying_key().to_encoded_point(false).as_bytes()),
+            .encode(ephemeral.verifying_key().to_sec1_point(false).as_bytes()),
         signature: String::new(),
     };
     let signature: Signature = identity(role).sign(&subscribe_proof_bytes(&proof));
@@ -298,7 +298,7 @@ async fn one_socket_can_join_multiple_self_certifying_rooms() {
                 .as_millis() as i64,
             challenge: challenge.clone(),
             ecdh_public_key: URL_SAFE_NO_PAD
-                .encode(ephemeral.verifying_key().to_encoded_point(false).as_bytes()),
+                .encode(ephemeral.verifying_key().to_sec1_point(false).as_bytes()),
             signature: String::new(),
         };
         let signature: Signature = identity(PeerRole::Desktop).sign(&subscribe_proof_bytes(&proof));

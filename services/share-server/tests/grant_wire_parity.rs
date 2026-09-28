@@ -36,7 +36,7 @@ fn vector() -> serde_json::Value {
 }
 
 fn hex_bytes(value: &str) -> Vec<u8> {
-    assert!(value.len() % 2 == 0, "hex must be even length");
+    assert!(value.len().is_multiple_of(2), "hex must be even length");
     (0..value.len())
         .step_by(2)
         .map(|index| u8::from_str_radix(&value[index..index + 2], 16).expect("hex"))
