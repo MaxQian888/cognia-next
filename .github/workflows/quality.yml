@@ -80,12 +80,12 @@ jobs:
         include: ${{ fromJSON(needs.prepare.outputs.groups) }}
 
     steps:
-      # Full history: several gates diff against git (lint-i18n --staged
-      # semantics, the static-export scanner's file listing, command parity).
+      # Gates inspect tracked files and the current index; they do not diff
+      # against an ancestor. Base-aware test selection owns its separate fetch.
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -95,6 +95,7 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: ${{ matrix.group == 'types' && '**/pnpm-lock.yaml' || 'pnpm-lock.yaml' }}
 
       - name: Setup Python
         if: matrix.python
@@ -151,24 +152,29 @@ jobs:
             ${{ runner.os }}-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml') }}-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       # Knip loads standalone Worker configs; their plugin imports must resolve
       # even though these packages intentionally sit outside the root workspace.
       - name: Install standalone Worker dependencies
         if: matrix.group == 'types'
         run: |
-          pnpm --dir services/share-server/worker install --frozen-lockfile
-          pnpm --dir services/update-server/worker install --frozen-lockfile
+          pnpm --dir services/share-server/worker install --frozen-lockfile --prefer-offline
+          pnpm --dir services/update-server/worker install --frozen-lockfile --prefer-offline
 
-      # Gate scripts must be runnable from a clean GitHub image. Audit scripts
-      # invoke ripgrep directly, while Rust-backed groups compile GTK/GLib and
-      # PipeWire crates that require their pkg-config development packages.
-      - name: Install gate system dependencies
-        if: matrix.rust || matrix.group == 'audit'
+      - name: Install audit search dependency
+        if: matrix.group == 'audit'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends ripgrep
+
+      # Only Rust-backed groups link the desktop stack. Audit-only jobs should
+      # not download GTK/WebKit and their transitive system dependencies.
+      - name: Install gate system dependencies
+        if: matrix.rust
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
             ripgrep \
             libglib2.0-dev \
             libgtk-3-dev \
@@ -180,10 +186,10 @@ jobs:
             patchelf \
             libssl-dev
 
-      # The artifact and SDK checks consume built workspace packages; the
-      # plugin runtime check additionally verifies a prepared Node payload.
+      # The artifacts group already starts with build:packages in the registry.
+      # SDK consumers need that prerequisite before their separate build gates.
       - name: Build workspace package prerequisites
-        if: matrix.group == 'artifacts' || matrix.group == 'plugin-sdk'
+        if: matrix.group == 'plugin-sdk'
         run: pnpm build:packages
 
       - name: Prepare the plugin Node runtime

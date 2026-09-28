@@ -28,7 +28,7 @@ what to do when one goes red, and how to set up the optional integrations.
 | **Deploy**   | manual, opt-in                    | `deploy.yml` (see below)                                                 |
 
 Tauri **bundling** is deliberately off the hot path — it is the largest
-wall-clock item in the repo. The Tauri crate is still compiled on every run:
+wall-clock item in the repo. The Tauri crate is compiled for affected PRs and full runs:
 `cargo-test-windows` builds the static export and then runs `cargo test`
 inside `src-tauri`, which is a full compile of the desktop app.
 
@@ -99,21 +99,44 @@ that is neither registered nor exempted with a written reason.
 
 Six runners, each with one owner:
 
-| Runner                           | Scope                    | Where it runs                                                                     |
-| -------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
-| Jest (`node` + `jsdom` projects) | 5,600+ co-located suites | `test.yml`, 4 coverage shards                                                     |
-| `node --test` (scripts)          | `scripts/**/*.test.mjs`  | `quality.yml`, `gate-tests` group                                                 |
-| `node --test` (sidecar)          | `sidecar/**`             | `test.yml`, `sidecar` job                                                         |
-| Playwright                       | `tests/e2e/**`           | `test.yml` — chromium + mobile-pixel-7, 2 shards each; tauri + iOS nightly        |
-| `cargo test`                     | 23 crates                | `test.yml` — `--workspace --exclude cognia-next` on Linux, `src-tauri` on Windows |
-| pytest                           | `plugin-sdk/python`      | `quality.yml`, `plugin-sdk` group                                                 |
-| Agent conformance                | real sidecars + server   | `test.yml`, dedicated conformance job                                             |
+| Runner                           | Scope                   | Where it runs                                                                     |
+| -------------------------------- | ----------------------- | --------------------------------------------------------------------------------- |
+| Jest (`node` + `jsdom` projects) | co-located suites       | `test.yml`, dynamic affected-test shards on PRs; full coverage shards otherwise   |
+| `node --test` (scripts)          | `scripts/**/*.test.mjs` | `quality.yml`, `gate-tests` group                                                 |
+| `node --test` (sidecar)          | `sidecar/**`            | `test.yml`, `sidecar` job                                                         |
+| Playwright                       | `tests/e2e/**`          | `test.yml` — chromium + mobile-pixel-7, 2 shards each; tauri + iOS nightly        |
+| `cargo test`                     | 23 crates               | `test.yml` — `--workspace --exclude cognia-next` on Linux, `src-tauri` on Windows |
+| pytest                           | `plugin-sdk/python`     | `quality.yml`, `plugin-sdk` group                                                 |
+| Agent conformance                | real sidecars + server  | `test.yml`, dedicated conformance job                                             |
 
-The hot path also builds the docs site, web site, Android debug app, root
-static export, and Tauri frontend contract as independent jobs. The iOS
+PRs default to **incremental tests without coverage**. The planner compares the
+exact PR base SHA with the checked-out merge SHA, selects changed, co-located,
+and transitively related suites, then publishes one immutable plan for every
+worker. Deleted modules include their former importers; global Jest configuration
+changes conservatively select the complete suite inventory. Dependency-only
+updates run critical runtime contracts and package-owned tests. Selection never
+truncates the test set to meet a shard limit.
+
+Incremental runs use at most **8 Jest shards, 4 concurrently**. Full runs use
+at most **64 bounded coverage shards, 8 concurrently**. Both use two workers per
+shard. Large incremental selections run sequential batches of at most 150 suites
+per Jest process, retaining every batch's results without accumulating all suites
+in one parent process. Trunk pushes, scheduled and release runs retain full testing. Manual
+`test.yml` runs default to full; reusable callers can choose `test-mode` as
+`auto`, `incremental`, or `full`. The plan artifact and job summary record the
+exact base/head, selected suites, shard assignment, and affected runtimes.
+
+PR builds follow those runtime impacts: docs, web, mobile, browser extension,
+sidecar, native Rust, PostgreSQL, diagnostic server, and gateway conformance each
+run when their inputs change. A regular frontend change uses the E2E static
+export and existing smoke/critical/accessibility/visual tests. Production export
+also runs for native changes, because Windows Rust tests require its artifact,
+and for root build configuration/dependency changes. Full mode runs all lanes.
+Quality gate groups remain mandatory.
+
+The iOS
 simulator build runs on manual/nightly executions because it requires a macOS
-runner. Nightly Tauri packaging does not depend on the test job, so a test
-failure no longer hides whether packaging itself is broken.
+runner. Nightly Tauri packaging depends on successful testing.
 
 `src-tauri` is excluded from the Linux workspace run because its
 `tauri::generate_context!()` needs the Next.js static export at compile time;
@@ -123,11 +146,12 @@ the Windows job builds the export first and covers it there.
 
 ## Coverage
 
-Two levels, and they are not the same number.
+Coverage is collected only in full mode; default incremental PR runs produce
+test results without coverage. Full runs retain two levels:
 
 - **Changed files: ≥90% per file** for lines/branches/functions — the real bar
   for anything you touch. `pnpm test:coverage:changed -- --strict`, gated on
-  every PR. One well-covered file cannot subsidize another changed file.
+  full-mode PRs. One well-covered file cannot subsidize another changed file.
 - **Repo-wide: layered floors** in `scripts/test/coverage-thresholds.json`,
   enforced by `scripts/test/merge-coverage.mjs --check` after the shards
   merge. They sit far below 90. `pnpm coverage:ratchet` reports which floors
@@ -199,10 +223,18 @@ cross-run flake history is not available.
 | Cache                      | Key                                      | Job                                                                     |
 | -------------------------- | ---------------------------------------- | ----------------------------------------------------------------------- |
 | pnpm store                 | lockfile hash (via `actions/setup-node`) | all Node jobs                                                           |
+| npm downloads              | Node major + standalone lockfiles        | Jest planner and shards (`sidecar/webclone`)                            |
 | Next.js `.next/cache`      | lockfile + source hash                   | `build`, `build-e2e` (separate keys — the E2E flag changes the output)  |
 | TypeScript `*.tsbuildinfo` | lockfile + source hash                   | `gates (types)` — advisory; stale or missing falls back to a full check |
 | Playwright browsers        | lockfile hash                            | `e2e`                                                                   |
 | cargo `target/`            | `Swatinem/rust-cache`                    | every Rust job                                                          |
+
+Frozen installs always run, using `--prefer-offline` to reuse cached downloads
+without skipping lockfile validation or workspace linking. Jest package and
+Webclone outputs are built once in the planner and shared as a run-scoped
+artifact; each shard installs its standalone dependencies after restoring them.
+PR planning checks out two commits and fetches only the exact base SHA. Other
+test and quality jobs use shallow checkout unless a gate needs history.
 
 ---
 

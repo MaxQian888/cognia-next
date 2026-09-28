@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
+import { spawnSync } from "node:child_process"
 import {
   chmodSync,
   existsSync,
@@ -210,9 +211,9 @@ describe("manifest and plans", () => {
 })
 
 describe("shims", () => {
-  it("links native binaries and wraps JavaScript with the bundled node", () => {
+  it("links glibc native binaries and wraps JavaScript with the bundled node", () => {
     assert.deepEqual(
-      shimFor({ libc: "musl", pkg: "@anthropic-ai/claude-code", target: "bin/claude.exe", elf: true }),
+      shimFor({ libc: "glibc", pkg: "@anthropic-ai/claude-code", target: "bin/claude.exe", elf: true }),
       { type: "symlink", target: "../lib/agents/node_modules/@anthropic-ai/claude-code/bin/claude.exe" }
     )
     assert.deepEqual(
@@ -223,6 +224,25 @@ describe("shims", () => {
           '#!/bin/sh\nexec /cognia/glibc/node/bin/node /cognia/glibc/lib/agents/node_modules/@google/gemini-cli/bundle/gemini.js "$@"\n',
       }
     )
+  })
+
+  it("musl native shims expose bundled C++ libraries and preserve arguments and existing library paths", () => {
+    const root = tempDir()
+    const entryDir = join(root, "musl/lib/agents/node_modules/native-cli")
+    mkdirSync(entryDir, { recursive: true })
+    writeFileSync(join(entryDir, "native"), '#!/bin/sh\nprintf "%s\\n" "$LD_LIBRARY_PATH" "$@"\n', { mode: 0o755 })
+    const shim = shimFor({ libc: "musl", pkg: "native-cli", target: "native", elf: true, injectionRoot: root })
+    assert.equal(shim.type, "script")
+    const launcher = join(root, "launch")
+    writeFileSync(launcher, shim.content, { mode: 0o755 })
+    for (const inherited of ["", "/custom/lib"]) {
+      const result = spawnSync(launcher, ["--version", "argument with spaces"], {
+        encoding: "utf8",
+        env: { PATH: process.env.PATH, LD_LIBRARY_PATH: inherited },
+      })
+      assert.equal(result.status, 0, result.stderr)
+      assert.equal(result.stdout, `${root}/musl/node/lib${inherited ? `:${inherited}` : ""}\n--version\nargument with spaces\n`)
+    }
   })
 
   it("reads bin entries in both package.json forms and detects ELF files", () => {
@@ -342,7 +362,8 @@ describe("stage", () => {
         id: "native-runtime",
         version: "2.0.0",
         libc: ["musl"],
-        commands: [{ name: "native", package: "native-cli", bin: "native", smoke: "version" }],
+        // Native executables need --version even when their launch shim is a script.
+        commands: [{ name: "native", package: "native-cli", bin: "native", smoke: "syntax" }],
       },
       {
         id: "vendor",
@@ -430,7 +451,7 @@ describe("stage", () => {
       readFileSync(join(tree, "bin/js"), "utf8"),
       `#!/bin/sh\nexec ${injection}/musl/node/bin/node ${injection}/musl/lib/agents/node_modules/@scope/js-cli/dist/cli.js "$@"\n`
     )
-    assert.equal(readlinkSync(join(tree, "bin/native")), "../lib/agents/node_modules/native-cli/bin/native.exe")
+    assert.match(readFileSync(join(tree, "bin/native"), "utf8"), /LD_LIBRARY_PATH=.*musl\/node\/lib/)
     assert.equal(readlinkSync(join(tree, "bin/vendor")), "../runtimes/vendor/vendor")
     assert.equal(readFileSync(join(tree, "runtimes/vendor/vendor"), "utf8"), "vendor-bin")
 

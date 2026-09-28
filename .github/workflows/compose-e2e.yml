@@ -255,7 +255,7 @@ jobs:
           cache: pnpm
 
       - name: Install Web Headless E2E dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium

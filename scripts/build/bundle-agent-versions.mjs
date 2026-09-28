@@ -469,15 +469,24 @@ export function isElf(path) {
 }
 
 /**
- * How `bin/<name>` reaches a command. A native binary is linked; a JavaScript
+ * How `bin/<name>` reaches a command. A glibc native binary is linked; musl
+ * native commands receive the bundled C++ library path. A JavaScript
  * entry gets a shell shim naming the bundled Node by absolute path, so a
  * `#!/usr/bin/env node` never resolves to the project's own Node.
  */
 export function shimFor({ libc, pkg, target, elf, injectionRoot = INJECTION_ROOT }) {
   const relativeTarget = `node_modules/${pkg}/${target}`.replace(/\/\.\//g, "/")
-  if (elf) return { type: "symlink", target: `../lib/agents/${relativeTarget}` }
-  const node = `${injectionRoot}/${libc}/node/bin/node`
   const entry = `${injectionRoot}/${libc}/lib/agents/${relativeTarget}`
+  if (elf) {
+    if (libc === "musl") {
+      return {
+        type: "script",
+        content: `#!/bin/sh\nLD_LIBRARY_PATH="${injectionRoot}/musl/node/lib\${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec ${entry} "$@"\n`,
+      }
+    }
+    return { type: "symlink", target: `../lib/agents/${relativeTarget}` }
+  }
+  const node = `${injectionRoot}/${libc}/node/bin/node`
   return { type: "script", content: `#!/bin/sh\nexec ${node} ${entry} "$@"\n` }
 }
 
@@ -673,11 +682,12 @@ export async function stage({
     const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"))
     const target = binTarget(manifest, command.bin)
     const targetPath = join(packageDir, target)
+    const elf = isElf(targetPath)
     const shim = shimFor({
       libc,
       pkg: command.package,
       target,
-      elf: isElf(targetPath),
+      elf,
       injectionRoot,
     })
     const path = join(bin, command.name)
@@ -687,7 +697,7 @@ export async function stage({
       rmSync(path, { force: true })
       writeFileSync(path, shim.content, { mode: 0o755 })
     }
-    smokes.push({ name: command.name, smoke: command.smoke, entry: targetPath, elf: shim.type === "symlink" })
+    smokes.push({ name: command.name, smoke: command.smoke, entry: targetPath, elf })
   }
 
   for (const download of downloadsFor(pins, libc, arch)) {

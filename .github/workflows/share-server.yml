@@ -17,11 +17,15 @@ on:
     paths:
       - "services/share-server/**"
       - "services/update-server/worker/**"
+      - ".cargo/**"
+      - "rust-toolchain.toml"
       - ".github/workflows/share-server.yml"
   pull_request:
     paths:
       - "services/share-server/**"
       - "services/update-server/worker/**"
+      - ".cargo/**"
+      - "rust-toolchain.toml"
       - ".github/workflows/share-server.yml"
   workflow_dispatch:
 
@@ -45,21 +49,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
+      - name: Setup pinned Rust toolchain
+        run: |
+          rustup show active-toolchain
+          rustup component add llvm-tools-preview clippy
 
       - name: Cache cargo + target
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            services/share-server/target
-          key: ${{ runner.os }}-share-${{ hashFiles('services/share-server/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-share-
+          workspaces: "services/share-server -> target"
+          key: share-server-native
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -119,7 +118,7 @@ jobs:
           cache-dependency-path: services/${{ matrix.service }}/worker/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Typecheck
         run: pnpm typecheck

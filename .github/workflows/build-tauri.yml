@@ -133,7 +133,7 @@ jobs:
             libssl-dev
 
       - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Verify standard build includes Paddle OCR
         shell: bash

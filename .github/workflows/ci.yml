@@ -8,16 +8,16 @@ name: CI/CD Pipeline
 #
 # Tier model (see CI_CD.md):
 #
-#   this file (push + PR)  quality gates · jest · e2e (chromium + mobile) ·
-#                          cargo test · Next.js build
+#   PR                  quality gates · changed/related tests · affected builds
+#   push / full runs    complete tests and coverage · e2e · cargo · Next.js build
 #   nightly.yml            4-platform Tauri bundles · Tauri E2E · iOS E2E
 #   release.yml            tagged release, signed updater artifacts
 #
 # Tauri BUNDLING is deliberately not here: the 4-platform cargo release matrix
 # is the single largest wall-clock item in the repo and it is not what breaks
-# on a normal change. The Tauri crate still gets compiled on every run — the
-# `cargo-test-windows` job in test.yml builds the static export and then runs
-# `cargo test` inside src-tauri, which is a full compile of the desktop app.
+# on a normal change. Affected PRs and full runs still compile the Tauri crate:
+# `cargo-test-windows` reuses the static-export artifact and runs `cargo test`
+# inside src-tauri, which is a full compile of the desktop app.
 #
 # Workflow structure:
 # ├── quality.yml     - gate groups, derived from scripts/gates/check-all.mjs
@@ -51,7 +51,8 @@ jobs:
     name: Quality
     uses: ./.github/workflows/quality.yml
 
-  # Jest (sharded, coverage-gated), sidecar suites, Playwright, cargo, build.
+  # PRs select affected tests; trunk/full runs retain complete coverage gates.
+  # Expensive builds and integration lanes follow the reusable workflow plan.
   test:
     name: Test
     uses: ./.github/workflows/test.yml

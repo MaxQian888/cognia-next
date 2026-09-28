@@ -4,7 +4,8 @@ name: Test Suite
 # Test Suite & Build Verification
 # ============================================================================
 # Job graph:
-#   test (jest, 64 bounded coverage shards) ─┐
+#   jest-plan (exact diff + affected runtimes + immutable suite assignment)
+#   test (PR: <=8 shards, no coverage; full: <=64 coverage shards) ─┐
 #                                   ├─ coverage-merge (merge maps + enforce
 #   sidecar (node --test suites)    │   thresholds + publish junit)
 #   build (plain static export, bundle size)
@@ -36,7 +37,18 @@ name: Test Suite
 # which a reusable workflow inherits from its caller's trigger.
 on:
   workflow_call:
+    inputs:
+      test-mode:
+        type: string
+        default: auto
+        description: auto selects incremental PR tests and full tests otherwise
   workflow_dispatch:
+    inputs:
+      test-mode:
+        type: choice
+        options: [full, incremental, auto]
+        default: full
+        description: Test selection mode
 
 concurrency:
   group: test-${{ github.ref }}
@@ -44,13 +56,42 @@ concurrency:
 
 jobs:
   jest-plan:
-    name: Freeze Jest shard timing input
+    name: Plan affected tests and runtimes
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has-tests: ${{ steps.plan.outputs.has-tests }}
+      impacts: ${{ steps.plan.outputs.impacts }}
+    env:
+      npm_config_prefer_offline: "true"
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: pnpm
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node26-npm-${{ hashFiles('sidecar/**/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-node26-npm-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Build Jest runtime prerequisites once
+        run: |
+          pnpm build:packages
+          pnpm sidecar:webclone:build
       - name: Restore Jest suite timing history
         uses: actions/cache/restore@v6
         with:
@@ -58,164 +99,129 @@ jobs:
           key: ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-${{ github.run_id }}
           restore-keys: |
             ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-
-
-      - name: Initialize missing history
+      - name: Test incremental planner
+        run: node --test scripts/test/coverage-changed.test.mjs scripts/test/jest-timing-sequencer.test.mjs scripts/ci/workflow-contract.test.mjs
+      - name: Freeze exact test plan
+        id: plan
+        env:
+          REQUESTED_MODE: ${{ inputs.test-mode || 'auto' }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          mkdir -p .cache/jest
-          if [ ! -f .cache/jest/timings.json ]; then
-            printf '%s\n' '{"version":1,"tests":{}}' > .cache/jest/timings.json
+          mode="$REQUESTED_MODE"
+          if [ "$mode" = auto ]; then
+            if [ "$EVENT_NAME" = pull_request ]; then mode=incremental; else mode=full; fi
           fi
-      - name: Publish immutable timing input
+          base="$GITHUB_SHA"
+          if [ "$EVENT_NAME" = pull_request ]; then
+            base="$PR_BASE_SHA"
+            git fetch --no-tags --depth=1 origin "$base"
+          elif [ "$mode" = incremental ]; then
+            base="$(git rev-parse HEAD^)"
+          fi
+          node scripts/test/coverage-changed.mjs --plan --base "$base" --head "$GITHUB_SHA" --mode "$mode" --output .cache/jest/plan.json > /tmp/jest-plan.json
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const plan = JSON.parse(readFileSync('.cache/jest/plan.json', 'utf8'));
+          for (const [key, value] of Object.entries({mode: plan.mode, matrix: JSON.stringify(plan.matrix), 'has-tests': plan.suiteCount > 0, impacts: JSON.stringify(plan.impacts)})) {
+            appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
+          }
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Test plan\nMode: ${plan.mode}\n\n${plan.changedFiles.length} changed paths → ${plan.suiteCount} suites / ${plan.shardCount} shards.\n\nBase: ${plan.base}\nHead: ${plan.head}\n\nCoverage is collected only in full mode.\n`);
+          NODE
+      - name: Publish immutable test plan
         uses: actions/upload-artifact@v7
         with:
-          name: jest-timing-input
-          path: .cache/jest/timings.json
+          name: jest-test-plan
+          path: .cache/jest/plan.json
           include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - name: Publish built Jest prerequisites
+        if: steps.plan.outputs.has-tests == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: jest-runtime-prerequisites
+          path: |
+            packages/*/dist/
+            sidecar/webclone/dist/
           if-no-files-found: error
           retention-days: 1
 
   test:
     needs: jest-plan
-    name: Jest (shard ${{ matrix.shard }}/64)
+    if: needs.jest-plan.outputs.has-tests == 'true'
+    name: Jest (shard ${{ matrix.shard }}/${{ matrix.total }})
     runs-on: ubuntu-latest
-
+    timeout-minutes: 60
     permissions:
       contents: read
-
     strategy:
       fail-fast: false
-      max-parallel: 16
-      matrix:
-        shard:
-          [
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
-            15,
-            16,
-            17,
-            18,
-            19,
-            20,
-            21,
-            22,
-            23,
-            24,
-            25,
-            26,
-            27,
-            28,
-            29,
-            30,
-            31,
-            32,
-            33,
-            34,
-            35,
-            36,
-            37,
-            38,
-            39,
-            40,
-            41,
-            42,
-            43,
-            44,
-            45,
-            46,
-            47,
-            48,
-            49,
-            50,
-            51,
-            52,
-            53,
-            54,
-            55,
-            56,
-            57,
-            58,
-            59,
-            60,
-            61,
-            62,
-            63,
-            64,
-          ]
-
+      max-parallel: ${{ needs.jest-plan.outputs.mode == 'incremental' && 4 || 8 }}
+      matrix: ${{ fromJSON(needs.jest-plan.outputs.matrix) }}
+    env:
+      npm_config_prefer_offline: "true"
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-
       - name: Setup Node.js 26.x
         uses: actions/setup-node@v7
         with:
           node-version: 26.x
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Jest runtime prerequisites
-        run: |
-          pnpm build:packages
-          pnpm sidecar:webclone:build
-
-      # Every wave consumes the same snapshot, even if another branch updates
-      # the cross-run cache while this matrix is still running.
-      - name: Download frozen Jest timing input
+          cache: pnpm
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node26-npm-${{ hashFiles('sidecar/**/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-node26-npm-
+      # Restore before postinstall so linked-package freshness checks can
+      # reuse compiled output while retaining all installation scripts.
+      - name: Download built Jest prerequisites
         uses: actions/download-artifact@v8
         with:
-          name: jest-timing-input
+          name: jest-runtime-prerequisites
+          path: .
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Install standalone engine dependencies
+        run: pnpm sidecar:webclone:install
+      - name: Download frozen Jest test plan
+        uses: actions/download-artifact@v8
+        with:
+          name: jest-test-plan
           path: .cache/jest/
-
-      # Thresholds are intentionally disabled per shard (see header comment);
-      # the json reporter emits the raw istanbul map for the merge job.
-      - name: Run Jest shard with coverage
-        run: >-
-          pnpm exec jest --coverage --silent --shard=${{ matrix.shard }}/64
-          --coverageReporters=json --coverageThreshold='{}' --maxWorkers=2
+      # The planner assigns every selected suite exactly once. Full mode keeps
+      # --maxWorkers=2 and the existing merged coverage thresholds.
+      - name: Run Jest planned shard
         env:
-          # V8 retains per-suite coverage in the parent: 250 suites exceeded
-          # 6 GB despite worker recycling. Bound each process to ~160 of the
-          # 10,000 suites, with 16 concurrent jobs and unchanged merged gates.
           NODE_OPTIONS: "--max-old-space-size=6144"
-          JEST_COVERAGE: "1"
+          MODE: ${{ needs.jest-plan.outputs.mode }}
+          SHARD: ${{ matrix.shard }}
           JEST_JUNIT_OUTPUT_NAME: junit-shard-${{ matrix.shard }}.xml
           JEST_TIMING_OUTPUT: coverage/jest-timings.json
-
-      - name: Upload shard coverage + junit
+        run: |
+          args=()
+          if [ "$MODE" = full ]; then args+=(--coverage); fi
+          node scripts/test/coverage-changed.mjs --run-plan .cache/jest/plan.json --shard "$SHARD" "${args[@]}"
+      - name: Upload shard results
         uses: actions/upload-artifact@v7
         if: always()
         with:
           name: jest-shard-${{ matrix.shard }}
           path: |
             coverage/coverage-final.json
-            coverage/junit-shard-${{ matrix.shard }}.xml
+            coverage/junit-shard-*.xml
             coverage/jest-timings.json
           retention-days: 7
 
   coverage-merge:
     name: Coverage Merge & Gate
     runs-on: ubuntu-latest
-    needs: test
-    if: always()
+    needs: [jest-plan, test]
+    if: always() && !cancelled() && needs.jest-plan.outputs.mode == 'full' && needs.test.result != 'skipped'
 
     # Read-only on purpose: this workflow is `workflow_call`ed from ci.yml,
     # which holds only the repo-default read token (and Dependabot PRs get a
@@ -240,7 +246,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       # The merge/threshold tooling itself gates this job — run its own
       # node --test suites first so a broken script fails loudly, not by
@@ -329,20 +335,18 @@ jobs:
           path: coverage/
           retention-days: 30
 
-  # The incremental half of the coverage story. The merged threshold gate
-  # above enforces the LAYERED floors in scripts/test/coverage-thresholds.json
-  # (global lines sits at 25) — that is what the repo can actually hold today.
-  # This job enforces CLAUDE.md's real rule, 90%, on the files a change
-  # touches, so the layered floors ratchet upward instead of being a ceiling.
+  # Full-mode PRs additionally enforce the existing 90% changed-file floor.
+  # Default PRs run affected tests without collecting coverage. The merged
+  # full-mode gate above enforces scripts/test/coverage-thresholds.json.
   #
   # Pull requests only, deliberately: on a direct push to `dev` the base ref
   # IS the commit under test, so the changed-file set is empty and the gate
   # would be theatre. Direct pushes are still covered by the merged gate.
   coverage-changed:
     name: Coverage Gate (changed files)
-    needs: [test, coverage-merge]
+    needs: [jest-plan, test, coverage-merge]
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && needs.test.result == 'success'
+    if: github.event_name == 'pull_request' && needs.jest-plan.outputs.mode == 'full' && needs.test.result == 'success'
 
     permissions:
       contents: read
@@ -364,7 +368,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Download complete coverage map
         uses: actions/download-artifact@v8
@@ -384,6 +388,8 @@ jobs:
   # in a dedicated job because it builds and launches the real headless server
   # plus the Agent SDK sidecar and is materially heavier than unit tests.
   conformance:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).gateway
     name: Agent gateway conformance
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -409,7 +415,7 @@ jobs:
           workspaces: ". -> target"
           cache-on-failure: true
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
@@ -433,6 +439,8 @@ jobs:
         run: pnpm test:conformance
 
   docs-build:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).docs
     name: Docs build
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -451,11 +459,13 @@ jobs:
           node-version: 26.x
           cache: "pnpm"
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build documentation
         run: pnpm docs:build
 
   web-build:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).web
     name: Marketing site build
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -474,11 +484,13 @@ jobs:
           node-version: 26.x
           cache: "pnpm"
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build marketing site
         run: pnpm web:build
 
   mobile-android-build:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).mobile
     name: Android native build
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -503,7 +515,7 @@ jobs:
           java-version: "21"
           cache: gradle
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build and sync the Android shell
         run: pnpm mobile:sync:android
       - name: Compile the Android debug application
@@ -511,10 +523,11 @@ jobs:
         run: ./gradlew assembleDebug
 
   mobile-ios-build:
+    needs: jest-plan
     name: iOS native build (nightly)
     runs-on: macos-14
     timeout-minutes: 90
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: fromJSON(needs.jest-plan.outputs.impacts).mobile && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
 
     permissions:
       contents: read
@@ -530,7 +543,7 @@ jobs:
           node-version: 26.x
           cache: "pnpm"
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build and sync the iOS shell
         run: pnpm mobile:sync:ios
       - name: Compile the iOS simulator application
@@ -545,6 +558,8 @@ jobs:
           build
 
   sidecar:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).sidecar
     name: Sidecar Tests
     runs-on: ubuntu-latest
 
@@ -565,7 +580,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Install sidecar dependencies
         run: pnpm sidecars:install
@@ -580,6 +595,8 @@ jobs:
         run: pnpm sidecar:test:live
 
   build:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).productionBuild
     name: Build Verification
     runs-on: ubuntu-latest
 
@@ -590,7 +607,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -611,7 +628,7 @@ jobs:
             ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Build Next.js application
         run: pnpm build
@@ -643,6 +660,8 @@ jobs:
           retention-days: 7
 
   build-e2e:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).frontend
     name: Build E2E Static Export
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -676,7 +695,7 @@ jobs:
             ${{ runner.os }}-nextjs-e2e-${{ hashFiles('**/pnpm-lock.yaml') }}-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       # NEXT_PUBLIC_E2E must be present at BUILD time so ExposeTestGlobals
       # (window.__cognia* seed/reset bridges every spec depends on) is
@@ -712,7 +731,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -724,7 +743,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Cache Playwright browsers
         uses: actions/cache@v6
@@ -790,6 +809,8 @@ jobs:
   # it into the matrix would make a 15-second suite wait on `build-e2e` and
   # then download an export it never opens.
   e2e-browser-extension:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).browserExtension
     name: E2E browser extension
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -811,7 +832,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Cache Playwright browsers
         uses: actions/cache@v6
@@ -854,7 +875,7 @@ jobs:
     name: E2E Merged Report
     runs-on: ubuntu-latest
     needs: e2e
-    if: always()
+    if: always() && !cancelled() && needs.e2e.result != 'skipped'
     timeout-minutes: 15
 
     permissions:
@@ -874,7 +895,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Download blob reports
         uses: actions/download-artifact@v8
@@ -924,7 +945,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
       - name: Setup Node.js 26.x
@@ -933,7 +954,7 @@ jobs:
           node-version: 26.x
           cache: "pnpm"
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Install Playwright (chromium + webkit)
         run: pnpm exec playwright install --with-deps chromium webkit
       - name: Download E2E static export
@@ -981,7 +1002,7 @@ jobs:
           node-version: 26.x
           cache: "pnpm"
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Install Playwright ${{ matrix.project }}
         run: pnpm exec playwright install --with-deps ${{ matrix.project }}
       - name: Download E2E static export
@@ -1006,12 +1027,13 @@ jobs:
           retention-days: 14
 
   e2e-tauri:
+    needs: jest-plan
     name: E2E Tauri (Windows)
     runs-on: windows-latest
     timeout-minutes: 120
     # Runs nightly (schedule) and on manual dispatch. Avoids paying the cargo
     # build cost on every PR.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: fromJSON(needs.jest-plan.outputs.impacts).rust && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
 
     permissions:
       contents: read
@@ -1026,7 +1048,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
       - name: Setup Node.js 26.x
@@ -1043,7 +1065,7 @@ jobs:
         with:
           workspaces: ". -> target"
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       # NOTE: tauri-driver is intentionally NOT installed — the launch helper
       # (tests/e2e/helpers/tauri-cdp-launch.ts) connects to WebView2 directly
       # over the Chrome DevTools Protocol and never spawns tauri-driver.
@@ -1070,9 +1092,10 @@ jobs:
           retention-days: 14
 
   cargo-test-windows:
+    if: fromJSON(needs.jest-plan.outputs.impacts).rust
     name: Rust Tests (Windows)
     runs-on: windows-latest
-    needs: build
+    needs: [jest-plan, build]
 
     permissions:
       contents: read
@@ -1081,7 +1104,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo build
@@ -1104,6 +1127,8 @@ jobs:
         run: cargo test --locked
 
   cargo-test-workspace:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).rust
     name: Rust Tests (workspace)
     runs-on: ubuntu-latest
 
@@ -1114,7 +1139,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -1157,6 +1182,8 @@ jobs:
         run: cargo check --locked --workspace --exclude cognia-next --all-targets
 
   postgres-rls:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).postgres
     name: PostgreSQL RLS & tenant integrity
     runs-on: ubuntu-latest
 
@@ -1199,6 +1226,8 @@ jobs:
         run: cargo test --locked -p cognia-collab-server --test postgres_rls -- --ignored
 
   cargo-test-diagnostic-server:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).diagnostic
     name: Rust Tests (diagnostic-server)
     runs-on: ubuntu-latest
 

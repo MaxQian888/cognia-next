@@ -144,3 +144,14 @@ test("assemble diffs the bundle when both measurements exist", () => {
   assert.equal(data.bundle.hasBase, true)
   assert.equal(data.bundle.metrics.find((m) => m.key === "totalBytes").delta, 100)
 })
+
+test("an incremental PR reports its tests without borrowing coverage from the baseline", () => {
+  const data = assemble({
+    junitDocs: [JUNIT],
+    coverage: null,
+    baseCoverage: istanbul("lib/a.ts", 10, 10),
+    meta: { conclusion: "success" },
+  })
+  assert.equal(data.jest.passed, 1)
+  assert.equal(data.coverage, undefined)
+})

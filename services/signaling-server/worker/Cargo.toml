@@ -28,5 +28,7 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 [profile.release]
 opt-level = "s"
 lto = true
-strip = true
+# wasm-bindgen needs symbol metadata to generate externref catch wrappers.
+# Strip debug information only; worker-build performs the final Wasm packaging.
+strip = "debuginfo"
 codegen-units = 1

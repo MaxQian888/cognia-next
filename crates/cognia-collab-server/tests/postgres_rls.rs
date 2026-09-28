@@ -3,21 +3,72 @@ use tokio_postgres::{Client, NoTls};
 
 const APP_ROLE: &str = "cognia_rls_app";
 
+struct TestDatabase {
+    name: String,
+    url: String,
+    cluster_admin: Client,
+    connection_task: tokio::task::JoinHandle<()>,
+}
+
+impl TestDatabase {
+    async fn create() -> Self {
+        let url = std::env::var("COLLAB_RLS_ADMIN_DATABASE_URL").unwrap();
+        let (cluster_admin, connection) = tokio_postgres::connect(&url, NoTls).await.unwrap();
+        let connection_task = tokio::spawn(async move { connection.await.unwrap() });
+        let name = format!("rls_test_{}", uuid::Uuid::new_v4().simple());
+        cluster_admin
+            .batch_execute(&format!("CREATE DATABASE {name}"))
+            .await
+            .unwrap();
+        Self {
+            url: Self::url_for(&url, &name),
+            name,
+            cluster_admin,
+            connection_task,
+        }
+    }
+
+    fn url_for(url: &str, database: &str) -> String {
+        let separator = if url.contains('?') { '&' } else { '?' };
+        format!("{url}{separator}dbname={database}&application_name={database}")
+    }
+
+    async fn cleanup(self) {
+        self.cluster_admin
+            .batch_execute(&format!("DROP DATABASE {} WITH (FORCE)", self.name))
+            .await
+            .unwrap();
+        drop(self.cluster_admin);
+        self.connection_task.await.unwrap();
+    }
+}
+
+#[test]
+fn isolated_database_url_preserves_each_roles_connection_options() {
+    for url in [
+        "postgresql://admin:synthetic@localhost:5433/postgres",
+        "postgresql://cognia_rls_app:synthetic@localhost:5433/postgres?sslmode=disable",
+    ] {
+        let original: tokio_postgres::Config = url.parse().unwrap();
+        let isolated: tokio_postgres::Config =
+            TestDatabase::url_for(url, "scenario_db").parse().unwrap();
+        assert_eq!(isolated.get_dbname(), Some("scenario_db"));
+        assert_eq!(isolated.get_application_name(), Some("scenario_db"));
+        assert_eq!(isolated.get_user(), original.get_user());
+        assert_eq!(isolated.get_password(), original.get_password());
+        assert_eq!(isolated.get_hosts(), original.get_hosts());
+        assert_eq!(isolated.get_ports(), original.get_ports());
+        assert_eq!(isolated.get_ssl_mode(), original.get_ssl_mode());
+    }
+}
+
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL instance"]
 async fn concurrent_bootstrap_waits_for_migration_lock_and_completes() {
     use std::time::Duration;
 
-    let url = std::env::var("COLLAB_RLS_ADMIN_DATABASE_URL").unwrap();
-    let (cluster_admin, cluster_connection) = tokio_postgres::connect(&url, NoTls).await.unwrap();
-    let cluster_task = tokio::spawn(async move { cluster_connection.await.unwrap() });
-    let database = format!("migration_test_{}", uuid::Uuid::new_v4().simple());
-    cluster_admin
-        .batch_execute(&format!("CREATE DATABASE {database}"))
-        .await
-        .unwrap();
-    let separator = if url.contains('?') { '&' } else { '?' };
-    let isolated_url = format!("{url}{separator}dbname={database}&application_name={database}");
+    let database = TestDatabase::create().await;
+    let isolated_url = database.url.clone();
     let (admin, connection) = tokio_postgres::connect(&isolated_url, NoTls).await.unwrap();
     let connection_task = tokio::spawn(async move { connection.await.unwrap() });
     admin
@@ -36,7 +87,7 @@ async fn concurrent_bootstrap_waits_for_migration_lock_and_completes() {
                 .query_one(
                     "SELECT count(*) FROM pg_stat_activity \
                      WHERE application_name = $1 AND wait_event = 'advisory'",
-                    &[&database],
+                    &[&database.name],
                 )
                 .await
                 .unwrap()
@@ -71,12 +122,7 @@ async fn concurrent_bootstrap_waits_for_migration_lock_and_completes() {
     drop((first, second));
     drop(admin);
     connection_task.await.unwrap();
-    cluster_admin
-        .batch_execute(&format!("DROP DATABASE {database} WITH (FORCE)"))
-        .await
-        .unwrap();
-    drop(cluster_admin);
-    cluster_task.await.unwrap();
+    database.cleanup().await;
 }
 
 #[tokio::test]
@@ -86,7 +132,10 @@ async fn shared_chat_claim_is_atomic_and_survives_pool_reconnect() {
     use cognia_collab_server::chat_store::{
         ChatStore, NewChatRunLease, NewChatRunQueueItem, NewSessionEvent, NewSharedSession,
     };
-    let url = std::env::var("COLLAB_RLS_ADMIN_DATABASE_URL").unwrap();
+    // A different integration test is free to migrate/bootstrap concurrently;
+    // its DDL must not contend with this scenario's lease transactions.
+    let database = TestDatabase::create().await;
+    let url = database.url.clone();
     let store = PgStore::connect(&url, 4).await.unwrap();
     let scope = bootstrap("shared_queue");
     store.bootstrap_operator(&scope).await.unwrap();
@@ -255,15 +304,18 @@ async fn shared_chat_claim_is_atomic_and_survives_pool_reconnect() {
             .len(),
         1
     );
+    drop(store);
+    database.cleanup().await;
 }
 
 #[tokio::test]
 #[ignore = "requires a real PostgreSQL instance and two database roles"]
 async fn force_rls_isolates_reads_and_every_write_across_pool_reuse() {
-    let admin_url = std::env::var("COLLAB_RLS_ADMIN_DATABASE_URL")
-        .expect("COLLAB_RLS_ADMIN_DATABASE_URL must name the migration/bootstrap role");
+    let database = TestDatabase::create().await;
+    let admin_url = database.url.clone();
     let app_url = std::env::var("COLLAB_RLS_APP_DATABASE_URL")
         .expect("COLLAB_RLS_APP_DATABASE_URL must name a non-BYPASSRLS application role");
+    let app_url = TestDatabase::url_for(&app_url, &database.name);
 
     let admin_store = PgStore::connect(&admin_url, 2)
         .await
@@ -280,7 +332,7 @@ async fn force_rls_isolates_reads_and_every_write_across_pool_reuse() {
     let (admin, admin_connection) = tokio_postgres::connect(&admin_url, NoTls)
         .await
         .expect("admin SQL connection must open");
-    tokio::spawn(async move {
+    let admin_task = tokio::spawn(async move {
         admin_connection
             .await
             .expect("admin SQL connection must stay healthy");
@@ -297,7 +349,7 @@ async fn force_rls_isolates_reads_and_every_write_across_pool_reuse() {
     let (mut app, app_connection) = tokio_postgres::connect(&app_url, NoTls)
         .await
         .expect("application SQL connection must open");
-    tokio::spawn(async move {
+    let app_task = tokio::spawn(async move {
         app_connection
             .await
             .expect("application SQL connection must stay healthy");
@@ -323,6 +375,10 @@ async fn force_rls_isolates_reads_and_every_write_across_pool_reuse() {
     assert_invitation_lookup_needs_the_token_hash(&mut app).await;
     assert_bootstrap_writes_pass_every_check_in_order(&mut app).await;
     assert_operation_and_credential_rows_are_owner_only(&mut app).await;
+    drop((app, admin, admin_store));
+    app_task.await.unwrap();
+    admin_task.await.unwrap();
+    database.cleanup().await;
 }
 
 // ── Migration 0009: the account control plane ────────────────────────────────

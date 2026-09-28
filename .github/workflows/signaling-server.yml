@@ -15,11 +15,13 @@ on:
     paths:
       - "services/signaling-server/**"
       - "rust-toolchain.toml"
+      - ".cargo/**"
       - ".github/workflows/signaling-server.yml"
   pull_request:
     paths:
       - "services/signaling-server/**"
       - "rust-toolchain.toml"
+      - ".cargo/**"
       - ".github/workflows/signaling-server.yml"
   workflow_dispatch:
 
@@ -49,15 +51,10 @@ jobs:
           rustup component add llvm-tools-preview clippy
 
       - name: Cache cargo + target
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            services/signaling-server/target
-          key: ${{ runner.os }}-signaling-${{ hashFiles('services/signaling-server/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-signaling-
+          workspaces: "services/signaling-server -> target"
+          key: signaling-server-native
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -109,15 +106,10 @@ jobs:
           rustup component add clippy
 
       - name: Cache cargo + target
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            services/signaling-server/worker/target
-          key: ${{ runner.os }}-signaling-worker-${{ hashFiles('services/signaling-server/worker/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-signaling-worker-
+          workspaces: "services/signaling-server/worker -> target"
+          key: signaling-server-wasm32-unknown-unknown
 
       - name: Clippy (wasm, deny warnings)
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
@@ -131,12 +123,13 @@ jobs:
       - name: Install worker-build
         uses: taiki-e/install-action@v2
         with:
-          tool: worker-build
+          tool: worker-build@0.8.7
 
       - name: Build worker artifact
         run: worker-build --release
 
       - name: Verify worker artifact
         run: |
-          test -f build/worker/shim.mjs
-          test -s build/worker/*.wasm
+          test -s build/worker/shim.mjs
+          test -s build/index.js
+          test -s build/index_bg.wasm

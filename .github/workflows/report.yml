@@ -48,16 +48,18 @@ jobs:
       - name: Checkout base repository
         uses: actions/checkout@v7
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 26.x
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install report dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Download this run's artifacts
         uses: actions/download-artifact@v8
@@ -91,6 +93,8 @@ jobs:
           path: baseline
         continue-on-error: true
 
+      # Incremental PRs intentionally omit coverage; the report preserves JUnit
+      # results and labels absent coverage instead of borrowing baseline values.
       - name: Build the report
         run: |
           node scripts/ci/report/build-report.mjs \

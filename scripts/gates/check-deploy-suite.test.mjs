@@ -328,3 +328,17 @@ test("workspace runtime installs patched dependencies without relocating pnpm li
     /ln -s \/opt\/cognia-runtime-root\/services\/workspace-runtime\/node_modules \/opt\/cognia-runtime\/node_modules/
   )
 })
+
+test("the web image activates bounded CI static generation inside its build container", () => {
+  const dockerfile = readFileSync(
+    new URL("../../deploy/compose/Dockerfile.web", import.meta.url),
+    "utf8"
+  )
+  assert.match(dockerfile, /^    CI=true \\$/m)
+  assert.match(dockerfile, /^RUN NODE_OPTIONS=--max-old-space-size=8192 pnpm build$/m)
+  const config = readFileSync(new URL("../../next.config.ts", import.meta.url), "utf8")
+  assert.match(
+    config,
+    /process\.env\.CI === "true" \? \{ cpus: 1, staticGenerationMaxConcurrency: 1 \}/
+  )
+})

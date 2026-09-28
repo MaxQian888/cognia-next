@@ -103,7 +103,7 @@ jobs:
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - if: matrix.target == 'darwin-arm64'
         name: Require Developer ID release signing
         run: node scripts/ci/require-macos-release-signing.mjs
@@ -182,7 +182,7 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.release.outputs.publish == 'true'
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - if: steps.release.outputs.publish == 'true'
         run: pnpm agent:sdk:smoke
       - if: steps.release.outputs.publish == 'true'
