@@ -268,6 +268,10 @@ test("the root Docker context excludes local caches without swallowing source fi
   const rules = readFileSync(new URL("../../.dockerignore", import.meta.url), "utf8").split("\n")
   assert.ok(rules.includes(".cache"))
   assert.ok(!rules.includes("**/out"))
+  // Root prebuild regenerates the Support Agent corpus from these inputs.
+  // Omitting them succeeds with an empty corpus and silently loses retrieval.
+  assert.ok(!rules.includes("docs/content"))
+  assert.ok(!rules.includes("docs/content/docs"))
   const tracked = execFileSync("git", ["ls-files", "--", ".cache"], {
     cwd: new URL("../../", import.meta.url),
     encoding: "utf8",

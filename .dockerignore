@@ -50,8 +50,8 @@ mobile/android
 src-tauri/gen
 src-tauri/binaries
 
-# Docs site (not needed by the image; manifest whitelisted below)
-docs/content
+# Docs content feeds the main app's generated Support Agent corpus.
+# Only the docs site's separate public assets are unnecessary here.
 docs/public
 
 # Re-include the workspace manifests the brain-builder stage COPYs explicitly

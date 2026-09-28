@@ -359,35 +359,40 @@ describe("runTeamWaves", () => {
   })
 
   it("threads wallClockTimeoutMs into the synthesized wave", async () => {
-    let seenTimeout: number | undefined
-    await runTeamWaves({
-      teamCtx: makeCtx(),
-      tasks: [task("t1")],
-      initialConcurrency: 1,
-      wallClockTimeoutMs: 45_000,
-      signal: new AbortController().signal,
-      runWave: async () => ok(),
-      synthesize: (input) => {
-        seenTimeout = input.wallClockTimeoutMs
-        return {
-          workflow: { id: "w", nodes: [], edges: [] } as unknown as VisualWorkflow,
-          nodeIdToTaskId: new Map(),
-        }
-      },
-      checkpoint: async ({ remaining }) => ({
-        remaining,
-        finish: false,
-        decision: {
-          action: "continue" as const,
-          reasoning: "x",
-          newTasks: [],
-          cancelTaskIds: [],
-          reorderTaskIds: [],
-          newMembers: [],
+    jest.useFakeTimers()
+    try {
+      let seenTimeout: number | undefined
+      await runTeamWaves({
+        teamCtx: makeCtx(),
+        tasks: [task("t1")],
+        initialConcurrency: 1,
+        wallClockTimeoutMs: 45_000,
+        signal: new AbortController().signal,
+        runWave: async () => ok(),
+        synthesize: (input) => {
+          seenTimeout = input.wallClockTimeoutMs
+          return {
+            workflow: { id: "w", nodes: [], edges: [] } as unknown as VisualWorkflow,
+            nodeIdToTaskId: new Map(),
+          }
         },
-      }),
-    })
-    expect(seenTimeout).toBe(45_000)
+        checkpoint: async ({ remaining }) => ({
+          remaining,
+          finish: false,
+          decision: {
+            action: "continue" as const,
+            reasoning: "x",
+            newTasks: [],
+            cancelTaskIds: [],
+            reorderTaskIds: [],
+            newMembers: [],
+          },
+        }),
+      })
+      expect(seenTimeout).toBe(45_000)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("returns the failed wave's lastResult and error", async () => {
