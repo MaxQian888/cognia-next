@@ -459,7 +459,7 @@
     "@tauri-apps/plugin-updater": "^2.10.1",
     "@tauri-apps/plugin-upload": "^2.4.0",
     "@tauri-apps/plugin-window-state": "^2.4.1",
-    "@xmldom/xmldom": "^0.9.10",
+    "@xmldom/xmldom": "^0.9.12",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-ligatures": "^0.10.0",
