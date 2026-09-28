@@ -472,6 +472,7 @@
       "diagnostics": "diagnostics"
     },
     "desktopNavigation": {
+      "files": "storage",
       "workflows": "workflows",
       "inbox": "inbox",
       "twin": "digital-twin",
