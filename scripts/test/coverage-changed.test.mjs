@@ -244,6 +244,35 @@ test("dependency-only plans choose explicit critical suites and changed package 
   assert.ok(plan.selectionReasons.some((reason) => reason.kind === "dependency-smoke"))
 })
 
+test("package patches affect every Jest suite while npm configuration exercises dependency contracts", () => {
+  const inventory = ["lib/db/messages.test.ts", "lib/unrelated.test.ts"]
+  const patch = "patches/@sinonjs__fake-timers@15.4.0.patch"
+  assert.deepEqual(
+    buildIncrementalTestPlan({ changedFiles: [patch], testFiles: inventory }).testFiles,
+    inventory
+  )
+  assert.deepEqual(
+    buildIncrementalTestPlan({ changedFiles: [".npmrc"], testFiles: inventory }).testFiles,
+    [inventory[0]]
+  )
+  for (const file of [patch, ".npmrc"]) {
+    const impact = classifyCiImpact([file])
+    for (const key of [
+      "globalJS",
+      "frontend",
+      "sidecar",
+      "docs",
+      "web",
+      "mobile",
+      "browserExtension",
+      "gateway",
+      "productionBuild",
+    ])
+      assert.equal(impact[key], true, `${file}: ${key}`)
+    assert.equal(impact.rust, false)
+  }
+})
+
 test("global Jest config selects every affected suite while docs-only changes launch no empty shards", () => {
   const inventory = ["lib/a.test.ts", "lib/b.test.ts"]
   const global = buildIncrementalTestPlan({

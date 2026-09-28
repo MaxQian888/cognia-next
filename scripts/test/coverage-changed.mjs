@@ -199,9 +199,9 @@ export const DEPENDENCY_SMOKE_TESTS = [
 ]
 
 const GLOBAL_TEST_INPUT =
-  /^(?:jest\.[^/]+|tsconfig(?:\.[^/]+)?\.json|babel\.config\.[^/]+|\.swcrc|scripts\/test\/jest-timing-sequencer\.cjs)$/
+  /^(?:jest\.[^/]+|tsconfig(?:\.[^/]+)?\.json|babel\.config\.[^/]+|\.swcrc|patches\/.*|scripts\/test\/jest-timing-sequencer\.cjs)$/
 const DEPENDENCY_INPUT =
-  /(?:^|\/)(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$/
+  /(?:^|\/)(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|\.npmrc)$/
 const TEST_INPUT = /\.(?:test|spec)\.[cm]?[jt]sx?$/
 const RELATED_INPUT = /\.(?:[cm]?[jt]sx?|json)$/
 
@@ -214,7 +214,7 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
     )
   const any = (pattern) => all || changedFiles.some((file) => pattern.test(file))
   const globalJS = any(
-    /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|tsconfig(?:\.[^/]+)?\.json|\.github\/workflows\/(?:ci|test)\.yml)$/
+    /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|\.npmrc|patches\/.*|tsconfig(?:\.[^/]+)?\.json|\.github\/workflows\/(?:ci|test)\.yml)$/
   )
   const globalRust = any(/^(?:Cargo\.(?:toml|lock)|rust-toolchain(?:\.toml)?|\.cargo\/.*)$/)
   const rust =
@@ -251,7 +251,7 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
     productionBuild:
       rust ||
       any(
-        /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^/]+)?\.json|next\.config\.[^/]+|postcss\.config\.[^/]+|scripts\/build\/)/
+        /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^/]+)?\.json|next\.config\.[^/]+|postcss\.config\.[^/]+|\.npmrc$|patches\/|scripts\/build\/)/
       ),
   }
 }
