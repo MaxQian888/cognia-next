@@ -55,16 +55,13 @@ export const MOBILE_QUICK_ACTION_SPOT_ICONS: Record<string, MobileSpotIconName> 
   search: "discover",
   workflows: "workflows",
   discover: "discover",
-  inbox: "chat",
+  inbox: "inbox",
   twin: "digital-twin",
   squads: "agent-teams",
-  // No template illustration exists in `MOBILE_SPOT_ICON_NAMES`, and every one
-  // that does is already spoken for. `skills` is the nearest true thing: a
-  // library of reusable, parameterised definitions.
-  templates: "skills",
-  fleet: "device-sync",
-  servers: "device-sync",
-  devices: "device-sync",
+  templates: "templates",
+  fleet: "fleet",
+  servers: "servers",
+  devices: "devices",
   me: "profile",
 }
 

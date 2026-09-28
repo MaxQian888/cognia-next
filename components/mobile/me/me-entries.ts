@@ -81,7 +81,7 @@ export interface MeEntry {
   /** Stable id — drives the `me-row-<id>` test id and the pin set. */
   id: string
   icon: LucideIcon
-  /** Larger companion illustration for selected high-value feature rows. */
+  /** Companion illustration for this feature entry. */
   spotIcon?: MobileSpotIconName
   /** i18n key under `mobile.me.<labelKey>`. */
   labelKey: string
@@ -135,6 +135,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "subscription",
+    spotIcon: "subscription",
     icon: KeyRoundIcon,
     labelKey: "subscriptionRow",
     href: "/me/subscription",
@@ -143,6 +144,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "cloud-account",
+    spotIcon: "cloud-account",
     icon: CloudIcon,
     labelKey: "cloudAccountRow",
     href: "/me/cloud-account",
@@ -160,6 +162,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "devices",
+    spotIcon: "devices",
     icon: SmartphoneIcon,
     labelKey: "devicesRow",
     // Was `/me/devices`, a mobile-only wrapper around the paired-devices card.
@@ -171,6 +174,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "remote-sessions",
+    spotIcon: "remote-sessions",
     icon: RadioTowerIcon,
     labelKey: "remoteSessionsRow",
     href: "/remote-sessions",
@@ -181,6 +185,7 @@ export const ME_ENTRIES: MeEntry[] = [
   // === Appearance & experience ===
   {
     id: "appearance",
+    spotIcon: "appearance",
     icon: PaletteIcon,
     labelKey: "appearanceLink",
     href: "/me/appearance",
@@ -189,6 +194,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "notifications",
+    spotIcon: "notifications",
     icon: BellIcon,
     labelKey: "notificationsRow",
     href: "/me/notifications",
@@ -197,6 +203,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "preferences",
+    spotIcon: "preferences",
     icon: TypeIcon,
     labelKey: "preferencesRow",
     href: "/me/preferences",
@@ -205,6 +212,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "presets",
+    spotIcon: "presets",
     icon: BookmarkIcon,
     labelKey: "presetsRow",
     href: "/me/presets",
@@ -213,6 +221,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "speech",
+    spotIcon: "speech",
     icon: Volume2Icon,
     labelKey: "speechRow",
     href: "/me/speech",
@@ -230,6 +239,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "artifacts",
+    spotIcon: "artifacts",
     icon: ShapesIcon,
     labelKey: "artifactsRow",
     href: "/me/artifacts",
@@ -268,6 +278,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "providers",
+    spotIcon: "providers",
     icon: KeyRoundIcon,
     labelKey: "providersRow",
     href: "/me/providers",
@@ -276,6 +287,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "model-catalog",
+    spotIcon: "model-catalog",
     icon: DatabaseIcon,
     labelKey: "modelCatalogRow",
     href: "/me/model-catalog",
@@ -293,6 +305,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "ocr",
+    spotIcon: "ocr",
     icon: SlidersHorizontalIcon,
     labelKey: "ocrRow",
     href: "/me/ocr",
@@ -319,6 +332,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "computer-use",
+    spotIcon: "computer-use",
     icon: MonitorIcon,
     labelKey: "computerUseRow",
     href: "/me/computer-use",
@@ -330,6 +344,7 @@ export const ME_ENTRIES: MeEntry[] = [
     // left the phone with a view of the repository and none of the workspace
     // that owns it: its roots, trust, capabilities and worktrees.
     id: "workspace",
+    spotIcon: "workspace",
     pairedOnly: true,
     icon: FolderTreeIcon,
     labelKey: "workspaceRow",
@@ -342,6 +357,7 @@ export const ME_ENTRIES: MeEntry[] = [
     // are full-viewport routes with complete mobile bodies that only a deep
     // link could reach. Now that the tables sync, the rows have contents.
     id: "issues",
+    spotIcon: "issues",
     pairedOnly: true,
     icon: CircleDotIcon,
     labelKey: "issuesRow",
@@ -351,6 +367,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "issue-projects",
+    spotIcon: "issue-projects",
     pairedOnly: true,
     icon: RocketIcon,
     labelKey: "issueProjectsRow",
@@ -360,6 +377,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "source-control",
+    spotIcon: "source-control",
     pairedOnly: true,
     icon: GitBranchIcon,
     labelKey: "sourceControlRow",
@@ -378,6 +396,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "command-history",
+    spotIcon: "command-history",
     icon: HistoryIcon,
     labelKey: "commandHistoryRow",
     href: "/me/command-history",
@@ -386,6 +405,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "instructions",
+    spotIcon: "instructions",
     pairedOnly: true,
     icon: ScrollTextIcon,
     labelKey: "instructionsRow",
@@ -402,6 +422,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "plugins",
+    spotIcon: "plugins",
     icon: PuzzleIcon,
     labelKey: "pluginsRow",
     href: "/me/plugins",
@@ -410,6 +431,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "subagents",
+    spotIcon: "subagents",
     pairedOnly: true,
     icon: NetworkIcon,
     labelKey: "subagentsRow",
@@ -419,6 +441,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "mcp",
+    spotIcon: "mcp",
     pairedOnly: true,
     icon: ServerIcon,
     labelKey: "mcpRow",
@@ -428,6 +451,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "external-agents",
+    spotIcon: "external-agents",
     pairedOnly: true,
     icon: PlugIcon,
     labelKey: "externalAgentsRow",
@@ -446,6 +470,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "slash-commands",
+    spotIcon: "slash-commands",
     pairedOnly: true,
     icon: TerminalSquareIcon,
     labelKey: "slashCommandsRow",
@@ -455,6 +480,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "network",
+    spotIcon: "network",
     pairedOnly: true,
     icon: NetworkIcon,
     labelKey: "networkRow",
@@ -464,6 +490,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "hooks",
+    spotIcon: "hooks",
     pairedOnly: true,
     icon: WebhookIcon,
     labelKey: "hooksRow",
@@ -495,10 +522,10 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     // `/templates` shipped `TemplatesMobileBody`, a complete phone catalog, and
-    // nothing on a phone linked to it. No spot illustration: the sixteen in
-    // `MOBILE_SPOT_ICON_NAMES` are each spoken for by one row, and reusing one
-    // would break that pairing.
+    // nothing on a phone linked to it. Its dedicated illustration now also
+    // distinguishes the catalog from the saved chat-template library.
     id: "templates",
+    spotIcon: "templates",
     icon: FileArchiveIcon,
     labelKey: "templatesRow",
     href: "/templates",
@@ -518,6 +545,7 @@ export const ME_ENTRIES: MeEntry[] = [
     // Saved chat messages with `{{parameter}}` slots — a different library from
     // the unified template catalog above, kept as its own row for that reason.
     id: "chat-templates",
+    spotIcon: "chat-templates",
     icon: MessageSquareIcon,
     labelKey: "chatTemplatesRow",
     href: "/me/chat-templates",
@@ -536,6 +564,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "characters",
+    spotIcon: "characters",
     icon: DramaIcon,
     labelKey: "charactersRow",
     href: "/me/characters",
@@ -553,6 +582,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "teams",
+    spotIcon: "teams",
     icon: UsersRoundIcon,
     labelKey: "teamsRow",
     href: "/me/teams",
@@ -561,6 +591,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "agent-modes",
+    spotIcon: "agent-modes",
     icon: UserCogIcon,
     labelKey: "agentModesRow",
     href: "/me/agent-modes",
@@ -569,6 +600,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "a2ui",
+    spotIcon: "a2ui",
     icon: AppWindowIcon,
     labelKey: "a2uiRow",
     href: "/me/a2ui",
@@ -577,6 +609,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "eval",
+    spotIcon: "eval",
     icon: ClipboardCheckIcon,
     labelKey: "evalRow",
     href: "/me/eval",
@@ -625,6 +658,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "maintenance",
+    spotIcon: "maintenance",
     icon: DatabaseIcon,
     labelKey: "dexieMaintenance",
     href: "/me/maintenance",
@@ -633,6 +667,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "storage",
+    spotIcon: "storage",
     icon: HardDriveIcon,
     labelKey: "storageRow",
     href: "/me/storage",
@@ -650,6 +685,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "memory-settings",
+    spotIcon: "memory-settings",
     icon: BrainCircuitIcon,
     labelKey: "memorySettingsRow",
     href: "/me/memory-settings",
@@ -660,6 +696,7 @@ export const ME_ENTRIES: MeEntry[] = [
   // === About ===
   {
     id: "about",
+    spotIcon: "about",
     icon: InfoIcon,
     labelKey: "aboutRow",
     href: "/me/about",
@@ -668,6 +705,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "help",
+    spotIcon: "help",
     icon: BookOpenIcon,
     labelKey: "helpRow",
     href: "/me/help",
@@ -676,6 +714,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "feedback",
+    spotIcon: "feedback",
     icon: MessageSquareIcon,
     labelKey: "feedbackRow",
     href: "/me/feedback",
@@ -684,6 +723,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "device-info",
+    spotIcon: "device-info",
     icon: ChartBarIcon,
     labelKey: "deviceInfoRow",
     href: "/me/device-info",
@@ -692,6 +732,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "logs",
+    spotIcon: "logs",
     icon: FileTextIcon,
     labelKey: "logsRow",
     href: "/me/logs",
@@ -700,6 +741,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "diagnostics",
+    spotIcon: "diagnostics",
     icon: ActivityIcon,
     labelKey: "diagnosticsRow",
     href: "/me/diagnostics",

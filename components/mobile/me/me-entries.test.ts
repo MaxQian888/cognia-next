@@ -5,12 +5,21 @@ import {
   matchMeEntry,
   type MeEntry,
 } from "./me-entries"
+import { MOBILE_SPOT_ICON_NAMES } from "../mobile-spot-icon"
 
 // A `t` that echoes the label key as its own "translation" so matching is
 // deterministic without next-intl.
 const echo = (key: string) => key
 
 describe("me-entries registry", () => {
+  it("gives every feature entry an available companion illustration", () => {
+    for (const entry of ME_ENTRIES) {
+      expect({ id: entry.id, covered: MOBILE_SPOT_ICON_NAMES.includes(entry.spotIcon!) }).toEqual({
+        id: entry.id,
+        covered: true,
+      })
+    }
+  })
   it("assigns every entry to a known section", () => {
     for (const entry of ME_ENTRIES) {
       expect(ME_SECTION_ORDER).toContain(entry.section)
@@ -64,7 +73,7 @@ describe("me-entries registry", () => {
       ME_ENTRIES.filter((entry) => entry.spotIcon).map((entry) => [entry.id, entry.spotIcon])
     )
 
-    expect(spots).toEqual({
+    expect(spots).toMatchObject({
       profile: "profile",
       sync: "device-sync",
       conversation: "chat",
@@ -82,7 +91,7 @@ describe("me-entries registry", () => {
       backup: "secure-backup",
       memory: "memory",
     })
-    expect(new Set(Object.values(spots)).size).toBe(16)
+    expect(new Set(Object.values(spots)).size).toBe(ME_ENTRIES.length)
   })
 
   it("routes every entry to an absolute path", () => {

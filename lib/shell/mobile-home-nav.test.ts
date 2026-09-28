@@ -6,6 +6,12 @@ import {
 import { MOBILE_QUICK_ACTION_CATALOG, DEFAULT_MOBILE_HOME_LAYOUT } from "@/types/shell/mobile-home"
 
 describe("mobile-home-nav", () => {
+  it("uses distinct matching illustrations for infrastructure and template shortcuts", () => {
+    const catalog = getMobileQuickActionCatalog()
+    for (const id of ["inbox", "templates", "fleet", "servers", "devices"]) {
+      expect(catalog.find((item) => item.id === id)?.spotIcon).toBe(id)
+    }
+  })
   it("attaches an icon to every catalog id", () => {
     const catalog = getMobileQuickActionCatalog()
     expect(catalog).toHaveLength(MOBILE_QUICK_ACTION_CATALOG.length)
@@ -46,7 +52,7 @@ describe("mobile-home-nav", () => {
     const templates = getMobileQuickActionCatalog().find((item) => item.id === "templates")
     expect(templates).toMatchObject({ kind: "route", route: "/templates", i18nKey: "templates" })
     expect(templates?.Icon).toBeDefined()
-    expect(templates?.spotIcon).toBe("skills")
+    expect(templates?.spotIcon).toBe("templates")
   })
 
   it("default layout resolves to four active actions", () => {

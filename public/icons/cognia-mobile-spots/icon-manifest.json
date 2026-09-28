@@ -81,6 +81,488 @@
       "position": 16,
       "name": "secure-backup",
       "metaphor": "the companion hugging a small shield with a cloud emblem"
+    },
+    {
+      "name": "templates",
+      "metaphor": "TEMPLATE LIBRARY: holds an open archive folder containing three layered cyan-edged blueprint cards with abstract geometric layouts.",
+      "source": "raw/expansion/templates.png"
+    },
+    {
+      "name": "plugins",
+      "metaphor": "PLUGIN EXTENSIONS: holds two interlocking cyan and navy puzzle pieces, delighted focused face.",
+      "source": "raw/expansion/plugins.png"
+    },
+    {
+      "name": "inbox",
+      "metaphor": "INBOX: collects a glowing envelope into a small navy inbox tray.",
+      "source": "raw/expansion/inbox.png"
+    },
+    {
+      "name": "devices",
+      "metaphor": "PAIRED DEVICES: holds a smartphone beside a miniature tablet with matching cyan diamond status lights.",
+      "source": "raw/expansion/devices.png"
+    },
+    {
+      "name": "subscription",
+      "metaphor": "SUBSCRIPTION: proudly holds a small navy membership pass with a cyan diamond seal and one tiny star.",
+      "source": "raw/expansion/subscription.png"
+    },
+    {
+      "name": "cloud-account",
+      "metaphor": "CLOUD ACCOUNT: gently hugs one small white cloud containing a cyan user silhouette badge.",
+      "source": "raw/expansion/cloud-account.png"
+    },
+    {
+      "name": "remote-sessions",
+      "metaphor": "REMOTE SESSIONS: uses a tiny floating monitor connected by a cyan beam to a small remote cursor orb.",
+      "source": "raw/expansion/remote-sessions.png"
+    },
+    {
+      "name": "appearance",
+      "metaphor": "APPEARANCE: holds a compact artist palette of cyan, lavender and navy swatches with one small brush.",
+      "source": "raw/expansion/appearance.png"
+    },
+    {
+      "name": "notifications",
+      "metaphor": "NOTIFICATIONS: rings a small cyan-edged notification bell with two tiny motion sparkles.",
+      "source": "raw/expansion/notifications.png"
+    },
+    {
+      "name": "preferences",
+      "metaphor": "PREFERENCES: adjusts a compact translucent panel showing three simple slider knobs.",
+      "source": "raw/expansion/preferences.png"
+    },
+    {
+      "name": "presets",
+      "metaphor": "PRESETS: holds one bookmarked stack of configuration cards with a luminous star seal.",
+      "source": "raw/expansion/presets.png"
+    },
+    {
+      "name": "speech",
+      "metaphor": "SPEECH: speaks toward a small cyan microphone with a short abstract audio waveform.",
+      "source": "raw/expansion/speech.png"
+    },
+    {
+      "name": "artifacts",
+      "metaphor": "ARTIFACTS: presents a luminous glass cube containing a miniature geometric document and prism.",
+      "source": "raw/expansion/artifacts.png"
+    },
+    {
+      "name": "providers",
+      "metaphor": "AI PROVIDERS: holds a cyan key beside a single small neural-chip hub, key and hub forming one compact prop.",
+      "source": "raw/expansion/providers.png"
+    },
+    {
+      "name": "model-catalog",
+      "metaphor": "MODEL CATALOG: examines an open catalog box of three tiny differently shaped neural chips.",
+      "source": "raw/expansion/model-catalog.png"
+    },
+    {
+      "name": "ocr",
+      "metaphor": "OCR: scans a paper with abstract dark bars using a luminous cyan rectangular scanner frame.",
+      "source": "raw/expansion/ocr.png"
+    },
+    {
+      "name": "computer-use",
+      "metaphor": "COMPUTER USE: operates a miniature desktop monitor with one prominent cyan mouse pointer.",
+      "source": "raw/expansion/computer-use.png"
+    },
+    {
+      "name": "workspace",
+      "metaphor": "WORKSPACE: opens a navy project folder containing tiny branching folder tabs.",
+      "source": "raw/expansion/workspace.png"
+    },
+    {
+      "name": "issues",
+      "metaphor": "ISSUE TRACKER: checks a small kanban board of three columns with one prominent diamond task card.",
+      "source": "raw/expansion/issues.png"
+    },
+    {
+      "name": "issue-projects",
+      "metaphor": "PROJECTS: proudly holds a small cyan rocket beside a compact milestone flag.",
+      "source": "raw/expansion/issue-projects.png"
+    },
+    {
+      "name": "source-control",
+      "metaphor": "SOURCE CONTROL: presents a glowing forked branch diagram with three round commit nodes.",
+      "source": "raw/expansion/source-control.png"
+    },
+    {
+      "name": "command-history",
+      "metaphor": "COMMAND HISTORY: rolls open a compact terminal scroll with abstract dash marks and a clock badge.",
+      "source": "raw/expansion/command-history.png"
+    },
+    {
+      "name": "instructions",
+      "metaphor": "INSTRUCTIONS: reads a luminous rolled instruction scroll with abstract geometric checklist marks.",
+      "source": "raw/expansion/instructions.png"
+    },
+    {
+      "name": "subagents",
+      "metaphor": "SUBAGENTS: directs two tiny cyan holographic helper orbs connected by a branching command line.",
+      "source": "raw/expansion/subagents.png"
+    },
+    {
+      "name": "mcp",
+      "metaphor": "MCP TOOLS: connects a small tool socket to a compact three-layer server block using a cyan cable.",
+      "source": "raw/expansion/mcp.png"
+    },
+    {
+      "name": "external-agents",
+      "metaphor": "EXTERNAL AGENTS: shakes a tiny robotic helper hand emerging from a cyan-edged portal.",
+      "source": "raw/expansion/external-agents.png"
+    },
+    {
+      "name": "slash-commands",
+      "metaphor": "SLASH COMMANDS: points at one large luminous slash-shaped command wand above a tiny command tile.",
+      "source": "raw/expansion/slash-commands.png"
+    },
+    {
+      "name": "network",
+      "metaphor": "NETWORK: holds a small router with a cyan antenna and three connected orbiting nodes.",
+      "source": "raw/expansion/network.png"
+    },
+    {
+      "name": "hooks",
+      "metaphor": "EVENT HOOKS: catches a glowing event orb with a small hook-shaped cable ending in a trigger spark.",
+      "source": "raw/expansion/hooks.png"
+    },
+    {
+      "name": "chat-templates",
+      "metaphor": "CHAT TEMPLATES: holds a stack of three blank speech-bubble cards secured with a cyan bookmark.",
+      "source": "raw/expansion/chat-templates.png"
+    },
+    {
+      "name": "characters",
+      "metaphor": "CHARACTERS: holds a small friendly theatrical persona mask beside her own unobscured face.",
+      "source": "raw/expansion/characters.png"
+    },
+    {
+      "name": "teams",
+      "metaphor": "CHARACTER TEAMS: arranges three small distinct persona portrait badges into a compact semicircle.",
+      "source": "raw/expansion/teams.png"
+    },
+    {
+      "name": "agent-modes",
+      "metaphor": "AGENT MODES: turns a small selector dial with three geometric mode symbols.",
+      "source": "raw/expansion/agent-modes.png"
+    },
+    {
+      "name": "a2ui",
+      "metaphor": "MINI APPS: presents a floating mini application window containing three large colorful geometric widgets.",
+      "source": "raw/expansion/a2ui.png"
+    },
+    {
+      "name": "eval",
+      "metaphor": "EVALUATION: holds a grading clipboard with a large cyan checkmark and three small score diamonds.",
+      "source": "raw/expansion/eval.png"
+    },
+    {
+      "name": "maintenance",
+      "metaphor": "DATABASE MAINTENANCE: repairs a small three-layer database cylinder using a compact wrench.",
+      "source": "raw/expansion/maintenance.png"
+    },
+    {
+      "name": "storage",
+      "metaphor": "STORAGE: hugs a small navy storage drive with a cyan status light and a simple segmented capacity gauge.",
+      "source": "raw/expansion/storage.png"
+    },
+    {
+      "name": "memory-settings",
+      "metaphor": "MEMORY SETTINGS: carefully adjusts a tiny gear attached to a glowing memory crystal.",
+      "source": "raw/expansion/memory-settings.png"
+    },
+    {
+      "name": "about",
+      "metaphor": "ABOUT: presents a small luminous diamond emblem on an open palm with a curious friendly expression.",
+      "source": "raw/expansion/about.png"
+    },
+    {
+      "name": "help",
+      "metaphor": "HELP: reads an open guidebook with a luminous cyan question-mark-shaped bookmark, no other text.",
+      "source": "raw/expansion/help.png"
+    },
+    {
+      "name": "feedback",
+      "metaphor": "FEEDBACK: drops a small speech-bubble card into a compact feedback box.",
+      "source": "raw/expansion/feedback.png"
+    },
+    {
+      "name": "device-info",
+      "metaphor": "DEVICE INFORMATION: inspects a small microchip with a magnifying monocle held in one hand.",
+      "source": "raw/expansion/device-info.png"
+    },
+    {
+      "name": "logs",
+      "metaphor": "LOGS: examines a scrolling cyan-edged paper strip of abstract event bars and dots.",
+      "source": "raw/expansion/logs.png"
+    },
+    {
+      "name": "diagnostics",
+      "metaphor": "DIAGNOSTICS: holds a small diagnostic monitor with a clear pulse waveform and one repair probe.",
+      "source": "raw/expansion/diagnostics.png"
+    },
+    {
+      "name": "fleet",
+      "metaphor": "AGENT FLEET: directs a compact group of three small floating monitor drones from a controller.",
+      "source": "raw/expansion/fleet.png"
+    },
+    {
+      "name": "servers",
+      "metaphor": "SERVERS: hugs a small navy server rack with three cyan status lights.",
+      "source": "raw/expansion/servers.png"
+    },
+    {
+      "name": "pet",
+      "metaphor": "DESKTOP PET: cuddles a tiny round original navy-and-white robotic pet with cyan diamond eyes, no animal features on the girl.",
+      "source": "raw/expansion/pet.png"
+    },
+    {
+      "name": "agent-runs",
+      "metaphor": "AGENT RUNS: holds a compact progress board with three stacked tracks and a cyan play triangle.",
+      "source": "raw/expansion/agent-runs.png"
+    },
+    {
+      "name": "sites",
+      "metaphor": "WEBSITES: presents a small floating webpage panel over a tiny cyan globe.",
+      "source": "raw/expansion/sites.png"
+    },
+    {
+      "name": "integrations",
+      "metaphor": "INTEGRATIONS: connects three distinct geometric service tiles into one small glowing hub.",
+      "source": "raw/expansion/integrations.png"
+    },
+    {
+      "name": "bots",
+      "metaphor": "BOTS: gently pats a tiny friendly round robot with a speech-bubble antenna.",
+      "source": "raw/expansion/bots.png"
+    },
+    {
+      "name": "performance",
+      "metaphor": "PERFORMANCE: monitors a compact speedometer with a cyan needle and a small upward graph.",
+      "source": "raw/expansion/performance.png"
+    },
+    {
+      "name": "usage-cost",
+      "metaphor": "USAGE AND COST: counts three small cyan tokens beside a compact bar chart.",
+      "source": "raw/expansion/usage-cost.png"
+    },
+    {
+      "name": "tools",
+      "metaphor": "TOOLS: opens a tiny toolkit containing a wrench, a stylus and a glowing gear.",
+      "source": "raw/expansion/tools.png"
+    },
+    {
+      "name": "sidebar",
+      "metaphor": "SIDEBAR LAYOUT: arranges a miniature application panel with a clearly highlighted vertical navigation rail.",
+      "source": "raw/expansion/sidebar.png"
+    },
+    {
+      "name": "shortcuts",
+      "metaphor": "KEYBOARD SHORTCUTS: taps a tiny keyboard with two oversized glowing cyan keycaps.",
+      "source": "raw/expansion/shortcuts.png"
+    },
+    {
+      "name": "gateway",
+      "metaphor": "GATEWAY: opens a small geometric archway with a cyan data beam passing through.",
+      "source": "raw/expansion/gateway.png"
+    },
+    {
+      "name": "webhooks",
+      "metaphor": "WEBHOOKS: dispatches a small glowing envelope along a curved arrow into a tiny receiver.",
+      "source": "raw/expansion/webhooks.png"
+    },
+    {
+      "name": "pro-ide",
+      "metaphor": "CODE EDITOR: holds a miniature split-pane code editor with abstract colored code bars and a cyan cursor.",
+      "source": "raw/expansion/pro-ide.png"
+    },
+    {
+      "name": "lsp",
+      "metaphor": "LANGUAGE SERVICES: inspects a small code tile with a magnifier highlighting a single glowing symbol.",
+      "source": "raw/expansion/lsp.png"
+    },
+    {
+      "name": "security",
+      "metaphor": "SECURITY: guards a small luminous cyan padlock on a navy shield.",
+      "source": "raw/expansion/security.png"
+    },
+    {
+      "name": "workspace-trust",
+      "metaphor": "WORKSPACE TRUST: stamps a prominent cyan checkmark seal onto a small project folder.",
+      "source": "raw/expansion/workspace-trust.png"
+    },
+    {
+      "name": "sandbox",
+      "metaphor": "SANDBOX: holds a transparent protective cube containing a tiny terminal tile.",
+      "source": "raw/expansion/sandbox.png"
+    },
+    {
+      "name": "image-catalog",
+      "metaphor": "IMAGE LIBRARY: fans out three small cyan-bordered picture cards showing simple mountains, moon and stars.",
+      "source": "raw/expansion/image-catalog.png"
+    },
+    {
+      "name": "updates",
+      "metaphor": "UPDATES: lifts a small software package cube wrapped in a circular upward cyan arrow.",
+      "source": "raw/expansion/updates.png"
     }
-  ]
+  ],
+  "version": 3,
+  "coverage": {
+    "mobileEntries": {
+      "profile": "profile",
+      "subscription": "subscription",
+      "cloud-account": "cloud-account",
+      "sync": "device-sync",
+      "devices": "devices",
+      "remote-sessions": "remote-sessions",
+      "appearance": "appearance",
+      "notifications": "notifications",
+      "preferences": "preferences",
+      "presets": "presets",
+      "speech": "speech",
+      "conversation": "chat",
+      "artifacts": "artifacts",
+      "canvas": "canvas",
+      "agent": "digital-twin",
+      "providers": "providers",
+      "model-catalog": "model-catalog",
+      "connectors": "connectors",
+      "ocr": "ocr",
+      "web-search": "browser",
+      "search": "discover",
+      "computer-use": "computer-use",
+      "workspace": "workspace",
+      "issues": "issues",
+      "issue-projects": "issue-projects",
+      "source-control": "source-control",
+      "terminal": "terminal",
+      "command-history": "command-history",
+      "instructions": "instructions",
+      "plugins": "plugins",
+      "subagents": "subagents",
+      "mcp": "mcp",
+      "external-agents": "external-agents",
+      "slash-commands": "slash-commands",
+      "network": "network",
+      "hooks": "hooks",
+      "squads": "agent-teams",
+      "templates": "templates",
+      "chat-templates": "chat-templates",
+      "characters": "characters",
+      "skills": "skills",
+      "teams": "teams",
+      "agent-modes": "agent-modes",
+      "a2ui": "a2ui",
+      "eval": "eval",
+      "scheduler": "scheduler",
+      "goals": "goals",
+      "workflows-settings": "workflows",
+      "backup": "secure-backup",
+      "maintenance": "maintenance",
+      "storage": "storage",
+      "memory": "memory",
+      "memory-settings": "memory-settings",
+      "about": "about",
+      "help": "help",
+      "feedback": "feedback",
+      "device-info": "device-info",
+      "logs": "logs",
+      "diagnostics": "diagnostics"
+    },
+    "desktopNavigation": {
+      "workflows": "workflows",
+      "inbox": "inbox",
+      "twin": "digital-twin",
+      "discover": "discover",
+      "templates": "templates",
+      "issues": "issues",
+      "skills": "skills",
+      "plugins": "plugins",
+      "squads": "agent-teams",
+      "scheduler": "scheduler",
+      "goals": "goals",
+      "pet": "pet",
+      "browser": "browser",
+      "source-control": "source-control",
+      "agent-runs": "agent-runs",
+      "workspace": "workspace",
+      "sites": "sites",
+      "a2ui": "a2ui",
+      "memory": "memory",
+      "servers": "servers",
+      "integrations": "integrations",
+      "devices": "devices",
+      "bots": "bots",
+      "eval": "eval",
+      "performance": "performance",
+      "logs": "logs",
+      "me": "profile"
+    },
+    "desktopSettings": {
+      "account": "profile",
+      "subscription": "subscription",
+      "usage-cost": "usage-cost",
+      "ai-connections": "providers",
+      "model-catalog": "model-catalog",
+      "ccswitch": "providers",
+      "agents": "digital-twin",
+      "agent-modes": "agent-modes",
+      "agent-runtime": "fleet",
+      "subagents": "subagents",
+      "squads": "agent-teams",
+      "teams": "teams",
+      "fleet": "fleet",
+      "eval": "eval",
+      "tools": "tools",
+      "search": "discover",
+      "memory": "memory",
+      "ocr": "ocr",
+      "speech": "speech",
+      "automation": "computer-use",
+      "skills": "skills",
+      "characters": "characters",
+      "slash-commands": "slash-commands",
+      "presets": "presets",
+      "chatTemplates": "chat-templates",
+      "hooks": "hooks",
+      "conversation": "chat",
+      "artifacts": "artifacts",
+      "canvas": "canvas",
+      "a2ui": "a2ui",
+      "appearance": "appearance",
+      "sidebar": "sidebar",
+      "shortcuts": "shortcuts",
+      "discover": "discover",
+      "pet": "pet",
+      "notifications": "notifications",
+      "connections": "connectors",
+      "mcp": "mcp",
+      "plugins": "plugins",
+      "services": "servers",
+      "external-bridge": "external-agents",
+      "gateway": "gateway",
+      "webhooks": "webhooks",
+      "workflows": "workflows",
+      "scheduled-tasks": "scheduler",
+      "goals": "goals",
+      "terminal": "terminal",
+      "source-control": "source-control",
+      "pro-ide": "pro-ide",
+      "lsp": "lsp",
+      "data": "storage",
+      "security": "security",
+      "workspace-trust": "workspace-trust",
+      "sandbox": "sandbox",
+      "image-catalog": "image-catalog",
+      "connectivity": "network",
+      "network": "network",
+      "desktop": "computer-use",
+      "logs": "logs",
+      "diagnostics": "diagnostics",
+      "updates": "updates",
+      "about": "about"
+    }
+  }
 }
