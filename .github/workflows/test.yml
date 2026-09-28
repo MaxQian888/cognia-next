@@ -80,12 +80,15 @@ jobs:
         with:
           node-version: 26.x
           cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
       - name: Cache standalone npm downloads
         uses: actions/cache@v6
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-node26-npm-${{ hashFiles('sidecar/**/package-lock.json') }}
-          restore-keys: ${{ runner.os }}-node26-npm-
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build Jest runtime prerequisites once
@@ -186,12 +189,15 @@ jobs:
         with:
           node-version: 26.x
           cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
       - name: Cache standalone npm downloads
         uses: actions/cache@v6
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-node26-npm-${{ hashFiles('sidecar/**/package-lock.json') }}
-          restore-keys: ${{ runner.os }}-node26-npm-
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
       # Restore before postinstall so linked-package freshness checks can
       # reuse compiled output while retaining all installation scripts.
       - name: Download built Jest prerequisites
@@ -213,6 +219,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           packages=(ripgrep)
+          native_helpers=false
           if node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';
           const plan = JSON.parse(readFileSync('.cache/jest/plan.json', 'utf8'));
@@ -222,10 +229,25 @@ jobs:
           NODE
           then
             tar -xf .cache/jest/native-helpers.tar
-            packages+=(bubblewrap)
+            packages+=(bubblewrap apparmor)
+            native_helpers=true
           fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends "${packages[@]}"
+          if [ "$native_helpers" = true ]; then
+            # Ubuntu 24.04 requires an application-specific userns allowance.
+            # Keep the host restriction enabled; bwrap still applies the actual
+            # filesystem/network sandbox exercised by the kernel integration tests.
+            sudo tee /etc/apparmor.d/cognia-ci-bwrap >/dev/null <<'PROFILE'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          PROFILE
+            sudo apparmor_parser -r /etc/apparmor.d/cognia-ci-bwrap
+            /usr/bin/bwrap --unshare-user --unshare-net --ro-bind / / -- /bin/true
+          fi
       # The planner assigns every selected suite exactly once. Full mode keeps
       # --maxWorkers=2 and the existing merged coverage thresholds.
       - name: Run Jest planned shard
@@ -277,6 +299,16 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -399,6 +431,16 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -440,6 +482,9 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo build
@@ -447,6 +492,13 @@ jobs:
         with:
           workspaces: ". -> target"
           cache-on-failure: true
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
       - name: Install Linux build dependencies
@@ -491,6 +543,30 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+      - name: Cache Next.js compilation (docs)
+        uses: actions/cache@v6
+        with:
+          path: docs/.next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-docs-ci-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'docs/next.config.ts', 'docs/tsconfig.json', 'docs/postcss.config.mjs') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-docs-ci-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'docs/next.config.ts', 'docs/tsconfig.json', 'docs/postcss.config.mjs') }}-
+
+      - name: Restore compiled workspace prerequisites
+        if: needs.jest-plan.outputs.has-tests == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: jest-runtime-prerequisites
+          path: .
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build documentation
@@ -516,6 +592,30 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+      - name: Cache Next.js compilation (web)
+        uses: actions/cache@v6
+        with:
+          path: web/.next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-web-ci-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'web/next.config.ts', 'web/tsconfig.json', 'web/postcss.config.mjs') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-web-ci-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'web/next.config.ts', 'web/tsconfig.json', 'web/postcss.config.mjs') }}-
+
+      - name: Restore compiled workspace prerequisites
+        if: needs.jest-plan.outputs.has-tests == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: jest-runtime-prerequisites
+          path: .
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build marketing site
@@ -541,12 +641,36 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
       - name: Setup Java 21
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
+      - name: Cache Next.js compilation (mobile)
+        uses: actions/cache@v6
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-mobile-android-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-mobile-android-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-
+
+      - name: Restore compiled workspace prerequisites
+        if: needs.jest-plan.outputs.has-tests == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: jest-runtime-prerequisites
+          path: .
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build and sync the Android shell
@@ -575,6 +699,23 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+      - name: Cache Next.js compilation (mobile)
+        uses: actions/cache@v6
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-mobile-ios-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-mobile-ios-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build and sync the iOS shell
@@ -589,6 +730,37 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO
           build
+
+  deepseek-runtime:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).deepseekRuntime
+    name: DeepSeek Runtime Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+      - name: Cache isolated runtime downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node26-deepseek-${{ hashFiles('runtime/deepseek-harness/package.json') }}
+          restore-keys: ${{ runner.os }}-node26-deepseek-
+      - name: Install isolated runtime
+        env:
+          DSH_TEST_ROOT: ${{ runner.temp }}/cognia-deepseek-runtime
+        run: |
+          echo "DSH_TEST_ROOT=$DSH_TEST_ROOT" >> "$GITHUB_ENV"
+          mkdir -p "$DSH_TEST_ROOT"
+          cp runtime/deepseek-harness/* "$DSH_TEST_ROOT/"
+          npm install --prefix "$DSH_TEST_ROOT" --ignore-scripts --no-audit --no-fund --prefer-offline
+      - name: Run launcher and service smoke suites
+        working-directory: ${{ env.DSH_TEST_ROOT }}
+        run: node --test launcher.test.mjs launcher.smoke.test.mjs services.smoke.test.mjs
 
   sidecar:
     needs: jest-plan
@@ -611,6 +783,23 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+
+      - name: Restore compiled workspace prerequisites
+        if: needs.jest-plan.outputs.has-tests == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: jest-runtime-prerequisites
+          path: .
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -650,15 +839,30 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
 
-      - name: Cache Next.js build
+      - name: Cache Next.js compilation (desktop)
         uses: actions/cache@v6
         with:
-          path: |
-            .next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
+          path: .next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-desktop-production-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-desktop-production-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-
+
+      - name: Restore compiled workspace prerequisites
+        if: needs.jest-plan.outputs.has-tests == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: jest-runtime-prerequisites
+          path: .
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -714,18 +918,33 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
 
       # Separate cache key from the plain verification build — the E2E flag
       # changes the compiled output, so the two builds must not share
       # incremental state.
-      - name: Cache Next.js build (E2E)
+      - name: Cache Next.js compilation (desktop)
         uses: actions/cache@v6
         with:
-          path: |
-            .next/cache
-          key: ${{ runner.os }}-nextjs-e2e-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-e2e-${{ hashFiles('**/pnpm-lock.yaml') }}-
+          path: .next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-desktop-e2e-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-desktop-e2e-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-
+
+      - name: Restore compiled workspace prerequisites
+        if: needs.jest-plan.outputs.has-tests == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: jest-runtime-prerequisites
+          path: .
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -774,6 +993,16 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -863,6 +1092,23 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+
+      - name: Restore compiled workspace prerequisites
+        if: needs.jest-plan.outputs.has-tests == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: jest-runtime-prerequisites
+          path: .
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -926,6 +1172,16 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -986,6 +1242,16 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
       - name: Install Playwright (chromium + webkit)
@@ -1034,6 +1300,16 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
       - name: Install Playwright ${{ matrix.project }}
@@ -1089,6 +1365,9 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       # This job pays for a full `tauri build --debug` below, so it needs the
@@ -1097,6 +1376,20 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
+      - name: Cache Next.js compilation (tauri)
+        uses: actions/cache@v6
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-tauri-e2e-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-tauri-e2e-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
       # NOTE: tauri-driver is intentionally NOT installed — the launch helper
@@ -1210,7 +1503,7 @@ jobs:
       # `tauri-host` turned on (what those crates' old defaults compiled), and
       # a separate check proves each crate still builds Tauri-free.
       - name: Run Rust tests (all crates except src-tauri)
-        run: cargo test --locked --workspace --exclude cognia-next --features "$(node scripts/gates/check-rust-architecture.mjs --print-ci-features)"
+        run: cargo test --locked --workspace --exclude cognia-next --no-fail-fast --features "$(node scripts/gates/check-rust-architecture.mjs --print-ci-features)"
       - name: Check the default (Tauri-free) feature set compiles
         run: cargo check --locked --workspace --exclude cognia-next --all-targets
 

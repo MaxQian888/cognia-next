@@ -7,8 +7,8 @@
 //! identical across them. Factoring it here keeps the native modules thin (just
 //! the FFI to read a node's fields + children) and, crucially, keeps the logic
 //! unit-tested on **every** host, including the Windows dev box where the AX /
-//! AT-SPI backends don't even compile. Same `cfg(any(…, test))` discipline as
-//! `keymap` / `shell_vars`.
+//! AT-SPI backends don't even compile. The session snapshot path also uses
+//! these helpers on every platform.
 
 use crate::automation::types::{ElementInfo, ElementRef, Locator, Point, Rect};
 use std::time::{Duration, Instant};

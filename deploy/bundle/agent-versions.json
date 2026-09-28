@@ -99,7 +99,7 @@
     },
     {
       "id": "copilot-cli",
-      "version": "1.0.88",
+      "version": "1.0.84",
       "libc": ["glibc", "musl"],
       "commands": [
         {
@@ -108,7 +108,8 @@
           "bin": "copilot",
           "smoke": "version"
         }
-      ]
+      ],
+      "$comment": "Compatibility hold: the musl ARM64 embedded Node launcher fails NAPI initialization through 1.0.88. 1.0.84 is the last stable package shipping the complete official JS distribution; musl ARM64 runs its index.js on our pinned Node. Keep all platforms on this truthful bundle version until upstream restores a usable launcher/distribution."
     },
     {
       "id": "qwen-code",

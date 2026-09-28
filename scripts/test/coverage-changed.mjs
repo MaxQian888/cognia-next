@@ -231,6 +231,7 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
         /^(?:(?:app|components|hooks|lib|stores|types|i18n|public|packages|scripts\/build|tests\/e2e|e2e)\/|next\.config\.|playwright\.)/
       ),
     sidecar: globalJS || any(/^(?:sidecar|cli|packages|lib)\//),
+    deepseekRuntime: globalJS || any(/^runtime\/deepseek-harness\//),
     docs: globalJS || any(/^docs\//),
     web: globalJS || any(/^web\//),
     mobile: globalJS || any(/^mobile\/|^lib\/capacitor\/|\.mobile\.tsx?$|^next\.config\./),

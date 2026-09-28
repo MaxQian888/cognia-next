@@ -346,6 +346,27 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
   })
 
+  it("pairs a mobile host under the active local account before a runtime target exists", async () => {
+    runtimeContextMock = null
+    activeAccountIdMock = "acct_mobile_second"
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+    await user.click(await screen.findByTestId("pair-discover-skip"))
+    fireEvent.change(screen.getByTestId("pair-payload"), { target: { value: PAIR_PAYLOAD } })
+    await user.click(screen.getByTestId("pair-submit"))
+    await waitFor(() => expect(mockPairAndActivate).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "acct_mobile_second", platform: "mobile" })
+    ))
+  })
+
+  it("limits mobile recovery hosts to the active account when its runtime binding is gone", async () => {
+    runtimeContextMock = null
+    activeAccountIdMock = "acct_mobile_second"
+    window.history.replaceState({}, "", "/pair?mode=recover")
+    render(<PairOnboardingClient />)
+    await waitFor(() => expect(mockListHosts).toHaveBeenCalledWith("acct_mobile_second"))
+  })
+
   it("hydrates and lands on the paired step when storage already has a config", async () => {
     window.localStorage.setItem(
       "cognia.companion.config.v1",

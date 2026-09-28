@@ -14,6 +14,7 @@
  */
 
 import { useEffect } from "react"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { SeededWorkflowKind } from "./workflow-fixtures"
 import type { ChatPerfMediaOptions } from "./chat-perf-fixtures"
 
@@ -47,6 +48,10 @@ declare global {
      */
     __cogniaReadMessages?: () => Promise<
       Array<{ database: string; sessionId: string; role: string; text: string }>
+    >
+    /** Persisted session metadata through the active account's content cipher. */
+    __cogniaReadSessions?: () => Promise<
+      Array<Pick<ChatSession, "id" | "projectId" | "executionContext"> & { database: string }>
     >
     __cogniaSeedCharacter?: (draft: {
       name: string
@@ -455,6 +460,16 @@ export function ExposeTestGlobals(): null {
           sessionId: row.sessionId,
           role: row.role,
           text: (row.parts ?? []).map((part) => (part.type === "text" ? part.text : "")).join(""),
+        }))
+      }
+
+      window.__cogniaReadSessions = async () => {
+        const db = getDb()
+        return (await db.sessions.toArray()).map((row) => ({
+          database: db.name,
+          id: row.id,
+          projectId: row.projectId,
+          executionContext: row.executionContext,
         }))
       }
 
@@ -936,6 +951,7 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaResetDb
       delete window.__cogniaSeedWorkflow
       delete window.__cogniaReadMessages
+      delete window.__cogniaReadSessions
       delete window.__cogniaSeedCharacter
       delete window.__cogniaSeedConversation
       delete window.__cogniaSeedTeam

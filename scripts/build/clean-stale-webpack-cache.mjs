@@ -19,9 +19,11 @@
  *
  * Usage:
  *   node scripts/build/clean-stale-webpack-cache.mjs
+ *   node scripts/build/clean-stale-webpack-cache.mjs --backups-only
  *   WEBPACK_CACHE_MAX_GB=2 node scripts/build/clean-stale-webpack-cache.mjs
  */
 
+import { lstatSync, readdirSync, unlinkSync } from "node:fs"
 import { resolve, join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -52,17 +54,64 @@ export function cleanStaleStorybookCaches({ repoRoot, thresholdBytes, log = cons
   })
 }
 
+/**
+ * After a successful Next build, discard only retired webpack index backups.
+ * Webpack commits index.pack last and deserializes that current index; .old is
+ * the preceding generation, not a referenced pack chunk. Retain a backup if its
+ * current index is absent, and never follow symlinks outside the cache tree.
+ */
+export function cleanWebpackIndexBackups({ repoRoot, log = console.log }) {
+  const result = { removed: 0, sizeBytes: 0 }
+  const stat = (path) => {
+    try {
+      return lstatSync(path)
+    } catch (error) {
+      if (error.code === "ENOENT") return undefined
+      throw error
+    }
+  }
+  let cacheDir = repoRoot
+  for (const segment of [".next", "cache", "webpack"]) {
+    cacheDir = join(cacheDir, segment)
+    if (!stat(cacheDir)?.isDirectory()) return result
+  }
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) visit(path)
+      else if (
+        entry.isFile() &&
+        entry.name === "index.pack.old" &&
+        stat(join(directory, "index.pack"))?.isFile()
+      ) {
+        const size = stat(path)?.size ?? 0
+        unlinkSync(path)
+        result.removed += 1
+        result.sizeBytes += size
+      }
+    }
+  }
+  visit(cacheDir)
+  if (result.removed)
+    log(`[clean-cache] removed ${result.removed} webpack index backups (${result.sizeBytes} bytes)`)
+  return result
+}
+
 const __filename = fileURLToPath(import.meta.url)
 const isDirectRun = process.argv[1] && resolve(process.argv[1]) === __filename
 
 if (isDirectRun) {
   try {
     const repoRoot = resolve(dirname(__filename), "..", "..")
-    const thresholdGb = Number(process.env.WEBPACK_CACHE_MAX_GB ?? 5)
-    cleanStaleStorybookCaches({
-      repoRoot,
-      thresholdBytes: thresholdGb * BYTES_PER_GB,
-    })
+    if (process.argv.includes("--backups-only")) {
+      cleanWebpackIndexBackups({ repoRoot })
+    } else {
+      const thresholdGb = Number(process.env.WEBPACK_CACHE_MAX_GB ?? 5)
+      cleanStaleStorybookCaches({
+        repoRoot,
+        thresholdBytes: thresholdGb * BYTES_PER_GB,
+      })
+    }
   } catch (error) {
     // A maintenance helper must never block `pnpm storybook`; degrade to a warning.
     console.warn(`[clean-cache] skipped (${error instanceof Error ? error.message : error})`)

@@ -20,6 +20,7 @@ const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaResetDb",
   "__cogniaSeedWorkflow",
   "__cogniaReadMessages",
+  "__cogniaReadSessions",
   "__cogniaSeedCharacter",
   "__cogniaSeedTeam",
   "__cogniaSeedSkill",
@@ -67,6 +68,7 @@ describe("ExposeTestGlobals", () => {
     render(<ExposeTestGlobals />)
     await Promise.resolve()
     expect(window.__cogniaResetDb).toBeUndefined()
+    expect(window.__cogniaReadSessions).toBeUndefined()
     expect(window.__cogniaSeedWorkflow).toBeUndefined()
     expect(window.__cogniaSeedCharacter).toBeUndefined()
     expect(window.__cogniaSeedTeam).toBeUndefined()
@@ -88,6 +90,7 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaResetDb).toBe("function")
     expect(typeof window.__cogniaSeedWorkflow).toBe("function")
     expect(typeof window.__cogniaReadMessages).toBe("function")
+    expect(typeof window.__cogniaReadSessions).toBe("function")
     expect(typeof window.__cogniaSeedCharacter).toBe("function")
     expect(typeof window.__cogniaSeedTeam).toBe("function")
     expect(typeof window.__cogniaSeedSkill).toBe("function")
@@ -148,6 +151,37 @@ describe("ExposeTestGlobals", () => {
     // Settings writes go through the account content cipher — this is the
     // call that used to throw when the doubled name was activated instead.
     await window.__cogniaSetSettings!({ mobileRuntimeMode: "standalone" })
+  })
+
+  it("reads persisted session execution context through the active account cipher", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    await provisionBrowserVault("acct_e2e_vault", "correct horse battery staple")
+    activateAccountDatabase("acct_e2e_vault")
+    render(<ExposeTestGlobals />)
+    await waitFor(() => expect(window.__cogniaTestGlobalsReady).toBe(true))
+    const { createSession } = await import("@/lib/db/sessions")
+    const executionContext = {
+      location: "local" as const,
+      projectId: "project_e2e",
+      projectRoot: "/tmp/cognia-workflow-e2e",
+      taskWorkspace: { taskId: "task_e2e", workspaceKey: "workspace_e2e" },
+    }
+    const session = await createSession({
+      title: "Persisted execution",
+      model: "claude-sonnet-5",
+      projectId: "project_e2e",
+      executionContext,
+    })
+    await expect(window.__cogniaReadSessions!()).resolves.toEqual(
+      expect.arrayContaining([
+        {
+          database: "cognia-account-acct_e2e_vault-encrypted-v1",
+          id: session.id,
+          projectId: "project_e2e",
+          executionContext,
+        },
+      ])
+    )
   })
 
   it("__cogniaReadMessages returns the text an encrypted account database stores", async () => {

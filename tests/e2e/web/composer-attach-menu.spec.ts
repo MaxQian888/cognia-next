@@ -9,7 +9,7 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
+import { ensureAppMounted, setCogniaSettings } from "../helpers/db-reset"
 
 // `resolveWebAccess` gates the row's `preSearch` on the master switch AND a
 // configured provider — seed both.
@@ -34,10 +34,7 @@ const ONBOARDED = {
 test.describe("web — composer attach menu capability rows", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
-    await page.goto("about:blank")
-    await page.goto("/", { waitUntil: "domcontentloaded" })
-    await waitForTestGlobals(page, 30_000)
+    await ensureAppMounted(page)
     await setCogniaSettings(page, ONBOARDED)
     // The gate's verdict latches per boot; a reload re-reads the settled row.
     await page.goto("about:blank")

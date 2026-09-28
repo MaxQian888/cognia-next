@@ -13,12 +13,11 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, resetCogniaDb, setCogniaSettings } from "../helpers/db-reset"
+import { resetCogniaDb, setCogniaSettings } from "../helpers/db-reset"
 
 test.describe("tauri — first-run onboarding", () => {
   test.beforeEach(async ({ page }) => {
-    await ensureCogniaAccount(page)
-    await resetCogniaDb(page)
+    await resetCogniaDb(page, { onboarding: "fresh" })
   })
 
   test("@critical routes a fresh install through welcome → scan", async ({ page }) => {

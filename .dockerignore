@@ -33,6 +33,7 @@ mobile/ios
 mobile/android
 
 # VCS / editor / local state
+.cache
 .git
 .github
 .husky

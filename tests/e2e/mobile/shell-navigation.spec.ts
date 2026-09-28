@@ -10,7 +10,13 @@ test.describe("mobile shell — 4-tab navigation", () => {
   test.beforeEach(async ({ page }) => {
     await injectCapacitor(page, { platform: "android" })
     await page.goto("/")
-    await bootstrapCogniaMobile(page, "standalone")
+    await bootstrapCogniaMobile(page, "standalone", {
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
   })
 
   test("@smoke tab bar renders and each tab routes correctly", async ({ page }) => {

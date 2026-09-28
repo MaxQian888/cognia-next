@@ -92,6 +92,7 @@ const NODE_ENV_DIRS = "{lib,stores,cli,packages,types,plugins,i18n}"
 // from the jsdom project so no suite runs twice. Must stay in sync with
 // NODE_ENV_DIRS / the node testMatch globs below.
 const NODE_ENV_TEST_REGEXES = [
+  "<rootDir>/tests/e2e/helpers/.*\\.test\\.ts$",
   "<rootDir>/(?:lib|stores|cli|packages|types|plugins|i18n)/.*__tests__/.*\\.[mc]?ts$",
   "<rootDir>/(?:lib|stores|cli|packages|types|plugins|i18n)/.*(?:/|\\.)(?:spec|test)\\.[mc]?ts$",
 ]
@@ -129,6 +130,9 @@ const baseTestPathIgnorePatterns = [
   // Importing those TAP suites through Jest reports an empty Jest suite while
   // the nested tests keep running in the background.
   "/services/workspace-runtime/",
+  // These launcher tests use node:test and the official runtime's native ESM
+  // module graph. The deepseek-runtime CI job installs and tests them in isolation.
+  "/runtime/deepseek-harness/.*\\.test\\.mjs$",
   // `services/share-server/` (worker + viewer) is a standalone Vitest
   // workspace with its own package.json/node_modules — same arrangement as
   // `sidecar/`. Its specs `import` from `vitest` and `cloudflare:test`, which
@@ -140,7 +144,8 @@ const baseTestPathIgnorePatterns = [
   // `tmp/` is gitignored (see .gitignore) — a local-only vendored clone of
   // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.
   "/tmp/",
-  "/tests/e2e/", // Playwright E2E tests — run via `pnpx playwright test`, not Jest
+  // Browser specs stay in Playwright; co-located helper unit tests run in Node.
+  "/tests/e2e/(?!helpers/.*\\.test\\.ts$)",
   "/tests/real-e2e/", // Real-service Playwright lane — run via `pnpm test:e2e:web-headless`
   // Conformance cases use Node's built-in `node:test` runner and native ESM.
   // Jest would transform their dynamic imports to CJS and then report both
@@ -794,6 +799,7 @@ const createNodeProject = createJestConfig({
   // Windows backslashes in the glob, which micromatch treats as escapes and
   // matches nothing (the whole node project vanished from discovery).
   testMatch: [
+    `${POSIX_ROOT_DIR}/tests/e2e/helpers/**/*.test.ts`,
     `${POSIX_ROOT_DIR}/${NODE_ENV_DIRS}/**/__tests__/**/*.?([mc])ts`,
     `${POSIX_ROOT_DIR}/${NODE_ENV_DIRS}/**/?(*.)+(spec|test).?([mc])ts`,
   ],

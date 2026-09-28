@@ -19,6 +19,10 @@ import {
 } from "./stores"
 import type { CompanionCredentialBook, CompanionHostCredential, CompanionHostKey } from "./types"
 
+jest.mock("@/lib/platform/detect", () => ({ isCapacitor: jest.fn(() => false) }))
+
+const platform = jest.requireMock("@/lib/platform/detect") as { isCapacitor: jest.Mock }
+
 jest.mock("@/lib/runtime/runtime-target-context", () => ({
   getActiveRuntimeTargetContext: jest.fn(() => null),
 }))
@@ -104,6 +108,7 @@ function freshBook(): CompanionCredentialBook {
 }
 
 beforeEach(() => {
+  platform.isCapacitor.mockReturnValue(false)
   runtimeContext.getActiveRuntimeTargetContext.mockReturnValue(null)
   browserVault.getActiveBrowserVault.mockReturnValue(null)
   __resetCredentialBookForTests(null)
@@ -229,6 +234,17 @@ describe("refileCursorNamespace", () => {
     jest.dontMock("@/lib/db/schema")
   })
 
+  it("does not capture an account database after its scope has changed", async () => {
+    const state = mockCursorTable([
+      { serverKey: "old", table: "sessions", since: 7, lastSyncAt: 1, lastError: null },
+    ])
+    const { refileCursorNamespace: scoped } = await import("./index")
+    await scoped("old", "new", () => false)
+    expect(state.put).toEqual([])
+    expect(state.deleted).toEqual([])
+    jest.dontMock("@/lib/db/schema")
+  })
+
   it("does nothing when the old key holds no cursors", async () => {
     const state = mockCursorTable([
       { serverKey: "somebody-else", table: "sessions", since: 7, lastSyncAt: 1, lastError: null },
@@ -242,6 +258,165 @@ describe("refileCursorNamespace", () => {
 })
 
 describe("MigratingCompanionStorage", () => {
+  it("hydrates a native legacy pairing through the opening placeholder without treating it as a Host id", async () => {
+    platform.isCapacitor.mockReturnValue(true)
+    runtimeContext.getActiveRuntimeTargetContext.mockReturnValue({
+      accountId: "local_acct_a",
+      targetId: "mobile-companion",
+    })
+    const book = freshBook()
+    const storage = new MigratingCompanionStorage({
+      book,
+      legacy: legacyStorage(config()),
+      refileCursors: async () => undefined,
+    })
+    expect(await storage.load()).toMatchObject({
+      accountId: "local_acct_a",
+      targetId: "dev-legacy",
+      deviceId: "dev-legacy",
+    })
+  })
+
+  it.each(["save", "clear"] as const)(
+    "retains legacy credentials when the account switches during %s cleanup",
+    async (operation) => {
+      platform.isCapacitor.mockReturnValue(true)
+      let namespace = "acct_second"
+      let resolveLegacy!: (value: CompanionConfig | null) => void
+      const legacy = legacyStorage(config())
+      const originalLoad = legacy.load
+      legacy.load = jest.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveLegacy = resolve
+          })
+      )
+      const storage = new MigratingCompanionStorage({
+        book: freshBook(),
+        legacy,
+        accountNamespace: () => namespace,
+        refileCursors: async () => undefined,
+      })
+      const pending =
+        operation === "save" ? storage.save(config({ deviceId: "new-device" })) : storage.clear()
+      while (!resolveLegacy) await Promise.resolve()
+      namespace = "local_acct_a"
+      resolveLegacy(config())
+      await pending
+      expect(legacy.cleared).toBe(0)
+      legacy.load = originalLoad
+      expect(await storage.load()).toMatchObject({
+        accountId: "local_acct_a",
+        deviceId: "dev-legacy",
+      })
+    }
+  )
+
+  it.each(["save", "clear", "remove"] as const)(
+    "rejects %s if the owner changes while migration is pending",
+    async (operation) => {
+      platform.isCapacitor.mockReturnValue(true)
+      let namespace = "acct_second"
+      let resolveLegacy!: (value: CompanionConfig | null) => void
+      const legacy = legacyStorage(null)
+      legacy.load = () =>
+        new Promise((resolve) => {
+          resolveLegacy = resolve
+        })
+      const book = freshBook()
+      const write = jest.spyOn(book, "upsert")
+      const remove = jest.spyOn(book, "remove")
+      const storage = new MigratingCompanionStorage({
+        book,
+        legacy,
+        accountNamespace: () => namespace,
+      })
+      const migration = storage.load()
+      const mutation = operation === "clear" ? storage.clear() : storage[operation](config())
+      const rejected = expect(mutation).rejects.toThrow("Companion account changed")
+      namespace = "local_acct_a"
+      resolveLegacy(null)
+      await Promise.all([migration, rejected])
+      expect(write).not.toHaveBeenCalled()
+      expect(remove).not.toHaveBeenCalled()
+      expect(legacy.cleared).toBe(0)
+    }
+  )
+
+  it("defers migration if the profile changes during the legacy read", async () => {
+    platform.isCapacitor.mockReturnValue(true)
+    let namespace = "local_acct_a"
+    let resolveLegacy!: (value: CompanionConfig | null) => void
+    const legacy = legacyStorage(config())
+    legacy.load = () =>
+      new Promise((resolve) => {
+        resolveLegacy = resolve
+      })
+    const book = freshBook()
+    const refile = jest.fn()
+    const storage = new MigratingCompanionStorage({
+      book,
+      legacy,
+      accountNamespace: () => namespace,
+      refileCursors: refile,
+    })
+    const pending = storage.load()
+    namespace = "acct_second"
+    resolveLegacy(config())
+    expect(await pending).toBeNull()
+    expect(await book.list("local_acct_a")).toEqual([])
+    expect(await book.list("acct_second")).toEqual([])
+    expect(refile).not.toHaveBeenCalled()
+    expect(legacy.cleared).toBe(0)
+  })
+
+  it("defers unscoped native credentials until their historical account is active", async () => {
+    platform.isCapacitor.mockReturnValue(true)
+    let namespace = "acct_second"
+    const legacy = legacyStorage(config())
+    const book = freshBook()
+    const storage = new MigratingCompanionStorage({
+      book,
+      legacy,
+      accountNamespace: () => namespace,
+      refileCursors: async () => undefined,
+    })
+    expect(await storage.load()).toBeNull()
+    expect(await book.list("acct_second")).toEqual([])
+    expect(legacy.cleared).toBe(0)
+    namespace = "local_acct_a"
+    expect(await storage.load()).toMatchObject({
+      accountId: "local_acct_a",
+      deviceId: "dev-legacy",
+    })
+    expect(legacy.cleared).toBe(1)
+  })
+
+  it.each(["save", "clear"] as const)(
+    "does not erase another native profile's legacy pairing on %s",
+    async (operation) => {
+      platform.isCapacitor.mockReturnValue(true)
+      let namespace = "acct_second"
+      const legacy = legacyStorage(config())
+      const book = freshBook()
+      const storage = new MigratingCompanionStorage({
+        book,
+        legacy,
+        accountNamespace: () => namespace,
+        refileCursors: async () => undefined,
+      })
+      if (operation === "save")
+        await storage.save(config({ accountId: namespace, deviceId: "new-device" }))
+      else await storage.clear()
+      expect(legacy.cleared).toBe(0)
+      namespace = "local_acct_a"
+      expect(await storage.load()).toMatchObject({
+        accountId: "local_acct_a",
+        deviceId: "dev-legacy",
+      })
+    }
+  )
+
   it("migrates the legacy record on first load and clears the source", async () => {
     const legacy = legacyStorage(config({ accountId: "acct_a" }))
     const book = freshBook()

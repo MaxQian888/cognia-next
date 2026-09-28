@@ -768,7 +768,7 @@ mod tests {
         for dependency in [
             "esbuild: true",
             "unrs-resolver: true",
-            "'@parcel/watcher': true",
+            r#""@parcel/watcher": true"#,
         ] {
             assert!(workspace.content.contains(dependency));
         }
@@ -912,7 +912,11 @@ mod tests {
         // The vendored SDK declaration surface re-exports ACP protocol types,
         // so standalone author projects must be able to resolve that published
         // peer without relying on this repository's node_modules.
-        assert!(ts::PACKAGE_JSON.contains(r#""@agentclientprotocol/sdk": "^1.4.0""#));
+        let package: serde_json::Value = serde_json::from_str(ts::PACKAGE_JSON).expect("package");
+        assert_eq!(
+            package["dependencies"]["@agentclientprotocol/sdk"],
+            "^1.5.0"
+        );
         // They stay external at build time — the host hands out its instances.
         assert!(ts::PACKAGE_JSON.contains("--external:@cognia/plugin-sdk"));
         assert!(ts::PACKAGE_JSON.contains("--external:@cognia/plugin-ui"));

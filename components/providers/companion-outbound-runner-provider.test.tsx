@@ -165,9 +165,14 @@ jest.mock("@/lib/runtime/runtime-target-lifecycle", () => ({
   },
 }))
 
+let accountProfile = {
+  unlockedAccountId: "acct-web" as string | null,
+  activeAccountId: "acct-web" as string | null,
+  accounts: [{ id: "acct-web" }],
+}
 jest.mock("@/stores/account/account-store", () => ({
-  useAccountStore: (selector: (state: { unlockedAccountId: string }) => unknown) =>
-    selector({ unlockedAccountId: "acct-web" }),
+  useAccountStore: (selector: (state: typeof accountProfile) => unknown) =>
+    selector(accountProfile),
 }))
 
 jest.mock("@/stores/settings/settings-store", () => ({
@@ -182,6 +187,11 @@ const scope = { accountId: "acct-web", targetId: "desktop-studio", routingGenera
 
 beforeEach(() => {
   jest.clearAllMocks()
+  accountProfile = {
+    unlockedAccountId: "acct-web",
+    activeAccountId: "acct-web",
+    accounts: [{ id: "acct-web" }],
+  }
   clearActiveRuntimeTargetContext()
   pendingObserver = undefined
   consentHandler = undefined
@@ -235,6 +245,7 @@ it("runs on native mobile and drains pending rows", () => {
 })
 
 it("uses the stable Host id and default Mobile account on a fresh install", () => {
+  accountProfile = { unlockedAccountId: null, activeAccountId: null, accounts: [] }
   runtimeTarget = { id: "host-mobile-a" }
 
   render(
@@ -254,6 +265,47 @@ it("uses the stable Host id and default Mobile account on a fresh install", () =
       canDispatch: expect.any(Function),
     })
   )
+})
+
+it("preserves the unlocked mobile profile when starting outbound dispatch", () => {
+  accountProfile = {
+    unlockedAccountId: "acct-second",
+    activeAccountId: "acct-second",
+    accounts: [{ id: "acct-second" }],
+  }
+  runtimeTarget = { id: "host-mobile-a" }
+  render(
+    <CompanionOutboundRunnerProvider
+      dispatcher={dispatcher}
+      platformOverride="mobile"
+      mobilePairedOverride
+    />
+  )
+  expect(getActiveRuntimeTargetContext()).toMatchObject({
+    accountId: "acct-second",
+    targetId: "host-mobile-a",
+  })
+  expect(createRunner).toHaveBeenCalledWith(
+    expect.objectContaining({ scope: expect.objectContaining({ accountId: "acct-second" }) })
+  )
+})
+
+it("does not dispatch with the historical mobile identity while a profile is locked", () => {
+  accountProfile = {
+    unlockedAccountId: null,
+    activeAccountId: "acct-second",
+    accounts: [{ id: "acct-second" }],
+  }
+  runtimeTarget = { id: "host-mobile-a" }
+  render(
+    <CompanionOutboundRunnerProvider
+      dispatcher={dispatcher}
+      platformOverride="mobile"
+      mobilePairedOverride
+    />
+  )
+  expect(createRunner).not.toHaveBeenCalled()
+  expect(getActiveRuntimeTargetContext()).toBeNull()
 })
 
 it("refuses to route a Web companion through the snapshot's placeholder id", () => {

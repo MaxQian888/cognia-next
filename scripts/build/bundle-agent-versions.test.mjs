@@ -9,6 +9,7 @@ import {
   readFileSync,
   readdirSync,
   readlinkSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs"
@@ -466,6 +467,44 @@ describe("stage", () => {
       ["<root>/musl/bin/vendor", "--version"],
     ])
   })
+
+  for (const libc of ["glibc", "musl"]) {
+    for (const arch of ["amd64", "arm64"]) {
+      it(`uses the official Copilot JS distribution only on musl ARM64 (${libc}/${arch})`, async () => {
+        const { tree, system, injection } = fixture(libc)
+        writeFileSync(join(system, "lib/ld-musl-aarch64.so.1"), "loader")
+        const packages = join(tree, "lib/agents/node_modules")
+        for (const [name, entry] of [["@github/copilot", "npm-loader.js"], ["@github/copilot-linuxmusl-arm64", "index.js"]]) {
+          mkdirSync(join(packages, name), { recursive: true })
+          writeFileSync(join(packages, name, "package.json"), JSON.stringify({ name, bin: entry }))
+          writeFileSync(join(packages, name, entry), "#!/usr/bin/env node\n")
+        }
+        const calls = []
+        const options = {
+          pins: {
+            ...PINS,
+            installScripts: {},
+            runtimes: [{ id: "copilot-cli", version: "1.0.84", libc: ["glibc", "musl"], commands: [{ name: "copilot", package: "@github/copilot", bin: "copilot", smoke: "version" }] }],
+          },
+          libc, arch, tree,
+          run: (command, args) => { calls.push({ command, args }); return { status: 0 } },
+          execPath: join(system, "node"),
+          systemLib: { loaderDir: join(system, "lib"), cxxDir: join(system, "usr/lib"), atomicDir: join(system, "usr/lib") },
+          injectionRoot: injection,
+          log: () => {},
+        }
+        await stage(options)
+        const externalNode = libc === "musl" && arch === "arm64"
+        const entry = externalNode ? "@github/copilot-linuxmusl-arm64/index.js" : "@github/copilot/npm-loader.js"
+        assert.equal(readFileSync(join(tree, "bin/copilot"), "utf8"), `#!/bin/sh\nexec ${injection}/${libc}/node/bin/node ${injection}/${libc}/lib/agents/node_modules/${entry} "$@"\n`)
+        assert.deepEqual(calls.at(-1), { command: `${injection}/${libc}/bin/copilot`, args: ["--version"] })
+        if (externalNode) {
+          rmSync(join(packages, "@github/copilot-linuxmusl-arm64/index.js"))
+          await assert.rejects(stage(options), /ENOENT.*index\.js/)
+        }
+      })
+    }
+  }
 
   it("bundles the glibc Node atomic runtime without replacing the host glibc or C++ runtime", async () => {
     const { tree, system, injection } = fixture("glibc")

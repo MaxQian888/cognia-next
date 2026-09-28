@@ -19,7 +19,7 @@ import {
 } from "./mock-v2-server"
 import { createOwnerPairPayload } from "./companion-fixture"
 import { injectCapacitor } from "../helpers/inject-capacitor"
-import { resetCogniaDb } from "../helpers/db-reset"
+import { bootstrapCogniaMobile } from "../helpers/db-reset"
 
 let server: MockCompanionServer
 
@@ -36,9 +36,17 @@ test.beforeEach(async ({ page }) => {
   server.reset()
   // Inject Capacitor before any navigation so platform-detection picks the
   // mobile branch and SecureStorage backs companionStorage.
-  await injectCapacitor(page, { platform: "android" })
+  await injectCapacitor(page, { platform: "android", pushToken: "e2e-pairing-push-token" })
   await page.goto("/")
-  await resetCogniaDb(page)
+  // Every test has a fresh browser context. Pairing is the subject here;
+  // complete the independent first-run choice before opening its own route.
+  await bootstrapCogniaMobile(page, "paired", {
+    onboardingProgress: {
+      version: 2,
+      path: "completed",
+      completedAt: "2026-01-01T00:00:00.000Z",
+    },
+  })
 })
 
 test.describe("mobile pair flow — UI state machine (existing smoke)", () => {
@@ -116,11 +124,45 @@ test.describe("mobile pair flow — cgnp3 + DPoP round-trip", () => {
     expect(publicBook).toContain(server.baseUrl)
     expect(publicBook).toContain("9.9.9")
     expect(publicBook).not.toContain('"d"')
+    expect(Object.values(JSON.parse(publicBook).hosts)).toEqual([
+      expect.objectContaining({
+        accountNamespace: "acct_e2e_seed_account",
+        tenantId: "local_acct_a",
+        hostId: MOCK_COMPANION_HOST_ID,
+      }),
+    ])
+    expect(server.rpcCalls.some((call) => call.command === "host_feature_manifest")).toBe(true)
+    expect(server.rpcCalls).toContainEqual(expect.objectContaining({
+      command: "register_push_token",
+      body: { token: "e2e-pairing-push-token", provider: "fcm" },
+    }))
     const privateEntries = Object.entries(persisted).filter(([key]) =>
       key.includes("private-jwk")
     )
     expect(privateEntries).toHaveLength(2)
     expect(privateEntries.every(([, value]) => JSON.parse(value).d)).toBe(true)
+  })
+
+  test("discovery is public but the Host manifest requires device proof", async ({ request }) => {
+    const health = await request.get(`${server.baseUrl}/healthz`)
+    expect(health.status()).toBe(200)
+    expect(await health.json()).toMatchObject({ server_id: MOCK_COMPANION_HOST_ID, advertised_port: server.port })
+    const manifest = await request.post(`${server.baseUrl}/api/_rpc/host_feature_manifest`, { data: {} })
+    expect(manifest.status()).toBe(401)
+    expect(server.rpcCalls).toHaveLength(0)
+  })
+
+  test("an incompatible Host protocol cannot complete activation", async ({ page }) => {
+    server.setHostProtocol({ min: 99, max: 99 })
+    await page.goto("/pair")
+    await page.getByTestId("pair-discover-skip").click()
+    await page.getByTestId("pair-payload").fill(createOwnerPairPayload(server.baseUrl))
+    const registration = server.waitForRegistration()
+    await page.getByTestId("pair-submit").click()
+    await registration
+    await expect(page.getByTestId("pair-error")).toBeVisible()
+    await expect(page.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
+    expect(server.rpcCalls.some((call) => call.command === "host_feature_manifest")).toBe(true)
   })
 
   test("expired Owner invitation: server returns 401 and leaves no paired target", async ({

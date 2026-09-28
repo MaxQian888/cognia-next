@@ -41,26 +41,26 @@ ENV HUSKY=0 \
 # using the repository's pinned pnpm even when the Node base moves.
 RUN npm install --global "corepack@${COREPACK_VERSION}" "pnpm@${PNPM_VERSION}"
 WORKDIR /app
-# Workspace manifests first so the store-heavy install layer survives source
-# edits. `pnpm install --frozen-lockfile` needs every workspace member's
-# package.json present (packages/* are small first-party TS libs; docs/ and
-# mobile/ only need their manifest here).
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY packages ./packages
-COPY docs/package.json ./docs/package.json
-COPY mobile/package.json ./mobile/package.json
-COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
+# Fetch only from lock/config/patch inputs. Keep the store in this ordinary
+# image layer: remote BuildKit layer caches do not export cache-mount contents.
+# Workspace source edits therefore reuse downloads even on a fresh CI builder.
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
 RUN if [ -n "${NPM_CONFIG_REGISTRY}" ]; then \
       registry="${NPM_CONFIG_REGISTRY%/}"; \
       sed -i "s#https://registry.npmjs.org/#${registry}/#g" pnpm-lock.yaml; \
       pnpm config set registry "${registry}"; \
     fi
-RUN --mount=type=cache,id=cognia-pnpm-store,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile --fetch-retries=5 --fetch-timeout=300000 --network-concurrency=16
-# Sources last. `prebuild` runs the full asset pipeline (bundled plugins,
-# Monaco/OCR assets, sidecar bundles) before `next build`; nothing in it needs
-# a .git directory, so the ignored VCS tree is not a problem.
+RUN pnpm fetch --frozen-lockfile --fetch-retries=5 --fetch-timeout=300000 --network-concurrency=16
+# Link workspace packages and run approved lifecycle scripts after fetching.
+# postinstall's partial-checkout guard defers the separately staged sidecars.
+COPY package.json ./
+COPY packages ./packages
+COPY docs/package.json ./docs/package.json
+COPY mobile/package.json ./mobile/package.json
+COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
+RUN pnpm install --frozen-lockfile --offline
+# Sources last. prebuild still runs the complete asset and sidecar pipeline.
 COPY . .
 RUN NODE_OPTIONS=--max-old-space-size=8192 pnpm build
 

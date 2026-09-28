@@ -5,7 +5,20 @@
 import type { StructuredLogEntry } from "@/types/logging"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import { AGENT_TRACE_SPAN_KIND } from "@/types/agent-trace/span"
-import { OtlpHttpTransport } from "./otlp-http-transport"
+import { hasNoLeakingPiiInOtlp, OtlpHttpTransport } from "./otlp-http-transport"
+
+it("distinguishes protobuf timestamps from sensitive OTLP string values", () => {
+  const timestamp = "1790577059608000000"
+  expect(hasNoLeakingPiiInOtlp({ timeUnixNano: timestamp, observedTimeUnixNano: timestamp })).toBe(
+    true
+  )
+  expect(hasNoLeakingPiiInOtlp({ body: { stringValue: "4111111111111111" } })).toBe(false)
+  expect(
+    hasNoLeakingPiiInOtlp({
+      attributes: [{ key: "timeUnixNano", value: { stringValue: "alice@example.com" } }],
+    })
+  ).toBe(false)
+})
 
 function makeSpan(over: Partial<AgentTraceSpan> = {}): AgentTraceSpan {
   return {

@@ -8,6 +8,7 @@ import { toast } from "sonner"
 
 import { usePlatform } from "@/hooks/use-platform"
 import { useSettingsStore } from "@/stores/settings"
+import { useAccountStore } from "@/stores/account/account-store"
 import { getShellColors } from "@/lib/appearance/shell-sync"
 import { minimizeApp, subscribeBackButton } from "@/lib/capacitor/app"
 import { getLaunchRoute, subscribe as subscribeDeeplink } from "@/lib/capacitor/deeplink"
@@ -45,7 +46,7 @@ import {
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
 import { DEFAULT_LOCAL_ACCOUNT_ID } from "@/lib/accounts/active-account-id"
 import { adoptMobileCompanionHosts } from "@/lib/companion/mobile-host-adoption"
-import { companionCredentialBook } from "@/lib/companion/credential-book"
+import { activeAccountNamespace, companionCredentialBook } from "@/lib/companion/credential-book"
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
 import { activateAccountDatabase } from "@/lib/db/schema"
 import { registerCompanionRuntimeTarget } from "@/lib/runtime/account-runtime-target"
@@ -222,9 +223,19 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
 
     const startHostBindings = async () => {
       const generation = ++hostGeneration
+      const profile = useAccountStore.getState()
       const syncAbort = new AbortController()
       hostCleanup.push(() => syncAbort.abort())
-      const isStale = () => cancelled || generation !== hostGeneration
+      const isStale = () => {
+        const current = useAccountStore.getState()
+        return (
+          cancelled ||
+          generation !== hostGeneration ||
+          current.activeAccountId !== profile.activeAccountId ||
+          current.unlockedAccountId !== profile.unlockedAccountId ||
+          (current.accounts.length === 0) !== (profile.accounts.length === 0)
+        )
+      }
       const addHostCleanup = (fn: () => void | Promise<void>) => {
         if (isStale()) dispose(fn)
         else hostCleanup.push(fn)
@@ -266,13 +277,25 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       // show the outcome and dismiss on it rather than on a stopwatch.
       beginMobileBootStage("companion")
 
-      await adoptMobileCompanionHosts()
+      const legacyMobileProfile = !profile.activeAccountId && profile.accounts.length === 0
+      const localAccountId =
+        profile.unlockedAccountId ??
+        (legacyMobileProfile ? (activeAccountNamespace() ?? DEFAULT_LOCAL_ACCOUNT_ID) : null)
+      if (!localAccountId) {
+        endMobileBootStage("companion", { status: "failed", detail: "unavailable" })
+        skipMobileBootStagesAfter("companion")
+        markMobileBootSettled()
+        return
+      }
+      // Pre-account hosts belong to the historical account. Never migrate
+      // those secrets or their database while another local profile is active.
+      if (localAccountId === DEFAULT_LOCAL_ACCOUNT_ID) await adoptMobileCompanionHosts()
       if (isStale()) return
-      const activeHost = await companionCredentialBook().getActive(DEFAULT_LOCAL_ACCOUNT_ID)
+      const activeHost = await companionCredentialBook().getActive(localAccountId)
       if (isStale()) return
       if (activeHost) {
-        activateAccountDatabase(DEFAULT_LOCAL_ACCOUNT_ID, activeHost.hostId)
-        setActiveRuntimeTargetContext(DEFAULT_LOCAL_ACCOUNT_ID, activeHost.hostId)
+        activateAccountDatabase(localAccountId, activeHost.hostId)
+        setActiveRuntimeTargetContext(localAccountId, activeHost.hostId)
         setRuntimeSnapshot({
           target: {
             id: activeHost.hostId,
@@ -286,6 +309,9 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         })
       }
 
+      if (!activeHost && legacyMobileProfile) {
+        setActiveRuntimeTargetContext(localAccountId, "mobile-companion")
+      }
       const config = await hydrateCompanionConfig()
       if (isStale()) return
       const mode = (await getSettings().catch(() => null))?.mobileRuntimeMode
@@ -316,7 +342,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       beginMobileBootStage("host")
       const registeredTarget = await registerCompanionRuntimeTarget({
         ...config,
-        accountId: DEFAULT_LOCAL_ACCOUNT_ID,
+        accountId: localAccountId,
         targetId: config.targetId,
       })
       if (isStale()) return

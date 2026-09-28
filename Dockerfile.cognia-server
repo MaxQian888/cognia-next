@@ -164,30 +164,25 @@ ENV HUSKY=0 \
 # keeps using the repository's pinned pnpm even when the Node base moves.
 RUN npm install --global "corepack@${COREPACK_VERSION}" "pnpm@${PNPM_VERSION}"
 WORKDIR /work
-# Workspace manifests first so the store-heavy install layer survives source
-# edits. pnpm --frozen-lockfile needs every workspace member's package.json
-# present; packages/* are small first-party TS libs, copied wholesale (their
-# node_modules/dist are stripped by .dockerignore). docs/ + mobile/ only need
-# their manifest here — full source arrives with the COPY . . below.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY packages ./packages
-COPY docs/package.json ./docs/package.json
-COPY mobile/package.json ./mobile/package.json
-# postinstall needs its guard script (it skips the sidecar steps here — the
-# sidecar tree arrives later; its deps install as their own layer below).
-COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
-# pnpm hashes every patched dependency during a frozen install.
+# Fetch only from lock/config/patch inputs. Keep the store in this ordinary
+# image layer: remote BuildKit layer caches do not export cache-mount contents.
+# Workspace source edits therefore reuse downloads even on a fresh CI builder.
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
-# pnpm preserves tarball URLs embedded in the frozen lockfile. When a registry
-# mirror is explicitly supplied for a constrained CI network, rewrite those
-# URLs inside the image as well; the repository lockfile remains untouched.
 RUN if [ -n "${NPM_CONFIG_REGISTRY}" ]; then \
       registry="${NPM_CONFIG_REGISTRY%/}"; \
       sed -i "s#https://registry.npmjs.org/#${registry}/#g" pnpm-lock.yaml; \
       pnpm config set registry "${registry}"; \
     fi
-RUN --mount=type=cache,id=cognia-pnpm-store,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile --fetch-retries=5 --fetch-timeout=300000 --network-concurrency=16
+RUN pnpm fetch --frozen-lockfile --fetch-retries=5 --fetch-timeout=300000 --network-concurrency=16
+# Link workspace packages and run approved lifecycle scripts after fetching.
+# postinstall's partial-checkout guard defers the separately staged sidecars.
+COPY package.json ./
+COPY packages ./packages
+COPY docs/package.json ./docs/package.json
+COPY mobile/package.json ./mobile/package.json
+COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
+RUN pnpm install --frozen-lockfile --offline
 COPY sidecar/package.json sidecar/pnpm-lock.yaml sidecar/pnpm-workspace.yaml ./sidecar/
 # A nested pnpm workspace inherits the repository root policy. Hide the root
 # config for this isolated install so sidecar/pnpm-workspace.yaml owns the

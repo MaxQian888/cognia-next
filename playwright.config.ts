@@ -57,6 +57,8 @@ const WEB_PROJECT_IGNORE = [
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Helpers have co-located Jest unit tests; only browser specs belong here.
+  testMatch: "**/*.spec.ts",
   // Visual baselines are generated from the same checked-in web fonts and
   // fixed Chromium project in CI. Keeping the path OS-neutral makes the
   // baseline reviewable once instead of silently creating per-runner copies.

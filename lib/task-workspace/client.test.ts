@@ -444,12 +444,17 @@ describe("task resource transfer wire contracts", () => {
     const first = new Promise<void>((resolve) => {
       releaseFirst = resolve
     })
+    let signalAllStarted!: () => void
+    const allStarted = new Promise<void>((resolve) => {
+      signalAllStarted = resolve
+    })
     const offsets: number[] = []
     call.mockImplementation(async (command: string, args: { offset: number; length: number }) => {
       if (command === "task_resource_download_open")
         return { handleId: "download", size: bytes.length, hash: digest, chunkBytes: 65_536 }
       if (command === "task_resource_download_read_chunk") {
         offsets.push(args.offset)
+        if (offsets.length === 6) signalAllStarted()
         if (args.offset === 0) await first
         const part = bytes.slice(args.offset, args.offset + args.length)
         return {
@@ -462,11 +467,20 @@ describe("task resource transfer wire contracts", () => {
       return null
     })
     const result = downloadTaskResource("run", "file")
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    const startedBeforeFirst = offsets.length
-    releaseFirst()
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        allStarted,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("Download capacity was not refilled")), 5000)
+        }),
+      ])
+      expect(offsets).toHaveLength(6)
+    } finally {
+      clearTimeout(timeout)
+      releaseFirst()
+    }
     expect(new Uint8Array(await (await result).arrayBuffer())).toEqual(bytes)
-    expect(startedBeforeFirst).toBe(6)
   })
 
   it("uses negotiated download blocks and validates the declared maximum", async () => {

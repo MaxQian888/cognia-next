@@ -19,6 +19,37 @@ function entry(overrides: Partial<StructuredLogEntry> = {}): StructuredLogEntry 
 }
 
 describe("OTLP Logs transport", () => {
+  it("exports numeric OTLP metadata while still rejecting sensitive log content", async () => {
+    const fetchImpl = jest.fn(async () => new Response("", { status: 200 }))
+    const transport = new OtlpLogTransport({
+      endpoint: "https://collector.example/v1/logs",
+      flushInterval: 0,
+      fetchImpl,
+    })
+    // This nanosecond timestamp happens to pass the Luhn checksum.
+    const timestamp = "2026-09-28T06:30:59.608Z"
+    transport.log(entry({ timestamp }))
+    await transport.flush()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(transport.getHealth()).toMatchObject({ status: "healthy", droppedEntries: 0 })
+
+    for (const overrides of [
+      { message: "4111111111111111" },
+      { data: { timeUnixNano: "alice@example.com" } },
+      { module: "alice@example.com" },
+    ]) {
+      transport.log(entry({ timestamp, ...overrides }))
+    }
+    await transport.flush()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(transport.getHealth()).toMatchObject({
+      status: "degraded",
+      droppedEntries: 3,
+      lastError: "OTLP log payload rejected by privacy gate",
+    })
+    await transport.close()
+  })
+
   it("exports ordinary structured logs and excludes synthetic Agent Trace entries", async () => {
     const fetchImpl = jest.fn(
       async (..._args: Parameters<typeof fetch>) => new Response("", { status: 200 })

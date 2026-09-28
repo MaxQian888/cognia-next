@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
+import { ensureAppMounted, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 async function openOverview(page: Page) {
   // The opener floats on the chat pane surface (`chat-summary-trigger`), not
@@ -31,10 +31,7 @@ async function prepareConversations(page: Page) {
     window.localStorage.setItem("cognia-ui", JSON.stringify(persisted))
   })
   await page.goto("/")
-  await ensureCogniaAccount(page)
-  await page.goto("about:blank")
-  await page.goto("/")
-  await waitForTestGlobals(page, 30_000)
+  await ensureAppMounted(page)
   await setCogniaSettings(page, {
     onboardingProgress: { version: 2, path: "completed", completedAt: "2026-09-12T00:00:00.000Z" },
   })
@@ -85,7 +82,11 @@ test("@smoke task summary reserves narrow space and opens the selected task deta
   await expect(page.getByTestId("title-bar-nav-arrows")).toHaveCount(0)
   await page.getByTestId("title-bar-navigation-menu").click()
   await expect(page.getByTestId("title-bar-nav-arrows")).toBeVisible()
-  await expect(page.getByTestId("title-bar-workspace")).toBeVisible()
+  // The sidebar projects the workspace switcher into the bar's start zone;
+  // opening compact navigation must not create a duplicate workspace chip.
+  const workspace = page.getByRole("banner").getByRole("button", { name: /^Active workspace:/ })
+  await expect(workspace).toHaveCount(1)
+  await expect(workspace).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(page.getByTestId("title-bar-nav-arrows")).toHaveCount(0)
   const toggle = page.getByRole("button", { name: "Toggle Right Sidebar", exact: true })
@@ -119,8 +120,7 @@ test("@smoke task summary reserves narrow space and opens the selected task deta
       const chat = await conversation.boundingBox()
       if (!region || !chat || !bounds) return false
       return (
-        region.width >= 250 &&
-        region.width <= 290 &&
+        Math.abs(region.width - 320) <= 1 &&
         chat.x + chat.width <= region.x + 1 &&
         Math.abs(bounds.width - chat.width - region.width) <= 2 &&
         region.x + region.width <= page.viewportSize()!.width
@@ -237,14 +237,15 @@ test("@smoke workbench tabs switch close reopen and preserve navigation preferen
   await expect(tabs).toHaveCount(0)
   await page.reload()
   await waitForTestGlobals(page, 30_000)
-  const toggle = page.getByRole("button", { name: "Toggle Right Sidebar", exact: true })
-  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+  // Reload can select another conversation and park its empty dock. Reopen
+  // through the same user action, then verify the global navigation preference.
+  await openOverview(page)
   await expect(rail).toBeVisible()
   await page.getByRole("button", { name: "Labeled tabs", exact: true }).click()
   await expect(tabs).toBeVisible()
   await page.reload()
   await waitForTestGlobals(page, 30_000)
-  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+  await openOverview(page)
   await expect(tabs).toBeVisible()
   await expect(rail).toHaveCount(0)
 })

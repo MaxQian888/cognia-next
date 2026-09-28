@@ -17,6 +17,7 @@ import {
   verify as verifySignature,
 } from "node:crypto"
 import type { Server } from "node:http"
+import type { HostFeatureManifestV2 } from "../../../lib/platform/host-feature-manifest"
 
 import { MOBILE_OUTBOUND_COMMANDS } from "../../../lib/db/mobile-outbound-types"
 import {
@@ -80,6 +81,7 @@ export interface MockCompanionServer {
   readonly baseUrl: string
   setPairScenario(scenario: PairScenario): void
   setStatusResponse(status: "ok" | "expired" | "offline"): void
+  setHostProtocol(protocol: { min: number; max: number }): void
   waitForRegistration(timeoutMs?: number): Promise<RegisterRequestPayload>
   readonly registrationAttempts: RegisterRequestPayload[]
   readonly rpcCalls: RpcCapture[]
@@ -160,6 +162,7 @@ export function createMockCompanionServer(): MockCompanionServer {
   let currentPort = 0
   let pairScenario: PairScenario = { kind: "ok" }
   let statusResponse: "ok" | "expired" | "offline" = "ok"
+  let hostProtocol = { min: 1, max: 2 }
   const challenges = new Map<string, ChallengeRecord>()
   const devices = new Map<string, DeviceRecord>()
   const accessTokens = new Map<string, AccessRecord>()
@@ -172,7 +175,18 @@ export function createMockCompanionServer(): MockCompanionServer {
   const knownRpcCommands = new Set<string>([
     ...MOBILE_OUTBOUND_COMMANDS,
     "claude_sidecar_status",
+    "host_feature_manifest",
+    "register_push_token",
   ])
+
+  app.get("/healthz", (_req: RequestLike, res: ResponseLike) => {
+    res.json({
+      version: pairScenario.kind === "ok" ? (pairScenario.serverVersion ?? "1.0.0-e2e") : "1.0.0-e2e",
+      fingerprint: "",
+      advertised_port: currentPort,
+      server_id: MOCK_COMPANION_HOST_ID,
+    })
+  })
 
   app.get("/api/auth/config", (_req: RequestLike, res: ResponseLike) => {
     res.json({
@@ -377,7 +391,31 @@ export function createMockCompanionServer(): MockCompanionServer {
       publicError(res, 404, "unknown_command", `Unknown command: ${command}`)
       return
     }
-    const result = command === "claude_sidecar_status" ? { status: "ok" } : {}
+    const manifest: HostFeatureManifestV2 = {
+      schemaVersion: 2,
+      hostBuildId: "e2e-companion",
+      platform: "tauri",
+      generatedAt: Date.now(),
+      hostIdentity: { id: MOCK_COMPANION_HOST_ID, kind: "desktop" },
+      hostStateScope: { accountId: access.tenantId, runtimeTargetId: "local-host" },
+      protocol: hostProtocol,
+      // This pairing mock negotiates identity; it does not advertise execution
+      // or host-state services it cannot implement. Capability gates stay real.
+      features: {},
+      operations: [],
+      deviceGrants: ["host.observe"],
+      limits: {
+        rpcJsonBodyBytes: 1024 * 1024,
+        skillMaxResources: 50,
+        skillMaxResourceBytes: 1024 * 1024,
+        skillUploadChunkBytes: 32768,
+        mcpRequestBodyBytes: 1024 * 1024,
+        maxConcurrentProxyCalls: 4,
+      },
+    }
+    const result = command === "host_feature_manifest"
+      ? manifest
+      : command === "claude_sidecar_status" ? { status: "ok" } : {}
     res.json({ requestId: randomUUID(), result })
   })
 
@@ -490,7 +528,11 @@ export function createMockCompanionServer(): MockCompanionServer {
     get rpcCalls() {
       return rpcCalls
     },
+    setHostProtocol(protocol) {
+      hostProtocol = { ...protocol }
+    },
     reset() {
+      hostProtocol = { min: 1, max: 2 }
       pairScenario = { kind: "ok" }
       statusResponse = "ok"
       challenges.clear()

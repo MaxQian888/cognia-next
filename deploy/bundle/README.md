@@ -65,12 +65,20 @@ Staging happens in two steps, because the libc tree can only be chosen after the
    node --test scripts/build/bundle-agent-versions.test.mjs
    ```
 
+## Copilot compatibility hold
+
+Copilot is pinned to **1.0.84 on every platform**, the last stable npm distribution containing the complete official JavaScript entry, native addons, and child-process preloads. On musl ARM64 only, the generated `copilot` launcher runs that distribution's `index.js` with the bundle's pinned Node. Other platforms keep the upstream npm launcher. The manifest reports the same pinned version throughout.
+
+The official musl ARM64 embedded executables in 1.0.86, 1.0.87, and 1.0.88 fail before normal CLI startup with `Node-API symbol napi_create_function has not been loaded` and `pathSystemTempDir is not a function`. Versions 1.0.85 and newer also removed the standalone JavaScript payload, so a newer package cannot use this supported external-Node launch path. Do not extract a failed executable's private cache as a build input. Remove the hold only after the upstream native entry or complete distribution passes the real launcher smoke on ARM64 Alpine.
+
+The package's [official distribution](https://www.npmjs.com/package/@github/copilot-linuxmusl-arm64) includes the required platform assets; the [official SDK documents launching the complete CLI distribution with Node](https://github.com/github/copilot-sdk/blob/main/rust/README.md). Verification includes `--version`, `--help`, and unauthenticated ACP `initialize` through the generated launcher. It does not certify authenticated model requests.
+
 ## Verification
 
 The `agent-bundle` job in `.github/workflows/images.yml` does the following:
 
 - checks the pins;
-- builds amd64 and runs `smoke.sh` against `debian:bookworm-slim`, `python:3.12-slim`, `alpine:3.22` and `busybox:uclibc`, plus a non-root refusal case;
-- builds amd64 and arm64 (QEMU).
+- builds amd64 and arm64 on their native runners;
+- runs `smoke.sh` against `debian:bookworm-slim`, `python:3.12-slim`, `alpine:3.22` and `busybox:uclibc`, plus a non-root refusal case, on both architectures.
 
 Inside the image build, each libc stage runs every command once. The `assemble` stage then installs every tree with `cognia-sandboxd` itself, so a broken symlink or special file fails the build.

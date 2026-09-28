@@ -6,15 +6,20 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, waitForTestGlobals } from "../helpers/db-reset"
+import { ensureAppMounted, setCogniaSettings } from "../helpers/db-reset"
 
 test.describe("settings — AI Connections and Model Catalog", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await ensureAppMounted(page)
+    await setCogniaSettings(page, {
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
     await page.goto("about:blank")
-    await page.goto("/", { waitUntil: "domcontentloaded" })
-    await waitForTestGlobals(page, 30_000)
   })
 
   test("@smoke keeps the legacy providers deep link compatible", async ({ page }) => {

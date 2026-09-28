@@ -3,7 +3,7 @@ import {
   type OtlpLogResourceMetadata,
 } from "@cognia/logging/otlp-log-record"
 import { recordDrop, type LogDropCounts, type LogDropReason } from "@cognia/logging/types/transport"
-import { hasNoLeakingPii } from "@cognia/redact"
+import { hasNoLeakingPiiInOtlp } from "./otlp-http-transport"
 import type { StructuredLogEntry, Transport, TransportHealthSnapshot } from "@/types/logging"
 import { AGENT_TRACE_SPAN_KIND } from "@/types/agent-trace/span"
 
@@ -183,7 +183,7 @@ export class OtlpLogTransport implements Transport {
   }
 
   /**
-   * ONE serialization and ONE privacy scan for the batch, which is what every
+   * ONE serialization and ONE structural privacy scan for the batch, which is what every
    * flush costs while nothing is leaking. Per-entry scanning cost N+1 full OTLP
    * serializations per flush on the renderer's log path; the offender is only
    * worth isolating once the batch has actually failed the gate, and halving
@@ -192,8 +192,8 @@ export class OtlpLogTransport implements Transport {
   private async exportBatch(batch: StructuredLogEntry[], batchEpoch: number): Promise<void> {
     if (batchEpoch !== this.discardEpoch || batch.length === 0) return
 
-    const body = JSON.stringify(structuredLogEntriesToOtlpLogs(batch, this.options.resource))
-    if (!hasNoLeakingPii(body)) {
+    const payload = structuredLogEntriesToOtlpLogs(batch, this.options.resource)
+    if (!hasNoLeakingPiiInOtlp(payload)) {
       if (batch.length === 1) {
         this.recordDropped("entry-rejected", 1)
         this.lastFailureAt = new Date().toISOString()
@@ -204,6 +204,7 @@ export class OtlpLogTransport implements Transport {
       return
     }
 
+    const body = JSON.stringify(payload)
     if (utf8ByteLength(body) > this.options.maxRequestBytes) {
       if (batch.length > 1) {
         await this.splitBatch(batch, batchEpoch)

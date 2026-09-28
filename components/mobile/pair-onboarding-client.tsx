@@ -52,7 +52,6 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { canPopWithinApp, useMobileBack } from "@/components/mobile/shell/mobile-back-button"
 import { usePlatform } from "@/hooks/use-platform"
-import { DEFAULT_LOCAL_ACCOUNT_ID } from "@/lib/accounts/active-account-id"
 import { useAccountStore } from "@/stores/account/account-store"
 import { companionCredentialBook, type CompanionHostRecord } from "@/lib/companion/credential-book"
 import {
@@ -209,16 +208,12 @@ export function PairOnboardingClient() {
   // pairing" forever. We now reveal a "set up manually" affordance early and
   // hard-fall-through to the discover step as a backstop.
   const [hydrateSlow, setHydrateSlow] = useState(false)
-  // The one account the recovery screen speaks for. A phone always files its
-  // hosts under the local account. A browser reads its live binding first and
-  // falls back to the signed-in account, which outlives that binding. Both the
-  // list of switchable hosts and the switch itself resolve through this, so
+  // The one account the recovery screen speaks for. Both shells read their
+  // live binding first and fall back to the signed-in local account, which
+  // outlives that binding. The host list and the switch both use this scope, so
   // the screen can never offer a host it would then refuse.
   const activeAccountId = useAccountStore((state) => state.activeAccountId)
-  const recoveryAccountId =
-    platform === "mobile"
-      ? DEFAULT_LOCAL_ACCOUNT_ID
-      : (getActiveRuntimeTargetContext()?.accountId ?? activeAccountId)
+  const recoveryAccountId = getActiveRuntimeTargetContext()?.accountId ?? activeAccountId
   const [recoveryHosts, setRecoveryHosts] = useState<CompanionHostRecord[]>([])
   // Rows the switch button can actually act on. Reading through the account
   // keeps a list fetched under a previous one from lingering on screen after
@@ -396,11 +391,12 @@ export function PairOnboardingClient() {
     async (config: CompanionConfig) => {
       const accountId =
         getActiveRuntimeTargetContext()?.accountId ??
-        (platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : config.accountId)
+        activeAccountId ??
+        config.accountId
       if (!accountId) throw new Error(t("accountContextMissing"))
       await pairAndActivateCompanionHost({ accountId, platform: isWebHost ? "web" : "mobile", config })
     },
-    [isWebHost, platform, t]
+    [activeAccountId, isWebHost, t]
   )
 
   const onContinueToChat = useCallback(() => {

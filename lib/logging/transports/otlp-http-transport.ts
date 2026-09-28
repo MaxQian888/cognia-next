@@ -32,11 +32,12 @@ const OTLP_STRUCTURAL_STRING_FIELDS = new Set([
   "startTimeUnixNano",
   "endTimeUnixNano",
   "timeUnixNano",
+  "observedTimeUnixNano",
   "intValue",
 ])
 
 /** Scan the final OTLP object while excluding protobuf strings that encode numbers or IDs. */
-function hasNoLeakingPiiInOtlp(value: unknown, field = ""): boolean {
+export function hasNoLeakingPiiInOtlp(value: unknown, field = ""): boolean {
   if (typeof value === "string") {
     return OTLP_STRUCTURAL_STRING_FIELDS.has(field) || hasNoLeakingPii(value)
   }

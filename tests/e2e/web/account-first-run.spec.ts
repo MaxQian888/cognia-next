@@ -19,8 +19,14 @@ test.describe("web — first-run Vault", () => {
     await recovery.getByRole("checkbox").check()
     await continueButton.click()
 
-    await expect(page.getByRole("complementary", { name: "Conversations" })).toBeVisible({
-      timeout: 30_000,
-    })
+    // A new account enters setup before the workspace (ADR-0122). Follow the
+    // supported defer path so this still proves entry beyond the Vault.
+    await expect(page).toHaveURL(/\/onboarding/)
+    await page.getByTestId("onboarding-welcome-customise").click()
+    await expect(page.getByTestId("onboarding-provider")).toBeVisible()
+    await page.getByTestId("onboarding-skip").click()
+    await expect(page).not.toHaveURL(/\/onboarding/)
+    await expect(page.getByTestId("onboarding-finish-bar")).toBeVisible()
+    await expect(page.getByTestId("composer-attach-menu")).toBeVisible()
   })
 })

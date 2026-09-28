@@ -102,7 +102,7 @@ fn command_discovery_and_schema_are_offline_json() {
         &[
             "host",
             "commands",
-            "--query",
+            "--search",
             "session_list",
             "--format",
             "json",

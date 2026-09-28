@@ -459,7 +459,7 @@ mod tests {
             .validate_output(
                 "session_list",
                 &json!({
-                    "rows": [{
+                    "items": [{
                         "id": "session-a",
                         "title": "Direct",
                         "kind": "direct",
@@ -474,7 +474,7 @@ mod tests {
             .validate_output(
                 "session_list",
                 &json!({
-                    "rows": [{
+                    "items": [{
                         "id": "session-b",
                         "title": "Legacy bridge row",
                         "projectId": "project-a",
@@ -485,8 +485,7 @@ mod tests {
                         "createdAt": 1,
                         "updatedAt": 2,
                     }],
-                    "next_offset": 1,
-                    "has_more": true,
+                    "nextPageToken": "opaque-session-page",
                 })
             )
             .is_ok());
@@ -500,7 +499,7 @@ mod tests {
             .validate_output(
                 "message_get_by_session",
                 &json!({
-                    "rows": [{
+                    "items": [{
                         "id": "message-a",
                         "sessionId": "session-a",
                         "role": "user",
@@ -515,7 +514,7 @@ mod tests {
             .validate_output(
                 "message_get_by_session",
                 &json!({
-                    "rows": [{
+                    "items": [{
                         "id": "message-b",
                         "sessionId": "session-a",
                         "turnKey": "turn-a",
@@ -528,10 +527,28 @@ mod tests {
                         "metadata": { "minimapLabel": "Greeting" },
                         "createdAt": 2,
                     }],
-                    "next_offset": 1,
+                    "nextPageToken": "opaque-message-page",
                 })
             )
             .is_ok());
+    }
+
+    #[test]
+    fn embedded_catalog_rejects_legacy_page_envelopes_before_normalization() {
+        let contract = HeadlessContract::embedded().expect("embedded contract");
+        for command in ["session_list", "message_get_by_session"] {
+            assert!(contract
+                .validate_output(command, &json!({ "items": [] }))
+                .is_ok());
+            assert!(contract
+                .validate_output(
+                    command,
+                    &json!({
+                        "rows": [], "next_offset": 1, "has_more": true,
+                    })
+                )
+                .is_err());
+        }
     }
 
     /// `JobOwner` and `MonitorCondition` are `#[serde(tag = "kind")]`, so the

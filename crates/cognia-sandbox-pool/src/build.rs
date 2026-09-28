@@ -1448,7 +1448,9 @@ mod tests {
                 &request,
                 "test",
                 &mut cancelled,
-                tokio::time::Instant::now() + Duration::from_secs(5),
+                // This exercises Git and several real subprocesses, not a latency bound.
+                // Keep a bounded guard with room for concurrent workspace tests.
+                tokio::time::Instant::now() + Duration::from_secs(30),
             )
             .await
             .unwrap();

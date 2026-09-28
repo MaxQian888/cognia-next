@@ -89,6 +89,9 @@ jobs:
         with:
           node-version: 26
           cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
       - uses: oven-sh/setup-bun@v2.2.0
         with:
@@ -103,6 +106,13 @@ jobs:
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
       - run: pnpm install --frozen-lockfile --prefer-offline
       - if: matrix.target == 'darwin-arm64'
         name: Require Developer ID release signing
@@ -170,6 +180,9 @@ jobs:
         with:
           node-version: 26
           cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
       - id: release
         name: Check whether this version is unpublished
@@ -181,6 +194,13 @@ jobs:
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
       - if: steps.release.outputs.publish == 'true'
         run: pnpm install --frozen-lockfile --prefer-offline
       - if: steps.release.outputs.publish == 'true'

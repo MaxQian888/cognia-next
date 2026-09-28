@@ -106,6 +106,9 @@ jobs:
         with:
           node-version: 26
           cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -131,6 +134,20 @@ jobs:
             librsvg2-dev \
             patchelf \
             libssl-dev
+
+      - name: Cache Next.js compilation (tauri)
+        uses: actions/cache@v6
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-tauri-release-${{ matrix.target }}-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-tauri-release-${{ matrix.target }}-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml') }}-
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile --prefer-offline

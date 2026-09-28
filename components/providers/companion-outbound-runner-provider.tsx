@@ -118,6 +118,9 @@ export function CompanionOutboundRunnerProvider({
   // user happens to be standing.
   const tApproval = useTranslations("mobile.offline")
   const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
+  const hasLocalProfile = useAccountStore(
+    (state) => state.activeAccountId !== null || state.accounts.length > 0
+  )
   const runtimeTarget = useRuntimeSnapshot().target
   const remoteTransport = useSyncExternalStore(
     subscribeActiveRemoteTransport,
@@ -132,7 +135,9 @@ export function CompanionOutboundRunnerProvider({
     platform === "tauri" ||
     (platform === "mobile" && mobilePaired) ||
     (platform === "web" && hasWebTarget)
-  const localAccountId = platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : unlockedAccountId
+  const localAccountId =
+    unlockedAccountId ??
+    (platform === "mobile" && !hasLocalProfile ? DEFAULT_LOCAL_ACCOUNT_ID : null)
   const collabBaseUrl = useSyncExternalStore(
     subscribeCollabConnection,
     () => (localAccountId ? (loadCollabConnection(localAccountId)?.baseUrl ?? "") : ""),

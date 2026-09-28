@@ -21,10 +21,8 @@ pub mod screen_capture;
 pub mod screenshot;
 // ADR-0020 cross-platform bounded subset — depth/node-capped tree walk, the
 // Locator matcher, and rect-center math shared by the macOS (AX) and Linux
-// (AT-SPI) backends. Compiled on those targets (and under `test` everywhere) so
-// the platform-agnostic logic stays covered on the Windows dev host where the
-// native backends don't compile.
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
+// (AT-SPI) backends and by the platform-independent session snapshot path.
+// Sessions need these bounds in Windows library builds as well as tests.
 pub mod tree_shape;
 // Epic 5 — versioned, re-resolvable element locators. Replaces the macOS
 // cache-only element refs (cleared on every `read_tree`) with an ancestry

@@ -678,14 +678,19 @@ export async function stage({
   mkdirSync(bin, { recursive: true })
   const smokes = []
   for (const command of commandsFor(pins, libc)) {
-    const packageDir = join(agents, "node_modules", command.package)
+    // Copilot's musl ARM64 embedded Node lacks NAPI symbols. The pinned
+    // 1.0.84 package still ships its complete official JS distribution; run
+    // that CLI entry with our Node, retaining native addons and child preloads.
+    const copilotNodeEntry = command.package === "@github/copilot" && libc === "musl" && arch === "arm64"
+    const pkg = copilotNodeEntry ? "@github/copilot-linuxmusl-arm64" : command.package
+    const packageDir = join(agents, "node_modules", pkg)
     const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"))
-    const target = binTarget(manifest, command.bin)
+    const target = copilotNodeEntry ? "index.js" : binTarget(manifest, command.bin)
     const targetPath = join(packageDir, target)
     const elf = isElf(targetPath)
     const shim = shimFor({
       libc,
-      pkg: command.package,
+      pkg,
       target,
       elf,
       injectionRoot,

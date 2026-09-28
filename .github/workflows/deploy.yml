@@ -218,6 +218,23 @@ jobs:
         with:
           node-version: 26
           cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+
+      - name: Cache Next.js compilation (docs)
+        uses: actions/cache@v6
+        with:
+          path: docs/.next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-docs-deploy-${{ inputs.environment }}-${{ vars.DOCS_SITE_URL }}-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'docs/next.config.ts', 'docs/tsconfig.json', 'docs/postcss.config.mjs') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-docs-deploy-${{ inputs.environment }}-${{ vars.DOCS_SITE_URL }}-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'docs/next.config.ts', 'docs/tsconfig.json', 'docs/postcss.config.mjs') }}-
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -276,6 +293,23 @@ jobs:
         with:
           node-version: 26
           cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+
+      - name: Cache Next.js compilation (web)
+        uses: actions/cache@v6
+        with:
+          path: web/.next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-web-deploy-${{ inputs.environment }}-${{ vars.WEB_SITE_URL }}-${{ vars.DOCS_SITE_URL }}-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'web/next.config.ts', 'web/tsconfig.json', 'web/postcss.config.mjs') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-web-deploy-${{ inputs.environment }}-${{ vars.WEB_SITE_URL }}-${{ vars.DOCS_SITE_URL }}-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'web/next.config.ts', 'web/tsconfig.json', 'web/postcss.config.mjs') }}-
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install
         run: pnpm install --frozen-lockfile --prefer-offline

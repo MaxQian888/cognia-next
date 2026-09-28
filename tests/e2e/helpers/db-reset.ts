@@ -30,11 +30,18 @@ declare global {
   }
 }
 
-export async function waitForTestGlobals(page: Page, timeoutMs = 10_000): Promise<void> {
+export async function waitForTestGlobals(
+  page: Page,
+  timeoutMs = 10_000,
+  requireAccountRuntime = false
+): Promise<void> {
   for (let recoveryAttempt = 0; recoveryAttempt <= 1; recoveryAttempt += 1) {
     const stateHandle = await page.waitForFunction(
-      () => {
-        if ((window as { __cogniaTestGlobalsReady?: boolean }).__cogniaTestGlobalsReady) {
+      (needsAccountRuntime) => {
+        if (
+          window.__cogniaTestGlobalsReady &&
+          (!needsAccountRuntime || window.__cogniaPluginRuntimeReady === true)
+        ) {
           return "ready"
         }
         if (document.querySelector('[data-testid="db-upgrade-blocked-dialog"]')) {
@@ -42,7 +49,7 @@ export async function waitForTestGlobals(page: Page, timeoutMs = 10_000): Promis
         }
         return false
       },
-      undefined,
+      requireAccountRuntime,
       { timeout: timeoutMs }
     )
     const state = await stateHandle.jsonValue()
@@ -95,25 +102,18 @@ export async function waitForPluginRuntimeReady(page: Page, timeoutMs = 30_000):
 }
 
 /**
- * Seed an unlocked local account so `AccountGate` renders the app (and thus the
- * `window.__cognia*` test bridge) in a plain browser.
+ * Fast-path a disposable browser account fixture for feature tests.
  *
- * Why this is needed: the app is gated behind `<AccountGate>`, which renders a
- * first-run "create account" form until an account exists and is unlocked.
- * Normal account creation calls `createPasswordVerifier` → Tauri
- * `invoke("account_password_create_verifier")`, which does NOT exist in a
- * browser (chromium / mobile Playwright projects), so the gate can never be
- * satisfied through the UI and the whole app — including `ExposeTestGlobals` —
- * never mounts.
+ * Browser account creation is supported through Browser Vault; account-first-run
+ * tests exercise that real UI. Other feature tests seed the registry directly
+ * with a stub verifier so they can focus on their own behavior. The dedicated
+ * `NEXT_PUBLIC_E2E=1` artifact provisions and unlocks the fixture's Browser Vault
+ * on the next load (see `lib/accounts/dev-auto-unlock.ts`).
  *
- * We sidestep Tauri entirely by writing an account straight through
- * `LocalAccountRegistry.createAccount` (which takes the password verifier as
- * input and never touches Tauri) with a stub verifier and pointing the registry
- * at it. The dedicated `NEXT_PUBLIC_E2E=1` browser artifact then provisions
- * its disposable Browser Vault and unlocks that active account on the next
- * load (see `lib/accounts/dev-auto-unlock.ts`), so `AccountGate` never prompts.
- * Test-infra only — no product code changes, and `isTauri()` is left false so
- * the app stays in web/mobile mode.
+ * Callers must wait for the account-owned runtime before navigating again:
+ * the test bridge mounts above `AccountGate` and alone does not prove unlock
+ * or vault provisioning has finished. `ensureAppMounted` owns that boundary.
+ * `isTauri()` stays false so these fixtures retain real web/mobile behavior.
  */
 export async function ensureCogniaAccount(page: Page): Promise<string> {
   // React can paint the onboarding route before AccountStoreInitializer's
@@ -309,16 +309,32 @@ export async function bootstrapCogniaMobile(
 }
 
 /**
- * Ensure the gated app has mounted its test-globals bridge. If it hasn't (the
- * AccountGate is blocking in a browser), seed an unlocked account and reload so
- * the gate passes. Idempotent — a no-op once the bridge is present.
+ * Open the disposable account and wait for its runtime, not only the fixture
+ * bridge: that bridge also mounts above AccountGate on first-run/locked pages.
+ * Callers must cross this boundary before navigating away or writing settings,
+ * otherwise navigation can interrupt Browser Vault provisioning mid-transaction.
  */
-async function ensureAppMounted(page: Page): Promise<void> {
-  const present = await page.evaluate(
-    () => typeof (window as { __cogniaResetDb?: unknown }).__cogniaResetDb === "function"
-  )
-  if (present) return
-  await ensureCogniaAccount(page)
+export async function ensureAppMounted(page: Page): Promise<void> {
+  if (page.url() === "about:blank") await page.goto("/", { waitUntil: "domcontentloaded" })
+  const state = await page.evaluate(async () => ({
+    ready: window.__cogniaPluginRuntimeReady === true,
+    native: "__TAURI_INTERNALS__" in window,
+    registryExists: (await indexedDB.databases()).some(
+      (database) => database.name === "cognia-account-registry"
+    ),
+  }))
+  if (state.ready) {
+    await waitForTestGlobals(page, 30_000)
+    return
+  }
+  const existingAccounts = state.registryExists
+    ? await readDexieRows(page, { db: ACCOUNT_REGISTRY_DB_NAME, table: "accounts" })
+    : []
+  // Existing accounts may still be provisioning their Browser Vault. Wait for
+  // that boot instead of overwriting a verifier or aborting it with navigation.
+  // Native fixtures own authentication and never receive a browser stub.
+  const needsBrowserAccount = !state.native && existingAccounts.length === 0
+  if (needsBrowserAccount) await ensureCogniaAccount(page)
   // Re-boot through about:blank instead of page.reload(): a reload can leave
   // the OLD document (and its IndexedDB connections) alive long enough to
   // block the new boot's dynamic plugin-table schema bump — the console shows
@@ -330,12 +346,20 @@ async function ensureAppMounted(page: Page): Promise<void> {
   // holding a connection can veto — is recorded as a product-side fix
   // candidate in docs/plans/2026-07-16-e2e-suite-revival.md §7.)
   const url = page.url()
-  await page.goto("about:blank")
-  await page.goto(url, { waitUntil: "domcontentloaded" })
-  await waitForTestGlobals(page, 30_000)
+  if (needsBrowserAccount) {
+    await page.goto("about:blank")
+    await page.goto(url, { waitUntil: "domcontentloaded" })
+  }
+  // This signal is owned by the initializer BELOW AccountGate. Reuse the
+  // bounded blocked-upgrade recovery without an unconditional timeout probe.
+  await waitForTestGlobals(page, 45_000, true)
 }
 
-export async function resetCogniaDb(page: Page): Promise<void> {
+/** Reset an authenticated feature fixture; onboarding journeys explicitly opt into fresh state. */
+export async function resetCogniaDb(
+  page: Page,
+  { onboarding = "completed" }: { onboarding?: "completed" | "fresh" } = {}
+): Promise<void> {
   await ensureAppMounted(page)
   await waitForTestGlobals(page)
   const ok = await page.evaluate(async () => {
@@ -347,6 +371,15 @@ export async function resetCogniaDb(page: Page): Promise<void> {
     return true
   })
   expect(ok, "window.__cogniaResetDb should be callable").toBe(true)
+  if (onboarding === "completed") {
+    await setCogniaSettings(page, {
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-09-28T00:00:00.000Z",
+      },
+    })
+  }
 }
 
 /**

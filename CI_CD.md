@@ -241,26 +241,89 @@ cross-run flake history is not available.
 
 ## Caching
 
-| Cache                      | Key                                      | Job                                                                     |
-| -------------------------- | ---------------------------------------- | ----------------------------------------------------------------------- |
-| pnpm store                 | lockfile hash (via `actions/setup-node`) | all Node jobs                                                           |
-| npm downloads              | Node major + standalone lockfiles        | Jest planner and shards (`sidecar/webclone`)                            |
-| Next.js `.next/cache`      | lockfile + source hash                   | `build`, `build-e2e` (separate keys — the E2E flag changes the output)  |
-| TypeScript `*.tsbuildinfo` | lockfile + source hash                   | `gates (types)` — advisory; stale or missing falls back to a full check |
-| Playwright browsers        | lockfile hash                            | `e2e`                                                                   |
-| cargo `target/`            | `Swatinem/rust-cache`                    | every Rust job                                                          |
+| Cached data                | Identity and restore boundary                                                 | Consumers                                                                                                                                 |
+| -------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| pnpm content store         | Root and sidecar lockfiles; quality includes all standalone pnpm locks        | Root Node installs in test, quality, Tauri/release, deploy, compose E2E and report jobs                                                   |
+| npm downloads              | OS + architecture + Node 26 + npm sidecar locks; isolated runtime manifest    | Every root workspace install; isolated DeepSeek runtime job                                                                               |
+| Root `.next/cache`         | OS + runner architecture + Node 26 + lockfiles + build configuration + commit | Separate desktop production, desktop E2E, Android, iOS, Tauri E2E and Tauri release scopes; release additionally separates target triples |
+| `docs/.next/cache`         | Same compiler identity; CI and deploy scopes separate                         | Docs verification and Pages deploy; deploy adds environment and canonical docs origin                                                     |
+| `web/.next/cache`          | Same compiler identity; CI and deploy scopes separate                         | Marketing verification and Pages deploy; deploy adds environment plus website/docs origins                                                |
+| TypeScript `*.tsbuildinfo` | OS + architecture + Node 26 + all pnpm locks and tsconfigs + commit           | Quality `types`; state remains advisory and cannot replace the compiler check                                                             |
+| Playwright browsers        | OS + lockfile                                                                 | Browser and extension E2E workers; system libraries are installed on cache hits too                                                       |
+| Cargo `target/`            | `Swatinem/rust-cache` compiler/dependency identity                            | Rust jobs, with standalone service/toolchain scopes                                                                                       |
 
-Frozen installs always run, using `--prefer-offline` to reuse cached downloads
-without skipping lockfile validation or workspace linking. Jest package and
-Webclone outputs are built once in the planner and shared as a run-scoped
-artifact; each shard installs its standalone dependencies after restoring them.
+Compiler caches restore the latest entry within the same mode, compiler,
+dependency and configuration prefix, then save under the current commit. Source,
+CSS, JSON and generated-output edits therefore get a new cache entry rather than
+repeatedly restoring an immutable cache keyed only by TypeScript files. Only
+compiler state is cached, never `out/` or a linked `node_modules` tree. GitHub's
+cache branch rules keep fork writes out of the base branch's cache; missing or
+evicted entries fall back to normal compilation.
+
+Frozen installs always run with `--prefer-offline`; a cache hit never skips
+lockfile validation, workspace linking or required install scripts. The DeepSeek
+runtime is intentionally separate: its complete pinned manifest is copied to
+`runner.temp`, installed there with the runtime's documented `--ignore-scripts`
+policy, and exercised with `node --test` using loopback mock providers. Its unit
+and real-launcher smoke suites are excluded from Jest, not from CI.
+
+Compiled workspace packages and Webclone output are built once in the Jest
+planner. Its run-scoped artifact is restored before root installs by Jest shards,
+Linux docs/marketing/Android builds, sidecar tests, production/E2E exports and
+browser-extension E2E. Consumers download from the same workflow run and checkout;
+when the plan contains no Jest suites, they build their own prerequisites normally.
+The production and E2E static exports remain different artifacts because their
+build flags differ. Playwright consumers share the E2E export, and Windows Rust
+verification consumes the production export; neither rebuilds that frontend.
+
 When selected tests exercise the real OS sandbox or bundled coding loop, the
-planner also builds `cognia-sandbox-exec` and `cognia-external-agent-launcher`
-once. A tar artifact preserves executable permissions. Only shards containing
-those tests restore the native helpers and install Bubblewrap; other shards
-avoid the native setup. Ripgrep is provisioned for source-contract tests.
-PR planning checks out two commits and fetches only the exact base SHA. Other
-test and quality jobs use shallow checkout unless a gate needs history.
+planner builds `cognia-sandbox-exec` and `cognia-external-agent-launcher` once.
+A tar artifact preserves executable permissions. Only matching shards restore
+those helpers and install Bubblewrap. Their Ubuntu runner installs an exact
+`/usr/bin/bwrap` AppArmor user-namespace allowance and checks a real user/network
+namespace before the tests; it does not disable the host-wide restriction.
+Ripgrep is provisioned for source-contract tests. PR planning checks out two
+commits and fetches only the exact base SHA; other jobs use shallow checkout unless
+a gate needs history.
+
+Every root workspace install also restores `~/.npm`, keyed by runner OS,
+architecture, Node 26, and the VSCode extension-host and Webclone npm lockfiles.
+These downloads are outside the pnpm store; restoring compiled workspace
+artifacts does not remove the VSCode postinstall dependency installation. The
+standalone Worker jobs use only pnpm and need no additional npm cache. Node-only
+quality registry checks perform no install and need neither cache.
+
+Local development keeps its existing policy: production Webpack caches normally,
+while the repository's default Turbopack development cache opt-out and explicit
+`dev:cached` opt-in remain unchanged. Installed Next 16.3.6 enables Turbopack build
+filesystem caching by default, so marketing builds reuse `web/.next/cache`
+without changing Next configuration. Compiler cache compression follows Next's
+defaults; the Actions cache service compresses the uploaded directory.
+
+Root `postbuild` removes only obsolete Webpack `index.pack.old` backups under
+`.next/cache/webpack` after a successful build, and only when the current
+`index.pack` exists. Current indexes and numbered pack chunks remain intact;
+Storybook's separate threshold cleanup is unchanged. This avoids uploading
+retired indexes to the compiler caches (one observed local backup occupied
+2.45 GB); remote transfer savings have not yet been measured. Negative cache
+path globs alone would not exclude a file inside an archived parent directory.
+
+The web and server-brain Docker builds fetch pnpm dependencies in an ordinary
+layer keyed by lockfiles, workspace configuration, and patches, then perform a
+frozen offline install after copying package manifests and sources. Source-only
+changes can reuse that fetch layer. The pnpm 11 fixture verified installation
+with an unreachable registry and rejection of a stale manifest. Docker Next
+compiler caches remain inside the build layer: source changes still produce a
+cold compiler build. No compiler cache mount is added, since GHA layer-cache
+export does not preserve mutable mount contents across fresh hosted runners.
+The large server Cargo layers retain registry caching instead of consuming the
+shared Actions cache quota.
+
+Verification distinguishes observed results from expected savings: the
+2026-09-28 run `36385584292` assigned all 10,114 selected Jest suites exactly once
+and completed all nine batches in each of eight shards without OOM. The new cache
+and artifact-sharing contracts are checked locally, but their cold/warm CI
+runtime savings require subsequent runs; no speedup percentage is established.
 
 ---
 

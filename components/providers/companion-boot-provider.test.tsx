@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, waitFor } from "@testing-library/react"
+import { act, render, waitFor } from "@testing-library/react"
 
 import { CompanionBootProvider } from "./companion-boot-provider"
 import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
@@ -41,9 +41,26 @@ const adoptHostsMock = jest.fn(async (): Promise<void> => undefined)
 jest.mock("@/lib/companion/mobile-host-adoption", () => ({
   adoptMobileCompanionHosts: () => adoptHostsMock(),
 }))
-const getActiveHostMock = jest.fn(async (): Promise<unknown> => null)
+let accountProfileMock: {
+  accounts: { id: string }[]
+  activeAccountId: string | null
+  unlockedAccountId: string | null
+} = {
+  accounts: [],
+  activeAccountId: null,
+  unlockedAccountId: null,
+}
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: { getState: () => accountProfileMock },
+}))
+
+let activeAccountNamespaceMock: string | null = "local_acct_a"
+const getActiveHostMock = jest.fn(async (..._args: unknown[]): Promise<unknown> => null)
 jest.mock("@/lib/companion/credential-book", () => ({
-  companionCredentialBook: () => ({ getActive: () => getActiveHostMock() }),
+  activeAccountNamespace: () => activeAccountNamespaceMock,
+  companionCredentialBook: () => ({
+    getActive: (...args: unknown[]) => getActiveHostMock(...args),
+  }),
 }))
 const activateAccountDatabaseMock = jest.fn()
 jest.mock("@/lib/db/schema", () => ({
@@ -280,6 +297,8 @@ beforeEach(() => {
   classifyWsHostMock.mockReset().mockReturnValue("ws-lan")
   remoteStepServerOptionsMock.mockClear()
   loadCompanionConfigMock.mockReset().mockReturnValue(null)
+  accountProfileMock = { accounts: [], activeAccountId: null, unlockedAccountId: null }
+  activeAccountNamespaceMock = "local_acct_a"
   activateAccountDatabaseMock.mockClear()
   setActiveRuntimeTargetContextMock.mockClear()
   setRuntimeSnapshotMock.mockClear()
@@ -1046,6 +1065,91 @@ describe("<CompanionBootProvider /> — host bindings detail", () => {
         connectionState: "connecting",
       })
     )
+  })
+
+  it("restores a mobile host using the unlocked account namespace instead of the legacy default", async () => {
+    setMobile()
+    activeAccountNamespaceMock = "acct_mobile_second"
+    accountProfileMock = {
+      accounts: [{ id: "acct_mobile_second" }],
+      activeAccountId: "acct_mobile_second",
+      unlockedAccountId: "acct_mobile_second",
+    }
+    getActiveHostMock.mockResolvedValue({
+      hostId: "host-a",
+      endpoints: { baseUrl: "http://192.168.1.10:7890" },
+    })
+    hydrateMock.mockResolvedValue({ ...pairedConfig, accountId: "acct_mobile_second" })
+    mount()
+    await waitFor(() => expect(registerCompanionRuntimeTargetMock).toHaveBeenCalled())
+    expect(adoptHostsMock).not.toHaveBeenCalled()
+    expect(getActiveHostMock).toHaveBeenCalledWith("acct_mobile_second")
+    expect(activateAccountDatabaseMock).toHaveBeenCalledWith("acct_mobile_second", "host-a")
+    expect(setActiveRuntimeTargetContextMock).toHaveBeenCalledWith("acct_mobile_second", "host-a")
+    expect(registerCompanionRuntimeTargetMock).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "acct_mobile_second" })
+    )
+  })
+
+  it("does not publish an old profile after an account switch during host lookup", async () => {
+    setMobile()
+    accountProfileMock = {
+      accounts: [{ id: "acct_first" }],
+      activeAccountId: "acct_first",
+      unlockedAccountId: "acct_first",
+    }
+    let finishLookup!: (value: { hostId: string; endpoints: { baseUrl: string } }) => void
+    getActiveHostMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishLookup = resolve
+        })
+    )
+    mount()
+    await waitFor(() => expect(getActiveHostMock).toHaveBeenCalled())
+    accountProfileMock = {
+      accounts: [{ id: "acct_second" }],
+      activeAccountId: "acct_second",
+      unlockedAccountId: "acct_second",
+    }
+    await act(async () =>
+      finishLookup({ hostId: "first-host", endpoints: { baseUrl: "http://first.local" } })
+    )
+    expect(activateAccountDatabaseMock).not.toHaveBeenCalled()
+    expect(setActiveRuntimeTargetContextMock).not.toHaveBeenCalled()
+    expect(hydrateMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps native legacy boot available before any profile has been registered", async () => {
+    setMobile()
+    activeAccountNamespaceMock = null
+    hydrateMock.mockResolvedValue(pairedConfig)
+    mount()
+    await waitFor(() => expect(registerCompanionRuntimeTargetMock).toHaveBeenCalled())
+    expect(adoptHostsMock).toHaveBeenCalled()
+    expect(setActiveRuntimeTargetContextMock).toHaveBeenCalledWith(
+      "local_acct_a",
+      "mobile-companion"
+    )
+    expect(registerCompanionRuntimeTargetMock).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "local_acct_a" })
+    )
+  })
+
+  it("does not activate a legacy account while a registered profile is locked", async () => {
+    setMobile()
+    activeAccountNamespaceMock = null
+    accountProfileMock = {
+      accounts: [{ id: "acct_mobile_second" }],
+      activeAccountId: "acct_mobile_second",
+      unlockedAccountId: null,
+    }
+    mount()
+    await waitFor(() => expect(getMobileBootSnapshot().settled).toBe(true))
+    expect(adoptHostsMock).not.toHaveBeenCalled()
+    expect(getActiveHostMock).not.toHaveBeenCalled()
+    expect(activateAccountDatabaseMock).not.toHaveBeenCalled()
+    expect(registerCompanionRuntimeTargetMock).not.toHaveBeenCalled()
   })
 
   it("routes remote resync requests: host-state to the host-state sync, everything else to a sync-down", async () => {

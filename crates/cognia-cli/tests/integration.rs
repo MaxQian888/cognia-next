@@ -189,13 +189,37 @@ fn plugin_contract_json_returns_the_complete_canonical_inventory_without_writing
     assert_eq!(parsed["action"], "contract");
     assert_eq!(parsed["catalogSchemaVersion"], 2);
     assert_eq!(parsed["pluginPointSchemaVersion"], 1);
-    assert_eq!(parsed["catalogCounts"]["pluginTypes"], 5);
-    assert_eq!(parsed["catalogCounts"]["capabilities"], 68);
-    assert_eq!(parsed["catalogCounts"]["manifestContributions"], 55);
-    assert_eq!(parsed["catalogCounts"]["permissions"], 114);
-    assert_eq!(parsed["catalogCounts"]["runtimeEntries"], 5);
-    assert_eq!(parsed["catalogCounts"]["pathFields"], 50);
-    assert_eq!(parsed["catalogCounts"]["pluginPoints"], 275);
+    let catalog: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../packages/plugin-sdk/contract/catalog.json"
+    ))
+    .expect("canonical authoring catalog");
+    let points: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../packages/plugin-sdk/contract/plugin-points.json"
+    ))
+    .expect("canonical plugin points");
+    for field in [
+        "pluginTypes",
+        "capabilities",
+        "manifestContributions",
+        "permissions",
+        "pathFields",
+    ] {
+        assert_eq!(parsed[field], catalog[field], "complete canonical {field}");
+        assert_eq!(
+            parsed["catalogCounts"][field],
+            catalog[field].as_array().unwrap().len()
+        );
+    }
+    assert_eq!(parsed["runtimeEntries"], catalog["runtimeEntries"]);
+    assert_eq!(
+        parsed["catalogCounts"]["runtimeEntries"],
+        catalog["runtimeEntries"].as_object().unwrap().len()
+    );
+    assert_eq!(parsed["pluginPoints"], points["pluginPoints"]);
+    assert_eq!(
+        parsed["catalogCounts"]["pluginPoints"],
+        points["pluginPoints"].as_array().unwrap().len()
+    );
     assert_eq!(parsed["selectionCounts"], parsed["catalogCounts"]);
     assert_eq!(parsed["filters"]["capabilities"], serde_json::json!([]));
     assert_eq!(parsed["filters"]["pluginPoints"], serde_json::json!([]));
@@ -274,9 +298,29 @@ fn plugin_contract_filters_related_capabilities_contributions_and_runtime_entrie
     assert_eq!(parsed["selectionCounts"]["manifestContributions"], 3);
     // Permissions and path contracts remain complete because the canonical
     // catalog does not claim a one-to-one permission/path mapping.
-    assert_eq!(parsed["selectionCounts"]["permissions"], 114);
-    assert_eq!(parsed["selectionCounts"]["pathFields"], 50);
-    assert_eq!(parsed["selectionCounts"]["pluginPoints"], 275);
+    let catalog: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../packages/plugin-sdk/contract/catalog.json"
+    ))
+    .expect("canonical authoring catalog");
+    let points: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../packages/plugin-sdk/contract/plugin-points.json"
+    ))
+    .expect("canonical plugin points");
+    for field in ["permissions", "pathFields"] {
+        assert_eq!(
+            parsed[field], catalog[field],
+            "unfiltered canonical {field}"
+        );
+        assert_eq!(
+            parsed["selectionCounts"][field],
+            catalog[field].as_array().unwrap().len()
+        );
+    }
+    assert_eq!(parsed["pluginPoints"], points["pluginPoints"]);
+    assert_eq!(
+        parsed["selectionCounts"]["pluginPoints"],
+        points["pluginPoints"].as_array().unwrap().len()
+    );
 }
 
 #[test]

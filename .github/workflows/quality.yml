@@ -95,7 +95,7 @@ jobs:
         with:
           node-version: 26.x
           cache: "pnpm"
-          cache-dependency-path: ${{ matrix.group == 'types' && '**/pnpm-lock.yaml' || 'pnpm-lock.yaml' }}
+          cache-dependency-path: "**/pnpm-lock.yaml"
 
       - name: Setup Python
         if: matrix.python
@@ -147,9 +147,16 @@ jobs:
           path: |
             tsconfig.tsbuildinfo
             tsconfig.build.tsbuildinfo
-          key: ${{ runner.os }}-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.ts', '**/*.tsx') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml', '**/tsconfig*.json') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml') }}-
+            ${{ runner.os }}-${{ runner.arch }}-node26-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml', '**/tsconfig*.json') }}-
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline

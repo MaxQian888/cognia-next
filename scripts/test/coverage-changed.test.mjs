@@ -162,6 +162,20 @@ test("shared manifests, Rust graph and workflow changes conservatively fan out t
   assert.ok(Object.values(classifyCiImpact([], "full")).every(Boolean))
 })
 
+test("DeepSeek runtime changes select the isolated Node launcher smoke without unrelated frontend builds", () => {
+  for (const file of [
+    "runtime/deepseek-harness/launcher.mjs",
+    "runtime/deepseek-harness/package.json",
+    "runtime/deepseek-harness/host.acp.yml",
+  ]) {
+    const impact = classifyCiImpact([file])
+    assert.equal(impact.deepseekRuntime, true, file)
+    assert.equal(impact.frontend, false, file)
+  }
+  assert.equal(classifyCiImpact(["components/chat/message.tsx"]).deepseekRuntime, false)
+  assert.equal(classifyCiImpact(["pnpm-lock.yaml"]).deepseekRuntime, true)
+})
+
 test("embedded native inputs and shared tenant auth activate their consumers", () => {
   for (const file of [
     ".cargo/config.toml",

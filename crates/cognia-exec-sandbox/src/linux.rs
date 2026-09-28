@@ -1018,13 +1018,10 @@ mod tests {
             max_processes: 0,
         };
         ensure_write_targets_exist(&policy).expect("no targets to create");
-        assert_eq!(
-            std::fs::read_dir(dir.path())
-                .expect("readable")
-                .next()
-                .is_none(),
-            true
-        );
+        assert!(std::fs::read_dir(dir.path())
+            .expect("readable")
+            .next()
+            .is_none());
     }
 
     #[test]

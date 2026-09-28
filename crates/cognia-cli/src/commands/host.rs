@@ -30,6 +30,8 @@ use crate::cli::{
 use crate::ui::RuntimeUi;
 
 const CATALOG_BYTES: &[u8] = cognia_headless_contract::EMBEDDED_CATALOG_BYTES;
+// ADR-0175: the catalog carries the protocol version this CLI understands.
+const SUPPORTED_CATALOG_SCHEMA_VERSION: u32 = 3;
 static HEADLESS_CONTRACT: OnceLock<Result<cognia_headless_contract::HeadlessContract, String>> =
     OnceLock::new();
 const HOST_SKILL: &str = include_str!("../../assets/skills/cognia-host/SKILL.md");
@@ -352,13 +354,17 @@ fn emit_failure(action: &str, rpc_command: Option<&str>, failure: HostFailure) -
 }
 
 pub(crate) fn load_catalog() -> std::result::Result<HostCatalog, HostFailure> {
-    let catalog: HostCatalog = serde_json::from_slice(CATALOG_BYTES).map_err(|error| {
+    parse_catalog(CATALOG_BYTES)
+}
+
+fn parse_catalog(bytes: &[u8]) -> std::result::Result<HostCatalog, HostFailure> {
+    let catalog: HostCatalog = serde_json::from_slice(bytes).map_err(|error| {
         HostFailure::configuration(
             "invalid_embedded_catalog",
             format!("embedded Headless command catalog is invalid: {error}"),
         )
     })?;
-    if catalog.schema_version != 1
+    if catalog.schema_version != SUPPORTED_CATALOG_SCHEMA_VERSION
         || catalog.catalog_hash.len() != 64
         || catalog.categories.is_empty()
         || catalog.resources.is_empty()
@@ -2731,6 +2737,25 @@ mod tests {
     }
 
     #[test]
+    fn catalog_rejects_unsupported_versions_instead_of_guessing_compatibility() {
+        let mut value: Value = serde_json::from_slice(CATALOG_BYTES).expect("embedded JSON");
+        let supported_version = SUPPORTED_CATALOG_SCHEMA_VERSION;
+        assert_eq!(
+            shared_contract()
+                .expect("embedded contract")
+                .schema_version(),
+            supported_version
+        );
+        for version in [0, supported_version - 1, supported_version + 1] {
+            value["schemaVersion"] = json!(version);
+            let bytes = serde_json::to_vec(&value).expect("serialize catalog");
+            let error = parse_catalog(&bytes).expect_err("unsupported version");
+            assert_eq!(error.code, "unsupported_catalog");
+        }
+        assert_eq!(catalog().schema_version, supported_version);
+    }
+
+    #[test]
     fn embedded_catalog_contains_concrete_commands() {
         let catalog = catalog();
         assert!(catalog.commands.len() > 400);
@@ -2882,13 +2907,13 @@ mod tests {
         let command = find_command(&catalog, "session_list").unwrap();
 
         assert_eq!(
-            validate_completed_output(command, &json!({"rows": [], "total": 1}), false)
+            validate_completed_output(command, &json!({"items": [], "total": 1}), false)
                 .unwrap()
                 .status,
             "valid"
         );
         let invalid =
-            validate_completed_output(command, &json!({"rows": [], "total": -1}), false).unwrap();
+            validate_completed_output(command, &json!({"items": [], "total": -1}), false).unwrap();
         assert_eq!(invalid.status, "invalid");
         assert!(!invalid.violations.is_empty());
     }

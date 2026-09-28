@@ -361,7 +361,7 @@
       "field": "RuntimeTargetScope.accountId",
       "contract": "lib/runtime/runtime-target-context.ts",
       "test": "components/providers/companion-boot-provider.test.tsx",
-      "source": "accountId: DEFAULT_LOCAL_ACCOUNT_ID,",
+      "source": "accountId: localAccountId,",
       "occurrences": 1,
       "reason": "Companion boot projects the host manifest local account scope into the shared runtime target registration contract."
     },
@@ -2135,6 +2135,28 @@
       "source": "accountId: string",
       "occurrences": 1,
       "reason": "Encrypted workflow artifacts persist the local-profile key and bind it into authenticated additional data; changing it would invalidate existing artifact ownership and decryption."
+    },
+    {
+      "file": "lib/companion/credential-book/index.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "CompanionConfig.accountId",
+      "contract": "lib/tauri/companion-storage.ts",
+      "test": "lib/companion/credential-book/index.test.ts",
+      "source": "((legacy.accountId ?? DEFAULT_LOCAL_ACCOUNT_ID) !== namespace ||",
+      "occurrences": 1,
+      "reason": "Legacy CompanionConfig persists its owning local profile as accountId; migration and clearing must read this existing wire field without transferring credentials across profiles."
+    },
+    {
+      "file": "lib/companion/credential-book/index.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "CompanionConfig.accountId",
+      "contract": "lib/tauri/companion-storage.ts",
+      "test": "lib/companion/credential-book/index.test.ts",
+      "source": "(legacy && (legacy.accountId ?? DEFAULT_LOCAL_ACCOUNT_ID) !== operationNamespace)",
+      "occurrences": 1,
+      "reason": "Legacy CompanionConfig persists its owning local profile as accountId; migration and clearing must read this existing wire field without transferring credentials across profiles."
     }
   ]
 }

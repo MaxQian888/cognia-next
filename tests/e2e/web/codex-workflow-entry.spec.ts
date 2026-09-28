@@ -5,54 +5,53 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import {
-  ensureCogniaAccount,
-  readDexieRows,
-  waitForPluginRuntimeReady,
-  waitForTestGlobals,
-} from "../helpers/db-reset"
-
-interface PersistedSessionRow {
-  id: string
-  projectId?: string
-  executionContext?: {
-    location: "local" | "managedWorktree"
-    projectId: string
-    projectRoot: string
-    taskWorkspace: { workspaceKey: string }
-  }
-}
+import { ensureAppMounted, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 test.describe("web — Codex-inspired workflow entry", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
-    await ensureCogniaAccount(page)
+    await ensureAppMounted(page)
+    const mockBaseUrl = process.env.E2E_ANTHROPIC_BASE_URL
+    if (!mockBaseUrl) throw new Error("Anthropic mock must be started by global setup")
+    await setCogniaSettings(page, {
+      defaultProvider: "anthropic",
+      providerSettings: {
+        anthropic: {
+          enabled: true,
+          apiKey: "test-e2e-key",
+          baseURL: `${mockBaseUrl.replace(/\/$/, "")}/v1`,
+        },
+      },
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
     await page.goto("about:blank")
     await page.goto("/", { waitUntil: "domcontentloaded" })
     await waitForTestGlobals(page, 30_000)
-    await waitForPluginRuntimeReady(page, 45_000)
-    const providerOnboarding = page.getByRole("alertdialog", { name: "Welcome to Cognia" })
-    if (await providerOnboarding.isVisible()) {
-      await providerOnboarding.getByRole("button", { name: "Skip for now" }).click()
-      await expect(providerOnboarding).toBeHidden()
-    }
   })
 
-  test("@smoke @critical Quick Chat persists project execution defaults and exposes workflow controls", async ({
+  test("@smoke @critical browser chat persists selected project execution and exposes workflow controls", async ({
     page,
   }) => {
-    await page.getByTestId("workspace-switcher").click()
-    await page.getByTestId("workspace-switcher-new").click()
+    await page
+      .getByRole("complementary", { name: "Conversations" })
+      .getByRole("button", { name: /^Active workspace:/ })
+      .click()
+    await page.getByTestId("workspace-switcher-manage").click()
 
     const workspaces = page.getByRole("dialog", { name: "Workspaces" })
     await expect(workspaces).toBeVisible()
+    await workspaces.getByTestId("workspace-new").click()
     await workspaces.getByRole("textbox", { name: "Name", exact: true }).fill("Workflow E2E")
     await workspaces.getByPlaceholder("Type an absolute path…").fill("/tmp/cognia-workflow-e2e")
     await workspaces.getByRole("button", { name: "Add folder" }).click()
     const saveWorkspace = workspaces.getByTestId("workspace-save")
     await saveWorkspace.scrollIntoViewIfNeeded()
     await saveWorkspace.click()
-    await expect(page.getByText("Workspace saved")).toBeVisible()
+    await expect(page.getByText("Workspace created")).toBeVisible()
 
     const setActive = workspaces.getByRole("button", { name: "Set active" })
     if (await setActive.isVisible()) {
@@ -65,16 +64,24 @@ test.describe("web — Codex-inspired workflow entry", () => {
     // Web Playwright exercises the same startNewSession contract through the
     // ordinary New chat entry point, including project execution defaults.
     await page.getByRole("button", { name: "New chat" }).first().click()
-    const characterPicker = page.getByRole("dialog", { name: /pick a character/i })
-    await expect(characterPicker).toBeVisible()
-    await characterPicker.getByRole("option").first().click()
-    await expect(page.getByRole("textbox", { name: /message/i }).first()).toBeVisible({
-      timeout: 30_000,
-    })
+    // The welcome composer creates the conversation on its first send.
+    const composer = page.getByRole("textbox", { name: /message/i }).first()
+    await expect(composer).toBeVisible({ timeout: 30_000 })
+    await page.getByRole("button", { name: "Worktree", exact: true }).click()
+    await page.getByTestId("ctxbar-worktree-off").click()
+    await page.keyboard.press("Escape")
+    await composer.fill("Check this workspace")
+    await composer.press("Enter")
+    await expect(
+      page.getByRole("log").getByText("[mock-anthropic-echo] Check this workspace", { exact: true })
+    ).toBeVisible()
 
     await expect
       .poll(async () => {
-        const sessions = await readDexieRows<PersistedSessionRow>(page, { table: "sessions" })
+        const sessions = await page.evaluate(async () => {
+          if (!window.__cogniaReadSessions) throw new Error("Session read bridge is unavailable")
+          return window.__cogniaReadSessions()
+        })
         return sessions.find(
           (row) => row.executionContext?.projectRoot === "/tmp/cognia-workflow-e2e"
         )
@@ -89,15 +96,19 @@ test.describe("web — Codex-inspired workflow entry", () => {
         },
       })
 
-    await page.getByRole("button", { name: "Session settings" }).click()
+    await page.getByRole("button", { name: "Task summary", exact: true }).click()
+    await page
+      .getByTestId("session-summary")
+      .getByRole("button", { name: "Manage task", exact: true })
+      .click()
     const settings = page.getByRole("dialog", { name: "Session settings" })
+    const execution = settings.getByRole("button", { name: /^Execution overrides/ })
+    if ((await execution.getAttribute("aria-expanded")) === "false") await execution.click()
     await expect(settings.getByText("Execution workspace")).toBeVisible()
     await expect(settings.getByText("Project environment")).toBeVisible()
     await page.keyboard.press("Escape")
 
-    const browseThreads = page.getByRole("button", { name: "Browse agent threads" })
-    await browseThreads.focus()
-    await browseThreads.press("Enter")
-    await expect(page.getByRole("dialog", { name: "Agent threads" })).toBeVisible()
+    // The thread browser stays dormant until a subagent exists.
+    await expect(page.getByRole("button", { name: "Browse agent threads" })).toHaveCount(0)
   })
 })

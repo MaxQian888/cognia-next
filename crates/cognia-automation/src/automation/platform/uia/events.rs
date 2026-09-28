@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -21,6 +21,8 @@ use uiautomation::events::{
 use uiautomation::types::{StructureChangeType, TreeScope, UIProperty};
 use uiautomation::variants::Variant;
 use uiautomation::{UIAutomation, UIElement, UITreeWalker};
+use windows::core::AgileReference;
+use windows::Win32::UI::Accessibility::IUIAutomationElement;
 
 use crate::automation::events::{emit_uia_event, UiaEventPayload};
 use crate::automation::selection_events::{self, SelectionSignal, SelectionSignalKind};
@@ -66,7 +68,7 @@ enum WorkerCommand {
     Subscribe {
         id: u64,
         filter: EventFilter,
-        scope: Option<UIElement>,
+        scope: Option<AgileReference<IUIAutomationElement>>,
         reply: mpsc::Sender<std::result::Result<(), String>>,
     },
     Unsubscribe {
@@ -158,14 +160,19 @@ impl EventSubscriptions {
         }
     }
 
-    /// Register exactly the requested kinds. `scope` is resolved by the
-    /// backend cache before crossing onto the event-registration thread.
+    /// Register exactly the requested kinds. Marshal the cached scope before
+    /// crossing threads; the MTA worker resolves its own apartment-safe proxy.
     pub fn subscribe(
         &self,
         filter: &EventFilter,
         scope: Option<UIElement>,
     ) -> Result<SubscriptionId> {
         validate_filter(filter)?;
+        let scope = scope
+            .as_ref()
+            .map(|element| AgileReference::new(element.as_ref()))
+            .transpose()
+            .map_err(|err| backend_error(format!("marshal subscription scope: {err}")))?;
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (reply, response) = mpsc::channel();
         self.sender
@@ -240,7 +247,13 @@ fn run_event_worker(
                 scope,
                 reply,
             } => {
-                let result = register_handlers(&automation, id, &filter, scope);
+                let result = scope
+                    .as_ref()
+                    .map(AgileReference::resolve)
+                    .transpose()
+                    .map(|scope| scope.map(UIElement::from))
+                    .map_err(|err| format!("resolve subscription scope: {err}"))
+                    .and_then(|scope| register_handlers(&automation, id, &filter, scope));
                 match result {
                     Ok(registered) => {
                         handlers.insert(id, registered);
@@ -463,6 +476,13 @@ fn emit_element_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_commands_carry_only_thread_safe_scope_references() {
+        fn assert_send<T: Send>() {}
+        assert_send::<WorkerCommand>();
+        assert_send::<AgileReference<IUIAutomationElement>>();
+    }
 
     fn filter(kinds: Option<Vec<EventKind>>) -> EventFilter {
         EventFilter { kinds, scope: None }

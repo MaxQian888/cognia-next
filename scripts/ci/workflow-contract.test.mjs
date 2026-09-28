@@ -9,6 +9,115 @@ import { parse } from "yaml"
 const readWorkflow = (name) =>
   readFile(new URL(`../../.github/workflows/${name}`, import.meta.url), "utf8")
 
+test("frontend build caches cover each build mode without sharing incompatible compilation state", async () => {
+  const scopes = new Set()
+  for (const [workflow, jobName, cachePath] of [
+    ["test.yml", "build", ".next/cache"],
+    ["test.yml", "build-e2e", ".next/cache"],
+    ["test.yml", "docs-build", "docs/.next/cache"],
+    ["test.yml", "web-build", "web/.next/cache"],
+    ["test.yml", "mobile-android-build", ".next/cache"],
+    ["test.yml", "mobile-ios-build", ".next/cache"],
+    ["test.yml", "e2e-tauri", ".next/cache"],
+    ["build-tauri.yml", "build-tauri", ".next/cache"],
+    ["deploy.yml", "deploy-docs", "docs/.next/cache"],
+    ["deploy.yml", "deploy-web", "web/.next/cache"],
+  ]) {
+    const { jobs } = parse(await readWorkflow(workflow))
+    const job = jobs[jobName]
+    assert.ok(job, `${workflow}: ${jobName}`)
+    const cache = job.steps.find(
+      (step) => step.uses?.startsWith("actions/cache@") && step.with.path.trim() === cachePath
+    )
+    assert.ok(cache, `${workflow}: ${jobName} persists its compiler cache`)
+    assert.match(cache.with.key, /runner\.os/)
+    assert.match(cache.with.key, /runner\.arch/)
+    assert.match(cache.with.key, /node26/)
+    assert.match(cache.with.key, /pnpm-lock\.yaml/)
+    assert.match(cache.with.key, /next\.config/)
+    assert.match(cache.with.key, /github\.sha/)
+    const scope = cache.with["restore-keys"].trim()
+    assert.ok(!scopes.has(scope), `${workflow}: ${jobName} has a distinct mode/origin scope`)
+    scopes.add(scope)
+    assert.equal(scope, cache.with.key.replace(/\$\{\{ github\.sha \}\}$/, ""))
+    if (workflow === "deploy.yml") {
+      assert.match(scope, /inputs\.environment/)
+      assert.match(scope, /vars\.DOCS_SITE_URL/)
+      if (jobName === "deploy-web") assert.match(scope, /vars\.WEB_SITE_URL/)
+    }
+  }
+})
+
+test("Linux frontend consumers reuse this run's compiled packages before frozen install", async () => {
+  const { jobs } = parse(await readWorkflow("test.yml"))
+  for (const name of [
+    "docs-build",
+    "web-build",
+    "mobile-android-build",
+    "sidecar",
+    "build",
+    "build-e2e",
+    "e2e-browser-extension",
+  ]) {
+    const job = jobs[name]
+    const download = job.steps.find(
+      (step) => step.name === "Restore compiled workspace prerequisites"
+    )
+    assert.equal(download.with.name, "jest-runtime-prerequisites", name)
+    assert.equal(download.if, "needs.jest-plan.outputs.has-tests == 'true'", name)
+    assert.equal(download.with.path, ".", name)
+    assert.equal(job.needs, "jest-plan", name)
+    const install = job.steps.findIndex(
+      (step) => step.run === "pnpm install --frozen-lockfile --prefer-offline"
+    )
+    assert.ok(job.steps.indexOf(download) < install, name)
+  }
+})
+
+test("workspace pnpm caches account for the sidecar lock installed by root postinstall", async () => {
+  for (const name of [
+    "test.yml",
+    "quality.yml",
+    "build-tauri.yml",
+    "release.yml",
+    "deploy.yml",
+    "compose-e2e.yml",
+    "report.yml",
+  ]) {
+    const { jobs } = parse(await readWorkflow(name))
+    for (const [jobName, job] of Object.entries(jobs)) {
+      for (const step of job.steps ?? []) {
+        if (!step.uses?.startsWith("actions/setup-node@") || step.with?.cache !== "pnpm") continue
+        const locks = step.with["cache-dependency-path"]
+        assert.ok(
+          locks?.includes("sidecar/pnpm-lock.yaml") || locks === "**/pnpm-lock.yaml",
+          `${name}:${jobName} caches both independently locked stores`
+        )
+      }
+    }
+  }
+})
+
+test("DeepSeek node:test suites run in their isolated native Node job, never under Jest", async () => {
+  const config = await readFile(new URL("../../jest.config.ts", import.meta.url), "utf8")
+  assert.ok(config.includes('"/runtime/deepseek-harness/.*\\\\.test\\\\.mjs$"'))
+  const { jobs } = parse(await readWorkflow("test.yml"))
+  const job = jobs["deepseek-runtime"]
+  assert.equal(job.needs, "jest-plan")
+  assert.equal(job.if, "fromJSON(needs.jest-plan.outputs.impacts).deepseekRuntime")
+  const install = job.steps.find((step) => step.name === "Install isolated runtime")
+  assert.match(install.run, /cp runtime\/deepseek-harness\/\* "\$DSH_TEST_ROOT\/"/)
+  assert.match(install.run, /npm install --prefix "\$DSH_TEST_ROOT" --ignore-scripts/)
+  const test = job.steps.find((step) => step.name === "Run launcher and service smoke suites")
+  assert.ok(job.steps.indexOf(install) < job.steps.indexOf(test))
+  assert.equal(test["working-directory"], "${{ env.DSH_TEST_ROOT }}")
+  assert.match(
+    test.run,
+    /node --test launcher.test.mjs launcher.smoke.test.mjs services.smoke.test.mjs/
+  )
+  assert.ok(!job.steps.some((step) => step.run?.includes("pnpm install")))
+})
+
 test("server PR image checks can read the registry cache without gaining write permissions", async () => {
   const { jobs } = parse(await readWorkflow("images.yml"))
   const job = jobs["cognia-server-check"]
@@ -191,6 +300,23 @@ test("Jest builds prerequisites once and restores them before standalone install
   assert.ok(!job.steps.some((step) => step.run?.includes("pnpm build:packages")))
   assert.match(job.steps[testIndex].run, /--run-plan .cache\/jest\/plan.json --shard "\$SHARD"/)
   assert.match(job.steps[testIndex].run, /if \[ "\$MODE" = full \]; then args\+=\(--coverage\)/)
+})
+
+test("workspace Rust tests report all failing crates with host features enabled", async () => {
+  const job = parse(await readWorkflow("test.yml")).jobs["cargo-test-workspace"]
+  const tests = job.steps.find(
+    (step) => step.name === "Run Rust tests (all crates except src-tauri)"
+  )
+  assert.match(
+    tests.run,
+    /cargo test --locked --workspace --exclude cognia-next --no-fail-fast --features/
+  )
+  assert.match(tests.run, /check-rust-architecture\.mjs --print-ci-features/)
+  assert.ok(
+    job.steps.some(
+      (step) => step.run === "cargo check --locked --workspace --exclude cognia-next --all-targets"
+    )
+  )
 })
 
 test("expensive PR lanes follow runtime impacts without skipping Windows prerequisites", async () => {
@@ -424,7 +550,7 @@ test("pnpm caches immutable store data but always validates and links frozen ins
   const cache = quality.jobs.gates.steps.find((step) =>
     step.uses?.startsWith("actions/setup-node@")
   )
-  assert.match(cache.with["cache-dependency-path"], /matrix.group == 'types'.*\*\*\/pnpm-lock.yaml/)
+  assert.equal(cache.with["cache-dependency-path"], "**/pnpm-lock.yaml")
 })
 
 test("standalone Rust caches follow the selected compiler and isolate WASM targets", async () => {
@@ -508,9 +634,72 @@ test("Jest builds selected sandbox helpers once and preserves executable artifac
   assert.match(shard[restore].run, /plan\.shards\.find/)
   assert.match(shard[restore].run, /shard\.testFiles\.some/)
   assert.match(shard[restore].run, /tar -xf/)
-  assert.match(shard[restore].run, /packages\+=\(bubblewrap\)/)
+  assert.match(shard[restore].run, /packages\+=\(bubblewrap apparmor\)/)
+  assert.match(shard[restore].run, /if \[ "\$native_helpers" = true \]; then/)
+  assert.match(
+    shard[restore].run,
+    /profile bwrap \/usr\/bin\/bwrap flags=\(unconfined\) \{\s+userns,/
+  )
+  assert.match(shard[restore].run, /sudo apparmor_parser -r \/etc\/apparmor.d\/cognia-ci-bwrap/)
+  assert.match(
+    shard[restore].run,
+    /\/usr\/bin\/bwrap --unshare-user --unshare-net --ro-bind \/ \/ -- \/bin\/true/
+  )
+  assert.doesNotMatch(shard[restore].run, /sysctl|apparmor_restrict_unprivileged_userns=0/)
   assert.equal(
     shard.flatMap((step) => (step.run ?? "").match(/sudo apt-get update/g) ?? []).length,
     1
   )
+})
+
+test("Playwright helper unit tests belong only to the Jest Node project", async () => {
+  const config = await readFile(new URL("../../jest.config.ts", import.meta.url), "utf8")
+  const ignore = config.match(/"(\/tests\/e2e\/[^"\n]*)"/)[1]
+  const ignored = new RegExp(JSON.parse(`"${ignore}"`))
+  assert.equal(ignored.test("/repo/tests/e2e/helpers/shared-chat.test.ts"), false)
+  assert.equal(ignored.test("/repo/tests/e2e/helpers/nested/example.test.ts"), false)
+  assert.equal(ignored.test("/repo/tests/e2e/web/account-first-run.spec.ts"), true)
+  assert.equal(ignored.test("/repo/tests/e2e/helpers/example.spec.ts"), true)
+  assert.ok(config.includes("${POSIX_ROOT_DIR}/tests/e2e/helpers/**/*.test.ts"))
+  assert.ok(config.includes('"<rootDir>/tests/e2e/helpers/.*\\\\.test\\\\.ts$"'))
+})
+
+test("every root install restores standalone npm downloads before postinstall", async () => {
+  for (const workflow of [
+    "test.yml",
+    "quality.yml",
+    "build-tauri.yml",
+    "release.yml",
+    "deploy.yml",
+    "compose-e2e.yml",
+    "report.yml",
+  ]) {
+    const { jobs } = parse(await readWorkflow(workflow))
+    for (const [name, job] of Object.entries(jobs)) {
+      const steps = job.steps ?? []
+      const install = steps.findIndex((step) => /pnpm install/.test(step.run ?? ""))
+      if (install < 0) continue
+      const cache = steps.findIndex(
+        (step) => step.uses?.startsWith("actions/cache@") && step.with.path === "~/.npm"
+      )
+      assert.ok(
+        cache >= 0 && cache < install,
+        `${workflow}:${name} restores npm downloads before root postinstall`
+      )
+      for (const token of [
+        "runner.os",
+        "runner.arch",
+        "node26",
+        "sidecar/vscode-ext-host/package-lock.json",
+        "sidecar/webclone/package-lock.json",
+      ]) {
+        assert.ok(
+          steps[cache].with.key.includes(token),
+          `${workflow}:${name} npm cache key includes ${token}`
+        )
+      }
+      assert.ok(steps[cache].with["restore-keys"].includes("runner.arch"))
+      assert.ok(!steps[install].run.includes("--ignore-scripts"))
+    }
+  }
 })

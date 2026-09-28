@@ -11,12 +11,11 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { ensureCogniaAccount, resetCogniaDb } from "../helpers/db-reset"
+import { resetCogniaDb } from "../helpers/db-reset"
 
 test.describe("web — first-run onboarding", () => {
   test.beforeEach(async ({ page }) => {
-    await ensureCogniaAccount(page)
-    await resetCogniaDb(page)
+    await resetCogniaDb(page, { onboarding: "fresh" })
   })
 
   test("@critical routes a fresh install into the flow and forks on the first screen", async ({

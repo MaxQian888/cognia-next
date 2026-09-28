@@ -218,3 +218,50 @@ test("both server compile stages carry Rust out-of-tree embedded inputs", () => 
     }
   }
 })
+
+for (const [file, stage] of [
+  ["Dockerfile.cognia-server", "brain-builder"],
+  ["deploy/compose/Dockerfile.web", "web-build"],
+]) {
+  test(`${file} exports a source-independent pnpm fetch layer before frozen offline linking`, () => {
+    const source = stageText(readFileSync(new URL(`../../${file}`, import.meta.url), "utf8"), stage)
+    const fetchAt = source.indexOf("RUN pnpm fetch --frozen-lockfile")
+    const installAt = source.indexOf("RUN pnpm install --frozen-lockfile --offline")
+    assert.ok(fetchAt >= 0 && installAt > fetchAt)
+    const fetchInputs = source.slice(0, fetchAt)
+    assert.match(fetchInputs, /^COPY pnpm-lock\.yaml pnpm-workspace\.yaml \.\/$/m)
+    assert.match(fetchInputs, /^COPY patches \.\/patches$/m)
+    assert.doesNotMatch(fetchInputs, /^COPY (?:package\.json|packages|scripts|\.) /m)
+    assert.doesNotMatch(fetchInputs, /--mount=type=cache/)
+    assert.ok(fetchInputs.includes('pnpm config set registry "${registry}"'))
+    const linkingInputs = source.slice(fetchAt, installAt)
+    for (const input of [
+      "package.json",
+      "packages",
+      "docs/package.json",
+      "mobile/package.json",
+      "scripts/postinstall.mjs",
+    ]) {
+      assert.ok(
+        linkingInputs.includes(`COPY ${input} `),
+        `${input} must be available for linking/lifecycle scripts`
+      )
+    }
+    assert.doesNotMatch(
+      source.slice(fetchAt, installAt + "RUN pnpm install --frozen-lockfile --offline".length),
+      /--ignore-scripts|--mount=type=cache/
+    )
+    assert.ok(source.indexOf("COPY . .", installAt) > installAt)
+  })
+}
+
+test("the root Docker context excludes local caches without swallowing source fixtures", () => {
+  const rules = readFileSync(new URL("../../.dockerignore", import.meta.url), "utf8").split("\n")
+  assert.ok(rules.includes(".cache"))
+  assert.ok(!rules.includes("**/out"))
+  const tracked = execFileSync("git", ["ls-files", "--", ".cache"], {
+    cwd: new URL("../../", import.meta.url),
+    encoding: "utf8",
+  })
+  assert.equal(tracked, "")
+})
