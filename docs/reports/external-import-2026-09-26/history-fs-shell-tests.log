@@ -1,0 +1,20 @@
+dependency libserde-0fd9bc8a385fa86e.rlib
+dependency libserde_json-ca3f73fe4f9eee27.rlib
+dependency librusqlite-bd1d4bbe597793f0.rlib
+dependency libdirs-ffd177ff9bf829d0.rlib
+dependency libchrono-f7ab702f6db5d5cd.rlib
+dependency libtauri-10e4007a6b9f176e.rlib
+dependency libcognia_agents-420efe21c1c0ff54.rlib
+shell_sha256 6d32c2b084dd22394f576514e185544509c953d4384a256d3951fb80c7d84687
+core_sha256 0abb0434b99dc5e46bbb430dfd9c8737e1ef4c2e3fdfc0bcad2e38526ad04f8d
+
+running 6 tests
+test shell_uses_real_tauri_version ... ok
+test shell::tests::external_store_command_rejects_renderer_supplied_roots ... ok
+test shell::tests::command_forwards_to_the_extracted_reader_and_tolerates_a_missing_install ... ok
+test shell::tests::history_roots_do_not_invent_relative_roots_without_home ... ok
+test shell::tests::history_roots_match_history_only_and_honor_relocation_without_globs ... ok
+test shell::tests::history_ui_gate_excludes_remote_and_embedded_views ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in 0.00s
+

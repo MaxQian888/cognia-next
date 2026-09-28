@@ -1,0 +1,41 @@
+  Using tsconfig file: tsconfig.build.json
+PASS node lib/session-import/fs-budget.test.ts
+  ● Console
+
+    console.log
+      [budget] codex listSessions:  readDir=12 stat=0 readTextFile=60 bytes=1.1MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:173:13)
+
+    console.log
+      [budget] codex importSessions K=8:  readDir=12 stat=0 readTextFile=60 bytes=1.1MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:184:13)
+
+    console.log
+      [budget] claude importSessions K=8:  readDir=0 stat=0 readTextFile=8 bytes=0.2MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:195:13)
+
+    console.log
+      [budget] cline importSessions K=8:  readDir=5 stat=0 readTextFile=60 bytes=0.0MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:205:13)
+
+    console.log
+      [budget] codex single-file import:  readDir=0 stat=0 readTextFile=1 bytes=0.0MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:219:13)
+
+    console.log
+      [budget] codex walk:  readDir=12 stat=0 readTextFile=60 bytes=1.1MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:229:13)
+
+PASS node lib/session-import/adapters/codex.test.ts
+
+Test Suites: 2 passed, 2 total
+Tests:       28 passed, 28 total
+Snapshots:   0 total
+Time:        0.719 s, estimated 1 s
+Ran all test suites matching lib/session-import/adapters/codex.test.ts|lib/session-import/fs-budget.test.ts.

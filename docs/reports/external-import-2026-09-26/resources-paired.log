@@ -1,0 +1,66 @@
+RESOURCE_PAIR {"ms":3324.350416,"sample":0,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":2867.156875,"sample":0,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1361.820167,"sample":1,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":782.7435409999999,"sample":1,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":882.997875,"sample":2,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":847.811417,"sample":2,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":754.180708,"sample":3,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":764.860541,"sample":3,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":794.487708,"sample":4,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":756.549417,"sample":4,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":791.161708,"sample":5,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":771.781292,"sample":5,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":763.036125,"sample":6,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":775.690125,"sample":6,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":751.756333,"sample":7,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1296.674417,"sample":7,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":764.430667,"sample":8,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":746.438583,"sample":8,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":778.588792,"sample":9,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1055.1981660000001,"sample":9,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":841.514417,"sample":10,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":770.109458,"sample":10,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":760.869667,"sample":11,"version":"current","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":752.940667,"sample":11,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":136.048875,"sample":0,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":1281.631041,"sample":0,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":765.181083,"sample":1,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":219.71933299999998,"sample":1,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":143.98129200000002,"sample":2,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":112.482916,"sample":2,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":114.767625,"sample":3,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":120.50233300000001,"sample":3,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":111.35050000000001,"sample":4,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":102.294917,"sample":4,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":105.17325,"sample":5,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":123.186542,"sample":5,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":119.583541,"sample":6,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":107.727208,"sample":6,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":106.551458,"sample":7,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":120.8055,"sample":7,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":114.563209,"sample":8,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":264.659583,"sample":8,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":98.213208,"sample":9,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":108.11295899999999,"sample":9,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":109.034166,"sample":10,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":98.91875,"sample":10,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":103.65425,"sample":11,"version":"current","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":110.953333,"sample":11,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+       55.74 real         1.30 user        10.36 sys
+          1385873408  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               91652  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+               20454  voluntary context switches
+              232796  involuntary context switches
+         93323116868  instructions retired
+         43007698105  cycles elapsed
+          1383794008  peak memory footprint

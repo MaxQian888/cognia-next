@@ -25,4 +25,30 @@ export const clineSessionSource = createPortableAgentSessionSource({
   contentHints: ["cline", "api_conversation_history", "isSubagent"],
   storeSource: "cline",
   defaultTitle: "Cline session",
+  normalizeDocument: (document, locatorSessionId) => {
+    if (!document || typeof document !== "object" || Array.isArray(document)) return [document]
+    const root = document as Record<string, unknown>
+    const raw = root.messages ?? root.events
+    if (!Array.isArray(raw)) return [document]
+    const isNative =
+      locatorSessionId.endsWith(".messages") ||
+      raw.some((item) => item && typeof item === "object" && "ts" in item)
+    if (!isNative) return [document]
+    return [
+      {
+        ...root,
+        sessionId:
+          root.sessionId ??
+          root.session_id ??
+          root.conversationId ??
+          root.id ??
+          locatorSessionId.replace(/\.messages$/, ""),
+        messages: raw.map((item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return item
+          const value = item as Record<string, unknown>
+          return { ...value, timestamp: value.timestamp ?? value.ts }
+        }),
+      },
+    ]
+  },
 })

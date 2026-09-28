@@ -1,0 +1,48 @@
+
+running 27 tests
+test session_import::tests::benchmark_native_opencode_import ... ignored
+test session_import::tests::candidate_db_paths_prefer_xdg_then_known_store_then_platform_fallback ... ok
+test session_import::tests::external_store_reader_rejects_unregistered_sources ... ok
+test session_import::tests::candidate_db_paths_are_deduped ... ok
+test session_import::tests::cursor_projection_finds_nested_composer_conversations ... ok
+test session_import::tests::cursor_projection_traverses_encoded_json_once ... ok
+test session_import::tests::missing_db_returns_empty_not_error ... ok
+test session_import::tests::missing_tables_yield_no_sessions ... ok
+test session_import::tests::opencode_missing_optional_tables_remain_compatible ... ok
+test session_import::tests::generic_session_store_preserves_parent_lifecycle_and_messages ... ok
+test session_import::tests::missing_message_ids_retain_shared_parts_for_every_valid_row ... ok
+test session_import::tests::builds_sessions_with_grouped_messages_and_parts ... ok
+test session_import::tests::duplicate_ids_preserve_complete_groups_and_stable_order ... ok
+test session_import::tests::history_directory_keeps_valid_siblings_of_unrepresentable_names ... FAILED
+test session_import::tests::history_fs_missing_is_distinct_from_io_errors ... ok
+test session_import::tests::history_fs_rejects_outside_paths_traversal_and_unsupported_text ... ok
+test session_import::tests::opencode_reports_schema_read_failure_instead_of_empty_history ... ok
+test session_import::tests::history_fs_reads_complete_text_and_preserves_wire_shapes ... ok
+test session_import::tests::public_copilot_reader_reads_sqlite_fixture ... ok
+test session_import::tests::history_fs_follows_only_confined_symlinks_and_keeps_directory_type_hints ... ok
+test session_import::tests::public_readers_report_corrupt_and_changed_schema_databases ... ok
+test session_import::tests::public_cursor_reader_reads_sqlite_fixture ... ok
+test session_import::tests::cursor_reader_keeps_rows_beyond_the_former_2000_row_limit ... ok
+test session_import::tests::public_cline_reader_reads_sqlite_fixture ... ok
+test session_import::tests::opencode_reports_existing_table_read_failure_instead_of_partial_history ... ok
+test session_import::tests::readonly_file_import_observes_later_commits_without_modifying_source ... ok
+test session_import::tests::cursor_reader_keeps_databases_beyond_the_former_200_database_limit ... ok
+
+failures:
+
+---- session_import::tests::history_directory_keeps_valid_siblings_of_unrepresentable_names stdout ----
+
+thread 'session_import::tests::history_directory_keeps_valid_siblings_of_unrepresentable_names' (1215015) panicked at crates/cognia-agent-state/src/session_import.rs:960:52:
+called `Result::unwrap()` on an `Err` value: Os { code: 92, kind: Uncategorized, message: "Illegal byte sequence" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    session_import::tests::history_directory_keeps_valid_siblings_of_unrepresentable_names
+
+test result: FAILED. 25 passed; 1 failed; 1 ignored; 0 measured; 61 filtered out; finished in 1.27s
+
+   Compiling cognia-agent-state v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-agent-state)
+    Finished `release` profile [optimized + debuginfo] target(s) in 23.07s
+     Running unittests src/lib.rs (target/release/deps/cognia_agent_state-faa0aaa292785696)
+error: test failed, to rerun pass `-p cognia-agent-state --lib`

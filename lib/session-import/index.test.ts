@@ -9,6 +9,8 @@ jest.mock("@/lib/memory/external/home", () => ({
 import { applyImported } from "@/lib/data/import-registry"
 import {
   __resetDynamicSessionSourcesForTesting,
+  attributePickedFiles,
+  getSessionSource,
   importSessions,
   listAllSessions,
   listSessionsForSource,
@@ -533,4 +535,122 @@ describe("session-import runner", () => {
       expect(convs.map((c) => c.session.importSource)).toEqual(["nested-src", "nested-src"])
     })
   })
+})
+
+describe("mixed picked corpus attribution", () => {
+  it("keeps portable source summaries and graph nodes isolated through import", async () => {
+    const make = (vendor: string, source: string) => ({
+      name: "history.json",
+      path: `/home/u/.${vendor}/${vendor === "qwen" ? "sessions" : "session-state"}/history.json`,
+      content: JSON.stringify({
+        id: source,
+        title: source,
+        messages: [{ role: "user", content: source }],
+      }),
+    })
+    const picked: SessionScanInput = {
+      ...input,
+      pickedFiles: [make("qwen", "qwen-only"), make("copilot", "copilot-only")],
+    }
+    attributePickedFiles(picked, ["copilot-cli", "qwen-code"])
+    const copilot = await listSessionsForSource("copilot-cli", picked)
+    const qwen = await listSessionsForSource("qwen-code", picked)
+    expect(copilot.map((s) => s.ref.originalSessionId)).toEqual(["copilot-only"])
+    expect(qwen.map((s) => s.ref.originalSessionId)).toEqual(["qwen-only"])
+    const conversations = await parseSessions(
+      [...copilot, ...qwen].map((s) => s.ref),
+      picked
+    )
+    expect(conversations.map((c) => [c.session.importSource, c.messages[0].parts[0]])).toEqual([
+      ["copilot-cli", { state: "done", type: "text", text: "copilot-only" }],
+      ["qwen-code", { state: "done", type: "text", text: "qwen-only" }],
+    ])
+  })
+
+  it("retains unrecognized auxiliary artifacts for a forced single source", async () => {
+    const picked: SessionScanInput = {
+      ...input,
+      pickedFiles: [{ name: "unknown.json", path: "/teams/t/config.json", content: "{}" }],
+    }
+    const adapter = source("forced", 0)
+    adapter.listSessions = jest.fn(async (received) => {
+      expect(received).toBe(picked)
+      return []
+    })
+    registerSessionSource(adapter)
+    attributePickedFiles(picked, ["forced"])
+    await listSessionsForSource("forced", picked)
+    expect(adapter.listSessions).toHaveBeenCalledTimes(1)
+  })
+})
+
+it("keeps Gemini child artifacts when another source is selected alongside them", async () => {
+  const jsonl = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n")
+  const picked: SessionScanInput = {
+    ...input,
+    pickedFiles: [
+      {
+        name: "main.jsonl",
+        path: "/picked/chats/main.jsonl",
+        content: jsonl([
+          { sessionId: "parent", projectHash: "p" },
+          { id: "u", type: "user", content: [{ text: "main" }] },
+        ]),
+      },
+      {
+        name: "child.jsonl",
+        path: "/picked/chats/parent/child.jsonl",
+        content: jsonl([
+          { sessionId: "child", kind: "subagent" },
+          { id: "c", type: "user", content: [{ text: "research" }] },
+        ]),
+      },
+      {
+        name: "other.json",
+        path: "/u/.copilot/session-state/other.json",
+        content: JSON.stringify({ id: "other", messages: [{ role: "user", content: "other" }] }),
+      },
+    ],
+  }
+  attributePickedFiles(picked, ["copilot-cli", "gemini-cli"])
+  const list = await listSessionsForSource("gemini-cli", picked)
+  expect(list).toHaveLength(1)
+  const conversations = await parseSessions(
+    list.map((s) => s.ref),
+    picked
+  )
+  expect(conversations.map((c) => c.session.id)).toEqual([
+    "import:gemini-cli:parent",
+    "import:gemini-cli:child",
+  ])
+})
+
+it("keeps Claude task dependencies ahead of weak vendor words in mixed picks", async () => {
+  const task = {
+    name: "1.json",
+    path: "/picked/tasks/team/1.json",
+    content: JSON.stringify({ id: "1", subject: "compare copilot and qwen", owner: "researcher" }),
+  }
+  const picked: SessionScanInput = {
+    ...input,
+    pickedFiles: [
+      task,
+      {
+        name: "c.json",
+        path: "/u/.copilot/session-state/c.json",
+        content: JSON.stringify({ id: "c", messages: [{ role: "user", content: "hi" }] }),
+      },
+    ],
+  }
+  const spy = jest.spyOn(getSessionSource("claude-code")!, "listSessions").mockResolvedValue([])
+  try {
+    attributePickedFiles(picked, ["copilot-cli", "claude-code"])
+    await listSessionsForSource("claude-code", picked)
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ pickedFiles: [task] }))
+    expect(
+      (await listSessionsForSource("copilot-cli", picked)).map((s) => s.ref.originalSessionId)
+    ).toEqual(["c"])
+  } finally {
+    spy.mockRestore()
+  }
 })

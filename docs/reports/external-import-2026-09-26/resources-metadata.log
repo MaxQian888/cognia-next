@@ -1,0 +1,52 @@
+    Blocking waiting for file lock on artifact directory
+   Compiling cognia-skills v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-skills)
+    Finished `release` profile [optimized + debuginfo] target(s) in 17.58s
+     Running unittests src/lib.rs (target/release/deps/cognia_skills-dd9d2f0c407f1563)
+
+running 1 test
+test native::tests::benchmark_native_skill_catalog ... RESOURCE_BENCH {"ms":855.249625,"sample":0,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":905.269416,"sample":1,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1075.899208,"sample":2,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1512.5776250000001,"sample":3,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1096.613166,"sample":4,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":924.9492499999999,"sample":5,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":888.005875,"sample":6,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":922.510541,"sample":7,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1294.96075,"sample":8,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1127.3901250000001,"sample":9,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":948.283125,"sample":10,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":986.938708,"sample":11,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":41.5385,"sample":0,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":41.312875,"sample":1,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":42.115834,"sample":2,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":48.049915999999996,"sample":3,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":46.257625,"sample":4,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":48.020125,"sample":5,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":46.295500000000004,"sample":6,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":47.770292,"sample":7,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":46.328458000000005,"sample":8,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":45.854709,"sample":9,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":46.219583,"sample":10,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":45.54625,"sample":11,"wire_bytes":44783361,"workload":"binary"}
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 85 filtered out; finished in 19.40s
+
+       37.51 real        37.87 user         6.52 sys
+          1004044288  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              220649  page reclaims
+               13222  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   3  signals received
+                6068  voluntary context switches
+              247125  involuntary context switches
+          3398984159  instructions retired
+          1736655325  cycles elapsed
+           172802744  peak memory footprint

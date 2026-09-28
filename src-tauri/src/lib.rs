@@ -707,6 +707,7 @@ pub fn run() {
             // local SQLite store read-only for the session importer.
             session_import::opencode_sessions_read,
             session_import::external_agent_sessions_read,
+            session_import::session_import_fs,
             session_import_watch::session_import_watch_start,
             session_import_watch::session_import_watch_stop,
             ccswitch::commands::ccswitch_status,
@@ -1845,6 +1846,15 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn session_history_filesystem_command_remains_registered() {
+        let production_source = include_str!("lib.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(production_source.contains("session_import::session_import_fs,"));
+    }
+
     #[test]
     fn structured_tracing_initializer_is_exposed_to_headless_binaries() {
         let initializer: fn() -> bool = super::init_structured_tracing;

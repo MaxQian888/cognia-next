@@ -6,6 +6,9 @@ import {
   getAcceptedPickerExtensions,
   getPickerOnlySources,
   getSessionSource,
+  getSourceWatchRoots,
+  isSourceWatchAuxiliaryPath,
+  isSourceWatchTranscriptPath,
   getSessionSources,
   registerSessionSource,
   unregisterSessionSourcesByPlugin,
@@ -132,6 +135,54 @@ describe("session-source registry", () => {
   })
 
   describe("detectSourceForPath", () => {
+    it("falls back from an empty Claude config root and limits transcript parsing", () => {
+      const source = getSessionSource("claude-code")!
+      const roots = { claudeConfigDir: "" } as never
+      expect(getSourceWatchRoots(source, "/home/u", roots)).toEqual(["/home/u/.claude"])
+      expect(
+        isSourceWatchAuxiliaryPath(source, "/home/u/.claude/tasks/team/1.json", "/home/u", roots)
+      ).toBe(true)
+      expect(
+        isSourceWatchTranscriptPath(source, "/home/u/.claude/projects/p/a.jsonl", "/home/u", roots)
+      ).toBe(true)
+      for (const path of [
+        "settings.json",
+        "plugins/cache/a.jsonl",
+        "projects/p/settings.json",
+        "projects-backup/p/a.jsonl",
+      ]) {
+        expect(
+          isSourceWatchTranscriptPath(source, `/home/u/.claude/${path}`, "/home/u", roots)
+        ).toBe(false)
+      }
+    })
+    it.each([
+      [".claude/teams/team/config.json", "claude-code"],
+      [".claude/tasks/team/1.json", "claude-code"],
+      [".copilot/session-store.db-wal", "copilot-cli"],
+      [".cursor/workspaces/hash/state.vscdb-wal", "cursor"],
+      [".cline/tasks/sessions.db-shm", "cline"],
+    ])("routes native store and auxiliary changes at %s", (path, id) => {
+      expect(detectSourceForPath(`/home/u/${path}`, "/home/u")?.id).toBe(id)
+    })
+
+    it("watches the configured Claude root and distinguishes graph dependencies", () => {
+      const source = getSessionSource("claude-code")!
+      const roots = { claudeConfigDir: "/custom/claude" } as never
+      expect(getSourceWatchRoots(source, "/home/u", roots)).toContain("/custom/claude")
+      expect(detectSourceForPath("/custom/claude/tasks/team/1.json", "/home/u", roots)?.id).toBe(
+        "claude-code"
+      )
+      expect(
+        isSourceWatchAuxiliaryPath(source, "/custom/claude/tasks/team/1.json", "/home/u", roots)
+      ).toBe(true)
+      expect(
+        isSourceWatchAuxiliaryPath(source, "/custom/claude/tasks-backup/1.json", "/home/u", roots)
+      ).toBe(false)
+      expect(
+        isSourceWatchAuxiliaryPath(source, "/custom/claude/projects/p/a.jsonl", "/home/u", roots)
+      ).toBe(false)
+    })
     it("maps a changed file to the source whose root contains it", () => {
       expect(detectSourceForPath("/home/u/.claude/projects/enc/a.jsonl", "/home/u")?.id).toBe(
         "claude-code"

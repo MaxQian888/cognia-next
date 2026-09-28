@@ -50,7 +50,7 @@ import type {
   SessionScanInput,
   SessionSummary,
 } from "../types"
-import { piActiveChain, piAlternateLeafIds, piChainToLeaf } from "./pi-tree"
+import { piSessionTree } from "./pi-tree"
 import { piCodec } from "../codecs/pi-codec"
 
 export const PI_SOURCE_ID = "pi"
@@ -496,8 +496,8 @@ export function parsePiSession(ref: SessionRef, content: string): ImportedConver
   const { header, entries, corruptLines } = parsePiSessionFile(content)
   const sessionId = importedSessionId(PI_SOURCE_ID, header?.id ?? ref.originalSessionId)
 
-  const chain = piActiveChain(entries)
-  const main = buildTurns(chain, sessionId)
+  const tree = piSessionTree(entries)
+  const main = buildTurns(tree.activeChain, sessionId)
 
   const createdAt = Date.parse(header?.timestamp ?? "") || Date.now()
   const updatedAt =
@@ -535,8 +535,8 @@ export function parsePiSession(ref: SessionRef, content: string): ImportedConver
   // Alternate leaves are branches the user can still reach in Pi's `/tree`.
   // They import as nested conversations rather than being discarded.
   const nested: ImportedConversation[] = []
-  for (const leafId of piAlternateLeafIds(entries)) {
-    const branchChain = piChainToLeaf(entries, leafId)
+  for (const leafId of tree.alternateLeafIds) {
+    const branchChain = tree.chainToLeaf(leafId)
     if (branchChain.length === 0) continue
     const branchSessionId = `${sessionId}:branch:${leafId}`
     const branch = buildTurns(branchChain, branchSessionId)

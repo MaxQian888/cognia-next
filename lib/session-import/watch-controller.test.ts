@@ -7,7 +7,9 @@ import {
   type SessionImportWatchDeps,
 } from "./watch-controller"
 
-type ChangedHandler = (event: { payload?: { path?: string } }) => void
+type ChangedHandler = (event: {
+  payload?: { path?: string; paths?: string[]; rescan?: boolean }
+}) => void
 
 function makeDeps(over: Partial<SessionImportWatchDeps> = {}) {
   let handler: ChangedHandler | null = null
@@ -23,7 +25,12 @@ function makeDeps(over: Partial<SessionImportWatchDeps> = {}) {
     runWatchImport: jest.fn(async () => ({ sessions: 0, messages: 0 })),
     ...over,
   }
-  return { deps, fire: (path?: string) => handler?.({ payload: { path } }), unlisten }
+  return {
+    deps,
+    fire: (path?: string) => handler?.({ payload: { path } }),
+    fireBatch: (paths: string[], rescan = false) => handler?.({ payload: { paths, rescan } }),
+    unlisten,
+  }
 }
 
 afterEach(() => {
@@ -32,6 +39,75 @@ afterEach(() => {
 })
 
 describe("session-import watch controller", () => {
+  it("imports every distinct path in a batch and rescans once after overflow", async () => {
+    const { deps, fireBatch } = makeDeps()
+    await startSessionImportWatch({ deps })
+    ;(deps.runWatchImport as jest.Mock).mockClear()
+    fireBatch(["a.jsonl", "b.jsonl", "a.jsonl"])
+    expect(deps.runWatchImport).toHaveBeenCalledTimes(2)
+    expect(deps.runWatchImport).toHaveBeenCalledWith({
+      changedPath: "a.jsonl",
+      projectId: undefined,
+    })
+    expect(deps.runWatchImport).toHaveBeenCalledWith({
+      changedPath: "b.jsonl",
+      projectId: undefined,
+    })
+    fireBatch(["partial.jsonl"], true)
+    expect(deps.runWatchImport).toHaveBeenLastCalledWith({
+      changedPath: undefined,
+      projectId: undefined,
+    })
+    await stopSessionImportWatch(deps)
+    fireBatch(["stale.jsonl"])
+    expect(deps.runWatchImport).toHaveBeenCalledTimes(3)
+  })
+
+  it("catches up offline changes once after successful installation", async () => {
+    const { deps } = makeDeps()
+    await startSessionImportWatch({ projectId: "workspace", deps })
+    expect(deps.runWatchImport).toHaveBeenCalledTimes(1)
+    expect(deps.runWatchImport).toHaveBeenCalledWith({ projectId: "workspace" })
+    await startSessionImportWatch({ projectId: "retarget", deps })
+    expect(deps.runWatchImport).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not catch up or keep a listener when native start finds no roots", async () => {
+    const { deps, unlisten } = makeDeps({ invoke: jest.fn(async () => false) })
+    await startSessionImportWatch({ deps })
+    expect(isSessionImportWatchActive()).toBe(false)
+    expect(deps.runWatchImport).not.toHaveBeenCalled()
+    expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps a successful watch installed when background catch-up fails", async () => {
+    const { deps } = makeDeps({
+      runWatchImport: jest.fn(async () => {
+        throw new Error("database busy")
+      }),
+    })
+    await expect(startSessionImportWatch({ deps })).resolves.toBeUndefined()
+    await Promise.resolve()
+    expect(isSessionImportWatchActive()).toBe(true)
+  })
+
+  it("subscribes before native start and cleans up a failed start", async () => {
+    const order: string[] = []
+    const unlisten = jest.fn()
+    const { deps } = makeDeps({
+      listen: jest.fn(async () => {
+        order.push("listen")
+        return unlisten
+      }),
+      invoke: jest.fn(async () => {
+        order.push("start")
+        throw new Error("native failed")
+      }),
+    })
+    await expect(startSessionImportWatch({ deps })).rejects.toThrow("native failed")
+    expect(order).toEqual(["listen", "start"])
+    expect(unlisten).toHaveBeenCalledTimes(1)
+  })
   it("is a no-op off Tauri", async () => {
     const { deps } = makeDeps({ isTauri: jest.fn(() => false) })
     await startSessionImportWatch({ deps })

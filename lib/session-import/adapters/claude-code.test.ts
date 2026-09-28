@@ -433,6 +433,28 @@ describe("claudeCodeSessionSource", () => {
     readTextFile: async () => "",
   }
 
+  it("never enriches a picked transcript with unselected local team artifacts", async () => {
+    const localFs = {
+      ...fs,
+      exists: jest.fn(async () => true),
+      readDir: jest.fn(async () => []),
+      readTextFile: jest.fn(async () => "{}"),
+    }
+    const input: SessionScanInput = {
+      fs: localFs,
+      home: "/home",
+      pickedFiles: [{ name: "sess-1.jsonl", path: "/export/sess-1.jsonl", content: CONTENT }],
+    }
+    const graph = await claudeCodeSessionSource.parseGraph!(
+      { sourceId: "claude-code", originalSessionId: "sess-1", locator: "/export/sess-1.jsonl" },
+      input
+    )
+    expect(graph.nodes).toHaveLength(1)
+    expect(localFs.exists).not.toHaveBeenCalled()
+    expect(localFs.readDir).not.toHaveBeenCalled()
+    expect(localFs.readTextFile).not.toHaveBeenCalled()
+  })
+
   it("advertises the projects scan root", () => {
     expect(claudeCodeSessionSource.scanRoots("/home/u")).toEqual([
       expect.stringContaining(".claude"),
@@ -593,6 +615,153 @@ describe("claudeCodeSessionSource", () => {
     )
     expect(conversation.nested).toHaveLength(1)
     expect(conversation.nested?.[0].messages).toHaveLength(4)
+  })
+
+  it.each([
+    {
+      label: "agent ID matches before the display name",
+      member: { name: "worker", agentId: "worker@team" },
+      tasks: [
+        { id: "first", owner: "worker@team", status: "completed" },
+        { id: "second", owner: "worker", status: "failed" },
+      ],
+      taskId: "first",
+      status: "completed",
+    },
+    {
+      label: "display name matches before the agent ID",
+      member: { name: "worker", agentId: "worker@team" },
+      tasks: [
+        { id: "first", owner: "worker", status: "failed" },
+        { id: "second", owner: "worker@team", status: "completed" },
+      ],
+      taskId: "first",
+      status: "failed",
+    },
+    {
+      label: "missing agent ID retains the first unowned match",
+      member: { name: "worker" },
+      tasks: [
+        { id: "first", status: "pending" },
+        { id: "second", owner: "worker", status: "completed" },
+      ],
+      taskId: "first",
+      status: "pending",
+    },
+    {
+      label: "missing display name retains the first unowned match",
+      member: { agentId: "worker@team" },
+      tasks: [
+        { id: "first", status: "waiting" },
+        { id: "second", owner: "worker@team", status: "completed" },
+      ],
+      taskId: "first",
+      status: "waiting",
+    },
+    {
+      label: "duplicate task IDs retain their existing final owner lookup",
+      member: { name: "worker", agentId: "worker@team" },
+      tasks: [
+        { id: "shared", owner: "former-worker", status: "pending" },
+        { id: "shared", owner: "worker", status: "completed" },
+      ],
+      taskId: "shared",
+      status: "pending",
+    },
+    {
+      label: "unmatched owners preserve member status",
+      member: { name: "worker", agentId: "worker@team" },
+      tasks: [{ id: "other", owner: "another-worker", status: "completed" }],
+      taskId: undefined,
+      status: "running",
+    },
+  ])("preserves first-task semantics when $label", async ({ member, tasks, taskId, status }) => {
+    const input: SessionScanInput = {
+      fs,
+      home: "",
+      pickedFiles: [
+        { name: "sess-1.jsonl", path: "/p/sess-1.jsonl", content: CONTENT },
+        {
+          name: "config.json",
+          path: "/home/.claude/teams/team/config.json",
+          content: JSON.stringify({
+            name: "team",
+            leadSessionId: "sess-1",
+            members: [{ ...member, sessionId: "worker-session", status: "running" }],
+          }),
+        },
+        ...tasks.map((task, index) => ({
+          name: `${index}.json`,
+          path: `/home/.claude/tasks/team/${index}.json`,
+          content: JSON.stringify(task),
+        })),
+      ],
+    }
+    const graph = await claudeCodeSessionSource.parseGraph!(
+      { sourceId: "claude-code", originalSessionId: "sess-1", locator: "/p/sess-1.jsonl" },
+      input
+    )
+    const worker = graph.nodes.find(
+      (node) => node.session.header.runtimeBinding?.nativeSessionId === "worker-session"
+    )
+    expect(worker?.session.header.lineage?.taskId).toBe(taskId)
+    expect(worker?.session.header.lifecycle?.status).toBe(status)
+  })
+
+  it("reloads changed transcript and team task state for a fresh scan input", async () => {
+    const files: Record<string, string> = {
+      "/home/.claude/projects/p/sess-1.jsonl": CONTENT,
+      "/home/.claude/teams/team/config.json": JSON.stringify({
+        name: "team",
+        leadSessionId: "sess-1",
+        members: [{ name: "worker", agentId: "worker@team", sessionId: "worker-session" }],
+      }),
+      "/home/.claude/tasks/team/1.json": JSON.stringify({
+        id: "task-1",
+        owner: "worker",
+        status: "pending",
+      }),
+    }
+    const input = (): SessionScanInput => ({
+      home: "/home",
+      fs: {
+        async exists(path) {
+          return Object.keys(files).some((file) => file === path || file.startsWith(`${path}/`))
+        },
+        async readDir(path) {
+          return [
+            ...new Set(
+              Object.keys(files)
+                .filter((file) => file.startsWith(`${path}/`))
+                .map((file) => file.slice(path.length + 1).split("/")[0])
+            ),
+          ]
+        },
+        async stat(path) {
+          return { size: files[path]?.length ?? 0, isFile: path in files }
+        },
+        async readTextFile(path) {
+          return files[path]
+        },
+      },
+    })
+    const ref = {
+      sourceId: "claude-code",
+      originalSessionId: "sess-1",
+      locator: "/home/.claude/projects/p/sess-1.jsonl",
+    }
+    const first = await claudeCodeSessionSource.parseGraph!(ref, input())
+    files[ref.locator] = CONTENT.replace("Hello world", "Fresh transcript")
+    files["/home/.claude/tasks/team/1.json"] = JSON.stringify({
+      id: "task-1",
+      owner: "worker",
+      status: "completed",
+    })
+    const second = await claudeCodeSessionSource.parseGraph!(ref, input())
+    expect(first.nodes[0].conversation.session.title).toBe("Hello world")
+    expect(second.nodes[0].conversation.session.title).toBe("Fresh transcript")
+    expect(first.nodes[1].session.header.lifecycle?.status).toBe("pending")
+    expect(second.nodes[1].session.header.lifecycle?.status).toBe("completed")
   })
 
   it("imports Agent Teams members, dependencies, and lifecycle from team/task artifacts", async () => {

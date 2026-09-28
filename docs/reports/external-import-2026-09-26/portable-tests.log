@@ -1,0 +1,12 @@
+  Using tsconfig file: tsconfig.build.json
+PASS node lib/session-import/adapters/qwen-code.test.ts
+PASS node lib/session-import/adapters/copilot-cli.test.ts
+PASS node lib/session-import/adapters/cursor.test.ts
+PASS node lib/session-import/adapters/cline.test.ts
+PASS node lib/session-import/adapters/portable-agent-source.test.ts
+
+Test Suites: 5 passed, 5 total
+Tests:       24 passed, 24 total
+Snapshots:   0 total
+Time:        1.945 s
+Ran all test suites matching lib/session-import/adapters/portable-agent-source.test.ts|lib/session-import/adapters/qwen-code.test.ts|lib/session-import/adapters/cline.test.ts|lib/session-import/adapters/copilot-cli.test.ts|lib/session-import/adapters/cursor.test.ts.

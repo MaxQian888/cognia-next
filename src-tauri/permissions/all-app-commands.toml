@@ -840,6 +840,7 @@ commands.allow = [
   "send_to_external_agent",
   "server_ops_events_close",
   "server_ops_events_open",
+  "session_import_fs",
   "session_import_watch_start",
   "session_import_watch_stop",
   "set_close_behavior",

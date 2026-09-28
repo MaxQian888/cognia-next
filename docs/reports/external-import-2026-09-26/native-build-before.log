@@ -1,0 +1,3 @@
+   Compiling cognia-agent-state v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-agent-state)
+    Finished `release` profile [optimized + debuginfo] target(s) in 22.23s
+  Executable unittests src/lib.rs (target/release/deps/cognia_agent_state-faa0aaa292785696)

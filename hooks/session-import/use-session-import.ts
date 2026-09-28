@@ -13,6 +13,7 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { pickAndReadFiles } from "@/lib/files/file-bridge"
 import { createLogger } from "@cognia/logging"
 import {
+  attributePickedFiles,
   detectSourcesForFiles,
   getAcceptedPickerExtensions as getAcceptedPickerExtensionsDefault,
   importSessions as importSessionsDefault,
@@ -136,6 +137,7 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
         // mixed selection (a Claude Code transcript plus a Codex rollout) used
         // to import one and silently drop the rest.
         const resolvedSources = sourceId ? [sourceId] : detect(files)
+        attributePickedFiles(input, resolvedSources)
         const perSource = await Promise.all(
           resolvedSources.map(async (id) => {
             try {

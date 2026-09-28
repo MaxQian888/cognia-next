@@ -1,0 +1,293 @@
+{
+  "before": {
+    "samples": [
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 117.69200000000001,
+        "output_bytes": 61635619,
+        "sample": 0,
+        "total_ms": 140.786584,
+        "warmup": true
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 97.54312499999999,
+        "output_bytes": 61635619,
+        "sample": 1,
+        "total_ms": 120.57475,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 99.199208,
+        "output_bytes": 61635619,
+        "sample": 2,
+        "total_ms": 122.538042,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 79.01474999999999,
+        "output_bytes": 61635619,
+        "sample": 3,
+        "total_ms": 101.848375,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 86.433208,
+        "output_bytes": 61635619,
+        "sample": 4,
+        "total_ms": 111.581875,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 81.596167,
+        "output_bytes": 61635619,
+        "sample": 5,
+        "total_ms": 107.28025,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 80.957666,
+        "output_bytes": 61635619,
+        "sample": 6,
+        "total_ms": 104.669916,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 78.148917,
+        "output_bytes": 61635619,
+        "sample": 7,
+        "total_ms": 101.060125,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 75.97804099999999,
+        "output_bytes": 61635619,
+        "sample": 8,
+        "total_ms": 99.03070799999999,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 76.861042,
+        "output_bytes": 61635619,
+        "sample": 9,
+        "total_ms": 98.83604199999999,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 79.78225,
+        "output_bytes": 61635619,
+        "sample": 10,
+        "total_ms": 103.03783299999999,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 79.63737499999999,
+        "output_bytes": 61635619,
+        "sample": 11,
+        "total_ms": 102.44420799999999,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 85.538084,
+        "output_bytes": 61635619,
+        "sample": 12,
+        "total_ms": 107.91145900000001,
+        "warmup": false
+      }
+    ],
+    "stats": {
+      "total_ms": {
+        "median": 103.85387449999999,
+        "mad": 3.7419800000000123,
+        "min": 98.83604199999999,
+        "max": 122.538042
+      },
+      "materialize_ms": {
+        "median": 80.369958,
+        "mad": 2.8649784999999994,
+        "min": 75.97804099999999,
+        "max": 99.199208
+      },
+      "maximum_resident_set_bytes": 1109934080,
+      "peak_memory_footprint_bytes": 853017896
+    }
+  },
+  "after": {
+    "samples": [
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 36.32575,
+        "output_bytes": 61635619,
+        "sample": 0,
+        "total_ms": 61.4675,
+        "warmup": true
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 34.881958,
+        "output_bytes": 61635619,
+        "sample": 1,
+        "total_ms": 60.123667,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 31.041083,
+        "output_bytes": 61635619,
+        "sample": 2,
+        "total_ms": 55.883833,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 51.2455,
+        "output_bytes": 61635619,
+        "sample": 3,
+        "total_ms": 78.46537500000001,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 32.436166,
+        "output_bytes": 61635619,
+        "sample": 4,
+        "total_ms": 57.437916,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 31.688083,
+        "output_bytes": 61635619,
+        "sample": 5,
+        "total_ms": 57.241125,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 33.240417,
+        "output_bytes": 61635619,
+        "sample": 6,
+        "total_ms": 58.527875,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 31.532999999999998,
+        "output_bytes": 61635619,
+        "sample": 7,
+        "total_ms": 57.061665999999995,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 33.725209,
+        "output_bytes": 61635619,
+        "sample": 8,
+        "total_ms": 60.196959,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 36.985,
+        "output_bytes": 61635619,
+        "sample": 9,
+        "total_ms": 64.96737499999999,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 34.565417000000004,
+        "output_bytes": 61635619,
+        "sample": 10,
+        "total_ms": 61.178999999999995,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 47.132167,
+        "output_bytes": 61635619,
+        "sample": 11,
+        "total_ms": 73.597542,
+        "warmup": false
+      },
+      {
+        "fixture_bytes": 33656832,
+        "fnv1a64": "eb9a3027be54f2cf",
+        "materialize_ms": 36.173249999999996,
+        "output_bytes": 61635619,
+        "sample": 12,
+        "total_ms": 63.278709,
+        "warmup": false
+      }
+    ],
+    "stats": {
+      "total_ms": {
+        "median": 60.160313,
+        "mad": 3.008917500000006,
+        "min": 55.883833,
+        "max": 78.46537500000001
+      },
+      "materialize_ms": {
+        "median": 34.145313,
+        "mad": 2.2425834999999985,
+        "min": 31.041083,
+        "max": 51.2455
+      },
+      "maximum_resident_set_bytes": 850280448,
+      "peak_memory_footprint_bytes": 767788112
+    }
+  },
+  "delta": {
+    "total_ms": {
+      "median_reduction_ms": 43.69356149999999,
+      "reduction_percent": 42.07215350448961,
+      "twice_max_mad_ms": 7.483960000000025
+    },
+    "materialize_ms": {
+      "median_reduction_ms": 46.224644999999995,
+      "reduction_percent": 57.51483035489454,
+      "twice_max_mad_ms": 5.729956999999999
+    }
+  },
+  "identity": {
+    "output_bytes": 61635619,
+    "fnv1a64": "eb9a3027be54f2cf",
+    "fixture_bytes": 33656832
+  }
+}

@@ -1233,17 +1233,41 @@ async function collectCodexArtifacts(input: SessionScanInput): Promise<ParsedSes
  * weakly like `collectSessions` in `opencode.ts`: a fresh scan builds a fresh
  * input, so there is no staleness across runs and nothing to invalidate.
  */
-const codexArtifactsCache = new WeakMap<SessionScanInput, Promise<ParsedSession[]>>()
+interface CodexArtifactIndex {
+  byId: Map<string, ParsedSession>
+  children: Map<string, ParsedSession[]>
+}
 
-function parseCodexArtifacts(input: SessionScanInput): Promise<ParsedSession[]> {
+function indexCodexArtifacts(artifacts: ParsedSession[]): CodexArtifactIndex {
+  const index: CodexArtifactIndex = { byId: new Map(), children: new Map() }
+  for (const artifact of artifacts) addCodexArtifact(index, artifact)
+  return index
+}
+
+function addCodexArtifact(index: CodexArtifactIndex, artifact: ParsedSession): void {
+  // Last duplicate ID wins lookup, while every child artifact keeps its
+  // original position. Retain orphan buckets so a late parent can attach them.
+  index.byId.set(artifact.originalSessionId, artifact)
+  if (artifact.parentNativeSessionId) {
+    const siblings = index.children.get(artifact.parentNativeSessionId) ?? []
+    siblings.push(artifact)
+    index.children.set(artifact.parentNativeSessionId, siblings)
+  }
+}
+
+const codexArtifactsCache = new WeakMap<SessionScanInput, Promise<CodexArtifactIndex>>()
+
+function parseCodexArtifacts(input: SessionScanInput): Promise<CodexArtifactIndex> {
   const cached = codexArtifactsCache.get(input)
   if (cached) return cached
   // Evict a FAILED read so the next attempt actually retries — a rejected
   // promise left in the cache would poison every later ref on this input.
-  const guarded = collectCodexArtifacts(input).catch((error: unknown) => {
-    codexArtifactsCache.delete(input)
-    throw error
-  })
+  const guarded = collectCodexArtifacts(input)
+    .then(indexCodexArtifacts)
+    .catch((error: unknown) => {
+      codexArtifactsCache.delete(input)
+      throw error
+    })
   codexArtifactsCache.set(input, guarded)
   return guarded
 }
@@ -1355,10 +1379,15 @@ export const codexSessionSource: AgentSessionSourceAdapter = {
     // `singleFile` (fs-watch path): graph just the changed rollout. Children
     // are skipped — their own file events import them — so one append does
     // not cost a full corpus scan+parse.
-    const artifacts = opts?.singleFile
-      ? [parseCodexRollout(await readRolloutContent(ref, input), ref.locator)]
+    const singleArtifact = opts?.singleFile
+      ? parseCodexRollout(await readRolloutContent(ref, input), ref.locator)
+      : undefined
+    // Keep ID/child indexes for the same lifetime as the already-cached parse.
+    // Rebuilding them for every selected ref made large batch imports quadratic.
+    const index = singleArtifact
+      ? indexCodexArtifacts([singleArtifact])
       : await parseCodexArtifacts(input)
-    const parsedById = new Map(artifacts.map((item) => [item.originalSessionId, item]))
+    const { byId: parsedById, children } = index
     // The selected session is almost always already in the cached artifact
     // pass — re-reading + re-parsing its file (up to hundreds of MB) per ref
     // was the second half of the freeze. Only a ref the scan didn't produce
@@ -1366,26 +1395,17 @@ export const codexSessionSource: AgentSessionSourceAdapter = {
     // read.
     let selected = ref.originalSessionId ? parsedById.get(ref.originalSessionId) : undefined
     if (!selected) {
-      // singleFile: artifacts[0] is this ref's own parse — reuse it. Corpus
+      // singleFile: singleArtifact is this ref's own parse — reuse it. Corpus
       // mode: the ref wasn't in the scan (stale summary, or a picked file
       // outside the roots) — read it directly rather than substitute another
       // corpus member.
       selected =
-        (opts?.singleFile ? artifacts[0] : undefined) ??
-        parseCodexRollout(await readRolloutContent(ref, input), ref.locator)
+        singleArtifact ?? parseCodexRollout(await readRolloutContent(ref, input), ref.locator)
       if (!parsedById.has(selected.originalSessionId)) {
-        artifacts.push(selected)
-        parsedById.set(selected.originalSessionId, selected)
+        addCodexArtifact(index, selected)
       }
     }
     const root = rootOf(selected, parsedById)
-    const children = new Map<string, ParsedSession[]>()
-    for (const item of artifacts) {
-      if (!item.parentNativeSessionId || !parsedById.has(item.parentNativeSessionId)) continue
-      const siblings = children.get(item.parentNativeSessionId) ?? []
-      siblings.push(item)
-      children.set(item.parentNativeSessionId, siblings)
-    }
     const graph = buildImportedSessionGraph(conversationTree(root, children), {
       sourceRuntime: this.id,
       sourceVersion: root.sourceVersion || selected.sourceVersion || this.verifiedVersion,

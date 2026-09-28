@@ -1,0 +1,33 @@
+   Compiling cognia-agent-state v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-agent-state)
+    Finished `release` profile [optimized + debuginfo] target(s) in 19.70s
+     Running unittests src/lib.rs (target/release/deps/cognia_agent_state-faa0aaa292785696)
+
+running 2 tests
+test session_import::tests::cursor_reader_keeps_databases_beyond_the_former_200_database_limit ... FAILED
+test session_import::tests::cursor_reader_keeps_rows_beyond_the_former_2000_row_limit ... FAILED
+
+failures:
+
+---- session_import::tests::cursor_reader_keeps_databases_beyond_the_former_200_database_limit stdout ----
+
+thread 'session_import::tests::cursor_reader_keeps_databases_beyond_the_former_200_database_limit' (985767) panicked at crates/cognia-agent-state/src/session_import.rs:1123:9:
+assertion `left == right` failed
+  left: 200
+ right: 201
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- session_import::tests::cursor_reader_keeps_rows_beyond_the_former_2000_row_limit stdout ----
+
+thread 'session_import::tests::cursor_reader_keeps_rows_beyond_the_former_2000_row_limit' (985777) panicked at crates/cognia-agent-state/src/session_import.rs:1105:9:
+assertion `left == right` failed
+  left: 2000
+ right: 2005
+
+
+failures:
+    session_import::tests::cursor_reader_keeps_databases_beyond_the_former_200_database_limit
+    session_import::tests::cursor_reader_keeps_rows_beyond_the_former_2000_row_limit
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 78 filtered out; finished in 0.46s
+
+error: test failed, to rerun pass `-p cognia-agent-state --lib`

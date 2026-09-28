@@ -1,0 +1,723 @@
+{
+  "revision": "5d48f846142312c8d344083b5240d32400b36946",
+  "node": "v26.5.0",
+  "cpu": "Apple M4 Pro",
+  "hashes": {
+    "baseline": "73c8fa2fcf256d331f2b54400fe33a1518ac1506c968dbd717d564b806564a07",
+    "candidate": "cb0d49077d0c7dc2b3a32ec303feeda292f64d8acfd25f8c95511103fcb759e0"
+  },
+  "workloads": {
+    "long": {
+      "bytes": 3214073,
+      "files": 1,
+      "batch": 1,
+      "outputHash": "bd2753858f30b288a54af2e7aa27da321f67df614930c1d784dd892cb8215fbd",
+      "samples": {
+        "baseline": [
+          {
+            "ms": 56.034208000000035,
+            "heapDelta": 25056672,
+            "retainedHeapDelta": 113864,
+            "rssDelta": 131072
+          },
+          {
+            "ms": 52.365542000000005,
+            "heapDelta": 43781936,
+            "retainedHeapDelta": -29408,
+            "rssDelta": 147456
+          },
+          {
+            "ms": 52.501041999999984,
+            "heapDelta": 43024120,
+            "retainedHeapDelta": 63680,
+            "rssDelta": 98304
+          },
+          {
+            "ms": 54.69516700000008,
+            "heapDelta": 16271056,
+            "retainedHeapDelta": 16104,
+            "rssDelta": 131072
+          },
+          {
+            "ms": 51.095417,
+            "heapDelta": 44182808,
+            "retainedHeapDelta": 79000,
+            "rssDelta": 163840
+          },
+          {
+            "ms": 63.64108300000021,
+            "heapDelta": 43530880,
+            "retainedHeapDelta": -7048,
+            "rssDelta": 376832
+          },
+          {
+            "ms": 54.55216599999994,
+            "heapDelta": 44226240,
+            "retainedHeapDelta": 122816,
+            "rssDelta": 114688
+          },
+          {
+            "ms": 50.79891599999996,
+            "heapDelta": 43245792,
+            "retainedHeapDelta": -37984,
+            "rssDelta": 147456
+          },
+          {
+            "ms": 52.592083,
+            "heapDelta": 43681344,
+            "retainedHeapDelta": 93696,
+            "rssDelta": 163840
+          },
+          {
+            "ms": 52.0674590000001,
+            "heapDelta": 44333392,
+            "retainedHeapDelta": 4616,
+            "rssDelta": 180224
+          },
+          {
+            "ms": 53.923,
+            "heapDelta": 43027336,
+            "retainedHeapDelta": 106000,
+            "rssDelta": 81920
+          },
+          {
+            "ms": 48.656124999999975,
+            "heapDelta": 41183448,
+            "retainedHeapDelta": -59248,
+            "rssDelta": 294912
+          }
+        ],
+        "candidate": [
+          {
+            "ms": 55.986125000000015,
+            "heapDelta": 43432296,
+            "retainedHeapDelta": 114168,
+            "rssDelta": 671744
+          },
+          {
+            "ms": 50.44662500000004,
+            "heapDelta": 40911928,
+            "retainedHeapDelta": -33752,
+            "rssDelta": 278528
+          },
+          {
+            "ms": 52.885583,
+            "heapDelta": 42942432,
+            "retainedHeapDelta": 74280,
+            "rssDelta": 114688
+          },
+          {
+            "ms": 52.02516700000001,
+            "heapDelta": 42445424,
+            "retainedHeapDelta": 297104,
+            "rssDelta": 131072
+          },
+          {
+            "ms": 49.30799999999999,
+            "heapDelta": 40603952,
+            "retainedHeapDelta": 53576,
+            "rssDelta": 147456
+          },
+          {
+            "ms": 46.79533300000003,
+            "heapDelta": 40684408,
+            "retainedHeapDelta": -5064,
+            "rssDelta": 131072
+          },
+          {
+            "ms": 54.76350000000002,
+            "heapDelta": 42257840,
+            "retainedHeapDelta": 649704,
+            "rssDelta": 147456
+          },
+          {
+            "ms": 60.144374999999854,
+            "heapDelta": 39860200,
+            "retainedHeapDelta": 8888,
+            "rssDelta": 475136
+          },
+          {
+            "ms": 50.15583300000003,
+            "heapDelta": 41310008,
+            "retainedHeapDelta": 78208,
+            "rssDelta": 131072
+          },
+          {
+            "ms": 51.80829099999983,
+            "heapDelta": 42104720,
+            "retainedHeapDelta": 9144,
+            "rssDelta": 196608
+          },
+          {
+            "ms": 87.77112499999998,
+            "heapDelta": 40465272,
+            "retainedHeapDelta": 98504,
+            "rssDelta": 147456
+          },
+          {
+            "ms": 47.46537500000022,
+            "heapDelta": 37352608,
+            "retainedHeapDelta": -84712,
+            "rssDelta": 917504
+          }
+        ]
+      },
+      "summary": {
+        "baseline": {
+          "timeMs": {
+            "median": 52.54656249999999,
+            "mad": 1.599396000000013
+          },
+          "retainedHeapBytes": {
+            "median": 39892,
+            "mad": 59956
+          }
+        },
+        "candidate": {
+          "timeMs": {
+            "median": 51.91672899999992,
+            "mad": 2.7277500000000146
+          },
+          "retainedHeapBytes": {
+            "median": 63928,
+            "mad": 54912
+          }
+        }
+      }
+    },
+    "large-tools": {
+      "bytes": 10326591,
+      "files": 3,
+      "batch": 1,
+      "outputHash": "42010406466302d9ee1e68306e0b7bbac4e1beedacd864dc992dd525e3452152",
+      "samples": {
+        "baseline": [
+          {
+            "ms": 166.89733300000034,
+            "heapDelta": 55263544,
+            "retainedHeapDelta": 76600,
+            "rssDelta": 10452992
+          },
+          {
+            "ms": 164.649042,
+            "heapDelta": 57943128,
+            "retainedHeapDelta": -117576,
+            "rssDelta": 10338304
+          },
+          {
+            "ms": 175.86974999999984,
+            "heapDelta": 57029768,
+            "retainedHeapDelta": -1091264,
+            "rssDelta": 10338304
+          },
+          {
+            "ms": 143.10991700000068,
+            "heapDelta": 28137352,
+            "retainedHeapDelta": -32904,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 162.6279169999998,
+            "heapDelta": 58017720,
+            "retainedHeapDelta": 9336,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 160.9434170000004,
+            "heapDelta": 58141272,
+            "retainedHeapDelta": 48440,
+            "rssDelta": 10436608
+          },
+          {
+            "ms": 163.9541250000002,
+            "heapDelta": 58075872,
+            "retainedHeapDelta": 848,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 162.4466250000005,
+            "heapDelta": 57959304,
+            "retainedHeapDelta": -37496,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 161.50020799999947,
+            "heapDelta": 58006368,
+            "retainedHeapDelta": -1032,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 175.05954199999996,
+            "heapDelta": 27942496,
+            "retainedHeapDelta": -79704,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 180.1780000000008,
+            "heapDelta": 58108008,
+            "retainedHeapDelta": 20208,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 163.33537500000057,
+            "heapDelta": 58072152,
+            "retainedHeapDelta": 30944,
+            "rssDelta": 10354688
+          }
+        ],
+        "candidate": [
+          {
+            "ms": 160.04362500000025,
+            "heapDelta": 58143536,
+            "retainedHeapDelta": -158320,
+            "rssDelta": 10780672
+          },
+          {
+            "ms": 164.65629199999967,
+            "heapDelta": 58156192,
+            "retainedHeapDelta": 79272,
+            "rssDelta": 10371072
+          },
+          {
+            "ms": 164.08508400000028,
+            "heapDelta": 57926496,
+            "retainedHeapDelta": -64840,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 162.03133399999933,
+            "heapDelta": 58047616,
+            "retainedHeapDelta": 23704,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 160.7939580000002,
+            "heapDelta": 57945024,
+            "retainedHeapDelta": -40096,
+            "rssDelta": 10354688
+          },
+          {
+            "ms": 162.24775000000045,
+            "heapDelta": 58085936,
+            "retainedHeapDelta": 35520,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 162.40879099999984,
+            "heapDelta": 57960808,
+            "retainedHeapDelta": -25576,
+            "rssDelta": 10403840
+          },
+          {
+            "ms": 185.7313749999994,
+            "heapDelta": 58020448,
+            "retainedHeapDelta": -54000,
+            "rssDelta": 10338304
+          },
+          {
+            "ms": 162.0960410000007,
+            "heapDelta": 57929872,
+            "retainedHeapDelta": -44384,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 179.28799999999956,
+            "heapDelta": 58034088,
+            "retainedHeapDelta": 21312,
+            "rssDelta": 10321920
+          },
+          {
+            "ms": 203.7445830000006,
+            "heapDelta": 57894392,
+            "retainedHeapDelta": -33208,
+            "rssDelta": 10338304
+          },
+          {
+            "ms": 182.2369579999995,
+            "heapDelta": 58014592,
+            "retainedHeapDelta": -4688,
+            "rssDelta": 10321920
+          }
+        ]
+      },
+      "summary": {
+        "baseline": {
+          "timeMs": {
+            "median": 163.64475000000039,
+            "mad": 2.422937500000444
+          },
+          "retainedHeapBytes": {
+            "median": -92,
+            "mad": 35108
+          }
+        },
+        "candidate": {
+          "timeMs": {
+            "median": 163.24693750000006,
+            "mad": 1.931166999999732
+          },
+          "retainedHeapBytes": {
+            "median": -29392,
+            "mad": 30076
+          }
+        }
+      }
+    },
+    "teams": {
+      "bytes": 935226,
+      "files": 4017,
+      "batch": 16,
+      "outputHash": "00ff1bd64da1f99dd49fc29a544a9a4ada32206cddf334d2cb7e8d822ebe282b",
+      "samples": {
+        "baseline": [
+          {
+            "ms": 316.41670799999883,
+            "heapDelta": 44345696,
+            "retainedHeapDelta": 17216,
+            "rssDelta": 32768
+          },
+          {
+            "ms": 293.04362500000025,
+            "heapDelta": 44296272,
+            "retainedHeapDelta": -5032,
+            "rssDelta": 49152
+          },
+          {
+            "ms": 286.5927920000013,
+            "heapDelta": 44039816,
+            "retainedHeapDelta": 30464,
+            "rssDelta": 32768
+          },
+          {
+            "ms": 389.42283300000054,
+            "heapDelta": 44089696,
+            "retainedHeapDelta": 31280,
+            "rssDelta": 16384
+          },
+          {
+            "ms": 341.6643750000003,
+            "heapDelta": 39792912,
+            "retainedHeapDelta": -18656,
+            "rssDelta": 114688
+          },
+          {
+            "ms": 372.56316700000025,
+            "heapDelta": 39822512,
+            "retainedHeapDelta": 6520,
+            "rssDelta": 0
+          },
+          {
+            "ms": 370.5830839999999,
+            "heapDelta": 39884528,
+            "retainedHeapDelta": 8552,
+            "rssDelta": 0
+          },
+          {
+            "ms": 279.87866699999904,
+            "heapDelta": 39803368,
+            "retainedHeapDelta": 21984,
+            "rssDelta": 0
+          },
+          {
+            "ms": 288.1402500000004,
+            "heapDelta": 39794280,
+            "retainedHeapDelta": 27936,
+            "rssDelta": 0
+          },
+          {
+            "ms": 287.0142500000002,
+            "heapDelta": 39848240,
+            "retainedHeapDelta": 20704,
+            "rssDelta": 0
+          },
+          {
+            "ms": 424.0844159999979,
+            "heapDelta": 39808664,
+            "retainedHeapDelta": -4272,
+            "rssDelta": 0
+          },
+          {
+            "ms": 348.43654199999946,
+            "heapDelta": 39817848,
+            "retainedHeapDelta": -8520,
+            "rssDelta": 65536
+          }
+        ],
+        "candidate": [
+          {
+            "ms": 370.79291600000033,
+            "heapDelta": 40023400,
+            "retainedHeapDelta": 24440,
+            "rssDelta": 0
+          },
+          {
+            "ms": 299.57795799999985,
+            "heapDelta": 39970624,
+            "retainedHeapDelta": -18736,
+            "rssDelta": 98304
+          },
+          {
+            "ms": 304.0131249999995,
+            "heapDelta": 39782032,
+            "retainedHeapDelta": 9224,
+            "rssDelta": 65536
+          },
+          {
+            "ms": 304.59262500000114,
+            "heapDelta": 39651416,
+            "retainedHeapDelta": 1952,
+            "rssDelta": 16384
+          },
+          {
+            "ms": 311.3210830000007,
+            "heapDelta": 39524560,
+            "retainedHeapDelta": 24040,
+            "rssDelta": 147456
+          },
+          {
+            "ms": 304.1527500000011,
+            "heapDelta": 39656688,
+            "retainedHeapDelta": -13120,
+            "rssDelta": 16384
+          },
+          {
+            "ms": 362.09262500000114,
+            "heapDelta": 39643088,
+            "retainedHeapDelta": -8192,
+            "rssDelta": 0
+          },
+          {
+            "ms": 273.03683399999863,
+            "heapDelta": 39677024,
+            "retainedHeapDelta": 15432,
+            "rssDelta": 16384
+          },
+          {
+            "ms": 279.20254100000056,
+            "heapDelta": 39645312,
+            "retainedHeapDelta": -1128,
+            "rssDelta": 0
+          },
+          {
+            "ms": 286.2024999999994,
+            "heapDelta": 39578336,
+            "retainedHeapDelta": -12776,
+            "rssDelta": 0
+          },
+          {
+            "ms": 351.43058299999757,
+            "heapDelta": 39596128,
+            "retainedHeapDelta": -10872,
+            "rssDelta": 0
+          },
+          {
+            "ms": 377.04120799999873,
+            "heapDelta": 39675672,
+            "retainedHeapDelta": 31280,
+            "rssDelta": 0
+          }
+        ]
+      },
+      "summary": {
+        "baseline": {
+          "timeMs": {
+            "median": 329.04054149999956,
+            "mad": 41.78441699999985
+          },
+          "retainedHeapBytes": {
+            "median": 12884,
+            "mad": 16104
+          }
+        },
+        "candidate": {
+          "timeMs": {
+            "median": 304.3726875000011,
+            "mad": 21.67016700000113
+          },
+          "retainedHeapBytes": {
+            "median": 412,
+            "mad": 13360
+          }
+        }
+      }
+    },
+    "small": {
+      "bytes": 5305,
+      "files": 1,
+      "batch": 1,
+      "outputHash": "6c708ef3fc2440fbb58629e9baf3908a543cc1692c3d8ea51712d4efb9eb59ad",
+      "samples": {
+        "baseline": [
+          {
+            "ms": 1.2827920000017912,
+            "heapDelta": 218160,
+            "retainedHeapDelta": -48,
+            "rssDelta": 0
+          },
+          {
+            "ms": 0.670458000000508,
+            "heapDelta": 216648,
+            "retainedHeapDelta": -9456,
+            "rssDelta": 0
+          },
+          {
+            "ms": 0.9053750000020955,
+            "heapDelta": 216648,
+            "retainedHeapDelta": -2376,
+            "rssDelta": 0
+          },
+          {
+            "ms": 1.627834000002622,
+            "heapDelta": 221968,
+            "retainedHeapDelta": -5344,
+            "rssDelta": 0
+          },
+          {
+            "ms": 0.9927080000015849,
+            "heapDelta": 217728,
+            "retainedHeapDelta": -344,
+            "rssDelta": 0
+          },
+          {
+            "ms": 2.3238750000018626,
+            "heapDelta": 218544,
+            "retainedHeapDelta": -9736,
+            "rssDelta": 0
+          },
+          {
+            "ms": 1.0542079999977432,
+            "heapDelta": 217736,
+            "retainedHeapDelta": 1040,
+            "rssDelta": 0
+          },
+          {
+            "ms": 5.317874999997002,
+            "heapDelta": 217728,
+            "retainedHeapDelta": -64,
+            "rssDelta": 0
+          },
+          {
+            "ms": 6.382667000001675,
+            "heapDelta": 222064,
+            "retainedHeapDelta": -472,
+            "rssDelta": 0
+          },
+          {
+            "ms": 1.0036250000011933,
+            "heapDelta": 222840,
+            "retainedHeapDelta": -5288,
+            "rssDelta": 0
+          },
+          {
+            "ms": 0.7168750000018917,
+            "heapDelta": 218160,
+            "retainedHeapDelta": -192,
+            "rssDelta": 0
+          },
+          {
+            "ms": 0.6597079999992275,
+            "heapDelta": 218816,
+            "retainedHeapDelta": -64,
+            "rssDelta": 0
+          }
+        ],
+        "candidate": [
+          {
+            "ms": 0.9102500000008149,
+            "heapDelta": 214904,
+            "retainedHeapDelta": 4176,
+            "rssDelta": 0
+          },
+          {
+            "ms": 0.9378329999999551,
+            "heapDelta": 210648,
+            "retainedHeapDelta": -9880,
+            "rssDelta": 0
+          },
+          {
+            "ms": 1.7689169999976002,
+            "heapDelta": 225168,
+            "retainedHeapDelta": 4200,
+            "rssDelta": 0
+          },
+          {
+            "ms": 0.9010420000013255,
+            "heapDelta": 211096,
+            "retainedHeapDelta": -5000,
+            "rssDelta": 0
+          },
+          {
+            "ms": 1.1622079999979178,
+            "heapDelta": 211752,
+            "retainedHeapDelta": -9584,
+            "rssDelta": 0
+          },
+          {
+            "ms": 5.261458000000857,
+            "heapDelta": 216048,
+            "retainedHeapDelta": 4200,
+            "rssDelta": 0
+          },
+          {
+            "ms": 3.975417000001471,
+            "heapDelta": 215776,
+            "retainedHeapDelta": -5288,
+            "rssDelta": 0
+          },
+          {
+            "ms": 7.26458300000013,
+            "heapDelta": 215432,
+            "retainedHeapDelta": -320,
+            "rssDelta": 0
+          },
+          {
+            "ms": 2.1241660000014235,
+            "heapDelta": 211752,
+            "retainedHeapDelta": -64,
+            "rssDelta": 0
+          },
+          {
+            "ms": 1.9035000000003492,
+            "heapDelta": 211752,
+            "retainedHeapDelta": -96,
+            "rssDelta": 0
+          },
+          {
+            "ms": 0.5300419999985024,
+            "heapDelta": 214904,
+            "retainedHeapDelta": 4176,
+            "rssDelta": 0
+          },
+          {
+            "ms": 0.5881660000013653,
+            "heapDelta": 210664,
+            "retainedHeapDelta": -9864,
+            "rssDelta": 0
+          }
+        ]
+      },
+      "summary": {
+        "baseline": {
+          "timeMs": {
+            "median": 1.0289164999994682,
+            "mad": 0.3352499999982683
+          },
+          "retainedHeapBytes": {
+            "median": -408,
+            "mad": 904
+          }
+        },
+        "candidate": {
+          "timeMs": {
+            "median": 1.465562499997759,
+            "mad": 0.611562000000049
+          },
+          "retainedHeapBytes": {
+            "median": -208,
+            "mad": 4408
+          }
+        }
+      }
+    }
+  }
+}

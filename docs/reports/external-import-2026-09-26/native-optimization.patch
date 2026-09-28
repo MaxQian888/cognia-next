@@ -1,0 +1,137 @@
+--- a/crates/cognia-agent-state/src/session_import.rs
++++ b/crates/cognia-agent-state/src/session_import.rs
+@@ -98,8 +98,8 @@
+         for row in iter.flatten() {
+             let mut map = row;
+             // Fold the polymorphic `data` JSON blob into the row.
+-            if let Some(Value::String(data)) = map.get("data").cloned() {
+-                if let Ok(Value::Object(inner)) = serde_json::from_str::<Value>(&data) {
++            if let Some(Value::String(data)) = map.get("data") {
++                if let Ok(Value::Object(inner)) = serde_json::from_str::<Value>(data) {
+                     for (k, v) in inner {
+                         map.entry(k).or_insert(v);
+                     }
+@@ -253,16 +253,16 @@
+     // are lexicographically ordered ULIDs) for a deterministic transcript.
+     let mut parts_by_msg: std::collections::HashMap<String, Vec<(String, Value)>> =
+         std::collections::HashMap::new();
+-    for p in &parts {
+-        let mid = match first_str(p, &["messageID", "message_id", "messageId"]) {
++    for p in parts {
++        let mid = match first_str(&p, &["messageID", "message_id", "messageId"]) {
+             Some(s) => s.to_string(),
+             None => continue,
+         };
+-        let pid = first_str(p, &["id"]).unwrap_or("").to_string();
++        let pid = first_str(&p, &["id"]).unwrap_or("").to_string();
+         parts_by_msg
+             .entry(mid)
+             .or_default()
+-            .push((pid, Value::Object(p.clone())));
++            .push((pid, Value::Object(p)));
+     }
+     for list in parts_by_msg.values_mut() {
+         list.sort_by(|a, b| a.0.cmp(&b.0));
+@@ -271,7 +271,18 @@
+     // Group messages by session id, carrying their parts.
+     let mut msgs_by_session: std::collections::HashMap<String, Vec<Value>> =
+         std::collections::HashMap::new();
+-    for m in &messages {
++    // Most stores have unique IDs. Move each group on its final use instead
++    // of cloning every payload; older schemas may contain duplicate IDs, so
++    // earlier occurrences still receive the same complete group as before.
++    let last_message_use: std::collections::HashMap<&str, usize> = messages
++        .iter()
++        .enumerate()
++        .filter_map(|(index, message)| {
++            first_str(message, &["sessionID", "session_id", "sessionId"])?;
++            Some((first_str(message, &["id"]).unwrap_or(""), index))
++        })
++        .collect();
++    for (index, m) in messages.iter().enumerate() {
+         let sid = match first_str(m, &["sessionID", "session_id", "sessionId"]) {
+             Some(s) => s.to_string(),
+             None => continue,
+@@ -279,15 +290,23 @@
+         let mid = first_str(m, &["id"]).unwrap_or("").to_string();
+         let role = first_str(m, &["role"]).unwrap_or("user").to_string();
+         let created = nested_num(m, "time", "created", &["created", "time_created"]);
+-        let part_values: Vec<Value> = parts_by_msg
+-            .get(&mid)
+-            .map(|list| list.iter().map(|(_, v)| v.clone()).collect())
+-            .unwrap_or_default();
++        let part_values: Vec<Value> = if last_message_use.get(mid.as_str()) == Some(&index) {
++            parts_by_msg
++                .remove(&mid)
++                .map(|list| list.into_iter().map(|(_, value)| value).collect())
++                .unwrap_or_default()
++        } else {
++            parts_by_msg
++                .get(&mid)
++                .map(|list| list.iter().map(|(_, value)| value.clone()).collect())
++                .unwrap_or_default()
++        };
+         let mut msg = json!({
+             "role": role,
+             "createdAt": created,
+-            "parts": part_values,
++            "parts": [],
+         });
++        msg["parts"] = Value::Array(part_values);
+         // Project the per-turn usage the assistant `data` carries so the TS
+         // adapter can reconstruct token/cost stats (see opencode.ts).
+         if let Some(model) = first_str(m, &["modelID", "model"]) {
+@@ -307,8 +326,13 @@
+         msgs.sort_by_key(|m| m["createdAt"].as_i64().unwrap_or(0));
+     }
+ 
+-    let mut out = Vec::new();
+-    for s in &sessions {
++    let last_session_use: std::collections::HashMap<&str, usize> = sessions
++        .iter()
++        .enumerate()
++        .filter_map(|(index, session)| first_str(session, &["id"]).map(|id| (id, index)))
++        .collect();
++    let mut out = Vec::with_capacity(sessions.len());
++    for (index, s) in sessions.iter().enumerate() {
+         let id = match first_str(s, &["id"]) {
+             Some(s) => s.to_string(),
+             None => continue,
+@@ -323,9 +347,18 @@
+         let parent_id = first_str(s, &["parentID", "parent_id", "parentId"]).map(|s| s.to_string());
+         let created = nested_num(s, "time", "created", &["created", "time_created"]);
+         let updated = nested_num(s, "time", "updated", &["updated", "time_updated"]);
+-        let msgs = msgs_by_session.get(&id).cloned().unwrap_or_default();
+-        let jobs = jobs_by_session.get(&id).cloned().unwrap_or_default();
+-        out.push(json!({
++        let (msgs, jobs) = if last_session_use.get(id.as_str()) == Some(&index) {
++            (
++                msgs_by_session.remove(&id).unwrap_or_default(),
++                jobs_by_session.remove(&id).unwrap_or_default(),
++            )
++        } else {
++            (
++                msgs_by_session.get(&id).cloned().unwrap_or_default(),
++                jobs_by_session.get(&id).cloned().unwrap_or_default(),
++            )
++        };
++        let mut session = json!({
+             "id": id,
+             "title": title,
+             "cwd": cwd,
+@@ -333,9 +366,12 @@
+             "parentId": parent_id,
+             "createdAt": created,
+             "updatedAt": if updated != 0 { updated } else { created },
+-            "messages": msgs,
+-            "jobs": jobs,
+-        }));
++            "messages": [],
++            "jobs": [],
++        });
++        session["messages"] = Value::Array(msgs);
++        session["jobs"] = Value::Array(jobs);
++        out.push(session);
+     }
+     out
+ }

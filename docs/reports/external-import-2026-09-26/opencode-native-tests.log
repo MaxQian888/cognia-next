@@ -1,0 +1,30 @@
+   Compiling cognia-agent-state v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-agent-state)
+    Finished `release` profile [optimized + debuginfo] target(s) in 20.42s
+     Running unittests src/lib.rs (target/release/deps/cognia_agent_state-faa0aaa292785696)
+
+running 22 tests
+test session_import::tests::benchmark_native_opencode_import ... ignored
+test session_import::tests::builds_sessions_with_grouped_messages_and_parts ... ok
+test session_import::tests::candidate_db_paths_are_deduped ... ok
+test session_import::tests::candidate_db_paths_prefer_xdg_then_known_store_then_platform_fallback ... ok
+test session_import::tests::cursor_projection_finds_nested_composer_conversations ... ok
+test session_import::tests::cursor_projection_traverses_encoded_json_once ... ok
+test session_import::tests::cursor_reader_keeps_databases_beyond_the_former_200_database_limit ... ok
+test session_import::tests::cursor_reader_keeps_rows_beyond_the_former_2000_row_limit ... ok
+test session_import::tests::duplicate_ids_preserve_complete_groups_and_stable_order ... ok
+test session_import::tests::external_store_reader_rejects_unregistered_sources ... ok
+test session_import::tests::generic_session_store_preserves_parent_lifecycle_and_messages ... ok
+test session_import::tests::missing_db_returns_empty_not_error ... ok
+test session_import::tests::missing_message_ids_retain_shared_parts_for_every_valid_row ... ok
+test session_import::tests::missing_tables_yield_no_sessions ... ok
+test session_import::tests::opencode_missing_optional_tables_remain_compatible ... ok
+test session_import::tests::opencode_reports_existing_table_read_failure_instead_of_partial_history ... ok
+test session_import::tests::opencode_reports_schema_read_failure_instead_of_empty_history ... ok
+test session_import::tests::public_cline_reader_reads_sqlite_fixture ... ok
+test session_import::tests::public_copilot_reader_reads_sqlite_fixture ... ok
+test session_import::tests::public_cursor_reader_reads_sqlite_fixture ... ok
+test session_import::tests::public_readers_report_corrupt_and_changed_schema_databases ... ok
+test session_import::tests::readonly_file_import_observes_later_commits_without_modifying_source ... ok
+
+test result: ok. 21 passed; 0 failed; 1 ignored; 0 measured; 61 filtered out; finished in 1.16s
+

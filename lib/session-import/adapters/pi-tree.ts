@@ -55,15 +55,25 @@ export function piActiveChain<T extends PiEntryNode>(entries: T[]): T[] {
  * them would silently discard work the user can still see in Pi's `/tree`.
  */
 export function piAlternateLeafIds<T extends PiEntryNode>(entries: T[]): string[] {
+  return alternateLeafIds(entries, indexEntries(entries), piActiveChain(entries))
+}
+
+function indexEntries<T extends PiEntryNode>(entries: T[]): Map<string, T> {
   const byId = new Map<string, T>()
   for (const entry of entries) if (entry.id) byId.set(entry.id, entry)
+  return byId
+}
 
+function alternateLeafIds<T extends PiEntryNode>(
+  entries: T[],
+  byId: ReadonlyMap<string, T>,
+  active: T[]
+): string[] {
   const claimed = new Set<string>()
   for (const entry of entries) {
     if (entry.parentId && byId.has(entry.parentId)) claimed.add(entry.parentId)
   }
 
-  const active = piActiveChain(entries)
   const activeLeafId = active.length > 0 ? active[active.length - 1].id : undefined
 
   return entries
@@ -80,9 +90,10 @@ export function piAlternateLeafIds<T extends PiEntryNode>(entries: T[]): string[
  * (which only ever walks the newest leaf).
  */
 export function piChainToLeaf<T extends PiEntryNode>(entries: T[], leafId: string): T[] {
-  const byId = new Map<string, T>()
-  for (const entry of entries) if (entry.id) byId.set(entry.id, entry)
+  return chainToLeaf(indexEntries(entries), leafId)
+}
 
+function chainToLeaf<T extends PiEntryNode>(byId: ReadonlyMap<string, T>, leafId: string): T[] {
   const chain: T[] = []
   const seen = new Set<string>()
   let cursor: string | undefined = leafId
@@ -95,6 +106,17 @@ export function piChainToLeaf<T extends PiEntryNode>(entries: T[], leafId: strin
   }
 
   return chain.reverse()
+}
+
+/** One parse-local index; alternate branches only walk their own ancestors. */
+export function piSessionTree<T extends PiEntryNode>(entries: T[]) {
+  const byId = indexEntries(entries)
+  const activeChain = piActiveChain(entries)
+  return {
+    activeChain,
+    alternateLeafIds: alternateLeafIds(entries, byId, activeChain),
+    chainToLeaf: (leafId: string): T[] => chainToLeaf(byId, leafId),
+  }
 }
 
 function parseTs(timestamp: string | undefined): number {

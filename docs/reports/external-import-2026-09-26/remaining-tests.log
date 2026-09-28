@@ -1,0 +1,34 @@
+  Using tsconfig file: tsconfig.build.json
+PASS jsdom hooks/session-import/use-session-import.test.ts
+PASS node lib/session-import/adapters/gemini-cli.test.ts
+FAIL node lib/session-import/index.test.ts
+  ● mixed picked corpus attribution › keeps portable source summaries and graph nodes isolated through import
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Array [
+    -   "copilot-only",
+    +   "history",
+      ]
+
+      555 |     const copilot = await listSessionsForSource("copilot-cli", picked)
+      556 |     const qwen = await listSessionsForSource("qwen-code", picked)
+    > 557 |     expect(copilot.map((s) => s.ref.originalSessionId)).toEqual(["copilot-only"])
+          |                                                         ^
+      558 |     expect(qwen.map((s) => s.ref.originalSessionId)).toEqual(["qwen-only"])
+      559 |     const conversations = await parseSessions(
+      560 |       [...copilot, ...qwen].map((s) => s.ref),
+
+      at Object.toEqual (lib/session-import/index.test.ts:557:57)
+
+PASS node lib/session-import/adapters/continue-dev.test.ts
+PASS node lib/session-import/adapters/aider.test.ts
+
+Test Suites: 1 failed, 4 passed, 5 total
+Tests:       1 failed, 69 passed, 70 total
+Snapshots:   0 total
+Time:        3.698 s
+Ran all test suites matching lib/session-import/adapters/gemini-cli.test.ts|lib/session-import/adapters/continue-dev.test.ts|lib/session-import/adapters/aider.test.ts|lib/session-import/index.test.ts|hooks/session-import/use-session-import.test.ts in 2 projects.

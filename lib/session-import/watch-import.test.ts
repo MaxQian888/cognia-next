@@ -18,6 +18,12 @@ const getSessionSources = idx.getSessionSources as jest.Mock
 const detectSourceForPath = idx.detectSourceForPath as jest.Mock
 
 const input = { fs: {}, home: "/home/u" }
+const perFileSource = {
+  id: "claude-code",
+  summarizeFile: () => null,
+  acceptedExtensions: [".jsonl"],
+  scanRoots: () => ["/home/u/.claude/projects", "/p"],
+}
 const summary = (id: string, locator: string, updatedAt = 0, watchRevision?: string) => ({
   ref: { sourceId: "gemini-cli", originalSessionId: id, locator },
   title: id,
@@ -38,6 +44,61 @@ beforeEach(() => {
 })
 
 describe("runWatchImport", () => {
+  it.each([
+    "settings.json",
+    "plugins/cache/a.jsonl",
+    "projects/p/settings.json",
+    "projects-backup/a.jsonl",
+  ])("ignores non-transcript Claude vendor changes at %s", async (path) => {
+    detectSourceForPath.mockReturnValue(perFileSource)
+    expect(await runWatchImport({ changedPath: `/home/u/.claude/${path}` })).toEqual({
+      sessions: 0,
+      messages: 0,
+    })
+    expect(importSessions).not.toHaveBeenCalled()
+    expect(listSessionsForSource).not.toHaveBeenCalled()
+    expect(listAllSessions).not.toHaveBeenCalled()
+  })
+  it("bounds distinct queued paths with a full rescan during a slow import", async () => {
+    detectSourceForPath.mockReturnValue(perFileSource)
+    listAllSessions.mockResolvedValue([summary("latest", "/latest.jsonl")])
+    let release!: () => void
+    importSessions.mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve({ sessions: 1, messages: 1 })))
+    )
+    const first = runWatchImport({ changedPath: "/p/first.jsonl" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const queued = Array.from({ length: 600 }, (_, index) =>
+      runWatchImport({ changedPath: `/p/file-${index}.jsonl` })
+    )
+    release()
+    await Promise.all([first, ...queued])
+    expect(listAllSessions).toHaveBeenCalledTimes(1)
+    expect(importSessions).toHaveBeenCalledTimes(258)
+    expect(importSessions.mock.calls.at(-1)?.[0][0].originalSessionId).toBe("latest")
+  })
+  it("refreshes Claude graphs after auxiliary changes even with unchanged summaries", async () => {
+    detectSourceForPath.mockReturnValue(perFileSource)
+    listSessionsForSource.mockResolvedValue([
+      summary("a", "/home/u/.claude/projects/p/a.jsonl", 100),
+    ])
+    await runWatchImport({ changedPath: "/home/u/.claude/tasks/team/1.json" })
+    await runWatchImport({ changedPath: "/home/u/.claude/teams/team/config.json" })
+    expect(importSessions).toHaveBeenCalledTimes(2)
+    for (const call of importSessions.mock.calls) {
+      expect(call[0][0].locator).toBe("/home/u/.claude/projects/p/a.jsonl")
+      expect(call[3]?.singleFile).toBeUndefined()
+    }
+  })
+
+  it("does not coalesce identical paths across workspace targets", async () => {
+    detectSourceForPath.mockReturnValue(perFileSource)
+    await Promise.all([
+      runWatchImport({ changedPath: "/p/a.jsonl", projectId: "old" }),
+      runWatchImport({ changedPath: "/p/a.jsonl", projectId: "new" }),
+    ])
+    expect(importSessions.mock.calls.map((call) => call[2])).toEqual(["old", "new"])
+  })
   it("no-ops when a full re-scan finds nothing", async () => {
     listAllSessions.mockResolvedValue([])
     expect(await runWatchImport()).toEqual({ sessions: 0, messages: 0 })
@@ -46,7 +107,7 @@ describe("runWatchImport", () => {
   })
 
   it("re-parses ONLY the changed file for a per-file source (no full scan)", async () => {
-    detectSourceForPath.mockReturnValue({ id: "claude-code", summarizeFile: () => null })
+    detectSourceForPath.mockReturnValue(perFileSource)
     const changedPath = "/home/u/.claude/projects/enc/abc.jsonl"
     await runWatchImport({ changedPath, projectId: "proj" })
 
@@ -64,7 +125,7 @@ describe("runWatchImport", () => {
   })
 
   it("coalesces same-path bursts into one import; different paths run serially", async () => {
-    detectSourceForPath.mockReturnValue({ id: "claude-code", summarizeFile: () => null })
+    detectSourceForPath.mockReturnValue(perFileSource)
     // Hold the first import open so the following calls land mid-flight.
     let release!: () => void
     importSessions.mockImplementationOnce(
@@ -90,7 +151,7 @@ describe("runWatchImport", () => {
   })
 
   it("a same-path event during an in-flight import queues a trailing run", async () => {
-    detectSourceForPath.mockReturnValue({ id: "claude-code", summarizeFile: () => null })
+    detectSourceForPath.mockReturnValue(perFileSource)
     let release!: () => void
     importSessions
       .mockImplementationOnce(
@@ -108,7 +169,7 @@ describe("runWatchImport", () => {
   })
 
   it("a queued import rejection reaches its caller without stalling the queue", async () => {
-    detectSourceForPath.mockReturnValue({ id: "claude-code", summarizeFile: () => null })
+    detectSourceForPath.mockReturnValue(perFileSource)
     importSessions
       .mockRejectedValueOnce(new Error("disk gone"))
       .mockImplementation(async () => ({ sessions: 1, messages: 1 }))

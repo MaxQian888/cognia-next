@@ -1,0 +1,98 @@
+
+<--- Last few GCs --->
+
+[3285:0x955c00000]   143268 ms: Scavenge (during sweeping) 8163.6 (8204.0) -> 8156.3 (8204.0) MB, pooled: 0.2 MB, 10.22 / 0.00 ms (average mu = 0.136, current mu = 0.048) allocation failure; 
+[3285:0x955c00000]   144862 ms: Mark-Compact 8172.0 (8212.0) -> 8156.3 (8210.8) MB, pooled: 1.8 MB, 1573.35 / 0.00 ms (average mu = 0.121, current mu = 0.069) allocation failure; scavenge might not succeed
+
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x1049ae478 node::OOMErrorHandler(char const*, v8::OOMDetails const&) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+ 2: 0x104bef5b8 v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+ 3: 0x104e4f234 v8::internal::Heap::stack() [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+ 4: 0x104e4d4c8 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags, v8::internal::PerformHeapLimitCheck, v8::internal::PerformIneffectiveMarkCompactCheck) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+ 5: 0x104e41514 v8::internal::HeapAllocator::CollectGarbageAndRetryAllocation(v8::base::FunctionRef<bool ()>, v8::internal::AllocationType) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+ 6: 0x104e412c8 v8::internal::HeapAllocator::RetryCustomAllocate(v8::base::FunctionRef<bool ()>, v8::internal::AllocationType) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+ 7: 0x104e40be0 v8::internal::HeapAllocator::AllocateRawSlowPath(v8::internal::HeapAllocator::AllocationRetryMode, int, v8::internal::AllocationType, v8::internal::AllocationOrigin, v8::internal::AllocationAlignment, v8::internal::AllocationHint) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+ 8: 0x104e1f0d4 v8::internal::Factory::NewFillerObject(int, v8::internal::AllocationAlignment, v8::internal::AllocationType, v8::internal::AllocationOrigin) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+ 9: 0x10529195c v8::internal::Runtime_AllocateInYoungGeneration(int, unsigned long*, v8::internal::Isolate*) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+10: 0x105964cac Builtins_CEntry_Return1_ArgvOnStack_NoBuiltinExit [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+11: 0x11aeb0e10 
+12: 0x11ae84944 
+13: 0x11ae84b94 
+14: 0x11ae84fd4 
+15: 0x11ae849f4 
+16: 0x11ae84b94 
+17: 0x11b5c43b0 
+18: 0x11b6c1fdc 
+19: 0x11ae98140 
+20: 0x11a5f6e84 
+21: 0x11aca3144 
+22: 0x11ae966e4 
+23: 0x11b5bd490 
+24: 0x11ac13dc8 
+25: 0x11b5af368 
+26: 0x11a5fbd60 
+27: 0x11ac13910 
+28: 0x11b5af368 
+29: 0x11b0e005c 
+30: 0x11a0fe27c 
+31: 0x11b5b0e28 
+32: 0x11a5fd820 
+33: 0x11a851798 
+34: 0x11b412c50 
+35: 0x11b3ffa70 
+36: 0x11b1d9dc0 
+37: 0x10594a368 Builtins_SetPrototypeForEach [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+38: 0x11b2a4ecc 
+39: 0x11a679df4 
+40: 0x11b3bb5c4 
+41: 0x11a679a98 
+42: 0x11b3d4730 
+43: 0x11b52e318 
+44: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+45: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+46: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+47: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+48: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+49: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+50: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+51: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+52: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+53: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+54: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+55: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+56: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+57: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+58: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+59: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+60: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+61: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+62: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+63: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+64: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+65: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+66: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+67: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+68: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+69: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+70: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+71: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+72: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+73: 0x1058c1424 Builtins_InterpreterEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+74: 0x1058be788 Builtins_JSEntryTrampoline [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+75: 0x1058be478 Builtins_JSEntry [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+76: 0x104d70078 v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+77: 0x104d6fa4c v8::internal::Execution::Call(v8::internal::Isolate*, v8::internal::DirectHandle<v8::internal::Object>, v8::internal::DirectHandle<v8::internal::Object>, v8::base::Vector<v8::internal::DirectHandle<v8::internal::Object> const>) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+78: 0x104bffd74 v8::Function::Call(v8::Isolate*, v8::Local<v8::Context>, v8::Local<v8::Value>, int, v8::Local<v8::Value>*) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+79: 0x10498553c node::builtins::BuiltinLoader::CompileAndCall(v8::Local<v8::Context>, char const*, node::Realm*) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+80: 0x106ea1494 node::Realm::ExecuteBootstrapper(char const*) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+81: 0x106e5aef0 node::StartExecution(node::Environment*, char const*) (.cold.1) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+82: 0x104966ccc node::StartExecution(node::Environment*, char const*) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+83: 0x104966c44 node::StartExecution(node::Environment*, std::__1::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfoWithModule const&)>) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+84: 0x1048b990c node::LoadEnvironment(node::Environment*, std::__1::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfoWithModule const&)>, std::__1::function<void (node::Environment*, v8::Local<v8::Value>, v8::Local<v8::Value>)>) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+85: 0x106e95e80 node::NodeMainInstance::Run() (.cold.1) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+86: 0x1049f3fa8 node::NodeMainInstance::Run() [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+87: 0x10496b0cc node::Start(int, char**) [/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node]
+88: 0x182f5be00 start [/usr/lib/dyld]
+[rtk] env: process terminated by signal 6

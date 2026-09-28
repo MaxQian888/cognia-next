@@ -163,3 +163,33 @@ describe("continueDevSessionSource", () => {
     })
   })
 })
+
+it("never reads the session index and bounds concurrent reads while retaining discovery order", async () => {
+  const root = "/home/u/.continue/sessions"
+  let active = 0,
+    peak = 0
+  const read = jest.fn(async (path: string) => {
+    active++
+    peak = Math.max(peak, active)
+    await new Promise((resolve) => setTimeout(resolve, path.endsWith("0.json") ? 10 : 1))
+    active--
+    if (path.endsWith("bad.json")) throw Error("unreadable")
+    return JSON.stringify({ ...SESSION, sessionId: path.split("/").pop() })
+  })
+  const names = ["sessions.json", ...Array.from({ length: 20 }, (_, i) => `${i}.json`), "bad.json"]
+  const scan: SessionScanInput = {
+    home: "/home/u",
+    fs: {
+      exists: async () => true,
+      readDir: async () => names,
+      readDirEntries: async () => names.map((name) => ({ name, isFile: true })),
+      stat: async () => ({ size: 0, isFile: true }),
+      readTextFile: read,
+    },
+  }
+  const list = await continueDevSessionSource.listSessions(scan)
+  expect(read).not.toHaveBeenCalledWith(`${root}/sessions.json`)
+  expect(peak).toBeGreaterThan(1)
+  expect(peak).toBeLessThanOrEqual(8)
+  expect(list.map((s) => s.ref.originalSessionId)).toEqual(names.slice(1, -1))
+})

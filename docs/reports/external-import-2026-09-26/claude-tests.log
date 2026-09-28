@@ -1,0 +1,41 @@
+  Using tsconfig file: tsconfig.build.json
+PASS node lib/session-import/adapters/claude-code.test.ts
+  parseClaudeTranscript
+    ✓ parses turns, folds tool_result into the tool part, and skips corrupt lines (2 ms)
+    ✓ maps a base64 image block to a file part
+    ✓ marks an errored tool_result on the tool part (1 ms)
+    ✓ captures assistant usage + model into metadata
+    ✓ omits usage metadata for an all-zero usage block
+    ✓ linearizes to the active leaf, dropping an abandoned edit branch
+    ✓ includes system records (previously dropped) (1 ms)
+    ✓ falls back to structured toolUseResult when the result block is empty
+    ✓ extracts subagent sidechains out of the main thread (1 ms)
+    ✓ reconstructs a subagent snapshot on the spawning turn + a nested session
+    ✓ reports unknown and malformed records with bounded redacted diagnostics (2 ms)
+  claudeCodeSessionSource
+    ✓ advertises the projects scan root
+    ✓ prefers the resolved $CLAUDE_CONFIG_DIR root over <home>/.claude
+    ✓ detects by path hint and content sniff
+    ✓ lists and parses from picked files (1 ms)
+    ✓ attaches modern independent subagent transcripts without listing them twice
+    ✓ merges resumed transcripts for the same independent agent
+    ✓ preserves first-task semantics when agent ID matches before the display name (1 ms)
+    ✓ preserves first-task semantics when display name matches before the agent ID
+    ✓ preserves first-task semantics when missing agent ID retains the first unowned match (1 ms)
+    ✓ preserves first-task semantics when missing display name retains the first unowned match
+    ✓ preserves first-task semantics when duplicate task IDs retain their existing final owner lookup
+    ✓ preserves first-task semantics when unmatched owners preserve member status (1 ms)
+    ✓ reloads changed transcript and team task state for a fresh scan input
+    ✓ imports Agent Teams members, dependencies, and lifecycle from team/task artifacts (1 ms)
+  summarizeClaudeFile (lightweight scan)
+    ✓ pulls title/cwd/count/timestamps without a full parse
+    ✓ returns null for a transcript with no user/assistant records
+    ✓ marks files under the modern subagents directory as child sessions
+    ✓ falls back past a text-less first user turn when deriving the title
+    ✓ falls back to the summary record for the title, then the locator id
+
+Test Suites: 1 passed, 1 total
+Tests:       30 passed, 30 total
+Snapshots:   0 total
+Time:        1.732 s
+Ran all test suites matching lib/session-import/adapters/claude-code.test.ts.

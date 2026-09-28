@@ -1,0 +1,18 @@
+  Using tsconfig file: tsconfig.build.json
+PASS node lib/session-import/fs.test.ts
+  walkFiles
+    ✓ recursively collects files matching the predicate (1 ms)
+    ✓ returns [] for an unreadable directory
+    ✓ stops descending instead of following a symlink loop forever
+  realSessionFs native history access
+    ✓ reads complete native history through the confined read-only command (1 ms)
+    ✓ retains directory types and unknown symlink types without per-entry IPC
+    ✓ distinguishes absence from access errors without a permissive fallback (4 ms)
+    ✓ maps native file metadata and rejects mismatched response kinds (1 ms)
+    ✓ preserves the web fallback without invoking native commands
+
+Test Suites: 1 passed, 1 total
+Tests:       8 passed, 8 total
+Snapshots:   0 total
+Time:        0.399 s, estimated 1 s
+Ran all test suites matching lib/session-import/fs.test.ts.

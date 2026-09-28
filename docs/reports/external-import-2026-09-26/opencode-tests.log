@@ -1,0 +1,9 @@
+  Using tsconfig file: tsconfig.build.json
+PASS node lib/session-import/adapters/opencode.test.ts
+PASS node lib/session-import/adapters/opencode-db.test.ts
+
+Test Suites: 2 passed, 2 total
+Tests:       36 passed, 36 total
+Snapshots:   0 total
+Time:        0.542 s, estimated 1 s
+Ran all test suites matching lib/session-import/adapters/opencode.test.ts|lib/session-import/adapters/opencode-db.test.ts.

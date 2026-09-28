@@ -1,0 +1,3 @@
+production_sha256 d8ac3b40f6bfa4492464db1ecf5639509b37b74333bf0eb0d7190b9a59ef395a
+harness_sha256 4068af78e08a75096a7a4e013e32f0f4f9c21b106fbd11d18360590283f1a4cf
+cargo test: 8 passed (2 suites, 2.00s)

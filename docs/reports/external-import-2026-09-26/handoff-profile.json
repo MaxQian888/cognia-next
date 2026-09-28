@@ -1,0 +1,29 @@
+{
+  "node": "v26.5.0",
+  "cpu": "Apple M4 Pro",
+  "hashes": {
+    "adapter": "457dd81d8c6989fe186c16b9c81456d9d881caf26517c0cbe5292350e0602f82",
+    "baseline": "03d01e10bb64ad001285571efe5d684ea6e21e7ea369bd8f676403c008f27d74",
+    "candidate": "03d01e10bb64ad001285571efe5d684ea6e21e7ea369bd8f676403c008f27d74"
+  },
+  "workloads": {
+    "large-tools": {
+      "bytes": 10275066,
+      "totalMs": 171.02704200000005,
+      "handoffCalls": 1,
+      "handoffMs": 3.191833000000031
+    },
+    "huge-tools": {
+      "bytes": 52502333,
+      "totalMs": 747.8334999999997,
+      "handoffCalls": 1,
+      "handoffMs": 12.028291999999965
+    },
+    "small": {
+      "bytes": 4780,
+      "totalMs": 0.5864169999999831,
+      "handoffCalls": 1,
+      "handoffMs": 0.022625000000061846
+    }
+  }
+}

@@ -1,0 +1,9 @@
+[command-parity] 2 literal invoke(s) of unregistered command(s):
+
+  lib/connectors/lark-web/intent-client.ts:276  invoke("companion_endpoints") — not in generate_handler!
+  lib/connectors/lark-web/intent-client.ts:277  invoke("host_feature_manifest") — not in generate_handler!
+
+  Register the command in src-tauri/src/lib.rs, fix the typo, or append
+  `// invoke-parity-exempt: <reason>` on the line (or the line above).
+
+[command-parity] 2 issue(s).

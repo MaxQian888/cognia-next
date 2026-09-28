@@ -148,6 +148,118 @@ describe("opencodeToConversation", () => {
 })
 
 describe("parseOpencodeExport", () => {
+  it("accepts the official CLI export envelope and nested message info", () => {
+    const content = JSON.stringify({
+      info: {
+        id: "cli-export",
+        title: "CLI export",
+        directory: "/repo",
+        time: { created: 1, updated: 5 },
+      },
+      messages: [
+        {
+          info: { role: "user", time: { created: 2 } },
+          parts: [{ type: "text", text: "Inspect only" }],
+        },
+        {
+          info: {
+            role: "assistant",
+            time: { created: 3 },
+            modelID: "model-cli",
+            cost: 0.25,
+            tokens: { input: 12, output: 4, reasoning: 2, cache: { read: 7, write: 1 } },
+          },
+          parts: [
+            {
+              type: "tool",
+              tool: "read",
+              callID: "call-1",
+              state: { status: "error", input: { path: "/repo/x" }, error: "missing" },
+            },
+          ],
+        },
+      ],
+    })
+    const sessions = parseOpencodeExport(content)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]).toMatchObject({
+      id: "cli-export",
+      title: "CLI export",
+      cwd: "/repo",
+      createdAt: 1,
+      updatedAt: 5,
+    })
+    expect(sessions[0].messages[1]).toMatchObject({
+      role: "assistant",
+      createdAt: 3,
+      model: "model-cli",
+      cost: 0.25,
+      tokens: { input: 12, output: 4, reasoning: 2, cacheRead: 7, cacheWrite: 1 },
+    })
+    const conversation = opencodeToConversation(sessions[0])
+    expect(conversation.messages[1].parts[0]).toMatchObject({
+      type: "tool-read",
+      state: "output-error",
+      errorText: "missing",
+      toolCallId: "call-1",
+    })
+    expect(
+      opencodeSessionSource.detect([{ name: "export.json", path: "/tmp/export.json", content }])
+    ).toBe("maybe")
+  })
+
+  it("groups current ShareNext type/data records while ignoring non-transcript records", () => {
+    const content = JSON.stringify([
+      { type: "part", data: { id: "p", messageID: "m", type: "text", text: "shared evidence" } },
+      { type: "session", data: { id: "share", title: "Shared", time: { created: 1 } } },
+      {
+        type: "message",
+        data: {
+          id: "m",
+          sessionID: "share",
+          role: "assistant",
+          time: { created: 2 },
+          modelID: "model-share",
+        },
+      },
+      { type: "model", data: { id: "not-a-session", title: "Model metadata", time: {} } },
+      { type: "session_diff", data: [] },
+    ])
+    const sessions = parseOpencodeExport(content)
+    expect(sessions.map((session) => session.id)).toEqual(["share"])
+    expect(sessions[0].messages[0]).toMatchObject({
+      role: "assistant",
+      model: "model-share",
+      parts: [{ type: "text", text: "shared evidence" }],
+    })
+    expect(
+      opencodeSessionSource.detect([{ name: "share.json", path: "/tmp/share.json", content }])
+    ).toBe("maybe")
+  })
+
+  it("skips malformed envelope entries without losing valid nested messages and parts", () => {
+    const sessions = parseOpencodeExport(
+      JSON.stringify({
+        info: { id: "valid", title: "Valid" },
+        messages: [
+          null,
+          4,
+          [],
+          { info: null, parts: [null, 1, {}, { type: "text", text: "keep" }] },
+        ],
+      })
+    )
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0].messages).toEqual([
+      { role: "user", createdAt: 0, parts: [{ type: "text", text: "keep" }] },
+    ])
+    expect(() =>
+      parseOpencodeExport(
+        JSON.stringify([{ key: 3, content: null }, { type: "message", data: "invalid" }, null])
+      )
+    ).not.toThrow()
+  })
+
   it("reconstructs sessions from a flat ShareRecord array", () => {
     const records = [
       {
@@ -445,6 +557,90 @@ describe("opencodeSessionSource", () => {
     })
     const graph = await opencodeSessionSource.parseGraph!(list[0].ref, input)
     expect(graph.nodes[0].session.header.source?.version).toBe("1.18.25")
+  })
+
+  it("preserves first-match conversations and last-match structured state for duplicate IDs", async () => {
+    __setOpencodeReaderForTesting(async () => [
+      { ...SESSION, title: "first conversation", jobs: [{ id: "first-job", status: "pending" }] },
+      { ...SESSION, title: "last conversation", jobs: [{ id: "last-job", status: "failed" }] },
+    ])
+    const input: SessionScanInput = { fs, home: "/home/u" }
+    const ref = { sourceId: "opencode", originalSessionId: SESSION.id, locator: SESSION.id }
+    const graph = await opencodeSessionSource.parseGraph!(ref, input)
+    expect(graph.nodes[0].conversation.session.title).toBe("first conversation")
+    expect(graph.nodes[0].session.tasks).toEqual([
+      expect.objectContaining({ taskId: "last-job", status: "failed" }),
+    ])
+    expect((await opencodeSessionSource.parseSession(ref, input)).session.title).toBe(
+      "first conversation"
+    )
+  })
+
+  it("preserves duplicate child order and skips cyclic descendants", async () => {
+    const child = { ...SESSION, id: "child", parentId: SESSION.id }
+    __setOpencodeReaderForTesting(async () => [
+      { ...SESSION, parentId: "child" },
+      { ...child, title: "first child" },
+      { ...child, title: "second child" },
+    ])
+    const input: SessionScanInput = { fs, home: "/home/u" }
+    const list = await opencodeSessionSource.listSessions(input)
+    expect(list.map((entry) => entry.ref.originalSessionId)).toEqual([SESSION.id])
+    const conversation = await opencodeSessionSource.parseSession(list[0].ref, input)
+    expect(conversation.nested?.map((entry) => entry.session.title)).toEqual([
+      "first child",
+      "second child",
+    ])
+    expect(conversation.nested?.every((entry) => !entry.nested?.length)).toBe(true)
+    const graph = await opencodeSessionSource.parseGraph!(list[0].ref, input)
+    expect(graph.nodes.length).toBeGreaterThan(0)
+  })
+
+  it("keeps children of an empty parent available when that parent is explicitly selected", async () => {
+    __setOpencodeReaderForTesting(async () => [
+      { ...SESSION, messages: [] },
+      { ...SESSION, id: "child", parentId: SESSION.id },
+    ])
+    const input: SessionScanInput = { fs, home: "/home/u" }
+    expect((await opencodeSessionSource.listSessions(input))[0].ref.originalSessionId).toBe("child")
+    const conversation = await opencodeSessionSource.parseSession(
+      { sourceId: "opencode", originalSessionId: SESSION.id, locator: SESSION.id },
+      input
+    )
+    expect(conversation.messages).toEqual([])
+    expect(conversation.nested?.[0].session.id).toBe("import:opencode:child")
+  })
+
+  it("isolates cached indexes across inputs and refreshes child membership on the next scan", async () => {
+    let includeChild = true
+    const reader = jest.fn(async () => [
+      SESSION,
+      ...(includeChild ? [{ ...SESSION, id: "child", parentId: SESSION.id }] : []),
+    ])
+    __setOpencodeReaderForTesting(reader)
+    const input: SessionScanInput = { fs, home: "/home/u" }
+    const ref = { sourceId: "opencode", originalSessionId: SESSION.id, locator: SESSION.id }
+    expect((await opencodeSessionSource.parseGraph!(ref, input)).nodes).toHaveLength(2)
+    includeChild = false
+    expect((await opencodeSessionSource.parseGraph!(ref, input)).nodes).toHaveLength(2)
+    expect((await opencodeSessionSource.parseGraph!(ref, { ...input })).nodes).toHaveLength(1)
+    expect(reader).toHaveBeenCalledTimes(2)
+  })
+
+  it("retries a failed graph read on the same input without keeping rejected indexes", async () => {
+    const reader = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("database is locked"))
+      .mockResolvedValue([SESSION])
+    __setOpencodeReaderForTesting(reader)
+    const input: SessionScanInput = { fs, home: "/home/u" }
+    const ref = { sourceId: "opencode", originalSessionId: SESSION.id, locator: SESSION.id }
+    await expect(opencodeSessionSource.parseGraph!(ref, input)).rejects.toThrow(
+      "database is locked"
+    )
+    const graph = await opencodeSessionSource.parseGraph!(ref, input)
+    expect(graph.nodes).toHaveLength(1)
+    expect(reader).toHaveBeenCalledTimes(2)
   })
 
   it("preserves background jobs and structural lifecycle in canonical state", async () => {

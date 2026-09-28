@@ -9,7 +9,10 @@
 //! scan roots) RECURSIVELY (those trees nest by date/project), and it filters by
 //! session-file extension rather than a single db name.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -21,19 +24,86 @@ pub const SESSION_CHANGED_EVENT: &str = "session-import://changed";
 
 /// Trailing debounce — coalesces an agent's write burst into one signal.
 const DEBOUNCE_MS: u64 = 300;
+const MAX_BATCH_MS: u64 = 2_000;
+const MAX_PENDING_PATHS: usize = 256;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ChangedPayload {
-    /// The last changed path in the burst (a hint; the frontend re-scans).
-    path: String,
+    /// Retained for older frontend listeners; new listeners consume every path.
+    path: Option<String>,
+    paths: Vec<String>,
+    /// Queue overflow or watcher errors require a full scan, never a partial one.
+    rescan: bool,
+}
+
+struct ActiveWatcher {
+    _watcher: RecommendedWatcher,
+    task: tauri::async_runtime::JoinHandle<()>,
+}
+
+impl Drop for ActiveWatcher {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// The same bounded collector is used by the native emitter and its tests.
+async fn next_batch(
+    rx: &mut tokio::sync::mpsc::Receiver<String>,
+    overflow: &AtomicBool,
+) -> Option<ChangedPayload> {
+    let first = rx.recv().await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(MAX_BATCH_MS);
+    let mut paths = BTreeSet::new();
+    let mut rescan = false;
+    let mut next = first;
+    loop {
+        if !next.is_empty() && !rescan {
+            paths.insert(next);
+            if paths.len() > MAX_PENDING_PATHS {
+                paths.clear();
+                rescan = true;
+            }
+        }
+        let quiet = tokio::time::Instant::now() + Duration::from_millis(DEBOUNCE_MS);
+        tokio::select! {
+            // The deadline wins even when writes never leave the channel empty.
+            biased;
+            _ = tokio::time::sleep_until(deadline.min(quiet)) => break,
+            msg = rx.recv() => match msg {
+                Some(path) => next = path,
+                None => return None,
+            },
+        }
+    }
+    rescan |= overflow.swap(false, Ordering::AcqRel);
+    let paths: Vec<String> = if rescan {
+        Vec::new()
+    } else {
+        paths.into_iter().collect()
+    };
+    Some(ChangedPayload {
+        path: paths.last().cloned(),
+        paths,
+        rescan,
+    })
+}
+
+fn enqueue_change(tx: &tokio::sync::mpsc::Sender<String>, overflow: &AtomicBool, path: String) {
+    if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(path) {
+        overflow.store(true, Ordering::Release);
+        // The consumer may drain the queue between try_send and the flag
+        // write. Wake it again so a late overflow flag cannot sit unobserved.
+        let _ = tx.try_send(String::new());
+    }
 }
 
 /// Managed Tauri state: the single active session-import watcher. Dropping it
 /// stops the OS watch and closes the channel, ending the debounce task.
 #[derive(Default)]
 pub struct SessionImportWatcherState {
-    watcher: Mutex<Option<RecommendedWatcher>>,
+    watcher: Mutex<Option<ActiveWatcher>>,
 }
 
 impl SessionImportWatcherState {
@@ -55,10 +125,8 @@ impl SessionImportWatcherState {
 /// in WAL mode writes new pages to `opencode.db-wal` and touches
 /// `opencode.db-shm`, leaving the main database file untouched until a
 /// checkpoint. Matching only `.db` therefore meant live sync could sit silent
-/// through an entire OpenCode session and fire only when SQLite happened to
-/// checkpoint. The frontend re-scans the whole source on any event from it, so
-/// treating a `-wal` touch as "OpenCode changed" is exactly right — and the
-/// 300ms debounce collapses a write burst either way.
+/// through an entire OpenCode session. SQLite changes re-scan their source;
+/// transcript changes retain every distinct path within the debounce window.
 fn is_session_file(p: &Path) -> bool {
     match p.extension().and_then(|s| s.to_str()) {
         Some(ext) => matches!(
@@ -72,6 +140,9 @@ fn is_session_file(p: &Path) -> bool {
                 | "sqlite"
                 | "sqlite-wal"
                 | "sqlite-shm"
+                | "vscdb"
+                | "vscdb-wal"
+                | "vscdb-shm"
         ),
         None => false,
     }
@@ -102,13 +173,30 @@ pub fn start(
         return Ok(());
     }
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(MAX_PENDING_PATHS);
+    let overflow = Arc::new(AtomicBool::new(false));
+    let callback_overflow = Arc::clone(&overflow);
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res {
-            for p in &event.paths {
-                if is_session_file(p) {
-                    let _ = tx.send(p.to_string_lossy().into_owned());
+        match res {
+            Ok(event) => {
+                if event.need_rescan() {
+                    callback_overflow.store(true, Ordering::Release);
+                    enqueue_change(&tx, &callback_overflow, String::new());
                 }
+                if matches!(event.kind, notify::EventKind::Access(_)) {
+                    return;
+                }
+                for p in &event.paths {
+                    if is_session_file(p) {
+                        enqueue_change(&tx, &callback_overflow, p.to_string_lossy().into_owned());
+                    }
+                }
+            }
+            Err(_) => {
+                // OS watchers may report dropped events. Wake the consumer even
+                // when the queue was empty; a full queue already guarantees it wakes.
+                callback_overflow.store(true, Ordering::Release);
+                enqueue_change(&tx, &callback_overflow, String::new());
             }
         }
     })
@@ -125,29 +213,18 @@ pub fn start(
         return Err("no session directories could be watched".to_string());
     }
 
-    // Debounce emitter: after the first event, wait for DEBOUNCE_MS of quiet,
-    // keeping the last changed path, then emit a single signal.
     let app_for_task = app.clone();
-    tauri::async_runtime::spawn(async move {
-        while let Some(first) = rx.recv().await {
-            let mut last = first;
-            loop {
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_millis(DEBOUNCE_MS)) => break,
-                    msg = rx.recv() => {
-                        match msg {
-                            Some(p) => last = p,
-                            None => return, // channel closed
-                        }
-                    }
-                }
-            }
-            let _ = app_for_task.emit(SESSION_CHANGED_EVENT, ChangedPayload { path: last });
+    let task = tauri::async_runtime::spawn(async move {
+        while let Some(batch) = next_batch(&mut rx, &overflow).await {
+            let _ = app_for_task.emit(SESSION_CHANGED_EVENT, batch);
         }
     });
 
-    // Replaces (and drops) any prior watcher.
-    *state.watcher.lock() = Some(watcher);
+    // Replacing or stopping a watcher also aborts its pending debounce task.
+    *state.watcher.lock() = Some(ActiveWatcher {
+        _watcher: watcher,
+        task,
+    });
     Ok(())
 }
 
@@ -199,6 +276,9 @@ mod tests {
         // Both spellings carry both sidecars: `.sqlite-shm` was missing while
         // `.db-shm` was accepted, so the two conventions behaved differently.
         assert!(is_session_file(&PathBuf::from("/x/store.sqlite-shm")));
+        assert!(is_session_file(&PathBuf::from("/x/state.vscdb")));
+        assert!(is_session_file(&PathBuf::from("/x/state.vscdb-wal")));
+        assert!(is_session_file(&PathBuf::from("/x/state.vscdb-shm")));
     }
 
     #[test]
@@ -223,5 +303,61 @@ mod tests {
         let state = SessionImportWatcherState::new();
         stop(&state); // must not panic
         assert!(!state.is_watching());
+    }
+
+    #[tokio::test]
+    async fn debounce_keeps_all_distinct_paths() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(MAX_PENDING_PATHS);
+        let overflow = AtomicBool::new(false);
+        for path in ["/claude/a.jsonl", "/codex/b.jsonl", "/claude/a.jsonl"] {
+            enqueue_change(&tx, &overflow, path.into());
+        }
+        let batch = next_batch(&mut rx, &overflow).await.unwrap();
+        assert_eq!(batch.paths, ["/claude/a.jsonl", "/codex/b.jsonl"]);
+        assert!(!batch.rescan);
+    }
+
+    #[tokio::test]
+    async fn overflow_requests_full_rescan() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        let overflow = AtomicBool::new(false);
+        for path in ["a.json", "b.json", "dropped.json"] {
+            enqueue_change(&tx, &overflow, path.into());
+        }
+        let batch = next_batch(&mut rx, &overflow).await.unwrap();
+        assert!(batch.rescan);
+        assert!(batch.paths.is_empty());
+        assert!(batch.path.is_none());
+        assert!(!overflow.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn continuous_writes_flush_at_maximum_deadline() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(MAX_PENDING_PATHS);
+        let producer = tokio::spawn(async move {
+            loop {
+                if tx.send("active.jsonl".into()).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+        let overflow = AtomicBool::new(false);
+        let result = tokio::time::timeout(
+            Duration::from_millis(MAX_BATCH_MS + 1_000),
+            next_batch(&mut rx, &overflow),
+        )
+        .await;
+        producer.abort();
+        assert_eq!(result.unwrap().unwrap().paths, ["active.jsonl"]);
+    }
+
+    #[tokio::test]
+    async fn closed_channel_does_not_emit_a_stale_batch() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        let overflow = AtomicBool::new(false);
+        tx.send("a.jsonl".into()).await.unwrap();
+        drop(tx);
+        assert!(next_batch(&mut rx, &overflow).await.is_none());
     }
 }

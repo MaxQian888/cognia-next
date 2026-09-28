@@ -338,3 +338,93 @@ describe("geminiCliSessionSource", () => {
     })
   })
 })
+
+describe("Gemini export detection and replay boundaries", () => {
+  it("detects pretty-printed Content exports without a vendor path", () => {
+    const file = {
+      name: "export.json",
+      path: "/downloads/export.json",
+      content: JSON.stringify(
+        [
+          { role: "user", parts: [{ text: "hello" }] },
+          { role: "model", parts: [{ text: "hi" }] },
+        ],
+        null,
+        2
+      ),
+    }
+    expect(geminiCliSessionSource.detect([file])).toBe("maybe")
+    expect(geminiCliSessionSource.detect([{ ...file, content: "[null, {}, 42]" }])).toBe("no")
+  })
+
+  it("detects complete recording JSON and ignores scalar JSONL records", () => {
+    const content = JSON.stringify(
+      { sessionId: "recording", projectHash: "p", messages: LINES.filter((x) => "type" in x) },
+      null,
+      2
+    )
+    expect(
+      geminiCliSessionSource.detect([{ name: "export.json", path: "/export.json", content }])
+    ).toBe("maybe")
+    expect(parseGeminiChat(`null\n42\n${CONTENT}\n{`, "x").messages).toHaveLength(2)
+  })
+
+  it("keeps duplicate insertion order, inclusive rewind and checkpoint resets", () => {
+    const row = (id: string, text: string) => ({ id, type: "user", content: [{ text }] })
+    const records = [
+      row("a", "a"),
+      row("b", "old"),
+      row("a", "updated"),
+      { $rewindTo: "b" },
+      row("b", "new"),
+      { $set: { messages: [row("x", "old"), row("y", "y"), row("x", "x")] } },
+      { $rewindTo: "y" },
+      row("z", "z"),
+    ]
+    expect(
+      parseGeminiChat(records.map((x) => JSON.stringify(x)).join("\n"), "x").messages.map(
+        (m) => m.parts[0]
+      )
+    ).toEqual([
+      { state: "done", type: "text", text: "x" },
+      { state: "done", type: "text", text: "z" },
+    ])
+    expect(
+      parseGeminiChat(
+        [row("a", "a"), { $rewindTo: "missing" }].map((x) => JSON.stringify(x)).join("\n"),
+        "x"
+      ).messages
+    ).toEqual([])
+  })
+
+  it("does not share mutable messages between picked graph parses", async () => {
+    const input: SessionScanInput = {
+      fs: {
+        exists: async () => false,
+        readDir: async () => [],
+        stat: async () => ({ size: 0, isFile: true }),
+        readTextFile: async () => "",
+      },
+      home: "",
+      pickedFiles: [
+        { name: "s.jsonl", path: "/s.jsonl", content: CONTENT },
+        { name: "other.jsonl", path: "/other.jsonl", content: CONTENT.replace("gem-1", "gem-2") },
+      ],
+    }
+    const ref = (await geminiCliSessionSource.listSessions(input))[0].ref
+    const first = await geminiCliSessionSource.parseSession(ref, input)
+    first.messages[0].parts = []
+    const second = await geminiCliSessionSource.parseSession(ref, input)
+    expect(second.messages[0].parts).toEqual([{ state: "done", type: "text", text: "fix the bug" }])
+    const fresh = {
+      ...input,
+      pickedFiles: [
+        { ...input.pickedFiles![0], content: CONTENT.replace("fix the bug", "new content") },
+        input.pickedFiles![1],
+      ],
+    }
+    expect((await geminiCliSessionSource.parseSession(ref, fresh)).messages[0].parts).toEqual([
+      { state: "done", type: "text", text: "new content" },
+    ])
+  })
+})

@@ -15,6 +15,11 @@ import {
   resolveScanInput,
 } from "./index"
 import type { SessionSummary } from "./types"
+import {
+  getSourceWatchRoots,
+  isSourceWatchAuxiliaryPath,
+  isSourceWatchTranscriptPath,
+} from "./registry"
 
 const EMPTY = { sessions: 0, messages: 0 }
 
@@ -43,6 +48,7 @@ interface WatchImportJob {
  */
 const watchJobQueue: WatchImportJob[] = []
 const pendingWatchJobs = new Map<string | undefined, Promise<WatchImportResult>>()
+const MAX_QUEUED_PATHS = 256
 let watchDrainActive = false
 
 /**
@@ -122,7 +128,21 @@ function recordImportedSessions(sourceId: string, summaries: SessionSummary[]): 
 export function runWatchImport(
   opts: { changedPath?: string; projectId?: string } = {}
 ): Promise<WatchImportResult> {
-  const key = opts.changedPath
+  const fullScanKey = JSON.stringify([opts.projectId, undefined])
+  const pendingFullScan = pendingWatchJobs.get(fullScanKey)
+  if (pendingFullScan) return pendingFullScan
+  // Bound path jobs per workspace during a slow import. A queued full scan
+  // covers all later events until it starts; events during that scan still
+  // enqueue a trailing read. Never discard a change just to cap the queue.
+  if (
+    opts.changedPath &&
+    watchJobQueue.filter((job) => job.opts.projectId === opts.projectId).length >= MAX_QUEUED_PATHS
+  ) {
+    opts = { projectId: opts.projectId }
+  }
+  // Project identity is part of the job: a workspace switch must not join a
+  // queued import whose new sessions will be stamped with the old workspace.
+  const key = JSON.stringify([opts.projectId, opts.changedPath])
   const pending = pendingWatchJobs.get(key)
   if (pending) return pending
   const promise = new Promise<WatchImportResult>((resolve, reject) => {
@@ -149,7 +169,7 @@ async function drainWatchJobs(): Promise<void> {
     const job = watchJobQueue.shift()!
     // Free the key BEFORE running: a fresh event for this path during the run
     // must queue a follow-up, not attach to the in-flight (older) read.
-    pendingWatchJobs.delete(job.opts.changedPath)
+    pendingWatchJobs.delete(JSON.stringify([job.opts.projectId, job.opts.changedPath]))
     try {
       job.resolve(await runWatchImportNow(job.opts))
     } catch (error) {
@@ -167,7 +187,16 @@ async function runWatchImportNow(opts: {
   if (opts.changedPath) {
     const source = detectSourceForPath(opts.changedPath, input.home, input.roots)
     if (source) {
-      if (source.summarizeFile) {
+      const auxiliary = isSourceWatchAuxiliaryPath(
+        source,
+        opts.changedPath,
+        input.home,
+        input.roots
+      )
+      if (source.summarizeFile && !auxiliary) {
+        if (!isSourceWatchTranscriptPath(source, opts.changedPath, input.home, input.roots)) {
+          return EMPTY
+        }
         // One-file-one-session: re-parse just the changed transcript.
         // `singleFile` keeps `parseGraph` from undoing the narrowing — Codex's
         // graph build otherwise walks+parses the whole corpus to find
@@ -180,7 +209,7 @@ async function runWatchImportNow(opts: {
       // re-import only the sessions that moved since the last watch event.
       const summaries = await listSessionsForSource(source.id, input)
       if (summaries.length === 0) return EMPTY
-      const changed = sinceLastWatch(source.id, summaries)
+      const changed = auxiliary ? summaries : sinceLastWatch(source.id, summaries)
       if (changed.length === 0) return EMPTY
       const parsedRefs = new Set<string>()
       const result = await importSessions(
@@ -222,7 +251,7 @@ export async function collectWatchRoots(): Promise<string[]> {
   const input = await resolveScanInput()
   const roots = new Set<string>()
   for (const source of getSessionSources()) {
-    for (const r of source.scanRoots(input.home, input.roots)) roots.add(r)
+    for (const r of getSourceWatchRoots(source, input.home, input.roots)) roots.add(r)
   }
   return [...roots]
 }

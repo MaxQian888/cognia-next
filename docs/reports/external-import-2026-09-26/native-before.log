@@ -1,0 +1,37 @@
+
+running 1 test
+test session_import::tests::benchmark_native_opencode_import ... NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":117.69200000000001,"output_bytes":61635619,"sample":0,"total_ms":140.786584,"warmup":true}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":97.54312499999999,"output_bytes":61635619,"sample":1,"total_ms":120.57475,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":99.199208,"output_bytes":61635619,"sample":2,"total_ms":122.538042,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":79.01474999999999,"output_bytes":61635619,"sample":3,"total_ms":101.848375,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":86.433208,"output_bytes":61635619,"sample":4,"total_ms":111.581875,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":81.596167,"output_bytes":61635619,"sample":5,"total_ms":107.28025,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":80.957666,"output_bytes":61635619,"sample":6,"total_ms":104.669916,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":78.148917,"output_bytes":61635619,"sample":7,"total_ms":101.060125,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":75.97804099999999,"output_bytes":61635619,"sample":8,"total_ms":99.03070799999999,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":76.861042,"output_bytes":61635619,"sample":9,"total_ms":98.83604199999999,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":79.78225,"output_bytes":61635619,"sample":10,"total_ms":103.03783299999999,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":79.63737499999999,"output_bytes":61635619,"sample":11,"total_ms":102.44420799999999,"warmup":false}
+NATIVE_BENCH {"fixture_bytes":33656832,"fnv1a64":"eb9a3027be54f2cf","materialize_ms":85.538084,"output_bytes":61635619,"sample":12,"total_ms":107.91145900000001,"warmup":false}
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 74 filtered out; finished in 2.77s
+
+        6.01 real         2.14 user         0.43 sys
+          1109934080  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               71709  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                1184  voluntary context switches
+                2024  involuntary context switches
+         27651354706  instructions retired
+          9944418177  cycles elapsed
+           853017896  peak memory footprint

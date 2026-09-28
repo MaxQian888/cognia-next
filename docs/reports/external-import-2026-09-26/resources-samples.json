@@ -1,0 +1,1422 @@
+{
+  "samples": [
+    {
+      "ms": 2035.978375,
+      "sample": 0,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1218.266042,
+      "sample": 1,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1318.588625,
+      "sample": 2,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1749.329667,
+      "sample": 3,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1313.860292,
+      "sample": 4,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1462.5984999999998,
+      "sample": 5,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1280.1418330000001,
+      "sample": 6,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1376.1815829999998,
+      "sample": 7,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1127.012667,
+      "sample": 8,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1607.143625,
+      "sample": 9,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1960.446291,
+      "sample": 10,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 1297.060334,
+      "sample": 11,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 44.402208,
+      "sample": 0,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 46.917625,
+      "sample": 1,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 45.898375,
+      "sample": 2,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 43.402625,
+      "sample": 3,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 44.115625,
+      "sample": 4,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 46.777958,
+      "sample": 5,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 45.987541,
+      "sample": 6,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 47.406957999999996,
+      "sample": 7,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 47.992792,
+      "sample": 8,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 48.359125000000006,
+      "sample": 9,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 48.854292,
+      "sample": 10,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 50.14625,
+      "sample": 11,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "baseline"
+    },
+    {
+      "ms": 855.249625,
+      "sample": 0,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 905.269416,
+      "sample": 1,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 1075.899208,
+      "sample": 2,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 1512.5776250000001,
+      "sample": 3,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 1096.613166,
+      "sample": 4,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 924.9492499999999,
+      "sample": 5,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 888.005875,
+      "sample": 6,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 922.510541,
+      "sample": 7,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 1294.96075,
+      "sample": 8,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 1127.3901250000001,
+      "sample": 9,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 948.283125,
+      "sample": 10,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 986.938708,
+      "sample": 11,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 41.5385,
+      "sample": 0,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 41.312875,
+      "sample": 1,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 42.115834,
+      "sample": 2,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 48.049915999999996,
+      "sample": 3,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 46.257625,
+      "sample": 4,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 48.020125,
+      "sample": 5,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 46.295500000000004,
+      "sample": 6,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 47.770292,
+      "sample": 7,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 46.328458000000005,
+      "sample": 8,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 45.854709,
+      "sample": 9,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 46.219583,
+      "sample": 10,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 45.54625,
+      "sample": 11,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "metadata"
+    },
+    {
+      "ms": 874.09525,
+      "sample": 0,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 975.264542,
+      "sample": 1,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 979.8410829999999,
+      "sample": 2,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 986.307791,
+      "sample": 3,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 1578.471,
+      "sample": 4,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 1604.462667,
+      "sample": 5,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 1881.722,
+      "sample": 6,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 1181.565167,
+      "sample": 7,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 1127.661042,
+      "sample": 8,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 1057.997791,
+      "sample": 9,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 1527.6151659999998,
+      "sample": 10,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 1684.27125,
+      "sample": 11,
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "after"
+    },
+    {
+      "ms": 63.754707999999994,
+      "sample": 0,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 54.903375,
+      "sample": 1,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 41.497375000000005,
+      "sample": 2,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 44.528833,
+      "sample": 3,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 41.485917,
+      "sample": 4,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 42.300292000000006,
+      "sample": 5,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 97.98825,
+      "sample": 6,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 68.00179200000001,
+      "sample": 7,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 93.146792,
+      "sample": 8,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 92.149084,
+      "sample": 9,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 67.792834,
+      "sample": 10,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 59.473,
+      "sample": 11,
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "after"
+    },
+    {
+      "ms": 3324.350416,
+      "sample": 0,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 2867.156875,
+      "sample": 0,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 1361.820167,
+      "sample": 1,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 782.7435409999999,
+      "sample": 1,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 882.997875,
+      "sample": 2,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 847.811417,
+      "sample": 2,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 754.180708,
+      "sample": 3,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 764.860541,
+      "sample": 3,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 794.487708,
+      "sample": 4,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 756.549417,
+      "sample": 4,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 791.161708,
+      "sample": 5,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 771.781292,
+      "sample": 5,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 763.036125,
+      "sample": 6,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 775.690125,
+      "sample": 6,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 751.756333,
+      "sample": 7,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 1296.674417,
+      "sample": 7,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 764.430667,
+      "sample": 8,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 746.438583,
+      "sample": 8,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 778.588792,
+      "sample": 9,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 1055.1981660000001,
+      "sample": 9,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 841.514417,
+      "sample": 10,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 770.109458,
+      "sample": 10,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 760.869667,
+      "sample": 11,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 752.940667,
+      "sample": 11,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "paired"
+    },
+    {
+      "ms": 136.048875,
+      "sample": 0,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 1281.631041,
+      "sample": 0,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 765.181083,
+      "sample": 1,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 219.71933299999998,
+      "sample": 1,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 143.98129200000002,
+      "sample": 2,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 112.482916,
+      "sample": 2,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 114.767625,
+      "sample": 3,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 120.50233300000001,
+      "sample": 3,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 111.35050000000001,
+      "sample": 4,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 102.294917,
+      "sample": 4,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 105.17325,
+      "sample": 5,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 123.186542,
+      "sample": 5,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 119.583541,
+      "sample": 6,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 107.727208,
+      "sample": 6,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 106.551458,
+      "sample": 7,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 120.8055,
+      "sample": 7,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 114.563209,
+      "sample": 8,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 264.659583,
+      "sample": 8,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 98.213208,
+      "sample": 9,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 108.11295899999999,
+      "sample": 9,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 109.034166,
+      "sample": 10,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 98.91875,
+      "sample": 10,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 103.65425,
+      "sample": 11,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 110.953333,
+      "sample": 11,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "paired"
+    },
+    {
+      "ms": 894.111083,
+      "sample": 0,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 361.154958,
+      "sample": 0,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 319.722958,
+      "sample": 1,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 886.498958,
+      "sample": 1,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 821.235083,
+      "sample": 2,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 288.763417,
+      "sample": 2,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 293.677625,
+      "sample": 3,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 831.426875,
+      "sample": 3,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 822.594416,
+      "sample": 4,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 316.479167,
+      "sample": 4,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 297.55674999999997,
+      "sample": 5,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 785.220708,
+      "sample": 5,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 879.224,
+      "sample": 6,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 336.052,
+      "sample": 6,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 328.047875,
+      "sample": 7,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 2328.081708,
+      "sample": 7,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 3745.319,
+      "sample": 8,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 401.503375,
+      "sample": 8,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 376.514709,
+      "sample": 9,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 992.230167,
+      "sample": 9,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 1371.111959,
+      "sample": 10,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 497.08808300000004,
+      "sample": 10,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 441.178375,
+      "sample": 11,
+      "version": "current",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 1520.795667,
+      "sample": 11,
+      "version": "baseline",
+      "wire_bytes": 2704001,
+      "workload": "small-text",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 176.041334,
+      "sample": 0,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 128.86766699999998,
+      "sample": 0,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 77.414167,
+      "sample": 1,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 157.02095799999998,
+      "sample": 1,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 218.528583,
+      "sample": 2,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 282.13791599999996,
+      "sample": 2,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 97.51937500000001,
+      "sample": 3,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 171.309833,
+      "sample": 3,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 202.83362499999998,
+      "sample": 4,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 80.521791,
+      "sample": 4,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 189.928291,
+      "sample": 5,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 312.97825,
+      "sample": 5,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 238.89325,
+      "sample": 6,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 114.26379200000001,
+      "sample": 6,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 291.341167,
+      "sample": 7,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 555.988875,
+      "sample": 7,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 463.773667,
+      "sample": 8,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 420.476292,
+      "sample": 8,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 237.308625,
+      "sample": 9,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 684.84325,
+      "sample": 9,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 351.208959,
+      "sample": 10,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 112.673333,
+      "sample": 10,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 123.13125,
+      "sample": 11,
+      "version": "current",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    },
+    {
+      "ms": 377.17275,
+      "sample": 11,
+      "version": "baseline",
+      "wire_bytes": 44783361,
+      "workload": "binary",
+      "experiment": "concurrent"
+    }
+  ],
+  "summary": [
+    {
+      "experiment": "baseline",
+      "workload": "small-text",
+      "version": "baseline",
+      "n": 12,
+      "median_ms": 1347.385104,
+      "mad_ms": 122.16622899999993,
+      "min_ms": 1127.012667,
+      "max_ms": 2035.978375
+    },
+    {
+      "experiment": "baseline",
+      "workload": "binary",
+      "version": "baseline",
+      "n": 12,
+      "median_ms": 46.8477915,
+      "mad_ms": 1.328167000000004,
+      "min_ms": 43.402625,
+      "max_ms": 50.14625
+    },
+    {
+      "experiment": "metadata",
+      "workload": "small-text",
+      "version": "metadata",
+      "n": 12,
+      "median_ms": 967.6109165,
+      "mad_ms": 93.94666650000005,
+      "min_ms": 855.249625,
+      "max_ms": 1512.5776250000001
+    },
+    {
+      "experiment": "metadata",
+      "workload": "binary",
+      "version": "metadata",
+      "n": 12,
+      "median_ms": 46.238603999999995,
+      "mad_ms": 1.1120209999999986,
+      "min_ms": 41.312875,
+      "max_ms": 48.049915999999996
+    },
+    {
+      "experiment": "after",
+      "workload": "small-text",
+      "version": "after",
+      "n": 12,
+      "median_ms": 1154.6131045,
+      "mad_ms": 229.93320849999998,
+      "min_ms": 874.09525,
+      "max_ms": 1881.722
+    },
+    {
+      "experiment": "after",
+      "workload": "binary",
+      "version": "after",
+      "n": 12,
+      "median_ms": 61.613853999999996,
+      "mad_ms": 18.199291499999994,
+      "min_ms": 41.485917,
+      "max_ms": 97.98825
+    },
+    {
+      "experiment": "paired",
+      "workload": "small-text",
+      "version": "baseline",
+      "n": 12,
+      "median_ms": 788.6156245,
+      "mad_ms": 30.6272285,
+      "min_ms": 752.940667,
+      "max_ms": 3324.350416
+    },
+    {
+      "experiment": "paired",
+      "workload": "small-text",
+      "version": "current",
+      "n": 12,
+      "median_ms": 772.8997915,
+      "mad_ms": 18.490499999999997,
+      "min_ms": 746.438583,
+      "max_ms": 2867.156875
+    },
+    {
+      "experiment": "paired",
+      "workload": "binary",
+      "version": "baseline",
+      "n": 12,
+      "median_ms": 120.042937,
+      "mad_ms": 8.89102049999999,
+      "min_ms": 108.11295899999999,
+      "max_ms": 219.71933299999998
+    },
+    {
+      "experiment": "paired",
+      "workload": "binary",
+      "version": "current",
+      "n": 12,
+      "median_ms": 107.139333,
+      "mad_ms": 6.485937500000006,
+      "min_ms": 98.213208,
+      "max_ms": 1281.631041
+    },
+    {
+      "experiment": "concurrent",
+      "workload": "small-text",
+      "version": "baseline",
+      "n": 12,
+      "median_ms": 890.3050205,
+      "mad_ms": 85.49754200000001,
+      "min_ms": 785.220708,
+      "max_ms": 3745.319
+    },
+    {
+      "experiment": "concurrent",
+      "workload": "small-text",
+      "version": "current",
+      "n": 12,
+      "median_ms": 332.0499375,
+      "mad_ms": 36.43275000000003,
+      "min_ms": 288.763417,
+      "max_ms": 497.08808300000004
+    },
+    {
+      "experiment": "concurrent",
+      "workload": "binary",
+      "version": "baseline",
+      "n": 12,
+      "median_ms": 275.93575,
+      "mad_ms": 100.565708,
+      "min_ms": 157.02095799999998,
+      "max_ms": 684.84325
+    },
+    {
+      "experiment": "concurrent",
+      "workload": "binary",
+      "version": "current",
+      "n": 12,
+      "median_ms": 125.99945849999999,
+      "mad_ms": 47.03147949999999,
+      "min_ms": 77.414167,
+      "max_ms": 420.476292
+    }
+  ],
+  "memory_max_rss_bytes": {
+    "baseline": 747536384,
+    "current": 705855488
+  }
+}

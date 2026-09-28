@@ -17,6 +17,158 @@ use serde_json::{json, Map, Value};
 use std::path::Path;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionHistoryFsOperation {
+    ReadText,
+    ReadDir,
+    Stat,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHistoryDirEntry {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_file: Option<bool>,
+}
+
+fn history_dir_entry(
+    name: std::ffi::OsString,
+    kind: Option<std::fs::FileType>,
+) -> Option<SessionHistoryDirEntry> {
+    Some(SessionHistoryDirEntry {
+        name: name.into_string().ok()?,
+        is_file: kind
+            .filter(|kind| !kind.is_symlink())
+            .map(|kind| kind.is_file()),
+    })
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SessionHistoryFsResult {
+    Text {
+        content: String,
+    },
+    Directory {
+        entries: Vec<SessionHistoryDirEntry>,
+    },
+    Stat {
+        exists: bool,
+        size: u64,
+        #[serde(rename = "isFile")]
+        is_file: bool,
+    },
+}
+
+/// Choose the lexical vendor history root before filesystem work. Both roots
+/// and path must be absolute; roots are supplied by native code, never IPC.
+fn confined_history_path(path: &Path, roots: &[PathBuf]) -> Result<Option<PathBuf>, String> {
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err("history path must be absolute and contain no parent traversal".into());
+    }
+    let root = roots
+        .iter()
+        .filter(|root| root.is_absolute() && path.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .ok_or_else(|| "path is outside the native session-history roots".to_string())?;
+    let canonical_root = match root.canonicalize() {
+        Ok(root) => root,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("resolve history root: {error}")),
+    };
+    let mut existing = path;
+    loop {
+        match existing.canonicalize() {
+            Ok(canonical) => {
+                if !canonical.starts_with(&canonical_root) {
+                    return Err("history path escapes its native root through a symlink".into());
+                }
+                return Ok((existing == path).then_some(canonical));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                existing = existing
+                    .parent()
+                    .ok_or_else(|| "history path has no existing ancestor".to_string())?;
+            }
+            Err(error) => return Err(format!("resolve history path: {error}")),
+        }
+    }
+}
+
+/// Read-only filesystem surface for history adapters. Unlike global plugin-fs
+/// scope grants, this does not authorize writes or unrelated credential trees.
+pub fn session_history_fs(
+    operation: SessionHistoryFsOperation,
+    path: &Path,
+    trusted_roots: &[PathBuf],
+) -> Result<SessionHistoryFsResult, String> {
+    let resolved = confined_history_path(path, trusted_roots)?;
+    if matches!(operation, SessionHistoryFsOperation::Stat) && resolved.is_none() {
+        return Ok(SessionHistoryFsResult::Stat {
+            exists: false,
+            size: 0,
+            is_file: false,
+        });
+    }
+    let resolved = resolved.ok_or_else(|| "history path does not exist".to_string())?;
+    match operation {
+        SessionHistoryFsOperation::ReadText => {
+            let extension = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default();
+            if !["json", "jsonl", "md"]
+                .iter()
+                .any(|allowed| extension.eq_ignore_ascii_case(allowed))
+            {
+                return Err("unsupported history text extension".into());
+            }
+            if !std::fs::metadata(&resolved)
+                .map_err(|error| format!("stat history text: {error}"))?
+                .is_file()
+            {
+                return Err("history text must be a regular file".into());
+            }
+            std::fs::read_to_string(resolved)
+                .map(|content| SessionHistoryFsResult::Text { content })
+                .map_err(|error| format!("read history text: {error}"))
+        }
+        SessionHistoryFsOperation::ReadDir => {
+            let mut entries = Vec::new();
+            for entry in std::fs::read_dir(resolved)
+                .map_err(|error| format!("read history directory: {error}"))?
+            {
+                let Ok(entry) = entry else { continue };
+                if let Some(entry) = history_dir_entry(entry.file_name(), entry.file_type().ok()) {
+                    entries.push(entry);
+                }
+            }
+            Ok(SessionHistoryFsResult::Directory { entries })
+        }
+        SessionHistoryFsOperation::Stat => match std::fs::metadata(resolved) {
+            Ok(metadata) => Ok(SessionHistoryFsResult::Stat {
+                exists: true,
+                size: metadata.len(),
+                is_file: metadata.is_file(),
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(SessionHistoryFsResult::Stat {
+                    exists: false,
+                    size: 0,
+                    is_file: false,
+                })
+            }
+            Err(error) => Err(format!("stat history path: {error}")),
+        },
+    }
+}
+
 /// Candidate on-disk locations for `opencode.db`, most-specific first, with
 /// duplicates removed (the platform data dir often *is* one of the others).
 ///
@@ -76,41 +228,6 @@ fn value_ref_to_json(v: ValueRef<'_>) -> Value {
     }
 }
 
-/// Read every row of `table` as a flat JSON map, folding a `data` JSON column
-/// (if present) into the top-level keys. Returns [] when the table is absent.
-fn rows_as_maps(conn: &Connection, table: &str) -> Vec<Map<String, Value>> {
-    let sql = format!("SELECT * FROM \"{table}\"");
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
-    let rows = stmt.query_map([], |row| {
-        let mut map = Map::new();
-        for (i, name) in col_names.iter().enumerate() {
-            let val = row.get_ref(i).map(value_ref_to_json).unwrap_or(Value::Null);
-            map.insert(name.clone(), val);
-        }
-        Ok(map)
-    });
-    let mut out = Vec::new();
-    if let Ok(iter) = rows {
-        for row in iter.flatten() {
-            let mut map = row;
-            // Fold the polymorphic `data` JSON blob into the row.
-            if let Some(Value::String(data)) = map.get("data").cloned() {
-                if let Ok(Value::Object(inner)) = serde_json::from_str::<Value>(&data) {
-                    for (k, v) in inner {
-                        map.entry(k).or_insert(v);
-                    }
-                }
-            }
-            out.push(map);
-        }
-    }
-    out
-}
-
 fn first_str<'a>(map: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a str> {
     for k in keys {
         if let Some(Value::String(s)) = map.get(*k) {
@@ -164,16 +281,6 @@ fn message_tokens(map: &Map<String, Value>) -> Option<Value> {
     }))
 }
 
-/// The list of table names in the DB (lowercased), for name-tolerant lookup.
-fn table_names(conn: &Connection) -> Vec<String> {
-    let mut stmt = match conn.prepare("SELECT name FROM sqlite_master WHERE type='table'") {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    let rows = stmt.query_map([], |r| r.get::<_, String>(0));
-    rows.map(|it| it.flatten().collect()).unwrap_or_default()
-}
-
 fn find_table(tables: &[String], want: &str) -> Option<String> {
     // Exact, then singular/plural, then contains.
     tables
@@ -193,19 +300,18 @@ fn find_table(tables: &[String], want: &str) -> Option<String> {
         .cloned()
 }
 
-fn build_sessions(conn: &Connection) -> Vec<Value> {
-    let tables = table_names(conn);
-    let session_tbl = find_table(&tables, "session").unwrap_or_else(|| "session".into());
+fn build_sessions(conn: &Connection) -> Result<Vec<Value>, String> {
+    let tables = table_names_checked(conn)
+        .map_err(|error| format!("opencode table discovery failed: {error}"))?;
+    let session_tbl = find_table(&tables, "session");
     let message_tbl = tables
         .iter()
         .find(|t| t.to_lowercase().contains("message"))
-        .cloned()
-        .unwrap_or_else(|| "message".into());
+        .cloned();
     let part_tbl = tables
         .iter()
         .find(|t| t.to_lowercase() == "part" || t.to_lowercase().contains("part"))
-        .cloned()
-        .unwrap_or_else(|| "part".into());
+        .cloned();
     let job_tbl = tables
         .iter()
         .find(|t| {
@@ -214,13 +320,19 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
         })
         .cloned();
 
-    let sessions = rows_as_maps(conn, &session_tbl);
-    let messages = rows_as_maps(conn, &message_tbl);
-    let parts = rows_as_maps(conn, &part_tbl);
-    let jobs = job_tbl
-        .as_deref()
-        .map(|table| rows_as_maps(conn, table))
-        .unwrap_or_default();
+    // Missing optional tables are valid across upstream schema generations;
+    // an existing table that cannot be read must never masquerade as empty.
+    let read_table = |table: Option<&str>| -> Result<Vec<Map<String, Value>>, String> {
+        match table {
+            Some(table) => rows_as_maps_checked(conn, table)
+                .map_err(|error| format!("opencode table {table} read failed: {error}")),
+            None => Ok(Vec::new()),
+        }
+    };
+    let sessions = read_table(session_tbl.as_deref())?;
+    let messages = read_table(message_tbl.as_deref())?;
+    let parts = read_table(part_tbl.as_deref())?;
+    let jobs = read_table(job_tbl.as_deref())?;
 
     let mut jobs_by_session: std::collections::HashMap<String, Vec<Value>> =
         std::collections::HashMap::new();
@@ -253,16 +365,16 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
     // are lexicographically ordered ULIDs) for a deterministic transcript.
     let mut parts_by_msg: std::collections::HashMap<String, Vec<(String, Value)>> =
         std::collections::HashMap::new();
-    for p in &parts {
-        let mid = match first_str(p, &["messageID", "message_id", "messageId"]) {
+    for p in parts {
+        let mid = match first_str(&p, &["messageID", "message_id", "messageId"]) {
             Some(s) => s.to_string(),
             None => continue,
         };
-        let pid = first_str(p, &["id"]).unwrap_or("").to_string();
+        let pid = first_str(&p, &["id"]).unwrap_or("").to_string();
         parts_by_msg
             .entry(mid)
             .or_default()
-            .push((pid, Value::Object(p.clone())));
+            .push((pid, Value::Object(p)));
     }
     for list in parts_by_msg.values_mut() {
         list.sort_by(|a, b| a.0.cmp(&b.0));
@@ -271,7 +383,18 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
     // Group messages by session id, carrying their parts.
     let mut msgs_by_session: std::collections::HashMap<String, Vec<Value>> =
         std::collections::HashMap::new();
-    for m in &messages {
+    // Most stores have unique IDs. Move each group on its final use instead
+    // of cloning every payload; older schemas may contain duplicate IDs, so
+    // earlier occurrences still receive the same complete group as before.
+    let last_message_use: std::collections::HashMap<&str, usize> = messages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, message)| {
+            first_str(message, &["sessionID", "session_id", "sessionId"])?;
+            Some((first_str(message, &["id"]).unwrap_or(""), index))
+        })
+        .collect();
+    for (index, m) in messages.iter().enumerate() {
         let sid = match first_str(m, &["sessionID", "session_id", "sessionId"]) {
             Some(s) => s.to_string(),
             None => continue,
@@ -279,15 +402,23 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
         let mid = first_str(m, &["id"]).unwrap_or("").to_string();
         let role = first_str(m, &["role"]).unwrap_or("user").to_string();
         let created = nested_num(m, "time", "created", &["created", "time_created"]);
-        let part_values: Vec<Value> = parts_by_msg
-            .get(&mid)
-            .map(|list| list.iter().map(|(_, v)| v.clone()).collect())
-            .unwrap_or_default();
+        let part_values: Vec<Value> = if last_message_use.get(mid.as_str()) == Some(&index) {
+            parts_by_msg
+                .remove(&mid)
+                .map(|list| list.into_iter().map(|(_, value)| value).collect())
+                .unwrap_or_default()
+        } else {
+            parts_by_msg
+                .get(&mid)
+                .map(|list| list.iter().map(|(_, value)| value.clone()).collect())
+                .unwrap_or_default()
+        };
         let mut msg = json!({
             "role": role,
             "createdAt": created,
-            "parts": part_values,
+            "parts": [],
         });
+        msg["parts"] = Value::Array(part_values);
         // Project the per-turn usage the assistant `data` carries so the TS
         // adapter can reconstruct token/cost stats (see opencode.ts).
         if let Some(model) = first_str(m, &["modelID", "model"]) {
@@ -307,8 +438,13 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
         msgs.sort_by_key(|m| m["createdAt"].as_i64().unwrap_or(0));
     }
 
-    let mut out = Vec::new();
-    for s in &sessions {
+    let last_session_use: std::collections::HashMap<&str, usize> = sessions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, session)| first_str(session, &["id"]).map(|id| (id, index)))
+        .collect();
+    let mut out = Vec::with_capacity(sessions.len());
+    for (index, s) in sessions.iter().enumerate() {
         let id = match first_str(s, &["id"]) {
             Some(s) => s.to_string(),
             None => continue,
@@ -323,9 +459,18 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
         let parent_id = first_str(s, &["parentID", "parent_id", "parentId"]).map(|s| s.to_string());
         let created = nested_num(s, "time", "created", &["created", "time_created"]);
         let updated = nested_num(s, "time", "updated", &["updated", "time_updated"]);
-        let msgs = msgs_by_session.get(&id).cloned().unwrap_or_default();
-        let jobs = jobs_by_session.get(&id).cloned().unwrap_or_default();
-        out.push(json!({
+        let (msgs, jobs) = if last_session_use.get(id.as_str()) == Some(&index) {
+            (
+                msgs_by_session.remove(&id).unwrap_or_default(),
+                jobs_by_session.remove(&id).unwrap_or_default(),
+            )
+        } else {
+            (
+                msgs_by_session.get(&id).cloned().unwrap_or_default(),
+                jobs_by_session.get(&id).cloned().unwrap_or_default(),
+            )
+        };
+        let mut session = json!({
             "id": id,
             "title": title,
             "cwd": cwd,
@@ -333,15 +478,18 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
             "parentId": parent_id,
             "createdAt": created,
             "updatedAt": if updated != 0 { updated } else { created },
-            "messages": msgs,
-            "jobs": jobs,
-        }));
+            "messages": [],
+            "jobs": [],
+        });
+        session["messages"] = Value::Array(msgs);
+        session["jobs"] = Value::Array(jobs);
+        out.push(session);
     }
-    out
+    Ok(out)
 }
 
 /// Read every OpenCode session from the local SQLite store. Returns [] when the
-/// DB is absent or unreadable (never errors on a missing install).
+/// DB is absent. Existing unreadable/corrupt databases return an error.
 /// The `#[tauri::command]` shell lives in `app_lib` (ADR-0067 Tier C) so this
 /// crate stays tauri-free for the headless server; it forwards straight here.
 pub fn read_opencode_sessions(home: String) -> Result<Vec<Value>, String> {
@@ -354,7 +502,8 @@ pub fn read_opencode_sessions(home: String) -> Result<Vec<Value>, String> {
         Ok(c) => c,
         Err(e) => return Err(format!("opencode db open failed: {e}")),
     };
-    Ok(build_sessions(&conn))
+    build_sessions(&conn)
+        .map_err(|error| format!("opencode db read failed at {}: {error}", path.display()))
 }
 
 fn find_named_files(root: &Path, name: &str, max_depth: usize, out: &mut Vec<PathBuf>) {
@@ -467,12 +616,12 @@ fn read_cursor_sessions(home: &str) -> Result<Vec<Value>, String> {
         find_named_files(&root, "state.vscdb", 4, &mut databases);
     }
     let mut out = Vec::new();
-    for path in databases.into_iter().take(200) {
+    for path in databases {
         let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|error| format!("cursor db open failed at {}: {error}", path.display()))?;
         let mut stmt = conn
             .prepare(
-                "SELECT key, value FROM ItemTable WHERE lower(key) LIKE '%composer%' OR lower(key) LIKE '%chat%' LIMIT 2000",
+                "SELECT key, value FROM ItemTable WHERE lower(key) LIKE '%composer%' OR lower(key) LIKE '%chat%'",
             )
             .map_err(|error| {
                 format!("cursor db query prepare failed at {}: {error}", path.display())
@@ -505,7 +654,7 @@ fn rows_as_maps_checked(
     conn: &Connection,
     table: &str,
 ) -> Result<Vec<Map<String, Value>>, rusqlite::Error> {
-    let sql = format!("SELECT * FROM \"{table}\"");
+    let sql = format!("SELECT * FROM \"{}\"", table.replace('"', "\"\""));
     let mut stmt = conn.prepare(&sql)?;
     let col_names: Vec<String> = stmt
         .column_names()
@@ -522,8 +671,8 @@ fn rows_as_maps_checked(
     let mut out = Vec::new();
     for row in rows {
         let mut map = row?;
-        if let Some(Value::String(data)) = map.get("data").cloned() {
-            if let Ok(Value::Object(inner)) = serde_json::from_str::<Value>(&data) {
+        if let Some(Value::String(data)) = map.get("data") {
+            if let Ok(Value::Object(inner)) = serde_json::from_str::<Value>(data) {
                 for (key, value) in inner {
                     map.entry(key).or_insert(value);
                 }
@@ -681,6 +830,209 @@ mod tests {
     use rusqlite::Connection;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[test]
+    fn history_fs_reads_complete_text_and_preserves_wire_shapes() {
+        let root = TestRoot::new("history-fs");
+        let file = root.0.join("long.JSONL");
+        let content = "{\"text\":\"long conversation 世界\"}\n".repeat(40_000);
+        std::fs::write(&file, &content).unwrap();
+        let roots = [root.0.clone()];
+        let text = session_history_fs(SessionHistoryFsOperation::ReadText, &file, &roots).unwrap();
+        assert_eq!(
+            serde_json::to_value(text).unwrap(),
+            json!({ "kind": "text", "content": content })
+        );
+        let stat = session_history_fs(SessionHistoryFsOperation::Stat, &file, &roots).unwrap();
+        assert_eq!(
+            serde_json::to_value(stat).unwrap(),
+            json!({ "kind": "stat", "exists": true, "size": content.len(), "isFile": true })
+        );
+        let directory =
+            session_history_fs(SessionHistoryFsOperation::ReadDir, &root.0, &roots).unwrap();
+        assert_eq!(
+            serde_json::to_value(directory).unwrap(),
+            json!({ "kind": "directory", "entries": [{"name":"long.JSONL", "isFile": true}] })
+        );
+        assert!(serde_json::from_value::<SessionHistoryFsOperation>(json!("readText")).is_ok());
+        assert!(serde_json::from_value::<SessionHistoryFsOperation>(json!("readDir")).is_ok());
+        assert!(serde_json::from_value::<SessionHistoryFsOperation>(json!("writeText")).is_err());
+    }
+
+    #[test]
+    fn history_fs_rejects_outside_paths_traversal_and_unsupported_text() {
+        let root = TestRoot::new("history-gate");
+        let sessions = root.0.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::write(sessions.join("auth.toml"), "secret").unwrap();
+        let roots = [sessions.clone()];
+        for path in [
+            PathBuf::from("relative.json"),
+            root.0.join("auth.json"),
+            root.0.join("sessions-backup/a.json"),
+            sessions.join("../auth.json"),
+        ] {
+            assert!(session_history_fs(SessionHistoryFsOperation::Stat, &path, &roots).is_err());
+        }
+        assert!(session_history_fs(
+            SessionHistoryFsOperation::ReadText,
+            &sessions.join("auth.toml"),
+            &roots
+        )
+        .is_err());
+        assert!(session_history_fs(SessionHistoryFsOperation::Stat, &sessions, &[]).is_err());
+    }
+
+    #[test]
+    fn history_fs_missing_is_distinct_from_io_errors() {
+        let root = TestRoot::new("history-missing");
+        let roots = [root.0.clone()];
+        let missing = root.0.join("not-installed/deep/file.jsonl");
+        assert_eq!(
+            serde_json::to_value(
+                session_history_fs(SessionHistoryFsOperation::Stat, &missing, &roots).unwrap()
+            )
+            .unwrap(),
+            json!({"kind":"stat", "exists":false, "size":0, "isFile":false})
+        );
+        assert!(session_history_fs(SessionHistoryFsOperation::ReadText, &missing, &roots).is_err());
+        let invalid = root.0.join("invalid.json");
+        std::fs::write(&invalid, [0xff, 0xfe]).unwrap();
+        assert!(session_history_fs(SessionHistoryFsOperation::ReadText, &invalid, &roots).is_err());
+        assert!(session_history_fs(
+            SessionHistoryFsOperation::Stat,
+            &invalid.join("child"),
+            &roots
+        )
+        .is_err());
+        let absent_root = root.0.join("uninstalled");
+        assert!(matches!(
+            session_history_fs(
+                SessionHistoryFsOperation::Stat,
+                &absent_root,
+                &[absent_root.clone()]
+            ),
+            Ok(SessionHistoryFsResult::Stat { exists: false, .. })
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn history_fs_follows_only_confined_symlinks_and_keeps_directory_type_hints() {
+        use std::os::unix::fs::symlink;
+        let root = TestRoot::new("history-links");
+        let sessions = root.0.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::write(sessions.join("a.json"), "history").unwrap();
+        std::fs::write(root.0.join("secret.json"), "private").unwrap();
+        symlink(sessions.join("a.json"), sessions.join("inside.json")).unwrap();
+        symlink(root.0.join("secret.json"), sessions.join("outside.json")).unwrap();
+        symlink(&root.0, sessions.join("outside-dir")).unwrap();
+        let roots = [sessions.clone()];
+        assert!(matches!(
+            session_history_fs(
+                SessionHistoryFsOperation::Stat,
+                &sessions.join("inside.json"),
+                &roots
+            ),
+            Ok(SessionHistoryFsResult::Stat { is_file: true, .. })
+        ));
+        assert!(session_history_fs(
+            SessionHistoryFsOperation::ReadText,
+            &sessions.join("outside.json"),
+            &roots
+        )
+        .is_err());
+        assert!(session_history_fs(
+            SessionHistoryFsOperation::Stat,
+            &sessions.join("outside-dir/missing.json"),
+            &roots
+        )
+        .is_err());
+        let listed = serde_json::to_value(
+            session_history_fs(SessionHistoryFsOperation::ReadDir, &sessions, &roots).unwrap(),
+        )
+        .unwrap();
+        let link = listed["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["name"] == "inside.json")
+            .unwrap();
+        assert!(link.get("isFile").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn history_directory_entry_conversion_filters_invalid_names_and_unknown_types() {
+        use std::os::unix::ffi::OsStringExt;
+        let invalid = std::ffi::OsString::from_vec(vec![0xff, b'.', b'j', b's', b'o', b'n']);
+        assert!(history_dir_entry(invalid, None).is_none());
+        let unknown = history_dir_entry("unknown.jsonl".into(), None).unwrap();
+        assert_eq!(unknown.name, "unknown.jsonl");
+        assert!(unknown.is_file.is_none());
+    }
+
+    // APFS rejects invalid UTF-8 names at creation. The converter is tested
+    // above on all Unix hosts; this actual filesystem fixture requires Linux.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn history_directory_keeps_valid_siblings_of_unrepresentable_names() {
+        use std::os::unix::ffi::OsStringExt;
+        let root = TestRoot::new("history-invalid-name");
+        std::fs::write(root.0.join("valid.jsonl"), "{}").unwrap();
+        let invalid = std::ffi::OsString::from_vec(vec![0xff, b'.', b'j', b's', b'o', b'n']);
+        std::fs::write(root.0.join(invalid), "{}").unwrap();
+        let result = session_history_fs(
+            SessionHistoryFsOperation::ReadDir,
+            &root.0,
+            &[root.0.clone()],
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            json!({ "kind": "directory", "entries": [{"name":"valid.jsonl", "isFile": true}] })
+        );
+    }
+
+    #[test]
+    fn history_text_rejects_directories_before_reading() {
+        let root = TestRoot::new("history-nonfile");
+        let directory = root.0.join("directory.json");
+        std::fs::create_dir(&directory).unwrap();
+        let error = session_history_fs(
+            SessionHistoryFsOperation::ReadText,
+            &directory,
+            &[root.0.clone()],
+        )
+        .unwrap_err();
+        assert!(error.contains("regular file"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn history_text_rejects_sockets_before_reading() {
+        // macOS's default temp directory plus fixture name exceeds sockaddr_un.
+        let path = PathBuf::from("/tmp").join(format!(
+            "cognia-hfs-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        let root = TestRoot(path);
+        let socket = root.0.join("s.json");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let error = session_history_fs(
+            SessionHistoryFsOperation::ReadText,
+            &socket,
+            &[root.0.clone()],
+        )
+        .unwrap_err();
+        assert!(error.contains("regular file"));
+    }
+
     struct TestRoot(PathBuf);
 
     impl TestRoot {
@@ -726,11 +1078,86 @@ mod tests {
         .unwrap();
     }
 
+    /// Manual fixed-workload performance evidence; never a wall-clock CI gate.
+    #[test]
+    #[ignore]
+    fn benchmark_native_opencode_import() {
+        let root = TestRoot::new("opencode-benchmark");
+        let path = root.0.join("opencode.db");
+        let mut writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch(
+                "CREATE TABLE session (id TEXT, title TEXT, data TEXT);
+             CREATE TABLE message (id TEXT, session_id TEXT, role TEXT, data TEXT);
+             CREATE TABLE part (id TEXT, message_id TEXT, type TEXT, data TEXT);
+             CREATE TABLE job (id TEXT, session_id TEXT, status TEXT, data TEXT);",
+            )
+            .unwrap();
+        let tx = writer.transaction().unwrap();
+        let payload = "x".repeat(4096);
+        for session in 0..30 {
+            let sid = format!("s{session:04}");
+            tx.execute("INSERT INTO session VALUES (?1, ?2, ?3)", rusqlite::params![
+                sid, format!("History {session}"),
+                json!({"time":{"created":session,"updated":session+1},"parentID": if session == 0 { Value::Null } else { json!("s0000") }}).to_string()
+            ]).unwrap();
+            tx.execute(
+                "INSERT INTO job VALUES (?1, ?2, 'failed', ?3)",
+                rusqlite::params![
+                    format!("j{session}"),
+                    sid,
+                    json!({"description":"index","error":"interrupted","blockedBy":["j0"]})
+                        .to_string()
+                ],
+            )
+            .unwrap();
+            for message in (0..80).rev() {
+                let mid = format!("m{session:04}-{message:04}");
+                tx.execute("INSERT INTO message VALUES (?1, ?2, 'assistant', ?3)", rusqlite::params![
+                    mid,sid,json!({"time":{"created":message},"modelID":"fixture-model","cost":0.02,"tokens":{"input":100,"output":50,"reasoning":30,"cache":{"read":200,"write":10}}}).to_string()
+                ]).unwrap();
+                for part in (0..3).rev() {
+                    tx.execute("INSERT INTO part VALUES (?1, ?2, 'tool', ?3)", rusqlite::params![
+                        format!("p{session:04}-{message:04}-{part}"),mid,
+                        json!({"tool":"read","callID":format!("call-{message}-{part}"),"state":{"status":"completed","input":{"path":"fixture.rs"},"output":payload}}).to_string()
+                    ]).unwrap();
+                }
+            }
+        }
+        tx.commit().unwrap();
+        drop(writer);
+        let mut expected = None;
+        for sample in 0..13 {
+            let started = std::time::Instant::now();
+            let reader =
+                Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+            let sessions = build_sessions(&reader).unwrap();
+            let materialize_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let encoded = serde_json::to_vec(&sessions).unwrap();
+            let total_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let hash = encoded.iter().fold(0xcbf29ce484222325u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+            });
+            let identity = (encoded.len(), hash);
+            if let Some(expected) = expected {
+                assert_eq!(identity, expected);
+            } else {
+                expected = Some(identity);
+            }
+            assert_eq!(sessions.len(), 30);
+            assert_eq!(sessions[0]["messages"].as_array().unwrap().len(), 80);
+            println!(
+                "NATIVE_BENCH {}",
+                json!({"sample":sample,"warmup":sample==0,"materialize_ms":materialize_ms,"total_ms":total_ms,"output_bytes":encoded.len(),"fnv1a64":format!("{hash:016x}"),"fixture_bytes":std::fs::metadata(&path).unwrap().len()})
+            );
+        }
+    }
+
     #[test]
     fn builds_sessions_with_grouped_messages_and_parts() {
         let conn = Connection::open_in_memory().unwrap();
         seed(&conn);
-        let sessions = build_sessions(&conn);
+        let sessions = build_sessions(&conn).unwrap();
         assert_eq!(sessions.len(), 2);
         let s = sessions.iter().find(|s| s["id"] == "s1").unwrap();
         assert_eq!(s["title"], "Fix bug");
@@ -766,9 +1193,88 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_ids_preserve_complete_groups_and_stable_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        seed(&conn);
+        conn.execute_batch(
+            r#"
+            INSERT INTO message VALUES ('m2', 's2', 'assistant', '{"time":{"created":15}}');
+            INSERT INTO message VALUES ('m2', 's1', 'system', '{"time":{"created":15}}');
+            INSERT INTO session SELECT * FROM session WHERE id = 's1';
+            -- A row without a session cannot consume the group of an earlier valid row.
+            INSERT INTO message VALUES ('m2', NULL, 'assistant', '{}');
+            INSERT INTO part VALUES ('p4', 'm2', 'text', '{"type":"ignored-collision","text":"retained","unknown":{"deep":[1,2,3]}}');
+            "#,
+        ).unwrap();
+        let sessions = build_sessions(&conn).unwrap();
+        assert_eq!(sessions.len(), 3);
+        assert_eq!(sessions[0], sessions[2]);
+        let messages = sessions[0]["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[2]["role"], "system");
+        assert_eq!(messages[1]["parts"], messages[2]["parts"]);
+        assert_eq!(messages[1]["parts"], sessions[1]["messages"][0]["parts"]);
+        let part = &messages[1]["parts"][2];
+        assert_eq!(part["type"], "text");
+        assert_eq!(part["unknown"]["deep"], json!([1, 2, 3]));
+        assert!(part["data"].as_str().unwrap().contains("ignored-collision"));
+        assert_eq!(sessions[0]["jobs"][0]["id"], "j1");
+    }
+
+    #[test]
+    fn missing_message_ids_retain_shared_parts_for_every_valid_row() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE session (id TEXT);
+            CREATE TABLE message (session_id TEXT, role TEXT);
+            CREATE TABLE part (message_id TEXT, data TEXT);
+            INSERT INTO session VALUES ('s');
+            INSERT INTO message VALUES ('s', 'user'), ('s', 'assistant');
+            INSERT INTO part VALUES ('', '{"text":"shared fallback"}');
+            "#,
+        )
+        .unwrap();
+        let sessions = build_sessions(&conn).unwrap();
+        assert_eq!(
+            sessions[0]["messages"][0]["parts"],
+            sessions[0]["messages"][1]["parts"]
+        );
+        assert_eq!(
+            sessions[0]["messages"][1]["parts"][0]["text"],
+            "shared fallback"
+        );
+    }
+
+    #[test]
+    fn readonly_file_import_observes_later_commits_without_modifying_source() {
+        let root = TestRoot::new("opencode-freshness");
+        let path = root.0.join("opencode.db");
+        let writer = Connection::open(&path).unwrap();
+        seed(&writer);
+        let reader = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let first = build_sessions(&reader).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        writer
+            .execute(
+                "UPDATE part SET data = ?1 WHERE id = 'p3'",
+                [r#"{"text":"new committed content"}"#],
+            )
+            .unwrap();
+        let second = build_sessions(&reader).unwrap();
+        assert_eq!(first[0]["messages"][1]["parts"][1]["text"], "done");
+        assert_eq!(
+            second[0]["messages"][1]["parts"][1]["text"],
+            "new committed content"
+        );
+    }
+
+    #[test]
     fn missing_tables_yield_no_sessions() {
         let conn = Connection::open_in_memory().unwrap();
-        assert!(build_sessions(&conn).is_empty());
+        assert!(build_sessions(&conn).unwrap().is_empty());
     }
 
     #[test]
@@ -804,6 +1310,59 @@ mod tests {
                 assert!(known_index <= platform_index);
             }
         }
+    }
+
+    #[test]
+    fn opencode_missing_optional_tables_remain_compatible() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session(id TEXT, title TEXT); INSERT INTO session VALUES ('s', 'Kept');",
+        )
+        .unwrap();
+        let sessions = build_sessions(&conn).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["messages"], json!([]));
+        assert_eq!(sessions[0]["jobs"], json!([]));
+    }
+
+    #[test]
+    fn opencode_reports_schema_read_failure_instead_of_empty_history() {
+        let root = TestRoot::new("opencode-corrupt-schema");
+        let path = root.0.join("opencode.db");
+        std::fs::write(&path, b"not a sqlite database").unwrap();
+        let reader = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let error = build_sessions(&reader).unwrap_err();
+        assert!(error.contains("table discovery failed"), "{error}");
+    }
+
+    #[test]
+    fn opencode_reports_existing_table_read_failure_instead_of_partial_history() {
+        use std::io::{Seek, SeekFrom, Write};
+        let root = TestRoot::new("opencode-corrupt-message");
+        let path = root.0.join("opencode.db");
+        let writer = Connection::open(&path).unwrap();
+        seed(&writer);
+        drop(writer);
+        let reader = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let page: u64 = reader
+            .query_row(
+                "SELECT rootpage FROM sqlite_master WHERE name='message'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let page_size: u64 = reader
+            .query_row("PRAGMA page_size", [], |row| row.get(0))
+            .unwrap();
+        // Damage only this private fixture's message B-tree after schema discovery.
+        // Schema listing still works, but reading the existing table must fail.
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.seek(SeekFrom::Start((page - 1) * page_size)).unwrap();
+        file.write_all(&[0]).unwrap();
+        file.flush().unwrap();
+        drop(file);
+        let error = build_sessions(&reader).unwrap_err();
+        assert!(error.contains("table message read failed"), "{error}");
     }
 
     #[test]
@@ -895,6 +1454,52 @@ mod tests {
                 .unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0]["sessionId"], "cursor-db");
+    }
+
+    #[test]
+    fn cursor_reader_keeps_rows_beyond_the_former_2000_row_limit() {
+        let root = TestRoot::new("cursor-many-rows");
+        let path = root.0.join(".cursor/state.vscdb");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch("CREATE TABLE ItemTable (key TEXT, value TEXT);")
+            .unwrap();
+        let tx = writer.transaction().unwrap();
+        for index in 0..2_005 {
+            let data = json!({"composerId": format!("conversation-{index}"), "bubbles": [{"bubbleId":"u", "type":1, "text":"retained"}]});
+            tx.execute(
+                "INSERT INTO ItemTable VALUES (?1, ?2)",
+                rusqlite::params![format!("composer-{index}"), data.to_string()],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        drop(writer);
+        let sessions = read_cursor_sessions(&root.0.to_string_lossy()).unwrap();
+        assert_eq!(sessions.len(), 2_005);
+        assert!(sessions
+            .iter()
+            .any(|session| session["sessionId"] == "conversation-2004"));
+    }
+
+    #[test]
+    fn cursor_reader_keeps_databases_beyond_the_former_200_database_limit() {
+        let root = TestRoot::new("cursor-many-databases");
+        let template = root.0.join("template.db");
+        let writer = Connection::open(&template).unwrap();
+        writer.execute_batch(r#"CREATE TABLE ItemTable (key TEXT, value TEXT);
+            INSERT INTO ItemTable VALUES ('composer', '{"composerId":"retained","bubbles":[{"type":1,"text":"retained"}]}');"#).unwrap();
+        drop(writer);
+        for index in 0..201 {
+            let path = root
+                .0
+                .join(format!(".cursor/workspace-{index:03}/state.vscdb"));
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::copy(&template, path).unwrap();
+        }
+        let sessions = read_cursor_sessions(&root.0.to_string_lossy()).unwrap();
+        assert_eq!(sessions.len(), 201);
     }
 
     #[test]

@@ -30,11 +30,17 @@ const log = createLogger("session-import-watch")
 /** The Tauri event the Rust watcher emits on a debounced change burst. */
 export const SESSION_IMPORT_CHANGED_EVENT = "session-import://changed"
 
+interface ChangedPayload {
+  path?: string
+  paths?: string[]
+  rescan?: boolean
+}
+
 export interface SessionImportWatchDeps {
   invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
   listen?: (
     event: string,
-    handler: (event: { payload?: { path?: string } }) => void
+    handler: (event: { payload?: ChangedPayload }) => void
   ) => Promise<() => void>
   isTauri?: () => boolean
   collectWatchRoots?: typeof collectWatchRoots
@@ -74,10 +80,10 @@ async function defaultInvoke(cmd: string, args?: Record<string, unknown>): Promi
 
 async function defaultListen(
   event: string,
-  handler: (e: { payload?: { path?: string } }) => void
+  handler: (e: { payload?: ChangedPayload }) => void
 ): Promise<() => void> {
   const { listen } = await import("@tauri-apps/api/event")
-  return listen<{ path?: string }>(event, handler)
+  return listen<ChangedPayload>(event, handler)
 }
 
 /** True when a watch is currently installed in this process. */
@@ -124,14 +130,25 @@ export function startSessionImportWatch(
     active = record
     try {
       const roots = await collectRoots()
-      await invokeFn("session_import_watch_start", { roots })
       const unlisten = await listenFn(SESSION_IMPORT_CHANGED_EVENT, (event) => {
+        if (active !== record) return
         // Errors here reach nobody: the watch is a background job with no
         // surface to fail into. Logging beats an unhandled rejection.
-        void doImport({ changedPath: event.payload?.path, projectId: record.projectId }).catch(
-          (error) => log.error("session-import-watch-import-failed", { error })
-        )
+        const payload = event.payload
+        const paths = payload?.rescan
+          ? [undefined]
+          : payload?.paths?.length
+            ? [...new Set(payload.paths)]
+            : [payload?.path]
+        for (const changedPath of paths) {
+          void doImport({ changedPath, projectId: record.projectId }).catch((error) =>
+            log.error("session-import-watch-import-failed", { error })
+          )
+        }
       })
+      record.unlisten = unlisten
+      // Subscribe before native start so its first batch cannot be lost.
+      const installed = await invokeFn("session_import_watch_start", { roots })
       if (active !== record) {
         // A stop landed while we were awaiting — honour it.
         safeUnlisten(unlisten)
@@ -142,9 +159,20 @@ export function startSessionImportWatch(
         }
         return
       }
+      if (installed === false) {
+        active = null
+        safeUnlisten(unlisten)
+        return
+      }
       record.unlisten = unlisten
+      // Catch up writes made while Cognia was closed or live sync disabled.
+      // Subscribe first, so changes during this scan still queue a trailing read.
+      void doImport({ projectId: record.projectId }).catch((error) =>
+        log.error("session-import-watch-catchup-failed", { error })
+      )
     } catch (error) {
       if (active === record) active = null
+      safeUnlisten(record.unlisten)
       log.error("session-import-watch-start-failed", { error })
       throw error
     }

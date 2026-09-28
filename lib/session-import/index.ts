@@ -30,6 +30,35 @@ import type {
  */
 export const DEFAULT_IMPORT_CHUNK = 25
 
+// Keep each picked corpus isolated for both listing and the later graph parse.
+// The input object also owns adapters' run-scoped caches.
+const pickedSourceInputs = new WeakMap<SessionScanInput, Map<string, SessionScanInput>>()
+
+export function attributePickedFiles(input: SessionScanInput, sourceIds: string[]): void {
+  if (!input.pickedFiles || sourceIds.length < 2) return
+  const sources = sourceIds.map(getSessionSource).filter((source) => source !== undefined)
+  const scoped = new Map<string, SessionScanInput>(
+    sourceIds.map((id) => [id, { ...input, pickedFiles: [] }])
+  )
+  for (const file of input.pickedFiles) {
+    const verdicts = sources.map((source) => ({ source, verdict: source.detect([file]) }))
+    const match = verdicts.find((entry) => entry.verdict === "match")
+    const auxiliary = /\/(?:teams|tasks)\//.test(file.path.replace(/\\/g, "/"))
+    if (!match && auxiliary && scoped.has("claude-code")) {
+      // Weak vendor names in task descriptions must not steal enrichment files.
+      scoped.get("claude-code")!.pickedFiles!.push(file)
+    } else {
+      const owner = match ?? verdicts.find((entry) => entry.verdict === "maybe")
+      if (owner) scoped.get(owner.source.id)!.pickedFiles!.push(file)
+    }
+  }
+  pickedSourceInputs.set(input, scoped)
+}
+
+function inputForSource(input: SessionScanInput, sourceId: string): SessionScanInput {
+  return pickedSourceInputs.get(input)?.get(sourceId) ?? input
+}
+
 function attachedStatusFromLifecycle(
   status: CanonicalSessionLifecycleStatus | undefined
 ): "staged" | "running" | "completed" | "interrupted" {
@@ -108,7 +137,9 @@ export async function listSessionsForSource(
 ): Promise<SessionSummary[]> {
   const source = getSessionSource(sourceId)
   if (!source) return []
-  return source.listSessions(input)
+  const scoped = inputForSource(input, sourceId)
+  if (scoped.pickedFiles?.length === 0) return []
+  return source.listSessions(scoped)
 }
 
 /** A source that threw during a scan, surfaced instead of silently swallowed. */
@@ -129,7 +160,7 @@ export async function scanAllSources(
   const errors: SessionScanError[] = []
   for (const source of getSessionSources()) {
     try {
-      summaries.push(...(await source.listSessions(input)))
+      summaries.push(...(await listSessionsForSource(source.id, input)))
     } catch (err) {
       errors.push({
         sourceId: source.id,
@@ -171,6 +202,7 @@ async function parseRefConversations(
       failure: { ref, code: "source-unavailable" },
     }
   try {
+    input = inputForSource(input, ref.sourceId)
     const richGraph = source.parseGraph
       ? await source.parseGraph(ref, input, { singleFile })
       : undefined

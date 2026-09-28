@@ -1,0 +1,10 @@
+{
+  "portable-agent-source.ts": "3d4548442c982a53c96307d6397b232dc67c7b08819ff26b5d86605a4b507997",
+  "portable-agent-source.test.ts": "141d5650634ec54962e36b552b8105a1c1e9d0ccbee3c8678840178f49e99542",
+  "qwen-code.ts": "8a40c8f3d2c5b6382678859fa90e39313338bca33bc77c4a4475e936b4ded9e5",
+  "qwen-code.test.ts": "d270f5b0e135623e38d9ce66bcf90c0d273a978f94692ad0185a3ecbee8b2de5",
+  "copilot-cli.ts": "393eb029cd4916f951ccddc4436a72608b4f8a99f4ffe281e742c32047441908",
+  "copilot-cli.test.ts": "eec1290fdec5b3a05780253f2852897ae3ca347ede283ef4c063dabf8648a599",
+  "cline.ts": "c385ba8ef7b42bdd8aed8e04eaa3ad343f0adc1fce59d95cb9f883086da3be74",
+  "cline.test.ts": "7f94c8166a52da8c68201f82e89e00f6346007d95d0e1eddc59f692fb035730d"
+}

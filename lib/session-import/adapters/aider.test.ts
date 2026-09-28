@@ -94,3 +94,34 @@ describe("aiderSessionSource", () => {
     })
   })
 })
+
+it("summary mode agrees with the full parser across notes, empty turns and restart boundaries", async () => {
+  const content = [
+    "# aider chat started at 2026-01-01 00:00:00",
+    "#### first",
+    "#### line two",
+    "> ignored",
+    "answer",
+    "#### ",
+    "",
+    "# aider chat started at 2026-01-02 00:00:00",
+    "#### last",
+    "done",
+  ].join("\n")
+  const parsed = parseAiderHistory(content, "/history.md")
+  const list = await aiderSessionSource.listSessions({
+    home: "",
+    fs: {
+      exists: async () => false,
+      readDir: async () => [],
+      stat: async () => ({ size: 0, isFile: true }),
+      readTextFile: async () => "",
+    },
+    pickedFiles: [{ name: "history.md", path: "/history.md", content }],
+  })
+  expect(list[0]).toMatchObject({
+    title: parsed.title,
+    messageCount: parsed.messages.length,
+    updatedAt: parsed.updatedAt,
+  })
+})

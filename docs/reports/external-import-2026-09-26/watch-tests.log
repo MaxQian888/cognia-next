@@ -1,0 +1,198 @@
+  Using tsconfig file: tsconfig.build.json
+PASS node lib/session-import/watch-controller.test.ts
+  ● Console
+
+    console.error
+      [ERROR] [session-import-watch] session-import-watch-catchup-failed {
+        error: {
+          error: {
+            name: 'Error',
+            message: 'database busy',
+            stack: 'Error: database busy\n' +
+              '    at /Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:86:15\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:305:39\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:312:13\n' +
+              '    at mockConstructor (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:102:19)\n' +
+              '    at doImport (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.ts:170:12)'
+          }
+        }
+      }
+
+      221 |         break
+      222 |       default:
+    > 223 |         consoleMethod(`${prefix} ${message}`, ...extra)
+          |         ^
+      224 |     }
+      225 |
+      226 |     // Output stack trace separately
+
+      at ConsoleTransport.consoleMethod [as log] (packages/logging/src/transports/console-transport.ts:223:9)
+      at log (packages/logging/src/core.ts:333:22)
+      at CoreLogger.dispatchEntry [as log] (packages/logging/src/core.ts:551:5)
+      at CoreLogger.log [as error] (packages/logging/src/core.ts:585:10)
+      at error (lib/session-import/watch-controller.ts:171:13)
+
+    console.error
+      [ERROR] [session-import-watch] session-import-watch-start-failed {
+        error: {
+          error: {
+            name: 'Error',
+            message: 'native failed',
+            stack: 'Error: native failed\n' +
+              '    at /Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:104:15\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:305:39\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:312:13\n' +
+              '    at mockConstructor (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:102:19)\n' +
+              '    at invokeFn (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.ts:151:31)'
+          }
+        }
+      }
+
+      221 |         break
+      222 |       default:
+    > 223 |         consoleMethod(`${prefix} ${message}`, ...extra)
+          |         ^
+      224 |     }
+      225 |
+      226 |     // Output stack trace separately
+
+      at ConsoleTransport.consoleMethod [as log] (packages/logging/src/transports/console-transport.ts:223:9)
+      at log (packages/logging/src/core.ts:333:22)
+      at CoreLogger.dispatchEntry [as log] (packages/logging/src/core.ts:551:5)
+      at CoreLogger.log [as error] (packages/logging/src/core.ts:585:10)
+      at error (lib/session-import/watch-controller.ts:176:11)
+
+    console.error
+      [ERROR] [session-import-watch] session-import-watch-catchup-failed {
+        error: {
+          error: {
+            name: 'Error',
+            message: 'dexie closed',
+            stack: 'Error: dexie closed\n' +
+              '    at /Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:184:15\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:305:39\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:312:13\n' +
+              '    at mockConstructor (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:102:19)\n' +
+              '    at doImport (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.ts:170:12)'
+          }
+        }
+      }
+
+      221 |         break
+      222 |       default:
+    > 223 |         consoleMethod(`${prefix} ${message}`, ...extra)
+          |         ^
+      224 |     }
+      225 |
+      226 |     // Output stack trace separately
+
+      at ConsoleTransport.consoleMethod [as log] (packages/logging/src/transports/console-transport.ts:223:9)
+      at log (packages/logging/src/core.ts:333:22)
+      at CoreLogger.dispatchEntry [as log] (packages/logging/src/core.ts:551:5)
+      at CoreLogger.log [as error] (packages/logging/src/core.ts:585:10)
+      at error (lib/session-import/watch-controller.ts:171:13)
+
+    console.error
+      [ERROR] [session-import-watch] session-import-watch-import-failed {
+        error: {
+          error: {
+            name: 'Error',
+            message: 'dexie closed',
+            stack: 'Error: dexie closed\n' +
+              '    at /Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:184:15\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:305:39\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:312:13\n' +
+              '    at mockConstructor (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:102:19)\n' +
+              '    at doImport (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.ts:144:16)\n' +
+              '    at handler (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:30:30)\n' +
+              '    at fire (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:188:18)\n' +
+              '    at Object.<anonymous> (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/expect@30.4.1/node_modules/expect/build/index.js:1824:9)\n' +
+              '    at Object.throwingMatcher [as toThrow] (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/expect@30.4.1/node_modules/expect/build/index.js:2235:93)\n' +
+              '    at Object.toThrow (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:188:40)'
+          }
+        }
+      }
+
+      221 |         break
+      222 |       default:
+    > 223 |         consoleMethod(`${prefix} ${message}`, ...extra)
+          |         ^
+      224 |     }
+      225 |
+      226 |     // Output stack trace separately
+
+      at ConsoleTransport.consoleMethod [as log] (packages/logging/src/transports/console-transport.ts:223:9)
+      at log (packages/logging/src/core.ts:333:22)
+      at CoreLogger.dispatchEntry [as log] (packages/logging/src/core.ts:551:5)
+      at CoreLogger.log [as error] (packages/logging/src/core.ts:585:10)
+      at error (lib/session-import/watch-controller.ts:145:17)
+
+    console.error
+      [ERROR] [session-import-watch] session-import-watch-start-failed {
+        error: {
+          error: {
+            name: 'Error',
+            message: 'no roots',
+            stack: 'Error: no roots\n' +
+              '    at /Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:197:57\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:305:39\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:312:13\n' +
+              '    at mockConstructor (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:57:19)\n' +
+              '    at invokeFn (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.ts:151:31)'
+          }
+        }
+      }
+
+      221 |         break
+      222 |       default:
+    > 223 |         consoleMethod(`${prefix} ${message}`, ...extra)
+          |         ^
+      224 |     }
+      225 |
+      226 |     // Output stack trace separately
+
+      at ConsoleTransport.consoleMethod [as log] (packages/logging/src/transports/console-transport.ts:223:9)
+      at log (packages/logging/src/core.ts:333:22)
+      at CoreLogger.dispatchEntry [as log] (packages/logging/src/core.ts:551:5)
+      at CoreLogger.log [as error] (packages/logging/src/core.ts:585:10)
+      at error (lib/session-import/watch-controller.ts:176:11)
+
+    console.error
+      [ERROR] [session-import-watch] session-import-watch-start-failed {
+        error: {
+          error: {
+            name: 'Error',
+            message: 'no roots',
+            stack: 'Error: no roots\n' +
+              '    at /Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:213:69\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:305:39\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:312:13\n' +
+              '    at mockConstructor (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:57:19)\n' +
+              '    at invokeFn (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.ts:151:31)'
+          }
+        }
+      }
+
+      221 |         break
+      222 |       default:
+    > 223 |         consoleMethod(`${prefix} ${message}`, ...extra)
+          |         ^
+      224 |     }
+      225 |
+      226 |     // Output stack trace separately
+
+      at ConsoleTransport.consoleMethod [as log] (packages/logging/src/transports/console-transport.ts:223:9)
+      at log (packages/logging/src/core.ts:333:22)
+      at CoreLogger.dispatchEntry [as log] (packages/logging/src/core.ts:551:5)
+      at CoreLogger.log [as error] (packages/logging/src/core.ts:585:10)
+      at error (lib/session-import/watch-controller.ts:176:11)
+
+PASS node lib/session-import/adapters/claude-code.test.ts
+PASS node lib/session-import/watch-import.test.ts
+PASS node lib/session-import/registry.test.ts
+
+Test Suites: 4 passed, 4 total
+Tests:       96 passed, 96 total
+Snapshots:   0 total
+Time:        2.563 s
+Ran all test suites matching lib/session-import/registry.test.ts|lib/session-import/watch-import.test.ts|lib/session-import/watch-controller.test.ts|lib/session-import/adapters/claude-code.test.ts.

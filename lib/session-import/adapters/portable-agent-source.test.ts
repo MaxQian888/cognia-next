@@ -1,3 +1,14 @@
+import { cursorSessionSource } from "./cursor"
+import { clineSessionSource } from "./cline"
+import { copilotCliSessionSource } from "./copilot-cli"
+import { qwenCodeSessionSource } from "./qwen-code"
+
+const mockStoreCall = jest.fn()
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => true,
+  transport: { call: (...args: unknown[]) => mockStoreCall(...args) },
+}))
+
 import {
   createPortableAgentSessionSource,
   parsePortableAgentArtifact,
@@ -182,5 +193,199 @@ describe("portable external-agent artifacts", () => {
     const messages = graph.nodes[0].conversation.messages
     expect(messages).toHaveLength(2)
     expect(new Set(messages.map((message) => message.id)).size).toBe(2)
+  })
+  it.each([
+    cursorSessionSource,
+    clineSessionSource,
+    copilotCliSessionSource,
+    qwenCodeSessionSource,
+  ])("uses the shared portable export path for $id without losing child state", async (source) => {
+    const input = {
+      fs,
+      home: "",
+      pickedFiles: [
+        {
+          name: "sessions.json",
+          path: "/tmp/sessions.json",
+          content: JSON.stringify({
+            sessions: [
+              {
+                sessionId: "root",
+                createdAt: 1,
+                messages: [{ id: "root-message", role: "user", content: "root" }],
+              },
+              {
+                sessionId: "child",
+                parentSessionId: "root",
+                kind: "branch",
+                status: "interrupted",
+                createdAt: 2,
+                messages: [
+                  { id: "child-message", role: "assistant", content: "child" },
+                  { type: "checkpoint", id: "saved" },
+                  { type: "rollback", id: "restore", summary: "rollback recorded" },
+                  { type: "background_job", id: "job", dependencies: ["prior"], status: "failed" },
+                  { type: "future", apiKey: "must-not-escape", detail: "kept" },
+                ],
+              },
+            ],
+          }),
+        },
+      ],
+    }
+    const listed = await source.listSessions(input)
+    expect(listed).toHaveLength(1)
+    const graph = await source.parseGraph!(listed[0].ref, input)
+    expect(graph.nodes.map((node) => node.session.header.runtimeBinding?.nativeSessionId)).toEqual([
+      "root",
+      "child",
+    ])
+    const child = graph.nodes[1]
+    expect(child.session.header.lineage?.kind).toBe("branch")
+    expect(child.session.header.lifecycle?.status).toBe("interrupted")
+    expect(child.session.checkpoints?.[0].checkpointId).toBe("saved")
+    expect(child.session.history?.[0].kind).toBe("rollback")
+    expect(child.session.tasks?.[0]).toMatchObject({
+      taskId: "job",
+      dependencies: ["prior"],
+      status: "failed",
+    })
+    expect(JSON.stringify(child.session.recordedEvents)).not.toContain("must-not-escape")
+    expect(child.loss.losses.some((loss) => loss.path === "events.future")).toBe(true)
+  })
+
+  it("shares one read and merged index across concurrent refs while a fresh input sees changes", async () => {
+    let content = JSON.stringify({
+      sessions: [
+        { sessionId: "root", createdAt: 1, messages: [{ role: "user", content: "original" }] },
+        { sessionId: "second", createdAt: 2, messages: [{ role: "user", content: "second" }] },
+        {
+          sessionId: "child",
+          parentSessionId: "root",
+          createdAt: 3,
+          messages: [{ role: "assistant", content: "child" }],
+        },
+      ],
+    })
+    const readTextFile = jest.fn(async () => content)
+    const input = {
+      home: "",
+      fs: {
+        ...fs,
+        readDirEntries: async () => [{ name: "sessions.json", isFile: true }],
+        readTextFile,
+      },
+    }
+    const source = createPortableAgentSessionSource({ ...config, roots: () => ["/fixture"] })
+    const [first, duplicate] = await Promise.all([
+      source.listSessions(input),
+      source.listSessions(input),
+    ])
+    expect(first).toEqual(duplicate)
+    await Promise.all(first.map((summary) => source.parseGraph!(summary.ref, input)))
+    await source.parseSession(first[0].ref, input)
+    expect(readTextFile).toHaveBeenCalledTimes(1)
+
+    content = JSON.stringify({
+      sessionId: "root",
+      createdAt: 1,
+      messages: [{ role: "user", content: "updated" }],
+    })
+    const freshInput = { ...input }
+    const updated = await source.listSessions(freshInput)
+    expect(updated).toHaveLength(1)
+    expect(updated[0].title).toBe("updated")
+    const graph = await source.parseGraph!(updated[0].ref, freshInput)
+    expect(graph.nodes).toHaveLength(1)
+    expect(readTextFile).toHaveBeenCalledTimes(2)
+  })
+
+  it("evicts a failed native store pass so the same input retries successfully", async () => {
+    mockStoreCall.mockReset()
+    mockStoreCall.mockRejectedValueOnce(new Error("database locked"))
+    mockStoreCall.mockResolvedValueOnce([
+      {
+        sessionId: "retried",
+        createdAt: 1,
+        messages: [{ role: "user", content: "retry succeeded" }],
+      },
+    ])
+    const source = createPortableAgentSessionSource({ ...config, storeSource: "cursor" })
+    const input = { fs, home: "/fixture" }
+    await expect(source.listSessions(input)).rejects.toThrow("database locked")
+    const listed = await source.listSessions(input)
+    expect(listed[0].ref.originalSessionId).toBe("retried")
+    const graph = await source.parseGraph!(listed[0].ref, input)
+    expect(graph.nodes[0].conversation.messages[0].parts).toEqual([
+      { type: "text", text: "retry succeeded", state: "done" },
+    ])
+    expect(mockStoreCall).toHaveBeenCalledTimes(2)
+  })
+
+  it("preserves child source order, terminates cycles, and keeps the missing-ref fallback", async () => {
+    const source = createPortableAgentSessionSource(config)
+    const input = {
+      fs,
+      home: "",
+      pickedFiles: [
+        {
+          name: "sessions.json",
+          path: "/tmp/sessions.json",
+          content: JSON.stringify({
+            sessions: [
+              { sessionId: "root", createdAt: 1, messages: [{ role: "user", content: "root" }] },
+              {
+                sessionId: "z-child",
+                parentSessionId: "root",
+                createdAt: 1,
+                messages: [{ role: "assistant", content: "first" }],
+              },
+              {
+                sessionId: "a-child",
+                parentSessionId: "root",
+                createdAt: 1,
+                messages: [{ role: "assistant", content: "second" }],
+              },
+              {
+                sessionId: "cycle-a",
+                parentSessionId: "cycle-b",
+                createdAt: 1,
+                messages: [{ role: "user", content: "a" }],
+              },
+              {
+                sessionId: "cycle-b",
+                parentSessionId: "cycle-a",
+                createdAt: 1,
+                messages: [{ role: "assistant", content: "b" }],
+              },
+            ],
+          }),
+        },
+      ],
+    }
+    const root = await source.parseSession(
+      { sourceId: config.id, originalSessionId: "root", locator: "root" },
+      input
+    )
+    expect(
+      root.nested?.map((child) => child.session.importRuntimeBinding?.nativeSessionId)
+    ).toEqual(["z-child", "a-child"])
+    const cycle = await source.parseSession(
+      { sourceId: config.id, originalSessionId: "cycle-a", locator: "cycle-a" },
+      input
+    )
+    expect(cycle.nested?.[0].nested?.[0].session.importRuntimeBinding?.nativeSessionId).toBe(
+      "cycle-a"
+    )
+    expect(cycle.nested?.[0].nested?.[0].nested).toBeUndefined()
+    const missing = await source.parseGraph!(
+      { sourceId: config.id, originalSessionId: "missing", locator: "missing" },
+      input
+    )
+    expect(missing.nodes).toHaveLength(1)
+    expect(missing.nodes[0].conversation.messages).toEqual([])
+    expect(missing.nodes[0].conversation.session.importRuntimeBinding?.nativeSessionId).toBe(
+      "missing"
+    )
   })
 })

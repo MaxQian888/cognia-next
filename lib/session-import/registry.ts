@@ -16,6 +16,7 @@ import { opencodeSessionSource } from "./adapters/opencode"
 import { piSessionSource } from "./adapters/pi"
 import { qwenCodeSessionSource } from "./adapters/qwen-code"
 import type { VendorRoots } from "@/lib/agent-roots"
+import { joinPath } from "@/lib/claude/instructions/paths"
 import type { AgentSessionSourceAdapter, PickedSessionFile } from "./types"
 
 /** Static, ordered for auto-detect priority. */
@@ -135,6 +136,65 @@ function normalizeSep(p: string): string {
   return p.replace(/\\/g, "/").replace(/\/+$/, "")
 }
 
+/** Watch native stores and graph dependencies as well as transcript scan roots. */
+export function getSourceWatchRoots(
+  source: AgentSessionSourceAdapter,
+  home: string,
+  roots?: VendorRoots
+): string[] {
+  const scanRoots = source.scanRoots(home, roots)
+  // Watch the existing vendor directory so newly created teams/tasks and store
+  // files are observed too; those directories are not themselves transcripts.
+  const vendorRoot =
+    source.id === "claude-code"
+      ? roots?.claudeConfigDir || (home ? joinPath(home, ".claude") : "")
+      : home && ["cursor", "cline", "copilot-cli"].includes(source.id)
+        ? joinPath(home, source.id === "copilot-cli" ? ".copilot" : `.${source.id}`)
+        : ""
+  if (!vendorRoot) return scanRoots
+  const norm = normalizeSep(vendorRoot)
+  return [
+    vendorRoot,
+    ...scanRoots.filter((root) => {
+      const path = normalizeSep(root)
+      return path !== norm && !path.startsWith(`${norm}/`)
+    }),
+  ]
+}
+
+/** Auxiliary files can change a graph without changing its transcript summary. */
+export function isSourceWatchAuxiliaryPath(
+  source: AgentSessionSourceAdapter,
+  path: string,
+  home: string,
+  roots?: VendorRoots
+): boolean {
+  if (source.id !== "claude-code") return false
+  const base = roots?.claudeConfigDir || (home ? joinPath(home, ".claude") : "")
+  if (!base) return false
+  const norm = normalizeSep(path)
+  return ["teams", "tasks"].some((dir) => {
+    const root = normalizeSep(joinPath(base, dir))
+    return norm === root || norm.startsWith(`${root}/`)
+  })
+}
+
+/** A broad vendor watch must never turn settings or plugins into transcripts. */
+export function isSourceWatchTranscriptPath(
+  source: AgentSessionSourceAdapter,
+  path: string,
+  home: string,
+  roots?: VendorRoots
+): boolean {
+  const norm = normalizeSep(path)
+  if (!source.acceptedExtensions.some((extension) => norm.toLowerCase().endsWith(extension)))
+    return false
+  return source.scanRoots(home, roots).some((root) => {
+    const base = normalizeSep(root)
+    return base && (norm === base || norm.startsWith(`${base}/`))
+  })
+}
+
 /**
  * The source whose desktop scan roots contain `path`, or undefined. Lets the
  * live-sync watcher re-import only the changed agent's history on an fs event
@@ -148,7 +208,7 @@ export function detectSourceForPath(
 ): AgentSessionSourceAdapter | undefined {
   const norm = normalizeSep(path)
   for (const source of getSessionSources()) {
-    for (const root of source.scanRoots(home, roots)) {
+    for (const root of getSourceWatchRoots(source, home, roots)) {
       const r = normalizeSep(root)
       if (r && (norm === r || norm.startsWith(`${r}/`))) return source
     }

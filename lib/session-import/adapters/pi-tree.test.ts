@@ -1,4 +1,4 @@
-import { piActiveChain, piAlternateLeafIds, piChainToLeaf } from "./pi-tree"
+import { piActiveChain, piAlternateLeafIds, piChainToLeaf, piSessionTree } from "./pi-tree"
 
 interface Node {
   id?: string
@@ -93,5 +93,46 @@ describe("piChainToLeaf", () => {
     const cyclic = [n("a", "b", "1"), n("b", "a", "2")]
     const chain = piChainToLeaf(cyclic, "a")
     expect(chain.length).toBeLessThanOrEqual(2)
+  })
+})
+
+describe("piSessionTree", () => {
+  it.each([
+    forked,
+    [] as Node[],
+    [{ timestamp: "1" }, { timestamp: "2" }],
+    [n("a", "b", "1"), n("b", "a", "2")],
+    [n("a", null, "bad"), n("b", "missing", "bad")],
+    [n("a", null, "1"), n("b", "a", "2"), n("b", "missing", "3")],
+  ])("preserves standalone helper behavior for tree %#", (...entries) => {
+    const tree = piSessionTree(entries)
+    expect(tree.activeChain).toEqual(piActiveChain(entries))
+    expect(tree.alternateLeafIds).toEqual(piAlternateLeafIds(entries))
+    for (const leaf of [...tree.alternateLeafIds, "a", "missing"]) {
+      expect(tree.chainToLeaf(leaf)).toEqual(piChainToLeaf(entries, leaf))
+    }
+  })
+
+  it("does not re-index the transcript for each alternate leaf", () => {
+    let idReads = 0
+    const entries = Array.from({ length: 1000 }, (_, i) => ({
+      get id() {
+        idReads++
+        return `e${i}`
+      },
+      parentId: i === 0 ? null : "e0",
+      timestamp: "2026-01-01T00:00:00Z",
+    }))
+    const tree = piSessionTree(entries)
+    idReads = 0
+    for (const leaf of tree.alternateLeafIds) expect(tree.chainToLeaf(leaf)).toHaveLength(2)
+    expect(idReads).toBe(0)
+  })
+
+  it("builds an independent index for each new snapshot", () => {
+    const first = piSessionTree(forked)
+    const edited = [...forked, n("later", "c", "2026-08-15T00:00:00Z")]
+    expect(piSessionTree(edited).activeChain.at(-1)?.id).toBe("later")
+    expect(first.activeChain.at(-1)?.id).toBe("c")
   })
 })

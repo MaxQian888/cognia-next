@@ -1,0 +1,172 @@
+  Using tsconfig file: tsconfig.build.json
+PASS node lib/session-import/adapters/claude-code.test.ts
+PASS node lib/session-import/index.test.ts
+PASS node lib/session-import/adapters/codex.test.ts
+PASS node lib/session-import/adapters/opencode.test.ts
+PASS node lib/session-import/watch-import.test.ts
+PASS node lib/session-import/codec-types.test.ts
+PASS node lib/session-import/adapters/gemini-cli.test.ts
+PASS node lib/session-import/fs-budget.test.ts
+  ● Console
+
+    console.log
+      [budget] codex listSessions:  readDir=12 stat=0 readTextFile=60 bytes=1.1MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:173:13)
+
+    console.log
+      [budget] codex importSessions K=8:  readDir=12 stat=0 readTextFile=60 bytes=1.1MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:184:13)
+
+    console.log
+      [budget] claude importSessions K=8:  readDir=0 stat=0 readTextFile=8 bytes=0.2MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:195:13)
+
+    console.log
+      [budget] cline importSessions K=8:  readDir=5 stat=0 readTextFile=60 bytes=0.0MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:205:13)
+
+    console.log
+      [budget] codex single-file import:  readDir=0 stat=0 readTextFile=1 bytes=0.0MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:219:13)
+
+    console.log
+      [budget] codex walk:  readDir=12 stat=0 readTextFile=60 bytes=1.1MB  (N=60 files)
+
+      at Object.log (lib/session-import/fs-budget.test.ts:229:13)
+
+PASS node lib/session-import/usage-scan.test.ts
+PASS node lib/session-import/registry.test.ts
+PASS node lib/session-import/adapters/continue-dev.test.ts
+PASS node lib/session-import/adapters/portable-agent-source.test.ts
+PASS node lib/session-import/watch-controller.test.ts
+  ● Console
+
+    console.error
+      [ERROR] [session-import-watch] session-import-watch-import-failed {
+        error: {
+          error: {
+            name: 'Error',
+            message: 'dexie closed',
+            stack: 'Error: dexie closed\n' +
+              '    at /Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:108:15\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:305:39\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:312:13\n' +
+              '    at mockConstructor (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:102:19)\n' +
+              '    at doImport (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.ts:131:14)\n' +
+              '    at handler (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:26:43)\n' +
+              '    at fire (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:112:18)\n' +
+              '    at Object.<anonymous> (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/expect@30.4.1/node_modules/expect/build/index.js:1824:9)\n' +
+              '    at Object.throwingMatcher [as toThrow] (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/expect@30.4.1/node_modules/expect/build/index.js:2235:93)\n' +
+              '    at Object.toThrow (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:112:40)'
+          }
+        }
+      }
+
+      221 |         break
+      222 |       default:
+    > 223 |         consoleMethod(`${prefix} ${message}`, ...extra)
+          |         ^
+      224 |     }
+      225 |
+      226 |     // Output stack trace separately
+
+      at ConsoleTransport.consoleMethod [as log] (packages/logging/src/transports/console-transport.ts:223:9)
+      at log (packages/logging/src/core.ts:333:22)
+      at CoreLogger.dispatchEntry [as log] (packages/logging/src/core.ts:551:5)
+      at CoreLogger.log [as error] (packages/logging/src/core.ts:585:10)
+      at error (lib/session-import/watch-controller.ts:132:26)
+
+    console.error
+      [ERROR] [session-import-watch] session-import-watch-start-failed {
+        error: {
+          error: {
+            name: 'Error',
+            message: 'no roots',
+            stack: 'Error: no roots\n' +
+              '    at /Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:121:57\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:305:39\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:312:13\n' +
+              '    at mockConstructor (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:57:19)\n' +
+              '    at invokeFn (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.ts:127:13)'
+          }
+        }
+      }
+
+      221 |         break
+      222 |       default:
+    > 223 |         consoleMethod(`${prefix} ${message}`, ...extra)
+          |         ^
+      224 |     }
+      225 |
+      226 |     // Output stack trace separately
+
+      at ConsoleTransport.consoleMethod [as log] (packages/logging/src/transports/console-transport.ts:223:9)
+      at log (packages/logging/src/core.ts:333:22)
+      at CoreLogger.dispatchEntry [as log] (packages/logging/src/core.ts:551:5)
+      at CoreLogger.log [as error] (packages/logging/src/core.ts:585:10)
+      at error (lib/session-import/watch-controller.ts:148:11)
+
+    console.error
+      [ERROR] [session-import-watch] session-import-watch-start-failed {
+        error: {
+          error: {
+            name: 'Error',
+            message: 'no roots',
+            stack: 'Error: no roots\n' +
+              '    at /Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.test.ts:137:69\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:305:39\n' +
+              '    at /Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:312:13\n' +
+              '    at mockConstructor (/Users/bytedance/Project/cognia-next/node_modules/.pnpm/jest-mock@30.4.1/node_modules/jest-mock/build/index.js:57:19)\n' +
+              '    at invokeFn (/Users/bytedance/Project/cognia-next/lib/session-import/watch-controller.ts:127:13)'
+          }
+        }
+      }
+
+      221 |         break
+      222 |       default:
+    > 223 |         consoleMethod(`${prefix} ${message}`, ...extra)
+          |         ^
+      224 |     }
+      225 |
+      226 |     // Output stack trace separately
+
+      at ConsoleTransport.consoleMethod [as log] (packages/logging/src/transports/console-transport.ts:223:9)
+      at log (packages/logging/src/core.ts:333:22)
+      at CoreLogger.dispatchEntry [as log] (packages/logging/src/core.ts:551:5)
+      at CoreLogger.log [as error] (packages/logging/src/core.ts:585:10)
+      at error (lib/session-import/watch-controller.ts:148:11)
+
+PASS node lib/session-import/to-parts.test.ts
+PASS node lib/session-import/adapters/claude-code-dag.test.ts
+PASS node lib/session-import/native-resume.test.ts
+PASS node lib/session-import/adapters/claude-code-subagent.test.ts
+PASS node lib/session-import/scan.test.ts
+PASS node lib/session-import/adapters/aider.test.ts
+PASS node lib/session-import/graph.test.ts
+PASS node lib/session-import/usage.test.ts
+PASS node lib/session-import/fs.test.ts
+PASS node lib/session-import/pacing.test.ts
+PASS node lib/session-import/support-matrix.test.ts
+PASS node lib/session-import/fixtures/upstream-generations.test.ts
+PASS node lib/session-import/codecs/pi-codec.test.ts
+PASS node lib/session-import/adapters/opencode-db.test.ts
+PASS node lib/session-import/codecs/claude-code-codec.test.ts
+PASS node lib/session-import/codecs/opencode-codec.test.ts
+PASS node lib/session-import/codecs/codex-codec.test.ts
+PASS node lib/session-import/adapters/cursor.test.ts
+PASS node lib/session-import/adapters/qwen-code.test.ts
+PASS node lib/session-import/adapters/cline.test.ts
+PASS node lib/session-import/adapters/copilot-cli.test.ts
+PASS node lib/session-import/adapters/pi.test.ts
+PASS node lib/session-import/adapters/pi-tree.test.ts
+
+Test Suites: 36 passed, 36 total
+Tests:       360 passed, 360 total
+Snapshots:   0 total
+Time:        4.587 s
+Ran all test suites matching lib/session-import.

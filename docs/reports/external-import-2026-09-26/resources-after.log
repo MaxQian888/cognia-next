@@ -1,0 +1,51 @@
+   Compiling cognia-skills v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-skills)
+    Finished `release` profile [optimized + debuginfo] target(s) in 13.11s
+     Running unittests src/lib.rs (target/release/deps/cognia_skills-dd9d2f0c407f1563)
+
+running 1 test
+test native::tests::benchmark_native_skill_catalog ... RESOURCE_BENCH {"ms":874.09525,"sample":0,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":975.264542,"sample":1,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":979.8410829999999,"sample":2,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":986.307791,"sample":3,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1578.471,"sample":4,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1604.462667,"sample":5,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1881.722,"sample":6,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1181.565167,"sample":7,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1127.661042,"sample":8,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1057.997791,"sample":9,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1527.6151659999998,"sample":10,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1684.27125,"sample":11,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":63.754707999999994,"sample":0,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":54.903375,"sample":1,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":41.497375000000005,"sample":2,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":44.528833,"sample":3,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":41.485917,"sample":4,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":42.300292000000006,"sample":5,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":97.98825,"sample":6,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":68.00179200000001,"sample":7,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":93.146792,"sample":8,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":92.149084,"sample":9,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":67.792834,"sample":10,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":59.473,"sample":11,"wire_bytes":44783361,"workload":"binary"}
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 88 filtered out; finished in 21.92s
+
+       35.62 real        36.81 user         6.71 sys
+          1006551040  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              226824  page reclaims
+               12306  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   3  signals received
+                4955  voluntary context switches
+              179148  involuntary context switches
+          3343408269  instructions retired
+          1774053974  cycles elapsed
+           172933816  peak memory footprint

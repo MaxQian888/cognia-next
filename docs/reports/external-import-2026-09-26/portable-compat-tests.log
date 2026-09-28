@@ -1,0 +1,29 @@
+  Using tsconfig file: tsconfig.build.json
+PASS node lib/session-import/adapters/portable-agent-source.test.ts
+FAIL node lib/session-import/adapters/qwen-code.test.ts
+  ● Qwen native ChatRecord transcripts › stops at missing parents and reports cycles without resurrecting discarded history
+
+    expect(received).toEqual(expected) // deep equality
+
+    Expected: ArrayContaining [ObjectContaining {"path": "events.qwen.history_gap"}]
+    Received: [{"detail": "Unknown source event retained as a bounded redacted diagnostic.", "kind": "approximated", "path": "events.qwen.qwen.history_gap"}]
+
+      131 |     ])
+      132 |     expect(JSON.stringify(graph.nodes[0].conversation.messages)).not.toContain("discarded")
+    > 133 |     expect(graph.nodes[0].loss.losses).toEqual(
+          |                                        ^
+      134 |       expect.arrayContaining([expect.objectContaining({ path: "events.qwen.history_gap" })])
+      135 |     )
+      136 |     const cyclic = await graphFor([
+
+      at Object.toEqual (lib/session-import/adapters/qwen-code.test.ts:133:40)
+
+PASS node lib/session-import/adapters/copilot-cli.test.ts
+PASS node lib/session-import/adapters/cursor.test.ts
+PASS node lib/session-import/adapters/cline.test.ts
+
+Test Suites: 1 failed, 4 passed, 5 total
+Tests:       1 failed, 20 passed, 21 total
+Snapshots:   0 total
+Time:        1.894 s
+Ran all test suites matching lib/session-import/adapters/portable-agent-source.test.ts|lib/session-import/adapters/qwen-code.test.ts|lib/session-import/adapters/cline.test.ts|lib/session-import/adapters/copilot-cli.test.ts|lib/session-import/adapters/cursor.test.ts.

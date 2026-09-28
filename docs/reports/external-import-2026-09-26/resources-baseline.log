@@ -1,0 +1,68 @@
+   Compiling futures-util v0.3.34
+   Compiling h2 v0.4.16
+   Compiling tokio-rustls v0.26.4
+   Compiling errno v0.3.14
+   Compiling tinyvec_macros v0.1.1
+   Compiling tinyvec v1.12.0
+   Compiling rustix v1.1.4
+   Compiling unicode-normalization v0.1.25
+   Compiling tempfile v3.27.0
+   Compiling tower v0.5.3
+   Compiling tokio-socks v0.5.3
+   Compiling tower-http v0.6.11
+   Compiling hyper v1.11.0
+   Compiling hyper-util v0.1.20
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.13.4
+   Compiling cognia-net v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-net)
+   Compiling cognia-skills v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-skills)
+    Finished `release` profile [optimized + debuginfo] target(s) in 21.71s
+     Running unittests src/lib.rs (target/release/deps/cognia_skills-dd9d2f0c407f1563)
+
+running 1 test
+test native::tests::benchmark_native_skill_catalog ... RESOURCE_BENCH {"ms":2035.978375,"sample":0,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1218.266042,"sample":1,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1318.588625,"sample":2,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1749.329667,"sample":3,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1313.860292,"sample":4,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1462.5984999999998,"sample":5,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1280.1418330000001,"sample":6,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1376.1815829999998,"sample":7,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1127.012667,"sample":8,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1607.143625,"sample":9,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1960.446291,"sample":10,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":1297.060334,"sample":11,"wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_BENCH {"ms":44.402208,"sample":0,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":46.917625,"sample":1,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":45.898375,"sample":2,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":43.402625,"sample":3,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":44.115625,"sample":4,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":46.777958,"sample":5,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":45.987541,"sample":6,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":47.406957999999996,"sample":7,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":47.992792,"sample":8,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":48.359125000000006,"sample":9,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":48.854292,"sample":10,"wire_bytes":44783361,"workload":"binary"}
+RESOURCE_BENCH {"ms":50.14625,"sample":11,"wire_bytes":44783361,"workload":"binary"}
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 85 filtered out; finished in 24.96s
+
+       46.98 real        51.15 user         9.07 sys
+          1001275392  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              468070  page reclaims
+               20448  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                  20  signals received
+               21747  voluntary context switches
+              227671  involuntary context switches
+          3977072296  instructions retired
+          2060023293  cycles elapsed
+           173261472  peak memory footprint

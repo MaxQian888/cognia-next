@@ -1,33 +1,60 @@
-// Real `SessionFs` over `lib/file/file-operations.ts`. Mirrors the `realFs()`
-// helper in `hooks/memory/use-external-memory.ts`, extended with the content
-// read the adapters need. Desktop-only for directory walks; the picker path
-// supplies file contents directly and never touches this.
+// Native history scans use a dedicated confined read-only command.
+// Picker imports supply contents directly and never touch the filesystem.
 
 import { joinPath } from "@/lib/claude/instructions/paths"
+import { isTauri } from "@/lib/platform/detect"
 import { mapBounded } from "./pacing"
 import type { SessionFs } from "./types"
 
-/** Real filesystem adapter. Directory walks resolve to [] off-desktop. */
+type HistoryFsResults = {
+  readText: { kind: "text"; content: string }
+  readDir: { kind: "directory"; entries: Array<{ name: string; isFile?: boolean }> }
+  stat: { kind: "stat"; exists: boolean; size: number; isFile: boolean }
+}
+
+async function readNativeHistory<K extends keyof HistoryFsResults>(
+  operation: K,
+  path: string
+): Promise<HistoryFsResults[K]> {
+  const { invoke } = await import("@tauri-apps/api/core")
+  const result = await invoke<HistoryFsResults[K]>("session_import_fs", { operation, path })
+  const expected = { readText: "text", readDir: "directory", stat: "stat" }[operation]
+  if (result.kind !== expected)
+    throw new Error(`Unexpected history filesystem response: ${result.kind}`)
+  return result
+}
+
+/** Read-only native history access. Picker contents bypass this adapter. */
 export function realSessionFs(): SessionFs {
   return {
     async exists(path) {
+      if (isTauri()) return (await readNativeHistory("stat", path)).exists
       const { exists } = await import("@/lib/file/file-operations")
       return exists(path)
     },
     async readDir(path) {
+      if (isTauri())
+        return (await readNativeHistory("readDir", path)).entries.map((entry) => entry.name)
       const { readDir } = await import("@/lib/file/file-operations")
       return readDir(path)
     },
     async readDirEntries(path) {
+      if (isTauri()) return (await readNativeHistory("readDir", path)).entries
       const { readDirEntries } = await import("@/lib/file/file-operations")
       return readDirEntries(path)
     },
     async stat(path) {
+      if (isTauri()) {
+        const result = await readNativeHistory("stat", path)
+        if (!result.exists) throw new Error(`History path does not exist: ${path}`)
+        return { size: result.size, isFile: result.isFile }
+      }
       const { statFile } = await import("@/lib/file/file-operations")
       const s = await statFile(path)
       return { size: s.size, isFile: s.isFile }
     },
     async readTextFile(path) {
+      if (isTauri()) return (await readNativeHistory("readText", path)).content
       const { readTextFile } = await import("@/lib/file/file-operations")
       return readTextFile(path)
     },
@@ -73,7 +100,7 @@ export async function walkFiles(
   const out: string[] = []
   if (depth > MAX_WALK_DEPTH) return out
   // `readDirEntries` reports each entry's type for free — the real fs gets it
-  // from `plugin-fs` `readDir` — so the desktop walk costs one IPC per
+  // from the native history reader — so the desktop walk costs one IPC per
   // DIRECTORY instead of one per ENTRY. Fakes/other implementations that only
   // have `readDir` fall back to the per-entry `stat` path below.
   let entries: Array<{ name: string; isFile?: boolean }>

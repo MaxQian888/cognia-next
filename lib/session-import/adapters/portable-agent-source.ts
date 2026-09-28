@@ -44,11 +44,14 @@ export interface PortableSourceConfig {
   roots: (home: string) => string[]
   pathHints: string[]
   contentHints?: string[]
+  detectContent?: (content: string) => boolean
   /** Read-only desktop SQLite projection supplied by the Tauri store transport. */
   storeSource?: "cursor" | "cline" | "copilot-cli"
   defaultTitle: string
   fidelity?: SessionFidelity
   markdown?: boolean
+  /** Project native records into the shared representation without changing legacy exports. */
+  normalizeDocument?: (document: unknown, locatorSessionId: string) => unknown[]
 }
 
 function stableLocatorKey(locator: string): string {
@@ -62,6 +65,7 @@ function stableLocatorKey(locator: string): string {
 
 export interface PortableParsedSession {
   originalSessionId: string
+  archiveOnly?: boolean
   parentNativeSessionId?: string
   relationKind?: "branch" | "fork" | "subagent" | "background" | "team-member"
   cwd?: string
@@ -141,8 +145,9 @@ function partsOf(content: unknown, toolId: string): Part[] {
   for (let index = 0; index < content.length; index += 1) {
     const value = record(content[index])
     const type = string(value.type)
+    if (type === "tool_result") continue
     const text = string(value.text) || string(record(value.content).text)
-    if ((type === "thinking" || type === "reasoning") && text) {
+    if ((type === "thinking" || type === "reasoning" || value.thought === true) && text) {
       parts.push(reasoningPart(text))
       continue
     }
@@ -150,11 +155,22 @@ function partsOf(content: unknown, toolId: string): Part[] {
       parts.push(textPart(text))
       continue
     }
-    const url = string(value.url) || string(value.uri) || string(record(value.image_url).url)
+    const inline = record(value.inlineData ?? value.source)
+    const file = record(value.fileData)
+    const mime = string(inline.mimeType ?? inline.media_type ?? file.mimeType)
+    const url =
+      string(value.url) ||
+      string(value.uri) ||
+      string(record(value.image_url).url) ||
+      string(file.fileUri) ||
+      (string(inline.data)
+        ? `data:${mime || "application/octet-stream"};base64,${string(inline.data)}`
+        : "")
     if (url) {
       parts.push(
         filePart({
-          mediaType: string(value.mime) || string(value.mediaType) || "application/octet-stream",
+          mediaType:
+            string(value.mime) || string(value.mediaType) || mime || "application/octet-stream",
           url,
           filename: string(value.name) || string(value.filename) || undefined,
         })
@@ -255,7 +271,11 @@ export function parsePortableAgentArtifact(
   const parsedDocument = markdown
     ? { documents: [{ messages: markdownMessages(content) }], invalidLineCount: 0 }
     : parseDocument(content)
-  const documents = parsedDocument.documents
+  const documents = config.normalizeDocument
+    ? parsedDocument.documents.flatMap((document) =>
+        config.normalizeDocument!(document, locatorId(locator))
+      )
+    : parsedDocument.documents
   const parsed: PortableParsedSession[] = []
 
   for (const [documentIndex, document] of documents.entries()) {
@@ -300,19 +320,36 @@ export function parsePortableAgentArtifact(
       if (!createdAt) createdAt = at
       updatedAt = Math.max(updatedAt, at)
 
-      if (type === "tool_result" || role === "tool") {
-        const callId = string(value.toolCallId ?? value.callId ?? value.tool_use_id)
+      const applyToolResult = (result: Record<string, unknown>): boolean => {
+        const callId = string(result.toolCallId ?? result.callId ?? result.tool_use_id)
         const owner = toolIndex.get(callId)
-        if (owner) {
-          const current = messages[owner.message].parts[owner.part] as Record<string, unknown>
-          const output = value.output ?? value.result ?? value.content
-          const isError = value.isError === true || string(value.status) === "failed"
-          messages[owner.message].parts[owner.part] = {
-            ...current,
-            state: isError ? "output-error" : "output-available",
-            ...(isError ? { errorText: textOf(output) || JSON.stringify(output) } : { output }),
-          } as unknown as Part
+        if (!owner) {
+          recordedEvents.push({
+            eventId: `${config.id}-event-${eventSequence}`,
+            sequence: eventSequence++,
+            at: new Date(at).toISOString(),
+            event: { kind: "diagnostic", runtime: config.id, payload: safeDiagnostic(result) },
+          })
+          losses.push({
+            path: `tools.${callId || "unknown"}`,
+            kind: "approximated",
+            detail: "Unmatched tool result retained as a bounded redacted diagnostic.",
+          })
+          return false
         }
+        const current = messages[owner.message].parts[owner.part] as Record<string, unknown>
+        const output = result.output ?? result.result ?? result.content
+        const isError =
+          result.isError === true || result.is_error === true || string(result.status) === "failed"
+        messages[owner.message].parts[owner.part] = {
+          ...current,
+          state: isError ? "output-error" : "output-available",
+          ...(isError ? { errorText: textOf(output) || JSON.stringify(output) } : { output }),
+        } as unknown as Part
+        return true
+      }
+      if (type === "tool_result" || role === "tool") {
+        applyToolResult(value)
         continue
       }
 
@@ -355,6 +392,12 @@ export function parsePortableAgentArtifact(
         role || (type.includes("assistant") ? "assistant" : type.includes("user") ? "user" : "")
       if (inferredRole === "user" || inferredRole === "assistant" || inferredRole === "system") {
         const contentValue = value.content ?? value.message ?? value.parts ?? value.text
+        if (Array.isArray(contentValue)) {
+          for (const block of contentValue) {
+            const result = record(block)
+            if (result.type === "tool_result") applyToolResult(result)
+          }
+        }
         const parts = partsOf(contentValue, string(value.id) || `turn-${messages.length}`)
         const calls = Array.isArray(value.toolCalls) ? value.toolCalls : []
         for (const [callIndex, callValue] of calls.entries()) {
@@ -454,6 +497,7 @@ export function parsePortableAgentArtifact(
     const now = Date.now()
     parsed.push({
       originalSessionId,
+      archiveOnly: merged.archiveOnly === true || undefined,
       parentNativeSessionId: parentNativeSessionId || undefined,
       relationKind,
       cwd: string(merged.cwd ?? merged.workspaceRoot ?? merged.workspace) || undefined,
@@ -491,13 +535,14 @@ function toConversation(
     kind: parsed.relationKind === "subagent" ? "subagent" : "direct",
     suppressSeed: parsed.relationKind === "subagent",
   })
-  session.importRuntimeBinding = {
-    ...(config.presetId ? { presetId: config.presetId } : {}),
-    nativeSessionId: parsed.originalSessionId,
-    cwd: parsed.cwd,
-    resumeMethod: "cli",
-    verifiedAt: "2026-08-29",
-  }
+  if (!parsed.archiveOnly)
+    session.importRuntimeBinding = {
+      ...(config.presetId ? { presetId: config.presetId } : {}),
+      nativeSessionId: parsed.originalSessionId,
+      cwd: parsed.cwd,
+      resumeMethod: "cli",
+      verifiedAt: "2026-08-29",
+    }
   if (parsed.parentNativeSessionId && parsed.relationKind) {
     session.parentSessionId = importedSessionId(config.id, parsed.parentNativeSessionId)
     session.importRelation = {
@@ -612,18 +657,18 @@ async function collectParsed(
   )
 }
 
+interface PortableParsedCorpus {
+  sessions: PortableParsedSession[]
+  byNativeId: Map<string, PortableParsedSession>
+  byConversationId: Map<string, PortableParsedSession>
+  byParent: Map<string, PortableParsedSession[]>
+}
+
 function attachTree(
   config: PortableSourceConfig,
   root: PortableParsedSession,
-  sessions: PortableParsedSession[]
+  byParent: ReadonlyMap<string, PortableParsedSession[]>
 ): ImportedConversation {
-  const byParent = new Map<string, PortableParsedSession[]>()
-  for (const session of sessions) {
-    if (!session.parentNativeSessionId) continue
-    const children = byParent.get(session.parentNativeSessionId) ?? []
-    children.push(session)
-    byParent.set(session.parentNativeSessionId, children)
-  }
   const build = (session: PortableParsedSession, seen: Set<string>): ImportedConversation => {
     const conversation = toConversation(config, session)
     if (seen.has(session.originalSessionId)) return conversation
@@ -648,17 +693,35 @@ export function createPortableAgentSessionSource(
    * (the O(K × corpus) freeze). Keyed weakly like `collectSessions` in
    * `opencode.ts`: a fresh scan builds a fresh input, so nothing goes stale.
    */
-  const parsedCache = new WeakMap<SessionScanInput, Promise<PortableParsedSession[]>>()
+  const parsedCache = new WeakMap<SessionScanInput, Promise<PortableParsedCorpus>>()
 
-  const collectParsedCached = (input: SessionScanInput): Promise<PortableParsedSession[]> => {
+  const collectParsedCached = (input: SessionScanInput): Promise<PortableParsedCorpus> => {
     const cached = parsedCache.get(input)
     if (cached) return cached
     // Evict a FAILED pass so the next attempt actually retries — a rejected
     // promise left in the cache would poison every later ref on this input.
-    const guarded = collectParsed(config, input).catch((error: unknown) => {
-      parsedCache.delete(input)
-      throw error
-    })
+    const guarded = collectParsed(config, input)
+      .then((sessions): PortableParsedCorpus => {
+        // Index the merged corpus once, preserving source order in child groups.
+        // Rebuilding these maps for every selected ref made bulk imports quadratic.
+        const byNativeId = new Map<string, PortableParsedSession>()
+        const byConversationId = new Map<string, PortableParsedSession>()
+        const byParent = new Map<string, PortableParsedSession[]>()
+        for (const session of sessions) {
+          byNativeId.set(session.originalSessionId, session)
+          byConversationId.set(importedSessionId(config.id, session.originalSessionId), session)
+          if (session.parentNativeSessionId) {
+            const siblings = byParent.get(session.parentNativeSessionId)
+            if (siblings) siblings.push(session)
+            else byParent.set(session.parentNativeSessionId, [session])
+          }
+        }
+        return { sessions, byNativeId, byConversationId, byParent }
+      })
+      .catch((error: unknown) => {
+        parsedCache.delete(input)
+        throw error
+      })
     parsedCache.set(input, guarded)
     return guarded
   }
@@ -680,6 +743,11 @@ export function createPortableAgentSessionSource(
       ) {
         return "match"
       }
+      if (
+        config.detectContent &&
+        files.some((file) => config.detectContent!(file.content.slice(0, 16_384)))
+      )
+        return "match"
       const looks = files.some((file) => {
         const haystack = `${file.name}\n${file.content.slice(0, 16_384)}`.toLowerCase()
         return (config.contentHints ?? []).some((hint) => haystack.includes(hint.toLowerCase()))
@@ -687,11 +755,11 @@ export function createPortableAgentSessionSource(
       return looks ? "maybe" : "no"
     },
     async listSessions(input: SessionScanInput): Promise<SessionSummary[]> {
-      const sessions = await collectParsedCached(input)
-      const known = new Set(sessions.map((session) => session.originalSessionId))
+      const { sessions, byNativeId } = await collectParsedCached(input)
       return sessions
         .filter(
-          (session) => !session.parentNativeSessionId || !known.has(session.parentNativeSessionId)
+          (session) =>
+            !session.parentNativeSessionId || !byNativeId.has(session.parentNativeSessionId)
         )
         .map((session) => ({
           ref: {
@@ -711,8 +779,8 @@ export function createPortableAgentSessionSource(
         .sort((a, b) => b.updatedAt - a.updatedAt)
     },
     async parseSession(ref: SessionRef, input: SessionScanInput): Promise<ImportedConversation> {
-      const sessions = await collectParsedCached(input)
-      const found = sessions.find((session) => session.originalSessionId === ref.originalSessionId)
+      const { byNativeId, byParent } = await collectParsedCached(input)
+      const found = byNativeId.get(ref.originalSessionId)
       if (!found) {
         return toConversation(config, {
           originalSessionId: ref.originalSessionId,
@@ -727,13 +795,13 @@ export function createPortableAgentSessionSource(
           losses: [],
         })
       }
-      return attachTree(config, found, sessions)
+      return attachTree(config, found, byParent)
     },
     async parseGraph(ref: SessionRef, input: SessionScanInput) {
-      const sessions = await collectParsedCached(input)
-      const found = sessions.find((session) => session.originalSessionId === ref.originalSessionId)
+      const { byNativeId, byParent, byConversationId } = await collectParsedCached(input)
+      const found = byNativeId.get(ref.originalSessionId)
       const conversation = found
-        ? attachTree(config, found, sessions)
+        ? attachTree(config, found, byParent)
         : await this.parseSession(ref, input)
       const graph = buildImportedSessionGraph(conversation, {
         sourceRuntime: config.id,
@@ -741,14 +809,8 @@ export function createPortableAgentSessionSource(
         verifiedAt: "2026-08-29",
         importFidelity: config.fidelity ?? "structured",
       })
-      const parsedById = new Map(
-        sessions.map((session) => [
-          importedSessionId(config.id, session.originalSessionId),
-          session,
-        ])
-      )
       for (const node of graph.nodes) {
-        const rich = parsedById.get(node.conversation.session.id)
+        const rich = byConversationId.get(node.conversation.session.id)
         if (!rich) continue
         if (rich.tasks.length > 0) node.session.tasks = rich.tasks
         if (rich.checkpoints.length > 0) node.session.checkpoints = rich.checkpoints

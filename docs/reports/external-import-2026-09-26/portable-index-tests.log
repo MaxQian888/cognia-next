@@ -1,0 +1,46 @@
+  Using tsconfig file: tsconfig.build.json
+FAIL node lib/session-import/adapters/portable-agent-source.test.ts
+  portable external-agent artifacts
+    ✓ preserves tools, lineage, lifecycle, tasks, checkpoints, history, and diagnostics (5 ms)
+    ✓ marks Markdown exports as lossy instead of inventing structured events
+    ✓ keeps valid JSONL records and reports a truncated tail
+    ✓ merges manifest and message artifacts from one legacy task directory
+    ✓ keeps locator-stable message ids when several artifacts omit upstream ids
+    ✓ uses the shared portable export path for cursor without losing child state (1 ms)
+    ✓ uses the shared portable export path for cline without losing child state (1 ms)
+    ✓ uses the shared portable export path for copilot-cli without losing child state (2 ms)
+    ✓ uses the shared portable export path for qwen-code without losing child state (1 ms)
+    ✓ shares one read and merged index across concurrent refs while a fresh input sees changes (1 ms)
+    ✕ evicts a failed native store pass so the same input retries successfully (7 ms)
+    ✓ preserves child source order, terminates cycles, and keeps the missing-ref fallback (1 ms)
+
+  ● portable external-agent artifacts › evicts a failed native store pass so the same input retries successfully
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 0
+    + Received  + 1
+
+      Array [
+        Object {
+    +     "state": "done",
+          "text": "retry succeeded",
+          "type": "text",
+        },
+      ]
+
+      317 |     expect(listed[0].ref.originalSessionId).toBe("retried")
+      318 |     const graph = await source.parseGraph!(listed[0].ref, input)
+    > 319 |     expect(graph.nodes[0].conversation.messages[0].parts).toEqual([
+          |                                                           ^
+      320 |       { type: "text", text: "retry succeeded" },
+      321 |     ])
+      322 |     expect(mockStoreCall).toHaveBeenCalledTimes(2)
+
+      at Object.toEqual (lib/session-import/adapters/portable-agent-source.test.ts:319:59)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 11 passed, 12 total
+Snapshots:   0 total
+Time:        0.949 s, estimated 1 s
+Ran all test suites matching lib/session-import/adapters/portable-agent-source.test.ts.

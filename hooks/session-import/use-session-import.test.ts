@@ -1,5 +1,6 @@
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { useSessionImport, summaryKey } from "./use-session-import"
+import { listSessionsForSource, parseSessions } from "@/lib/session-import"
 import type { SessionScanInput, SessionSummary } from "@/lib/session-import"
 
 const input: SessionScanInput = {
@@ -307,4 +308,45 @@ describe("useSessionImport", () => {
     expect(d.listSessionsForSource).toHaveBeenCalledTimes(1)
     expect(d.listSessionsForSource).toHaveBeenCalledWith("codex", expect.anything())
   })
+})
+
+it("attributes actual mixed portable files consistently when listing and importing", async () => {
+  const files = [
+    {
+      name: "q.json",
+      path: "/u/.qwen/sessions/q.json",
+      content: JSON.stringify({ id: "q", messages: [{ role: "user", content: "qwen text" }] }),
+    },
+    {
+      name: "c.json",
+      path: "/u/.copilot/session-state/c.json",
+      content: JSON.stringify({ id: "c", messages: [{ role: "user", content: "copilot text" }] }),
+    },
+  ]
+  const applied: string[] = []
+  const d = deps({
+    pick: jest.fn(async () => files),
+    resolveScanInput: jest.fn(async (partial) => ({ ...input, ...partial })),
+    detect: jest.fn(() => ["copilot-cli", "qwen-code"]),
+    listSessionsForSource,
+    importSessions: jest.fn(async (refs, scan) => {
+      const conversations = await parseSessions(refs, scan)
+      applied.push(
+        ...conversations.map(
+          (c) => `${c.session.importSource}:${c.session.importRuntimeBinding?.nativeSessionId}`
+        )
+      )
+      return {
+        sessions: conversations.length,
+        messages: conversations.length,
+        lossBySource: {},
+        details: [],
+      }
+    }),
+  })
+  const { result } = renderHook(() => useSessionImport(d))
+  await act(async () => result.current.pickFiles())
+  expect(result.current.selectedCount).toBe(2)
+  await act(async () => result.current.importSelected())
+  expect(applied).toEqual(["copilot-cli:c", "qwen-code:q"])
 })

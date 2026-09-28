@@ -548,3 +548,111 @@ describe("summarizeCodexFile (lightweight scan)", () => {
     expect(summarizeCodexFile(meta, "/p/empty.jsonl")).toBeNull()
   })
 })
+
+describe("Codex corpus indexes", () => {
+  const folder = "/h/.codex/sessions"
+  const rollout = (id: string, parent?: string, text = id) =>
+    [
+      {
+        timestamp: "2026-01-01T00:00:00Z",
+        type: "session_meta",
+        payload: { id, parent_thread_id: parent },
+      },
+      {
+        timestamp: "2026-01-01T00:00:01Z",
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n")
+  const ref = (id: string, file = id) => ({
+    sourceId: "codex",
+    originalSessionId: id,
+    locator: `${folder}/${file}.jsonl`,
+  })
+  function setup(entries: Array<[string, string]>) {
+    const files = new Map(entries.map(([name, content]) => [`${folder}/${name}.jsonl`, content]))
+    const fs = {
+      exists: async (path: string) => files.has(path),
+      readDir: async () => [],
+      readDirEntries: jest.fn(async () =>
+        [...files.keys()].map((path) => ({ name: path.slice(folder.length + 1), isFile: true }))
+      ),
+      stat: async () => ({ size: 0, isFile: true }),
+      readTextFile: jest.fn(async (path: string) => {
+        const content = files.get(path)
+        if (content === undefined) throw new Error("unreadable rollout")
+        return content
+      }),
+    }
+    return { files, fs, input: { fs, home: "/h" } satisfies SessionScanInput }
+  }
+
+  it("attaches previously orphaned children when a parent appears after the corpus read", async () => {
+    const { files, fs, input } = setup([["child", rollout("child", "root")]])
+    const first = await codexSessionSource.parseGraph!(ref("child"), input)
+    expect(first.nodes).toHaveLength(1)
+    files.set(ref("root").locator, rollout("root"))
+    const parent = await codexSessionSource.parseGraph!(ref("root"), input)
+    expect(parent.nodes.map((node) => node.conversation.session.id)).toEqual([
+      "import:codex:root",
+      "import:codex:child",
+    ])
+    expect(await codexSessionSource.parseGraph!(ref("child"), input)).toEqual(parent)
+    expect(fs.readDirEntries).toHaveBeenCalledTimes(1)
+    expect(fs.readTextFile).toHaveBeenCalledTimes(2)
+  })
+
+  it("retains last duplicate ID lookup and the original duplicate child order", async () => {
+    const { input } = setup([
+      ["root-old", rollout("root", undefined, "old root")],
+      ["root", rollout("root", undefined, "latest root")],
+      ["child-old", rollout("child", "root", "first child artifact")],
+      ["child", rollout("child", "root", "second child artifact")],
+    ])
+    const graph = await codexSessionSource.parseGraph!(ref("root"), input)
+    expect(graph.nodes.map((node) => node.conversation.session.title)).toEqual([
+      "latest root",
+      "first child artifact",
+      "second child artifact",
+    ])
+    expect(await codexSessionSource.parseGraph!(ref("child"), input)).toEqual(graph)
+  })
+
+  it("keeps parent cycles bounded", async () => {
+    const { input } = setup([
+      ["a", rollout("a", "b")],
+      ["b", rollout("b", "a")],
+    ])
+    const graph = await codexSessionSource.parseGraph!(ref("a"), input)
+    expect(graph.nodes.map((node) => node.conversation.session.id)).toEqual([
+      "import:codex:a",
+      "import:codex:b",
+      "import:codex:a",
+    ])
+  })
+
+  it("watch reads bypass the snapshot and a new input observes subsequent file edits", async () => {
+    const { input, files, fs } = setup([["root", rollout("root", undefined, "before")]])
+    const old = await codexSessionSource.parseGraph!(ref("root"), input)
+    files.set(ref("root").locator, rollout("root", undefined, "after"))
+    const watched = await codexSessionSource.parseGraph!(ref("root"), input, { singleFile: true })
+    expect(watched.nodes[0].conversation.session.title).toBe("after")
+    expect(fs.readDirEntries).toHaveBeenCalledTimes(1)
+    expect(await codexSessionSource.parseGraph!(ref("root"), input)).toEqual(old)
+    expect(await codexSessionSource.parseGraph!(ref("root"), { ...input })).toEqual(watched)
+    expect(fs.readDirEntries).toHaveBeenCalledTimes(2)
+  })
+
+  it("retries a missing selected file without poisoning later refs", async () => {
+    const { input, files } = setup([])
+    await expect(codexSessionSource.parseGraph!(ref("root"), input)).rejects.toThrow(
+      "unreadable rollout"
+    )
+    files.set(ref("root").locator, rollout("root"))
+    const graph = await codexSessionSource.parseGraph!(ref("root"), input)
+    expect(graph.nodes[0].conversation.session.id).toBe("import:codex:root")
+    expect(await codexSessionSource.parseGraph!(ref("root"), input)).toEqual(graph)
+  })
+})

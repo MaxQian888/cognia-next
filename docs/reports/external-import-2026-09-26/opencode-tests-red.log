@@ -1,0 +1,101 @@
+  Using tsconfig file: tsconfig.build.json
+FAIL node lib/session-import/adapters/opencode.test.ts
+  opencodeToConversation
+    ✓ maps normalized parts and keeps structural step markers (1 ms)
+    ✓ maps assistant tokens/cost/model into usage metadata (reasoning folds into output)
+    ✓ keeps the real MIME type of file parts (OpenCode stores it as `mime`)
+    ✓ surfaces agent/retry/compaction markers instead of dropping them
+    ✓ surfaces patch, snapshot, and step markers instead of dropping them
+    ✓ marks an errored tool part
+  parseOpencodeExport
+    ✕ accepts the official CLI export envelope and nested message info (1 ms)
+    ✕ groups current ShareNext type/data records while ignoring non-transcript records (1 ms)
+    ✕ skips malformed envelope entries without losing valid nested messages and parts
+    ✓ reconstructs sessions from a flat ShareRecord array
+    ✓ returns [] on invalid json
+    ✓ projects tokens/cost/model from a share-export message (1 ms)
+  opencodeSessionSource
+    ✓ lists via the injected SQLite reader and parses one
+    ✓ advertises the opencode data dirs as scan roots (feeds the fs-watcher) (3 ms)
+    ✓ puts the resolved $XDG_DATA_HOME dir first, without dropping the defaults
+    ✓ de-dupes a resolved data dir that equals a default
+    ✓ keeps the platform data fallback alongside an XDG override
+    ✓ reads the DB once per scan input (parse of N sessions is not N reads) (1 ms)
+    ✓ propagates a DB read failure instead of reporting an empty history (3 ms)
+    ✓ a failed read is not cached, so the next scan retries
+    ✓ nests child (subagent) sessions under their parent and hides them from the list (1 ms)
+    ✓ imports the full descendant tree and lists only its root (6 ms)
+    ✓ uses the newest child timestamp for the parent summary
+    ✓ changes the parent watch revision when child content changes
+    ✓ still lists an orphaned child whose parent is missing from the store
+    ✓ lists from a picked export file (1 ms)
+    ✓ preserves first-match conversations and last-match structured state for duplicate IDs
+    ✓ preserves duplicate child order and skips cyclic descendants (1 ms)
+    ✓ keeps children of an empty parent available when that parent is explicitly selected
+    ✓ isolates cached indexes across inputs and refreshes child membership on the next scan (1 ms)
+    ✓ retries a failed graph read on the same input without keeping rejected indexes
+    ✓ preserves background jobs and structural lifecycle in canonical state
+
+  ● parseOpencodeExport › accepts the official CLI export envelope and nested message info
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 1
+    Received length: 0
+    Received array:  []
+
+      160 |     })
+      161 |     const sessions = parseOpencodeExport(content)
+    > 162 |     expect(sessions).toHaveLength(1)
+          |                      ^
+      163 |     expect(sessions[0]).toMatchObject({ id: "cli-export", title: "CLI export", cwd: "/repo", createdAt: 1, updatedAt: 5 })
+      164 |     expect(sessions[0].messages[1]).toMatchObject({ role: "assistant", createdAt: 3, model: "model-cli", cost: 0.25,
+      165 |       tokens: { input: 12, output: 4, reasoning: 2, cacheRead: 7, cacheWrite: 1 } })
+
+      at Object.toHaveLength (lib/session-import/adapters/opencode.test.ts:162:22)
+
+  ● parseOpencodeExport › groups current ShareNext type/data records while ignoring non-transcript records
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 3
+    + Received  + 1
+
+    - Array [
+    -   "share",
+    - ]
+    + Array []
+
+      178 |     ])
+      179 |     const sessions = parseOpencodeExport(content)
+    > 180 |     expect(sessions.map((session) => session.id)).toEqual(["share"])
+          |                                                   ^
+      181 |     expect(sessions[0].messages[0]).toMatchObject({ role: "assistant", model: "model-share", parts: [{ type: "text", text: "shared evidence" }] })
+      182 |     expect(opencodeSessionSource.detect([{ name: "share.json", path: "/tmp/share.json", content }])).toBe("maybe")
+      183 |   })
+
+      at Object.toEqual (lib/session-import/adapters/opencode.test.ts:180:51)
+
+  ● parseOpencodeExport › skips malformed envelope entries without losing valid nested messages and parts
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 1
+    Received length: 0
+    Received array:  []
+
+      188 |       messages: [null, 4, [], { info: null, parts: [null, 1, {}, { type: "text", text: "keep" }] }],
+      189 |     }))
+    > 190 |     expect(sessions).toHaveLength(1)
+          |                      ^
+      191 |     expect(sessions[0].messages).toEqual([{ role: "user", createdAt: 0, parts: [{ type: "text", text: "keep" }] }])
+      192 |     expect(() => parseOpencodeExport(JSON.stringify([{ key: 3, content: null }, { type: "message", data: "invalid" }, null]))).not.toThrow()
+      193 |   })
+
+      at Object.toHaveLength (lib/session-import/adapters/opencode.test.ts:190:22)
+
+Test Suites: 1 failed, 1 total
+Tests:       3 failed, 29 passed, 32 total
+Snapshots:   0 total
+Time:        0.739 s, estimated 1 s
+Ran all test suites matching lib/session-import/adapters/opencode.test.ts.

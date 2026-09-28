@@ -1,0 +1,42 @@
+RESOURCE_PAIR {"ms":3160.914041,"sample":0,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":2394.9613329999997,"sample":1,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":2254.453459,"sample":2,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1884.130625,"sample":3,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1705.8355000000001,"sample":4,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1372.507584,"sample":5,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1223.28675,"sample":6,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1045.4423749999999,"sample":7,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":929.794708,"sample":8,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1082.450625,"sample":9,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1054.6713340000001,"sample":10,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":1132.944583,"sample":11,"version":"baseline","wire_bytes":2704001,"workload":"small-text"}
+RESOURCE_PAIR {"ms":227.486083,"sample":0,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":229.992792,"sample":1,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":262.066167,"sample":2,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":239.127416,"sample":3,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":253.74162500000003,"sample":4,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":198.411459,"sample":5,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":350.487375,"sample":6,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":403.051625,"sample":7,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":243.45512499999998,"sample":8,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":236.28983300000002,"sample":9,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":325.540292,"sample":10,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+RESOURCE_PAIR {"ms":173.890542,"sample":11,"version":"baseline","wire_bytes":44783361,"workload":"binary"}
+      117.30 real         0.93 user         8.73 sys
+           747536384  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               47923  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+               12031  voluntary context switches
+              189866  involuntary context switches
+         62519437641  instructions retired
+         34164968175  cycles elapsed
+           740328336  peak memory footprint

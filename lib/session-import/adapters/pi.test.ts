@@ -111,6 +111,35 @@ describe("parsePiSessionFile", () => {
   })
 })
 
+it("keeps every alternate branch and its shared tool history in a large tree", () => {
+  const branches = Array.from({ length: 100 }, (_, i) => ({
+    type: "message",
+    id: `branch-${i}`,
+    parentId: "e5",
+    timestamp: new Date(Date.UTC(2026, 7, 15, 0, i)).toISOString(),
+    message: { role: "user", content: `continue branch ${i}` },
+  }))
+  const parsed = parsePiSession(REF, fixture(branches) + '\n{"type":"message"')
+  expect(parsed.nested).toHaveLength(99)
+  expect(parsed.messages.at(-1)?.parts).toEqual([
+    expect.objectContaining({ type: "text", text: "continue branch 99" }),
+  ])
+  expect(notesOf(parsed.messages)?.corrupt_lines).toBe(1)
+  for (const [i, branch] of parsed.nested!.entries()) {
+    expect(branch.session.id).toBe(`import:pi:sess-uuid:branch:branch-${98 - i}`)
+    expect(branch.messages.at(-1)?.parts).toEqual([
+      expect.objectContaining({ type: "text", text: `continue branch ${98 - i}` }),
+    ])
+    expect(branch.messages.flatMap((message) => message.parts)).toContainEqual(
+      expect.objectContaining({
+        type: "tool-bash",
+        toolCallId: "call_1",
+        state: "output-available",
+      })
+    )
+  }
+})
+
 describe("summarizePiFile", () => {
   it("summarizes without building messages", () => {
     const summary = summarizePiFile(fixture(), REF.locator)!
