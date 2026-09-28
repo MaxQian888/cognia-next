@@ -61,7 +61,12 @@
     }
   ],
   "pythonVenv": "isolated",
-  "pythonDependencies": ["pydantic>=2.0", "aiosqlite>=0.20.0", "networkx>=3.0", "tiktoken>=0.7"],
+  "pythonDependencies": [
+    "pydantic>=2.13.5",
+    "aiosqlite>=0.22.1",
+    "networkx>=3.4.2",
+    "tiktoken>=0.14.0"
+  ],
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",

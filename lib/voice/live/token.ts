@@ -19,9 +19,10 @@
  * path: they travel in the session config and end up on a third party's server.
  */
 
-import type {
-  Experimental_RealtimeModelV4,
-  Experimental_RealtimeModelV4SessionConfig as RealtimeSessionConfig,
+import {
+  UnsupportedFunctionalityError,
+  type Experimental_RealtimeModelV4,
+  type Experimental_RealtimeModelV4SessionConfig as RealtimeSessionConfig,
 } from "@ai-sdk/provider"
 
 import { isTauri as detectTauri } from "@/lib/platform/detect"
@@ -103,6 +104,12 @@ export async function mintLiveToken(
     baseURL: request.baseURL,
     ...(hostInjectsKey ? { fetch: createFetch(request.provider) } : {}),
   })
+
+  if (typeof adapter.doCreateClientSecret !== "function") {
+    throw new UnsupportedFunctionalityError({
+      functionality: `${request.provider} realtime client secrets`,
+    })
+  }
 
   const secret = await adapter.doCreateClientSecret({
     expiresAfterSeconds: request.expiresAfterSeconds,

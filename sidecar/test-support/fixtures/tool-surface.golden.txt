@@ -193,10 +193,10 @@ git_commit desc=dfbd5f05f14e schema=ebf9c9f5ba51
 ## ai-sdk · all categories + plugin tools, openai
 Monitor desc=6b93edb09991 schema=84099a2ff8e3
 NotebookEdit desc=9b2dab768743 schema=38e78d4cebab
-TaskCreate desc=85933eefe500 schema=a7260a308ade
+TaskCreate desc=85933eefe500 schema=cb3be064ee1e
 TaskGet desc=0228efcf91f5 schema=d3b83710c536
 TaskList desc=25dfd032c99b schema=f973399805c1
-TaskUpdate desc=39d3b499aaa7 schema=2deabd605e9e
+TaskUpdate desc=39d3b499aaa7 schema=e762cfb7279c
 TodoWrite desc=929c53e641b3 schema=8ce34f8faae3
 apply_patch desc=3eb017483d6e schema=09a6ca3aa333
 ast_grep_replace desc=612e484480f0 schema=23277fd6308d
@@ -271,7 +271,7 @@ start_process desc=09da2721fd36 schema=fbcfdac464a5
 system_info desc=371e4daf2ce6 schema=f973399805c1
 terminal_repl_kill desc=ed3988dfb38d schema=563974b5d0c3
 terminal_repl_read desc=336cddcd0898 schema=b031fdf2d8b2
-terminal_repl_spawn desc=7ec92939262b schema=ea82d4154fc8
+terminal_repl_spawn desc=7ec92939262b schema=25432d935d15
 terminal_repl_write desc=a275a67a565c schema=2c248173f1ef
 terminate_process desc=f2ebcb1b2d1b schema=6a044eeeb15d
 top_memory_processes desc=e3b54e52ba99 schema=bb9f4d2b7732
@@ -285,10 +285,10 @@ resident with cognia-plugin-tools always loaded: TaskCreate TaskGet TaskList Tas
 ## ai-sdk · all categories, ollama, no plan tools
 Monitor desc=6b93edb09991 schema=84099a2ff8e3
 NotebookEdit desc=9b2dab768743 schema=38e78d4cebab
-TaskCreate desc=85933eefe500 schema=a7260a308ade
+TaskCreate desc=85933eefe500 schema=cb3be064ee1e
 TaskGet desc=0228efcf91f5 schema=d3b83710c536
 TaskList desc=25dfd032c99b schema=f973399805c1
-TaskUpdate desc=39d3b499aaa7 schema=2deabd605e9e
+TaskUpdate desc=39d3b499aaa7 schema=e762cfb7279c
 TodoWrite desc=929c53e641b3 schema=8ce34f8faae3
 apply_patch desc=3eb017483d6e schema=09a6ca3aa333
 ast_grep_replace desc=612e484480f0 schema=23277fd6308d
@@ -360,7 +360,7 @@ start_process desc=09da2721fd36 schema=fbcfdac464a5
 system_info desc=371e4daf2ce6 schema=f973399805c1
 terminal_repl_kill desc=ed3988dfb38d schema=563974b5d0c3
 terminal_repl_read desc=336cddcd0898 schema=b031fdf2d8b2
-terminal_repl_spawn desc=7ec92939262b schema=ea82d4154fc8
+terminal_repl_spawn desc=7ec92939262b schema=25432d935d15
 terminal_repl_write desc=a275a67a565c schema=2c248173f1ef
 terminate_process desc=f2ebcb1b2d1b schema=6a044eeeb15d
 top_memory_processes desc=e3b54e52ba99 schema=bb9f4d2b7732

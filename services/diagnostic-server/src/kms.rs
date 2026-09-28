@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, time::Duration};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{DateTime, Utc};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use reqwest::{header::HeaderMap, Url};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};

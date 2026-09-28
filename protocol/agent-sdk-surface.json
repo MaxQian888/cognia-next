@@ -1,7 +1,7 @@
 {
   "$schema": "./agent-sdk-surface.schema.json",
   "schemaVersion": 1,
-  "sdkVersion": "0.3.269",
+  "sdkVersion": "0.3.283",
   "generatedBy": "pnpm check:sdk-surface:write",
   "surface": {
     "options": {
@@ -185,6 +185,9 @@
         "status": "supported",
         "capability": "plugins.native"
       },
+      "projectConfigRoot": {
+        "status": "planned"
+      },
       "promptSuggestions": {
         "status": "supported",
         "capability": "observability.child"
@@ -272,6 +275,9 @@
       "tools": {
         "status": "supported",
         "capability": "tools.ordinary"
+      },
+      "verbatimPrompts": {
+        "status": "planned"
       }
     },
     "queryMethods": {
@@ -310,6 +316,9 @@
       "readFile": {
         "status": "supported",
         "capability": "checkpoint"
+      },
+      "readMcpResource": {
+        "status": "planned"
       },
       "reconnectMcpServer": {
         "status": "supported",
@@ -892,6 +901,7 @@
       "BaseHookInput",
       "BaseOutputFormat",
       "CanUseTool",
+      "ClaimOptions",
       "ConfigChangeHookInput",
       "ConfigScope",
       "CwdChangedHookInput",
@@ -936,6 +946,7 @@
       "McpSdkServerConfigWithInstance",
       "McpServerConfig",
       "McpServerConfigForProcessTransport",
+      "McpServerProvenance",
       "McpServerStatus",
       "McpServerStatusConfig",
       "McpServerToolPolicy",
@@ -1002,6 +1013,7 @@
       "SDKControlInitializeResponse",
       "SDKControlInterruptResponse",
       "SDKControlListPermissionRulesResponse",
+      "SDKControlMcpReadResourceResponse",
       "SDKControlPermissionRulesState",
       "SDKControlReadFileResponse",
       "SDKControlReloadOutputStylesResponse",
@@ -1043,6 +1055,7 @@
       "SDKSessionInfo",
       "SDKSessionStateChangedMessage",
       "SDKSettingsParseError",
+      "SDKStartupFailureReason",
       "SDKStatus",
       "SDKStatusMessage",
       "SDKSystemMessage",
@@ -1053,6 +1066,7 @@
       "SDKThinkingTokensMessage",
       "SDKToolProgressMessage",
       "SDKToolUseSummaryMessage",
+      "SDKUsageReport",
       "SDKUserMessage",
       "SDKUserMessageReplay",
       "SDKWorkerShuttingDownMessage",
@@ -1081,6 +1095,7 @@
       "SetupHookInput",
       "SetupHookSpecificOutput",
       "SlashCommand",
+      "SpareProcess",
       "SpawnOptions",
       "SpawnedProcess",
       "StopFailureHookInput",
@@ -1125,6 +1140,7 @@
       "importSessionToStore",
       "listSessions",
       "listSubagents",
+      "prewarm",
       "query",
       "renameSession",
       "resolveSettings",

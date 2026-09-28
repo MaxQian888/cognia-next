@@ -107,7 +107,7 @@ tower-http = { workspace = true, features = ["limit", "trace", "cors"] }
 tracing.workspace = true
 url.workspace = true
 uuid = { workspace = true, features = ["v4", "v7"] }
-webrtc = "0.20.2"
+webrtc = "0.21.0"
 
 [dev-dependencies]
 cognia-agents = { path = "../cognia-agents" }

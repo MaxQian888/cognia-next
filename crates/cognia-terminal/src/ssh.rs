@@ -389,8 +389,16 @@ impl client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &ssh_key::PublicKey,
+        server_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        // The current trust store pins raw host keys, not certificate authorities.
+        let russh::keys::PublicKeyOrCertificate::PublicKey {
+            key: server_public_key,
+            ..
+        } = server_key
+        else {
+            return Ok(false);
+        };
         let verdict = verify_or_learn_host_key(
             &self.host,
             self.port,
@@ -2011,6 +2019,27 @@ mod tests {
 
     fn fingerprint(encoded: &str) -> String {
         super::fingerprint_of(&key(encoded))
+    }
+
+    #[tokio::test]
+    async fn host_key_callback_preserves_tofu_and_rejects_changed_keys() {
+        use russh::client::Handler;
+
+        let directory = tempfile::tempdir().unwrap();
+        let observation = Arc::new(super::StdMutex::new(super::HostObservation::default()));
+        let mut handler = super::ClientHandler {
+            host: "host.example".into(),
+            port: 22,
+            known_hosts_path: directory.path().join("known_hosts"),
+            observation: observation.clone(),
+            forwards: None,
+        };
+        let first = russh::keys::PublicKeyOrCertificate::from(key(KEY_A));
+        let changed = russh::keys::PublicKeyOrCertificate::from(key(KEY_B));
+        assert!(handler.check_server_key(&first).await.unwrap());
+        assert!(handler.check_server_key(&first).await.unwrap());
+        assert!(!handler.check_server_key(&changed).await.unwrap());
+        assert!(observation.lock().unwrap().changed.is_some());
     }
 
     #[test]

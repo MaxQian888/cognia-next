@@ -89,7 +89,7 @@ describe.each([
   })
 
   it("never mints a renderer-visible secret", async () => {
-    await expect(adapter.doCreateClientSecret({ sessionConfig: {} })).rejects.toThrow(
+    await expect(adapter.doCreateClientSecret?.({ sessionConfig: {} })).rejects.toThrow(
       /host keyring/
     )
     expect(adapter.provider).toBe(provider)

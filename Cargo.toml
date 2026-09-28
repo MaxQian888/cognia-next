@@ -171,7 +171,7 @@ exclude = [
 # `check-runtime-versions.mjs` reads the gateway's.
 [workspace.package]
 edition = "2021"
-rust-version = "1.95"
+rust-version = "1.96"
 license = "AGPL-3.0-or-later"
 publish = false
 repository = "https://github.com/MaxQian888/cognia-next"
@@ -192,10 +192,10 @@ base64 = { version = "0.23" }
 uuid = { version = "1" }
 log = { version = "0.4" }
 sha2 = { version = "0.11" }
-tauri = { version = "=2.11.5" }
+tauri = { version = "=2.12.0" }
 reqwest = { version = "0.13", default-features = false }
 chrono = { version = "0.4" }
-dirs = { version = "6" }
+dirs = { version = "7" }
 hex = { version = "0.4" }
 url = { version = "2" }
 futures-util = { version = "0.3", default-features = false }
@@ -205,7 +205,7 @@ ed25519-dalek = { version = "3" }
 rand = { version = "0.10" }
 axum = { version = "0.8" }
 regex = { version = "1" }
-rusqlite = { version = "0.37" }
+rusqlite = { version = "0.40" }
 rustls = { version = "0.23", default-features = false }
 libc = { version = "0.2" }
 notify = { version = "8" }
@@ -217,7 +217,7 @@ schemars = { version = "1" }
 tower = { version = "0.5" }
 tracing = { version = "0.1" }
 subtle = { version = "2" }
-tokio-tungstenite = { version = "0.29", default-features = false }
+tokio-tungstenite = { version = "0.30", default-features = false }
 flate2 = { version = "1" }
 hmac = { version = "0.13" }
 rcgen = { version = "0.14" }

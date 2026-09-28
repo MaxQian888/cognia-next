@@ -1,4 +1,4 @@
-FROM rust:1.93-bookworm AS builder
+FROM rust:1.96.1-bookworm AS builder
 WORKDIR /build
 # Copy the workspace manifests + sources. `core/` is a workspace member and the
 # binary depends on it via `path = "core"`; Cargo.lock is required by `--locked`.

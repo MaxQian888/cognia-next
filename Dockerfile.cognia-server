@@ -28,7 +28,7 @@
 # ── Rust: cargo-chef base ────────────────────────────────────────────────────
 # Base tracks the `rust-toolchain.toml` pin (1.95); matching the base avoids
 # downloading a second channel at build time.
-FROM rust:1.95-bookworm AS chef
+FROM rust:1.96.1-bookworm AS chef
 # The official image already contains this exact compiler. Override the
 # workspace component list for image builds so cargo does not try to download
 # rustfmt/clippy/rust-analyzer while preparing an otherwise compile-only image.

@@ -25,10 +25,11 @@
  *   packs audio, text and turn-complete into a single `serverContent` message.
  */
 
-import type {
-  Experimental_RealtimeModelV4 as RealtimeModel,
-  Experimental_RealtimeModelV4ClientEvent as RealtimeClientEvent,
-  Experimental_RealtimeModelV4ServerEvent as RealtimeServerEvent,
+import {
+  UnsupportedFunctionalityError,
+  type Experimental_RealtimeModelV4 as RealtimeModel,
+  type Experimental_RealtimeModelV4ClientEvent as RealtimeClientEvent,
+  type Experimental_RealtimeModelV4ServerEvent as RealtimeServerEvent,
 } from "@ai-sdk/provider"
 import { createPlatformWebSocket, type PlatformWebSocket } from "@/lib/network/platform-websocket"
 import { voiceLiveWsOpen } from "@/lib/tauri"
@@ -132,6 +133,11 @@ export class LiveVoiceTransport {
     }
 
     const { adapter, createWebSocket = defaultCreateWebSocket } = this.options
+    if (typeof adapter.getWebSocketConfig !== "function") {
+      throw new UnsupportedFunctionalityError({
+        functionality: `${adapter.provider} realtime WebSocket transport`,
+      })
+    }
     const config = adapter.getWebSocketConfig({ token: session.token, url: session.url })
     const socket = createWebSocket(config.url, config.protocols)
 

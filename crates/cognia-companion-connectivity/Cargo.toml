@@ -35,9 +35,9 @@ cognia-signaling-core = { path = "../../services/signaling-server/core" }
 # PeerConnection builder, one event-handler object per connection, and polled
 # DataChannel events. Keep the minimum on the patched 0.20.2 release; Cargo
 # may take compatible 0.20.x fixes. Re-exported as `webrtc`.
-webrtc = "0.20.2"
+webrtc = "0.21.0"
 # `_cognia._tcp.local.` advertisement and discovery (`mdns`).
-mdns-sd = "0.20"
+mdns-sd = "0.21"
 # LAN and mesh-VPN interface enumeration (`mdns`, `mesh`).
 local-ip-address = "0.6"
 # Self-signed listener certificate; the client pins its SPKI fingerprint, so

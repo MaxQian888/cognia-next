@@ -148,7 +148,7 @@ jobs:
             context: .
             file: deploy/compose/Dockerfile.web
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # The runner image lands with the Phase 3 artifacts; until its Dockerfile
       # exists this matrix entry no-ops instead of failing the whole workflow.
@@ -162,10 +162,10 @@ jobs:
             echo "::notice::${{ matrix.file }} not present — skipping ${{ matrix.name }}"
           fi
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
         if: steps.ctx.outputs.present == 'true'
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         if: steps.ctx.outputs.present == 'true' && needs.vars.outputs.should_push == 'true'
         with:
           registry: ghcr.io
@@ -183,7 +183,7 @@ jobs:
             type=sha
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         if: steps.ctx.outputs.present == 'true'
         with:
           context: ${{ matrix.context }}
@@ -204,7 +204,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
@@ -213,11 +213,11 @@ jobs:
       - name: Check bundle pins
         run: node scripts/build/bundle-agent-versions.mjs check
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         if: needs.vars.outputs.should_push == 'true'
         with:
           registry: ghcr.io
@@ -235,7 +235,7 @@ jobs:
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Build amd64 for the smoke test
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/bundle/Dockerfile
@@ -249,7 +249,7 @@ jobs:
         run: sh deploy/bundle/smoke.sh cognia-agent-bundle:smoke
 
       - name: Build amd64 + arm64
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/bundle/Dockerfile
@@ -268,11 +268,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.cognia-server
@@ -291,11 +291,11 @@ jobs:
       matrix:
         variant: [slim, full]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -312,7 +312,7 @@ jobs:
             type=sha
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.cognia-server

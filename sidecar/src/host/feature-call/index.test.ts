@@ -471,7 +471,7 @@ test("validates the discovered OpenCode V2 endpoint and derives its version from
       },
     }),
     fetchImpl: async (url, options) => {
-      assert.equal(url.toString(), "http://127.0.0.1:4096/api/status")
+      assert.equal(url.toString(), "http://127.0.0.1:4096/api/info")
       assert.deepEqual(options.headers, { authorization: "Basic ephemeral" })
       return {
         ok: true,

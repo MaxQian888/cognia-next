@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@cognia/provider-embedding": "workspace:*",
-    "@firecrawl/anydoc-wasm": "0.1.9"
+    "@firecrawl/anydoc-wasm": "0.2.4"
   },
   "peerDependencies": {
     "cheerio": "*",

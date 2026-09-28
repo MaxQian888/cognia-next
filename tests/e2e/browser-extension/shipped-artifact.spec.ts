@@ -105,7 +105,10 @@ test.describe("the shipped extension", () => {
     // Chrome renders the bound shortcut per platform ("Alt+Shift+C" on Linux
     // and Windows, "\u2325\u21e7C" on macOS), so pinning the rendered string
     // would fail on whichever runner is not the one it was written on.
-    expect(manifest.commands?.["capture-page"]?.suggested_key?.default).toBe("Alt+Shift+C")
+    const suggestedKey = manifest.commands?.["capture-page"]?.suggested_key
+    expect(typeof suggestedKey === "string" ? suggestedKey : suggestedKey?.default).toBe(
+      "Alt+Shift+C"
+    )
     // `getAll()` returning the named command proves Chrome accepted the
     // registration. Its `shortcut` may legitimately be blank: Chrome leaves a
     // suggested key unbound when it conflicts with the browser, the OS, or

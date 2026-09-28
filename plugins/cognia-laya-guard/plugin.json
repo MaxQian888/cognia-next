@@ -10,7 +10,7 @@
   "pythonMain": "main.py",
   "bundle_include": ["layaguard/__init__.py", "layaguard/engine.py", "pyproject.toml", "README.md"],
   "pythonVenv": "isolated",
-  "pythonDependencies": ["laya==0.3.5"],
+  "pythonDependencies": ["laya==0.3.21"],
   "activationEvents": ["startup"],
   "author": {
     "name": "cognia-next"

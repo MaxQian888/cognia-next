@@ -14,6 +14,7 @@
     "resolveJsonModule": true,
     "declaration": false,
     "outDir": "dist",
+    "rootDir": ".",
     "lib": ["ES2022", "DOM"],
     // `@testing-library/jest-dom` is listed so its matcher augmentation
     // (`toBeInTheDocument`) is visible. `@types/react-dom` comes in for
@@ -27,7 +28,6 @@
     // instances — these entries exist purely so `tsc` can see the declarations.
     // provider-types / provider-core appear because the SDK's public type
     // surface reaches into them; they are not meant to be imported directly.
-    "baseUrl": ".",
     "paths": {
       "@cognia/plugin-sdk": ["./types/cognia-plugin-sdk.d.ts"],
       "@cognia/plugin-ui": ["./types/cognia-plugin-ui.d.ts"],

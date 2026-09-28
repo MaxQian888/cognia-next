@@ -18,7 +18,7 @@ import { awaitPending } from "../../shared/pending.ts"
 
 import { randomUUID } from "node:crypto"
 
-import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk/core"
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"

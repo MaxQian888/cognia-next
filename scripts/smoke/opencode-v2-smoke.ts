@@ -204,7 +204,7 @@ async function main() {
     assert.ok(endpoint, `OpenCode did not become ready: ${startupError}`)
     checked("registered service discovery and authentication")
     client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) })
-    const status = await client.server.status(request())
+    const status = await client.server.info(request())
     assert.match(status.version, /^2\./)
     assert.ok(status.pid > 0)
     checked("health contract")

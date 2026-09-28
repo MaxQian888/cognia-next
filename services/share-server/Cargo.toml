@@ -2,7 +2,7 @@
 name = "cognia-share-server"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.96"
 description = "Self-hosted public share-link service for cognia — a blind store for zero-knowledge AES-GCM envelopes (ADR-0037)"
 license = "AGPL-3.0-or-later"
 publish = false
@@ -41,7 +41,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Errors, CLI, RNG, concurrency
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
-rand = "0.9"
+rand = "0.10"
 parking_lot = "0.12"
 
 [dev-dependencies]

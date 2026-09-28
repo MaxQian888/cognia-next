@@ -13,20 +13,20 @@
     "test": "node --test tests/**/*.test.mjs"
   },
   "dependencies": {
-    "@babel/parser": "^8.0.4",
-    "@babel/traverse": "^8.0.4",
-    "@babel/types": "^8.0.4",
+    "@babel/parser": "^8.0.6",
+    "@babel/traverse": "^8.0.6",
+    "@babel/types": "^8.0.6",
     "@cognia/network-guard": "file:../../packages/network-guard",
     "css-tree": "^3.2.1",
     "http-proxy-agent": "^9.1.0",
     "https-proxy-agent": "^9.1.0",
     "linkedom": "^0.18.13",
-    "postcss": "^8.5.26"
+    "postcss": "^8.5.28"
   },
   "devDependencies": {
     "@types/babel__traverse": "^7.28.0",
     "@types/css-tree": "^3.2.0",
-    "@types/node": "^26.2.0",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
   }
 }

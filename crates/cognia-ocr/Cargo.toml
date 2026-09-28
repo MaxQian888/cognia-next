@@ -38,10 +38,10 @@ tempfile.workspace = true
 # ADR-0024 — local OCR engines (opt-in). `ocrs` + `rten` = pure-Rust ONNX-style
 # pipeline (no system deps); `oar-ocr` = PaddleOCR PP-OCRv6 via ONNX Runtime
 # (best CJK accuracy). `image` is the shared decoder for both.
-ocrs           = { version = "0.12", optional = true }
-rten           = { version = "0.24", optional = true, default-features = false }
-rten-imageproc = { version = "0.24", optional = true }
-oar-ocr        = { version = "0.9.1", optional = true, default-features = false, features = ["download-binaries", "simd"] }
+ocrs           = { version = "0.13", optional = true }
+rten           = { version = "0.26", optional = true, default-features = false }
+rten-imageproc = { version = "0.26", optional = true }
+oar-ocr        = { version = "0.9.2", optional = true, default-features = false, features = ["download-binaries", "simd"] }
 image          = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff"] }
 
 # Apple Vision text recognition (macOS) — in-process via the objc2 framework

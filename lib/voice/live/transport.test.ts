@@ -1,3 +1,4 @@
+import { UnsupportedFunctionalityError } from "@ai-sdk/provider"
 import type {
   Experimental_RealtimeModelV4 as RealtimeModel,
   Experimental_RealtimeModelV4ServerEvent as RealtimeServerEvent,
@@ -125,6 +126,27 @@ const HOST_SESSION = {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe("connect", () => {
+  it("refuses adapters without browser WebSocket support before opening a socket", () => {
+    const h = harness({ getWebSocketConfig: undefined })
+
+    expect(() => h.transport.connect(SESSION)).toThrow(UnsupportedFunctionalityError)
+    expect(h.created).toEqual([])
+    expect(h.transport.isOpen).toBe(false)
+  })
+
+  it("preserves the adapter receiver when configuring its socket", () => {
+    const h = harness({
+      getWebSocketConfig({ url }) {
+        return { url: `${url}?model=${this.modelId}` }
+      },
+    })
+
+    h.transport.connect(SESSION)
+
+    expect(h.created).toEqual([{ url: "wss://provider.example/realtime?model=fake-realtime" }])
+    h.transport.close()
+  })
+
   it("resolves only after the socket is open", async () => {
     const h = harness()
     let settled = false

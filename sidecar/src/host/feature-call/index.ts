@@ -147,7 +147,7 @@ export async function discoverOpenCodeV2Service({
       ([name, value]) => name.trim() && typeof value === "string"
     )
   )
-  const statusResponse = await fetchImpl(new URL("/api/status", endpoint), {
+  const statusResponse = await fetchImpl(new URL("/api/info", endpoint), {
     headers,
     signal: signal
       ? AbortSignal.any([signal, AbortSignal.timeout(2_000)])

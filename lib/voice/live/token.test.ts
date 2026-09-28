@@ -1,3 +1,4 @@
+import { UnsupportedFunctionalityError } from "@ai-sdk/provider"
 import { HOST_INJECTED_API_KEY } from "./proxy-fetch"
 import { mintLiveToken, type MintLiveTokenDeps, type MintLiveTokenRequest } from "./token"
 
@@ -100,6 +101,28 @@ describe("mintLiveToken — desktop (Tauri)", () => {
 })
 
 describe("mintLiveToken — web BYOK", () => {
+  it("rejects adapters without client-secret support", async () => {
+    const createAdapter = jest.fn().mockResolvedValue({})
+
+    await expect(mintLiveToken(BASE, deps({ createAdapter }))).rejects.toThrow(
+      UnsupportedFunctionalityError
+    )
+  })
+
+  it("preserves the adapter receiver when minting a secret", async () => {
+    const adapter = {
+      token: "receiver-token",
+      async doCreateClientSecret() {
+        return { token: this.token, url: "wss://provider.example/realtime" }
+      },
+    }
+    const createAdapter = jest.fn().mockResolvedValue(adapter)
+
+    await expect(mintLiveToken(BASE, deps({ createAdapter }))).resolves.toMatchObject({
+      token: "receiver-token",
+    })
+  })
+
   it("mints through the adapter and returns its token and URL", async () => {
     const createAdapter = adapterReturning({
       token: "web_token",

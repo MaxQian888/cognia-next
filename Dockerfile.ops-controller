@@ -2,7 +2,7 @@
 # Tracks the `rust-toolchain.toml` pin: the build runs `--locked` against the
 # shared root Cargo.lock, whose floor is the workspace channel, not this
 # crate's own `rust-version`.
-FROM rust:1.95-bookworm AS builder
+FROM rust:1.96.1-bookworm AS builder
 WORKDIR /src
 COPY . .
 RUN cargo build --locked --release -p cognia-ops-controller

@@ -5,8 +5,8 @@
  * Lark im/v1 API calls (send, edit, delete, reactions).
  */
 
-import { sha256 } from "@noble/hashes/sha256"
-import { bytesToHex } from "@noble/hashes/utils"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { segmentsToPlainText } from "@/types/connectors/segment"
@@ -17,7 +17,7 @@ const LARK_API_BASE = "https://open.feishu.cn/open-apis"
 // Feishu caps message uuid at 50 characters. Preserve existing short keys;
 // hash the entire long key so retries remain stable and suffixes stay distinct.
 function messageUuid(key: string): string {
-  return key.length <= 50 ? key : bytesToHex(sha256(key)).slice(0, 48)
+  return key.length <= 50 ? key : bytesToHex(sha256(utf8ToBytes(key))).slice(0, 48)
 }
 
 export interface SerializedLarkCall {

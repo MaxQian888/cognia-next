@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -96,7 +96,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -156,9 +156,9 @@ jobs:
       # signs the updater bundles with TAURI_SIGNING_PRIVATE_KEY, applies
       # Developer ID signing + notarization on tagged macOS builds, and — when
       # a tagName is supplied — creates the release with installers, `.sig`
-      # files, and the `latest.json` updater manifest (includeUpdaterJson).
+      # files, and the `latest.json` updater manifest (uploadUpdaterJson).
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -176,7 +176,7 @@ jobs:
           # Every matrix leg uploads to the same draft. The publish-release job
           # makes it visible only after all signed artifacts are complete.
           releaseDraft: true
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
 
   publish-release:
     name: Publish complete release

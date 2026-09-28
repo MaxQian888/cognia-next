@@ -64,9 +64,9 @@ cbc = { version = "0.2", features = ["alloc"] }
 aes-gcm = { workspace = true, features = ["aes"] }
 prost = "0.14"
 # Matrix E2EE stack — the heavy dependency this crate isolates.
-matrix-sdk-crypto = { version = "0.18.0", default-features = false }
-matrix-sdk-sqlite = { version = "0.18.0", default-features = false, features = ["crypto-store", "bundled"] }
-ruma = { version = "0.16.0", features = ["client-api-c", "events", "rand"] }
+matrix-sdk-crypto = { version = "0.19.1", default-features = false }
+matrix-sdk-sqlite = { version = "0.19.1", default-features = false, features = ["crypto-store", "bundled"] }
+ruma = { version = "0.17.0", features = ["client-api-c", "events", "rand"] }
 
 [dev-dependencies]
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }

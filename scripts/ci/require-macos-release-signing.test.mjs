@@ -96,6 +96,8 @@ test("publishes only after every platform has uploaded to the draft", () => {
   const workflow = readFileSync(`${repositoryRoot}/.github/workflows/build-tauri.yml`, "utf8")
 
   assert.match(workflow, /releaseDraft: true/)
+  assert.match(workflow, /uploadUpdaterJson: true/)
+  assert.doesNotMatch(workflow, /includeUpdaterJson:/)
   assert.doesNotMatch(workflow, /releaseDraft: false/)
   assert.match(
     workflow,

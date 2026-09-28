@@ -163,7 +163,7 @@ impl DurableObject for RoomDurableObject {
         self.state.accept_web_socket(&server);
         let now = Date::now().as_millis() as f64;
         let mut challenge_bytes = [0u8; 32];
-        getrandom::getrandom(&mut challenge_bytes)
+        getrandom::fill(&mut challenge_bytes)
             .map_err(|_| Error::RustError("secure random challenge failed".into()))?;
         let challenge = URL_SAFE_NO_PAD.encode(challenge_bytes);
         let attachment = Attachment::fresh(now, ip, upgrade_rendezvous_id, challenge.clone());

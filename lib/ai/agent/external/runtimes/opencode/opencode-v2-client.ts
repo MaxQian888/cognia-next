@@ -215,7 +215,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
           return platformStreamingFetch(input, { ...init, readTimeout: 90_000 })
         },
       })
-      const status = await this.client.server.status({ signal: this.connection.signal })
+      const status = await this.client.server.info({ signal: this.connection.signal })
       if (
         !CURRENT_VERSION.test(status.version) ||
         !Number.isSafeInteger(status.pid) ||
@@ -299,7 +299,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
    *
    * The desktop delegates discovery to its sidecar because the renderer has no
    * process table; the standalone CLI owns one and has no feature-call bridge,
-   * so it runs the identical `Service.discover` + `/api/status` probe
+   * so it runs the identical `Service.discover` + `/api/info` probe
    * in-process (the same contract `sidecar/src/host/feature-call/index.ts` serves).
    */
   private async discoverService(signal: AbortSignal): Promise<OpenCodeV2Discovery> {
@@ -322,7 +322,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
         ([name, value]) => name.trim() && typeof value === "string"
       )
     )
-    const probe = await platformStreamingFetch(new URL("/api/status", url), {
+    const probe = await platformStreamingFetch(new URL("/api/info", url), {
       headers,
       signal: AbortSignal.any([signal, AbortSignal.timeout(2_000)]),
     })
@@ -370,7 +370,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
           return platformStreamingFetch(input, { ...init, readTimeout: 90_000 })
         },
       })
-      const status = await client.server.status({ signal: this.connection.signal })
+      const status = await client.server.info({ signal: this.connection.signal })
       if (
         !CURRENT_VERSION.test(status.version) ||
         !Number.isSafeInteger(status.pid) ||
@@ -387,7 +387,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   async healthCheck(): Promise<boolean> {
     if (!this.isConnected()) return false
     try {
-      const status = await this.getSdkClient().server.status({
+      const status = await this.getSdkClient().server.info({
         signal: AbortSignal.timeout(5_000),
       })
       return CURRENT_VERSION.test(status.version)

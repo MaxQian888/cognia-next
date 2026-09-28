@@ -1,10 +1,10 @@
-# Workspace toolchain pin. `1.95` is the floor: `oar-ocr 0.9.x`, which ships
-# PP-OCRv6 through the default `ocr-paddle` feature, requires Rust 1.95.
+# Workspace toolchain pin. `1.96` is the floor: Matrix SDK 0.19 and
+# Wasmtime 49 require Rust 1.96.
 # All workspace members + CI compile against this channel.
 #
 # Bumping: if cargo check fails on "requires rustc X.Y.Z", check the
 # Cargo.lock for the demanding crate and either downgrade it
 # (`cargo update -p <crate>@<ver> --precise <older>`) or bump this pin.
 [toolchain]
-channel = "1.95"
+channel = "1.96"
 components = ["rustfmt", "clippy", "rust-analyzer"]

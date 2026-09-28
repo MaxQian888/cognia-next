@@ -19,7 +19,7 @@
     "@deepseek-ai/dsh-fs-sandbox": "0.1.5-rc.1",
     "@deepseek-ai/dsh-tool-fs": "0.1.5-rc.1",
     "@deepseek-ai/dsh-user-approval": "0.1.5-rc.1",
-    "node-addon-require-builtin": "0.1.4",
+    "node-addon-require-builtin": "0.1.6",
     "@deepseek-ai/dsh-attachment-local": "0.1.5-rc.1",
     "@deepseek-ai/dsh-mcp-client": "0.1.5-rc.1",
     "@deepseek-ai/dsh-llm-pi-ai": "0.1.5-rc.1"

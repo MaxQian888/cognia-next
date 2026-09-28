@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.32.4"]
 build-backend = "hatchling.build"
 
 [project]
@@ -10,11 +10,11 @@ requires-python = ">=3.10"
 # Mirror of plugin.json `pythonDependencies` so `uv run --project` resolves the
 # same environment the host installs.
 dependencies = [
-    "laya==0.3.5",
+    "laya==0.3.21",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = ["pytest>=9.1.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["layaguard"]

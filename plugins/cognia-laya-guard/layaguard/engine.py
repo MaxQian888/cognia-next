@@ -277,7 +277,7 @@ def measure_question(tok: Any, question: Dict[str, Any], max_len: int, head_max_
     """Replay laya's head packing for one question (laya/common.py build_sequence).
 
     Returns the instruction tokens written vs kept, how many options lost
-    tokens, and the room left for the state. laya is pinned (==0.3.5), so
+    tokens, and the room left for the state. laya is pinned (==0.3.21), so
     mirroring its arithmetic is exact rather than approximate.
     """
     head = _token_count(tok, "%s question: %s" % (question["type"], question["instructions"]))

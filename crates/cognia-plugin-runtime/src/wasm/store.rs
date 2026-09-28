@@ -14,9 +14,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use wasmtime::{Store, StoreLimits, StoreLimitsBuilder};
-use wasmtime_wasi::{
-    DirPerms, FilePerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView,
-};
+use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use super::engine::engine;
 use super::services::WasmHostServices;
@@ -120,7 +118,7 @@ pub fn build_store(
             wasmtime::Error::msg(format!("create plugin data dir {data_dir:?}: {e}"))
         })?;
     }
-    wasi_builder.preopened_dir(data_dir, "/", DirPerms::all(), FilePerms::all())?;
+    wasi_builder.preopened_dir(data_dir, "/", FsPerms::ReadWrite)?;
     for extra in extra_preopens {
         // Skip non-existent extra preopens silently — the user may have
         // granted a path that no longer exists, and a hard failure here
@@ -129,7 +127,7 @@ pub fn build_store(
             continue;
         }
         let guest_path = format!("/extra/{}", sanitize_extra_label(extra));
-        wasi_builder.preopened_dir(extra, &guest_path, DirPerms::all(), FilePerms::all())?;
+        wasi_builder.preopened_dir(extra, &guest_path, FsPerms::ReadWrite)?;
     }
 
     let memory_bytes = (memory_limit_mb as usize).saturating_mul(1024 * 1024);

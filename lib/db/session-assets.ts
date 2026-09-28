@@ -95,8 +95,8 @@ export function hashSessionAssetSource(blob: Blob): Promise<string> {
     hash = (async () => {
       const chunkSize = 1024 * 1024
       if (blob.size <= chunkSize * 4) return sha256Blob(blob)
-      const { sha256 } = await import("@noble/hashes/sha256")
-      const { bytesToHex } = await import("@noble/hashes/utils")
+      const { sha256 } = await import("@noble/hashes/sha2.js")
+      const { bytesToHex } = await import("@noble/hashes/utils.js")
       const digest = sha256.create()
       for (let offset = 0; offset < blob.size; offset += chunkSize) {
         digest.update(

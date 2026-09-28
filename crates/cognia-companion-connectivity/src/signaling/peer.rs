@@ -222,6 +222,8 @@ async fn handle_inbound_channel(
                     break;
                 }
                 DataChannelEvent::OnBufferedAmountHigh => {}
+                // Future informational events must not change channel state.
+                _ => {}
             }
         }
     }

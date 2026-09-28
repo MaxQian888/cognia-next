@@ -9,7 +9,7 @@
 // of tools through a separate stdio bridge — see `sidecar/a2ui-mcp.mjs`.
 
 import { z } from "zod"
-import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk/core"
 import { toolText, toolError } from "../kernel/result.ts"
 import {
   SERVER_NAME as DEFS_SERVER_NAME,

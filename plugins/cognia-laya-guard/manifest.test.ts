@@ -50,7 +50,7 @@ describe("cognia-laya-guard manifest", () => {
     // laya pulls torch + transformers — heavy enough that it must never sit in
     // the shared bucket constraining other plugins' solves.
     expect(manifest.pythonVenv).toBe("isolated")
-    expect(manifest.pythonDependencies).toEqual(["laya==0.3.5"])
+    expect(manifest.pythonDependencies).toEqual(["laya==0.3.21"])
   })
 
   it("declares exactly the permissions the wiring needs", () => {

@@ -31,7 +31,7 @@ use cognia_signaling_core::policy::{
 };
 use cognia_signaling_core::protocol::verify_subscribe_proof;
 use futures_util::{SinkExt, StreamExt};
-use rand::RngCore;
+use rand::Rng;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 

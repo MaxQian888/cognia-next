@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai"
-import { sha256 } from "@noble/hashes/sha256"
-import { bytesToHex } from "@noble/hashes/utils"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
@@ -209,26 +209,28 @@ export async function returnSessionFromCodexApp(session: ChatSession): Promise<s
   // Codex transcript receives a new identity and preserves both branches.
   const digest = bytesToHex(
     sha256(
-      JSON.stringify({
-        sourceSessionId: source.id,
-        conversations: conversations
-          .map((conversation) => ({
-            id: conversation.session.id,
-            title: conversation.session.title,
-            workingDir: conversation.session.workingDir,
-            model: conversation.session.model,
-            state: conversation.session.importCanonicalState,
-            relation: conversation.session.importRelation,
-            lifecycle: conversation.session.importLifecycle,
-            messages: conversation.messages.map((message) => ({
-              id: message.id,
-              role: message.role,
-              parts: message.parts,
-              metadata: message.metadata,
-            })),
-          }))
-          .sort((left, right) => left.id.localeCompare(right.id)),
-      })
+      utf8ToBytes(
+        JSON.stringify({
+          sourceSessionId: source.id,
+          conversations: conversations
+            .map((conversation) => ({
+              id: conversation.session.id,
+              title: conversation.session.title,
+              workingDir: conversation.session.workingDir,
+              model: conversation.session.model,
+              state: conversation.session.importCanonicalState,
+              relation: conversation.session.importRelation,
+              lifecycle: conversation.session.importLifecycle,
+              messages: conversation.messages.map((message) => ({
+                id: message.id,
+                role: message.role,
+                parts: message.parts,
+                metadata: message.metadata,
+              })),
+            }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+        })
+      )
     )
   )
   const ids = new Map(

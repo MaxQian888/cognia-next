@@ -7,7 +7,7 @@
 name = "signaling-worker"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.96"
 description = "Cloudflare Durable Objects build of the cognia WebRTC signaling rendezvous (ADR-0021)"
 license = "AGPL-3.0-or-later"
 publish = false
@@ -22,8 +22,8 @@ cognia-signaling-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 console_error_panic_hook = "0.1"
-base64 = "0.22"
-getrandom = { version = "0.2", features = ["js"] }
+base64 = "0.23"
+getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [profile.release]
 opt-level = "s"

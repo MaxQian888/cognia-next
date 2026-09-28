@@ -52,7 +52,7 @@
     "pack:test": "node scripts/pack-test.mjs"
   },
   "dependencies": {
-    "valibot": "^1.4.2"
+    "valibot": "^1.5.0"
   },
   "optionalDependencies": {
     "@cognia/agent-host-darwin-arm64": "0.1.0",

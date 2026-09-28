@@ -15,8 +15,8 @@
  */
 
 import type { UIMessage } from "ai"
-import { sha256 } from "@noble/hashes/sha256"
-import { bytesToHex } from "@noble/hashes/utils"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import type { CanonicalSession, CanonicalTurn } from "@cognia/agent-config-types/canonical-session"
 
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -201,7 +201,7 @@ export async function importHandoffSession(params: ImportHandoffParams): Promise
   // handoffs retain their ticket-controlled overwrite semantics.
   const handoffSource = params.handoffSource ?? "cli"
   const receiptPayload = bytesToHex(
-    sha256(JSON.stringify({ messages, meta, title: params.title, historicalState }))
+    sha256(utf8ToBytes(JSON.stringify({ messages, meta, title: params.title, historicalState })))
   )
   const normalized = await Promise.all(uiMessages.map(normalizeMessageMedia))
   const resolvedProjectId = await resolveScopeProjectId(params.projectId)

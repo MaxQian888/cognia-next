@@ -91,7 +91,7 @@ sha2.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v4", "serde"] }
 zip = { workspace = true, features = ["deflate"] }
-zstd = "0.13"
+zstd = "0.14"
 
 # --- ADR-0067 Tier C: the `desktop-host` cluster (all optional) ---
 tauri = { workspace = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"], optional = true }
@@ -116,10 +116,10 @@ cognia-instrument = { path = "../cognia-instrument", optional = true }
 cognia-net = { path = "../cognia-net", optional = true }
 cognia-secrets = { path = "../cognia-secrets", optional = true }
 # --- ADR-0073 OTLP export (optional, see [features]) ---
-opentelemetry = { version = "0.32", optional = true, features = ["trace", "metrics"] }
-opentelemetry_sdk = { version = "0.32", optional = true, features = ["trace", "metrics", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.32", optional = true, default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-client"] }
-tracing-opentelemetry = { version = "0.33", optional = true }
+opentelemetry = { version = "0.33", optional = true, features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.33", optional = true, features = ["trace", "metrics", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.33", optional = true, default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-client"] }
+tracing-opentelemetry = { version = "0.34", optional = true }
 
 # The out-of-process minidump monitor. Gated exactly as in src-tauri; the
 # `#[cfg(...)]` in `crash/monitor.rs` mirrors this predicate (it used to read

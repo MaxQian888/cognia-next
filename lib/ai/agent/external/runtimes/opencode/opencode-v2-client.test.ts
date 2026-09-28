@@ -46,9 +46,7 @@ const event = (type: string, data: object = {}) => ({
 function fakeClient() {
   return {
     server: {
-      status: jest
-        .fn()
-        .mockResolvedValue({ version: "2.0.5", pid: 12, urls: ["http://localhost"] }),
+      info: jest.fn().mockResolvedValue({ version: "2.0.5", pid: 12, urls: ["http://localhost"] }),
     },
     session: {
       list: jest.fn().mockResolvedValue({ data: [info()], cursor: {} }),
@@ -324,7 +322,7 @@ describe("current OpenCode V2 adapter", () => {
       })
     )
     await adapter.disconnect()
-    client.server.status.mockResolvedValue({ version: "2.0.0-beta.1", pid: 12, urls: [] })
+    client.server.info.mockResolvedValue({ version: "2.0.0-beta.1", pid: 12, urls: [] })
     await expect(adapter.connect(config)).rejects.toThrow(/current OpenCode V2/)
     expect(adapter.connectionStatus).toBe("error")
   })
@@ -347,6 +345,13 @@ describe("current OpenCode V2 adapter", () => {
       await adapter.connect({ ...config, network: undefined })
       expect(discoverOpenCodeV2ViaSidecar).not.toHaveBeenCalled()
       expect(Service.discover).toHaveBeenCalledTimes(1)
+      expect(platformStreamingFetch).toHaveBeenCalledWith(
+        new URL("http://127.0.0.1:5566/api/info"),
+        expect.objectContaining({
+          headers: { authorization: "Basic b3BlbmNvZGU6cHc=" },
+          signal: expect.any(AbortSignal),
+        })
+      )
       expect(OpenCode.make).toHaveBeenCalledWith(
         expect.objectContaining({
           baseUrl: "http://127.0.0.1:5566",
@@ -364,7 +369,7 @@ describe("current OpenCode V2 adapter", () => {
   it.each(["1.18.14", "2.0.0-beta.1", "3.0.0"])(
     "rejects unsupported server version %s",
     async (version) => {
-      client.server.status.mockResolvedValue({ version, pid: 12, urls: [] })
+      client.server.info.mockResolvedValue({ version, pid: 12, urls: [] })
       await expect(adapter.connect(config)).rejects.toThrow(/current OpenCode V2/)
       expect(() => adapter.getSdkClient()).toThrow(/Not connected/)
     }
@@ -374,7 +379,7 @@ describe("current OpenCode V2 adapter", () => {
     { version: "2.0.0", pid: 0, urls: [] },
     { version: "not-a-version", pid: 12, urls: [] },
   ])("rejects invalid status %#", async (status) => {
-    client.server.status.mockResolvedValue(status)
+    client.server.info.mockResolvedValue(status)
     await expect(adapter.connect(config)).rejects.toThrow(/current OpenCode V2/)
   })
 
@@ -418,7 +423,7 @@ describe("current OpenCode V2 adapter", () => {
     await adapter.connect(config)
     await adapter.createSession()
     expect(await adapter.healthCheck()).toBe(true)
-    client.server.status.mockRejectedValueOnce(new Error("offline"))
+    client.server.info.mockRejectedValueOnce(new Error("offline"))
     expect(await adapter.healthCheck()).toBe(false)
     await adapter.disconnect()
     expect(adapter.getSessions()).toEqual([])

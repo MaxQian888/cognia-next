@@ -44,7 +44,7 @@ describe("cognia-repowiki manifest", () => {
     // never makes an installed one worse.
     expect(manifest.pythonVenv).toBe("isolated")
     expect(manifest.pythonDependencies).toEqual(
-      expect.arrayContaining(["pydantic>=2.0", "aiosqlite>=0.20.0", "networkx>=3.0"])
+      expect.arrayContaining(["pydantic>=2.13.5", "aiosqlite>=0.22.1", "networkx>=3.4.2"])
     )
   })
 

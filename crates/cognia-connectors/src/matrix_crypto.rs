@@ -7,12 +7,12 @@ use matrix_sdk_crypto::types::events::room::encrypted::EncryptedEvent;
 use matrix_sdk_crypto::types::requests::AnyOutgoingRequest;
 use matrix_sdk_crypto::{
     AttachmentDecryptor, AttachmentEncryptor, DecryptionSettings, EncryptionSettings,
-    EncryptionSyncChanges, MediaEncryptionInfo, OlmMachine, TrustRequirement,
+    EncryptionSyncChanges, MediaEncryptionInfo, OlmMachine, OlmMachineBuilder, TrustRequirement,
 };
 use matrix_sdk_sqlite::SqliteCryptoStore;
 use parking_lot::Mutex;
 use ruma::api::client::sync::sync_events::DeviceLists;
-use ruma::api::IncomingResponse;
+use ruma::api::{IncomingResponse, IncomingResponseExt};
 use ruma::events::{AnyMessageLikeEventContent, AnyToDeviceEvent, MessageLikeEventContent};
 use ruma::serde::Raw;
 use ruma::{DeviceId, OneTimeKeyAlgorithm, RoomId, TransactionId, UInt, UserId};
@@ -250,7 +250,9 @@ pub async fn matrix_crypto_init(req: MatrixCryptoInitRequest) -> Result<(), Stri
         let store = SqliteCryptoStore::open(store_dir, Some(passphrase.as_str()))
             .await
             .map_err(|err| format!("open Matrix crypto store failed: {err}"))?;
-        OlmMachine::with_store(&user_id, device_id, store, None)
+        OlmMachineBuilder::new(&user_id, device_id)
+            .with_crypto_store(store)
+            .build()
             .await
             .map_err(|err| format!("open Matrix OlmMachine failed: {err}"))?
     };
@@ -654,7 +656,7 @@ where
     let response = ruma::exports::http::Response::builder()
         .status(200)
         .header("content-type", "application/json")
-        .body(body)
+        .body(body.as_slice())
         .map_err(|err| format!("build Matrix {label} HTTP response failed: {err}"))?;
     T::try_from_http_response(response)
         .map_err(|err| format!("invalid Matrix {label} response: {err}"))

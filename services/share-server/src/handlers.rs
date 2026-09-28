@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use cognia_share_core::codegen::{code_from_bytes, CODE_LENGTH};
 use cognia_share_core::policy::{is_origin_allowed, looks_like_envelope, timing_safe_eq};
 use cognia_share_core::proto::{ShareMeta, StatsView};
-use rand::RngCore;
+use rand::Rng;
 
 use crate::metrics::RejectReason;
 use crate::server::{now_ms_f64, now_ms_i64, AppState};

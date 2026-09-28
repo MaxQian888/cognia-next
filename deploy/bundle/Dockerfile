@@ -22,7 +22,7 @@ ARG NODE_VERSION=26.8.2
 ARG ALPINE_VERSION=3.24
 
 # ── cognia-sandboxd, static musl ─────────────────────────────────────────────
-FROM rust:1.95-alpine AS sandboxd
+FROM rust:1.96.1-alpine AS sandboxd
 RUN apk add --no-cache musl-dev binutils
 WORKDIR /work
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./

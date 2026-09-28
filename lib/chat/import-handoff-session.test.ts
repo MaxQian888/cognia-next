@@ -269,6 +269,16 @@ describe("importHandoffSession", () => {
     expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"])
   })
 
+  it("preserves persisted receipt digests for Unicode transcripts", async () => {
+    const session = await importHandoffSession({
+      sessionId: "unicode-receipt",
+      messages: [{ role: "user", content: "你好🙂" }],
+    })
+    expect(session.cliHandoffReceipt?.payloadDigest).toBe(
+      "a583877beb1a5f3c5108abdb709068e8c119d73e686b92cde14e05285b4e20e0"
+    )
+  })
+
   it("forks changed snapshots instead of replacing desktop history", async () => {
     const first = await importHandoffSession({
       sessionId: "s_cli_3",

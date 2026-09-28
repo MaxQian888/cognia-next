@@ -33,6 +33,12 @@ function makeReq(opts: {
 }
 
 describe("serializeSend", () => {
+  it("preserves the UTF-8 retry-key digest across hashing dependency upgrades", () => {
+    const req = makeReq({ channelId: "oc_chat_001" })
+    req.metadata.idempotencyKey = "会话🙂".repeat(30)
+    expect(serializeSend(req).payload.uuid).toBe("4e324d235981ea7dbdc335e9cd024b380d88f4c3340ba705")
+  })
+
   it.each(["send", "reply", "thread"])(
     "bounds long retry keys for %s without losing their suffix",
     async (route) => {

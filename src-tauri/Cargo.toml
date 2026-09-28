@@ -49,7 +49,7 @@ path = "src/bin/cognia-webrtc-peer.rs"
 required-features = ["webrtc-harness"]
 
 [build-dependencies]
-tauri-build = { version = "2.6.3", features = [] }
+tauri-build = { version = "2.7.0", features = [] }
 
 [dependencies]
 serde_json.workspace = true
@@ -346,7 +346,7 @@ hmac.workspace = true
 sha1 = "0.11"
 sha2.workspace = true
 p256 = { version = "0.14", features = ["ecdsa", "ecdh"] }
-argon2 = "0.5"
+argon2 = "0.6"
 ed25519-dalek.workspace = true
 hex.workspace = true
 url.workspace = true
@@ -389,14 +389,14 @@ clap = { workspace = true, features = ["derive"] }
 
 # ADR-0067 Phase 5 — `xcap` (screenshot) + the UIA/a11y crates moved to
 # `crates/cognia-automation`.
-dial9-tokio-telemetry = "0.3"
+dial9 = { version = "0.5", default-features = false, features = ["tokio"] }
 
 # WebRTC stack (ADR-0021) — the current 0.20 API uses a runtime-agnostic
 # PeerConnection builder, one event-handler object per connection, and polled
 # DataChannel events. The desktop side of the WAN transport acts as the peer
 # counterpart of every mobile client in its rendezvous room. Keep the minimum
 # on the patched 0.20.2 release; Cargo may take compatible 0.20.x fixes.
-webrtc = "0.20.2"
+webrtc = "0.21.0"
 
 # ADR-0067 Phase 3 — native OCR subsystem (ADR-0024) lives in `crates/cognia-ocr`.
 # The optional ocrs/rten/rten-imageproc/oar-ocr/ort/image deps and the 5 `ocr-*`

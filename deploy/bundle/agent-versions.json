@@ -41,7 +41,7 @@
   "runtimes": [
     {
       "id": "claude-agent-acp",
-      "version": "0.77.0",
+      "version": "0.81.2",
       "libc": ["glibc", "musl"],
       "commands": [
         {
@@ -60,7 +60,7 @@
     },
     {
       "id": "codex-acp",
-      "version": "1.11.0",
+      "version": "1.13.1",
       "libc": ["glibc", "musl"],
       "commands": [
         {
@@ -73,7 +73,7 @@
     },
     {
       "id": "codex-app-server",
-      "version": "0.153.4",
+      "version": "0.157.1",
       "libc": ["glibc", "musl"],
       "commands": [
         {
@@ -86,7 +86,7 @@
     },
     {
       "id": "gemini-cli",
-      "version": "0.59.0",
+      "version": "0.61.0",
       "libc": ["glibc", "musl"],
       "commands": [
         {
@@ -99,7 +99,7 @@
     },
     {
       "id": "copilot-cli",
-      "version": "1.0.83",
+      "version": "1.0.88",
       "libc": ["glibc", "musl"],
       "commands": [
         {
@@ -112,7 +112,7 @@
     },
     {
       "id": "qwen-code",
-      "version": "0.23.4",
+      "version": "0.24.6",
       "libc": ["glibc", "musl"],
       "commands": [
         {
@@ -125,7 +125,7 @@
     },
     {
       "id": "pi",
-      "version": "0.85.1",
+      "version": "0.87.1",
       "libc": ["glibc", "musl"],
       "commands": [
         {
@@ -144,7 +144,7 @@
     },
     {
       "id": "opencode",
-      "version": "1.18.31",
+      "version": "1.18.32",
       "libc": ["glibc", "musl"],
       "commands": [
         {
@@ -157,7 +157,7 @@
     },
     {
       "id": "opencode-acp",
-      "version": "1.18.31",
+      "version": "1.18.32",
       "libc": ["glibc", "musl"],
       "commands": [
         {

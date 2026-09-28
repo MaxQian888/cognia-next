@@ -23,7 +23,7 @@ cognia-net = { path = "../cognia-net" }
 # Balance tokens live in the OS credential store.
 cognia-secrets = { path = "../cognia-secrets" }
 # The sandbox. Nothing else in the workspace links it.
-rquickjs = "0.12.2"
+rquickjs = "0.14.0"
 # `stream` for the bounded body read; the TLS and proxy features come from
 # `cognia-net`'s declaration of the same reqwest.
 reqwest = { workspace = true, features = ["stream"] }

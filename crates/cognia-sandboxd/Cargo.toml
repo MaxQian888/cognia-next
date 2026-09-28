@@ -42,7 +42,7 @@ thiserror.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
-signal-hook = "0.3"
+signal-hook = "0.4"
 
 [dev-dependencies]
 tempfile.workspace = true

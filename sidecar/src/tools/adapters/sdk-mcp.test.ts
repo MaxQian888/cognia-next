@@ -1,8 +1,36 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 
 import { buildCogniaToolsServer, wrapNativeToolResults } from "./sdk-mcp.ts"
 import type { CallableTool } from "../../../test-support/tool-result.ts"
+
+test("real MCP discovery preserves record-valued schemas and rejects invalid values", async () => {
+  const server = buildCogniaToolsServer({ enabled: { terminalRepl: true } })!
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  const client = new Client({ name: "record-schema-test", version: "1" })
+  await server.instance.connect(serverTransport)
+  await client.connect(clientTransport)
+  try {
+    const tools = (await client.listTools()).tools
+    const spawn = tools.find((tool) => tool.name === "terminal_repl_spawn")!
+    assert.deepEqual(spawn.inputSchema.properties?.env, {
+      description: "Extra env vars to merge into the child env.",
+      type: "object",
+      propertyNames: { type: "string" },
+      additionalProperties: { type: "string" },
+    })
+    const result = await client.callTool({
+      name: "terminal_repl_spawn",
+      arguments: { agentId: "test", shell: "node", cwd: process.cwd(), env: { INVALID: 123 } },
+    })
+    assert.equal(result.isError, true)
+  } finally {
+    await client.close()
+    await server.instance.close()
+  }
+})
 
 test("buildCogniaToolsServer returns null when no categories enabled", () => {
   assert.equal(buildCogniaToolsServer({ enabled: {} }), null)

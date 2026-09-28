@@ -6,7 +6,7 @@
 //   - an `McpSdkServerConfigWithInstance` ready to be merged into the
 //     `mcpServers` field of the SDK's `query()` options.
 
-import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk"
+import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk/core"
 import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk"
 
 import type { ToolDefinition, ToolHandlerExtra, WrappedToolDefinition } from "../kernel/define.ts"

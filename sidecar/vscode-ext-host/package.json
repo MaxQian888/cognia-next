@@ -12,11 +12,11 @@
     "test": "node --test --experimental-vm-modules tests/*.test.mjs"
   },
   "dependencies": {
-    "vscode-jsonrpc": "^9.0.1",
-    "vscode-languageclient": "^10.1.0"
+    "vscode-jsonrpc": "^9.0.3",
+    "vscode-languageclient": "^10.1.2"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
   }
 }

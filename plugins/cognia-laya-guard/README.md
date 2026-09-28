@@ -14,7 +14,7 @@ provisions or downloads before that.
 
 Enabling it does real work, once:
 
-- the host provisions an isolated Python venv and installs `laya==0.3.5`,
+- the host provisions an isolated Python venv and installs `laya==0.3.21`,
   which pulls torch + transformers (~3 GB on disk);
 - with `warmup` on (the default) the plugin then starts loading the laya
   checkpoint in the background, which on first run **downloads the weights
@@ -143,7 +143,7 @@ Validated locally on the real checkpoints (Apple Silicon, MPS):
   inbound IM message to score it. Scoring is local; the text never leaves
   this computer.
 - `decisions:provide` — offers `laya-local` as a decision provider.
-- `pythonDependencies: ["laya==0.3.5"]`, isolated venv.
+- `pythonDependencies: ["laya==0.3.21"]`, isolated venv.
 
 ## Environment preparation
 
