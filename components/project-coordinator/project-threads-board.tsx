@@ -18,6 +18,8 @@ import {
   type ProjectThreadRow as Row,
 } from "@/hooks/project-coordinator/use-project-threads"
 import { THREAD_BOARD_ORDER, type ThreadBoardState } from "@/lib/project-coordinator/thread-state"
+import { resolveCoordinatorConfig } from "@/lib/project-coordinator/config"
+import { useProjectStore } from "@/stores/project/project-store"
 import { ProjectThreadRow } from "./thread-row"
 import { ThreadStateBadge } from "./thread-state-badge"
 
@@ -41,6 +43,9 @@ export function ProjectThreadsBoard({ projectId, coordinatorSessionId }: Project
   const threads = useProjectThreads(coordinatorSessionId)
   const rows = useProjectThreadRows(threads, now, useThreadPrStatuses(projectId))
   const [showResolved, setShowResolved] = useState(false)
+  const icon = useProjectStore(
+    (s) => resolveCoordinatorConfig(s.projects.find((p) => p.id === projectId)).icon
+  )
   const groups = rows ? groupRows(rows) : undefined
   const open = groups?.filter(([state]) => state !== "resolved") ?? []
   const resolved = groups?.find(([state]) => state === "resolved")?.[1] ?? []
@@ -51,7 +56,7 @@ export function ProjectThreadsBoard({ projectId, coordinatorSessionId }: Project
       pane="workspace-pane"
       idPrefix="workspace-section"
       icon={WorkflowIcon}
-      title={t("title")}
+      title={icon ? `${icon} ${t("title")}` : t("title")}
       meta={rows ? rows.length - resolved.length : undefined}
       wide
     >

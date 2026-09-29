@@ -322,7 +322,10 @@ export interface Project {
 export type ProjectThreadExecution = "auto" | "managedWorktree" | "local"
 
 export interface ProjectCoordinatorModelChoice {
-  modelId: string
+  /** Absent: the app's default model, with only the effort overridden. */
+  modelId?: string
+  /** Provider serving `modelId`; absent means the app's default provider. */
+  providerId?: string
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
 }
 

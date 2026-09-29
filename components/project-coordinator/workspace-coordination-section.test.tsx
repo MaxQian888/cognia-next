@@ -16,6 +16,27 @@ jest.mock("next/link", () => ({
   ),
 }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
+jest.mock("@/components/shared/model-select", () => ({
+  ModelSelect: ({
+    model,
+    provider,
+    onSelect,
+  }: {
+    model: string
+    provider: string
+    onSelect: (choice: { providerId: string; modelId: string }) => void
+  }) => (
+    <button
+      type="button"
+      data-testid="model-select-stub"
+      data-model={model}
+      data-provider={provider}
+      onClick={() => onSelect({ providerId: "openai", modelId: "gpt-5" })}
+    >
+      {model}
+    </button>
+  ),
+}))
 jest.mock("@/lib/project-coordinator/user-actions", () => ({
   enableProjectCoordination: jest.fn(async () => ({ id: "coord" })),
   disableProjectCoordination: jest.fn(),
@@ -175,5 +196,37 @@ describe("WorkspaceCoordinationSection", () => {
       "href",
       "/memory?workspace=p1"
     )
+  })
+
+  it("sets, tunes and resets the model new threads start with", async () => {
+    const user = userEvent.setup()
+    settingsState.settings = { defaultModel: "claude-sonnet-5", defaultProvider: "anthropic" }
+    const { current, rerender } = mount({ enabled: true })
+    const threads = screen.getByTestId("project-model-threads")
+    const picker = threads.querySelector("[data-testid=model-select-stub]") as HTMLElement
+    // Unset shows what the next conversation will really use: the app default.
+    expect(picker).toHaveAttribute("data-model", "claude-sonnet-5")
+    fireEvent.click(picker)
+    expect(current().coordinator?.model).toEqual({
+      threads: { modelId: "gpt-5", providerId: "openai" },
+    })
+
+    rerender(<WorkspaceCoordinationSection project={current()} />)
+    await user.click(screen.getByTestId("project-effort-threads"))
+    await user.click(await screen.findByRole("option", { name: "High" }))
+    expect(current().coordinator?.model?.threads).toEqual({
+      modelId: "gpt-5",
+      providerId: "openai",
+      effort: "high",
+    })
+
+    rerender(<WorkspaceCoordinationSection project={current()} />)
+    fireEvent.click(screen.getByTestId("project-model-threads-reset"))
+    expect(current().coordinator?.model).toEqual({ threads: { effort: "high" } })
+
+    rerender(<WorkspaceCoordinationSection project={current()} />)
+    await user.click(screen.getByTestId("project-effort-threads"))
+    await user.click(await screen.findByRole("option", { name: "Auto" }))
+    expect(current().coordinator?.model).toEqual({})
   })
 })

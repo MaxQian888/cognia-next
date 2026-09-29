@@ -128,6 +128,7 @@ export async function createThreadSession(
         projectThread,
         titleAuto: false,
         ...(model?.effort ? thinkingLevelPatch(model.effort) : {}),
+        ...(model?.modelId && model.providerId ? { providerOverride: model.providerId } : {}),
       },
     },
     {

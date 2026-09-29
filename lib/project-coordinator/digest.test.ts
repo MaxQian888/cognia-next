@@ -75,4 +75,18 @@ describe("buildCoordinatorContextSection", () => {
       "Threads: none yet."
     )
   })
+
+  it("names the roots a thread can be sent to, only when there is a choice", () => {
+    const roots = [
+      { id: "r-app", path: "/src/app", isPrimary: true },
+      { id: "r-docs", path: "/src/docs", label: " Docs site " },
+    ]
+    const section = buildCoordinatorContextSection({ coordinator: { enabled: true }, roots }, [], 1)
+    expect(section).toContain("Roots (pass root_id to spawn_thread")
+    expect(section).toContain("- r-app: /src/app (primary)")
+    expect(section).toContain("- r-docs: Docs site")
+    expect(
+      buildCoordinatorContextSection({ coordinator: { enabled: true }, roots: [roots[0]] }, [], 1)
+    ).not.toContain("Roots")
+  })
 })

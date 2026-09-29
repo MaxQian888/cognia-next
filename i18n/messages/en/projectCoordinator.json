@@ -166,6 +166,14 @@
         "critical": "Critical only"
       }
     },
-    "memoryLink": "Open this workspace's memory"
+    "memoryLink": "Open this workspace's memory",
+    "models": {
+      "title": "Models",
+      "description": "What new coordinator and thread conversations start with. Each conversation can still switch.",
+      "coordinator": "Coordinator",
+      "threads": "Threads",
+      "effort": "{role} effort",
+      "useDefault": "Use default"
+    }
   }
 }

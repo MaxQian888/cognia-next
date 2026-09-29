@@ -20,7 +20,14 @@ import { toast } from "sonner"
 import { BrainIcon } from "lucide-react"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { NotificationLevel, NotificationSourcePref } from "@/types/notifications"
-import type { Project, ProjectCoordinatorPreferences, ProjectThreadExecution } from "@/types"
+import type {
+  Project,
+  ProjectCoordinatorConfig,
+  ProjectCoordinatorModelChoice,
+  ProjectCoordinatorPreferences,
+  ProjectThreadExecution,
+} from "@/types"
+import { ModelSelect } from "@/components/shared/model-select"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -244,6 +251,8 @@ function CoordinatorFields({ project }: { project: Project }) {
         </div>
       </div>
 
+      <ModelDefaultsFields project={project} />
+
       <ToggleRow
         id="project-propose-first"
         label={t("proposeBeforeStart")}
@@ -258,6 +267,99 @@ function CoordinatorFields({ project }: { project: Project }) {
         checked={config.preferences.autoFixPr}
         onChange={(autoFixPr) => patchPreferences({ autoFixPr })}
       />
+    </div>
+  )
+}
+
+const EFFORTS = ["default", "low", "medium", "high", "xhigh", "max"] as const
+type EffortChoice = (typeof EFFORTS)[number]
+type ModelRole = keyof NonNullable<ProjectCoordinatorConfig["model"]>
+
+/** The model and effort new coordinator and thread conversations start with. */
+function ModelDefaultsFields({ project }: { project: Project }) {
+  const t = useTranslations("projectCoordinator.settings")
+  const config = resolveCoordinatorConfig(project)
+  const defaultModel = useSettingsStore((s) => s.settings?.defaultModel ?? "")
+  const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider ?? "")
+  // The same tier names the composer's effort control uses; "off" reads "Auto".
+  const tLevels = useTranslations("chat.composer.effort.level")
+
+  const write = (role: ModelRole, choice: ProjectCoordinatorModelChoice | undefined) => {
+    const next = { ...config.model }
+    if (choice && (choice.modelId || choice.effort)) next[role] = choice
+    else delete next[role]
+    updateCoordinator(project.id, { model: next })
+  }
+
+  return (
+    <div className="flex flex-col gap-3" data-testid="project-model-defaults">
+      <div>
+        <p className="text-xs font-medium">{t("models.title")}</p>
+        <p className="text-xs text-muted-foreground">{t("models.description")}</p>
+      </div>
+      {(["coordinator", "threads"] as const).map((role) => {
+        const choice = config.model[role]
+        return (
+          <div
+            key={role}
+            className="flex flex-wrap items-center gap-2"
+            data-testid={`project-model-${role}`}
+          >
+            <span className="w-24 shrink-0 text-xs text-muted-foreground">
+              {t(`models.${role}`)}
+            </span>
+            <ModelSelect
+              model={choice?.modelId ?? defaultModel}
+              provider={choice?.providerId ?? defaultProvider}
+              onSelect={({ providerId, modelId }) =>
+                write(role, { ...choice, modelId, providerId })
+              }
+              className="h-8 min-w-0 flex-1"
+            />
+            <Select
+              value={choice?.effort ?? "default"}
+              onValueChange={(value) => {
+                const effort = value === "default" ? undefined : (value as EffortChoice)
+                const { effort: _previous, ...rest } = choice ?? {}
+                write(role, {
+                  ...rest,
+                  ...(effort ? { effort } : {}),
+                } as ProjectCoordinatorModelChoice)
+              }}
+            >
+              <SelectTrigger
+                className="h-8 w-28"
+                aria-label={t("models.effort", { role: t(`models.${role}`) })}
+                data-testid={`project-effort-${role}`}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EFFORTS.map((effort) => (
+                  <SelectItem key={effort} value={effort}>
+                    {tLevels(effort === "default" ? "off" : effort)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {choice?.modelId ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8"
+                onClick={() => {
+                  const { modelId: _m, providerId: _p, ...rest } = choice
+                  write(role, rest)
+                }}
+                data-testid={`project-model-${role}-reset`}
+              >
+                {t("models.useDefault")}
+              </Button>
+            ) : null}
+          </div>
+        )
+      })}
     </div>
   )
 }

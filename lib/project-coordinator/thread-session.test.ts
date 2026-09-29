@@ -145,7 +145,13 @@ describe("createThreadSession", () => {
       coordinator: {
         enabled: true,
         threadExecution: "local",
-        model: { threads: { modelId: "claude-haiku-4-5-20251001", effort: "medium" } },
+        model: {
+          threads: {
+            modelId: "claude-haiku-4-5-20251001",
+            providerId: "anthropic",
+            effort: "medium",
+          },
+        },
       },
     })
     const thread = await createThreadSession(
@@ -162,6 +168,7 @@ describe("createThreadSession", () => {
     expect(startNewSession.mock.calls[0][0]).not.toHaveProperty("worktreeName")
     expect(rows.get(thread.id)).toMatchObject({
       effort: "medium",
+      providerOverride: "anthropic",
       projectThread: { rootId: "docs", proposedBy: "user" },
     })
   })

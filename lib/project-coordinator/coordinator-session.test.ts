@@ -53,7 +53,9 @@ describe("ensureCoordinatorSession", () => {
   it("creates a local, non-activated coordinator and records the pointer", async () => {
     const { deps, rows, project } = setup({
       enabled: true,
-      model: { coordinator: { modelId: "claude-sonnet-5", effort: "low" } },
+      model: {
+        coordinator: { modelId: "claude-sonnet-5", providerId: "anthropic", effort: "low" },
+      },
     })
     const session = await ensureCoordinatorSession({ projectId: "p1", title: "Coordinator" }, deps)
     expect(deps.startNewSession).toHaveBeenCalledWith({
@@ -69,6 +71,7 @@ describe("ensureCoordinatorSession", () => {
       titleAuto: false,
       effort: "low",
       thinkingLevel: "low",
+      providerOverride: "anthropic",
     })
     expect(project().coordinator?.sessionId).toBe(session.id)
   })

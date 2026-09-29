@@ -18,6 +18,7 @@ jest.mock("./thread-row", () => ({
 }))
 
 import { useProjectThreads } from "@/hooks/project-coordinator/use-project-threads"
+import { useProjectStore } from "@/stores/project/project-store"
 import { ProjectThreadsBoard } from "./project-threads-board"
 
 const row = (id: string, state: ProjectThreadRow["state"]): ProjectThreadRow => ({
@@ -51,5 +52,15 @@ describe("ProjectThreadsBoard", () => {
     expect(screen.queryByTestId("row-d")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Resolved (1)" }))
     expect(screen.getByTestId("row-d")).toBeInTheDocument()
+  })
+
+  it("leads its title with the project's icon", () => {
+    rows = []
+    useProjectStore.setState({
+      projects: [{ id: "p1", name: "W", coordinator: { enabled: true, icon: "🚀" } } as never],
+    })
+    render(<ProjectThreadsBoard projectId="p1" coordinatorSessionId="coord" />)
+    expect(screen.getByText(/🚀 Threads/)).toBeInTheDocument()
+    useProjectStore.setState({ projects: [] })
   })
 })

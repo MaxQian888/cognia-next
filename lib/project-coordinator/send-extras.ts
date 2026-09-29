@@ -56,7 +56,7 @@ function defaultDeps(): SendExtrasDeps {
 
 export async function resolveProjectRoleSendExtras(
   session: Pick<ChatSession, "id" | "projectRole" | "projectId">,
-  project: Pick<Project, "coordinator">,
+  project: Pick<Project, "coordinator"> & Partial<Pick<Project, "roots">>,
   deps: SendExtrasDeps = defaultDeps()
 ): Promise<ProjectRoleSendExtras | undefined> {
   if (!projectRoleToolsApply(session, project)) return undefined

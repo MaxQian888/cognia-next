@@ -166,6 +166,14 @@
         "critical": "仅严重"
       }
     },
-    "memoryLink": "打开此工作区的记忆"
+    "memoryLink": "打开此工作区的记忆",
+    "models": {
+      "title": "模型",
+      "description": "新建的协调者和线程对话默认使用的模型。每个对话仍可自行切换。",
+      "coordinator": "协调者",
+      "threads": "线程",
+      "effort": "{role}思考强度",
+      "useDefault": "使用默认"
+    }
   }
 }

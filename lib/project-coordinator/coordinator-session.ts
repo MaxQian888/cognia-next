@@ -100,6 +100,7 @@ async function resolveOrCreateCoordinator(
     projectRole: "coordinator",
     titleAuto: false,
     ...(model?.effort ? thinkingLevelPatch(model.effort) : {}),
+    ...(model?.modelId && model.providerId ? { providerOverride: model.providerId } : {}),
   }
   await deps.updateSession(created.id, patch)
   deps.updateCoordinator(input.projectId, { sessionId: created.id })

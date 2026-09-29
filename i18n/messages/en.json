@@ -28369,6 +28369,14 @@
       "icon": "Icon",
       "maxConcurrentThreads": "Threads running at once",
       "memoryLink": "Open this workspace's memory",
+      "models": {
+        "coordinator": "Coordinator",
+        "description": "What new coordinator and thread conversations start with. Each conversation can still switch.",
+        "effort": "{role} effort",
+        "threads": "Threads",
+        "title": "Models",
+        "useDefault": "Use default"
+      },
       "noLimit": "No limit",
       "notifications": {
         "enabled": "Notify me about this workspace",

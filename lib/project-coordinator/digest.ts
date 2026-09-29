@@ -2,6 +2,8 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 import type { PrDerivedStatus } from "@/lib/github/pr-observe/types"
+import { truncateLine } from "@/lib/fleet/format"
+import { primaryRootOf } from "@/lib/workspace/roots"
 import { resolveCoordinatorConfig } from "./config"
 import { deriveThreadState, type ThreadBoardState } from "./thread-state"
 
@@ -16,11 +18,6 @@ export const DIGEST_MAX_THREADS = 12
 export const DIGEST_SUMMARY_MAX_CHARS = 400
 export const DIGEST_MAX_CHARS = 6_000
 
-function clip(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, " ").trim()
-  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`
-}
-
 function preferenceLines(project: Pick<Project, "coordinator">): string[] {
   const { preferences, threadExecution } = resolveCoordinatorConfig(project)
   return [
@@ -32,6 +29,24 @@ function preferenceLines(project: Pick<Project, "coordinator">): string[] {
   ]
 }
 
+/**
+ * The workspace's roots, when there is a choice to make: `spawn_thread` takes a
+ * `root_id`, and the coordinator can only name one it has been shown.
+ */
+function rootLines(project: Partial<Pick<Project, "roots">>): string[] {
+  const roots = project.roots ?? []
+  if (roots.length < 2) return []
+  const primary = primaryRootOf(project)
+  return [
+    "",
+    "Roots (pass root_id to spawn_thread for work outside the primary):",
+    ...roots.map(
+      (root) =>
+        `- ${root.id}: ${root.label?.trim() || root.path}${root.id === primary?.id ? " (primary)" : ""}`
+    ),
+  ]
+}
+
 export interface DigestThreadInput {
   thread: ChatSession
   status: ChatStatus
@@ -40,7 +55,7 @@ export interface DigestThreadInput {
 }
 
 export function buildCoordinatorContextSection(
-  project: Pick<Project, "coordinator">,
+  project: Pick<Project, "coordinator"> & Partial<Pick<Project, "roots">>,
   threads: readonly DigestThreadInput[],
   now: number
 ): string {
@@ -72,7 +87,7 @@ export function buildCoordinatorContextSection(
       const result = thread.attachedChild?.result?.summary
       return [
         `- ${thread.title} (${thread.id}) — ${state}${branch}${pr}`,
-        ...(result ? [`  last result: ${clip(result, DIGEST_SUMMARY_MAX_CHARS)}`] : []),
+        ...(result ? [`  last result: ${truncateLine(result, DIGEST_SUMMARY_MAX_CHARS)}`] : []),
       ].join("\n")
     })
 
@@ -80,6 +95,7 @@ export function buildCoordinatorContextSection(
     "## Project status",
     "Preferences:",
     ...preferenceLines(project),
+    ...rootLines(project),
     "",
     threads.length === 0 ? "Threads: none yet." : `Threads (${countLine}):`,
     ...recent,
