@@ -20,6 +20,15 @@ export interface CreateAttachedSessionInput {
   prompt: string
   context: AttachedSessionContextMode
   workspace: AttachedSessionWorkspace
+  /**
+   * Extra columns written with the attachment in the same update, so a
+   * specialised child (a project thread, ADR-0204) is never observable half
+   * built. Cannot override the attachment's own columns.
+   */
+  extra?: Omit<
+    Partial<ChatSession>,
+    "id" | "parentSessionId" | "attachedChild" | "spawnedTask" | "branchSeed"
+  >
 }
 
 export interface AttachedSessionDeps {
@@ -33,7 +42,12 @@ export interface AttachedSessionDeps {
   now: () => number
 }
 
-function defaultDeps(): AttachedSessionDeps {
+/**
+ * The production dependencies. Exported so a caller that needs a different
+ * child surface (a visible top-level session instead of a workbench aside)
+ * overrides just `createChild` and keeps everything else.
+ */
+export function defaultAttachedSessionDeps(): AttachedSessionDeps {
   return {
     getSession,
     listChildren: listSessionBranches,
@@ -76,7 +90,7 @@ function childExecutionContext(
 
 export async function createAttachedSession(
   input: CreateAttachedSessionInput,
-  deps: AttachedSessionDeps = defaultDeps()
+  deps: AttachedSessionDeps = defaultAttachedSessionDeps()
 ): Promise<ChatSession> {
   const parentSessionId = input.parentSessionId.trim()
   const title = input.title.trim()
@@ -115,11 +129,16 @@ export async function createAttachedSession(
     createdAt: now,
     updatedAt: now,
   }
+  // An independent child keeps whatever placement its creator already gave it
+  // (a thread's own managed worktree); only a shared child borrows the parent's.
   const patch: Partial<ChatSession> = {
+    ...input.extra,
     parentSessionId,
     attachedChild,
-    workingDir: input.workspace === "shared" ? parent.workingDir : undefined,
-    executionContext: childExecutionContext(parent, child.id, input.workspace),
+    workingDir: input.workspace === "shared" ? parent.workingDir : child.workingDir,
+    executionContext:
+      childExecutionContext(parent, child.id, input.workspace) ??
+      (input.workspace === "independent" ? child.executionContext : undefined),
     spawnedTask: {
       mode: input.context.mode === "none" ? "aside" : "inherit",
       pendingPrompt: prompt,
@@ -139,6 +158,20 @@ export async function createAttachedSession(
   return { ...child, ...patch }
 }
 
+/**
+ * Retire a staged first prompt once it has been submitted (or has gone stale
+ * because the conversation already has turns). Keeps the task mode, drops the
+ * prompt, so a reload can never submit it twice. The one writer of this
+ * transition for every surface that consumes a staged prompt.
+ */
+export async function consumeStagedPrompt(
+  sessionId: string,
+  mode: NonNullable<ChatSession["spawnedTask"]>["mode"],
+  deps: Pick<AttachedSessionDeps, "updateSession"> = defaultAttachedSessionDeps()
+): Promise<void> {
+  await deps.updateSession(sessionId, { spawnedTask: { mode } })
+}
+
 async function requireAttachedSession(
   childSessionId: string,
   deps: Pick<AttachedSessionDeps, "getSession">
@@ -152,7 +185,7 @@ async function requireAttachedSession(
 
 export async function markAttachedSessionRunning(
   childSessionId: string,
-  deps: AttachedSessionDeps = defaultDeps()
+  deps: AttachedSessionDeps = defaultAttachedSessionDeps()
 ): Promise<void> {
   const child = await requireAttachedSession(childSessionId, deps)
   if (child.attachedChild.status === "running" || child.attachedChild.status === "closed") return
@@ -168,7 +201,7 @@ export async function markAttachedSessionRunning(
 export async function completeAttachedSession(
   childSessionId: string,
   result: { summary: string; messageId?: string },
-  deps: AttachedSessionDeps = defaultDeps()
+  deps: AttachedSessionDeps = defaultAttachedSessionDeps()
 ): Promise<void> {
   const child = await requireAttachedSession(childSessionId, deps)
   const summary = result.summary.trim()
@@ -191,7 +224,7 @@ export async function completeAttachedSession(
 export async function interruptAttachedSession(
   childSessionId: string,
   ownerSessionId: string,
-  deps: AttachedSessionDeps = defaultDeps()
+  deps: AttachedSessionDeps = defaultAttachedSessionDeps()
 ): Promise<void> {
   const child = await requireAttachedSession(childSessionId, deps)
   if (child.attachedChild.lifecycleOwnerSessionId !== ownerSessionId) {
@@ -210,7 +243,7 @@ export async function interruptAttachedSession(
 export async function closeAttachedSession(
   childSessionId: string,
   ownerSessionId: string,
-  deps: AttachedSessionDeps = defaultDeps()
+  deps: AttachedSessionDeps = defaultAttachedSessionDeps()
 ): Promise<void> {
   const child = await requireAttachedSession(childSessionId, deps)
   if (child.attachedChild.lifecycleOwnerSessionId !== ownerSessionId) {

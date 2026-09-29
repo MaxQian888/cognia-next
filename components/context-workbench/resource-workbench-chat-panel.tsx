@@ -10,7 +10,7 @@ import { useChatScope } from "@/components/chat/chat-scope-provider"
 import { useClaudeChat } from "@/hooks/chat/use-claude-chat"
 import { getDb } from "@/lib/db/schema"
 import { listMessages } from "@/lib/db/messages"
-import { updateSession } from "@/lib/db/sessions"
+import { consumeStagedPrompt } from "@/lib/chat/attached-session"
 import { useChatStore } from "@/stores/chat"
 import { useContextWorkbench } from "./context-workbench"
 import { AsideTargetProvider } from "./aside-target"
@@ -191,7 +191,7 @@ export function ResourceWorkbenchChatPanel({
     ) {
       return
     }
-    void updateSession(sessionId, { spawnedTask: { mode: spawnedTaskMode } }).catch((error) => {
+    void consumeStagedPrompt(sessionId, spawnedTaskMode).catch((error) => {
       console.error("Failed to clear a stale spawned-task prompt", error)
     })
   }, [
@@ -215,7 +215,7 @@ export function ResourceWorkbenchChatPanel({
       .then(async () => {
         if (pendingPrompt) onPendingPromptConsumed?.()
         else if (spawnedTaskMode) {
-          await updateSession(sessionId, { spawnedTask: { mode: spawnedTaskMode } })
+          await consumeStagedPrompt(sessionId, spawnedTaskMode)
         }
       })
       .catch(() => {

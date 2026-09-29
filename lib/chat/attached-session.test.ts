@@ -4,6 +4,7 @@ import type { UIMessage } from "ai"
 import {
   closeAttachedSession,
   completeAttachedSession,
+  consumeStagedPrompt,
   createAttachedSession,
   interruptAttachedSession,
   type AttachedSessionDeps,
@@ -69,6 +70,56 @@ function setup(messages: UIMessage[] = []) {
 }
 
 describe("createAttachedSession", () => {
+  it("keeps an independent child's own placement and writes extra columns atomically", async () => {
+    const { deps, child, updates } = setup()
+    const ownContext = {
+      location: "managedWorktree" as const,
+      projectId: "project-1",
+      projectRoot: "/repo",
+      taskWorkspace: { taskId: "task-workspace:child-1", workspaceKey: "child-1" },
+    }
+    child.workingDir = "/wt/child"
+    child.executionContext = ownContext
+
+    const created = await createAttachedSession(
+      {
+        parentSessionId: "parent-1",
+        title: "Thread",
+        prompt: "Do it",
+        context: { mode: "none" },
+        workspace: "independent",
+        extra: { projectRole: "thread" },
+      },
+      deps
+    )
+
+    expect(updates).toHaveLength(1)
+    expect(updates[0].patch).toMatchObject({
+      projectRole: "thread",
+      workingDir: "/wt/child",
+      executionContext: ownContext,
+      parentSessionId: "parent-1",
+    })
+    expect(created.projectRole).toBe("thread")
+  })
+
+  it("never lets extra columns override the attachment", async () => {
+    const { deps, updates } = setup()
+    await createAttachedSession(
+      {
+        parentSessionId: "parent-1",
+        title: "Thread",
+        prompt: "Do it",
+        context: { mode: "none" },
+        workspace: "independent",
+        extra: { title: "renamed" } as never,
+      },
+      deps
+    )
+    expect(updates[0].patch.attachedChild?.parentSessionId).toBe("parent-1")
+    expect(updates[0].patch.spawnedTask).toEqual({ mode: "aside", pendingPrompt: "Do it" })
+  })
+
   it("creates a full-context child using an SDK fork and a separate lifecycle link", async () => {
     const { deps, updates } = setup([message("u1", "user", "Parent context")])
 
@@ -300,5 +351,13 @@ describe("attached session lifecycle", () => {
 
     expect(rows.get("child-1")?.attachedChild?.status).toBe("closed")
     expect(rows.get("grandchild-1")?.attachedChild?.status).toBe("closed")
+  })
+})
+
+describe("consumeStagedPrompt", () => {
+  it("drops the staged prompt and keeps the task mode", async () => {
+    const updateSession = jest.fn(async () => undefined)
+    await consumeStagedPrompt("child-1", "inherit", { updateSession })
+    expect(updateSession).toHaveBeenCalledWith("child-1", { spawnedTask: { mode: "inherit" } })
   })
 })
