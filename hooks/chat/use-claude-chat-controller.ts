@@ -267,6 +267,7 @@ import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { chatTurnPerformance } from "@/lib/perf/chat-turn-performance"
 import { enforceCostBudget, isCostBudgetConfigured } from "@/lib/usage/cost-budget-gate"
+import { isProjectRoleSessionPaused } from "@/lib/project-coordinator/project-access"
 import { cancelRouterFusionTurn } from "@/lib/router-fusion/gate/chat-events"
 import { abortRouterFusionSend, prepareRouterFusionSend } from "@/lib/router-fusion/gate/chat-send"
 import { routerFusionRefusalDiagnostic } from "@/lib/router-fusion/gate/refusal-diagnostic"
@@ -1149,6 +1150,20 @@ export function useClaudeChat() {
       }
 
       const sharedTarget = await getSession(sessionId)
+      // A paused project runs nothing (ADR-0204): no brief, report, nudge or
+      // typed message starts a turn in its coordinator or threads until the
+      // project is resumed. Refused before anything reaches the transcript;
+      // the paused banner above the composer carries Resume.
+      if (isProjectRoleSessionPaused(sharedTarget)) {
+        store
+          .getState()
+          .setSessionDiagnostic(
+            sessionId,
+            createDiagnostic("projectPaused", { source: "chat", meta: { sessionId } })
+          )
+        rejectSend("project_paused")
+        return
+      }
       const turnRoute = callOptions?.turnRoute ?? null
       // An addressed turn that cannot run: refused with the reason, before
       // anything reaches the transcript.

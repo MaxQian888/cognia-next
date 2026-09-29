@@ -30,6 +30,7 @@ import { PlatformConversationContext } from "@/components/inbox/platform-convers
 import { ChatColumn } from "./chat-column"
 import { CharacterMissingBanner } from "./character-missing-banner"
 import { WorkSubmissionNotice } from "./work-submission-notice"
+import { ProjectPausedBanner } from "@/components/project-coordinator/project-paused-banner"
 import {
   EmptyChatState,
   type WelcomeStyle,
@@ -899,6 +900,13 @@ export function ChatPane({
       <ChatColumn className="mt-2">
         <WorkSubmissionNotice sessionId={activeSession.id} />
       </ChatColumn>
+      {/* ADR-0204 — a paused project's coordinator and threads refuse sends;
+          this says why and offers Resume. Nothing while the project runs. */}
+      {activeSession.projectRole && activeSession.projectId ? (
+        <ChatColumn className="mt-2">
+          <ProjectPausedBanner projectId={activeSession.projectId} />
+        </ChatColumn>
+      ) : null}
       <ExternalAgentSessionPanel sessionId={activeSession.id} />
       {/* The surface swap (loader / welcome ⇄ transcript) is a crossfade IN
           PLACE, not a reflow. `popLayout` lifts the exiting branch out of the

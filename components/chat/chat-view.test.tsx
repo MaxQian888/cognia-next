@@ -79,6 +79,11 @@ jest.mock("@/components/shell/title-bar-outlets", () => ({
 jest.mock("./character-missing-banner", () => ({
   CharacterMissingBanner: () => null,
 }))
+jest.mock("@/components/project-coordinator/project-paused-banner", () => ({
+  ProjectPausedBanner: ({ projectId }: { projectId: string }) => (
+    <div data-testid="project-paused-banner-stub">{projectId}</div>
+  ),
+}))
 jest.mock("./empty-state", () => ({ EmptyChatState: jest.fn(() => null) }))
 jest.mock("@/components/error/diagnostic-card", () => ({
   InlineError: jest.fn(() => null),
@@ -300,6 +305,18 @@ function makeProps() {
 }
 
 describe("ChatPane shared blocking capabilities", () => {
+  it("mounts the project pause banner only in a project coordinator or thread", () => {
+    const { rerender } = render(<ChatPane {...makeProps()} />)
+    expect(screen.queryByTestId("project-paused-banner-stub")).not.toBeInTheDocument()
+    rerender(
+      <ChatPane
+        {...makeProps()}
+        activeSession={{ ...mockSession, projectId: "p1", projectRole: "thread" }}
+      />
+    )
+    expect(screen.getByTestId("project-paused-banner-stub")).toHaveTextContent("p1")
+  })
+
   it("does not expose local AI rewrite actions on platform transcripts", () => {
     const MockList = MessageList as jest.Mock
     MockList.mockClear()

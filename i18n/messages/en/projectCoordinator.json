@@ -114,5 +114,14 @@
     "byModel": {
       "title": "By model"
     }
+  },
+  "pause": {
+    "bannerTitle": "Project paused",
+    "bannerBody": "Paused {since}. The coordinator and its threads won't run until you resume.",
+    "reason": "Reason: {reason}",
+    "resume": "Resume",
+    "pause": "Pause",
+    "pauseFailed": "The project could not be paused: {error}",
+    "resumeFailed": "The project could not be resumed: {error}"
   }
 }

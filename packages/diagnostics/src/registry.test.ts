@@ -123,6 +123,14 @@ describe("DIAGNOSTIC_CODES", () => {
     expect(isDiagnosticCode("turnRouteWhileBusy")).toBe(true)
   })
 
+  it("says a paused project refused the turn, with nothing to retry", () => {
+    const paused = DIAGNOSTIC_CODES.projectPaused
+    expect(paused.retryable).toBe(false)
+    expect(paused.persistent).toBe(false)
+    expect(paused.actions).toEqual([{ kind: "dismiss" }])
+    expect(isDiagnosticCode("projectPaused")).toBe(true)
+  })
+
   it("keeps the 23 parser category ids so their translations still resolve", () => {
     const inherited: DiagnosticCode[] = [
       "connectionRefused",

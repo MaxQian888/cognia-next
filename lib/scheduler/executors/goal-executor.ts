@@ -23,6 +23,24 @@ const log = loggers.scheduler
 
 type GoalExecutionResult = TaskExecutorResult
 
+/** Read from Dexie: the headless brain has no project store. Fails open, like the budget. */
+async function isOwningProjectPaused(projectId: string | undefined): Promise<boolean> {
+  if (!projectId) return false
+  const [{ getAllProjects }, { isProjectPausedConfig }] = await Promise.all([
+    import("@/lib/db/projects"),
+    import("@/lib/project-coordinator/config"),
+  ])
+  try {
+    return isProjectPausedConfig((await getAllProjects()).find((p) => p.id === projectId))
+  } catch (err) {
+    log.warn("Scheduler goal task: reading the workspace failed; not treating it as paused", {
+      projectId,
+      err: String(err),
+    })
+    return false
+  }
+}
+
 export async function executeGoalTask(
   task: ScheduledTask,
   execution: TaskExecution,
@@ -67,6 +85,15 @@ export async function executeGoalTask(
   if (payload.sessionId) {
     const existing = await getSession(payload.sessionId)
     if (!existing) return { success: false, error: `Session not found: ${payload.sessionId}` }
+    // A paused project's coordinator and threads run nothing (ADR-0204). The
+    // chat controller refuses their sends; this loop drives turns without it,
+    // so it asks the same question of the persisted workspace row.
+    if (existing.projectRole && (await isOwningProjectPaused(existing.projectId))) {
+      return {
+        success: false,
+        error: `project-paused: the target conversation belongs to a paused project (${existing.projectId})`,
+      }
+    }
     sessionId = existing.id
   } else {
     const session = await createSession({

@@ -13353,6 +13353,10 @@
         "hint": "该智能体所需的命令未安装，或不在 PATH 中——请安装它，或让 Cognia 指向已有的可执行文件。",
         "label": "缺少前置依赖"
       },
+      "projectPaused": {
+        "hint": "此项目已暂停，协调者和线程都不会运行。恢复项目后即可继续。",
+        "label": "项目已暂停"
+      },
       "promptBlockedByPlugin": {
         "hint": "有插件在消息发出前将其拦截——请检查该插件的设置。",
         "label": "被插件拦截"
@@ -28271,6 +28275,15 @@
       "noGoal": "尚未设置目标，可在工作区设置中添加。",
       "open": "打开协调者",
       "title": "项目协调"
+    },
+    "pause": {
+      "bannerBody": "已于{since}暂停。恢复之前，协调者及其线程都不会运行。",
+      "bannerTitle": "项目已暂停",
+      "pause": "暂停",
+      "pauseFailed": "无法暂停项目：{error}",
+      "reason": "原因：{reason}",
+      "resume": "恢复",
+      "resumeFailed": "无法恢复项目：{error}"
     },
     "pr": {
       "addressComments": "处理评论",

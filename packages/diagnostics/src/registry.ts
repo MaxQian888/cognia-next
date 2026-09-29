@@ -754,6 +754,15 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "dismiss" }],
     icon: "clock",
   },
+  // Lasts until the person resumes the project; the paused banner above the
+  // composer carries the Resume action, so this only has to say why.
+  projectPaused: {
+    severity: "info",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "clock",
+  },
 
   // ------------------------------------------------------ Cognia internals
   settingsLoadFailed: {

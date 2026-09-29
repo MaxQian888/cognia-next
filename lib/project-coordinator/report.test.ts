@@ -44,6 +44,7 @@ function setup() {
     }),
     setTimer: (fn, ms) => timers.push({ fn, ms }),
     now: () => now,
+    isPaused: jest.fn(() => false),
   }
   return { deps, timers, rows, advance: (ms: number) => (now += ms) }
 }
@@ -112,5 +113,23 @@ describe("reportThreadToCoordinator", () => {
     await expect(flushThreadReports("coord")).resolves.toBeUndefined()
     expect(deps.updateSession).not.toHaveBeenCalled()
     warn.mockRestore()
+  })
+})
+
+describe("reports to a paused project", () => {
+  it("arrive as notes and do not spend the hourly trigger budget", async () => {
+    const { deps } = setup()
+    ;(deps.isPaused as jest.Mock).mockReturnValue(true)
+    for (let i = 0; i < MAX_TRIGGERED_REPORTS_PER_HOUR + 1; i++) {
+      reportThreadToCoordinator(report("t1", { summary: `r${i}` }), deps)
+      await flushThreadReports("coord")
+    }
+    const intents = (deps.send as jest.Mock).mock.calls.map(([input]) => input.intent)
+    expect(intents.every((intent) => intent === "note")).toBe(true)
+
+    ;(deps.isPaused as jest.Mock).mockReturnValue(false)
+    reportThreadToCoordinator(report("t1"), deps)
+    await flushThreadReports("coord")
+    expect((deps.send as jest.Mock).mock.calls.at(-1)[0].intent).toBe("trigger_turn")
   })
 })

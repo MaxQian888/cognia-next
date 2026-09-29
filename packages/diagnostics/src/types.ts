@@ -355,6 +355,11 @@ export type DiagnosticCode =
    * cannot move the turn to another one.
    */
   | "turnRouteWhileBusy"
+  /**
+   * The conversation is a project coordinator or thread and its project is
+   * paused (ADR-0204): nothing starts a turn there until it is resumed.
+   */
+  | "projectPaused"
   | "routingNoCandidates"
   // --- Cognia internals ---
   | "settingsLoadFailed"

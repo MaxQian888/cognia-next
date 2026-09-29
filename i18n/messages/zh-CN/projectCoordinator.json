@@ -114,5 +114,14 @@
     "byModel": {
       "title": "按模型"
     }
+  },
+  "pause": {
+    "bannerTitle": "项目已暂停",
+    "bannerBody": "已于{since}暂停。恢复之前，协调者及其线程都不会运行。",
+    "reason": "原因：{reason}",
+    "resume": "恢复",
+    "pause": "暂停",
+    "pauseFailed": "无法暂停项目：{error}",
+    "resumeFailed": "无法恢复项目：{error}"
   }
 }

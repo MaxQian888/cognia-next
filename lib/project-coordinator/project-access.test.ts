@@ -1,6 +1,11 @@
 import type { Project } from "@/types"
 import { useProjectStore } from "@/stores/project/project-store"
-import { getProject, updateCoordinator } from "./project-access"
+import {
+  getProject,
+  isProjectPaused,
+  isProjectRoleSessionPaused,
+  updateCoordinator,
+} from "./project-access"
 
 function project(overrides: Partial<Project> = {}): Project {
   const now = new Date()
@@ -41,5 +46,21 @@ describe("project-access", () => {
 
   it("throws for an unknown workspace", () => {
     expect(() => updateCoordinator("nope", { enabled: true })).toThrow(/nope/)
+  })
+
+  it("reads whether a project is paused", () => {
+    expect(isProjectPaused("p1")).toBe(false)
+    expect(isProjectPaused(undefined)).toBe(false)
+    expect(isProjectPaused("nope")).toBe(false)
+    updateCoordinator("p1", { enabled: true, paused: { at: 1 } })
+    expect(isProjectPaused("p1")).toBe(true)
+  })
+
+  it("pauses only the coordinator and threads, not ordinary conversations", () => {
+    updateCoordinator("p1", { enabled: true, paused: { at: 1 } })
+    expect(isProjectRoleSessionPaused({ projectId: "p1", projectRole: "thread" })).toBe(true)
+    expect(isProjectRoleSessionPaused({ projectId: "p1", projectRole: "coordinator" })).toBe(true)
+    expect(isProjectRoleSessionPaused({ projectId: "p1" })).toBe(false)
+    expect(isProjectRoleSessionPaused(null)).toBe(false)
   })
 })

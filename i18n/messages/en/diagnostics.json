@@ -420,6 +420,10 @@
     "handoffChainCapped": {
       "hint": "The members were still handing the conversation to each other when this team ran out of follow-up rounds. Raise the limit in the team's settings to let them finish.",
       "label": "The room stopped short"
+    },
+    "projectPaused": {
+      "hint": "This project is paused, so its coordinator and threads don't run. Resume the project to continue.",
+      "label": "Project paused"
     }
   },
   "detail": {

@@ -16,6 +16,10 @@ jest.mock("@/lib/db/sessions", () => ({
   createSession: (...a: unknown[]) => createSessionMock(...a),
   getSession: (...a: unknown[]) => getSessionMock(...a),
 }))
+const getAllProjectsMock = jest.fn()
+jest.mock("@/lib/db/projects", () => ({
+  getAllProjects: (...a: unknown[]) => getAllProjectsMock(...a),
+}))
 jest.mock("@/lib/goal/runtime", () => ({
   getGoalRuntime: () => ({ createGoal: (...a: unknown[]) => createGoalMock(...a) }),
 }))
@@ -41,6 +45,7 @@ beforeEach(() => {
   isTauriMock.mockReturnValue(true)
   createSessionMock.mockReset().mockResolvedValue({ id: "new_session" })
   getSessionMock.mockReset()
+  getAllProjectsMock.mockReset().mockResolvedValue([])
   createGoalMock.mockReset().mockResolvedValue({ id: "goal_1" })
   runGoalLoopMock.mockReset().mockResolvedValue({ status: "completed", turns: 3 })
 })
@@ -124,6 +129,35 @@ describe("executeGoalTask", () => {
     )
     expect(createSessionMock).not.toHaveBeenCalled()
     expect(createGoalMock).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "existing" }))
+  })
+
+  it("refuses to drive a paused project's coordinator or thread", async () => {
+    getSessionMock.mockResolvedValue({ id: "t1", projectId: "p1", projectRole: "thread" })
+    getAllProjectsMock.mockResolvedValue([
+      { id: "p1", coordinator: { enabled: true, paused: { at: 1 } } },
+    ])
+    const result = await executeGoalTask(
+      makeTask({ objective: "x", sessionId: "t1" }),
+      execution,
+      new AbortController().signal
+    )
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringMatching(/^project-paused/),
+    })
+    expect(createGoalMock).not.toHaveBeenCalled()
+  })
+
+  it("runs in a project thread once the project is not paused, and fails open on a read error", async () => {
+    getSessionMock.mockResolvedValue({ id: "t1", projectId: "p1", projectRole: "thread" })
+    getAllProjectsMock.mockRejectedValueOnce(new Error("db closed"))
+    const result = await executeGoalTask(
+      makeTask({ objective: "x", sessionId: "t1" }),
+      execution,
+      new AbortController().signal
+    )
+    expect(result.success).toBe(true)
+    expect(createGoalMock).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "t1" }))
   })
 
   it("fails when the supplied session is missing", async () => {

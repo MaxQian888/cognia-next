@@ -370,6 +370,11 @@ jest.mock("@/stores/project/project-store", () => ({
   },
 }))
 
+const isProjectRoleSessionPausedMock = jest.fn((_session: unknown) => false)
+jest.mock("@/lib/project-coordinator/project-access", () => ({
+  isProjectRoleSessionPaused: (session: unknown) => isProjectRoleSessionPausedMock(session),
+}))
+
 const getProjectEnvironmentMock = jest.fn()
 jest.mock("@/lib/db/project-environments", () => ({
   getProjectEnvironment: (id: string) => getProjectEnvironmentMock(id),
@@ -8635,5 +8640,31 @@ describe("useClaudeChat — @agent turn routing", () => {
         adapter.makeUserMessage.mockImplementation(baseMakeUserMessage)
       }
     })
+  })
+})
+
+describe("paused project (ADR-0204)", () => {
+  afterEach(() => isProjectRoleSessionPausedMock.mockReset().mockReturnValue(false))
+
+  it("refuses a turn in a paused project's thread before it reaches the transcript", async () => {
+    const thread = { id: "sess-1", title: "Thread", projectId: "project-1", projectRole: "thread" }
+    getSessionMock.mockResolvedValue(thread)
+    isProjectRoleSessionPausedMock.mockReturnValue(true)
+    const { result } = renderHook(useClaudeChat)
+    await flush()
+    chatState.replaceSessionMessages.mockClear()
+    await act(async () => {
+      await expect(
+        result.current.send("keep going", undefined, { throwOnError: true })
+      ).rejects.toThrow("project_paused")
+    })
+    expect(isProjectRoleSessionPausedMock).toHaveBeenCalledWith(thread)
+    expect(
+      chatState.setSessionDiagnostic.mock.calls.some(
+        ([, diagnostic]) => (diagnostic as { code?: string } | null)?.code === "projectPaused"
+      )
+    ).toBe(true)
+    expect(persistSessionAssetsMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
   })
 })

@@ -2,7 +2,7 @@
 
 /**
  * The workspace's door into project coordination (ADR-0204): turn it on, see
- * the goal, open the coordinator. The threads board sits beside it once on.
+ * the goal, open the coordinator, pause and resume the project. The threads board sits beside it once on.
  * Settings (goal, limits, execution) live in the workspace manager — one
  * editor, reached from its existing "Manage" entry.
  */
@@ -11,7 +11,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { MessagesSquareIcon, PowerIcon, SparklesIcon } from "lucide-react"
+import { MessagesSquareIcon, PauseIcon, PowerIcon, SparklesIcon } from "lucide-react"
 import { ConsoleSection } from "@/components/surface/console-section"
 import { Button } from "@/components/ui/button"
 import { sessionHref } from "@/lib/issues/run/agent-task-adapter"
@@ -22,6 +22,8 @@ import {
 } from "@/lib/project-coordinator/user-actions"
 import { ensureCoordinatorSession } from "@/lib/project-coordinator/coordinator-session"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useProjectPause } from "@/hooks/project-coordinator/use-project-pause"
+import { ProjectPausedBanner } from "./project-paused-banner"
 
 export interface ProjectCoordinatorEntryProps {
   workspaceId: string
@@ -33,6 +35,8 @@ export function ProjectCoordinatorEntry({ workspaceId }: ProjectCoordinatorEntry
   const project = useProjectStore((s) => s.projects.find((p) => p.id === workspaceId))
   const config = resolveCoordinatorConfig(project)
   const [busy, setBusy] = useState(false)
+  const pause = useProjectPause(workspaceId)
+  const tPause = useTranslations("projectCoordinator.pause")
 
   const openCoordinator = async (enable: boolean) => {
     if (busy) return
@@ -84,16 +88,30 @@ export function ProjectCoordinatorEntry({ workspaceId }: ProjectCoordinatorEntry
               {config.goal ?? t("noGoal")}
             </p>
           </div>
-          <Button
-            size="sm"
-            className="self-start"
-            disabled={busy}
-            onClick={() => void openCoordinator(false)}
-            data-testid="project-coordination-open"
-          >
-            <MessagesSquareIcon aria-hidden className="size-3.5" />
-            {t("open")}
-          </Button>
+          <ProjectPausedBanner projectId={workspaceId} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => void openCoordinator(false)}
+              data-testid="project-coordination-open"
+            >
+              <MessagesSquareIcon aria-hidden className="size-3.5" />
+              {t("open")}
+            </Button>
+            {pause.paused ? null : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pause.busy}
+                onClick={() => void pause.pause()}
+                data-testid="project-pause"
+              >
+                <PauseIcon aria-hidden className="size-3.5" />
+                {tPause("pause")}
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="flex flex-col gap-3" data-testid="project-coordination-off">

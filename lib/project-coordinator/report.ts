@@ -1,5 +1,6 @@
 import type { ChatSession, ProjectThreadDeclaredState } from "@cognia/agent-config-types"
 import { getSession, updateSession } from "@/lib/db/sessions"
+import { isProjectRoleSessionPaused } from "./project-access"
 import {
   sendSessionPeerMessage,
   type SendSessionPeerMessageInput,
@@ -18,6 +19,7 @@ import {
  *   as ONE message, so N threads finishing together cost one coordinator turn;
  * - past {@link MAX_TRIGGERED_REPORTS_PER_HOUR} a report is delivered as a
  *   note (visible, no turn) until the window rolls.
+ * A paused project's coordinator gets every report as a note.
  */
 
 export const REPORT_COALESCE_MS = 5_000
@@ -43,6 +45,8 @@ export interface ReportDeps {
   updateSession: (id: string, patch: Partial<ChatSession>) => Promise<unknown>
   setTimer: (fn: () => void, ms: number) => unknown
   now: () => number
+  /** A paused coordinator (ADR-0204) takes reports as notes, never as turns. */
+  isPaused: (session: ChatSession | undefined) => boolean
 }
 
 function defaultDeps(): ReportDeps {
@@ -52,6 +56,7 @@ function defaultDeps(): ReportDeps {
     updateSession,
     setTimer: (fn, ms) => setTimeout(fn, ms),
     now: Date.now,
+    isPaused: (session) => isProjectRoleSessionPaused(session),
   }
 }
 
@@ -106,8 +111,9 @@ export async function flushThreadReports(coordinatorSessionId: string): Promise<
   pending.delete(coordinatorSessionId)
   const { reports, deps } = batch
   const now = deps.now()
+  const paused = deps.isPaused(await deps.getSession(coordinatorSessionId))
   const recent = (triggeredAt.get(coordinatorSessionId) ?? []).filter((at) => now - at < HOUR_MS)
-  const trigger = recent.length < MAX_TRIGGERED_REPORTS_PER_HOUR
+  const trigger = !paused && recent.length < MAX_TRIGGERED_REPORTS_PER_HOUR
   if (trigger) recent.push(now)
   triggeredAt.set(coordinatorSessionId, recent)
 

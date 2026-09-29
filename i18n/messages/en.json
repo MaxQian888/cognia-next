@@ -13353,6 +13353,10 @@
         "hint": "The command this agent needs isn't installed or isn't on your PATH — install it, or point Cognia at an existing copy.",
         "label": "Missing prerequisite"
       },
+      "projectPaused": {
+        "hint": "This project is paused, so its coordinator and threads don't run. Resume the project to continue.",
+        "label": "Project paused"
+      },
       "promptBlockedByPlugin": {
         "hint": "A plugin stopped this message before it was sent — check the plugin's settings.",
         "label": "Blocked by a plugin"
@@ -28271,6 +28275,15 @@
       "noGoal": "No goal set. Add one in workspace settings.",
       "open": "Open coordinator",
       "title": "Project coordination"
+    },
+    "pause": {
+      "bannerBody": "Paused {since}. The coordinator and its threads won't run until you resume.",
+      "bannerTitle": "Project paused",
+      "pause": "Pause",
+      "pauseFailed": "The project could not be paused: {error}",
+      "reason": "Reason: {reason}",
+      "resume": "Resume",
+      "resumeFailed": "The project could not be resumed: {error}"
     },
     "pr": {
       "addressComments": "Address comments",

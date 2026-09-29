@@ -12,6 +12,10 @@ jest.mock("@/lib/project-coordinator/user-actions", () => ({
   enableProjectCoordination: jest.fn(async () => ({ id: "coord" })),
   disableProjectCoordination: jest.fn(),
 }))
+jest.mock("@/lib/project-coordinator/pause", () => ({
+  pauseProject: jest.fn(async () => undefined),
+  resumeProject: jest.fn(async () => undefined),
+}))
 jest.mock("@/lib/project-coordinator/coordinator-session", () => ({
   ensureCoordinatorSession: jest.fn(async () => ({ id: "coord" })),
 }))
@@ -22,6 +26,7 @@ import {
   enableProjectCoordination,
 } from "@/lib/project-coordinator/user-actions"
 import { ensureCoordinatorSession } from "@/lib/project-coordinator/coordinator-session"
+import { pauseProject } from "@/lib/project-coordinator/pause"
 import { ProjectCoordinatorEntry } from "./project-coordinator-entry"
 
 function setProject(coordinator?: Project["coordinator"]) {
@@ -67,5 +72,20 @@ describe("ProjectCoordinatorEntry", () => {
       expect(toastError).toHaveBeenCalledWith("Coordination could not be turned on: nope")
     )
     expect(screen.getByText(/No goal set|splits work/)).toBeInTheDocument()
+  })
+
+  it("pauses a running project", async () => {
+    setProject({ enabled: true })
+    render(<ProjectCoordinatorEntry workspaceId="p1" />)
+    expect(screen.queryByTestId("project-paused-banner")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("project-pause"))
+    await waitFor(() => expect(pauseProject).toHaveBeenCalledWith("p1", { reason: undefined }))
+  })
+
+  it("shows the paused banner instead of the pause button while paused", () => {
+    setProject({ enabled: true, paused: { at: Date.now() } })
+    render(<ProjectCoordinatorEntry workspaceId="p1" />)
+    expect(screen.getByTestId("project-paused-banner")).toBeInTheDocument()
+    expect(screen.queryByTestId("project-pause")).not.toBeInTheDocument()
   })
 })

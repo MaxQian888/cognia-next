@@ -1,6 +1,7 @@
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project, ProjectCoordinatorConfig } from "@/types"
 import { useProjectStore } from "@/stores/project/project-store"
-import { patchCoordinatorConfig } from "./config"
+import { isProjectPausedConfig, patchCoordinatorConfig } from "./config"
 
 /**
  * The one place project-coordinator code reads and writes a workspace row.
@@ -31,3 +32,23 @@ export function updateCoordinator(
 }
 
 export const projectAccess: ProjectAccess = { getProject, updateCoordinator }
+
+/** Is this project's coordination paused (ADR-0204)? Unknown workspaces are not. */
+export function isProjectPaused(
+  projectId: string | undefined,
+  read: ProjectAccess["getProject"] = getProject
+): boolean {
+  return isProjectPausedConfig(projectId ? read(projectId) : undefined)
+}
+
+/**
+ * The send-admission check: true when `session` is a project coordinator or
+ * thread whose project is paused. Ordinary conversations in the same
+ * workspace are not project work and keep running.
+ */
+export function isProjectRoleSessionPaused(
+  session: Pick<ChatSession, "projectRole" | "projectId"> | null | undefined,
+  read: ProjectAccess["getProject"] = getProject
+): boolean {
+  return Boolean(session?.projectRole) && isProjectPaused(session?.projectId, read)
+}
