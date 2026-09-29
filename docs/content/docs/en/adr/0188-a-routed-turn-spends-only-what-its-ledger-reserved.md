@@ -1,11 +1,11 @@
 ---
 title: "0188 — A routed turn spends only what its ledger reserved"
-description: "Router + Fusion brings the router_fusion spec into cognia-next's model routing as an opt-in subsystem. An action router picks a mode per turn; a call ledger reserves every model call before it is sent and settles it from reported usage; runs, attempts and money live in a separate per-account database with an outbox. Off by default, off means the existing code runs untouched, and an infrastructure fault falls ordinary traffic back to the original path. B1 ships chat as a direct run, B2 the ledgered utilities and the gateway Run API, B3 cascade, panel, the cognia/* models and the action catalog editor."
+description: "Router + Fusion brings the router_fusion spec into cognia-next's model routing as an opt-in subsystem. An action router picks a mode per turn; a call ledger reserves every model call before it is sent and settles it from reported usage; runs, attempts and money live in a separate per-account database with an outbox. Off by default, off means the existing code runs untouched, and an infrastructure fault falls ordinary traffic back to the original path. B1 ships chat as a direct run, B2 the ledgered utilities, the gateway Run API and the companion RPC, B3 cascade, panel, the cognia/* models and the action catalog editor, B4 delegate with sandboxed acceptance and approvals, B5 the LLM classifier, Agent/Squad/workflow action choice and the live smoke, B6 routing experiments with a shadow-only learned router. B7 is planned."
 ---
 
 # ADR 0188 — A routed turn spends only what its ledger reserved
 
-**Status:** Accepted — B1 (chat as a direct run), B2 (utilities, gateway, cockpit) and B3 (cascade, panel, `cognia/*` models, action catalog) implemented, except B2's companion RPC; B4–B7 planned
+**Status:** Accepted — B1 (chat as a direct run), B2 (utilities, gateway, cockpit, companion RPC), B3 (cascade, panel, `cognia/*` models, action catalog), B4 (delegate), B5 (LLM classifier, action choice, live smoke) and B6 (routing experiments, shadow router) implemented; B7 planned
 **Date:** 2026-09-16
 **Related:** [ADR-0043](./0043-llm-provider-execution) (the provider routing engine this sits on top of), [ADR-0125](./0125-durable-work-submission) (durable send and replay), [ADR-0169](./0169-one-runtime-one-review-one-control-machine) (run control and the `executionRuns` projection), [ADR-0059](./0059-cloud-deployment-headless-brain) (the headless brain)
 
@@ -44,6 +44,9 @@ An infrastructure fault is a fusion-database error, a failed module import, a re
 
 - **Ordinary traffic** (a direct chat turn) completes on the original, unledgered path. The message shows a "Not ledgered" badge, and the send carries `routerFusionBypass`.
 - **Breaker.** Consecutive faults on a surface (default 3) trip it. It stays on the original path until the user re-arms it in settings. The trip is persisted in `trippedSurfaces` and announced once.
+  - On `chat` the breaker counts faulted turns. Success is recorded only when a turn seals with no fault anywhere in it (`finishRouterFusionChatTurn`). Run creation and the seal no longer reset the count (`runOrdinaryWithFallback` with `recordSuccess: false`), so a fault in the middle of a turn counts too.
+  - The settings pane shows a live trip on every surface, read from the breaker as well as from the persisted row.
+- **Bypass notice.** A background utility, an Agent completion or a workflow node has no message to badge. Its bypass is raised as the `routerFusionBypassed` diagnostic (`gate/bypass-diagnostic.ts`), once per surface per app session, and not only logged.
 - **Explicit fusion work** (cascade, panel, delegate, `/v1/runs`, `cognia/*` models, arriving from B2 on) fails explicitly. It is never faked.
 - **Refusals are not faults.** A budget, limit or deadline refusal is refused and explained (`routerFusion.refusal.*`), and never bypassed.
 
@@ -70,7 +73,11 @@ An infrastructure fault is a fusion-database error, a failed module import, a re
 ### Chat as a direct run (B1)
 
 - **Seal.** `resolveSendOptions` seals the route last, for the provider, model and credentials the send really carries. It stamps `SendOptions.ledger` and `routerFusion` and deletes `fallbackModel`. Only the chat controller opts in (`dispatch.routerFusionSurface === "chat"`, desktop only). Remote-session and host-state sends never stamp.
+  - The controller decides host-state eligibility before it builds the options (`hostStateSendEligible`, `hooks/chat/host-state-send-eligibility.ts`) and passes `routerFusionHostState`, so `resolveSendOptions` neither selects fusion nor seals such a turn.
+  - A turn that was sealed anyway is always dispatched locally, never handed to the host, so its run is created.
 - **Run creation.** `prepareRouterFusionSend` creates the run right before dispatch. It takes the fusion session lock and the tenant hold, which is reserved against the existing `costBudget` remainder (D22). A durable replay or a reused send reseals as a new run on the same deployment.
+  - A reseal (retry, reroute, durable replay) routes on the original turn's routing inputs, carried in the renderer-only `SendOptions.routerFusionRouting` (stripped before IPC), and on the lane from the stamp, never a guess from the provider.
+  - Options frozen by an older build carry no routing inputs. They go out unledgered with the notice `routing_inputs_missing`, which is not a breaker fault.
 - **AI SDK lane.**
   - `perLegCap = 1` and `maxRetries: 0`.
   - Before each leg the sidecar sends `call_reserve_request` and waits for the renderer's `claude_call_reserve_decision` (30 s, then a bypass).
@@ -81,21 +88,22 @@ An infrastructure fault is a fusion-database error, a failed module import, a re
   - Each assistant `message.id` is settled.
   - `api_retry` is recorded as a failed attempt.
   - Every tool use re-checks the run through a PreToolUse hook.
-  - The card labels the result "estimated cap".
+  - The card labels the result "estimated cap" (`estimatedCapEnvelope`), a line separate from the unaudited-price notice.
 - **Sealing the run.** A run seals at the turn's `result`, not at `session_ended`, because goal, loop and steer continuations start the next run first. `session_ended` seals a turn that produced no result, and `sidecar_exited` seals every registered turn. Because the AI SDK lane emits a success `result` even when its last leg failed, a failed final leg downgrades the run to failed (`CALL_FAILED`).
 - **Reroutes (D5).** A cross-provider retry is a new, ledgered run, at most 2 per turn (`MAX_LEDGERED_REROUTES`), and only before anything visible was committed. The content-policy chain is off for ledgered turns.
-- **Budget gates (D35).** The legacy `enforceCostBudget` is skipped for a stamped send, and runs again if the send ended up bypassing.
+- **Budget gates (D35).** The legacy `enforceCostBudget` is skipped for a stamped send, and runs again if the send ended up bypassing. A durable replay that falls back to unledgered re-runs it too, and fails with `cost_budget_exceeded` (`lib/work-submission/stored-chat-dispatch.ts`).
 - **Money shown once.** The chat usage row is keyed by the assistant message with `costSource: "ledger"`, and its cost is the run's settled `spentMicrousd`. Non-chat surfaces project their usage rows through the outbox instead.
 - **UI.**
   - `RouterFusionRunCard` renders `MessageRunMetadata.routerFusion` under the assistant message: action, mode, rule, model, lane, budget, cap, cost and cost status, calls, overspend, frozen, and the `schema_only` acceptance label.
   - The routing settings pane gains a collapsible "Router + Fusion" card:
-    - master and surface switches, where dormant surfaces show "Later release";
+    - master and surface switches (as shipped in B1, dormant surfaces showed "Later release"; since B2's companion RPC none is dormant);
     - breaker state with re-arm;
     - budget mode, run caps and the unknown-price reserve;
     - data class and restricted grants;
     - rule rows with provenance;
     - the migration notice and restore.
-- **Boot.** `RouterFusionInitializer` restores persisted breaker trips. While chat is on, it seals the runs a closed window left holding a lock or a hold, and runs retention daily.
+  - **Refusals are sentences.** Every code the chat path can surface has a sentence in both locales (`CHAT_SURFACED_CODES` in `gate/refusal-diagnostic.ts`, pinned by its test), `CALL_FAILED` included.
+- **Boot.** `RouterFusionInitializer` restores persisted breaker trips. While chat is on, it seals the runs a closed window left holding a lock or a hold, and runs retention daily. Recovery always drains pending outbox effects, not only when it recovered a run: a window that sealed its run and closed before the drain left effects no later seal would apply.
 
 ### Utilities, the gateway and the cockpit (B2)
 
@@ -103,9 +111,20 @@ An infrastructure fault is a fusion-database error, a failed module import, a re
   - `gate/utility-ledger.ts` wraps an `LlmClient` so each background call becomes a session-less run: conversation titles, memory, the `/goal` judge, and workflow `ai.prompt` nodes.
   - The wrapped client forces `maxRetries: 0`, so a retry is a new, visible reservation rather than a hidden second bill.
   - Utility calls sit on `utilityLedger`, and workflow nodes on `agentsWorkflows`.
+  - Since B5 the ledgered set also covers `ai.prompt` v1 and v2 (explicit and routed), `ai.council`, the `/council` slash command, `ai.classify` / `ai.extract`, and the completion rail of `ai.ensemble`.
+  - Workflow nodes, Agent runs, auto-compose, plan and goal nodes, team-ops and scheduler replan book on `agentsWorkflows`. `/council` books on `utilityLedger` with origin `chat`.
+  - Each routing attempt is its own reservation with `maxRetries: 0`. A candidate the ledger refused is skipped, and when every candidate was refused the refusal is thrown.
+  - `executeAgent`'s completion rail is ledgered through `lib/ai/ledgered-model-call.ts` (`beginLedgeredGeneration`).
+  - `buildRendererLlmClient` defaults `workspaceId` to the session's workspace (`sessionWorkspaceId`), so the D30 data class applies.
+  - Usage is attributed per call. `createLlmClient` reports each call's own usage (`onUsage`, `reportsCallUsage`). A client that only reports cumulative snapshots is serialized, and an abandoned stream settles UNKNOWN.
+- **What is not ledgered.** The tool-enabled sidecar rail of non-chat turns (agent-executor tools, headless turns, connectors, A2UI, creator, plugins, scheduled goals and others) is not ledgered. The sidecar ledgers only a send stamped by `resolveSendOptions`, and only chat stamps.
+  - These paths are tracked in `scripts/gates/llm-ledger-boundary-baseline.json` (`pnpm audit:llm-ledger-boundary`).
+  - The gate fails an `unwrapped` row whose file references a ledger seam, unless the row carries a `partial` note saying which calls are ledgered and which are not.
 - **The Run API lives in the gateway; its data lives in the brain (D9).**
   - `crates/cognia-gateway/src/runs.rs` serves `/v1/runs`: create returns 202 with an `Idempotency-Key`, plus get, events over SSE (`id: seq`, 15 s keep-alive, 410 when a resumed run is gone), cancel, resume and feedback.
-  - Every request crosses `brain_bridge.rs`. The desktop implements that bridge over the existing companion writes bridge (`src-tauri/src/gateway_brain_bridge.rs`), so no second channel exists.
+  - Every request crosses `brain_bridge.rs`. As shipped in B2 the desktop implemented that bridge in `src-tauri/src/gateway_brain_bridge.rs`. It is now host-neutral: `cognia_companion::gateway_brain::WritesBrainBridge` runs over the existing companion writes bridge, so no second channel exists, and one function reads the brain's envelope (`cognia_gateway::brain_bridge::interpret_envelope`).
+  - The desktop installs it through `DesktopBrainBridge`, which tries a connected headless brain first, then the window.
+  - Headless `cognia-server` installs it through `HeadlessRouterFusionGateway` over the brain's `/internal/bridge` socket. `cognia-server` therefore serves `/v1/runs`, `cognia/*` and the passthrough ledger too.
   - The brain answers with tagged values, not throws, so Rust can return the brain's own status.
   - The run's input messages are stored as an encrypted artifact before the run exists, because the request is gone once the gateway answers 202.
 - **Keys are actors (D8).**
@@ -115,10 +134,14 @@ An infrastructure fault is a fusion-database error, a failed module import, a re
   - A Run API session is an ordinary chat session tagged `origin: gateway-api` with the key's name (D24).
 - **`cognia/*` models answer explicitly (D13).** `virtual_models.rs` catches them before model resolution:
   - `403 ROUTER_FUSION_DISABLED` when the surface is off;
-  - `422` for `delegate`, which is Run API only.
+  - `422 DELEGATE_REQUIRES_RUN_API` for `cognia/delegate`, which is Run API only.
   - As shipped in B2, `auto`, `direct`, `cascade` and `panel` were refused with `422` too. B3 serves them (see below).
 - **The passthrough lane is ledgered, never stopped by the ledger (D13, D38).**
+  - It covers `/v1/chat/completions`, `/v1/messages`, `/v1/responses` and `/v1/embeddings`.
   - With `gatewayPassthroughLedger` on, each upstream attempt is reserved immediately before it is sent. It is settled from the usage the gateway already reads, including at the end of a stream.
+  - Embeddings settle on prompt tokens (falling back to `total_tokens`). A price with an input rate only counts as complete for embeddings only.
+  - A settle is applied whatever the switch or the breaker say now. Only a fusion-database fault prevents it (`bypassed:ledger_unavailable`, counted as a fault).
+  - A settle the bridge could not deliver is retried up to 3 times with backoff (`SETTLE_ATTEMPTS`, `SETTLE_RETRY_BACKOFF`) and logged if it never lands. The brain books `settle:<attemptId>` once, so a retry never bills twice.
   - The failure class (`not_sent`, `rate_limited`, `server_error`, `auth`, `invalid_request`) travels with the settlement. A stalled or unreadable answer settles UNKNOWN and keeps its money held.
   - A failed-over request is one run (`gwpt:<requestId>`) with one logical step per attempt.
   - A budget or policy refusal returns `402` and the request is not sent.
@@ -128,13 +151,15 @@ An infrastructure fault is a fusion-database error, a failed module import, a re
   - Its outcomes, refusals and bypasses included, travel in the same `{ ok: true, value }` envelope as the Run API's. The desktop brain bridge rejects any other shape as a broken contract.
   - Each settle drains the outbox immediately, because no run driver exists to carry the usage row across later.
 - **The gateway reads the switches from the routing snapshot.** `RoutingSnapshot.routerFusion` carries the two gateway switches, not the breaker. The brain answers a tripped surface itself, so the caller gets `503` or `bypassed:breaker_tripped` rather than a misleading "off".
+  - The desktop pushes them in the renderer's routing snapshot.
+  - A headless brain publishes them with `gateway_router_fusion_switches_publish` whenever the settings row changes (a Dexie `liveQuery`) and every 60 s. The server stamps the last published value onto every profile snapshot. A malformed publish is refused, and both switches are off until the first publish.
 - **Runs nothing local started still show up (D39).**
   - A fusion run whose origin owns no execution run (today only `gateway`) queues `execution_run_projection` effects at create, start and seal.
   - The applier creates an `ExecutionRun` of the new kind `fusion`, with `origin: "gateway-api"` and the key's name, then advances it through the ordinary journal.
   - Passthrough runs (`origin: "gatewayPassthrough"`) are never projected: a proxy hop is a bill, not a task.
 - **The cockpit filters by origin.** `/agent-runs?origin=` narrows to local or gateway runs.
   - The control appears only once a non-local run exists, so with the Run API off the header is unchanged.
-  - A `fusion` row offers stop only. Its handler goes through `gate/run-control.ts` and deliberately skips the Run API's actor check: the person at the machine may stop work the machine is doing.
+  - As shipped in B2, a `fusion` row offered stop only. Since B4 it also offers approve and deny for a delegate approval. Its handler goes through `gate/run-control.ts` and deliberately skips the Run API's actor check: the person at the machine may stop or decide on work the machine is doing.
 - **Projection lands when it happens.** A Run API run drains its outbox as soon as it starts, so its cockpit row can be stopped while it is live. Cancelling a queued run drains too, since no worker is left to do it.
 - **Boot recovery and retention cover every wired surface, on both hosts.**
   - `recoverStaleFusionRuns` seals any lapsed run, not only chat's, and a fault there counts against every live surface. From B3 on, a run the orchestrator drives is resumed rather than sealed (see below).
@@ -143,6 +168,10 @@ An infrastructure fault is a fusion-database error, a failed module import, a re
 - **The brain reads the switches from the account row.** A headless brain never loads the settings store (only `SettingsHydrator` does), so every gate read on a path the brain serves goes through `gate/current-settings.ts`. That covers the Run API, passthrough, run control and workflow prompts.
   - The helper uses the store when it is loaded and the stored row otherwise.
   - Mid-call re-checks use `calls/live-settings.ts`, which falls back to the request's own snapshot.
+- **The companion RPC.** A paired phone or browser reaches `execution_run_*` and `claude_call_reserve_respond` through `lib/router-fusion/gate/companion-bridge.ts`, on the `companion` surface.
+  - A device may answer a reservation only for a turn it sent. The sidecar's `call_reserve_request` carries the turn's `remoteExecutionContext`. The companion event bus records the request per remote execution context and delivers it only to the originating device.
+  - The Rust RPC checks ownership (`crates/cognia-companion-bus` `remote_context`: `session_response_origin`, `consume_session_response`). It answers `403 RESERVATION_NOT_OWNED`, `409 RESERVATION_NOT_PENDING` or `410 RESERVATION_EXPIRED`. An answer is single-use.
+  - Rust stamps `reservationOriginDeviceId` server-side. The TS bridge refuses unless `callerDeviceId` equals it, and refuses with `COMPANION_ACTOR_REQUIRED` when no caller device is present.
 
 ### Cascade, panel and the virtual models (B3)
 
@@ -183,6 +212,7 @@ An infrastructure fault is a fusion-database error, a failed module import, a re
   - A step with an UNKNOWN or RECONCILED attempt is refused with `STEP_OUTCOME_UNKNOWN`, never sent again.
   - The boot sweep hands such runs to `orchestratedRunResumer` while their surface is on, instead of sealing them.
 - **The Run API completes its surface.** `GET /v1/sessions/{id}`, `GET /v1/artifacts/{id}` (with a 60 s HMAC `read_url` built from the request's host) and `GET /v1/artifacts/{id}/content?token=` (re-authorized on every read, `no-store`, `nosniff`). Every gateway error is the contract `ErrorResponse`: `code`, `message`, `retryable` (429 and 503), `details` and a `trace_id`.
+  - Read tokens are keyed per account: the HMAC key is a Browser Vault secret (`router-fusion.artifact-read-token-key.v1`), so a token stays valid across restarts and across brains of the same account. Only a non-account database uses a per-process key. A locked vault is a fault, not a reason to fall back.
 - **The `cognia/*` models are served (D13).** `cognia/auto`, `cognia/direct`, `cognia/cascade` and `cognia/panel` on `/v1/chat/completions` become runs.
   - The brain maps the strict compat subset in `api/chat-compat.ts`: unknown parameters, tools and `n > 1` are `422`, never ignored. The whole message snapshot becomes the run's input in a new conversation, through the same `acceptRun` as `POST /v1/runs`.
   - A non-streaming caller waits for the verified answer. A streaming caller gets SSE comment heartbeats until the answer is verified, then standard deltas and `[DONE]`.
@@ -191,7 +221,8 @@ An infrastructure fault is a fusion-database error, a failed module import, a re
 - **Chat can run a cascade or a panel.**
   - The composer gets a per-conversation mode chip (`stores/chat/fusion-mode-store.ts`): Auto, Direct, Cascade or Panel. It shows only while chat is on, on the built-in runtime, in the desktop app.
   - `resolveSendOptions` asks `selectChatFusionRun` for an explicit Cascade or Panel. For Auto it asks only when the user approved `cascade_verifiable` or `panel_research` and the turn names no agent tools.
-  - A fusion selection stamps `SendOptions.routerFusionRun` and skips the direct route and the seal. Images in an explicit fusion turn are `FUSION_TEXT_ONLY`.
+  - A fusion selection stamps `SendOptions.routerFusionRun` and skips the direct route and the seal.
+  - Images. Attachment kinds are carried even when the turn has no typed text. An explicit Cascade or Panel with an image anywhere in the transcript is `FUSION_TEXT_ONLY`. Auto never chooses fusion for an image turn. The transcript builder (`fusionTranscriptOf`) refuses instead of dropping an image.
   - An explicit mode on a paused surface or a fault is `RouterFusionUnavailableError`, never a direct turn (D38).
   - The controller branches where a Squad turn does. `hooks/chat/router-fusion-chat-turn.ts` saves the person's message, runs the turn through `gate/chat-fusion-run.ts` (`runExplicitFusion`), and shows the verified answer at once. The run wrote the answer durably through the outbox (`writesSessionAnswer`, answer only).
   - A progress card above the composer shows the phase, the calls and the spend against the cap every 700 ms, and says the answer appears once verified.
@@ -221,6 +252,49 @@ An infrastructure fault is a fusion-database error, a failed module import, a re
   - A brain refusal is always an error status. A run id that is not a UUID never reaches a header, and an event type outside `[A-Za-z0-9._-]` is sent as `message`.
   - Artifact content is served as an `attachment` under `Content-Security-Policy: sandbox`.
 
+### Delegate (B4)
+
+- **Where it runs.** Delegate is a Run API mode (`EXECUTABLE_MODES` in `lib/router-fusion/api/run-api.ts`). `cognia/delegate` on the compat endpoint is `422 DELEGATE_REQUIRES_RUN_API`. Agents, Squad members and workflow nodes can also choose it (see B5).
+- **Approvals.**
+  - A person decides through `POST /v1/runs/{id}/resume` (scope `runs:approve`) or in `/agent-runs`.
+  - The Run API snapshot returns the real `pending_approval_id`.
+  - The ledger writes the contract's `approval.required` event. Older `approval.requested` rows are mapped to it on read.
+  - A refused approval decision is an answer about the run, not a breaker fault.
+- **Delivery.** `x-cognia.delegate_delivery` is a Cognia extension beside the strict `RunRequest`: `patch_only` (the default) or `workspace_updated`.
+  - `workspace_updated` is refused when the request cannot run delegate, and is persisted only on a run the router actually sent to delegate.
+  - Workflows set it with the node param `delegateDelivery`, Squad teammates with `fusionDelegateDelivery`.
+- **Agents, Squad and workflows.**
+  - The run stores `projectId`, `workspaceRoot` (the project's primary folder, through `fusionWorkspaceRootOf`) and `acceptanceProfileId`.
+  - The picker and the runtime share the same workspace check, and member turns validate the stored choice.
+  - An approval attaches a `fusion_approval` interrupt to the caller's existing execution run (`workflowExecutionRunId`, `agentTeamExecutionRunId`) rather than adding a new cockpit row.
+  - `lib/execution/run-control.ts` sends any `fusion_approval` to the fusion handler, and `agentsWorkflows` is in `CONTROLLED_RUN_SURFACES`.
+  - The caller holds the run driver (`holdRunDriver`) and waits across the approval. It cancels on abort (`RUN_CANCELLED`), on expiry (`APPROVAL_EXPIRED`), or when no parent run exists to carry the interrupt (`APPROVAL_UNREACHABLE`).
+  - The interrupt title is an approval kind code, translated in the cockpit (`agentRuns.approvals.fusionApproval.*`), never stored English.
+- **Sandboxed acceptance (`lib/router-fusion/verify/code-acceptance-host.ts`).** The `code_fixture` profile runs the approved command in the strongest eligible tier: microVM, then container, then OS sandbox.
+  - The microVM tier is eligible only when the adapter `accepts()` the worktree. Otherwise the next tier is taken. The plugin SDK's sandbox adapter gained `accepts` and `readFile` for this.
+  - The report is read from inside the sandbox, at the path the command ran under.
+  - E2B currently declines acceptance runs: its clones are provisioned with network on, and network off cannot be enforced afterwards.
+  - The container tier is intentionally absent by default (`container: null`): it is not offered until it can enforce every ceiling it claims.
+  - No eligible tier is `SANDBOX_UNAVAILABLE`. Delegated code is never run unconfined.
+- **Workspace patches (`tools/workspace-patch.ts`).** The Rust commands `task_workspace_revision_get`, `task_workspace_revision_apply` and `task_workspace_revision_read` compare and swap on the tree's revision.
+  - Only a genuinely unknown command (a non-Tauri host) may use the check-then-write fallback.
+  - ACL and authorization errors propagate; they never fall back.
+- **Fusion workflow nodes honor `onSchemaViolation`.** `fail` (the default) throws `SchemaViolationError`; `soft` returns `schemaValid: false`.
+
+### Classifier, action choice and live smoke (B5)
+
+- **LLM classifier (D18, `routing/llm-classifier.ts`).** Opt-in. An Auto route asks the configured router model once. The call is a ledgered, PII-gated, bounded utility run. Every failure (timeout, invalid reply, PII hit, refusal, fault) ends in the rules classifier (ROUTE-03).
+- **Action choice for Agents, Squad and workflows.** A shared picker (`components/router-fusion/fusion-action-field.tsx`) offers Auto, Direct, Cascade, Panel and Delegate on the `agentsWorkflows` surface. Auto keeps the old behaviour. Every other choice runs the step as a fusion run.
+- **Live smoke (D20, `lib/router-fusion/live/`).** Real cases run through the real engine in a dedicated fusion database. The $5 total is enforced by the ledger's tenant limit, not by the harness.
+
+### Routing experiments and the shadow router (B6)
+
+- **Samples.** Each routed decision can be stored as a text-free routing sample with its acceptance label, actual cost and propensity (`lib/router-fusion/eval/`).
+- **Experiment (`eval/routing-experiment.ts`).** Cost per accepted run counts every cost and only accepted runs (EVAL-03). A simulated report claims nothing (EVAL-04).
+- **Shadow router (`eval/shadow-router.ts`).** It records what the learned router would have chosen beside the rules decision, and never acts. Nothing on a routing path imports `lib/router-fusion/eval/`.
+- **Promotion and rollback (`eval/promotion.ts`).** Promotion is a pointer move in the fusion database, so rollback is one click. It needs a passing grouped bootstrap, and a simulated predictor is never promoted.
+- **Still shadow-only.** Live samples are logged with propensity 1, so the gate answers `DETERMINISTIC_LOGGING` and promotes nothing. No predictor feeds the live router (see Rule 7 below).
+
 ### A separate database and an outbox (D39)
 
 Router + Fusion never bumps `lib/db/schema.ts`. Each main database gets a sibling IndexedDB, `<main database>-router-fusion-v1`, created lazily on first use. It holds these tables:
@@ -232,7 +306,11 @@ Router + Fusion never bumps `lib/db/schema.ts`. Each main database gets a siblin
 - `fusionArtifacts`, whose content is encrypted with the account content cipher;
 - `fusionConfigSnapshots` and `fusionOutbox`;
 - `fusionIdempotency` and `fusionFeedback`, added in B2 (schema version 2, additive: every B1 store keeps its index layout);
-- `fusionApiSessions` (the Run API's id for a conversation) and `fusionToolOperations` (tool receipts), added in B3 (schema version 3, additive).
+- `fusionApiSessions` (the Run API's id for a conversation) and `fusionToolOperations` (tool receipts), added in B3 (schema version 3, additive);
+- `fusionAcceptanceApprovals`, `fusionPatchSets` and `fusionDelegateSteps`, added in B4 (schema version 4, additive);
+- `fusionRoutingSamples`, `fusionPredictorManifests` and `fusionShadowDecisions`, added in B6 (schema version 5, additive).
+
+That is 21 tables at schema version 5 (`lib/router-fusion/db/fusion-db.ts`).
 
 Effects on the main database go through the outbox with idempotent effect ids and are replayed at boot and recovery.
 
@@ -241,13 +319,17 @@ Effects on the main database go through the outbox with idempotent effect ids an
   - Backup is device-local (a ledger is this device's spending, not portable content), and sync is none.
 - **Deletion.**
   - Every path that deletes a main database deletes the sibling, through the zero-import `gate/database-name.ts`: account deletion, runtime-target removal, the refused-layout reset and "clear all data".
-  - Where the path already verified deletion, it verifies the sibling too.
+  - Where the path already verified deletion, it verifies the sibling too. "Clear all data" now verifies both the main database and its sibling.
+  - Removing a target or host deletes and verifies the plaintext, encrypted and fusion databases together, through `runtimeTargetDatabaseNames` / `deleteRuntimeTargetDatabases` (`lib/runtime/target-registry.ts`). That covers account runtime-target removal, detaching the active companion target, companion host removal and forget-target-only.
   - A plaintext account or target database is only a migration source in this build, so it never had a sibling.
 - **Retention (`lib/router-fusion/db/retention.ts`).**
   - Artifact content expires after 7 days, unless a live run wrote it.
-  - A terminal run that ended more than 30 days ago goes with its events, attempts, reservations, decision and outbox rows. It is kept while it still pins money (a held or uncertain reservation, a non-final attempt), holds a lock, or has a pending effect.
+  - A terminal run's event journal goes 7 days after it ended; the Run API then answers `410 EVENT_HISTORY_EXPIRED` and points at the snapshot.
+  - A terminal run that ended more than 30 days ago goes with its events, attempts, reservations, decision and outbox rows, and its delegate step journal. It is kept while it still pins money (a held or uncertain reservation, a non-final attempt), holds a lock, or has a pending effect.
   - Config snapshots older than 30 days go once no retained run uses them.
-  - The money ledger is append-only and is never reaped.
+  - Delegate patch sets expire after 7 days, unless their run is live.
+  - Routing samples and their shadow decisions expire after 180 days, deliberately longer than the run trail.
+  - The money ledger is append-only and is never reaped. Acceptance approvals and predictor manifests are not reaped on a window either.
   - Idempotency keys expire after 7 days (`ROUTER_FUSION_IDEMPOTENCY_DAYS`) on their own clock, even while their run is live. Feedback goes with its run.
   - Retention runs only while a wired surface is on. Its failures are logged and never feed a breaker.
 
@@ -256,31 +338,31 @@ Effects on the main database go through the outbox with idempotent effect ids an
 | Spec mechanism | Here |
 |---|---|
 | Postgres RLS | account-scoped database plus key-scope and actor filters (AUTH-03, CACHE-05, B2) |
-| Redis pub/sub | notification channel with polling fallback (REC-07, B2) |
+| Redis pub/sub | Polling only (REC-07, B2): no notification channel exists. `/v1/runs/{id}/events` polls the brain every 250 ms (`EVENT_POLL_INTERVAL`), resumes by seq with no gaps, and closes after 300 s with no frames (`SSE_MAX_SILENCE`). |
 | `SELECT … SKIP LOCKED` | Dexie lease plus an incrementing fencing token |
-| Signed URLs | 60 s HMAC read tokens (B2) |
+| Signed URLs | 60 s HMAC read tokens, keyed per account (B2) |
 | Alembic migrations | single-version Dexie schema per database, as for the main database |
 | LangGraph checkpoints | logical-step ledger replay: a SUCCEEDED `logicalStepId` returns its committed output (REC-01) |
 
 ### Rule 7 dormancy
 
-`chat`, `gatewayRuns`, `gatewayPassthroughLedger`, `utilityLedger` and `agentsWorkflows` are wired (`WIRED_ROUTER_FUSION_SURFACES`). `companion` stays dormant until its companion RPC lands.
+`chat`, `gatewayRuns`, `gatewayPassthroughLedger`, `utilityLedger`, `agentsWorkflows` and `companion` are wired (`WIRED_ROUTER_FUSION_SURFACES`). As shipped in B1–B3, `companion` stayed dormant until its companion RPC landed; it is now wired. The dormancy mechanism stays in place for future surfaces.
 
-The `economy_simple`, `cascade_verifiable` and `panel_research` rule rows are wired (`WIRED_RULE_ROWS`). `delegate_multifile` stays dormant until B4. In chat, `cascade_verifiable` never matches under Auto, because a chat turn carries no JSON schema; it matches through the Run API and `cognia/auto`, and its description says so.
+The `economy_simple`, `cascade_verifiable`, `panel_research` and `delegate_multifile` rule rows are wired (`WIRED_RULE_ROWS`). `delegate_multifile` still matches only where delegate can really run: its rule also requires a sandbox tier and an approved acceptance profile. In chat, `cascade_verifiable` never matches under Auto, because a chat turn carries no JSON schema; it matches through the Run API and `cognia/auto`, and its description says so.
 
-Three more parts stay dormant until B4:
+Delegate actions and custom delegate actions are editable (`EDITABLE_ACTION_MODES`). The "Later release" delegate text is gone.
 
-- actions of mode `delegate`;
-- the `code_fixture` verifier profile, which has no runtime verifier yet, so the router does not choose `cascade_code`;
-- a custom action of mode `delegate`.
+Two parts stay dormant:
 
-- **Types.** Every list is documented at the type (`WIRED_RULE_ROWS`, `EDITABLE_ACTION_MODES`, `EDITABLE_PROFILES_BY_MODE`).
+- `cascade_code` and its `code_fixture` profile in the answer verifier. No host supplies a runtime verifier (`AnswerVerifierPorts.runtimeVerifier`), so `runVerifierProfiles` never offers `code_fixture` and the router never selects `cascade_code`. A delegate action's `code_fixture` is served by its own acceptance runner instead.
+- The learned router. A promoted predictor is recorded and shadowed, and changes no routing decision.
+
+- **Types.** Documented at `HostCapabilities.verifierProfiles` (`routing/action-router.ts`), `EDITABLE_PROFILES_BY_MODE` (`settings/action-catalog.ts`), `runVerifierProfiles` (`routing/run-route.ts`) and `eval/promotion.ts`. Every list is documented at the type (`WIRED_RULE_ROWS`, `EDITABLE_ACTION_MODES`, `EDITABLE_PROFILES_BY_MODE`).
 - **UI.**
-  - The settings pane shows the dormant surfaces, rows and delegate actions disabled with "Later release".
   - `cascade_code` shows "Not chosen yet".
-  - The add form offers `delegate` disabled.
+  - The routing experiment panel labels promotion "Later release": a promoted predictor is recorded and shadowed, and changes no routing decision (`routerFusionEval.promotion.dormant`).
   - The composer's mode chip renders nothing while chat is off.
-- **Tests.** `switches.test.ts`, `settings.test.ts`, `action-catalog.test.ts` and the editor's test pin the lists. `switches.test.ts` also fails if any source calls the gate for a dormant surface.
+- **Tests.** `run-route.test.ts` and `action-router.test.ts` pin that `cascade_code` is never selected. `shadow-router.test.ts` pins that no routing path imports the evaluation code. `switches.test.ts`, `settings.test.ts`, `action-catalog.test.ts` and the editor's test pin the lists. `switches.test.ts` also fails if any source calls the gate for a dormant surface.
 
 ## Consequences
 
@@ -291,12 +373,12 @@ Three more parts stay dormant until B4:
   - ISO-01 through ISO-05 pin fault isolation and idempotent outbox replay.
 - **Two Dexie databases can be half-committed relative to each other.** The outbox makes the cross-database effects idempotent and replayable; a crash between them repairs on the next boot.
 - **Chat turns on a ledgered surface are slower to start.** Each AI SDK leg waits for a reservation round trip to the renderer. The Claude Agent SDK lane pays one envelope reservation per turn.
-- **The acceptance registry is the definition of done.** `packages/router-fusion/src/acceptance/registry.ts` maps the 79 spec cases plus the Cognia OFF/ISO cases to batches. `registry.test.ts` fails when a delivered batch has a case with no `[ACC:<ID>]` test in the scanned roots.
+- **The acceptance registry is the definition of done.** `packages/router-fusion/src/acceptance/registry.ts` maps the 79 spec cases plus the Cognia OFF/ISO cases to batches. `registry.test.ts` fails when a delivered batch has a case with no `[ACC:<ID>]` test in the scanned roots. `DELIVERED_BATCHES` is B1–B6.
 - **Some things cannot be verified offline.**
   - Whether `CLAUDE_CODE_MAX_RETRIES=0` fully disables CLI retries.
   - Real provider usage semantics and request ids.
   - Tauri bridge timing.
-  - These are covered by the authorized live smoke ($5 total, ledger-enforced) in B5.
+  - These are covered by the authorized live smoke ($5 total, ledger-enforced), delivered in B5.
 
 ## Alternatives considered
 
@@ -310,9 +392,9 @@ Three more parts stay dormant until B4:
 | Batch | Scope | State |
 |---|---|---|
 | B1 | contracts, state, money, ledger, rules router, direct workflow; chat as a direct run; gate, breaker, fusion DB, outbox, governance, retention; run card and settings | implemented |
-| B2 | ledgered utilities and workflow prompts; gateway `/v1/runs` + SSE + scoped keys; `cognia/*` refusals; passthrough ledger and headers; `fusion` run projection and cockpit origin filter | implemented, except the companion RPC (`companion` surface), which stays dormant |
+| B2 | ledgered utilities and workflow prompts; gateway `/v1/runs` + SSE + scoped keys; `cognia/*` refusals; passthrough ledger and headers; `fusion` run projection and cockpit origin filter; companion RPC (`companion` surface) | implemented |
 | B3 | full ActionRouter; cascade and panel workflows; evidence tools; context compaction; verified_buffered delivery; orchestrated-run recovery; Run API sessions and artifacts; served `cognia/*` models; chat cascade and panel turns with mode picker, progress card and run card; action catalog editor | implemented |
-| B4 | delegate with sandboxed acceptance and approvals | planned |
-| B5 | LLM classifier, Agent/Squad/workflow action choice, live smoke | planned |
-| B6 | routing experiments and learned router | planned |
-| B7 | fault-injection matrix and full `/agent-runs` detail | planned |
+| B4 | delegate with sandboxed acceptance and approvals | implemented |
+| B5 | LLM classifier, Agent/Squad/workflow fusion action choice, live smoke | implemented |
+| B6 | routing experiments, shadow router, promotion and rollback | implemented; the learned router stays shadow-only |
+| B7 | fault-injection matrix; `/agent-runs` detail pane for cascade and panel runs (today only delegate runs get one, `components/agent-runs/run-detail-pane.tsx`) | planned |

@@ -7,7 +7,8 @@
  *
  * Several cases translate a server-side mechanism onto this stack (the ADR
  * records each): RLS → key-scope and actor isolation (AUTH-03, CACHE-05),
- * Redis loss → notification-channel loss with polling fallback (REC-07).
+ * Redis pub/sub → polling only (REC-07): no notification channel exists, so
+ * the event stream polls the brain and a lost poll is simply the next one.
  */
 
 export type AcceptanceBatch = "B1" | "B2" | "B3" | "B4" | "B5" | "B6" | "B7"
@@ -134,7 +135,7 @@ export const COGNIA_ACCEPTANCE_BATCH: Record<string, AcceptanceBatch> = {
  * Batches whose cases must all have tagged tests. Extended only when a batch
  * is complete — this is the gate that keeps "delivered" honest.
  */
-export const DELIVERED_BATCHES: readonly AcceptanceBatch[] = ["B1", "B2", "B3"]
+export const DELIVERED_BATCHES: readonly AcceptanceBatch[] = ["B1", "B2", "B3", "B4", "B5", "B6"]
 
 /** Roots scanned for `[ACC:<ID>]` test titles. */
 export const ACCEPTANCE_TEST_ROOTS = [

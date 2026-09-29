@@ -1,11 +1,11 @@
 ---
 title: "0188 — 路由后的轮次只花账本预留过的钱"
-description: "Router + Fusion 以可选开启的子系统形式，把 router_fusion 规格接入 cognia-next 的模型路由。动作路由器按轮次选择模式；调用账本在每次模型调用发出前预留，按上报用量结算；运行、调用尝试和资金放在按账户独立的数据库里，并通过 outbox 同步到主库。默认关闭，关闭时既有代码原样运行；基础设施故障时普通流量回退到原路径。B1 交付聊天作为 direct 运行，B2 交付工具类生成入账与网关 Run API，B3 交付 cascade、panel、cognia/* 模型与动作目录编辑器。"
+description: "Router + Fusion 以可选开启的子系统形式，把 router_fusion 规格接入 cognia-next 的模型路由。动作路由器按轮次选择模式；调用账本在每次模型调用发出前预留，按上报用量结算；运行、调用尝试和资金放在按账户独立的数据库里，并通过 outbox 同步到主库。默认关闭，关闭时既有代码原样运行；基础设施故障时普通流量回退到原路径。B1 交付聊天作为 direct 运行，B2 交付工具类生成入账、网关 Run API 与 companion RPC，B3 交付 cascade、panel、cognia/* 模型与动作目录编辑器，B4 交付带沙箱验收与审批的 delegate，B5 交付 LLM 分类器、Agent/Squad/工作流的动作选择与真实冒烟测试，B6 交付路由实验与只做影子运行的学习型路由器。B7 规划中。"
 ---
 
 # ADR 0188 — 路由后的轮次只花账本预留过的钱
 
-**Status:** Accepted — B1（聊天作为 direct 运行）、B2（工具类生成、网关、任务驾驶舱）与 B3（cascade、panel、`cognia/*` 模型、动作目录）已实现，B2 中的 companion RPC 除外；B4–B7 规划中
+**Status:** Accepted — B1（聊天作为 direct 运行）、B2（工具类生成、网关、任务驾驶舱、companion RPC）、B3（cascade、panel、`cognia/*` 模型、动作目录）、B4（delegate）、B5（LLM 分类器、动作选择、真实冒烟测试）与 B6（路由实验、影子路由器）已实现；B7 规划中
 **Date:** 2026-09-16
 **Related:** [ADR-0043](./0043-llm-provider-execution)（本文所依托的 provider 路由引擎）、[ADR-0125](./0125-durable-work-submission)（持久化发送与重放）、[ADR-0169](./0169-one-runtime-one-review-one-control-machine)（运行控制与 `executionRuns` 投影）、[ADR-0059](./0059-cloud-deployment-headless-brain)（headless brain）
 
@@ -44,6 +44,9 @@ description: "Router + Fusion 以可选开启的子系统形式，把 router_fus
 
 - **普通流量**（direct 聊天轮次）走原来的、不入账的路径完成。消息上显示"未入账"标记，发送参数带 `routerFusionBypass`。
 - **熔断**：同一入口连续故障（默认 3 次）会熔断，一直走原路径，直到用户在设置里重新启用。熔断状态持久化到 `trippedSurfaces`，只通知一次。
+  - `chat` 入口按出过故障的轮次计数。只有整个轮次都没有任何故障地封存时才记为成功（`finishRouterFusionChatTurn`）。创建运行和封存不再重置计数（`runOrdinaryWithFallback` 传 `recordSuccess: false`），因此轮次中途的故障也会计入。
+  - 设置页在每个入口上实时显示熔断，既读熔断器本身，也读持久化的记录。
+- **绕过通知**：后台工具类调用、Agent 补全或工作流节点没有可以打标记的消息。它们的绕过以 `routerFusionBypassed` 诊断上报（`gate/bypass-diagnostic.ts`），每个入口每次应用会话只报一次，而不只是写日志。
 - **显式选择的 fusion 工作**（cascade、panel、delegate、`/v1/runs`、`cognia/*` 模型，从 B2 起陆续接入）明确失败，绝不伪造。
 - **拒绝不是故障**：预算、限额或截止时间的拒绝会照常拒绝并说明原因（`routerFusion.refusal.*`），绝不绕过。
 
@@ -70,7 +73,11 @@ description: "Router + Fusion 以可选开启的子系统形式，把 router_fus
 ### 聊天作为 direct 运行（B1）
 
 - **封装路由**：`resolveSendOptions` 最后才封装路由，针对这次发送实际使用的 provider、模型和凭据。它写入 `SendOptions.ledger` 和 `routerFusion`，并删除 `fallbackModel`。只有聊天控制器会主动开启（`dispatch.routerFusionSurface === "chat"`，仅桌面端），远程会话和 host-state 的发送都不会带标记。
+  - 控制器在构建发送参数之前就判断是否走 host-state（`hostStateSendEligible`，`hooks/chat/host-state-send-eligibility.ts`），并传入 `routerFusionHostState`，因此 `resolveSendOptions` 对这类轮次既不选择 fusion，也不封装。
+  - 已经封装的轮次一律在本机派发，绝不交给 host，这样它的运行才会被创建。
 - **创建运行**：`prepareRouterFusionSend` 在派发前一刻创建运行，同时取得 fusion 会话锁和租户预留。租户预留从现有 `costBudget` 的剩余额度中扣（D22）。持久化重放或复用的发送，会在同一部署上重新封装为新的运行。
+  - 重新封装（重试、改路由、持久化重放）使用原始轮次的路由输入和标记中的通道。路由输入放在只存在于渲染进程的 `SendOptions.routerFusionRouting` 中（IPC 之前剥离），通道从不根据 provider 猜测。
+  - 旧版本冻结的发送参数不带路由输入，会以不入账方式发出，并附带提示 `routing_inputs_missing`；这不算熔断故障。
 - **AI SDK 通道**：
   - `perLegCap = 1`，`maxRetries: 0`；
   - 每一段之前，sidecar 发出 `call_reserve_request`，等待渲染进程的 `claude_call_reserve_decision`（30 秒后视为绕过）；
@@ -81,21 +88,22 @@ description: "Router + Fusion 以可选开启的子系统形式，把 router_fus
   - 按每个 assistant `message.id` 结算；
   - `api_retry` 记为失败的调用尝试；
   - 每次工具调用都通过 PreToolUse hook 重新检查运行状态；
-  - 卡片标注为"预估上限"。
+  - 卡片标注为"预估上限"（`estimatedCapEnvelope`），与"价格未经核实"的提示分开显示。
 - **结束运行**：运行在轮次的 `result` 时结束，而不是 `session_ended`，因为 goal、loop、steer 的续接会先开始下一个运行。没有产出 result 的轮次由 `session_ended` 结束，`sidecar_exited` 则结束所有已登记的轮次。AI SDK 通道即使最后一段失败也会发出成功的 `result`，所以最后一段失败时，运行会降为失败（`CALL_FAILED`）。
 - **改路由（D5）**：跨 provider 的重试是一个新的、入账的运行，每个轮次最多 2 次（`MAX_LEDGERED_REROUTES`），而且只能在任何可见内容提交之前。入账轮次关闭内容策略回退链。
-- **预算闸门（D35）**：带标记的发送跳过旧的 `enforceCostBudget`；如果发送最终走了绕过路径，会再检查一次。
+- **预算闸门（D35）**：带标记的发送跳过旧的 `enforceCostBudget`；如果发送最终走了绕过路径，会再检查一次。回退为不入账的持久化重放同样会重新检查，超限时以 `cost_budget_exceeded` 失败（`lib/work-submission/stored-chat-dispatch.ts`）。
 - **金额只显示一次**：聊天的用量行以 assistant 消息为键，`costSource: "ledger"`，成本取运行结算后的 `spentMicrousd`。非聊天入口改由 outbox 投影用量行。
 - **界面**：
   - `RouterFusionRunCard` 在 assistant 消息下渲染 `MessageRunMetadata.routerFusion`：动作、模式、规则、模型、通道、预算、上限、成本及其状态、调用次数、超支、冻结，以及 `schema_only` 验收标记。
   - 路由设置页新增可折叠的"Router + Fusion"卡片：
-    - 总开关与各入口开关，未接入的入口显示"后续版本"；
+    - 总开关与各入口开关（B1 交付时，未接入的入口显示"后续版本"；B2 的 companion RPC 落地后已没有未接入的入口）；
     - 熔断状态与重新启用；
     - 预算模式、运行上限和未知价格预留；
     - 数据等级与受限授权；
     - 带来源标记的规则行；
     - 迁移提示与恢复。
-- **启动**：`RouterFusionInitializer` 恢复持久化的熔断状态。聊天开启期间，它会结束已关闭窗口遗留的、仍占着锁或预留的运行，并每天执行一次保留策略。
+  - **每个拒绝都有一句说明**：聊天路径可能出现的每个代码在两种语言里都有对应的说明（`gate/refusal-diagnostic.ts` 中的 `CHAT_SURFACED_CODES`，由其测试固定），包括 `CALL_FAILED`。
+- **启动**：`RouterFusionInitializer` 恢复持久化的熔断状态。聊天开启期间，它会结束已关闭窗口遗留的、仍占着锁或预留的运行，并每天执行一次保留策略。恢复时总会应用待处理的 outbox 效果，而不只在恢复了运行时才这样做：封存了运行却在应用之前关闭的窗口，会留下之后任何封存都不会再应用的效果。
 
 ### 工具类生成、网关与任务驾驶舱（B2）
 
@@ -103,9 +111,20 @@ description: "Router + Fusion 以可选开启的子系统形式，把 router_fus
   - `gate/utility-ledger.ts` 包装 `LlmClient`，让每次后台调用都成为一个不绑定会话的运行，包括会话标题、记忆、`/goal` 评判和工作流 `ai.prompt` 节点。
   - 包装后的客户端强制 `maxRetries: 0`，重试会是一次新的、可见的预留，而不是隐藏的第二笔账单。
   - 工具类调用归 `utilityLedger`，工作流节点归 `agentsWorkflows`。
+  - B5 起，入账范围还包括 `ai.prompt` v1 与 v2（明确指定与路由两种）、`ai.council`、`/council` 斜杠命令、`ai.classify` / `ai.extract`，以及 `ai.ensemble` 的补全通道。
+  - 工作流节点、Agent 运行、自动组队、plan 与 goal 节点、team-ops 和调度器重新规划记在 `agentsWorkflows` 上；`/council` 记在 `utilityLedger` 上，来源为 `chat`。
+  - 每次路由尝试各自预留，`maxRetries: 0`。被账本拒绝的候选会被跳过；所有候选都被拒绝时抛出该拒绝。
+  - `executeAgent` 的补全通道通过 `lib/ai/ledgered-model-call.ts`（`beginLedgeredGeneration`）入账。
+  - `buildRendererLlmClient` 默认把 `workspaceId` 设为会话所属的工作区（`sessionWorkspaceId`），因此 D30 的数据等级同样适用。
+  - 用量按调用归属。`createLlmClient` 上报每次调用自己的用量（`onUsage`、`reportsCallUsage`）；只能上报累计快照的客户端会被串行化；被放弃的流按 UNKNOWN 结算。
+- **不入账的部分**：非聊天轮次中带工具的 sidecar 通道（agent-executor 工具、headless 轮次、连接器、A2UI、creator、插件、定时 goal 等）不入账。sidecar 只为 `resolveSendOptions` 打过标记的发送入账，而只有聊天会打标记。
+  - 这些路径登记在 `scripts/gates/llm-ledger-boundary-baseline.json`（`pnpm audit:llm-ledger-boundary`）中。
+  - 如果某条 `unwrapped` 记录的文件引用了账本接缝，而该记录没有 `partial` 说明（写明哪些调用入账、哪些不入账），闸门就会失败。
 - **Run API 由网关提供，数据留在 brain（D9）。**
   - `crates/cognia-gateway/src/runs.rs` 提供 `/v1/runs`：创建返回 202 并支持 `Idempotency-Key`；另有查询、SSE 事件流（`id: seq`、15 秒保活、续传的运行已不存在时返回 410）、取消、恢复和反馈。
-  - 每个请求都经过 `brain_bridge.rs`。桌面端在现有的 companion 写入桥之上实现它（`src-tauri/src/gateway_brain_bridge.rs`），不另开通道。
+  - 每个请求都经过 `brain_bridge.rs`。B2 交付时由桌面端在 `src-tauri/src/gateway_brain_bridge.rs` 中实现。现在它与主机无关：`cognia_companion::gateway_brain::WritesBrainBridge` 运行在现有的 companion 写入桥之上，不另开通道；brain 返回的信封由唯一的函数 `cognia_gateway::brain_bridge::interpret_envelope` 读取。
+  - 桌面端通过 `DesktopBrainBridge` 安装它，优先使用已连接的 headless brain，其次才是窗口。
+  - headless 的 `cognia-server` 通过 `HeadlessRouterFusionGateway` 在 brain 的 `/internal/bridge` socket 上安装它。因此 `cognia-server` 同样提供 `/v1/runs`、`cognia/*` 和透传账本。
   - brain 用带标签的值作答，而不是抛异常，这样 Rust 能把 brain 自己的状态码返回给调用方。
   - 网关答完 202 后请求就没了，所以运行的输入消息在运行创建之前就先存为加密产物。
 - **Key 即调用方（D8）。**
@@ -115,10 +134,14 @@ description: "Router + Fusion 以可选开启的子系统形式，把 router_fus
   - Run API 的会话是普通聊天会话，标记为 `origin: gateway-api` 并带 key 名称（D24）。
 - **`cognia/*` 模型给出明确答复（D13）。** `virtual_models.rs` 在模型解析之前拦下它们：
   - 入口关闭时返回 `403 ROUTER_FUSION_DISABLED`；
-  - `delegate` 只在 Run API 提供，返回 `422`。
+  - `cognia/delegate` 只在 Run API 提供，返回 `422 DELEGATE_REQUIRES_RUN_API`。
   - B2 交付时，`auto`、`direct`、`cascade`、`panel` 也返回 `422`；B3 起这四个模型正式提供服务（见下文）。
 - **透传通道入账，但不会因账本而被拦下（D13、D38）。**
+  - 覆盖 `/v1/chat/completions`、`/v1/messages`、`/v1/responses` 和 `/v1/embeddings`。
   - 打开 `gatewayPassthroughLedger` 后，每次上游尝试在发送前一刻预留，结算时使用网关本来就会读取的用量（流式响应在流结束时结算）。
+  - embeddings 按 prompt token 结算（没有时回退到 `total_tokens`）。只有输入单价的价格仅对 embeddings 视为完整。
+  - 结算无论当前开关或熔断状态如何都会执行。只有 fusion 数据库故障会阻止它（`bypassed:ledger_unavailable`，计为故障）。
+  - 桥未能送达的结算会带退避重试最多 3 次（`SETTLE_ATTEMPTS`、`SETTLE_RETRY_BACKOFF`），始终未送达则记日志。brain 对 `settle:<attemptId>` 只记一次账，所以重试不会重复计费。
   - 失败类别（`not_sent`、`rate_limited`、`server_error`、`auth`、`invalid_request`）随结算一起传递；卡住或无法解析的答复按 UNKNOWN 结算，钱继续占着。
   - 发生故障转移的请求是一个运行（`gwpt:<requestId>`），每次尝试是一个逻辑步骤。
   - 预算或策略拒绝返回 `402`，请求不发出。
@@ -128,13 +151,15 @@ description: "Router + Fusion 以可选开启的子系统形式，把 router_fus
   - 它的结果（包括拒绝和绕过）与 Run API 使用同一个 `{ ok: true, value }` 信封；桌面端 brain 桥会把其他形状当作契约错误拒绝。
   - 每次结算后立即应用 outbox，因为之后没有运行驱动器来把用量记录带过去。
 - **网关从路由快照读取开关。** `RoutingSnapshot.routerFusion` 只携带两个网关开关，不含熔断状态。熔断由 brain 自己回答，调用方因此得到 `503` 或 `bypassed:breaker_tripped`，而不是误导性的"已关闭"。
+  - 桌面端通过渲染进程的路由快照推送这两个开关。
+  - headless brain 在设置记录变化时（Dexie `liveQuery`）以及每 60 秒通过 `gateway_router_fusion_switches_publish` 发布它们。服务器把最后一次发布的值写进每个 profile 快照。格式错误的发布会被拒绝；首次发布之前两个开关都视为关闭。
 - **非本机发起的运行也能看到（D39）。**
   - 如果 fusion 运行的来源本身没有执行运行（目前只有 `gateway`），会在创建、开始和结束时各写一个 `execution_run_projection` 效果。
   - 应用器创建一个新类型 `fusion` 的 `ExecutionRun`，带 `origin: "gateway-api"` 和 key 名称，再通过普通的运行日志推进状态。
   - 透传运行（`origin: "gatewayPassthrough"`）从不投影：一次代理转发只是一笔账，不是一项任务。
 - **任务驾驶舱可按来源筛选。** `/agent-runs?origin=` 可筛出本机或网关发起的运行。
   - 只有出现非本机运行后才显示这个控件，所以 Run API 关闭时页头与之前完全一样。
-  - `fusion` 行只提供"停止"。处理器通过 `gate/run-control.ts`，并有意跳过 Run API 的调用方校验：坐在这台机器前的人可以停止这台机器正在做的事。
+  - B2 交付时，`fusion` 行只提供"停止"。B4 起它还为 delegate 审批提供"批准"和"拒绝"。处理器通过 `gate/run-control.ts`，并有意跳过 Run API 的调用方校验：坐在这台机器前的人可以停止这台机器正在做的事，或为它做决定。
 - **投影在发生时就落地。** Run API 运行一开始就应用 outbox，这样驾驶舱里的行在运行中就能被停止；取消排队中的运行也会立即应用，因为已经没有 worker 来做这件事。
 - **启动恢复与数据清理覆盖所有已接入入口，两种主机都有。**
   - `recoverStaleFusionRuns` 会封存所有租约已过期的运行，不只是聊天的；这里出的故障计入每个开启中的入口。B3 起，由编排器驱动的运行会被恢复执行而不是封存（见下文）。
@@ -143,6 +168,10 @@ description: "Router + Fusion 以可选开启的子系统形式，把 router_fus
 - **brain 从账户记录读取开关。** headless brain 从不加载设置 store（只有 `SettingsHydrator` 会加载），因此 brain 会处理的路径上，每次 gate 读取都通过 `gate/current-settings.ts`，包括 Run API、透传、运行控制和工作流提示词。
   - 该辅助函数在 store 已加载时用 store，否则读数据库中存储的记录。
   - 调用中途的重新检查使用 `calls/live-settings.ts`，拿不到时回退到本次请求自己的快照。
+- **companion RPC。** 已配对的手机或浏览器通过 `lib/router-fusion/gate/companion-bridge.ts` 在 `companion` 入口上访问 `execution_run_*` 和 `claude_call_reserve_respond`。
+  - 设备只能为自己发出的轮次回答预留请求。sidecar 的 `call_reserve_request` 携带该轮次的 `remoteExecutionContext`；companion 事件总线按远程执行上下文记录该请求，只投递给发起它的设备。
+  - Rust RPC 检查归属（`crates/cognia-companion-bus` 的 `remote_context`：`session_response_origin`、`consume_session_response`），返回 `403 RESERVATION_NOT_OWNED`、`409 RESERVATION_NOT_PENDING` 或 `410 RESERVATION_EXPIRED`。每个回答只能使用一次。
+  - Rust 在服务端写入 `reservationOriginDeviceId`。TS 桥只在 `callerDeviceId` 与之相等时才接受；没有调用方设备时以 `COMPANION_ACTOR_REQUIRED` 拒绝。
 
 ### cascade、panel 与虚拟模型（B3）
 
@@ -183,6 +212,7 @@ description: "Router + Fusion 以可选开启的子系统形式，把 router_fus
   - 某一步存在 UNKNOWN 或 RECONCILED 的尝试时，以 `STEP_OUTCOME_UNKNOWN` 拒绝，绝不重新发送。
   - 启动清理在对应入口开启时，把这类运行交给 `orchestratedRunResumer` 继续执行，而不是封存。
 - **Run API 补全接口。** `GET /v1/sessions/{id}`、`GET /v1/artifacts/{id}`（带按请求 Host 构造的 60 秒 HMAC `read_url`）和 `GET /v1/artifacts/{id}/content?token=`（每次读取都重新鉴权，`no-store`、`nosniff`）。网关的所有错误都是契约中的 `ErrorResponse`：`code`、`message`、`retryable`（429 与 503）、`details` 和 `trace_id`。
+  - 读取令牌按账户生成密钥：HMAC 密钥是 Browser Vault 中的密钥 `router-fusion.artifact-read-token-key.v1`，因此令牌在重启之后、在同一账户的不同 brain 之间都有效。只有非账户数据库使用进程内密钥。保险库已锁定属于故障，不会因此回退。
 - **`cognia/*` 模型正式提供服务（D13）。** `/v1/chat/completions` 上的 `cognia/auto`、`cognia/direct`、`cognia/cascade`、`cognia/panel` 都会变成运行。
   - brain 在 `api/chat-compat.ts` 中映射严格的兼容子集：未知参数、tools 和 `n > 1` 返回 `422`，从不忽略。完整的消息快照在新会话中成为运行输入，走与 `POST /v1/runs` 相同的 `acceptRun`。
   - 非流式调用方等待通过验证的回答。流式调用方在验证完成前只收到 SSE 注释心跳，之后收到标准增量和 `[DONE]`。
@@ -191,7 +221,8 @@ description: "Router + Fusion 以可选开启的子系统形式，把 router_fus
 - **聊天可以运行 cascade 或 panel。**
   - 输入框新增按会话记忆的模式芯片（`stores/chat/fusion-mode-store.ts`）：自动、直接、级联、评审团。只有聊天入口开启、使用内置运行时、在桌面应用中时才显示。
   - `resolveSendOptions` 对明确选择的级联或评审团调用 `selectChatFusionRun`。自动模式下，只有用户批准了 `cascade_verifiable` 或 `panel_research`、且该轮次没有指定智能体工具时才会调用。
-  - 选中 fusion 后会写入 `SendOptions.routerFusionRun`，并跳过 direct 路由和封存步骤。明确的 fusion 轮次若带图片，返回 `FUSION_TEXT_ONLY`。
+  - 选中 fusion 后会写入 `SendOptions.routerFusionRun`，并跳过 direct 路由和封存步骤。
+  - 图片：即使轮次没有输入文字，附件类型也会随之传递。明确选择的级联或评审团，只要对话记录中任何位置有图片，就返回 `FUSION_TEXT_ONLY`。自动模式从不为带图片的轮次选择 fusion。对话记录构建器（`fusionTranscriptOf`）遇到图片时直接拒绝，而不是丢弃图片。
   - 明确的模式遇到入口已暂停或基础设施故障时，抛出 `RouterFusionUnavailableError`，绝不改为 direct 轮次（D38）。
   - 控制器在 Squad 轮次分支的位置分出 fusion 分支。`hooks/chat/router-fusion-chat-turn.ts` 保存用户消息，通过 `gate/chat-fusion-run.ts`（`runExplicitFusion`）运行该轮次，并立即显示通过验证的回答。回答已由运行通过 outbox 持久写入（`writesSessionAnswer`，只写回答）。
   - 输入框上方的进度卡片每 700 毫秒刷新一次阶段、调用次数和相对上限的花费，并说明回答要等验证通过后才显示。
@@ -221,6 +252,49 @@ description: "Router + Fusion 以可选开启的子系统形式，把 router_fus
   - brain 的拒绝一律映射为错误状态码。不是 UUID 的运行 ID 不会写入响应头，不在 `[A-Za-z0-9._-]` 范围内的事件类型以 `message` 发送。
   - 产物内容以 `attachment` 方式返回，并带 `Content-Security-Policy: sandbox`。
 
+### delegate（B4）
+
+- **在哪里运行。** delegate 是 Run API 的一种模式（`lib/router-fusion/api/run-api.ts` 中的 `EXECUTABLE_MODES`）。兼容接口上的 `cognia/delegate` 返回 `422 DELEGATE_REQUIRES_RUN_API`。Agent、Squad 成员和工作流节点也可以选择它（见 B5）。
+- **审批。**
+  - 用户通过 `POST /v1/runs/{id}/resume`（scope `runs:approve`）或在 `/agent-runs` 中做决定。
+  - Run API 快照返回真实的 `pending_approval_id`。
+  - 账本写入契约中的 `approval.required` 事件；旧的 `approval.requested` 记录在读取时映射为它。
+  - 被拒绝的审批决定是关于运行的回答，不算熔断故障。
+- **交付方式。** `x-cognia.delegate_delivery` 是与严格的 `RunRequest` 并列的 Cognia 扩展：`patch_only`（默认）或 `workspace_updated`。
+  - 请求无法运行 delegate 时，`workspace_updated` 会被拒绝；只有路由器真正交给 delegate 的运行才会保存它。
+  - 工作流用节点参数 `delegateDelivery` 设置，Squad 队友用 `fusionDelegateDelivery` 设置。
+- **Agent、Squad 与工作流。**
+  - 运行保存 `projectId`、`workspaceRoot`（项目的主文件夹，通过 `fusionWorkspaceRootOf` 获得）和 `acceptanceProfileId`。
+  - 选择器与运行时共用同一个工作区检查，成员轮次会校验已保存的选择。
+  - 审批以 `fusion_approval` 中断的形式挂到调用方已有的执行运行上（`workflowExecutionRunId`、`agentTeamExecutionRunId`），而不是新增一行驾驶舱记录。
+  - `lib/execution/run-control.ts` 把所有 `fusion_approval` 交给 fusion 处理器，`agentsWorkflows` 在 `CONTROLLED_RUN_SURFACES` 中。
+  - 调用方持有运行驱动器（`holdRunDriver`），跨越审批等待。遇到中止（`RUN_CANCELLED`）、过期（`APPROVAL_EXPIRED`）或没有可承载中断的父运行（`APPROVAL_UNREACHABLE`）时取消。
+  - 中断标题是审批类型代码，在驾驶舱中翻译（`agentRuns.approvals.fusionApproval.*`），从不保存英文文本。
+- **沙箱验收（`lib/router-fusion/verify/code-acceptance-host.ts`）。** `code_fixture` 档位在可用的最强层级运行已批准的命令：microVM，其次容器，再次操作系统沙箱。
+  - 只有适配器 `accepts()` 该 worktree 时，microVM 层级才可用；否则使用下一层级。插件 SDK 的沙箱适配器为此新增了 `accepts` 和 `readFile`。
+  - 报告在沙箱内部、按命令运行时的路径读取。
+  - E2B 目前拒绝验收运行：它的克隆在创建时就开启了网络，之后无法再强制关闭网络。
+  - 容器层级默认有意缺席（`container: null`）：在它能强制执行自己声明的所有限制之前不会提供。
+  - 没有可用层级时返回 `SANDBOX_UNAVAILABLE`。委派的代码绝不会在无约束的环境中运行。
+- **工作区补丁（`tools/workspace-patch.ts`）。** Rust 命令 `task_workspace_revision_get`、`task_workspace_revision_apply` 和 `task_workspace_revision_read` 按树的版本做比较并交换。
+  - 只有命令确实不存在时（非 Tauri 主机）才可以使用"先检查后写入"的回退。
+  - ACL 与授权错误直接向上传递，绝不回退。
+- **fusion 工作流节点遵循 `onSchemaViolation`。** `fail`（默认）抛出 `SchemaViolationError`；`soft` 返回 `schemaValid: false`。
+
+### 分类器、动作选择与真实冒烟测试（B5）
+
+- **LLM 分类器（D18，`routing/llm-classifier.ts`）。** 可选开启。自动路由会询问一次配置好的路由模型。这次调用是入账、经过 PII 检查、有边界的工具类运行。任何失败（超时、无效回复、PII 命中、拒绝、故障）都回到规则分类器（ROUTE-03）。
+- **Agent、Squad 与工作流的动作选择。** 共享的选择器（`components/router-fusion/fusion-action-field.tsx`）在 `agentsWorkflows` 入口上提供自动、直接、级联、评审团和委派。自动保持原有行为，其他选择都把该步骤作为 fusion 运行执行。
+- **真实冒烟测试（D20，`lib/router-fusion/live/`）。** 真实用例在专用的 fusion 数据库中经真实引擎运行。5 美元的总额由账本的租户限额强制，而不是由测试框架。
+
+### 路由实验与影子路由器（B6）
+
+- **样本。** 每个路由决策都可以保存为不含文本的路由样本，带验收标签、实际成本和倾向度（`lib/router-fusion/eval/`）。
+- **实验（`eval/routing-experiment.ts`）。** 每个被接受运行的成本计入所有成本，但只除以被接受的运行（EVAL-03）。模拟报告不做任何结论（EVAL-04）。
+- **影子路由器（`eval/shadow-router.ts`）。** 它在规则决策旁记录学习型路由器本会做出的选择，从不执行。路由路径上没有任何代码导入 `lib/router-fusion/eval/`。
+- **晋升与回滚（`eval/promotion.ts`）。** 晋升是 fusion 数据库中的一次指针移动，所以回滚只需一次点击。晋升要求分组 bootstrap 通过，模拟数据训练的预测器永不晋升。
+- **仍然只做影子运行。** 真实样本以倾向度 1 记录，因此闸门返回 `DETERMINISTIC_LOGGING`，不晋升任何东西。没有任何预测器接入真实路由器（见下文规则 7）。
+
 ### 独立数据库与 outbox（D39）
 
 Router + Fusion 从不升级 `lib/db/schema.ts`。每个主数据库旁边有一个同级 IndexedDB `<主数据库名>-router-fusion-v1`，第一次使用时才创建。其中包含这些表：
@@ -232,7 +306,11 @@ Router + Fusion 从不升级 `lib/db/schema.ts`。每个主数据库旁边有一
 - `fusionArtifacts`，内容用账户内容密钥加密；
 - `fusionConfigSnapshots`、`fusionOutbox`；
 - `fusionIdempotency`、`fusionFeedback`，B2 新增（schema 版本 2，只增不改：B1 的每个表都保留原有索引）；
-- `fusionApiSessions`（Run API 为会话分配的 ID）与 `fusionToolOperations`（工具调用回执），B3 新增（schema 版本 3，只增不改）。
+- `fusionApiSessions`（Run API 为会话分配的 ID）与 `fusionToolOperations`（工具调用回执），B3 新增（schema 版本 3，只增不改）；
+- `fusionAcceptanceApprovals`、`fusionPatchSets` 与 `fusionDelegateSteps`，B4 新增（schema 版本 4，只增不改）；
+- `fusionRoutingSamples`、`fusionPredictorManifests` 与 `fusionShadowDecisions`，B6 新增（schema 版本 5，只增不改）。
+
+schema 版本 5 共 21 张表（`lib/router-fusion/db/fusion-db.ts`）。
 
 对主数据库的影响通过 outbox 写入，效果 ID 幂等，在启动和恢复时重放。
 
@@ -241,13 +319,17 @@ Router + Fusion 从不升级 `lib/db/schema.ts`。每个主数据库旁边有一
   - 备份为 device-local（账本记录的是这台设备的花费，不是可迁移的用户内容），不参与同步。
 - **删除**：
   - 所有删除主数据库的路径都通过零依赖的 `gate/database-name.ts` 一并删除同级库：删除账户、移除运行目标、重置被拒绝的存储布局、"清除全部数据"。
-  - 原本就会校验删除结果的路径，也会校验同级库。
+  - 原本就会校验删除结果的路径，也会校验同级库。"清除全部数据"现在同时校验主数据库及其同级库。
+  - 移除目标或主机时，通过 `runtimeTargetDatabaseNames` / `deleteRuntimeTargetDatabases`（`lib/runtime/target-registry.ts`）一起删除并校验明文库、加密库和 fusion 库。覆盖账户运行目标的移除、断开当前 companion 目标、移除 companion 主机以及只遗忘目标。
   - 明文账户库或目标库在本版本里只作为迁移来源，从来没有同级库。
 - **保留策略（`lib/router-fusion/db/retention.ts`）**：
   - 产物内容 7 天后过期，除非写入它的运行仍在进行。
-  - 结束超过 30 天的终态运行，连同事件、调用尝试、预留、路由决策和 outbox 记录一起删除。只要它还占着钱（held 或 uncertain 的预留、未到终态的调用尝试）、持有锁或有待处理的效果，就保留。
+  - 终态运行的事件日志在结束 7 天后删除；之后 Run API 返回 `410 EVENT_HISTORY_EXPIRED`，并指向快照。
+  - 结束超过 30 天的终态运行，连同事件、调用尝试、预留、路由决策、outbox 记录及其 delegate 步骤日志一起删除。只要它还占着钱（held 或 uncertain 的预留、未到终态的调用尝试）、持有锁或有待处理的效果，就保留。
   - 超过 30 天且没有保留中的运行引用的配置快照会删除。
-  - 资金账本只追加，从不清理。
+  - delegate 补丁集 7 天后过期，除非其运行仍在进行。
+  - 路由样本及其影子决策 180 天后过期，有意比运行记录保留得更久。
+  - 资金账本只追加，从不清理。验收审批和预测器清单也不按时间窗口清理。
   - 幂等 key 按自己的时钟 7 天（`ROUTER_FUSION_IDEMPOTENCY_DAYS`）后过期，即使对应运行仍在进行；反馈随所属运行一起删除。
   - 保留任务只在有已接入入口开启时运行，失败只记日志，不计入熔断。
 
@@ -256,45 +338,47 @@ Router + Fusion 从不升级 `lib/db/schema.ts`。每个主数据库旁边有一
 | 规格机制 | 本实现 |
 |---|---|
 | Postgres RLS | 按账户隔离的数据库，加上 key scope 与 actor 过滤（AUTH-03、CACHE-05，B2） |
-| Redis pub/sub | 通知通道加轮询兜底（REC-07，B2） |
+| Redis pub/sub | 只有轮询（REC-07，B2）：不存在通知通道。`/v1/runs/{id}/events` 每 250 毫秒轮询一次 brain（`EVENT_POLL_INTERVAL`），按 seq 无间断续传，连续 300 秒没有帧时关闭（`SSE_MAX_SILENCE`）。 |
 | `SELECT … SKIP LOCKED` | Dexie 租约加递增的 fencing token |
-| 签名 URL | 60 秒 HMAC 读取令牌（B2） |
+| 签名 URL | 60 秒 HMAC 读取令牌，按账户生成密钥（B2） |
 | Alembic 迁移 | 每个数据库一个单版本 Dexie schema，与主数据库做法相同 |
 | LangGraph checkpoint | 按逻辑步骤的账本重放：已 SUCCEEDED 的 `logicalStepId` 直接返回已提交的输出（REC-01） |
 
 ### 规则 7：未接入部分的标注
 
-已接入的入口是 `chat`、`gatewayRuns`、`gatewayPassthroughLedger`、`utilityLedger` 和 `agentsWorkflows`（`WIRED_ROUTER_FUSION_SURFACES`）。`companion` 在它的 companion RPC 落地前保持未接入。
+已接入的入口是 `chat`、`gatewayRuns`、`gatewayPassthroughLedger`、`utilityLedger`、`agentsWorkflows` 和 `companion`（`WIRED_ROUTER_FUSION_SURFACES`）。B1–B3 交付时，`companion` 在它的 companion RPC 落地前保持未接入；现在已经接入。未接入机制本身保留，供将来的入口使用。
 
-已接入的规则行是 `economy_simple`、`cascade_verifiable` 和 `panel_research`（`WIRED_RULE_ROWS`），`delegate_multifile` 在 B4 之前保持未接入。聊天轮次不带 JSON 结构，因此在自动模式下 `cascade_verifiable` 永远不会匹配；它通过 Run API 和 `cognia/auto` 生效，规则说明中也写明了这一点。
+已接入的规则行是 `economy_simple`、`cascade_verifiable`、`panel_research` 和 `delegate_multifile`（`WIRED_RULE_ROWS`）。`delegate_multifile` 仍然只在 delegate 真能运行的地方匹配：它的规则还要求有沙箱层级和已批准的验收档位。聊天轮次不带 JSON 结构，因此在自动模式下 `cascade_verifiable` 永远不会匹配；它通过 Run API 和 `cognia/auto` 生效，规则说明中也写明了这一点。
 
-以下三项在 B4 之前同样未接入：
+delegate 动作和 delegate 模式的自定义动作都可以编辑（`EDITABLE_ACTION_MODES`）。委派动作的"后续版本"文案已经移除。
 
-- `delegate` 模式的动作；
-- `code_fixture` 验证方式，因为还没有运行时验证器，所以路由器不会选择 `cascade_code`；
-- `delegate` 模式的自定义动作。
+仍有两部分未接入：
 
-- **类型**：每份清单都在类型处注明（`WIRED_RULE_ROWS`、`EDITABLE_ACTION_MODES`、`EDITABLE_PROFILES_BY_MODE`）。
+- 答案验证器中的 `cascade_code` 及其 `code_fixture` 档位。没有任何主机提供运行时验证器（`AnswerVerifierPorts.runtimeVerifier`），因此 `runVerifierProfiles` 从不提供 `code_fixture`，路由器也从不选择 `cascade_code`。delegate 动作的 `code_fixture` 则由它自己的验收执行器负责。
+- 学习型路由器。晋升后的预测器会被记录并以影子方式运行，但不改变任何路由决策。
+
+- **类型**：在 `HostCapabilities.verifierProfiles`（`routing/action-router.ts`）、`EDITABLE_PROFILES_BY_MODE`（`settings/action-catalog.ts`）、`runVerifierProfiles`（`routing/run-route.ts`）和 `eval/promotion.ts` 处注明。每份清单都在类型处注明（`WIRED_RULE_ROWS`、`EDITABLE_ACTION_MODES`、`EDITABLE_PROFILES_BY_MODE`）。
 - **界面**：
-  - 设置页把未接入的入口、规则行和委派动作显示为禁用，标注"后续版本"。
   - `cascade_code` 显示"暂不会被选中"。
-  - 添加表单中的 `delegate` 为禁用状态。
+  - 路由实验面板把晋升标注为"后续版本"：晋升后的预测器会被记录并以影子方式运行，但不改变任何路由决策（`routerFusionEval.promotion.dormant`）。
   - 聊天入口关闭时，输入框的模式芯片不渲染。
-- **测试**：`switches.test.ts`、`settings.test.ts`、`action-catalog.test.ts` 和编辑器的测试固定这些清单；`switches.test.ts` 还会在任何源码为未接入入口调用 gate 时失败。
+- **测试**：`run-route.test.ts` 和 `action-router.test.ts` 固定 `cascade_code` 永不被选中；`shadow-router.test.ts` 固定路由路径不导入评估代码；`switches.test.ts`、`settings.test.ts`、`action-catalog.test.ts` 和编辑器的测试固定这些清单；`switches.test.ts` 还会在任何源码为未接入入口调用 gate 时失败。
 
 ## 影响
 
 - **关闭路径由测试保护，而不是靠小心**：
-  - OFF-01 到 OFF-04 固定：所有开关默认关闭；开关关闭时 `resolveSendOptions` 与 sidecar 派发和基线一致；不加载任何 Router + Fusion 模块，也从不打开 fusion 数据库。
+  - OFF-01 到 OFF-04 固定所有开关默认关闭。
+  - 开关关闭时，`resolveSendOptions` 与 sidecar 派发和基线一致。
+  - 不加载任何 Router + Fusion 模块，也从不打开 fusion 数据库。
   - ISO-01 到 ISO-05 固定故障隔离与 outbox 的幂等重放。
 - **两个 Dexie 数据库之间可能只提交了一半**：outbox 让跨库效果幂等、可重放，两者之间的崩溃会在下次启动时修复。
 - **入账入口的聊天轮次启动更慢**：AI SDK 每一段都要和渲染进程往返一次预留；Claude Agent SDK 通道每个轮次预留一次信封额度。
-- **验收登记表就是完成的定义**：`packages/router-fusion/src/acceptance/registry.ts` 把 79 条规格用例和 Cognia 的 OFF/ISO 用例分配到各批次。某个已交付批次如果有用例在扫描范围内找不到 `[ACC:<ID>]` 测试，`registry.test.ts` 就会失败。
+- **验收登记表就是完成的定义**：`packages/router-fusion/src/acceptance/registry.ts` 把 79 条规格用例和 Cognia 的 OFF/ISO 用例分配到各批次。某个已交付批次如果有用例在扫描范围内找不到 `[ACC:<ID>]` 测试，`registry.test.ts` 就会失败。`DELIVERED_BATCHES` 为 B1–B6。
 - **有些东西离线无法验证**：
   - `CLAUDE_CODE_MAX_RETRIES=0` 是否彻底关闭了 CLI 重试；
   - 真实 provider 的用量口径和请求 ID；
   - Tauri 桥接的时序。
-  - 这些由 B5 中经授权的真实冒烟测试覆盖（总额 5 美元，由账本强制）。
+  - 这些由经授权的真实冒烟测试覆盖（总额 5 美元，由账本强制），已在 B5 交付。
 
 ## 备选方案
 
@@ -308,9 +392,9 @@ Router + Fusion 从不升级 `lib/db/schema.ts`。每个主数据库旁边有一
 | 批次 | 范围 | 状态 |
 |---|---|---|
 | B1 | 契约、状态机、金额、账本、规则路由、direct 工作流；聊天作为 direct 运行；gate、熔断、fusion 数据库、outbox、治理、保留策略；运行卡片与设置 | 已实现 |
-| B2 | 工具类生成与工作流提示词入账；网关 `/v1/runs` + SSE + 带 scope 的 key；`cognia/*` 明确拒绝；透传入账与响应头；`fusion` 运行投影与驾驶舱来源筛选 | 已实现，companion RPC（`companion` 入口）除外，该入口保持未接入 |
+| B2 | 工具类生成与工作流提示词入账；网关 `/v1/runs` + SSE + 带 scope 的 key；`cognia/*` 明确拒绝；透传入账与响应头；`fusion` 运行投影与驾驶舱来源筛选；companion RPC（`companion` 入口） | 已实现 |
 | B3 | 完整的 ActionRouter；cascade 与 panel 工作流；证据工具；上下文压缩；verified_buffered 交付；编排运行的恢复；Run API 的会话与产物接口；正式提供服务的 `cognia/*` 模型；聊天中的级联与评审团轮次（模式选择、进度卡片、运行卡片）；动作目录编辑器 | 已实现 |
-| B4 | 带沙箱验收与审批的 delegate | 规划中 |
-| B5 | LLM 分类器、Agent/Squad/工作流的动作选择、真实冒烟测试 | 规划中 |
-| B6 | 路由实验与学习型路由器 | 规划中 |
-| B7 | 故障注入矩阵与完整的 `/agent-runs` 详情 | 规划中 |
+| B4 | 带沙箱验收与审批的 delegate | 已实现 |
+| B5 | LLM 分类器、Agent/Squad/工作流的 fusion 动作选择、真实冒烟测试 | 已实现 |
+| B6 | 路由实验、影子路由器、晋升与回滚 | 已实现；学习型路由器仍只做影子运行 |
+| B7 | 故障注入矩阵；cascade 与 panel 运行的 `/agent-runs` 详情面板（目前只有 delegate 运行有详情面板，`components/agent-runs/run-detail-pane.tsx`） | 规划中 |

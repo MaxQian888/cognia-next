@@ -466,7 +466,7 @@ describe("runRoutingExperiment", () => {
     ).rejects.toThrow(`samples encode legacy/0; this build encodes ${ROUTING_FEATURES_VERSION}`)
   })
 
-  it("reports a simulated set as simulated and claims nothing (EVAL-04)", async () => {
+  it("[ACC:EVAL-04] reports a simulated set as simulated and claims nothing", async () => {
     const rows = simulatedRoutingSamples({ seed: 1 })
     const { report, trainingManifest, publishedManifest } = await runRoutingExperiment(
       rows,
@@ -521,7 +521,7 @@ describe("runRoutingExperiment", () => {
     )
   })
 
-  it("puts every sample's cost in the numerator and only accepted ones in the denominator (EVAL-03)", async () => {
+  it("[ACC:EVAL-03] puts every sample's cost in the numerator and only accepted ones in the denominator", async () => {
     const rows = simulatedRoutingSamples({ seed: 4, sessionCount: 80 }).map((sample, index) =>
       index % 7 === 0
         ? { ...sample, runStatus: "failed" as const, accepted: false, qualityStatus: null }
@@ -635,7 +635,7 @@ describe("runRoutingExperiment", () => {
     )
   })
 
-  it("never claims for a simulated set, even when its gate passed (EVAL-04)", async () => {
+  it("[ACC:EVAL-04] never claims for a simulated set, even when its gate passed", async () => {
     const rows = liveRows(7, 200).map((sample) => ({ ...sample, origin: "simulated" as const }))
     const { report } = await runRoutingExperiment(rows, options)
     expect(report.label).toBe("simulated")

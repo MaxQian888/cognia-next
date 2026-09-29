@@ -30,7 +30,7 @@ function pairedGroups(
 }
 
 describe("acceptedCost", () => {
-  it("keeps every cost in the numerator and only accepted runs in the denominator", () => {
+  it("[ACC:EVAL-03] keeps every cost in the numerator and only accepted runs in the denominator", () => {
     // 10 calls: 2 accepted, 3 degraded, 5 failed.
     const runs = [
       { costMicrousd: 1_000, accepted: true },
