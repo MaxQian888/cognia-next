@@ -24,7 +24,10 @@ export interface SessionNotificationEvent {
   errorMessage?: string | null
 }
 
-type Slices = Record<string, Pick<SessionChatSlice, "status" | "errorMessage">>
+type Slices = Record<
+  string,
+  Pick<SessionChatSlice, "status"> & Partial<Pick<SessionChatSlice, "errorMessage">>
+>
 
 /**
  * The transitions worth telling the user about, between two store snapshots.
