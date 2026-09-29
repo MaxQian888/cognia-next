@@ -43,3 +43,18 @@ export function resolveSessionWorkspace<T extends Pick<Project, "id">>(
   if (!activeProjectId) return null
   return projects.find((candidate) => candidate.id === activeProjectId) ?? null
 }
+
+/**
+ * The workspace id a session's data belongs to, with no project list at hand —
+ * the same precedence as {@link resolveSessionWorkspace}, minus the active
+ * workspace. For attribution that must not guess: Router + Fusion's data-class
+ * policy (ADR-0188 D30) keys a ledgered call off this id, and a call from a
+ * session with no workspace is attributed to none rather than to whatever the UI
+ * happens to show.
+ */
+export function sessionWorkspaceId(
+  session:
+    { projectId?: string; executionContext?: { projectId?: string } | null } | null | undefined
+): string | null {
+  return session?.projectId || session?.executionContext?.projectId || null
+}

@@ -9,9 +9,23 @@ jest.mock("@cognia/agent-trace/emitter", () => ({
 }))
 
 const mockRunRoutedPrompt = jest.fn()
+const mockDefaultRoutedPromptDeps = jest.fn(async (_options: unknown) => ({ marker: "deps" }))
 jest.mock("./ai-prompt-routed", () => ({
   runRoutedPrompt: (...args: unknown[]) => mockRunRoutedPrompt(...(args as [])),
-  defaultRoutedPromptDeps: jest.fn().mockResolvedValue({ marker: "deps" }),
+  defaultRoutedPromptDeps: (options: unknown) => mockDefaultRoutedPromptDeps(options),
+  workflowNodeLedger: jest.requireActual("./ai-prompt-routed").workflowNodeLedger,
+}))
+
+// Router + Fusion (ADR-0188 D27): off unless a case turns `agentsWorkflows` on.
+const mockGateSettings: { current: unknown } = { current: null }
+jest.mock("@/lib/router-fusion/gate/current-settings", () => ({
+  currentRouterFusionGateSettings: async () => mockGateSettings.current,
+}))
+const mockBeginLedgeredUtilityCall = jest.fn()
+jest.mock("@/lib/router-fusion/gate/load-engine", () => ({
+  loadRouterFusionHost: async () => ({
+    beginLedgeredUtilityCall: (...args: unknown[]) => mockBeginLedgeredUtilityCall(...args),
+  }),
 }))
 
 const mockComplete = jest.fn()
@@ -56,6 +70,7 @@ function makeCtx(
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockGateSettings.current = null
   mockComplete.mockResolvedValue("real completion")
   injectTwinContextMock.mockResolvedValue({ systemPrompt: "", applied: false })
 })
@@ -93,6 +108,64 @@ describe("executeAiPromptV2 — explicit mode", () => {
       "span1",
       expect.objectContaining({ responseModel: "gpt-x" })
     )
+  })
+
+  it("reserves every call — the auto-fix retry included — on agentsWorkflows when the switch is on", async () => {
+    mockGateSettings.current = {
+      routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } },
+    }
+    const booked: unknown[] = []
+    mockBeginLedgeredUtilityCall.mockImplementation(async () => ({
+      kind: "granted",
+      handle: {
+        runId: "r",
+        maxOutputTokens: 512,
+        succeeded: async (usage: unknown) => void booked.push(usage),
+        failed: async () => {},
+        unknown: async () => {},
+      },
+    }))
+    mockComplete.mockResolvedValueOnce('{"a":1}').mockResolvedValueOnce('{"a":"x"}')
+    const ctx = makeCtx(
+      {
+        provider: "openai",
+        model: "gpt-x",
+        apiKey: "k",
+        userPrompt: "hi",
+        responseFormat: "json",
+        outputSchema: {
+          type: "object",
+          properties: { a: { type: "string" } },
+          required: ["a"],
+        },
+      },
+      { projectId: "ws-1" }
+    )
+    await executeAiPromptV2(ctx)
+    expect(mockBeginLedgeredUtilityCall).toHaveBeenCalledTimes(2)
+    expect(mockBeginLedgeredUtilityCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: "agentsWorkflows",
+        origin: "workflow",
+        featureId: "workflow:n1",
+        providerId: "openai",
+        modelId: "gpt-x",
+        workspaceId: "ws-1",
+      })
+    )
+    // No hidden SDK retries; the reserved output bound applies.
+    expect(mockComplete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ maxRetries: 0, maxTokens: 512 })
+    )
+    expect(booked).toHaveLength(2)
+  })
+
+  it("sends the explicit call untouched while the switch is off", async () => {
+    const ctx = makeCtx({ provider: "openai", model: "gpt-x", apiKey: "k", userPrompt: "hi" })
+    await executeAiPromptV2(ctx)
+    expect(mockBeginLedgeredUtilityCall).not.toHaveBeenCalled()
+    expect(mockComplete.mock.calls[0][1]).not.toHaveProperty("maxRetries")
   })
 
   it("forwards explicit provider protocol metadata to the LLM client", async () => {
@@ -467,6 +540,15 @@ describe("executeAiPromptV2 — routed mode", () => {
       expect.objectContaining({ modelAlias: "fast", userPrompt: "hi" }),
       { marker: "deps" }
     )
+    // Every candidate attempt is ledgered as this node's work.
+    expect(mockDefaultRoutedPromptDeps).toHaveBeenCalledWith({
+      ledger: {
+        surface: "agentsWorkflows",
+        origin: "workflow",
+        featureId: "workflow:n1",
+        workspaceId: null,
+      },
+    })
   })
 
   it("fails the span and rethrows when routing fails", async () => {

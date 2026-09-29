@@ -61,6 +61,17 @@ jest.mock("@/lib/ai/agent/team/auto/auto-orchestrate", () => {
 })
 jest.mock("@/lib/ai/agent/team/auto/materialize", () => ({ materializeProposal: jest.fn() }))
 jest.mock("@/lib/ai/renderer-llm-client", () => ({ buildRendererLlmClient: jest.fn() }))
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: (sel: (s: { activeProjectId: string | null }) => unknown) =>
+    sel({ activeProjectId: "ws-5" }),
+}))
+const mockDefaultCouncilRunPrompt = jest.fn(async (_ledger: unknown) => async () => ({
+  completion: "x",
+}))
+jest.mock("@/lib/ai/council/run-council", () => ({
+  ...jest.requireActual("@/lib/ai/council/run-council"),
+  defaultCouncilRunPrompt: (ledger: unknown) => mockDefaultCouncilRunPrompt(ledger),
+}))
 jest.mock("@/lib/ai/agent/team/auto/clarify-objective", () => {
   const actual = jest.requireActual("@/lib/ai/agent/team/auto/clarify-objective")
   return { ...actual, clarifyObjective: jest.fn() }
@@ -162,8 +173,14 @@ describe("AutoComposeDialog — generate + preview", () => {
     fireEvent.click(screen.getByTestId("auto-compose-submit"))
 
     await waitFor(() => expect(screen.getByTestId("auto-compose-preview")).toBeInTheDocument())
+    // Composing a team is Agent work, booked in the workspace the team lands in.
     expect(mockBuildClient).toHaveBeenCalledWith(
-      expect.objectContaining({ featureId: "agent-team-auto" })
+      expect.objectContaining({
+        featureId: "agent-team-auto",
+        ledgerSurface: "agentsWorkflows",
+        ledgerOrigin: "agent",
+        workspaceId: "ws-5",
+      })
     )
     expect(mockPlan).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -588,6 +605,22 @@ describe("AutoComposeDialog — executor dispatch (council / ensemble)", () => {
     await waitFor(() => screen.getByTestId("auto-compose-result"))
     expect(runEnsembleExec).toHaveBeenCalled()
     expect(screen.getByTestId("auto-compose-result")).toHaveTextContent("ENSEMBLE REPORT")
+  })
+
+  it("ledgers the in-dialog council's calls as Agent work when no runner is injected", async () => {
+    mockPlan.mockResolvedValue(councilProposal)
+    setupExec({ makeRunPrompt: undefined })
+    typeObjective("decide the architecture")
+    fireEvent.click(screen.getByTestId("auto-compose-submit"))
+    await waitFor(() => screen.getByTestId("auto-compose-approve"))
+    fireEvent.click(screen.getByTestId("auto-compose-approve"))
+    await waitFor(() => screen.getByTestId("auto-compose-result"))
+    expect(mockDefaultCouncilRunPrompt).toHaveBeenCalledWith({
+      surface: "agentsWorkflows",
+      origin: "agent",
+      featureId: "agent-team-auto:council",
+      workspaceId: "ws-5",
+    })
   })
 
   it("threads the consensus signal into plan when the toggle is on", async () => {

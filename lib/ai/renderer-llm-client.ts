@@ -29,6 +29,7 @@ import {
 import { resolveAppDefaultModel } from "./app-default-model"
 import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 import { isRoutingPlaceholderModel } from "./routing/auto-model-resolution"
+import { sessionWorkspaceId } from "@/lib/workspace/session-workspace"
 
 export interface BuildRendererLlmClientArgs {
   session: ChatSession | null | undefined
@@ -55,7 +56,13 @@ export interface BuildRendererLlmClientArgs {
   ledgerSurface?: Extract<RouterFusionSurface, "utilityLedger" | "agentsWorkflows">
   /** Where the run came from, for the run list. Defaults to the surface's own kind. */
   ledgerOrigin?: UtilityRunOrigin
-  /** Workspace the call belongs to, for the data-class policy (D30). */
+  /**
+   * Workspace the call belongs to, for the data-class policy (D30). Omitted,
+   * it is the session's own workspace (`sessionWorkspaceId`), and none without a
+   * session. Pass it explicitly when the call's data belongs somewhere the
+   * session does not say — a workflow step, a team's workspace — or `null` to
+   * attribute none.
+   */
   workspaceId?: string | null
 }
 
@@ -74,7 +81,7 @@ export function buildRendererLlmClient({
   modelPreference,
   ledgerSurface = "utilityLedger",
   ledgerOrigin,
-  workspaceId = null,
+  workspaceId,
 }: BuildRendererLlmClientArgs): LlmClient | null {
   if (!appSettings) return null
 
@@ -153,7 +160,7 @@ export function buildRendererLlmClient({
       // and the circuit breakers are all keyed by it.
       providerId,
       modelId: model,
-      workspaceId,
+      workspaceId: workspaceId !== undefined ? workspaceId : sessionWorkspaceId(session),
     },
     settings: appSettings,
   })

@@ -153,6 +153,19 @@ describe("runTeamCompose", () => {
     })
   })
 
+  it("books its planning call on agentsWorkflows in the workflow's workspace", async () => {
+    await runTeamCompose({ ...makeCtx({ objective: "do it" }), projectId: "ws-4" })
+    expect(buildClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        featureId: "workflow.team.compose",
+        ledgerSurface: "agentsWorkflows",
+        workspaceId: "ws-4",
+      })
+    )
+    await runTeamCompose(makeCtx({ objective: "do it" }))
+    expect(buildClientMock).toHaveBeenLastCalledWith(expect.objectContaining({ workspaceId: null }))
+  })
+
   it("plans + materializes without starting by default", async () => {
     const result = await runTeamCompose(makeCtx({ objective: "do it", maxRoster: 4 }))
     expect(planMock).toHaveBeenCalledWith(

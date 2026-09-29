@@ -555,6 +555,15 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "open-settings", section: "ai-connections" }],
     icon: "alert",
   },
+  routerFusionBypassed: {
+    // The call itself succeeded; only its bookkeeping is missing. A warning, not
+    // an error, and never retried: retrying would spend the money twice.
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "open-settings", section: "ai-connections" }],
+    icon: "gauge",
+  },
   dispatchRejectedCycle: {
     severity: "error",
     retryable: false,

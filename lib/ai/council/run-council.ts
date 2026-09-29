@@ -14,6 +14,8 @@
  * the suite runs without touching real providers.
  */
 
+import type { RoutedPromptLedger } from "@/lib/workflow/nodes/ai/ai-prompt-routed"
+
 export type CouncilConfidence = "unanimous" | "majority" | "split" | "unknown"
 
 export interface CouncillorSpec {
@@ -274,11 +276,18 @@ export async function runCouncil(
 /**
  * Production `runPrompt` backed by the ADR-0043 routing engine. Built lazily so
  * importing this module never touches stores (mirrors `ai-prompt-routed`).
+ *
+ * `ledger` says whose calls these are (ADR-0188 D27): every councillor, the
+ * synthesizer and each of their fallback attempts is its own reservation on
+ * that surface. The `ai.council` / `ai.ensemble` nodes and Agent auto-compose
+ * pass `agentsWorkflows`; the `/council` slash command passes `utilityLedger`.
  */
-export async function defaultCouncilRunPrompt(): Promise<RunCouncilDeps["runPrompt"]> {
+export async function defaultCouncilRunPrompt(
+  ledger: RoutedPromptLedger
+): Promise<RunCouncilDeps["runPrompt"]> {
   const { runRoutedPrompt, defaultRoutedPromptDeps } =
     await import("@/lib/workflow/nodes/ai/ai-prompt-routed")
-  const routedDeps = await defaultRoutedPromptDeps("council")
+  const routedDeps = await defaultRoutedPromptDeps({ routingSurface: "council", ledger })
   return async (input: RunPromptInput): Promise<RunPromptOutput> => {
     const out = await runRoutedPrompt(
       {

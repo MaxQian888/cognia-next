@@ -98,13 +98,25 @@ function formatSamplesForSynthesis(samples: EnsembleSampleResult[]): string {
   return `Merge the following attempts into one best answer.\n\n${blocks.join("\n\n")}`
 }
 
-/** Production deps: executeAgent / runWorkflow / the routing engine. */
-export async function defaultAiEnsembleDeps(): Promise<AiEnsembleDeps> {
-  const [{ executeAgent }, { getSettings }, { defaultCouncilRunPrompt }] = await Promise.all([
-    import("@/lib/ai/agent/agent-executor"),
-    import("@/lib/db/settings"),
-    import("@/lib/ai/council/run-council"),
-  ])
+/**
+ * Production deps: executeAgent / runWorkflow / the routing engine.
+ *
+ * Every model call is ledgered as this step's work on `agentsWorkflows`
+ * (ADR-0188 D27): each agent sample's completion-rail attempts (through
+ * `executeAgent`'s `ledger` binding) and each synthesizer attempt (through the
+ * routed prompt's per-attempt client). A sample that runs tools rides the
+ * sidecar rail, which the ledger reaches only for a stamped chat turn today.
+ * A sub-workflow target's own nodes ledger themselves.
+ */
+export async function defaultAiEnsembleDeps(ctx: StepExecutionContext): Promise<AiEnsembleDeps> {
+  const [{ executeAgent }, { getSettings }, { defaultCouncilRunPrompt }, { workflowNodeLedger }] =
+    await Promise.all([
+      import("@/lib/ai/agent/agent-executor"),
+      import("@/lib/db/settings"),
+      import("@/lib/ai/council/run-council"),
+      import("./ai-prompt-routed"),
+    ])
+  const ledger = workflowNodeLedger(ctx)
   const settings = await getSettings().catch(() => undefined)
   const providerSnapshot = settings
     ? {
@@ -117,7 +129,7 @@ export async function defaultAiEnsembleDeps(): Promise<AiEnsembleDeps> {
         >["customProviders"],
       }
     : {}
-  const runPrompt = await defaultCouncilRunPrompt()
+  const runPrompt = await defaultCouncilRunPrompt(ledger)
 
   return {
     runAgent: async (input) => {
@@ -129,6 +141,11 @@ export async function defaultAiEnsembleDeps(): Promise<AiEnsembleDeps> {
         toolsEnabled: input.toolsEnabled,
         abortSignal: input.signal,
         timeoutMs: input.timeoutMs,
+        ledger: {
+          featureId: ledger.featureId,
+          origin: "workflow" as const,
+          workspaceId: ledger.workspaceId,
+        },
         ...providerSnapshot,
       }
       const schema = input.outputSchema
@@ -177,7 +194,7 @@ export async function defaultAiEnsembleDeps(): Promise<AiEnsembleDeps> {
 
 export async function executeAiEnsemble(
   ctx: StepExecutionContext,
-  depsFactory: () => Promise<AiEnsembleDeps> = defaultAiEnsembleDeps
+  depsFactory: (ctx: StepExecutionContext) => Promise<AiEnsembleDeps> = defaultAiEnsembleDeps
 ): Promise<StepExecutionResult> {
   const params = ctx.params as AiEnsembleParams
   const target = params.target ?? {}
@@ -209,7 +226,7 @@ export async function executeAiEnsemble(
     throw nonRetryable("ai.ensemble: a 'target.workflowId' is required for a subworkflow target")
   }
 
-  const deps = await depsFactory()
+  const deps = await depsFactory(ctx)
 
   const runSample: RunEnsembleDeps["runSample"] = async ({ index, lens }) => {
     if (targetKind === "subworkflow") {

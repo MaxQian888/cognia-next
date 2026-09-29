@@ -217,8 +217,11 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
   }
 
   if (params.mode === "routed") {
-    const { runRoutedPrompt, defaultRoutedPromptDeps } = await import("./ai-prompt-routed")
-    const deps = await defaultRoutedPromptDeps()
+    const { runRoutedPrompt, defaultRoutedPromptDeps, workflowNodeLedger } =
+      await import("./ai-prompt-routed")
+    // Every candidate and fallback attempt is its own `agentsWorkflows`
+    // reservation (ADR-0188 D27); off, the clients are exactly as built.
+    const deps = await defaultRoutedPromptDeps({ ledger: workflowNodeLedger(ctx) })
     // Sum usage/cost across the auto-fix retry so `step_usage` reflects what
     // the node actually spent, not just the last call.
     const totals = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
@@ -286,8 +289,18 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     })
   }
 
-  const { createLlmClient } = await import("@/lib/twin/distill/llm")
-  const client = createLlmClient({
+  const [
+    { createLlmClient },
+    { ledgerUtilityCalls },
+    { currentRouterFusionGateSettings },
+    { workflowNodeLedger },
+  ] = await Promise.all([
+    import("@/lib/twin/distill/llm"),
+    import("@/lib/router-fusion/gate/utility-ledger"),
+    import("@/lib/router-fusion/gate/current-settings"),
+    import("./ai-prompt-routed"),
+  ])
+  const built = createLlmClient({
     provider: params.provider as Parameters<typeof createLlmClient>[0]["provider"],
     model: params.model,
     apiKey,
@@ -295,6 +308,19 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     apiFlavor: params.apiFlavor,
     headers: params.headers,
     defaultTemperature: params.temperature,
+  })
+  // Router + Fusion reserves and settles each call — the auto-fix retry
+  // included — when the `agentsWorkflows` switch is on (ADR-0188 D27), exactly
+  // as v1 does. Off, the default, `ledgerUtilityCalls` returns `built` itself.
+  // The settings read works on the headless brain too, which never loads the
+  // settings store.
+  const client = ledgerUtilityCalls(built, {
+    binding: {
+      ...workflowNodeLedger(ctx),
+      providerId: params.provider,
+      modelId: params.model,
+    },
+    settings: await currentRouterFusionGateSettings(),
   })
 
   const callOnce = async (fix?: string): Promise<PromptOutcome> => {

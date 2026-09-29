@@ -31,14 +31,19 @@ export interface AiCouncilParams {
   piiGate?: PiiGateMode
 }
 
-/** Build production deps lazily (routing engine). Injectable for tests. */
-export async function defaultAiCouncilDeps(): Promise<RunCouncilDeps> {
-  return { runPrompt: await defaultCouncilRunPrompt() }
+/**
+ * Build production deps lazily (routing engine). Injectable for tests. Every
+ * councillor and synthesizer attempt is ledgered as this step's work on
+ * `agentsWorkflows` (ADR-0188 D27).
+ */
+export async function defaultAiCouncilDeps(ctx: StepExecutionContext): Promise<RunCouncilDeps> {
+  const { workflowNodeLedger } = await import("./ai-prompt-routed")
+  return { runPrompt: await defaultCouncilRunPrompt(workflowNodeLedger(ctx)) }
 }
 
 export async function executeAiCouncil(
   ctx: StepExecutionContext,
-  depsFactory: () => Promise<RunCouncilDeps> = defaultAiCouncilDeps
+  depsFactory: (ctx: StepExecutionContext) => Promise<RunCouncilDeps> = defaultAiCouncilDeps
 ): Promise<StepExecutionResult> {
   const params = ctx.params as AiCouncilParams
   const councillors = (params.councillors ?? []).filter(
@@ -64,7 +69,7 @@ export async function executeAiCouncil(
     throw nonRetryable("ai.council: a non-empty prompt is required")
   }
 
-  const deps = await depsFactory()
+  const deps = await depsFactory(ctx)
   const depsWithLog: RunCouncilDeps = {
     ...deps,
     log: (level, message) => ctx.log(level, message),

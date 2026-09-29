@@ -10,18 +10,24 @@
  * `LlmClient` (text in, text out) cannot carry.
  *
  * This module is the ledger seam for those. It exposes the reservation itself
- * rather than a wrapper, because the shapes differ too much for one wrapper:
+ * rather than a wrapper, because the shapes differ too much for one wrapper —
+ * a stream, for one, is settled only once its last part has been read:
  *
  * ```ts
  * const lease = await beginLedgeredGeneration({ binding, prompt, system })
  * try {
- *   const result = await generateText({ ...args, ...lease?.options })
- *   await lease?.succeeded(usageOfResult(result))
+ *   const result = streamText({ ...args, ...lease?.options })
+ *   for await (const part of result.textStream) consume(part)
+ *   await lease?.succeeded(usageOfResult(await result.usage, await result.providerMetadata))
  * } catch (error) {
  *   await lease?.failed(error)
  *   throw error
  * }
  * ```
+ *
+ * The Agent completion rail (`runCompletionRail` in
+ * `lib/ai/agent/agent-executor.ts`) is its caller: every routing attempt is its
+ * own lease on `agentsWorkflows`.
  *
  * The contract, matching `ledgerUtilityCalls`:
  *
@@ -52,10 +58,12 @@ import {
   routerFusionGate,
   type RouterFusionGateSettings,
 } from "@/lib/router-fusion/gate/feature-gate"
+import { reportLedgerBypass } from "@/lib/router-fusion/gate/bypass-diagnostic"
 import { runOrdinaryWithFallback } from "@/lib/router-fusion/gate/guard"
 import { loadRouterFusionHost, type RouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
 import {
   classifyUtilityFailure,
+  rawUsageOf,
   type LedgeredUtilityBinding,
   type UtilityCallHandleLike,
   type UtilityGrant,
@@ -185,12 +193,13 @@ export async function beginLedgeredGeneration(
         // from a store a headless brain never loads.
         ...(settings ? { appSettings: settings as AppSettings } : {}),
       }),
-    onBypass: (notice) => {
-      console.warn(
-        `[router-fusion] ${input.binding.featureId} called on the original path, unledgered`,
-        notice.fault
-      )
-    },
+    // No message to badge: the bypass is a diagnostic, deduplicated per surface.
+    onBypass: (notice) =>
+      reportLedgerBypass({
+        surface: notice.surface,
+        featureId: input.binding.featureId,
+        fault: notice.fault,
+      }),
     // Bypassed: the call still happens, it is simply not booked.
     original: async () => null,
   })
@@ -219,47 +228,10 @@ export async function beginLedgeredGeneration(
  * the same way.
  */
 export function usageOfResult(usage: unknown, providerMetadata?: unknown): RawUsage | null {
-  const delta = readUsageDelta(
-    usage as Record<string, unknown> | undefined,
-    providerMetadata as Record<string, unknown> | undefined
+  return rawUsageOf(
+    readUsageDelta(
+      usage as Record<string, unknown> | undefined,
+      providerMetadata as Record<string, unknown> | undefined
+    )
   )
-  if (
-    delta.inputTokens <= 0 &&
-    delta.outputTokens <= 0 &&
-    delta.cacheReadTokens <= 0 &&
-    delta.cacheCreationTokens <= 0
-  ) {
-    return null
-  }
-  return {
-    inputTokens: Math.max(0, delta.inputTokens),
-    outputTokens: Math.max(0, delta.outputTokens),
-    ...(delta.cacheReadTokens > 0 ? { cacheReadTokens: delta.cacheReadTokens } : {}),
-    ...(delta.cacheCreationTokens > 0 ? { cacheWriteTokens: delta.cacheCreationTokens } : {}),
-  }
-}
-
-export interface LedgeredGenerationRun<T> extends BeginLedgeredGenerationInput {
-  /** The generation itself. `options` is `undefined` when the call is not ledgered. */
-  run: (options: LedgeredGenerationOptions | undefined) => Promise<T>
-  /** The usage to settle with, read from the awaited result. */
-  usageOf: (result: T) => RawUsage | null
-}
-
-/**
- * {@link beginLedgeredGeneration} around one awaited generation — the shape
- * almost every non-streaming call site wants.
- */
-export async function withLedgeredGeneration<T>(input: LedgeredGenerationRun<T>): Promise<T> {
-  const lease = await beginLedgeredGeneration(input)
-  if (!lease) return input.run(undefined)
-  let result: T
-  try {
-    result = await input.run(lease.options)
-  } catch (error) {
-    await lease.failed(error)
-    throw error
-  }
-  await lease.succeeded(input.usageOf(result))
-  return result
 }

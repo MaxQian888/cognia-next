@@ -14,6 +14,10 @@ jest.mock("@/lib/agent/plan/step-dispatch", () => ({
 jest.mock("@/lib/agent/plan/step-workspace", () => ({
   resolvePlanExecutionRoot: jest.fn(async () => ({ root: "/tmp/plan" })),
 }))
+const mockBuildRendererLlmClient = jest.fn((_args: unknown) => null)
+jest.mock("@/lib/ai/renderer-llm-client", () => ({
+  buildRendererLlmClient: (args: unknown) => mockBuildRendererLlmClient(args),
+}))
 
 describe("plan-nodes registration", () => {
   it.each([
@@ -144,5 +148,72 @@ describe("action.plan.reject", () => {
     const { output } = await reject({ planId: "plan_r" })
     expect(output.rejected).toBe(false)
     expect(output.plan.status).toBe("executing")
+  })
+})
+
+describe("action.plan.refine ledger attribution", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    getDb()
+    await whenSeeded()
+    mockBuildRendererLlmClient.mockClear()
+  })
+
+  async function seedPlan(sessionProjectId: string | undefined) {
+    await getDb().sessions.put({
+      id: "ses_ledger",
+      title: "S",
+      ...(sessionProjectId ? { projectId: sessionProjectId } : {}),
+      createdAt: new Date(1),
+      updatedAt: new Date(1),
+    } as never)
+    await getDb().agentPlans.put({
+      id: "plan_l",
+      sessionId: "ses_ledger",
+      title: "T",
+      source: "manual",
+      executionMode: "auto",
+      status: "draft",
+      steps: [],
+      totalSteps: 0,
+      completedSteps: 0,
+      config: {},
+      refinementCount: 0,
+      generationId: "g",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+  }
+
+  function refine(projectId?: string) {
+    const executor = getExecutor("action.plan.refine" as never, 1)!
+    return executor.execute({
+      runId: "r",
+      stepId: "step_refine",
+      ...(projectId ? { projectId } : {}),
+      params: { planId: "plan_l" },
+      signal: undefined,
+    } as never)
+  }
+
+  it("books the planner call on agentsWorkflows in the plan's conversation workspace", async () => {
+    await seedPlan("ws-conversation")
+    await expect(refine("ws-workflow")).rejects.toThrow(/planner model/)
+    expect(mockBuildRendererLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        featureId: "plan-refine",
+        ledgerSurface: "agentsWorkflows",
+        workspaceId: "ws-conversation",
+      })
+    )
+  })
+
+  it("falls back to the workflow's workspace when the conversation names none", async () => {
+    await seedPlan(undefined)
+    await expect(refine("ws-workflow")).rejects.toThrow(/planner model/)
+    expect(mockBuildRendererLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "ws-workflow" })
+    )
   })
 })

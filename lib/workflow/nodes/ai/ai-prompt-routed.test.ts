@@ -1,6 +1,7 @@
 import {
   defaultRoutedPromptDeps,
   runRoutedPrompt,
+  workflowNodeLedger,
   type ResolvedCreds,
   type RoutedPromptDeps,
   type RoutingSelection,
@@ -29,9 +30,29 @@ jest.mock("@/stores/settings/circuit-breaker-store", () => ({
 jest.mock("@cognia/provider-core/providers/model-pricing", () => ({
   estimateCallCostUsd: jest.fn(),
 }))
+jest.mock("@/lib/router-fusion/gate/utility-ledger", () => ({
+  ledgerUtilityCalls: jest.fn((client: unknown, input: unknown) => ({ ledgered: client, input })),
+}))
 
 import { getSettings } from "@/lib/db/settings"
 import { buildRoutingEngine } from "@cognia/provider-routing/build-preview-engine"
+import { createLlmClient } from "@/lib/twin/distill/llm"
+import { ledgerUtilityCalls } from "@/lib/router-fusion/gate/utility-ledger"
+import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
+
+const WORKFLOW_LEDGER = {
+  surface: "agentsWorkflows" as const,
+  origin: "workflow" as const,
+  featureId: "workflow:step-1",
+  workspaceId: "ws-1",
+}
+
+function refusingClient(code: string): LlmClient {
+  return {
+    complete: jest.fn().mockRejectedValue(new RouterFusionRefusalError(code, `refused: ${code}`)),
+    getUsageSnapshot: () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
+  }
+}
 
 const getSettingsMock = getSettings as jest.Mock
 const buildRoutingEngineMock = buildRoutingEngine as jest.Mock
@@ -143,8 +164,39 @@ describe("runRoutedPrompt", () => {
         apiKey: "k",
         baseURL: "https://gateway.example/v1",
         apiFlavor: "responses",
-      })
+      }),
+      // The app's own provider id, not the SDK protocol: the ledger prices it.
+      { providerId: "p1", modelId: "m1" }
     )
+  })
+
+  it("skips a candidate the ledger refused without counting it against the provider", async () => {
+    const log = jest.fn()
+    const { deps, outcomes } = makeDeps({
+      makeClient: jest.fn((_config, deployment: { providerId: string }) =>
+        deployment.providerId === "p1"
+          ? refusingClient("DATA_CLASS_NOT_ALLOWED")
+          : okClient("via p2")
+      ),
+    })
+    const out = await runRoutedPrompt({ ...baseInput, log }, deps)
+    expect(out).toMatchObject({ provider: "p2", completion: "via p2", attempts: 1 })
+    // Nothing was sent to p1, so its health metrics learn nothing from it.
+    expect(outcomes.map((o) => o.providerId)).toEqual(["p2"])
+    expect(log).toHaveBeenCalledWith(
+      "warn",
+      expect.stringContaining("p1 (refused by Router + Fusion: DATA_CLASS_NOT_ALLOWED)")
+    )
+  })
+
+  it("raises the refusal, not retryable, when every candidate was refused", async () => {
+    const { deps, outcomes } = makeDeps({
+      makeClient: jest.fn(() => refusingClient("RUN_BUDGET_EXHAUSTED")),
+    })
+    const failure = await runRoutedPrompt({ ...baseInput }, deps).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(RouterFusionRefusalError)
+    expect(failure).toMatchObject({ code: "RUN_BUDGET_EXHAUSTED", retryable: false })
+    expect(outcomes).toEqual([])
   })
 
   it("walks the fallback chain when the primary fails and records both outcomes", async () => {
@@ -275,7 +327,7 @@ describe("runRoutedPrompt", () => {
       routingConfig: { strategy: "reliability" },
     })
 
-    const deps = await defaultRoutedPromptDeps()
+    const deps = await defaultRoutedPromptDeps({ ledger: WORKFLOW_LEDGER })
     await deps.selectRoute({ modelAlias: "fast", promptText: "```js\nx\n```" })
     expect(planRoute).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -289,6 +341,25 @@ describe("runRoutedPrompt", () => {
         taskHints: { hasCode: false, toolCount: 0, messageCount: 1 },
       })
     )
+  })
+
+  it("ledgers every attempt's client under the caller's binding and the attempt's deployment", async () => {
+    const settings = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } } }
+    getSettingsMock.mockResolvedValue(settings)
+    buildRoutingEngineMock.mockReturnValue({ planRoute: jest.fn() })
+    const raw = { complete: jest.fn() }
+    ;(createLlmClient as jest.Mock).mockReturnValue(raw)
+
+    const deps = await defaultRoutedPromptDeps({ ledger: WORKFLOW_LEDGER })
+    const config = { provider: "openai" as const, model: "m2", apiKey: "k" }
+    const client = deps.makeClient(config, { providerId: "p2", modelId: "m2" })
+
+    expect(createLlmClient).toHaveBeenCalledWith(config)
+    expect(ledgerUtilityCalls).toHaveBeenCalledWith(raw, {
+      binding: { ...WORKFLOW_LEDGER, providerId: "p2", modelId: "m2" },
+      settings,
+    })
+    expect(client).toEqual({ ledgered: raw, input: expect.anything() })
   })
 
   it("uses the plan's single primary only once", async () => {
@@ -316,5 +387,17 @@ describe("runRoutedPrompt", () => {
     })
     await expect(runRoutedPrompt({ ...baseInput }, deps)).rejects.toThrow(/all providers failed/)
     expect(makeClient).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("workflowNodeLedger", () => {
+  it("books a node's calls per step on agentsWorkflows, in the workflow's workspace", () => {
+    expect(workflowNodeLedger({ stepId: "s1", projectId: "ws-1" })).toEqual({
+      surface: "agentsWorkflows",
+      origin: "workflow",
+      featureId: "workflow:s1",
+      workspaceId: "ws-1",
+    })
+    expect(workflowNodeLedger({ stepId: "s2" }).workspaceId).toBeNull()
   })
 })

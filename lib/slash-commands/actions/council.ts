@@ -25,6 +25,8 @@ import {
   type CouncillorSpec,
   type RunCouncilDeps,
 } from "@/lib/ai/council/run-council"
+import type { RoutedPromptLedger } from "@/lib/workflow/nodes/ai/ai-prompt-routed"
+import { sessionWorkspaceId } from "@/lib/workspace/session-workspace"
 
 /** Max councillors auto-selected from configured aliases. */
 const AUTO_COUNCILLOR_LIMIT = 3
@@ -153,6 +155,31 @@ export async function executeCouncilCommand(
   }
 }
 
+/**
+ * Whose calls a `/council` run makes (ADR-0188 D27, D30).
+ *
+ * The surface is `utilityLedger`, origin `chat`. The command is typed in a chat
+ * but is not a chat turn: it calls its models from the renderer, outside the
+ * sidecar, with no assistant message a run card could attach to — and only a
+ * sealed composer turn is a `chat` run. It is not Agent or workflow work either.
+ * That is exactly the renderer-side, session-less generation `utilityLedger`
+ * books, the same surface as a conversation title. The workspace is the active
+ * conversation's own, so its data-class rules apply to what the councillors see.
+ */
+export async function councilLedgerFor(
+  sessionId: string | null,
+  loadSession: (id: string) => Promise<Parameters<typeof sessionWorkspaceId>[0]> = async (id) =>
+    (await import("@/lib/db/sessions")).getSession(id)
+): Promise<RoutedPromptLedger> {
+  const session = sessionId ? await loadSession(sessionId).catch(() => undefined) : undefined
+  return {
+    surface: "utilityLedger",
+    origin: "chat",
+    featureId: "slash-council",
+    workspaceId: sessionWorkspaceId(session),
+  }
+}
+
 /** Production handler registered as the `/council` action command. */
 export async function handleCouncil(ctx: SlashContext): Promise<void> {
   await executeCouncilCommand(ctx, {
@@ -162,6 +189,6 @@ export async function handleCouncil(ctx: SlashContext): Promise<void> {
       const mappings = Array.isArray(settings.modelMappings) ? settings.modelMappings : []
       return mappings.filter((m) => m && m.enabled !== false && m.alias).map((m) => m.alias)
     },
-    runPrompt: await defaultCouncilRunPrompt(),
+    runPrompt: await defaultCouncilRunPrompt(await councilLedgerFor(ctx.activeSessionId)),
   })
 }

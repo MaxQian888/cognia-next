@@ -1,6 +1,14 @@
 /**
  * @jest-environment node
  */
+const mockDefaultCouncilRunPrompt = jest.fn(async (_ledger: unknown) => async () => ({
+  completion: "ok",
+}))
+jest.mock("@/lib/ai/council/run-council", () => ({
+  ...jest.requireActual("@/lib/ai/council/run-council"),
+  defaultCouncilRunPrompt: (ledger: unknown) => mockDefaultCouncilRunPrompt(ledger),
+}))
+
 import { councilRun, type CouncilDeps } from "./council-controller"
 import type { TuiAction } from "../state/types"
 import type { CouncilResult } from "@/lib/ai/council/run-council"
@@ -45,6 +53,18 @@ describe("councilRun", () => {
       { type: "NOTICE", message: expect.stringContaining("Usage: /council") },
     ])
     expect(h.runPrompt).not.toHaveBeenCalled()
+  })
+
+  it("books the default runner's calls on utilityLedger, like the desktop /council", async () => {
+    const run = jest.fn(async () => RESULT)
+    const h = harness({ runPrompt: undefined, run })
+    await councilRun("why is the sky blue", h.deps)
+    expect(mockDefaultCouncilRunPrompt).toHaveBeenCalledWith({
+      surface: "utilityLedger",
+      origin: "chat",
+      featureId: "cli-council",
+      workspaceId: null,
+    })
   })
 
   it("notices the roster error when no aliases are configured", async () => {

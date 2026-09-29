@@ -32,9 +32,9 @@
       "note": "Canvas AI suggestions: generateObject on the configured or custom canvas provider, never reserved or settled."
     },
     "lib/ai/agent/agent-executor.ts": {
-      "reason": "unwrapped",
+      "reason": "ledgered-entry",
       "entries": ["ai:streamText"],
-      "note": "executeAgent text channel (web/mobile, or no tools requested): one streamText completion with no ledger; its sidecar channel sends carry no ledger stamp either."
+      "note": "executeAgent completion rail: every routing attempt's streamText is reserved through beginLedgeredGeneration (lib/ai/ledgered-model-call.ts) on agentsWorkflows and settled from the stream's usage; ai.ensemble binds it to its step. The tool (sidecar) rail makes no direct call here and is ledgered only for a stamped chat send."
     },
     "lib/ai/chat/standalone-engine.ts": {
       "reason": "unwrapped",
@@ -117,14 +117,14 @@
       "note": "createLlmClient / createAnthropicLlmClient: the raw LlmClient whose complete/stream call generateText/streamText. Ledgered only where a consumer wraps it; every consumer has its own row."
     },
     "lib/twin/runtime/build-deps.ts": {
-      "reason": "unwrapped",
+      "reason": "ledgered-entry",
       "entries": ["llm-client:createLlmClient"],
-      "note": "Twin LLM reranker: createLlmClient on the twin's own LLM config, never wrapped with ledgerUtilityCalls."
+      "note": "Twin LLM reranker: createLlmClient wrapped with ledgerUtilityCalls on utilityLedger (`twin-rerank`)."
     },
     "lib/twin/worker-runtime.ts": {
-      "reason": "unwrapped",
+      "reason": "ledgered-entry",
       "entries": ["llm-client:createAnthropicLlmClient"],
-      "note": "Twin distillation worker: createAnthropicLlmClient on the twin's own LLM config, never wrapped with ledgerUtilityCalls."
+      "note": "Twin distillation worker: createAnthropicLlmClient wrapped with ledgerUtilityCalls on utilityLedger (`twin-distill-worker`). The orchestrator runs calls on the one client concurrently; each settles with its own usage (`onUsage`), not the shared snapshot."
     },
     "lib/wiki/rebuild-runner.ts": {
       "reason": "unwrapped",
@@ -132,14 +132,14 @@
       "note": "Wiki rebuild: createLlmClient from the active provider row, never wrapped with ledgerUtilityCalls."
     },
     "lib/workflow/nodes/ai/ai-prompt-routed.ts": {
-      "reason": "unwrapped",
+      "reason": "ledgered-entry",
       "entries": ["llm-client:createLlmClient"],
-      "note": "ai.prompt v2 routed mode: makeClient = createLlmClient per routing candidate, unwrapped; fallback attempts are unledgered too."
+      "note": "ai.prompt v2 routed mode, ai.council, ai.ensemble's synthesizer and /council: the production makeClient wraps each routing candidate's createLlmClient with ledgerUtilityCalls, so the primary and every fallback attempt is its own reservation (agentsWorkflows for workflow and Agent callers, utilityLedger for /council)."
     },
     "lib/workflow/nodes/ai/ai-prompt-v2.ts": {
-      "reason": "unwrapped",
+      "reason": "ledgered-entry",
       "entries": ["llm-client:createLlmClient"],
-      "note": "ai.prompt v2 explicit mode: createLlmClient, unwrapped (only the v1 executor in executors.ts is ledgered on agentsWorkflows)."
+      "note": "ai.prompt v2 explicit mode: createLlmClient wrapped with ledgerUtilityCalls on agentsWorkflows (`workflow:<stepId>`, the workflow's workspace), exactly as v1; routed mode ledgers through ai-prompt-routed.ts."
     },
     "lib/workflow/nodes/ai/executors.ts": {
       "reason": "ledgered-entry",

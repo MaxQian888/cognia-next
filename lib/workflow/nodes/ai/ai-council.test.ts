@@ -1,4 +1,12 @@
-import { executeAiCouncil, type AiCouncilParams } from "./ai-council"
+const mockDefaultCouncilRunPrompt = jest.fn(async (_ledger: unknown) => async () => ({
+  completion: "x",
+}))
+jest.mock("@/lib/ai/council/run-council", () => ({
+  ...jest.requireActual("@/lib/ai/council/run-council"),
+  defaultCouncilRunPrompt: (ledger: unknown) => mockDefaultCouncilRunPrompt(ledger),
+}))
+
+import { defaultAiCouncilDeps, executeAiCouncil, type AiCouncilParams } from "./ai-council"
 import type { RunCouncilDeps } from "@/lib/ai/council/run-council"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 
@@ -20,7 +28,7 @@ function makeCtx(params: AiCouncilParams, extra: Partial<StepExecutionContext> =
 }
 
 /** Deps factory: councillors echo their alias; synthesizer returns a report. */
-function fakeDepsFactory(): () => Promise<RunCouncilDeps> {
+function fakeDepsFactory(): (ctx: StepExecutionContext) => Promise<RunCouncilDeps> {
   return async () => ({
     runPrompt: async (input) => {
       if (input.systemPrompt?.startsWith(COUNCIL_SYS_HEAD)) {
@@ -124,5 +132,18 @@ describe("executeAiCouncil", () => {
       retryable: false,
     })
     expect(depsFactory).not.toHaveBeenCalled()
+  })
+})
+
+describe("defaultAiCouncilDeps", () => {
+  it("ledgers every councillor and synthesizer call as this step's agentsWorkflows work", async () => {
+    const { ctx } = makeCtx(baseParams, { projectId: "ws-2" })
+    await defaultAiCouncilDeps(ctx)
+    expect(mockDefaultCouncilRunPrompt).toHaveBeenCalledWith({
+      surface: "agentsWorkflows",
+      origin: "workflow",
+      featureId: "workflow:step1",
+      workspaceId: "ws-2",
+    })
   })
 })

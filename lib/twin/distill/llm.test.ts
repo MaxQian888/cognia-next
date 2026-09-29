@@ -191,6 +191,30 @@ describe("createLlmClient", () => {
     expect(lastGenerateTextCall()).toHaveProperty("maxRetries", 0)
   })
 
+  it("reports each call's own usage through onUsage, apart from the cumulative snapshot", async () => {
+    const client = createLlmClient({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      apiKey: "k",
+    })
+    expect(client.reportsCallUsage).toBe(true)
+    const completed: unknown[] = []
+    const streamed: unknown[] = []
+    await client.complete("hi", { onUsage: (usage) => completed.push(usage) })
+    for await (const _delta of client.stream!("hi", { onUsage: (usage) => streamed.push(usage) })) {
+      // drain
+    }
+    await client.complete("again")
+    expect(completed).toEqual([
+      { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheCreationTokens: 0 },
+    ])
+    expect(streamed).toEqual([
+      { inputTokens: 3, outputTokens: 4, cacheReadTokens: 0, cacheCreationTokens: 0 },
+    ])
+    // The snapshot still sums every call, the one without a callback included.
+    expect(client.getUsageSnapshot!()).toMatchObject({ inputTokens: 5, outputTokens: 8 })
+  })
+
   it("createAnthropicLlmClient is the same factory for back-compat", () => {
     expect(createAnthropicLlmClient).toBe(createLlmClient)
   })

@@ -32,6 +32,12 @@ const mockResolveProviderAttemptOptions = jest.fn()
 const mockHasNoLeakingPiiDeep = jest.fn((_value?: unknown) => true)
 
 jest.mock("ai", () => ({ streamText: jest.fn() }))
+const mockBeginLedgeredUtilityCall = jest.fn()
+jest.mock("@/lib/router-fusion/gate/load-engine", () => ({
+  loadRouterFusionHost: async () => ({
+    beginLedgeredUtilityCall: (...args: unknown[]) => mockBeginLedgeredUtilityCall(...args),
+  }),
+}))
 jest.mock("@/lib/ai/provider-consumption", () => ({
   createProviderSettingsSnapshot: jest.fn((input) => input),
   resolveFeatureProvider: jest.fn(),
@@ -624,6 +630,152 @@ describe("executeAgent", () => {
         expect(failure).toBe(abort.signal.reason)
         expect(mockStreamText).toHaveBeenCalledTimes(1)
       })
+    })
+  })
+
+  describe("Router + Fusion ledger (text channel)", () => {
+    const ledgerOn = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } } }
+
+    function ledgerHandle(runId: string) {
+      const booked: Array<{ kind: string; detail?: unknown }> = []
+      return {
+        booked,
+        grant: {
+          kind: "granted" as const,
+          handle: {
+            runId,
+            maxOutputTokens: 1_024,
+            succeeded: async (usage: unknown) =>
+              void booked.push({ kind: "succeeded", detail: usage }),
+            failed: async (errorClass: string) =>
+              void booked.push({ kind: `failed:${errorClass}` }),
+            unknown: async (reason: string) =>
+              void booked.push({ kind: "unknown", detail: reason }),
+          },
+        },
+      }
+    }
+
+    it("reserves each attempt on agentsWorkflows and settles it from the stream's usage", async () => {
+      mockLiveSettingsState.settings = ledgerOn
+      primeTextChannel(["ledgered"])
+      mockStreamText.mockReturnValue({
+        textStream: (async function* () {
+          yield "ledgered"
+        })(),
+        finishReason: Promise.resolve("stop"),
+        usage: Promise.resolve({ inputTokens: 40, outputTokens: 9 }),
+        providerMetadata: Promise.resolve({}),
+      } as never)
+      const first = ledgerHandle("run-a")
+      mockBeginLedgeredUtilityCall.mockResolvedValue(first.grant)
+
+      await expect(
+        runCompletionRail("hi", {
+          ledger: { featureId: "workflow:step-7", origin: "workflow", workspaceId: "ws-1" },
+        })
+      ).resolves.toMatchObject({ text: "ledgered" })
+
+      expect(mockBeginLedgeredUtilityCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          surface: "agentsWorkflows",
+          origin: "workflow",
+          featureId: "workflow:step-7",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          workspaceId: "ws-1",
+          prompt: "hi",
+        })
+      )
+      // No hidden SDK retries, and the reserved output bound.
+      expect(mockStreamText).toHaveBeenCalledWith(
+        expect.objectContaining({ maxRetries: 0, maxOutputTokens: 1_024 })
+      )
+      expect(first.booked).toEqual([
+        { kind: "succeeded", detail: { inputTokens: 40, outputTokens: 9 } },
+      ])
+    })
+
+    it("books every fallback attempt as its own reservation", async () => {
+      mockLiveSettingsState.settings = ledgerOn
+      primeTextChannel()
+      mockPlanRoute.mockResolvedValue(
+        routingPlan([
+          { providerId: "openai", modelId: "gpt-4o" },
+          { providerId: "anthropic", modelId: "claude-sonnet-4-5" },
+        ])
+      )
+      mockStreamText
+        .mockReturnValueOnce({
+          textStream: (async function* () {
+            throw Object.assign(new Error("overloaded"), { statusCode: 529 })
+          })(),
+          finishReason: Promise.resolve("error"),
+        } as never)
+        .mockReturnValueOnce({
+          textStream: (async function* () {
+            yield "recovered"
+          })(),
+          finishReason: Promise.resolve("stop"),
+        } as never)
+      const failedAttempt = ledgerHandle("run-a")
+      const recovered = ledgerHandle("run-b")
+      mockBeginLedgeredUtilityCall
+        .mockResolvedValueOnce(failedAttempt.grant)
+        .mockResolvedValueOnce(recovered.grant)
+
+      await expect(runCompletionRail("hi")).resolves.toMatchObject({ text: "recovered" })
+      expect(mockBeginLedgeredUtilityCall).toHaveBeenCalledTimes(2)
+      expect(mockBeginLedgeredUtilityCall.mock.calls[0][0]).toMatchObject({
+        origin: "agent",
+        featureId: "agent-executor",
+        workspaceId: null,
+      })
+      expect(mockBeginLedgeredUtilityCall.mock.calls[1][0]).toMatchObject({
+        providerId: "anthropic",
+        modelId: "claude-sonnet-4-5",
+      })
+      expect(failedAttempt.booked).toEqual([{ kind: "failed:server_error" }])
+      // The provider reported no usage: unknown, not free.
+      expect(recovered.booked).toEqual([{ kind: "succeeded", detail: null }])
+    })
+
+    it("holds the money of a stream that broke after text arrived", async () => {
+      mockLiveSettingsState.settings = ledgerOn
+      primeTextChannel()
+      mockStreamText.mockReturnValue({
+        textStream: (async function* () {
+          yield "partial"
+          throw new Error("stream interrupted")
+        })(),
+        finishReason: Promise.resolve("error"),
+      } as never)
+      const attempt = ledgerHandle("run-a")
+      mockBeginLedgeredUtilityCall.mockResolvedValue(attempt.grant)
+
+      await expect(runCompletionRail("hi")).rejects.toThrow("stream interrupted")
+      expect(attempt.booked).toEqual([{ kind: "unknown", detail: "stream_interrupted" }])
+    })
+
+    it("does not send a refused attempt", async () => {
+      mockLiveSettingsState.settings = ledgerOn
+      primeTextChannel()
+      mockBeginLedgeredUtilityCall.mockResolvedValue({
+        kind: "refused",
+        code: "DATA_CLASS_NOT_ALLOWED",
+      })
+
+      await expect(runCompletionRail("hi")).rejects.toMatchObject({
+        code: "DATA_CLASS_NOT_ALLOWED",
+      })
+      expect(mockStreamText).not.toHaveBeenCalled()
+    })
+
+    it("takes no reservation and adds nothing to the request while the surface is off", async () => {
+      primeTextChannel()
+      await runCompletionRail("hi")
+      expect(mockBeginLedgeredUtilityCall).not.toHaveBeenCalled()
+      expect(mockStreamText.mock.calls[0][0]).not.toHaveProperty("maxRetries")
     })
   })
 

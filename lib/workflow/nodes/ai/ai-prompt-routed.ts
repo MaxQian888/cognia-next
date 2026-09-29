@@ -11,6 +11,16 @@
  * All collaborators are injectable for tests; `defaultRoutedPromptDeps()`
  * wires the production singletons lazily so headless runs (no hydrated
  * stores) degrade to priority-order routing instead of crashing.
+ *
+ * Every attempt is ledgered (ADR-0188 D27): the production `makeClient` wraps
+ * each candidate's client with `ledgerUtilityCalls`, so each attempt — the
+ * primary and every fallback — is its own reservation, sent with no hidden SDK
+ * retries and settled from its own usage. The caller names the surface: a
+ * workflow node or an Agent feature is `agentsWorkflows`, the `/council` slash
+ * command is `utilityLedger`. Off — the default — the client is returned as it
+ * was built. A candidate the ledger refuses (its data class, its budget) is
+ * skipped like one with no credentials: nothing was sent, and it says nothing
+ * about the provider's health.
  */
 
 import type { LlmClient, LlmConfig } from "@/lib/twin/distill/llm"
@@ -20,6 +30,10 @@ import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-br
 import type { ApiFlavor } from "@cognia/provider-types/provider"
 import type { RoutingPlan, RoutingSurface } from "@cognia/provider-types/auto-router"
 import { RoutingAttemptController } from "@cognia/provider-routing/routing-attempt-controller"
+import type { RouterFusionSurface } from "@cognia/router-fusion/settings/switches"
+import { isRefusal, type RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
+import type { UtilityRunOrigin } from "@/lib/router-fusion/gate/utility-ledger"
+import type { StepExecutionContext } from "@/types/workflow/visual"
 
 export interface ResolvedCreds {
   protocol: LlmConfig["provider"]
@@ -39,7 +53,12 @@ export interface RoutedPromptDeps {
   }) => Promise<RoutingSelection | null>
   /** Resolve credentials for one provider; null when unusable (no config). */
   resolveCreds: (providerId: string) => Promise<ResolvedCreds | null>
-  makeClient: (config: LlmConfig) => LlmClient
+  /**
+   * Build the client for one attempt. `deployment` is the app's own provider
+   * id and model (the config carries only the SDK protocol), which is what the
+   * ledger prices and polices.
+   */
+  makeClient: (config: LlmConfig, deployment: { providerId: string; modelId: string }) => LlmClient
   recordOutcome: (outcome: ProviderOutcome) => void
   getCircuitBreakerState: (providerId: string) => CircuitBreakerStateValue
   estimateCostUsd: (input: {
@@ -79,15 +98,50 @@ export interface RoutedPromptOutput {
   routingReason: string
 }
 
+/** Who a routed prompt's ledgered attempts belong to (ADR-0188 D27, D30). */
+export interface RoutedPromptLedger {
+  surface: Extract<RouterFusionSurface, "utilityLedger" | "agentsWorkflows">
+  origin: UtilityRunOrigin
+  /** Stable id of the feature, e.g. `workflow:<stepId>` or `slash-council`. */
+  featureId: string
+  /** Workspace whose data the prompt carries, for the data-class policy. */
+  workspaceId: string | null
+}
+
+/**
+ * The ledger binding every workflow AI node uses: its calls are Agent/workflow
+ * work (`agentsWorkflows`), booked per step, in the workflow's own workspace —
+ * the same binding `ai.prompt` v1 gives its client.
+ */
+export function workflowNodeLedger(
+  ctx: Pick<StepExecutionContext, "stepId" | "projectId">
+): RoutedPromptLedger {
+  return {
+    surface: "agentsWorkflows",
+    origin: "workflow",
+    featureId: `workflow:${ctx.stepId}`,
+    workspaceId: ctx.projectId ?? null,
+  }
+}
+
+export interface DefaultRoutedPromptDepsOptions {
+  /** The ADR-0043 routing surface the plans are made for. Defaults to `workflow`. */
+  routingSurface?: RoutingSurface
+  ledger: RoutedPromptLedger
+}
+
 /** Build the production deps. Imported lazily so tests never touch stores. */
 export async function defaultRoutedPromptDeps(
-  surface: RoutingSurface = "workflow"
+  options: DefaultRoutedPromptDepsOptions
 ): Promise<RoutedPromptDeps> {
-  const [{ getSettings }, { buildRoutingEngine }, { createLlmClient }] = await Promise.all([
-    import("@/lib/db/settings"),
-    import("@cognia/provider-routing/build-preview-engine"),
-    import("@/lib/twin/distill/llm"),
-  ])
+  const surface = options.routingSurface ?? "workflow"
+  const [{ getSettings }, { buildRoutingEngine }, { createLlmClient }, { ledgerUtilityCalls }] =
+    await Promise.all([
+      import("@/lib/db/settings"),
+      import("@cognia/provider-routing/build-preview-engine"),
+      import("@/lib/twin/distill/llm"),
+      import("@/lib/router-fusion/gate/utility-ledger"),
+    ])
   const settings = await getSettings()
   const engine = buildRoutingEngine(settings)
   const { resolveFeatureProvider, createProviderSettingsSnapshot } =
@@ -165,7 +219,17 @@ export async function defaultRoutedPromptDeps(
         apiFlavor: resolution.apiFlavor,
       }
     },
-    makeClient: createLlmClient,
+    // One ledgered client per attempt: each attempt is its own reservation.
+    // `settings` is the row this function just read, on either host.
+    makeClient: (config, deployment) =>
+      ledgerUtilityCalls(createLlmClient(config), {
+        binding: {
+          ...options.ledger,
+          providerId: deployment.providerId,
+          modelId: deployment.modelId,
+        },
+        settings,
+      }),
     recordOutcome: recordProviderOutcome,
     getCircuitBreakerState: (id) => useCircuitBreakerStore.getState().getState(id),
     estimateCostUsd: async (input) =>
@@ -210,6 +274,7 @@ export async function runRoutedPrompt(
   const controller = new RoutingAttemptController(route, deps.maxFallbackAttempts ?? 3, deps.now)
   const skipped: string[] = []
   const errors: string[] = []
+  const refusals: RouterFusionRefusalError[] = []
   let attempts = 0
   let entry = controller.begin()
   while (entry) {
@@ -227,14 +292,17 @@ export async function runRoutedPrompt(
     attempts++
     const started = deps.now()
     try {
-      const client = deps.makeClient({
-        provider: creds.protocol,
-        model: entry.modelId,
-        apiKey: creds.apiKey ?? "",
-        baseURL: creds.baseURL,
-        apiFlavor: creds.apiFlavor,
-        defaultTemperature: input.temperature,
-      })
+      const client = deps.makeClient(
+        {
+          provider: creds.protocol,
+          model: entry.modelId,
+          apiKey: creds.apiKey ?? "",
+          baseURL: creds.baseURL,
+          apiFlavor: creds.apiFlavor,
+          defaultTemperature: input.temperature,
+        },
+        { providerId: entry.providerId, modelId: entry.modelId }
+      )
       const completion = await complete(client, input, () => controller.commit())
       const usage = client.getUsageSnapshot?.() ?? {
         inputTokens: 0,
@@ -269,6 +337,15 @@ export async function runRoutedPrompt(
         routingReason: route.reasonCodes.join(", "),
       }
     } catch (err) {
+      if (isRefusal(err)) {
+        // The ledger refused before anything was sent: not an attempt, and not
+        // a provider failure the health metrics should learn from.
+        attempts--
+        refusals.push(err)
+        skipped.push(`${entry.providerId} (refused by Router + Fusion: ${err.code})`)
+        entry = controller.failAndAdvance()
+        continue
+      }
       const message = err instanceof Error ? err.message : String(err)
       deps.recordOutcome({
         providerId: entry.providerId,
@@ -288,6 +365,13 @@ export async function runRoutedPrompt(
 
   if (skipped.length > 0) {
     input.log("warn", `ai.prompt (routed): skipped ${skipped.join(", ")}`)
+  }
+  if (attempts === 0 && refusals.length > 0) {
+    // Every candidate that could run was refused: the refusal is the answer,
+    // and retrying the step would be refused again.
+    const [refusal] = refusals
+    ;(refusal as RouterFusionRefusalError & { retryable?: boolean }).retryable = false
+    throw refusal
   }
   if (attempts === 0) {
     throw nonRetryable(

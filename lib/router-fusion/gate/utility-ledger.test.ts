@@ -2,18 +2,22 @@ import type { RawUsage } from "@cognia/router-fusion"
 import type { LlmClient, LlmClientCallOptions, LlmUsageSnapshot } from "@/lib/twin/distill/llm"
 
 import { __resetBreakerForTesting, getBreakerSnapshot } from "./breaker"
+import { reportLedgerBypass } from "./bypass-diagnostic"
 import { RouterFusionRefusalError } from "./faults"
 import type { RouterFusionHost } from "./load-engine"
 import {
   classifyUtilityFailure,
   ledgerUtilityCalls,
   ledgeredLlmClient,
+  rawUsageOf,
   usageDelta,
   type BeginLedgeredUtilityCallInput,
   type LedgeredUtilityBinding,
   type UtilityCallHandleLike,
   type UtilityGrant,
 } from "./utility-ledger"
+
+jest.mock("./bypass-diagnostic", () => ({ reportLedgerBypass: jest.fn() }))
 
 const BINDING: LedgeredUtilityBinding = {
   surface: "utilityLedger",
@@ -93,7 +97,45 @@ function fakeHandle() {
 
 beforeEach(() => {
   __resetBreakerForTesting()
+  ;(reportLedgerBypass as jest.Mock).mockClear()
 })
+
+/**
+ * A client like the real one: every call reports its own usage through
+ * `onUsage` and also moves the shared cumulative snapshot. Each call waits for
+ * its gate, so a test decides the order the calls finish in.
+ */
+function perCallClient() {
+  const usage: LlmUsageSnapshot = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+  const gates: Array<() => void> = []
+  const calls: Array<LlmClientCallOptions | undefined> = []
+  const client: LlmClient = {
+    reportsCallUsage: true,
+    async complete(prompt, options) {
+      calls.push(options)
+      await new Promise<void>((resolve) => gates.push(resolve))
+      const tokens = Number(prompt)
+      usage.inputTokens += tokens
+      usage.outputTokens += 1
+      usage.totalTokens = usage.inputTokens + usage.outputTokens
+      options?.onUsage?.({
+        inputTokens: tokens,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      })
+      return `answer ${prompt}`
+    },
+    getUsageSnapshot: () => ({ ...usage }),
+  }
+  return { client, gates, calls }
+}
+
+/** Resolve pending promise callbacks until `condition` holds. */
+async function until(condition: () => boolean) {
+  for (let i = 0; i < 50 && !condition(); i++) await Promise.resolve()
+  expect(condition()).toBe(true)
+}
 
 describe("usageDelta", () => {
   it("reports what one call added, not the running total", () => {
@@ -109,6 +151,18 @@ describe("usageDelta", () => {
     const flat: LlmUsageSnapshot = { inputTokens: 7, outputTokens: 1, totalTokens: 8 }
     expect(usageDelta(flat, flat)).toBeNull()
     expect(usageDelta(undefined, undefined)).toBeNull()
+  })
+})
+
+describe("rawUsageOf", () => {
+  it("maps one call's report onto the ledger's buckets and reads nothing as unknown", () => {
+    expect(
+      rawUsageOf({ inputTokens: 9, outputTokens: 3, cacheReadTokens: 2, cacheCreationTokens: 1 })
+    ).toEqual({ inputTokens: 9, outputTokens: 3, cacheReadTokens: 2, cacheWriteTokens: 1 })
+    expect(
+      rawUsageOf({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 })
+    ).toBeNull()
+    expect(rawUsageOf(undefined)).toBeNull()
   })
 })
 
@@ -268,6 +322,100 @@ describe("ledgeredLlmClient", () => {
     expect(other.booked).toEqual([{ kind: "failed:not_sent", usage: null }])
   })
 
+  it("settles two concurrent calls on one client with each call's own tokens", async () => {
+    // lib/twin/distill/orchestrator.ts runs its distill calls on one client at
+    // once. Reading the cumulative snapshot, the call that finished second
+    // would have booked the first one's tokens as its own too.
+    const { client, gates } = perCallClient()
+    const bookings: Array<{ run: string; usage: RawUsage | null }> = []
+    let next = 0
+    const wrapped = ledgeredLlmClient(client, BINDING, {
+      begin: async () => {
+        const run = `run-${++next}`
+        return {
+          kind: "granted",
+          handle: {
+            runId: run,
+            maxOutputTokens: 64,
+            succeeded: async (usage) => {
+              bookings.push({ run, usage })
+            },
+            failed: async () => {},
+            unknown: async () => {},
+          },
+        }
+      },
+    })
+    expect(wrapped.reportsCallUsage).toBe(true)
+    const callerUsage = jest.fn()
+    const first = wrapped.complete("100", { onUsage: callerUsage })
+    const second = wrapped.complete("7")
+    // Both are in flight together: a per-call client is never serialized.
+    await until(() => gates.length === 2)
+    gates[1]()
+    await expect(second).resolves.toBe("answer 7")
+    gates[0]()
+    await expect(first).resolves.toBe("answer 100")
+    expect(bookings).toEqual([
+      { run: "run-2", usage: { inputTokens: 7, outputTokens: 1 } },
+      { run: "run-1", usage: { inputTokens: 100, outputTokens: 1 } },
+    ])
+    // The caller's own callback still hears its call.
+    expect(callerUsage).toHaveBeenCalledWith(expect.objectContaining({ inputTokens: 100 }))
+  })
+
+  it("runs a snapshot-only client's calls one at a time, so each delta is its own", async () => {
+    const usage: LlmUsageSnapshot = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+    const gates: Array<() => void> = []
+    const client: LlmClient = {
+      async complete(prompt) {
+        await new Promise<void>((resolve) => gates.push(resolve))
+        usage.inputTokens += Number(prompt)
+        usage.outputTokens += 1
+        usage.totalTokens = usage.inputTokens + usage.outputTokens
+        return prompt
+      },
+      getUsageSnapshot: () => ({ ...usage }),
+    }
+    const { handle, booked } = fakeHandle()
+    const begin = jest.fn(async (): Promise<UtilityGrant> => ({ kind: "granted", handle }))
+    const wrapped = ledgeredLlmClient(client, BINDING, { begin })
+    expect(wrapped.reportsCallUsage).toBeUndefined()
+    const first = wrapped.complete("100")
+    const second = wrapped.complete("7")
+    await until(() => gates.length === 1)
+    // The second call waits for the first, reservation included.
+    expect(begin).toHaveBeenCalledTimes(1)
+    gates[0]()
+    await expect(first).resolves.toBe("100")
+    await until(() => gates.length === 2)
+    gates[1]()
+    await expect(second).resolves.toBe("7")
+    expect(booked).toEqual([
+      { kind: "succeeded", usage: { inputTokens: 100, outputTokens: 1 } },
+      { kind: "succeeded", usage: { inputTokens: 7, outputTokens: 1 } },
+    ])
+  })
+
+  it("books a stream the consumer abandoned as sent-with-no-answer", async () => {
+    const client: LlmClient = {
+      complete: async () => "",
+      async *stream() {
+        yield "one"
+        yield "two"
+      },
+    }
+    const { handle, booked } = fakeHandle()
+    const wrapped = ledgeredLlmClient(client, BINDING, {
+      begin: async () => ({ kind: "granted", handle }),
+    })
+    for await (const chunk of wrapped.stream!("x")) {
+      expect(chunk).toBe("one")
+      break
+    }
+    expect(booked).toEqual([{ kind: "unknown", reason: "stream_abandoned" }])
+  })
+
   it("carries the inner client's identity, and omits a stream it does not have", () => {
     const plain = fakeClient({ withStream: false, withSnapshot: false })
     const wrapped = ledgeredLlmClient(plain.client, BINDING, { begin: async () => null })
@@ -336,7 +484,12 @@ describe("ledgerUtilityCalls", () => {
     // Unledgered means unledgered: the caller's own options, no retry cap.
     expect(calls[0].options).toBeUndefined()
     expect(getBreakerSnapshot("utilityLedger").consecutiveFaults).toBe(1)
-    expect(warn).toHaveBeenCalled()
+    // Utilities have no message to badge: the bypass is raised as a diagnostic.
+    expect(reportLedgerBypass).toHaveBeenCalledWith({
+      surface: "utilityLedger",
+      featureId: "conversation-title",
+      fault: expect.objectContaining({ code: "internal" }),
+    })
     warn.mockRestore()
   })
 

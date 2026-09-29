@@ -279,6 +279,12 @@ export type DiagnosticCode =
   | "routerFusionRefused"
   /** A Router + Fusion cascade or panel run stopped before its answer was verified (ADR-0188 B3). */
   | "routerFusionRunFailed"
+  /**
+   * A background utility, Agent or workflow model call went out on the original
+   * path, unledgered, because Router + Fusion hit an infrastructure fault
+   * (ADR-0188 D38). Such calls have no message to badge.
+   */
+  | "routerFusionBypassed"
   | "dispatchRejectedCycle"
   | "dispatchRejectedDepth"
   | "dispatchRejectedPolicy"

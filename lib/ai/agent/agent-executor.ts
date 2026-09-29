@@ -264,6 +264,28 @@ export interface ExecuteAgentConfig {
    * the unopened ephemeral session. Set by the `dispatch_agent` host tool.
    */
   approvalRoute?: import("@/types/plugin/plugin-agent-sdk").PluginDispatchApprovalRoute
+  /**
+   * Router + Fusion attribution for this run's completion-rail calls (ADR-0188
+   * D27). An Agent's generations sit on the `agentsWorkflows` surface: with that
+   * switch on, every completion-rail routing attempt is reserved before it is
+   * sent and settled from the provider's usage. Omitted, a call is booked as
+   * `agent-executor`, origin `agent`, with no workspace.
+   *
+   * The tool-enabled (sidecar) rail is not covered by this field: the sidecar
+   * ledgers a send only when `resolveSendOptions` stamps `SendOptions.ledger`,
+   * which today only a chat composer turn does.
+   */
+  ledger?: ExecuteAgentLedger
+}
+
+/** Who an Agent run's ledgered calls belong to (see {@link ExecuteAgentConfig.ledger}). */
+export interface ExecuteAgentLedger {
+  /** Stable id of the feature running the Agent, e.g. `workflow:<stepId>`. */
+  featureId: string
+  /** `workflow` for a workflow node's run; `agent` (the default) otherwise. */
+  origin?: "agent" | "workflow"
+  /** Workspace whose data the run carries, for the data-class policy (D30). */
+  workspaceId?: string | null
 }
 
 export type ExecuteAgentChannel = "sidecar" | "text"
@@ -997,8 +1019,18 @@ export async function runCompletionRail(
   )
   let candidate = controller.begin()
   let lastError: unknown
+  // Every routing attempt is its own reservation (ADR-0188 D27): the surface
+  // is `agentsWorkflows`, and off — the default — no lease is taken and the
+  // request below is exactly what it was.
+  const { beginLedgeredGeneration, usageOfResult } = await import("@/lib/ai/ledgered-model-call")
+  const ledgerText = [
+    ...(config.priorMessages ?? []).map((message) => message.content),
+    prompt,
+  ].join("\n")
 
   while (candidate) {
+    let lease: import("@/lib/ai/ledgered-model-call").LedgeredGenerationLease | null = null
+    let streamed = false
     try {
       const resolution = resolveFeatureProvider(
         {
@@ -1024,6 +1056,27 @@ export async function runCompletionRail(
         providerSettings,
         customProviders,
       } as AppSettings)
+      // Reserved right before the request leaves; a refusal throws here and the
+      // attempt is treated like any failed candidate (the next one is tried).
+      lease = await beginLedgeredGeneration({
+        binding: {
+          surface: "agentsWorkflows",
+          origin: config.ledger?.origin ?? "agent",
+          featureId: config.ledger?.featureId ?? "agent-executor",
+          providerId: candidate.providerId,
+          modelId: candidate.modelId,
+          workspaceId: config.ledger?.workspaceId ?? null,
+        },
+        prompt: ledgerText,
+        system,
+        maxOutputTokens:
+          typeof modelParams?.maxOutputTokens === "number"
+            ? modelParams.maxOutputTokens
+            : undefined,
+        // The renderer's hydrated settings when there are any; the headless
+        // brain has no settings store, and the seam reads its own host's.
+        ...(liveSettings ? { settings: liveSettings } : {}),
+      })
       const options: Record<string, unknown> = {
         model,
         ...modelParams,
@@ -1031,6 +1084,8 @@ export async function runCompletionRail(
         // This rail is the web/mobile fallback: keep a failed or stopped stream
         // from leaking the SDK's tracing promise (see webview-safe-telemetry).
         telemetry: webviewSafeTelemetry(),
+        // A ledgered attempt: no hidden SDK retries, and the reserved output bound.
+        ...(lease ? lease.options : {}),
       }
       if (config.temperature !== undefined) options.temperature = config.temperature
       if (config.abortSignal) options.abortSignal = config.abortSignal
@@ -1041,6 +1096,7 @@ export async function runCompletionRail(
         if (chunk.length > 0 && controller.state.phase === "inFlight") {
           controller.commit()
         }
+        if (chunk.length > 0) streamed = true
         text += chunk
         config.onDelta?.(chunk)
         config.onEvent?.({ type: "text-delta", delta: chunk })
@@ -1049,6 +1105,12 @@ export async function runCompletionRail(
       const rawUsage = await Promise.resolve(result.usage).catch(() => undefined)
       const inputTokens = Number(rawUsage?.inputTokens ?? 0) || 0
       const outputTokens = Number(rawUsage?.outputTokens ?? 0) || 0
+      if (lease) {
+        const providerMetadata = await Promise.resolve(result.providerMetadata).catch(
+          () => undefined
+        )
+        await lease.succeeded(usageOfResult(rawUsage, providerMetadata))
+      }
       controller.complete()
       return {
         text,
@@ -1062,6 +1124,12 @@ export async function runCompletionRail(
       }
     } catch (error) {
       lastError = error
+      if (lease) {
+        // Text already arrived, so the request was billed and its bill never
+        // read: the money stays held. Before any text the error says what
+        // happened (an abort books unknown, a refused request books failed).
+        await (streamed ? lease.unknown("stream_interrupted") : lease.failed(error))
+      }
       if (config.abortSignal?.aborted) {
         controller.cancel()
         throw error

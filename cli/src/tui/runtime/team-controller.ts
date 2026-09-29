@@ -284,7 +284,16 @@ export async function teamAuto(objective: string, deps: TeamAutoDeps): Promise<v
   const session = await (deps.getSession ?? getSession)(deps.sessionId)
   const client = (
     deps.buildClient ??
-    ((s, a) => buildRendererLlmClient({ session: s, appSettings: a, featureId: "agent-team-auto" }))
+    ((s, a) =>
+      buildRendererLlmClient({
+        session: s,
+        appSettings: a,
+        featureId: "agent-team-auto",
+        // Composing a team is Agent work: agentsWorkflows (ADR-0188 D27), in
+        // the conversation's workspace, as in the desktop dialog.
+        ledgerSurface: "agentsWorkflows",
+        ledgerOrigin: "agent",
+      }))
   )(session, appSettings)
 
   if (!client) {

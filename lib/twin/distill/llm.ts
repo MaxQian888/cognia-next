@@ -43,6 +43,14 @@ export interface LlmClientCallOptions {
    * ones (ADR-0188 D27).
    */
   maxRetries?: number
+  /**
+   * Called once with THIS call's own tokens when the provider answered. A
+   * client that honours it says so with `reportsCallUsage`. The cumulative
+   * snapshot cannot attribute tokens to one call when several run on the same
+   * client at once; this can, which is what a per-call ledger settlement needs
+   * (ADR-0188 D27).
+   */
+  onUsage?: (usage: UsageDelta) => void
 }
 
 /**
@@ -140,6 +148,13 @@ export interface LlmClient {
    * always implement it.
    */
   getUsageSnapshot?(): LlmUsageSnapshot
+  /**
+   * True when `complete()` and `stream()` call `options.onUsage` with each
+   * call's own usage once the provider answered. Absent means the client only
+   * keeps the cumulative snapshot, and a caller that needs one call's tokens
+   * must not run another call on the client until it has read the snapshot.
+   */
+  readonly reportsCallUsage?: boolean
   /**
    * Which provider/model this client actually resolved to.
    *
@@ -302,7 +317,8 @@ export function createLlmClient(config: LlmConfig): LlmClient {
 
   const addUsage = (
     u: Record<string, unknown> | undefined,
-    providerMetadata?: Record<string, unknown>
+    providerMetadata: Record<string, unknown> | undefined,
+    options: LlmClientCallOptions | undefined
   ) => {
     const d = readUsageDelta(u, providerMetadata)
     usage.inputTokens += d.inputTokens
@@ -310,11 +326,13 @@ export function createLlmClient(config: LlmConfig): LlmClient {
     usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + d.cacheReadTokens
     usage.cacheCreationTokens = (usage.cacheCreationTokens ?? 0) + d.cacheCreationTokens
     usage.totalTokens = usage.inputTokens + usage.outputTokens
+    options?.onUsage?.(d)
   }
 
   return {
     provider: config.provider,
     model: config.model,
+    reportsCallUsage: true,
     async complete(prompt, options) {
       const model = await getModel()
       const result = await generateText({
@@ -329,7 +347,8 @@ export function createLlmClient(config: LlmConfig): LlmClient {
       })
       addUsage(
         result.usage as Record<string, unknown> | undefined,
-        result.providerMetadata as Record<string, unknown> | undefined
+        result.providerMetadata as Record<string, unknown> | undefined,
+        options
       )
       return result.text
     },
@@ -358,7 +377,8 @@ export function createLlmClient(config: LlmConfig): LlmClient {
         (await Promise.resolve(result.usage).catch(() => undefined)) as
           Record<string, unknown> | undefined,
         (await Promise.resolve(result.providerMetadata).catch(() => undefined)) as
-          Record<string, unknown> | undefined
+          Record<string, unknown> | undefined,
+        options
       )
     },
     getUsageSnapshot() {

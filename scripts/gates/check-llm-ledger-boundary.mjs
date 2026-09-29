@@ -9,7 +9,10 @@
  *
  *   - renderer utilities: `lib/ai/renderer-llm-client.ts` → `ledgerUtilityCalls`
  *     (`lib/router-fusion/gate/utility-ledger.ts`) → `lib/router-fusion/calls/*`;
- *   - workflow `ai.prompt`: the same wrapper, on `agentsWorkflows`;
+ *   - workflow `ai.prompt` (v1 and v2, every routed attempt), `ai.council` and
+ *     `ai.ensemble`: the same wrapper, on `agentsWorkflows`;
+ *   - direct AI SDK generations (the Agent completion rail):
+ *     `lib/ai/ledgered-model-call.ts` → `beginLedgeredGeneration`;
  *   - the sidecar: `sidecar/dispatch/call-ledger-gate.mjs`, engaged by the
  *     `SendOptions.ledger` stamp of a routed chat turn;
  *   - Router + Fusion's own role calls (`lib/router-fusion/calls/*`).
@@ -57,6 +60,13 @@
  * reserved by its caller (the sidecar AI SDK adapter, reserved per leg by
  * `sidecar/dispatch/ai-sdk.mjs`) names that caller in `seam`, and the check runs
  * there instead.
+ *
+ * `unwrapped` is checked the other way round. A file labelled unwrapped that
+ * references a ledger seam has (at least partly) been wrapped, and a stale label
+ * would hide the progress and let the file regress unnoticed: the row is
+ * `mislabeled` and fails until it is relabelled `ledgered-entry`. A file that
+ * really does both — ledgers some calls and not others — says which in a
+ * `partial` field (a sentence), and stays `unwrapped`.
  *
  * ## What a static scan cannot see
  *
@@ -163,6 +173,7 @@ export const REASONS = {
 /** What a `ledgered-entry` file must reference for the claim to be believable. */
 export const LEDGER_SEAM_MARKERS = [
   /\bledgerUtilityCalls\b/,
+  /\bbeginLedgeredGeneration\b/,
   /\bcreateCallLedgerGate\b/,
   /call-ledger-gate/,
   /\bledgerGate\b/,
@@ -562,7 +573,9 @@ export function hasLedgerSeam(file, source) {
   const { bare, code } = lexSource(source)
   return (
     LEDGER_SEAM_MARKERS.some((marker) => marker.test(bare)) ||
-    /["'][^"']*(?:router-fusion\/gate\/utility-ledger|call-ledger-gate)[^"']*["']/.test(code)
+    /["'][^"']*(?:router-fusion\/gate\/utility-ledger|ai\/ledgered-model-call|call-ledger-gate)[^"']*["']/.test(
+      code
+    )
   )
 }
 
@@ -619,6 +632,11 @@ export function loadBaseline(path = BASELINE) {
     if (!Object.hasOwn(REASONS, row?.reason))
       errors.push(`${file}: reason must be one of ${Object.keys(REASONS).join(", ")}`)
     if (typeof row?.note !== "string" || !row.note.trim()) errors.push(`${file}: note is required`)
+    if (row?.partial !== undefined) {
+      if (row.reason !== "unwrapped") errors.push(`${file}: partial is only for unwrapped rows`)
+      else if (typeof row.partial !== "string" || !row.partial.trim())
+        errors.push(`${file}: partial must say which calls are ledgered and which are not`)
+    }
     if (row?.seam !== undefined) {
       if (row.reason !== "ledgered-entry")
         errors.push(`${file}: seam is only for ledgered-entry rows`)
@@ -645,7 +663,9 @@ export function loadBaseline(path = BASELINE) {
  *   unlisted  — a file (or an entry of a listed file) the baseline does not name;
  *   stale     — a row naming an entry the file no longer has (remove it);
  *   unproven  — a `ledgered-entry` row whose seam file (the row's `seam`, else the
- *               file itself) references no ledger seam, or no longer exists.
+ *               file itself) references no ledger seam, or no longer exists;
+ *   mislabeled — an `unwrapped` row (without `partial`) whose file references a
+ *               ledger seam: it was wrapped, so the label must say so.
  *
  * `readSource(file)` returns the file's text, or null when it does not exist.
  */
@@ -653,6 +673,7 @@ export function compare(found, baseline, readSource) {
   const unlisted = []
   const stale = []
   const unproven = []
+  const mislabeled = []
   for (const [file, entries] of Object.entries(found)) {
     const row = baseline[file]
     const missing = row ? entries.filter((entry) => !row.entries.includes(entry)) : entries
@@ -668,12 +689,17 @@ export function compare(found, baseline, readSource) {
       if (source === null || !hasLedgerSeam(seamFile, source))
         unproven.push({ file, seam: seamFile })
     }
+    if (row.reason === "unwrapped" && row.partial === undefined && present.length > 0) {
+      const source = readSource(file)
+      if (source !== null && hasLedgerSeam(file, source)) mislabeled.push({ file })
+    }
   }
   const byFile = (a, b) => a.file.localeCompare(b.file)
   return {
     unlisted: unlisted.sort(byFile),
     stale: stale.sort(byFile),
     unproven: unproven.sort(byFile),
+    mislabeled: mislabeled.sort(byFile),
   }
 }
 
@@ -703,7 +729,10 @@ export function parseArgs(argv) {
 
 export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv)
-  const { files, baseline, unlisted, stale, unproven } = runAudit(args.root, args.baseline)
+  const { files, baseline, unlisted, stale, unproven, mislabeled } = runAudit(
+    args.root,
+    args.baseline
+  )
   if (stale.length > 0) {
     console.error(
       `[llm-ledger-boundary] ${stale.length} stale baseline row(s) (the list may only shrink):`
@@ -721,6 +750,16 @@ export function main(argv = process.argv.slice(2)) {
       "Wrap the calls with ledgerUtilityCalls / the sidecar call-ledger gate, or relabel the row."
     )
   }
+  if (mislabeled.length > 0) {
+    console.error(
+      `[llm-ledger-boundary] ${mislabeled.length} unwrapped row(s) whose file now references a ledger seam:`
+    )
+    for (const row of mislabeled) console.error(`  ${row.file}`)
+    console.error(
+      "Relabel the row ledgered-entry (the baseline may only shrink honestly), or, if the file " +
+        "still makes calls the ledger never sees, say which in the row's `partial` field."
+    )
+  }
   if (unlisted.length > 0) {
     console.error(
       `[llm-ledger-boundary] ${unlisted.length} file(s) with unreviewed direct LLM generation calls:`
@@ -731,7 +770,8 @@ export function main(argv = process.argv.slice(2)) {
         "dispatch), or add a reviewed row to scripts/gates/llm-ledger-boundary-baseline.json."
     )
   }
-  if (stale.length > 0 || unproven.length > 0 || unlisted.length > 0) return 1
+  if (stale.length > 0 || unproven.length > 0 || mislabeled.length > 0 || unlisted.length > 0)
+    return 1
   const count = (reason) => Object.values(baseline).filter((row) => row.reason === reason).length
   const exempt = Object.keys(baseline).length - count("ledgered-entry") - count("unwrapped")
   console.log(

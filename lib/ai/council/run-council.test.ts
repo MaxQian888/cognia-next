@@ -1,4 +1,12 @@
+const mockDefaultRoutedPromptDeps = jest.fn(async (_options: unknown) => ({ routed: true }))
+const mockRunRoutedPrompt = jest.fn()
+jest.mock("@/lib/workflow/nodes/ai/ai-prompt-routed", () => ({
+  defaultRoutedPromptDeps: (options: unknown) => mockDefaultRoutedPromptDeps(options),
+  runRoutedPrompt: (...args: unknown[]) => mockRunRoutedPrompt(...args),
+}))
+
 import {
+  defaultCouncilRunPrompt,
   runCouncil,
   formatCouncillorPrompt,
   formatCouncillorResults,
@@ -189,5 +197,33 @@ describe("formatting helpers", () => {
     expect(report).toMatch(/2\/3 councillors responded/)
     expect(report).toMatch(/synthesized by gpt/)
     expect(report).toMatch(/majority/)
+  })
+})
+
+describe("defaultCouncilRunPrompt", () => {
+  it("routes on the council surface and ledgers every call under the caller's binding", async () => {
+    mockRunRoutedPrompt.mockResolvedValue({
+      completion: "answer",
+      provider: "openai",
+      model: "gpt-5",
+    })
+    const ledger = {
+      surface: "utilityLedger" as const,
+      origin: "chat" as const,
+      featureId: "slash-council",
+      workspaceId: "ws-9",
+    }
+    const runPrompt = await defaultCouncilRunPrompt(ledger)
+    expect(mockDefaultRoutedPromptDeps).toHaveBeenCalledWith({ routingSurface: "council", ledger })
+
+    await expect(runPrompt({ modelAlias: "fast", userPrompt: "q" })).resolves.toEqual({
+      completion: "answer",
+      provider: "openai",
+      model: "gpt-5",
+    })
+    expect(mockRunRoutedPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ modelAlias: "fast", userPrompt: "q" }),
+      { routed: true }
+    )
   })
 })

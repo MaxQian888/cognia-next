@@ -72,7 +72,17 @@ export async function councilRun(rawArgs: string, deps: CouncilDeps): Promise<vo
 
   deps.dispatch({ type: "ACTIVITY_START", kind: "council", label: truncate(parsed.prompt) })
   try {
-    const runPrompt = deps.runPrompt ?? (await defaultCouncilRunPrompt())
+    // Like the desktop `/council`: a command typed in a conversation that is
+    // not a chat turn, booked on utilityLedger (ADR-0188 D27). The TUI has no
+    // workspace to attribute the calls to.
+    const runPrompt =
+      deps.runPrompt ??
+      (await defaultCouncilRunPrompt({
+        surface: "utilityLedger",
+        origin: "chat",
+        featureId: "cli-council",
+        workspaceId: null,
+      }))
     const run = deps.run ?? runCouncil
     const result = await run(
       {

@@ -32,6 +32,7 @@ import type { GenerationSeam } from "@cognia/provider-embedding/generation-seam"
 import type { RouterFusionSurface } from "@cognia/router-fusion/settings/switches"
 
 import { recordFusionFault } from "@/lib/router-fusion/gate/breaker"
+import { reportLedgerBypass } from "@/lib/router-fusion/gate/bypass-diagnostic"
 import { toInfrastructureFault } from "@/lib/router-fusion/gate/faults"
 import {
   breakerThresholdOf,
@@ -153,10 +154,8 @@ export async function resolveLedgeredGenerationSeam(
     // A refusal is an answer, never bypassed (none is expected from a read).
     if (!fault) throw error
     recordFusionFault(input.surface, fault.code, breakerThresholdOf(input.settings))
-    console.warn(
-      "[router-fusion] a package generation called on the original path, unledgered",
-      fault
-    )
+    // The binding is what names the feature, and it is the read that failed.
+    reportLedgerBypass({ surface: input.surface, featureId: "package-generation", fault })
     return undefined
   }
   return ledgeredGenerationSeam({

@@ -237,6 +237,14 @@ test("a ledgered-entry file must show its ledger seam", () => {
     true
   )
   assert.equal(hasLedgerSeam("lib/b.ts", "// ledgerUtilityCalls, one day\n" + GENERATES), false)
+  // The direct AI SDK seam counts, by name or by module.
+  assert.equal(
+    hasLedgerSeam(
+      "lib/c.ts",
+      'const { beginLedgeredGeneration } = await import("@/lib/ai/ledgered-model-call")\n'
+    ),
+    true
+  )
 })
 
 // ── Baseline ────────────────────────────────────────────────────────────────
@@ -250,6 +258,8 @@ test("the baseline vocabulary is fixed and every row is complete", () => {
     { ...row, entries: ["ai:generateText", "ai:generateText"] },
     { ...row, seam: "lib/other.ts" }, // a seam only belongs on a ledgered-entry row
     { ...row, reason: "ledgered-entry", seam: "lib/a.ts" }, // …and names another file
+    { ...row, reason: "ledgered-entry", partial: "some" }, // partial is only for unwrapped rows
+    { ...row, partial: " " }, // …and must say something
   ]
   for (const value of bad) {
     withFixture({}, { "lib/a.ts": value }, (_root, baselinePath) =>
@@ -292,6 +302,29 @@ test("compare reports unlisted files and entries, stale rows and unproven claims
   ])
   assert.deepEqual(result.stale, [{ file: "lib/gone.ts", entries: ["ai:streamText"] }])
   assert.deepEqual(result.unproven, [{ file: "lib/claims.ts", seam: "lib/claims.ts" }])
+  assert.deepEqual(result.mislabeled, [])
+})
+
+test("compare reports an unwrapped row whose file now references a ledger seam", () => {
+  const found = {
+    "lib/wrapped.ts": ["llm-client:createLlmClient"],
+    "lib/half.ts": ["llm-client:createLlmClient"],
+    "lib/raw.ts": ["ai:generateText"],
+  }
+  const baseline = {
+    "lib/wrapped.ts": { reason: "unwrapped", entries: ["llm-client:createLlmClient"], note: "n" },
+    "lib/half.ts": {
+      reason: "unwrapped",
+      entries: ["llm-client:createLlmClient"],
+      note: "n",
+      partial: "the rerank client is ledgered, the export client is not",
+    },
+    "lib/raw.ts": { reason: "unwrapped", entries: ["ai:generateText"], note: "n" },
+  }
+  const sources = { "lib/wrapped.ts": LEDGERED, "lib/half.ts": LEDGERED, "lib/raw.ts": GENERATES }
+  const result = compare(found, baseline, (file) => sources[file] ?? null)
+  assert.deepEqual(result.mislabeled, [{ file: "lib/wrapped.ts" }])
+  assert.deepEqual(result.unproven, [])
 })
 
 // ── Fixture trees, through runAudit and the CLI entry point ─────────────────
@@ -332,6 +365,7 @@ test("a fully reviewed tree passes, through runAudit and the CLI", () => {
     assert.deepEqual(result.unlisted, [])
     assert.deepEqual(result.stale, [])
     assert.deepEqual(result.unproven, [])
+    assert.deepEqual(result.mislabeled, [])
     const cli = runCli(root, baselinePath)
     assert.equal(cli.status, 0, cli.stderr)
     assert.match(
@@ -390,6 +424,31 @@ test("a ledgered-entry that loses its seam fails", () => {
       cli.stderr,
       /sidecar\/dispatch\/adapter\.mjs \(seam: sidecar\/dispatch\/dispatcher\.mjs\)/
     )
+  })
+})
+
+test("an unwrapped row that was wrapped fails until it is relabelled", () => {
+  const tree = {
+    ...CLEAN_TREE,
+    "lib/ai/unwrapped.ts": GENERATES.replace("go =", "go = ledgerUtilityCalls,"),
+  }
+  withFixture(tree, CLEAN_BASELINE, (root, baselinePath) => {
+    assert.deepEqual(runAudit(root, baselinePath).mislabeled, [{ file: "lib/ai/unwrapped.ts" }])
+    const cli = runCli(root, baselinePath)
+    assert.equal(cli.status, 1)
+    assert.match(cli.stderr, /1 unwrapped row\(s\) whose file now references a ledger seam/)
+    assert.match(cli.stderr, /lib\/ai\/unwrapped\.ts/)
+  })
+  const relabelled = {
+    ...CLEAN_BASELINE,
+    "lib/ai/unwrapped.ts": {
+      reason: "ledgered-entry",
+      entries: ["ai:generateText"],
+      note: "now wrapped",
+    },
+  }
+  withFixture(tree, relabelled, (root, baselinePath) => {
+    assert.equal(runCli(root, baselinePath).status, 0)
   })
 })
 

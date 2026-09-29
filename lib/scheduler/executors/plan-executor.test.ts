@@ -104,6 +104,26 @@ describe("executePlanTask", () => {
     )
   })
 
+  it("books the replan client on agentsWorkflows in the schedule's workspace", async () => {
+    runPlanMock.mockResolvedValue({ status: "completed" })
+    await executePlanTask(
+      {
+        ...makeTask({ planId: "p1", replanOnFailure: true }),
+        projectId: "ws-sched",
+      } as ScheduledTask,
+      execution,
+      new AbortController().signal
+    )
+    expect(buildUtilityLlmClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        featureId: "scheduler-plan-replan",
+        ledgerSurface: "agentsWorkflows",
+        ledgerOrigin: "agent",
+        workspaceId: "ws-sched",
+      })
+    )
+  })
+
   it("surfaces a thrown error", async () => {
     runPlanMock.mockRejectedValue(new Error("boom"))
     const r = await executePlanTask(

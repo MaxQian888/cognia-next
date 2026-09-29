@@ -4,6 +4,18 @@ jest.mock("@/lib/twin/distill/llm", () => ({
   createLlmClient: (...args: unknown[]) => mockCreateLlmClient(...(args as [])),
 }))
 
+const mockLedgerUtilityCalls = jest.fn()
+jest.mock("@/lib/router-fusion/gate/utility-ledger", () => {
+  const actual = jest.requireActual("@/lib/router-fusion/gate/utility-ledger")
+  return {
+    ...actual,
+    ledgerUtilityCalls: (...args: unknown[]) => {
+      mockLedgerUtilityCalls(...args)
+      return actual.ledgerUtilityCalls(...args)
+    },
+  }
+})
+
 import { buildRendererLlmClient } from "./renderer-llm-client"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
@@ -74,6 +86,43 @@ describe("buildRendererLlmClient", () => {
         ledgerSurface: "agentsWorkflows",
       })
     ).toBe(built)
+  })
+
+  it("attributes a call to its session's workspace unless the caller names one", () => {
+    const bindingOf = () =>
+      (mockLedgerUtilityCalls.mock.calls.at(-1)?.[1] as { binding: { workspaceId: unknown } })
+        .binding
+    buildRendererLlmClient({
+      session: makeSession({ projectId: "ws-session" }),
+      appSettings: makeSettings(),
+      featureId: "goal-judge",
+    })
+    expect(bindingOf()).toMatchObject({ workspaceId: "ws-session", surface: "utilityLedger" })
+
+    buildRendererLlmClient({
+      session: makeSession({ projectId: "ws-session" }),
+      appSettings: makeSettings(),
+      featureId: "plan-refine",
+      ledgerSurface: "agentsWorkflows",
+      workspaceId: "ws-workflow",
+    })
+    expect(bindingOf()).toMatchObject({
+      workspaceId: "ws-workflow",
+      surface: "agentsWorkflows",
+      origin: "workflow",
+    })
+
+    // An explicit null is an answer: attribute none, whatever the session says.
+    buildRendererLlmClient({
+      session: makeSession({ projectId: "ws-session" }),
+      appSettings: makeSettings(),
+      featureId: "x",
+      workspaceId: null,
+    })
+    expect(bindingOf().workspaceId).toBeNull()
+
+    buildRendererLlmClient({ session: null, appSettings: makeSettings(), featureId: "radar" })
+    expect(bindingOf().workspaceId).toBeNull()
   })
 
   it("returns null when appSettings is missing", () => {

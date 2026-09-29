@@ -4,11 +4,24 @@ import "fake-indexeddb/auto"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { createExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
-import { createRunRetrospectiveService } from "./run-retrospective"
+import {
+  createRunRetrospectiveService,
+  generateConfiguredRunRetrospective,
+} from "./run-retrospective"
 
-async function terminalRun(id: string, status: "completed" | "failed" | "cancelled" = "completed") {
+const mockBuildUtilityLlmClient = jest.fn()
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: (args: unknown) => mockBuildUtilityLlmClient(args),
+}))
+
+async function terminalRun(
+  id: string,
+  status: "completed" | "failed" | "cancelled" = "completed",
+  projectId?: string
+) {
   await createExecutionRun({
     id,
+    ...(projectId ? { projectId } : {}),
     kind: "agent-turn",
     sourceId: "turn-1",
     sessionId: "session-1",
@@ -106,5 +119,35 @@ describe("run retrospective service", () => {
       }),
     })
     await expect(oversized.generate("oversized")).rejects.toThrow("8 proposals")
+  })
+})
+
+describe("generateConfiguredRunRetrospective", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    mockBuildUtilityLlmClient.mockReset()
+  })
+
+  it("attributes the analysis call to the run's own workspace", async () => {
+    await terminalRun("run-ws", "completed", "ws-run")
+    mockBuildUtilityLlmClient.mockReturnValue({
+      complete: async () => JSON.stringify({ issueTimeline: [], proposals: [] }),
+    })
+    await generateConfiguredRunRetrospective("run-ws")
+    expect(mockBuildUtilityLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({ featureId: "run-retrospective", workspaceId: "ws-run" })
+    )
+  })
+
+  it("still refuses without a utility model", async () => {
+    await terminalRun("run-none")
+    mockBuildUtilityLlmClient.mockReturnValue(null)
+    await expect(generateConfiguredRunRetrospective("run-none")).rejects.toThrow(
+      /utility model is required/
+    )
+    expect(mockBuildUtilityLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: null })
+    )
   })
 })

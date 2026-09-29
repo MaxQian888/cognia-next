@@ -7,8 +7,10 @@
  */
 
 jest.mock("ai", () => ({ generateText: jest.fn(), streamText: jest.fn() }))
+jest.mock("@/lib/router-fusion/gate/bypass-diagnostic", () => ({ reportLedgerBypass: jest.fn() }))
 
 import { __resetBreakerForTesting, getBreakerSnapshot } from "@/lib/router-fusion/gate/breaker"
+import { reportLedgerBypass } from "@/lib/router-fusion/gate/bypass-diagnostic"
 import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
 import type { RouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
 import type {
@@ -20,7 +22,6 @@ import type {
 import {
   beginLedgeredGeneration,
   usageOfResult,
-  withLedgeredGeneration,
   type LedgeredUtilityBinding,
 } from "./ledgered-model-call"
 
@@ -131,8 +132,7 @@ describe("beginLedgeredGeneration", () => {
     ).rejects.toBeInstanceOf(RouterFusionRefusalError)
   })
 
-  it("falls back to the original path on an infrastructure fault and feeds the breaker", async () => {
-    jest.spyOn(console, "warn").mockImplementation(() => {})
+  it("falls back to the original path on an infrastructure fault, feeds the breaker and raises the notice", async () => {
     const host = fakeHost("fault")
     const lease = await beginLedgeredGeneration({
       binding: BINDING,
@@ -142,6 +142,24 @@ describe("beginLedgeredGeneration", () => {
     })
     expect(lease).toBeNull()
     expect(getBreakerSnapshot("utilityLedger").consecutiveFaults).toBe(1)
+    expect(reportLedgerBypass).toHaveBeenCalledWith({
+      surface: "utilityLedger",
+      featureId: "canvas-suggestions",
+      fault: expect.objectContaining({ code: "internal" }),
+    })
+  })
+
+  it("books a sent call with no readable answer as unknown", async () => {
+    const { handle, booked } = fakeHandle()
+    const host = fakeHost({ kind: "granted", handle })
+    const lease = await beginLedgeredGeneration({
+      binding: BINDING,
+      prompt: "document",
+      settings: ON,
+      loadHost: host.loadHost,
+    })
+    await lease?.unknown("stream_interrupted")
+    expect(booked).toEqual([{ kind: "unknown", reason: "stream_interrupted" }])
   })
 
   it("reads the host's settings when the caller passes none, and treats an unreadable switch as off", async () => {
@@ -226,57 +244,5 @@ describe("usageOfResult", () => {
   it("answers null when the provider reported nothing", () => {
     expect(usageOfResult(undefined)).toBeNull()
     expect(usageOfResult({ inputTokens: 0, outputTokens: 0 })).toBeNull()
-  })
-})
-
-describe("withLedgeredGeneration", () => {
-  it("runs with no options and books nothing while the surface is off", async () => {
-    const run = jest.fn(async () => ({ text: "hi" }))
-    const result = await withLedgeredGeneration({
-      binding: BINDING,
-      prompt: "document",
-      settings: OFF,
-      run,
-      usageOf: () => null,
-    })
-    expect(result).toEqual({ text: "hi" })
-    expect(run).toHaveBeenCalledWith(undefined)
-  })
-
-  it("settles a successful call from the result's usage", async () => {
-    const { handle, booked } = fakeHandle(300)
-    const host = fakeHost({ kind: "granted", handle })
-    const seenOptions: unknown[] = []
-    await withLedgeredGeneration({
-      binding: BINDING,
-      prompt: "document",
-      settings: ON,
-      loadHost: host.loadHost,
-      run: async (options) => {
-        seenOptions.push(options)
-        return { usage: { inputTokens: 90, outputTokens: 12 } }
-      },
-      usageOf: (result) => usageOfResult(result.usage),
-    })
-    expect(seenOptions).toEqual([{ maxRetries: 0, maxOutputTokens: 300 }])
-    expect(booked).toEqual([{ kind: "succeeded", usage: { inputTokens: 90, outputTokens: 12 } }])
-  })
-
-  it("books a failure and rethrows the provider's error", async () => {
-    const { handle, booked } = fakeHandle()
-    const host = fakeHost({ kind: "granted", handle })
-    await expect(
-      withLedgeredGeneration({
-        binding: BINDING,
-        prompt: "document",
-        settings: ON,
-        loadHost: host.loadHost,
-        run: async () => {
-          throw Object.assign(new Error("boom"), { statusCode: 500 })
-        },
-        usageOf: () => null,
-      })
-    ).rejects.toThrow("boom")
-    expect(booked[0].kind).toBe("failed:server_error")
   })
 })

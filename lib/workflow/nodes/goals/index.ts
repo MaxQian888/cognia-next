@@ -34,6 +34,7 @@ import { createGoalFromTemplate } from "@/lib/goal/templates"
 import { seedGoalTemplates } from "@/lib/goal/seed-templates"
 import { getSession } from "@/lib/db/sessions"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
+import { sessionWorkspaceId } from "@/lib/workspace/session-workspace"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   applyGoalLimit,
@@ -224,6 +225,11 @@ registerNodeExecutor({
       session,
       appSettings: useSettingsStore.getState().settings,
       featureId: "goal-subgoals",
+      // A workflow step's call: agentsWorkflows, not the utility surface
+      // (ADR-0188 D27). The goal is its conversation's data, so that
+      // workspace's data-class rules apply; the workflow's own is the fallback.
+      ledgerSurface: "agentsWorkflows",
+      workspaceId: sessionWorkspaceId(session) ?? ctx.projectId ?? null,
     })
     if (!client) {
       throw nonRetryable("action.goal.decomposeSubgoals requires a configured judge model")

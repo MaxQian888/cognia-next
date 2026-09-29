@@ -1,6 +1,11 @@
 /**
  * @jest-environment node
  */
+const mockBuildRendererLlmClient = jest.fn((_args: unknown) => null)
+jest.mock("@/lib/ai/renderer-llm-client", () => ({
+  buildRendererLlmClient: (args: unknown) => mockBuildRendererLlmClient(args),
+}))
+
 import { formatTeamDoc, teamAuto, teamList, teamRun, teamShow } from "./team-controller"
 import type { Team } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
@@ -314,6 +319,18 @@ describe("teamAuto", () => {
     const { dispatch, actions } = recorder()
     await teamAuto("do it", { dispatch, ...baseDeps({ buildClient: () => null }) })
     expect((actions[0] as { message: string }).message).toContain("renderer-side API key")
+  })
+
+  it("books the planning call on agentsWorkflows by default", async () => {
+    const { dispatch } = recorder()
+    await teamAuto("do it", { dispatch, ...baseDeps({ buildClient: undefined }) })
+    expect(mockBuildRendererLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        featureId: "agent-team-auto",
+        ledgerSurface: "agentsWorkflows",
+        ledgerOrigin: "agent",
+      })
+    )
   })
 
   it("surfaces the PII refusal distinctly", async () => {

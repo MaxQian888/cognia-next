@@ -1,4 +1,5 @@
 import {
+  councilLedgerFor,
   parseCouncilArgs,
   resolveCouncilRoster,
   executeCouncilCommand,
@@ -122,5 +123,27 @@ describe("executeCouncilCommand", () => {
     const { ctx, messages } = makeCtx("q")
     await executeCouncilCommand(ctx, deps)
     expect(messages[messages.length - 1]).toMatch(/Council failed: synth down/)
+  })
+})
+
+describe("councilLedgerFor", () => {
+  it("books the command on utilityLedger under the conversation's own workspace", async () => {
+    const loadSession = jest.fn(async () => ({ projectId: "ws-7" }))
+    await expect(councilLedgerFor("s1", loadSession)).resolves.toEqual({
+      surface: "utilityLedger",
+      origin: "chat",
+      featureId: "slash-council",
+      workspaceId: "ws-7",
+    })
+    expect(loadSession).toHaveBeenCalledWith("s1")
+  })
+
+  it("attributes no workspace when there is no conversation or it cannot be read", async () => {
+    const loadSession = jest.fn(async () => {
+      throw new Error("db closed")
+    })
+    await expect(councilLedgerFor(null, loadSession)).resolves.toMatchObject({ workspaceId: null })
+    expect(loadSession).not.toHaveBeenCalled()
+    await expect(councilLedgerFor("s1", loadSession)).resolves.toMatchObject({ workspaceId: null })
   })
 })

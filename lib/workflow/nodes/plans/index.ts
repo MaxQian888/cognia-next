@@ -14,6 +14,7 @@ import type { PlanRunContext } from "@/lib/agent/plan/plan-run-context"
 import { listAllPlans, listPlanEvents } from "@/lib/db/plans"
 import { getSession } from "@/lib/db/sessions"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
+import { sessionWorkspaceId } from "@/lib/workspace/session-workspace"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   buildPlanDraftPatch,
@@ -211,6 +212,11 @@ registerNodeExecutor({
       session: session ?? null,
       appSettings: useSettingsStore.getState().settings,
       featureId: "plan-refine",
+      // A workflow step's call: agentsWorkflows, not the utility surface
+      // (ADR-0188 D27). The plan is its conversation's data, so that
+      // workspace's data-class rules apply; the workflow's own is the fallback.
+      ledgerSurface: "agentsWorkflows",
+      workspaceId: sessionWorkspaceId(session) ?? ctx.projectId ?? null,
     })
     if (!client) {
       throw nonRetryable("action.plan.refine requires a configured planner model")

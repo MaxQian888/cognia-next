@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/select"
 
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { useProjectStore } from "@/stores/project/project-store"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 import {
   AutoOrchestrationPiiError,
@@ -146,6 +147,10 @@ export function AutoComposeDialog({
 }: AutoComposeDialogProps) {
   const t = useTranslations("agentTeamsWorkspace.autoCompose")
   const appSettings = useSettingsStore((s) => s.settings)
+  // The team this dialog composes lands in the active workspace (the store
+  // stamps it on creation), so its planning calls carry that workspace's data
+  // and its data-class rules apply to them (ADR-0188 D30).
+  const workspaceId = useProjectStore((s) => s.activeProjectId)
 
   const [phase, setPhase] = useState<Phase>("input")
   const [objective, setObjective] = useState("")
@@ -165,8 +170,12 @@ export function AutoComposeDialog({
           session: null,
           appSettings,
           featureId: "agent-team-auto",
+          // Composing a team is Agent work: it is booked on agentsWorkflows.
+          ledgerSurface: "agentsWorkflows",
+          ledgerOrigin: "agent",
+          workspaceId: workspaceId ?? null,
         })),
-    [buildClient, appSettings]
+    [buildClient, appSettings, workspaceId]
   )
 
   const reset = () => {
@@ -243,7 +252,14 @@ export function AutoComposeDialog({
   ) => {
     setPhase("loading")
     try {
-      const runPrompt = await (makeRunPrompt ?? defaultCouncilRunPrompt)()
+      const runPrompt = makeRunPrompt
+        ? await makeRunPrompt()
+        : await defaultCouncilRunPrompt({
+            surface: "agentsWorkflows",
+            origin: "agent",
+            featureId: `agent-team-auto:${kind}`,
+            workspaceId: workspaceId ?? null,
+          })
       const deps: RunExecutorDeps = { loadAliases: resolveAliases, runPrompt }
       const res =
         kind === "council" ? await runCouncilExec(p, deps) : await runEnsembleExec(p, deps)

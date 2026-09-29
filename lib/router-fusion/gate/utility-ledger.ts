@@ -11,10 +11,11 @@
  * given after one property read — the feature's calls are byte-for-byte what
  * they were, and no Router + Fusion module is loaded. With it on, each call
  * becomes its own session-less utility run: reserved before the request leaves,
- * settled from the client's own usage snapshot when it comes back.
+ * settled from that call's own usage when it comes back.
  *
  * Utilities are ordinary traffic (D38), so an infrastructure fault sends the
- * call out on the original path, unledgered, and counts towards the breaker. A
+ * call out on the original path, unledgered, counts towards the breaker, and
+ * raises the `routerFusionBypassed` notice (`bypass-diagnostic.ts`). A
  * refusal — no budget left, no route past the hard filters — is an answer and
  * is raised, never bypassed.
  *
@@ -26,8 +27,14 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { RawUsage, RoleCallErrorClass } from "@cognia/router-fusion"
 import type { RouterFusionSurface } from "@cognia/router-fusion/settings/switches"
-import type { LlmClient, LlmClientCallOptions, LlmUsageSnapshot } from "@/lib/twin/distill/llm"
+import type {
+  LlmClient,
+  LlmClientCallOptions,
+  LlmUsageSnapshot,
+  UsageDelta,
+} from "@/lib/twin/distill/llm"
 
+import { reportLedgerBypass } from "./bypass-diagnostic"
 import { RouterFusionRefusalError } from "./faults"
 import { breakerThresholdOf, routerFusionGate, type RouterFusionGateSettings } from "./feature-gate"
 import { runOrdinaryWithFallback } from "./guard"
@@ -66,18 +73,16 @@ export type UtilityGrant =
   | { kind: "granted"; handle: UtilityCallHandleLike }
   | { kind: "refused"; code: string; reasons?: string[] }
 
-/** The tokens one call added to a client's cumulative snapshot. */
-export function usageDelta(
-  before: LlmUsageSnapshot | undefined,
-  after: LlmUsageSnapshot | undefined
-): RawUsage | null {
-  if (!after) return null
-  const input = after.inputTokens - (before?.inputTokens ?? 0)
-  const output = after.outputTokens - (before?.outputTokens ?? 0)
-  const cacheRead = (after.cacheReadTokens ?? 0) - (before?.cacheReadTokens ?? 0)
-  const cacheWrite = (after.cacheCreationTokens ?? 0) - (before?.cacheCreationTokens ?? 0)
-  // A provider that reported no usage leaves the snapshot where it was. That is
-  // "unknown", not "free": the reservation stands as the estimate.
+/**
+ * One call's own usage in the ledger's shape, or `null` when the provider
+ * reported nothing — which is "unknown", not "free": the reservation stands as
+ * the estimate.
+ */
+export function rawUsageOf(delta: UsageDelta | null | undefined): RawUsage | null {
+  if (!delta) return null
+  const { inputTokens: input, outputTokens: output } = delta
+  const cacheRead = delta.cacheReadTokens
+  const cacheWrite = delta.cacheCreationTokens
   if (input <= 0 && output <= 0 && cacheRead <= 0 && cacheWrite <= 0) return null
   return {
     inputTokens: Math.max(0, input),
@@ -85,6 +90,22 @@ export function usageDelta(
     ...(cacheRead > 0 ? { cacheReadTokens: cacheRead } : {}),
     ...(cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}),
   }
+}
+
+/** The tokens one call added to a client's cumulative snapshot. */
+export function usageDelta(
+  before: LlmUsageSnapshot | undefined,
+  after: LlmUsageSnapshot | undefined
+): RawUsage | null {
+  if (!after) return null
+  // A provider that reported no usage leaves the snapshot where it was. That is
+  // "unknown", not "free": the reservation stands as the estimate.
+  return rawUsageOf({
+    inputTokens: after.inputTokens - (before?.inputTokens ?? 0),
+    outputTokens: after.outputTokens - (before?.outputTokens ?? 0),
+    cacheReadTokens: (after.cacheReadTokens ?? 0) - (before?.cacheReadTokens ?? 0),
+    cacheCreationTokens: (after.cacheCreationTokens ?? 0) - (before?.cacheCreationTokens ?? 0),
+  })
 }
 
 /**
@@ -127,12 +148,46 @@ export interface LedgeredClientDeps {
   begin: (input: BeginLedgeredUtilityCallInput) => Promise<UtilityGrant | null>
 }
 
-/** Wrap a client so each of its calls is a ledgered utility run. */
+/**
+ * A one-at-a-time lock. `acquire()` resolves with the release once every
+ * earlier holder has released.
+ */
+function serialLock(): () => Promise<() => void> {
+  let tail: Promise<void> = Promise.resolve()
+  return async () => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const previous = tail
+    tail = previous.then(() => held)
+    await previous
+    return release
+  }
+}
+
+const NO_LOCK = async () => () => {}
+
+/**
+ * Wrap a client so each of its calls is a ledgered utility run.
+ *
+ * Each call is settled with its OWN usage. A client that reports per-call usage
+ * (`reportsCallUsage`, which `createLlmClient` does) is read through
+ * `onUsage`, so any number of calls may run on it at once — the twin distiller
+ * does exactly that. A client that keeps only a cumulative snapshot cannot say
+ * which call spent what while two are in flight, so its calls run one at a time
+ * and each is settled from the snapshot's movement across its own call. A
+ * concurrent pair would otherwise both read the other's tokens and book them
+ * twice.
+ */
 export function ledgeredLlmClient(
   inner: LlmClient,
   binding: LedgeredUtilityBinding,
   deps: LedgeredClientDeps
 ): LlmClient {
+  const perCall = inner.reportsCallUsage === true
+  const acquire = perCall ? NO_LOCK : serialLock()
+
   const start = (prompt: string, options: LlmClientCallOptions | undefined) =>
     deps.begin({
       ...binding,
@@ -148,70 +203,110 @@ export function ledgeredLlmClient(
       { featureId: binding.featureId, ...(grant.reasons ? { reasons: grant.reasons } : {}) }
     )
 
-  const ledgered = (
-    options: LlmClientCallOptions | undefined,
-    handle: UtilityCallHandleLike
-  ): LlmClientCallOptions => ({
-    ...options,
-    maxRetries: 0,
-    maxTokens: options?.maxTokens ?? handle.maxOutputTokens,
-  })
-
   const snapshot = () => inner.getUsageSnapshot?.()
+
+  /**
+   * What one granted call reads its usage from: the per-call report, or the
+   * snapshot's movement since it started (only sound under the lock).
+   */
+  const meter = (options: LlmClientCallOptions | undefined, handle: UtilityCallHandleLike) => {
+    let reported: RawUsage | null = null
+    const before = perCall ? undefined : snapshot()
+    const callOptions: LlmClientCallOptions = {
+      ...options,
+      maxRetries: 0,
+      maxTokens: options?.maxTokens ?? handle.maxOutputTokens,
+      ...(perCall
+        ? {
+            onUsage: (delta: UsageDelta) => {
+              reported = rawUsageOf(delta)
+              options?.onUsage?.(delta)
+            },
+          }
+        : {}),
+    }
+    return {
+      callOptions,
+      usage: (): RawUsage | null => (perCall ? reported : usageDelta(before, snapshot())),
+    }
+  }
 
   return {
     ...(inner.provider !== undefined ? { provider: inner.provider } : {}),
     ...(inner.model !== undefined ? { model: inner.model } : {}),
+    ...(perCall ? { reportsCallUsage: true } : {}),
     ...(inner.getUsageSnapshot ? { getUsageSnapshot: () => inner.getUsageSnapshot!() } : {}),
 
     async complete(prompt, options) {
-      const grant = await start(prompt, options)
-      if (!grant) return inner.complete(prompt, options)
-      if (grant.kind === "refused") throw refusal(grant)
-      const { handle } = grant
-      const before = snapshot()
-      let text: string
+      // Reserve under the lock too, so a queued call's reservation is taken
+      // just before it is sent rather than while it waits its turn.
+      const release = await acquire()
       try {
-        text = await inner.complete(prompt, ledgered(options, handle))
-      } catch (error) {
-        const errorClass = classifyUtilityFailure(error)
-        await bookOutcome(() =>
-          errorClass === "cancelled"
-            ? handle.unknown("aborted_before_answer")
-            : handle.failed(errorClass, usageDelta(before, snapshot()))
-        )
-        throw error
+        const grant = await start(prompt, options)
+        if (grant?.kind === "refused") throw refusal(grant)
+        // Bypassed: sent as the caller asked, but still inside the lock, so an
+        // unledgered call cannot move the snapshot under a ledgered one.
+        if (!grant) return await inner.complete(prompt, options)
+        const { handle } = grant
+        const metered = meter(options, handle)
+        let text: string
+        try {
+          text = await inner.complete(prompt, metered.callOptions)
+        } catch (error) {
+          const errorClass = classifyUtilityFailure(error)
+          await bookOutcome(() =>
+            errorClass === "cancelled"
+              ? handle.unknown("aborted_before_answer")
+              : handle.failed(errorClass, metered.usage())
+          )
+          throw error
+        }
+        await bookOutcome(() => handle.succeeded(metered.usage()))
+        return text
+      } finally {
+        release()
       }
-      await bookOutcome(() => handle.succeeded(usageDelta(before, snapshot())))
-      return text
     },
 
     ...(inner.stream
       ? {
           async *stream(prompt: string, options?: LlmClientCallOptions) {
             const streamInner = inner.stream!
-            const grant = await start(prompt, options)
-            if (!grant) {
-              yield* streamInner(prompt, options)
-              return
-            }
-            if (grant.kind === "refused") throw refusal(grant)
-            const { handle } = grant
-            const before = snapshot()
+            const release = await acquire()
             try {
-              yield* streamInner(prompt, ledgered(options, handle))
-            } catch (error) {
-              const errorClass = classifyUtilityFailure(error)
-              // A stream that broke after it started had already been sent, so
-              // its bill is unknowable; only a connect failure is provably unsent.
-              await bookOutcome(() =>
-                errorClass === "not_sent"
-                  ? handle.failed(errorClass, null)
-                  : handle.unknown(`stream_${errorClass}`)
-              )
-              throw error
+              const grant = await start(prompt, options)
+              if (grant?.kind === "refused") throw refusal(grant)
+              if (!grant) {
+                yield* streamInner(prompt, options)
+                return
+              }
+              const { handle } = grant
+              const metered = meter(options, handle)
+              let settled = false
+              try {
+                yield* streamInner(prompt, metered.callOptions)
+                settled = true
+                await bookOutcome(() => handle.succeeded(metered.usage()))
+              } catch (error) {
+                settled = true
+                const errorClass = classifyUtilityFailure(error)
+                // A stream that broke after it started had already been sent, so
+                // its bill is unknowable; only a connect failure is provably unsent.
+                await bookOutcome(() =>
+                  errorClass === "not_sent"
+                    ? handle.failed(errorClass, null)
+                    : handle.unknown(`stream_${errorClass}`)
+                )
+                throw error
+              } finally {
+                // The consumer stopped reading before the stream ended: the
+                // request was sent and its bill never arrived, so the money
+                // stays held rather than the reservation being left open.
+                if (!settled) await bookOutcome(() => handle.unknown("stream_abandoned"))
+              }
+            } finally {
+              release()
             }
-            await bookOutcome(() => handle.succeeded(usageDelta(before, snapshot())))
           },
         }
       : {}),
@@ -244,12 +339,14 @@ export function ledgerUtilityCalls(inner: LlmClient, input: LedgerUtilityCallsIn
             // re-read them from a store a headless brain never loads.
             ...(input.settings ? { appSettings: input.settings as AppSettings } : {}),
           }),
-        onBypass: (notice) => {
-          console.warn(
-            `[router-fusion] ${call.featureId} called on the original path, unledgered`,
-            notice.fault
-          )
-        },
+        // Utilities have no message to badge: the notice is a diagnostic
+        // (deduplicated per surface), and the breaker has already counted it.
+        onBypass: (notice) =>
+          reportLedgerBypass({
+            surface: notice.surface,
+            featureId: call.featureId,
+            fault: notice.fault,
+          }),
         // Bypassed: the feature's call still happens, it is simply not booked.
         original: async () => null,
       }),

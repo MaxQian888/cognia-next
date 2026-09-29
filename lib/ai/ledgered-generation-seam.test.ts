@@ -7,6 +7,7 @@
  */
 
 jest.mock("ai", () => ({ generateText: jest.fn(), streamText: jest.fn() }))
+jest.mock("@/lib/router-fusion/gate/bypass-diagnostic", () => ({ reportLedgerBypass: jest.fn() }))
 
 import { generateText } from "ai"
 import type { LanguageModel } from "ai"
@@ -19,6 +20,7 @@ import type {
 import type * as WebSearchSeam from "@cognia/web-search/generation-seam"
 
 import { __resetBreakerForTesting, getBreakerSnapshot } from "@/lib/router-fusion/gate/breaker"
+import { reportLedgerBypass } from "@/lib/router-fusion/gate/bypass-diagnostic"
 import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
 import type { RouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
 import type {
@@ -189,18 +191,17 @@ describe("resolveLedgeredGenerationSeam", () => {
   })
 
   it("[ACC:ISO-01] falls back to no seam, and counts the fault, when the binding read fails", async () => {
-    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     resolveBinding.mockRejectedValueOnce(new Error("settings row unreadable"))
 
     await expect(
       resolveLedgeredGenerationSeam({ surface: "utilityLedger", settings: ON, resolveBinding })
     ).resolves.toBeUndefined()
     expect(getBreakerSnapshot("utilityLedger").consecutiveFaults).toBe(1)
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("unledgered"),
-      expect.objectContaining({ code: "internal" })
-    )
-    warn.mockRestore()
+    expect(reportLedgerBypass).toHaveBeenCalledWith({
+      surface: "utilityLedger",
+      featureId: "package-generation",
+      fault: expect.objectContaining({ code: "internal" }),
+    })
   })
 })
 

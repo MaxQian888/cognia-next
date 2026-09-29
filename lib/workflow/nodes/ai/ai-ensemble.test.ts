@@ -10,8 +10,9 @@ jest.mock("@/lib/db/settings", () => ({
   })),
 }))
 const mockCouncilRunPrompt = jest.fn(async () => ({ completion: "merged-by-council" }))
+const mockDefaultCouncilRunPrompt = jest.fn(async (_ledger: unknown) => mockCouncilRunPrompt)
 jest.mock("@/lib/ai/council/run-council", () => ({
-  defaultCouncilRunPrompt: jest.fn(async () => mockCouncilRunPrompt),
+  defaultCouncilRunPrompt: (ledger: unknown) => mockDefaultCouncilRunPrompt(ledger),
 }))
 const mockExecuteDeployedWorkflow = jest.fn()
 jest.mock("@/lib/workflow/runtime/execution-authority", () => ({
@@ -202,13 +203,13 @@ describe("defaultAiEnsembleDeps", () => {
 
   it("runAgent without a schema returns the completion text", async () => {
     mockExecuteAgent.mockResolvedValue({ text: "plain answer" })
-    const deps = await defaultAiEnsembleDeps()
+    const deps = await defaultAiEnsembleDeps(makeCtx({}))
     expect(await deps.runAgent({ prompt: "go" })).toEqual({ text: "plain answer" })
   })
 
   it("runAgent with a schema returns the validated object", async () => {
     mockExecuteAgent.mockResolvedValue({ text: "{}", object: { v: "a" } })
-    const deps = await defaultAiEnsembleDeps()
+    const deps = await defaultAiEnsembleDeps(makeCtx({}))
     const r = await deps.runAgent({
       prompt: "go",
       outputSchema: { type: "object", properties: { v: { type: "string" } }, required: ["v"] },
@@ -220,7 +221,7 @@ describe("defaultAiEnsembleDeps", () => {
     mockExecuteDeployedWorkflow.mockResolvedValue({
       result: { status: "succeeded", output: { ok: true } },
     })
-    const deps = await defaultAiEnsembleDeps()
+    const deps = await defaultAiEnsembleDeps(makeCtx({}))
     expect(await deps.runSubworkflow({ workflowId: "w", payload: {} })).toEqual({
       object: { ok: true },
     })
@@ -228,18 +229,37 @@ describe("defaultAiEnsembleDeps", () => {
 
   it("runSubworkflow throws when the target is missing", async () => {
     mockExecuteDeployedWorkflow.mockRejectedValue(new Error("workflow w not found"))
-    const deps = await defaultAiEnsembleDeps()
+    const deps = await defaultAiEnsembleDeps(makeCtx({}))
     await expect(deps.runSubworkflow({ workflowId: "w", payload: {} })).rejects.toThrow(/not found/)
   })
 
   it("runSubworkflow throws when the run does not succeed", async () => {
     mockExecuteDeployedWorkflow.mockResolvedValue({ result: { status: "failed" } })
-    const deps = await defaultAiEnsembleDeps()
+    const deps = await defaultAiEnsembleDeps(makeCtx({}))
     await expect(deps.runSubworkflow({ workflowId: "w", payload: {} })).rejects.toThrow(/failed/)
   })
 
+  it("ledgers every sample and synthesizer call as this step's agentsWorkflows work", async () => {
+    mockExecuteAgent.mockResolvedValue({ text: "plain answer" })
+    const ctx = { ...makeCtx({}), projectId: "ws-3" }
+    const deps = await defaultAiEnsembleDeps(ctx)
+    await deps.runAgent({ prompt: "go" })
+    expect(mockExecuteAgent).toHaveBeenCalledWith(
+      "go",
+      expect.objectContaining({
+        ledger: { featureId: "workflow:n1", origin: "workflow", workspaceId: "ws-3" },
+      })
+    )
+    expect(mockDefaultCouncilRunPrompt).toHaveBeenCalledWith({
+      surface: "agentsWorkflows",
+      origin: "workflow",
+      featureId: "workflow:n1",
+      workspaceId: "ws-3",
+    })
+  })
+
   it("runPrompt delegates to the council runPrompt", async () => {
-    const deps = await defaultAiEnsembleDeps()
+    const deps = await defaultAiEnsembleDeps(makeCtx({}))
     expect(await deps.runPrompt({ modelAlias: "q", userPrompt: "x" })).toEqual({
       completion: "merged-by-council",
     })

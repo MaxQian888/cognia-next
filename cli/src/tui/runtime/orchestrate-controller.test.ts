@@ -1,3 +1,19 @@
+const mockBuildRendererLlmClient = jest.fn((_args: unknown) => ({ complete: async () => "{}" }))
+jest.mock("@/lib/ai/renderer-llm-client", () => ({
+  buildRendererLlmClient: (args: unknown) => mockBuildRendererLlmClient(args),
+}))
+const mockDefaultCouncilRunPrompt = jest.fn(
+  async (_ledger: unknown) =>
+    async ({ modelAlias }: { modelAlias: string }) => ({
+      completion: `out(${modelAlias})`,
+      model: modelAlias,
+    })
+)
+jest.mock("@/lib/ai/council/run-council", () => ({
+  ...jest.requireActual("@/lib/ai/council/run-council"),
+  defaultCouncilRunPrompt: (ledger: unknown) => mockDefaultCouncilRunPrompt(ledger),
+}))
+
 import { orchestrateRun, parseOrchestrateArgs } from "./orchestrate-controller"
 import type { OrchestrateDeps } from "./orchestrate-controller"
 import type { AutoOrchestrationProposal } from "@/lib/ai/agent/team/auto/types"
@@ -84,6 +100,24 @@ describe("orchestrateRun", () => {
       expect(doc.overlay.title).toContain("Council")
       expect(doc.overlay.body).toContain("Council:")
     }
+  })
+
+  it("books planning and the in-TUI council on agentsWorkflows by default", async () => {
+    const { deps } = baseDeps({
+      buildClient: undefined,
+      runPrompt: undefined,
+      plan: (async () => proposalWith("manager_worker", "council")) as never,
+    })
+    await orchestrateRun("decide arch --consensus", deps)
+    expect(mockBuildRendererLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({ ledgerSurface: "agentsWorkflows", ledgerOrigin: "agent" })
+    )
+    expect(mockDefaultCouncilRunPrompt).toHaveBeenCalledWith({
+      surface: "agentsWorkflows",
+      origin: "agent",
+      featureId: "cli-orchestrate:council",
+      workspaceId: null,
+    })
   })
 
   it("runs an ensemble for a --verify objective", async () => {

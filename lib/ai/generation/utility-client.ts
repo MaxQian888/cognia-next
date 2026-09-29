@@ -12,7 +12,10 @@
 
 import type { AppSettings, ChatSession, UtilityModelConfig } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
-import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
+import {
+  buildRendererLlmClient,
+  type BuildRendererLlmClientArgs,
+} from "@/lib/ai/renderer-llm-client"
 
 /**
  * Default cheap models for utility tasks when no explicit override is configured.
@@ -32,6 +35,12 @@ export interface BuildUtilityClientArgs {
   override?: UtilityModelConfig
   /** Telemetry-only feature id forwarded to the resolver. */
   featureId: string
+  /** Router + Fusion surface (ADR-0188 D27); background chores are `utilityLedger`. */
+  ledgerSurface?: BuildRendererLlmClientArgs["ledgerSurface"]
+  /** Where the run came from, for the run list. */
+  ledgerOrigin?: BuildRendererLlmClientArgs["ledgerOrigin"]
+  /** Workspace the call belongs to (D30); defaults to the session's own. */
+  workspaceId?: string | null
 }
 
 /**
@@ -60,6 +69,9 @@ export function buildUtilityLlmClient({
   appSettings,
   override,
   featureId,
+  ledgerSurface,
+  ledgerOrigin,
+  workspaceId,
 }: BuildUtilityClientArgs): LlmClient | null {
   // Only suggest a cheap model when the user hasn't explicitly configured one
   // in the per-feature override.
@@ -72,5 +84,8 @@ export function buildUtilityLlmClient({
     providerOverride: override?.providerOverride,
     modelOverride: override?.model,
     modelPreference: cheapHint,
+    ...(ledgerSurface ? { ledgerSurface } : {}),
+    ...(ledgerOrigin ? { ledgerOrigin } : {}),
+    ...(workspaceId !== undefined ? { workspaceId } : {}),
   })
 }

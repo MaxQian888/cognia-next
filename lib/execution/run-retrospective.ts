@@ -57,7 +57,8 @@ export interface SafeRunRetrospectiveAdapterContext {
 }
 
 export interface RunRetrospectiveServiceOptions {
-  runModel(prompt: string): Promise<RunRetrospectiveModelResult>
+  /** `run` is the ExecutionRun being analysed, for attributing the model call. */
+  runModel(prompt: string, run: ExecutionRun): Promise<RunRetrospectiveModelResult>
   buildAdapterContext?: (
     run: ExecutionRun
   ) => Promise<SafeRunRetrospectiveAdapterContext | undefined>
@@ -227,7 +228,7 @@ export function createRunRetrospectiveService(options: RunRetrospectiveServiceOp
         listVisibleExecutionRunEvents(runId),
         options.buildAdapterContext?.(run),
       ])
-      const result = await options.runModel(buildPrompt(run, events, adapterContext))
+      const result = await options.runModel(buildPrompt(run, events, adapterContext), run)
       const createdAt = now()
       const retrospectiveId = id("run-retrospective")
       const normalized = normalizeResult(runId, result, retrospectiveId, createdAt)
@@ -264,14 +265,17 @@ export async function generateConfiguredRunRetrospective(
     import("@/stores/settings"),
     import("@/lib/twin/distill/llm"),
   ])
-  const client = buildUtilityLlmClient({
-    session: null,
-    appSettings: useSettingsStore.getState().settings,
-    featureId: "run-retrospective",
-  })
-  if (!client) throw new Error("A utility model is required for run retrospective analysis")
   return createRunRetrospectiveService({
-    runModel: async (prompt) => {
+    runModel: async (prompt, run) => {
+      // Built per run: the analysis carries that run's projections, so its
+      // workspace's data-class rules apply to the call (ADR-0188 D30).
+      const client = buildUtilityLlmClient({
+        session: null,
+        appSettings: useSettingsStore.getState().settings,
+        featureId: "run-retrospective",
+        workspaceId: run.projectId ?? null,
+      })
+      if (!client) throw new Error("A utility model is required for run retrospective analysis")
       const response = await client.complete(prompt, {
         system:
           "Return JSON only: {issueTimeline:[{at,summary,eventRef?}],proposals:[{targetKind,targetId?,title,before?,after,evidenceRefs?}]}. " +

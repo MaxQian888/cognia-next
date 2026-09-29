@@ -76,6 +76,10 @@ export async function runTeamCompose(ctx: StepExecutionContext): Promise<StepExe
     session: null,
     appSettings: useSettingsStore.getState().settings,
     featureId: "workflow.team.compose",
+    // A workflow step composing a team: agentsWorkflows (ADR-0188 D27), in the
+    // workflow's own workspace (D30).
+    ledgerSurface: "agentsWorkflows",
+    workspaceId: ctx.projectId ?? null,
   })
   if (!client) {
     throw nonRetryable(

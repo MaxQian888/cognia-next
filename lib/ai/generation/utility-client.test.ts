@@ -10,6 +10,18 @@ jest.mock("@/lib/twin/distill/llm", () => ({
   createLlmClient: (config: unknown) => createLlmClientMock(config),
 }))
 
+const buildRendererSpy = jest.fn()
+jest.mock("@/lib/ai/renderer-llm-client", () => {
+  const actual = jest.requireActual("@/lib/ai/renderer-llm-client")
+  return {
+    ...actual,
+    buildRendererLlmClient: (args: unknown) => {
+      buildRendererSpy(args)
+      return actual.buildRendererLlmClient(args)
+    },
+  }
+})
+
 function appSettings(partial: Record<string, unknown> = {}): AppSettings {
   return {
     id: "singleton",
@@ -158,5 +170,31 @@ describe("buildUtilityLlmClient", () => {
     expect(createLlmClientMock).toHaveBeenCalledWith(
       expect.objectContaining({ model: "session-model" })
     )
+  })
+})
+
+describe("buildUtilityLlmClient ledger attribution", () => {
+  it("forwards the Router + Fusion surface, origin and workspace only when given", () => {
+    const settings = appSettings({
+      defaultProvider: "openai",
+      providerSettings: { openai: { apiKey: "sk-1" } },
+    })
+    buildUtilityLlmClient({ session: null, appSettings: settings, featureId: "title" })
+    expect(buildRendererSpy.mock.calls.at(-1)?.[0]).not.toHaveProperty("workspaceId")
+    expect(buildRendererSpy.mock.calls.at(-1)?.[0]).not.toHaveProperty("ledgerSurface")
+
+    buildUtilityLlmClient({
+      session: null,
+      appSettings: settings,
+      featureId: "scheduler-plan-replan",
+      ledgerSurface: "agentsWorkflows",
+      ledgerOrigin: "agent",
+      workspaceId: "ws-1",
+    })
+    expect(buildRendererSpy.mock.calls.at(-1)?.[0]).toMatchObject({
+      ledgerSurface: "agentsWorkflows",
+      ledgerOrigin: "agent",
+      workspaceId: "ws-1",
+    })
   })
 })

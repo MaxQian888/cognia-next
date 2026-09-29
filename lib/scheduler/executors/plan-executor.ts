@@ -62,6 +62,12 @@ export async function executePlanTask(
           session: null,
           appSettings,
           featureId: "scheduler-plan-replan",
+          // Repairing a plan mid-run is part of the plan's Agent work, so it is
+          // booked on agentsWorkflows (ADR-0188 D27), in the workspace the
+          // schedule belongs to (D30).
+          ledgerSurface: "agentsWorkflows",
+          ledgerOrigin: "agent",
+          workspaceId: task.projectId ?? null,
         }) ?? undefined
     } catch (err) {
       log.warn("Scheduler plan task: failed to build replan client; continuing without", {

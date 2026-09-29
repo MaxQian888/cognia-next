@@ -1,4 +1,4 @@
-import { resolveSessionWorkspace } from "./session-workspace"
+import { resolveSessionWorkspace, sessionWorkspaceId } from "./session-workspace"
 
 const projects = [
   { id: "proj-a", name: "A" },
@@ -45,5 +45,22 @@ describe("resolveSessionWorkspace", () => {
     expect(
       resolveSessionWorkspace({ executionContext: { projectId: "proj-gone" } }, projects, "proj-a")
     ).toBeNull()
+  })
+})
+
+describe("sessionWorkspaceId", () => {
+  it("reads the session's own workspace, then its binding's", () => {
+    expect(sessionWorkspaceId({ projectId: "p1" })).toBe("p1")
+    expect(sessionWorkspaceId({ executionContext: { projectId: "p2" } })).toBe("p2")
+    expect(sessionWorkspaceId({ projectId: "p1", executionContext: { projectId: "p2" } })).toBe(
+      "p1"
+    )
+  })
+
+  it("answers null rather than guessing when the session names no workspace", () => {
+    expect(sessionWorkspaceId({})).toBeNull()
+    expect(sessionWorkspaceId({ projectId: "", executionContext: null })).toBeNull()
+    expect(sessionWorkspaceId(null)).toBeNull()
+    expect(sessionWorkspaceId(undefined)).toBeNull()
   })
 })

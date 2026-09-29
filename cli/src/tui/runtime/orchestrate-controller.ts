@@ -102,7 +102,16 @@ export async function orchestrateRun(rawArgs: string, deps: OrchestrateDeps): Pr
   const session = await (deps.getSession ?? getSession)(deps.sessionId)
   const client = (
     deps.buildClient ??
-    ((s, a) => buildRendererLlmClient({ session: s, appSettings: a, featureId: "agent-team-auto" }))
+    ((s, a) =>
+      buildRendererLlmClient({
+        session: s,
+        appSettings: a,
+        featureId: "agent-team-auto",
+        // Composing a team is Agent work: agentsWorkflows (ADR-0188 D27), in
+        // the conversation's workspace, as in the desktop dialog.
+        ledgerSurface: "agentsWorkflows",
+        ledgerOrigin: "agent",
+      }))
   )(session, appSettings)
   if (!client) {
     deps.dispatch({
@@ -153,7 +162,16 @@ export async function orchestrateRun(rawArgs: string, deps: OrchestrateDeps): Pr
   // Analysis executors run right here.
   deps.dispatch({ type: "ACTIVITY_START", kind: "council", label: truncate(parsed.objective) })
   try {
-    const runPrompt = deps.runPrompt ?? (await defaultCouncilRunPrompt())
+    // Like the desktop auto-compose dialog: Agent work, booked on
+    // agentsWorkflows (ADR-0188 D27), with no workspace in the TUI.
+    const runPrompt =
+      deps.runPrompt ??
+      (await defaultCouncilRunPrompt({
+        surface: "agentsWorkflows",
+        origin: "agent",
+        featureId: `cli-orchestrate:${kind}`,
+        workspaceId: null,
+      }))
     const execDeps: RunExecutorDeps = {
       loadAliases: deps.loadAliases ?? loadConfiguredAliases,
       runPrompt,
