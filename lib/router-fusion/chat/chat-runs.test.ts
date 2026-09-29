@@ -485,6 +485,31 @@ describe("chat runs", () => {
     expect(await recoverStaleFusionRuns(boot.deps)).toBe(0)
   })
 
+  it("replays pending outbox effects at recovery even when no run needed sealing (D39)", async () => {
+    const shared = harness()
+    const run = await started("run-1", shared)
+    // The window sealed its run and closed before it drained the outbox.
+    const lease = await shared.store.acquireLease("run-1", "window-a", 60_000)
+    if (!lease.ok) throw new Error(lease.code)
+    const sealed = await shared.store.finalizeRun("run-1", lease.fencingToken, {
+      status: "succeeded",
+    })
+    expect(sealed.ok).toBe(true)
+    __resetChatRunsForTesting()
+    const pending = await shared.store.db.fusionOutbox
+      .filter((row) => row.status === "pending")
+      .toArray()
+    expect(pending.length).toBeGreaterThan(0)
+    expect(run.runId).toBe("run-1")
+
+    const boot = harness({ leaseOwner: "window-c", store: shared.store, clock: shared.clock })
+    expect(await recoverStaleFusionRuns(boot.deps)).toBe(0)
+    expect(boot.applied.sort()).toEqual(pending.map((row) => row.effectId).sort())
+    expect(
+      await shared.store.db.fusionOutbox.filter((row) => row.status === "pending").count()
+    ).toBe(0)
+  })
+
   it("[ACC:REC-03] hands a lapsed orchestrated run to its resumer and seals it only when refused", async () => {
     const shared = harness()
     for (const runId of ["run-api-1", "run-api-2"]) {

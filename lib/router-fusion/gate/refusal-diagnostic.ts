@@ -35,6 +35,81 @@ export interface RouterFusionRefusalDiagnosticInput {
 
 const NAMESPACE = "routerFusion.refusal"
 
+/**
+ * Every refusal or failure code the chat path can put in front of a reader,
+ * each of which must have a sentence under `routerFusion.refusal` in every
+ * locale (pinned by `refusal-diagnostic.test.ts`). Anything else still reads
+ * as the `unknown` sentence naming its code. Where each comes from:
+ *
+ *  - routing and selection (`build-options`, `route-chat-turn`,
+ *    `chat-fusion-turn`, the image check of `hooks/chat/router-fusion-chat-turn`);
+ *  - run creation and the one-run grant (`chat-runs` begin, `chat-turn-bridge`);
+ *  - a reservation the renderer answered (`chat-runs` reserve: the live policy
+ *    check, the per-call amount, the envelope check, the ledger's prepare and
+ *    dispatch), shown on the run card and in the sidecar's `session_ended`;
+ *  - the sidecar's own gate (`call-ledger-gate`);
+ *  - a direct run's seal (`chat-runs` finalize / abort, stale-run recovery);
+ *  - a cascade or panel run (`orchestrator-host`, the `durable-call`, `cascade`
+ *    and `panel` workflows).
+ */
+export const CHAT_SURFACED_CODES = [
+  // routing and selection
+  "ROUTE_NO_SOLUTION",
+  "FUSION_TEXT_ONLY",
+  "ROUTE_EXPIRED",
+  "PII_BLOCKED",
+  "ROUTER_FUSION_DISABLED",
+  "ROUTER_FUSION_UNAVAILABLE",
+  // run creation
+  "RUN_EXISTS",
+  "SESSION_BUSY",
+  "TENANT_BUDGET_EXHAUSTED",
+  "DECLINED_GRANT",
+  // reservations
+  "DEPLOYMENT_UNKNOWN",
+  "PROVIDER_UNAVAILABLE",
+  "RESTRICTED_NOT_GRANTED",
+  "DEPLOYMENT_NOT_IN_SNAPSHOT",
+  "DATA_CLASS_NOT_ALLOWED",
+  "PRICE_UNKNOWN",
+  "RUN_NOT_RUNNING",
+  "RUN_TERMINAL",
+  "BUDGET_FROZEN",
+  "DEADLINE_EXCEEDED",
+  "MAX_MODEL_CALLS",
+  "RUN_BUDGET_EXHAUSTED",
+  "STAGE_NOT_HELD",
+  "FENCED",
+  "REVOKED",
+  "STEP_OUTCOME_UNKNOWN",
+  "ATTEMPTS_EXHAUSTED",
+  "STEP_ALREADY_COMMITTED",
+  "NOT_PREPARED",
+  // the sidecar's gate
+  "SESSION_CLOSED",
+  "REFUSED",
+  // a direct run's seal
+  "CALL_FAILED",
+  "DISPATCH_FAILED",
+  "RUN_SETUP_FAILED",
+  "RUN_LOST",
+  // a cascade or panel run
+  "RUN_NOT_FOUND",
+  "RUN_INPUT_MISSING",
+  "RUN_BUSY",
+  "ROLE_UNRESOLVABLE",
+  "INTERNAL",
+  "CALL_OUTCOME_UNKNOWN",
+  "POLICY_REFUSAL",
+  "FORMAT_INVALID",
+  "VERIFICATION_FAILED",
+  "CONTEXT_PRECHECK_FAILED",
+  "CONTEXT_BUDGET_EXHAUSTED",
+  "FUSION_INSUFFICIENT_CANDIDATES",
+  "JUDGE_OUTPUT_INVALID",
+  "CANCELLED",
+] as const
+
 export function isRouterFusionRefusal(error: unknown): error is RouterFusionRefusalError {
   return (
     error instanceof RouterFusionRefusalError ||

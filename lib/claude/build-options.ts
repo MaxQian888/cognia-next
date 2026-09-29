@@ -48,7 +48,7 @@ import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "@/lib/claude/agents/di
 import { runtimeFromLegacy } from "@/lib/ai/agent/execution/legacy-mapping"
 // Router + Fusion (ADR-0188 D37): only the zero-cost gate is imported here;
 // everything behind it is loaded dynamically once the chat switch is on.
-import { recordFusionFault, recordFusionSuccess } from "@/lib/router-fusion/gate/breaker"
+import { recordFusionFault } from "@/lib/router-fusion/gate/breaker"
 import {
   RouterFusionRefusalError,
   RouterFusionUnavailableError,
@@ -596,6 +596,15 @@ export interface BuildOptionsContext {
    * off (the default) the field changes nothing.
    */
   routerFusionSurface?: "chat"
+  /**
+   * The chat turn will be handed to the HostState host (a `message.enqueue`
+   * intent) rather than dispatched from this window. Host-state sends never
+   * stamp (ADR-0188 B1): the direct route is neither selected through Router +
+   * Fusion nor sealed, and no route is remembered, because no run would ever
+   * be created for it here. An explicit cascade or panel still runs in this
+   * window — such a turn is never handed to the Host.
+   */
+  routerFusionHostState?: boolean
   /** Semantic Agent model role. Normal chat/dispatch defaults to `execute`. */
   modelRole?: import("@cognia/agent-config-types").AgentModelRole
   /**
@@ -1452,6 +1461,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     { kind: "selected" }
   > | null = null
   let fusionRunStamp: import("@cognia/agent-config-types").RouterFusionRunStamp | null = null
+  // What the direct route was selected on; the seal keeps it with the stamp so
+  // a resend reseals on the same inputs (retries, reroutes, durable replay).
+  let fusionRoutingInputs: import("@cognia/agent-config-types").RouterFusionRoutingInputs | null =
+    null
   const bypassRouterFusion = (error: unknown) => {
     const fault = toInfrastructureFault(error)
     if (!fault) throw error
@@ -1468,8 +1481,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     fusionHost = null
     fusionRouteHost = null
     fusionSelection = null
+    fusionRoutingInputs = null
     delete opts.ledger
     delete opts.routerFusion
+    delete opts.routerFusionRouting
     opts.routerFusionBypass = { code: fault.code, justTripped: record.justTripped }
   }
   // The composer's Router + Fusion mode (ADR-0188 B3), read only while the gate
@@ -1614,7 +1629,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         bypassRouterFusion(error)
       }
     }
-    if (fusionGate === "on" && !fusionRunStamp && !opts.routerFusionBypass) {
+    if (
+      fusionGate === "on" &&
+      !fusionRunStamp &&
+      !opts.routerFusionBypass &&
+      !ctx.routerFusionHostState
+    ) {
       try {
         const fusion = await loadRouterFusionHost()
         const routeHost = fusion.createChatRouteHost({
@@ -1624,9 +1644,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           // The chat surface books this turn's classification call, if any.
           surface: "chat",
         })
-        const selection = await fusion.selectChatDeployment(routeHost, {
-          selection: routingRequest.selection,
-          routingRequest,
+        const inputs: import("@cognia/agent-config-types").RouterFusionRoutingInputs = {
           promptText: promptText ?? "",
           estimatedInputTokens: estimatedInputTokens ?? 1,
           hints: {
@@ -1635,9 +1653,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             workspaceBound: Boolean(capabilityScope.projectId),
             ...(taskHints.attachmentKinds ? { attachmentKinds: taskHints.attachmentKinds } : {}),
           },
-          workspaceId: capabilityScope.projectId,
           hasImages: taskHints.attachmentKinds?.includes("image") ?? false,
           needsTools: (taskHints.toolCount ?? 0) > 0,
+        }
+        const selection = await fusion.selectChatDeployment(routeHost, {
+          selection: routingRequest.selection,
+          routingRequest,
+          ...inputs,
+          workspaceId: capabilityScope.projectId,
         })
         if (selection.kind === "refused") {
           throw new RouterFusionRefusalError(
@@ -1649,6 +1672,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         fusionHost = fusion
         fusionRouteHost = routeHost
         fusionSelection = selection
+        fusionRoutingInputs = inputs
         model = selection.modelId
         providerId = selection.providerId
         opts.routingPlan = selection.plan
@@ -5278,6 +5302,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     fusionGate === "on" &&
     !opts.routerFusionBypass &&
     !opts.routerFusionRun &&
+    !ctx.routerFusionHostState &&
     session?.id &&
     appSettings
   ) {
@@ -5310,6 +5335,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         if (!selection) {
           // No selection was routed above (the model came from the provider's
           // default): the final model is the pick.
+          const attachmentKinds = ctx.routingContextHint?.attachmentKinds
+          fusionRoutingInputs = {
+            promptText: promptText ?? "",
+            estimatedInputTokens: promptText ? estimateCJKTokenCount(promptText) : 1,
+            hints: {
+              workspaceBound: Boolean(capabilityScope.projectId),
+              ...(attachmentKinds ? { attachmentKinds } : {}),
+            },
+            hasImages: attachmentKinds?.includes("image") ?? false,
+            needsTools: false,
+          }
           const picked = await fusion.selectChatDeployment(routeHost, {
             selection: { kind: "manual", providerId: sealProvider, modelId: opts.model },
             routingRequest: {
@@ -5317,12 +5353,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
               selection: { kind: "manual", providerId: sealProvider, modelId: opts.model },
               sessionId: session.id,
             },
-            promptText: promptText ?? "",
-            estimatedInputTokens: promptText ? estimateCJKTokenCount(promptText) : 1,
-            hints: { workspaceBound: Boolean(capabilityScope.projectId) },
+            ...fusionRoutingInputs,
             workspaceId: capabilityScope.projectId,
-            hasImages: ctx.routingContextHint?.attachmentKinds?.includes("image") ?? false,
-            needsTools: false,
           })
           if (picked.kind === "refused") {
             throw new RouterFusionRefusalError(
@@ -5358,6 +5390,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         }
         opts.ledger = seal.ledger
         opts.routerFusion = seal.stamp
+        if (fusionRoutingInputs) opts.routerFusionRouting = fusionRoutingInputs
         // A per-call reservation holds the output bound, so the call must not
         // be allowed more than was reserved.
         if (lane === "ai-sdk" && opts.modelParams?.maxOutputTokens === undefined) {
@@ -5366,7 +5399,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         // No silent in-turn model switch on a ledgered turn (D5).
         delete opts.fallbackModel
         fusion.rememberChatRoute(seal.prepared)
-        recordFusionSuccess("chat")
+        // No breaker success here: the turn has not run yet. Its seal records
+        // one once the whole turn stayed ledgered (ADR-0188 D38).
       } catch (error) {
         bypassRouterFusion(error)
       }

@@ -250,14 +250,75 @@ describe("chat turn bridge", () => {
     expect(summary?.bypass).toEqual({ code: "sidecar_unanswered", justTripped: false })
   })
 
+  it("[ACC:ISO-02] trips the breaker after three consecutive turns that each faulted mid-turn", async () => {
+    // Each turn creates its run fine and then loses the ledger once mid-turn;
+    // the AI SDK lane goes on unledgered for the rest of that turn, so the
+    // fault is counted once per turn. Run creation is not a success, so the
+    // streak is counted in turns and the third one trips the surface.
+    const faultedTurn = async (runId: string) => {
+      const route = prepared(runId)
+      rememberChatRoute(route)
+      await expect(
+        startRouterFusionChatTurn({ sessionId: "s1", options: sendOptionsFor(route) })
+      ).resolves.toEqual({ kind: "started", runId })
+      await handleRouterFusionSidecarEvent({
+        type: "ledger_bypassed",
+        sessionId: "s1",
+        runId,
+        reason: "renderer_unanswered",
+      })
+      return finishRouterFusionChatTurn("s1", { status: "succeeded" })
+    }
+    await faultedTurn("run-1")
+    await faultedTurn("run-2")
+    expect(getBreakerSnapshot("chat")).toMatchObject({ consecutiveFaults: 2, trip: null })
+    const third = await faultedTurn("run-3")
+    expect(third?.bypass).toEqual({ code: "sidecar_unanswered", justTripped: true })
+    expect(getBreakerSnapshot("chat").trip).toMatchObject({ reason: "sidecar_unanswered" })
+  })
+
+  it("resets the fault streak only when a whole turn was sealed without a fault", async () => {
+    const run = async (runId: string, fault: boolean) => {
+      const route = prepared(runId)
+      rememberChatRoute(route)
+      await startRouterFusionChatTurn({ sessionId: "s1", options: sendOptionsFor(route) })
+      if (fault) {
+        await handleRouterFusionSidecarEvent({
+          type: "ledger_bypassed",
+          sessionId: "s1",
+          runId,
+          reason: "renderer_unanswered",
+        })
+      }
+      // A turn whose model call failed is still a healthy ledgered turn.
+      return finishRouterFusionChatTurn("s1", { status: fault ? "succeeded" : "failed" })
+    }
+    await run("run-1", true)
+    await run("run-2", true)
+    expect(getBreakerSnapshot("chat").consecutiveFaults).toBe(2)
+    await run("run-3", false)
+    expect(getBreakerSnapshot("chat").consecutiveFaults).toBe(0)
+    await run("run-4", true)
+    expect(getBreakerSnapshot("chat")).toMatchObject({ consecutiveFaults: 1, trip: null })
+  })
+
   describe("reseal and reroute", () => {
     const on = { routerFusion: { enabled: true, surfaces: { chat: true } } }
+    /** What the original turn was routed on, kept by its seal. */
+    const routing = {
+      promptText: "Refactor the parser and add tests",
+      estimatedInputTokens: 2_400,
+      hints: { hasCode: true, toolCount: 3, workspaceBound: true, attachmentKinds: ["image"] },
+      hasImages: true,
+      needsTools: true,
+    }
     const cached = (extra: Record<string, unknown> = {}) =>
       ({
         provider: "openai",
         model: "gpt-5",
         fallbackModel: "gpt-5-mini",
-        routerFusion: { runId: "sealed-run" },
+        routerFusion: { runId: "sealed-run", lane: "ai-sdk" },
+        routerFusionRouting: routing,
         ledger: { runId: "sealed-run", mode: "per_call" },
         ...extra,
       }) as never
@@ -288,11 +349,86 @@ describe("chat turn bridge", () => {
       expect(routeMocks.select).not.toHaveBeenCalled()
     })
 
+    it("reseals on the original turn's routing inputs, never on placeholders", async () => {
+      mockSettings.current = on
+      const route = prepared("resealed-inputs")
+      sealAs(route)
+      const outcome = await resealRouterFusionOptions({
+        sessionId: "s1",
+        options: cached(),
+        workspaceId: "p1",
+      })
+      expect(routeMocks.select).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          selection: { kind: "manual", providerId: "openai", modelId: "gpt-5" },
+          promptText: routing.promptText,
+          estimatedInputTokens: 2_400,
+          hints: routing.hints,
+          hasImages: true,
+          needsTools: true,
+          workspaceId: "p1",
+        })
+      )
+      // The next resend of the resealed options is still the same turn.
+      expect(
+        (outcome as { options: { routerFusionRouting?: unknown } }).options.routerFusionRouting
+      ).toEqual(routing)
+    })
+
+    it("seals the lane the original turn ran on, not one guessed from the provider", async () => {
+      mockSettings.current = on
+      sealAs(prepared("resealed-lane"))
+      // An Anthropic model on the AI SDK runtime stays on the AI SDK lane.
+      await resealRouterFusionOptions({
+        sessionId: "s1",
+        options: cached({ provider: "anthropic", model: "claude-sonnet-5" }),
+        workspaceId: null,
+      })
+      expect(routeMocks.seal).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ lane: "ai-sdk", providerId: "anthropic" })
+      )
+      routeMocks.seal.mockClear()
+      await resealRouterFusionOptions({
+        sessionId: "s1",
+        options: cached({ routerFusion: { runId: "sealed-run", lane: "claude-agent-sdk" } }),
+        workspaceId: null,
+      })
+      expect(routeMocks.seal).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ lane: "claude-agent-sdk", providerId: "openai" })
+      )
+    })
+
+    it("sends options sealed without routing inputs unledgered, with the notice and no fault", async () => {
+      mockSettings.current = on
+      const outcome = await resealRouterFusionOptions({
+        sessionId: "s1",
+        options: cached({ routerFusionRouting: undefined }),
+        workspaceId: null,
+      })
+      expect(outcome).toEqual({
+        kind: "bypassed",
+        options: {
+          provider: "openai",
+          model: "gpt-5",
+          fallbackModel: "gpt-5-mini",
+          routerFusionBypass: { code: "routing_inputs_missing", justTripped: false },
+        },
+      })
+      expect(routeMocks.select).not.toHaveBeenCalled()
+      expect(getBreakerSnapshot("chat").consecutiveFaults).toBe(0)
+    })
+
     it("leaves a resend this build does not ledger on the original path", async () => {
       mockSettings.current = on
       const otherLane = await resealRouterFusionOptions({
         sessionId: "s1",
-        options: cached({ execution: { runtimeAdapter: "codex" } }),
+        options: cached({
+          routerFusion: { runId: "sealed-run" },
+          execution: { runtimeAdapter: "codex" },
+        }),
         workspaceId: null,
       })
       expect(otherLane.kind).toBe("bypassed")
@@ -324,7 +460,7 @@ describe("chat turn bridge", () => {
       expect(options.modelParams).toEqual({ maxOutputTokens: 4_096 })
       expect(routeMocks.select).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ workspaceId: "p1", hints: { workspaceBound: true } })
+        expect.objectContaining({ workspaceId: "p1", hints: routing.hints })
       )
       // The route was remembered, so the run can actually be created from it.
       await expect(

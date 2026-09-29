@@ -3,6 +3,7 @@ import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 import { sendPrompt } from "@/lib/claude/ipc"
 import { getWorkSubmissionBundle, type WorkSubmissionRow } from "@/lib/db/work-submissions"
 import { abortRouterFusionSend, prepareRouterFusionSend } from "@/lib/router-fusion/gate/chat-send"
+import { enforceCostBudget, isCostBudgetConfigured } from "@/lib/usage/cost-budget-gate"
 import { useSettingsStore } from "@/stores/settings"
 
 import { openWorkSubmissionPayload, type WorkSubmissionCryptoDeps } from "./crypto"
@@ -18,6 +19,9 @@ interface StoredChatDispatchDeps extends WorkSubmissionCryptoDeps {
   getBundle?: typeof getWorkSubmissionBundle
   /** Test seam for the Router + Fusion replay step. */
   prepareRouterFusionSend?: typeof prepareRouterFusionSend
+  /** Test seams for the legacy cost ceiling a bypassed replay must pass (ADR-0188 D35). */
+  isCostBudgetConfigured?: typeof isCostBudgetConfigured
+  enforceCostBudget?: typeof enforceCostBudget
 }
 
 function recoveryRequired(errorCode: string): WorkDispatchOutcome {
@@ -105,6 +109,17 @@ export function createStoredChatDispatch(
         return { status: "failed", errorCode: `router_fusion_refused:${fusionSend.code}` }
       }
       sendOptions = fusionSend.options
+      // D35: the accepted turn skipped the legacy cost ceiling because its run
+      // held the budget. A replay that goes out unledgered (Router + Fusion is
+      // off now, or faulted) has no run, so the ceiling applies again — the
+      // same late check the chat controller makes before dispatch.
+      if (!sendOptions.routerFusion && (deps.isCostBudgetConfigured ?? isCostBudgetConfigured)()) {
+        const budget = await (deps.enforceCostBudget ?? enforceCostBudget)({
+          ...(sendOptions.provider ? { providerId: sendOptions.provider } : {}),
+          runId: row.runId,
+        })
+        if (!budget.allowed) return { status: "failed", errorCode: "cost_budget_exceeded" }
+      }
     }
 
     try {

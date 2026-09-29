@@ -135,6 +135,79 @@ describe("stored chat dispatch", () => {
       })
     }, 30_000)
 
+    describe("the legacy cost ceiling (D35)", () => {
+      const unledgered = {
+        cwd: "/original/workspace",
+        provider: "openai",
+        model: "gpt-5",
+        routerFusionBypass: { code: "db_unavailable", justTripped: false },
+      }
+      const blocked = { allowed: false, verdict: null, blockedBy: [{ scopeKey: "daily" }] }
+
+      it("checks the ceiling again when the replay goes out unledgered, and fails it when over", async () => {
+        const row = await seedReplayableSubmission(stamped)
+        const prepare = jest.fn().mockResolvedValue({ kind: "send", options: unledgered })
+        const enforce = jest.fn().mockResolvedValue(blocked)
+
+        await expect(
+          createStoredChatDispatch({
+            loadKey,
+            prepareRouterFusionSend: prepare,
+            isCostBudgetConfigured: () => true,
+            enforceCostBudget: enforce as never,
+          })(row)
+        ).resolves.toEqual({ status: "failed", errorCode: "cost_budget_exceeded" })
+        expect(enforce).toHaveBeenCalledWith({ providerId: "openai", runId: "run-1" })
+        expect(mockSendPrompt).not.toHaveBeenCalled()
+      }, 30_000)
+
+      it("dispatches an unledgered replay the ceiling allows", async () => {
+        const row = await seedReplayableSubmission(stamped)
+        const prepare = jest.fn().mockResolvedValue({ kind: "send", options: unledgered })
+        const enforce = jest.fn().mockResolvedValue({ allowed: true, verdict: null, blockedBy: [] })
+
+        await expect(
+          createStoredChatDispatch({
+            loadKey,
+            prepareRouterFusionSend: prepare,
+            isCostBudgetConfigured: () => true,
+            enforceCostBudget: enforce as never,
+          })(row)
+        ).resolves.toEqual({ status: "dispatched" })
+        expect(mockSendPrompt).toHaveBeenCalledWith("session-1", "frozen prompt", unledgered, {
+          commandId: "submission-1",
+        })
+      }, 30_000)
+
+      it("leaves a ledgered replay to its run's budget, and skips an unconfigured ceiling", async () => {
+        const replayed = { ...stamped, routerFusion: { ...stamped.routerFusion, runId: "rf-new" } }
+        const enforce = jest.fn().mockResolvedValue(blocked)
+        const ledgered = await seedReplayableSubmission(stamped)
+        await expect(
+          createStoredChatDispatch({
+            loadKey,
+            prepareRouterFusionSend: jest
+              .fn()
+              .mockResolvedValue({ kind: "send", options: replayed }),
+            isCostBudgetConfigured: () => true,
+            enforceCostBudget: enforce as never,
+          })(ledgered)
+        ).resolves.toEqual({ status: "dispatched" })
+
+        await expect(
+          createStoredChatDispatch({
+            loadKey,
+            prepareRouterFusionSend: jest
+              .fn()
+              .mockResolvedValue({ kind: "send", options: unledgered }),
+            isCostBudgetConfigured: () => false,
+            enforceCostBudget: enforce as never,
+          })(ledgered)
+        ).resolves.toEqual({ status: "dispatched" })
+        expect(enforce).not.toHaveBeenCalled()
+      }, 30_000)
+    })
+
     it("[ACC:ISO-04] fails a replay Router + Fusion refuses instead of sending it", async () => {
       const row = await seedReplayableSubmission(stamped)
       const prepare = jest.fn().mockResolvedValue({ kind: "refused", code: "PROVIDER_UNAVAILABLE" })

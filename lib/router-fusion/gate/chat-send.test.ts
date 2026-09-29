@@ -6,7 +6,7 @@ jest.mock("@/lib/router-fusion/gate/load-engine", () => ({
 
 import type { SendOptions } from "@cognia/agent-config-types"
 
-import { __resetBreakerForTesting, getBreakerSnapshot } from "./breaker"
+import { __resetBreakerForTesting, getBreakerSnapshot, recordFusionSuccess } from "./breaker"
 import { RouterFusionInfrastructureError } from "./faults"
 import { loadRouterFusionHost, type RouterFusionHost } from "./load-engine"
 import {
@@ -133,7 +133,7 @@ describe("prepareRouterFusionSend", () => {
     })
   })
 
-  it("[ACC:ISO-02] counts only consecutive faults: a started run resets the streak, three in a row trip", async () => {
+  it("[ACC:ISO-02] counts only consecutive faults: a started run is not yet a success, a clean seal resets the streak, three in a row trip", async () => {
     const faulty = host({
       startRouterFusionChatTurn: jest
         .fn()
@@ -145,6 +145,10 @@ describe("prepareRouterFusionSend", () => {
     await prepareRouterFusionSend({ ...base, options: stamped, loadHost: faulty })
     await prepareRouterFusionSend({ ...base, options: stamped, loadHost: faulty })
     await prepareRouterFusionSend({ ...base, options: stamped, loadHost: healthy })
+    // The run exists, but the turn can still fault after dispatch: only the
+    // turn's clean seal (`finishRouterFusionChatTurn`) counts as a success.
+    expect(getBreakerSnapshot("chat").consecutiveFaults).toBe(2)
+    recordFusionSuccess("chat")
     expect(getBreakerSnapshot("chat").consecutiveFaults).toBe(0)
 
     await prepareRouterFusionSend({ ...base, options: stamped, loadHost: faulty })

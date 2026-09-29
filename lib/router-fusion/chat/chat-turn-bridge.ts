@@ -33,7 +33,7 @@ import { waitForDecision, type ApprovalKey } from "@/lib/runtime/approval-bus"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
-import { recordFusionFault } from "../gate/breaker"
+import { recordFusionFault, recordFusionSuccess } from "../gate/breaker"
 import { RouterFusionInfrastructureError, toInfrastructureFault } from "../gate/faults"
 import { breakerThresholdOf, routerFusionGate } from "../gate/feature-gate"
 import {
@@ -197,14 +197,36 @@ export type ResealOutcome =
   | { kind: "bypassed"; options: SendOptions }
 
 function withoutFusion(options: SendOptions, bypass: FusionTurnBypass | null): SendOptions {
-  const { ledger: _ledger, routerFusion: _stamp, routerFusionBypass: _previous, ...rest } = options
+  const {
+    ledger: _ledger,
+    routerFusion: _stamp,
+    routerFusionRouting: _inputs,
+    routerFusionBypass: _previous,
+    ...rest
+  } = options
   return bypass ? { ...rest, routerFusionBypass: bypass } : rest
 }
 
 /**
+ * Options sealed by a build that did not keep the turn's routing inputs (a
+ * durable submission frozen before they existed). Routing them again on
+ * guessed inputs would pick a cap and action for a different turn, so the
+ * resend goes out unledgered with the notice instead. Not a fault: the breaker
+ * does not count it.
+ */
+export const ROUTING_INPUTS_MISSING = "routing_inputs_missing"
+
+/** The runtime lane the original turn was sealed for, never a guess from the provider. */
+function sealedLaneOf(options: SendOptions): "ai-sdk" | "claude-agent-sdk" | null {
+  const lane = options.routerFusion?.lane ?? options.execution?.runtimeAdapter
+  return lane === "ai-sdk" || lane === "claude-agent-sdk" ? lane : null
+}
+
+/**
  * A send that reuses cached options (a retry, a loop continuation, a reroute
- * to another model) is a NEW run: its old stamp names a run that was already
- * sealed. Route it again for the provider and model it now carries.
+ * to another model, a durable replay) is a NEW run: its old stamp names a run
+ * that was already sealed. Route it again for the provider and model it now
+ * carries, on the original turn's routing inputs and runtime lane.
  */
 export async function resealRouterFusionOptions(input: {
   sessionId: string
@@ -216,12 +238,16 @@ export async function resealRouterFusionOptions(input: {
   if (!settings || routerFusionGate(settings, "chat") !== "on") {
     return { kind: "bypassed", options: withoutFusion(options, null) }
   }
-  const lane = (options.execution?.runtimeAdapter ??
-    (options.provider === "anthropic" || !options.provider
-      ? "claude-agent-sdk"
-      : "ai-sdk")) as string
-  if ((lane !== "ai-sdk" && lane !== "claude-agent-sdk") || !options.provider || !options.model) {
+  const lane = sealedLaneOf(options)
+  if (!lane || !options.provider || !options.model) {
     return { kind: "bypassed", options: withoutFusion(options, null) }
+  }
+  const inputs = options.routerFusionRouting
+  if (!inputs) {
+    return {
+      kind: "bypassed",
+      options: withoutFusion(options, { code: ROUTING_INPUTS_MISSING, justTripped: false }),
+    }
   }
   try {
     const routingConfig = settings.routingConfig ?? DEFAULT_ROUTING_CONFIG
@@ -239,12 +265,12 @@ export async function resealRouterFusionOptions(input: {
     const selection = await selectChatDeployment(host, {
       selection: pick,
       routingRequest: { surface: "chat", selection: pick, sessionId: input.sessionId },
-      promptText: "",
-      estimatedInputTokens: 1,
-      hints: { workspaceBound: Boolean(input.workspaceId) },
+      promptText: inputs.promptText,
+      estimatedInputTokens: Math.max(1, inputs.estimatedInputTokens),
+      hints: inputs.hints,
       workspaceId: input.workspaceId,
-      hasImages: false,
-      needsTools: false,
+      hasImages: inputs.hasImages,
+      needsTools: inputs.needsTools,
     })
     if (selection.kind === "refused") {
       return { kind: "refused", code: selection.code, reasons: selection.reasons }
@@ -265,6 +291,8 @@ export async function resealRouterFusionOptions(input: {
       ...withoutFusion(options, null),
       ledger: seal.ledger,
       routerFusion: seal.stamp,
+      // The next resend of these options is the same turn again.
+      routerFusionRouting: inputs,
     }
     if (lane === "ai-sdk" && next.modelParams?.maxOutputTokens === undefined) {
       next.modelParams = { ...next.modelParams, maxOutputTokens: seal.maxOutputTokens }
@@ -396,6 +424,12 @@ export async function finishRouterFusionChatTurn(
   try {
     const seal = await finalizeChatRun(sessionId, outcome, depsFor(sessionId))
     if (!seal) return null
+    const turnBypass = fusionTurnBypassOf(sessionId) ?? bypass
+    // The breaker counts consecutive faulted TURNS (D38): only a turn that was
+    // sealed with no fault anywhere in it — not at run creation, not at a
+    // reservation, not while sealing — resets the streak. A refused or failed
+    // model call is an answer, not a fault, so it still counts as healthy.
+    if (!turnBypass) recordFusionSuccess("chat")
     return {
       runId: seal.run.runId,
       status: seal.run.status,
@@ -405,7 +439,7 @@ export async function finishRouterFusionChatTurn(
       costStatus: seal.run.costStatus,
       frozen: seal.run.budget.frozen,
       refusalCode: seal.refusal?.code ?? null,
-      bypass: fusionTurnBypassOf(sessionId) ?? bypass,
+      bypass: turnBypass,
     }
   } finally {
     clearFusionTurn(sessionId)

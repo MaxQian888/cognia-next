@@ -195,8 +195,25 @@ export function RouterFusionRunCard({ routerFusion }: RouterFusionRunCardProps) 
             <span className="font-mono text-[10px]">{route.runId}</span>
           </Row>
         </dl>
+        {/* The Claude Agent SDK lane books an envelope (D34): the SDK sizes
+            its own calls, so the run is checked between them and the cap is
+            an estimate whatever the price. A model with no audited price is
+            an estimate on either lane. */}
+        {route.lane === "claude-agent-sdk" ? (
+          <p
+            className="mt-2 text-[11px] text-amber-600 dark:text-amber-400"
+            data-testid="router-fusion-estimated-cap-envelope"
+          >
+            {t("estimatedCapEnvelope")}
+          </p>
+        ) : null}
         {!route.priceKnown ? (
-          <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">{t("estimatedCap")}</p>
+          <p
+            className="mt-2 text-[11px] text-amber-600 dark:text-amber-400"
+            data-testid="router-fusion-estimated-cap-price"
+          >
+            {t("estimatedCap")}
+          </p>
         ) : null}
         {bypass ? (
           <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">

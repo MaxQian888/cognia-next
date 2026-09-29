@@ -37,7 +37,13 @@ export interface PrepareRouterFusionSendInput {
 }
 
 function unledgered(options: SendOptions, bypass: SendOptions["routerFusionBypass"]): SendOptions {
-  const { ledger: _ledger, routerFusion: _stamp, routerFusionBypass: _previous, ...rest } = options
+  const {
+    ledger: _ledger,
+    routerFusion: _stamp,
+    routerFusionRouting: _inputs,
+    routerFusionBypass: _previous,
+    ...rest
+  } = options
   return bypass ? { ...rest, routerFusionBypass: bypass } : rest
 }
 
@@ -55,6 +61,9 @@ function guardChatSend(
   return runOrdinaryWithFallback<RouterFusionSendOutcome>({
     surface: "chat",
     threshold: breakerThresholdOf(settings),
+    // A created run is not yet a healthy turn: the turn's seal records the
+    // success once the whole turn stayed ledgered (D38).
+    recordSuccess: false,
     fusion,
     onBypass: (bypass) => {
       notice = bypass

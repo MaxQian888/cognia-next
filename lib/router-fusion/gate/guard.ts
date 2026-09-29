@@ -45,6 +45,18 @@ export interface OrdinaryGuardInput<T> {
   original: () => Promise<T>
   onBypass: (notice: BypassNotice) => void
   now?: () => number
+  /**
+   * Whether a fusion step that returned counts as a success for the breaker
+   * (default true). Chat passes false: its fusion step only creates the run,
+   * and a turn can still fault after dispatch (a reservation the ledger could
+   * not answer), after which the sidecar continues unledgered for the rest of
+   * the turn. Counting the run's creation as a success would reset the streak
+   * every turn, so a fault that recurs on every turn would never trip the
+   * breaker. Chat records its success when the turn is sealed without a fault
+   * (`finishRouterFusionChatTurn`), which makes "consecutive faults" mean
+   * consecutive turns.
+   */
+  recordSuccess?: boolean
 }
 
 export async function runOrdinaryWithFallback<T>(input: OrdinaryGuardInput<T>): Promise<T> {
@@ -72,7 +84,7 @@ export async function runOrdinaryWithFallback<T>(input: OrdinaryGuardInput<T>): 
     }
     return input.original()
   }
-  recordFusionSuccess(input.surface)
+  if (input.recordSuccess !== false) recordFusionSuccess(input.surface)
   return result
 }
 

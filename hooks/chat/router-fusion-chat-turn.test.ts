@@ -105,6 +105,79 @@ describe("fusionTranscriptOf", () => {
   })
 })
 
+describe("fusionTranscriptOf — images", () => {
+  it("refuses a conversation with an image instead of silently dropping it", () => {
+    const withImage: UIMessage[] = [
+      {
+        id: "u-img",
+        role: "user",
+        parts: [
+          { type: "file", mediaType: "image/png", url: "data:image/png;base64,AAAA" },
+          { type: "text", text: "what is in this picture?" },
+        ],
+      },
+    ]
+    let thrown: unknown
+    try {
+      fusionTranscriptOf(withImage)
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBeInstanceOf(RouterFusionRefusalError)
+    expect(thrown).toMatchObject({
+      code: "FUSION_TEXT_ONLY",
+      details: { reasons: ["attachments:image:u-img"] },
+    })
+    // An image-only turn with nothing typed is refused the same way.
+    expect(() =>
+      fusionTranscriptOf([
+        { id: "u2", role: "user", parts: [{ type: "file", mediaType: "IMAGE/JPEG", url: "x" }] },
+      ])
+    ).toThrow(RouterFusionRefusalError)
+  })
+
+  it("keeps a non-image file out of the transcript without refusing", () => {
+    expect(
+      fusionTranscriptOf([
+        {
+          id: "u3",
+          role: "user",
+          parts: [
+            { type: "file", mediaType: "application/pdf", url: "x" },
+            { type: "text", text: "summarise" },
+          ],
+        },
+      ])
+    ).toEqual([{ role: "user", content: "summarise" }])
+  })
+
+  it("reports an image turn as a FUSION_TEXT_ONLY refusal and never starts the run", async () => {
+    const d = deps()
+    const result = await runFusionChatTurn(
+      {
+        sessionId: SESSION,
+        stamp,
+        messages: [
+          {
+            id: "u-img",
+            role: "user",
+            parts: [{ type: "file", mediaType: "image/png", url: "x" }],
+          },
+        ],
+        userMessage: null,
+        workspaceRoot: null,
+        settings: null,
+      },
+      d
+    )
+    expect(result).toBe("failed")
+    expect(d.runTurn).not.toHaveBeenCalled()
+    expect(session()?.errorDiagnostic?.code).toBe(
+      "refused:FUSION_TEXT_ONLY:attachments:image:u-img"
+    )
+  })
+})
+
 describe("routerFusionSendDiagnostic", () => {
   it("explains a refusal and an unavailable Router + Fusion, and leaves other errors alone", async () => {
     const d = deps()

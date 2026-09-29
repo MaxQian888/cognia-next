@@ -103,7 +103,10 @@ import {
   persistMessages,
   persistStreamingMessages,
 } from "@/lib/db/messages"
-import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
+import {
+  enqueueHostStateIntentIfAvailable,
+  hostStateSessionIntentAvailable,
+} from "@/lib/db/mobile-outbound-queue"
 import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
 import {
   getSession,
@@ -267,6 +270,7 @@ import { cancelRouterFusionTurn } from "@/lib/router-fusion/gate/chat-events"
 import { abortRouterFusionSend, prepareRouterFusionSend } from "@/lib/router-fusion/gate/chat-send"
 import { routerFusionRefusalDiagnostic } from "@/lib/router-fusion/gate/refusal-diagnostic"
 import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
+import { routerFusionGate } from "@/lib/router-fusion/gate/feature-gate"
 import type { UIMessage } from "ai"
 import { registerInteractiveWorkSubmissionEvents } from "@/lib/work-submission/terminal-events"
 import {
@@ -281,6 +285,7 @@ import {
 } from "./claude-chat-turn-tasks"
 import type { SendFn } from "./claude-chat-turn-tasks"
 import { buildSendOptions } from "./claude-chat-send-options"
+import { hostStateSendEligible } from "./host-state-send-eligibility"
 import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
 import { drainSteerVia, handleEvent, tryAutoModeDecision } from "./claude-chat-events"
 import {
@@ -1647,6 +1652,43 @@ export function useClaudeChat() {
             })
             .filter((kind): kind is "image" | "audio" | "video" | "document" => kind !== undefined)
         : undefined
+      // Host-state sends never stamp (ADR-0188 B1). Whether this turn will be
+      // handed to the HostState host is foreseen here, before the options are
+      // built, so a turn the Host takes is never sealed as a Router + Fusion
+      // run nobody would create. Asked only while chat routing is on, so every
+      // other send pays nothing; the hand-off below re-checks with the final
+      // content and options.
+      const hostStateForeseen =
+        !opts &&
+        routerFusionGate(useSettingsStore.getState().settings, "chat") === "on" &&
+        hostStateSendEligible({
+          fusionRun: false,
+          routerFusionStamped: false,
+          skipAppend: callOptions?.skipUserAppend === true || callOptions?.steerDrain === true,
+          contentIsString: typeof content === "string",
+          hasResourceContext: callOptions?.resourceContext !== undefined,
+          attachmentCount: callOptions?.attachmentManifest?.length ?? 0,
+          builtinLane: turnLane.kind === "builtin",
+          addressed: Boolean(turnRoute),
+          // The same test that decides below whether another runtime's replies
+          // ride this turn's content.
+          carriesForeignTurns:
+            turnLane.kind === "builtin" &&
+            builtinHandoffContext === undefined &&
+            !callOptions?.skipUserAppend &&
+            !callOptions?.sharedRequest &&
+            !isStandaloneChatMode() &&
+            unseenForeignTurns(
+              selectVisibleMessages(
+                store.getState().sessions[sessionId]?.messages ?? [],
+                store.getState().sessions[sessionId]?.activeBranchByGroup ?? {}
+              ),
+              "builtin"
+            ).length > 0,
+          collaboration: Boolean(session?.collaboration),
+          standalone: isStandaloneChatMode(),
+        }) &&
+        (await hostStateSessionIntentAvailable(sessionId).catch(() => false))
       let sendOptions: SendOptions
       try {
         sendOptions =
@@ -1682,6 +1724,7 @@ export function useClaudeChat() {
             // request, not this user's.
             {
               ...(turnRoute ? {} : { routerFusionSurface: "chat" as const }),
+              ...(hostStateForeseen ? { hostState: true } : {}),
               interactive:
                 !callOptions?.sharedRequest &&
                 (!callOptions?.skipUserAppend || Boolean(callOptions?.regenerateBranch)),
@@ -2194,24 +2237,22 @@ export function useClaudeChat() {
           ? effectiveContent.length - providerSourceContent.length
           : 0
       )
-      const hostStateEligible =
-        !sendOptions.routerFusionRun &&
-        !skipAppend &&
-        typeof effectiveContent === "string" &&
-        callOptions?.resourceContext === undefined &&
-        (turnManifest?.length ?? 0) === 0 &&
-        turnLane.kind === "builtin" &&
-        // The host runs a queued intent on the SESSION's lane with the
-        // session's own character, and writes the intent's `text` as the user
-        // row. An addressed turn would lose its `@handle` and its
-        // `metadata.turnRoute` there (so a later regenerate would no longer
-        // know where it was addressed), and a handed-over stretch of another
-        // runtime's replies would be recorded as if the user had typed it.
-        // Both take the direct path, which keeps the typed row.
-        !turnRoute &&
-        !foreignTurnsContext &&
-        !session?.collaboration &&
-        !isStandaloneChatMode()
+      // A sealed Router + Fusion turn (one the check before the build did not
+      // foresee as host-state) is dispatched here, where its run is created:
+      // host-state sends never stamp (ADR-0188 B1).
+      const hostStateEligible = hostStateSendEligible({
+        fusionRun: Boolean(sendOptions.routerFusionRun),
+        routerFusionStamped: Boolean(sendOptions.routerFusion),
+        skipAppend,
+        contentIsString: typeof effectiveContent === "string",
+        hasResourceContext: callOptions?.resourceContext !== undefined,
+        attachmentCount: turnManifest?.length ?? 0,
+        builtinLane: turnLane.kind === "builtin",
+        addressed: Boolean(turnRoute),
+        carriesForeignTurns: Boolean(foreignTurnsContext),
+        collaboration: Boolean(session?.collaboration),
+        standalone: isStandaloneChatMode(),
+      })
       if (hostStateEligible) {
         try {
           const queued = await enqueueHostStateIntentIfAvailable({

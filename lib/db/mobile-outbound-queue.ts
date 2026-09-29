@@ -84,6 +84,29 @@ export interface EnqueueHostStateIntentInput {
 }
 
 /**
+ * Whether a session intent for `sessionId` would be queued right now: the
+ * active target negotiated HostState and the session's channel has a
+ * confirmed Host snapshot. The same checks `enqueueHostStateIntentIfAvailable`
+ * makes before it writes, without writing — for a caller that must decide
+ * BEFORE building a send whether the send will be handed to the Host (a
+ * Router + Fusion seal is never made for a host-state send, ADR-0188). A
+ * full outbox still throws at enqueue time; that is an error, not a fallback.
+ */
+export async function hostStateSessionIntentAvailable(sessionId: string): Promise<boolean> {
+  if (!sessionId) return false
+  const local = getActiveRuntimeTargetContext()
+  if (!local || !(await hostStateSubmitNegotiated())) return false
+  const scope = (await negotiatedHostStateScope()) ?? {
+    accountId: local.accountId,
+    targetId: local.targetId,
+  }
+  const confirmed = await getDb().hostStateChannels.get(
+    sessionStateChannel(scope.targetId, sessionId)
+  )
+  return Boolean(confirmed?.hostId) && (confirmed?.hostGeneration ?? 0) >= 1
+}
+
+/**
  * Persist a client intent against the latest confirmed Host snapshot.
  *
  * Returns null when the active target did not negotiate HostState or its

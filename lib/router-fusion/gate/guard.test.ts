@@ -75,6 +75,32 @@ describe("router-fusion guards", () => {
     expect(getBreakerSnapshot("chat").consecutiveFaults).toBe(0)
   })
 
+  it("leaves the streak alone when the caller records its own success later", async () => {
+    const fault = () =>
+      runOrdinaryWithFallback({
+        surface: "chat",
+        threshold: 3,
+        recordSuccess: false,
+        fusion: async () => {
+          throw new RouterFusionInfrastructureError("import_failed", "chunk")
+        },
+        original: async () => "ok",
+        onBypass: () => undefined,
+      })
+    await fault()
+    await expect(
+      runOrdinaryWithFallback({
+        surface: "chat",
+        threshold: 3,
+        recordSuccess: false,
+        fusion: async () => "ledgered",
+        original: async () => "never",
+        onBypass: () => undefined,
+      })
+    ).resolves.toBe("ledgered")
+    expect(getBreakerSnapshot("chat").consecutiveFaults).toBe(1)
+  })
+
   it("resets the fault count after a success and survives a throwing notice", async () => {
     const spy = jest.spyOn(console, "error").mockImplementation(() => undefined)
     await runOrdinaryWithFallback({

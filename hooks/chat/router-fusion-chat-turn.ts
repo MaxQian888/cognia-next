@@ -28,7 +28,10 @@ import {
   runRouterFusionChatTurn,
   type RunRouterFusionChatTurnInput,
 } from "@/lib/router-fusion/gate/chat-fusion-run"
-import { RouterFusionUnavailableError } from "@/lib/router-fusion/gate/faults"
+import {
+  RouterFusionRefusalError,
+  RouterFusionUnavailableError,
+} from "@/lib/router-fusion/gate/faults"
 import {
   refusalOf,
   routerFusionRefusalDiagnostic,
@@ -41,17 +44,37 @@ export type FusionChatTurnResult = "completed" | "failed" | "cancelled"
 
 type FusionMessage = RunRouterFusionChatTurnInput["messages"][number]
 
+/** Whether a message part is an image the provider would have seen (a photo, a video's poster). */
+function isImagePart(part: UIMessage["parts"][number]): boolean {
+  if (part.type !== "file") return false
+  const mediaType = (part as { mediaType?: unknown }).mediaType
+  return typeof mediaType === "string" && mediaType.toLowerCase().startsWith("image/")
+}
+
 /**
  * The conversation as the run reads it: the text of each user, assistant and
- * system message, oldest first. Reasoning, tool calls, files and cards carry no
- * text a fusion run can use; a message with nothing else is left out.
+ * system message, oldest first. Reasoning, tool calls and cards carry no text a
+ * fusion run can use; a message with nothing else is left out.
+ *
+ * Cascade and panel runs read text only (ADR-0188 B3). An image anywhere in
+ * the conversation would be dropped from what the models see while the person
+ * believes they are answering about it, so it is refused as
+ * `FUSION_TEXT_ONLY` instead of silently left out.
  */
 export function fusionTranscriptOf(messages: readonly UIMessage[]): FusionMessage[] {
   const transcript: FusionMessage[] = []
   for (const message of messages) {
     if (message.role !== "user" && message.role !== "assistant" && message.role !== "system")
       continue
-    const text = (message.parts ?? [])
+    const parts = message.parts ?? []
+    if (parts.some(isImagePart)) {
+      throw new RouterFusionRefusalError(
+        "FUSION_TEXT_ONLY",
+        "Cascade and panel runs read text only; this conversation has an image.",
+        { reasons: [`attachments:image:${message.id}`] }
+      )
+    }
+    const text = parts
       .filter((part): part is { type: "text"; text: string } => part.type === "text")
       .map((part) => (message.role === "user" ? stripSteerPrefix(part.text) : part.text))
       .join("\n\n")

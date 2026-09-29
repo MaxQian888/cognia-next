@@ -136,10 +136,17 @@ export async function sendPrompt(
   // Sends carrying a frozen execution spec use the canonical command (same
   // impl body Rust-side; the alias split feeds the Phase 9 telemetry).
   const command = options?.execution || delivery?.commandId ? "agent_send" : "claude_send"
+  // Router + Fusion's routing inputs are renderer-only (a reseal reads them
+  // from the cached or frozen options); the host never needs the prompt twice.
+  let wireOptions = options
+  if (options && "routerFusionRouting" in options) {
+    const { routerFusionRouting: _renderOnly, ...rest } = options
+    wireOptions = rest
+  }
   await transport.call(command, {
     sessionId,
     prompt,
-    options,
+    options: wireOptions,
     ...(delivery?.commandId ? { commandId: delivery.commandId } : {}),
   })
 }

@@ -60,12 +60,20 @@ const DATA_CLASSES = ["public", "internal", "restricted"] as const
  */
 const CAPPED_MODES = ["direct", "cascade", "panel"] as const
 
-/** The in-memory trip of a surface, re-read whenever the breaker publishes. */
-function useLiveTrip(surface: RouterFusionSurface): number | null {
+/**
+ * The in-memory trips of every surface, re-read whenever the breaker publishes.
+ * A trip is persisted by `breaker-persistence` a moment later; reading the
+ * breaker too means a surface shows tripped the instant it trips, whichever
+ * surface it is. The snapshot is a primitive key so React can compare it.
+ */
+function useLiveTripsKey(): string {
   return useSyncExternalStore(
     (onChange) => subscribeBreaker(() => onChange()),
-    () => getBreakerSnapshot(surface).trip?.trippedAt ?? null,
-    () => null
+    () =>
+      ROUTER_FUSION_SURFACES.map(
+        (surface) => `${surface}:${getBreakerSnapshot(surface).trip?.trippedAt ?? ""}`
+      ).join("|"),
+    () => ""
   )
 }
 
@@ -79,7 +87,8 @@ export function RouterFusionSection() {
   const customProviders = useSettingsStore((s) => s.settings?.customProviders)
   const modelMappings = useSettingsStore((s) => s.settings?.modelMappings)
   const settings = useMemo(() => normalizeRouterFusionSettings(raw), [raw])
-  const liveChatTrip = useLiveTrip("chat")
+  // Subscribed for its re-render: `tripOf` reads the breaker directly.
+  useLiveTripsKey()
 
   const providerIds = useMemo(
     () =>
@@ -141,9 +150,8 @@ export function RouterFusionSection() {
         toast.error(t("saveFailed"))
       })
 
-  const chatTrip =
-    settings.trippedSurfaces.chat ??
-    (liveChatTrip !== null ? getBreakerSnapshot("chat").trip : null)
+  const tripOf = (surface: RouterFusionSurface) =>
+    settings.trippedSurfaces[surface] ?? getBreakerSnapshot(surface).trip
 
   return (
     <div className="space-y-5" data-testid="router-fusion-section">
@@ -208,7 +216,7 @@ export function RouterFusionSection() {
           {ROUTER_FUSION_SURFACES.map((surface) => {
             const wired = isRouterFusionSurfaceWired(surface)
             const label = t(`surface.${surface}.label` as never)
-            const trip = surface === "chat" ? chatTrip : settings.trippedSurfaces[surface]
+            const trip = tripOf(surface)
             return (
               <li
                 key={surface}

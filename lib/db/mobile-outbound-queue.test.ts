@@ -11,6 +11,7 @@ import {
   enqueueCollabMutation,
   enqueueHostStateAction,
   enqueueHostStateIntentIfAvailable,
+  hostStateSessionIntentAvailable,
   listByStatus,
   markHostStateResult,
   markCollabConflict,
@@ -348,6 +349,35 @@ describe("mobile outbound queue target isolation", () => {
 
     expect(row?.channel).toBe(channel)
     expect(row?.targetId).toBe(scope.targetId)
+  })
+
+  it("says whether a session intent would be queued, without queueing anything", async () => {
+    const snapshot = (operations: string[]) =>
+      setRuntimeSnapshot({
+        target: { id: scope.targetId, kind: "companion", platform: "web", hostKind: "desktop" },
+        vaultState: "unlocked",
+        connectionState: "online",
+        host: { compatible: true, operations, grants: [] },
+      })
+    snapshot([])
+    // Not negotiated.
+    await expect(hostStateSessionIntentAvailable("s-avail")).resolves.toBe(false)
+    snapshot(["host_state_submit"])
+    // Negotiated, but the session has no confirmed Host snapshot yet.
+    await expect(hostStateSessionIntentAvailable("s-avail")).resolves.toBe(false)
+    await getDb().hostStateChannels.put({
+      channel: sessionStateChannel(scope.targetId, "s-avail"),
+      hostId: "host-authority",
+      hostGeneration: 1,
+      hostSeq: 1,
+      revision: 1,
+      digest: "digest",
+      state: createEmptyHostStateSession(scope.targetId, "s-avail"),
+      updatedAt: 100,
+    })
+    await expect(hostStateSessionIntentAvailable("s-avail")).resolves.toBe(true)
+    await expect(hostStateSessionIntentAvailable("")).resolves.toBe(false)
+    await expect(getDb().mobileOutboundQueue.count()).resolves.toBe(0)
   })
 
   it("keeps legacy writes when HostState was not negotiated or has no confirmed snapshot", async () => {

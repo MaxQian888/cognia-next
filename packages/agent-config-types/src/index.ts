@@ -977,6 +977,15 @@ export type SendOptions = {
   routerFusion?: RouterFusionTurnStamp
 
   /**
+   * Renderer-only: what a ledgered turn was routed on (ADR-0188), set with
+   * `routerFusion` by the seal. A resend of these options — a retry, a loop
+   * continuation, a reroute, a durable replay — is a new run and reseals on
+   * the ORIGINAL turn's inputs rather than on placeholders. Carried in the
+   * frozen (encrypted) submission; `sendPrompt` strips it before the IPC.
+   */
+  routerFusionRouting?: RouterFusionRoutingInputs
+
+  /**
    * Set instead of `routerFusion` when the turn is a cascade or panel run
    * (ADR-0188 B3). Renderer-only; a send carrying it never reaches the sidecar.
    */
@@ -3497,6 +3506,27 @@ export interface RouterFusionTurnStamp {
   acceptanceProfile: string | null
   /** The runtime lane the turn dispatches on, which decides the ledger mode. */
   lane: "ai-sdk" | "claude-agent-sdk"
+}
+
+/**
+ * The routing inputs of a ledgered chat turn (ADR-0188 B1), so a reseal routes
+ * the same turn it replaces. Mirrors the chat selection input of
+ * `lib/router-fusion/chat/route-chat-turn.ts`.
+ */
+export interface RouterFusionRoutingInputs {
+  /** The text the turn was routed on (what the person asked); labels the decision. */
+  promptText: string
+  estimatedInputTokens: number
+  hints: {
+    hasCode?: boolean
+    toolCount?: number
+    workspaceBound?: boolean
+    attachmentKinds?: Array<"image" | "audio" | "video" | "document">
+  }
+  /** The turn carries an image: the deployment must take image input. */
+  hasImages: boolean
+  /** The turn's tools need a tool-capable model. */
+  needsTools: boolean
 }
 
 /**

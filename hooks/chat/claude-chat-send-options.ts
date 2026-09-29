@@ -137,6 +137,12 @@ export async function buildSendOptions(
   dispatch?: {
     routerFusionSurface?: "chat"
     /**
+     * The turn will be handed to the HostState host rather than dispatched
+     * here. Host-state sends are never sealed or stamped (ADR-0188); an
+     * explicit cascade or panel is still resolved, and runs in this window.
+     */
+    hostState?: boolean
+    /**
      * A person typed this turn into THIS app's chat pane, where a built-in
      * skill's approval dialog is shown. Only the live chat controller sets it.
      * Turns relayed from a paired phone (`host-state-service`,
@@ -436,22 +442,28 @@ export async function buildSendOptions(
     // message (unlike twin/memory it needs no handshake gate). Attachment
     // kinds and transcript depth ride along as task hints for the local
     // classifier — `messageCount` counts what is already on the transcript,
-    // not the outgoing turn.
-    routingContextHint: userMessage
-      ? {
-          promptText: userMessage,
-          ...(routingHints?.attachmentKinds?.length
-            ? { attachmentKinds: routingHints.attachmentKinds }
-            : {}),
-          messageCount: sessionMessages.length,
-        }
-      : undefined,
+    // not the outgoing turn. A turn with only attachments (an image and no
+    // typed text) still carries its kinds: an image implies vision, and
+    // Router + Fusion must see it to refuse or skip a text-only cascade/panel.
+    routingContextHint:
+      userMessage || routingHints?.attachmentKinds?.length
+        ? {
+            ...(userMessage ? { promptText: userMessage } : {}),
+            ...(routingHints?.attachmentKinds?.length
+              ? { attachmentKinds: routingHints.attachmentKinds }
+              : {}),
+            messageCount: sessionMessages.length,
+          }
+        : undefined,
     routingSurface: "chat",
     // Router + Fusion chat runs are ledgered in this desktop window's fusion
     // database and answered over the desktop IPC; other shells never ask
     // (ADR-0188; the companion surface is separate). Inert while the switch is off.
     ...(isTauri() && dispatch?.routerFusionSurface === "chat"
-      ? { routerFusionSurface: "chat" as const }
+      ? {
+          routerFusionSurface: "chat" as const,
+          ...(dispatch.hostState ? { routerFusionHostState: true } : {}),
+        }
       : {}),
     ephemeralSkillIds,
     skillIntents,

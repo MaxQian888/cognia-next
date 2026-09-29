@@ -100,6 +100,38 @@ describe("RouterFusionRunCard", () => {
     expect(details).toHaveTextContent("Estimated cap")
   })
 
+  it("labels a Claude Agent SDK run an estimated cap even when its price is known (D34)", async () => {
+    const user = userEvent.setup()
+    render(
+      <RouterFusionRunCard
+        routerFusion={{ route: { ...route, lane: "claude-agent-sdk", priceKnown: true }, outcome }}
+      />
+    )
+    await user.click(screen.getByTestId("router-fusion-run-card"))
+    const details = await screen.findByTestId("router-fusion-run-details")
+    expect(details).toHaveTextContent("Claude Agent SDK")
+    expect(screen.getByTestId("router-fusion-estimated-cap-envelope")).toHaveTextContent(
+      "Estimated cap: the Claude Agent SDK sizes its own model calls"
+    )
+    // The price is audited: only the envelope's reason is given.
+    expect(screen.queryByTestId("router-fusion-estimated-cap-price")).toBeNull()
+  })
+
+  it("gives both reasons for an Agent SDK run on a model with no audited price", async () => {
+    const user = userEvent.setup()
+    render(
+      <RouterFusionRunCard
+        routerFusion={{ route: { ...route, lane: "claude-agent-sdk", priceKnown: false } }}
+      />
+    )
+    await user.click(screen.getByTestId("router-fusion-run-card"))
+    await screen.findByTestId("router-fusion-run-details")
+    expect(screen.getByTestId("router-fusion-estimated-cap-envelope")).toBeInTheDocument()
+    expect(screen.getByTestId("router-fusion-estimated-cap-price")).toHaveTextContent(
+      "no audited price"
+    )
+  })
+
   it("shows a verified cascade or panel answer's mode and cost, expanding into its run", async () => {
     const user = userEvent.setup()
     const fusion: NonNullable<RouterFusionRunMetadata["fusion"]> = {

@@ -351,7 +351,8 @@ async function recoverStaleRun(
 
 /**
  * Boot-time sweep for this account: every run whose lease has lapsed is sealed,
- * so no hold or session lock outlives a crashed window.
+ * so no hold or session lock outlives a crashed window, and every effect still
+ * pending in the outbox is replayed.
  *
  * Every WIRED surface, not just chat. A window that closed mid-turn can leave a
  * utility call, a Run API run or a passthrough reservation holding money just
@@ -371,9 +372,13 @@ export async function recoverStaleFusionRuns(deps: ChatRunDeps): Promise<number>
   for (const run of open) {
     if (await recoverStaleRun(store, run.runId, deps)) recovered += 1
   }
-  if (recovered > 0) {
-    await drainFusionOutbox(store.db, deps.appliers, store.outboxContext()).catch(() => undefined)
-  }
+  // Effects are replayed at boot and recovery (D39), not only for the runs
+  // sealed just now: a window that sealed its run and closed before the drain
+  // (or whose drain failed) left effects pending that no later seal of that
+  // run will ever carry across. Replay is idempotent by effect id.
+  await drainFusionOutbox(store.db, deps.appliers, store.outboxContext()).catch((error) => {
+    console.warn("[router-fusion] outbox replay during recovery failed", error)
+  })
   return recovered
 }
 

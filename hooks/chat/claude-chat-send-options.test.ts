@@ -235,6 +235,33 @@ describe("Claude chat send-option seam", () => {
     expect(jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]?.routerFusionSurface).toBe("chat")
   })
 
+  it("tells the resolver a host-state send is never sealed, only in the desktop shell", async () => {
+    const hostState = { routerFusionSurface: "chat" as const, hostState: true }
+    ;(globalThis as { __mockIsTauri?: boolean }).__mockIsTauri = true
+    try {
+      await buildSendOptions({ id: "s1" } as never, "hello", undefined, undefined, undefined, {
+        routerFusionSurface: "chat",
+      })
+      expect(jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]).not.toHaveProperty(
+        "routerFusionHostState"
+      )
+      await buildSendOptions(
+        { id: "s1" } as never,
+        "hello",
+        undefined,
+        undefined,
+        undefined,
+        hostState
+      )
+      expect(jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]).toMatchObject({
+        routerFusionSurface: "chat",
+        routerFusionHostState: true,
+      })
+    } finally {
+      delete (globalThis as { __mockIsTauri?: boolean }).__mockIsTauri
+    }
+  })
+
   it("omits attachmentKinds when no hints are passed but still reports depth", async () => {
     await buildSendOptions({ id: "s1" } as never, "hello")
     const hint = jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]?.routingContextHint
@@ -242,10 +269,19 @@ describe("Claude chat send-option seam", () => {
     expect(hint).not.toHaveProperty("attachmentKinds")
   })
 
-  it("keeps routingContextHint absent when there is no user message", async () => {
+  it("carries the attachment kinds of a turn with nothing typed (an image-only turn)", async () => {
     await buildSendOptions({ id: "s1" } as never, undefined, undefined, undefined, {
       attachmentKinds: ["image"],
     })
+    const hint = jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]?.routingContextHint
+    // Router + Fusion reads `hasImages` from these kinds: without them an
+    // image-only turn would reach a text-only cascade or panel.
+    expect(hint).toEqual({ attachmentKinds: ["image"], messageCount: 0 })
+    expect(hint).not.toHaveProperty("promptText")
+  })
+
+  it("keeps routingContextHint absent when there is neither text nor an attachment", async () => {
+    await buildSendOptions({ id: "s1" } as never, undefined)
     expect(
       jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]?.routingContextHint
     ).toBeUndefined()

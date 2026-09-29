@@ -335,6 +335,22 @@ describe("Claude session commands", () => {
     )
   })
 
+  it("keeps Router + Fusion's renderer-only routing inputs off the wire", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await sendPrompt("sess-1", "hello", {
+      model: "gpt-5",
+      routerFusionRouting: {
+        promptText: "hello",
+        estimatedInputTokens: 2,
+        hints: {},
+        hasImages: false,
+        needsTools: false,
+      },
+    })
+    const payload = callSpy.mock.calls.at(-1)?.[1] as { options: Record<string, unknown> }
+    expect(payload.options).toEqual({ model: "gpt-5" })
+  })
+
   it("gates the complete provider-visible prompt before any send", async () => {
     callSpy.mockResolvedValueOnce(undefined)
     await sendPrompt("sess-1", "hello", {

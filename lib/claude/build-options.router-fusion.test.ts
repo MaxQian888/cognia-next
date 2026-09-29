@@ -497,6 +497,27 @@ describe("resolveSendOptions — Router + Fusion on", () => {
     ])
     // The route waits in memory for the run to be created at dispatch.
     expect(preparedChatRoute(opts.routerFusion!.runId)?.sessionId).toBe("s1")
+    // What the turn was routed on travels with it, so a resend reseals the same turn.
+    expect(opts.routerFusionRouting).toMatchObject({
+      promptText: "What is the capital of France?",
+      hasImages: false,
+      needsTools: false,
+      hints: { workspaceBound: false },
+    })
+    expect(opts.routerFusionRouting?.estimatedInputTokens).toBeGreaterThan(1)
+  })
+
+  it("keeps the image of a routed turn in its routing inputs", async () => {
+    const opts = await send({
+      appSettings: appSettings(ON),
+      routerFusionSurface: "chat",
+      routingContextHint: { promptText: "What is this?", attachmentKinds: ["image"] },
+    })
+    expect(opts.routerFusionRouting).toMatchObject({
+      promptText: "What is this?",
+      hasImages: true,
+      hints: { attachmentKinds: ["image"] },
+    })
   })
 
   it("[ACC:CACHE-03] keeps the model-facing prompt byte-stable across consecutive routed turns", async () => {
@@ -531,6 +552,7 @@ describe("resolveSendOptions — Router + Fusion on", () => {
     expect(opts.routerFusionBypass).toEqual({ code: "import_failed", justTripped: false })
     expect(opts.ledger).toBeUndefined()
     expect(opts.routerFusion).toBeUndefined()
+    expect(opts.routerFusionRouting).toBeUndefined()
     // The original path ran: its in-turn fallback is back.
     expect(opts.model).toBe("claude-opus-4-8")
     expect(opts.fallbackModel).toBe("claude-opus-4-7")
@@ -601,6 +623,7 @@ describe("resolveSendOptions — Router + Fusion on", () => {
     })
     expect(opts.ledger?.runId).toBe(opts.routerFusion?.runId)
     expect(opts.fallbackModel).toBeUndefined()
+    expect(opts.routerFusionRouting?.promptText).toBe("What is the capital of France?")
   })
 
   it("[ACC:ISO-04] refuses a provider-default model the router cannot place", async () => {
@@ -813,6 +836,38 @@ describe("resolveSendOptions — Router + Fusion runs (B3)", () => {
     }).catch((error) => error)
     expect(refusal).toBeInstanceOf(RouterFusionRefusalError)
     expect(refusal).toMatchObject({ code: "FUSION_TEXT_ONLY" })
+  })
+
+  it("refuses an explicit cascade or panel for an image-only turn with nothing typed", async () => {
+    for (const mode of ["cascade", "panel"] as const) {
+      useChatFusionModeStore.getState().setMode("s1", mode)
+      const refusal = await send({
+        appSettings: tieredSettings(ON),
+        routerFusionSurface: "chat",
+        // What the composer sends for a turn that is only an image.
+        routingContextHint: { attachmentKinds: ["image"], messageCount: 0 },
+      }).catch((error) => error)
+      expect(refusal).toBeInstanceOf(RouterFusionRefusalError)
+      expect(refusal).toMatchObject({ code: "FUSION_TEXT_ONLY" })
+    }
+  })
+
+  it("never lets Auto pick a cascade or panel for a turn with an image", async () => {
+    const settings = tieredSettings({ ...ON, approvedRuleRows: ["panel_research"] })
+    // The same turn without the image is a panel: the image is what keeps it direct.
+    const text = await send({
+      appSettings: settings,
+      routerFusionSurface: "chat",
+      routingContextHint: research,
+    })
+    expect(text.routerFusionRun?.mode).toBe("panel")
+    const withImage = await send({
+      appSettings: settings,
+      routerFusionSurface: "chat",
+      routingContextHint: { ...research, attachmentKinds: ["image"] },
+    })
+    expect(withImage.routerFusionRun).toBeUndefined()
+    expect(withImage.routerFusion?.mode).toBe("direct")
   })
 
   it("[ACC:ISO-03] fails an explicit mode on a fault or a paused surface, never falling back", async () => {

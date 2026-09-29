@@ -120,6 +120,7 @@ const onClaudeMessageMock = jest.fn(async (cb: (evt: unknown) => void) => {
 })
 const sendPromptMock = jest.fn().mockResolvedValue(undefined)
 const enqueueHostStateIntentMock = jest.fn().mockResolvedValue(null)
+const hostStateSessionIntentAvailableMock = jest.fn().mockResolvedValue(false)
 const interruptSessionMock = jest.fn().mockResolvedValue(undefined)
 // Live mid-turn steer into the Anthropic sidecar's streaming input. Rejecting
 // is the realistic default for most tests: an idle/closed query refuses, and
@@ -178,6 +179,8 @@ jest.mock("@/lib/work-submission/lease-heartbeat", () => ({
 
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueueHostStateIntentIfAvailable: (...args: unknown[]) => enqueueHostStateIntentMock(...args),
+  hostStateSessionIntentAvailable: (...args: unknown[]) =>
+    hostStateSessionIntentAvailableMock(...args),
 }))
 
 // Standalone (BYOK) chat — off by default so the sidecar-path suite is
@@ -999,6 +1002,7 @@ beforeEach(() => {
   startLeaseHeartbeatMock.mockClear()
   stopLeaseHeartbeatMock.mockClear()
   enqueueHostStateIntentMock.mockReset().mockResolvedValue(null)
+  hostStateSessionIntentAvailableMock.mockReset().mockResolvedValue(false)
   interruptSessionMock.mockReset().mockResolvedValue(undefined)
   beginSharedSessionRunMock.mockReset().mockResolvedValue({ kind: "private" })
   standaloneFlag.value = false
@@ -6080,6 +6084,63 @@ describe("useClaudeChat — Router + Fusion dispatch (ADR-0188)", () => {
       sendPromptMock.mock.invocationCallOrder.at(-1)!
     )
     expect(abortRouterFusionSendMock).not.toHaveBeenCalled()
+  })
+
+  describe("host-state sends never stamp (ADR-0188 B1)", () => {
+    const settings = settingsState.settings as Record<string, unknown>
+    beforeEach(() => {
+      settings.routerFusion = { enabled: true, surfaces: { chat: true } }
+    })
+    afterEach(() => {
+      delete settings.routerFusion
+    })
+
+    it("builds a turn the Host will take without a seal, and hands it over", async () => {
+      hostStateSessionIntentAvailableMock.mockResolvedValue(true)
+      enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "action-rf", status: "pending" })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("host-owned")
+      })
+      expect(hostStateSessionIntentAvailableMock).toHaveBeenCalledWith("sess-1")
+      expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ routerFusionSurface: "chat", routerFusionHostState: true })
+      )
+      expect(enqueueHostStateIntentMock).toHaveBeenCalledTimes(1)
+      expect(prepareRouterFusionSendMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+    })
+
+    it("asks nothing about the Host while chat routing is off", async () => {
+      delete settings.routerFusion
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("hello")
+      })
+      expect(hostStateSessionIntentAvailableMock).not.toHaveBeenCalled()
+      expect(resolveSendOptionsMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ routerFusionHostState: true })
+      )
+    })
+
+    it("dispatches a sealed turn here, where its run is created, instead of handing it over", async () => {
+      // The Host became available after the options were sealed.
+      resolveSendOptionsMock.mockResolvedValue(stamped)
+      enqueueHostStateIntentMock.mockResolvedValue({ id: "action-late", status: "pending" })
+      prepareRouterFusionSendMock.mockResolvedValue({ kind: "send", options: stamped })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("hello")
+      })
+      expect(enqueueHostStateIntentMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: expect.objectContaining({ kind: "message.enqueue" }) })
+      )
+      expect(prepareRouterFusionSendMock).toHaveBeenCalledTimes(1)
+      expect((sendPromptMock.mock.calls.at(-1)?.[2] as SendOptions).routerFusion).toBe(stamp)
+    })
   })
 
   it("routes cached options again as a new run", async () => {

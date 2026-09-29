@@ -1,7 +1,9 @@
 import en from "@/i18n/messages/en/routerFusion.json"
+import zhCN from "@/i18n/messages/zh-CN/routerFusion.json"
 
 import { RouterFusionRefusalError } from "./faults"
 import {
+  CHAT_SURFACED_CODES,
   isRouterFusionRefusal,
   refusalOf,
   routerFusionRefusalDiagnostic,
@@ -49,6 +51,31 @@ describe("routerFusionRefusalDiagnostic", () => {
     expect(diagnostic.message).toBe(refusal.VERIFICATION_FAILED)
     expect(diagnostic.meta?.extra).toEqual({ runErrorCode: "VERIFICATION_FAILED" })
   })
+
+  it("explains a cascade or panel run whose model call failed (CALL_FAILED)", async () => {
+    const diagnostic = await routerFusionRefusalDiagnostic({
+      code: "CALL_FAILED",
+      sessionId: "s1",
+      kind: "failed",
+      reasons: ["model call failed", "run rf-1"],
+      translator,
+    })
+    expect(diagnostic.code).toBe("routerFusionRunFailed")
+    expect(diagnostic.message).toBe(refusal.CALL_FAILED)
+    expect(diagnostic.message).not.toContain("CALL_FAILED")
+    expect(diagnostic.detail).toBe("CALL_FAILED\nmodel call failed\nrun rf-1")
+  })
+
+  it.each(["en", "zh-CN"] as const)(
+    "has a %s sentence for every code the chat path can surface",
+    (locale) => {
+      const sentences = (locale === "en" ? en.refusal : zhCN.refusal) as Record<string, string>
+      const missing = CHAT_SURFACED_CODES.filter(
+        (code) => typeof sentences[code] !== "string" || sentences[code].trim() === ""
+      )
+      expect(missing).toEqual([])
+    }
+  )
 
   it("names a code this build has no sentence for", async () => {
     const diagnostic = await routerFusionRefusalDiagnostic({

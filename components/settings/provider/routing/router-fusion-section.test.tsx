@@ -169,6 +169,18 @@ describe("RouterFusionSection", () => {
     expect(screen.getByTestId("router-fusion-trip-chat")).toHaveTextContent("import_failed")
   })
 
+  it("shows a live trip on any surface, not only chat", () => {
+    withSettings({ routerFusion: { enabled: true, surfaces: { utilityLedger: true } } })
+    render(<RouterFusionSection />)
+    expect(screen.queryByTestId("router-fusion-trip-utilityLedger")).toBeNull()
+    act(() => {
+      recordFusionFault("utilityLedger", "db_unavailable", 1, Date.UTC(2026, 8, 16))
+    })
+    expect(screen.getByTestId("router-fusion-trip-utilityLedger")).toHaveTextContent(
+      "db_unavailable"
+    )
+  })
+
   it("rejects a malformed amount and saves a valid run cap on blur", async () => {
     const user = userEvent.setup()
     render(<RouterFusionSection />)
