@@ -163,7 +163,9 @@ deliverable,linkedAt}`, `lib/issues/deliverables.ts` (label-keyed
   own fetch: that one is ETag-cached per observation and also reads
   reviews and comments. Per-sweep CI reads are capped
   (`pullRequestCiLimit`, 10).
-- **Not built:** Phases 5 and 6 (gated on demand by this plan).
+- **Not built:** Phases 5 and 6 (gated on demand by this plan). Checked
+  2026-09-30: no multi-host or third-party-plugin use case yet, so the plan
+  closes here; reopen either phase when one appears.
 
 ## Delta since the August snapshots
 
