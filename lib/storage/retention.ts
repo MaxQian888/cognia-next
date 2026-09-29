@@ -31,6 +31,7 @@ import { pruneExpiredWorkflowAppData } from "@/lib/workflow/apps/retention-servi
 import { pruneOnlineEvalData } from "@/lib/db/eval-online"
 import { pruneMemoryGovernanceData } from "@/lib/db/memory-governance"
 import { pruneRetrievalControlData } from "@/lib/db/retrieval-control"
+import { pruneSettledVideoJobs } from "@/lib/db/media-generation-jobs"
 import { pruneNotificationDelivery } from "@/lib/db/notification-delivery-retention"
 import { resolvePreferences } from "@/lib/notifications/preferences"
 import {
@@ -79,6 +80,16 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
       const report = await pruneMemoryGovernanceData(Date.now())
       return report.jobsDeleted + report.auditsDeleted + report.orphanEvidenceDeleted
     },
+  },
+  // ADR-0205: failed / cancelled / timed-out video jobs, 30 days after they
+  // settle. The window is the catalog's, not the user's trace slider.
+  mediaGenerationJobs: {
+    policy: "row-expiry",
+    prune: () =>
+      pruneSettledVideoJobs(
+        Date.now() -
+          (policyForTable("mediaGenerationJobs")?.retentionPolicy.days ?? 30) * MS_PER_DAY
+      ),
   },
   retrievalControl: {
     policy: "row-expiry",

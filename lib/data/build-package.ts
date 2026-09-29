@@ -5,6 +5,7 @@
 // can override for "true full snapshot" use cases.
 
 import { getDb } from "@/lib/db/schema"
+import { isPortableVideoJob } from "@/lib/db/media-generation-jobs"
 import { getSettings } from "@/lib/db/settings"
 import { getDeviceMetadata } from "@/lib/device/device-identity"
 import { isTauri } from "@/lib/tauri"
@@ -128,6 +129,7 @@ export async function buildBackupPackage(
     libraryFolders,
     libraryAssets,
     libraryMediaHashes,
+    mediaGenerationJobs,
   ] = await Promise.all([
     getSettings(),
     readTable(db.characters),
@@ -186,6 +188,9 @@ export async function buildBackupPackage(
     includeCoreData ? readTable(db.libraryFolders) : Promise.resolve([]),
     includeCoreData ? exportLibraryAssets() : Promise.resolve([]),
     includeCoreData ? listLibraryMediaHashes() : Promise.resolve([] as string[]),
+    includeCoreData || opts.includeSessions
+      ? readTable(db.mediaGenerationJobs)
+      : Promise.resolve([]),
   ])
 
   // The setting face contains nested provider credentials. Reuse the settings
@@ -322,6 +327,13 @@ export async function buildBackupPackage(
   const exportedSessionIds = opts.includeSessions
     ? new Set((payload.sessions ?? []).map((session) => session.id))
     : new Set<string>()
+  // Video jobs (ADR-0205): settled ones, scoped like the video they point at.
+  const portableJobs = mediaGenerationJobs.filter((row) =>
+    isPortableVideoJob(row, { includeCoreData, exportedSessionIds })
+  )
+  // Emitted whenever the domains that own jobs are exported (the payload
+  // carries every portable section, even empty); absent otherwise.
+  if (includeCoreData || opts.includeSessions) payload.mediaGenerationJobs = portableJobs
   if (exportedSessionIds.size > 0 || libraryMediaHashes.length > 0) {
     for await (const record of exportMessageMediaRecords(
       exportedSessionIds,

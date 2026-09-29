@@ -55,6 +55,13 @@ let shared: ProviderOperationExecutor | undefined
 export function getProviderOperationExecutor(): ProviderOperationExecutor {
   if (shared) return shared
   registerBuiltInProviderOperationHandlers(providerOperationHandlerRegistry)
+  // This is the renderer's executor (the CLI builds its own), so its video
+  // jobs must land in Dexie even when it runs before the boot initializer
+  // mounts (ADR-0205). Required lazily for the same reason as the store below.
+  type RendererVideoHost = typeof import("@/lib/ai/media/video-jobs/renderer-host")
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const videoHost = require("@/lib/ai/media/video-jobs/renderer-host") as RendererVideoHost
+  videoHost.ensureRendererVideoJobHost()
   shared = createProviderOperationExecutor({
     registry: providerOperationHandlerRegistry,
     hostSurfaces: detectHostSurfaces(),

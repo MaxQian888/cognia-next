@@ -5,6 +5,7 @@ import { useEffect } from "react"
 import { CodeAdoptionTrackerInitializer } from "./code-adoption-tracker-initializer"
 import { DesktopNetworkRuntimeInitializer } from "./desktop-network-runtime-initializer"
 import { ExecutionControlInitializer } from "./execution-control-initializer"
+import { MediaGenerationInitializer } from "./media-generation-initializer"
 import { ProviderCoreRuntimeInitializer } from "./provider-core-runtime-initializer"
 import { ProviderOAuthRefreshInitializer } from "./provider-oauth-refresh-initializer"
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
@@ -56,6 +57,9 @@ export function DeferredBootInitializersImpl() {
       {/* After ProviderCoreRuntimeInitializer: its renewals go through the
       same proxy-fetch adapter that initializer installs. */}
       <ProviderOAuthRefreshInitializer />
+      {/* After ProviderCoreRuntimeInitializer too: video jobs reach providers
+      through the platform transport, and resume polling after a reload. */}
+      <MediaGenerationInitializer />
       <RoutingRuntimeInitializer />
       <RemoteNotificationInitializer />
       <GatewayProvider />

@@ -35,8 +35,29 @@ import { detectPlatform } from "@/lib/platform/detect"
 
 export type PlatformFetchKind = "tauri" | "capacitor" | "browser"
 
+/**
+ * Per-call options the native transports honor on top of `RequestInit`. A
+ * plain browser `fetch` ignores both.
+ */
+export interface PlatformRequestInit extends RequestInit {
+  /**
+   * Whole-request timeout in ms for the native transports. Default 30 s —
+   * fine for API calls, too short for downloading a media file.
+   */
+  timeout?: number
+  /**
+   * The response body is bytes, not text. The Capacitor bridge only carries
+   * strings, so it must be asked for base64 up front; reading a video as text
+   * corrupts it. Desktop and browser read bytes either way.
+   */
+  binaryResponse?: boolean
+}
+
 /** A `fetch`-compatible function. Narrower than `typeof fetch` on purpose. */
-export type PlatformFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+export type PlatformFetch = (
+  input: RequestInfo | URL,
+  init?: PlatformRequestInit
+) => Promise<Response>
 
 /** Thrown when the shell has no usable transport at all. */
 export class PlatformFetchUnavailableError extends Error {
@@ -89,10 +110,14 @@ const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([101, 103, 204, 205, 304
  *
  * Binary request bodies are base64-encoded and flagged, because the native
  * bridge only carries strings: without that, an artifact upload would arrive
- * as the string `"[object ArrayBuffer]"`. Responses are read as text and,
- * for non-JSON content types, decoded from base64 back into bytes.
+ * as the string `"[object ArrayBuffer]"`. Responses are read as text unless
+ * the caller sets `binaryResponse`, in which case the bridge returns base64
+ * and it is decoded back into bytes.
  */
-async function capacitorFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+async function capacitorFetch(
+  input: RequestInfo | URL,
+  init?: PlatformRequestInit
+): Promise<Response> {
   const plugin = getCapacitorHttp()
   if (!plugin) throw new PlatformFetchUnavailableError("CapacitorHttp is unavailable")
   const request = new Request(input, init)
@@ -121,17 +146,31 @@ async function capacitorFetch(input: RequestInfo | URL, init?: RequestInit): Pro
     data,
     // Text, not json: error and success bodies are both JSON here, but a
     // native auto-parse would hand back an object the `Response` constructor
-    // cannot take, and every caller parses either way.
-    responseType: "text",
-    connectTimeout: 30_000,
-    readTimeout: 30_000,
+    // cannot take, and every caller parses either way. `blob` makes both
+    // native stacks answer with base64.
+    responseType: init?.binaryResponse ? "blob" : "text",
+    connectTimeout: init?.timeout ?? DEFAULT_TIMEOUT_MS,
+    readTimeout: init?.timeout ?? DEFAULT_TIMEOUT_MS,
   })
-  const payload =
-    typeof response.data === "string" ? response.data : JSON.stringify(response.data ?? null)
+  const payload: BodyInit =
+    init?.binaryResponse && typeof response.data === "string"
+      ? base64ToBytes(response.data)
+      : typeof response.data === "string"
+        ? response.data
+        : JSON.stringify(response.data ?? null)
   return new Response(NULL_BODY_STATUSES.has(response.status) ? null : payload, {
     status: response.status,
     headers: response.headers,
   })
+}
+
+const DEFAULT_TIMEOUT_MS = 30_000
+
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length))
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  return bytes
 }
 
 type CapacitorMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
@@ -167,10 +206,23 @@ export function createPlatformFetch(
       // Wrapped rather than returned directly: `createProxyFetch` accepts its
       // own `ProxyFetchOptions` init, which is narrower than `RequestInit` and
       // so not assignable to `PlatformFetch` under `strictFunctionTypes`.
+      // `timeout` carries straight through to the native `timeout_ms`; the
+      // bridge returns bytes regardless, so `binaryResponse` is dropped.
       const proxied = createProxyFetch()
-      return (input, init) => proxied(input, init)
+      return (input, init) => {
+        if (!init) return proxied(input)
+        const { binaryResponse: _binary, ...rest } = init
+        return proxied(input, rest)
+      }
     }
     default:
-      return deps.browser ?? ((input, init) => fetch(input, init))
+      return (
+        deps.browser ??
+        ((input, init) => {
+          if (!init) return fetch(input)
+          const { timeout: _timeout, binaryResponse: _binary, ...rest } = init
+          return fetch(input, rest)
+        })
+      )
   }
 }

@@ -11,6 +11,11 @@ jest.mock("@/stores/settings", () => ({
   },
 }))
 
+const ensureRendererVideoJobHost = jest.fn()
+jest.mock("@/lib/ai/media/video-jobs/renderer-host", () => ({
+  ensureRendererVideoJobHost: () => ensureRendererVideoJobHost(),
+}))
+
 import {
   __resetProviderOperationExecutorForTests,
   getProviderOperationExecutor,
@@ -33,5 +38,11 @@ describe("getProviderOperationExecutor", () => {
     })
     expect(result).toMatchObject({ ok: true, providerId: "openai", support: "derived" })
     expect(result.ok && (result.output as { cells: unknown[] }).cells).toHaveLength(50)
+  })
+
+  it("installs the renderer video job host before its first video job can start", () => {
+    ensureRendererVideoJobHost.mockClear()
+    getProviderOperationExecutor()
+    expect(ensureRendererVideoJobHost).toHaveBeenCalledTimes(1)
   })
 })

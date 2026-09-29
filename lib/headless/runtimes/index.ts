@@ -89,6 +89,11 @@
  *   capture WebView/client logs and share the desktop Host or credentialless
  *   Collector egress policy. Headless processes own their process logging and
  *   OTel exporters directly; they do not bootstrap the renderer logger graph.
+ * - `media-generation` (video job reconciler, ADR-0205) — a renderer
+ *   `setInterval` sweeper over the Dexie job table, elected per window with
+ *   Web Locks. Headless and CLI hosts keep video jobs in the engine's
+ *   in-memory store and advance them only when a caller polls
+ *   `videos.get` / `videos.content`, so there is nothing to sweep.
  * - `storage-persistence` — `navigator.storage.persist()` is a browser API.
  * - `window-title`, `context-keys`, `appearance` — WebView chrome/UI state.
  * - `window-liveness-initializers` — reveals and heartbeats the Tauri main

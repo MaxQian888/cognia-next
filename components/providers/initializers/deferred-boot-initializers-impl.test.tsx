@@ -5,6 +5,9 @@ import { render } from "@testing-library/react"
 jest.mock("./provider-core-runtime-initializer", () => ({
   ProviderCoreRuntimeInitializer: () => <span data-boot="provider-core" />,
 }))
+jest.mock("./media-generation-initializer", () => ({
+  MediaGenerationInitializer: () => <span data-boot="media-generation" />,
+}))
 jest.mock("./routing-runtime-initializer", () => ({
   RoutingRuntimeInitializer: () => <span data-boot="routing" />,
 }))
@@ -44,8 +47,11 @@ describe("DeferredBootInitializersImpl", () => {
     // read; without it they degrade to a bare `fetch` the packaged shell's CSP
     // blocks). The rest preserves the pre-deferral layout order so a dropped
     // child is caught here.
+    // Video jobs (ADR-0205) reach providers through the transport
+    // provider-core installs, so they come after it too.
     expect(order).toEqual([
       "provider-core",
+      "media-generation",
       "routing",
       "remote-notifications",
       "gateway",

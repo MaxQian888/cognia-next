@@ -89,6 +89,50 @@ describe("createPlatformFetch", () => {
     expect(request).toHaveBeenCalledWith(expect.objectContaining({ data: "AAEC/Q==" }))
   })
 
+  it("asks the Capacitor bridge for base64 and decodes it when the body is binary", async () => {
+    const request = jest.fn().mockResolvedValue({
+      data: "AAEC/Q==",
+      status: 200,
+      headers: { "content-type": "video/mp4" },
+      url: "https://cdn.test/v.mp4",
+    })
+    getCapacitorHttp.mockReturnValue({ request })
+    const platformFetch = createPlatformFetch({ kind: "capacitor" })
+
+    const response = await platformFetch("https://cdn.test/v.mp4", {
+      binaryResponse: true,
+      timeout: 600_000,
+    })
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        responseType: "blob",
+        connectTimeout: 600_000,
+        readTimeout: 600_000,
+      })
+    )
+    expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual([0, 1, 2, 253])
+  })
+
+  it("keeps the 30 s text defaults when the caller asks for neither", async () => {
+    const request = jest.fn().mockResolvedValue({ data: "{}", status: 200, headers: {}, url: "" })
+    getCapacitorHttp.mockReturnValue({ request })
+    await createPlatformFetch({ kind: "capacitor" })("https://diag.test/v1/groups")
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ responseType: "text", connectTimeout: 30_000, readTimeout: 30_000 })
+    )
+  })
+
+  it("passes the timeout to the desktop bridge and drops the binary hint", async () => {
+    const proxied = jest.fn().mockResolvedValue(new Response("{}", { status: 200 }))
+    createProxyFetch.mockReturnValue(proxied)
+    await createPlatformFetch({ kind: "tauri" })("https://cdn.test/v.mp4", {
+      timeout: 600_000,
+      binaryResponse: true,
+    })
+    expect(proxied).toHaveBeenCalledWith("https://cdn.test/v.mp4", { timeout: 600_000 })
+  })
+
   it("never hands a body to a status that forbids one", async () => {
     const request = jest.fn().mockResolvedValue({
       data: "",

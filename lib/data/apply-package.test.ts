@@ -489,6 +489,53 @@ describe("sessions slice", () => {
   })
 })
 
+describe("video generation jobs (ADR-0205)", () => {
+  const job = (id: string, sessionId?: string) => ({
+    id,
+    kind: "video" as const,
+    ...(sessionId ? { sessionId } : {}),
+    origin: sessionId
+      ? ({ surface: "chat-tool", sessionId } as const)
+      : ({ surface: "plugin", pluginId: "p" } as const),
+    request: { prompt: "a boat" },
+    provider: { providerId: "google" as const, modelId: "veo", credentialAffinity: "keyless" },
+    operation: {},
+    status: "succeeded" as const,
+    pollCount: 1,
+    nextPollAt: 0,
+    deadlineAt: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    settledAt: 1,
+  })
+
+  it("restores a session's jobs only with the session, and Files jobs always", async () => {
+    const db = getDb()
+    await applyBackupPackage(
+      pkg({ mediaGenerationJobs: [job("j-session", "s1"), job("j-plugin")] }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
+    )
+    expect(await db.mediaGenerationJobs.toCollection().primaryKeys()).toEqual(["j-plugin"])
+  })
+
+  it("follows a duplicated session onto its new id", async () => {
+    const db = getDb()
+    await db.sessions.put({ id: "s1", title: "local", createdAt: 1, updatedAt: 1 })
+    const summary = await applyBackupPackage(
+      pkg({
+        sessions: [{ id: "s1", title: "x", createdAt: 1, updatedAt: 1 }],
+        mediaGenerationJobs: [job("j-session", "s1")],
+      }),
+      { mergeStrategy: "duplicate", includeSessions: true, includeApiKey: false }
+    )
+    const restored = await db.mediaGenerationJobs.get("j-session")
+    expect(restored?.sessionId).toBeDefined()
+    expect(restored?.sessionId).not.toBe("s1")
+    expect(await db.sessions.get(restored!.sessionId!)).toBeDefined()
+    expect(summary.added.mediaGenerationJobs).toBe(1)
+  })
+})
+
 describe("empty / missing collections", () => {
   it("returns an empty summary when payload has no rows", async () => {
     const summary = await applyBackupPackage(pkg({}), {

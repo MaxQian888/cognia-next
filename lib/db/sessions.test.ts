@@ -1310,6 +1310,37 @@ describe("deleteSession — /loop + goal cascade (v79)", () => {
     expect(await listGoalsBySession(s.id)).toHaveLength(0)
   })
 
+  it("deletes the video jobs a conversation started and keeps everyone else's", async () => {
+    const s = await createSession({ title: "video" })
+    const job = (id: string, sessionId?: string) => ({
+      id,
+      kind: "video" as const,
+      ...(sessionId ? { sessionId } : {}),
+      origin: sessionId
+        ? ({ surface: "chat-tool", sessionId } as const)
+        : ({ surface: "plugin", pluginId: "p" } as const),
+      request: { prompt: "p" },
+      provider: { providerId: "google" as const, modelId: "veo", credentialAffinity: "keyless" },
+      operation: {},
+      status: "succeeded" as const,
+      pollCount: 0,
+      nextPollAt: 0,
+      deadlineAt: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await getDb().mediaGenerationJobs.bulkPut([
+      job("mine", s.id),
+      job("other", "s-other"),
+      job("plugin"),
+    ])
+    await deleteSession(s.id)
+    expect((await getDb().mediaGenerationJobs.toCollection().primaryKeys()).sort()).toEqual([
+      "other",
+      "plugin",
+    ])
+  })
+
   it("bulkDeleteSessions runs the same cascade per id", async () => {
     schedulerMock.deleteTask.mockClear()
     const a = await createSession({ title: "a" })

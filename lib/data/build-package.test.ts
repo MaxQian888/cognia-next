@@ -539,7 +539,9 @@ describe("buildBackupPackage", () => {
       },
       { storage: null }
     )
+    // Video jobs a conversation started travel with it (ADR-0205).
     expect(Object.keys(sessionsOnly.payload).sort()).toEqual([
+      "mediaGenerationJobs",
       "messages",
       "sessionState",
       "sessions",

@@ -179,4 +179,17 @@ describe("video job handlers", () => {
       failure: { code: "capability-unsupported" },
     })
   })
+
+  it("never sends a restarted process's local- handle to a vendor wire", async () => {
+    const google = resolved("google", "google", "https://generativelanguage.googleapis.com/v1beta")
+    const stale = handleFor({ kind: "video", id: "local-abc", owner: google })
+    await expect(run("videos.get", google, { handle: stale })).rejects.toThrow(
+      /no record of video job local-abc/
+    )
+    await expect(run("videos.content", google, { handle: stale })).rejects.toThrow(
+      /no record of video job/
+    )
+    expect(http.providerRequest).not.toHaveBeenCalled()
+    expect(http.providerDownload).not.toHaveBeenCalled()
+  })
 })

@@ -981,6 +981,7 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       db.loops,
       db.loopEvents,
       db.syncTombstones,
+      db.mediaGenerationJobs,
     ],
     async () => {
       const at = Date.now()
@@ -1064,6 +1065,9 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       await db.sessionPeerMessages
         .filter((row) => doomedIds.has(row.senderSessionId) || doomedIds.has(row.receiverSessionId))
         .delete()
+      // Video jobs a conversation started (ADR-0205); their video is one of
+      // the session assets released above.
+      await db.mediaGenerationJobs.where("sessionId").anyOf(deletedIds).delete()
       await recordTombstones("sessions", deletedIds, at)
       await recordTombstones("messages", allMessageIds, at)
       await recordTombstones("sessionState", deletedIds, at)

@@ -1,8 +1,9 @@
 /**
  * `videos.get`, `videos.cancel` and `videos.content` (ADR-0163, Batch 15),
  * in the contract shapes. A video handle names either
+ *   - a durable video job (`vjob_…`, ADR-0205), answered by the job engine,
  *   - a job this process completed synchronously through the SDK (kept in
- *     the job registry with its bytes), or
+ *     the job registry with its bytes; `local-…`), or
  *   - a vendor-side job: the OpenAI videos API (`/videos/{id}`, content at
  *     `/content`, deletion as cancellation) or a Veo long-running operation
  *     (the handle id is the operation name, the bytes come from the sample
@@ -28,6 +29,7 @@ import { requireHandle } from "../resource-handle"
 import { bytesRefOf, type BytesRef } from "./bytes"
 import { providerDownload, providerRequest } from "./http"
 import { contextOf, jobStatusOf, type JobStatus, type WireContext } from "./jobs-shared"
+import { cancelVideoJob, getVideoJob, isVideoJobHandle, videoJobContent } from "./video-job-bridge"
 
 export type VideosGetInput = z.infer<typeof videosGetInput>
 export type VideosGetOutput = z.infer<typeof videosGetOutput>
@@ -183,6 +185,21 @@ function unknownJob(handle: ProviderResourceHandle): ProviderOperationFailureErr
 
 type Context = Parameters<ProviderOperationHandlerRegistration["handler"]>[0]
 
+/**
+ * A `local-…` handle was minted by this process's registry. Once the registry
+ * no longer has it (a restart), it names nothing the vendor knows, so it must
+ * not fall through to a vendor wire as if it were a remote job id.
+ */
+function isLocalRegistryHandle(handle: ProviderResourceHandle): boolean {
+  return handle.id.startsWith("local-")
+}
+
+function vendorWire(context: Context, handle: ProviderResourceHandle): VideoWire {
+  const wire = isLocalRegistryHandle(handle) ? undefined : videoWireFor(contextOf(context))
+  if (!wire) throw unknownJob(handle)
+  return wire
+}
+
 function handleOf(context: Context): ProviderResourceHandle {
   return requireHandle(context.request.input as VideosGetInput, "video", context.provider)
 }
@@ -196,11 +213,10 @@ export const videosGetHandler: ProviderOperationHandlerRegistration<
   support: "native",
   async handler(context) {
     const handle = handleOf(context)
+    if (isVideoJobHandle(handle)) return getVideoJob(handle, context.settings)
     const local = providerJobRegistry.get(handle)
     if (local) return fromRegistry(handle, local)
-    const wire = videoWireFor(contextOf(context))
-    if (!wire) throw unknownJob(handle)
-    return wire.get(contextOf(context), handle)
+    return vendorWire(context, handle).get(contextOf(context), handle)
   },
 }
 
@@ -213,12 +229,11 @@ export const videosCancelHandler: ProviderOperationHandlerRegistration<
   support: "native",
   async handler(context) {
     const handle = handleOf(context)
+    if (isVideoJobHandle(handle)) return cancelVideoJob(handle, context.settings)
     const local = providerJobRegistry.get(handle)
     // A locally completed job has nothing left to cancel: report it as it is.
     if (local) return fromRegistry(handle, local)
-    const wire = videoWireFor(contextOf(context))
-    if (!wire) throw unknownJob(handle)
-    return wire.cancel(contextOf(context), handle)
+    return vendorWire(context, handle).cancel(contextOf(context), handle)
   },
 }
 
@@ -231,6 +246,7 @@ export const videosContentHandler: ProviderOperationHandlerRegistration<
   support: "native",
   async handler(context) {
     const handle = handleOf(context)
+    if (isVideoJobHandle(handle)) return { video: await videoJobContent(handle, context.settings) }
     const local = providerJobRegistry.get(handle)
     if (local?.content) {
       const { base64, bytes, url, mimeType } = local.content
@@ -250,9 +266,7 @@ export const videosContentHandler: ProviderOperationHandlerRegistration<
         message: `video job ${handle.id} is ${local.status} and holds no bytes`,
       })
     }
-    const wire = videoWireFor(contextOf(context))
-    if (!wire) throw unknownJob(handle)
-    return { video: await wire.content(contextOf(context), handle) }
+    return { video: await vendorWire(context, handle).content(contextOf(context), handle) }
   },
 }
 

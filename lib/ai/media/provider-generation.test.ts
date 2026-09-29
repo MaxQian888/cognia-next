@@ -1,4 +1,4 @@
-import { experimental_generateVideo, generateImage } from "ai"
+import { generateImage } from "ai"
 import { createGoogle } from "@ai-sdk/google"
 import { createXai } from "@ai-sdk/xai"
 import { createFal } from "@ai-sdk/fal"
@@ -15,13 +15,14 @@ import { createAlibaba } from "@ai-sdk/alibaba"
 import type { ProviderSettingsSnapshot } from "@/lib/ai/provider-consumption"
 import {
   MediaGenerationError,
+  assertSafeMediaPrompt,
+  createProviderVideoModel,
   generateProviderImage,
-  generateProviderVideo,
+  resolveVideoProvider,
 } from "./provider-generation"
 
 jest.mock("ai", () => ({
   generateImage: jest.fn(),
-  experimental_generateVideo: jest.fn(),
 }))
 
 jest.mock("@ai-sdk/openai", () => ({
@@ -82,9 +83,10 @@ const generatedImage = {
   image: { uint8Array: new Uint8Array([1]), base64: "AQ==", mediaType: "image/png" },
   images: [],
 }
-const generatedVideo = {
-  video: { uint8Array: new Uint8Array([2]), base64: "Ag==", mediaType: "video/mp4" },
-  videos: [],
+
+/** Resolve + build the video model the way a video job does. */
+function videoModel(settings: ProviderSettingsSnapshot, providerId?: string, model?: string) {
+  return createProviderVideoModel(resolveVideoProvider(settings, providerId), model)
 }
 
 function snapshot(
@@ -102,7 +104,6 @@ describe("provider media generation", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     ;(generateImage as jest.Mock).mockResolvedValue(generatedImage)
-    ;(experimental_generateVideo as jest.Mock).mockResolvedValue(generatedVideo)
   })
 
   it("uses the xAI image adapter and replaces a chat default with the image default", async () => {
@@ -213,7 +214,7 @@ describe("provider media generation", () => {
     }
   )
 
-  it("uses Google Veo for video generation", async () => {
+  it("uses Google Veo for video generation", () => {
     const settings = snapshot("google", {
       google: {
         enabled: true,
@@ -222,26 +223,34 @@ describe("provider media generation", () => {
       },
     })
 
-    await expect(
-      generateProviderVideo({
-        snapshot: settings,
-        prompt: "A paper boat crossing a puddle",
-        aspectRatio: "16:9",
-      })
-    ).resolves.toBe(generatedVideo)
+    expect(videoModel(settings)).toBe("google-video-model")
 
     const googleClient = (createGoogle as jest.Mock).mock.results[0].value
     expect(googleClient.video).toHaveBeenCalledWith("veo-3.1-generate-preview")
-    expect(experimental_generateVideo).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "google-video-model",
-        prompt: "A paper boat crossing a puddle",
-        aspectRatio: "16:9",
-      })
-    )
   })
 
-  it("passes image and video generation controls through to the AI SDK", async () => {
+  it("threads an injected fetch into every video provider client", () => {
+    const fetchImpl = jest.fn() as unknown as typeof fetch
+    const configs: Array<[string, ProviderSettingsSnapshot["providers"][string]]> = [
+      ["xai", { enabled: true, apiKey: "k" }],
+      ["fal", { enabled: true, apiKey: "k" }],
+      ["replicate", { enabled: true, apiKey: "k" }],
+      ["doubao", { enabled: true, apiKey: "k", baseURL: "https://ark.test/api/v3" }],
+      [
+        "qwen",
+        { enabled: true, apiKey: "k", baseURL: "https://dashscope.test/compatible-mode/v1" },
+      ],
+    ]
+    for (const [providerId, config] of configs) {
+      const settings = snapshot(providerId, { [providerId]: config })
+      createProviderVideoModel(resolveVideoProvider(settings), undefined, { fetch: fetchImpl })
+    }
+    for (const factory of [createXai, createFal, createReplicate, createByteDance, createAlibaba]) {
+      expect(factory).toHaveBeenCalledWith(expect.objectContaining({ fetch: fetchImpl }))
+    }
+  })
+
+  it("passes image generation controls through to the AI SDK", async () => {
     const settings = snapshot("xai", {
       xai: {
         enabled: true,
@@ -250,7 +259,6 @@ describe("provider media generation", () => {
       },
     })
     const imageController = new AbortController()
-    const videoController = new AbortController()
 
     await generateProviderImage({
       snapshot: settings,
@@ -261,18 +269,6 @@ describe("provider media generation", () => {
       seed: 42,
       providerOptions: { xai: { quality: "high" } },
       abortSignal: imageController.signal,
-    })
-    await generateProviderVideo({
-      snapshot: settings,
-      prompt: "A clockwork bird takes flight",
-      n: 2,
-      aspectRatio: "16:9",
-      resolution: "1280x720",
-      duration: 8,
-      fps: 24,
-      seed: 7,
-      providerOptions: { xai: { resolution: "720p" } },
-      abortSignal: videoController.signal,
     })
 
     expect(generateImage).toHaveBeenCalledWith(
@@ -285,19 +281,7 @@ describe("provider media generation", () => {
         abortSignal: imageController.signal,
       })
     )
-    expect(experimental_generateVideo).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "xai-video-model",
-        n: 2,
-        aspectRatio: "16:9",
-        resolution: "1280x720",
-        duration: 8,
-        fps: 24,
-        seed: 7,
-        providerOptions: { xai: { resolution: "720p" } },
-        abortSignal: videoController.signal,
-      })
-    )
+    expect(videoModel(settings, undefined, "grok-imagine-video")).toBe("xai-video-model")
   })
 
   it("constructs FAL and Replicate with their provider-specific credential names", async () => {
@@ -308,8 +292,8 @@ describe("provider media generation", () => {
       replicate: { enabled: true, apiKey: "replicate-token", defaultModel: "unused-chat-model" },
     })
 
-    await generateProviderVideo({ snapshot: falSettings, prompt: "A quiet forest" })
-    await generateProviderVideo({ snapshot: replicateSettings, prompt: "A bright city" })
+    videoModel(falSettings)
+    videoModel(replicateSettings)
 
     expect(createFal).toHaveBeenCalledWith(
       expect.objectContaining({ apiKey: "fal-key", baseURL: "https://fal.run" })
@@ -335,7 +319,7 @@ describe("provider media generation", () => {
       })
 
       await generateProviderImage({ snapshot: settings, prompt: "A clay robot" })
-      await generateProviderVideo({ snapshot: settings, prompt: "A clay robot waves" })
+      videoModel(settings)
 
       expect(createByteDance).toHaveBeenCalledWith({
         apiKey: "ark-key",
@@ -358,7 +342,7 @@ describe("provider media generation", () => {
       },
     })
 
-    await generateProviderVideo({ snapshot: settings, prompt: "Clouds cross a mountain ridge" })
+    expect(videoModel(settings)).toBe("alibaba-video-model")
 
     expect(createAlibaba).toHaveBeenCalledWith({
       apiKey: "dashscope-key",
@@ -367,9 +351,6 @@ describe("provider media generation", () => {
     })
     const client = (createAlibaba as jest.Mock).mock.results[0].value
     expect(client.video).toHaveBeenCalledWith("wan2.7-t2v")
-    expect(experimental_generateVideo).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "alibaba-video-model" })
-    )
   })
 
   it("blocks prompts that fail the outbound PII gate", async () => {
@@ -397,15 +378,13 @@ describe("provider media generation", () => {
         prompt: { text: "Contact alice@example.com", images: ["data:image/png;base64,AQ=="] },
       })
     ).rejects.toMatchObject({ code: "PII_BLOCKED" })
-    await expect(
-      generateProviderVideo({
-        snapshot: settings,
-        prompt: {
-          text: "Contact bob@example.com",
-          image: "data:image/png;base64,AQ==",
-        },
+    expect(() =>
+      assertSafeMediaPrompt({
+        text: "Contact bob@example.com",
+        image: "data:image/png;base64,AQ==",
       })
-    ).rejects.toMatchObject({ code: "PII_BLOCKED" })
+    ).toThrow(expect.objectContaining({ code: "PII_BLOCKED" }))
+    expect(() => assertSafeMediaPrompt("A paper boat")).not.toThrow()
   })
 
   it("rejects unsupported explicit providers and missing configurations", async () => {
@@ -419,22 +398,16 @@ describe("provider media generation", () => {
       })
     ).rejects.toMatchObject({ code: "UNSUPPORTED_PROVIDER", providerId: "anthropic" })
 
-    await expect(
-      generateProviderVideo({
-        snapshot: snapshot("openai", {
-          openai: { enabled: true, apiKey: "openai-key" },
-        }),
-        prompt: "A paper sculpture spins",
-        providerId: "openai" as never,
-      })
-    ).rejects.toMatchObject({ code: "UNSUPPORTED_PROVIDER", providerId: "openai" })
+    expect(() =>
+      resolveVideoProvider(
+        snapshot("openai", { openai: { enabled: true, apiKey: "openai-key" } }),
+        "openai"
+      )
+    ).toThrow(expect.objectContaining({ code: "UNSUPPORTED_PROVIDER", providerId: "openai" }))
 
-    await expect(
-      generateProviderVideo({
-        snapshot: snapshot("google", {}),
-        prompt: "A paper sculpture spins",
-      })
-    ).rejects.toMatchObject({ code: "NO_PROVIDER" })
+    expect(() => resolveVideoProvider(snapshot("google", {}))).toThrow(
+      expect.objectContaining({ code: "NO_PROVIDER" })
+    )
   })
 
   it("falls back from a non-media default to a configured media provider", async () => {

@@ -1,4 +1,5 @@
 import { PROFILE_STORE_SCHEMA_VERSION } from "@cognia/provider-types"
+import { isPortableVideoJob } from "@/lib/db/media-generation-jobs"
 import { isSessionExposed } from "@/lib/chat/session-exposure"
 import { getDb } from "@/lib/db/schema"
 import { getSettings } from "@/lib/db/settings"
@@ -222,6 +223,13 @@ export async function* buildBackupSections(
         if (isSessionExposed(session, "standard-export")) portableSessionIds.add(session.id)
     }
     yield* exportSessionAssetRecords(portableSessionIds, sourceChunkBytes)
+  }
+
+  // Video jobs (ADR-0205): settled ones, scoped like the video they point at.
+  if (includeCoreData || options.includeSessions) {
+    yield* tableSections("mediaGenerationJobs", db.mediaGenerationJobs, iterate, (row) =>
+      isPortableVideoJob(row, { includeCoreData, exportedSessionIds: portableSessionIds })
+    )
   }
 
   // Transcript media plus whatever Files keeps or owns, in one pass so a hash

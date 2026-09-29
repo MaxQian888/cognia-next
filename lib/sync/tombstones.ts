@@ -131,6 +131,7 @@ export async function pruneTombstones(
           db.chatTranscriptIndexState,
           db.messageMediaRefs,
           db.messageMedia,
+          db.mediaGenerationJobs,
         ],
         async () => {
           // Re-read markers inside the write transaction; a restore or another
@@ -154,6 +155,8 @@ export async function pruneTombstones(
             count += await db.chatTranscriptIndexState.where("sessionId").anyOf(deleted).count()
             await db.chatTranscriptIndexState.bulkDelete(deleted)
             count += await db.messageMediaRefs.where("sessionId").anyOf(deleted).delete()
+            // Video jobs a deleted conversation started (ADR-0205).
+            count += await db.mediaGenerationJobs.where("sessionId").anyOf(deleted).delete()
             if (hashes.length > 0) {
               // Use this captured database throughout the transaction, including
               // the same indexed reference re-check and media grace window as GC.

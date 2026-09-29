@@ -66,7 +66,12 @@ describe("ai-sdk-surface", () => {
     )
     expect(() => generateImageGated({ model, prompt: leak })).toThrow(ProviderOperationPiiGateError)
     expect(() => generateSpeechGated({ model, text: leak })).toThrow(ProviderOperationPiiGateError)
+    // An image-to-video prompt carries its text beside the image.
+    expect(() =>
+      generateVideoGated({ model, prompt: { image: new Uint8Array([1]), text: leak } })
+    ).toThrow(ProviderOperationPiiGateError)
     expect(mocked.embed).not.toHaveBeenCalled()
+    expect(mocked.experimental_generateVideo).not.toHaveBeenCalled()
     expect(mocked.generateImage).not.toHaveBeenCalled()
   })
 

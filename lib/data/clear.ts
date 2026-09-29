@@ -44,6 +44,7 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
       db.chatTurnSummaries,
       db.chatTranscriptIndexState,
       db.syncTombstones,
+      db.mediaGenerationJobs,
       db.characters,
       db.skills,
       db.teams,
@@ -86,6 +87,9 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
         await db.chatTurnSummaries.clear()
         await db.chatTranscriptIndexState.clear()
         await db.sessions.clear()
+        // Session-bound video jobs (ADR-0205) go with their conversations;
+        // plugin results kept in Files have no session and stay.
+        await db.mediaGenerationJobs.where("sessionId").above("").delete()
         const at = Date.now()
         await recordTombstones("sessions", sessionIds, at)
         await recordTombstones("messages", messageIds, at)

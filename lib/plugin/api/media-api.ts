@@ -25,12 +25,14 @@ import {
 } from "@/lib/ai/media/image-generation-sdk"
 import {
   generateProviderImage,
-  generateProviderVideo,
   type ImageGenerationProviderId,
   type ProviderImageGenerationRequest,
-  type ProviderVideoGenerationRequest,
 } from "@/lib/ai/media/provider-generation"
 import type { VideoProviderId } from "@/lib/ai/media/video-generation-sdk"
+import type { StartVideoJobInput } from "@/lib/ai/media/video-jobs/engine"
+import { getVideoJobEngine, getVideoJobHost } from "@/lib/ai/media/video-jobs/host"
+import { ensureRendererVideoJobHost } from "@/lib/ai/media/video-jobs/renderer-host"
+import { readBlobAsArrayBuffer } from "@cognia/ocr/blob-utils"
 import {
   registerPluginMediaAsset,
   type MediaCatalogWriter,
@@ -55,7 +57,7 @@ import { isTauri } from "@/lib/utils"
 import { decodeNativeVideoFrame } from "@/lib/media/native-video-frame"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createApiGuardedAPI } from "./api-permission-gate"
-import { assertNoLeakingPii } from "./plugin-pii-gate"
+import { assertNoLeakingPii, assertNoLeakingPiiDeep } from "./plugin-pii-gate"
 import type { PluginManager } from "../core/manager"
 
 // =============================================================================
@@ -91,7 +93,7 @@ export interface MediaVideoGenerationOptions {
   fps?: number
   seed?: number
   inputImage?: ImageData
-  providerOptions?: ProviderVideoGenerationRequest["providerOptions"]
+  providerOptions?: StartVideoJobInput["providerOptions"]
   abortSignal?: AbortSignal
 }
 
@@ -717,6 +719,17 @@ function frameResponseToImageData(response: ArrayBuffer | Uint8Array | number[])
   return typeof ImageData === "undefined"
     ? { data, width, height, colorSpace: "srgb" }
     : new ImageData(data, width, height)
+}
+
+/** A plugin video job that did not produce a video; `code` is the job's error code. */
+export class VideoJobFailedError extends Error {
+  constructor(
+    readonly code: string,
+    message: string
+  ) {
+    super(message)
+    this.name = "VideoJobFailedError"
+  }
 }
 
 function toBlobPart(bytes: Uint8Array): ArrayBuffer {
@@ -1504,29 +1517,57 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         options?: MediaVideoGenerationOptions
       ): Promise<Blob> => {
         assertNoLeakingPii(pluginId, "ctx.media.ai.generateVideo", [prompt])
+        // Vendor options are sent verbatim, so they are screened as deeply as
+        // the prompt (the engine checks again for every other caller).
+        assertNoLeakingPiiDeep(pluginId, "ctx.media.ai.generateVideo", [options?.providerOptions])
+        // A durable video job (ADR-0205): it survives a reload, reaches the
+        // provider through the platform transport, and the finished video is
+        // also kept in Files. The call still resolves with the video itself.
         return runGeneratedMediaAi(pluginId, "ai.generateVideo", async () => {
-          const generationPrompt = options?.inputImage
+          const startFrame = options?.inputImage
             ? {
-                text: prompt,
-                image: imageDataToDataUrl(options.inputImage),
+                kind: "bytes" as const,
+                data: new Uint8Array(
+                  await readBlobAsArrayBuffer(
+                    await pixelBufferToBlob(asBuffer(options.inputImage), "png")
+                  )
+                ),
+                mediaType: "image/png",
               }
-            : prompt
-          const result = await generateProviderVideo({
-            snapshot: currentProviderSettingsSnapshot(),
-            prompt: generationPrompt,
+            : undefined
+          ensureRendererVideoJobHost()
+          const engine = getVideoJobEngine()
+          const started = await engine.start({
+            prompt,
+            ...(startFrame ? { startFrame } : {}),
             ...(options?.providerId ? { providerId: options.providerId } : {}),
             ...(options?.model ? { model: options.model } : {}),
-            ...(options?.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
-            ...(options?.resolution ? { resolution: options.resolution } : {}),
-            ...(options?.duration !== undefined ? { duration: options.duration } : {}),
-            ...(options?.fps !== undefined ? { fps: options.fps } : {}),
-            ...(options?.seed !== undefined ? { seed: options.seed } : {}),
+            params: {
+              ...(options?.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
+              ...(options?.resolution ? { resolution: options.resolution } : {}),
+              ...(options?.duration !== undefined ? { durationSec: options.duration } : {}),
+              ...(options?.fps !== undefined ? { fps: options.fps } : {}),
+              ...(options?.seed !== undefined ? { seed: options.seed } : {}),
+            },
             ...(options?.providerOptions ? { providerOptions: options.providerOptions } : {}),
+            origin: { surface: "plugin", pluginId },
+            snapshot: currentProviderSettingsSnapshot(),
             ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
           })
-          return new Blob([toBlobPart(result.video.uint8Array)], {
-            type: result.video.mediaType,
+          if (!started.ok) throw new VideoJobFailedError(started.error.code, started.error.message)
+          const settled = await engine.wait(started.job.id, {
+            snapshot: currentProviderSettingsSnapshot(),
+            ...(options?.abortSignal ? { signal: options.abortSignal } : {}),
           })
+          if (!settled || settled.status !== "succeeded" || !settled.result) {
+            const code = settled?.error?.code ?? settled?.status ?? "missing"
+            throw new VideoJobFailedError(
+              code,
+              settled?.error?.message ?? `The video job ended ${settled?.status ?? "missing"}.`
+            )
+          }
+          const blob = await getVideoJobHost().readContent(settled.result.content)
+          return blob.type ? blob : new Blob([blob], { type: settled.result.mediaType })
         })
       },
 

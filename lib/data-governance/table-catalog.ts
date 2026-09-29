@@ -224,6 +224,7 @@ export const CORE_TABLE_NAMES = [
   "mcpServers",
   "mcpServerSummaries",
   "mcpSyncJobs",
+  "mediaGenerationJobs",
   "memories",
   "mentionLinks",
   "mentionLinkState",
@@ -469,6 +470,10 @@ export const PORTABLE_BACKUP_BINDINGS = {
   // user did by hand; the pinned bytes travel with them in the media section.
   libraryItems: "libraryItems",
   libraryFolders: "libraryFolders",
+  // Settled video-generation jobs (ADR-0205): the record of what was asked
+  // for and where the video landed, which the Files page lists. In-flight
+  // jobs are filtered out at export (`isPortableVideoJob`).
+  mediaGenerationJobs: "mediaGenerationJobs",
   // Schedules are configuration the user authored: a cron expression, a prompt,
   // a workspace binding. Losing them on a restore is losing work. The run
   // history (`scheduledTaskRuns`) deliberately stays out, for the same reason
@@ -902,6 +907,8 @@ const USER_CONTENT_TABLES = new Set<CoreTableName>([
   // its source conversation. Content, not counters.
   "libraryItems",
   "libraryFolders",
+  // A video job keeps the prompt the user (or an agent for them) wrote.
+  "mediaGenerationJobs",
   "canvasComments",
   "canvasDocuments",
   "canvasSessions",
@@ -1073,6 +1080,8 @@ const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>
   messageMediaRefs: "chat",
   libraryItems: "artifact",
   libraryFolders: "artifact",
+  // Job rows are small; the videos themselves are session assets in `chat`.
+  mediaGenerationJobs: "chat",
   chatTranscriptIndexState: "chat",
   chatTurnSummaries: "chat",
   sessionState: "chat",
@@ -1186,6 +1195,17 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     executorId: "memoryGovernance",
     reason:
       "ADR-0115 durable job retention. `pruneMemoryGovernanceData` keeps a succeeded or no-output job for 30 days and a failed, skipped or cancelled one for 90, and caps retained completed rows so a busy profile cannot grow without bound.",
+  },
+  // ADR-0205: failed, cancelled and timed-out video jobs are kept 30 days so
+  // "what happened to my video" stays answerable; a succeeded job follows its
+  // conversation (deleted with it) or its Files entry.
+  mediaGenerationJobs: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "mediaGenerationJobs",
+    reason:
+      "`pruneSettledVideoJobs` drops failed, cancelled and timed-out jobs 30 days after they settle; succeeded jobs are removed with their conversation.",
   },
   memoryAuditEvents: {
     mode: "ttl",

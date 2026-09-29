@@ -112,6 +112,11 @@ describe("deleted session reconciliation before tombstone expiry", () => {
     } as never)
     await db.chatTurnSummaries.put({ sessionId, itemKey: "item", turnKey: "turn" } as never)
     await db.chatTranscriptIndexState.put({ sessionId } as never)
+    await db.mediaGenerationJobs.put({
+      id: `vjob_${sessionId}`,
+      sessionId,
+      status: "succeeded",
+    } as never)
     await db.messageMediaRefs.put({ sessionId, messageId: sessionId, hash })
     await db.messageMedia.put({
       hash,
@@ -148,9 +153,12 @@ describe("deleted session reconciliation before tombstone expiry", () => {
       expect(await db.chatTurnSummaries.where("sessionId").equals(id).count()).toBe(0)
       expect(await db.chatTranscriptIndexState.get(id)).toBeUndefined()
       expect(await db.messageMediaRefs.where("sessionId").equals(id).count()).toBe(0)
+      expect(await db.mediaGenerationJobs.get(`vjob_${id}`)).toBeUndefined()
     }
-    for (const id of ["live", "optimistic", "pending-history"])
+    for (const id of ["live", "optimistic", "pending-history"]) {
       expect(await db.chatDrafts.get(id)).toBeDefined()
+      expect(await db.mediaGenerationJobs.get(`vjob_${id}`)).toBeDefined()
+    }
     expect(await db.messageMedia.get("deleted")).toBeUndefined()
     expect(await db.messageMedia.get("shared-deleted")).toBeDefined()
   })

@@ -37,6 +37,7 @@ const SHAPES: Record<
   libraryItems: "rows",
   libraryFolders: "rows",
   libraryAssets: "rows",
+  mediaGenerationJobs: "rows",
   templateDefinitions: "rows",
   templatePackages: "rows",
   templateInstances: "rows",

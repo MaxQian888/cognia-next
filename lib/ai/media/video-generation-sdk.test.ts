@@ -1,5 +1,8 @@
 import {
+  BROWSER_DIRECT_VIDEO_PROVIDERS,
+  VIDEO_PROVIDER_OPTIONS,
   VIDEO_PROVIDERS,
+  videoStartFrameMode,
   isSupportedVideoProvider,
   resolveVideoModel,
   type VideoProviderId,
@@ -43,5 +46,29 @@ describe("video-generation-sdk registry", () => {
     expect(resolveVideoModel("xai")).toBe(VIDEO_PROVIDERS.xai.defaultModel)
     expect(resolveVideoModel("volcengine")).toBe(VIDEO_PROVIDERS.volcengine.defaultModel)
     expect(resolveVideoModel("qwen")).toBe("wan2.7-t2v")
+  })
+
+  it("declares option support for every provider", () => {
+    expect(Object.keys(VIDEO_PROVIDER_OPTIONS).sort()).toEqual([...providerIds].sort())
+    expect(VIDEO_PROVIDER_OPTIONS.qwen.aspectRatio).toBe(false)
+    expect(VIDEO_PROVIDER_OPTIONS.xai.seed).toBe(false)
+    expect(VIDEO_PROVIDER_OPTIONS.fal.resolution).toBe(false)
+  })
+
+  it("reads the start-frame mode from the model id", () => {
+    expect(videoStartFrameMode("wan2.6-i2v-flash")).toBe("required")
+    expect(videoStartFrameMode("wan2.7-t2v")).toBe("unsupported")
+    expect(videoStartFrameMode("wan2.7-r2v")).toBe("unsupported")
+    expect(videoStartFrameMode("veo-3.1-generate-preview")).toBe("optional")
+    for (const providerId of providerIds) {
+      for (const model of VIDEO_PROVIDERS[providerId].models) {
+        expect(["optional", "required", "unsupported"]).toContain(videoStartFrameMode(model))
+      }
+    }
+  })
+
+  it("only lists browser-direct providers that are video providers", () => {
+    // Pinned: widening this set is a claim about a vendor's CORS policy.
+    expect([...BROWSER_DIRECT_VIDEO_PROVIDERS]).toEqual(["google"])
   })
 })

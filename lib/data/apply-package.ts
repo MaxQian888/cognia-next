@@ -21,6 +21,8 @@ import type {
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { LibraryFolder, LibraryItemRow } from "@/lib/db/files-library-types"
+import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
+import { remapVideoJobSession } from "@/lib/db/media-generation-jobs"
 import { reconcileLibraryPins } from "@/lib/db/files-library-items"
 import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
 import type { PetAchievementRecord, PetCharacterBinding, PetInventoryRow } from "@/types/pet"
@@ -276,6 +278,7 @@ export async function applyBackupPackage(
       db.browserRecordings,
       db.libraryItems,
       db.libraryFolders,
+      db.mediaGenerationJobs,
       db.providerProfiles,
       db.deploymentProfiles,
       db.transportProfiles,
@@ -954,6 +957,22 @@ export async function applyBackupPackage(
       const restoredAssets = await restoreLibraryAssets(libraryAssets, opts.mergeStrategy)
       if (restoredAssets > 0) incrementCounter(summary.added, "libraryAssets")
       if (env.libraryItems?.length || libraryAssets.length) await reconcileLibraryPins()
+
+      // --- Video jobs (ADR-0205) ----------------------------------------
+      // Settled rows only (see `isPortableVideoJob`). A session-bound job is
+      // restored only with its session, pointing at the id the session got.
+      await applyKeyedCollection<MediaGenerationJobRow>({
+        rows: env.mediaGenerationJobs
+          ?.filter(
+            (row) => !row.sessionId || (opts.includeSessions && sessionMapping.has(row.sessionId))
+          )
+          .map((row) => remapVideoJobSession(row, sessionMapping)),
+        table: db.mediaGenerationJobs,
+        kind: "mediaGenerationJobs",
+        opts,
+        summary,
+        keyOf: (row) => row.id,
+      })
     }
   )
 

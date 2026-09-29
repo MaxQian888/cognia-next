@@ -1561,6 +1561,24 @@ describe("getDb", () => {
     expect(await db.sessions.where("folderId").anyOf(["folder-1", "folder-2"]).count()).toBe(2)
   })
 
+  it("v234 adds durable video-generation jobs", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(234)
+    expect(db.mediaGenerationJobs.schema.primKey.name).toBe("id")
+    expect(db.mediaGenerationJobs.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "status",
+        "[status+nextPollAt]",
+        "sessionId",
+        "[sessionId+createdAt]",
+        "projectId",
+        "settledAt",
+      ])
+    )
+  })
+
   it("v233 adds project-thread PR observations keyed by session", async () => {
     const db = getDb()
     await db.open()

@@ -96,7 +96,7 @@ export function streamTranscribeGated(args: StreamTranscribeArgs) {
 }
 
 export function generateVideoGated(args: GenerateVideoArgs) {
-  gateText(typeof args.prompt === "string" ? args.prompt : undefined)
+  gateText(typeof args.prompt === "string" ? args.prompt : args.prompt.text)
   return experimental_generateVideo(args)
 }
 

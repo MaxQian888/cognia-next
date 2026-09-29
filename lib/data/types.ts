@@ -43,6 +43,7 @@ import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory
 import type { LocalStorageSnapshot } from "./snapshots/types"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { LibraryFolder, LibraryItemRow } from "@/lib/db/files-library-types"
+import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
 import type { BrowserRecordingRow } from "@/lib/db/browser-recordings"
@@ -156,6 +157,13 @@ export interface BackupPayloadV3 {
   libraryFolders?: LibraryFolder[]
   /** Files uploaded straight into Files: owner metadata. Bytes ride `messageMedia` as `original:<sha>`. */
   libraryAssets?: SessionAsset[]
+  /**
+   * Settled video-generation jobs (ADR-0205, schema v234). Session-bound jobs
+   * travel with their conversation (their video is a session asset); the rest
+   * (plugin results kept in Files) travel with the core data. In-flight jobs
+   * stay on the device polling them. See `isPortableVideoJob`.
+   */
+  mediaGenerationJobs?: MediaGenerationJobRow[]
   /**
    * Scheduled tasks (schema v219). Configuration the user authored: a trigger,
    * a payload, a workspace binding. Run history is NOT here. It is append-heavy

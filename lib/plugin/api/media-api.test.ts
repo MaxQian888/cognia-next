@@ -42,13 +42,22 @@ import { initializePluginPermissions } from "./permission-api"
 import { transport } from "@/lib/tauri"
 import { isTauri } from "@/lib/utils"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
-import { generateProviderImage, generateProviderVideo } from "@/lib/ai/media/provider-generation"
+import { generateProviderImage } from "@/lib/ai/media/provider-generation"
+import { getVideoJobEngine, getVideoJobHost } from "@/lib/ai/media/video-jobs/host"
 import {
   clearAllPluginPointDiagnostics,
   getPluginPointDiagnostics,
 } from "../contracts/diagnostics-store"
 
 jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
+jest.mock("@/lib/ai/media/video-jobs/renderer-host", () => ({
+  ensureRendererVideoJobHost: jest.fn(),
+}))
+jest.mock("@/lib/ai/media/video-jobs/host", () => {
+  const engine = { start: jest.fn(), wait: jest.fn() }
+  const host = { readContent: jest.fn() }
+  return { getVideoJobEngine: () => engine, getVideoJobHost: () => host }
+})
 jest.mock("@/lib/tauri/transport-routing", () => ({
   getActiveRemoteEndpoint: jest.fn(() => null),
 }))
@@ -72,7 +81,6 @@ jest.mock("@/lib/network/proxy-fetch", () => ({
 
 jest.mock("@/lib/ai/media/provider-generation", () => ({
   generateProviderImage: jest.fn(),
-  generateProviderVideo: jest.fn(),
 }))
 
 jest.mock("@/stores", () => ({
@@ -886,15 +894,20 @@ describe("Media Registry", () => {
       )
     })
 
-    it("generates text-to-video and image-to-video through the unified provider layer", async () => {
-      ;(generateProviderVideo as jest.Mock).mockResolvedValue({
-        video: {
-          uint8Array: new Uint8Array([4, 5, 6]),
-          base64: "BAUG",
-          mediaType: "video/mp4",
-        },
+    it("runs text-to-video and image-to-video as durable video jobs", async () => {
+      const engine = getVideoJobEngine() as unknown as { start: jest.Mock; wait: jest.Mock }
+      const host = getVideoJobHost() as unknown as { readContent: jest.Mock }
+      engine.start.mockResolvedValue({ ok: true, job: { id: "vjob_1" } })
+      engine.wait.mockResolvedValue({
+        id: "vjob_1",
+        status: "succeeded",
+        result: { content: { kind: "library", assetId: "a" }, mediaType: "video/mp4", byteSize: 3 },
       })
+      host.readContent.mockResolvedValue(
+        new Blob([new Uint8Array([4, 5, 6])], { type: "video/mp4" })
+      )
       const api = createMediaAPI(testPluginId, {} as never)
+      const signal = new AbortController().signal
 
       const textVideo = await api.ai.generateVideo("A kite rises", {
         providerId: "volcengine",
@@ -902,10 +915,9 @@ describe("Media Registry", () => {
         model: "dreamina-seedance-2-0-260128",
         aspectRatio: "16:9",
         resolution: "1280x720",
-        fps: 24,
         seed: 9,
         providerOptions: { bytedance: { generateAudio: true } },
-        abortSignal: new AbortController().signal,
+        abortSignal: signal,
       })
       const imageVideo = await api.ai.generateVideo("The portrait smiles", {
         inputImage: createTestImageData(),
@@ -914,29 +926,49 @@ describe("Media Registry", () => {
       expect(textVideo).toBeInstanceOf(Blob)
       expect(textVideo.type).toBe("video/mp4")
       expect(imageVideo).toBeInstanceOf(Blob)
-      expect(generateProviderVideo).toHaveBeenNthCalledWith(
+      expect(engine.start).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
+          prompt: "A kite rises",
           providerId: "volcengine",
           model: "dreamina-seedance-2-0-260128",
-          aspectRatio: "16:9",
-          resolution: "1280x720",
-          duration: 5,
-          fps: 24,
-          seed: 9,
+          params: { aspectRatio: "16:9", resolution: "1280x720", durationSec: 5, seed: 9 },
           providerOptions: { bytedance: { generateAudio: true } },
-          abortSignal: expect.any(AbortSignal),
+          origin: { surface: "plugin", pluginId: testPluginId },
+          abortSignal: signal,
         })
       )
-      expect(generateProviderVideo).toHaveBeenNthCalledWith(
+      expect(engine.wait).toHaveBeenCalledWith("vjob_1", expect.objectContaining({ signal }))
+      expect(engine.start).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
-          prompt: expect.objectContaining({
-            text: "The portrait smiles",
-            image: expect.stringMatching(/^data:image\/png;base64,/),
-          }),
+          prompt: "The portrait smiles",
+          startFrame: expect.objectContaining({ kind: "bytes", mediaType: "image/png" }),
         })
       )
+    })
+
+    it("rejects with the job's error code when a video job fails", async () => {
+      const engine = getVideoJobEngine() as unknown as { start: jest.Mock; wait: jest.Mock }
+      engine.start.mockResolvedValueOnce({
+        ok: false,
+        error: { code: "no_provider", message: "No video provider", recheckable: true },
+      })
+      const api = createMediaAPI(testPluginId, {} as never)
+      await expect(api.ai.generateVideo("A kite")).rejects.toMatchObject({
+        name: "VideoJobFailedError",
+        code: "no_provider",
+      })
+      engine.start.mockResolvedValueOnce({ ok: true, job: { id: "vjob_2" } })
+      engine.wait.mockResolvedValueOnce({
+        id: "vjob_2",
+        status: "failed",
+        error: { code: "generation_failed", message: "flagged", recheckable: false },
+      })
+      await expect(api.ai.generateVideo("A kite")).rejects.toMatchObject({
+        code: "generation_failed",
+        message: "flagged",
+      })
     })
 
     it("blocks generated-media prompts that fail the plugin PII gate", async () => {
@@ -948,8 +980,13 @@ describe("Media Registry", () => {
       await expect(api.ai.generateVideo("Send this to bob@example.com")).rejects.toMatchObject({
         name: "PluginPiiError",
       })
+      await expect(
+        api.ai.generateVideo("A kite", {
+          providerOptions: { fal: { negative_prompt: "bob@example.com" } },
+        })
+      ).rejects.toMatchObject({ name: "PluginPiiError" })
       expect(generateProviderImage).not.toHaveBeenCalled()
-      expect(generateProviderVideo).not.toHaveBeenCalled()
+      expect((getVideoJobEngine() as unknown as { start: jest.Mock }).start).not.toHaveBeenCalled()
     })
 
     it("routes upscale requests through the configured image provider", async () => {

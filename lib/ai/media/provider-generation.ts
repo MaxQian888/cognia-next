@@ -7,8 +7,8 @@ import { createXai } from "@ai-sdk/xai"
 import { createByteDance } from "@ai-sdk/bytedance"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createAlibaba } from "@ai-sdk/alibaba"
-import type { Experimental_VideoModelV3, ImageModelV3 } from "@ai-sdk/provider"
-import { experimental_generateVideo, generateImage } from "ai"
+import type { Experimental_VideoModelV4, ImageModelV3 } from "@ai-sdk/provider"
+import { generateImage, type GenerateVideoPrompt } from "ai"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
 
@@ -45,7 +45,7 @@ export const IMAGE_GENERATION_PROVIDER_IDS = [
 export type ImageGenerationProviderId = (typeof IMAGE_GENERATION_PROVIDER_IDS)[number]
 
 export type ProviderImagePrompt = Parameters<typeof generateImage>[0]["prompt"]
-export type ProviderVideoPrompt = Parameters<typeof experimental_generateVideo>[0]["prompt"]
+export type ProviderVideoPrompt = GenerateVideoPrompt
 
 export interface ProviderImageGenerationRequest {
   snapshot: ProviderSettingsSnapshot
@@ -57,21 +57,6 @@ export interface ProviderImageGenerationRequest {
   aspectRatio?: `${number}:${number}`
   seed?: number
   providerOptions?: Parameters<typeof generateImage>[0]["providerOptions"]
-  abortSignal?: AbortSignal
-}
-
-export interface ProviderVideoGenerationRequest {
-  snapshot: ProviderSettingsSnapshot
-  prompt: ProviderVideoPrompt
-  providerId?: VideoProviderId
-  model?: string
-  n?: number
-  aspectRatio?: `${number}:${number}`
-  resolution?: `${number}x${number}`
-  duration?: number
-  fps?: number
-  seed?: number
-  providerOptions?: Parameters<typeof experimental_generateVideo>[0]["providerOptions"]
   abortSignal?: AbortSignal
 }
 
@@ -94,7 +79,8 @@ function promptText(prompt: ProviderImagePrompt | ProviderVideoPrompt): string |
   return typeof prompt === "string" ? prompt : prompt.text
 }
 
-function assertSafePrompt(prompt: ProviderImagePrompt | ProviderVideoPrompt): void {
+/** Outbound PII gate for a media prompt; throws `PII_BLOCKED`. */
+export function assertSafeMediaPrompt(prompt: ProviderImagePrompt | ProviderVideoPrompt): void {
   const text = promptText(prompt)
   if (text && !hasNoLeakingPii(text)) {
     throw new MediaGenerationError(
@@ -228,10 +214,42 @@ function createProviderImageModel(resolved: ResolvedProvider, requestedModel?: s
   }
 }
 
-function createProviderVideoModel(resolved: ResolvedProvider, requestedModel?: string) {
+/**
+ * Resolve the provider a video job runs on: `preferredProviderId` when given
+ * (it must be a video provider), else the default provider when it is one,
+ * else the first configured video provider. Throws `UNSUPPORTED_PROVIDER` /
+ * `NO_PROVIDER`.
+ */
+export function resolveVideoProvider(
+  snapshot: ProviderSettingsSnapshot,
+  preferredProviderId?: string
+): ResolvedProvider {
+  return resolveMediaProvider(snapshot, "video", preferredProviderId)
+}
+
+interface ProviderVideoModelOptions {
+  /**
+   * Transport for every request the model makes. Video providers are not on
+   * the desktop WebView's `connect-src` allowlist, so the packaged app must
+   * route them through the native bridge (`createPlatformFetch`).
+   */
+  fetch?: typeof globalThis.fetch
+}
+
+/**
+ * Build the AI SDK video model for a resolved provider. Every supported
+ * provider ships a v4 model with `doStart` / `doStatus`, which is what lets a
+ * job be started now and checked from a later process.
+ */
+export function createProviderVideoModel(
+  resolved: ResolvedProvider,
+  requestedModel?: string,
+  options: ProviderVideoModelOptions = {}
+): Experimental_VideoModelV4 {
   const providerId = resolved.providerId as VideoProviderId
   const modelId = resolveVideoModel(providerId, requestedModel ?? resolved.model)
   const baseURL = normalizedSpecializedBaseURL(resolved)
+  const fetch = options.fetch ? { fetch: options.fetch } : {}
 
   switch (providerId) {
     case "google": {
@@ -242,28 +260,30 @@ function createProviderVideoModel(resolved: ResolvedProvider, requestedModel?: s
         baseURL: resolved.baseURL,
         isCustomProvider: resolved.isCustomProvider,
         useProxy: resolved.useProxy,
-      }) as unknown as { video: (model: string) => Experimental_VideoModelV3 }
+        ...fetch,
+      }) as unknown as { video: (model: string) => Experimental_VideoModelV4 }
       return client.video(modelId)
     }
     case "xai":
-      return createXai({ apiKey: resolved.apiKey, baseURL }).video(modelId)
+      return createXai({ apiKey: resolved.apiKey, baseURL, ...fetch }).video(modelId)
     case "fal":
-      return createFal({ apiKey: resolved.apiKey, baseURL }).video(modelId)
+      return createFal({ apiKey: resolved.apiKey, baseURL, ...fetch }).video(modelId)
     case "replicate":
-      return createReplicate({ apiToken: resolved.apiKey, baseURL }).video(modelId)
+      return createReplicate({ apiToken: resolved.apiKey, baseURL, ...fetch }).video(modelId)
     case "doubao":
     case "volcengine":
-      return createByteDance(clientSettings(resolved)).video(modelId)
+      return createByteDance({ ...clientSettings(resolved), ...fetch }).video(modelId)
     case "qwen":
       return createAlibaba({
         ...clientSettings(resolved),
         videoBaseURL: resolved.baseURL?.replace(/\/compatible-mode\/v1\/?$/, ""),
+        ...fetch,
       }).video(modelId)
   }
 }
 
 export async function generateProviderImage(request: ProviderImageGenerationRequest) {
-  assertSafePrompt(request.prompt)
+  assertSafeMediaPrompt(request.prompt)
   const resolved = resolveMediaProvider(request.snapshot, "image", request.providerId)
   const model = createProviderImageModel(resolved, request.model)
 
@@ -273,25 +293,6 @@ export async function generateProviderImage(request: ProviderImageGenerationRequ
     ...(request.n !== undefined ? { n: request.n } : {}),
     ...(request.size ? { size: request.size } : {}),
     ...(request.aspectRatio ? { aspectRatio: request.aspectRatio } : {}),
-    ...(request.seed !== undefined ? { seed: request.seed } : {}),
-    ...(request.providerOptions ? { providerOptions: request.providerOptions } : {}),
-    ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
-  })
-}
-
-export async function generateProviderVideo(request: ProviderVideoGenerationRequest) {
-  assertSafePrompt(request.prompt)
-  const resolved = resolveMediaProvider(request.snapshot, "video", request.providerId)
-  const model = createProviderVideoModel(resolved, request.model)
-
-  return experimental_generateVideo({
-    model,
-    prompt: request.prompt,
-    ...(request.n !== undefined ? { n: request.n } : {}),
-    ...(request.aspectRatio ? { aspectRatio: request.aspectRatio } : {}),
-    ...(request.resolution ? { resolution: request.resolution } : {}),
-    ...(request.duration !== undefined ? { duration: request.duration } : {}),
-    ...(request.fps !== undefined ? { fps: request.fps } : {}),
     ...(request.seed !== undefined ? { seed: request.seed } : {}),
     ...(request.providerOptions ? { providerOptions: request.providerOptions } : {}),
     ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),

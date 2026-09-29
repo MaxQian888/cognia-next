@@ -112,3 +112,56 @@ export function resolveVideoModel(providerId: VideoProviderId, configuredModel?:
     ? (configuredModel as string)
     : VIDEO_PROVIDERS[providerId].defaultModel
 }
+
+/**
+ * Which standard `startVideo` options a provider's AI SDK adapter forwards.
+ * Read from each adapter's request builder (an unsupported option is dropped
+ * with a warning there), so the settings UI and the job engine can refuse or
+ * hide a control instead of letting it vanish silently. Values themselves are
+ * validated by the provider; a rejected value comes back as a job error.
+ */
+export interface VideoProviderOptionSupport {
+  aspectRatio: boolean
+  resolution: boolean
+  duration: boolean
+  seed: boolean
+  fps: boolean
+}
+
+export const VIDEO_PROVIDER_OPTIONS: Record<VideoProviderId, VideoProviderOptionSupport> = {
+  google: { aspectRatio: true, resolution: true, duration: true, seed: true, fps: false },
+  // fal takes resolution only through model-specific providerOptions.
+  fal: { aspectRatio: true, resolution: false, duration: true, seed: true, fps: false },
+  // Replicate is the only adapter that forwards `fps`.
+  replicate: { aspectRatio: true, resolution: true, duration: true, seed: true, fps: true },
+  // xAI warns "video models do not support seed" (and custom FPS).
+  xai: { aspectRatio: true, resolution: true, duration: true, seed: false, fps: false },
+  doubao: { aspectRatio: true, resolution: true, duration: true, seed: true, fps: false },
+  volcengine: { aspectRatio: true, resolution: true, duration: true, seed: true, fps: false },
+  // DashScope Wan warns on aspectRatio and fps; size comes from resolution.
+  qwen: { aspectRatio: false, resolution: true, duration: true, seed: true, fps: false },
+}
+
+/**
+ * How a model treats a start frame. Seedance and Wan encode the mode in the
+ * model id (`…-t2v-…` text only, `…-i2v…` image required); every other model
+ * takes an optional start frame.
+ */
+export type VideoStartFrameMode = "optional" | "required" | "unsupported"
+
+export function videoStartFrameMode(model: string): VideoStartFrameMode {
+  const normalized = model.toLowerCase()
+  if (normalized.includes("i2v")) return "required"
+  if (normalized.includes("t2v") || normalized.includes("r2v")) return "unsupported"
+  return "optional"
+}
+
+/**
+ * Providers the web build can call directly. A browser `fetch` reaches a
+ * provider only if it serves CORS headers for any origin; Google's
+ * Generative Language API does (the chat path already streams from it in the
+ * browser). The others are not known to, so on the web build they are listed
+ * but inert ("desktop app required") rather than failing with an opaque
+ * network error — the desktop and mobile shells reach them natively.
+ */
+export const BROWSER_DIRECT_VIDEO_PROVIDERS: ReadonlySet<VideoProviderId> = new Set(["google"])

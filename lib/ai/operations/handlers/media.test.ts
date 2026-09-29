@@ -9,12 +9,12 @@ const surface = jest.requireMock("./ai-sdk-surface") as Record<string, jest.Mock
 jest.mock("@/lib/ai/media/provider-generation", () => ({
   IMAGE_GENERATION_PROVIDER_IDS: ["openai", "google"],
   generateProviderImage: jest.fn(),
-  generateProviderVideo: jest.fn(),
 }))
 const media = jest.requireMock("@/lib/ai/media/provider-generation") as {
   generateProviderImage: jest.Mock
-  generateProviderVideo: jest.Mock
 }
+const videoEngine = { start: jest.fn() }
+jest.mock("@/lib/ai/media/video-jobs/host", () => ({ getVideoJobEngine: () => videoEngine }))
 jest.mock("@/lib/ai/media/video-generation-sdk", () => ({
   VIDEO_GENERATION_PROVIDER_IDS: ["google"],
 }))
@@ -112,21 +112,26 @@ describe("media handlers", () => {
     })
   })
 
-  it("records a generated video as a locally completed job under a pinned handle", async () => {
-    media.generateProviderVideo.mockResolvedValueOnce({
-      videos: [{ base64: "vv", mediaType: "video/mp4" }],
+  it("starts a durable video job and answers with its handle while it runs", async () => {
+    videoEngine.start.mockResolvedValueOnce({
+      ok: true,
+      job: { id: "vjob_abc", status: "generating", createdAt: 7 },
     })
     const google = { ...provider, providerId: "google", protocol: "google" as const }
-    const output = (await registry
-      .resolve("videos.generate", "google", "google")!
-      .handler(
-        ctx(
-          "videos.generate",
-          { model: "veo", prompt: "dog", durationSeconds: 4, extra: { resolution: "1280x720" } },
-          google
-        )
-      )) as {
+    const output = (await registry.resolve("videos.generate", "google", "google")!.handler(
+      ctx(
+        "videos.generate",
+        {
+          model: "veo",
+          prompt: "dog",
+          durationSeconds: 4,
+          extra: { resolution: "1280x720", seed: 3 },
+        },
+        google
+      )
+    )) as {
       handle: {
+        id: string
         kind: string
         providerId: string
         deploymentRef: string
@@ -134,19 +139,39 @@ describe("media handlers", () => {
       }
       status: string
     }
-    expect(media.generateProviderVideo).toHaveBeenCalledWith(
-      expect.objectContaining({ duration: 4, resolution: "1280x720", providerId: "google" })
+    expect(videoEngine.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "dog",
+        providerId: "google",
+        model: "veo",
+        params: { resolution: "1280x720", durationSec: 4, seed: 3 },
+        origin: { surface: "executor" },
+        snapshot: settings,
+      })
     )
-    expect(videosGenerateOutput.parse(output)).toMatchObject({ status: "succeeded" })
+    expect(videosGenerateOutput.parse(output)).toMatchObject({ status: "running" })
     expect(output.handle).toMatchObject({
+      id: "vjob_abc",
       kind: "video",
       providerId: "google",
       deploymentRef: "dep-1",
     })
     expect(output.handle.credentialAffinity).not.toContain("k")
-    const job = providerJobRegistry.get(output.handle as never)
-    expect(job?.status).toBe("succeeded")
-    expect(job?.content).toEqual({ base64: "vv", mimeType: "video/mp4" })
+  })
+
+  it("maps a refused video job to a typed failure and refuses n > 1", async () => {
+    videoEngine.start.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "unsupported_input", message: "no seed", recheckable: false },
+    })
+    const google = { ...provider, providerId: "google", protocol: "google" as const }
+    const handler = registry.resolve("videos.generate", "google", "google")!.handler
+    await expect(
+      handler(ctx("videos.generate", { model: "veo", prompt: "dog" }, google))
+    ).rejects.toMatchObject({ failure: { code: "capability-unsupported" } })
+    await expect(
+      handler(ctx("videos.generate", { model: "veo", prompt: "dog", extra: { n: 2 } }, google))
+    ).rejects.toMatchObject({ failure: { code: "capability-unsupported" } })
   })
 
   it("speaks and transcribes through the client's optional factories", async () => {

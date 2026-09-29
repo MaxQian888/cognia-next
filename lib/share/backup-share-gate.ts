@@ -66,6 +66,9 @@ export const BACKUP_PAYLOAD_DOMAIN: Record<keyof BackupPayloadV3, BackupShareDom
   // keep deletions deleted on the receiving device.
   retrievalTombstones: "retrieval",
   sessionState: "sessions",
+  // Video jobs keep the prompt that produced each video; most follow a
+  // conversation (ADR-0205).
+  mediaGenerationJobs: "sessions",
   scheduledTasks: "library",
   libraryFolders: "library",
   libraryItems: "library",

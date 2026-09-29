@@ -122,6 +122,7 @@ describe("pruneRetainedTables", () => {
       { id: "evalArtifacts", removed: 0 },
       { id: "evalOnline", removed: 0 },
       { id: "workSubmissions", removed: 0 },
+      { id: "mediaGenerationJobs", removed: 0 },
       { id: "memoryGovernance", removed: 0 },
       { id: "notificationDelivery", removed: 0 },
       { id: "ocrResults", removed: 0 },

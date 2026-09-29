@@ -311,6 +311,7 @@ import type {
 import type { WorkflowAppApiKey } from "@/types/workflow/api-key"
 import type { TeamPrObservationRow } from "./team-pr-observations"
 import type { SessionPrObservationRow } from "./session-pr-observations"
+import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
 import type { AgentTeamBoardRow } from "./agent-team-board"
 import type {
   TemplateDefinitionRow,
@@ -419,7 +420,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 233
+export const CURRENT_SCHEMA_VERSION = 234
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -611,6 +612,10 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   opticalArchives: "&id, sessionId, createdAt, [sessionId+createdAt]",
   teamPrObservations: "&id, teamId, [teamId+updatedAt], runId, derivedStatus",
   sessionPrObservations: "&id, sessionId, projectId, derivedStatus, updatedAt",
+  // v234 — durable video-generation jobs (ADR-0205). See
+  // `lib/ai/media/video-jobs/types.ts` and `lib/db/media-generation-jobs.ts`.
+  mediaGenerationJobs:
+    "&id, status, [status+nextPollAt], sessionId, [sessionId+createdAt], projectId, settledAt",
   agentTeamBoard: "&id, teamId, [teamId+updatedAt], updatedAt, kind, status",
   fleetSessions: "&id, [agent+sessionId], startedAt, endedAt, agent, outcome",
   codeAdoptionTurns: "&id, runId, sessionId, workspaceRoot, ts, [sessionId+ts]",
@@ -1435,6 +1440,8 @@ export class CogniaDB extends Dexie {
   teamPrObservations!: Table<TeamPrObservationRow, string>
   // v233 — project-thread PR observations (ADR-0204). See `lib/db/session-pr-observations.ts`.
   sessionPrObservations!: Table<SessionPrObservationRow, string>
+  // v234 — durable video-generation jobs (ADR-0205). See `lib/db/media-generation-jobs.ts`.
+  mediaGenerationJobs!: Table<MediaGenerationJobRow, string>
   // v104 — Agent-Team board projection (one-way store→Dexie mirror for mobile
   // sync). See `lib/db/agent-team-board.ts`.
   agentTeamBoard!: Table<AgentTeamBoardRow, string>

@@ -177,6 +177,7 @@
   "mcpServerSummaries": "metadata-only",
   "mcpServers": "metadata-only",
   "mcpSyncJobs": "metadata-only",
+  "mediaGenerationJobs": "encrypted-content",
   "memories": "encrypted-content",
   "memoryAuditEvents": "metadata-only",
   "memoryEvidence": "encrypted-content",

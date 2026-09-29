@@ -2,17 +2,19 @@
  * `images.generate`, `videos.generate`, `speech.generate` and
  * `transcription.create`, in the contract shapes.
  *
- * Image and video generation for the vendors the media module already
- * drives go through `generateProviderImage` / `generateProviderVideo`, so the
- * plugin media API and this executor share one code path (the module keeps
- * its own prompt gate because the plugin API calls it directly). Every
- * other vendor is served through its AI SDK client's optional factories,
- * and a client without the factory fails typed as `capability-unsupported`.
+ * Image generation for the vendors the media module drives goes through
+ * `generateProviderImage`, so the plugin media API and this executor share
+ * one code path (the module keeps its own prompt gate because the plugin API
+ * calls it directly). Video generation for those vendors starts a durable job
+ * on the video job engine (ADR-0205) and answers with its handle while the job
+ * runs; `videos.get` / `videos.content` follow it. Every other vendor is
+ * served through its AI SDK client's optional factories, and a client without
+ * the factory fails typed as `capability-unsupported`.
  *
- * A generated video is registered as a locally completed job so `videos.get`
- * and `videos.content` can answer for it through the pinned handle. Vendor
- * knobs the contract does not name (`n`, `seed`, `resolution`, `fps`) ride
- * `extra`.
+ * A video produced synchronously through an SDK factory is registered as a
+ * locally completed job so `videos.get` and `videos.content` can answer for it
+ * through the pinned handle. Vendor knobs the contract does not name (`n`,
+ * `seed`, `resolution`, `fps`) ride `extra`.
  */
 
 import type { z } from "zod"
@@ -29,9 +31,9 @@ import type {
 import {
   IMAGE_GENERATION_PROVIDER_IDS,
   generateProviderImage,
-  generateProviderVideo,
   type ImageGenerationProviderId,
 } from "@/lib/ai/media/provider-generation"
+import { getVideoJobEngine } from "@/lib/ai/media/video-jobs/host"
 import {
   VIDEO_GENERATION_PROVIDER_IDS,
   type VideoProviderId,
@@ -54,6 +56,7 @@ import {
 } from "./ai-sdk-surface"
 import { bytesRefOfGenerated, dataContentOf, type BytesRef } from "./bytes"
 import { providerSdkClient, requireModelFactory, requireModelId } from "./sdk-client"
+import { contractStatusOf, failureOfVideoJobError } from "./video-job-bridge"
 
 export type ImagesGenerateInput = z.infer<typeof imagesGenerateInput>
 export type ImagesGenerateOutput = z.infer<typeof imagesGenerateOutput>
@@ -63,9 +66,12 @@ export type SpeechGenerateOutput = z.infer<typeof speechGenerateOutput>
 export type TranscriptionCreateInput = z.infer<typeof transcriptionCreateInput>
 export type TranscriptionCreateOutput = z.infer<typeof transcriptionCreateOutput>
 
-/** The contract output plus the bytes, which the job registry also keeps. */
+/**
+ * The contract output. A synchronously generated video (SDK factory path)
+ * also carries its bytes; a durable job carries none until it finishes.
+ */
 export interface VideosGenerateOutput extends z.infer<typeof videosGenerateOutput> {
-  videos: BytesRef[]
+  videos?: BytesRef[]
 }
 
 type Size = `${number}x${number}`
@@ -213,19 +219,42 @@ function mediaModuleVideoHandler(
     providerMatch: { kind: "provider", providerId },
     support: "native",
     async handler({ provider, settings, request, signal }) {
-      const result = await generateProviderVideo({
-        snapshot: settings,
-        prompt: request.input.prompt,
+      const input = request.input
+      const n = numberExtra(input.extra, "n")
+      if (n !== undefined && n !== 1) {
+        throw new ProviderOperationFailureError({
+          code: "capability-unsupported",
+          retryable: false,
+          message: "a video job generates one video; start one job per video",
+        })
+      }
+      const options = videoOptions(input)
+      const started = await getVideoJobEngine().start({
+        prompt: input.prompt,
         providerId,
-        model: request.input.model,
-        ...videoOptions(request.input),
+        model: input.model,
+        params: {
+          ...(options.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
+          ...(options.resolution ? { resolution: options.resolution } : {}),
+          ...(options.duration !== undefined ? { durationSec: options.duration } : {}),
+          ...(options.seed !== undefined ? { seed: options.seed } : {}),
+          ...(options.fps !== undefined ? { fps: options.fps } : {}),
+        },
+        origin: { surface: "executor" },
+        snapshot: settings,
         ...(signal ? { abortSignal: signal } : {}),
       })
-      return recordLocalVideoJob(
-        provider,
-        request.deploymentRef,
-        result.videos.map(bytesRefOfGenerated)
-      )
+      if (!started.ok) throw failureOfVideoJobError(started.error)
+      return {
+        handle: handleFor({
+          kind: "video",
+          id: started.job.id,
+          owner: provider,
+          deploymentRef: request.deploymentRef,
+          createdAt: started.job.createdAt,
+        }),
+        status: contractStatusOf(started.job.status),
+      }
     },
   }
 }
