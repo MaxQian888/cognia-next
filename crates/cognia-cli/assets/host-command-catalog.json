@@ -27690,7 +27690,9 @@
                   "estimate",
                   "cycle",
                   "addLabel",
-                  "removeLabel"
+                  "removeLabel",
+                  "stage",
+                  "triage"
                 ]
               }
             },
@@ -27790,6 +27792,17 @@
           },
           "estimate": {
             "type": "number"
+          },
+          "stage": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "triage": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
           },
           "labelIds": {
             "type": "array",
@@ -64480,5 +64493,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "9e9a5de4d785718d97521f996b80e463dfa7158129eccfcd8b5c622a04e12180"
+  "catalogHash": "ba2986603a289589c9d38a137cf0b6d4a99712469bed791bcb5dcca71b93d3dd"
 }

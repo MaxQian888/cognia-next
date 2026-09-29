@@ -137,6 +137,19 @@ describe("createIssueRecord", () => {
     await expect(createIssueRecord({ title: " ", by })).rejects.toThrow(/title/)
     await expect(createIssueRecord({ title: "x", by })).rejects.toThrow(/project first/)
   })
+
+  it("passes a stage and triage through, refusing an unknown triage state before writing", async () => {
+    mockListProjects.mockResolvedValueOnce([{ id: "p1" }])
+    await createIssueRecord({ title: "x", by, parentId: "i1", stage: 2, triage: "pending" })
+    expect(mockCreateIssue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ parentId: "i1", stage: 2, triage: "pending" })
+    )
+    mockCreateIssue.mockClear()
+    await expect(
+      createIssueRecord({ title: "x", by, triage: "later" as unknown as "pending" })
+    ).rejects.toThrow(/triage/)
+    expect(mockCreateIssue).not.toHaveBeenCalled()
+  })
 })
 
 describe("applyIssueAction", () => {

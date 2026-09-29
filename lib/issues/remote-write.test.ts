@@ -20,6 +20,21 @@ describe("remote issue writes", () => {
     expect(isRemoteIssueAction({ kind: "project", issueProjectId: "p" })).toBe(false)
     expect(isRemoteIssueAction({ kind: "parent", parentId: null })).toBe(false)
     expect(REMOTE_ISSUE_ACTION_KINDS).not.toContain("delete")
+    expect(isRemoteIssueAction({ kind: "stage", to: 2 })).toBe(true)
+    expect(isRemoteIssueAction({ kind: "triage", to: null })).toBe(true)
+  })
+
+  it("matches the kinds the companion wire schema lets through", () => {
+    // A kind the phone sends but the request schema omits is refused before
+    // the host's gate ever sees it, so the two lists have to move together.
+    const schemas = jest.requireActual<{
+      commands: Record<
+        string,
+        { properties: { action: { properties: { kind: { enum: string[] } } } } }
+      >
+    }>("@/protocol/companion-request-schemas.json")
+    const wire = schemas.commands.issue_apply_action.properties.action.properties.kind.enum
+    expect([...wire].sort()).toEqual([...REMOTE_ISSUE_ACTION_KINDS].sort())
   })
 
   it("queues an action with the issue and a readable label", async () => {
@@ -57,5 +72,17 @@ describe("remote issue writes", () => {
       payload: { projectId: "w", issueProjectId: "p", title: "New", status: "todo", estimate: 0 },
       label: "New",
     })
+    await queueIssueCreate({
+      projectId: "w",
+      issueProjectId: "p",
+      title: "Step",
+      parentId: "i1",
+      stage: 2,
+    })
+    expect(mockEnqueue).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ parentId: "i1", stage: 2 }),
+      })
+    )
   })
 })

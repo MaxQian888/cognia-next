@@ -90,7 +90,9 @@ import { cn } from "@/lib/utils"
 import type { IssueCycle } from "@/types/issues"
 import {
   ISSUE_PRIORITIES,
+  ISSUE_STAGE_MAX,
   ISSUE_STATUSES,
+  isIssueStage,
   statusCategoryOf,
   type IssueActor,
   type IssuePriority,
@@ -152,6 +154,8 @@ interface FormState {
   estimate: number | undefined
   /** Local issue id of the parent; seeded from the sub-issue flow. */
   parentId: string
+  /** Sub-issue stage (`Issue.stage`). Only sent with a parent. */
+  stage: number | undefined
   /** Local issue ids that block this one (relation the model already stores). */
   blockedByIds: string[]
 }
@@ -169,6 +173,7 @@ function initialForm(props: CreateIssuePageProps): FormState {
     dueDate: undefined,
     estimate: undefined,
     parentId: props.parent?.id ?? "",
+    stage: undefined,
     blockedByIds: [],
   }
 }
@@ -297,6 +302,7 @@ function useCreateIssueForm(props: CreateIssuePageProps) {
           labelIds: form.labelIds,
           createdBy: { kind: "human" },
           ...(form.parentId ? { parentId: form.parentId } : {}),
+          ...(form.parentId && form.stage !== undefined ? { stage: form.stage } : {}),
           ...(form.blockedByIds.length > 0 ? { blockedBy: form.blockedByIds } : {}),
           ...(form.cycleId ? { cycleId: form.cycleId } : {}),
           ...(form.dueDate !== undefined ? { dueDate: form.dueDate } : {}),
@@ -1482,13 +1488,35 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
                   {form.form.parentId ? (
                     <button
                       type="button"
-                      onClick={() => form.patch({ parentId: "" })}
+                      onClick={() => form.patch({ parentId: "", stage: undefined })}
                       aria-label={t("planning.clearParent")}
                       data-testid="create-field-parent-clear"
                       className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                     >
                       <XIcon className="size-3" />
                     </button>
+                  ) : null}
+                  {form.form.parentId ? (
+                    <Input
+                      type="number"
+                      min={1}
+                      max={ISSUE_STAGE_MAX}
+                      step={1}
+                      inputMode="numeric"
+                      value={form.form.stage ?? ""}
+                      onChange={(event) => {
+                        const raw = event.target.value
+                        if (raw === "") return form.patch({ stage: undefined })
+                        const stage = Number(raw)
+                        // A half-typed or out-of-range value is not a stage yet.
+                        if (isIssueStage(stage)) form.patch({ stage })
+                      }}
+                      placeholder={t("planning.stage")}
+                      aria-label={t("planning.stage")}
+                      title={t("planning.stageHint")}
+                      data-testid="create-field-stage"
+                      className="h-7 w-20 px-2 text-xs"
+                    />
                   ) : null}
 
                   <IssuePicker

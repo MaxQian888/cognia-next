@@ -19,7 +19,9 @@ import {
   applyIssueAction,
   createIssueRecord,
   isIssuePriority,
+  isIssueStage,
   isIssueStatus,
+  isIssueTriageState,
   queryIssues,
   resolveIssue,
   toIssueWire,
@@ -27,7 +29,13 @@ import {
   type IssueBulkOutcome,
 } from "@/lib/issues/service"
 import { ensureIssueLabels } from "@/lib/issues/sync/apply"
-import type { Issue, IssueActor, IssueStatus } from "@/types/issues"
+import {
+  ISSUE_STAGE_MAX,
+  type Issue,
+  type IssueActor,
+  type IssueStatus,
+  type IssueTriageState,
+} from "@/types/issues"
 
 /** The actor stamped on everything a workflow writes. */
 export function workflowIssueActor(ctx: Pick<StepExecutionContext, "workflowId">): IssueActor {
@@ -68,6 +76,20 @@ function optionalNumberOrNull(
   if (value === null) return null
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value
   throw nonRetryable(`${kind}: '${field}' must be a non-negative number or null`)
+}
+
+/** `stage`: absent, `null` (unstage) or an integer from 1 to `ISSUE_STAGE_MAX`. */
+function optionalStage(value: unknown, kind: string): number | null | undefined {
+  if (value === undefined || value === null) return value
+  if (isIssueStage(value)) return value
+  throw nonRetryable(`${kind}: 'stage' must be an integer from 1 to ${ISSUE_STAGE_MAX} or null`)
+}
+
+/** `triage`: absent, `null` (accept) or `"pending"`. */
+function optionalTriage(value: unknown, kind: string): IssueTriageState | null | undefined {
+  if (value === undefined || value === null) return value
+  if (isIssueTriageState(value)) return value
+  throw nonRetryable(`${kind}: unknown triage state '${String(value)}'`)
 }
 
 function summarize(issue: Issue, outcomes: readonly IssueBulkOutcome[]) {
@@ -112,6 +134,8 @@ registerNodeExecutor({
     }
     const dueDate = optionalNumberOrNull(p.dueDate, "dueDate", "action.issue.create")
     const estimate = optionalNumberOrNull(p.estimate, "estimate", "action.issue.create")
+    const stage = optionalStage(p.stage, "action.issue.create")
+    const triage = optionalTriage(p.triage, "action.issue.create")
     const issue = await createIssueRecord({
       title,
       by: workflowIssueActor(ctx),
@@ -128,6 +152,8 @@ registerNodeExecutor({
       ...(typeof p.cycleId === "string" && p.cycleId ? { cycleId: p.cycleId } : {}),
       ...(typeof dueDate === "number" ? { dueDate } : {}),
       ...(typeof estimate === "number" ? { estimate } : {}),
+      ...(typeof stage === "number" ? { stage } : {}),
+      ...(triage ? { triage } : {}),
     })
     return {
       output: { issueId: issue.id, identifier: issue.identifier, issue: toIssueWire(issue) },
@@ -206,6 +232,10 @@ registerNodeExecutor({
     if (p.cycleId === null) actions.push({ kind: "cycle", cycleId: null })
     else if (typeof p.cycleId === "string" && p.cycleId)
       actions.push({ kind: "cycle", cycleId: p.cycleId })
+    const stage = optionalStage(p.stage, "action.issue.update")
+    if (stage !== undefined) actions.push({ kind: "stage", to: stage })
+    const triage = optionalTriage(p.triage, "action.issue.update")
+    if (triage !== undefined) actions.push({ kind: "triage", to: triage })
     if (actions.length === 0) throw nonRetryable("action.issue.update: nothing to change")
     return applyAll(ctx, issue, actions)
   },

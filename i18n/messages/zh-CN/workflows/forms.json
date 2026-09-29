@@ -3632,6 +3632,14 @@
     },
     "cycleId": {
       "label": "迭代 id"
+    },
+    "stage": {
+      "label": "子议题阶段",
+      "hint": "1 到 1000。子议题每完成一个阶段都会唤醒父议题。"
+    },
+    "triage": {
+      "label": "分诊",
+      "hint": "待分诊的议题需要有人接受：在此之前聊天和唤醒都不会让智能体开始处理。"
     }
   },
   "issueCreate": {
@@ -3640,7 +3648,8 @@
     },
     "description": {
       "label": "描述"
-    }
+    },
+    "fileIntoTriage": "送入待分诊"
   },
   "issueList": {
     "statuses": {
@@ -3666,6 +3675,11 @@
     "unchanged": "保持不变",
     "cycleId": {
       "hint": "填写迭代 id 会把事项规划进该迭代。"
+    },
+    "clearStage": "清除阶段",
+    "triageOptions": {
+      "pending": "送入待分诊",
+      "accept": "接受并移出待分诊"
     }
   },
   "issueAssign": {

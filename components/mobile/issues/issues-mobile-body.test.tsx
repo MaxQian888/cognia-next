@@ -111,6 +111,13 @@ describe("IssuesMobileBody", () => {
     expect(screen.getByText(/^summary/)).toBeInTheDocument()
   })
 
+  it("marks a row waiting in triage", () => {
+    issuesResult = [issue({ triage: "pending" }), issue()]
+    render(<IssuesMobileBody />)
+    expect(screen.getByTestId("issues-mobile-row-triage-i1")).toHaveTextContent("triage.badge")
+    expect(screen.queryByTestId("issues-mobile-row-triage-i2")).not.toBeInTheDocument()
+  })
+
   it("offers no create button on the empty board without a workspace to file into", () => {
     mockActiveProjectId = null
     render(<IssuesMobileBody />)

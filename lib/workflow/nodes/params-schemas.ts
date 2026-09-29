@@ -23,6 +23,7 @@ import {
   type PlanStatus as PlanStatusValue,
 } from "@/types/agent/plan"
 import { VERIFIER_LENSES } from "@/types/agent/ultracode"
+import { ISSUE_STAGE_MAX, ISSUE_TRIAGE_STATES } from "@/types/issues"
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
 
 /**
@@ -527,6 +528,9 @@ const PlanStatus = z.enum(PLAN_STATUS_VALUES as [PlanStatusValue, ...PlanStatusV
 // ── Issue tracker (spec 2026-09-06 D9) ───────────────────────────────────
 const IssueStatusParam = z.enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"])
 const IssuePriorityParam = z.enum(["urgent", "high", "medium", "low", "none"])
+/** Sub-issue stage (`Issue.stage`). */
+const IssueStageParam = positiveInteger().max(ISSUE_STAGE_MAX, "maxValue")
+const IssueTriageParam = z.enum(ISSUE_TRIAGE_STATES)
 const IssueRefParams = z.object({
   /** Row id or printed identifier (MERC-12). */
   issue: requiredString("required"),
@@ -544,6 +548,8 @@ const IssueCreateParams = z.object({
   cycleId: optionalString,
   dueDate: numberRange(0).optional(),
   estimate: numberRange(0).optional(),
+  stage: IssueStageParam.optional(),
+  triage: IssueTriageParam.optional(),
 })
 const IssueListParams = z.object({
   projectId: optionalString,
@@ -563,6 +569,10 @@ const IssueUpdateParams = IssueRefParams.extend({
   dueDate: z.union([numberRange(0), z.null()]).optional(),
   estimate: z.union([numberRange(0), z.null()]).optional(),
   cycleId: z.union([z.string(), z.null()]).optional(),
+  /** `null` unstages. */
+  stage: z.union([IssueStageParam, z.null()]).optional(),
+  /** `"pending"` sends it into triage, `null` accepts it out. */
+  triage: z.union([IssueTriageParam, z.null()]).optional(),
 })
 const IssueAssignParams = IssueRefParams.extend({
   /** "none" unassigns. */

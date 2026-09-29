@@ -53842,15 +53842,24 @@
           "label": "项目 key",
           "placeholder": "MERC"
         },
+        "stage": {
+          "hint": "1 到 1000。子议题每完成一个阶段都会唤醒父议题。",
+          "label": "子议题阶段"
+        },
         "status": {
           "default": "默认",
           "label": "状态"
+        },
+        "triage": {
+          "hint": "待分诊的议题需要有人接受：在此之前聊天和唤醒都不会让智能体开始处理。",
+          "label": "分诊"
         }
       },
       "issueCreate": {
         "description": {
           "label": "描述"
         },
+        "fileIntoTriage": "送入待分诊",
         "title": {
           "label": "标题"
         }
@@ -53902,6 +53911,7 @@
         }
       },
       "issueUpdate": {
+        "clearStage": "清除阶段",
         "cycleId": {
           "hint": "填写迭代 id 会把事项规划进该迭代。"
         },
@@ -53911,6 +53921,10 @@
         "intro": "只修改填写的字段，每个字段对应一次看板动作。",
         "title": {
           "label": "新标题"
+        },
+        "triageOptions": {
+          "accept": "接受并移出待分诊",
+          "pending": "送入待分诊"
         },
         "unchanged": "保持不变"
       },

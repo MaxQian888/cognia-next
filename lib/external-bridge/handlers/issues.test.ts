@@ -92,6 +92,25 @@ describe("issuesCreate", () => {
     })
     await expect(issuesCreate({ title: "" })).rejects.toThrow(/title/)
   })
+
+  it("files a staged sub-issue into triage and answers an illegal stage or state", async () => {
+    await issuesCreate({ title: "Step", parentId: "i1", stage: 2, triage: "pending" })
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ parentId: "i1", stage: 2, triage: "pending" })
+    )
+    mockCreate.mockClear()
+    expect(await issuesCreate({ title: "x", stage: 0 })).toMatchObject({
+      ok: false,
+      reason: "invalid",
+      detail: expect.stringMatching(/stage/),
+    })
+    expect(await issuesCreate({ title: "x", triage: "later" })).toMatchObject({
+      ok: false,
+      reason: "invalid",
+      detail: expect.stringMatching(/triage/),
+    })
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
 })
 
 describe("issuesUpdate and issuesComment", () => {
@@ -109,6 +128,31 @@ describe("issuesUpdate and issuesComment", () => {
     ])
     expect(mockApply.mock.calls[0][2]).toBe(MCP_ISSUE_ACTOR)
     expect(result).toMatchObject({ ok: true, outcome: { applied: 3 } })
+  })
+
+  it("stages, unstages and sends to triage, refusing illegal values up front", async () => {
+    await issuesUpdate({ ref: "MERC-1", stage: 4, triage: "pending" })
+    await issuesUpdate({ ref: "MERC-1", stage: null })
+    expect(mockApply.mock.calls.map((c) => c[1])).toEqual([
+      { kind: "stage", to: 4 },
+      { kind: "triage", to: "pending" },
+      { kind: "stage", to: null },
+    ])
+    mockApply.mockClear()
+    // Accepting is the person's say-so the triage gate waits for.
+    expect(await issuesUpdate({ ref: "MERC-1", triage: null })).toMatchObject({
+      ok: false,
+      reason: "refused",
+    })
+    expect(await issuesUpdate({ ref: "MERC-1", stage: 2.5 })).toMatchObject({
+      ok: false,
+      reason: "invalid",
+    })
+    expect(await issuesUpdate({ ref: "MERC-1", triage: "done" })).toMatchObject({
+      ok: false,
+      reason: "invalid",
+    })
+    expect(mockApply).not.toHaveBeenCalled()
   })
 
   it("reports a refusal with the gate's reason instead of ok", async () => {

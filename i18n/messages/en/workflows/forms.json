@@ -3632,6 +3632,14 @@
     },
     "cycleId": {
       "label": "Cycle id"
+    },
+    "stage": {
+      "label": "Sub-issue stage",
+      "hint": "1 to 1000. The parent is woken as each stage of its sub-issues finishes."
+    },
+    "triage": {
+      "label": "Triage",
+      "hint": "An issue in triage waits for a person: chats and wakeups do not start an agent on it."
     }
   },
   "issueCreate": {
@@ -3640,7 +3648,8 @@
     },
     "description": {
       "label": "Description"
-    }
+    },
+    "fileIntoTriage": "File into triage"
   },
   "issueList": {
     "statuses": {
@@ -3666,6 +3675,11 @@
     "unchanged": "Unchanged",
     "cycleId": {
       "hint": "A cycle id plans the issue into it."
+    },
+    "clearStage": "Clear the stage",
+    "triageOptions": {
+      "pending": "Send to triage",
+      "accept": "Accept out of triage"
     }
   },
   "issueAssign": {

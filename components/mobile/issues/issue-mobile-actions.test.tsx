@@ -6,6 +6,7 @@ jest.mock("next-intl", () => ({
 }))
 const mockQueue = jest.fn(async (..._a: unknown[]) => ({ id: "job" }))
 jest.mock("@/lib/issues/remote-write", () => ({
+  ...jest.requireActual("@/lib/issues/remote-write"),
   queueIssueAction: (...a: unknown[]) => mockQueue(...a),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
@@ -119,5 +120,73 @@ describe("IssueMobileActions", () => {
     expect(screen.queryByTestId("issues-mobile-status")).not.toBeInTheDocument()
     expect(screen.queryByTestId("issues-mobile-comment")).not.toBeInTheDocument()
     expect(screen.getByTestId("assignee-picker-stub")).toBeInTheDocument()
+  })
+
+  it("accepts an issue out of triage and sends one back, as queued actions", async () => {
+    const { unmount } = render(<IssueMobileActions item={item({ triage: "pending" })} />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("issue-detail-triage-accept"))
+    })
+    expect(mockQueue).toHaveBeenLastCalledWith({
+      issueId: "i1",
+      identifier: "MERC-1",
+      action: { kind: "triage", to: null },
+    })
+    unmount()
+    render(<IssueMobileActions item={item()} />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("issue-detail-triage-send"))
+    })
+    expect(mockQueue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: { kind: "triage", to: "pending" } })
+    )
+  })
+
+  it("commits a sub-issue's stage once, on blur, and never a half-typed value", async () => {
+    render(<IssueMobileActions item={item({ parentId: "p1", stage: 1 })} />)
+    const box = screen.getByTestId("issues-mobile-stage")
+    fireEvent.change(box, { target: { value: "1" } })
+    fireEvent.change(box, { target: { value: "12" } })
+    expect(mockQueue).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.blur(box)
+    })
+    expect(mockQueue).toHaveBeenCalledTimes(1)
+    expect(mockQueue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: { kind: "stage", to: 12 } })
+    )
+    // Out of range is dropped; an empty box unstages; the same stage is no edit.
+    mockQueue.mockClear()
+    fireEvent.change(box, { target: { value: "0" } })
+    await act(async () => {
+      fireEvent.blur(box)
+    })
+    fireEvent.change(box, { target: { value: "1" } })
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" })
+    })
+    expect(mockQueue).not.toHaveBeenCalled()
+    fireEvent.change(box, { target: { value: "" } })
+    await act(async () => {
+      fireEvent.blur(box)
+    })
+    expect(mockQueue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: { kind: "stage", to: null } })
+    )
+  })
+
+  it("offers no stage box on a top-level issue or without edit rights", () => {
+    const { unmount } = render(<IssueMobileActions item={item()} />)
+    expect(screen.queryByTestId("issues-mobile-stage")).not.toBeInTheDocument()
+    unmount()
+    render(
+      <IssueMobileActions
+        item={item({
+          parentId: "p1",
+          capabilities: { ...FULL_ISSUE_CAPABILITIES, canEdit: false },
+        })}
+      />
+    )
+    expect(screen.queryByTestId("issues-mobile-stage")).not.toBeInTheDocument()
   })
 })

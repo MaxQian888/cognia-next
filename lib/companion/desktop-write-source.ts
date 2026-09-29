@@ -1598,7 +1598,9 @@ async function issueApplyActionRpc(payload: Record<string, unknown>): Promise<un
     throw new Error("issue_apply_action.action is required")
   }
   const kind = (action as { kind: string }).kind
-  if (!MOBILE_ISSUE_ACTION_KINDS.has(kind)) {
+  // One allowlist for both ends: the phone builds from it, the host enforces it.
+  const { REMOTE_ISSUE_ACTION_KINDS } = await import("@/lib/issues/remote-write")
+  if (!(REMOTE_ISSUE_ACTION_KINDS as readonly string[]).includes(kind)) {
     throw new Error(`issue_apply_action.action.kind "${kind}" is not allowed from a paired client`)
   }
   const { getIssue } = await import("@/lib/db/issues")
@@ -1619,21 +1621,6 @@ async function issueApplyActionRpc(payload: Record<string, unknown>): Promise<un
   )
   return outcome
 }
-
-/** The subset of `IssueBulkAction` kinds a paired client may send (D8). */
-const MOBILE_ISSUE_ACTION_KINDS: ReadonlySet<string> = new Set([
-  "status",
-  "assignee",
-  "comment",
-  "priority",
-  "title",
-  "description",
-  "dueDate",
-  "estimate",
-  "cycle",
-  "addLabel",
-  "removeLabel",
-])
 
 async function issueCreateRpc(payload: Record<string, unknown>): Promise<unknown> {
   const projectId = payload.projectId
@@ -1667,6 +1654,9 @@ async function issueCreateRpc(payload: Record<string, unknown>): Promise<unknown
     ...(typeof payload.cycleId === "string" ? { cycleId: payload.cycleId } : {}),
     ...(typeof payload.dueDate === "number" ? { dueDate: payload.dueDate } : {}),
     ...(typeof payload.estimate === "number" ? { estimate: payload.estimate } : {}),
+    // `createIssue` refuses an illegal stage; triage has one state to accept.
+    ...(typeof payload.stage === "number" ? { stage: payload.stage } : {}),
+    ...(payload.triage === "pending" ? { triage: "pending" as const } : {}),
     ...(Array.isArray(payload.labelIds)
       ? { labelIds: payload.labelIds.filter((id): id is string => typeof id === "string") }
       : {}),

@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { ISSUE_PRIORITIES, ISSUE_STATUSES } from "@/types/issues"
+import { ISSUE_PRIORITIES, ISSUE_STAGE_MAX, ISSUE_STATUSES, isIssueStage } from "@/types/issues"
 import type { ConfigProps } from "./form-support"
 import { Field, FieldGroup, FieldRow, patchParam, readNumber, readString } from "./shared"
 
@@ -54,6 +54,29 @@ function patchOptionalNumber(params: Record<string, unknown>, key: string, raw: 
   if (!trimmed) return patchParam(params, key, undefined)
   const parsed = Number(trimmed)
   return Number.isFinite(parsed) && parsed >= 0 ? patchParam(params, key, parsed) : params
+}
+
+/** Sub-issue stage: an empty box means "not given"; only a legal stage is written. */
+function patchStage(params: Record<string, unknown>, raw: string) {
+  const trimmed = raw.trim()
+  if (!trimmed) return patchParam(params, "stage", undefined)
+  const parsed = Number(trimmed)
+  return isIssueStage(parsed) ? patchParam(params, "stage", parsed) : params
+}
+
+function StageInput({ params, onChange, id }: ConfigProps & { id: string }) {
+  return (
+    <Input
+      id={id}
+      type="number"
+      min={1}
+      max={ISSUE_STAGE_MAX}
+      step={1}
+      disabled={params.stage === null}
+      value={typeof params.stage === "number" ? params.stage : ""}
+      onChange={(e) => onChange(patchStage(params, e.target.value))}
+    />
+  )
 }
 
 function IssueRefField({ params, onChange, id }: ConfigProps & { id: string }) {
@@ -237,6 +260,26 @@ export function IssueCreateConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       </FieldRow>
+      <Field
+        label={tc("stage.label")}
+        htmlFor="issue-create-stage"
+        hint={tc("stage.hint")}
+        name="stage"
+      >
+        <StageInput params={params} onChange={onChange} id="issue-create-stage" />
+      </Field>
+      <Field label={tc("triage.label")} hint={tc("triage.hint")} name="triage">
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={params.triage === "pending"}
+            onCheckedChange={(checked) =>
+              onChange(patchParam(params, "triage", checked === true ? "pending" : undefined))
+            }
+            data-testid="issue-create-triage"
+          />
+          <span>{t("fileIntoTriage")}</span>
+        </label>
+      </Field>
     </FieldGroup>
   )
 }
@@ -390,6 +433,45 @@ export function IssueUpdateConfig({ params, onChange }: ConfigProps) {
           id="issue-update-cycle"
           value={readString(params, "cycleId")}
           onChange={(e) => onChange(patchParam(params, "cycleId", e.target.value || undefined))}
+        />
+      </Field>
+      <Field
+        label={tc("stage.label")}
+        htmlFor="issue-update-stage"
+        hint={tc("stage.hint")}
+        name="stage"
+      >
+        <div className="flex flex-col gap-1.5">
+          <StageInput params={params} onChange={onChange} id="issue-update-stage" />
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={params.stage === null}
+              onCheckedChange={(checked) =>
+                onChange(patchParam(params, "stage", checked === true ? null : undefined))
+              }
+              data-testid="issue-update-stage-clear"
+            />
+            <span>{t("clearStage")}</span>
+          </label>
+        </div>
+      </Field>
+      <Field
+        label={tc("triage.label")}
+        htmlFor="issue-update-triage"
+        hint={tc("triage.hint")}
+        name="triage"
+      >
+        <EnumSelect
+          id="issue-update-triage"
+          value={params.triage === "pending" ? "pending" : params.triage === null ? "accept" : ""}
+          options={["pending", "accept"]}
+          noneLabel={t("unchanged")}
+          labelFor={(option) => t(`triageOptions.${option}`)}
+          onChange={(v) =>
+            onChange(
+              patchParam(params, "triage", v === "pending" ? "pending" : v === "accept" ? null : v)
+            )
+          }
         />
       </Field>
     </FieldGroup>

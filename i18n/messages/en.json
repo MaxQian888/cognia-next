@@ -53842,15 +53842,24 @@
           "label": "Project key",
           "placeholder": "MERC"
         },
+        "stage": {
+          "hint": "1 to 1000. The parent is woken as each stage of its sub-issues finishes.",
+          "label": "Sub-issue stage"
+        },
         "status": {
           "default": "Default",
           "label": "Status"
+        },
+        "triage": {
+          "hint": "An issue in triage waits for a person: chats and wakeups do not start an agent on it.",
+          "label": "Triage"
         }
       },
       "issueCreate": {
         "description": {
           "label": "Description"
         },
+        "fileIntoTriage": "File into triage",
         "title": {
           "label": "Title"
         }
@@ -53902,6 +53911,7 @@
         }
       },
       "issueUpdate": {
+        "clearStage": "Clear the stage",
         "cycleId": {
           "hint": "A cycle id plans the issue into it."
         },
@@ -53911,6 +53921,10 @@
         "intro": "Only the fields you fill in are changed. Each becomes one board action.",
         "title": {
           "label": "New title"
+        },
+        "triageOptions": {
+          "accept": "Accept out of triage",
+          "pending": "Send to triage"
         },
         "unchanged": "Unchanged"
       },

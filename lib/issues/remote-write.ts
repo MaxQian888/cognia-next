@@ -30,6 +30,8 @@ export const REMOTE_ISSUE_ACTION_KINDS = [
   "cycle",
   "addLabel",
   "removeLabel",
+  "stage",
+  "triage",
 ] as const satisfies readonly IssueBulkAction["kind"][]
 
 export type RemoteIssueAction = Extract<
@@ -73,6 +75,8 @@ export interface QueueIssueCreateInput {
   cycleId?: string
   dueDate?: number
   estimate?: number
+  /** Sub-issue stage, 1 to `ISSUE_STAGE_MAX`. The host validates it. */
+  stage?: number
   labelIds?: string[]
 }
 
@@ -95,6 +99,7 @@ export async function queueIssueCreate(
   if (input.cycleId) payload.cycleId = input.cycleId
   if (input.dueDate !== undefined) payload.dueDate = input.dueDate
   if (input.estimate !== undefined) payload.estimate = input.estimate
+  if (input.stage !== undefined) payload.stage = input.stage
   if (input.labelIds?.length) payload.labelIds = input.labelIds
   return enqueue({ command: "issue_create", payload, label: title })
 }

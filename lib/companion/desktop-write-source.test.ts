@@ -2041,6 +2041,18 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
       { kind: "human" },
       new Set(["local:i1"])
     )
+    // Stage and triage ride the same allowlist the phone builds from.
+    mockGetIssue.mockResolvedValueOnce({ id: "i1" })
+    await dispatchCommand("issue_apply_action", {
+      issueId: "i1",
+      action: { kind: "triage", to: null },
+    })
+    expect(mockApplyBulk).toHaveBeenLastCalledWith(
+      expect.anything(),
+      { kind: "triage", to: null },
+      { kind: "human" },
+      expect.anything()
+    )
   })
 
   it("issue_create validates the three required fields and forwards the optional ones", async () => {
@@ -2066,6 +2078,25 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
       labelIds: ["l1"],
       createdBy: { kind: "human" },
     })
+    await dispatchCommand("issue_create", {
+      projectId: "w",
+      issueProjectId: "p",
+      title: "Step",
+      parentId: "i1",
+      stage: 2,
+      triage: "pending",
+    })
+    expect(mockCreateIssue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ parentId: "i1", stage: 2, triage: "pending" })
+    )
+    // An unknown triage state is dropped, never written.
+    await dispatchCommand("issue_create", {
+      projectId: "w",
+      issueProjectId: "p",
+      title: "T",
+      triage: "later",
+    })
+    expect(mockCreateIssue.mock.calls.at(-1)?.[0]).not.toHaveProperty("triage")
   })
 
   it("memory_list is policy-gated and clamps the limit", async () => {

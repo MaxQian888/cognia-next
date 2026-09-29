@@ -211,6 +211,15 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
                     </div>
                     <p className="text-sm font-medium leading-snug">{item.title}</p>
                     <div className="flex flex-wrap items-center gap-1">
+                      {item.triage === "pending" ? (
+                        <Badge
+                          variant="secondary"
+                          className="h-5 px-1.5 text-[10px] font-normal"
+                          data-testid={`issues-mobile-row-triage-${item.sourceId}`}
+                        >
+                          {t("triage.badge")}
+                        </Badge>
+                      ) : null}
                       <PlanningBadges item={item} hint={planningHints.get(item.unifiedId)} />
                       {item.issueProjectId && projectNamesById.get(item.issueProjectId) ? (
                         <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">

@@ -20,7 +20,9 @@ import {
   applyIssueAction,
   createIssueRecord,
   isIssuePriority,
+  isIssueStage,
   isIssueStatus,
+  isIssueTriageState,
   queryIssues,
   resolveIssue,
   toIssueWire,
@@ -34,7 +36,13 @@ import { registerIssueSyncProvider } from "@/lib/issues/sync/registry"
 import type { IssueSyncProvider } from "@/lib/issues/sync/types"
 import { ensureIssueLabels } from "@/lib/issues/sync/apply"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
-import type { IssueActor, IssueEvent, IssueEventKind } from "@/types/issues"
+import {
+  ISSUE_STAGE_MAX,
+  type IssueActor,
+  type IssueEvent,
+  type IssueEventKind,
+  type IssueTriageState,
+} from "@/types/issues"
 
 export type PluginIssueCreateInput = Omit<CreateIssueRequest, "by" | "origin">
 export type PluginIssueQuery = IssueQuery
@@ -48,6 +56,10 @@ export interface PluginIssueUpdatePatch {
   dueDate?: number | null
   estimate?: number | null
   cycleId?: string | null
+  /** Sub-issue stage, 1 to `ISSUE_STAGE_MAX`. `null` unstages. */
+  stage?: number | null
+  /** `"pending"` sends it into triage, `null` accepts it out. */
+  triage?: IssueTriageState | null
 }
 
 export interface PluginIssueEventOptions {
@@ -141,6 +153,16 @@ export function createIssuesAPI(pluginId: string): PluginIssuesAPI {
       if (patch.dueDate !== undefined) actions.push({ kind: "dueDate", to: patch.dueDate })
       if (patch.estimate !== undefined) actions.push({ kind: "estimate", to: patch.estimate })
       if (patch.cycleId !== undefined) actions.push({ kind: "cycle", cycleId: patch.cycleId })
+      if (patch.stage !== undefined) {
+        if (patch.stage !== null && !isIssueStage(patch.stage))
+          throw new Error(`Stage must be an integer from 1 to ${ISSUE_STAGE_MAX}`)
+        actions.push({ kind: "stage", to: patch.stage })
+      }
+      if (patch.triage !== undefined) {
+        if (patch.triage !== null && !isIssueTriageState(patch.triage))
+          throw new Error(`Unknown triage state '${String(patch.triage)}'`)
+        actions.push({ kind: "triage", to: patch.triage })
+      }
       if (actions.length === 0) throw new Error("Nothing to change")
       return apply(ref, actions)
     },

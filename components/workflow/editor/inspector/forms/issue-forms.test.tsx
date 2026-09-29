@@ -4,7 +4,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import {
   IssueAssignConfig,
   IssueCommentConfig,
@@ -88,5 +88,36 @@ describe("issue forms", () => {
     const onUpdate = harness(IssueUpdateConfig, {})
     fireEvent.change(screen.getByLabelText("title.label"), { target: { value: "New" } })
     expect(onUpdate).toHaveBeenLastCalledWith({ title: "New" })
+  })
+
+  it("writes only a legal sub-issue stage and files a new issue into triage", () => {
+    const onChange = harness(IssueCreateConfig, { title: "x" })
+    fireEvent.change(screen.getByLabelText("stage.label"), { target: { value: "2" } })
+    expect(onChange).toHaveBeenLastCalledWith({ title: "x", stage: 2 })
+    onChange.mockClear()
+    // Zero, a fraction and past the ceiling are half-typed, not edits.
+    for (const value of ["0", "1.5", "1001"]) {
+      fireEvent.change(screen.getByLabelText("stage.label"), { target: { value } })
+    }
+    expect(onChange).toHaveBeenCalledTimes(3)
+    for (const [params] of onChange.mock.calls) expect(params).toEqual({ title: "x" })
+    fireEvent.click(screen.getByTestId("issue-create-triage"))
+    expect(onChange).toHaveBeenLastCalledWith({ title: "x", triage: "pending" })
+  })
+
+  it("clears an update's stage with null and locks the box while it does", () => {
+    const onChange = harness(IssueUpdateConfig, { issue: "MERC-1", stage: 3 })
+    fireEvent.click(screen.getByTestId("issue-update-stage-clear"))
+    expect(onChange).toHaveBeenLastCalledWith({ issue: "MERC-1", stage: null })
+    cleanup()
+    harness(IssueUpdateConfig, { issue: "MERC-1", stage: null })
+    expect(screen.getByLabelText("stage.label")).toBeDisabled()
+  })
+
+  it("shows an update's triage choice as send or accept", () => {
+    harness(IssueUpdateConfig, { issue: "MERC-1", triage: null })
+    expect(screen.getByText("triageOptions.accept")).toBeInTheDocument()
+    harness(IssueUpdateConfig, { issue: "MERC-2", triage: "pending" })
+    expect(screen.getByText("triageOptions.pending")).toBeInTheDocument()
   })
 })

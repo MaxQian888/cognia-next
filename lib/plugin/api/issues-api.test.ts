@@ -99,6 +99,24 @@ describe("createIssuesAPI", () => {
     await expect(api.update("MERC-1", { status: "closed" })).rejects.toThrow(/status/)
   })
 
+  it("stages and triages through board actions, refusing illegal values", async () => {
+    const api = createIssuesAPI("p")
+    await api.update("MERC-1", { stage: 2, triage: "pending" })
+    await api.update("MERC-1", { stage: null, triage: null })
+    expect(mockApply.mock.calls.map((c) => c[1])).toEqual([
+      { kind: "stage", to: 2 },
+      { kind: "triage", to: "pending" },
+      { kind: "stage", to: null },
+      { kind: "triage", to: null },
+    ])
+    mockApply.mockClear()
+    await expect(api.update("MERC-1", { stage: 0 })).rejects.toThrow(/Stage/)
+    await expect(api.update("MERC-1", { triage: "later" as unknown as "pending" })).rejects.toThrow(
+      /triage/
+    )
+    expect(mockApply).not.toHaveBeenCalled()
+  })
+
   it("returns null for an unknown ref on get, and throws on writes", async () => {
     const api = createIssuesAPI("p")
     mockResolve.mockResolvedValue(undefined)

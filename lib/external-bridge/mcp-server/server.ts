@@ -73,6 +73,7 @@ import {
   issuesList,
   issuesUpdate,
 } from "../handlers/issues"
+import { ISSUE_STAGE_MAX, ISSUE_TRIAGE_STATES } from "@/types/issues"
 import { spawnTask } from "../handlers/spawn-task"
 import { browserTool, type BrowserToolOutput } from "../handlers/browser"
 import {
@@ -1591,6 +1592,8 @@ function registerUsageTools(server: McpServer, settingsGetter: SettingsGetter) {
 function registerIssuesTools(server: McpServer, settingsGetter: SettingsGetter) {
   const statusSchema = z.enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"])
   const prioritySchema = z.enum(["urgent", "high", "medium", "low", "none"])
+  const stageSchema = z.number().int().min(1).max(ISSUE_STAGE_MAX)
+  const triageSchema = z.enum(ISSUE_TRIAGE_STATES)
   const assigneeSchema = z
     .object({
       kind: z.enum(["human", "agent", "team"]),
@@ -1682,6 +1685,12 @@ function registerIssuesTools(server: McpServer, settingsGetter: SettingsGetter) 
         cycleId: z.string().optional(),
         dueDate: z.number().optional().describe("Unix epoch ms"),
         estimate: z.number().min(0).optional().describe("Points"),
+        stage: stageSchema
+          .optional()
+          .describe("Sub-issue stage: the parent wakes as each stage of its sub-issues finishes"),
+        triage: triageSchema
+          .optional()
+          .describe("pending files it into triage: no derived run starts until a person accepts"),
       },
     },
     async (args, extra) =>
@@ -1699,7 +1708,7 @@ function registerIssuesTools(server: McpServer, settingsGetter: SettingsGetter) 
     {
       title: "Update a Cognia tracker issue",
       description:
-        "Change title, description, status, priority, assignee, due date, estimate or cycle. Every field goes through the board's own gate: an issue an agent is running on cannot be moved.",
+        "Change title, description, status, priority, assignee, due date, estimate, cycle, sub-issue stage or triage. Every field goes through the board's own gate: an issue an agent is running on cannot be moved.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -1716,6 +1725,10 @@ function registerIssuesTools(server: McpServer, settingsGetter: SettingsGetter) 
         dueDate: z.number().nullable().optional().describe("Unix epoch ms, null clears"),
         estimate: z.number().min(0).nullable().optional().describe("Points, null clears"),
         cycleId: z.string().nullable().optional().describe("null unplans"),
+        stage: stageSchema.nullable().optional().describe("Sub-issue stage, null unstages"),
+        triage: triageSchema
+          .optional()
+          .describe("pending sends it into triage. Only a person accepts it back out"),
       },
     },
     async (args, extra) =>

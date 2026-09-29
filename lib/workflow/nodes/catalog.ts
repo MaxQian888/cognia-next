@@ -598,7 +598,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
   "action.issue.update": {
     label: "Update issue",
     description:
-      "Change an issue's title, description, status, priority, due date, estimate or cycle.",
+      "Change an issue's title, description, status, priority, due date, estimate, cycle, sub-issue stage or triage.",
     iconName: "CircleDot",
     keywords: ["issue", "tracker", "update", "status", "priority", "edit"],
   },

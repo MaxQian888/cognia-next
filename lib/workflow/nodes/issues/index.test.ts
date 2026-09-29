@@ -108,6 +108,20 @@ describe("action.issue.create", () => {
     )
     expect(mockCreate).not.toHaveBeenCalled()
   })
+
+  it("files a staged sub-issue into triage, and refuses an illegal stage or triage state", async () => {
+    await run("action.issue.create", { title: "Step", parentId: "i1", stage: 2, triage: "pending" })
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ parentId: "i1", stage: 2, triage: "pending" })
+    )
+    mockCreate.mockClear()
+    await expect(run("action.issue.create", { title: "x", stage: 0 })).rejects.toThrow(/stage/)
+    await expect(run("action.issue.create", { title: "x", stage: 1.5 })).rejects.toThrow(/stage/)
+    await expect(run("action.issue.create", { title: "x", triage: "done" })).rejects.toThrow(
+      /triage/
+    )
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
 })
 
 describe("action.issue.get and list", () => {
@@ -163,6 +177,25 @@ describe("action.issue.update / assign / comment / label", () => {
       skipped: 0,
       failed: 0,
     })
+  })
+
+  it("stages, unstages, sends to triage and accepts through board actions", async () => {
+    await run("action.issue.update", { issue: "MERC-1", stage: 3, triage: "pending" })
+    await run("action.issue.update", { issue: "MERC-1", stage: null, triage: null })
+    expect(mockApply.mock.calls.map((c) => c[1])).toEqual([
+      { kind: "stage", to: 3 },
+      { kind: "triage", to: "pending" },
+      { kind: "stage", to: null },
+      { kind: "triage", to: null },
+    ])
+    mockApply.mockClear()
+    await expect(run("action.issue.update", { issue: "MERC-1", stage: 1001 })).rejects.toThrow(
+      /stage/
+    )
+    await expect(run("action.issue.update", { issue: "MERC-1", triage: "later" })).rejects.toThrow(
+      /triage/
+    )
+    expect(mockApply).not.toHaveBeenCalled()
   })
 
   it("refuses an update with nothing to change and an unknown issue", async () => {

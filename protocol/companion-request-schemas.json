@@ -7972,7 +7972,9 @@
                 "estimate",
                 "cycle",
                 "addLabel",
-                "removeLabel"
+                "removeLabel",
+                "stage",
+                "triage"
               ]
             }
           },
@@ -8024,6 +8026,17 @@
         },
         "estimate": {
           "type": "number"
+        },
+        "stage": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "triage": {
+          "type": "string",
+          "enum": [
+            "pending"
+          ]
         },
         "labelIds": {
           "type": "array",

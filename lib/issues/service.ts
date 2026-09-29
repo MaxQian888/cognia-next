@@ -31,11 +31,14 @@ import { ensureIssueLabels } from "./sync/apply"
 import {
   ISSUE_PRIORITIES,
   ISSUE_STATUSES,
+  ISSUE_TRIAGE_STATES,
+  isIssueStage,
   type Issue,
   type IssueActor,
   type IssueOrigin,
   type IssuePriority,
   type IssueStatus,
+  type IssueTriageState,
 } from "@/types/issues"
 
 /** The active workspace, or null outside a signed-in shell. */
@@ -61,6 +64,12 @@ export function isIssuePriority(value: unknown): value is IssuePriority {
   return typeof value === "string" && (ISSUE_PRIORITIES as readonly string[]).includes(value)
 }
 
+export function isIssueTriageState(value: unknown): value is IssueTriageState {
+  return typeof value === "string" && (ISSUE_TRIAGE_STATES as readonly string[]).includes(value)
+}
+
+export { isIssueStage }
+
 export interface CreateIssueRequest {
   /** Workspace. Defaults to the active one. */
   projectId?: string
@@ -79,6 +88,10 @@ export interface CreateIssueRequest {
   cycleId?: string
   dueDate?: number
   estimate?: number
+  /** Sub-issue stage (`Issue.stage`), 1 to `ISSUE_STAGE_MAX`. Only meaningful with a parent. */
+  stage?: number
+  /** File it straight into triage (`Issue.triage`), for an intake that proposes work. */
+  triage?: IssueTriageState
   by: IssueActor
   origin?: IssueOrigin
 }
@@ -122,6 +135,10 @@ export async function resolveIssueContainer(input: {
 export async function createIssueRecord(request: CreateIssueRequest): Promise<Issue> {
   const title = request.title.trim()
   if (!title) throw new Error("Issue title is required")
+  // Callers outside TypeScript (plugins, the bridge) can hand over anything.
+  if (request.triage !== undefined && !isIssueTriageState(request.triage)) {
+    throw new Error(`Unknown triage state '${String(request.triage)}'`)
+  }
   const { projectId, issueProjectId } = await resolveIssueContainer(request)
   const labelIds = new Set<string>(request.labelIds ?? [])
   if (request.labels?.length) {
@@ -141,6 +158,8 @@ export async function createIssueRecord(request: CreateIssueRequest): Promise<Is
     ...(request.cycleId ? { cycleId: request.cycleId } : {}),
     ...(request.dueDate !== undefined ? { dueDate: request.dueDate } : {}),
     ...(request.estimate !== undefined ? { estimate: request.estimate } : {}),
+    ...(request.stage !== undefined ? { stage: request.stage } : {}),
+    ...(request.triage ? { triage: request.triage } : {}),
     ...(request.origin ? { origin: request.origin } : {}),
   }
   return createIssue(input)

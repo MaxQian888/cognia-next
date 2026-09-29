@@ -220,6 +220,38 @@ describe("CreateIssuePage", () => {
     expect(props.onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it("stages a sub-issue once a parent is picked, ignoring an illegal stage", async () => {
+    const user = userEvent.setup()
+    renderPage()
+    expect(screen.queryByTestId("create-field-stage")).not.toBeInTheDocument()
+    await user.click(await screen.findByTestId("create-field-parent"))
+    await user.click(await screen.findByTestId("create-field-parent-option-i1"))
+    fireEvent.change(screen.getByTestId("create-field-stage"), { target: { value: "0" } })
+    expect(screen.getByTestId("create-field-stage")).toHaveValue(null)
+    fireEvent.change(screen.getByTestId("create-field-stage"), { target: { value: "2" } })
+    await user.type(screen.getByTestId("create-issue-title"), "Step two")
+    await user.click(screen.getByTestId("create-issue-submit"))
+    await waitFor(() =>
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ parentId: "i1", stage: 2 })
+      )
+    )
+  })
+
+  it("clears the stage along with the parent", async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByTestId("create-field-parent"))
+    await user.click(await screen.findByTestId("create-field-parent-option-i1"))
+    fireEvent.change(screen.getByTestId("create-field-stage"), { target: { value: "3" } })
+    await user.click(screen.getByTestId("create-field-parent-clear"))
+    expect(screen.queryByTestId("create-field-stage")).not.toBeInTheDocument()
+    await user.type(screen.getByTestId("create-issue-title"), "Loose")
+    await user.click(screen.getByTestId("create-issue-submit"))
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalled())
+    expect(mockCreateIssue.mock.calls[0][0]).not.toHaveProperty("stage")
+  })
+
   it("collects blockers as chips and submits their ids", async () => {
     const user = userEvent.setup()
     renderPage()

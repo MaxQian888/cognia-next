@@ -7,8 +7,8 @@
  * consumed it beyond a background tint, so a deep link highlighted a row the
  * user could not open. This is what it opens.
  *
- * A local issue gets the phone's three writes at the bottom
- * (`IssueMobileActions`): status, assignee, comment, each queued for the host
+ * A local issue gets the phone's writes at the bottom (`IssueMobileActions`):
+ * triage, status, assignee, sub-issue stage and a comment, each queued for the host
  * as an `issue_apply_action` job. Everything else here is read: the activity
  * trail and the dispatch history sync now, and this is where they are shown.
  *
@@ -162,6 +162,13 @@ export function IssueDetailSheet({
                 <Row label={t("planning.estimate")}>
                   <span data-testid="issues-mobile-detail-estimate">
                     {t("planning.points", { count: item.estimate })}
+                  </span>
+                </Row>
+              ) : null}
+              {parentIdentifier && item.stage !== undefined ? (
+                <Row label={t("planning.stage")}>
+                  <span data-testid="issues-mobile-detail-stage">
+                    {t("planning.stageLabel", { stage: item.stage })}
                   </span>
                 </Row>
               ) : null}

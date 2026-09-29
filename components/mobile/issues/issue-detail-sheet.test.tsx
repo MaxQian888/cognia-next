@@ -92,6 +92,16 @@ describe("IssueDetailSheet", () => {
     expect(screen.getByTestId("issues-mobile-detail")).toHaveTextContent("priority.urgent")
   })
 
+  it("prints a sub-issue's stage, and nothing for an unstaged or top-level one", () => {
+    const { unmount } = renderSheet({ item: item({ parentId: "p9", stage: 2 }) })
+    expect(screen.getByTestId("issues-mobile-detail-stage")).toHaveTextContent(
+      "planning.stageLabel:2"
+    )
+    unmount()
+    renderSheet({ item: item({ parentId: "p9" }) })
+    expect(screen.queryByTestId("issues-mobile-detail-stage")).not.toBeInTheDocument()
+  })
+
   it("names an unassigned issue explicitly", () => {
     renderSheet()
     expect(screen.getByTestId("issues-mobile-detail-assignee-none")).toHaveTextContent(

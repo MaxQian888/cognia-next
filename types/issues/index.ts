@@ -77,7 +77,8 @@ export function statusCategoryOf(status: IssueStatus): IssueStatusCategory {
 }
 
 /** `Issue.triage`. One state today; absent means accepted. */
-export type IssueTriageState = "pending"
+export const ISSUE_TRIAGE_STATES = ["pending"] as const
+export type IssueTriageState = (typeof ISSUE_TRIAGE_STATES)[number]
 
 /** Upper bound of `Issue.stage` (lower bound is 1). */
 export const ISSUE_STAGE_MAX = 1000

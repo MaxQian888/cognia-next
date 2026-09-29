@@ -4,6 +4,12 @@
  *   issues_list / issues_get         scope `issues:read`
  *   issues_create / issues_update / issues_comment   scope `issues:write`
  *
+ * Stage and triage ride the same actions as the board: a sub-issue's stage
+ * orders the parent's barrier, and an issue in triage is refused to derived
+ * runs until someone accepts it. An external agent may send an issue into
+ * triage but never accept one out: that acceptance is the person's say-so
+ * the gate waits for, so an agent granting it would defeat the gate.
+ *
  * Pure handlers: validation plus delegation to `lib/issues/service.ts`, the
  * same face the board, the /issue command, the workflow nodes and `ctx.issues`
  * use. The MCP server layer owns the permission gate and the audit log. A
@@ -17,7 +23,9 @@ import {
   applyIssueAction,
   createIssueRecord,
   isIssuePriority,
+  isIssueStage,
   isIssueStatus,
+  isIssueTriageState,
   queryIssues,
   resolveIssue,
   toIssueWire,
@@ -25,7 +33,7 @@ import {
   type IssueBulkOutcome,
   type IssueWire,
 } from "@/lib/issues/service"
-import type { IssueActor, IssueEvent, IssueStatus } from "@/types/issues"
+import { ISSUE_STAGE_MAX, type IssueActor, type IssueEvent, type IssueStatus } from "@/types/issues"
 
 export type { IssueWire }
 
@@ -105,7 +113,13 @@ export interface IssuesCreateInput {
   cycleId?: string
   dueDate?: number
   estimate?: number
+  /** Sub-issue stage, 1 to `ISSUE_STAGE_MAX`. */
+  stage?: number
+  /** `"pending"` files it into triage, so derived runs wait for a person. */
+  triage?: string
 }
+
+const STAGE_RANGE_DETAIL = `stage must be an integer from 1 to ${ISSUE_STAGE_MAX}`
 
 export type IssuesCreateResult = { ok: true; issue: IssueWire } | IssueWriteFailure
 
@@ -119,6 +133,12 @@ export async function issuesCreate(input: IssuesCreateInput): Promise<IssuesCrea
   }
   if (input.priority !== undefined && !isIssuePriority(input.priority)) {
     return { ok: false, reason: "invalid", detail: `unknown priority '${input.priority}'` }
+  }
+  if (input.stage !== undefined && !isIssueStage(input.stage)) {
+    return { ok: false, reason: "invalid", detail: STAGE_RANGE_DETAIL }
+  }
+  if (input.triage !== undefined && !isIssueTriageState(input.triage)) {
+    return { ok: false, reason: "invalid", detail: `unknown triage state '${input.triage}'` }
   }
   try {
     const issue = await createIssueRecord({
@@ -134,6 +154,8 @@ export async function issuesCreate(input: IssuesCreateInput): Promise<IssuesCrea
       ...(input.cycleId ? { cycleId: input.cycleId } : {}),
       ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
       ...(input.estimate !== undefined ? { estimate: input.estimate } : {}),
+      ...(isIssueStage(input.stage) ? { stage: input.stage } : {}),
+      ...(isIssueTriageState(input.triage) ? { triage: input.triage } : {}),
     })
     return { ok: true, issue: toIssueWire(issue) }
   } catch (error) {
@@ -157,6 +179,10 @@ export interface IssuesUpdateInput {
   dueDate?: number | null
   estimate?: number | null
   cycleId?: string | null
+  /** `null` unstages. */
+  stage?: number | null
+  /** `"pending"` sends it into triage. Accepting it out is refused (see above). */
+  triage?: string | null
 }
 
 export type IssuesUpdateResult =
@@ -217,6 +243,25 @@ export async function issuesUpdate(input: IssuesUpdateInput): Promise<IssuesUpda
   if (input.dueDate !== undefined) actions.push({ kind: "dueDate", to: input.dueDate })
   if (input.estimate !== undefined) actions.push({ kind: "estimate", to: input.estimate })
   if (input.cycleId !== undefined) actions.push({ kind: "cycle", cycleId: input.cycleId })
+  if (input.stage !== undefined) {
+    if (input.stage !== null && !isIssueStage(input.stage)) {
+      return { ok: false, reason: "invalid", detail: STAGE_RANGE_DETAIL }
+    }
+    actions.push({ kind: "stage", to: input.stage })
+  }
+  if (input.triage !== undefined) {
+    if (input.triage === null) {
+      return {
+        ok: false,
+        reason: "refused",
+        detail: "only a person accepts an issue out of triage",
+      }
+    }
+    if (!isIssueTriageState(input.triage)) {
+      return { ok: false, reason: "invalid", detail: `unknown triage state '${input.triage}'` }
+    }
+    actions.push({ kind: "triage", to: input.triage })
+  }
   if (actions.length === 0) return { ok: false, reason: "invalid", detail: "nothing to change" }
   return applyMany(input.ref, actions)
 }
