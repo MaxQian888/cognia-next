@@ -142,6 +142,20 @@ describe("compileIssueWakeup", () => {
     )
   })
 
+  it("wakes on timeout only with a deadline, and drops by default", () => {
+    const expiresAt = new Date("2030-01-01T00:00:00Z")
+    const event = { on: "event" } as const
+    expect(
+      compileIssueWakeup({ ...base, trigger: event, expiresAt, onTimeout: "wake" }).payload
+    ).toMatchObject({ onTimeout: "wake" })
+    expect(
+      compileIssueWakeup({ ...base, trigger: event, expiresAt, onTimeout: "drop" }).payload
+    ).not.toHaveProperty("onTimeout")
+    expect(() => compileIssueWakeup({ ...base, trigger: event, onTimeout: "wake" })).toThrow(
+      /deadline/
+    )
+  })
+
   it.each([
     [{ ...base, instruction: "   " }, /instruction/],
     [{ ...base, maxFires: 0 }, /maxFires/],

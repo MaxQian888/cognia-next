@@ -228,6 +228,29 @@ export function unregisterEventFireGate(taskType: string): void {
 }
 
 /**
+ * Called once a task of one type has expired (`endAt` passed or `maxRuns`
+ * consumed), after the row says so. For a subsystem whose rules promise
+ * something AT their deadline (an issue wakeup that wakes its assignee when
+ * the wait runs out); the expiry itself is the scheduler's and has already
+ * happened. A handler that throws is logged: it cannot un-expire the task.
+ */
+export type TaskExpiryHandler = (
+  task: ScheduledTask,
+  reason: "ended" | "max-runs-reached"
+) => Promise<void>
+
+const taskExpiryHandlers: Map<string, TaskExpiryHandler> = new Map()
+
+/** Register the expiry handler for a task type. Last write wins, like executors. */
+export function registerTaskExpiryHandler(taskType: string, handler: TaskExpiryHandler): void {
+  taskExpiryHandlers.set(taskType, handler)
+}
+
+export function unregisterTaskExpiryHandler(taskType: string): void {
+  taskExpiryHandlers.delete(taskType)
+}
+
+/**
  * Check whether a task executor is currently registered for a task type.
  */
 export function hasTaskExecutor(taskType: string): boolean {
@@ -889,6 +912,13 @@ class TaskSchedulerImpl {
     // expired task records its terminal state without advancing the schedule.
     if (isPastEndAt(task, now) || isAtMaxRuns(task)) {
       await this.expireTask(task, isAtMaxRuns(task) ? "max-runs-reached" : "ended")
+      return
+    }
+    // An event task is armed only to expire at its `endAt` (`scheduleTask`);
+    // its work runs when its event arrives. Woken early (the bound moved
+    // later since it was armed), it re-arms for the bound it has now.
+    if (task.trigger.type === "event") {
+      await this.scheduleTask(task)
       return
     }
     const scheduledFor = new Date(canonicalMs)
@@ -1760,7 +1790,11 @@ class TaskSchedulerImpl {
    */
   async runTaskNow(
     taskId: string,
-    opts: { triggerSource?: TaskExecutionTriggerSource } = {}
+    opts: {
+      triggerSource?: TaskExecutionTriggerSource
+      /** Merged over the row's payload for this one run, as an event fire's is. */
+      payload?: Record<string, unknown>
+    } = {}
   ): Promise<TaskExecution | null> {
     const task = await schedulerDb.getTask(taskId)
     if (!task) {
@@ -1768,7 +1802,8 @@ class TaskSchedulerImpl {
       return null
     }
 
-    return this.executeTask(task, 0, { triggerSource: opts.triggerSource ?? "run-now" })
+    const run = opts.payload ? { ...task, payload: { ...task.payload, ...opts.payload } } : task
+    return this.executeTask(run, 0, { triggerSource: opts.triggerSource ?? "run-now" })
   }
 
   /**
@@ -1872,7 +1907,10 @@ class TaskSchedulerImpl {
   private async scheduleTask(task: ScheduledTask, expectedVersion?: number): Promise<void> {
     if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
     if (task.status !== "active") return
-    if (task.trigger.type === "event") return
+    // An event task has no slot to arm, but a bounded one has a deadline: arm
+    // that, so it expires when its `endAt` passes rather than whenever the
+    // next event happens to arrive (which may be never).
+    if (task.trigger.type === "event" && !task.endAt) return
     // Promoted to the OS scheduler: the OS timer wakes the app and the
     // deep-link handler runs the task — arming it here too would double-fire.
     if (task.promotion) return
@@ -1883,7 +1921,8 @@ class TaskSchedulerImpl {
       return
     }
 
-    const nextRun = task.nextRunAt || this.calculateNextRunTime(task)
+    const nextRun =
+      task.trigger.type === "event" ? task.endAt : task.nextRunAt || this.calculateNextRunTime(task)
     if (!nextRun) {
       log.warn(`Could not calculate next run time for task: ${task.name}`)
       return
@@ -1915,7 +1954,8 @@ class TaskSchedulerImpl {
     }
     const armedAtMs = applyJitter(canonicalMs, task.trigger.jitterMs, this.rng)
     await driver.arm(task.id, armedAtMs)
-    await this.armPrewarm(driver, task, armedAtMs)
+    // An event task's alarm is its deadline, not a run: nothing to warm.
+    if (task.trigger.type !== "event") await this.armPrewarm(driver, task, armedAtMs)
 
     log.debug(`Scheduled task ${task.name} for ${nextRun.toISOString()}`)
   }
@@ -2025,6 +2065,14 @@ class TaskSchedulerImpl {
     this.unscheduleTask(task.id)
     this.queues.delete(task.id)
     log.info(`Task ${task.name} expired (${reason})`)
+    const handler = taskExpiryHandlers.get(task.type)
+    if (handler) {
+      try {
+        await handler({ ...task, status: "expired" }, reason)
+      } catch (error) {
+        log.error(`Expiry handler for "${task.type}" threw on task ${task.name}`, error)
+      }
+    }
   }
 
   /**
@@ -3205,6 +3253,13 @@ class TaskSchedulerImpl {
 
     for (const task of eventTasks) {
       if (!task.trigger.eventSource || task.trigger.eventSource === eventSource) {
+        // The deadline timer may not have run (another host held the timing
+        // authority, the app was closed across it): an event is never the one
+        // that fires a task past its bounds.
+        if (isPastEndAt(task, new Date()) || isAtMaxRuns(task)) {
+          await this.expireTask(task, isAtMaxRuns(task) ? "max-runs-reached" : "ended")
+          continue
+        }
         const verdict = await this.askEventFireGate(task, {
           type: eventType,
           ...(eventSource !== undefined ? { source: eventSource } : {}),

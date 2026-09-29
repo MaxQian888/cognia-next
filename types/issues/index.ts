@@ -600,6 +600,8 @@ export type IssueEventPayload =
       instruction: string
       /** How many inputs this fire carried. */
       inputs: number
+      /** The rule's deadline passed before its condition held (`onTimeout: "wake"`). */
+      timedOut?: true
     }
   | { kind: "run_checked_in"; runId: string; adapterId: string; note: string }
 

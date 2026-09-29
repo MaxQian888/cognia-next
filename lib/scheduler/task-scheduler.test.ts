@@ -10,6 +10,8 @@ import {
   unregisterTaskExecutor,
   registerEventFireGate,
   unregisterEventFireGate,
+  registerTaskExpiryHandler,
+  unregisterTaskExpiryHandler,
   createTaskScheduler,
   waitForTaskExecutor,
   resolveDefaultTimingDriver,
@@ -3251,6 +3253,94 @@ describe("TaskScheduler", () => {
         )
         expect(driver.disarm).toHaveBeenCalledWith("ended-task")
         sched.stop()
+      })
+
+      it("arms a bounded event task for its endAt and expires it there, telling its type", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const onExpire = jest.fn().mockResolvedValue(undefined)
+        registerTaskExpiryHandler("test", onExpire)
+        const endAt = new Date(Date.now() + 60_000)
+        const task = makePolicyTask({
+          id: "bounded-event",
+          trigger: { type: "event", eventType: "e" },
+          endAt,
+        })
+        mockSchedulerDb.getTasksByStatus.mockResolvedValue([task])
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        jest.mocked(driver.arm).mockClear()
+        await sched.initialize()
+        expect(driver.arm).toHaveBeenCalledWith("bounded-event", endAt.getTime())
+        // No prewarm alarm: the deadline is not a run.
+        expect(driver.arm).toHaveBeenCalledTimes(1)
+
+        mockSchedulerDb.getTask.mockResolvedValue({ ...task, endAt: new Date(Date.now() - 1) })
+        driver.fire("bounded-event", endAt.getTime())
+        await jest.advanceTimersByTimeAsync(10)
+        expect(executor).not.toHaveBeenCalled()
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: "bounded-event",
+            status: "expired",
+            lastTerminalReason: "ended",
+          })
+        )
+        expect(onExpire).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "bounded-event", status: "expired" }),
+          "ended"
+        )
+        unregisterTaskExpiryHandler("test")
+        sched.stop()
+      })
+
+      it("re-arms an event task woken before its endAt instead of running it", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        const endAt = new Date(Date.now() + 120_000)
+        const task = makePolicyTask({
+          id: "moved-bound",
+          trigger: { type: "event", eventType: "e" },
+          endAt,
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        jest.mocked(driver.arm).mockClear()
+        driver.fire("moved-bound", Date.now())
+        await jest.advanceTimersByTimeAsync(10)
+        expect(executor).not.toHaveBeenCalled()
+        expect(driver.arm).toHaveBeenCalledWith("moved-bound", endAt.getTime())
+        sched.stop()
+      })
+
+      it("expires an event task an event reaches after its endAt, without firing it", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({
+          id: "late-event",
+          trigger: { type: "event", eventType: "late" },
+          endAt: new Date(Date.now() - 1000),
+        })
+        mockSchedulerDb.getActiveEventTasks.mockResolvedValueOnce([task])
+        await scheduler.triggerEventTask("late")
+        await jest.advanceTimersByTimeAsync(10)
+        expect(executor).not.toHaveBeenCalled()
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "late-event", status: "expired" })
+        )
+      })
+
+      it("merges a run-now payload over the row's for that run only", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({ id: "run-now-payload", payload: { own: 1 } })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        await scheduler.runTaskNow("run-now-payload", { payload: { timedOut: true } })
+        await jest.advanceTimersByTimeAsync(10)
+        expect(executor.mock.calls[0][0].payload).toEqual({ own: 1, timedOut: true })
       })
 
       it("expires a task that already consumed its maxRuns budget", async () => {

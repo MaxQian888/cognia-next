@@ -17977,6 +17977,7 @@
       "joined": "并入了当前运行",
       "notified": "通知了受让人",
       "run": "启动了运行",
+      "timedOut": "已到期",
       "trail": "无受让人"
     },
     "actor": {
@@ -18679,6 +18680,7 @@
       "dailyAt": "时间",
       "delete": "删除唤醒",
       "deletedToast": "唤醒已删除",
+      "dropOnTimeoutHint": "如果等待的事没有及时发生，规则就此停止。",
       "empty": "这个议题还没有唤醒规则。",
       "error": {
         "issue-finished": "议题已结束，请先重新打开。",
@@ -18688,6 +18690,17 @@
         "target-missing": "要关注的议题已不存在。",
         "target-other-workspace": "要关注的议题属于另一个工作空间。"
       },
+      "expires": "{when}到期",
+      "expiresIn": {
+        "1": "1 小时后",
+        "4": "4 小时后",
+        "24": "1 天后",
+        "72": "3 天后",
+        "168": "1 周后",
+        "336": "2 周后",
+        "none": "永不"
+      },
+      "expiresLabel": "到期",
       "finishedHint": "议题已结束，其唤醒规则已停止。重新打开议题后可恢复。",
       "fires": "已触发 {count}/{max} 次",
       "held": "{count, plural, other {# 条输入等待当前运行结束}}",
@@ -18801,7 +18814,10 @@
         "issueFinished": "{issue} 结束时",
         "prMerged": "关联的拉取请求合并时",
         "statusTo": "状态变为 {statuses} 时"
-      }
+      },
+      "wakeOnTimeout": "到期时唤醒",
+      "wakeOnTimeoutHint": "如果等待的事没有及时发生，会再唤醒一次该议题，并告知等待已超时。",
+      "wakesOnTimeout": "到期时唤醒"
     },
     "workspace": {
       "agentsWorking": "工作中的 Agent",

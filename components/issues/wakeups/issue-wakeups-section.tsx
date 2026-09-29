@@ -261,6 +261,17 @@ export function IssueWakeupsSection({
                   {held > 0 ? (
                     <span data-testid="issue-wakeup-held">{t("held", { count: held })}</span>
                   ) : null}
+                  {task.status === "active" && task.endAt ? (
+                    <span data-testid="issue-wakeup-expires">
+                      {t("expires", {
+                        when: new Intl.DateTimeFormat(undefined, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        }).format(task.endAt),
+                      })}
+                      {payload.onTimeout === "wake" ? ` · ${t("wakesOnTimeout")}` : ""}
+                    </span>
+                  ) : null}
                   <span className="flex-1" />
                   {task.status === "active" ? (
                     <Button

@@ -109,6 +109,24 @@ describe("wakeupSpecFromForm", () => {
       wakeupSpecFromForm("i1", form({ preset: "children-done", instruction: "x", once: true }))
     ).not.toHaveProperty("once")
   })
+
+  it("turns a deadline preset into an instant from now, and says whether to wake at it", () => {
+    const now = Date.UTC(2030, 0, 1)
+    expect(
+      wakeupSpecFromForm("i1", form({ instruction: "x", expiresInHours: "24" }), now)
+    ).toMatchObject({ expiresAt: new Date(now + 24 * 3_600_000), onTimeout: "drop" })
+    expect(
+      wakeupSpecFromForm(
+        "i1",
+        form({ instruction: "x", expiresInHours: "4", wakeOnTimeout: true }),
+        now
+      )
+    ).toMatchObject({ expiresAt: new Date(now + 4 * 3_600_000), onTimeout: "wake" })
+    // Waking without a deadline means nothing, so no deadline sends neither.
+    const open = wakeupSpecFromForm("i1", form({ instruction: "x", wakeOnTimeout: true }), now)
+    expect(open).not.toHaveProperty("expiresAt")
+    expect(open).not.toHaveProperty("onTimeout")
+  })
 })
 
 describe("describeWakeupWriteError", () => {
@@ -168,6 +186,22 @@ describe("WakeupCreateDialog", () => {
     })
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
     expect(mockToastSuccess).toHaveBeenCalledWith("createdToast:MERC-1")
+  })
+
+  it("offers waking at the deadline only once a deadline is picked, and submits it", async () => {
+    mockCreate.mockResolvedValue({ id: "wk" })
+    renderDialog()
+    expect(screen.queryByTestId("wakeup-wake-on-timeout")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("option", { name: "expiresIn.72" }))
+    fireEvent.click(screen.getByTestId("wakeup-wake-on-timeout"))
+    expect(screen.getByText("wakeOnTimeoutHint")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("wakeup-instruction"), { target: { value: "Chase" } })
+    const before = Date.now()
+    fireEvent.click(screen.getByTestId("wakeup-create-submit"))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalled())
+    const sent = mockCreate.mock.calls[0][0] as { expiresAt: Date; onTimeout: string }
+    expect(sent.onTimeout).toBe("wake")
+    expect(sent.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 72 * 3_600_000)
   })
 
   it("offers only other open local issues as a watch target", () => {

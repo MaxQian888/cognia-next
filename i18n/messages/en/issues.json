@@ -794,7 +794,8 @@
     "run": "started a run",
     "joined": "joined the active run",
     "notified": "notified the assignee",
-    "trail": "no assignee"
+    "trail": "no assignee",
+    "timedOut": "deadline passed"
   },
   "wakeups": {
     "section": "Wakeups",
@@ -939,6 +940,21 @@
     },
     "systemInstruction": "Instruction when sub-issues finish",
     "systemInstructionHint": "Applies to this issue only. Empty uses the project's default.",
-    "instructionSavedToast": "Instruction saved"
+    "instructionSavedToast": "Instruction saved",
+    "expiresLabel": "Expires",
+    "expiresIn": {
+      "none": "Never",
+      "1": "In 1 hour",
+      "4": "In 4 hours",
+      "24": "In 1 day",
+      "72": "In 3 days",
+      "168": "In 1 week",
+      "336": "In 2 weeks"
+    },
+    "wakeOnTimeout": "Wake when it expires",
+    "wakeOnTimeoutHint": "If nothing it waits for happens in time, the issue is woken once more, told the wait ran out.",
+    "dropOnTimeoutHint": "If nothing it waits for happens in time, the rule just stops.",
+    "expires": "expires {when}",
+    "wakesOnTimeout": "wakes on timeout"
   }
 }

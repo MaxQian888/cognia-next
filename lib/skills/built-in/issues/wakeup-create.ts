@@ -105,6 +105,12 @@ const schema = z.object({
     .optional()
     .describe("Fire budget; the rule expires once spent. Defaults to 20."),
   expiresAt: z.string().optional().describe("ISO-8601 instant after which the rule expires."),
+  onTimeout: z
+    .enum(["wake", "drop"])
+    .optional()
+    .describe(
+      "What happens if expiresAt passes before the trigger: wake starts one last run saying the wait ran out; drop (default) just stops the rule. wake needs expiresAt."
+    ),
 })
 
 type Args = z.infer<typeof schema>
@@ -145,6 +151,7 @@ async function toSpec(args: Args, ctx: Pick<BuiltInSkillContext, "sessionId">) {
       ...(args.once !== undefined ? { once: args.once } : {}),
       ...(args.maxFires !== undefined ? { maxFires: args.maxFires } : {}),
       ...(expiresAt ? { expiresAt } : {}),
+      ...(args.onTimeout ? { onTimeout: args.onTimeout } : {}),
     },
   }
 }

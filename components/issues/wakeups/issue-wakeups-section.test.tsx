@@ -165,6 +165,14 @@ it("on a finished issue, lists rules but lets none be added or resumed", () => {
   expect(screen.getByText("finishedHint")).toBeInTheDocument()
 })
 
+it("shows an active rule's deadline and whether it wakes at it", () => {
+  mockTasks = [wakeup({ endAt: new Date("2030-01-01T09:00:00Z") }, { onTimeout: "wake" })]
+  render(<IssueWakeupsSection issueId="i1" identifier="MERC-1" />)
+  const expires = screen.getByTestId("issue-wakeup-expires")
+  expect(expires.textContent).toMatch(/^expires:/)
+  expect(expires).toHaveTextContent("wakesOnTimeout")
+})
+
 describe("the platform rule's instruction", () => {
   const platform = () =>
     wakeup(

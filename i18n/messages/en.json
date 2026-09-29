@@ -17977,6 +17977,7 @@
       "joined": "joined the active run",
       "notified": "notified the assignee",
       "run": "started a run",
+      "timedOut": "deadline passed",
       "trail": "no assignee"
     },
     "actor": {
@@ -18679,6 +18680,7 @@
       "dailyAt": "Time",
       "delete": "Delete wakeup",
       "deletedToast": "Wakeup deleted",
+      "dropOnTimeoutHint": "If nothing it waits for happens in time, the rule just stops.",
       "empty": "No wakeups on this issue.",
       "error": {
         "issue-finished": "This issue is finished; reopen it first.",
@@ -18688,6 +18690,17 @@
         "target-missing": "The issue to watch no longer exists.",
         "target-other-workspace": "The issue to watch is in another workspace."
       },
+      "expires": "expires {when}",
+      "expiresIn": {
+        "1": "In 1 hour",
+        "4": "In 4 hours",
+        "24": "In 1 day",
+        "72": "In 3 days",
+        "168": "In 1 week",
+        "336": "In 2 weeks",
+        "none": "Never"
+      },
+      "expiresLabel": "Expires",
       "finishedHint": "This issue is finished, so its wakeups stopped. Reopen it to resume them.",
       "fires": "Fired {count} of {max}",
       "held": "{count, plural, one {# input held for the active run} other {# inputs held for the active run}}",
@@ -18801,7 +18814,10 @@
         "issueFinished": "When {issue} is finished",
         "prMerged": "When a linked pull request merges",
         "statusTo": "When status changes to {statuses}"
-      }
+      },
+      "wakeOnTimeout": "Wake when it expires",
+      "wakeOnTimeoutHint": "If nothing it waits for happens in time, the issue is woken once more, told the wait ran out.",
+      "wakesOnTimeout": "wakes on timeout"
     },
     "workspace": {
       "agentsWorking": "Agents working",

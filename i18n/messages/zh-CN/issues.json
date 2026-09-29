@@ -794,7 +794,8 @@
     "run": "启动了运行",
     "joined": "并入了当前运行",
     "notified": "通知了受让人",
-    "trail": "无受让人"
+    "trail": "无受让人",
+    "timedOut": "已到期"
   },
   "wakeups": {
     "section": "唤醒",
@@ -939,6 +940,21 @@
     },
     "systemInstruction": "子议题完成时的说明",
     "systemInstructionHint": "只对这个议题生效。留空则使用项目的默认说明。",
-    "instructionSavedToast": "说明已保存"
+    "instructionSavedToast": "说明已保存",
+    "expiresLabel": "到期",
+    "expiresIn": {
+      "none": "永不",
+      "1": "1 小时后",
+      "4": "4 小时后",
+      "24": "1 天后",
+      "72": "3 天后",
+      "168": "1 周后",
+      "336": "2 周后"
+    },
+    "wakeOnTimeout": "到期时唤醒",
+    "wakeOnTimeoutHint": "如果等待的事没有及时发生，会再唤醒一次该议题，并告知等待已超时。",
+    "dropOnTimeoutHint": "如果等待的事没有及时发生，规则就此停止。",
+    "expires": "{when}到期",
+    "wakesOnTimeout": "到期时唤醒"
   }
 }

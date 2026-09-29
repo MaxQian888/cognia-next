@@ -32,7 +32,11 @@ import type {
   IssueWakeupDelivery,
   IssueWakeupPauseReason,
 } from "@/types/issues"
-import { ISSUE_WAKEUP_EVENT_KINDS, WAKEUP_PRESETS } from "@/lib/issues/wakeups/model"
+import {
+  ISSUE_WAKEUP_EVENT_KINDS,
+  WAKEUP_EXPIRY_HOURS,
+  WAKEUP_PRESETS,
+} from "@/lib/issues/wakeups/model"
 import type { IssueWakeupWriteError } from "@/lib/issues/wakeups/service"
 import {
   ISSUE_PRIORITIES,
@@ -233,6 +237,8 @@ const DYNAMIC_KEYS: string[] = [
     `issues.wakeups.cue.reason.${v}`,
   ]),
   ...WAKEUP_DELIVERIES.map((v) => `issues.activityWakeupDelivery.${v}`),
+  "issues.activityWakeupDelivery.timedOut",
+  ...["none", ...WAKEUP_EXPIRY_HOURS].map((v) => `issues.wakeups.expiresIn.${v}`),
   ...WAKEUP_PRESETS.flatMap((v) => [
     `issues.wakeups.preset.${v}`,
     `issues.wakeups.presetHint.${v}`,

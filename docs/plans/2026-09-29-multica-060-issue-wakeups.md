@@ -140,8 +140,18 @@ deliverable,linkedAt}`, `lib/issues/deliverables.ts` (label-keyed
   fires. Departure: upstream's middle layer is the workspace; here it is
   the container, because the container already has the tracker's settings
   surface and the workspace has none.
+- **Expiry and `on-timeout`** (2026-09-30): event tasks never honoured
+  `endAt` — only timer paths checked it, so an event rule fired past its
+  deadline and never expired while idle. The scheduler now arms a bounded
+  event task for its `endAt`, refuses (expires) an event that reaches it
+  late, and calls a per-type `registerTaskExpiryHandler`. A wakeup with
+  `onTimeout: "wake"` (needs `expiresAt`) runs once more through
+  `runTaskNow` with a timeout flag: the brief says the wait ran out, the
+  trail's `wakeup_fired` carries `timedOut`, it is not charged to the rate
+  cap, and what an expired rule could not deliver lands on the trail rather
+  than being held forever. The dialog offers deadline presets.
 - **Not built:** Phases 5 and 6 (gated on demand by this plan); `until-pr`
-  `checks` and wakeup expiry (`expires-in` / `on-timeout`).
+  `checks`.
 
 ## Delta since the August snapshots
 

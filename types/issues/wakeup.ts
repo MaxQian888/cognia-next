@@ -143,6 +143,13 @@ export interface IssueWakeupPayload extends Record<string, unknown> {
   condition?: IssueWakeupCondition
   /** Consumed by its first delivery (run started, input joined, person notified). */
   once?: boolean
+  /**
+   * What happens when the rule's deadline (`ScheduledTask.endAt`) passes
+   * first. `wake` delivers once more, saying the wait ran out, so the agent
+   * can decide what to do without the event it waited for; absent is drop,
+   * the scheduler's own expiry: the rule just stops.
+   */
+  onTimeout?: "wake"
   system?: IssueSystemWakeupKind
   /**
    * A platform rule's instruction for THIS issue, set by a person. Wins over

@@ -12,6 +12,7 @@ jest.mock("@/lib/scheduler/task-scheduler", () => ({
   getTaskScheduler: jest.fn(),
   registerTaskExecutor: jest.fn(),
   registerEventFireGate: jest.fn(),
+  registerTaskExpiryHandler: jest.fn(),
 }))
 
 import type { IssueActor, IssueWakeupEvidence } from "@/types/issues"
@@ -28,11 +29,18 @@ import {
   startIssueRun,
 } from "@/lib/issues/run/registry"
 import type { IssueRunAdapter, IssueRunStartContext } from "@/lib/issues/run/types"
-import { registerEventFireGate, registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
 import {
+  getTaskScheduler,
+  registerEventFireGate,
+  registerTaskExecutor,
+  registerTaskExpiryHandler,
+} from "@/lib/scheduler/task-scheduler"
+import {
+  WAKEUP_TIMEOUT_FLAG,
   createIssueWakeupExecutor,
   registerIssueWakeupExecutor,
   resetIssueWakeupExecutorRegistration,
+  wakeOnTimeout,
   type IssueWakeupExecutorDeps,
 } from "./executor"
 import { WAKEUP_BARRIER_KEY, WAKEUP_RELEASE_FLAG } from "./gate"
@@ -473,5 +481,78 @@ describe("registerIssueWakeupExecutor", () => {
     expect(registerTaskExecutor).toHaveBeenCalledTimes(1)
     expect(registerTaskExecutor).toHaveBeenCalledWith("issue-wakeup", expect.any(Function))
     expect(registerEventFireGate).toHaveBeenCalledWith("issue-wakeup", expect.any(Function))
+    expect(registerTaskExpiryHandler).toHaveBeenCalledWith("issue-wakeup", wakeOnTimeout)
+  })
+})
+
+describe("waking on timeout", () => {
+  const timedOutRun = (task: ScheduledTask) => ({
+    ...task,
+    payload: { ...task.payload, [WAKEUP_TIMEOUT_FLAG]: true },
+  })
+  const DEADLINE = new Date("2026-10-01T09:00:00.000Z")
+
+  it("runs the rule once more only when its deadline passed and it asked to wake", async () => {
+    const runTaskNow = jest.fn()
+    jest.mocked(getTaskScheduler).mockReturnValue({ runTaskNow } as never)
+    const waking = wakeupTask("i1", { endAt: DEADLINE }, { onTimeout: "wake" })
+    await wakeOnTimeout(waking, "ended")
+    expect(runTaskNow).toHaveBeenCalledWith("wk1", {
+      triggerSource: "schedule",
+      payload: { [WAKEUP_TIMEOUT_FLAG]: true },
+    })
+    runTaskNow.mockClear()
+    // A spent budget is not a timeout, and a rule that did not ask stays quiet.
+    await wakeOnTimeout(waking, "max-runs-reached")
+    await wakeOnTimeout(wakeupTask("i1", { endAt: DEADLINE }), "ended")
+    expect(runTaskNow).not.toHaveBeenCalled()
+  })
+
+  it("tells the woken agent the wait ran out, and says so on the trail", async () => {
+    registerIssueRunAdapter(engine())
+    const issue = await makeIssue({ assignee: AGENT })
+    const task = wakeupTask(issue.id, { endAt: DEADLINE, status: "expired" }, { onTimeout: "wake" })
+    // A timeout is never charged against the hourly cap.
+    const { execute, calls } = harness(task, {
+      priorEventFires: async () => Array.from({ length: 50 }, () => new Date(10 * 3_600_000)),
+    })
+    const result = await execute(timedOutRun(task), EXECUTION, SIGNAL)
+    expect(result).toMatchObject({ success: true, output: { outcome: "run" } })
+    expect(calls.pause).toEqual([])
+    expect(starts[0]!.brief).toContain("deadline (2026-10-01T09:00:00.000Z) passed")
+    const fired = (await listIssueEvents({ issueId: issue.id })).find(
+      (e) => e.kind === "wakeup_fired"
+    )
+    expect(fired?.payload).toMatchObject({ delivery: "run", timedOut: true })
+  })
+
+  it("records the timeout on the trail when the run in flight cannot take it", async () => {
+    registerIssueRunAdapter(engine())
+    const issue = await makeIssue({ assignee: AGENT })
+    await createIssueRun({
+      issueId: issue.id,
+      projectId: "w1",
+      adapterId: "fake",
+      kind: "agent-task",
+      targetId: "t",
+      by: HUMAN,
+    })
+    const task = wakeupTask(issue.id, { endAt: DEADLINE }, { onTimeout: "wake" })
+    const { execute, calls } = harness(task)
+    const result = await execute(timedOutRun(task), EXECUTION, SIGNAL)
+    expect(result).toMatchObject({ success: true, output: { outcome: "trail" } })
+    // Nothing is held on a rule that will never fire again.
+    expect(calls.deferred).toEqual([])
+  })
+
+  it("wakes nobody on a finished issue, and leaves the expired rule expired", async () => {
+    const issue = await makeIssue({ status: "done" })
+    const task = wakeupTask(issue.id, { endAt: DEADLINE }, { onTimeout: "wake" })
+    const { execute, calls } = harness(task)
+    await expect(execute(timedOutRun(task), EXECUTION, SIGNAL)).resolves.toMatchObject({
+      success: true,
+      output: { outcome: "skipped" },
+    })
+    expect(calls.pause).toEqual([])
   })
 })

@@ -39,6 +39,7 @@ import {
   ISSUE_WAKEUP_DEFAULT_MAX_FIRES,
   ISSUE_WAKEUP_INSTRUCTION_MAX,
   ISSUE_WAKEUP_MAX_FIRES_LIMIT,
+  WAKEUP_EXPIRY_HOURS,
   WAKEUP_PRESETS,
   isTerminalIssueStatus,
   type WakeupPreset,
@@ -64,6 +65,10 @@ export interface WakeupFormState {
   /** `datetime-local` value. */
   at: string
   maxFires: number
+  /** Deadline as hours from now, one of {@link WAKEUP_EXPIRY_HOURS}; `""` for none. */
+  expiresInHours: string
+  /** At the deadline: wake the issue once more instead of just stopping. */
+  wakeOnTimeout: boolean
 }
 
 export const INITIAL_WAKEUP_FORM: WakeupFormState = {
@@ -78,6 +83,8 @@ export const INITIAL_WAKEUP_FORM: WakeupFormState = {
   intervalHours: 4,
   at: "",
   maxFires: ISSUE_WAKEUP_DEFAULT_MAX_FIRES,
+  expiresInHours: "",
+  wakeOnTimeout: false,
 }
 
 /** Presets whose rule can be one-shot or repeat, so the form offers the switch. */
@@ -129,11 +136,21 @@ export function wakeupTriggerFromForm(form: WakeupFormState): IssueWakeupTrigger
   }
 }
 
-/** Form → the full spec `createIssueWakeup` takes, or `null` when incomplete. */
-export function wakeupSpecFromForm(issueId: string, form: WakeupFormState): IssueWakeupSpec | null {
+/**
+ * Form → the full spec `createIssueWakeup` takes, or `null` when incomplete.
+ * `now` anchors the deadline, so the submit and the tests pass the instant.
+ */
+export function wakeupSpecFromForm(
+  issueId: string,
+  form: WakeupFormState,
+  now: number = Date.now()
+): IssueWakeupSpec | null {
   const trigger = wakeupTriggerFromForm(form)
   const instruction = form.instruction.trim()
   if (!trigger || !instruction) return null
+  const hours = form.expiresInHours === "" ? null : Number(form.expiresInHours)
+  if (hours !== null && !(Number.isFinite(hours) && hours > 0)) return null
+  const expiresAt = hours === null ? undefined : new Date(now + hours * 3_600_000)
   if (
     !Number.isInteger(form.maxFires) ||
     form.maxFires < 1 ||
@@ -147,6 +164,7 @@ export function wakeupSpecFromForm(issueId: string, form: WakeupFormState): Issu
     trigger,
     maxFires: form.maxFires,
     ...(ONCE_CAPABLE.has(form.preset) ? { once: form.once } : {}),
+    ...(expiresAt ? { expiresAt, onTimeout: form.wakeOnTimeout ? "wake" : "drop" } : {}),
     author: { kind: "human" },
   }
 }
@@ -201,11 +219,13 @@ export function WakeupCreateDialog({
   const spec = wakeupSpecFromForm(issueId, form)
 
   async function submit() {
-    if (!spec) return
+    // Re-derived at the click, so the deadline counts from when it was made.
+    const final = wakeupSpecFromForm(issueId, form, Date.now())
+    if (!final) return
     setBusy(true)
     setError(null)
     try {
-      await createIssueWakeup({ ...spec, source: "user", createdBy: { kind: "user" } })
+      await createIssueWakeup({ ...final, source: "user", createdBy: { kind: "user" } })
       toast.success(t("createdToast", { identifier }))
       onOpenChange(false)
     } catch (cause) {
@@ -403,6 +423,43 @@ export function WakeupCreateDialog({
               </div>
             ) : null}
           </div>
+          <div className="flex items-end gap-3">
+            <div className="flex flex-1 flex-col gap-1.5">
+              <Label htmlFor="wakeup-expires">{t("expiresLabel")}</Label>
+              <Select
+                value={form.expiresInHours || "none"}
+                onValueChange={(value) => set("expiresInHours", value === "none" ? "" : value)}
+              >
+                <SelectTrigger id="wakeup-expires" data-testid="wakeup-expires">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{t("expiresIn.none")}</SelectItem>
+                  {WAKEUP_EXPIRY_HOURS.map((hours) => (
+                    <SelectItem key={hours} value={hours}>
+                      {t(`expiresIn.${hours}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {form.expiresInHours ? (
+              <div className="flex items-center gap-2 pb-2">
+                <Switch
+                  id="wakeup-wake-on-timeout"
+                  checked={form.wakeOnTimeout}
+                  onCheckedChange={(checked) => set("wakeOnTimeout", checked)}
+                  data-testid="wakeup-wake-on-timeout"
+                />
+                <Label htmlFor="wakeup-wake-on-timeout">{t("wakeOnTimeout")}</Label>
+              </div>
+            ) : null}
+          </div>
+          {form.expiresInHours ? (
+            <p className="text-xs text-muted-foreground">
+              {form.wakeOnTimeout ? t("wakeOnTimeoutHint") : t("dropOnTimeoutHint")}
+            </p>
+          ) : null}
           <p className="text-xs text-muted-foreground">{t("safetyHint")}</p>
 
           {error ? (

@@ -45,6 +45,14 @@ describe("activityValues", () => {
     })
   })
 
+  it("says a wakeup fired because its deadline passed", () => {
+    expect(
+      activityValues({ kind: "wakeup_fired", delivery: "run", timedOut: true }, t)
+    ).toMatchObject({
+      delivery: `${t("activityWakeupDelivery.timedOut")} · ${t("activityWakeupDelivery.run")}`,
+    })
+  })
+
   it("survives an event whose payload is missing entirely", () => {
     // These rows cross the companion wire now, so a host on an older shape
     // can hand a phone an event this code does not recognise. A timeline is

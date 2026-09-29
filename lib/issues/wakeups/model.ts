@@ -94,6 +94,8 @@ export interface IssueWakeupSpec {
   maxFires?: number
   /** The rule expires at this instant (`ScheduledTask.endAt`). */
   expiresAt?: Date
+  /** At {@link expiresAt}: wake the issue once more, or just stop (default). */
+  onTimeout?: "wake" | "drop"
   author?: IssueActor
   system?: IssueSystemWakeupKind
 }
@@ -147,10 +149,15 @@ export function compileIssueWakeup(spec: IssueWakeupSpec): CompiledIssueWakeup {
     throw new Error(`maxFires must be an integer from 1 to ${ISSUE_WAKEUP_MAX_FIRES_LIMIT}.`)
   }
 
+  if (spec.onTimeout === "wake" && !spec.expiresAt) {
+    throw new Error("A wakeup can only wake on timeout when it has a deadline (expiresAt).")
+  }
+
   const ownSource = issueWakeupEventSource(spec.issueId)
   const base: IssueWakeupPayload = {
     issueId: spec.issueId,
     instruction,
+    ...(spec.onTimeout === "wake" ? { onTimeout: "wake" as const } : {}),
     ...(spec.adapterId ? { adapterId: spec.adapterId } : {}),
     ...(spec.author ? { author: spec.author } : {}),
     ...(spec.system ? { system: spec.system } : {}),
@@ -582,6 +589,8 @@ export interface WakeupBriefInput {
   identifiersById?: ReadonlyMap<string, string>
   /** What a children-done fire reached, so the agent knows which hand-off this is. */
   barrier?: IssueChildrenBarrier
+  /** The deadline that passed first, when this is a rule waking on timeout. */
+  timedOutAt?: Date
 }
 
 /**
@@ -597,6 +606,12 @@ export function buildWakeupBrief(input: WakeupBriefInput): string {
     input.instruction.trim(),
   ]
   if (input.barrier) lines.push("", describeBarrier(input.barrier))
+  if (input.timedOutAt) {
+    lines.push(
+      "",
+      `This wakeup's deadline (${input.timedOutAt.toISOString()}) passed before what it waited for happened. Decide what to do without it: follow up, ask, or close the loop.`
+    )
+  }
   const shown = input.inputs.slice(-ISSUE_WAKEUP_BRIEF_MAX_INPUTS)
   if (shown.length > 0) {
     lines.push("", "What happened:")
@@ -624,6 +639,12 @@ export function buildWakeupBrief(input: WakeupBriefInput): string {
  * {@link IssueWakeupTriggerSpec}. Here rather than in the component so the
  * i18n coverage test can enumerate them without importing React.
  */
+/**
+ * The deadlines the authoring dialog offers, in hours from creation. Here for
+ * the same reason as {@link WAKEUP_PRESETS}: the i18n test enumerates them.
+ */
+export const WAKEUP_EXPIRY_HOURS = ["1", "4", "24", "72", "168", "336"] as const
+
 export const WAKEUP_PRESETS = [
   "comment",
   "status",
@@ -750,6 +771,7 @@ export function summariseWakeup(task: ScheduledTask) {
     instruction: payload?.instruction ?? "",
     ...(payload?.instructionOverride ? { instructionOverride: payload.instructionOverride } : {}),
     once: payload?.once === true,
+    ...(payload?.onTimeout ? { onTimeout: payload.onTimeout } : {}),
     system: payload?.system ?? null,
     fires: task.runCount,
     maxFires: task.config.maxRuns ?? null,

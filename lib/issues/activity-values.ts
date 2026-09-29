@@ -20,6 +20,8 @@ export interface IssueActivityPayload {
   winner?: unknown
   /** `wakeup_fired`: what the fire became. */
   delivery?: unknown
+  /** `wakeup_fired`: the rule's deadline passed first. */
+  timedOut?: unknown
 }
 
 /** Translate function shape both shells already have from `useTranslations`. */
@@ -64,7 +66,9 @@ export function activityValues(
   if (typeof payload?.field === "string") values.field = payload.field
   if (typeof payload?.winner === "string") values.winner = t(`activitySide.${payload.winner}`)
   if (typeof payload?.delivery === "string") {
-    values.delivery = t(`activityWakeupDelivery.${payload.delivery}`)
+    const delivery = t(`activityWakeupDelivery.${payload.delivery}`)
+    values.delivery =
+      payload.timedOut === true ? `${t("activityWakeupDelivery.timedOut")} · ${delivery}` : delivery
   }
   return values
 }

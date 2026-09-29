@@ -31,7 +31,6 @@ import type {
   IssueWakeupDelivery,
   IssueWakeupEvidence,
   IssueWakeupPauseReason,
-  IssueWakeupPayload,
 } from "@/types/issues"
 import {
   ISSUE_WAKEUP_PAUSE_TERMINAL_REASONS,
@@ -74,7 +73,11 @@ import {
   getTaskScheduler,
   registerEventFireGate,
   registerTaskExecutor,
+  registerTaskExpiryHandler,
 } from "@/lib/scheduler/task-scheduler"
+
+/** Merged over the payload of the one run a rule's deadline starts (`onTimeout: "wake"`). */
+export const WAKEUP_TIMEOUT_FLAG = "wakeupTimedOut"
 
 export interface IssueWakeupExecutorDeps {
   now: () => number
@@ -155,7 +158,8 @@ async function recordFired(
   instruction: string,
   delivery: IssueWakeupDelivery,
   inputs: number,
-  runId?: string
+  runId?: string,
+  timedOut = false
 ): Promise<void> {
   await appendIssueEvent({
     issueId: issue.id,
@@ -166,6 +170,7 @@ async function recordFired(
       ...(runId ? { runId } : {}),
       instruction,
       inputs,
+      ...(timedOut ? { timedOut: true as const } : {}),
     },
   })
 }
@@ -189,6 +194,7 @@ export function createIssueWakeupExecutor(overrides: Partial<IssueWakeupExecutor
     const envelope = (task.payload as Record<string, unknown>).event as
       { data?: unknown } | undefined
     const release = (task.payload as Record<string, unknown>)[WAKEUP_RELEASE_FLAG] === true
+    const timedOut = (task.payload as Record<string, unknown>)[WAKEUP_TIMEOUT_FLAG] === true
     const barrier = readBarrier((task.payload as Record<string, unknown>)[WAKEUP_BARRIER_KEY])
     const eventData = readActivityData(envelope?.data)
     // Held inputs are read from the row, not from the snapshot the fire was
@@ -209,6 +215,10 @@ export function createIssueWakeupExecutor(overrides: Partial<IssueWakeupExecutor
       )
     }
     if (isTerminalIssueStatus(issue.status)) {
+      // The deadline already expired the rule; a finished issue needs no wake.
+      if (timedOut) {
+        return { success: true, output: { outcome: "skipped", why: "issue-finished" } }
+      }
       await deps.pause(task.id, "issue-closed")
       return paused("issue-closed", `${issue.identifier} is ${issue.status}; its wakeups stopped.`)
     }
@@ -221,7 +231,7 @@ export function createIssueWakeupExecutor(overrides: Partial<IssueWakeupExecutor
         `This wakeup was reached ${ISSUE_WAKEUP_MAX_CHAIN_VISITS} times on one chain of agent runs with no person in between (${chain.join(" → ")}).`
       )
     }
-    if (task.trigger.type === "event" && !release) {
+    if (task.trigger.type === "event" && !release && !timedOut) {
       const prior = await deps.priorEventFires(task.id, execution.id)
       if (isOverWakeupRate(prior, deps.now())) {
         await deps.pause(task.id, "rate")
@@ -250,13 +260,14 @@ export function createIssueWakeupExecutor(overrides: Partial<IssueWakeupExecutor
         periodic,
         identifiersById,
         ...(barrier ? { barrier } : {}),
+        ...(timedOut && task.endAt ? { timedOutAt: task.endAt } : {}),
       })
     const delivered = async (
       delivery: IssueWakeupDelivery,
       runId?: string,
       extra: Record<string, unknown> = {}
     ): Promise<TaskExecutorResult> => {
-      await recordFired(issue, task, instruction, delivery, inputs.length, runId)
+      await recordFired(issue, task, instruction, delivery, inputs.length, runId, timedOut)
       if (held.length > 0) await deps.setDeferred(task.id, [])
       if (payload.once) await deps.consume(task.id)
       return {
@@ -265,6 +276,9 @@ export function createIssueWakeupExecutor(overrides: Partial<IssueWakeupExecutor
       }
     }
     const hold = async (why: string, run?: IssueRun): Promise<TaskExecutorResult> => {
+      // An expired rule is never fired again, so nothing would release what it
+      // held: the deadline's wake lands on the trail instead of being lost.
+      if (timedOut) return delivered("trail", run?.id, { why })
       await deps.setDeferred(task.id, inputs)
       return {
         success: true,
@@ -355,6 +369,24 @@ export function registerIssueWakeupExecutor(): void {
   registered = true
   registerTaskExecutor(ISSUE_WAKEUP_TASK_TYPE, createIssueWakeupExecutor())
   registerEventFireGate(ISSUE_WAKEUP_TASK_TYPE, createIssueWakeupFireGate())
+  registerTaskExpiryHandler(ISSUE_WAKEUP_TASK_TYPE, wakeOnTimeout)
+}
+
+/**
+ * A rule whose deadline passed before its condition held, set to wake: one
+ * last run through the executor, flagged so the brief says the wait ran out.
+ * Only for the deadline (`ended`): a spent fire budget is not a timeout.
+ */
+export async function wakeOnTimeout(
+  task: ScheduledTask,
+  reason: "ended" | "max-runs-reached"
+): Promise<void> {
+  if (reason !== "ended") return
+  if (readWakeupPayload(task.payload)?.onTimeout !== "wake") return
+  await getTaskScheduler().runTaskNow(task.id, {
+    triggerSource: "schedule",
+    payload: { [WAKEUP_TIMEOUT_FLAG]: true },
+  })
 }
 
 /** Test-only. */

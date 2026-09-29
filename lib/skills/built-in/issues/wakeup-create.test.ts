@@ -127,6 +127,24 @@ it("resolves a watched issue by identifier and a one-off time", async () => {
   ).rejects.toThrow(/ISO-8601/)
 })
 
+it("passes a deadline and whether to wake when it passes", async () => {
+  const issue = await make()
+  await skill.execute(
+    {
+      issue: issue.identifier,
+      instruction: "Chase the review",
+      trigger: { on: "event", kinds: ["commented"] },
+      expiresAt: "2030-01-01T00:00:00Z",
+      onTimeout: "wake",
+    } as never,
+    CTX
+  )
+  expect(mockCreateIssueWakeup.mock.calls[0][0]).toMatchObject({
+    expiresAt: new Date("2030-01-01T00:00:00Z"),
+    onTimeout: "wake",
+  })
+})
+
 it("preflight refuses a finished issue before anyone is asked", async () => {
   const done = await make({ status: "done" })
   await expect(
