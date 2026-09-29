@@ -329,3 +329,38 @@ describe("source workspace label", () => {
     expect(deps.db.rows.get("fixed-id")!.projectId).toBeUndefined()
   })
 })
+
+describe("per-workspace routing (ADR-0204)", () => {
+  const sessionInput = {
+    source: "session" as const,
+    level: "warning" as const,
+    title: "x",
+    sourceRef: { kind: "session" as const, id: "s1" },
+  }
+
+  it("resolves the workspace before routing when a workspace rule exists", async () => {
+    const toast = jest.fn()
+    const resolveSessionWorkspace = jest.fn(async () => "w1")
+    const deps = baseDeps({
+      toast,
+      resolveSessionWorkspace,
+      loadPrefs: () =>
+        resolvePreferences({
+          globalDefaultChannels: ["center", "toast"],
+          perProject: { w1: { enabled: false } },
+        }),
+    })
+    await notify(sessionInput, deps)
+    expect(toast).not.toHaveBeenCalled()
+    expect(resolveSessionWorkspace).toHaveBeenCalledTimes(1)
+    expect(deps.db.rows.get("fixed-id")!.projectId).toBe("w1")
+  })
+
+  it("does not resolve the workspace for a coalesced bump when no rule exists", async () => {
+    const resolveSessionWorkspace = jest.fn(async () => "w1")
+    const deps = baseDeps({ resolveSessionWorkspace })
+    await notify({ ...sessionInput, dedupeKey: "k" }, deps)
+    await notify({ ...sessionInput, dedupeKey: "k" }, deps)
+    expect(resolveSessionWorkspace).toHaveBeenCalledTimes(1)
+  })
+})

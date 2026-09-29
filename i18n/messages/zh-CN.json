@@ -23606,9 +23606,14 @@
       "warning": "警告"
     },
     "session": {
+      "approvalBody": "「{title}」正在等待你的审批。",
+      "approvalBodyUnnamed": "有对话正在等待你的审批。",
+      "approvalTitle": "Cognia · 需要审批",
       "errorBody": "会话以错误结束。",
+      "errorBodyNamed": "「{title}」以错误结束。",
       "errorTitle": "Cognia · 会话出错",
       "readyBody": "Claude 已生成完成。",
+      "readyBodyNamed": "「{title}」已完成。",
       "readyTitle": "Cognia · 回复就绪"
     },
     "snoozePresets": {

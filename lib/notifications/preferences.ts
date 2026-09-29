@@ -23,6 +23,7 @@ export function resolvePreferences(
       ...(stored.quietHours ?? {}),
     },
     perSource: { ...(stored.perSource ?? {}) },
+    perProject: { ...(stored.perProject ?? {}) },
     globalDefaultChannels:
       stored.globalDefaultChannels ?? DEFAULT_NOTIFICATION_PREFERENCES.globalDefaultChannels,
   }
@@ -34,4 +35,17 @@ export function resolveSourcePref(
   source: NotificationSource
 ): NotificationSourcePref {
   return prefs.perSource[source] ?? { enabled: true }
+}
+
+/** A workspace's override, when one exists (ADR-0204). */
+export function resolveProjectPref(
+  prefs: NotificationPreferences,
+  projectId: string | undefined
+): NotificationSourcePref | undefined {
+  return projectId ? prefs.perProject?.[projectId] : undefined
+}
+
+/** Whether any workspace carries an override — lets callers skip resolving one. */
+export function hasProjectPrefs(prefs: NotificationPreferences): boolean {
+  return Object.keys(prefs.perProject ?? {}).length > 0
 }

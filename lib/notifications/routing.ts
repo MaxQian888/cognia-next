@@ -13,7 +13,7 @@ import {
 } from "@/types/notifications"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import { deviceTimeZone } from "@/lib/profile/timezone"
-import { resolveSourcePref } from "./preferences"
+import { resolveProjectPref, resolveSourcePref } from "./preferences"
 
 const CHANNEL_ORDER: NotificationChannel[] = ["center", "toast", "os", "push", "im"]
 
@@ -25,6 +25,8 @@ export interface RoutingInput {
   source: NotificationSource
   level: NotificationLevel
   channels?: NotificationChannel[]
+  /** Workspace the notification belongs to — selects its per-workspace override. */
+  projectId?: string
 }
 
 export interface RoutingDecision {
@@ -45,13 +47,15 @@ export function resolveChannels(
 ): RoutingDecision {
   const critical = input.level === "critical"
   const sourcePref = resolveSourcePref(prefs, input.source)
+  const projectPref = resolveProjectPref(prefs, input.projectId)
 
   // Base channel set: a caller-supplied `channels` is authoritative (it knows
   // what it wants, e.g. a scheduler task configured for desktop), otherwise the
-  // per-source override, else the global default. Either way `center` survives
-  // and the level gates / mute / DND below still apply.
+  // workspace override, then the per-source override, else the global default.
+  // Either way `center` survives and the level gates / mute / DND below still
+  // apply.
   const channels = new Set<NotificationChannel>(
-    input.channels ?? sourcePref.channels ?? prefs.globalDefaultChannels
+    input.channels ?? projectPref?.channels ?? sourcePref.channels ?? prefs.globalDefaultChannels
   )
   channels.add("center")
 
@@ -62,14 +66,18 @@ export function resolveChannels(
     return { channels: ordered(channels), suppressedByDnd: false }
   }
 
-  // Muted source → center only.
-  if (sourcePref.enabled === false) {
+  // Muted source or muted workspace → center only.
+  if (sourcePref.enabled === false || projectPref?.enabled === false) {
     return { channels: ["center"], suppressedByDnd: false }
   }
 
-  // Level gates for OS / push.
+  // Level gates for OS / push. A workspace gate can only raise the bar.
   const rank = NOTIFICATION_LEVEL_RANK[input.level]
-  if (rank < NOTIFICATION_LEVEL_RANK[sourcePref.minOsLevel ?? prefs.minOsLevel]) {
+  const osGate = Math.max(
+    NOTIFICATION_LEVEL_RANK[sourcePref.minOsLevel ?? prefs.minOsLevel],
+    projectPref?.minOsLevel ? NOTIFICATION_LEVEL_RANK[projectPref.minOsLevel] : 0
+  )
+  if (rank < osGate) {
     channels.delete("os")
   }
   if (rank < NOTIFICATION_LEVEL_RANK[prefs.minPushLevel]) {

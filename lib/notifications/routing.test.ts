@@ -138,6 +138,70 @@ describe("resolveChannels", () => {
   })
 })
 
+describe("resolveChannels — per-workspace overrides (ADR-0204)", () => {
+  it("a muted workspace records to center only, whatever its source says", () => {
+    const prefs = base({ perProject: { w1: { enabled: false } } })
+    const d = resolveChannels(
+      { source: "session", level: "error", projectId: "w1" },
+      prefs,
+      0,
+      "UTC"
+    )
+    expect(d.channels).toEqual(["center"])
+    const other = resolveChannels(
+      { source: "session", level: "error", projectId: "w2" },
+      prefs,
+      0,
+      "UTC"
+    )
+    expect(other.channels).toContain("os")
+  })
+
+  it("still lets a critical notification through a muted workspace", () => {
+    const prefs = base({ perProject: { w1: { enabled: false } } })
+    const d = resolveChannels(
+      { source: "system", level: "critical", projectId: "w1" },
+      prefs,
+      0,
+      "UTC"
+    )
+    expect(d.channels).toEqual(expect.arrayContaining(["toast", "os"]))
+  })
+
+  it("a workspace OS gate can raise the bar but never lower it", () => {
+    const raised = base({
+      minOsLevel: "info",
+      perProject: { w1: { enabled: true, minOsLevel: "error" } },
+    })
+    expect(
+      resolveChannels({ source: "session", level: "warning", projectId: "w1" }, raised, 0, "UTC")
+        .channels
+    ).not.toContain("os")
+    const lowered = base({
+      minOsLevel: "error",
+      perProject: { w1: { enabled: true, minOsLevel: "info" } },
+    })
+    expect(
+      resolveChannels({ source: "session", level: "warning", projectId: "w1" }, lowered, 0, "UTC")
+        .channels
+    ).not.toContain("os")
+  })
+
+  it("a workspace channel override wins over the source's", () => {
+    const prefs = base({
+      perSource: { session: { enabled: true, channels: ["center", "os"] } },
+      perProject: { w1: { enabled: true, channels: ["center", "toast"] } },
+    })
+    const d = resolveChannels(
+      { source: "session", level: "warning", projectId: "w1" },
+      prefs,
+      0,
+      "UTC"
+    )
+    expect(d.channels).toEqual(["center", "toast"])
+  })
+})
+
 describe("localTimeZone", () => {
   it("returns a non-empty IANA string", () => {
     expect(typeof localTimeZone()).toBe("string")

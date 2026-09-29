@@ -62,9 +62,14 @@
     "warning": "Warning"
   },
   "session": {
+    "approvalBody": "\"{title}\" is waiting for your approval.",
+    "approvalBodyUnnamed": "A conversation is waiting for your approval.",
+    "approvalTitle": "Cognia · approval needed",
     "errorBody": "The session ended with an error.",
+    "errorBodyNamed": "\"{title}\" ended with an error.",
     "errorTitle": "Cognia · session error",
     "readyBody": "Claude finished generating.",
+    "readyBodyNamed": "\"{title}\" finished.",
     "readyTitle": "Cognia · response ready"
   },
   "snoozePresets": {

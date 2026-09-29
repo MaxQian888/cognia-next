@@ -11,6 +11,7 @@ import type {
   NotificationPreferences,
 } from "@/types/notifications"
 import { resolveChannels, type RoutingDecision } from "./routing"
+import { hasProjectPrefs } from "./preferences"
 import { coalesceSince, decideCoalesce, buildBumpPatch } from "./dedup"
 import { cachedNotificationScopeKey } from "./scope"
 
@@ -66,6 +67,19 @@ async function runSafely(label: string, fn: () => void | Promise<void>): Promise
   }
 }
 
+/** A session-scoped notification inherits its conversation's workspace. Never throws. */
+async function resolveSourceWorkspace(
+  input: NotificationInput,
+  deps: NotifyDeps
+): Promise<string | undefined> {
+  if (input.sourceRef?.kind !== "session" || !deps.resolveSessionWorkspace) return undefined
+  try {
+    return (await deps.resolveSessionWorkspace(input.sourceRef.id)) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Emit a notification. Persists the durable `center` record (insert or coalesce
  * bump), fans out to the resolved channels, updates the reactive store, and
@@ -74,7 +88,15 @@ async function runSafely(label: string, fn: () => void | Promise<void>): Promise
 export async function notify(input: NotificationInput, deps: NotifyDeps): Promise<string> {
   const now = deps.now()
   const prefs = await deps.loadPrefs()
-  const decision = resolveChannels(input, prefs, now, deps.tz)
+  // Routing needs the workspace only when some workspace carries its own rule
+  // (ADR-0204); everyone else keeps resolving it lazily, below, on insert.
+  let projectId = input.projectId
+  let projectResolved = Boolean(projectId)
+  if (!projectResolved && hasProjectPrefs(prefs)) {
+    projectId = await resolveSourceWorkspace(input, deps)
+    projectResolved = true
+  }
+  const decision = resolveChannels({ ...input, projectId }, prefs, now, deps.tz)
 
   // 1. Coalesce decision.
   let existing: NotificationRecord | undefined
@@ -116,15 +138,10 @@ export async function notify(input: NotificationInput, deps: NotifyDeps): Promis
     // resolving before the split paid a Dexie round-trip per coalesced
     // notification for a value that was then thrown away — and every await
     // between `findByDedupeKey` and the write widens the window in which two
-    // concurrent calls both see no existing row and each insert one.
-    let projectId = input.projectId
-    if (!projectId && input.sourceRef?.kind === "session" && deps.resolveSessionWorkspace) {
-      try {
-        projectId = (await deps.resolveSessionWorkspace(input.sourceRef.id)) ?? undefined
-      } catch {
-        projectId = undefined
-      }
-    }
+    // concurrent calls both see no existing row and each insert one. The one
+    // exception is routing that depends on it (a per-workspace rule exists),
+    // which resolved it up front.
+    if (!projectResolved) projectId = await resolveSourceWorkspace(input, deps)
     const id = (deps.newId ?? nanoid)()
     record = {
       id,

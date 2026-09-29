@@ -1,4 +1,9 @@
-import { resolvePreferences, resolveSourcePref } from "./preferences"
+import {
+  hasProjectPrefs,
+  resolvePreferences,
+  resolveProjectPref,
+  resolveSourcePref,
+} from "./preferences"
 import { DEFAULT_NOTIFICATION_PREFERENCES } from "@/types/notifications"
 
 describe("resolvePreferences", () => {
@@ -38,5 +43,17 @@ describe("resolveSourcePref", () => {
   it("returns the stored override when present", () => {
     const prefs = resolvePreferences({ perSource: { plugin: { enabled: false } } } as never)
     expect(resolveSourcePref(prefs, "plugin")).toEqual({ enabled: false })
+  })
+})
+
+describe("per-workspace preferences", () => {
+  it("carries stored workspace overrides and answers lookups", () => {
+    const prefs = resolvePreferences({ perProject: { w1: { enabled: false } } })
+    expect(resolveProjectPref(prefs, "w1")).toEqual({ enabled: false })
+    expect(resolveProjectPref(prefs, "w2")).toBeUndefined()
+    expect(resolveProjectPref(prefs, undefined)).toBeUndefined()
+    expect(hasProjectPrefs(prefs)).toBe(true)
+    expect(hasProjectPrefs(resolvePreferences(null))).toBe(false)
+    expect(hasProjectPrefs(resolvePreferences({}))).toBe(false)
   })
 })

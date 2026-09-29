@@ -289,6 +289,13 @@ export interface NotificationPreferences {
   /** Global push gate. */
   minPushLevel: NotificationLevel
   perSource: Partial<Record<NotificationSource, NotificationSourcePref>>
+  /**
+   * Per-workspace overrides, keyed by project id (ADR-0204): mute a busy
+   * project's threads, or raise its OS gate, without touching any source.
+   * Layered over the per-source override — the stricter of the two wins.
+   * Absent on stored preferences written before it existed.
+   */
+  perProject?: Record<string, NotificationSourcePref>
   quietHours: NotificationQuietHours
   sound: boolean
   badge: boolean
