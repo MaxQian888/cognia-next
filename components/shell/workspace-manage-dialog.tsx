@@ -50,6 +50,7 @@ import { isTauri } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
 import { WorkspaceKnowledgeSection } from "@/components/shell/workspace-knowledge-section"
+import { WorkspaceCoordinationSection } from "@/components/project-coordinator/workspace-coordination-section"
 import { WorkspaceFolderPicker } from "@/components/shell/workspace-folder-picker"
 import { WorkspaceDefaultAgentField } from "@/components/shell/workspace-default-agent-field"
 import { normalizeRoots } from "@/lib/workspace/roots"
@@ -1034,6 +1035,19 @@ export function WorkspaceManageDialog({ open, onOpenChange, initialId }: Props) 
                         </p>
                       )}
                     </Surface>
+
+                    {/* Written through, like knowledge: coordination, the
+                        workspace's spending limit and its notification rule
+                        each live outside the Save draft (ADR-0204). */}
+                    {editing ? (
+                      <Surface
+                        radius="panel"
+                        elevation={1}
+                        className="border p-4 @2xl/workspace-editor:col-span-2"
+                      >
+                        <WorkspaceCoordinationSection project={editing} />
+                      </Surface>
+                    ) : null}
                   </div>
                 </ScrollArea>
 

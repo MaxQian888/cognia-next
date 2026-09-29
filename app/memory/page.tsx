@@ -10,7 +10,8 @@ import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 /**
  * Dedicated full-page long-term memory management panel. Reached from the
  * guild-rail "Memory" entry, Settings → Memory, and the in-chat memory chips
- * (`/memory?id=<memoryId>` deep link — static-export idiom: `useSearchParams`
+ * (`/memory?id=<memoryId>` deep link, and `/memory?workspace=<projectId>` to
+ * open filtered to one workspace — static-export idiom: `useSearchParams`
  * inside a `<Suspense>` boundary, NOT a dynamic `[id]` route). The console
  * owns its own chrome; this page just hosts it full-height (mirrors `/goals`).
  *
@@ -21,11 +22,14 @@ import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 function MemoryPageInner() {
   const compact = useCompactLayout()
   const params = useSearchParams()
-  const initialSelectedId = params.get("id")
-  if (compact) return <MemoryMobileBody initialSelectedId={initialSelectedId ?? undefined} />
+  const initialSelectedId = params.get("id") ?? undefined
+  const workspace = params.get("workspace") ?? undefined
+  if (compact) {
+    return <MemoryMobileBody initialSelectedId={initialSelectedId} projectId={workspace} />
+  }
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
-      <MemoryConsole initialSelectedId={initialSelectedId ?? undefined} />
+      <MemoryConsole initialSelectedId={initialSelectedId} initialProjectId={workspace} />
     </div>
   )
 }

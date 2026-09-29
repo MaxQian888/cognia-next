@@ -96,6 +96,14 @@ jest.mock("@/lib/execution/broker", () => ({
   }),
 }))
 
+// The coordination section writes through to three stores and has its own
+// suite; a marker stands in so these cases only check where it mounts.
+jest.mock("@/components/project-coordinator/workspace-coordination-section", () => ({
+  WorkspaceCoordinationSection: ({ project }: { project: { id: string } }) => (
+    <section data-testid="workspace-coordination-stub">{project.id}</section>
+  ),
+}))
+
 // The agent list is a Dexie live query with its own suite; a plain input
 // stands in so these cases drive the value the dialog saves.
 jest.mock("@/components/shell/workspace-default-agent-field", () => ({
@@ -185,6 +193,8 @@ describe("WorkspaceManageDialog", () => {
     expect(useProjectStore.getState().projects).toHaveLength(0)
     expect(screen.getByLabelText("nameLabel")).toBeInTheDocument()
     expect(screen.getByTestId("workspace-knowledge-after-create")).toBeInTheDocument()
+    // Written-through settings need a row to write to.
+    expect(screen.queryByTestId("workspace-coordination-stub")).not.toBeInTheDocument()
     expect(screen.queryByTestId("workspace-delete")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("workspace-save"))
@@ -196,6 +206,7 @@ describe("WorkspaceManageDialog", () => {
     expect(screen.getByTestId(`workspace-row-${created.id}`)).toBeInTheDocument()
     expect(screen.getByTestId("workspace-save")).toHaveTextContent("save")
     expect(screen.queryByTestId("workspace-knowledge-after-create")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-coordination-stub")).toHaveTextContent(created.id)
   })
 
   it("does not add a tag or root on the Enter that confirms an IME candidate", () => {

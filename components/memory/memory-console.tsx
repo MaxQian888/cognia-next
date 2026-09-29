@@ -70,9 +70,14 @@ type MemoryTab = (typeof TABS)[number]
 export interface MemoryConsoleProps {
   /** Preselect this memory's inspector (`/memory?id=` deep link from chat chips). */
   initialSelectedId?: string
+  /**
+   * Open filtered to one workspace's memories (`/memory?workspace=` deep link
+   * from the workspace manager's coordination section, ADR-0204).
+   */
+  initialProjectId?: string
 }
 
-export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
+export function MemoryConsole({ initialSelectedId, initialProjectId }: MemoryConsoleProps = {}) {
   const t = useTranslations("memory.panel")
   const tErrors = useTranslations("memory.errors")
 
@@ -81,7 +86,9 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
 
   const [tab, setTab] = useState<MemoryTab>("app")
   const [view, setView] = useState<MemoryQuickViewId>("all")
-  const [filter, setFilter] = useState<MemoryFilter>({})
+  const [filter, setFilter] = useState<MemoryFilter>(() =>
+    initialProjectId ? { projectIds: [initialProjectId] } : {}
+  )
   const [sort, setSort] = useState<MemorySortKey>("recent")
   const [density, setDensity] = useState<MemoryDensity>("comfortable")
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)

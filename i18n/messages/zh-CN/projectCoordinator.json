@@ -123,5 +123,49 @@
     "pause": "暂停",
     "pauseFailed": "无法暂停项目：{error}",
     "resumeFailed": "无法恢复项目：{error}"
+  },
+  "settings": {
+    "title": "项目协调",
+    "description": "一个长期运行的协调者对话，把这个工作区的工作拆成后台线程。",
+    "enabled": "项目协调",
+    "coordinatorTitle": "项目协调者",
+    "toggleFailed": "无法更改协调设置：{error}",
+    "goal": "目标",
+    "goalPlaceholder": "用一句话写下这个项目要达成什么",
+    "goalHint": "会发送给协调者和每个线程。",
+    "goalLeak": "目标中包含邮箱地址、密钥或令牌。请删除；目标会随每一轮对话发送。",
+    "icon": "图标",
+    "threadExecution": "线程运行位置",
+    "execution": {
+      "auto": "git 仓库中使用独立 worktree，否则使用文件夹",
+      "managedWorktree": "始终使用独立 worktree",
+      "local": "始终使用工作区文件夹"
+    },
+    "maxConcurrentThreads": "同时运行的线程数",
+    "dailyThreadCap": "每天新建线程数",
+    "noLimit": "不限",
+    "proposeBeforeStart": "启动线程前先询问",
+    "proposeBeforeStartHint": "协调者只提议线程，由你来启动。",
+    "autoFixPr": "自动修复拉取请求",
+    "autoFixPrHint": "线程的拉取请求 CI 失败、收到评审意见或出现冲突时，自动让该线程去修复。",
+    "budget": {
+      "title": "花费上限",
+      "description": "此工作区花费达到上限后，新的对话轮次会被拦截，直到你批准再多一次。",
+      "daily": "每日上限（美元）",
+      "monthly": "每月上限（美元）"
+    },
+    "notifications": {
+      "title": "通知",
+      "enabled": "通知我此工作区的动态",
+      "enabledHint": "关闭后，它的通知只进入通知中心。",
+      "osGate": "系统通知级别",
+      "gate": {
+        "inherit": "与其他设置相同",
+        "warning": "警告及以上",
+        "error": "错误及以上",
+        "critical": "仅严重"
+      }
+    },
+    "memoryLink": "打开此工作区的记忆"
   }
 }

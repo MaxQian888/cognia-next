@@ -123,5 +123,49 @@
     "pause": "Pause",
     "pauseFailed": "The project could not be paused: {error}",
     "resumeFailed": "The project could not be resumed: {error}"
+  },
+  "settings": {
+    "title": "Project coordination",
+    "description": "A long-lived coordinator conversation that splits this workspace's work into background threads.",
+    "enabled": "Project coordination",
+    "coordinatorTitle": "Project coordinator",
+    "toggleFailed": "Coordination could not be changed: {error}",
+    "goal": "Goal",
+    "goalPlaceholder": "What this project is working toward, in one line",
+    "goalHint": "Sent to the coordinator and every thread.",
+    "goalLeak": "The goal contains an email address, key or token. Remove it; this goal is sent with every turn.",
+    "icon": "Icon",
+    "threadExecution": "Where threads run",
+    "execution": {
+      "auto": "Own worktree in a git repository, otherwise the folder",
+      "managedWorktree": "Always an own worktree",
+      "local": "Always the workspace folder"
+    },
+    "maxConcurrentThreads": "Threads running at once",
+    "dailyThreadCap": "New threads per day",
+    "noLimit": "No limit",
+    "proposeBeforeStart": "Ask before starting threads",
+    "proposeBeforeStartHint": "The coordinator proposes threads and you start them.",
+    "autoFixPr": "Fix pull requests automatically",
+    "autoFixPrHint": "When a thread's pull request fails CI, gets review comments or conflicts, send the thread the fix-up request.",
+    "budget": {
+      "title": "Spending limit",
+      "description": "Blocks new turns in this workspace once it has spent this much, until you approve one more.",
+      "daily": "Daily limit (USD)",
+      "monthly": "Monthly limit (USD)"
+    },
+    "notifications": {
+      "title": "Notifications",
+      "enabled": "Notify me about this workspace",
+      "enabledHint": "When off, its notifications only go to the notification center.",
+      "osGate": "System notifications for",
+      "gate": {
+        "inherit": "Same as my other settings",
+        "warning": "Warnings and above",
+        "error": "Errors and above",
+        "critical": "Critical only"
+      }
+    },
+    "memoryLink": "Open this workspace's memory"
   }
 }

@@ -495,6 +495,16 @@ describe("MemoryConsole — deep link", () => {
     expect(screen.getByTestId("memory-inspector").dataset.memoryId).toBe("b")
   })
 
+  it("opens filtered to the deep-linked workspace", () => {
+    mockData = [
+      mem({ id: "a", scope: "workspace", projectId: "p1" }),
+      mem({ id: "b", scope: "workspace", projectId: "p2" }),
+      mem({ id: "c" }),
+    ]
+    render(<MemoryConsole initialProjectId="p1" />)
+    expect(rows().map((row) => row.dataset.memoryId ?? row.textContent)).toHaveLength(1)
+  })
+
   it("keeps the deep-linked selection while the live query is still empty", () => {
     mockData = []
     render(<MemoryConsole initialSelectedId="b" />)

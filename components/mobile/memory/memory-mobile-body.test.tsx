@@ -119,6 +119,18 @@ describe("<MemoryMobileBody />", () => {
     expect(screen.queryByTestId("memory-row-m2")).not.toBeInTheDocument()
   })
 
+  it("shows only one workspace's memories when opened for it", () => {
+    liveQuery.mockReturnValue([
+      mem({ id: "m1", text: "remember milk", projectId: "p1" }),
+      mem({ id: "m2", text: "buy bread", projectId: "p2" }),
+      mem({ id: "m3", text: "global note" }),
+    ])
+    render(<MemoryMobileBody projectId="p1" />)
+    expect(screen.getByTestId("memory-row-m1")).toBeInTheDocument()
+    expect(screen.queryByTestId("memory-row-m2")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("memory-row-m3")).not.toBeInTheDocument()
+  })
+
   it("gives the screen a way back to the hub that opened it", () => {
     liveQuery.mockReturnValue([])
     render(<MemoryMobileBody />)

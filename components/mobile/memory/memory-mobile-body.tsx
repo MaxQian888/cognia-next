@@ -37,22 +37,25 @@ import { COMPACT_PAGE_MIN_H } from "@/lib/shell/compact-shell"
 export interface MemoryMobileBodyProps {
   /** Scroll the deep-linked memory into view once (`/memory?id=` from chips). */
   initialSelectedId?: string
+  /** Only this workspace's memories (`/memory?workspace=` deep link, ADR-0204). */
+  projectId?: string
 }
 
-export function MemoryMobileBody({ initialSelectedId }: MemoryMobileBodyProps = {}) {
+export function MemoryMobileBody({ initialSelectedId, projectId }: MemoryMobileBodyProps = {}) {
   const t = useTranslations("mobile.memory")
   const tErrors = useTranslations("memory.errors")
   const memories = useLiveQuery(() => listMemories({ status: "active" }), [])
   const [query, setQuery] = useState("")
 
   const visible = useMemo(() => {
-    const list = memories ?? []
+    const all = memories ?? []
+    const list = projectId ? all.filter((m) => m.projectId === projectId) : all
     const q = query.trim().toLowerCase()
     if (!q) return list
     return list.filter(
       (m) => m.text.toLowerCase().includes(q) || (m.key ?? "").toLowerCase().includes(q)
     )
-  }, [memories, query])
+  }, [memories, query, projectId])
 
   // The PullToRefresh wrapper is the scroll container; virtualize against it
   // so large synced stores don't render every row on a phone.
