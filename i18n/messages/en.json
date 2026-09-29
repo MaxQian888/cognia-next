@@ -20489,6 +20489,9 @@
         "branchScope": "Branch",
         "claimKind": "Kind",
         "contamination": "Context trust",
+        "corroboration": "Corroboration",
+        "corroborationUnknown": "Not measured yet",
+        "corroborationValue": "{percent}% · {sessions, plural, =0 {no conversations yet} one {# conversation} other {# conversations}}",
         "created": "Created",
         "evidence": "Evidence",
         "freshnessField": "Freshness",
@@ -20516,6 +20519,7 @@
       "sections": {
         "activity": "Activity",
         "content": "Memory",
+        "history": "History",
         "metrics": "Metrics",
         "origin": "Origin",
         "projectClaim": "Project context",
@@ -20606,6 +20610,83 @@
       "unreviewed": "Unreviewed",
       "verified": "Verified"
     },
+    "health": {
+      "checking": "Checking…",
+      "contradictionCheck": {
+        "disabled": "Contradiction check is off while memory is disabled or temporary.",
+        "no_vectors": "Contradiction check skipped: no stored vectors are available.",
+        "ran": "Contradiction check used stored vectors."
+      },
+      "description": "Checks that point at memories worth a look. Nothing here changes a memory until you open it and act.",
+      "empty": "No issues found.",
+      "gone": "(deleted)",
+      "kinds": {
+        "cold_episodic": {
+          "description": "Retention {retention} is below the cold threshold; the lifecycle sweep would compact or fold it.",
+          "title": "Gone cold"
+        },
+        "conflict_open": {
+          "description": "Contradicts {count, plural, one {# other memory} other {# other memories}} and is withheld from recall until you decide.",
+          "title": "Unresolved conflict"
+        },
+        "duplicate": {
+          "description": "{count, plural, one {# memory says} other {# memories say}} the same thing in the same scope.",
+          "title": "Duplicate"
+        },
+        "feedback_flagged": {
+          "description": "Still active although it was marked unhelpful or out of date ({positive} helpful, {negative} unhelpful).",
+          "title": "Flagged by you"
+        },
+        "missing_evidence": {
+          "description": "Every source that supported this memory has since been deleted.",
+          "title": "Evidence gone"
+        },
+        "pending_instruction_aging": {
+          "description": "A learned working preference has waited {waitedDays, plural, one {# day} other {# days}} for your review; it is not used until you approve it.",
+          "title": "Waiting for review"
+        },
+        "pinned_expiring": {
+          "description": "Pinning keeps it from being forgotten, but its expiry ({daysUntilExpiry, plural, one {# day} other {# days}}) still ends it.",
+          "title": "Pinned but expiring"
+        },
+        "stale": {
+          "description": "An episode from {ageDays, plural, one {# day} other {# days}} ago that has never been recalled.",
+          "title": "Never used"
+        },
+        "suspected_contradiction": {
+          "description": "Two memories about the same subject (similarity {similarity}) that are not duplicates. The newer one is listed first.",
+          "title": "Possible contradiction"
+        }
+      },
+      "open": "Open",
+      "refresh": "Check again",
+      "scanned": "{count, plural, one {# memory checked} other {# memories checked}}",
+      "severity": {
+        "info": "Note",
+        "warning": "Warning"
+      },
+      "title": "Memory health"
+    },
+    "history": {
+      "empty": "No earlier versions.",
+      "reasons": {
+        "compaction": "Compacted",
+        "conflict-merge": "Conflict merged",
+        "consolidation": "Merged with new detail",
+        "dedup-merge": "Duplicates folded in",
+        "edit": "Edited",
+        "external-update": "Changed by an integration",
+        "restore": "Replaced by a restore"
+      },
+      "restore": "Restore",
+      "restoreConfirm": {
+        "cancel": "Cancel",
+        "confirm": "Restore",
+        "description": "The current text is kept in the history, so you can switch back later.",
+        "title": "Restore this version?"
+      },
+      "window": "{from} – {to}"
+    },
     "panel": {
       "accessedRelative": "used {time}",
       "add": "Add",
@@ -20628,6 +20709,7 @@
       "clearFilters": "Clear filters",
       "clearTags": "Clear tags",
       "clearedToast": "{count, plural, one {# memory deleted} other {# memories deleted}}",
+      "compacted": "compacted",
       "copied": "Copied",
       "copyText": "Copy text",
       "createdRelative": "added {time}",
@@ -20702,7 +20784,8 @@
       "summary": "{active} active · {pinned} pinned · {conflicts} in conflict · {coverage}% indexed",
       "tabs": {
         "app": "App memory",
-        "external": "External agent memory"
+        "external": "External agent memory",
+        "health": "Health"
       },
       "tagFilterLabel": "Tags:",
       "title": "Memory",
@@ -28170,6 +28253,63 @@
     "runsTitle": "Agent runs",
     "statusText": "Cognia: {count} open",
     "statusTooltip": "Open the Cognia panel"
+  },
+  "projectCoordinator": {
+    "board": {
+      "empty": "No threads yet. Send work to the coordinator and it starts threads here.",
+      "loading": "Loading threads",
+      "resolved": "Resolved ({count})",
+      "title": "Threads"
+    },
+    "entry": {
+      "coordinatorTitle": "Project coordinator",
+      "description": "One conversation that splits work into threads, runs them in the background, and collects their results.",
+      "disable": "Turn off",
+      "enable": "Turn on coordination",
+      "enableFailed": "Coordination could not be turned on: {error}",
+      "goal": "Goal",
+      "noGoal": "No goal set. Add one in workspace settings.",
+      "open": "Open coordinator",
+      "title": "Project coordination"
+    },
+    "row": {
+      "actionFailed": "The thread action failed: {error}",
+      "actions": "Thread actions for {title}",
+      "refused": {
+        "daily-cap": "The project reached its daily thread limit.",
+        "disabled": "Project coordination is off for this workspace.",
+        "paused": "The project is paused."
+      },
+      "reopen": "Reopen",
+      "resolve": "Mark resolved",
+      "staged": {
+        "over-concurrency": "Too many threads are running; it will wait until you start it.",
+        "propose-first": "The project proposes threads first; start it when ready."
+      },
+      "start": "Start",
+      "starting": "Starting when the chat runtime is ready.",
+      "stop": "Stop",
+      "untitled": "Untitled thread"
+    },
+    "state": {
+      "idle": "Idle",
+      "landing": "Landing",
+      "ready-for-review": "Ready for review",
+      "resolved": "Resolved",
+      "staged": "Not started",
+      "waiting": "Waiting on you",
+      "working": "Working"
+    },
+    "suggested": {
+      "start": "Start",
+      "startAll": "Start all",
+      "started": "Started",
+      "title": "Suggested threads"
+    },
+    "threadCard": {
+      "missing": "This thread no longer exists.",
+      "open": "Open thread"
+    }
   },
   "projectEditor": {
     "action": {
@@ -42152,6 +42292,34 @@
           }
         }
       },
+      "maintenance": {
+        "coldThreshold": {
+          "description": "An episode whose retention score falls below this value counts as cold. Higher values act on more memories.",
+          "label": "Cold threshold"
+        },
+        "compaction": {
+          "description": "Shrink a cold episode to its first sentence plus the file paths, error codes and identifiers it mentions.",
+          "label": "Compact cold episodes"
+        },
+        "dedup": {
+          "description": "Merge cold episodes that say almost the same thing into the one you used most, keeping every path and identifier any of them mentioned.",
+          "label": "Fold near-duplicate episodes",
+          "noVectors": "Needs hybrid retrieval with an allowed embedding backend; until then this pass is skipped."
+        },
+        "forgetting": {
+          "title": "Forgetting"
+        },
+        "reinforcement": {
+          "description": "Memories you keep recalling are forgotten more slowly when the per-scope cap is reached. It only ever keeps memory longer; it never changes recall ranking.",
+          "label": "Access reinforcement",
+          "off": "Off"
+        },
+        "sweep": {
+          "description": "A daily pass over episodic memories nobody has needed in a while. It never deletes: the previous text stays in each memory's history and can be restored.",
+          "gatedReason": "Turn on compaction or duplicate folding to use the sweep.",
+          "title": "Lifecycle sweep"
+        }
+      },
       "manage": "Manage memories",
       "maxIdle": {
         "label": "Forget after unused days (0 = never)"
@@ -42281,6 +42449,11 @@
         "label": "Minimum recall relevance"
       },
       "retrieval": {
+        "beliefWeight": {
+          "description": "Rank memories confirmed across several conversations higher. At off, ranking ignores corroboration; it is still shown in the memory inspector.",
+          "label": "Corroboration weight",
+          "off": "Off"
+        },
         "gates": {
           "memoryOff": "Turn on long-term memory to edit retrieval controls.",
           "recallOff": "Turn on memory recall to edit these controls."
@@ -42293,6 +42466,10 @@
           "description": "Combine semantic vector search with keyword matching.",
           "label": "Hybrid retrieval"
         },
+        "llmRerank": {
+          "description": "Let the utility model reorder the top recalled memories (up to 30) once per turn. The query is redacted before it is sent; any failure keeps the local order.",
+          "label": "Rerank with the utility model"
+        },
         "queryExpansion": {
           "description": "Expand the keyword query with related terms.",
           "label": "Query expansion"
@@ -42300,6 +42477,10 @@
         "relevanceFloor": {
           "description": "Exclude memories whose relevance score falls below this value.",
           "label": "Minimum relevance"
+        },
+        "sessionRecall": {
+          "description": "When you ask about an earlier conversation (\"last time\", \"上次\"), rank remembered episodes above general facts.",
+          "label": "Past-conversation routing"
         },
         "tokenBudget": {
           "description": "Maximum number of memory tokens that may be injected into a turn.",

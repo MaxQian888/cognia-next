@@ -10,7 +10,7 @@ import { sessionStatusOf } from "@/hooks/chat/steer-runtime"
 import { projectRoleToolsApply } from "./config"
 import { buildCoordinatorContextSection, type DigestThreadInput } from "./digest"
 import { PROJECT_COORDINATOR_PROTOCOL, PROJECT_THREAD_PROTOCOL } from "./protocol"
-import { defaultThreadRuntimeDeps } from "./thread-runtime"
+import { listProjectThreads } from "./thread-runtime"
 
 /**
  * What a coordinator or thread turn adds to its send options (ADR-0204) —
@@ -35,7 +35,7 @@ export interface SendExtrasDeps {
 
 function defaultDeps(): SendExtrasDeps {
   return {
-    listThreads: defaultThreadRuntimeDeps().listThreads,
+    listThreads: listProjectThreads,
     threadInput: (thread) => ({
       thread,
       status: sessionStatusOf(thread.id),

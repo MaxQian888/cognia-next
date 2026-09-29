@@ -17,11 +17,9 @@ jest.mock("@/lib/gateway/mint-session-ticket", () => ({
 // Project coordination reads its threads from Dexie; the digest only needs a list.
 jest.mock("@/lib/project-coordinator/thread-runtime", () => ({
   ...jest.requireActual("@/lib/project-coordinator/thread-runtime"),
-  defaultThreadRuntimeDeps: () => ({
-    listThreads: async () => [
-      { id: "t1", title: "Fix login", createdAt: 1, updatedAt: 1, projectRole: "thread" },
-    ],
-  }),
+  listProjectThreads: async () => [
+    { id: "t1", title: "Fix login", createdAt: 1, updatedAt: 1, projectRole: "thread" },
+  ],
 }))
 
 jest.mock("@/lib/db/characters", () => ({

@@ -1,0 +1,57 @@
+{
+  "board": {
+    "empty": "还没有线程。把工作发给协调者，它会在这里开启线程。",
+    "loading": "正在加载线程",
+    "resolved": "已解决（{count}）",
+    "title": "线程"
+  },
+  "entry": {
+    "coordinatorTitle": "项目协调者",
+    "description": "一个对话把工作拆成多个线程，在后台并行运行并汇总结果。",
+    "disable": "关闭",
+    "enable": "开启项目协调",
+    "enableFailed": "无法开启项目协调：{error}",
+    "goal": "目标",
+    "noGoal": "尚未设置目标，可在工作区设置中添加。",
+    "open": "打开协调者",
+    "title": "项目协调"
+  },
+  "row": {
+    "actions": "{title} 的线程操作",
+    "actionFailed": "线程操作失败：{error}",
+    "refused": {
+      "daily-cap": "项目已达到今日线程上限。",
+      "disabled": "此工作区未开启项目协调。",
+      "paused": "项目已暂停。"
+    },
+    "reopen": "重新打开",
+    "resolve": "标记为已解决",
+    "staged": {
+      "over-concurrency": "运行中的线程过多，需要你手动启动它。",
+      "propose-first": "项目设置为先提议线程，准备好后再启动。"
+    },
+    "start": "启动",
+    "starting": "聊天运行时就绪后开始。",
+    "stop": "停止",
+    "untitled": "未命名线程"
+  },
+  "state": {
+    "idle": "空闲",
+    "landing": "合并中",
+    "ready-for-review": "待审阅",
+    "resolved": "已解决",
+    "staged": "未启动",
+    "waiting": "等你处理",
+    "working": "进行中"
+  },
+  "suggested": {
+    "start": "启动",
+    "startAll": "全部启动",
+    "started": "已启动",
+    "title": "建议的线程"
+  },
+  "threadCard": {
+    "missing": "此线程已不存在。",
+    "open": "打开线程"
+  }
+}

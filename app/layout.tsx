@@ -106,6 +106,7 @@ import { PluginThemeApplier } from "@/lib/appearance/plugin-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import { AgentExecutionHandleProvider } from "@/components/providers/agent-execution-handle-provider"
 import { ClaudeChatRuntimeProvider } from "@/hooks/chat/use-claude-chat"
+import { ProjectCoordinatorHost } from "@/components/project-coordinator/project-coordinator-host"
 import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
 import { PerfHud } from "@/lib/perf"
@@ -385,6 +386,7 @@ export default async function RootLayout({
                                                         still a valid @scope (#app) root. */}
                                                               <AgentExecutionHandleProvider>
                                                                 <ClaudeChatRuntimeProvider>
+                                                                  <ProjectCoordinatorHost />
                                                                   <div
                                                                     id="app"
                                                                     data-bg-target="global"

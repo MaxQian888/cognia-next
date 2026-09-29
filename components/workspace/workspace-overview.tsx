@@ -78,6 +78,9 @@ import type { IssueProject, IssueStatus } from "@/types/issues"
 import { useProjectStore } from "@/stores/project/project-store"
 import { IssueStatusIcon } from "@/components/issues/issue-glyphs"
 import { WorkspaceCapabilities } from "./workspace-capabilities"
+import { ProjectCoordinatorEntry } from "@/components/project-coordinator/project-coordinator-entry"
+import { ProjectThreadsBoard } from "@/components/project-coordinator/project-threads-board"
+import { resolveCoordinatorConfig } from "@/lib/project-coordinator/config"
 import { WorkspaceMembers } from "./workspace-members"
 import { WorkspaceActivity } from "./workspace-activity"
 import { AgentBranchesSection } from "./agent-branches-section"
@@ -136,6 +139,8 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
   const workspaceId = useProjectStore((s) => s.activeProjectId)
   const workspaces = useProjectStore((s) => s.projects)
   const workspace = workspaces.find((candidate) => candidate.id === workspaceId)
+  const coordination = resolveCoordinatorConfig(workspace)
+  const coordinatorSessionId = coordination.enabled ? coordination.sessionId : undefined
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [agentsOpen, setAgentsOpen] = useState(false)
   // Requests to the shell's dialog host: a Popover or Drawer unmounts its
@@ -427,6 +432,10 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
             ) : null}
 
             <div className="grid items-start gap-3.5 @3xl/workspace-pane:grid-cols-2">
+              {workspaceId ? <ProjectCoordinatorEntry workspaceId={workspaceId} /> : null}
+              {coordinatorSessionId ? (
+                <ProjectThreadsBoard coordinatorSessionId={coordinatorSessionId} />
+              ) : null}
               <WorkspaceRecentConversations workspaceId={workspaceId} />
               <WorkspaceContextSummary workspace={workspace ?? null} onEdit={openManage} />
 

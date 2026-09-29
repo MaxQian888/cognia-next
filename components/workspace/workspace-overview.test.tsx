@@ -152,6 +152,16 @@ jest.mock("./workspace-agents-working", () => ({
   ),
 }))
 jest.mock("@/lib/db/trusted-workspaces", () => ({ listTrustedWorkspaces: jest.fn() }))
+jest.mock("@/components/project-coordinator/project-coordinator-entry", () => ({
+  ProjectCoordinatorEntry: ({ workspaceId }: { workspaceId: string }) => (
+    <section data-testid="coordination-entry-stub">{workspaceId}</section>
+  ),
+}))
+jest.mock("@/components/project-coordinator/project-threads-board", () => ({
+  ProjectThreadsBoard: ({ coordinatorSessionId }: { coordinatorSessionId: string }) => (
+    <section data-testid="threads-board-stub">{coordinatorSessionId}</section>
+  ),
+}))
 
 let storeState: { activeProjectId: string | null; projects: unknown[] } = {
   activeProjectId: "w1",
@@ -195,6 +205,27 @@ function ControlledOverview() {
 }
 
 describe("WorkspaceOverview", () => {
+  it("offers project coordination and shows its threads board once on", () => {
+    storeState = { activeProjectId: "w1", projects: [{ id: "w1", name: "Cognia", roots: [] }] }
+    const { rerender } = render(<WorkspaceOverview />)
+    expect(screen.getByTestId("coordination-entry-stub").textContent).toBe("w1")
+    expect(screen.queryByTestId("threads-board-stub")).toBeNull()
+
+    storeState = {
+      activeProjectId: "w1",
+      projects: [
+        {
+          id: "w1",
+          name: "Cognia",
+          roots: [],
+          coordinator: { enabled: true, sessionId: "coord" },
+        },
+      ],
+    }
+    rerender(<WorkspaceOverview />)
+    expect(screen.getByTestId("threads-board-stub").textContent).toBe("coord")
+  })
+
   it("titles itself with the active workspace name", () => {
     storeState = {
       activeProjectId: "w1",

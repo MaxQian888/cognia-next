@@ -38,6 +38,9 @@ import { WebFetchCard } from "./mcp-renderers/web-fetch-card"
 import { WebSearchCard } from "./mcp-renderers/web-search-card"
 import { ComputerUseCard } from "./mcp-renderers/computer-use-card"
 import { SpawnTaskCard } from "./mcp-renderers/spawn-task-card"
+import { ProjectThreadCard } from "./mcp-renderers/project-thread-card"
+import { SuggestedThreadsCard } from "./mcp-renderers/suggested-threads-card"
+import { PROJECT_COORDINATOR_TOOL_NAMES } from "@/lib/claude/project-coordinator-builtin-tools"
 import { SCHEDULED_TASK_CARDS } from "./mcp-renderers/scheduled-task-card"
 import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
 import { ManagedMcpAppCard } from "@/components/mcp-apps/managed-mcp-app-card"
@@ -52,6 +55,23 @@ const REGISTRY: Record<string, CardComponent> = {
   runtime_query: RuntimeQueryCard,
   spawn_task: SpawnTaskCard,
   "mcp__cognia-plugin-tools__spawn_task": SpawnTaskCard,
+  // Project coordination (ADR-0204): thread-addressing tools render the live
+  // thread; proposals render with Start buttons. Both name forms, as above.
+  ...Object.fromEntries(
+    [
+      PROJECT_COORDINATOR_TOOL_NAMES.spawnThread,
+      PROJECT_COORDINATOR_TOOL_NAMES.startThread,
+      PROJECT_COORDINATOR_TOOL_NAMES.messageThread,
+      PROJECT_COORDINATOR_TOOL_NAMES.stopThread,
+      PROJECT_COORDINATOR_TOOL_NAMES.resolveThread,
+    ].flatMap((name) => [
+      [name, ProjectThreadCard],
+      [`mcp__cognia-plugin-tools__${name}`, ProjectThreadCard],
+    ])
+  ),
+  [PROJECT_COORDINATOR_TOOL_NAMES.proposeThreads]: SuggestedThreadsCard,
+  [`mcp__cognia-plugin-tools__${PROJECT_COORDINATOR_TOOL_NAMES.proposeThreads}`]:
+    SuggestedThreadsCard,
   // The `schedule.*` built-in skills (scheduler_list_tasks … scheduler_delete_task).
   // They reach the sidecar as `mcp__cognia-plugin-tools__scheduler_*`, which
   // `toolNameOf` folds onto these bare keys.

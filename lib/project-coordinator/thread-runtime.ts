@@ -62,8 +62,7 @@ export function defaultThreadRuntimeDeps(): ThreadRuntimeDeps {
     getProject: projectAccess.getProject,
     getSession,
     updateSession,
-    listThreads: async (coordinatorSessionId) =>
-      (await listSessionBranches(coordinatorSessionId)).filter(isThreadOf(coordinatorSessionId)),
+    listThreads: listProjectThreads,
     markRunning: (threadId) => markAttachedSessionRunning(threadId),
     interrupt: (threadId, owner) => interruptAttachedSession(threadId, owner),
     consumeStagedPrompt: (threadId, mode) => consumeStagedPrompt(threadId, mode),
@@ -84,6 +83,11 @@ export function isThreadOf(coordinatorSessionId: string) {
     session.projectThread?.coordinatorSessionId === coordinatorSessionId &&
     session.archivedAt === undefined &&
     session.importTombstonedAt === undefined
+}
+
+/** A coordinator's threads (not archived), newest first — one indexed read. */
+export async function listProjectThreads(coordinatorSessionId: string): Promise<ChatSession[]> {
+  return (await listSessionBranches(coordinatorSessionId)).filter(isThreadOf(coordinatorSessionId))
 }
 
 /** Threads of a coordinator with a turn in flight or waiting on a person. */

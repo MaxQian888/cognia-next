@@ -1,0 +1,57 @@
+{
+  "board": {
+    "empty": "No threads yet. Send work to the coordinator and it starts threads here.",
+    "loading": "Loading threads",
+    "resolved": "Resolved ({count})",
+    "title": "Threads"
+  },
+  "entry": {
+    "coordinatorTitle": "Project coordinator",
+    "description": "One conversation that splits work into threads, runs them in the background, and collects their results.",
+    "disable": "Turn off",
+    "enable": "Turn on coordination",
+    "enableFailed": "Coordination could not be turned on: {error}",
+    "goal": "Goal",
+    "noGoal": "No goal set. Add one in workspace settings.",
+    "open": "Open coordinator",
+    "title": "Project coordination"
+  },
+  "row": {
+    "actions": "Thread actions for {title}",
+    "actionFailed": "The thread action failed: {error}",
+    "refused": {
+      "daily-cap": "The project reached its daily thread limit.",
+      "disabled": "Project coordination is off for this workspace.",
+      "paused": "The project is paused."
+    },
+    "reopen": "Reopen",
+    "resolve": "Mark resolved",
+    "staged": {
+      "over-concurrency": "Too many threads are running; it will wait until you start it.",
+      "propose-first": "The project proposes threads first; start it when ready."
+    },
+    "start": "Start",
+    "starting": "Starting when the chat runtime is ready.",
+    "stop": "Stop",
+    "untitled": "Untitled thread"
+  },
+  "state": {
+    "idle": "Idle",
+    "landing": "Landing",
+    "ready-for-review": "Ready for review",
+    "resolved": "Resolved",
+    "staged": "Not started",
+    "waiting": "Waiting on you",
+    "working": "Working"
+  },
+  "suggested": {
+    "start": "Start",
+    "startAll": "Start all",
+    "started": "Started",
+    "title": "Suggested threads"
+  },
+  "threadCard": {
+    "missing": "This thread no longer exists.",
+    "open": "Open thread"
+  }
+}
