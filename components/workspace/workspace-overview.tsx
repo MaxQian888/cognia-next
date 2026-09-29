@@ -279,11 +279,17 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
     },
   ]
 
+  // The page title IS the switcher: the name is what you would switch, so it
+  // carries the chevron instead of being repeated in a second band below.
   const switcherTrigger = (
-    <Button size="sm" variant="outline" data-testid="workspace-switcher-trigger">
-      <FolderIcon aria-hidden className="size-3.5" />
-      <span className="max-w-40 truncate">{workspace?.name ?? tSwitcher("heading")}</span>
-      <ChevronsUpDownIcon aria-hidden className="size-3.5 opacity-60" />
+    <Button
+      variant="ghost"
+      className="h-auto gap-1.5 px-1.5 py-0.5 has-[>svg]:px-1.5 text-[length:inherit] font-[inherit] tracking-[inherit]"
+      title={tSwitcher("switchTitle")}
+      data-testid="workspace-switcher-trigger"
+    >
+      <span className="truncate">{workspace?.name ?? t("workspace.title")}</span>
+      <ChevronsUpDownIcon aria-hidden className="size-3.5 shrink-0 opacity-60" />
     </Button>
   )
 
@@ -293,21 +299,7 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
       header={
         <FeaturePageHeader
           variant="management"
-          title={workspace?.name ?? t("workspace.title")}
-          // The workspace's own description when it has one: the generic
-          // tagline says what the page is, not what this workspace is for.
-          summary={workspace?.description?.trim() || t("workspace.overview")}
-          secondaryActions={[
-            {
-              id: "manage",
-              label: t("workspace.manage"),
-              icon: SettingsIcon,
-              onSelect: openManage,
-              disabled: !workspace,
-              testId: "workspace-header-manage",
-            },
-          ]}
-          controls={
+          title={
             /*
               The switcher belongs on the page about the workspace, not only in
               the desktop rail. On a phone that rail lives inside a nav sheet
@@ -325,7 +317,7 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
               // and the bottom sheet shows its title above it.
               title={tSwitcher("switchTitle")}
               variant="panel"
-              align="end"
+              align="start"
               side="bottom"
               contentClassName="w-72 p-1"
               commandClassName="px-2"
@@ -338,6 +330,19 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
               />
             </ResponsivePicker>
           }
+          // The workspace's own description when it has one: the generic
+          // tagline says what the page is, not what this workspace is for.
+          summary={workspace?.description?.trim() || t("workspace.overview")}
+          secondaryActions={[
+            {
+              id: "manage",
+              label: t("workspace.manage"),
+              icon: SettingsIcon,
+              onSelect: openManage,
+              disabled: !workspace,
+              testId: "workspace-header-manage",
+            },
+          ]}
         />
       }
     >
