@@ -6,7 +6,9 @@
  *
  *  1. **Read the spend.** Day and month totals, global and per-provider, come
  *     from the durable `providerCostDaily` rollup — the same table the routing
- *     engine's `dailyCostBudget` reads, so the two can never disagree.
+ *     engine's `dailyCostBudget` reads, so the two can never disagree. A
+ *     project's share comes from `sessionUsage[projectId+at]`, the ledger that
+ *     rollup is derived from.
  *  2. **Announce thresholds.** 80% / 95% go through `lib/notifications/notify`
  *     (ADR-0042), deduped per scope per day so a long session does not emit the
  *     same warning on every turn.
@@ -17,13 +19,16 @@
  */
 
 import { localDayString, getCostRange } from "@/lib/db/provider-cost-daily"
+import { listLocalUsageForProjectSince } from "@/lib/db/session-usage"
 import { notify } from "@/lib/notifications/runtime"
 import { waitForDecision, type ApprovalKey } from "@/lib/runtime/approval-bus"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
+import { useProjectStore } from "@/stores/project/project-store"
 
 import {
   formatBudgetRatio,
   GLOBAL_BUDGET_TARGET,
+  projectIdOfBudgetTarget,
   type CostBudgetSpend,
   type CostBudgetVerdict,
 } from "./cost-budget"
@@ -37,13 +42,46 @@ export function monthStartDay(now: number = Date.now()): string {
   return `${day.slice(0, 7)}-01`
 }
 
+/** Local-midnight epoch ms of the first day of `now`'s month, and of `now`'s day. */
+export function localWindowStarts(now: number = Date.now()): {
+  dayStart: number
+  monthStart: number
+} {
+  const date = new Date(now)
+  return {
+    dayStart: new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime(),
+    monthStart: new Date(date.getFullYear(), date.getMonth(), 1).getTime(),
+  }
+}
+
+/** Today's and this month's local spend for one project. */
+export async function readProjectSpend(
+  projectId: string,
+  now: number = Date.now()
+): Promise<{ dayUsd: number; monthUsd: number }> {
+  const { dayStart, monthStart } = localWindowStarts(now)
+  const rows = await listLocalUsageForProjectSince(projectId, monthStart)
+  let dayUsd = 0
+  let monthUsd = 0
+  for (const row of rows) {
+    const cost = Number.isFinite(row.costUsd) && row.costUsd > 0 ? row.costUsd : 0
+    monthUsd += cost
+    if (row.at >= dayStart) dayUsd += cost
+  }
+  return { dayUsd, monthUsd }
+}
+
 /**
  * Read today's and this month's spend from the durable rollup.
  *
  * One range query covers both windows — today is a subset of the month, so
- * issuing two reads would only add a chance for them to disagree.
+ * issuing two reads would only add a chance for them to disagree. When
+ * `projectIds` is given, those projects' shares are read too.
  */
-export async function readCostBudgetSpend(now: number = Date.now()): Promise<CostBudgetSpend> {
+export async function readCostBudgetSpend(
+  now: number = Date.now(),
+  projectIds: readonly string[] = []
+): Promise<CostBudgetSpend> {
   const today = localDayString(now)
   const rows = await getCostRange(monthStartDay(now), today)
   const spend: CostBudgetSpend = {
@@ -63,13 +101,38 @@ export async function readCostBudgetSpend(now: number = Date.now()): Promise<Cos
         (spend.byProviderDayUsd![row.providerId] ?? 0) + cost
     }
   }
+  if (projectIds.length > 0) {
+    spend.byProjectDayUsd = {}
+    spend.byProjectMonthUsd = {}
+    const projects = await Promise.all(
+      [...new Set(projectIds)].map(async (id) => [id, await readProjectSpend(id, now)] as const)
+    )
+    for (const [id, { dayUsd, monthUsd }] of projects) {
+      spend.byProjectDayUsd[id] = dayUsd
+      spend.byProjectMonthUsd[id] = monthUsd
+    }
+  }
   return spend
+}
+
+/** Display name for a project target; the id when the workspace is not loaded. */
+function projectName(projectId: string): string {
+  try {
+    return (
+      useProjectStore.getState().projects.find((project) => project.id === projectId)?.name ??
+      projectId
+    )
+  } catch {
+    return projectId
+  }
 }
 
 function scopeLabel(verdict: CostBudgetVerdict): string {
   const window = verdict.period === "day" ? "Daily" : "Monthly"
-  return verdict.target === GLOBAL_BUDGET_TARGET
-    ? `${window} budget`
+  if (verdict.target === GLOBAL_BUDGET_TARGET) return `${window} budget`
+  const projectId = projectIdOfBudgetTarget(verdict.target)
+  return projectId
+    ? `${window} budget for workspace ${projectName(projectId)}`
     : `${window} budget for ${verdict.target}`
 }
 

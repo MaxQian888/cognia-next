@@ -80,6 +80,7 @@ import { IssueStatusIcon } from "@/components/issues/issue-glyphs"
 import { WorkspaceCapabilities } from "./workspace-capabilities"
 import { ProjectCoordinatorEntry } from "@/components/project-coordinator/project-coordinator-entry"
 import { ProjectThreadsBoard } from "@/components/project-coordinator/project-threads-board"
+import { ProjectUsagePanel } from "@/components/project-coordinator/project-usage-panel"
 import { resolveCoordinatorConfig } from "@/lib/project-coordinator/config"
 import { WorkspaceMembers } from "./workspace-members"
 import { WorkspaceActivity } from "./workspace-activity"
@@ -110,7 +111,8 @@ function normalizePath(path: string): string {
 }
 
 /**
- * The three views, in the order the strip renders them.
+ * The four views, in the order the strip renders them. `usage` is the
+ * workspace's own spend and budget (ADR-0204).
  *
  * `source-control` used to be a fourth, mounting the whole `SourceControlPanel`
  * inside this page. That put a `FeaturePageHeader` inside a `FeaturePageShell`,
@@ -118,7 +120,7 @@ function normalizePath(path: string): string {
  * workspace as the unit of work (ADR-0144), which can own several roots. It is
  * a link now. `app/workspace/page.tsx` redirects the old deep link.
  */
-export const WORKSPACE_TABS = ["overview", "environments", "capabilities"] as const
+export const WORKSPACE_TABS = ["overview", "environments", "capabilities", "usage"] as const
 export type WorkspaceTab = (typeof WORKSPACE_TABS)[number]
 
 export interface WorkspaceOverviewProps {
@@ -134,6 +136,7 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
   const tCapabilities = useTranslations("workspace.capabilities")
   const tSwitcher = useTranslations("workspace.switcher")
   const tManage = useTranslations("workspace.manage")
+  const tUsage = useTranslations("projectCoordinator.usage")
   const router = useRouter()
   const isMobile = useIsMobile()
   const workspaceId = useProjectStore((s) => s.activeProjectId)
@@ -380,6 +383,7 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
               ) : null}
             </TabsTrigger>
             <TabsTrigger value="capabilities">{tCapabilities("tab")}</TabsTrigger>
+            <TabsTrigger value="usage">{tUsage("tab")}</TabsTrigger>
           </TabsList>
           {/* Not a tab: it leaves the page. Beside the strip rather than in
               it, because a link is not a tab (`role="tablist"` admits only
@@ -655,6 +659,14 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
         >
           {/* Deltas only. The definitions stay in Settings. See the component. */}
           <WorkspaceCapabilities workspaceId={workspaceId} />
+        </TabsContent>
+
+        <TabsContent
+          value="usage"
+          className={cn("mt-0 min-h-0 flex-1 overflow-y-auto px-4 pb-6", TAB_ENTER)}
+          data-testid="workspace-usage"
+        >
+          {workspaceId ? <ProjectUsagePanel projectId={workspaceId} /> : null}
         </TabsContent>
       </Tabs>
     </FeaturePageShell>

@@ -118,10 +118,11 @@ export function ProjectCoordinatorHost() {
       .catch((error) => console.warn("project thread PR watch sync failed", error))
   }, [threadsByCoordinator, pausedCoordinators])
   useEffect(
-    () => () =>
-      getProjectPrWatch()
+    () => () => {
+      void getProjectPrWatch()
         .sync([])
-        .catch(() => undefined),
+        .catch(() => undefined)
+    },
     []
   )
 

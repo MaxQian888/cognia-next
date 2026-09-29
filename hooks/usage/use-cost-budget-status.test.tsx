@@ -54,6 +54,26 @@ describe("useCostBudgetStatus", () => {
     expect(result.current.worst?.scopeKey).toBe("month:anthropic")
   })
 
+  it("narrows to one project's own ceilings", () => {
+    settings.costBudget = {
+      dailyUsd: 20,
+      perProjectDailyUsd: { alpha: 4 },
+      perProjectMonthlyUsd: { beta: 10 },
+    }
+    spendResult.value = {
+      dayUsd: 5,
+      monthUsd: 5,
+      byProjectDayUsd: { alpha: 3 },
+      byProjectMonthUsd: { alpha: 3 },
+    }
+    const { result } = renderHook(() => useCostBudgetStatus({ projectId: "alpha" }))
+    expect(result.current.configured).toBe(true)
+    expect(result.current.verdicts.map((v) => v.scopeKey)).toEqual(["day:project:alpha"])
+    const other = renderHook(() => useCostBudgetStatus({ projectId: "gamma" }))
+    expect(other.result.current.configured).toBe(false)
+    expect(other.result.current.verdicts).toEqual([])
+  })
+
   it("hands back an empty policy object rather than undefined", () => {
     const { result } = renderHook(() => useCostBudgetStatus())
     expect(result.current.policy).toEqual({})

@@ -4,6 +4,8 @@
     "dayGlobal": "今日 · 全部提供商",
     "monthGlobal": "本月 · 全部提供商",
     "dayProvider": "今日 · {provider}",
-    "monthProvider": "本月 · {provider}"
+    "monthProvider": "本月 · {provider}",
+    "dayProject": "今日 · 工作区 {workspace}",
+    "monthProject": "本月 · 工作区 {workspace}"
   }
 }

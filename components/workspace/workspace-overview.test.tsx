@@ -157,6 +157,11 @@ jest.mock("@/components/project-coordinator/project-coordinator-entry", () => ({
     <section data-testid="coordination-entry-stub">{workspaceId}</section>
   ),
 }))
+jest.mock("@/components/project-coordinator/project-usage-panel", () => ({
+  ProjectUsagePanel: ({ projectId }: { projectId: string }) => (
+    <section data-testid="project-usage-stub">{projectId}</section>
+  ),
+}))
 jest.mock("@/components/project-coordinator/project-threads-board", () => ({
   ProjectThreadsBoard: ({ coordinatorSessionId }: { coordinatorSessionId: string }) => (
     <section data-testid="threads-board-stub">{coordinatorSessionId}</section>
@@ -245,6 +250,13 @@ describe("WorkspaceOverview", () => {
     // renders its name as the bare key "tab". Positional is the stable read.
     await user.click(screen.getAllByRole("tab")[2] as HTMLElement)
     expect(screen.getByTestId("workspace-capabilities-stub")).toBeInTheDocument()
+  })
+
+  it("shows this workspace's spend and budget on the Usage tab", async () => {
+    const user = userEvent.setup()
+    render(<ControlledOverview />)
+    await user.click(screen.getAllByRole("tab")[3] as HTMLElement)
+    expect(screen.getByTestId("project-usage-stub")).toHaveTextContent("w1")
   })
 
   /**

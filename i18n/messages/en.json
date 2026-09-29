@@ -28344,6 +28344,32 @@
     "threadCard": {
       "missing": "This thread no longer exists.",
       "open": "Open thread"
+    },
+    "usage": {
+      "budget": {
+        "empty": "This workspace has no budget of its own. Set a daily or monthly limit in the workspace settings.",
+        "title": "Budget"
+      },
+      "byModel": {
+        "title": "By model"
+      },
+      "bySession": {
+        "role": {
+          "coordinator": "coordinator",
+          "thread": "thread"
+        },
+        "title": "By conversation",
+        "untitled": "Untitled conversation"
+      },
+      "loading": "Reading usage…",
+      "spend": {
+        "cost": "Cost",
+        "empty": "No spend recorded in this workspace yet.",
+        "title": "Last {days} days",
+        "tokens": "Tokens",
+        "turns": "Turns"
+      },
+      "tab": "Usage"
     }
   },
   "projectEditor": {
@@ -50919,8 +50945,10 @@
     "loading": "Reading spend…",
     "scope": {
       "dayGlobal": "Today, all providers",
+      "dayProject": "Today · workspace {workspace}",
       "dayProvider": "Today · {provider}",
       "monthGlobal": "This month, all providers",
+      "monthProject": "This month · workspace {workspace}",
       "monthProvider": "This month · {provider}"
     }
   },

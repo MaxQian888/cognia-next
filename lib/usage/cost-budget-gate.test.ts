@@ -1,7 +1,10 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { CostBudgetSpend, CostBudgetVerdict } from "./cost-budget"
 
-const readSpendMock = jest.fn<Promise<CostBudgetSpend>, [number | undefined]>()
+const readSpendMock = jest.fn<
+  Promise<CostBudgetSpend>,
+  [number | undefined, readonly string[] | undefined]
+>()
 const notifyThresholdMock = jest.fn<Promise<void>, [CostBudgetVerdict, number | undefined]>()
 const requestOverrideMock = jest.fn<
   Promise<{ approved: boolean; scopeKey: string }>,
@@ -9,7 +12,8 @@ const requestOverrideMock = jest.fn<
 >()
 
 jest.mock("./cost-budget-runtime", () => ({
-  readCostBudgetSpend: (now?: number) => readSpendMock(now),
+  readCostBudgetSpend: (now?: number, projectIds?: readonly string[]) =>
+    readSpendMock(now, projectIds),
   notifyCostBudgetThreshold: (verdict: CostBudgetVerdict, now?: number) =>
     notifyThresholdMock(verdict, now),
   requestCostBudgetOverride: (verdict: CostBudgetVerdict, options: unknown) =>
@@ -173,5 +177,34 @@ describe("enforceCostBudget — failure modes", () => {
       enforceCostBudget({ loadSettings: settings({ dailyUsd: 10 }) })
     ).resolves.toMatchObject({ allowed: true })
     expect(requestOverrideMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("enforceCostBudget — per-project ceilings", () => {
+  it("reads and judges the sending project's spend", async () => {
+    readSpendMock.mockResolvedValue({
+      dayUsd: 3,
+      monthUsd: 3,
+      byProjectDayUsd: { alpha: 3 },
+      byProjectMonthUsd: { alpha: 3 },
+    })
+    requestOverrideMock.mockResolvedValue({ approved: false, scopeKey: "day:project:alpha" })
+    const result = await enforceCostBudget({
+      projectId: "alpha",
+      loadSettings: settings({ perProjectDailyUsd: { alpha: 3 } }),
+    })
+    expect(readSpendMock).toHaveBeenCalledWith(undefined, ["alpha"])
+    expect(result.allowed).toBe(false)
+    expect(result.blockedBy.map((v) => v.scopeKey)).toEqual(["day:project:alpha"])
+  })
+
+  it("does not read project spend for a project without its own ceiling", async () => {
+    readSpendMock.mockResolvedValue({ dayUsd: 1, monthUsd: 1 })
+    const result = await enforceCostBudget({
+      projectId: "other",
+      loadSettings: settings({ perProjectDailyUsd: { alpha: 3 } }),
+    })
+    expect(readSpendMock).toHaveBeenCalledWith(undefined, [])
+    expect(result).toEqual({ allowed: true, verdict: null, blockedBy: [] })
   })
 })

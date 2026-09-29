@@ -26,6 +26,10 @@ import { parseLocalDay } from "@/lib/usage/session-analytics"
 import { readCostBudgetSpend } from "@/lib/usage/cost-budget-runtime"
 import {
   evaluateCostBudget,
+  hasAnyCostCeiling,
+  projectBudgetTarget,
+  projectHasCostCeiling,
+  projectsWithCostCeiling,
   worstCostBudgetVerdict,
   type CostBudgetPolicy,
   type CostBudgetSpend,
@@ -37,7 +41,7 @@ export interface CostBudgetStatus {
   policy: CostBudgetPolicy
   /** Observed spend, or `null` until the first live-query result lands. */
   spend: CostBudgetSpend | null
-  /** One verdict per configured scope, global first then per provider. */
+  /** One verdict per configured scope: global, per provider, then per project. */
   verdicts: CostBudgetVerdict[]
   /** Most severe verdict, or `null` when no ceiling is configured. */
   worst: CostBudgetVerdict | null
@@ -49,24 +53,16 @@ export interface CostBudgetStatus {
 
 const EMPTY: CostBudgetVerdict[] = []
 
-/**
- * Whether any positive ceiling exists. Derived from the POLICY, not from the
- * verdict list: verdicts are empty while the spend query is still in flight,
- * and a card that reads "no limit configured" for the first frame after every
- * mount is worse than one that renders nothing until it knows.
- */
-function hasAnyCeiling(policy: CostBudgetPolicy): boolean {
-  const positive = (value: number | undefined): boolean =>
-    typeof value === "number" && Number.isFinite(value) && value > 0
-  return (
-    positive(policy.dailyUsd) ||
-    positive(policy.monthlyUsd) ||
-    Object.values(policy.perProviderDailyUsd ?? {}).some(positive) ||
-    Object.values(policy.perProviderMonthlyUsd ?? {}).some(positive)
-  )
+export interface CostBudgetStatusOptions {
+  /**
+   * Narrow the read-out to one workspace's own ceilings (ADR-0204). Without it
+   * every configured scope is evaluated, including each project with a ceiling.
+   */
+  projectId?: string
 }
 
-export function useCostBudgetStatus(): CostBudgetStatus {
+export function useCostBudgetStatus(options: CostBudgetStatusOptions = {}): CostBudgetStatus {
+  const { projectId } = options
   const policy = useSettingsStore((s) => s.settings?.costBudget)
   // The shared ticker owns the clock. Reading `Date.now()` here would be an
   // impure render, and a cold ticker returning 0 is handled by falling back to
@@ -77,16 +73,31 @@ export function useCostBudgetStatus(): CostBudgetStatus {
   // midnight keeps the query key stable through the day and rebuilds the
   // subscription exactly once, at midnight.
   const dayKey = localDayString(ticked > 0 ? ticked : mountedAt)
+  const resolved = useMemo(() => policy ?? {}, [policy])
+  // Only the projects that carry a ceiling are read; the key keeps the live
+  // query stable while the policy object is replaced with an equal one.
+  const projectKey = (projectId ? [projectId] : projectsWithCostCeiling(resolved).sort()).join(
+    "\u0000"
+  )
   const spend = useLiveQuery(
-    () => readCostBudgetSpend(parseLocalDay(dayKey).getTime()).catch(() => null),
-    [dayKey]
+    () =>
+      readCostBudgetSpend(
+        // Anchored at local midnight (the window start), not the clock, so the
+        // query key is stable; `now` only picks the day and month windows.
+        parseLocalDay(dayKey).getTime(),
+        projectKey ? projectKey.split("\u0000") : []
+      ).catch(() => null),
+    [dayKey, projectKey]
   )
 
-  const resolved = useMemo(() => policy ?? {}, [policy])
-  const verdicts = useMemo(
-    () => (spend ? evaluateCostBudget(resolved, spend) : EMPTY),
-    [resolved, spend]
-  )
+  const verdicts = useMemo(() => {
+    if (!spend) return EMPTY
+    if (!projectId) return evaluateCostBudget(resolved, spend)
+    const target = projectBudgetTarget(projectId)
+    return evaluateCostBudget(resolved, spend, undefined, projectId).filter(
+      (verdict) => verdict.target === target
+    )
+  }, [resolved, spend, projectId])
 
   return {
     policy: resolved,
@@ -94,6 +105,8 @@ export function useCostBudgetStatus(): CostBudgetStatus {
     verdicts,
     worst: worstCostBudgetVerdict(verdicts),
     loading: spend === undefined,
-    configured: hasAnyCeiling(resolved),
+    configured: projectId
+      ? projectHasCostCeiling(resolved, projectId)
+      : hasAnyCostCeiling(resolved),
   }
 }

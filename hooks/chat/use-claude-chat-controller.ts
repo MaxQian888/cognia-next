@@ -2780,6 +2780,7 @@ export function useClaudeChat() {
         isCostBudgetConfigured() && !sendOptions.routerFusion
           ? await enforceCostBudget({
               ...(sendOptions.provider ? { providerId: sendOptions.provider } : {}),
+              ...(session?.projectId ? { projectId: session.projectId } : {}),
               runId: executionRunId,
             })
           : null
@@ -4493,6 +4494,7 @@ export function useClaudeChat() {
           if (!sendOptions.routerFusion && isCostBudgetConfigured()) {
             const lateBudget = await enforceCostBudget({
               ...(sendOptions.provider ? { providerId: sendOptions.provider } : {}),
+              ...(session?.projectId ? { projectId: session.projectId } : {}),
               runId: executionRunId,
             })
             if (!lateBudget.allowed) {

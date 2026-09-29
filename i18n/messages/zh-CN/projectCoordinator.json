@@ -88,5 +88,31 @@
   "threadCard": {
     "missing": "此线程已不存在。",
     "open": "打开线程"
+  },
+  "usage": {
+    "tab": "用量",
+    "loading": "正在读取用量…",
+    "budget": {
+      "title": "预算",
+      "empty": "此工作区没有单独的预算。可在工作区设置中设置每日或每月上限。"
+    },
+    "spend": {
+      "title": "最近 {days} 天",
+      "empty": "此工作区还没有花费记录。",
+      "cost": "花费",
+      "turns": "轮次",
+      "tokens": "Token"
+    },
+    "bySession": {
+      "title": "按对话",
+      "untitled": "未命名对话",
+      "role": {
+        "coordinator": "协调者",
+        "thread": "线程"
+      }
+    },
+    "byModel": {
+      "title": "按模型"
+    }
   }
 }

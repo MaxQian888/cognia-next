@@ -25,6 +25,7 @@ import type {
   IssueRunTarget,
   IssueRunVerdict,
 } from "./types"
+import { withRunBrief } from "./types"
 
 export const AGENT_TASK_RUN_ADAPTER_ID = "agent-task"
 
@@ -121,7 +122,7 @@ export function createAgentTaskRunAdapter(
         agentId,
         projectId: issue.projectId,
         title: `${issue.identifier}: ${issue.title}`,
-        description: buildAgentTaskDescription(target),
+        description: withRunBrief(buildAgentTaskDescription(target), context.brief),
         priority: issuePriorityToAgentTaskPriority(issue.priority),
         tags: ["issue", `issue:${issue.id}`, issue.identifier],
         now: deps.now(),
@@ -134,6 +135,7 @@ export function createAgentTaskRunAdapter(
         targetId: task.id,
         by: context.by,
         status: "queued",
+        ...(context.wakeup ? { wakeup: context.wakeup } : {}),
         now: deps.now(),
       })
       // If the scheduler refuses, let it throw: the run row stays `queued`
@@ -174,8 +176,20 @@ export function createAgentTaskRunAdapter(
     async cancel(run: IssueRun): Promise<void> {
       await deps.cancelTask(run.targetId)
     },
+    // Every attempt runs in a chat session of its own. Only the ones still
+    // executing can take a steer or be the caller of a check-in.
+    async sessionIds(run: IssueRun): Promise<string[]> {
+      const attempts = await deps.listAttempts(run.targetId)
+      return attempts
+        .filter((attempt) => attempt.sessionId && LIVE_ATTEMPT_STATUSES.has(attempt.status))
+        .sort((a, b) => b.attemptNo - a.attemptNo)
+        .map((attempt) => attempt.sessionId!)
+    },
   }
 }
+
+/** Attempt states whose chat session is still executing. */
+const LIVE_ATTEMPT_STATUSES: ReadonlySet<AgentTaskAttempt["status"]> = new Set(["queued", "running"])
 
 /** `IssuePriority` → `AgentTaskPriority`; `none` reads as `normal`. */
 export function issuePriorityToAgentTaskPriority(

@@ -86,7 +86,7 @@ export function useProjectThreadRows(
     if (!threads) return undefined
     return threads
       .map((thread) => {
-        const status = statuses.get(thread.id) ?? "idle"
+        const status: ChatStatus = statuses.get(thread.id) ?? "idle"
         const pendingApprovals = approvals[thread.id] ?? 0
         const pr = prStatuses.get(thread.id)
         return {

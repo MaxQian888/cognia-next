@@ -16,17 +16,33 @@
  *
  * ## Scopes
  *
- * Four independent scopes, any subset configured: day/month × global/per-provider.
- * They are independent on purpose — a per-provider daily cap is how you stop one
- * misbehaving provider without lowering the ceiling for everything else, and a
- * monthly cap is what maps to how these services actually bill.
+ * Six independent scopes, any subset configured: day/month × global/per-provider/
+ * per-project. They are independent on purpose — a per-provider daily cap is how
+ * you stop one misbehaving provider without lowering the ceiling for everything
+ * else, a per-project cap is how a long-running project coordinator (ADR-0204)
+ * is kept from eating the whole allowance, and a monthly cap is what maps to how
+ * these services actually bill.
  */
 
 /** Rolling window a limit applies to. */
 export type CostBudgetPeriod = "day" | "month"
 
-/** What a limit is scoped to: everything, or one provider. */
+/** What a limit is scoped to: everything, one provider, or one project. */
 export const GLOBAL_BUDGET_TARGET = "*"
+
+const PROJECT_TARGET_PREFIX = "project:"
+
+/** Target for a per-project scope. Prefixed so it can never collide with a provider id. */
+export function projectBudgetTarget(projectId: string): string {
+  return `${PROJECT_TARGET_PREFIX}${projectId}`
+}
+
+/** The project id a target names, or `null` for a global or provider target. */
+export function projectIdOfBudgetTarget(target: string): string | null {
+  return target.startsWith(PROJECT_TARGET_PREFIX)
+    ? target.slice(PROJECT_TARGET_PREFIX.length) || null
+    : null
+}
 
 export interface CostBudgetPolicy {
   /** Ceiling for all spend today. Absent or <= 0 means no limit. */
@@ -37,6 +53,10 @@ export interface CostBudgetPolicy {
   perProviderDailyUsd?: Record<string, number>
   /** Per-provider monthly ceilings, keyed by provider id. */
   perProviderMonthlyUsd?: Record<string, number>
+  /** Per-project daily ceilings, keyed by project (workspace) id. */
+  perProjectDailyUsd?: Record<string, number>
+  /** Per-project monthly ceilings, keyed by project (workspace) id. */
+  perProjectMonthlyUsd?: Record<string, number>
   /** Warning ratio (0–1). Default 0.80. */
   warnAt?: number
   /** Critical ratio (0–1). Default 0.95. */
@@ -53,6 +73,10 @@ export interface CostBudgetSpend {
   byProviderDayUsd?: Record<string, number>
   /** This month's spend per provider. */
   byProviderMonthUsd?: Record<string, number>
+  /** Today's spend per project. Only the projects that were read are present. */
+  byProjectDayUsd?: Record<string, number>
+  /** This month's spend per project. */
+  byProjectMonthUsd?: Record<string, number>
 }
 
 export type CostBudgetLevel = "ok" | "warning" | "critical" | "exceeded"
@@ -61,7 +85,7 @@ export interface CostBudgetVerdict {
   /** Stable key for dedupe, override grants and gate ids. */
   scopeKey: string
   period: CostBudgetPeriod
-  /** Provider id, or {@link GLOBAL_BUDGET_TARGET}. */
+  /** Provider id, {@link projectBudgetTarget}, or {@link GLOBAL_BUDGET_TARGET}. */
   target: string
   usedUsd: number
   limitUsd: number
@@ -81,7 +105,7 @@ const LEVEL_RANK: Record<CostBudgetLevel, number> = {
   exceeded: 3,
 }
 
-/** `day:*`, `month:anthropic`, … */
+/** `day:*`, `month:anthropic`, `day:project:<id>`, … */
 export function budgetScopeKey(period: CostBudgetPeriod, target: string): string {
   return `${period}:${target}`
 }
@@ -104,11 +128,19 @@ function levelFor(ratio: number, warnAt: number, criticalAt: number): CostBudget
  * provider — the caller is asking "may THIS provider spend?", and other
  * providers' caps have no bearing on that. With no provider, every configured
  * per-provider scope is evaluated, which is what a dashboard wants.
+ *
+ * Per-project scopes follow the same rule with `projectId`: a send is judged
+ * against its own project's ceiling only; with no project, every configured
+ * project scope is evaluated. A snapshot read without project figures (no
+ * `byProject*` maps) cannot judge a project scope at all, so those scopes are
+ * skipped rather than reported as $0 spent — callers that never ask about a
+ * project are unaffected by project ceilings.
  */
 export function evaluateCostBudget(
   policy: CostBudgetPolicy,
   spend: CostBudgetSpend,
-  providerId?: string
+  providerId?: string,
+  projectId?: string
 ): CostBudgetVerdict[] {
   const warnAt = clampRatio(policy.warnAt, DEFAULT_WARN_AT)
   const criticalAt = clampRatio(policy.criticalAt, DEFAULT_CRITICAL_AT)
@@ -146,7 +178,55 @@ export function evaluateCostBudget(
     }
   }
 
+  for (const [period, limits, byProject] of [
+    ["day", policy.perProjectDailyUsd, spend.byProjectDayUsd],
+    ["month", policy.perProjectMonthlyUsd, spend.byProjectMonthUsd],
+  ] as const) {
+    if (!limits || !byProject) continue
+    for (const [project, rawLimit] of Object.entries(limits)) {
+      if (projectId !== undefined && project !== projectId) continue
+      const limit = usableLimit(rawLimit)
+      if (limit === null) continue
+      push(period, projectBudgetTarget(project), num(byProject?.[project]), limit)
+    }
+  }
+
   return out
+}
+
+function positiveLimit(value: number | undefined): boolean {
+  return usableLimit(value) !== null
+}
+
+/** Whether any positive ceiling is configured, in any scope. */
+export function hasAnyCostCeiling(policy: CostBudgetPolicy): boolean {
+  return (
+    positiveLimit(policy.dailyUsd) ||
+    positiveLimit(policy.monthlyUsd) ||
+    [
+      policy.perProviderDailyUsd,
+      policy.perProviderMonthlyUsd,
+      policy.perProjectDailyUsd,
+      policy.perProjectMonthlyUsd,
+    ].some((limits) => Object.values(limits ?? {}).some(positiveLimit))
+  )
+}
+
+/** Whether `projectId` has a ceiling of its own. */
+export function projectHasCostCeiling(policy: CostBudgetPolicy, projectId: string): boolean {
+  return (
+    positiveLimit(policy.perProjectDailyUsd?.[projectId]) ||
+    positiveLimit(policy.perProjectMonthlyUsd?.[projectId])
+  )
+}
+
+/** Every project with a ceiling of its own — the projects a dashboard must read spend for. */
+export function projectsWithCostCeiling(policy: CostBudgetPolicy): string[] {
+  const ids = new Set<string>()
+  for (const limits of [policy.perProjectDailyUsd, policy.perProjectMonthlyUsd]) {
+    for (const [id, limit] of Object.entries(limits ?? {})) if (positiveLimit(limit)) ids.add(id)
+  }
+  return [...ids]
 }
 
 /** The single most severe verdict, or `null` when no scope is configured. */

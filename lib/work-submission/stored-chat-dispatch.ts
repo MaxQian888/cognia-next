@@ -116,6 +116,7 @@ export function createStoredChatDispatch(
       if (!sendOptions.routerFusion && (deps.isCostBudgetConfigured ?? isCostBudgetConfigured)()) {
         const budget = await (deps.enforceCostBudget ?? enforceCostBudget)({
           ...(sendOptions.provider ? { providerId: sendOptions.provider } : {}),
+          ...(context.projectId ? { projectId: context.projectId } : {}),
           runId: row.runId,
         })
         if (!budget.allowed) return { status: "failed", errorCode: "cost_budget_exceeded" }

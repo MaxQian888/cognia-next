@@ -4,14 +4,15 @@
 import { render, screen } from "@testing-library/react"
 
 import { UsageBudgetMeters } from "./usage-budget-meters"
+import { useProjectStore } from "@/stores/project/project-store"
 import type { CostBudgetStatus } from "@/hooks/usage/use-cost-budget-status"
 
 // next-intl is globally mocked against en.json in jest.setup.ts.
 
-const status = jest.fn<CostBudgetStatus, []>()
+const status = jest.fn<CostBudgetStatus, [unknown]>()
 
 jest.mock("@/hooks/usage/use-cost-budget-status", () => ({
-  useCostBudgetStatus: () => status(),
+  useCostBudgetStatus: (options: unknown) => status(options),
 }))
 
 function state(patch: Partial<CostBudgetStatus>): CostBudgetStatus {
@@ -99,5 +100,43 @@ describe("UsageBudgetMeters", () => {
     render(<UsageBudgetMeters />)
     expect(screen.getByTestId("usage-budget-scope-day:*")).toHaveTextContent("130.0%")
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100")
+  })
+
+  it("narrows to a workspace and labels its scopes by the workspace name", () => {
+    useProjectStore.setState({ projects: [{ id: "alpha", name: "Billing" } as never] })
+    status.mockReturnValue(
+      state({
+        configured: true,
+        verdicts: [
+          {
+            scopeKey: "day:project:alpha",
+            period: "day",
+            target: "project:alpha",
+            usedUsd: 1,
+            limitUsd: 4,
+            ratio: 0.25,
+            level: "ok",
+          },
+          {
+            scopeKey: "month:project:gone",
+            period: "month",
+            target: "project:gone",
+            usedUsd: 1,
+            limitUsd: 4,
+            ratio: 0.25,
+            level: "ok",
+          },
+        ],
+      })
+    )
+    render(<UsageBudgetMeters projectId="alpha" />)
+    expect(status).toHaveBeenLastCalledWith({ projectId: "alpha" })
+    expect(screen.getByTestId("usage-budget-scope-day:project:alpha")).toHaveTextContent(
+      "Today · workspace Billing"
+    )
+    expect(screen.getByTestId("usage-budget-scope-month:project:gone")).toHaveTextContent(
+      "This month · workspace gone"
+    )
+    useProjectStore.setState({ projects: [] })
   })
 })

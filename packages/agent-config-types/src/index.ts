@@ -3706,8 +3706,8 @@ export interface AppSettings {
    */
   storageRetention?: { traceRetentionDays: number }
   /**
-   * USD spending ceilings (ADR-0130). Four independent scopes — day/month ×
-   * global/per-provider — evaluated by `lib/usage/cost-budget.ts`.
+   * USD spending ceilings (ADR-0130). Independent scopes — day/month ×
+   * global/per-provider/per-project — evaluated by `lib/usage/cost-budget.ts`.
    *
    * Distinct from `ProviderConstraint.dailyCostBudget`, which is an ADVISORY
    * routing hint: it deprioritises an over-budget provider and warns, but the
@@ -3719,6 +3719,10 @@ export interface AppSettings {
     monthlyUsd?: number
     perProviderDailyUsd?: Record<string, number>
     perProviderMonthlyUsd?: Record<string, number>
+    /** Per-project (workspace) daily ceilings, keyed by project id (ADR-0204). */
+    perProjectDailyUsd?: Record<string, number>
+    /** Per-project (workspace) monthly ceilings, keyed by project id. */
+    perProjectMonthlyUsd?: Record<string, number>
     /** Warning ratio (0–1). Defaults to 0.80. */
     warnAt?: number
     /** Critical ratio (0–1). Defaults to 0.95. */

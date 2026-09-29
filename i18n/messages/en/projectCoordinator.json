@@ -88,5 +88,31 @@
   "threadCard": {
     "missing": "This thread no longer exists.",
     "open": "Open thread"
+  },
+  "usage": {
+    "tab": "Usage",
+    "loading": "Reading usage…",
+    "budget": {
+      "title": "Budget",
+      "empty": "This workspace has no budget of its own. Set a daily or monthly limit in the workspace settings."
+    },
+    "spend": {
+      "title": "Last {days} days",
+      "empty": "No spend recorded in this workspace yet.",
+      "cost": "Cost",
+      "turns": "Turns",
+      "tokens": "Tokens"
+    },
+    "bySession": {
+      "title": "By conversation",
+      "untitled": "Untitled conversation",
+      "role": {
+        "coordinator": "coordinator",
+        "thread": "thread"
+      }
+    },
+    "byModel": {
+      "title": "By model"
+    }
   }
 }

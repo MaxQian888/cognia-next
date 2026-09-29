@@ -3,6 +3,11 @@ import {
   evaluateCostBudget,
   exceededScopes,
   formatBudgetRatio,
+  hasAnyCostCeiling,
+  projectBudgetTarget,
+  projectHasCostCeiling,
+  projectIdOfBudgetTarget,
+  projectsWithCostCeiling,
   worstCostBudgetVerdict,
   GLOBAL_BUDGET_TARGET,
   type CostBudgetPolicy,
@@ -144,5 +149,57 @@ describe("helpers", () => {
   it("formats a ratio for display", () => {
     expect(formatBudgetRatio(0.974)).toBe("97.4%")
     expect(formatBudgetRatio(Number.NaN)).toBe("0%")
+  })
+})
+
+describe("per-project scopes", () => {
+  const policy = {
+    perProjectDailyUsd: { alpha: 4, beta: 0 },
+    perProjectMonthlyUsd: { alpha: 20, gamma: 50 },
+  }
+  const spend = {
+    dayUsd: 9,
+    monthUsd: 40,
+    byProjectDayUsd: { alpha: 4 },
+    byProjectMonthUsd: { alpha: 10, gamma: 5 },
+  }
+
+  it("judges a send against its own project's ceilings only", () => {
+    const verdicts = evaluateCostBudget(policy, spend, undefined, "alpha")
+    expect(verdicts.map((v) => [v.scopeKey, v.level])).toEqual([
+      ["day:project:alpha", "exceeded"],
+      ["month:project:alpha", "ok"],
+    ])
+  })
+
+  it("evaluates every configured project when no project is named", () => {
+    const verdicts = evaluateCostBudget(policy, spend)
+    expect(verdicts.map((v) => v.scopeKey)).toEqual([
+      "day:project:alpha",
+      "month:project:alpha",
+      "month:project:gamma",
+    ])
+  })
+
+  it("skips project scopes when the snapshot carries no project figures", () => {
+    expect(evaluateCostBudget(policy, { dayUsd: 9, monthUsd: 40 }, undefined, "alpha")).toEqual([])
+  })
+
+  it("round-trips a project target and never mistakes a provider for one", () => {
+    expect(projectBudgetTarget("alpha")).toBe("project:alpha")
+    expect(projectIdOfBudgetTarget("project:alpha")).toBe("alpha")
+    expect(projectIdOfBudgetTarget("anthropic")).toBeNull()
+    expect(projectIdOfBudgetTarget(GLOBAL_BUDGET_TARGET)).toBeNull()
+    expect(projectIdOfBudgetTarget("project:")).toBeNull()
+  })
+
+  it("reports which ceilings exist", () => {
+    expect(hasAnyCostCeiling({})).toBe(false)
+    expect(hasAnyCostCeiling({ perProjectDailyUsd: { beta: 0 } })).toBe(false)
+    expect(hasAnyCostCeiling({ perProjectMonthlyUsd: { gamma: 1 } })).toBe(true)
+    expect(hasAnyCostCeiling({ perProviderDailyUsd: { anthropic: 2 } })).toBe(true)
+    expect(projectHasCostCeiling(policy, "alpha")).toBe(true)
+    expect(projectHasCostCeiling(policy, "beta")).toBe(false)
+    expect(projectsWithCostCeiling(policy).sort()).toEqual(["alpha", "gamma"])
   })
 })

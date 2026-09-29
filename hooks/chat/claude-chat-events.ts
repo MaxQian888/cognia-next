@@ -1306,6 +1306,8 @@ export async function handleEvent(
             characterId: session?.characterId,
             model: lastSendForSpan?.options.model ?? session?.model,
             providerId: lastSendForSpan?.options.provider,
+            // Per-workspace spend (ADR-0204 project budgets) sums on this.
+            ...(session?.projectId ? { projectId: session.projectId } : {}),
             result: sdkResult,
             // The ledger is the one writer of a ledgered turn's money.
             ...(routerFusionSummary

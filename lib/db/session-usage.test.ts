@@ -5,6 +5,7 @@ import {
   listUsageForSession,
   pruneSessionUsageOlderThan,
   isLocalSpend,
+  listLocalUsageForProjectSince,
   recordConnectorUsage,
   recordExternalAgentUsage,
   recordGoalUsage,
@@ -941,5 +942,19 @@ describe("imported spend provenance", () => {
     expect(
       await recordImportedUsage({ operationId: "", sessionId: "s", usage: { costUsd: 1 } })
     ).toBeNull()
+  })
+})
+
+describe("listLocalUsageForProjectSince", () => {
+  it("reads one project's local rows from the window start, oldest first", async () => {
+    await upsertSessionUsage(row("old", "s1", { projectId: "p1", at: 5, costUsd: 1 }))
+    await upsertSessionUsage(row("b", "s1", { projectId: "p1", at: 30, costUsd: 2 }))
+    await upsertSessionUsage(row("a", "s2", { projectId: "p1", at: 10, costUsd: 3 }))
+    await upsertSessionUsage(row("other", "s3", { projectId: "p2", at: 20, costUsd: 4 }))
+    await upsertSessionUsage(
+      row("imp", "s1", { projectId: "p1", at: 20, costUsd: 9, imported: true })
+    )
+    const rows = await listLocalUsageForProjectSince("p1", 10)
+    expect(rows.map((r) => r.messageId)).toEqual(["a", "b"])
   })
 })

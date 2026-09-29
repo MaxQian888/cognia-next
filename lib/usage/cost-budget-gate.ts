@@ -27,6 +27,8 @@ import { useSettingsStore } from "@/stores/settings"
 import {
   evaluateCostBudget,
   exceededScopes,
+  hasAnyCostCeiling,
+  projectHasCostCeiling,
   worstCostBudgetVerdict,
   type CostBudgetLevel,
   type CostBudgetPolicy,
@@ -41,6 +43,8 @@ import {
 export interface EnforceCostBudgetInput {
   /** Provider about to be charged. Scopes the per-provider ceilings. */
   providerId?: string
+  /** Workspace the send belongs to. Scopes the per-project ceilings (ADR-0204). */
+  projectId?: string
   /** Run this send belongs to — labels the HITL gate. */
   runId?: string
   signal?: AbortSignal
@@ -67,17 +71,6 @@ export function __resetCostBudgetGateForTesting(): void {
   announced.clear()
 }
 
-function hasAnyCeiling(policy: CostBudgetPolicy): boolean {
-  const positive = (value: number | undefined): boolean =>
-    typeof value === "number" && Number.isFinite(value) && value > 0
-  return (
-    positive(policy.dailyUsd) ||
-    positive(policy.monthlyUsd) ||
-    Object.values(policy.perProviderDailyUsd ?? {}).some(positive) ||
-    Object.values(policy.perProviderMonthlyUsd ?? {}).some(positive)
-  )
-}
-
 /**
  * Synchronous pre-check: is any ceiling configured at all?
  *
@@ -90,7 +83,7 @@ function hasAnyCeiling(policy: CostBudgetPolicy): boolean {
 export function isCostBudgetConfigured(): boolean {
   try {
     const settings = useSettingsStore.getState().settings
-    return hasAnyCeiling(settings?.costBudget ?? {})
+    return hasAnyCostCeiling(settings?.costBudget ?? {})
   } catch {
     return false
   }
@@ -119,12 +112,15 @@ export async function enforceCostBudget(
   } catch {
     return ALLOW_UNCONFIGURED
   }
-  if (!hasAnyCeiling(policy)) return ALLOW_UNCONFIGURED
+  if (!hasAnyCostCeiling(policy)) return ALLOW_UNCONFIGURED
 
   let verdicts: CostBudgetVerdict[]
   try {
-    const spend = await readCostBudgetSpend(input.now)
-    verdicts = evaluateCostBudget(policy, spend, input.providerId)
+    const spend = await readCostBudgetSpend(
+      input.now,
+      input.projectId && projectHasCostCeiling(policy, input.projectId) ? [input.projectId] : []
+    )
+    verdicts = evaluateCostBudget(policy, spend, input.providerId, input.projectId)
   } catch {
     return ALLOW_UNCONFIGURED
   }

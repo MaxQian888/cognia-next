@@ -157,7 +157,12 @@ describe("stored chat dispatch", () => {
             enforceCostBudget: enforce as never,
           })(row)
         ).resolves.toEqual({ status: "failed", errorCode: "cost_budget_exceeded" })
-        expect(enforce).toHaveBeenCalledWith({ providerId: "openai", runId: "run-1" })
+        // The frozen workspace carries through, so its own ceiling applies too.
+        expect(enforce).toHaveBeenCalledWith({
+          providerId: "openai",
+          projectId: "project-1",
+          runId: "run-1",
+        })
         expect(mockSendPrompt).not.toHaveBeenCalled()
       }, 30_000)
 

@@ -713,6 +713,23 @@ export async function listUsageForSession(sessionId: string): Promise<SessionUsa
   return getDb().sessionUsage.where("sessionId").equals(sessionId).sortBy("at")
 }
 
+/**
+ * Rows a project (workspace) paid for locally since `since` (inclusive),
+ * oldest-first. One `[projectId+at]` range scan; imported rows are dropped
+ * because they were paid elsewhere and must not count against this install's
+ * per-project budget (ADR-0204).
+ */
+export async function listLocalUsageForProjectSince(
+  projectId: string,
+  since: number
+): Promise<SessionUsageRow[]> {
+  const rows = await getDb()
+    .sessionUsage.where("[projectId+at]")
+    .between([projectId, since], [projectId, Number.MAX_SAFE_INTEGER], true, true)
+    .toArray()
+  return rows.filter(isLocalSpend)
+}
+
 /** Aggregated totals helper. Returns 0 across the board when no rows exist. */
 export interface SessionUsageTotals {
   inputTokens: number

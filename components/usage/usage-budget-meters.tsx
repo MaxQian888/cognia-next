@@ -14,6 +14,9 @@
  * of the ceiling is left. Both read the same {@link useCostBudgetStatus}, so
  * the two views cannot drift.
  *
+ * A third mount, the workspace usage tab, narrows it to one workspace's own
+ * ceilings with `projectId`.
+ *
  * Bars reuse `QuotaBar`, the same primitive the plan-quota gauges use, mapped
  * from the budget's own four levels onto the meter's status vocabulary.
  */
@@ -22,7 +25,12 @@ import { useTranslations } from "next-intl"
 
 import { QuotaBar } from "@/components/settings/subscription/quota-bar"
 import { useCostBudgetStatus } from "@/hooks/usage/use-cost-budget-status"
-import { formatBudgetRatio, GLOBAL_BUDGET_TARGET } from "@/lib/usage/cost-budget"
+import {
+  formatBudgetRatio,
+  GLOBAL_BUDGET_TARGET,
+  projectIdOfBudgetTarget,
+} from "@/lib/usage/cost-budget"
+import { useProjectStore } from "@/stores/project/project-store"
 import type { CostBudgetLevel, CostBudgetVerdict } from "@/lib/usage/cost-budget"
 import { formatCost } from "@/types/system/usage"
 import { cn } from "@/lib/utils"
@@ -53,12 +61,14 @@ export interface UsageBudgetMetersProps {
    * because a card with no rows and no words reads as broken.
    */
   emptyHint?: string
+  /** Only this workspace's own ceilings (the workspace usage tab, ADR-0204). */
+  projectId?: string
   className?: string
 }
 
-export function UsageBudgetMeters({ emptyHint, className }: UsageBudgetMetersProps) {
+export function UsageBudgetMeters({ emptyHint, projectId, className }: UsageBudgetMetersProps) {
   const t = useTranslations("usageBudget")
-  const { verdicts, loading, configured } = useCostBudgetStatus()
+  const { verdicts, loading, configured } = useCostBudgetStatus(projectId ? { projectId } : {})
 
   if (!configured) {
     return emptyHint ? (
@@ -87,12 +97,19 @@ export function UsageBudgetMeters({ emptyHint, className }: UsageBudgetMetersPro
 
 function BudgetMeterRow({ verdict }: { verdict: CostBudgetVerdict }) {
   const t = useTranslations("usageBudget")
-  const global = verdict.target === GLOBAL_BUDGET_TARGET
-  const label = global
-    ? t(verdict.period === "day" ? "scope.dayGlobal" : "scope.monthGlobal")
-    : t(verdict.period === "day" ? "scope.dayProvider" : "scope.monthProvider", {
-        provider: verdict.target,
-      })
+  const projectId = projectIdOfBudgetTarget(verdict.target)
+  const workspaceName = useProjectStore((state) =>
+    projectId ? state.projects.find((project) => project.id === projectId)?.name : undefined
+  )
+  const day = verdict.period === "day"
+  const label =
+    verdict.target === GLOBAL_BUDGET_TARGET
+      ? t(day ? "scope.dayGlobal" : "scope.monthGlobal")
+      : projectId
+        ? t(day ? "scope.dayProject" : "scope.monthProject", {
+            workspace: workspaceName ?? projectId,
+          })
+        : t(day ? "scope.dayProvider" : "scope.monthProvider", { provider: verdict.target })
   // Capped for the bar, uncapped in the text: a 130% overshoot must not draw a
   // bar wider than its track, but it must still say 130%.
   const barPct = Math.min(100, Math.round(verdict.ratio * 100))

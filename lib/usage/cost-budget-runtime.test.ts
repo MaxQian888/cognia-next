@@ -9,17 +9,26 @@ jest.mock("@/lib/db/provider-cost-daily", () => ({
   getCostRange: (...args: unknown[]) => getCostRangeMock(...args),
 }))
 
+const listProjectUsageMock = jest.fn()
+
+jest.mock("@/lib/db/session-usage", () => ({
+  listLocalUsageForProjectSince: (...args: unknown[]) => listProjectUsageMock(...args),
+}))
+
 jest.mock("@/lib/notifications/runtime", () => ({
   notify: (input: Record<string, unknown>) => notifyMock(input),
 }))
 
 import { approve, reject, __resetForTesting } from "@/lib/runtime/approval-bus"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
+import { useProjectStore } from "@/stores/project/project-store"
 import {
   costBudgetApprovalKey,
+  localWindowStarts,
   monthStartDay,
   notifyCostBudgetThreshold,
   readCostBudgetSpend,
+  readProjectSpend,
   requestCostBudgetOverride,
   COST_BUDGET_APPROVAL_SCOPE,
 } from "./cost-budget-runtime"
@@ -42,6 +51,7 @@ function verdict(over: Partial<CostBudgetVerdict> = {}): CostBudgetVerdict {
 
 beforeEach(() => {
   getCostRangeMock.mockReset()
+  listProjectUsageMock.mockReset().mockResolvedValue([])
   notifyMock.mockReset().mockResolvedValue("id")
   __resetForTesting()
   usePendingGatesStore.setState({ gates: [] })
@@ -79,6 +89,51 @@ describe("readCostBudgetSpend", () => {
 
   it("anchors the month at its first day", () => {
     expect(monthStartDay(NOW)).toBe("2026-08-01")
+  })
+
+  it("adds the named projects' day and month spend", async () => {
+    getCostRangeMock.mockResolvedValue([])
+    const { dayStart, monthStart } = localWindowStarts(NOW)
+    listProjectUsageMock.mockImplementation(async (projectId: string) =>
+      projectId === "alpha"
+        ? [
+            { at: monthStart + 1, costUsd: 4 },
+            { at: dayStart + 1, costUsd: 1.5 },
+            { at: dayStart + 2, costUsd: Number.NaN },
+          ]
+        : []
+    )
+    const spend = await readCostBudgetSpend(NOW, ["alpha", "beta", "alpha"])
+    expect(listProjectUsageMock).toHaveBeenCalledTimes(2)
+    expect(listProjectUsageMock).toHaveBeenCalledWith("alpha", monthStart)
+    expect(spend.byProjectDayUsd).toEqual({ alpha: 1.5, beta: 0 })
+    expect(spend.byProjectMonthUsd).toEqual({ alpha: 5.5, beta: 0 })
+  })
+
+  it("leaves project figures out when no project is asked for", async () => {
+    getCostRangeMock.mockResolvedValue([])
+    const spend = await readCostBudgetSpend(NOW)
+    expect(spend.byProjectDayUsd).toBeUndefined()
+    expect(listProjectUsageMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("readProjectSpend / localWindowStarts", () => {
+  it("windows on local midnight and the first of the month", () => {
+    const { dayStart, monthStart } = localWindowStarts(NOW)
+    const local = new Date(NOW)
+    expect(new Date(dayStart).getDate()).toBe(local.getDate())
+    expect(new Date(dayStart).getHours()).toBe(0)
+    expect(new Date(monthStart).getDate()).toBe(1)
+  })
+
+  it("sums only positive costs", async () => {
+    const { dayStart } = localWindowStarts(NOW)
+    listProjectUsageMock.mockResolvedValue([
+      { at: dayStart, costUsd: 2 },
+      { at: dayStart, costUsd: -1 },
+    ])
+    await expect(readProjectSpend("alpha", NOW)).resolves.toEqual({ dayUsd: 2, monthUsd: 2 })
   })
 })
 
@@ -151,5 +206,28 @@ describe("requestCostBudgetOverride", () => {
     // A caller that gave up waiting must never be told the spend was authorised.
     await expect(pending).resolves.toEqual({ approved: false, scopeKey: "day:*" })
     expect(usePendingGatesStore.getState().gates).toHaveLength(0)
+  })
+})
+
+describe("project scope labels", () => {
+  afterEach(() => useProjectStore.setState({ projects: [] }))
+
+  it("names the workspace in a project budget notification", async () => {
+    useProjectStore.setState({
+      projects: [{ id: "alpha", name: "Billing" } as never],
+    })
+    await notifyCostBudgetThreshold(
+      verdict({ scopeKey: "day:project:alpha", target: "project:alpha" }),
+      NOW
+    )
+    expect(notifyMock.mock.calls[0][0].title).toBe("Daily budget for workspace Billing at 95.0%")
+  })
+
+  it("falls back to the id for an unknown workspace", async () => {
+    await notifyCostBudgetThreshold(
+      verdict({ scopeKey: "month:project:gone", period: "month", target: "project:gone" }),
+      NOW
+    )
+    expect(notifyMock.mock.calls[0][0].title).toBe("Monthly budget for workspace gone at 95.0%")
   })
 })

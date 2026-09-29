@@ -4,6 +4,8 @@
     "dayGlobal": "Today, all providers",
     "monthGlobal": "This month, all providers",
     "dayProvider": "Today · {provider}",
-    "monthProvider": "This month · {provider}"
+    "monthProvider": "This month · {provider}",
+    "dayProject": "Today · workspace {workspace}",
+    "monthProject": "This month · workspace {workspace}"
   }
 }
