@@ -55,6 +55,15 @@ describe("issue.update_project", () => {
     expect((await getIssueProject(containerId))?.targetDate).toBeUndefined()
   })
 
+  it("sets and clears the default instruction for finished sub-issues", async () => {
+    await run({ issueProject: "MERC", childrenDoneInstruction: "Cut the release." })
+    expect(await getIssueProject(containerId)).toMatchObject({
+      childrenDoneInstruction: "Cut the release.",
+    })
+    await run({ issueProject: "MERC", childrenDoneInstruction: null })
+    expect(await getIssueProject(containerId)).not.toHaveProperty("childrenDoneInstruction")
+  })
+
   it("offers no way to change the key", async () => {
     // It is baked into every identifier the container has already minted, and
     // into whatever commits and chat messages quoted them.

@@ -348,7 +348,9 @@
     "statusValuesHint": "Option text for each status, when the column does not use the status names themselves.",
     "statusValueFor": "Option text for {status}",
     "larkDesktopOnly": "Lark can only be reached from the desktop app.",
-    "larkNotAuthorized": "{account} is not authorised. Reconnect it in Settings, Connections."
+    "larkNotAuthorized": "{account} is not authorised. Reconnect it in Settings, Connections.",
+    "childrenDoneInstruction": "When sub-issues finish",
+    "childrenDoneInstructionHint": "What an agent is asked to do when a parent's sub-issues are all finished. Leave empty to use the built-in instruction; a parent can override it."
   },
   "workspace": {
     "title": "Workspace",
@@ -934,6 +936,9 @@
       "target-other-workspace": "The issue to watch is in another workspace.",
       "pr-unobservable": "This project is not bound to a GitHub repository in import mode, so a merge would never be seen.",
       "not-a-wakeup": "That wakeup no longer exists."
-    }
+    },
+    "systemInstruction": "Instruction when sub-issues finish",
+    "systemInstructionHint": "Applies to this issue only. Empty uses the project's default.",
+    "instructionSavedToast": "Instruction saved"
   }
 }

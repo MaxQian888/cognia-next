@@ -18359,6 +18359,8 @@
       "bitableApp": "多维表格链接或 app token",
       "bitableHint": "粘贴多维表格的链接，或它的 bascn… token。",
       "bitableInvalid": "这不是多维表格的链接或 token。",
+      "childrenDoneInstruction": "子议题完成时",
+      "childrenDoneInstructionHint": "父议题的子议题全部完成时要让智能体做什么。留空则使用内置说明；父议题可以单独覆盖。",
       "create": "新建项目",
       "createHint": "项目用来归组议题，并决定它们标识符的前缀。",
       "delete": "删除项目",
@@ -18691,6 +18693,7 @@
       "held": "{count, plural, other {# 条输入等待当前运行结束}}",
       "instruction": "给 Agent 的指令",
       "instructionPlaceholder": "例如：回答新评论中的问题，或更新计划。",
+      "instructionSavedToast": "说明已保存",
       "intervalHours": "间隔（小时）",
       "kind": {
         "artifact_linked": "关联产物",
@@ -18781,6 +18784,8 @@
         "paused": "已暂停"
       },
       "system": "自动",
+      "systemInstruction": "子议题完成时的说明",
+      "systemInstructionHint": "只对这个议题生效。留空则使用项目的默认说明。",
       "target": "要关注的议题",
       "targetPlaceholder": "选择一个议题",
       "toStatus": "状态",

@@ -152,6 +152,20 @@ describe("updateIssueProject", () => {
   it("is a no-op for an unknown id", async () => {
     await expect(updateIssueProject("nope", { name: "x" })).resolves.toBeUndefined()
   })
+
+  it("stores the sub-issue default instruction trimmed, and clears it when blank or null", async () => {
+    const project = await createIssueProject({ projectId: "w1", name: "X" })
+    await updateIssueProject(project.id, { childrenDoneInstruction: "  Merge and tag.  " })
+    expect((await getIssueProject(project.id))?.childrenDoneInstruction).toBe("Merge and tag.")
+    await updateIssueProject(project.id, { childrenDoneInstruction: "   " })
+    expect(await getIssueProject(project.id)).not.toHaveProperty("childrenDoneInstruction")
+    await updateIssueProject(project.id, { childrenDoneInstruction: "again" })
+    await updateIssueProject(project.id, { childrenDoneInstruction: null })
+    expect(await getIssueProject(project.id)).not.toHaveProperty("childrenDoneInstruction")
+    await expect(
+      updateIssueProject(project.id, { childrenDoneInstruction: "x".repeat(2001) })
+    ).rejects.toThrow(/limited/)
+  })
 })
 
 describe("resources", () => {

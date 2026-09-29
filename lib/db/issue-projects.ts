@@ -15,12 +15,13 @@
  * truth and bypass `lib/workspace/trust-gate.ts`.
  */
 
-import type {
-  IssueProject,
-  IssueProjectResource,
-  IssueProjectStatus,
-  IssuePriority,
-  IssueActor,
+import {
+  ISSUE_WAKEUP_INSTRUCTION_MAX,
+  type IssueProject,
+  type IssueProjectResource,
+  type IssueProjectStatus,
+  type IssuePriority,
+  type IssueActor,
 } from "@/types/issues"
 import { deriveProjectKey, isValidProjectKey } from "@/lib/issues/identifier"
 import { getDb } from "./schema"
@@ -133,6 +134,8 @@ export interface IssueProjectUpdatePatch {
   startDate?: number | null
   targetDate?: number | null
   icon?: string
+  /** The platform children-done wakeup's default instruction. `null` or blank clears. */
+  childrenDoneInstruction?: string | null
 }
 
 /**
@@ -165,6 +168,15 @@ export async function updateIssueProject(
   if (patch.targetDate !== undefined) {
     if (patch.targetDate === null) delete next.targetDate
     else next.targetDate = patch.targetDate
+  }
+  if (patch.childrenDoneInstruction !== undefined) {
+    const text = patch.childrenDoneInstruction?.trim()
+    if (!text) delete next.childrenDoneInstruction
+    else if (text.length > ISSUE_WAKEUP_INSTRUCTION_MAX) {
+      throw new Error(
+        `A sub-issue instruction is limited to ${ISSUE_WAKEUP_INSTRUCTION_MAX} characters.`
+      )
+    } else next.childrenDoneInstruction = text
   }
 
   await db.issueProjects.put(next)

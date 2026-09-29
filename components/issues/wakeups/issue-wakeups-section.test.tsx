@@ -16,15 +16,22 @@ jest.mock("sonner", () => ({
 }))
 
 let mockTasks: ScheduledTask[] = []
+let mockContainer: { childrenDoneInstruction?: string } | null = null
 jest.mock("@/hooks/data", () => ({
-  useClientLiveQuery: () => mockTasks,
+  // The section reads two things live: its rules (initial []) and the issue's
+  // project (initial null), told apart by what each starts from.
+  useClientLiveQuery: (_query: unknown, _deps: unknown, initial: unknown) =>
+    initial === null ? mockContainer : mockTasks,
 }))
+jest.mock("@/lib/db/issues", () => ({ getIssue: jest.fn() }))
+jest.mock("@/lib/db/issue-projects", () => ({ getIssueProject: jest.fn() }))
 jest.mock("@/components/ui/select")
 jest.mock("@/components/ui/switch")
 jest.mock("@/components/ui/dialog")
 
 const mockSetEnabled = jest.fn()
 const mockDelete = jest.fn()
+const mockSetInstruction = jest.fn()
 jest.mock("@/lib/issues/wakeups/service", () => {
   class IssueWakeupWriteError extends Error {
     constructor(
@@ -40,6 +47,7 @@ jest.mock("@/lib/issues/wakeups/service", () => {
     createIssueWakeup: jest.fn(),
     setIssueWakeupEnabled: (...args: unknown[]) => mockSetEnabled(...args),
     deleteIssueWakeup: (...args: unknown[]) => mockDelete(...args),
+    setChildrenDoneInstruction: (...args: unknown[]) => mockSetInstruction(...args),
   }
 })
 
@@ -76,6 +84,7 @@ function wakeup(
 
 beforeEach(() => {
   mockTasks = []
+  mockContainer = null
   jest.clearAllMocks()
 })
 
@@ -154,4 +163,57 @@ it("on a finished issue, lists rules but lets none be added or resumed", () => {
   expect(screen.getByTestId("issue-wakeup-add")).toBeDisabled()
   expect(screen.getByTestId("issue-wakeup-resume")).toBeDisabled()
   expect(screen.getByText("finishedHint")).toBeInTheDocument()
+})
+
+describe("the platform rule's instruction", () => {
+  const platform = () =>
+    wakeup(
+      { id: "sys" },
+      {
+        system: "children-done",
+        condition: { kind: "children-done" },
+        instruction: "Built-in text.",
+      }
+    )
+
+  it("shows the project's default as the fallback, and saves this issue's own words", async () => {
+    mockContainer = { childrenDoneInstruction: "Project default." }
+    mockTasks = [platform()]
+    mockSetInstruction.mockResolvedValue(undefined)
+    render(<IssueWakeupsSection issueId="i1" identifier="MERC-1" />)
+    const box = screen.getByTestId("issue-wakeup-system-instruction")
+    expect(box).toHaveTextContent("Project default.")
+    fireEvent.click(box)
+    const input = screen.getByTestId("issue-wakeup-system-instruction-input")
+    fireEvent.change(input, { target: { value: "Tag the release." } })
+    fireEvent.blur(input)
+    await waitFor(() =>
+      expect(mockSetInstruction).toHaveBeenCalledWith("i1", "Tag the release.", {
+        source: "user",
+      })
+    )
+    expect(mockToast.success).toHaveBeenCalledWith("instructionSavedToast")
+  })
+
+  it("clears the override with null when the box is emptied", async () => {
+    mockTasks = [wakeup({ id: "sys" }, { ...platform().payload, instructionOverride: "Mine." })]
+    mockSetInstruction.mockResolvedValue(undefined)
+    render(<IssueWakeupsSection issueId="i1" identifier="MERC-1" />)
+    const box = screen.getByTestId("issue-wakeup-system-instruction")
+    expect(box).toHaveTextContent("Mine.")
+    fireEvent.click(box)
+    const input = screen.getByTestId("issue-wakeup-system-instruction-input")
+    fireEvent.change(input, { target: { value: "  " } })
+    fireEvent.blur(input)
+    await waitFor(() =>
+      expect(mockSetInstruction).toHaveBeenCalledWith("i1", null, { source: "user" })
+    )
+  })
+
+  it("leaves an author's rule showing its own instruction, not an editor", () => {
+    mockTasks = [wakeup()]
+    render(<IssueWakeupsSection issueId="i1" identifier="MERC-1" />)
+    expect(screen.queryByTestId("issue-wakeup-system-instruction")).not.toBeInTheDocument()
+    expect(screen.getByTestId("issue-wakeup-wk1")).toHaveTextContent("Answer new comments")
+  })
 })

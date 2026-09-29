@@ -215,6 +215,23 @@ export function ProjectInspector({
 
         <section className="flex flex-col gap-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("projects.childrenDoneInstruction")}
+          </h3>
+          <IssueTextEditor
+            value={project.childrenDoneInstruction ?? ""}
+            multiline
+            onCommit={(text) => onPatch({ childrenDoneInstruction: text.trim() ? text : null })}
+            placeholder={t("projects.childrenDoneInstructionHint")}
+            ariaLabel={t("projects.childrenDoneInstruction")}
+            testId="project-children-done-instruction"
+            className="-mx-2 leading-relaxed"
+          />
+        </section>
+
+        <Separator />
+
+        <section className="flex flex-col gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {t("projects.resources")}
           </h3>
           {project.resources.length === 0 ? (

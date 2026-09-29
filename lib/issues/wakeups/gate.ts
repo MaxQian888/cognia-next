@@ -4,8 +4,9 @@
  * Runs before the scheduler records an execution, so everything that should
  * cost a rule nothing is decided here:
  *
- *   - held inputs are released when the run that blocked them settles, or
- *     the issue that held them in triage is accepted;
+ *   - held inputs are released when the run that blocked them settles, the
+ *     issue that held them in triage is accepted, or a parent that held its
+ *     sub-issue hand-off in backlog leaves it;
  *   - an event the rule's own run caused never refires it;
  *   - the match (kinds, actor kinds, target statuses) and the condition
  *     (the sub-issue barrier advanced, the watched issue finished, a linked
@@ -13,7 +14,12 @@
  *     hold; a children-done fire carries the barrier it reached;
  *   - an input that arrives while the issue's run cannot take it is held on
  *     the rule instead of firing, so it is neither lost nor turned into a
- *     second run racing the first.
+ *     second run racing the first;
+ *   - the platform children-done rule holds its hand-off while the parent
+ *     sits in backlog: nobody has started the parent, so there is no one to
+ *     hand to yet. Every stage that finishes meanwhile is held, and the parent
+ *     is woken ONCE, with all of them, when it leaves backlog. An author's
+ *     children-done rule is not held: its author asked for it explicitly.
  *
  * Loop and rate protection are NOT here: tripping them is a fire that pauses
  * the rule, and a person reading the rule's history should see that fire.
@@ -60,6 +66,11 @@ const RUN_SETTLE_KINDS: ReadonlySet<string> = new Set([
 /** A `triage_changed` entry that took the issue out of triage. */
 function isTriageAccepted(data: IssueActivityEventData): boolean {
   return data.kind === "triage_changed" && data.triageTo === null
+}
+
+/** A `status_changed` entry that took the issue out of backlog. */
+function leftBacklog(data: IssueActivityEventData): boolean {
+  return data.kind === "status_changed" && data.from === "backlog" && data.to !== "backlog"
 }
 
 export interface IssueWakeupGateDeps {
@@ -138,11 +149,12 @@ export function createIssueWakeupFireGate(deps: IssueWakeupGateDeps = defaultDep
     const activeRuns = await listIssueRuns({ issueId: payload.issueId, activeOnly: true })
 
     // What held these inputs back is over: the run settled (whatever this
-    // settle event is and whoever's run it was), or the issue left triage.
+    // settle event is and whoever's run it was), the issue left triage, or
+    // the parent left backlog.
     if (
       payload.deferred?.length &&
       data.subjectId === payload.issueId &&
-      (RUN_SETTLE_KINDS.has(data.kind) || isTriageAccepted(data)) &&
+      (RUN_SETTLE_KINDS.has(data.kind) || isTriageAccepted(data) || leftBacklog(data)) &&
       activeRuns.length === 0
     ) {
       return { fire: true, payload: { [WAKEUP_RELEASE_FLAG]: true } }
@@ -153,16 +165,24 @@ export function createIssueWakeupFireGate(deps: IssueWakeupGateDeps = defaultDep
     const condition = await conditionHolds(payload, data)
     if (!condition.holds) return { fire: false, reason: "condition-unmet" }
     const barrier = condition.barrier ? { [WAKEUP_BARRIER_KEY]: condition.barrier } : undefined
-
-    const active = activeRuns[0]
-    if (active && (await issueRunSessionIds(active)).length === 0) {
+    const holdInput = async (reason: string): Promise<EventFireVerdict> => {
       const evidence = evidenceFromActivity(data)
       // The barrier is not re-derived at release, so the held input says it.
       if (condition.barrier) {
         evidence.summary = `${evidence.summary} — ${describeBarrier(condition.barrier)}`
       }
       await deps.hold(task.id, (held) => appendDeferred(held, evidence))
-      return { fire: false, reason: "held-for-active-run" }
+      return { fire: false, reason }
+    }
+
+    if (payload.system === "children-done" && condition.barrier) {
+      const parent = await getIssue(payload.issueId)
+      if (parent?.status === "backlog") return holdInput("held-parent-in-backlog")
+    }
+
+    const active = activeRuns[0]
+    if (active && (await issueRunSessionIds(active)).length === 0) {
+      return holdInput("held-for-active-run")
     }
     return barrier ? { fire: true, payload: barrier } : { fire: true }
   }

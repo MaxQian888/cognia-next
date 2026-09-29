@@ -115,6 +115,28 @@ describe("ProjectInspector", () => {
       expect(props.onPatch).toHaveBeenCalledWith({ description: "Context for agents" })
     })
 
+    it("sets and clears the sub-issue default instruction", async () => {
+      const user = userEvent.setup()
+      const props = renderInspector().props
+      await user.click(screen.getByTestId("project-children-done-instruction"))
+      await user.type(
+        screen.getByTestId("project-children-done-instruction-input"),
+        "Merge the stack"
+      )
+      fireEvent.blur(screen.getByTestId("project-children-done-instruction-input"))
+      expect(props.onPatch).toHaveBeenCalledWith({ childrenDoneInstruction: "Merge the stack" })
+    })
+
+    it("sends null when the sub-issue instruction is emptied", async () => {
+      const user = userEvent.setup()
+      const { props } = renderInspector({ project: project({ childrenDoneInstruction: "Old" }) })
+      expect(screen.getByTestId("project-children-done-instruction")).toHaveTextContent("Old")
+      await user.click(screen.getByTestId("project-children-done-instruction"))
+      await user.clear(screen.getByTestId("project-children-done-instruction-input"))
+      fireEvent.blur(screen.getByTestId("project-children-done-instruction-input"))
+      expect(props.onPatch).toHaveBeenCalledWith({ childrenDoneInstruction: null })
+    })
+
     it("picks an icon from a fixed palette", async () => {
       const user = userEvent.setup()
       const props = renderInspector().props

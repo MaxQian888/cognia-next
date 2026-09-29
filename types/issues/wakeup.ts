@@ -145,6 +145,13 @@ export interface IssueWakeupPayload extends Record<string, unknown> {
   once?: boolean
   system?: IssueSystemWakeupKind
   /**
+   * A platform rule's instruction for THIS issue, set by a person. Wins over
+   * the container's default (`IssueProject.childrenDoneInstruction`), which
+   * wins over the built-in {@link instruction}; resolved when the rule fires,
+   * so changing a default reaches every parent without rewriting its rule.
+   */
+  instructionOverride?: string
+  /**
    * Inputs that arrived while an active run could not take them. Delivered
    * when that run settles, so a fact is held rather than lost. Bounded to
    * {@link ISSUE_WAKEUP_MAX_DEFERRED}, oldest dropped first.
@@ -153,6 +160,9 @@ export interface IssueWakeupPayload extends Record<string, unknown> {
 }
 
 export const ISSUE_WAKEUP_MAX_DEFERRED = 20
+
+/** Longest instruction a wakeup (or a container's children-done default) may carry. */
+export const ISSUE_WAKEUP_INSTRUCTION_MAX = 2000
 
 /** `wakeup_fired.delivery`: what a fire turned into. */
 export type IssueWakeupDelivery =

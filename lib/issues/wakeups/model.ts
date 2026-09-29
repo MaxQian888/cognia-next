@@ -32,6 +32,7 @@ import {
   wakeupPauseReasonOf,
   ISSUE_WAKEUP_MAX_CHAIN_VISITS,
   ISSUE_WAKEUP_MAX_DEFERRED,
+  ISSUE_WAKEUP_INSTRUCTION_MAX,
   isActiveIssueRunStatus,
   issueWakeupEventSource,
 } from "@/types/issues"
@@ -48,7 +49,8 @@ export const ISSUE_WAKEUP_RATE_WINDOW_MS = 60 * 60_000
 /** Bounds on what a woken agent is handed. */
 export const ISSUE_WAKEUP_SUMMARY_MAX = 280
 export const ISSUE_WAKEUP_BRIEF_MAX_INPUTS = 10
-export const ISSUE_WAKEUP_INSTRUCTION_MAX = 2000
+// The instruction bound lives with the types so the container field can share it.
+export { ISSUE_WAKEUP_INSTRUCTION_MAX }
 
 /** The derived kinds a children-done rule listens to: a child finishing, or moving stage. */
 export const CHILDREN_DONE_KINDS = ["child_status_changed", "child_stage_changed"] as const
@@ -108,15 +110,38 @@ export interface CompiledIssueWakeup {
  * could never honour, so a bad rule is refused when it is written rather than
  * discovered when it fires.
  */
-export function compileIssueWakeup(spec: IssueWakeupSpec): CompiledIssueWakeup {
-  const instruction = spec.instruction.trim()
-  if (!spec.issueId) throw new Error("A wakeup needs the issue it belongs to.")
+/** Trimmed, and refused when empty or over {@link ISSUE_WAKEUP_INSTRUCTION_MAX}. */
+export function normalizeWakeupInstruction(text: string): string {
+  const instruction = text.trim()
   if (!instruction) throw new Error("A wakeup needs an instruction for the agent it wakes.")
   if (instruction.length > ISSUE_WAKEUP_INSTRUCTION_MAX) {
     throw new Error(
       `A wakeup instruction is limited to ${ISSUE_WAKEUP_INSTRUCTION_MAX} characters.`
     )
   }
+  return instruction
+}
+
+/**
+ * What a fire asks the agent to do. An author's rule says it itself; the
+ * platform children-done rule falls back from the parent's own override to
+ * its container's default to the built-in text on the rule.
+ */
+export function effectiveWakeupInstruction(
+  payload: Pick<IssueWakeupPayload, "instruction" | "instructionOverride" | "system">,
+  container?: { childrenDoneInstruction?: string }
+): string {
+  if (payload.system !== "children-done") return payload.instruction
+  return (
+    payload.instructionOverride?.trim() ||
+    container?.childrenDoneInstruction?.trim() ||
+    payload.instruction
+  )
+}
+
+export function compileIssueWakeup(spec: IssueWakeupSpec): CompiledIssueWakeup {
+  if (!spec.issueId) throw new Error("A wakeup needs the issue it belongs to.")
+  const instruction = normalizeWakeupInstruction(spec.instruction)
   const maxFires = spec.maxFires ?? ISSUE_WAKEUP_DEFAULT_MAX_FIRES
   if (!Number.isInteger(maxFires) || maxFires < 1 || maxFires > ISSUE_WAKEUP_MAX_FIRES_LIMIT) {
     throw new Error(`maxFires must be an integer from 1 to ${ISSUE_WAKEUP_MAX_FIRES_LIMIT}.`)
@@ -723,6 +748,7 @@ export function summariseWakeup(task: ScheduledTask) {
     status: task.status,
     trigger: decompileWakeupTrigger(task),
     instruction: payload?.instruction ?? "",
+    ...(payload?.instructionOverride ? { instructionOverride: payload.instructionOverride } : {}),
     once: payload?.once === true,
     system: payload?.system ?? null,
     fires: task.runCount,

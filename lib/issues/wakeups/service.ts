@@ -28,6 +28,7 @@ import { getDb } from "@/lib/db/schema"
 import {
   compileIssueWakeup,
   isTerminalIssueStatus,
+  normalizeWakeupInstruction,
   readWakeupPayload,
   type IssueWakeupSpec,
 } from "./model"
@@ -445,6 +446,43 @@ export async function ensureChildrenDoneWakeup(
     })
     return "created"
   })
+}
+
+/**
+ * Set (or clear, with `null`) what the platform children-done rule asks for
+ * on ONE parent, over its container's default and the built-in text. Creates
+ * the rule when the parent has none yet, so a person can say what the hand-off
+ * should be before the first sub-issue is filed. Written straight to the row,
+ * like held inputs: an instruction is not a trigger edit and must not re-arm.
+ */
+export async function setChildrenDoneInstruction(
+  parentId: string,
+  instruction: string | null,
+  options: MutateIssueWakeupOptions
+): Promise<ScheduledTask> {
+  const text = instruction === null ? null : normalizeWakeupInstruction(instruction)
+  await authorize({ ...options, operation: "mutate" })
+  const ensured = await ensureChildrenDoneWakeup(parentId)
+  if (ensured === "skipped") {
+    const parent = await getIssue(parentId)
+    if (!parent) throw new IssueWakeupWriteError("issue-missing", `No issue ${parentId}.`)
+    throw new IssueWakeupWriteError(
+      "issue-finished",
+      `${parent.identifier} is ${parent.status}; wakeups only watch open issues.`
+    )
+  }
+  const id = childrenDoneWakeupId(parentId)
+  const table = await schedulerTable()
+  await withWakeupLock(id, async () => {
+    const latest = await table.getTask(id)
+    const payload = readWakeupPayload(latest?.payload)
+    if (!latest || !payload) return
+    const next = { ...payload }
+    if (text) next.instructionOverride = text
+    else delete next.instructionOverride
+    await table.updateTask({ ...latest, payload: next, updatedAt: new Date() })
+  })
+  return requireWakeup(id)
 }
 
 /**

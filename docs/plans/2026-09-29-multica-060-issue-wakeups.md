@@ -127,11 +127,21 @@ deliverable,linkedAt}`, `lib/issues/deliverables.ts` (label-keyed
   bounded (count + age + coalescing, pruned on every write), but the
   in-memory feed kept pruned rows until reload; it now evicts them.
   (3) Paused-reason display was already covered.
+- **Backlog hold** (2026-09-30): the platform children-done rule holds
+  its hand-off in the fire gate while the parent sits in `backlog`, each
+  stage that finishes meanwhile is held with the barrier it reached, and
+  the parent is woken once, with all of them, when it leaves backlog. An
+  author's children-done rule is not held.
+- **Instruction fallback** (2026-09-30): the parent's own override
+  (`IssueWakeupPayload.instructionOverride`, edited in the issue's
+  wakeups section) → the CONTAINER's default
+  (`IssueProject.childrenDoneInstruction`, project inspector and
+  `issue.update_project`) → the built-in text, resolved when the rule
+  fires. Departure: upstream's middle layer is the workspace; here it is
+  the container, because the container already has the tracker's settings
+  surface and the workspace has none.
 - **Not built:** Phases 5 and 6 (gated on demand by this plan); `until-pr`
-  `checks` and wakeup expiry (`expires-in` / `on-timeout`); holding a
-  parent's children-done wakeup while the parent sits in backlog; a
-  per-issue or workspace instruction override on the platform
-  children-done rule.
+  `checks` and wakeup expiry (`expires-in` / `on-timeout`).
 
 ## Delta since the August snapshots
 

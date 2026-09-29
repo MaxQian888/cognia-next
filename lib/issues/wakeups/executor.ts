@@ -39,6 +39,7 @@ import {
   ISSUE_WAKEUP_MAX_CHAIN_VISITS,
 } from "@/types/issues"
 import { getIssue } from "@/lib/db/issues"
+import { getIssueProject } from "@/lib/db/issue-projects"
 import type { IssueRunRefusalReason } from "@/lib/issues/run/types"
 import { appendIssueEvent } from "@/lib/db/issue-events"
 import { listIssueRuns } from "@/lib/db/issue-runs"
@@ -52,6 +53,7 @@ import {
   ISSUE_WAKEUP_RATE_LIMIT_PER_HOUR,
   buildWakeupBrief,
   chainOfInputs,
+  effectiveWakeupInstruction,
   evidenceFromActivity,
   isOverWakeupRate,
   isPeriodicWakeup,
@@ -150,7 +152,7 @@ async function identifiersFor(
 async function recordFired(
   issue: Issue,
   task: ScheduledTask,
-  payload: IssueWakeupPayload,
+  instruction: string,
   delivery: IssueWakeupDelivery,
   inputs: number,
   runId?: string
@@ -162,7 +164,7 @@ async function recordFired(
       taskId: task.id,
       delivery,
       ...(runId ? { runId } : {}),
-      instruction: payload.instruction,
+      instruction,
       inputs,
     },
   })
@@ -232,10 +234,16 @@ export function createIssueWakeupExecutor(overrides: Partial<IssueWakeupExecutor
 
     const periodic = isPeriodicWakeup(task)
     const identifiersById = await identifiersFor(issue, inputs)
+    // Resolved now, not when the rule was written: a container default a
+    // person changed since reaches every parent's next hand-off.
+    const instruction = effectiveWakeupInstruction(
+      payload,
+      payload.system ? await getIssueProject(issue.issueProjectId) : undefined
+    )
     const brief = (joined: boolean) =>
       buildWakeupBrief({
         taskId: task.id,
-        instruction: payload.instruction,
+        instruction,
         identifier: issue.identifier,
         inputs,
         joined,
@@ -248,7 +256,7 @@ export function createIssueWakeupExecutor(overrides: Partial<IssueWakeupExecutor
       runId?: string,
       extra: Record<string, unknown> = {}
     ): Promise<TaskExecutorResult> => {
-      await recordFired(issue, task, payload, delivery, inputs.length, runId)
+      await recordFired(issue, task, instruction, delivery, inputs.length, runId)
       if (held.length > 0) await deps.setDeferred(task.id, [])
       if (payload.once) await deps.consume(task.id)
       return {

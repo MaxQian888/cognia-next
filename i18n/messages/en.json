@@ -18359,6 +18359,8 @@
       "bitableApp": "Bitable link or app token",
       "bitableHint": "Paste the Bitable's link, or its bascn… token.",
       "bitableInvalid": "That is not a Bitable link or token.",
+      "childrenDoneInstruction": "When sub-issues finish",
+      "childrenDoneInstructionHint": "What an agent is asked to do when a parent's sub-issues are all finished. Leave empty to use the built-in instruction; a parent can override it.",
       "create": "New project",
       "createHint": "A project groups issues and gives them their identifier prefix.",
       "delete": "Delete project",
@@ -18691,6 +18693,7 @@
       "held": "{count, plural, one {# input held for the active run} other {# inputs held for the active run}}",
       "instruction": "Instruction for the agent",
       "instructionPlaceholder": "e.g. Answer the question in the new comment, or update the plan.",
+      "instructionSavedToast": "Instruction saved",
       "intervalHours": "Every (hours)",
       "kind": {
         "artifact_linked": "artifact linked",
@@ -18781,6 +18784,8 @@
         "paused": "Paused"
       },
       "system": "Automatic",
+      "systemInstruction": "Instruction when sub-issues finish",
+      "systemInstructionHint": "Applies to this issue only. Empty uses the project's default.",
       "target": "Issue to watch",
       "targetPlaceholder": "Choose an issue",
       "toStatus": "Status",

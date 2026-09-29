@@ -210,6 +210,46 @@ describe("children-done", () => {
     )
     await expect(gate(stageOne, fromUnstaged)).resolves.toMatchObject({ fire: false })
   })
+
+  it("holds the platform hand-off while the parent sits in backlog", async () => {
+    const parent = await makeIssue({ status: "backlog" })
+    const first = await makeIssue({ parentId: parent.id, status: "done", stage: 1 })
+    await makeIssue({ parentId: parent.id, status: "todo", stage: 2 })
+    const { gate, held } = setup()
+    const platform = children(parent.id, { system: "children-done" })
+    await expect(
+      gate(platform, childMoved(parent.id, first.id, "in_review", "done"))
+    ).resolves.toEqual({ fire: false, reason: "held-parent-in-backlog" })
+    expect(held).toHaveLength(1)
+    expect(held[0][0]).toMatchObject({ kind: "child_status_changed", subjectId: first.id })
+    expect(held[0][0].summary).toMatch(/stage 1/)
+    // An author's rule on the same parent is not held.
+    const authored = children(parent.id, { condition: { kind: "children-done", stage: 1 } })
+    await expect(
+      gate(authored, childMoved(parent.id, first.id, "in_review", "done"))
+    ).resolves.toMatchObject({ fire: true })
+  })
+})
+
+it("releases a held hand-off once when the parent leaves backlog, not on other moves", async () => {
+  const parent = await makeIssue({ status: "todo" })
+  const deferred: IssueWakeupEvidence[] = [
+    { kind: "child_status_changed", subjectId: "c1", ts: 0, summary: "stage 1", chain: [] },
+  ]
+  const { gate } = setup()
+  const task = rule(parent.id, {
+    deferred,
+    system: "children-done",
+    match: { kinds: ["child_status_changed", "child_stage_changed"] },
+    condition: { kind: "children-done" },
+  })
+  const moved = (from: string, to: string) =>
+    event(activity(parent.id, { kind: "status_changed", from, to }))
+  await expect(gate(task, moved("backlog", "todo"))).resolves.toEqual({
+    fire: true,
+    payload: { [WAKEUP_RELEASE_FLAG]: true },
+  })
+  await expect(gate(task, moved("todo", "in_review"))).resolves.toMatchObject({ fire: false })
 })
 
 it("fires an issue-finished rule only when the watched issue finished", async () => {

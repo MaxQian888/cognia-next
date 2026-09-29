@@ -44,6 +44,7 @@ import {
   pauseIssueWakeupFor,
   pauseWakeupsForIssue,
   reconcileChildrenDoneWakeups,
+  setChildrenDoneInstruction,
   setIssueWakeupDeferred,
   setIssueWakeupEnabled,
   withWakeupLock,
@@ -313,5 +314,33 @@ describe("the parent's children-done rule", () => {
     await makeIssue()
     expect(await reconcileChildrenDoneWakeups()).toBe(1)
     expect(await reconcileChildrenDoneWakeups()).toBe(0)
+  })
+
+  it("takes a person's instruction for one parent, creating the rule if needed, and clears it", async () => {
+    const parent = await makeIssue()
+    const set = await setChildrenDoneInstruction(parent.id, "  Ship the release notes.  ", {
+      source: "user",
+    })
+    expect(set.id).toBe(childrenDoneWakeupId(parent.id))
+    expect(set.payload).toMatchObject({ instructionOverride: "Ship the release notes." })
+    // Not a trigger edit: the scheduler was never asked to re-arm it.
+    expect(mockScheduler.updateTask).not.toHaveBeenCalled()
+    const cleared = await setChildrenDoneInstruction(parent.id, null, { source: "user" })
+    expect(cleared.payload).not.toHaveProperty("instructionOverride")
+    await expect(setChildrenDoneInstruction(parent.id, "   ", { source: "user" })).rejects.toThrow(
+      /instruction/
+    )
+  })
+
+  it("refuses an instruction for a finished parent or a policy that says no", async () => {
+    const finished = await makeIssue({ status: "done" })
+    await expect(
+      setChildrenDoneInstruction(finished.id, "x", { source: "user" })
+    ).rejects.toMatchObject({ reason: "issue-finished" })
+    const open = await makeIssue()
+    mockAuthorize.mockResolvedValueOnce({ allowed: false, message: "Agents may not." })
+    await expect(
+      setChildrenDoneInstruction(open.id, "x", { source: "agent" } as never)
+    ).rejects.toMatchObject({ reason: "policy" })
   })
 })

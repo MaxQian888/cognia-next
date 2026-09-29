@@ -233,6 +233,12 @@ export interface IssueProject {
   resources: IssueProjectResource[]
   /** Emoji or lucide icon name for the list/board chip. */
   icon?: string
+  /**
+   * What an agent is asked to do when every sub-issue of a parent in this
+   * project finished (the platform children-done wakeup). Absent: the
+   * built-in instruction. A parent's own override wins over it.
+   */
+  childrenDoneInstruction?: string
   createdAt: number
   updatedAt: number
 }

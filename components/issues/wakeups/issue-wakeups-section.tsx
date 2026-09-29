@@ -8,6 +8,11 @@
  * waiting for and why a stopped one stopped, and lets the user pause, resume,
  * delete and add them. Every write goes through `lib/issues/wakeups/service.ts`
  * as the user, the same door the `issue.wakeup_*` skills use as an agent.
+ *
+ * The platform "sub-issues finished" rule's instruction is editable in place:
+ * what a person writes applies to this issue only, and an empty box falls
+ * back to the project's default and then the built-in text, which the box
+ * shows as its placeholder so the fallback is never a guess.
  */
 
 import { useState } from "react"
@@ -18,10 +23,17 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useClientLiveQuery } from "@/hooks/data"
-import { decompileWakeupTrigger, readWakeupPayload } from "@/lib/issues/wakeups/model"
+import { getIssue } from "@/lib/db/issues"
+import { getIssueProject } from "@/lib/db/issue-projects"
+import {
+  decompileWakeupTrigger,
+  effectiveWakeupInstruction,
+  readWakeupPayload,
+} from "@/lib/issues/wakeups/model"
 import {
   deleteIssueWakeup,
   listIssueWakeups,
+  setChildrenDoneInstruction,
   setIssueWakeupEnabled,
 } from "@/lib/issues/wakeups/service"
 import { formatNextRun } from "@/lib/scheduler/format-utils"
@@ -29,6 +41,7 @@ import { wakeupPauseReasonOf } from "@/types/issues"
 import type { ScheduledTask } from "@/types/scheduler"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 
+import { IssueTextEditor } from "../editors/issue-text-editor"
 import { WakeupCreateDialog, describeWakeupWriteError } from "./wakeup-create-dialog"
 
 export interface IssueWakeupsSectionProps {
@@ -126,6 +139,14 @@ export function IssueWakeupsSection({
     [issueId],
     [] as ScheduledTask[]
   )
+  const container = useClientLiveQuery(
+    async () => {
+      const issue = await getIssue(issueId)
+      return issue ? ((await getIssueProject(issue.issueProjectId)) ?? null) : null
+    },
+    [issueId],
+    null
+  )
   const triggerText = useWakeupTriggerText(items)
   const stateText = useWakeupStateText()
 
@@ -193,7 +214,37 @@ export function IssueWakeupsSection({
                     {state.label}
                   </Badge>
                 </span>
-                <p className="line-clamp-2 text-muted-foreground">{payload.instruction}</p>
+                {payload.system === "children-done" ? (
+                  <div className="flex flex-col gap-0.5">
+                    <IssueTextEditor
+                      value={payload.instructionOverride ?? ""}
+                      multiline
+                      disabled={busy || finished}
+                      placeholder={effectiveWakeupInstruction(
+                        { ...payload, instructionOverride: undefined },
+                        container ?? undefined
+                      )}
+                      onCommit={(text) =>
+                        void act(
+                          task.id,
+                          () =>
+                            setChildrenDoneInstruction(issueId, text.trim() ? text : null, {
+                              source: "user",
+                            }),
+                          t("instructionSavedToast")
+                        )
+                      }
+                      ariaLabel={t("systemInstruction")}
+                      testId="issue-wakeup-system-instruction"
+                      className="-mx-2 text-muted-foreground"
+                    />
+                    <span className="text-[10px] text-muted-foreground">
+                      {t("systemInstructionHint")}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="line-clamp-2 text-muted-foreground">{payload.instruction}</p>
+                )}
                 <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
                   <span>{t("fires", { count: task.runCount, max: task.config.maxRuns ?? 0 })}</span>
                   {task.status === "active" && task.nextRunAt ? (

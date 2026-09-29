@@ -348,7 +348,9 @@
     "statusValuesHint": "当该列不直接使用状态名时，填写每个状态对应的选项文字。",
     "statusValueFor": "{status} 对应的选项文字",
     "larkDesktopOnly": "只有桌面应用能访问飞书。",
-    "larkNotAuthorized": "{account} 未授权。请在 设置 → 连接 中重新连接。"
+    "larkNotAuthorized": "{account} 未授权。请在 设置 → 连接 中重新连接。",
+    "childrenDoneInstruction": "子议题完成时",
+    "childrenDoneInstructionHint": "父议题的子议题全部完成时要让智能体做什么。留空则使用内置说明；父议题可以单独覆盖。"
   },
   "workspace": {
     "title": "工作区",
@@ -934,6 +936,9 @@
       "target-other-workspace": "要关注的议题属于另一个工作空间。",
       "pr-unobservable": "此项目未以导入模式绑定 GitHub 仓库，合并永远不会被观察到。",
       "not-a-wakeup": "这个唤醒已不存在。"
-    }
+    },
+    "systemInstruction": "子议题完成时的说明",
+    "systemInstructionHint": "只对这个议题生效。留空则使用项目的默认说明。",
+    "instructionSavedToast": "说明已保存"
   }
 }

@@ -417,6 +417,32 @@ describe("delivering", () => {
     expect(starts[0]!.brief).toContain("Sub-issue stage 2 and every earlier stage are finished.")
   })
 
+  it("asks the platform rule's run for the parent's override, else the project default", async () => {
+    registerIssueRunAdapter(engine())
+    const { updateIssueProject } = await import("@/lib/db/issue-projects")
+    await updateIssueProject(containerId, { childrenDoneInstruction: "Project default." })
+    const issue = await makeIssue({ assignee: AGENT })
+    const platform = wakeupTask(issue.id, {}, { system: "children-done" })
+    const first = harness(platform)
+    await first.execute(fired(platform, comment(issue.id)), EXECUTION, SIGNAL)
+    expect(starts[0]!.brief).toContain("Project default.")
+    const trail = await listIssueEvents({ issueId: issue.id })
+    expect(trail.find((e) => e.kind === "wakeup_fired")?.payload).toMatchObject({
+      instruction: "Project default.",
+    })
+
+    const other = await makeIssue({ assignee: AGENT })
+    const overridden = wakeupTask(
+      other.id,
+      {},
+      { system: "children-done", instructionOverride: "This parent's own words." }
+    )
+    const second = harness(overridden)
+    await second.execute(fired(overridden, comment(other.id)), EXECUTION, SIGNAL)
+    expect(starts[1]!.brief).toContain("This parent's own words.")
+    expect(starts[1]!.brief).not.toContain("Project default.")
+  })
+
   it("marks a periodic rule's run as periodic", async () => {
     registerIssueRunAdapter(engine())
     const issue = await makeIssue({ assignee: AGENT })

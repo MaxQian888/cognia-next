@@ -32,6 +32,9 @@ import {
   summariseWakeup,
   type BarrierChild,
   type IssueWakeupSpec,
+  effectiveWakeupInstruction,
+  normalizeWakeupInstruction,
+  ISSUE_WAKEUP_INSTRUCTION_MAX,
 } from "./model"
 
 const base: Omit<IssueWakeupSpec, "trigger"> = { issueId: "i1", instruction: "  Look again  " }
@@ -531,5 +534,47 @@ describe("cues and agent summaries", () => {
     expect(isPeriodicWakeup({ trigger: { type: "cron", cronExpression: "* * * * *" } })).toBe(true)
     expect(isPeriodicWakeup({ trigger: { type: "interval", intervalMs: 1 } })).toBe(true)
     expect(isPeriodicWakeup({ trigger: { type: "event" } })).toBe(false)
+  })
+})
+
+describe("effectiveWakeupInstruction", () => {
+  const platform = { instruction: "Built-in.", system: "children-done" as const }
+  it("falls back from the parent's override to the project default to the built-in text", () => {
+    expect(effectiveWakeupInstruction(platform)).toBe("Built-in.")
+    expect(effectiveWakeupInstruction(platform, { childrenDoneInstruction: " Project. " })).toBe(
+      "Project."
+    )
+    expect(
+      effectiveWakeupInstruction(
+        { ...platform, instructionOverride: "Mine." },
+        { childrenDoneInstruction: "Project." }
+      )
+    ).toBe("Mine.")
+    // Blank layers are skipped rather than handing the agent nothing.
+    expect(
+      effectiveWakeupInstruction(
+        { ...platform, instructionOverride: "  " },
+        { childrenDoneInstruction: "" }
+      )
+    ).toBe("Built-in.")
+  })
+
+  it("leaves an author's rule to its own words", () => {
+    expect(
+      effectiveWakeupInstruction(
+        { instruction: "Author.", instructionOverride: "ignored" },
+        { childrenDoneInstruction: "Project." }
+      )
+    ).toBe("Author.")
+  })
+})
+
+describe("normalizeWakeupInstruction", () => {
+  it("trims, and refuses empty or overlong text", () => {
+    expect(normalizeWakeupInstruction("  go  ")).toBe("go")
+    expect(() => normalizeWakeupInstruction("   ")).toThrow(/needs an instruction/)
+    expect(() => normalizeWakeupInstruction("x".repeat(ISSUE_WAKEUP_INSTRUCTION_MAX + 1))).toThrow(
+      /limited/
+    )
   })
 })

@@ -11,6 +11,7 @@ import { z } from "zod"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
+import { ISSUE_WAKEUP_INSTRUCTION_MAX } from "@/types/issues"
 import { ISSUE_PRIORITY_VALUES, projectRefSchema, resolveWorkspaceId } from "./_core"
 
 const PROJECT_STATUS_VALUES = [
@@ -34,6 +35,14 @@ const schema = z.object({
     .nullable()
     .optional()
     .describe("Target date as a unix epoch in milliseconds. Pass null to clear it."),
+  childrenDoneInstruction: z
+    .string()
+    .max(ISSUE_WAKEUP_INSTRUCTION_MAX)
+    .nullable()
+    .optional()
+    .describe(
+      "What an agent is asked to do when every sub-issue of a parent in this project finished. A parent's own instruction wins over it. Pass null to use the built-in instruction again."
+    ),
 })
 
 const skill: BuiltInSkill<typeof schema> = {
@@ -41,9 +50,9 @@ const skill: BuiltInSkill<typeof schema> = {
   family: "issue",
   label: { en: "Update issue project", "zh-CN": "更新议题项目" },
   description: {
-    en: "Amend a delivery container's name, description, lifecycle status, priority or target date. The key cannot be changed: it is baked into every identifier the container has already issued.",
+    en: "Amend a delivery container's name, description, lifecycle status, priority, target date or the default instruction for when a parent's sub-issues finish. The key cannot be changed: it is baked into every identifier the container has already issued.",
     "zh-CN":
-      "修改交付容器的名称、描述、生命周期状态、优先级或目标日期。key 不可更改，它已经写进该容器发出的所有议题编号里。",
+      "修改交付容器的名称、描述、生命周期状态、优先级、目标日期，或父议题的子议题全部完成时的默认说明。key 不可更改，它已经写进该容器发出的所有议题编号里。",
   },
   platforms: "any",
   mutation: "write",
@@ -61,6 +70,9 @@ const skill: BuiltInSkill<typeof schema> = {
       ...(args.status !== undefined ? { status: args.status } : {}),
       ...(args.priority !== undefined ? { priority: args.priority } : {}),
       ...(args.targetDate !== undefined ? { targetDate: args.targetDate } : {}),
+      ...(args.childrenDoneInstruction !== undefined
+        ? { childrenDoneInstruction: args.childrenDoneInstruction }
+        : {}),
     }
     if (Object.keys(patch).length === 0) {
       return { status: "no-op", id: project.id, key: project.key }
