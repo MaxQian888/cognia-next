@@ -594,6 +594,13 @@ interface ChatState {
   openSessionIds: string[]
   /** Mounted chat surfaces, separate from navigation tabs. First pane owns dialogs. */
   paneIdsBySession: Record<string, string[]>
+  /**
+   * Headless holds (ADR-0204): sessions kept live with no surface mounted, by
+   * holder id. A held session is "open" for event routing — its approvals wait
+   * for a person instead of being auto-denied, and peer messages reach it — but
+   * a hold never owns decisions (that stays with the first real pane).
+   */
+  backgroundHolds: Record<string, string[]>
   /** Session shown in the secondary split pane, or `null` when not split. */
   splitSessionId: string | null
   messages: UIMessage[]
@@ -715,6 +722,13 @@ interface ChatState {
   openSession: (id: string) => void
   retainPane: (sessionId: string, paneId: string) => void
   releasePane: (sessionId: string, paneId: string) => void
+  /** Keep a session live with no surface mounted. Idempotent per holder. */
+  holdInBackground: (sessionId: string, holderId: string) => void
+  /**
+   * Drop one holder. When the last hold goes and nothing else keeps the
+   * session (tab, pane, focus) and it is idle, its slice is discarded.
+   */
+  releaseBackgroundHold: (sessionId: string, holderId: string) => void
   /** Close a session pane: drop its slice + tab, clear split if it held it,
    * and re-focus the next open session when the active one was closed. */
   closeSession: (id: string) => void
@@ -882,6 +896,7 @@ export const useChatStore = create<ChatState>((set) => ({
   sessions: {},
   openSessionIds: [],
   paneIdsBySession: {},
+  backgroundHolds: {},
   splitSessionId: null,
   messages: [],
   status: "idle",
@@ -967,13 +982,50 @@ export const useChatStore = create<ChatState>((set) => ({
       // Closing a surface does not close its tab or discard a live turn/draft.
       return { paneIdsBySession }
     }),
+  holdInBackground: (sessionId, holderId) =>
+    set((s) => {
+      const holders = s.backgroundHolds[sessionId] ?? []
+      if (holders.includes(holderId)) return s
+      return {
+        backgroundHolds: { ...s.backgroundHolds, [sessionId]: [...holders, holderId] },
+        sessions: s.sessions[sessionId]
+          ? s.sessions
+          : { ...s.sessions, [sessionId]: makeSessionSlice() },
+      }
+    }),
+  releaseBackgroundHold: (sessionId, holderId) =>
+    set((s) => {
+      const holders = s.backgroundHolds[sessionId]
+      if (!holders?.includes(holderId)) return s
+      const backgroundHolds = { ...s.backgroundHolds }
+      const remaining = holders.filter((id) => id !== holderId)
+      if (remaining.length) backgroundHolds[sessionId] = remaining
+      else delete backgroundHolds[sessionId]
+      const slice = s.sessions[sessionId]
+      const stillKept =
+        remaining.length > 0 ||
+        s.openSessionIds.includes(sessionId) ||
+        Boolean(s.paneIdsBySession[sessionId]?.length) ||
+        s.activeSessionId === sessionId
+      // Only an idle, unkept slice is discarded — a live turn or a pending ask
+      // outlives its hold until someone opens the session.
+      if (stillKept || !slice || slice.status !== "idle" || slice.pendingApprovals.length) {
+        return { backgroundHolds }
+      }
+      const sessions = { ...s.sessions }
+      delete sessions[sessionId]
+      const lastSendBySession = { ...s.lastSendBySession }
+      delete lastSendBySession[sessionId]
+      return { backgroundHolds, sessions, lastSendBySession }
+    }),
   closeSession: (id) =>
     set((s) => {
       const openSessionIds = s.openSessionIds.filter((x) => x !== id)
       const sessions = { ...s.sessions }
-      if (!s.paneIdsBySession[id]?.length) delete sessions[id]
+      const retained = Boolean(s.paneIdsBySession[id]?.length || s.backgroundHolds[id]?.length)
+      if (!retained) delete sessions[id]
       const lastSendBySession = { ...s.lastSendBySession }
-      if (!s.paneIdsBySession[id]?.length) delete lastSendBySession[id]
+      if (!retained) delete lastSendBySession[id]
       const splitSessionId = s.splitSessionId === id ? null : s.splitSessionId
       const base = { openSessionIds, sessions, lastSendBySession, splitSessionId }
       if (s.activeSessionId !== id) return base
@@ -1484,6 +1536,7 @@ export const useChatStore = create<ChatState>((set) => ({
       sessions: {},
       openSessionIds: [],
       paneIdsBySession: {},
+      backgroundHolds: {},
       splitSessionId: null,
       messages: [],
       status: "idle",

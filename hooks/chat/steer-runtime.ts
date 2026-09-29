@@ -83,13 +83,45 @@ export function sessionStatusOf(sessionId: string): ChatStatus {
   return s.sessions[sessionId]?.status ?? (sessionId === s.activeSessionId ? s.status : "idle")
 }
 
-/** Navigation tabs and embedded panes both receive live state. Pane lifetimes
- * do not change the navigation tab strip or the focused session. */
+/** Navigation tabs, embedded panes and headless background holds (ADR-0204)
+ * all receive live state. Pane and hold lifetimes do not change the navigation
+ * tab strip or the focused session. */
 export function isSessionOpen(sessionId: string): boolean {
   const state = useChatStore.getState()
   return (
-    state.openSessionIds.includes(sessionId) || Boolean(state.paneIdsBySession?.[sessionId]?.length)
+    state.openSessionIds.includes(sessionId) ||
+    Boolean(state.paneIdsBySession?.[sessionId]?.length) ||
+    Boolean(state.backgroundHolds?.[sessionId]?.length)
   )
+}
+
+/**
+ * Open only through a headless hold — no tab, pane or focus shows it. Such a
+ * session's user is somewhere else, so its waits are measured in hours, not
+ * the minutes a visible prompt gets.
+ */
+export function isHeldInBackgroundOnly(sessionId: string): boolean {
+  const state = useChatStore.getState()
+  return (
+    Boolean(state.backgroundHolds?.[sessionId]?.length) &&
+    !state.openSessionIds.includes(sessionId) &&
+    !state.paneIdsBySession?.[sessionId]?.length &&
+    state.activeSessionId !== sessionId
+  )
+}
+
+/** Every session {@link isSessionOpen} would accept, from one store snapshot. */
+export function liveSessionIds(
+  state: Pick<
+    ReturnType<typeof useChatStore.getState>,
+    "openSessionIds" | "paneIdsBySession" | "backgroundHolds"
+  >
+): Set<string> {
+  return new Set([
+    ...state.openSessionIds,
+    ...Object.keys(state.paneIdsBySession ?? {}),
+    ...Object.keys(state.backgroundHolds ?? {}),
+  ])
 }
 
 /**

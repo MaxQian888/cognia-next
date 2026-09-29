@@ -582,6 +582,7 @@ interface ChatStateLike {
   activeSessionId: string | null
   openSessionIds: string[]
   paneIdsBySession: Record<string, string[]>
+  backgroundHolds: Record<string, string[]>
   splitSessionId: string | null
   /** Slices for *background* (non-focused) sessions; the active session's slice
    * is projected from the flat fields below by the `sessions` getter, so the
@@ -644,6 +645,7 @@ const chatState: ChatStateLike = {
   activeSessionId: "sess-1",
   openSessionIds: ["sess-1"],
   paneIdsBySession: {},
+  backgroundHolds: {},
   splitSessionId: null,
   otherSlices: {},
   get sessions() {
@@ -949,6 +951,7 @@ import type { TurnRoute } from "@/lib/chat/turn-route/types"
 import { subscribeDiagnostic } from "@/lib/diagnostics/bus"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { useClaudeChat } from "./use-claude-chat-controller"
+import { HELD_SESSION_APPROVAL_BACKSTOP_MS } from "./claude-chat-events"
 import { recordChatCanonicalEvents } from "@/lib/chat/canonical-sink"
 import {
   clearSubagentApprovalRoute,
@@ -976,6 +979,7 @@ jest.setTimeout(30_000)
 beforeEach(() => {
   persistSessionAssetsMock.mockReset().mockImplementation(async (_sessionId, message) => message)
   chatState.paneIdsBySession = {}
+  chatState.backgroundHolds = {}
   useSubagentRuntimeStore.setState({ subAgents: {} })
   resetComputerUseSessionGrants()
   isTauriMock.mockReset().mockReturnValue(true)
@@ -4675,6 +4679,50 @@ describe("useClaudeChat — actions", () => {
     } finally {
       __resetRemoteAttachForTests()
       jest.useRealTimers()
+    }
+  })
+
+  it("holds a background-held session's approval for a person with the long backstop", async () => {
+    chatState.activeSessionId = "sess-other"
+    chatState.openSessionIds = ["sess-other"]
+    chatState.backgroundHolds = { "sess-1": ["project-thread"] }
+    renderHook(useClaudeChat)
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    jest.useFakeTimers()
+    try {
+      await act(async () => {
+        _messageCallback?.({
+          type: "permission_request",
+          sessionId: "sess-1",
+          requestId: "held-ask",
+          toolName: "edit",
+          input: {},
+        })
+      })
+      expect(approveToolMock).not.toHaveBeenCalled()
+      expect(chatState.pushApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "sess-1", requestId: "held-ask" })
+      )
+      // The visible-pane window passes without a denial…
+      await act(async () => jest.advanceTimersByTime(DEFAULT_APPROVAL_BACKSTOP_MS))
+      expect(approveToolMock).not.toHaveBeenCalled()
+      // …and the held-session window still bounds it.
+      delete chatState.otherSlices["sess-1"]
+      await act(async () =>
+        jest.advanceTimersByTime(HELD_SESSION_APPROVAL_BACKSTOP_MS - DEFAULT_APPROVAL_BACKSTOP_MS)
+      )
+      expect(approveToolMock).toHaveBeenCalledWith(
+        "sess-1",
+        "held-ask",
+        "deny",
+        "auto-denied: approval timed out"
+      )
+    } finally {
+      __resetRemoteAttachForTests()
+      jest.useRealTimers()
+      chatState.backgroundHolds = {}
+      chatState.activeSessionId = "sess-1"
     }
   })
 

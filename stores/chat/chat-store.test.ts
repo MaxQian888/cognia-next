@@ -96,6 +96,44 @@ describe("useChatStore", () => {
     expect(useChatStore.getState().activeSessionId).toBe("main")
   })
 
+  it("keeps a background-held session live without a tab, pane or focus", () => {
+    const store = useChatStore.getState()
+    store.setActiveSession("main")
+    store.holdInBackground("thread", "coordinator")
+    store.holdInBackground("thread", "coordinator")
+    store.holdInBackground("thread", "notifier")
+    store.replaceSessionMessages("thread", [msg("work")])
+    expect(useChatStore.getState().openSessionIds).toEqual(["main"])
+    expect(useChatStore.getState().paneIdsBySession.thread).toBeUndefined()
+    expect(useChatStore.getState().backgroundHolds.thread).toEqual(["coordinator", "notifier"])
+
+    // Closing a tab of the same id keeps the slice while a hold remains.
+    store.openSession("thread")
+    store.closeSession("thread")
+    expect(useChatStore.getState().sessions.thread.messages).toEqual([msg("work")])
+
+    store.releaseBackgroundHold("thread", "coordinator")
+    expect(useChatStore.getState().sessions.thread).toBeDefined()
+    store.releaseBackgroundHold("thread", "notifier")
+    store.releaseBackgroundHold("thread", "notifier")
+    expect(useChatStore.getState().backgroundHolds.thread).toBeUndefined()
+    // Idle and unkept: the last release discards the slice.
+    expect(useChatStore.getState().sessions.thread).toBeUndefined()
+  })
+
+  it("keeps a released hold's slice while its turn is live or an ask is pending", () => {
+    const store = useChatStore.getState()
+    store.holdInBackground("s1", "coordinator")
+    store.pushApproval(approval("pending"))
+    store.releaseBackgroundHold("s1", "coordinator")
+    expect(useChatStore.getState().sessions.s1.pendingApprovals).toHaveLength(1)
+
+    store.holdInBackground("busy", "coordinator")
+    store.setSessionStatus("busy", "streaming")
+    store.releaseBackgroundHold("busy", "coordinator")
+    expect(useChatStore.getState().sessions.busy.status).toBe("streaming")
+  })
+
   it("keeps one pending approval when the same request is delivered twice", () => {
     const store = useChatStore.getState()
     const ask = approval("same-request")

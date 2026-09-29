@@ -39,6 +39,7 @@ import { routerFusionRefusalDiagnostic } from "@/lib/router-fusion/gate/refusal-
 import { ProviderResolutionError } from "@/lib/ai/provider-resolution-error"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import {
+  isHeldInBackgroundOnly,
   isSessionOpen,
   markPendingSteersFailed,
   maybeDrainSteer,
@@ -286,33 +287,47 @@ export async function tryAutoModeDecision(
   return false
 }
 
+/**
+ * A background-held session (a project thread, ADR-0204) waits this long for a
+ * person before its ask is denied: nobody is looking at it, so the visible-pane
+ * window would deny every ask before its owner could come back to it.
+ */
+export const HELD_SESSION_APPROVAL_BACKSTOP_MS = 24 * 60 * 60 * 1000
+
 /** An awaiting tool remains bounded even if its only pane is later hidden/closed. */
 function pushInteractiveApproval(approval: PendingApproval, ownerSessionId = approval.sessionId) {
   useChatStore.getState().pushApproval(approval)
-  armApprovalBackstop(approval.sessionId, approval.requestId, () => {
-    const owner = useChatStore.getState().sessions[ownerSessionId]
-    // A decision already removed the request. A missing slice, however, means
-    // the pane closed; the sidecar still needs its timeout denial.
-    if (
-      owner &&
-      !owner.pendingApprovals.some(
-        (pending) => pending.requestId === approval.requestId && pending.status !== "interrupted"
-      )
+  armApprovalBackstop(
+    approval.sessionId,
+    approval.requestId,
+    () => denyTimedOutApproval(approval, ownerSessionId),
+    isHeldInBackgroundOnly(ownerSessionId) ? HELD_SESSION_APPROVAL_BACKSTOP_MS : undefined
+  )
+}
+
+function denyTimedOutApproval(approval: PendingApproval, ownerSessionId: string) {
+  const owner = useChatStore.getState().sessions[ownerSessionId]
+  // A decision already removed the request. A missing slice, however, means
+  // the pane closed; the sidecar still needs its timeout denial.
+  if (
+    owner &&
+    !owner.pendingApprovals.some(
+      (pending) => pending.requestId === approval.requestId && pending.status !== "interrupted"
     )
-      return
-    void approveTool(
-      approval.sessionId,
-      approval.requestId,
-      "deny",
-      "auto-denied: approval timed out"
-    )
-      .then(() => {
-        useChatStore
-          .getState()
-          .markApprovalInterrupted(approval.requestId, approval.sessionId, "approval timed out")
-      })
-      .catch((error) => console.error("approval backstop deny failed", error))
-  })
+  )
+    return
+  void approveTool(
+    approval.sessionId,
+    approval.requestId,
+    "deny",
+    "auto-denied: approval timed out"
+  )
+    .then(() => {
+      useChatStore
+        .getState()
+        .markApprovalInterrupted(approval.requestId, approval.sessionId, "approval timed out")
+    })
+    .catch((error) => console.error("approval backstop deny failed", error))
 }
 
 export async function handleEvent(

@@ -46,6 +46,7 @@ import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/
 import {
   appendSteerMessage,
   isSessionOpen,
+  liveSessionIds,
   markPendingSteersFailed,
   mergeSteerWebSearchIntoLastSend,
   sessionExternalLane,
@@ -535,7 +536,7 @@ export function useClaudeChat() {
     const apply = () => {
       const runtime = useSubagentRuntimeStore.getState().subAgents
       const chat = useChatStore.getState()
-      const ids = new Set([...chat.openSessionIds, ...Object.keys(chat.paneIdsBySession ?? {})])
+      const ids = liveSessionIds(chat)
       if (chat.activeSessionId) ids.add(chat.activeSessionId)
       for (const sid of ids) {
         const subs = selectSessionSubagents(runtime, sid)
@@ -557,6 +558,7 @@ export function useClaudeChat() {
       if (
         previous &&
         state.paneIdsBySession === previous.paneIdsBySession &&
+        state.backgroundHolds === previous.backgroundHolds &&
         state.openSessionIds === previous.openSessionIds &&
         state.activeSessionId === previous.activeSessionId
       )
@@ -4887,14 +4889,19 @@ export function useClaudeChat() {
   )
   const openSessionIdsForDrain = useChatStore((s) => s.openSessionIds)
   const paneIdsForDrain = useChatStore((s) => s.paneIdsBySession)
+  const holdsForDrain = useChatStore((s) => s.backgroundHolds)
   useEffect(() => {
     void expireSessionPeerMessages().catch(() => undefined)
-    const reachable = new Set([...openSessionIdsForDrain, ...Object.keys(paneIdsForDrain ?? {})])
+    const reachable = liveSessionIds({
+      openSessionIds: openSessionIdsForDrain,
+      paneIdsBySession: paneIdsForDrain,
+      backgroundHolds: holdsForDrain,
+    })
     for (const sessionId of reachable) {
       maybeDrainBackgroundResults(sessionId)
       void drainSessionPeerMessages(sessionId).catch(() => undefined)
     }
-  }, [openSessionIdsForDrain, paneIdsForDrain])
+  }, [openSessionIdsForDrain, paneIdsForDrain, holdsForDrain])
 
   // Self-paced /loop kick-off: when the runtime creates or resumes a loop
   // for a reachable session, dispatch its next iteration silently — the same

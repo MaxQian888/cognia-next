@@ -30,6 +30,7 @@ const state = {
   sessions: {} as Record<string, SliceLike>,
   openSessionIds: [] as string[],
   paneIdsBySession: {} as Record<string, string[]>,
+  backgroundHolds: {} as Record<string, string[]>,
   lastSendBySession: {} as Record<
     string,
     { content: string; options: SendOptions; attemptIndex: number }
@@ -68,7 +69,9 @@ import {
   appendSteerMessage,
   discardPendingSteer,
   editPendingSteer,
+  isHeldInBackgroundOnly,
   isSessionOpen,
+  liveSessionIds,
   markPendingSteersFailed,
   mergeSteerWebSearchContexts,
   mergeSteerWebSearchIntoLastSend,
@@ -257,6 +260,31 @@ describe("isSessionOpen", () => {
     state.openSessionIds = ["s1"]
     expect(isSessionOpen("s1")).toBe(true)
     expect(isSessionOpen("s2")).toBe(false)
+  })
+  it("treats a background hold as open, and as held-only without a surface", () => {
+    state.backgroundHolds = { thread: ["coordinator"] }
+    expect(isSessionOpen("thread")).toBe(true)
+    expect(isHeldInBackgroundOnly("thread")).toBe(true)
+    state.paneIdsBySession.thread = ["pane"]
+    expect(isHeldInBackgroundOnly("thread")).toBe(false)
+    delete state.paneIdsBySession.thread
+    state.backgroundHolds = {}
+    expect(isSessionOpen("thread")).toBe(false)
+    expect(isHeldInBackgroundOnly("thread")).toBe(false)
+  })
+})
+
+describe("liveSessionIds", () => {
+  it("unions tabs, panes and holds", () => {
+    expect(
+      [
+        ...liveSessionIds({
+          openSessionIds: ["a"],
+          paneIdsBySession: { b: ["p"] },
+          backgroundHolds: { c: ["h"], a: ["h"] },
+        }),
+      ].sort()
+    ).toEqual(["a", "b", "c"])
   })
 })
 

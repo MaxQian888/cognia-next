@@ -72,3 +72,11 @@ it("restores the existing mode when persistence fails", async () => {
   await expect(result.current.resumePlan("go", "default")).rejects.toThrow("write failed")
   expect(useChatStore.getState().sessions["plan-session"].permissionMode).toBe("acceptEdits")
 })
+
+it("gives decisions to the first real pane even when a background hold came first", () => {
+  useChatStore.getState().holdInBackground("thread", "coordinator")
+  const pane = renderHook(() => useChatPaneRuntime("thread"))
+  expect(pane.result.current.ownsDecisions).toBe(true)
+  pane.unmount()
+  expect(useChatStore.getState().backgroundHolds.thread).toEqual(["coordinator"])
+})
