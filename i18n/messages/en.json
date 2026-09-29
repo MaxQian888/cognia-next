@@ -18525,6 +18525,12 @@
         "running": "Running",
         "succeeded": "Succeeded"
       },
+      "steerLabel": "Steer the running agent",
+      "steerPlaceholder": "Tell the agent something it should act on now (⌘/Ctrl+Enter to send)",
+      "steerRefused": "The run did not take the message: its turn may have closed its input, or the text was held back. Leave a comment instead.",
+      "steerSend": "Send to the agent",
+      "steerSent": "Sent to the running agent",
+      "steerUnavailable": "This run's engine does not take input while it works. Leave a comment, or cancel and run again.",
       "submit": "Run",
       "timeline": "Run history",
       "timelineEntry": "{engine}: {status}, started {at}",

@@ -74,8 +74,11 @@ jest.mock("@/lib/db/issues", () => ({
   addIssueComment: (...a: unknown[]) => mockAddIssueComment(...a),
 }))
 const mockCancelIssueRun = jest.fn()
+const mockRunSessionIds = jest.fn(async (_run: unknown): Promise<string[]> => ["s1"])
 jest.mock("@/lib/issues/run/registry", () => ({
   cancelIssueRun: (...a: unknown[]) => mockCancelIssueRun(...a),
+  issueRunSessionIds: (run: unknown) => mockRunSessionIds(run),
+  steerIssueRun: async () => true,
 }))
 const mockToastSuccess = jest.fn()
 const mockToastError = jest.fn()
@@ -255,6 +258,9 @@ describe("IssueDetailPanel", () => {
     expect(links[1]).not.toHaveAttribute("target")
     expect(screen.getByText("run.activeHint")).toBeInTheDocument()
     expect(screen.queryByTestId("issue-run-trigger")).not.toBeInTheDocument()
+    // Only the active run is offered for steering.
+    expect(await screen.findByTestId("issue-run-steer")).toBeInTheDocument()
+    expect(mockRunSessionIds).toHaveBeenCalledWith(expect.objectContaining({ id: "run-2" }))
     fireEvent.click(screen.getByTestId("issue-run-cancel"))
     await waitFor(() => expect(mockCancelIssueRun).toHaveBeenCalledWith("run-2"))
     expect(mockToastSuccess).toHaveBeenCalledWith("run.cancelled")

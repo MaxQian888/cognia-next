@@ -534,7 +534,13 @@
     "stackOn": "叠加在",
     "stackOnHint": "把这个 issue 的 PR 基于另一个 issue 的分支，而不是基分支，这样每次评审只看到它自己的改动。只列出已完成的运行真正推送过的分支。",
     "stackOnNone": "不叠加——使用基分支",
-    "baseBranchStacked": "由所叠加的分支决定：一个 PR 只有一个基分支。"
+    "baseBranchStacked": "由所叠加的分支决定：一个 PR 只有一个基分支。",
+    "steerLabel": "引导运行中的智能体",
+    "steerPlaceholder": "告诉智能体现在就该处理的事（⌘/Ctrl+Enter 发送）",
+    "steerSend": "发送给智能体",
+    "steerSent": "已发送给运行中的智能体",
+    "steerRefused": "这次运行没有接收该消息：它的回合可能已关闭输入，或文本被拦下。请改为留言。",
+    "steerUnavailable": "这次运行的引擎在工作时不接受输入。请留言，或取消后重新运行。"
   },
   "notify": {
     "open": "打开议题",

@@ -18525,6 +18525,12 @@
         "running": "运行中",
         "succeeded": "成功"
       },
+      "steerLabel": "引导运行中的智能体",
+      "steerPlaceholder": "告诉智能体现在就该处理的事（⌘/Ctrl+Enter 发送）",
+      "steerRefused": "这次运行没有接收该消息：它的回合可能已关闭输入，或文本被拦下。请改为留言。",
+      "steerSend": "发送给智能体",
+      "steerSent": "已发送给运行中的智能体",
+      "steerUnavailable": "这次运行的引擎在工作时不接受输入。请留言，或取消后重新运行。",
       "submit": "运行",
       "timeline": "运行历史",
       "timelineEntry": "{engine}：{status}，开始于 {at}",

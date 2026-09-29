@@ -76,6 +76,7 @@ import { IssueTriageRow } from "./triage/issue-triage-row"
 import { IssueDeliverablesSection } from "./deliverables/issue-deliverables-section"
 import { IssueRunArtifactLink } from "./deliverables/issue-run-artifact-link"
 import { IssueRunStrip } from "./runs/issue-run-strip"
+import { IssueRunSteer } from "./runs/issue-run-steer"
 import { IssueWakeupsSection } from "./wakeups/issue-wakeups-section"
 import { MentionBacklinksPanel } from "@/components/chat/mention-backlinks-chip"
 import { entityBacklinkTarget } from "@/lib/chat/mentions/backlinks"
@@ -575,6 +576,7 @@ export function IssueDetailPanel({
               <p className="text-xs text-muted-foreground">
                 {activeRun ? t("run.activeHint") : t("run.sectionHint")}
               </p>
+              {activeRun ? <IssueRunSteer run={activeRun} /> : null}
               <IssueRunStrip runs={runs ?? []} />
               {(runs ?? []).length > 0 ? (
                 <ol className="flex flex-col gap-2" data-testid="issue-run-list">

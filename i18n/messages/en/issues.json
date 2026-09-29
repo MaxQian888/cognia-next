@@ -534,7 +534,13 @@
     "stackOn": "Stack on",
     "stackOnHint": "Base this issue's pull request on another issue's branch instead of the base branch, so each review shows only its own change. Only branches a finished run already pushed are offered.",
     "stackOnNone": "Nothing — base branch",
-    "baseBranchStacked": "Set by the stack: a pull request has one base."
+    "baseBranchStacked": "Set by the stack: a pull request has one base.",
+    "steerLabel": "Steer the running agent",
+    "steerPlaceholder": "Tell the agent something it should act on now (⌘/Ctrl+Enter to send)",
+    "steerSend": "Send to the agent",
+    "steerSent": "Sent to the running agent",
+    "steerRefused": "The run did not take the message: its turn may have closed its input, or the text was held back. Leave a comment instead.",
+    "steerUnavailable": "This run's engine does not take input while it works. Leave a comment, or cancel and run again."
   },
   "notify": {
     "open": "Open issue",
