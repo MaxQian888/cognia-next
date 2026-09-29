@@ -190,6 +190,30 @@ describe("getMemoryExternal", () => {
     expect(await getMemoryExternal("m1", localUserCaller())).toBeUndefined()
     expect(mockGetMemory).not.toHaveBeenCalled()
   })
+
+  it("hides a revision snapshot even when its scope is readable", async () => {
+    mockResolvePolicy.mockResolvedValue({ canRecall: true, readableScopes: ["global"] })
+    mockGetMemory.mockResolvedValue(
+      row({
+        id: "snap1",
+        scope: "global",
+        status: "invalidated",
+        revisionOf: "m1",
+        supersededById: "m1",
+      })
+    )
+    expect(await getMemoryExternal("snap1", localUserCaller())).toBeUndefined()
+    expect(mockGetMemory).toHaveBeenCalledWith("snap1")
+  })
+
+  it("still returns an ordinary invalidated (non-snapshot) row", async () => {
+    mockResolvePolicy.mockResolvedValue({ canRecall: true, readableScopes: ["global"] })
+    mockGetMemory.mockResolvedValue(row({ scope: "global", status: "invalidated" }))
+    expect(await getMemoryExternal("m1", localUserCaller())).toMatchObject({
+      id: "m1",
+      status: "invalidated",
+    })
+  })
 })
 
 describe("countMemoriesExternal", () => {

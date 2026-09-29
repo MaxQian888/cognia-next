@@ -187,6 +187,11 @@ export async function buildAutoExtractionDeps(
           // themselves — and the row keeps its personal identity, so it goes on
           // rendering under "What you remember about the user".
           claimFilter: "personal-only",
+          // A similarity lookup for the judge, not a recall: the user's recall
+          // preferences (LLM rerank, session routing, belief weight) do not apply.
+          rerank: false,
+          sessionRecallRouting: false,
+          beliefRankingWeight: 0,
         },
         memDeps
       ).catch(() => [])
@@ -208,7 +213,7 @@ export async function buildAutoExtractionDeps(
     },
     update: async (id, text) => {
       if (!hasNoLeakingPii(text)) return
-      await memDb.updateMemory(id, { text, bumpVersion: true })
+      await memDb.updateMemory(id, { text, bumpVersion: true, revisionReason: "consolidation" })
       if (vectorSink) {
         try {
           await vectorSink.upsert(id, text)

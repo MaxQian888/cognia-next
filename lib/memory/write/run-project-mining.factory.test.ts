@@ -204,6 +204,7 @@ describe("buildProjectMiningDeps", () => {
     expect(mockUpdateMemory).toHaveBeenLastCalledWith("existing", {
       text: "corrected fact",
       bumpVersion: true,
+      revisionReason: "consolidation",
       projectMemoryKind: "constraint",
       observedAt: 2000,
       confidence: 0.95,
@@ -226,6 +227,7 @@ describe("buildProjectMiningDeps", () => {
     expect(mockUpdateMemory).toHaveBeenLastCalledWith("existing", {
       text: "revised again",
       bumpVersion: true,
+      revisionReason: "consolidation",
       projectMemoryKind: "state",
       confidence: 0.8,
     })
@@ -242,6 +244,7 @@ describe("buildProjectMiningDeps", () => {
     expect(mockUpdateMemory).toHaveBeenCalledWith("new1", {
       text: "revised fact",
       bumpVersion: true,
+      revisionReason: "consolidation",
     })
     await wired.invalidate("new1", "new2")
     expect(mockInvalidateMemory).toHaveBeenCalledWith("new1", "new2")

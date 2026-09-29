@@ -169,6 +169,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:changed": "jest --changedSince=origin/dev",
+    "memory:eval": "cross-env MEMORY_EVAL_REPORT=1 jest packages/memory/src/eval --verbose",
     "test:coverage": "node scripts/test/run-coverage.mjs",
     "test:e2e": "playwright test",
     "test:conformance": "node --test tests/conformance/anthropic-server/server.test.mjs tests/conformance/suite-manifest.test.mjs tests/conformance/harness/*.test.mjs tests/conformance/cases/*.test.mjs",

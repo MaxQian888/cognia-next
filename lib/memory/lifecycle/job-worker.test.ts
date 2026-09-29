@@ -22,6 +22,11 @@ const mockGetProject = jest.fn()
 const mockListClaimsNeedingRecheck = jest.fn()
 const mockBuildRevalidateDeps = jest.fn()
 const mockRevalidateClaim = jest.fn()
+const mockTryBuildVectorReader = jest.fn()
+const mockRunLifecycleSweep = jest.fn()
+const mockInvalidateMemory = jest.fn()
+const mockListEvidence = jest.fn()
+const mockNoteVectorFailure = jest.fn()
 
 jest.mock("@/lib/db/settings", () => ({ getSettings: () => mockGetSettings() }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: () => mockGetSession() }))
@@ -36,8 +41,10 @@ jest.mock("@/lib/db/memory-governance", () => ({
   createMemoryEvidence: (...args: unknown[]) => mockCreateEvidence(...args),
   bindMemoryGovernanceOutcome: (...args: unknown[]) => mockBindOutcome(...args),
   failMemoryJob: jest.fn(),
+  listMemoryEvidence: (...args: unknown[]) => mockListEvidence(...args),
 }))
 jest.mock("@/lib/db/memories", () => ({
+  invalidateMemory: (...args: unknown[]) => mockInvalidateMemory(...args),
   listMemories: (...args: unknown[]) => mockListMemories(...args),
   listProjectClaimsNeedingRecheck: (...args: unknown[]) => mockListClaimsNeedingRecheck(...args),
   updateMemory: (...args: unknown[]) => mockUpdateMemory(...args),
@@ -58,6 +65,13 @@ jest.mock("@/lib/memory/lifecycle/maintenance", () => ({
 }))
 jest.mock("@/lib/memory/runtime/build-deps", () => ({
   tryBuildMemoryVectorSink: (...args: unknown[]) => mockTryBuildVectorSink(...args),
+  tryBuildMemoryVectorReader: (...args: unknown[]) => mockTryBuildVectorReader(...args),
+}))
+jest.mock("@/lib/memory/lifecycle/lifecycle-sweep", () => ({
+  runMemoryLifecycleSweep: (...args: unknown[]) => mockRunLifecycleSweep(...args),
+}))
+jest.mock("./enqueue-reconcile", () => ({
+  noteMemoryVectorFailure: (...args: unknown[]) => mockNoteVectorFailure(...args),
 }))
 jest.mock("@/lib/memory/write/run-project-mining", () => ({
   buildProjectMiningDeps: (...args: unknown[]) => mockBuildMiningDeps(...args),
@@ -1079,5 +1093,249 @@ describe("memory job worker", () => {
       "memory-job-worker",
       3
     )
+  })
+})
+
+describe("memory-lifecycle-sweep job", () => {
+  type SweepDeps = import("./lifecycle-sweep").LifecycleSweepDeps
+  const sweepJob = (): MemoryJob => ({ ...job("sweep"), kind: "memory-lifecycle-sweep" })
+  const row = (over: Record<string, unknown> = {}) =>
+    ({ id: "m1", text: "old text", ...over }) as never
+
+  async function capturedDeps(): Promise<SweepDeps> {
+    await processMemoryJob(sweepJob())
+    return mockRunLifecycleSweep.mock.calls[0]![1] as SweepDeps
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockGetSettings.mockResolvedValue({
+      memory: { enabled: true, compactColdEpisodic: true, dedupColdClusters: true },
+    })
+    mockTryBuildVectorSink.mockResolvedValue(undefined)
+    mockTryBuildVectorReader.mockResolvedValue(undefined)
+    mockRunLifecycleSweep.mockResolvedValue({ candidates: 0, compacted: [], merges: [] })
+    mockUpdateMemory.mockResolvedValue(undefined)
+    mockInvalidateMemory.mockResolvedValue(undefined)
+    mockListMemories.mockResolvedValue([])
+    mockListEvidence.mockResolvedValue([])
+    mockCreateEvidence.mockResolvedValue({})
+    mockAppendAudit.mockResolvedValue({ id: "audit-1" })
+  })
+
+  it("skips when memory is disabled", async () => {
+    mockGetSettings.mockResolvedValue({
+      memory: { enabled: false, compactColdEpisodic: true, dedupColdClusters: true },
+    })
+    await expect(processMemoryJob(sweepJob())).resolves.toEqual({
+      status: "skipped",
+      resultCode: "memory_disabled",
+    })
+    expect(mockRunLifecycleSweep).not.toHaveBeenCalled()
+  })
+
+  it("finishes as no_output when both passes were turned off after queueing", async () => {
+    mockGetSettings.mockResolvedValue({
+      memory: { enabled: true, compactColdEpisodic: false, dedupColdClusters: false },
+    })
+    await expect(processMemoryJob(sweepJob())).resolves.toEqual({
+      status: "no_output",
+      resultCode: "lifecycle_sweep_disabled",
+    })
+    expect(mockRunLifecycleSweep).not.toHaveBeenCalled()
+    expect(mockTryBuildVectorSink).not.toHaveBeenCalled()
+  })
+
+  it("succeeds when the sweep compacted or merged something", async () => {
+    mockRunLifecycleSweep.mockResolvedValueOnce({ candidates: 1, compacted: ["m1"], merges: [] })
+    await expect(processMemoryJob(sweepJob())).resolves.toEqual({
+      status: "succeeded",
+      resultCode: "lifecycle_swept",
+    })
+    mockRunLifecycleSweep.mockResolvedValueOnce({
+      candidates: 2,
+      compacted: [],
+      merges: [{ survivorId: "a", mergedIds: ["b"] }],
+    })
+    await expect(processMemoryJob(sweepJob())).resolves.toEqual({
+      status: "succeeded",
+      resultCode: "lifecycle_swept",
+    })
+  })
+
+  it("reports nothing_cold or lifecycle_dedup_no_vectors when nothing changed", async () => {
+    await expect(processMemoryJob(sweepJob())).resolves.toEqual({
+      status: "no_output",
+      resultCode: "nothing_cold",
+    })
+    mockRunLifecycleSweep.mockResolvedValueOnce({
+      candidates: 3,
+      compacted: [],
+      merges: [],
+      dedupSkipped: "no_vectors",
+    })
+    await expect(processMemoryJob(sweepJob())).resolves.toEqual({
+      status: "no_output",
+      resultCode: "lifecycle_dedup_no_vectors",
+    })
+  })
+
+  it("passes the resolved config and lists only active rows", async () => {
+    const deps = await capturedDeps()
+    const [input] = mockRunLifecycleSweep.mock.calls[0]!
+    expect(input).toEqual({
+      config: expect.objectContaining({
+        enabled: true,
+        compactColdEpisodic: true,
+        dedupColdClusters: true,
+        coldRetentionThreshold: expect.any(Number),
+      }),
+    })
+    await deps.listActive()
+    expect(mockListMemories).toHaveBeenCalledWith({ status: "active" })
+  })
+
+  it("wires the vector reader only when dedup is on", async () => {
+    const getEmbeddings = jest.fn(async () => new Map([["m1", [1, 0]]]))
+    mockTryBuildVectorReader.mockResolvedValue({ getEmbeddings })
+    const deps = await capturedDeps()
+    expect(deps.loadEmbeddings).toBeDefined()
+    await expect(deps.loadEmbeddings!([row()])).resolves.toEqual(new Map([["m1", [1, 0]]]))
+    expect(getEmbeddings).toHaveBeenCalledWith([row()])
+
+    jest.clearAllMocks()
+    mockRunLifecycleSweep.mockResolvedValue({ candidates: 0, compacted: [], merges: [] })
+    mockGetSettings.mockResolvedValue({
+      memory: { enabled: true, compactColdEpisodic: true, dedupColdClusters: false },
+    })
+    const compactOnly = await capturedDeps()
+    expect(mockTryBuildVectorReader).not.toHaveBeenCalled()
+    expect(compactOnly.loadEmbeddings).toBeUndefined()
+  })
+
+  it("omits loadEmbeddings when no reader can be built", async () => {
+    const deps = await capturedDeps()
+    expect(mockTryBuildVectorReader).toHaveBeenCalledTimes(1)
+    expect(deps.loadEmbeddings).toBeUndefined()
+  })
+
+  it("reviseText writes through updateMemory with the revision reason and compactedAt", async () => {
+    const deps = await capturedDeps()
+    await deps.reviseText(row(), "compacted text", "compaction", 1234)
+    expect(mockUpdateMemory).toHaveBeenCalledTimes(1)
+    expect(mockUpdateMemory).toHaveBeenCalledWith("m1", {
+      text: "compacted text",
+      bumpVersion: true,
+      revisionReason: "compaction",
+      compactedAt: 1234,
+    })
+    await deps.reviseText(row({ id: "m2" }), "merged text", "dedup-merge", 99)
+    expect(mockUpdateMemory).toHaveBeenLastCalledWith("m2", {
+      text: "merged text",
+      bumpVersion: true,
+      revisionReason: "dedup-merge",
+      compactedAt: 99,
+    })
+  })
+
+  it("reviseText re-indexes the new text and records a fresh vector doc id", async () => {
+    const upsert = jest.fn(async () => undefined)
+    mockTryBuildVectorSink.mockResolvedValue({ upsert, delete: jest.fn() })
+    const deps = await capturedDeps()
+
+    await deps.reviseText(row(), "compacted text", "compaction", 1)
+    expect(upsert).toHaveBeenCalledWith("m1", "compacted text")
+    expect(mockUpdateMemory).toHaveBeenLastCalledWith("m1", { vectorDocId: "m1" })
+
+    mockUpdateMemory.mockClear()
+    await deps.reviseText(row({ id: "m2", vectorDocId: "doc-2" }), "next text", "compaction", 2)
+    expect(upsert).toHaveBeenLastCalledWith("doc-2", "next text")
+    // Already indexed: only the text patch, no vectorDocId write.
+    expect(mockUpdateMemory).toHaveBeenCalledTimes(1)
+  })
+
+  it("reviseText never sends leaking PII to the vector sink", async () => {
+    const upsert = jest.fn(async () => undefined)
+    mockTryBuildVectorSink.mockResolvedValue({ upsert })
+    const deps = await capturedDeps()
+    await deps.reviseText(row(), "Email bob@example.com", "compaction", 1)
+    expect(mockUpdateMemory).toHaveBeenCalledTimes(1)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it("reviseText drops the stale vector when the new text may not be embedded", async () => {
+    const upsert = jest.fn(async () => undefined)
+    const del = jest.fn(async () => undefined)
+    mockTryBuildVectorSink.mockResolvedValue({ upsert, delete: del })
+    const deps = await capturedDeps()
+    await deps.reviseText(row({ vectorDocId: "doc-1" }), "Email bob@example.com", "compaction", 1)
+    expect(upsert).not.toHaveBeenCalled()
+    expect(del).toHaveBeenCalledWith(["doc-1"])
+  })
+
+  it("reviseText notes a vector failure instead of throwing", async () => {
+    mockTryBuildVectorSink.mockResolvedValue({
+      upsert: jest.fn(async () => {
+        throw new Error("backend down")
+      }),
+    })
+    const deps = await capturedDeps()
+    await expect(deps.reviseText(row(), "compacted text", "compaction", 1)).resolves.toBeUndefined()
+    expect(mockNoteVectorFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it("supersede invalidates the loser and drops its vector doc", async () => {
+    const del = jest.fn(async () => undefined)
+    mockTryBuildVectorSink.mockResolvedValue({ upsert: jest.fn(), delete: del })
+    const deps = await capturedDeps()
+    await deps.supersede(row({ id: "loser", vectorDocId: "doc-l" }), row({ id: "survivor" }))
+    expect(mockInvalidateMemory).toHaveBeenCalledWith("loser", "survivor")
+    expect(del).toHaveBeenCalledWith(["doc-l"])
+
+    del.mockClear()
+    await deps.supersede(row({ id: "unindexed" }), row({ id: "survivor" }))
+    expect(del).not.toHaveBeenCalled()
+  })
+
+  it("supersede notes a vector delete failure instead of throwing", async () => {
+    mockTryBuildVectorSink.mockResolvedValue({
+      upsert: jest.fn(),
+      delete: jest.fn(async () => {
+        throw new Error("backend down")
+      }),
+    })
+    const deps = await capturedDeps()
+    await expect(
+      deps.supersede(row({ id: "loser", vectorDocId: "doc-l" }), row({ id: "survivor" }))
+    ).resolves.toBeUndefined()
+    expect(mockInvalidateMemory).toHaveBeenCalledWith("loser", "survivor")
+    expect(mockNoteVectorFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it("moveEvidence copies each evidence row onto the survivor", async () => {
+    mockListEvidence.mockResolvedValue([
+      {
+        id: "ev1",
+        memoryId: "loser",
+        createdAt: 5,
+        sourceKind: "message",
+        sourceId: "msg-1",
+      },
+    ])
+    const deps = await capturedDeps()
+    await deps.moveEvidence(row({ id: "loser" }), row({ id: "survivor" }))
+    expect(mockListEvidence).toHaveBeenCalledWith("loser")
+    expect(mockCreateEvidence).toHaveBeenCalledWith({
+      memoryId: "survivor",
+      sourceKind: "message",
+      sourceId: "msg-1",
+    })
+  })
+
+  it("audit forwards the event and resolves to undefined", async () => {
+    const deps = await capturedDeps()
+    const event = { action: "revised" as const, memoryId: "m1", reason: "compacted" as const }
+    await expect(deps.audit(event)).resolves.toBeUndefined()
+    expect(mockAppendAudit).toHaveBeenCalledWith(event)
   })
 })

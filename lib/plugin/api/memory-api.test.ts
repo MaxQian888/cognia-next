@@ -104,6 +104,15 @@ describe("createMemoryAPI", () => {
       expect(await api.search("q")).toEqual([])
     })
 
+    it("forwards asOf so a plugin can search memory as it was at an instant", async () => {
+      const api = createMemoryAPI(PLUGIN)
+      await api.search("editor", { asOf: 1_700_000_000_000 })
+      expect(mockSearchExternal).toHaveBeenCalledWith(
+        { query: "editor", asOf: 1_700_000_000_000 },
+        PLUGIN_CALLER
+      )
+    })
+
     it("list delegates to the authorized read boundary under the plugin caller", async () => {
       const api = createMemoryAPI(PLUGIN)
       expect(

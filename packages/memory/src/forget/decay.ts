@@ -8,13 +8,17 @@
  *    longer than `maxIdleDays` (access-time forgetting, à la Claude's memory
  *    tool). Not run by default — the caller opts in.
  *
- * Scoring reuses `scoreMemories` with relevance pinned to 0 (recency ×
- * importance only — there's no query at eviction time). Dependency-injected and
- * pure-logic; the lifecycle wires real Dexie functions.
+ * Eviction ranks by `retentionScore` (time decay since the text took effect +
+ * access reinforcement, `./retention`) alongside importance — there is no query
+ * at eviction time, so relevance plays no part. Both factors are min-max
+ * normalized across the candidates and summed, the same shape `scoreMemories`
+ * uses, so a defining fact nobody has recalled lately still outlives a trivial
+ * one. Dependency-injected and pure-logic; the lifecycle wires real Dexie
+ * functions.
  */
 
 import type { Memory, MemoryScope } from "../types/memory"
-import { scoreMemories } from "../retrieve/scoring"
+import { retentionScore, type RetentionParams } from "./retention"
 
 export interface DecayDeps {
   listActive: (scope: MemoryScope, namespace?: MemoryDecayNamespace) => Promise<Memory[]>
@@ -35,8 +39,46 @@ export interface MemoryDecayInput extends MemoryDecayNamespace {
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
+/** Min-max normalize to [0,1]; all-equal input is neutral (1s). */
+function minMaxNormalize(values: number[]): number[] {
+  if (values.length === 0) return []
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min
+  if (range === 0) return values.map(() => 1)
+  return values.map((value) => (value - min) / range)
+}
+
+/**
+ * Keep-worthiness of each candidate, highest first. Exported for the lifecycle
+ * sweep and the console, which must agree with eviction about what is "cold".
+ */
+export function rankByKeepWorthiness<T extends Memory>(
+  memories: readonly T[],
+  options: { now?: number; retention?: Partial<RetentionParams> } = {}
+): { memory: T; retention: number; score: number }[] {
+  const retention = memories.map((memory) =>
+    retentionScore(memory, { now: options.now, params: options.retention })
+  )
+  const importance = memories.map((memory) => Math.min(10, Math.max(1, memory.importance)) / 10)
+  const normRetention = minMaxNormalize(retention)
+  const normImportance = minMaxNormalize(importance)
+  return memories
+    .map((memory, index) => ({
+      memory,
+      retention: retention[index],
+      score: normRetention[index] + normImportance[index],
+    }))
+    .sort((a, b) => b.score - a.score)
+}
+
 export async function evictOverflow(
-  input: MemoryDecayInput & { maxActivePerScope: number },
+  input: MemoryDecayInput & {
+    maxActivePerScope: number
+    now?: number
+    /** Retention knobs; `sigma` comes from `MemoryConfig.accessReinforcementWeight`. */
+    retention?: Partial<RetentionParams>
+  },
   deps: DecayDeps
 ): Promise<{ evicted: string[] }> {
   const active = await deps.listActive(input.scope, decayNamespace(input))
@@ -46,11 +88,8 @@ export async function evictOverflow(
   const candidates = active.filter((m) => !m.pinned)
   if (candidates.length === 0) return { evicted: [] }
 
-  // Lowest score first → evict from the bottom.
-  const ranked = scoreMemories(
-    candidates.map((m) => ({ ...m, relevance: 0 })),
-    { weights: { relevance: 0 } }
-  )
+  // Lowest keep-worthiness first → evict from the bottom.
+  const ranked = rankByKeepWorthiness(candidates, { now: input.now, retention: input.retention })
   const lowestFirst = ranked.slice().reverse()
   const toEvict = lowestFirst.slice(0, Math.min(overflow, candidates.length))
 

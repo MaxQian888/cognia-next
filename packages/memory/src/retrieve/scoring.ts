@@ -80,6 +80,21 @@ export interface ScorableMemory {
   veracity?: number
   /** Combined confidence/review/feedback/staleness/contamination trust in [0,1]. */
   governance?: number
+  /**
+   * Corroboration-derived belief strength in [0,1] (`lifecycle/belief.ts`).
+   * Contributes only through `weights.belief`, which defaults to 0, and is NOT
+   * min-max normalized: an uncorroborated candidate set must not have its
+   * weakest witness promoted to full belief. Absent reads as 0.
+   */
+  belief?: number
+  /**
+   * Multiplicative adjustment of the final score (`score × (1 + boost)`) — the
+   * session-recall routing boost. ai-memory applies its routing term inside a
+   * multiplicative authority factor around 1.0, so a multiplier is the faithful
+   * mapping; an absolute +0.25 on this five-factor sum (range 0–5) would be
+   * about a fifth of the intended effect. Absent or non-finite reads as 0.
+   */
+  boost?: number
 }
 
 export interface MemoryScoreParts {
@@ -88,6 +103,7 @@ export interface MemoryScoreParts {
   relevance: number
   veracity: number
   governance: number
+  belief: number
 }
 
 export interface ScoredMemory<T> {
@@ -101,7 +117,7 @@ export interface ScoreOptions {
   now?: number
   /** Per-day decay base in (0,1]; defaults to 0.995. */
   recencyDecay?: number
-  /** Factor weights; default all 1. */
+  /** Factor weights; default 1 for every factor except `belief`, which defaults to 0. */
   weights?: Partial<MemoryScoreParts>
 }
 
@@ -117,6 +133,10 @@ function minMaxNormalize(values: number[]): number[] {
   const range = max - min
   if (range === 0) return values.map(() => 1)
   return values.map((v) => (v - min) / range)
+}
+
+function clampUnit(value: number): number {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0
 }
 
 /**
@@ -149,6 +169,7 @@ export function scoreMemories<T extends ScorableMemory>(
   const wRelevance = opts.weights?.relevance ?? 1
   const wVeracity = opts.weights?.veracity ?? 1
   const wGovernance = opts.weights?.governance ?? 1
+  const wBelief = opts.weights?.belief ?? 0
 
   const recencyRaw = memories.map((m) => rawRecency(m.lastAccessedAt, now, decay, m.halfLifeDays))
   const importanceRaw = memories.map((m) => Math.min(10, Math.max(1, m.importance)) / 10)
@@ -176,14 +197,17 @@ export function scoreMemories<T extends ScorableMemory>(
         relevance: relevance[i],
         veracity: veracity[i],
         governance: governance[i],
+        belief: clampUnit(memory.belief ?? 0),
       }
       const score =
         wRecency * parts.recency +
         wImportance * parts.importance +
         wRelevance * parts.relevance +
         wVeracity * parts.veracity +
-        wGovernance * parts.governance
-      return { memory, score, parts }
+        wGovernance * parts.governance +
+        wBelief * parts.belief
+      const boost = Number.isFinite(memory.boost) ? Math.max(-1, memory.boost!) : 0
+      return { memory, score: score * (1 + boost), parts }
     })
     .sort((a, b) => b.score - a.score)
 }

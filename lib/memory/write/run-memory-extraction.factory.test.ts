@@ -123,7 +123,11 @@ describe("buildAutoExtractionDeps", () => {
 
     // update / invalidate passthrough
     await captured!.update("id1", "newtext")
-    expect(mockUpdateMemory).toHaveBeenCalledWith("id1", { text: "newtext", bumpVersion: true })
+    expect(mockUpdateMemory).toHaveBeenCalledWith("id1", {
+      text: "newtext",
+      bumpVersion: true,
+      revisionReason: "consolidation",
+    })
     await captured!.invalidate("id1", "sup1")
     expect(mockInvalidateMemory).toHaveBeenCalledWith("id1", "sup1")
   })

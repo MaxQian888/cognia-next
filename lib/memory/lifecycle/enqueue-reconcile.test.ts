@@ -7,6 +7,7 @@ import {
   __resetVectorFailureCount,
   enqueueClaimRevalidation,
   enqueueDailyClaimRevalidation,
+  enqueueDailyLifecycleSweep,
   enqueueDailyVectorReconcile,
   noteMemoryVectorFailure,
 } from "./enqueue-reconcile"
@@ -105,5 +106,46 @@ describe("claim revalidation triggers", () => {
   it("swallows an enqueue failure — the sweep is the backstop, not the point", async () => {
     mockEnqueue.mockRejectedValue(new Error("db closed"))
     await expect(enqueueClaimRevalidation("mem9")).resolves.toBeUndefined()
+  })
+})
+
+describe("enqueueDailyLifecycleSweep", () => {
+  it("enqueues a global system job with a day-bucketed dedupe key and reuseCompleted", async () => {
+    await enqueueDailyLifecycleSweep(Date.UTC(2026, 8, 29, 9, 15))
+    expect(mockEnqueue).toHaveBeenCalledWith(
+      {
+        dedupeKey: "memory-lifecycle-sweep:2026-09-29",
+        kind: "memory-lifecycle-sweep",
+        scope: "global",
+        provenance: "system",
+        evidenceIds: [],
+      },
+      { reuseCompleted: true }
+    )
+  })
+
+  it("buckets by UTC day: same day → same key, next day → new key", async () => {
+    await enqueueDailyLifecycleSweep(Date.UTC(2026, 8, 29, 0, 0))
+    await enqueueDailyLifecycleSweep(Date.UTC(2026, 8, 29, 23, 59, 59))
+    await enqueueDailyLifecycleSweep(Date.UTC(2026, 8, 30, 0, 0))
+    const keys = mockEnqueue.mock.calls.map((c) => (c[0] as { dedupeKey: string }).dedupeKey)
+    expect(keys).toEqual([
+      "memory-lifecycle-sweep:2026-09-29",
+      "memory-lifecycle-sweep:2026-09-29",
+      "memory-lifecycle-sweep:2026-09-30",
+    ])
+  })
+
+  it("defaults to the current day", async () => {
+    await enqueueDailyLifecycleSweep()
+    const today = new Date().toISOString().slice(0, 10)
+    expect(mockEnqueue.mock.calls[0]![0]).toMatchObject({
+      dedupeKey: `memory-lifecycle-sweep:${today}`,
+    })
+  })
+
+  it("swallows enqueue failures", async () => {
+    mockEnqueue.mockRejectedValueOnce(new Error("db closed"))
+    await expect(enqueueDailyLifecycleSweep()).resolves.toBeUndefined()
   })
 })

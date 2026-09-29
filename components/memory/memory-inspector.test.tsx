@@ -296,3 +296,101 @@ describe("the project-claim section", () => {
     expect(screen.queryByTestId("memory-claim-mark-outdated")).toBeNull()
   })
 })
+
+describe("the history section", () => {
+  const revision = (over: Partial<Memory> = {}) =>
+    mem({
+      id: "r1",
+      text: "The user preferred npm",
+      status: "invalidated",
+      revisionOf: "m1",
+      revisionReason: "edit",
+      invalidatedAt: NOW - 1000,
+      ...over,
+    })
+
+  it("is absent when the host passes no revisions", () => {
+    setup()
+    expect(screen.queryByRole("heading", { name: "History" })).toBeNull()
+  })
+
+  it("shows the empty state for a memory with no earlier versions", () => {
+    setup({ revisions: [], onRestoreRevision: jest.fn() })
+    expect(screen.getByRole("heading", { name: "History" })).toBeTruthy()
+    expect(screen.getByText("No earlier versions.")).toBeTruthy()
+  })
+
+  it("lists the revisions and restores one against this memory", async () => {
+    const user = userEvent.setup()
+    const onRestoreRevision = jest.fn()
+    setup({ revisions: [revision()], onRestoreRevision })
+    expect(screen.getByText("The user preferred npm")).toBeTruthy()
+    await user.click(screen.getByTestId("memory-revision-restore"))
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Restore" })
+    )
+    expect(onRestoreRevision).toHaveBeenCalledWith("m1", "r1")
+  })
+
+  it("is read-only when no restore handler is supplied", () => {
+    setup({ revisions: [revision()] })
+    expect(screen.getByTestId("memory-revision-history")).toBeTruthy()
+    expect(screen.queryByTestId("memory-revision-restore")).toBeNull()
+  })
+
+  it("is read-only for an archived memory even with a restore handler", () => {
+    setup({
+      memory: mem({ status: "invalidated", invalidatedAt: NOW }),
+      revisions: [revision()],
+      onRestoreRevision: jest.fn(),
+    })
+    expect(screen.getByTestId("memory-revision-history")).toBeTruthy()
+    expect(screen.queryByTestId("memory-revision-restore")).toBeNull()
+  })
+})
+
+describe("corroboration and compaction", () => {
+  it("says corroboration is not measured for a row without belief inputs", () => {
+    setup()
+    expect(screen.getByTestId("memory-inspector-corroboration").textContent).toContain(
+      "Not measured yet"
+    )
+  })
+
+  it("renders belief as a percentage with the conversation count", () => {
+    // 3 distinct sessions, no recency data, no conflicts → 1 − e^(−1) ≈ 63%.
+    setup({ memory: mem({ beliefInputs: { evidenceCount: 3, distinctSessions: 3 } }) })
+    expect(screen.getByTestId("memory-inspector-corroboration").textContent).toContain(
+      "63% · 3 conversations"
+    )
+  })
+
+  it("lowers belief while a contradiction is open", () => {
+    setup({
+      memory: mem({
+        beliefInputs: { evidenceCount: 3, distinctSessions: 3 },
+        reviewStatus: "conflict",
+        conflictWithIds: ["m2"],
+      }),
+    })
+    // Same corroboration halved by one live contradiction → ≈ 32%.
+    expect(screen.getByTestId("memory-inspector-corroboration").textContent).toContain("32%")
+  })
+
+  it("treats zero-breadth belief inputs as unknown rather than disbelieved", () => {
+    setup({ memory: mem({ beliefInputs: { evidenceCount: 0, distinctSessions: 0 } }) })
+    expect(screen.getByTestId("memory-inspector-corroboration").textContent).toContain(
+      "Not measured yet"
+    )
+  })
+
+  it("badges a compacted memory", () => {
+    setup({ memory: mem({ compactedAt: NOW }) })
+    expect(screen.getByTestId("memory-inspector-compacted").textContent).toBe("compacted")
+  })
+
+  it("shows no compacted badge otherwise", () => {
+    setup()
+    expect(screen.queryByTestId("memory-inspector-compacted")).toBeNull()
+  })
+})

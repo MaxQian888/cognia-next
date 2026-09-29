@@ -54,6 +54,22 @@ export interface MemorySearchInput {
   agentId?: string
   branch?: string
   path?: string
+  /**
+   * Answer as of this instant — epoch milliseconds or an ISO 8601 string.
+   * Searches the text each memory had then (earlier wordings from revision
+   * history); memories created later or already forgotten are excluded.
+   */
+  asOf?: number | string
+}
+
+/** Parse an `asOf` argument; throws on anything that is not a real instant. */
+export function parseMemoryAsOf(value: number | string | undefined): number | undefined {
+  if (value === undefined) return undefined
+  const instant = typeof value === "number" ? value : Date.parse(value)
+  if (!Number.isFinite(instant) || instant <= 0) {
+    throw new Error("asOf must be epoch milliseconds or an ISO 8601 timestamp")
+  }
+  return instant
 }
 
 export type MemorySearchResult =
@@ -70,6 +86,7 @@ export type MemorySearchResult =
 
 export async function memorySearch(input: MemorySearchInput): Promise<MemorySearchResult> {
   const query = requireText(input.query, "query", MAX_MEMORY_TEXT_CHARS)
+  const asOf = parseMemoryAsOf(input.asOf)
   const result = await searchMemoriesExternal(
     {
       query,
@@ -80,6 +97,7 @@ export async function memorySearch(input: MemorySearchInput): Promise<MemorySear
       agentId: input.agentId,
       branch: input.branch,
       path: input.path,
+      ...(asOf !== undefined ? { asOf } : {}),
     },
     mcpCaller()
   )

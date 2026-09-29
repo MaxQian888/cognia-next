@@ -59,6 +59,17 @@ const ROW: Memory = {
   lastAccessedAt: 1,
 }
 
+/** A revision snapshot of `m0`: invalidated, superseded by its owner. */
+const SNAPSHOT: Memory = {
+  ...ROW,
+  id: "snap1",
+  vectorDocId: undefined,
+  status: "invalidated",
+  invalidatedAt: 2,
+  revisionOf: "m0",
+  supersededById: "m0",
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
@@ -251,6 +262,19 @@ describe("updateExternalMemory", () => {
     await updateExternalMemory("m2", { text: "new" })
     expect(mockVectorSink).not.toHaveBeenCalled()
   })
+  it("treats a revision snapshot id as not_found (history is not editable)", async () => {
+    mockGetMemory.mockResolvedValue({ ...SNAPSHOT })
+    expect(await updateExternalMemory("snap1", { text: "rewrite history" })).toEqual({
+      ok: false,
+      reason: "not_found",
+    })
+    expect(await updateExternalMemory("snap1", { pinned: true })).toEqual({
+      ok: false,
+      reason: "not_found",
+    })
+    expect(mockRunMutation).not.toHaveBeenCalled()
+    expect(mockVectorSink).not.toHaveBeenCalled()
+  })
 })
 
 describe("forgetExternalMemory", () => {
@@ -313,6 +337,12 @@ describe("forgetExternalMemory", () => {
     mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
     mockGetMemory.mockResolvedValue(undefined)
     expect(await forgetExternalMemory("m1")).toEqual({ ok: false, reason: "not_found" })
+    expect(mockRunMutation).not.toHaveBeenCalled()
+  })
+
+  it("treats a revision snapshot id as not_found instead of a settled no-op", async () => {
+    mockGetMemory.mockResolvedValue({ ...SNAPSHOT })
+    expect(await forgetExternalMemory("snap1")).toEqual({ ok: false, reason: "not_found" })
     expect(mockRunMutation).not.toHaveBeenCalled()
   })
 })

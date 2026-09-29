@@ -17,6 +17,7 @@ import {
   PROJECT_MEMORY_KINDS,
   type Memory,
   type MemoryReaderContext,
+  type MemoryRevisionReason,
   type MemoryScope,
   type MemoryStatus,
   type MemoryType,
@@ -25,10 +26,37 @@ import {
   applyRetrievalFeedback,
   type RetrievalFeedbackVerdict,
 } from "@cognia/memory/lifecycle/retrieval-feedback"
+import { buildRevisionSnapshot, isRevisionSnapshot } from "@cognia/memory/lifecycle/revision"
 import { getDb } from "./schema"
 
-function newMemoryId(): string {
+export function newMemoryId(): string {
   return `mem_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+/**
+ * Preserve `existing`'s text as a revision snapshot when `nextText` replaces
+ * it, and return the fields the live row needs alongside the new text.
+ *
+ * MUST run inside a transaction that includes `memories` and that also writes
+ * the live row — the snapshot and the replacement commit together or not at
+ * all. Returns `{}` (and writes nothing) when the text is unchanged, so a patch
+ * that re-sends the same text does not grow the history.
+ *
+ * This is the single place the "supersede, never overwrite" rule is enforced;
+ * both write chokepoints (`updateMemory` here and `runMemoryMutation` in
+ * `./memory-operations`) call it.
+ */
+export async function preserveRevisionIfTextChanges(
+  existing: Memory,
+  nextText: string | undefined,
+  reason: MemoryRevisionReason,
+  now: number
+): Promise<Pick<Memory, "revisedAt"> | Record<string, never>> {
+  if (nextText === undefined || nextText === existing.text) return {}
+  // A snapshot is history; editing one would rewrite the past.
+  if (isRevisionSnapshot(existing)) throw new Error("memory_revision_is_immutable")
+  await getDb().memories.add(buildRevisionSnapshot(existing, { id: newMemoryId(), now, reason }))
+  return { revisedAt: now }
 }
 
 /**
@@ -195,17 +223,100 @@ export interface MemoryUpdatePatch {
   scopeRationale?: string
   /** When true, also bumps `version` (used by the consolidation UPDATE op). */
   bumpVersion?: boolean
+  /**
+   * Why the text is changing, recorded on the revision snapshot that keeps the
+   * old text. Only read when `text` differs from the stored text; defaults to
+   * `"edit"`.
+   */
+  revisionReason?: MemoryRevisionReason
+  /**
+   * Do not keep the outgoing text as a revision. Only for a paired device's
+   * optimistic mirror of an edit whose authority is the desktop: the desktop
+   * writes the revision and syncs it down, so a local one would be a duplicate.
+   */
+  skipRevision?: boolean
+  /** Set by the lifecycle sweep when it compacts the row. */
+  compactedAt?: number
+  /** Corroboration counters, refreshed whenever evidence changes. */
+  beliefInputs?: Memory["beliefInputs"]
 }
 
-/** Apply a partial patch, always bumping `updatedAt`. */
+/**
+ * Apply a partial patch, always bumping `updatedAt`. A patch that changes
+ * `text` first preserves the outgoing text as a revision snapshot, in the same
+ * transaction.
+ */
 export async function updateMemory(id: string, patch: MemoryUpdatePatch): Promise<void> {
-  const { bumpVersion, ...rest } = patch
-  const next: Partial<Memory> = { ...rest, updatedAt: Date.now() }
-  if (bumpVersion) {
-    const existing = await getDb().memories.get(id)
-    next.version = (existing?.version ?? 0) + 1
-  }
-  await getDb().memories.update(id, next)
+  const { bumpVersion, revisionReason, skipRevision, ...rest } = patch
+  const db = getDb()
+  await db.transaction("rw", db.memories, async () => {
+    const now = Date.now()
+    const needsRow = bumpVersion || rest.text !== undefined
+    const existing = needsRow ? await db.memories.get(id) : undefined
+    const next: Partial<Memory> = { ...rest, updatedAt: now }
+    if (existing && !skipRevision) {
+      Object.assign(
+        next,
+        await preserveRevisionIfTextChanges(existing, rest.text, revisionReason ?? "edit", now)
+      )
+    }
+    if (bumpVersion) next.version = (existing?.version ?? 0) + 1
+    await db.memories.update(id, next)
+  })
+}
+
+/**
+ * Earlier texts of one memory, newest first. Each snapshot's
+ * `[revisedAt ?? createdAt, invalidatedAt)` is when that text was live and
+ * `revisionReason` is why it was replaced.
+ *
+ * Unindexed by design (no schema version for a history view): the scan is
+ * limited to invalidated rows, and it runs when a person opens one memory.
+ */
+export async function listMemoryRevisions(memoryId: string): Promise<Memory[]> {
+  const rows = await getDb()
+    .memories.where("status")
+    .equals("invalidated")
+    .filter((row) => row.revisionOf === memoryId)
+    .toArray()
+  return rows.sort((a, b) => (b.invalidatedAt ?? 0) - (a.invalidatedAt ?? 0))
+}
+
+export type RestoreMemoryRevisionResult =
+  { ok: true; memory: Memory } | { ok: false; reason: "not_found" | "not_a_revision" | "unchanged" }
+
+/**
+ * Put an earlier text back. The text being replaced becomes a revision itself
+ * (`reason: "restore"`), so a restore is undoable the same way. The live row
+ * keeps its id; `version` is bumped so optimistic-concurrency callers see the
+ * change. Vector re-indexing and the audit event belong to the caller.
+ */
+export async function restoreMemoryRevision(
+  memoryId: string,
+  revisionId: string
+): Promise<RestoreMemoryRevisionResult> {
+  const db = getDb()
+  return db.transaction("rw", db.memories, async () => {
+    const [live, revision] = await db.memories.bulkGet([memoryId, revisionId])
+    if (!live || !revision) return { ok: false, reason: "not_found" } as const
+    if (revision.revisionOf !== memoryId) return { ok: false, reason: "not_a_revision" } as const
+    if (revision.text === live.text) return { ok: false, reason: "unchanged" } as const
+    const now = Date.now()
+    const preserved = await preserveRevisionIfTextChanges(live, revision.text, "restore", now)
+    const next: Partial<Memory> = {
+      ...preserved,
+      text: revision.text,
+      version: live.version + 1,
+      updatedAt: now,
+    }
+    // Restoring the pre-compaction text un-compacts the row, so a later sweep
+    // may compact it again if it goes cold again.
+    if (live.compactedAt !== undefined && revision.compactedAt === undefined) {
+      next.compactedAt = undefined
+    }
+    await db.memories.update(memoryId, next)
+    return { ok: true, memory: { ...live, ...next } as Memory } as const
+  })
 }
 
 /**
@@ -268,15 +379,27 @@ export async function invalidateMemory(id: string, supersededById?: string): Pro
   await getDb().memories.update(id, next)
 }
 
-/** Bump `lastAccessedAt` + `accessCount` — called by the retriever on a hit. */
-export async function touchMemories(ids: string[]): Promise<void> {
+/**
+ * Minimum gap between two access bumps of one memory. Recall runs every turn,
+ * and access count feeds retention (`forget/retention.ts`); without a cooldown
+ * a memory injected on every turn of one long conversation would look like it
+ * had been needed dozens of separate times. ai-memory uses the same 60 s.
+ */
+export const ACCESS_BUMP_COOLDOWN_MS = 60_000
+
+/**
+ * Bump `lastAccessedAt` + `accessCount` — called by the retriever on a hit.
+ * A row bumped less than {@link ACCESS_BUMP_COOLDOWN_MS} ago is skipped
+ * entirely, so a continuously hot memory still earns one bump per minute.
+ */
+export async function touchMemories(ids: string[], now: number = Date.now()): Promise<void> {
   if (ids.length === 0) return
   const db = getDb()
-  const now = Date.now()
   await db.transaction("rw", db.memories, async () => {
     for (const id of ids) {
       const row = await db.memories.get(id)
       if (!row) continue
+      if (row.accessCount > 0 && now - row.lastAccessedAt < ACCESS_BUMP_COOLDOWN_MS) continue
       await db.memories.update(id, { lastAccessedAt: now, accessCount: row.accessCount + 1 })
     }
   })
@@ -297,6 +420,13 @@ export interface ListMemoriesQuery {
   exactNamespace?: boolean
   type?: MemoryType
   status?: MemoryStatus
+  /**
+   * Include revision snapshots (earlier texts of other memories). Off by
+   * default: every listing surface — console, plugin/MCP `list`, mentions,
+   * global search — shows memories, not wordings of them, and a snapshot is
+   * reached through its owner's history (`listMemoryRevisions`).
+   */
+  includeRevisions?: boolean
 }
 
 /**
@@ -305,6 +435,7 @@ export interface ListMemoriesQuery {
  */
 export async function listMemories(query: ListMemoriesQuery = {}): Promise<Memory[]> {
   let collection = getDb().memories.toCollection()
+  if (!query.includeRevisions) collection = collection.filter((m) => m.revisionOf === undefined)
   if (query.scope !== undefined) collection = collection.filter((m) => m.scope === query.scope)
   if (query.exactNamespace) {
     collection = collection.filter(
@@ -403,6 +534,25 @@ export async function listActiveForReader(
   })
 }
 
+/**
+ * Every row visible to a reader WHATEVER its status — active, forgotten, and
+ * revision snapshots — for `asOf` recall, which decides per row whether its
+ * text was live at the requested instant (`wasLiveAt`). Visibility uses the
+ * same predicate as live recall, so history can never widen what a reader may
+ * see. No stable-key narrowing: which row held a key changes over time, and
+ * the retriever resolves one row per memory identity instead.
+ */
+export async function listHistoricalForReader(
+  readerOrCharacterId: MemoryReaderContext | string = {}
+): Promise<Memory[]> {
+  const reader: MemoryReaderContext =
+    typeof readerOrCharacterId === "string"
+      ? { characterId: readerOrCharacterId }
+      : readerOrCharacterId
+  const rows = await getDb().memories.toArray()
+  return rows.filter((memory) => isVisibleToReader(memory, reader))
+}
+
 /** Active procedural memories for a reader (global + character override). */
 export async function listActiveProcedural(
   readerOrCharacterId?: MemoryReaderContext | string
@@ -438,9 +588,18 @@ export async function hardDeleteMemories(ids: string[]): Promise<number> {
       db.retrievalTombstones,
     ],
     async () => {
-      const rows = (await db.memories.bulkGet(uniqueIds)).filter(
+      const owners = (await db.memories.bulkGet(uniqueIds)).filter(
         (row): row is Memory => row !== undefined
       )
+      // Deleting a memory deletes its history: a revision snapshot holds the
+      // same user fact in an earlier wording, and "delete" must mean gone.
+      const ownerIds = new Set(owners.map((row) => row.id))
+      const revisions = await db.memories
+        .where("status")
+        .equals("invalidated")
+        .filter((row) => row.revisionOf !== undefined && ownerIds.has(row.revisionOf))
+        .toArray()
+      const rows = [...owners, ...revisions.filter((row) => !ownerIds.has(row.id))]
       const now = Date.now()
       for (const row of rows) {
         await db.memoryEvidence.where("memoryId").equals(row.id).delete()
@@ -458,16 +617,20 @@ export async function hardDeleteMemories(ids: string[]): Promise<number> {
           pendingDeviceIds: [],
           eligiblePurgeAt: now + 30 * 24 * 60 * 60 * 1000,
         })
-        await db.memoryAuditEvents.add({
-          id: `mau_delete_${row.id}_${now}`,
-          action: "deleted",
-          memoryId: row.id,
-          reason: "user_requested",
-          createdAt: now,
-        })
+        // Snapshots still get a sync tombstone above (paired devices hold
+        // them too), but the audit trail records the memory, once.
+        if (row.revisionOf === undefined || !ownerIds.has(row.revisionOf)) {
+          await db.memoryAuditEvents.add({
+            id: `mau_delete_${row.id}_${now}`,
+            action: "deleted",
+            memoryId: row.id,
+            reason: "user_requested",
+            createdAt: now,
+          })
+        }
       }
       await db.memories.bulkDelete(rows.map((row) => row.id))
-      return rows.length
+      return owners.length
     }
   )
 }
@@ -489,7 +652,12 @@ export async function setMemoriesPinned(ids: string[], pinned: boolean): Promise
  * "clear all" from the panel.
  */
 export async function clearMemories(query: ListMemoriesQuery = {}): Promise<number> {
-  const rows = await listMemories(query)
+  // Clearing forgotten memories clears history too: a revision snapshot is an
+  // earlier wording kept for undo, which is exactly what "clear archived"
+  // asks to drop. Every other clear reaches snapshots through their owner.
+  const rows = await listMemories(
+    query.status === "invalidated" ? { ...query, includeRevisions: true } : query
+  )
   const ids = rows.map((m) => m.id)
   if (ids.length === 0) return 0
   return hardDeleteMemories(ids)

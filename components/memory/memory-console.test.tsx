@@ -68,18 +68,28 @@ jest.mock("./memory-retrieval-chip", () => ({
   MemoryRetrievalChip: () => <div data-testid="memory-retrieval-chip" />,
 }))
 
-jest.mock("@/lib/db/memories", () => ({ listMemories: jest.fn() }))
+jest.mock("@/lib/db/memories", () => ({
+  listMemories: jest.fn(),
+  listMemoryRevisions: jest.fn(async () => []),
+}))
 jest.mock("@/lib/db/memory-governance", () => ({
   listMemoryEvidence: jest.fn(async () => []),
   listMemoryAuditEvents: jest.fn(async () => []),
 }))
+
+// The Health tab's lint runner reads settings and stored vectors; the hook and
+// the panel have their own suites, so only the console's wiring is exercised.
+jest.mock("@/lib/memory/lint/run-memory-lint", () => ({ runMemoryLint: jest.fn() }))
 
 const mockManage = jest.fn<Promise<ManageMemoryResult>, unknown[]>(async () => ({ ok: true }))
 jest.mock("@/lib/memory/control-plane/manage", () => ({
   manageMemory: (...args: unknown[]) => mockManage(...args),
 }))
 
+import { runMemoryLint } from "@/lib/memory/lint/run-memory-lint"
 import { MemoryConsole } from "./memory-console"
+
+const mockRunMemoryLint = runMemoryLint as jest.MockedFunction<typeof runMemoryLint>
 
 let seq = 0
 function mem(over: Partial<Memory> = {}): Memory {
@@ -112,6 +122,8 @@ beforeEach(() => {
   mockToastError.mockClear()
   mockToastWarning.mockClear()
   mockToastSuccess.mockClear()
+  mockRunMemoryLint.mockReset()
+  mockRunMemoryLint.mockResolvedValue({ findings: [], contradictionCheck: "ran", scanned: 0 })
   window.history.replaceState({}, "", "/memory")
 })
 
@@ -498,5 +510,106 @@ describe("MemoryConsole — tabs", () => {
     await userEvent.click(screen.getByTestId("memory-tab-external"))
     expect(screen.getByTestId("external-tab")).toBeTruthy()
     expect(screen.queryByTestId("memory-toolbar")).toBeNull()
+  })
+})
+
+describe("MemoryConsole — health tab", () => {
+  it("does not lint until the health tab is opened", async () => {
+    mockData = [mem({ id: "a" })]
+    render(<MemoryConsole />)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(mockRunMemoryLint).not.toHaveBeenCalled()
+  })
+
+  it("lints the loaded memories and renders the findings", async () => {
+    mockData = [mem({ id: "a", text: "Alpha fact" }), mem({ id: "b" })]
+    mockRunMemoryLint.mockResolvedValue({
+      findings: [{ kind: "missing_evidence", severity: "warning", memoryIds: ["a"] }],
+      contradictionCheck: "ran",
+      scanned: 2,
+    })
+    render(<MemoryConsole />)
+    await userEvent.click(screen.getByTestId("memory-tab-health"))
+    expect(screen.getByTestId("memory-health-panel")).toBeTruthy()
+    expect(screen.queryByTestId("memory-toolbar")).toBeNull()
+    const finding = await screen.findByTestId("memory-health-finding")
+    expect(finding.dataset.kind).toBe("missing_evidence")
+    expect(within(finding).getByText("Alpha fact")).toBeTruthy()
+    expect(mockRunMemoryLint).toHaveBeenCalledWith({ memories: mockData })
+  })
+
+  it("opens a finding's memory in the app tab's inspector", async () => {
+    mockData = [mem({ id: "a" }), mem({ id: "b", text: "Beta fact" })]
+    mockRunMemoryLint.mockResolvedValue({
+      findings: [{ kind: "stale", severity: "info", memoryIds: ["b"], metrics: { ageDays: 40 } }],
+      contradictionCheck: "no_vectors",
+      scanned: 2,
+    })
+    render(<MemoryConsole />)
+    await userEvent.click(screen.getByTestId("memory-tab-health"))
+    const finding = await screen.findByTestId("memory-health-finding")
+    await userEvent.click(within(finding).getByRole("button", { name: "Open" }))
+    expect(screen.queryByTestId("memory-health-panel")).toBeNull()
+    expect(screen.getByTestId("memory-toolbar")).toBeTruthy()
+    expect(screen.getByTestId("memory-inspector").dataset.memoryId).toBe("b")
+  })
+
+  it("re-runs the lint from the refresh button", async () => {
+    mockData = [mem({ id: "a" })]
+    render(<MemoryConsole />)
+    await userEvent.click(screen.getByTestId("memory-tab-health"))
+    await waitFor(() => expect(mockRunMemoryLint).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByTestId("memory-health-refresh")).not.toBeDisabled())
+    await userEvent.click(screen.getByTestId("memory-health-refresh"))
+    await waitFor(() => expect(mockRunMemoryLint).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe("MemoryConsole — revision history", () => {
+  const memories = jest.requireMock("@/lib/db/memories")
+
+  afterEach(() => {
+    memories.listMemoryRevisions.mockReset()
+    memories.listMemoryRevisions.mockImplementation(async () => [])
+  })
+
+  it("loads the selected memory's revisions and restores one through manageMemory", async () => {
+    mockData = [mem({ id: "a", text: "current text" })]
+    // The console's live-query mock passes synchronous values straight through.
+    memories.listMemoryRevisions.mockReturnValue([
+      mem({
+        id: "rev1",
+        text: "earlier text",
+        status: "invalidated",
+        revisionOf: "a",
+        revisionReason: "compaction",
+      }),
+    ])
+    render(<MemoryConsole />)
+    await userEvent.click(rows()[0]!)
+    expect(memories.listMemoryRevisions).toHaveBeenCalledWith("a")
+    const history = screen.getByTestId("memory-revision-history")
+    expect(within(history).getByText("earlier text")).toBeTruthy()
+    expect(within(history).getByText("Compacted")).toBeTruthy()
+
+    await userEvent.click(within(history).getByTestId("memory-revision-restore"))
+    await userEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Restore" })
+    )
+    await waitFor(() =>
+      expect(mockManage).toHaveBeenCalledWith({
+        kind: "restore-revision",
+        id: "a",
+        revisionId: "rev1",
+      })
+    )
+  })
+
+  it("shows the empty history for a memory with no earlier versions", async () => {
+    mockData = [mem({ id: "a" })]
+    render(<MemoryConsole />)
+    await userEvent.click(rows()[0]!)
+    expect(screen.getByRole("heading", { name: "History" })).toBeTruthy()
+    expect(screen.getByText("No earlier versions.")).toBeTruthy()
   })
 })

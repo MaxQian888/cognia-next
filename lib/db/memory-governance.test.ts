@@ -1,3 +1,9 @@
+jest.mock("@cognia/memory/lifecycle/belief", () => {
+  const actual = jest.requireActual("@cognia/memory/lifecycle/belief")
+  return { ...actual, computeBeliefInputs: jest.fn(actual.computeBeliefInputs) }
+})
+
+import { computeBeliefInputs } from "@cognia/memory/lifecycle/belief"
 import { createDbTestFixture } from "./test-fixture"
 import {
   appendMemoryAuditEvent,
@@ -21,10 +27,12 @@ import {
   pruneMemoryGovernanceData,
   cancelMemoryJobsForSession,
   recordMemoryEvidenceVerdict,
+  refreshMemoryBeliefInputs,
   revokeMemoryEvidenceForMessages,
   revokeMemoryEvidenceForSession,
 } from "./memory-governance"
 import { createMemory, getMemory } from "./memories"
+import { getDb } from "./schema"
 
 const dbFixture = createDbTestFixture()
 
@@ -648,5 +656,189 @@ describe("cancelMemoryJobsForSession", () => {
 
   it("no-ops on an empty session id", async () => {
     expect(await cancelMemoryJobsForSession("")).toBe(0)
+  })
+})
+
+describe("belief counters", () => {
+  const computeBeliefInputsMock = computeBeliefInputs as jest.Mock
+
+  async function seedMemory(id = "mb") {
+    return createMemory({
+      id,
+      scope: "global",
+      type: "semantic",
+      text: "fact",
+      importance: 5,
+      provenance: "user",
+    })
+  }
+
+  function evidenceDraft(overrides: Partial<Parameters<typeof createMemoryEvidence>[0]> = {}) {
+    return {
+      memoryId: "mb",
+      kind: "message" as const,
+      sourceId: "msg-1",
+      sessionId: "s1",
+      messageId: "msg-1",
+      contaminationState: "clean" as const,
+      reviewed: false,
+      ...overrides,
+    }
+  }
+
+  async function waitForBelief(memoryId: string, evidenceCount: number) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const row = await getMemory(memoryId)
+      if (row?.beliefInputs?.evidenceCount === evidenceCount) return row
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    throw new Error(`beliefInputs never reached evidenceCount=${evidenceCount}`)
+  }
+
+  it("refreshes after createMemoryEvidence without stamping updatedAt", async () => {
+    const created = await seedMemory()
+    await createMemoryEvidence(evidenceDraft({ id: "e1", createdAt: 100 }))
+    await createMemoryEvidence(
+      evidenceDraft({ id: "e2", sourceId: "msg-2", messageId: "msg-2", createdAt: 300 })
+    )
+    await createMemoryEvidence(
+      evidenceDraft({ id: "e3", sourceId: "msg-3", sessionId: "s2", createdAt: 200 })
+    )
+    const row = await getMemory("mb")
+    expect(row?.beliefInputs).toEqual({
+      evidenceCount: 3,
+      distinctSessions: 2,
+      newestEvidenceAt: 300,
+    })
+    expect(row?.updatedAt).toBe(created.updatedAt)
+  })
+
+  it("skips the refresh for evidence that names no memory", async () => {
+    computeBeliefInputsMock.mockClear()
+    await createMemoryEvidence(evidenceDraft({ id: "e-orphan", memoryId: undefined }))
+    expect(computeBeliefInputsMock).not.toHaveBeenCalled()
+  })
+
+  it("defers the refresh to the completion of an enclosing transaction", async () => {
+    await seedMemory()
+    const db = getDb()
+    await db.transaction("rw", db.memoryEvidence, async () => {
+      await createMemoryEvidence(evidenceDraft({ id: "e1", createdAt: 100 }))
+    })
+    const row = await waitForBelief("mb", 1)
+    expect(row.beliefInputs).toEqual({
+      evidenceCount: 1,
+      distinctSessions: 1,
+      newestEvidenceAt: 100,
+    })
+  })
+
+  it("refreshes after a verdict revokes a citation", async () => {
+    await seedMemory()
+    await createMemoryEvidence(evidenceDraft({ id: "e1", createdAt: 100 }))
+    await createMemoryEvidence(
+      evidenceDraft({ id: "e2", sourceId: "msg-2", sessionId: "s2", createdAt: 200 })
+    )
+    await recordMemoryEvidenceVerdict("e2", { validationState: "revoked", validatedAt: 500 })
+    expect((await getMemory("mb"))?.beliefInputs).toEqual({
+      evidenceCount: 1,
+      distinctSessions: 1,
+      newestEvidenceAt: 100,
+    })
+    // A verdict on a missing evidence row is harmless.
+    await expect(
+      recordMemoryEvidenceVerdict("missing", { validationState: "valid" })
+    ).resolves.toBeUndefined()
+  })
+
+  it("refreshes after revoking by message and by session", async () => {
+    await seedMemory()
+    await createMemoryEvidence(evidenceDraft({ id: "e1", createdAt: 100 }))
+    await createMemoryEvidence(
+      evidenceDraft({
+        id: "e2",
+        sourceId: "s1:turn:2",
+        messageId: undefined,
+        createdAt: 150,
+      })
+    )
+    await createMemoryEvidence(
+      evidenceDraft({ id: "e3", sourceId: "msg-9", messageId: "msg-9", sessionId: "s2" })
+    )
+    expect((await getMemory("mb"))?.beliefInputs?.evidenceCount).toBe(3)
+
+    expect(await revokeMemoryEvidenceForMessages(["msg-1"], 1_000)).toEqual(["mb"])
+    expect((await getMemory("mb"))?.beliefInputs).toMatchObject({
+      evidenceCount: 2,
+      distinctSessions: 2,
+    })
+
+    expect(await revokeMemoryEvidenceForSession("s1", 2_000)).toEqual(["mb"])
+    expect((await getMemory("mb"))?.beliefInputs).toMatchObject({
+      evidenceCount: 1,
+      distinctSessions: 1,
+    })
+  })
+
+  it("computes the counters inline inside bindMemoryGovernanceOutcome", async () => {
+    await seedMemory()
+    await createMemoryEvidence(evidenceDraft({ id: "e-prior", createdAt: 50 }))
+    await bindMemoryGovernanceOutcome({
+      memoryId: "mb",
+      patch: { evidenceState: "supported" },
+      evidence: {
+        id: "e-bound",
+        kind: "message",
+        sourceId: "msg-7",
+        sessionId: "s7",
+        contaminationState: "clean",
+        reviewed: false,
+        createdAt: 80,
+      },
+      audit: { id: "a-bound", action: "created", reason: "automatic_learning" },
+      now: 90,
+    })
+    expect(await getMemory("mb")).toMatchObject({
+      evidenceState: "supported",
+      updatedAt: 90,
+      beliefInputs: { evidenceCount: 2, distinctSessions: 2, newestEvidenceAt: 80 },
+    })
+  })
+
+  it("swallows a refresh failure and still refreshes the remaining memories", async () => {
+    await seedMemory("mb")
+    await seedMemory("mc")
+    await getDb().memoryEvidence.bulkAdd([
+      { ...evidenceDraft({ memoryId: "mb" }), id: "eb", createdAt: 10 },
+      { ...evidenceDraft({ memoryId: "mc" }), id: "ec", createdAt: 20 },
+    ])
+    computeBeliefInputsMock.mockImplementationOnce(() => {
+      throw new Error("boom")
+    })
+    await expect(refreshMemoryBeliefInputs(["mb", "mc", "mb", ""])).resolves.toBeUndefined()
+    expect((await getMemory("mb"))?.beliefInputs).toBeUndefined()
+    expect((await getMemory("mc"))?.beliefInputs).toEqual({
+      evidenceCount: 1,
+      distinctSessions: 1,
+      newestEvidenceAt: 20,
+    })
+  })
+
+  it("does not fail evidence creation when the refresh throws", async () => {
+    await seedMemory()
+    computeBeliefInputsMock.mockImplementationOnce(() => {
+      throw new Error("boom")
+    })
+    const row = await createMemoryEvidence(evidenceDraft({ id: "e1" }))
+    expect(row.id).toBe("e1")
+    expect(await listMemoryEvidence("mb")).toHaveLength(1)
+    expect((await getMemory("mb"))?.beliefInputs).toBeUndefined()
+  })
+
+  it("is a no-op for an empty id list", async () => {
+    computeBeliefInputsMock.mockClear()
+    await refreshMemoryBeliefInputs([])
+    await refreshMemoryBeliefInputs([""])
+    expect(computeBeliefInputsMock).not.toHaveBeenCalled()
   })
 })

@@ -135,4 +135,69 @@ describe("buildEpisodicMaintenanceDeps", () => {
       expect.objectContaining({ memoryId: "m9", reason: "capacity" })
     )
   })
+
+  it("records a corroborating NOOP as evidence only in recordDistillation", async () => {
+    const deps = await buildEpisodicMaintenanceDeps(params, cfg())
+    await deps!.recordDistillation?.(
+      {
+        transcript: [],
+        scope: "workspace",
+        provenance: "user",
+        contaminationState: "external-context",
+        source: { sessionId: "session_1" },
+        config: cfg(),
+      },
+      [
+        { op: "NOOP", targetId: "mem_old", candidate: { type: "episodic" } } as never,
+        { op: "NOOP", candidate: { type: "episodic" } } as never,
+      ]
+    )
+    expect(mockCreateEvidence).toHaveBeenCalledTimes(1)
+    expect(mockCreateEvidence).toHaveBeenCalledWith({
+      memoryId: "mem_old",
+      kind: "message",
+      sourceId: "session-distill:session_1",
+      sessionId: "session_1",
+      contaminationState: "external-context",
+      reviewed: false,
+    })
+    expect(mockUpdateMemory).not.toHaveBeenCalled()
+    expect(mockAppendAudit).not.toHaveBeenCalled()
+  })
+
+  it("corroborates with a clean default and an unknown source when none is given", async () => {
+    const deps = await buildEpisodicMaintenanceDeps(params, cfg())
+    await deps!.recordDistillation?.(
+      { transcript: [], scope: "global", provenance: "user", config: cfg() } as never,
+      [{ op: "NOOP", targetId: "mem_old", candidate: { type: "episodic" } } as never]
+    )
+    const [call] = mockCreateEvidence.mock.calls[0] as [Record<string, unknown>]
+    expect(call).toMatchObject({
+      memoryId: "mem_old",
+      sourceId: "session-distill:unknown",
+      contaminationState: "clean",
+    })
+    expect(call).not.toHaveProperty("sessionId")
+  })
+
+  it("does not fail the distillation when the corroboration write fails", async () => {
+    mockCreateEvidence.mockRejectedValueOnce(new Error("db down"))
+    const deps = await buildEpisodicMaintenanceDeps(params, cfg())
+    await expect(
+      deps!.recordDistillation?.(
+        {
+          transcript: [],
+          scope: "workspace",
+          provenance: "user",
+          source: { sessionId: "s" },
+          config: cfg(),
+        } as never,
+        [
+          { op: "NOOP", targetId: "mem_old", candidate: { type: "episodic" } } as never,
+          { op: "ADD", memory: { id: "mem_new" } } as never,
+        ]
+      )
+    ).resolves.toBeUndefined()
+    expect(mockUpdateMemory).toHaveBeenCalledWith("mem_new", expect.anything())
+  })
 })

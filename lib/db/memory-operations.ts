@@ -30,8 +30,9 @@
  * caller re-read and fixed its expectation.)
  */
 
-import type { Memory } from "@/types/memory/memory"
+import type { Memory, MemoryRevisionReason } from "@/types/memory/memory"
 import type { MemoryAuditAction, MemoryOperationRow } from "@/types/memory/governance"
+import { preserveRevisionIfTextChanges } from "./memories"
 import { getDb } from "./schema"
 
 export interface MemoryOperationBinding {
@@ -66,6 +67,12 @@ export interface MemoryMutationRequest {
   apply: (existing: Memory) => {
     patch: Partial<Memory>
     audits?: { action: MemoryAuditAction; reason: string }[]
+    /**
+     * Why `patch.text` replaces the stored text, for the revision snapshot
+     * that preserves it. Defaults to `"external-update"` — this path serves
+     * the API surfaces.
+     */
+    revisionReason?: MemoryRevisionReason
   }
 }
 
@@ -137,8 +144,17 @@ export async function runMemoryMutation(
       const changed = Object.keys(applied.patch).length > 0
       const version = changed ? existing.version + 1 : existing.version
       if (changed) {
+        // Same transaction as the replacement: the outgoing text is kept as a
+        // revision snapshot, or neither write happens.
+        const preserved = await preserveRevisionIfTextChanges(
+          existing,
+          applied.patch.text,
+          applied.revisionReason ?? "external-update",
+          now
+        )
         await db.memories.update(request.memoryId, {
           ...applied.patch,
+          ...preserved,
           version,
           updatedAt: now,
         })

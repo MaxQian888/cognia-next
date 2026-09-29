@@ -33,6 +33,12 @@ export interface SearchMemoriesExternalInput {
   path?: string
   /** Default true; false = don't bump lastAccessedAt/accessCount. */
   touch?: boolean
+  /**
+   * Answer as of this instant (epoch ms): search the text each memory had
+   * then — earlier wordings come back from revision history, memories created
+   * later or already forgotten are excluded. Lexical only; never bumps access.
+   */
+  asOf?: number
 }
 
 export interface ExternalMemoryHit {
@@ -91,6 +97,14 @@ export async function searchMemoriesExternal(
       (await baseDeps.loadCandidates(candidateReader)).filter((memory) =>
         read.isAuthorized(memory)
       ),
+    ...(baseDeps.loadHistoricalCandidates
+      ? {
+          loadHistoricalCandidates: async (candidateReader) =>
+            (await baseDeps.loadHistoricalCandidates!(candidateReader)).filter((memory) =>
+              read.isAuthorized(memory)
+            ),
+        }
+      : {}),
   }
   if (input.touch === false) deps = { ...deps, touch: undefined }
 
@@ -104,6 +118,7 @@ export async function searchMemoriesExternal(
       types: input.types,
       enableQueryExpansion: config.enableQueryExpansion,
       recencyHalfLifeDays: config.decayHalfLifeDays,
+      ...(input.asOf !== undefined ? { asOf: input.asOf } : {}),
     },
     deps
   )

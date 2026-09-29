@@ -166,6 +166,27 @@ describe("MemorySection", () => {
     mockInsights.retrievalMode = { kind: "bm25", reason: "hybrid_disabled" }
   })
 
+  it("renders the extracted maintenance panel's sweep controls and saves them", () => {
+    render(<MemorySection />)
+    fireEvent.click(screen.getByTestId("memory-nav-item-maintenance"))
+
+    expect(screen.getByRole("heading", { name: "Forgetting" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Lifecycle sweep" })).toBeInTheDocument()
+    expect(screen.getByRole("slider", { name: "Access reinforcement" })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("switch", { name: "Fold near-duplicate episodes" }))
+    expect(mockSave).toHaveBeenCalledWith(
+      expect.objectContaining({ memory: expect.objectContaining({ dedupColdClusters: true }) })
+    )
+  })
+
+  it("passes the retrieval mode through so folding warns without vectors", () => {
+    mockSettings = { memory: { dedupColdClusters: true } }
+    render(<MemorySection />)
+    fireEvent.click(screen.getByTestId("memory-nav-item-maintenance"))
+    expect(screen.getByTestId("mem-dedup-no-vectors")).toBeInTheDocument()
+  })
+
   it("shows a zero idle limit when retention is unset", () => {
     mockSettings = { memory: { maxIdleDays: 45 } }
     render(<MemorySection />)

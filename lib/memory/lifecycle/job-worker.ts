@@ -755,6 +755,80 @@ async function processVectorReconcile(): Promise<MemoryJobProcessOutcome> {
     : { status: "no_output", resultCode: "already_consistent" }
 }
 
+async function processLifecycleSweep(): Promise<MemoryJobProcessOutcome> {
+  const settings = await getSettings()
+  const config = resolveMemoryConfig(settings?.memory)
+  if (!config.enabled) return { status: "skipped", resultCode: "memory_disabled" }
+  if (!config.compactColdEpisodic && !config.dedupColdClusters) {
+    return { status: "no_output", resultCode: "lifecycle_sweep_disabled" }
+  }
+  const [{ runMemoryLifecycleSweep }, buildDeps, memDb, governance] = await Promise.all([
+    import("@/lib/memory/lifecycle/lifecycle-sweep"),
+    import("@/lib/memory/runtime/build-deps"),
+    import("@/lib/db/memories"),
+    import("@/lib/db/memory-governance"),
+  ])
+  const [reader, sink] = await Promise.all([
+    config.dedupColdClusters ? buildDeps.tryBuildMemoryVectorReader(config) : undefined,
+    buildDeps.tryBuildMemoryVectorSink(config),
+  ])
+  const report = await runMemoryLifecycleSweep(
+    { config },
+    {
+      listActive: () => listMemories({ status: "active" }),
+      ...(reader ? { loadEmbeddings: (rows) => reader.getEmbeddings(rows) } : {}),
+      reviseText: async (memory, text, reason, now) => {
+        await memDb.updateMemory(memory.id, {
+          text,
+          bumpVersion: true,
+          revisionReason: reason,
+          compactedAt: now,
+        })
+        if (!sink) return
+        try {
+          if (hasNoLeakingPii(text)) {
+            await sink.upsert(memory.vectorDocId ?? memory.id, text)
+            if (!memory.vectorDocId) {
+              await memDb.updateMemory(memory.id, { vectorDocId: memory.id })
+            }
+          } else if (memory.vectorDocId) {
+            // The new text may not be embedded, and the old vector would keep
+            // matching the text that was just replaced.
+            await sink.delete([memory.vectorDocId])
+          }
+        } catch {
+          const { noteMemoryVectorFailure } = await import("./enqueue-reconcile")
+          noteMemoryVectorFailure()
+        }
+      },
+      supersede: async (loser, survivor) => {
+        await memDb.invalidateMemory(loser.id, survivor.id)
+        if (!sink || !loser.vectorDocId) return
+        try {
+          await sink.delete([loser.vectorDocId])
+        } catch {
+          const { noteMemoryVectorFailure } = await import("./enqueue-reconcile")
+          noteMemoryVectorFailure()
+        }
+      },
+      moveEvidence: async (loser, survivor) => {
+        for (const row of await governance.listMemoryEvidence(loser.id)) {
+          const { id: _id, createdAt: _createdAt, memoryId: _memoryId, ...rest } = row
+          await governance.createMemoryEvidence({ ...rest, memoryId: survivor.id })
+        }
+      },
+      audit: (event) => appendMemoryAuditEvent(event).then(() => undefined),
+    }
+  )
+  if (report.merges.length === 0 && report.compacted.length === 0) {
+    return {
+      status: "no_output",
+      resultCode: report.dedupSkipped ? "lifecycle_dedup_no_vectors" : "nothing_cold",
+    }
+  }
+  return { status: "succeeded", resultCode: "lifecycle_swept" }
+}
+
 /**
  * Dispatch one job.
  *
@@ -775,6 +849,8 @@ export async function processMemoryJob(job: MemoryJob): Promise<MemoryJobProcess
       return processClaimRevalidation(job)
     case "vector-reconcile":
       return processVectorReconcile()
+    case "memory-lifecycle-sweep":
+      return processLifecycleSweep()
     default: {
       const exhaustive: never = job.kind
       throw new MemoryJobTerminalError(`unknown_job_kind:${String(exhaustive)}`)

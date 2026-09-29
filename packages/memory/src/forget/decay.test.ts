@@ -1,5 +1,5 @@
 import type { Memory, MemoryScope } from "../types/memory"
-import { evictOverflow, expireStale, type DecayDeps } from "./decay"
+import { evictOverflow, expireStale, rankByKeepWorthiness, type DecayDeps } from "./decay"
 
 let seq = 0
 const NOW = 1_700_000_000_000
@@ -89,6 +89,109 @@ describe("evictOverflow", () => {
     const d = deps([mem({ pinned: true }), mem({ pinned: true })])
     const res = await evictOverflow({ scope: "global", maxActivePerScope: 1 }, d)
     expect(res.evicted).toEqual([])
+  })
+})
+
+describe("evictOverflow keep-worthiness", () => {
+  const old = NOW - 100 * DAY
+
+  it("keeps an often-recalled memory over a never-recalled one of equal importance and age", async () => {
+    const recalled = mem({
+      id: "recalled",
+      type: "episodic",
+      createdAt: old,
+      accessCount: 20,
+      lastAccessedAt: NOW - DAY,
+    })
+    const ignored = mem({ id: "ignored", type: "episodic", createdAt: old, lastAccessedAt: old })
+    // Order must not matter: try both.
+    for (const active of [
+      [recalled, ignored],
+      [ignored, recalled],
+    ]) {
+      const d = deps(active)
+      const res = await evictOverflow({ scope: "global", maxActivePerScope: 1, now: NOW }, d)
+      expect(res.evicted).toEqual(["ignored"])
+    }
+  })
+
+  it("sigma = 0 removes the recall advantage", async () => {
+    const recalled = mem({
+      id: "recalled",
+      type: "episodic",
+      createdAt: old,
+      accessCount: 20,
+      lastAccessedAt: NOW - DAY,
+    })
+    const ignored = mem({ id: "ignored", type: "episodic", createdAt: old, lastAccessedAt: old })
+    const ranked = rankByKeepWorthiness([ignored, recalled], {
+      now: NOW,
+      retention: { sigma: 0 },
+    })
+    expect(ranked[0].score).toBe(ranked[1].score)
+    expect(ranked[0].retention).toBe(ranked[1].retention)
+    // Ties keep input order, so the recalled row (listed last) is now the one evicted.
+    const d = deps([ignored, recalled])
+    const res = await evictOverflow(
+      { scope: "global", maxActivePerScope: 1, now: NOW, retention: { sigma: 0 } },
+      d
+    )
+    expect(res.evicted).toEqual(["recalled"])
+  })
+
+  it("an important but idle fact outlives a trivial fresh one", async () => {
+    const defining = mem({ id: "defining", importance: 10, createdAt: NOW - 60 * DAY })
+    const trivial = mem({ id: "trivial", importance: 1, createdAt: NOW - 40 * DAY })
+    const filler = mem({ id: "filler", importance: 5, createdAt: NOW - 40 * DAY })
+    const ancient = mem({ id: "ancient", importance: 5, createdAt: NOW - 200 * DAY })
+    const d = deps([defining, trivial, filler, ancient])
+    const res = await evictOverflow({ scope: "global", maxActivePerScope: 2, now: NOW }, d)
+    expect(res.evicted).toEqual(["ancient", "trivial"])
+  })
+
+  it("counts age from revisedAt, so a rewrite is a fresh start", async () => {
+    const rewritten = mem({ id: "rewritten", createdAt: NOW - 300 * DAY, revisedAt: NOW })
+    const aged = mem({ id: "aged", createdAt: NOW - 100 * DAY })
+    const d = deps([rewritten, aged])
+    const res = await evictOverflow({ scope: "global", maxActivePerScope: 1, now: NOW }, d)
+    expect(res.evicted).toEqual(["aged"])
+  })
+})
+
+describe("rankByKeepWorthiness", () => {
+  it("returns [] for no memories", () => {
+    expect(rankByKeepWorthiness([])).toEqual([])
+  })
+
+  it("sums min-max normalized retention and importance, highest first", () => {
+    const fresh = mem({ id: "fresh", importance: 1, createdAt: NOW })
+    const important = mem({ id: "important", importance: 10, createdAt: NOW - 1000 * DAY })
+    const both = mem({ id: "both", importance: 10, createdAt: NOW })
+    const ranked = rankByKeepWorthiness([fresh, important, both], { now: NOW })
+    expect(ranked.map((r) => r.memory.id)).toEqual(["both", expect.any(String), expect.any(String)])
+    const byId = new Map(ranked.map((r) => [r.memory.id, r]))
+    expect(byId.get("both")!.score).toBeCloseTo(2)
+    expect(byId.get("fresh")!.score).toBeCloseTo(1)
+    expect(byId.get("important")!.score).toBeCloseTo(1)
+    expect(byId.get("fresh")!.retention).toBeCloseTo(1)
+    expect(byId.get("important")!.retention).toBeCloseTo(Math.exp(-0.02 * 1000))
+  })
+
+  it("treats all-equal factors as neutral", () => {
+    const ranked = rankByKeepWorthiness([mem({ id: "x" }), mem({ id: "y" })], { now: NOW })
+    expect(ranked.map((r) => r.score)).toEqual([2, 2])
+    expect(ranked.map((r) => r.memory.id)).toEqual(["x", "y"])
+  })
+
+  it("clamps importance to [1, 10]", () => {
+    const over = mem({ id: "over", importance: 50 })
+    const top = mem({ id: "top", importance: 10 })
+    const under = mem({ id: "under", importance: -5 })
+    const bottom = mem({ id: "bottom", importance: 1 })
+    const ranked = rankByKeepWorthiness([over, top, under, bottom], { now: NOW })
+    const byId = new Map(ranked.map((r) => [r.memory.id, r.score]))
+    expect(byId.get("over")).toBe(byId.get("top"))
+    expect(byId.get("under")).toBe(byId.get("bottom"))
   })
 })
 

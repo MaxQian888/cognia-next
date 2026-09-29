@@ -1,5 +1,6 @@
 import type { CogniaDB } from "@/lib/db/schema"
 import { parseAttachmentEvidenceSourceId } from "@cognia/memory/extract/project-attachment-evidence"
+import { computeBeliefInputs } from "@cognia/memory/lifecycle/belief"
 
 /**
  * When a message or a session is deleted, the claims that cited it must stop
@@ -109,6 +110,12 @@ export async function revokeClaimsForChangedAttachment(
     evidence.map((row) => ({ ...row, validationState: "revoked" as const, validatedAt: now }))
   )
   const ids = [...new Set(evidence.flatMap((row) => (row.memoryId ? [row.memoryId] : [])))]
+  // Revoked evidence no longer witnesses anything; recompute the corroboration
+  // counters in this same transaction (both tables are in scope here).
+  for (const memoryId of ids) {
+    const rows = await db.memoryEvidence.where("memoryId").equals(memoryId).toArray()
+    await db.memories.update(memoryId, { beliefInputs: computeBeliefInputs(rows) })
+  }
   const memories = await db.memories.bulkGet(ids)
   const claims = memories.filter((row) => row?.projectMemoryKind && row.status === "active")
   for (const row of claims) {

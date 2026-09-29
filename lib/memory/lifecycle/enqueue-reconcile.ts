@@ -107,3 +107,27 @@ export async function enqueueDailyClaimRevalidation(now: number = Date.now()): P
     // Best-effort — tomorrow's tick retries.
   }
 }
+
+/**
+ * At most one lifecycle sweep per calendar day (UTC bucket). The caller only
+ * invokes this when compaction or cold-cluster dedup is enabled; the handler
+ * re-reads the config anyway, so a sweep queued before the user turned both
+ * off finishes as `no_output` instead of acting.
+ */
+export async function enqueueDailyLifecycleSweep(now: number = Date.now()): Promise<void> {
+  const dayBucket = new Date(now).toISOString().slice(0, 10)
+  try {
+    await enqueueMemoryJob(
+      {
+        dedupeKey: `memory-lifecycle-sweep:${dayBucket}`,
+        kind: "memory-lifecycle-sweep",
+        scope: "global",
+        provenance: "system",
+        evidenceIds: [],
+      },
+      { reuseCompleted: true }
+    )
+  } catch {
+    // Best-effort — tomorrow's tick retries.
+  }
+}

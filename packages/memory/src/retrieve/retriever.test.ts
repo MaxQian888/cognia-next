@@ -6,6 +6,7 @@ import {
   isMemoryEligibleForRetrieval,
   type MemoryRetrieverDeps,
 } from "./retriever"
+import type { MemoryReranker } from "./llm-rerank"
 
 // The BM25 index is cached by corpus signature at module scope; reset between
 // cases so a shared cache key (e.g. `global::`) can't return another test's
@@ -757,4 +758,399 @@ it("keeps concurrent lexical-only reads independent of remote-work capacity", as
       (result) => result.reasons.length === 1 && result.reasons[0].code === "vector_not_configured"
     )
   ).toBe(true)
+})
+
+describe("historical (asOf) recall", () => {
+  const T0 = 1_700_000_000_000
+  const HOUR = 60 * 60 * 1000
+
+  // Live memory L was reworded at T0 + 10h; the snapshot keeps its first wording.
+  const live = () =>
+    mem("we build the cache with pnpm", {
+      id: "L",
+      createdAt: T0,
+      revisedAt: T0 + 10 * HOUR,
+      vectorDocId: "vL",
+    })
+  const snapshot = () =>
+    mem("we build the cache with npm", {
+      id: "S",
+      createdAt: T0,
+      revisedAt: T0,
+      status: "invalidated",
+      invalidatedAt: T0 + 10 * HOUR,
+      supersededById: "L",
+      revisionOf: "L",
+    })
+
+  it("returns the earlier wording from a snapshot row", async () => {
+    const loadCandidates = jest.fn(async () => [live()])
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates,
+      loadHistoricalCandidates: async () => [live(), snapshot()],
+    }
+    const past = await retrieveMemories(
+      { ...base, queryText: "cache", asOf: T0 + 5 * HOUR, now: T0 + 20 * HOUR },
+      deps
+    )
+    expect(past.map((r) => r.memory.id)).toEqual(["S"])
+    expect(past[0].memory.text).toBe("we build the cache with npm")
+    expect(loadCandidates).not.toHaveBeenCalled()
+
+    const later = await retrieveMemories(
+      { ...base, queryText: "cache", asOf: T0 + 15 * HOUR, now: T0 + 20 * HOUR },
+      deps
+    )
+    expect(later.map((r) => r.memory.id)).toEqual(["L"])
+  })
+
+  it("excludes memories created after asOf and memories invalidated before it", async () => {
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [],
+      loadHistoricalCandidates: async () => [
+        mem("cache note that existed", { id: "kept", createdAt: T0 }),
+        mem("cache note from the future", { id: "future", createdAt: T0 + 8 * HOUR }),
+        mem("cache note forgotten early", {
+          id: "forgotten",
+          createdAt: T0,
+          status: "invalidated",
+          invalidatedAt: T0 + 2 * HOUR,
+        }),
+        mem("cache note forgotten later", {
+          id: "forgotten-later",
+          createdAt: T0,
+          status: "invalidated",
+          invalidatedAt: T0 + 9 * HOUR,
+        }),
+        mem("cache note in conflict", { id: "conflict", createdAt: T0, reviewStatus: "conflict" }),
+      ],
+    }
+    const out = await retrieveMemories(
+      { ...base, queryText: "cache", asOf: T0 + 5 * HOUR, now: T0 + 20 * HOUR },
+      deps
+    )
+    expect(out.map((r) => r.memory.id).sort()).toEqual(["forgotten-later", "kept"])
+  })
+
+  it("never runs the vector leg and never touches access counters", async () => {
+    const embed = jest.fn(async () => [0.1, 0.2])
+    const vectorSearch = jest.fn(async () => [{ id: "vL", score: 1 }])
+    const touch = jest.fn(async () => undefined)
+    const rerank = jest.fn(async () => null)
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [live()],
+      loadHistoricalCandidates: async () => [live(), snapshot()],
+      embed,
+      vectorSearch,
+      touch,
+      rerank,
+    }
+    const out = await retrieveMemories(
+      { ...base, queryText: "cache", asOf: T0 + 15 * HOUR, rerank: true },
+      deps
+    )
+    expect(out).toHaveLength(1)
+    expect(embed).not.toHaveBeenCalled()
+    expect(vectorSearch).not.toHaveBeenCalled()
+    expect(touch).not.toHaveBeenCalled()
+    expect(rerank).not.toHaveBeenCalled()
+  })
+
+  it("returns [] when the host cannot load history, without answering from the present", async () => {
+    const loadCandidates = jest.fn(async () => [live()])
+    const out = await retrieveMemories(
+      { ...base, queryText: "cache", asOf: T0 + 15 * HOUR },
+      { loadCandidates }
+    )
+    expect(out).toEqual([])
+    expect(loadCandidates).not.toHaveBeenCalled()
+  })
+
+  it("ignores a non-finite asOf and recalls the present", async () => {
+    const loadHistoricalCandidates = jest.fn(async () => [snapshot()])
+    const out = await retrieveMemories(
+      { ...base, queryText: "cache", asOf: Number.NaN },
+      { loadCandidates: async () => [live()], loadHistoricalCandidates }
+    )
+    expect(out.map((r) => r.memory.id)).toEqual(["L"])
+    expect(loadHistoricalCandidates).not.toHaveBeenCalled()
+  })
+
+  it("keeps one row per memory identity, preferring the most recently effective text", async () => {
+    // A corrupted chain: two snapshots of L both claim to be live at asOf.
+    const older = mem("cache text one", {
+      id: "S1",
+      createdAt: T0,
+      revisedAt: T0,
+      status: "invalidated",
+      invalidatedAt: T0 + 20 * HOUR,
+      revisionOf: "L",
+    })
+    const newer = mem("cache text two", {
+      id: "S2",
+      createdAt: T0,
+      revisedAt: T0 + 2 * HOUR,
+      status: "invalidated",
+      invalidatedAt: T0 + 20 * HOUR,
+      revisionOf: "L",
+    })
+    const out = await retrieveMemories(
+      { ...base, queryText: "cache", asOf: T0 + 5 * HOUR },
+      { loadCandidates: async () => [], loadHistoricalCandidates: async () => [older, newer] }
+    )
+    expect(out.map((r) => r.memory.id)).toEqual(["S2"])
+  })
+})
+
+describe("ranking extensions", () => {
+  const NOW = 1_700_000_000_000
+  // Equal-length texts → equal BM25 relevance for "cache". Importance decides
+  // the local order: sem (6) > epi (5) > low (1).
+  const corpus = () => [
+    mem("we cache with redis", { id: "sem", type: "semantic", importance: 6 }),
+    mem("we cache with memcached", { id: "epi", type: "episodic", importance: 5 }),
+    mem("we cache with disk", { id: "low", type: "semantic", importance: 1 }),
+  ]
+  const ids = (hits: { memory: Memory }[]) => hits.map((h) => h.memory.id)
+
+  describe("sessionRecallRouting", () => {
+    it("ranks by the local score without routing", async () => {
+      const out = await retrieveMemories(
+        { ...base, queryText: "last time cache", now: NOW },
+        { loadCandidates: async () => corpus() }
+      )
+      expect(ids(out)).toEqual(["sem", "epi", "low"])
+    })
+
+    it("boosts episodic hits when the query asks about a past conversation", async () => {
+      const out = await retrieveMemories(
+        { ...base, queryText: "last time cache", now: NOW, sessionRecallRouting: true },
+        { loadCandidates: async () => corpus() }
+      )
+      expect(ids(out)).toEqual(["epi", "sem", "low"])
+      const epi = out.find((h) => h.memory.id === "epi")!
+      const sem = out.find((h) => h.memory.id === "sem")!
+      expect(epi.score).toBeGreaterThan(sem.score)
+    })
+
+    it("does not boost when the query has no session-recall intent", async () => {
+      const out = await retrieveMemories(
+        { ...base, queryText: "cache", now: NOW, sessionRecallRouting: true },
+        { loadCandidates: async () => corpus() }
+      )
+      expect(ids(out)).toEqual(["sem", "epi", "low"])
+    })
+  })
+
+  describe("beliefRankingWeight", () => {
+    const withBelief = () =>
+      corpus().map((m) =>
+        m.id === "epi" ? { ...m, beliefInputs: { evidenceCount: 20, distinctSessions: 20 } } : m
+      )
+
+    it("leaves ranking unchanged at 0 / absent", async () => {
+      for (const beliefRankingWeight of [undefined, 0, -1, Number.NaN]) {
+        const out = await retrieveMemories(
+          { ...base, queryText: "cache", now: NOW, beliefRankingWeight },
+          { loadCandidates: async () => withBelief() }
+        )
+        expect(ids(out)).toEqual(["sem", "epi", "low"])
+      }
+    })
+
+    it("promotes a well-corroborated memory when weighted", async () => {
+      const out = await retrieveMemories(
+        { ...base, queryText: "cache", now: NOW, beliefRankingWeight: 1 },
+        { loadCandidates: async () => withBelief() }
+      )
+      expect(ids(out)).toEqual(["epi", "sem", "low"])
+    })
+
+    it("divides belief by live contradictions", async () => {
+      const contradicted = () =>
+        withBelief().map((m) =>
+          m.id === "epi" ? { ...m, conflictWithIds: ["x", "y", "z", "w", "v", "u", "t"] } : m
+        )
+      const out = await retrieveMemories(
+        { ...base, queryText: "cache", now: NOW, beliefRankingWeight: 1 },
+        { loadCandidates: async () => contradicted() }
+      )
+      // 0.95 / 8 ≈ 0.12 < the 0.2 importance gap.
+      expect(ids(out)).toEqual(["sem", "epi", "low"])
+    })
+  })
+
+  describe("rerank", () => {
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        mem(`we cache item ${i}`, {
+          id: `r${String(i).padStart(2, "0")}`,
+          importance: 10 - (i % 10),
+        })
+      )
+
+    it("calls deps.rerank with a window of max(topK, min(3·topK, 30))", async () => {
+      const rerank = jest.fn<ReturnType<MemoryReranker>, Parameters<MemoryReranker>>(
+        async () => null
+      )
+      await retrieveMemories(
+        { queryText: "cache", topK: 2, relevanceFloor: 0, now: NOW, rerank: true },
+        { loadCandidates: async () => many(10), rerank }
+      )
+      expect(rerank).toHaveBeenCalledTimes(1)
+      expect(rerank.mock.calls[0][1]).toHaveLength(6)
+
+      rerank.mockClear()
+      await retrieveMemories(
+        { queryText: "cache", topK: 20, relevanceFloor: 0, now: NOW, rerank: true },
+        { loadCandidates: async () => many(40), rerank }
+      )
+      expect(rerank.mock.calls[0][1]).toHaveLength(30)
+
+      rerank.mockClear()
+      await retrieveMemories(
+        { queryText: "cache", topK: 35, relevanceFloor: 0, now: NOW, rerank: true },
+        { loadCandidates: async () => many(40), rerank }
+      )
+      expect(rerank.mock.calls[0][1]).toHaveLength(35)
+    })
+
+    it("passes query, candidate texts, the caller signal and the configured timeout", async () => {
+      const rerank = jest.fn(async () => null)
+      const controller = new AbortController()
+      await retrieveMemories(
+        { ...base, queryText: "cache", now: NOW, rerank: true, signal: controller.signal },
+        { loadCandidates: async () => corpus(), rerank, rerankTimeoutMs: 1234 }
+      )
+      const [query, candidates, options] = rerank.mock.calls[0] as unknown as [
+        string,
+        { id: string; text: string }[],
+        { signal?: AbortSignal; timeoutMs?: number },
+      ]
+      expect(query).toBe("cache")
+      expect(candidates).toEqual([
+        { id: "sem", text: "we cache with redis" },
+        { id: "epi", text: "we cache with memcached" },
+        { id: "low", text: "we cache with disk" },
+      ])
+      expect(options).toEqual({ signal: controller.signal, timeoutMs: 1234 })
+    })
+
+    it("reorders the window by the model's relevance, then trims to topK", async () => {
+      const rerank = jest.fn(
+        async () =>
+          new Map([
+            ["sem", 0.1],
+            ["epi", 0.2],
+            ["low", 0.9],
+          ])
+      )
+      const out = await retrieveMemories(
+        { queryText: "cache", topK: 2, relevanceFloor: 0, now: NOW, rerank: true },
+        { loadCandidates: async () => corpus(), rerank }
+      )
+      expect(ids(out)).toEqual(["low", "epi"])
+    })
+
+    it("keeps positions outside the window after the reranked prefix", async () => {
+      // topK 1 → window max(1, min(3, 30)) = 3; ranks 4+ keep their local order.
+      const rerank = jest.fn(
+        async (_q: string, c: readonly { id: string }[]) =>
+          new Map(c.map((entry, i) => [entry.id, i / 10]))
+      )
+      const outcome = await retrieveMemoriesWithOutcome(
+        { queryText: "cache", topK: 1, relevanceFloor: 0, now: NOW, rerank: true },
+        { loadCandidates: async () => many(6), rerank }
+      )
+      const window = rerank.mock.calls[0][1].map((c) => c.id)
+      expect(window).toHaveLength(3)
+      // The model scored the window's last entry highest.
+      expect(ids(outcome.hits)).toEqual([window[2]])
+    })
+
+    it("keeps the local order when the reranker answers null or throws", async () => {
+      for (const rerank of [
+        jest.fn(async () => null),
+        jest.fn(async () => {
+          throw new Error("boom")
+        }),
+      ]) {
+        const out = await retrieveMemories(
+          { ...base, queryText: "cache", now: NOW, rerank: true },
+          { loadCandidates: async () => corpus(), rerank }
+        )
+        expect(rerank).toHaveBeenCalled()
+        expect(ids(out)).toEqual(["sem", "epi", "low"])
+      }
+    })
+
+    it("does not call the reranker when rerank is off or fewer than 2 hits", async () => {
+      const rerank = jest.fn(async () => null)
+      await retrieveMemories(
+        { ...base, queryText: "cache", now: NOW },
+        { loadCandidates: async () => corpus(), rerank }
+      )
+      await retrieveMemories(
+        { ...base, queryText: "cache", now: NOW, rerank: false },
+        { loadCandidates: async () => corpus(), rerank }
+      )
+      await retrieveMemories(
+        { ...base, queryText: "redis", now: NOW, rerank: true },
+        { loadCandidates: async () => corpus(), rerank }
+      )
+      expect(rerank).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("deps.defaults", () => {
+    it("applies defaults when the request leaves fields undefined", async () => {
+      const rerank = jest.fn(async () => null)
+      const out = await retrieveMemories(
+        { ...base, queryText: "last time cache", now: NOW },
+        {
+          loadCandidates: async () => corpus(),
+          rerank,
+          defaults: { sessionRecallRouting: true, rerank: true },
+        }
+      )
+      expect(ids(out)).toEqual(["epi", "sem", "low"])
+      expect(rerank).toHaveBeenCalledTimes(1)
+    })
+
+    it("applies a default belief weight", async () => {
+      const out = await retrieveMemories(
+        { ...base, queryText: "cache", now: NOW },
+        {
+          loadCandidates: async () =>
+            corpus().map((m) =>
+              m.id === "epi"
+                ? { ...m, beliefInputs: { evidenceCount: 20, distinctSessions: 20 } }
+                : m
+            ),
+          defaults: { beliefRankingWeight: 1 },
+        }
+      )
+      expect(ids(out)).toEqual(["epi", "sem", "low"])
+    })
+
+    it("lets explicit request fields override the defaults", async () => {
+      const rerank = jest.fn(async () => null)
+      const out = await retrieveMemories(
+        {
+          ...base,
+          queryText: "last time cache",
+          now: NOW,
+          sessionRecallRouting: false,
+          rerank: false,
+        },
+        {
+          loadCandidates: async () => corpus(),
+          rerank,
+          defaults: { sessionRecallRouting: true, rerank: true },
+        }
+      )
+      expect(ids(out)).toEqual(["sem", "epi", "low"])
+      expect(rerank).not.toHaveBeenCalled()
+    })
+  })
 })

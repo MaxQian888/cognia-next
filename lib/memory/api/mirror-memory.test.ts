@@ -27,7 +27,11 @@ describe("applyMirroredMemoryMutation", () => {
     await expect(
       applyMirroredMemoryMutation({ kind: "update", id: "m1", patch: { text: "next" } })
     ).resolves.toEqual({ ok: true })
-    expect(mockUpdate).toHaveBeenCalledWith("m1", { text: "next", bumpVersion: true })
+    expect(mockUpdate).toHaveBeenCalledWith("m1", {
+      text: "next",
+      bumpVersion: true,
+      skipRevision: true,
+    })
     expect(mockAudit).toHaveBeenCalledWith({
       action: "revised",
       memoryId: "m1",

@@ -28,6 +28,11 @@ jest.mock("@/lib/db/memory-governance", () => ({
   appendMemoryAuditEvent: (...args: unknown[]) => mockAppendAudit(...(args as [])),
 }))
 
+const mockRecordCorroboration = jest.fn()
+jest.mock("@/lib/memory/lifecycle/record-memory-outcome", () => ({
+  recordMemoryCorroboration: (...args: unknown[]) => mockRecordCorroboration(...args),
+}))
+
 const mockNoteVectorFailure = jest.fn()
 jest.mock("@/lib/memory/lifecycle/enqueue-reconcile", () => ({
   noteMemoryVectorFailure: (...args: unknown[]) => mockNoteVectorFailure(...args),
@@ -72,6 +77,7 @@ beforeEach(() => {
   // `mockRejectedValue` set by an earlier case, and a bare jest.fn() returns
   // undefined — which the `.catch(...)` on the audit call would blow up on.
   mockAppendAudit.mockResolvedValue(undefined)
+  mockRecordCorroboration.mockResolvedValue(undefined)
   mockResolvePolicy.mockResolvedValue({
     canCreate: true,
     writableScopes: ["global", "workspace", "character", "agent"],
@@ -270,6 +276,62 @@ describe("storeMemoryCore", () => {
     mockConsolidate.mockResolvedValue({ applied: [{ op: "NOOP" }] })
     const result = await storeMemoryCore({ text: "already known", provenance: "system" })
     expect(result).toEqual({ ok: true, stored: false, consolidated: true, applied: ["NOOP"] })
+  })
+
+  it("records a NOOP with a targetId as corroborating evidence, not an edit", async () => {
+    mockConsolidate.mockResolvedValue({
+      applied: [{ op: "NOOP", targetId: "mem_known", candidate: { type: "semantic" } }],
+    })
+    const result = await storeMemoryCore({
+      text: "already known",
+      provenance: "explicit",
+      source: { sessionId: "s1", messageId: "msg1" },
+    })
+    expect(result).toEqual({ ok: true, stored: false, consolidated: true, applied: ["NOOP"] })
+    expect(mockRecordCorroboration).toHaveBeenCalledTimes(1)
+    expect(mockRecordCorroboration).toHaveBeenCalledWith({
+      memoryId: "mem_known",
+      sessionId: "s1",
+      contaminationState: "clean",
+      evidence: { kind: "manual", sourceId: "msg1" },
+    })
+    expect(mockUpdateMemory).not.toHaveBeenCalled()
+    expect(mockAppendAudit).not.toHaveBeenCalled()
+  })
+
+  it("marks external corroboration as external evidence sourced from the plugin", async () => {
+    mockConsolidate.mockResolvedValue({
+      applied: [{ op: "NOOP", targetId: "mem_known", candidate: { type: "semantic" } }],
+    })
+    await storeMemoryCore({
+      text: "already known",
+      provenance: "external",
+      attribution: ATTRIBUTION,
+    })
+    expect(mockRecordCorroboration).toHaveBeenCalledWith({
+      memoryId: "mem_known",
+      sessionId: undefined,
+      contaminationState: "external-context",
+      evidence: { kind: "external", sourceId: "com.example.notes" },
+    })
+  })
+
+  it("falls back to a manual:<id> source id when nothing identifies the capture", async () => {
+    mockConsolidate.mockResolvedValue({
+      applied: [{ op: "NOOP", targetId: "mem_known", candidate: { type: "semantic" } }],
+    })
+    await storeMemoryCore({ text: "already known", provenance: "system" })
+    expect(mockRecordCorroboration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        evidence: { kind: "manual", sourceId: "manual:mem_known" },
+      })
+    )
+  })
+
+  it("does not corroborate a NOOP without a targetId", async () => {
+    mockConsolidate.mockResolvedValue({ applied: [{ op: "NOOP" }] })
+    await storeMemoryCore({ text: "already known", provenance: "system" })
+    expect(mockRecordCorroboration).not.toHaveBeenCalled()
   })
 
   it("patches trimmed tags onto ADDed rows after consolidation", async () => {

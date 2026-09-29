@@ -6,6 +6,7 @@ import {
   invalidateMemory,
   listMemories,
   recordRetrievalFeedback,
+  restoreMemoryRevision,
   setMemoryPinned,
   updateMemory,
   type ListMemoriesQuery,
@@ -51,6 +52,12 @@ export type ManageMemoryCommand =
    */
   | { kind: "retrieval-feedback"; id: string; verdict: RetrievalFeedbackVerdict }
   | { kind: "delete"; id: string }
+  /**
+   * Put an earlier text of `id` back (`revisionId` is one of its revision
+   * snapshots). The text being replaced is preserved as a revision too, so a
+   * restore is undoable the same way.
+   */
+  | { kind: "restore-revision"; id: string; revisionId: string }
   /**
    * Soft-delete (chat-chip 撤销 and conflict resolution): status →
    * `invalidated`, history preserved; mirrors `forgetExternalMemory`.
@@ -121,14 +128,24 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
   }
 
   if (command.kind === "clear") {
-    const rows = await listMemories(command.query)
+    // Clearing forgotten memories also drops revision snapshots (earlier
+    // wordings kept for undo) — the same rule as `clearMemories`. Any other
+    // clear reaches snapshots through their owner's delete.
+    const rows = await listMemories(
+      command.query?.status === "invalidated"
+        ? { ...command.query, includeRevisions: true }
+        : command.query
+    )
     for (const row of rows) await manageMemory({ kind: "delete", id: row.id })
     return { ok: true, clearedCount: rows.length }
   }
 
   if (command.kind === "resolve-conflict") {
     const [keep, drop] = await Promise.all([getMemory(command.keepId), getMemory(command.dropId)])
-    if (!keep || !drop) return { ok: false, reason: "not_found" }
+    // Revision snapshots are history and never a side of a live conflict.
+    if (!keep || !drop || keep.revisionOf !== undefined || drop.revisionOf !== undefined) {
+      return { ok: false, reason: "not_found" }
+    }
     const settings = await getSettings().catch(() => undefined)
     const config = resolveMemoryConfig(settings?.memory)
 
@@ -144,6 +161,7 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
       await updateMemory(command.keepId, {
         text: redacted,
         bumpVersion: true,
+        revisionReason: "conflict-merge",
         reviewStatus: "verified",
         conflictWithIds: (keep.conflictWithIds ?? []).filter((id) => id !== command.dropId),
         evidenceState: "supported",
@@ -247,6 +265,11 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
 
   const existing = await getMemory(command.id)
   if (!existing) return { ok: false, reason: "not_found" }
+  // A revision snapshot is history: it can be deleted, never edited, pinned or
+  // reviewed on its own. Restoring goes through its owner's id.
+  if (existing.revisionOf !== undefined && command.kind !== "delete") {
+    return { ok: false, reason: "not_found" }
+  }
 
   if (command.kind === "pin") {
     await setMemoryPinned(command.id, command.pinned)
@@ -294,6 +317,46 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
     await hardDeleteMemory(command.id)
     await deleteMemoryEvidence(command.id)
     await appendMemoryAuditEvent({ action: "deleted", memoryId: command.id, reason: "user" })
+    return { ok: true, memoryId: command.id }
+  }
+
+  if (command.kind === "restore-revision") {
+    if (config.temporary) return { ok: false, reason: "temporary" }
+    const restored = await restoreMemoryRevision(command.id, command.revisionId)
+    if (!restored.ok) {
+      // `unchanged` means the live text already equals the revision — the
+      // user's intent is already true, so it is not an error.
+      if (restored.reason === "unchanged") return { ok: true, memoryId: command.id }
+      return { ok: false, reason: "not_found" }
+    }
+    // Restored text was PII-gated when it was first written; re-check anyway,
+    // because the vector sink sends it to the embedder.
+    try {
+      const sink = await tryBuildMemoryVectorSink(config)
+      if (hasNoLeakingPii(restored.memory.text)) {
+        await sink?.upsert(existing.vectorDocId ?? existing.id, restored.memory.text)
+      } else if (existing.vectorDocId) {
+        // Never embed it — and drop the vector of the text it replaced, which
+        // would otherwise keep matching.
+        await sink?.delete([existing.vectorDocId])
+      }
+    } catch {
+      // Canonical restore remains BM25-searchable.
+      noteMemoryVectorFailure()
+    }
+    await createMemoryEvidence({
+      memoryId: command.id,
+      kind: "manual",
+      sourceId: `restore:${command.id}:${command.revisionId}`,
+      contaminationState: "clean",
+      reviewed: true,
+    })
+    await appendMemoryAuditEvent({
+      action: "revised",
+      memoryId: command.id,
+      reason: "restored",
+      metadata: { revisionId: command.revisionId, version: restored.memory.version },
+    })
     return { ok: true, memoryId: command.id }
   }
 

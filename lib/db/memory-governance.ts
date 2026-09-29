@@ -1,9 +1,11 @@
+import Dexie from "dexie"
 import type {
   MemoryAuditEvent,
   MemoryEvidence,
   MemoryJob,
   MemoryJobStatus,
 } from "@/types/memory/governance"
+import { computeBeliefInputs } from "@cognia/memory/lifecycle/belief"
 import { getDb } from "./schema"
 
 function newId(prefix: string): string {
@@ -31,6 +33,45 @@ const TERMINAL_MEMORY_JOB_STATUSES: readonly MemoryJobStatus[] = [
 export type MemoryEvidenceDraft = Omit<MemoryEvidence, "id" | "createdAt"> &
   Partial<Pick<MemoryEvidence, "id" | "createdAt">>
 
+/**
+ * Recompute the corroboration counters (`Memory.beliefInputs`) of each memory
+ * from its evidence rows. Derived data: it never stamps `updatedAt` (the
+ * content did not change) and a failure is swallowed — the next evidence
+ * change recomputes from scratch.
+ */
+export async function refreshMemoryBeliefInputs(memoryIds: readonly string[]): Promise<void> {
+  const ids = [...new Set(memoryIds.filter(Boolean))]
+  if (ids.length === 0) return
+  const db = getDb()
+  for (const memoryId of ids) {
+    try {
+      const evidence = await db.memoryEvidence.where("memoryId").equals(memoryId).toArray()
+      await db.memories.update(memoryId, { beliefInputs: computeBeliefInputs(evidence) })
+    } catch {
+      // Derived counters; recomputed on the next evidence change.
+    }
+  }
+}
+
+/**
+ * Refresh belief counters once the evidence write is visible. Evidence is
+ * often written inside a caller's transaction that does not include
+ * `memories` (or has not committed yet), so the refresh is deferred to that
+ * transaction's completion instead of running inside it.
+ */
+function scheduleBeliefRefresh(memoryIds: readonly string[]): Promise<void> | void {
+  const ids = memoryIds.filter(Boolean)
+  if (ids.length === 0) return
+  const transaction = Dexie.currentTransaction
+  if (transaction) {
+    transaction.on("complete", () => {
+      void Dexie.ignoreTransaction(() => refreshMemoryBeliefInputs(ids))
+    })
+    return
+  }
+  return refreshMemoryBeliefInputs(ids)
+}
+
 export async function createMemoryEvidence(draft: MemoryEvidenceDraft): Promise<MemoryEvidence> {
   const row: MemoryEvidence = {
     ...draft,
@@ -38,6 +79,7 @@ export async function createMemoryEvidence(draft: MemoryEvidenceDraft): Promise<
     createdAt: draft.createdAt ?? Date.now(),
   }
   await getDb().memoryEvidence.add(row)
+  if (row.memoryId) await scheduleBeliefRefresh([row.memoryId])
   return row
 }
 
@@ -61,11 +103,14 @@ export async function recordMemoryEvidenceVerdict(
     validationStrategy?: MemoryEvidence["validationStrategy"]
   }
 ): Promise<void> {
-  await getDb().memoryEvidence.update(id, {
+  const db = getDb()
+  await db.memoryEvidence.update(id, {
     validationState: verdict.validationState,
     validatedAt: verdict.validatedAt ?? Date.now(),
     ...(verdict.validationStrategy ? { validationStrategy: verdict.validationStrategy } : {}),
   })
+  const row = await db.memoryEvidence.get(id)
+  if (row?.memoryId) await scheduleBeliefRefresh([row.memoryId])
 }
 
 /**
@@ -89,7 +134,11 @@ export async function revokeMemoryEvidenceForMessages(
   await db.memoryEvidence.bulkPut(
     rows.map((row) => ({ ...row, validationState: "revoked" as const, validatedAt: now }))
   )
-  return [...new Set(rows.map((row) => row.memoryId).filter((id): id is string => Boolean(id)))]
+  const memoryIds = [
+    ...new Set(rows.map((row) => row.memoryId).filter((id): id is string => Boolean(id))),
+  ]
+  await scheduleBeliefRefresh(memoryIds)
+  return memoryIds
 }
 
 /**
@@ -111,7 +160,11 @@ export async function revokeMemoryEvidenceForSession(
   await db.memoryEvidence.bulkPut(
     rows.map((row) => ({ ...row, validationState: "revoked" as const, validatedAt: now }))
   )
-  return [...new Set(rows.map((row) => row.memoryId).filter((id): id is string => Boolean(id)))]
+  const memoryIds = [
+    ...new Set(rows.map((row) => row.memoryId).filter((id): id is string => Boolean(id))),
+  ]
+  await scheduleBeliefRefresh(memoryIds)
+  return memoryIds
 }
 
 /**
@@ -224,6 +277,10 @@ export async function bindMemoryGovernanceOutcome(input: {
     await db.memories.update(input.memoryId, { ...input.patch, updatedAt: now })
     await db.memoryEvidence.add(evidence)
     await db.memoryAuditEvents.add(audit)
+    // Inside this transaction `memories` IS in scope, so the counters commit
+    // atomically with the evidence that changed them.
+    const allEvidence = await db.memoryEvidence.where("memoryId").equals(input.memoryId).toArray()
+    await db.memories.update(input.memoryId, { beliefInputs: computeBeliefInputs(allEvidence) })
     return { evidence, audit }
   })
 }

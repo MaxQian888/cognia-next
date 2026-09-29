@@ -165,6 +165,84 @@ describe("scoreMemories", () => {
   })
 })
 
+describe("scoreMemories belief factor", () => {
+  const neutral = { recency: 0, importance: 0, relevance: 0, veracity: 0, governance: 0 }
+
+  it("ignores belief unless weights.belief > 0", () => {
+    const believed = mem({ belief: 0.9 })
+    const doubted = mem({ belief: 0.1 })
+    const out = scoreMemories([doubted, believed], { now: NOW })
+    expect(out[0].score).toBe(out[1].score)
+    // parts still report the raw value
+    expect(out.find((o) => o.memory === believed)!.parts.belief).toBe(0.9)
+    const zero = scoreMemories([doubted, believed], { now: NOW, weights: { belief: 0 } })
+    expect(zero[0].score).toBe(zero[1].score)
+  })
+
+  it("adds weights.belief × belief when enabled", () => {
+    const believed = mem({ belief: 0.9 })
+    const doubted = mem({ belief: 0.1 })
+    const out = scoreMemories([doubted, believed], {
+      now: NOW,
+      weights: { ...neutral, belief: 2 },
+    })
+    expect(out[0].memory).toBe(believed)
+    expect(out[0].score).toBeCloseTo(1.8)
+    expect(out[1].score).toBeCloseTo(0.2)
+  })
+
+  it("does not min-max normalize belief", () => {
+    const a = mem({ belief: 0.3 })
+    const b = mem({ belief: 0.2 })
+    const out = scoreMemories([a, b], { now: NOW, weights: { ...neutral, belief: 1 } })
+    expect(out.map((o) => o.parts.belief)).toEqual([0.3, 0.2])
+    expect(out[0].score).toBeCloseTo(0.3)
+  })
+
+  it("clamps belief to [0,1] and reads absent or non-finite as 0", () => {
+    const out = scoreMemories(
+      [mem({ belief: 5 }), mem({ belief: -1 }), mem({ belief: Number.NaN }), mem()],
+      { now: NOW, weights: { ...neutral, belief: 1 } }
+    )
+    expect(out.map((o) => o.parts.belief)).toEqual([1, 0, 0, 0])
+  })
+})
+
+describe("scoreMemories boost", () => {
+  it("multiplies the weighted sum by (1 + boost)", () => {
+    const plain = mem({ relevance: 0.5 })
+    const boosted = mem({ relevance: 0.5, boost: 0.25 })
+    const out = scoreMemories([plain, boosted], { now: NOW })
+    const plainScore = out.find((o) => o.memory === plain)!.score
+    const boostedScore = out.find((o) => o.memory === boosted)!.score
+    expect(out[0].memory).toBe(boosted)
+    expect(boostedScore).toBeCloseTo(plainScore * 1.25)
+  })
+
+  it("leaves a zero score at zero (not additive)", () => {
+    const zeroWeights = { recency: 0, importance: 0, relevance: 0, veracity: 0, governance: 0 }
+    const out = scoreMemories([mem({ boost: 0.25 })], { now: NOW, weights: zeroWeights })
+    expect(out[0].score).toBe(0)
+  })
+
+  it("clamps boost at -1 and treats non-finite boost as 0", () => {
+    const [floored] = scoreMemories([mem({ boost: -5 })], { now: NOW })
+    expect(floored.score).toBeCloseTo(0)
+    const base = scoreMemories([mem()], { now: NOW })[0].score
+    expect(scoreMemories([mem({ boost: Number.NaN })], { now: NOW })[0].score).toBeCloseTo(base)
+    expect(
+      scoreMemories([mem({ boost: Number.POSITIVE_INFINITY })], { now: NOW })[0].score
+    ).toBeCloseTo(base)
+  })
+
+  it("does not change parts", () => {
+    const [a] = scoreMemories([mem({ boost: 1 })], { now: NOW })
+    const [b] = scoreMemories([mem()], { now: NOW })
+    expect(a.parts).toEqual(b.parts)
+    expect(a.score).toBeCloseTo(b.score * 2)
+  })
+})
+
 describe("recencyHalfLifeDaysForType", () => {
   it("scales the base half-life by type: episodic < semantic < procedural", () => {
     const base = 30

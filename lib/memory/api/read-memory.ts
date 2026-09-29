@@ -148,7 +148,9 @@ export async function getMemoryExternal(
   if (!authorized.ok) return undefined
   const { getMemory } = await import("@/lib/db/memories")
   const row = await getMemory(id)
-  return row && authorized.read.isAuthorized(row) ? row : undefined
+  // Revision snapshots are reached through their memory's history, never by id
+  // from an external surface — same rule as the default listing.
+  return row && row.revisionOf === undefined && authorized.read.isAuthorized(row) ? row : undefined
 }
 
 /** Active-row count for a scope; a scope outside the caller's reads as 0. */

@@ -2,6 +2,7 @@ import type { Memory } from "@/types/memory/memory"
 import { createDbTestFixture } from "./test-fixture"
 import { getDb } from "./schema"
 import {
+  ACCESS_BUMP_COOLDOWN_MS,
   clearMemories,
   countActive,
   createMemory,
@@ -12,9 +13,12 @@ import {
   invalidateMemory,
   listActiveForReader,
   listActiveProcedural,
+  listHistoricalForReader,
   listMemories,
   listMemoriesBySourceMessageId,
+  listMemoryRevisions,
   recordRetrievalFeedback,
+  restoreMemoryRevision,
   setMemoriesPinned,
   setMemoryPinned,
   touchMemories,
@@ -425,5 +429,351 @@ describe("recordRetrievalFeedback", () => {
 
   it("answers false for a memory deleted in another window", async () => {
     expect(await recordRetrievalFeedback("gone", "helpful", 1)).toBe(false)
+  })
+})
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 2))
+
+async function onlyRevisionOf(ownerId: string): Promise<Memory> {
+  const revisions = await listMemoryRevisions(ownerId)
+  expect(revisions).toHaveLength(1)
+  return revisions[0]
+}
+
+describe("revision snapshots", () => {
+  it("preserves the outgoing text as an invalidated snapshot with reason 'edit' by default", async () => {
+    const owner = await createMemory(
+      buildInput({
+        id: "m1",
+        text: "old text",
+        vectorDocId: "v1",
+        key: "pkg",
+        sourceMessageId: "msg-1",
+        sourceSessionId: "sess-1",
+        tags: ["a"],
+      })
+    )
+    await tick()
+    await updateMemory("m1", { text: "new text" })
+
+    const live = await getMemory("m1")
+    expect(live?.text).toBe("new text")
+    expect(live?.revisedAt).toBe(live?.updatedAt)
+    expect(live?.version).toBe(1)
+
+    const snapshot = await onlyRevisionOf("m1")
+    expect(snapshot.id).not.toBe("m1")
+    expect(snapshot).toMatchObject({
+      text: "old text",
+      status: "invalidated",
+      revisionOf: "m1",
+      supersededById: "m1",
+      revisionReason: "edit",
+      invalidatedAt: live?.revisedAt,
+      revisedAt: owner.createdAt,
+      accessCount: 0,
+      pinned: false,
+      tags: ["a"],
+    })
+    expect(snapshot.vectorDocId).toBeUndefined()
+    expect(snapshot.key).toBeUndefined()
+    expect(snapshot.sourceMessageId).toBeUndefined()
+    expect(snapshot.sourceSessionId).toBeUndefined()
+  })
+
+  it("records a caller-supplied revisionReason", async () => {
+    await createMemory(buildInput({ id: "m1", text: "a" }))
+    await updateMemory("m1", { text: "b", revisionReason: "consolidation" })
+    expect((await onlyRevisionOf("m1")).revisionReason).toBe("consolidation")
+  })
+
+  it("writes no snapshot for a paired device's mirrored edit (skipRevision)", async () => {
+    await createMemory(buildInput({ id: "m1", text: "a" }))
+    await updateMemory("m1", { text: "b", bumpVersion: true, skipRevision: true })
+    expect(await listMemoryRevisions("m1")).toEqual([])
+    const live = await getMemory("m1")
+    expect(live?.text).toBe("b")
+    expect(live?.revisedAt).toBeUndefined()
+    expect(live).not.toHaveProperty("skipRevision")
+  })
+
+  it("writes no snapshot when the text is unchanged or absent", async () => {
+    await createMemory(buildInput({ id: "m1", text: "same" }))
+    await updateMemory("m1", { text: "same", tags: ["x"] })
+    await updateMemory("m1", { importance: 9 })
+    await updateMemory("m1", { importance: 8, bumpVersion: true })
+    expect(await listMemoryRevisions("m1")).toEqual([])
+    const live = await getMemory("m1")
+    expect(live?.revisedAt).toBeUndefined()
+    expect(live?.version).toBe(2)
+    expect(await listMemories({ includeRevisions: true })).toHaveLength(1)
+  })
+
+  it("refuses to edit the text of a snapshot and leaves it untouched", async () => {
+    await createMemory(buildInput({ id: "m1", text: "a" }))
+    await updateMemory("m1", { text: "b" })
+    const snapshot = await onlyRevisionOf("m1")
+    await expect(updateMemory(snapshot.id, { text: "rewritten" })).rejects.toThrow(
+      "memory_revision_is_immutable"
+    )
+    expect((await getMemory(snapshot.id))?.text).toBe("a")
+    expect(await listMemoryRevisions("m1")).toHaveLength(1)
+  })
+
+  it("bumps the live version alongside the snapshot when bumpVersion is set", async () => {
+    await createMemory(buildInput({ id: "m1", text: "a" }))
+    await updateMemory("m1", { text: "b", bumpVersion: true })
+    expect((await getMemory("m1"))?.version).toBe(2)
+    // The snapshot keeps the version the preserved text had.
+    expect((await onlyRevisionOf("m1")).version).toBe(1)
+  })
+
+  it("listMemories hides snapshots by default and includes them on request", async () => {
+    await createMemory(buildInput({ id: "m1", text: "a" }))
+    await updateMemory("m1", { text: "b" })
+    expect((await listMemories()).map((m) => m.id)).toEqual(["m1"])
+    expect((await listMemories({ status: "invalidated" })).map((m) => m.id)).toEqual([])
+    const all = await listMemories({ includeRevisions: true })
+    expect(all).toHaveLength(2)
+    expect(all.filter((m) => m.revisionOf === "m1")).toHaveLength(1)
+  })
+
+  it("listMemoryRevisions returns only that memory's snapshots, newest first", async () => {
+    await createMemory(buildInput({ id: "m1", text: "v1" }))
+    await createMemory(buildInput({ id: "m2", text: "other" }))
+    await updateMemory("m1", { text: "v2" })
+    await tick()
+    await updateMemory("m2", { text: "other 2" })
+    await tick()
+    await updateMemory("m1", { text: "v3" })
+    const revisions = await listMemoryRevisions("m1")
+    expect(revisions.map((r) => r.text)).toEqual(["v2", "v1"])
+    expect(revisions[0].invalidatedAt!).toBeGreaterThan(revisions[1].invalidatedAt!)
+    // The second snapshot's live window starts where the first one ended.
+    expect(revisions[0].revisedAt).toBe(revisions[1].invalidatedAt)
+    expect(await listMemoryRevisions("missing")).toEqual([])
+  })
+})
+
+describe("restoreMemoryRevision", () => {
+  it("puts the earlier text back, bumps version, and preserves the replaced text as 'restore'", async () => {
+    await createMemory(buildInput({ id: "m1", text: "original" }))
+    await updateMemory("m1", { text: "mistake" })
+    const earlier = await onlyRevisionOf("m1")
+    await tick()
+
+    const result = await restoreMemoryRevision("m1", earlier.id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.memory).toMatchObject({ id: "m1", text: "original", version: 2 })
+
+    const live = await getMemory("m1")
+    expect(live).toMatchObject({ text: "original", version: 2 })
+    expect(live?.revisedAt).toBe(live?.updatedAt)
+    const revisions = await listMemoryRevisions("m1")
+    expect(revisions.map((r) => [r.text, r.revisionReason])).toEqual([
+      ["mistake", "restore"],
+      ["original", "edit"],
+    ])
+  })
+
+  it("un-compacts the row when restoring the pre-compaction text", async () => {
+    await createMemory(buildInput({ id: "m1", text: "long original" }))
+    await updateMemory("m1", { text: "short", compactedAt: 100, revisionReason: "compaction" })
+    const preCompaction = await onlyRevisionOf("m1")
+    expect(preCompaction.compactedAt).toBeUndefined()
+
+    const result = await restoreMemoryRevision("m1", preCompaction.id)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.memory.compactedAt).toBeUndefined()
+    const live = await getMemory("m1")
+    expect(live?.text).toBe("long original")
+    expect(live?.compactedAt).toBeUndefined()
+    // The compacted wording is itself history now, still marked compacted.
+    const restoredFrom = (await listMemoryRevisions("m1")).find((r) => r.text === "short")
+    expect(restoredFrom?.compactedAt).toBe(100)
+  })
+
+  it("keeps compactedAt when the restored text was itself compacted", async () => {
+    await createMemory(buildInput({ id: "m1", text: "a" }))
+    await updateMemory("m1", { text: "b", compactedAt: 100 })
+    await updateMemory("m1", { text: "c" })
+    const compacted = (await listMemoryRevisions("m1")).find((r) => r.text === "b")!
+    expect((await restoreMemoryRevision("m1", compacted.id)).ok).toBe(true)
+    expect((await getMemory("m1"))?.compactedAt).toBe(100)
+  })
+
+  it("reports not_found when either row is missing", async () => {
+    await createMemory(buildInput({ id: "m1", text: "a" }))
+    await updateMemory("m1", { text: "b" })
+    const snapshot = await onlyRevisionOf("m1")
+    expect(await restoreMemoryRevision("m1", "missing")).toEqual({
+      ok: false,
+      reason: "not_found",
+    })
+    expect(await restoreMemoryRevision("missing", snapshot.id)).toEqual({
+      ok: false,
+      reason: "not_found",
+    })
+  })
+
+  it("reports not_a_revision for a live row or another memory's snapshot", async () => {
+    await createMemory(buildInput({ id: "m1", text: "a" }))
+    await createMemory(buildInput({ id: "m2", text: "x" }))
+    await updateMemory("m2", { text: "y" })
+    const foreign = await onlyRevisionOf("m2")
+    expect(await restoreMemoryRevision("m1", "m2")).toEqual({
+      ok: false,
+      reason: "not_a_revision",
+    })
+    expect(await restoreMemoryRevision("m1", foreign.id)).toEqual({
+      ok: false,
+      reason: "not_a_revision",
+    })
+    expect((await getMemory("m1"))?.text).toBe("a")
+  })
+
+  it("reports unchanged when the revision's text is already live, writing nothing", async () => {
+    await createMemory(buildInput({ id: "m1", text: "a" }))
+    await updateMemory("m1", { text: "b" })
+    await updateMemory("m1", { text: "a" })
+    const sameText = (await listMemoryRevisions("m1")).find((r) => r.text === "a")!
+    expect(await restoreMemoryRevision("m1", sameText.id)).toEqual({
+      ok: false,
+      reason: "unchanged",
+    })
+    expect(await listMemoryRevisions("m1")).toHaveLength(2)
+    expect((await getMemory("m1"))?.version).toBe(1)
+  })
+})
+
+describe("listHistoricalForReader", () => {
+  it("returns every status visible to the reader, snapshots included, never widening visibility", async () => {
+    await createMemory(buildInput({ id: "g1", text: "g old" }))
+    await updateMemory("g1", { text: "g new" })
+    await createMemory(buildInput({ id: "g2" }))
+    await invalidateMemory("g2")
+    await createMemory(buildInput({ id: "cA", scope: "character", characterId: "charA" }))
+    await createMemory(
+      buildInput({ id: "cB", scope: "character", characterId: "charB", text: "b old" })
+    )
+    await updateMemory("cB", { text: "b new" })
+    await createMemory(buildInput({ id: "conflict", reviewStatus: "conflict" }))
+
+    const gSnapshot = await onlyRevisionOf("g1")
+    const bSnapshot = await onlyRevisionOf("cB")
+
+    const forA = (await listHistoricalForReader("charA")).map((m) => m.id).sort()
+    expect(forA).toEqual(["cA", "g1", "g2", gSnapshot.id].sort())
+    expect(forA).not.toContain(bSnapshot.id)
+
+    const forB = (await listHistoricalForReader({ characterId: "charB" })).map((m) => m.id)
+    expect(forB).toEqual(expect.arrayContaining(["cB", bSnapshot.id, "g1", gSnapshot.id]))
+    expect(forB).not.toContain("cA")
+
+    const anonymous = (await listHistoricalForReader()).map((m) => m.id).sort()
+    expect(anonymous).toEqual(["g1", "g2", gSnapshot.id].sort())
+  })
+})
+
+describe("touchMemories cooldown", () => {
+  it("skips a second bump within the cooldown and counts one after it", async () => {
+    await createMemory(buildInput({ id: "m1" }))
+    const t0 = 10_000_000_000_000
+    await touchMemories(["m1"], t0)
+    expect(await getMemory("m1")).toMatchObject({ accessCount: 1, lastAccessedAt: t0 })
+
+    await touchMemories(["m1"], t0 + ACCESS_BUMP_COOLDOWN_MS - 1)
+    expect(await getMemory("m1")).toMatchObject({ accessCount: 1, lastAccessedAt: t0 })
+
+    await touchMemories(["m1"], t0 + ACCESS_BUMP_COOLDOWN_MS)
+    expect(await getMemory("m1")).toMatchObject({
+      accessCount: 2,
+      lastAccessedAt: t0 + ACCESS_BUMP_COOLDOWN_MS,
+    })
+  })
+
+  it("always counts the first touch of a never-accessed row, even right after creation", async () => {
+    const row = await createMemory(buildInput({ id: "m1" }))
+    // lastAccessedAt === createdAt, well inside the cooldown window.
+    await touchMemories(["m1"], row.lastAccessedAt + 1)
+    expect(await getMemory("m1")).toMatchObject({
+      accessCount: 1,
+      lastAccessedAt: row.lastAccessedAt + 1,
+    })
+  })
+})
+
+describe("revision-aware delete & clear", () => {
+  async function seedWithHistory() {
+    await createMemory(buildInput({ id: "m1", text: "v1" }))
+    await updateMemory("m1", { text: "v2" })
+    await tick()
+    await updateMemory("m1", { text: "v3" })
+    await createMemory(buildInput({ id: "m2", text: "x1" }))
+    await updateMemory("m2", { text: "x2" })
+    const m1Revisions = await listMemoryRevisions("m1")
+    const m2Revisions = await listMemoryRevisions("m2")
+    expect(m1Revisions).toHaveLength(2)
+    expect(m2Revisions).toHaveLength(1)
+    return { m1Revisions, m2Revisions }
+  }
+
+  it("hardDeleteMemories cascades to snapshots, counts owners, tombstones all, audits owners once", async () => {
+    const { m1Revisions, m2Revisions } = await seedWithHistory()
+    const db = getDb()
+
+    expect(await hardDeleteMemories(["m1"])).toBe(1)
+
+    expect(await getMemory("m1")).toBeUndefined()
+    for (const revision of m1Revisions) {
+      expect(await getMemory(revision.id)).toBeUndefined()
+      expect(await db.retrievalTombstones.get(`memory:${revision.id}`)).toMatchObject({
+        entityType: "memory",
+        entityId: revision.id,
+      })
+      expect(await db.memoryAuditEvents.where("memoryId").equals(revision.id).count()).toBe(0)
+    }
+    expect(await db.retrievalTombstones.get("memory:m1")).toBeDefined()
+    const ownerAudits = await db.memoryAuditEvents.where("memoryId").equals("m1").toArray()
+    expect(ownerAudits.filter((a) => a.action === "deleted")).toHaveLength(1)
+
+    // The other memory and its history are untouched.
+    expect(await getMemory("m2")).toBeDefined()
+    expect(await getMemory(m2Revisions[0].id)).toBeDefined()
+  })
+
+  it("hardDeleteMemories does not double-delete a snapshot listed alongside its owner", async () => {
+    const { m1Revisions } = await seedWithHistory()
+    const db = getDb()
+    expect(await hardDeleteMemories(["m1", m1Revisions[0].id])).toBe(2)
+    expect(await listMemoryRevisions("m1")).toEqual([])
+    // Listed explicitly, but still history of a deleted owner: no audit row.
+    expect(await db.memoryAuditEvents.where("memoryId").equals(m1Revisions[0].id).count()).toBe(0)
+  })
+
+  it("clearMemories on a scope reaches snapshots through their owners", async () => {
+    const { m1Revisions, m2Revisions } = await seedWithHistory()
+    expect(await clearMemories({ scope: "global" })).toBe(2)
+    expect(await listMemories({ includeRevisions: true })).toEqual([])
+    for (const revision of [...m1Revisions, ...m2Revisions]) {
+      expect(await getMemory(revision.id)).toBeUndefined()
+    }
+  })
+
+  it("clearMemories({ status: 'invalidated' }) drops forgotten memories and all revision history", async () => {
+    const { m1Revisions, m2Revisions } = await seedWithHistory()
+    await createMemory(buildInput({ id: "forgotten" }))
+    await invalidateMemory("forgotten")
+
+    // One forgotten memory plus three snapshots.
+    expect(await clearMemories({ status: "invalidated" })).toBe(4)
+
+    expect(await getMemory("forgotten")).toBeUndefined()
+    for (const revision of [...m1Revisions, ...m2Revisions]) {
+      expect(await getMemory(revision.id)).toBeUndefined()
+    }
+    expect((await listMemories()).map((m) => m.id).sort()).toEqual(["m1", "m2"])
+    expect((await getMemory("m1"))?.text).toBe("v3")
   })
 })

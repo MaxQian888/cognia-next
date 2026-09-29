@@ -1197,6 +1197,161 @@ describe("applyBackupPackage — learned memory", () => {
     expect(second?.conflictWithIds).toEqual([first?.id])
   })
 
+  function withRevisionSnapshot(overrides: Record<string, unknown> = {}): BackupPayloadV3 {
+    const snapshot = memorySnapshot()
+    snapshot.memories!.push({
+      ...snapshot.memories![0],
+      id: "mem_rev_1",
+      text: "The project used npm.",
+      status: "invalidated",
+      supersededById: "mem_1",
+      revisionOf: "mem_1",
+      revisionReason: "edit",
+      revisedAt: 5,
+      ...overrides,
+    } as never)
+    return snapshot
+  }
+
+  it("imports a canonical revision snapshot with its reason and timestamps", async () => {
+    const db = getDb()
+    const snapshot = withRevisionSnapshot({ compactedAt: 6 })
+    Object.assign(snapshot.memories![0], { revisedAt: 7, compactedAt: 8 })
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    expect(await db.memories.get("mem_rev_1")).toMatchObject({
+      status: "invalidated",
+      supersededById: "mem_1",
+      revisionOf: "mem_1",
+      revisionReason: "edit",
+      revisedAt: 5,
+      compactedAt: 6,
+    })
+    expect(await db.memories.get("mem_1")).toMatchObject({ revisedAt: 7, compactedAt: 8 })
+  })
+
+  it("keeps the snapshot link but drops an unknown revision reason", async () => {
+    const db = getDb()
+    await applyBackupPackage(
+      pkg(withRevisionSnapshot({ revisionReason: "not-a-reason" })),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const row = await db.memories.get("mem_rev_1")
+    expect(row?.revisionOf).toBe("mem_1")
+    expect(row?.revisionReason).toBeUndefined()
+  })
+
+  it("imports an active row claiming revisionOf as an ordinary row", async () => {
+    const db = getDb()
+    await applyBackupPackage(
+      pkg(withRevisionSnapshot({ status: "active" })),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const row = await db.memories.get("mem_rev_1")
+    expect(row).toBeDefined()
+    expect(row?.status).toBe("active")
+    expect(row?.revisionOf).toBeUndefined()
+    expect(row?.revisionReason).toBeUndefined()
+  })
+
+  it("rejects revisionOf that does not match supersededById", async () => {
+    const db = getDb()
+    await applyBackupPackage(
+      pkg(withRevisionSnapshot({ revisionOf: "mem_other" })),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const row = await db.memories.get("mem_rev_1")
+    expect(row?.supersededById).toBe("mem_1")
+    expect(row?.revisionOf).toBeUndefined()
+    expect(row?.revisionReason).toBeUndefined()
+    // revisedAt is a plain timestamp and travels regardless of the link.
+    expect(row?.revisedAt).toBe(5)
+  })
+
+  it("rejects a revision reason on a row that is not a snapshot", async () => {
+    const db = getDb()
+    const snapshot = memorySnapshot()
+    Object.assign(snapshot.memories![0], { revisionReason: "edit" })
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    expect((await db.memories.get("mem_1"))?.revisionReason).toBeUndefined()
+  })
+
+  it("drops non-finite revision timestamps and derived belief inputs", async () => {
+    const db = getDb()
+    const snapshot = memorySnapshot()
+    Object.assign(snapshot.memories![0], {
+      revisedAt: "yesterday",
+      compactedAt: Number.NaN,
+      beliefInputs: { corroborations: 9, contradictions: 0 },
+    })
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const row = await db.memories.get("mem_1")
+    expect(row?.revisedAt).toBeUndefined()
+    expect(row?.compactedAt).toBeUndefined()
+    // The package's counters are ignored; they are recomputed from the evidence
+    // that actually landed (one row here, with no session: residual credit only).
+    expect(row?.beliefInputs).toMatchObject({ evidenceCount: 1, distinctSessions: 0 })
+    expect(row?.beliefInputs).not.toHaveProperty("corroborations")
+  })
+
+  it("drops a revision snapshot whose memory is not in the package", async () => {
+    const db = getDb()
+    const snapshot = withRevisionSnapshot({
+      revisionOf: "mem_elsewhere",
+      supersededById: "mem_elsewhere",
+    })
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    expect(await db.memories.get("mem_rev_1")).toBeUndefined()
+    expect(await db.memories.get("mem_1")).toBeDefined()
+  })
+
+  it("moves a snapshot with its memory when a duplicate import remaps ids", async () => {
+    const db = getDb()
+    const snapshot = withRevisionSnapshot()
+    const options = { includeSessions: false, includeApiKey: false } as const
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", ...options },
+      {
+        projectMcp: async () => [],
+      }
+    )
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "duplicate", ...options },
+      {
+        projectMcp: async () => [],
+      }
+    )
+    const rows = await db.memories.toArray()
+    const copy = rows.find((row) => row.id !== "mem_1" && row.text === "The project uses pnpm.")
+    const copiedRevision = rows.find(
+      (row) => row.id !== "mem_rev_1" && row.text === "The project used npm."
+    )
+    expect(copy).toBeDefined()
+    // The copied history belongs to the copied memory, never to the original.
+    expect(copiedRevision).toMatchObject({ revisionOf: copy!.id, supersededById: copy!.id })
+    expect(await db.memories.get("mem_rev_1")).toMatchObject({ revisionOf: "mem_1" })
+  })
+
   it("validates imported governance rows and redacts memory text before persistence", async () => {
     const db = getDb()
     const snapshot = memorySnapshot()

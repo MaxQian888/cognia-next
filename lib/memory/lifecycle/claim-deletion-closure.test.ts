@@ -58,11 +58,20 @@ describe("revokeClaimsForChangedAttachment", () => {
     expect(await revokeClaimsForChangedAttachment("s1", "a1", db as never, 100)).toBe(1)
     expect(where).toHaveBeenCalledWith("sessionId")
     expect(bulkPut.mock.calls[0]?.[0]).toHaveLength(2)
-    expect(update).toHaveBeenCalledTimes(1)
-    expect(update).toHaveBeenCalledWith(
-      "claim1",
-      expect.objectContaining({ status: "invalidated", staleness: "expired", validatedAt: 100 })
-    )
+    const invalidations = (
+      update.mock.calls as unknown as [string, Record<string, unknown>][]
+    ).filter(([, patch]) => patch.status === "invalidated")
+    expect(invalidations).toEqual([
+      ["claim1", expect.objectContaining({ staleness: "expired", validatedAt: 100 })],
+    ])
+    // Both memories that cited the attachment get fresh corroboration counters,
+    // personal ones included — revoked evidence no longer witnesses anything.
+    for (const memoryId of ["claim1", "personal1"]) {
+      expect(update).toHaveBeenCalledWith(
+        memoryId,
+        expect.objectContaining({ beliefInputs: expect.any(Object) })
+      )
+    }
   })
 
   it("propagates evidence write failures so the caller can roll back source deletion", async () => {

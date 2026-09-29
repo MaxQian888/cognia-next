@@ -12,6 +12,7 @@ import type { MemoryConfig } from "@/types/memory/memory"
 import type { MemoryMaintenanceDeps } from "./maintenance"
 import {
   consolidationAuditAction,
+  consolidationCorroboratedId,
   consolidationOpMemoryId,
 } from "@/lib/memory/consolidate/consolidator"
 
@@ -51,6 +52,22 @@ export async function buildEpisodicMaintenanceDeps(
         await import("@/lib/db/memory-governance")
       const contaminationState = input.contaminationState ?? "clean"
       for (const operation of operations) {
+        // An episode the judge found already recorded is a second witness for
+        // it, not an edit: evidence only (see `recordMemoryCorroboration`).
+        const corroborated = consolidationCorroboratedId(operation)
+        if (corroborated) {
+          const { recordMemoryCorroboration } = await import("./record-memory-outcome")
+          await recordMemoryCorroboration({
+            memoryId: corroborated,
+            sessionId: input.source?.sessionId,
+            contaminationState,
+            evidence: {
+              kind: "message",
+              sourceId: `session-distill:${input.source?.sessionId ?? "unknown"}`,
+            },
+          })
+          continue
+        }
         const memoryId = consolidationOpMemoryId(operation)
         const auditAction = consolidationAuditAction(operation)
         if (!memoryId || !auditAction) continue

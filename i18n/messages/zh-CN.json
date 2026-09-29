@@ -20091,6 +20091,9 @@
         "branchScope": "分支",
         "claimKind": "类别",
         "contamination": "上下文信任",
+        "corroboration": "佐证",
+        "corroborationUnknown": "尚未计算",
+        "corroborationValue": "{percent}% · {sessions} 次对话",
         "created": "创建于",
         "evidence": "证据",
         "freshnessField": "新鲜度",
@@ -20118,6 +20121,7 @@
       "sections": {
         "activity": "活动",
         "content": "内容",
+        "history": "历史",
         "metrics": "指标",
         "origin": "归属",
         "projectClaim": "项目上下文",
@@ -20208,6 +20212,83 @@
       "unreviewed": "未审核",
       "verified": "已验证"
     },
+    "health": {
+      "checking": "检查中…",
+      "contradictionCheck": {
+        "disabled": "记忆关闭或处于临时模式时，矛盾检查不会运行。",
+        "no_vectors": "已跳过矛盾检查：没有可用的已存储向量。",
+        "ran": "矛盾检查使用了已存储的向量。"
+      },
+      "description": "指出值得查看的记忆。在你打开并操作之前，这里不会修改任何记忆。",
+      "empty": "未发现问题。",
+      "gone": "（已删除）",
+      "kinds": {
+        "cold_episodic": {
+          "description": "保留分数 {retention} 低于冷阈值；生命周期清理会压缩或合并它。",
+          "title": "已变冷"
+        },
+        "conflict_open": {
+          "description": "与另外 {count} 条记忆矛盾，在你做出决定前不会被召回。",
+          "title": "未解决的冲突"
+        },
+        "duplicate": {
+          "description": "同一范围内有 {count} 条记忆内容相同。",
+          "title": "重复"
+        },
+        "feedback_flagged": {
+          "description": "虽然被标记为无帮助或已过时，但仍处于启用状态（有帮助 {positive}，无帮助 {negative}）。",
+          "title": "被你标记"
+        },
+        "missing_evidence": {
+          "description": "支撑这条记忆的所有来源都已被删除。",
+          "title": "证据已失效"
+        },
+        "pending_instruction_aging": {
+          "description": "一条学到的工作偏好已等待你审核 {waitedDays} 天；批准前不会被使用。",
+          "title": "等待审核"
+        },
+        "pinned_expiring": {
+          "description": "置顶可以防止被遗忘，但它的过期时间（{daysUntilExpiry} 天）仍会让它失效。",
+          "title": "已置顶但会过期"
+        },
+        "stale": {
+          "description": "一条 {ageDays} 天前的情节记忆，从未被召回。",
+          "title": "从未使用"
+        },
+        "suspected_contradiction": {
+          "description": "两条关于同一主题的记忆（相似度 {similarity}），但并非重复。较新的一条排在前面。",
+          "title": "可能矛盾"
+        }
+      },
+      "open": "打开",
+      "refresh": "重新检查",
+      "scanned": "已检查 {count} 条记忆",
+      "severity": {
+        "info": "提示",
+        "warning": "警告"
+      },
+      "title": "记忆健康"
+    },
+    "history": {
+      "empty": "没有更早的版本。",
+      "reasons": {
+        "compaction": "已压缩",
+        "conflict-merge": "冲突已合并",
+        "consolidation": "合并了新细节",
+        "dedup-merge": "合并了重复项",
+        "edit": "已编辑",
+        "external-update": "由集成修改",
+        "restore": "被恢复操作替换"
+      },
+      "restore": "恢复",
+      "restoreConfirm": {
+        "cancel": "取消",
+        "confirm": "恢复",
+        "description": "当前文本会保留在历史中，之后可以再切换回来。",
+        "title": "恢复这个版本？"
+      },
+      "window": "{from} – {to}"
+    },
     "panel": {
       "accessedRelative": "{time}使用",
       "add": "新增",
@@ -20230,6 +20311,7 @@
       "clearFilters": "清除筛选",
       "clearTags": "清除标签",
       "clearedToast": "已删除 {count} 条记忆",
+      "compacted": "已压缩",
       "copied": "已复制",
       "copyText": "复制内容",
       "createdRelative": "{time}添加",
@@ -20304,7 +20386,8 @@
       "summary": "{active} 条活跃 · {pinned} 条置顶 · {conflicts} 条冲突 · 已建索引 {coverage}%",
       "tabs": {
         "app": "应用记忆",
-        "external": "外部 Agent 记忆"
+        "external": "外部 Agent 记忆",
+        "health": "健康"
       },
       "tagFilterLabel": "标签：",
       "title": "记忆",
@@ -41747,6 +41830,34 @@
           }
         }
       },
+      "maintenance": {
+        "coldThreshold": {
+          "description": "保留分数低于该值的情节视为冷记忆。数值越高，处理的记忆越多。",
+          "label": "冷阈值"
+        },
+        "compaction": {
+          "description": "把冷情节缩短为第一句话，以及其中提到的文件路径、错误码和标识符。",
+          "label": "压缩冷情节"
+        },
+        "dedup": {
+          "description": "把内容几乎相同的冷情节合并到你最常用的那一条，并保留其中任意一条提到的路径和标识符。",
+          "label": "合并近似重复的情节",
+          "noVectors": "需要开启混合检索并允许使用嵌入后端；在此之前会跳过这一步。"
+        },
+        "forgetting": {
+          "title": "遗忘"
+        },
+        "reinforcement": {
+          "description": "达到每个范围的上限时，你经常召回的记忆会更晚被遗忘。它只会让记忆保留更久，不会改变召回排序。",
+          "label": "访问强化",
+          "off": "关闭"
+        },
+        "sweep": {
+          "description": "每天处理一次很久没被用到的情节记忆。它从不删除：之前的文本保留在每条记忆的历史中，可以随时恢复。",
+          "gatedReason": "开启压缩或重复合并后才能使用清理。",
+          "title": "生命周期清理"
+        }
+      },
       "manage": "管理记忆",
       "maxIdle": {
         "label": "未使用后遗忘天数（0 为永不）"
@@ -41876,6 +41987,11 @@
         "label": "最低召回相关度"
       },
       "retrieval": {
+        "beliefWeight": {
+          "description": "让在多次对话中得到印证的记忆排得更靠前。关闭时排序不考虑佐证，但记忆检查器中仍会显示。",
+          "label": "佐证权重",
+          "off": "关闭"
+        },
         "gates": {
           "memoryOff": "请先开启长期记忆，再编辑检索控制项。",
           "recallOff": "请先开启记忆召回，再编辑这些控制项。"
@@ -41888,6 +42004,10 @@
           "description": "结合语义向量检索与关键词匹配。",
           "label": "混合检索"
         },
+        "llmRerank": {
+          "description": "每轮让工具模型对召回的前若干条记忆（最多 30 条）重新排序一次。发送前会先对查询脱敏；任何失败都会保留本地排序。",
+          "label": "使用工具模型重排"
+        },
         "queryExpansion": {
           "description": "使用相关词扩展关键词查询。",
           "label": "查询扩展"
@@ -41895,6 +42015,10 @@
         "relevanceFloor": {
           "description": "排除相关度分数低于此值的记忆。",
           "label": "最低相关度"
+        },
+        "sessionRecall": {
+          "description": "当你询问之前的对话（「上次」「last time」）时，优先召回情节记忆而不是一般事实。",
+          "label": "过往会话路由"
         },
         "tokenBudget": {
           "description": "每轮最多可注入的记忆 Token 数。",

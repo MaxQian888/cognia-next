@@ -108,6 +108,51 @@ export function isProjectMemoryKind(value: unknown): value is ProjectMemoryKind 
   return PROJECT_MEMORY_KINDS.includes(value as ProjectMemoryKind)
 }
 
+/**
+ * Why a memory's content changed, recorded on the revision snapshot that keeps
+ * the previous text (see `Memory.revisionOf`).
+ *
+ * - `edit` — a person edited the text in the console.
+ * - `consolidation` — the consolidation judge merged new detail in (UPDATE).
+ * - `external-update` — an API surface (plugin / MCP / RPC) patched the text.
+ * - `conflict-merge` — a conflict was resolved by merging both sides.
+ * - `compaction` — the lifecycle sweep extractively compacted a cold episode.
+ * - `dedup-merge` — the lifecycle sweep folded near-duplicate cold episodes in.
+ * - `restore` — a person restored an earlier revision (the text being replaced
+ *   is kept, so a restore is itself undoable).
+ */
+export const MEMORY_REVISION_REASONS = [
+  "edit",
+  "consolidation",
+  "external-update",
+  "conflict-merge",
+  "compaction",
+  "dedup-merge",
+  "restore",
+] as const
+
+export type MemoryRevisionReason = (typeof MEMORY_REVISION_REASONS)[number]
+
+/** Narrowing guard for untrusted input — backup imports. */
+export function isMemoryRevisionReason(value: unknown): value is MemoryRevisionReason {
+  return MEMORY_REVISION_REASONS.includes(value as MemoryRevisionReason)
+}
+
+/**
+ * Corroboration counters behind a memory's belief strength (see
+ * `lifecycle/belief.ts`). Stored as raw inputs, not as the final number,
+ * because the recency factor depends on the reading clock: a stored confidence
+ * would silently stop decaying.
+ */
+export interface MemoryBeliefInputs {
+  /** Live (unrevoked) evidence rows attached to the memory. */
+  evidenceCount: number
+  /** Distinct sessions among those rows — the anti-entrenchment unit. */
+  distinctSessions: number
+  /** Newest live evidence row, epoch ms. */
+  newestEvidenceAt?: number
+}
+
 export interface Memory {
   /** `mem_<ts>_<rand>`. */
   id: string
@@ -202,6 +247,27 @@ export interface Memory {
   observedAt?: number
   /** Last time this row's evidence was re-verified. Undefined means never. */
   validatedAt?: number
+  /**
+   * Set ONLY on a revision snapshot: the id of the live memory whose earlier
+   * text this row preserves. A snapshot is always `status: "invalidated"` with
+   * `supersededById === revisionOf`, carries no vector, key or source-message
+   * link, and is hidden from every listing except the owning memory's history
+   * (`listMemories` excludes it by default). Unindexed — no schema version.
+   */
+  revisionOf?: string
+  /** On a snapshot: why the text it preserves was replaced. */
+  revisionReason?: MemoryRevisionReason
+  /**
+   * When the row's CURRENT text took effect. Absent means `createdAt` (the text
+   * never changed). On a snapshot it is when the preserved text took effect, so
+   * `[revisedAt ?? createdAt, invalidatedAt)` is the window that text was live —
+   * the basis of `asOf` recall.
+   */
+  revisedAt?: number
+  /** Set when the lifecycle sweep extractively compacted this row. Never re-compacted. */
+  compactedAt?: number
+  /** Corroboration counters; absent means never computed (belief unknown). */
+  beliefInputs?: MemoryBeliefInputs
 }
 
 /**
@@ -306,6 +372,46 @@ export interface MemoryConfig {
    * alternate phrasings). Off by default; the vector leg is unaffected.
    */
   enableQueryExpansion?: boolean
+  /**
+   * σ of the access-reinforcement term in retention scoring
+   * (`forget/retention.ts`): memory you keep using decays slower. Only ever
+   * keeps memory LONGER, so it is on by default; 0 turns it off. Retention
+   * drives forgetting (eviction ranking, the lifecycle sweep), never recall
+   * ranking — frequently recalled rows must not rank higher merely for having
+   * been recalled.
+   */
+  accessReinforcementWeight?: number
+  /**
+   * Boost episodic memories when the query asks about a past conversation
+   * ("上次" / "last time"). Opt-in, off by default.
+   */
+  sessionRecallRouting?: boolean
+  /**
+   * Weight of corroboration-derived belief strength in recall ranking. 0 (the
+   * default) leaves ranking byte-identical; belief is still shown in the
+   * inspector.
+   */
+  beliefRankingWeight?: number
+  /**
+   * One bounded LLM rerank pass over the recalled candidates (≤30 candidates,
+   * one call per recall, keeps the local order on any failure). Off by default.
+   */
+  llmRerank?: boolean
+  /**
+   * Lifecycle sweep: extractively compact cold episodic memories (summary +
+   * durable tokens) instead of leaving them to be forgotten. Reversible — the
+   * previous text is kept as a revision. Off by default.
+   */
+  compactColdEpisodic?: boolean
+  /**
+   * Lifecycle sweep: fold near-duplicate cold episodic memories into one
+   * survivor (density clustering over their vectors; needs an embedding
+   * backend). Reversible — the others are superseded, not deleted. Off by
+   * default.
+   */
+  dedupColdClusters?: boolean
+  /** Retention below which an episodic memory counts as cold. Default 0.2. */
+  coldRetentionThreshold?: number
 }
 
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
@@ -329,6 +435,13 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   decayHalfLifeDays: 30,
   temporary: false,
   enableQueryExpansion: false,
+  accessReinforcementWeight: 0.6,
+  sessionRecallRouting: false,
+  beliefRankingWeight: 0,
+  llmRerank: false,
+  compactColdEpisodic: false,
+  dedupColdClusters: false,
+  coldRetentionThreshold: 0.2,
 }
 
 /** View mode for the `/memory` management panel. */

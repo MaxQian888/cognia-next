@@ -21,6 +21,7 @@ import {
 } from "@/lib/memory/write/run-episodic-distill"
 import { evictOverflow, expireStale, type DecayDeps } from "@/lib/memory/forget/decay"
 import type { ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
+import { retentionParamsFor } from "@/lib/memory/lifecycle/lifecycle-sweep"
 
 export interface MemoryMaintenanceInput {
   transcript: { role: string; text: string }[]
@@ -100,6 +101,9 @@ export async function runMemoryMaintenance(
       scope: input.scope,
       ...decayNamespace,
       maxActivePerScope: input.config.maxActivePerScope,
+      now: input.now,
+      // Memory the user keeps recalling decays slower (σ of the access term).
+      retention: retentionParamsFor(input.config),
     },
     deps.decayDeps
   )
@@ -171,6 +175,19 @@ export interface ScheduleMemoryMaintenanceParams {
  */
 export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParams): void {
   const { config, sessionId } = params
+  // The cold-memory pass (compaction / dedup) acts on memories already stored,
+  // so it does not depend on whether this chat may learn — only on memory being
+  // on and one of its opt-in passes being enabled. The idle tick after a turn is
+  // just the clock that queues it (at most once a day).
+  if (
+    config.enabled &&
+    !config.temporary &&
+    (config.compactColdEpisodic || config.dedupColdClusters)
+  ) {
+    void import("./enqueue-reconcile")
+      .then(({ enqueueDailyLifecycleSweep }) => enqueueDailyLifecycleSweep())
+      .catch(() => undefined)
+  }
   if (!config.enabled || !config.learnFromChats || config.temporary) return
   if (params.provenance === "inbound") return
 

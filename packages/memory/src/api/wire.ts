@@ -29,11 +29,22 @@ export interface MemoryWireRow {
   version: number
   createdAt: number
   updatedAt: number
+  /**
+   * Present only on a historical (`asOf`) hit whose text was an earlier
+   * wording: the snapshot's own id. `id` is always the memory's id, so a caller
+   * that acts on a hit acts on the memory, never on a piece of its history.
+   */
+  revisionId?: string
+  /** When this text became the memory's text (historical hits). */
+  validFrom?: number
+  /** When this text stopped being the memory's text; absent while it still is. */
+  validTo?: number
 }
 
 export function toMemoryWireRow(m: Memory): MemoryWireRow {
+  const isRevision = m.revisionOf !== undefined
   return {
-    id: m.id,
+    id: m.revisionOf ?? m.id,
     text: m.text,
     type: m.type,
     scope: m.scope,
@@ -49,5 +60,10 @@ export function toMemoryWireRow(m: Memory): MemoryWireRow {
     version: m.version,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
+    ...(isRevision ? { revisionId: m.id } : {}),
+    ...(isRevision || m.revisedAt !== undefined ? { validFrom: m.revisedAt ?? m.createdAt } : {}),
+    ...(m.status === "invalidated" && m.invalidatedAt !== undefined
+      ? { validTo: m.invalidatedAt }
+      : {}),
   }
 }

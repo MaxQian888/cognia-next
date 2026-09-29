@@ -29,6 +29,7 @@ import type {
 } from "@/types/memory/memory"
 import { memoryRowWithinNamespaces, type TrustedMemoryCaller } from "@cognia/memory/types/caller"
 import {
+  consolidationCorroboratedId,
   consolidationOpMemoryId,
   type ConsolidationOp,
 } from "@/lib/memory/consolidate/consolidator"
@@ -317,6 +318,32 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
         }
       } catch {
         // The canonical memory already landed; governance persistence retries separately.
+      }
+    }
+    // A deliberate capture of something already remembered is a new witness
+    // for that memory (belief strength), not an edit of it.
+    const corroboratedIds = applied.flatMap((op) => {
+      const id = consolidationCorroboratedId(op)
+      return id ? [id] : []
+    })
+    if (corroboratedIds.length > 0) {
+      const { recordMemoryCorroboration } =
+        await import("@/lib/memory/lifecycle/record-memory-outcome")
+      for (const id of corroboratedIds) {
+        await recordMemoryCorroboration({
+          memoryId: id,
+          sessionId: input.source?.sessionId,
+          contaminationState: input.provenance === "external" ? "external-context" : "clean",
+          evidence: {
+            kind: input.provenance === "external" ? "external" : "manual",
+            sourceId:
+              input.source?.messageId ??
+              input.source?.sessionId ??
+              input.attribution?.pluginId ??
+              input.attribution?.channel ??
+              `manual:${id}`,
+          },
+        })
       }
     }
     return {

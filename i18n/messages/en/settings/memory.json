@@ -102,6 +102,34 @@
       }
     }
   },
+  "maintenance": {
+    "coldThreshold": {
+      "description": "An episode whose retention score falls below this value counts as cold. Higher values act on more memories.",
+      "label": "Cold threshold"
+    },
+    "compaction": {
+      "description": "Shrink a cold episode to its first sentence plus the file paths, error codes and identifiers it mentions.",
+      "label": "Compact cold episodes"
+    },
+    "dedup": {
+      "description": "Merge cold episodes that say almost the same thing into the one you used most, keeping every path and identifier any of them mentioned.",
+      "label": "Fold near-duplicate episodes",
+      "noVectors": "Needs hybrid retrieval with an allowed embedding backend; until then this pass is skipped."
+    },
+    "forgetting": {
+      "title": "Forgetting"
+    },
+    "reinforcement": {
+      "description": "Memories you keep recalling are forgotten more slowly when the per-scope cap is reached. It only ever keeps memory longer; it never changes recall ranking.",
+      "label": "Access reinforcement",
+      "off": "Off"
+    },
+    "sweep": {
+      "description": "A daily pass over episodic memories nobody has needed in a while. It never deletes: the previous text stays in each memory's history and can be restored.",
+      "gatedReason": "Turn on compaction or duplicate folding to use the sweep.",
+      "title": "Lifecycle sweep"
+    }
+  },
   "manage": "Manage memories",
   "maxIdle": {
     "label": "Forget after unused days (0 = never)"
@@ -231,6 +259,11 @@
     "label": "Minimum recall relevance"
   },
   "retrieval": {
+    "beliefWeight": {
+      "description": "Rank memories confirmed across several conversations higher. At off, ranking ignores corroboration; it is still shown in the memory inspector.",
+      "label": "Corroboration weight",
+      "off": "Off"
+    },
     "gates": {
       "memoryOff": "Turn on long-term memory to edit retrieval controls.",
       "recallOff": "Turn on memory recall to edit these controls."
@@ -243,6 +276,10 @@
       "description": "Combine semantic vector search with keyword matching.",
       "label": "Hybrid retrieval"
     },
+    "llmRerank": {
+      "description": "Let the utility model reorder the top recalled memories (up to 30) once per turn. The query is redacted before it is sent; any failure keeps the local order.",
+      "label": "Rerank with the utility model"
+    },
     "queryExpansion": {
       "description": "Expand the keyword query with related terms.",
       "label": "Query expansion"
@@ -250,6 +287,10 @@
     "relevanceFloor": {
       "description": "Exclude memories whose relevance score falls below this value.",
       "label": "Minimum relevance"
+    },
+    "sessionRecall": {
+      "description": "When you ask about an earlier conversation (\"last time\", \"上次\"), rank remembered episodes above general facts.",
+      "label": "Past-conversation routing"
     },
     "tokenBudget": {
       "description": "Maximum number of memory tokens that may be injected into a turn.",

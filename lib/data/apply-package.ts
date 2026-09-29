@@ -38,7 +38,13 @@ import type {
   PluginRow,
 } from "@/lib/db/plugin-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
-import { isMemorySourceChannel, isProjectMemoryKind, type Memory } from "@/types/memory/memory"
+import { computeBeliefInputs } from "@cognia/memory/lifecycle/belief"
+import {
+  isMemoryRevisionReason,
+  isMemorySourceChannel,
+  isProjectMemoryKind,
+  type Memory,
+} from "@/types/memory/memory"
 import {
   MEMORY_EVIDENCE_KINDS,
   MEMORY_JOB_KINDS,
@@ -1321,6 +1327,13 @@ async function applyMemoryBundle(args: MemoryBundleArgs): Promise<void> {
   const evidenceIdMap = new Map<string, string>()
 
   for (const memory of memories) {
+    // A revision snapshot whose owner is not in this package would attach, by
+    // id, to whatever local memory happens to hold that id — and could then be
+    // "restored" into it. Drop it before it is written.
+    if (memory.revisionOf !== undefined && !importedMemoryIds.has(memory.revisionOf)) {
+      incrementCounter(summary.skipped, "memories")
+      continue
+    }
     const importedId = await applyMappedRow({
       row: memory,
       table: db.memories,
@@ -1335,6 +1348,17 @@ async function applyMemoryBundle(args: MemoryBundleArgs): Promise<void> {
   for (const memory of memories) {
     const importedId = memoryIdMap.get(memory.id)
     if (!importedId) continue
+    // A revision snapshot belongs to exactly one memory. Its owner must have
+    // come with this package — otherwise the snapshot would attach, by id, to
+    // whatever local memory happens to hold that id and could be "restored"
+    // into it — and must follow its owner to a remapped id.
+    if (memory.revisionOf !== undefined) {
+      const ownerId = memoryIdMap.get(memory.revisionOf) ?? memory.revisionOf
+      if (ownerId !== memory.revisionOf) {
+        await db.memories.update(importedId, { revisionOf: ownerId, supersededById: ownerId })
+      }
+      continue
+    }
     const supersededById = memory.supersededById
       ? (memoryIdMap.get(memory.supersededById) ?? memory.supersededById)
       : undefined
@@ -1401,6 +1425,14 @@ async function applyMemoryBundle(args: MemoryBundleArgs): Promise<void> {
       opts,
       summary,
     })
+  }
+
+  // Belief counters are derived from evidence and were deliberately not
+  // imported (see `sanitizeImportedMemory`); recompute them from the evidence
+  // that actually landed, against the database being imported into.
+  for (const memoryId of new Set(memoryIdMap.values())) {
+    const rows = await db.memoryEvidence.where("memoryId").equals(memoryId).toArray()
+    await db.memories.update(memoryId, { beliefInputs: computeBeliefInputs(rows) })
   }
 }
 
@@ -1641,6 +1673,23 @@ function sanitizeImportedMemory(value: unknown): Memory | undefined {
   }
   const observedAt = optionalFiniteNumber(value.observedAt)
   if (observedAt !== undefined) row.observedAt = observedAt
+  // Revision history travels with the memory it belongs to. A snapshot is only
+  // accepted in its canonical shape (invalidated, superseded by its owner), so
+  // an imported row cannot pose as live history of some other memory; one that
+  // does not fit is kept as an ordinary archived row instead.
+  const revisionOf = optionalIdentifier(value.revisionOf)
+  if (revisionOf && row.status === "invalidated" && row.supersededById === revisionOf) {
+    row.revisionOf = revisionOf
+    if (isMemoryRevisionReason(value.revisionReason)) row.revisionReason = value.revisionReason
+  }
+  const revisedAt = optionalFiniteNumber(value.revisedAt)
+  if (revisedAt !== undefined) row.revisedAt = revisedAt
+  const compactedAt = optionalFiniteNumber(value.compactedAt)
+  if (compactedAt !== undefined) row.compactedAt = compactedAt
+  // `beliefInputs` is derived from evidence and is recomputed by the next
+  // evidence change; importing a stale copy would be a claim about evidence
+  // that may not have come with this package, the same reason `validatedAt`
+  // is dropped above.
   return row
 }
 

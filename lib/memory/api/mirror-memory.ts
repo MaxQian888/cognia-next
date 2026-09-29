@@ -56,7 +56,8 @@ export async function applyMirroredMemoryMutation(
     if (text !== undefined) {
       // `bumpVersion` matches what the desktop authority does, so the mirror
       // does not look older than the row it is mirroring.
-      await updateMemory(mutation.id, { text, bumpVersion: true })
+      // No local revision: the desktop authority keeps it and syncs it down.
+      await updateMemory(mutation.id, { text, bumpVersion: true, skipRevision: true })
       await auditMirror(mutation.id, "revised")
     }
     return { ok: true }

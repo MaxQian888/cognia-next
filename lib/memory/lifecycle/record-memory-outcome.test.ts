@@ -1,12 +1,14 @@
 const mockBind = jest.fn()
 const mockAudit = jest.fn()
+const mockCreateEvidence = jest.fn()
 
 jest.mock("@/lib/db/memory-governance", () => ({
   bindMemoryGovernanceOutcome: (...a: unknown[]) => mockBind(...a),
   appendMemoryAuditEvent: (...a: unknown[]) => mockAudit(...a),
+  createMemoryEvidence: (...a: unknown[]) => mockCreateEvidence(...a),
 }))
 
-import { recordMemoryJobOutcome } from "./record-memory-outcome"
+import { recordMemoryCorroboration, recordMemoryJobOutcome } from "./record-memory-outcome"
 import type { ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
 
 const JOB = { id: "job-1", sessionId: "s1" }
@@ -34,6 +36,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockBind.mockResolvedValue({})
   mockAudit.mockResolvedValue({})
+  mockCreateEvidence.mockResolvedValue({})
 })
 
 describe("recordMemoryJobOutcome", () => {
@@ -137,5 +140,82 @@ describe("recordMemoryJobOutcome", () => {
     const [call] = mockBind.mock.calls[0] as [Record<string, Record<string, unknown>>]
     expect(call.evidence).not.toHaveProperty("sessionId")
     expect(call.audit).not.toHaveProperty("sessionId")
+  })
+})
+
+function corroborate(targetId: string): ConsolidationOp {
+  return {
+    op: "NOOP",
+    targetId,
+    candidate: { type: "semantic", text: "x", importance: 5 },
+  } as unknown as ConsolidationOp
+}
+
+describe("corroboration (NOOP with targetId)", () => {
+  it("attaches evidence only: no governance patch and no audit event", async () => {
+    await record([corroborate("m7")])
+    expect(mockBind).not.toHaveBeenCalled()
+    expect(mockAudit).not.toHaveBeenCalled()
+    expect(mockCreateEvidence).toHaveBeenCalledTimes(1)
+    expect(mockCreateEvidence).toHaveBeenCalledWith({
+      memoryId: "m7",
+      kind: "message",
+      sourceId: "s1:m2:2",
+      sessionId: "s1",
+      contaminationState: "clean",
+      reviewed: false,
+      sourceRole: "user",
+    })
+  })
+
+  it("still binds the other operations of the same job", async () => {
+    await record([corroborate("m7"), add("m1")])
+    expect(mockCreateEvidence).toHaveBeenCalledWith(expect.objectContaining({ memoryId: "m7" }))
+    expect(mockBind).toHaveBeenCalledTimes(1)
+    expect(mockBind).toHaveBeenCalledWith(expect.objectContaining({ memoryId: "m1" }))
+  })
+
+  it("carries the job contamination onto the corroborating evidence", async () => {
+    await recordMemoryJobOutcome({
+      job: JOB,
+      operations: [corroborate("m7")],
+      contaminationState: "external-context",
+      evidence: EVIDENCE,
+      auditReason: "automatic_learning",
+    })
+    expect(mockCreateEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ contaminationState: "external-context" })
+    )
+  })
+
+  it("swallows an evidence write failure and keeps processing the job", async () => {
+    mockCreateEvidence.mockRejectedValueOnce(new Error("db down"))
+    await expect(record([corroborate("m7"), add("m1")])).resolves.toBeUndefined()
+    expect(mockBind).toHaveBeenCalledWith(expect.objectContaining({ memoryId: "m1" }))
+    expect(mockAudit).not.toHaveBeenCalled()
+  })
+
+  it("omits sessionId and sourceRole when absent", async () => {
+    await recordMemoryCorroboration({
+      memoryId: "m7",
+      contaminationState: "clean",
+      evidence: { kind: "checkpoint", sourceId: "x" },
+    })
+    const [call] = mockCreateEvidence.mock.calls[0] as [Record<string, unknown>]
+    expect(call).not.toHaveProperty("sessionId")
+    expect(call).not.toHaveProperty("sourceRole")
+    expect(call).toMatchObject({ memoryId: "m7", kind: "checkpoint", sourceId: "x" })
+  })
+
+  it("recordMemoryCorroboration never rejects", async () => {
+    mockCreateEvidence.mockRejectedValue(new Error("db down"))
+    await expect(
+      recordMemoryCorroboration({
+        memoryId: "m7",
+        sessionId: "s1",
+        contaminationState: "clean",
+        evidence: EVIDENCE,
+      })
+    ).resolves.toBeUndefined()
   })
 })

@@ -16,11 +16,16 @@
  * (it also disables the write-path vector sink).
  */
 
-import type { MemoryConfig } from "@/types/memory/memory"
+import type { Memory, MemoryConfig } from "@/types/memory/memory"
 import type { ApplyMemoryContextDeps } from "./apply-memory-context"
 import { createProviderEmbeddingAdapter } from "@cognia/memory/runtime/provider-embedding-adapter"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
-import { listActiveForReader, listActiveProcedural, touchMemories } from "@/lib/db/memories"
+import {
+  listActiveForReader,
+  listActiveProcedural,
+  listHistoricalForReader,
+  touchMemories,
+} from "@/lib/db/memories"
 import { createBedrockSidecarEmbeddingModel } from "@/lib/claude/feature-call"
 import type { EmbeddingConfig } from "@cognia/provider-embedding/embedding"
 import { isLocalEmbeddingProvider } from "@cognia/rag"
@@ -131,7 +136,35 @@ export async function tryBuildMemoryDeps(
   const deps: ApplyMemoryContextDeps = {
     loadCandidates: (reader) => listActiveForReader(reader),
     loadProcedural: (reader) => listActiveProcedural(reader),
+    loadHistoricalCandidates: (reader) => listHistoricalForReader(reader),
     touch: (ids) => touchMemories(ids),
+    defaults: {
+      sessionRecallRouting: config.sessionRecallRouting === true,
+      beliefRankingWeight: Math.max(0, config.beliefRankingWeight ?? 0),
+      rerank: config.llmRerank === true,
+    },
+  }
+
+  if (config.llmRerank) {
+    // The reranker sends the (redacted) query and recalled texts to the
+    // utility model, so it exists only when the user turned it on. A missing
+    // utility model leaves recall on its local order.
+    try {
+      const [{ getSettings }, { buildUtilityLlmClient }, { createMemoryLlmReranker }] =
+        await Promise.all([
+          import("@/lib/db/settings"),
+          import("@/lib/ai/generation/utility-client"),
+          import("@cognia/memory/retrieve/llm-rerank"),
+        ])
+      const client = buildUtilityLlmClient({
+        session: null,
+        appSettings: (await getSettings().catch(() => undefined)) ?? null,
+        featureId: "memory-rerank",
+      })
+      if (client) deps.rerank = createMemoryLlmReranker(client)
+    } catch {
+      // No reranker — recall keeps its local order.
+    }
   }
 
   try {
@@ -227,6 +260,79 @@ export async function tryBuildMemoryDeps(
   }
 
   return deps
+}
+
+export interface MemoryVectorReader {
+  /**
+   * Stored vectors for the given memories, keyed by MEMORY id. Rows without a
+   * vector, or whose vector is empty / non-finite / of a different dimension
+   * than the rest, are simply absent from the map.
+   */
+  getEmbeddings: (
+    memories: readonly Pick<Memory, "id" | "vectorDocId">[]
+  ) => Promise<Map<string, number[]>>
+}
+
+/**
+ * Read-only access to stored memory vectors, for the maintenance passes that
+ * compare memories with each other (lifecycle-sweep dedup, lint's suspected
+ * contradictions). Same privacy gate as recall — `undefined` when embeddings
+ * are unavailable or not allowed — and it never embeds anything: it reads what
+ * the write path already stored, so it adds no provider traffic.
+ */
+export async function tryBuildMemoryVectorReader(
+  config: MemoryConfig
+): Promise<MemoryVectorReader | undefined> {
+  if (!config.enabled || config.temporary) return undefined
+  try {
+    const backend = await resolveMemoryBackend(config)
+    if (!backend || typeof backend.store.getDocuments !== "function") return undefined
+    return {
+      getEmbeddings: async (memories) => {
+        const byDocId = new Map<string, string>()
+        for (const memory of memories) {
+          if (memory.vectorDocId) byDocId.set(memory.vectorDocId, memory.id)
+        }
+        const valid: { memoryId: string; embedding: number[] }[] = []
+        const docIds = [...byDocId.keys()]
+        for (let offset = 0; offset < docIds.length; offset += VECTOR_READ_BATCH_SIZE) {
+          const batch = docIds.slice(offset, offset + VECTOR_READ_BATCH_SIZE)
+          const docs = await backend.store.getDocuments(MEMORY_VECTOR_COLLECTION, batch)
+          for (const doc of docs) {
+            const memoryId = byDocId.get(doc.id)
+            const embedding = doc.embedding
+            if (
+              !memoryId ||
+              !Array.isArray(embedding) ||
+              embedding.length === 0 ||
+              !embedding.every(Number.isFinite)
+            )
+              continue
+            valid.push({ memoryId, embedding })
+          }
+        }
+        // Vectors of a different dimension come from a different embedding
+        // model (a provider switch mid-corpus) and cannot be compared. Keep the
+        // majority dimension, so one stale vector cannot evict the rest by
+        // happening to be read first.
+        const counts = new Map<number, number>()
+        for (const { embedding } of valid) {
+          counts.set(embedding.length, (counts.get(embedding.length) ?? 0) + 1)
+        }
+        let dimension: number | undefined
+        for (const [length, count] of counts) {
+          if (dimension === undefined || count > counts.get(dimension)!) dimension = length
+        }
+        const out = new Map<string, number[]>()
+        for (const { memoryId, embedding } of valid) {
+          if (embedding.length === dimension) out.set(memoryId, embedding)
+        }
+        return out
+      },
+    }
+  } catch {
+    return undefined
+  }
 }
 
 export interface MemoryVectorSink {

@@ -3,6 +3,7 @@ import type { MemoryCandidate } from "../extract/extractor"
 import {
   consolidate,
   consolidationAuditAction,
+  consolidationCorroboratedId,
   consolidationOpMemoryId,
   sameMemoryNamespace,
   type ConsolidateDeps,
@@ -618,5 +619,82 @@ describe("consolidation op projections", () => {
     [{ op: "NOOP" }, undefined],
   ])("maps %p to audit action %p", (op, expected) => {
     expect(consolidationAuditAction(op)).toBe(expected)
+  })
+})
+
+describe("NOOP corroboration", () => {
+  it("carries a valid targetId on NOOP without mutating anything", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => [existing("The user uses pnpm", { id: "t1" })],
+      client: { complete: jest.fn(async () => JSON.stringify({ op: "NOOP", targetId: "t1" })) },
+    })
+    const res = await consolidate({ ...baseInput, candidates: [cand("uses pnpm")] }, deps)
+    expect(res.applied).toEqual([{ op: "NOOP", targetId: "t1" }])
+    expect(deps.persisted).toHaveLength(0)
+    expect(deps.updates).toHaveLength(0)
+    expect(deps.invalidations).toHaveLength(0)
+    expect(deps.conflicts).toHaveLength(0)
+  })
+
+  it("drops a hallucinated targetId on NOOP rather than failing closed", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => [existing("The user uses pnpm", { id: "t1" })],
+      client: {
+        complete: jest.fn(async () => JSON.stringify({ op: "NOOP", targetId: "ghost" })),
+      },
+    })
+    const res = await consolidate(
+      { ...baseInput, candidates: [cand("uses pnpm")], failureMode: "quarantine" },
+      deps
+    )
+    expect(res.applied).toEqual([{ op: "NOOP" }])
+    expect(deps.persisted).toHaveLength(0)
+  })
+
+  it("drops a non-string targetId on NOOP", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => [existing("The user uses pnpm", { id: "t1" })],
+      client: { complete: jest.fn(async () => JSON.stringify({ op: "noop", targetId: 1 })) },
+    })
+    const res = await consolidate({ ...baseInput, candidates: [cand("uses pnpm")] }, deps)
+    expect(res.applied).toEqual([{ op: "NOOP" }])
+  })
+
+  it("treats a missing op as NOOP and keeps a valid target", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => [existing("The user uses pnpm", { id: "t1" })],
+      client: { complete: jest.fn(async () => JSON.stringify({ targetId: "t1" })) },
+    })
+    const res = await consolidate({ ...baseInput, candidates: [cand("uses pnpm")] }, deps)
+    expect(res.applied).toEqual([{ op: "NOOP", targetId: "t1" }])
+  })
+
+  it("asks the judge for the capturing memory's id on NOOP", async () => {
+    const complete = jest.fn(async (_prompt: string) => JSON.stringify({ op: "NOOP" }))
+    const deps = makeDeps({
+      findSimilar: async () => [existing("The user uses pnpm", { id: "t1" })],
+      client: { complete },
+    })
+    await consolidate({ ...baseInput, candidates: [cand("uses pnpm")] }, deps)
+    const prompt = complete.mock.calls[0][0]
+    expect(prompt).toContain(
+      "NOOP: the candidate is already fully captured (give the id of the memory that"
+    )
+    expect(prompt).toContain("captures it)")
+  })
+
+  it.each<[ConsolidationOp, string | undefined]>([
+    [{ op: "NOOP", targetId: "t1" }, "t1"],
+    [{ op: "NOOP" }, undefined],
+    [{ op: "UPDATE", targetId: "t1" }, undefined],
+    [{ op: "DELETE", targetId: "t1" }, undefined],
+  ])("consolidationCorroboratedId(%p) → %p", (op, expected) => {
+    expect(consolidationCorroboratedId(op)).toBe(expected)
+  })
+
+  it("keeps NOOP out of the governance/audit projections even with a target", () => {
+    const op: ConsolidationOp = { op: "NOOP", targetId: "t1" }
+    expect(consolidationOpMemoryId(op)).toBeUndefined()
+    expect(consolidationAuditAction(op)).toBeUndefined()
   })
 })

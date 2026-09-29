@@ -29,6 +29,11 @@ import { assembleProceduralContext } from "../procedural"
 import { buildMemoryContextSnapshot, type MemoryContextSnapshot } from "../types/context-snapshot"
 import { createContextManager } from "@cognia/rag/context-manager"
 import { hasNoLeakingPii } from "@cognia/redact"
+import {
+  MEMORY_RECALL_PREAMBLE,
+  PROCEDURAL_PRECEDENCE_NOTE,
+  RECALL_HEADING,
+} from "./recall-framing"
 
 export interface ApplyMemoryContextDeps extends MemoryRetrieverDeps {
   /** All active procedural memories for the reader (global + character). */
@@ -57,6 +62,12 @@ export interface ApplyMemoryContextInput {
   enableQueryExpansion?: boolean
   /** Base recency half-life (days), from `MemoryConfig.decayHalfLifeDays`. */
   recencyHalfLifeDays?: number
+  /** `MemoryConfig.sessionRecallRouting`. */
+  sessionRecallRouting?: boolean
+  /** `MemoryConfig.beliefRankingWeight`. */
+  beliefRankingWeight?: number
+  /** `MemoryConfig.llmRerank` — only effective when `deps.rerank` is wired. */
+  rerank?: boolean
   /** Clock override for the snapshot's createdAt/expiresAt (tests). */
   now?: number
   deps: ApplyMemoryContextDeps
@@ -89,7 +100,8 @@ export interface ApplyMemoryContextResult {
   snapshot: MemoryContextSnapshot
 }
 
-const RECALL_HEADING = "## What you remember about the user"
+export { MEMORY_RECALL_PREAMBLE, PROCEDURAL_PRECEDENCE_NOTE, RECALL_HEADING }
+
 const RECALLED_TYPES: MemoryType[] = ["semantic", "episodic"]
 
 function normalizeForOverlap(text: string): string {
@@ -155,6 +167,9 @@ export async function applyMemoryContext(
                 precomputedQueryEmbedding: input.precomputedQueryEmbedding,
                 enableQueryExpansion: input.enableQueryExpansion,
                 recencyHalfLifeDays: input.recencyHalfLifeDays,
+                sessionRecallRouting: input.sessionRecallRouting,
+                beliefRankingWeight: input.beliefRankingWeight,
+                rerank: input.rerank,
                 now,
               },
               input.deps
@@ -195,7 +210,10 @@ export async function applyMemoryContext(
       (memory) => isMemoryEligibleForRetrieval(memory, now) && hasNoLeakingPii(memory.text)
     )
     const withheldProceduralCount = proceduralAll.length - safeProcedural.length
-    const procedural = assembleProceduralContext(safeProcedural, { maxTokens: proceduralBudget })
+    const procedural = assembleProceduralContext(safeProcedural, {
+      maxTokens: proceduralBudget,
+      preamble: PROCEDURAL_PRECEDENCE_NOTE,
+    })
     const proceduralBlock = procedural.text
     const proceduralCount = procedural.memories.length
     const activeProceduralCount = safeProcedural.filter(
@@ -204,7 +222,7 @@ export async function applyMemoryContext(
     const render = (memories: AppliedMemory[]) =>
       [
         memories.length
-          ? `${RECALL_HEADING}\n${memories.map((m) => `- ${m.text}`).join("\n")}`
+          ? `${RECALL_HEADING}\n${MEMORY_RECALL_PREAMBLE}\n${memories.map((m) => `- ${m.text}`).join("\n")}`
           : null,
         proceduralBlock,
       ]

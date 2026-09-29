@@ -328,6 +328,63 @@ describe("runMemoryMaintenance", () => {
   })
 })
 
+describe("runMemoryMaintenance retention wiring", () => {
+  const DAY = 24 * 60 * 60 * 1000
+  const now = 1_700_000_000_000
+  // Same importance; "recalled" is old but recalled often yesterday, "fresh" is
+  // new and never recalled. Which one eviction drops depends only on σ.
+  const rows = () => [
+    mem({
+      id: "recalled",
+      type: "episodic",
+      createdAt: now - 100 * DAY,
+      lastAccessedAt: now - DAY,
+      accessCount: 50,
+    }),
+    mem({
+      id: "fresh",
+      type: "episodic",
+      createdAt: now - 10 * DAY,
+      lastAccessedAt: now - 10 * DAY,
+    }),
+  ]
+
+  async function evictOne(config: MemoryConfig): Promise<string[]> {
+    const invalidated: string[] = []
+    await runMemoryMaintenance(
+      { transcript, scope: "global", provenance: "user", config, now },
+      {
+        distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
+        decayDeps: {
+          listActive: async () => rows(),
+          invalidate: async (id) => {
+            invalidated.push(id)
+          },
+        },
+      }
+    )
+    return invalidated
+  }
+
+  it("keeps a memory the user keeps recalling when reinforcement is on", async () => {
+    await expect(
+      evictOne(cfg({ maxActivePerScope: 1, accessReinforcementWeight: 0.6 }))
+    ).resolves.toEqual(["fresh"])
+  })
+
+  it("ranks on the time curve alone when reinforcement is zero", async () => {
+    await expect(
+      evictOne(cfg({ maxActivePerScope: 1, accessReinforcementWeight: 0 }))
+    ).resolves.toEqual(["recalled"])
+  })
+
+  it("treats a negative weight as zero", async () => {
+    await expect(
+      evictOne(cfg({ maxActivePerScope: 1, accessReinforcementWeight: -1 }))
+    ).resolves.toEqual(["recalled"])
+  })
+})
+
 describe("scheduleMemoryMaintenance", () => {
   beforeEach(() => {
     jest.clearAllMocks()
@@ -529,5 +586,74 @@ describe("scheduleMemoryMaintenance", () => {
       }),
       { reuseCompleted: true }
     )
+  })
+
+  const lifecycleSweeps = () =>
+    mockEnqueueJob.mock.calls
+      .map(([draft]) => draft as { kind: string; dedupeKey: string })
+      .filter((draft) => draft.kind === "memory-lifecycle-sweep")
+
+  it("does not queue a lifecycle sweep when both cold passes are off", async () => {
+    scheduleMemoryMaintenance({
+      ...base,
+      config: cfg({ compactColdEpisodic: false, dedupColdClusters: false }),
+    })
+    await jest.runAllTimersAsync()
+    expect(lifecycleSweeps()).toEqual([])
+    // The other daily sweeps are unaffected.
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "vector-reconcile" }),
+      { reuseCompleted: true }
+    )
+  })
+
+  it.each([
+    ["compaction", { compactColdEpisodic: true, dedupColdClusters: false }],
+    ["dedup", { compactColdEpisodic: false, dedupColdClusters: true }],
+    ["both", { compactColdEpisodic: true, dedupColdClusters: true }],
+  ])("queues one day-bucketed lifecycle sweep when %s is on", async (_label, passes) => {
+    scheduleMemoryMaintenance({ ...base, config: cfg(passes) })
+    await jest.runAllTimersAsync()
+    const sweeps = lifecycleSweeps()
+    expect(sweeps).toHaveLength(1)
+    expect(sweeps[0]!.dedupeKey).toMatch(/^memory-lifecycle-sweep:\d{4}-\d{2}-\d{2}$/)
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "memory-lifecycle-sweep", scope: "global" }),
+      { reuseCompleted: true }
+    )
+  })
+
+  it("queues the lifecycle sweep even when this chat may not learn", async () => {
+    // The sweep acts on memories already stored; learning being off (or the
+    // conversation being too short to distill) is no reason to skip it.
+    scheduleMemoryMaintenance({
+      ...base,
+      transcript: [],
+      config: cfg({ learnFromChats: false, compactColdEpisodic: true }),
+    })
+    await jest.runAllTimersAsync()
+    expect(lifecycleSweeps()).toHaveLength(1)
+    expect(mockEnqueueJob).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "session-distill" }),
+      expect.anything()
+    )
+  })
+
+  it("queues no lifecycle sweep in temporary mode", async () => {
+    scheduleMemoryMaintenance({
+      ...base,
+      config: cfg({ temporary: true, compactColdEpisodic: true, dedupColdClusters: true }),
+    })
+    await jest.runAllTimersAsync()
+    expect(lifecycleSweeps()).toEqual([])
+  })
+
+  it("queues no lifecycle sweep when memory maintenance itself is gated off", async () => {
+    scheduleMemoryMaintenance({
+      ...base,
+      config: cfg({ enabled: false, compactColdEpisodic: true, dedupColdClusters: true }),
+    })
+    await jest.runAllTimersAsync()
+    expect(lifecycleSweeps()).toEqual([])
   })
 })

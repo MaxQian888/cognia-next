@@ -6,6 +6,7 @@
 // existing speak behavior (and its tests) are the compatibility lock.
 
 import type { PetBones, PetMood, PetSoul } from "@/types/pet"
+import { MEMORY_RECALL_PREAMBLE, RECALL_HEADING } from "@cognia/memory/runtime/recall-framing"
 import { emotionInstructionLine } from "./emotion-tags"
 
 export interface PetPromptState {
@@ -41,9 +42,6 @@ export interface BuildPetSystemPromptInput {
    */
   conversational?: boolean
 }
-
-/** Matches `apply-memory-context.ts` so the pet and chat speak one format. */
-const RECALL_HEADING = "## What you remember about the user"
 
 /**
  * Legacy layer-1 text. The default (non-conversational) branch is kept
@@ -81,7 +79,9 @@ export function buildPetSystemPrompt(input: BuildPetSystemPromptInput): string {
   }
 
   if (input.recallText) {
-    sections.push(`${RECALL_HEADING}\n${input.recallText}`)
+    // Same heading and trust boundary as chat recall, so recalled facts never
+    // read as instructions to the pet either.
+    sections.push(`${RECALL_HEADING}\n${MEMORY_RECALL_PREAMBLE}\n${input.recallText}`)
   }
 
   if (input.emotionInstruction) {

@@ -517,6 +517,11 @@ export async function buildProjectMiningDeps(
           // "What you remember about the user". This is the write-side twin of
           // the retriever's `claimFilter` partition.
           claimFilter: "project-only",
+          // A similarity lookup for the judge, not a recall: the user's recall
+          // preferences (LLM rerank, session routing, belief weight) do not apply.
+          rerank: false,
+          sessionRecallRouting: false,
+          beliefRankingWeight: 0,
         },
         memDeps
       ).catch(() => [])
@@ -542,6 +547,7 @@ export async function buildProjectMiningDeps(
       await memDb.updateMemory(id, {
         text,
         bumpVersion: true,
+        revisionReason: "consolidation",
         ...(claim ? { projectMemoryKind: claim.projectMemoryKind } : {}),
         ...(claim?.observedAt !== undefined ? { observedAt: claim.observedAt } : {}),
         ...(claim?.confidence !== undefined ? { confidence: claim.confidence } : {}),

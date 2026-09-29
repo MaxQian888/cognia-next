@@ -3,6 +3,9 @@ import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "@/types/memory/memory"
 const mockTryBuildTwinDeps = jest.fn()
 const mockCreateProviderEmbeddingAdapter = jest.fn()
 const mockSearchByEmbedding = jest.fn()
+const mockGetSettings = jest.fn()
+const mockBuildUtilityLlmClient = jest.fn()
+const mockCreateMemoryLlmReranker = jest.fn()
 
 jest.mock("@/lib/twin/runtime/build-deps", () => ({
   tryBuildTwinDeps: () => mockTryBuildTwinDeps(),
@@ -17,11 +20,23 @@ jest.mock("@/lib/claude/feature-call", () => ({
 jest.mock("@/lib/db/memories", () => ({
   listActiveForReader: jest.fn(async () => [{ id: "c1" }]),
   listActiveProcedural: jest.fn(async () => [{ id: "p1" }]),
+  listHistoricalForReader: jest.fn(async () => [{ id: "h1" }]),
   touchMemories: jest.fn(async () => undefined),
 }))
+jest.mock("@/lib/db/settings", () => ({
+  getSettings: () => mockGetSettings(),
+}))
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: (...args: unknown[]) => mockBuildUtilityLlmClient(...args),
+}))
+jest.mock("@cognia/memory/retrieve/llm-rerank", () => ({
+  createMemoryLlmReranker: (...args: unknown[]) => mockCreateMemoryLlmReranker(...args),
+}))
 
+import { listHistoricalForReader } from "@/lib/db/memories"
 import {
   tryBuildMemoryDeps,
+  tryBuildMemoryVectorReader,
   tryBuildMemoryVectorSink,
   describeMemoryRetrievalMode,
   MEMORY_VECTOR_COLLECTION,
@@ -35,6 +50,9 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockSearchByEmbedding.mockResolvedValue([{ id: "v1", content: "x", score: 0.7 }])
   mockCreateProviderEmbeddingAdapter.mockReturnValue(async () => [0.1, 0.2])
+  mockGetSettings.mockResolvedValue({ theme: "dark" })
+  mockBuildUtilityLlmClient.mockReturnValue({ complete: jest.fn() })
+  mockCreateMemoryLlmReranker.mockReturnValue(async () => null)
 })
 
 describe("tryBuildMemoryDeps", () => {
@@ -298,6 +316,219 @@ describe("tryBuildMemoryDeps", () => {
     // The second tryBuildTwinDeps() call is skipped — the backend came from the
     // caller-supplied deps.
     expect(mockTryBuildTwinDeps).not.toHaveBeenCalled()
+  })
+})
+
+describe("tryBuildMemoryDeps defaults / historical / rerank", () => {
+  beforeEach(() => {
+    mockTryBuildTwinDeps.mockResolvedValue(undefined)
+  })
+
+  it("loads historical candidates through listHistoricalForReader", async () => {
+    const deps = await tryBuildMemoryDeps(cfg())
+    const reader = { scope: "global" } as never
+    await expect(deps!.loadHistoricalCandidates!(reader)).resolves.toEqual([{ id: "h1" }])
+    expect(listHistoricalForReader).toHaveBeenCalledWith(reader)
+  })
+
+  it("derives off-by-default recall defaults from the default config", async () => {
+    const deps = await tryBuildMemoryDeps(cfg())
+    expect(deps!.defaults).toEqual({
+      sessionRecallRouting: false,
+      beliefRankingWeight: 0,
+      rerank: false,
+    })
+  })
+
+  it("carries configured recall defaults and clamps a negative belief weight to 0", async () => {
+    const on = await tryBuildMemoryDeps(
+      cfg({ sessionRecallRouting: true, beliefRankingWeight: 0.4, llmRerank: true })
+    )
+    expect(on!.defaults).toEqual({
+      sessionRecallRouting: true,
+      beliefRankingWeight: 0.4,
+      rerank: true,
+    })
+    const negative = await tryBuildMemoryDeps(cfg({ beliefRankingWeight: -2 }))
+    expect(negative!.defaults!.beliefRankingWeight).toBe(0)
+    const missing = await tryBuildMemoryDeps(cfg({ beliefRankingWeight: undefined }))
+    expect(missing!.defaults!.beliefRankingWeight).toBe(0)
+  })
+
+  it("never builds a reranker (nor touches the utility model) when llmRerank is off", async () => {
+    const deps = await tryBuildMemoryDeps(cfg({ llmRerank: false }))
+    expect(deps!.rerank).toBeUndefined()
+    expect(mockBuildUtilityLlmClient).not.toHaveBeenCalled()
+    expect(mockGetSettings).not.toHaveBeenCalled()
+    expect(mockCreateMemoryLlmReranker).not.toHaveBeenCalled()
+  })
+
+  it("attaches the utility-model reranker when llmRerank is on", async () => {
+    const client = { complete: jest.fn() }
+    const reranker = jest.fn()
+    mockBuildUtilityLlmClient.mockReturnValue(client)
+    mockCreateMemoryLlmReranker.mockReturnValue(reranker)
+    const deps = await tryBuildMemoryDeps(cfg({ llmRerank: true }))
+    expect(mockBuildUtilityLlmClient).toHaveBeenCalledWith({
+      session: null,
+      appSettings: { theme: "dark" },
+      featureId: "memory-rerank",
+    })
+    expect(mockCreateMemoryLlmReranker).toHaveBeenCalledWith(client)
+    expect(deps!.rerank).toBe(reranker)
+  })
+
+  it("leaves rerank unset when no utility model is configured", async () => {
+    mockBuildUtilityLlmClient.mockReturnValue(null)
+    const deps = await tryBuildMemoryDeps(cfg({ llmRerank: true }))
+    expect(deps!.rerank).toBeUndefined()
+    expect(mockCreateMemoryLlmReranker).not.toHaveBeenCalled()
+    // The config default still says rerank; only the capability is missing.
+    expect(deps!.defaults!.rerank).toBe(true)
+  })
+
+  it("passes null app settings when reading settings fails", async () => {
+    mockGetSettings.mockRejectedValue(new Error("db closed"))
+    const deps = await tryBuildMemoryDeps(cfg({ llmRerank: true }))
+    expect(mockBuildUtilityLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({ appSettings: null, featureId: "memory-rerank" })
+    )
+    expect(deps!.rerank).toBeDefined()
+  })
+
+  it("keeps building deps when the reranker construction throws", async () => {
+    mockBuildUtilityLlmClient.mockImplementation(() => {
+      throw new Error("bad provider")
+    })
+    const deps = await tryBuildMemoryDeps(cfg({ llmRerank: true }))
+    expect(deps).toBeDefined()
+    expect(deps!.rerank).toBeUndefined()
+  })
+})
+
+describe("tryBuildMemoryVectorReader", () => {
+  const localEmbedding = { provider: "transformersjs", model: "x", apiKey: "" }
+
+  it("returns undefined when memory is disabled or temporary, without touching the backend", async () => {
+    expect(await tryBuildMemoryVectorReader(cfg({ enabled: false }))).toBeUndefined()
+    expect(await tryBuildMemoryVectorReader(cfg({ temporary: true }))).toBeUndefined()
+    expect(mockTryBuildTwinDeps).not.toHaveBeenCalled()
+  })
+
+  it("returns undefined when the privacy/capability gate yields no backend", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue(undefined)
+    expect(await tryBuildMemoryVectorReader(cfg())).toBeUndefined()
+
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments: jest.fn() },
+      embedding: localEmbedding,
+    })
+    expect(await tryBuildMemoryVectorReader(cfg({ hybridEnabled: false }))).toBeUndefined()
+
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments: jest.fn() },
+      embedding: { provider: "openai", model: "x", apiKey: "k" },
+    })
+    expect(await tryBuildMemoryVectorReader(cfg({ allowCloudEmbedding: false }))).toBeUndefined()
+    expect(await tryBuildMemoryVectorReader(cfg({ allowCloudEmbedding: true }))).toBeDefined()
+  })
+
+  it("returns undefined when the store cannot read documents", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: localEmbedding,
+    })
+    expect(await tryBuildMemoryVectorReader(cfg())).toBeUndefined()
+  })
+
+  it("returns undefined when building the backend throws", async () => {
+    mockTryBuildTwinDeps.mockRejectedValue(new Error("boom"))
+    expect(await tryBuildMemoryVectorReader(cfg())).toBeUndefined()
+  })
+
+  it("maps vector doc ids back to memory ids and skips memories without a vector", async () => {
+    const getDocuments = jest.fn(async () => [
+      { id: "doc-a", embedding: [1, 0] },
+      { id: "doc-b", embedding: [0, 1] },
+    ])
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments },
+      embedding: localEmbedding,
+    })
+    const reader = await tryBuildMemoryVectorReader(cfg())
+    const out = await reader!.getEmbeddings([
+      { id: "mem-a", vectorDocId: "doc-a" },
+      { id: "mem-b", vectorDocId: "doc-b" },
+      { id: "mem-none" },
+    ])
+    expect(getDocuments).toHaveBeenCalledWith(MEMORY_VECTOR_COLLECTION, ["doc-a", "doc-b"])
+    expect(out).toEqual(
+      new Map([
+        ["mem-a", [1, 0]],
+        ["mem-b", [0, 1]],
+      ])
+    )
+    expect(mockSearchByEmbedding).not.toHaveBeenCalled()
+  })
+
+  it("does not query the store when no memory has a vector", async () => {
+    const getDocuments = jest.fn()
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments },
+      embedding: localEmbedding,
+    })
+    const reader = await tryBuildMemoryVectorReader(cfg())
+    await expect(reader!.getEmbeddings([{ id: "m1" }])).resolves.toEqual(new Map())
+    expect(getDocuments).not.toHaveBeenCalled()
+  })
+
+  it("drops unexpected ids, missing / empty / non-finite vectors and mismatched dimensions", async () => {
+    const getDocuments = jest.fn(async () => [
+      { id: "doc-stranger", embedding: [1, 0] },
+      { id: "doc-missing" },
+      { id: "doc-empty", embedding: [] },
+      { id: "doc-nan", embedding: [NaN, 1] },
+      { id: "doc-inf", embedding: [Infinity, 0] },
+      { id: "doc-ok", embedding: [0.5, 0.5] },
+      { id: "doc-3d", embedding: [1, 0, 0] },
+      { id: "doc-ok2", embedding: [0.1, 0.9] },
+    ])
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments },
+      embedding: localEmbedding,
+    })
+    const reader = await tryBuildMemoryVectorReader(cfg())
+    const ids = ["missing", "empty", "nan", "inf", "ok", "3d", "ok2"]
+    const out = await reader!.getEmbeddings(ids.map((id) => ({ id, vectorDocId: `doc-${id}` })))
+    expect([...out.keys()]).toEqual(["ok", "ok2"])
+    expect(out.get("ok")).toEqual([0.5, 0.5])
+  })
+
+  it("reads in bounded batches and keeps the dimension fixed across batches", async () => {
+    const memories = Array.from({ length: 600 }, (_, index) => ({
+      id: `mem-${index}`,
+      vectorDocId: `doc-${index}`,
+    }))
+    const getDocuments = jest.fn(async (_collection: string, batch: string[]) => {
+      expect(batch.length).toBeLessThanOrEqual(256)
+      return batch.map((id) => ({
+        id,
+        // The last doc (third batch) has a different dimension than the first.
+        embedding: id === "doc-599" ? [1, 0, 0] : [1, 0],
+      }))
+    })
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments },
+      embedding: localEmbedding,
+    })
+    const reader = await tryBuildMemoryVectorReader(cfg())
+    const out = await reader!.getEmbeddings(memories)
+    expect(getDocuments).toHaveBeenCalledTimes(3)
+    expect(getDocuments.mock.calls.flatMap(([, batch]) => batch)).toEqual(
+      memories.map((m) => m.vectorDocId)
+    )
+    expect(out.size).toBe(599)
+    expect(out.has("mem-599")).toBe(false)
   })
 })
 

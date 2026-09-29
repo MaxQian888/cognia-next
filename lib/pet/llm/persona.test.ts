@@ -1,5 +1,6 @@
 import { buildPetSystemPrompt } from "./persona"
 import type { PetBones, PetSoul } from "@/types/pet"
+import { MEMORY_RECALL_PREAMBLE } from "@cognia/memory/runtime/recall-framing"
 
 const soul: PetSoul = { name: "Boba", personality: "curious and gentle", hatchDate: "2026-01-01" }
 const bones = { rarity: "rare", species: "axolotl" } as PetBones
@@ -44,7 +45,10 @@ describe("buildPetSystemPrompt", () => {
       recallText: "- Loves matcha",
     })
     expect(out).toContain("Recent things you said together:\nUser: hi\nYou: hey!")
-    expect(out).toContain("## What you remember about the user\n- Loves matcha")
+    // Same heading and data-only trust boundary as chat recall.
+    expect(out).toContain(
+      `## What you remember about the user\n${MEMORY_RECALL_PREAMBLE}\n- Loves matcha`
+    )
 
     const without = buildPetSystemPrompt({ soul, bones, historyText: "", recallText: "" })
     expect(without).toBe(legacyPrompt())

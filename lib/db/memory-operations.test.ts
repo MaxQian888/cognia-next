@@ -10,7 +10,7 @@ import {
   runMemoryMutation,
   type MemoryOperationBinding,
 } from "./memory-operations"
-import { createMemory, getMemory } from "./memories"
+import { createMemory, getMemory, listMemoryRevisions } from "./memories"
 import { getDb } from "./schema"
 
 const dbFixture = createDbTestFixture()
@@ -338,5 +338,62 @@ describe("memoryOperationRequestHash", () => {
     const a = await memoryOperationRequestHash("update", { text: "x", extra: undefined })
     const b = await memoryOperationRequestHash("update", { text: "x" })
     expect(a).toBe(b)
+  })
+})
+
+describe("runMemoryMutation revision snapshots", () => {
+  it("preserves the outgoing text with reason 'external-update' by default", async () => {
+    await seedMemory()
+    const outcome = await runMemoryMutation({
+      memoryId: "m1",
+      seen: seen(),
+      apply: () => ({ patch: { text: "updated" } }),
+    })
+    expect(outcome).toEqual({ ok: true, version: 2 })
+    const live = await getMemory("m1")
+    expect(live).toMatchObject({ text: "updated", version: 2 })
+    expect(live?.revisedAt).toBe(live?.updatedAt)
+
+    const revisions = await listMemoryRevisions("m1")
+    expect(revisions).toHaveLength(1)
+    expect(revisions[0]).toMatchObject({
+      text: "fact",
+      status: "invalidated",
+      revisionOf: "m1",
+      supersededById: "m1",
+      revisionReason: "external-update",
+      version: 1,
+      invalidatedAt: live?.updatedAt,
+    })
+  })
+
+  it("records the revisionReason the mutation supplies", async () => {
+    await seedMemory()
+    await runMemoryMutation({
+      memoryId: "m1",
+      seen: seen(),
+      apply: () => ({ patch: { text: "merged" }, revisionReason: "conflict-merge" }),
+    })
+    const revisions = await listMemoryRevisions("m1")
+    expect(revisions.map((r) => r.revisionReason)).toEqual(["conflict-merge"])
+  })
+
+  it("writes no snapshot for a patch that leaves the text alone", async () => {
+    await seedMemory()
+    const outcome = await runMemoryMutation({
+      memoryId: "m1",
+      seen: seen(),
+      apply: () => ({ patch: { importance: 9, tags: ["t"] } }),
+    })
+    expect(outcome).toEqual({ ok: true, version: 2 })
+    await runMemoryMutation({
+      memoryId: "m1",
+      seen: seen(),
+      apply: () => ({ patch: { text: "fact" } }),
+    })
+    expect(await listMemoryRevisions("m1")).toEqual([])
+    const live = await getMemory("m1")
+    expect(live).toMatchObject({ text: "fact", importance: 9, version: 3 })
+    expect(live?.revisedAt).toBeUndefined()
   })
 })

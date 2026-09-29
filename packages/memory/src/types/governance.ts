@@ -129,6 +129,12 @@ export const MEMORY_JOB_KINDS = [
   "vector-reconcile",
   "project-mining",
   "project-claim-revalidate",
+  /**
+   * The daily cold-memory pass (`lib/memory/lifecycle/lifecycle-sweep.ts`):
+   * extractive compaction and cold-cluster dedup of episodic memory. Enqueued
+   * only when at least one of those opt-in passes is enabled.
+   */
+  "memory-lifecycle-sweep",
 ] as const
 
 export type MemoryJobKind = (typeof MEMORY_JOB_KINDS)[number]

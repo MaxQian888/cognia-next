@@ -38,9 +38,11 @@ import { MemoryList } from "@/components/memory/memory-list"
 import { MemoryRetrievalChip } from "@/components/memory/memory-retrieval-chip"
 import { MemoryToolbar, type MemoryDensity } from "@/components/memory/memory-toolbar"
 import { ExternalMemoryTab } from "@/components/memory/external/external-memory-tab"
+import { MemoryHealthPanel } from "@/components/memory/memory-health-panel"
+import { useMemoryLint } from "@/hooks/memory/use-memory-lint"
 import { useLiveQueryState } from "@/hooks/ui"
 import { useClientLiveQuery } from "@/hooks/data"
-import { listMemories } from "@/lib/db/memories"
+import { listMemories, listMemoryRevisions } from "@/lib/db/memories"
 import { listMemoryAuditEvents, listMemoryEvidence } from "@/lib/db/memory-governance"
 import { manageMemory, type ManageMemoryCommand } from "@/lib/memory/control-plane/manage"
 import { computeMemoryCorpusInsights } from "@/lib/memory/insights"
@@ -61,7 +63,7 @@ import { cn } from "@/lib/utils"
 
 const EMPTY_MEMORIES: Memory[] = []
 const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>()
-const TABS = ["app", "external"] as const
+const TABS = ["app", "health", "external"] as const
 
 type MemoryTab = (typeof TABS)[number]
 
@@ -146,6 +148,11 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
   )
   const selectedAuditEvents = useClientLiveQuery(
     () => (selectedId ? listMemoryAuditEvents({ memoryId: selectedId }) : Promise.resolve([])),
+    [selectedId],
+    []
+  )
+  const selectedRevisions = useClientLiveQuery(
+    () => (selectedId ? listMemoryRevisions(selectedId) : Promise.resolve([])),
     [selectedId],
     []
   )
@@ -295,6 +302,12 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
     },
     [runManaged]
   )
+  const handleRestoreRevision = useCallback(
+    (id: string, revisionId: string) => {
+      void runManaged({ kind: "restore-revision", id, revisionId })
+    },
+    [runManaged]
+  )
   const handleTagClick = useCallback((tag: string) => {
     setFilter((prev) => {
       const tags = prev.tags ?? []
@@ -305,6 +318,11 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
     })
   }, [])
   const resolveMemory = useCallback((id: string) => memoryById.get(id), [memoryById])
+  const lint = useMemoryLint(all, tab === "health")
+  const openFromHealth = useCallback((id: string) => {
+    setTab("app")
+    setSelectedId(id)
+  }, [])
 
   const clearFilters = useCallback(() => {
     setFilter({})
@@ -477,6 +495,8 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
                     onOpenResolver={conflictPartner ? () => setResolverOpen(true) : undefined}
                     onMarkOutdated={handleMarkOutdated}
                     readerContext={readerContext}
+                    revisions={selectedRevisions}
+                    onRestoreRevision={handleRestoreRevision}
                   />
                 ),
                 defaultSize: 30,
@@ -539,6 +559,14 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
               />
             </div>
           </div>
+        ) : tab === "health" ? (
+          <MemoryHealthPanel
+            report={lint.report}
+            loading={lint.loading}
+            onRefresh={lint.refresh}
+            resolveMemory={resolveMemory}
+            onOpenMemory={openFromHealth}
+          />
         ) : (
           <ExternalMemoryTab />
         )}

@@ -52,6 +52,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { ConfirmActionDialog } from "@/components/agent/workspace/settings/confirm-action-dialog"
+import { MemoryRevisionHistory } from "@/components/memory/memory-revision-history"
+import { beliefStrength } from "@cognia/memory/lifecycle/belief"
 
 export interface MemoryInspectorPatch {
   text?: string
@@ -95,6 +97,10 @@ export interface MemoryInspectorProps {
    * that already has its own button.
    */
   onMarkOutdated?: (id: string) => void | Promise<void>
+  /** Earlier texts of this memory, newest first (`listMemoryRevisions`). */
+  revisions?: readonly Memory[]
+  /** Put an earlier text back. Absent → the history is read-only. */
+  onRestoreRevision?: (id: string, revisionId: string) => void
   className?: string
 }
 
@@ -124,6 +130,8 @@ export function MemoryInspector({
   onOpenResolver,
   readerContext,
   onMarkOutdated,
+  revisions,
+  onRestoreRevision,
   className,
 }: MemoryInspectorProps) {
   const t = useTranslations("memory.detail")
@@ -182,6 +190,12 @@ export function MemoryInspector({
   const since = (ts: number) => format.relativeTime(new Date(ts), now)
 
   const timeline = buildTimeline(evidence, auditEvents)
+  // Null means "unknown" (no evidence counters yet — legacy rows), which is
+  // shown as such rather than as zero belief.
+  const belief = beliefStrength(memory.beliefInputs, {
+    liveContradictions: conflictIds.length,
+    now: now.getTime(),
+  })
 
   return (
     <div
@@ -199,6 +213,11 @@ export function MemoryInspector({
         {invalidated ? (
           <Badge variant="secondary" className="font-normal">
             {tPanel("invalidated")}
+          </Badge>
+        ) : null}
+        {memory.compactedAt !== undefined ? (
+          <Badge variant="outline" className="font-normal" data-testid="memory-inspector-compacted">
+            {tPanel("compacted")}
           </Badge>
         ) : null}
         <span className="flex-1" />
@@ -505,8 +524,33 @@ export function MemoryInspector({
                 }
               />
               <Field label={t("fields.indexed")} value={memory.vectorDocId ? t("yes") : t("no")} />
+              <Field
+                label={t("fields.corroboration")}
+                testId="memory-inspector-corroboration"
+                value={
+                  belief === null
+                    ? t("fields.corroborationUnknown")
+                    : t("fields.corroborationValue", {
+                        percent: Math.round(belief * 100),
+                        sessions: memory.beliefInputs?.distinctSessions ?? 0,
+                      })
+                }
+              />
             </FieldGrid>
           </Section>
+
+          {revisions ? (
+            <Section title={t("sections.history")}>
+              <MemoryRevisionHistory
+                revisions={revisions}
+                onRestore={
+                  onRestoreRevision && !invalidated
+                    ? (revisionId) => onRestoreRevision(memory.id, revisionId)
+                    : undefined
+                }
+              />
+            </Section>
+          ) : null}
 
           <Section title={t("sections.activity")}>
             {timeline.length === 0 ? (

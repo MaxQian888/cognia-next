@@ -51,6 +51,13 @@ export interface PluginMemorySearchOptions {
   path?: string
   /** Default true; false = don't bump lastAccessedAt/accessCount. */
   touch?: boolean
+  /**
+   * Search memory as it was at this instant (epoch ms): earlier wordings come
+   * back from revision history (their `revisionOf` names the memory),
+   * memories created later or already forgotten are excluded. Lexical only;
+   * never bumps access counters.
+   */
+  asOf?: number
 }
 
 export interface PluginMemoryListFilter {

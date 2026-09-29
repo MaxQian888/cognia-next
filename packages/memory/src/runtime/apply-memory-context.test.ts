@@ -1,5 +1,12 @@
 import type { Memory } from "../types/memory"
-import { applyMemoryContext, type ApplyMemoryContextDeps } from "./apply-memory-context"
+import {
+  applyMemoryContext,
+  MEMORY_RECALL_PREAMBLE,
+  PROCEDURAL_PRECEDENCE_NOTE,
+  RECALL_HEADING,
+  type ApplyMemoryContextDeps,
+} from "./apply-memory-context"
+import * as framing from "./recall-framing"
 import { createContextManager } from "@cognia/rag/context-manager"
 import { __resetMemoryBm25Cache } from "../retrieve/retriever"
 
@@ -345,4 +352,110 @@ describe("independent recall sources and delivery governance", () => {
       expect(result.budget.used).toBe(actual)
     }
   )
+})
+
+describe("recall framing", () => {
+  it("re-exports the shared framing constants", () => {
+    expect(RECALL_HEADING).toBe(framing.RECALL_HEADING)
+    expect(MEMORY_RECALL_PREAMBLE).toBe(framing.MEMORY_RECALL_PREAMBLE)
+    expect(PROCEDURAL_PRECEDENCE_NOTE).toBe(framing.PROCEDURAL_PRECEDENCE_NOTE)
+  })
+
+  it("places the data-only preamble right after the recall heading", async () => {
+    const res = await applyMemoryContext({
+      ...base,
+      userMessage: "pnpm",
+      deps: deps({ loadCandidates: async () => [mem("The user prefers pnpm")] }),
+    })
+    expect(res.systemPromptSection).toContain(
+      `${RECALL_HEADING}\n${MEMORY_RECALL_PREAMBLE}\n- The user prefers pnpm`
+    )
+  })
+
+  it("adds the precedence note under the procedural heading", async () => {
+    const res = await applyMemoryContext({
+      ...base,
+      userMessage: "",
+      deps: deps({
+        loadProcedural: async () => [mem("Use pnpm", { type: "procedural" })],
+      }),
+    })
+    expect(res.systemPromptSection).toContain(
+      `## Working preferences you've learned\n${PROCEDURAL_PRECEDENCE_NOTE}\n- Use pnpm`
+    )
+    // No recall happened, so the recall preamble is absent.
+    expect(res.systemPromptSection).not.toContain(MEMORY_RECALL_PREAMBLE)
+  })
+})
+
+describe("recall preference pass-through", () => {
+  const NOW = 1_700_000_000_000
+  const corpus = () => [
+    mem("we cache with redis", { id: "sem", type: "semantic", importance: 6 }),
+    mem("we cache with memcached", { id: "epi", type: "episodic", importance: 5 }),
+    mem("we cache with disk", { id: "low", type: "semantic", importance: 1 }),
+  ]
+
+  it("forwards sessionRecallRouting", async () => {
+    const off = await applyMemoryContext({
+      ...base,
+      userMessage: "last time cache",
+      now: NOW,
+      deps: deps({ loadCandidates: async () => corpus() }),
+    })
+    expect(off.retrievedMemories.map((m) => m.id)).toEqual(["sem", "epi", "low"])
+    const on = await applyMemoryContext({
+      ...base,
+      userMessage: "last time cache",
+      now: NOW,
+      sessionRecallRouting: true,
+      deps: deps({ loadCandidates: async () => corpus() }),
+    })
+    expect(on.retrievedMemories.map((m) => m.id)).toEqual(["epi", "sem", "low"])
+  })
+
+  it("forwards beliefRankingWeight", async () => {
+    const res = await applyMemoryContext({
+      ...base,
+      userMessage: "cache",
+      now: NOW,
+      beliefRankingWeight: 1,
+      deps: deps({
+        loadCandidates: async () =>
+          corpus().map((m) =>
+            m.id === "epi" ? { ...m, beliefInputs: { evidenceCount: 20, distinctSessions: 20 } } : m
+          ),
+      }),
+    })
+    expect(res.retrievedMemories.map((m) => m.id)).toEqual(["epi", "sem", "low"])
+  })
+
+  it("forwards rerank to the retriever's reranker", async () => {
+    const rerank = jest.fn(
+      async () =>
+        new Map([
+          ["sem", 0],
+          ["epi", 0],
+          ["low", 1],
+        ])
+    )
+    const off = await applyMemoryContext({
+      ...base,
+      userMessage: "cache",
+      now: NOW,
+      deps: deps({ loadCandidates: async () => corpus(), rerank }),
+    })
+    expect(rerank).not.toHaveBeenCalled()
+    expect(off.retrievedMemories[0].id).toBe("sem")
+
+    const on = await applyMemoryContext({
+      ...base,
+      userMessage: "cache",
+      now: NOW,
+      rerank: true,
+      deps: deps({ loadCandidates: async () => corpus(), rerank }),
+    })
+    expect(rerank).toHaveBeenCalledTimes(1)
+    expect(on.retrievedMemories.map((m) => m.id)).toEqual(["low", "sem", "epi"])
+  })
 })

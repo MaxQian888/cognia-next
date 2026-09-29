@@ -131,7 +131,10 @@
       "scope": "Scope",
       "updated": "Updated",
       "validatedAt": "Last verified",
-      "version": "Version"
+      "version": "Version",
+      "corroboration": "Corroboration",
+      "corroborationValue": "{percent}% · {sessions, plural, =0 {no conversations yet} one {# conversation} other {# conversations}}",
+      "corroborationUnknown": "Not measured yet"
     },
     "importanceLabel": "Importance",
     "next": "Next memory",
@@ -148,7 +151,8 @@
       "origin": "Origin",
       "projectClaim": "Project context",
       "status": "Status",
-      "tags": "Tags"
+      "tags": "Tags",
+      "history": "History"
     },
     "source": "Source",
     "tagsLabel": "Tags",
@@ -330,7 +334,8 @@
     "summary": "{active} active · {pinned} pinned · {conflicts} in conflict · {coverage}% indexed",
     "tabs": {
       "app": "App memory",
-      "external": "External agent memory"
+      "external": "External agent memory",
+      "health": "Health"
     },
     "tagFilterLabel": "Tags:",
     "title": "Memory",
@@ -342,7 +347,8 @@
       "conflicts": "Conflicts",
       "needsReview": "Needs review",
       "pinned": "Pinned"
-    }
+    },
+    "compacted": "compacted"
   },
   "projectKind": {
     "constraint": "Constraint",
@@ -371,5 +377,82 @@
     "episodic": "Event",
     "procedural": "Preference",
     "semantic": "Fact"
+  },
+  "history": {
+    "empty": "No earlier versions.",
+    "restore": "Restore",
+    "window": "{from} – {to}",
+    "restoreConfirm": {
+      "title": "Restore this version?",
+      "description": "The current text is kept in the history, so you can switch back later.",
+      "confirm": "Restore",
+      "cancel": "Cancel"
+    },
+    "reasons": {
+      "edit": "Edited",
+      "consolidation": "Merged with new detail",
+      "external-update": "Changed by an integration",
+      "conflict-merge": "Conflict merged",
+      "compaction": "Compacted",
+      "dedup-merge": "Duplicates folded in",
+      "restore": "Replaced by a restore"
+    }
+  },
+  "health": {
+    "title": "Memory health",
+    "description": "Checks that point at memories worth a look. Nothing here changes a memory until you open it and act.",
+    "refresh": "Check again",
+    "checking": "Checking…",
+    "empty": "No issues found.",
+    "scanned": "{count, plural, one {# memory checked} other {# memories checked}}",
+    "open": "Open",
+    "gone": "(deleted)",
+    "contradictionCheck": {
+      "ran": "Contradiction check used stored vectors.",
+      "no_vectors": "Contradiction check skipped: no stored vectors are available.",
+      "disabled": "Contradiction check is off while memory is disabled or temporary."
+    },
+    "severity": {
+      "warning": "Warning",
+      "info": "Note"
+    },
+    "kinds": {
+      "stale": {
+        "title": "Never used",
+        "description": "An episode from {ageDays, plural, one {# day} other {# days}} ago that has never been recalled."
+      },
+      "cold_episodic": {
+        "title": "Gone cold",
+        "description": "Retention {retention} is below the cold threshold; the lifecycle sweep would compact or fold it."
+      },
+      "pinned_expiring": {
+        "title": "Pinned but expiring",
+        "description": "Pinning keeps it from being forgotten, but its expiry ({daysUntilExpiry, plural, one {# day} other {# days}}) still ends it."
+      },
+      "duplicate": {
+        "title": "Duplicate",
+        "description": "{count, plural, one {# memory says} other {# memories say}} the same thing in the same scope."
+      },
+      "feedback_flagged": {
+        "title": "Flagged by you",
+        "description": "Still active although it was marked unhelpful or out of date ({positive} helpful, {negative} unhelpful)."
+      },
+      "conflict_open": {
+        "title": "Unresolved conflict",
+        "description": "Contradicts {count, plural, one {# other memory} other {# other memories}} and is withheld from recall until you decide."
+      },
+      "missing_evidence": {
+        "title": "Evidence gone",
+        "description": "Every source that supported this memory has since been deleted."
+      },
+      "pending_instruction_aging": {
+        "title": "Waiting for review",
+        "description": "A learned working preference has waited {waitedDays, plural, one {# day} other {# days}} for your review; it is not used until you approve it."
+      },
+      "suspected_contradiction": {
+        "title": "Possible contradiction",
+        "description": "Two memories about the same subject (similarity {similarity}) that are not duplicates. The newer one is listed first."
+      }
+    }
   }
 }

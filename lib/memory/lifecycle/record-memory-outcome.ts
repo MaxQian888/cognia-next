@@ -13,9 +13,14 @@
  * gains the atomicity it never had.
  */
 
-import { appendMemoryAuditEvent, bindMemoryGovernanceOutcome } from "@/lib/db/memory-governance"
+import {
+  appendMemoryAuditEvent,
+  bindMemoryGovernanceOutcome,
+  createMemoryEvidence,
+} from "@/lib/db/memory-governance"
 import {
   consolidationAuditAction,
+  consolidationCorroboratedId,
   consolidationOpMemoryId,
   type ConsolidationOp,
 } from "@/lib/memory/consolidate/consolidator"
@@ -34,8 +39,46 @@ export interface RecordMemoryJobOutcomeInput {
   auditReason: string
 }
 
+/**
+ * Attach this turn's evidence to a memory the judge said already captures the
+ * candidate. Evidence only — no governance patch, no audit event: a
+ * restatement is a new witness for the memory (its belief strength grows),
+ * not an edit, and must not reset a verified memory to unreviewed.
+ */
+export async function recordMemoryCorroboration(input: {
+  memoryId: string
+  sessionId?: string
+  contaminationState: MemoryEvidence["contaminationState"]
+  evidence: RecordMemoryJobOutcomeInput["evidence"]
+}): Promise<void> {
+  try {
+    await createMemoryEvidence({
+      memoryId: input.memoryId,
+      kind: input.evidence.kind,
+      sourceId: input.evidence.sourceId,
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      contaminationState: input.contaminationState,
+      reviewed: false,
+      ...(input.evidence.sourceRole ? { sourceRole: input.evidence.sourceRole } : {}),
+    })
+  } catch {
+    // Corroboration is a ranking signal; losing one witness is not worth
+    // failing the job that learned nothing new anyway.
+  }
+}
+
 export async function recordMemoryJobOutcome(input: RecordMemoryJobOutcomeInput): Promise<void> {
   for (const operation of input.operations) {
+    const corroborated = consolidationCorroboratedId(operation)
+    if (corroborated) {
+      await recordMemoryCorroboration({
+        memoryId: corroborated,
+        sessionId: input.job.sessionId,
+        contaminationState: input.contaminationState,
+        evidence: input.evidence,
+      })
+      continue
+    }
     const memoryId = consolidationOpMemoryId(operation)
     const auditAction = consolidationAuditAction(operation)
     if (!memoryId || !auditAction) continue

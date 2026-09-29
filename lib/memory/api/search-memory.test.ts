@@ -185,4 +185,43 @@ describe("searchMemoriesExternal", () => {
     const depsDefault = mockRetrieveMemories.mock.calls[1][1]
     expect(depsDefault.touch).toBeDefined()
   })
+  it("passes asOf to the retriever only when provided", async () => {
+    await searchMemoriesExternal({ query: "q", asOf: 1_700_000_000_000 }, localUserCaller())
+    expect(mockRetrieveMemories.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ asOf: 1_700_000_000_000 })
+    )
+
+    await searchMemoriesExternal({ query: "q" }, localUserCaller())
+    expect(mockRetrieveMemories.mock.calls[1][0]).not.toHaveProperty("asOf")
+  })
+
+  it("passes asOf 0 through (not treated as absent)", async () => {
+    await searchMemoriesExternal({ query: "q", asOf: 0 }, localUserCaller())
+    expect(mockRetrieveMemories.mock.calls[0][0]).toEqual(expect.objectContaining({ asOf: 0 }))
+  })
+
+  it("filters historical candidates by the same authorization as live ones", async () => {
+    const loadHistoricalCandidates = jest.fn(async () => [
+      { id: "g-old", scope: "global" },
+      { id: "c-old", scope: "character" },
+    ])
+    mockTryBuildMemoryDeps.mockResolvedValue({
+      loadCandidates: jest.fn(async () => []),
+      loadHistoricalCandidates,
+    })
+    mockResolvePolicy.mockResolvedValue({ canRecall: true, readableScopes: ["character"] })
+    await searchMemoriesExternal({ query: "q", asOf: 1 }, localUserCaller())
+    const scopedDeps = mockRetrieveMemories.mock.calls[0][1]
+    const reader = { projectId: "p1" }
+    await expect(scopedDeps.loadHistoricalCandidates(reader)).resolves.toEqual([
+      { id: "c-old", scope: "character" },
+    ])
+    expect(loadHistoricalCandidates).toHaveBeenCalledWith(reader)
+  })
+
+  it("omits the historical loader when the backend has none", async () => {
+    await searchMemoriesExternal({ query: "q", asOf: 1 }, localUserCaller())
+    const deps = mockRetrieveMemories.mock.calls[0][1]
+    expect(deps).not.toHaveProperty("loadHistoricalCandidates")
+  })
 })

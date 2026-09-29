@@ -27,7 +27,6 @@ import { useMemoryInsights } from "@/hooks/memory/use-memory-insights"
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
-import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
 import {
   SETTINGS_DETAIL_PANE_CLASS,
   SettingsMasterDetail,
@@ -38,6 +37,7 @@ import { MemoryToggleRow } from "@/components/settings/memory/memory-controls"
 import { MemoryNav } from "@/components/settings/memory/memory-nav"
 import { DEFAULT_MEMORY_PANEL, type MemoryPanelId } from "@/components/settings/memory/nav-config"
 import { LearningPanel } from "@/components/settings/memory/panels/learning-panel"
+import { MaintenancePanel } from "@/components/settings/memory/panels/maintenance-panel"
 import { OverviewPanel } from "@/components/settings/memory/panels/overview-panel"
 import { RetrievalPanel } from "@/components/settings/memory/panels/retrieval-panel"
 import { ProjectContextPanel } from "@/components/settings/memory/panels/project-context-panel"
@@ -79,34 +79,7 @@ export function MemorySection() {
           />
         )
       case "maintenance":
-        return (
-          <div className="grid gap-4 @md/memory-pane:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="mem-max-idle">{t("maxIdle.label")}</Label>
-              <ClampedNumberInput
-                id="mem-max-idle"
-                aria-label={t("maxIdle.label")}
-                value={config.maxIdleDays ?? 0}
-                min={0}
-                max={3650}
-                integer
-                onCommit={(maxIdleDays) => update({ maxIdleDays })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="mem-cap">{t("cap.label")}</Label>
-              <ClampedNumberInput
-                id="mem-cap"
-                aria-label={t("cap.label")}
-                value={config.maxActivePerScope}
-                min={1}
-                max={100_000}
-                integer
-                onCommit={(maxActivePerScope) => update({ maxActivePerScope })}
-              />
-            </div>
-          </div>
-        )
+        return <MaintenancePanel config={config} update={update} insights={insights} />
       case "privacy":
         return (
           <div className="space-y-4">

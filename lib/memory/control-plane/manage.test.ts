@@ -13,6 +13,7 @@ const mockSinkDelete = jest.fn()
 const mockSinkUpsert = jest.fn()
 const mockRecordMemoryConflictGovernance = jest.fn()
 const mockReportGovernanceProjectionFailure = jest.fn()
+const mockRestoreRevision = jest.fn()
 
 jest.mock("@/lib/memory/api/store-memory", () => ({
   storeMemoryCore: (...args: unknown[]) => mockStore(...args),
@@ -25,6 +26,7 @@ jest.mock("@/lib/db/memories", () => ({
   invalidateMemory: (...args: unknown[]) => mockInvalidate(...args),
   recordRetrievalFeedback: (...args: unknown[]) => mockFeedback(...args),
   listMemories: (...args: unknown[]) => mockList(...args),
+  restoreMemoryRevision: (...args: unknown[]) => mockRestoreRevision(...args),
 }))
 jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn(async () => ({ memory: {} })) }))
 jest.mock("@/lib/db/memory-governance", () => ({
@@ -52,6 +54,9 @@ jest.mock("@/lib/db/governance-ledger", () => ({
 }))
 
 import { manageMemory } from "./manage"
+import { getSettings } from "@/lib/db/settings"
+
+const getSettingsMock = getSettings as jest.Mock
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -171,6 +176,25 @@ describe("manageMemory", () => {
     expect(result).toEqual({ ok: true, memoryId: "a" })
   })
 
+  it("resolve-conflict refuses a revision snapshot on either side", async () => {
+    mockGet.mockImplementation(async (id: string) => ({
+      id,
+      text: id,
+      version: 1,
+      ...(id === "snap" ? { revisionOf: "a", status: "invalidated" } : {}),
+    }))
+    for (const [keepId, dropId] of [
+      ["snap", "b"],
+      ["a", "snap"],
+    ]) {
+      await expect(
+        manageMemory({ kind: "resolve-conflict", keepId, dropId, mode: "keep" })
+      ).resolves.toEqual({ ok: false, reason: "not_found" })
+    }
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockInvalidate).not.toHaveBeenCalled()
+  })
+
   it("resolve-conflict keep-both verifies both sides and drops nothing", async () => {
     mockGet.mockImplementation(async (id: string) => ({
       id,
@@ -214,6 +238,8 @@ describe("manageMemory", () => {
       expect.objectContaining({
         text: "User migrated from npm to pnpm in 2026",
         bumpVersion: true,
+        // The merged-away text is preserved as a revision tagged with why.
+        revisionReason: "conflict-merge",
         reviewStatus: "verified",
       })
     )
@@ -333,7 +359,8 @@ describe("manageMemory", () => {
     mockList.mockResolvedValue([{ id: "i1" }, { id: "i2" }, { id: "i3" }])
     mockGet.mockImplementation(async (id) => ({ id, version: 1 }))
     const result = await manageMemory({ kind: "clear", query: { status: "invalidated" } })
-    expect(mockList).toHaveBeenCalledWith({ status: "invalidated" })
+    // Clearing forgotten memories also clears revision history.
+    expect(mockList).toHaveBeenCalledWith({ status: "invalidated", includeRevisions: true })
     expect(result).toEqual({ ok: true, clearedCount: 3 })
   })
 })
@@ -383,5 +410,145 @@ describe("manageMemory retrieval-feedback", () => {
   it("does not write an evidence row — the counters are the record", async () => {
     await manageMemory({ kind: "retrieval-feedback", id: "m1", verdict: "outdated" })
     expect(mockEvidence).not.toHaveBeenCalled()
+  })
+})
+
+describe("manageMemory revision snapshots", () => {
+  const SNAPSHOT = {
+    id: "snap1",
+    text: "older wording",
+    version: 1,
+    status: "invalidated",
+    revisionOf: "m1",
+    supersededById: "m1",
+  }
+
+  it("refuses to edit, pin, review, invalidate or restore through a snapshot id", async () => {
+    mockGet.mockResolvedValue({ ...SNAPSHOT })
+    const commands = [
+      { kind: "update", id: "snap1", patch: { text: "rewrite" } },
+      { kind: "pin", id: "snap1", pinned: true },
+      { kind: "review", id: "snap1", status: "verified" },
+      { kind: "invalidate", id: "snap1" },
+      { kind: "retrieval-feedback", id: "snap1", verdict: "helpful" },
+      { kind: "restore-revision", id: "snap1", revisionId: "m1" },
+    ] as const
+    for (const command of commands) {
+      await expect(manageMemory(command)).resolves.toEqual({ ok: false, reason: "not_found" })
+    }
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockPin).not.toHaveBeenCalled()
+    expect(mockInvalidate).not.toHaveBeenCalled()
+    expect(mockFeedback).not.toHaveBeenCalled()
+    expect(mockRestoreRevision).not.toHaveBeenCalled()
+    expect(mockAudit).not.toHaveBeenCalled()
+  })
+
+  it("still lets a snapshot be deleted", async () => {
+    mockGet.mockResolvedValue({ ...SNAPSHOT })
+    await expect(manageMemory({ kind: "delete", id: "snap1" })).resolves.toEqual({
+      ok: true,
+      memoryId: "snap1",
+    })
+    expect(mockDelete).toHaveBeenCalledWith("snap1")
+  })
+})
+
+describe("manageMemory restore-revision", () => {
+  beforeEach(() => {
+    mockGet.mockResolvedValue({ id: "m1", text: "current", version: 3, vectorDocId: "vec-m1" })
+    mockRestoreRevision.mockResolvedValue({
+      ok: true,
+      memory: { id: "m1", text: "older wording", version: 4, vectorDocId: "vec-m1" },
+    })
+  })
+
+  it("restores, re-indexes, evidences and audits the revision", async () => {
+    const result = await manageMemory({ kind: "restore-revision", id: "m1", revisionId: "snap1" })
+    expect(result).toEqual({ ok: true, memoryId: "m1" })
+    expect(mockRestoreRevision).toHaveBeenCalledWith("m1", "snap1")
+    expect(mockSinkUpsert).toHaveBeenCalledWith("vec-m1", "older wording")
+    expect(mockEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memoryId: "m1",
+        kind: "manual",
+        sourceId: "restore:m1:snap1",
+        contaminationState: "clean",
+        reviewed: true,
+      })
+    )
+    expect(mockAudit).toHaveBeenCalledWith({
+      action: "revised",
+      memoryId: "m1",
+      reason: "restored",
+      metadata: { revisionId: "snap1", version: 4 },
+    })
+  })
+
+  it("falls back to the memory id as the vector doc id when the row was never indexed", async () => {
+    mockGet.mockResolvedValue({ id: "m1", text: "current", version: 3 })
+    await manageMemory({ kind: "restore-revision", id: "m1", revisionId: "snap1" })
+    expect(mockSinkUpsert).toHaveBeenCalledWith("m1", "older wording")
+  })
+
+  it("skips the embedder when the restored text would leak PII, but still restores", async () => {
+    mockRestoreRevision.mockResolvedValue({
+      ok: true,
+      memory: { id: "m1", text: "mail bob@example.com", version: 4 },
+    })
+    const result = await manageMemory({ kind: "restore-revision", id: "m1", revisionId: "snap1" })
+    expect(result).toEqual({ ok: true, memoryId: "m1" })
+    expect(mockSinkUpsert).not.toHaveBeenCalled()
+    // The replaced text's vector must not keep matching.
+    expect(mockSinkDelete).toHaveBeenCalledWith(["vec-m1"])
+    expect(mockAudit).toHaveBeenCalledWith(expect.objectContaining({ reason: "restored" }))
+  })
+
+  it("notes a vector failure without failing the restore", async () => {
+    mockSinkUpsert.mockRejectedValueOnce(new Error("embedder down"))
+    const result = await manageMemory({ kind: "restore-revision", id: "m1", revisionId: "snap1" })
+    expect(result).toEqual({ ok: true, memoryId: "m1" })
+    expect(mockNoteVectorFailure).toHaveBeenCalledTimes(1)
+    expect(mockAudit).toHaveBeenCalledWith(expect.objectContaining({ reason: "restored" }))
+  })
+
+  it("treats an unchanged restore as ok with no side effects", async () => {
+    mockRestoreRevision.mockResolvedValue({ ok: false, reason: "unchanged" })
+    const result = await manageMemory({ kind: "restore-revision", id: "m1", revisionId: "snap1" })
+    expect(result).toEqual({ ok: true, memoryId: "m1" })
+    expect(mockSinkUpsert).not.toHaveBeenCalled()
+    expect(mockEvidence).not.toHaveBeenCalled()
+    expect(mockAudit).not.toHaveBeenCalled()
+  })
+
+  it("maps not_found and not_a_revision to not_found", async () => {
+    for (const reason of ["not_found", "not_a_revision"]) {
+      mockRestoreRevision.mockResolvedValueOnce({ ok: false, reason })
+      await expect(
+        manageMemory({ kind: "restore-revision", id: "m1", revisionId: "snap1" })
+      ).resolves.toEqual({ ok: false, reason: "not_found" })
+    }
+    expect(mockAudit).not.toHaveBeenCalled()
+    expect(mockEvidence).not.toHaveBeenCalled()
+  })
+
+  it("returns not_found when the live memory is gone", async () => {
+    mockGet.mockResolvedValue(undefined)
+    await expect(
+      manageMemory({ kind: "restore-revision", id: "m1", revisionId: "snap1" })
+    ).resolves.toEqual({ ok: false, reason: "not_found" })
+    expect(mockRestoreRevision).not.toHaveBeenCalled()
+  })
+
+  it("refuses in temporary mode and when memory is disabled", async () => {
+    getSettingsMock.mockResolvedValueOnce({ memory: { temporary: true } })
+    await expect(
+      manageMemory({ kind: "restore-revision", id: "m1", revisionId: "snap1" })
+    ).resolves.toEqual({ ok: false, reason: "temporary" })
+    getSettingsMock.mockResolvedValueOnce({ memory: { enabled: false } })
+    await expect(
+      manageMemory({ kind: "restore-revision", id: "m1", revisionId: "snap1" })
+    ).resolves.toEqual({ ok: false, reason: "disabled" })
+    expect(mockRestoreRevision).not.toHaveBeenCalled()
   })
 })

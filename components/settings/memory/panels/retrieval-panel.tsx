@@ -3,11 +3,10 @@
 import { useTranslations } from "next-intl"
 
 import { Label } from "@/components/ui/label"
-import { Slider } from "@/components/ui/slider"
 import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
 import type { MemoryConfig } from "@/types/memory/memory"
 import type { MemoryInsights } from "@/hooks/memory/use-memory-insights"
-import { GatedGroup, MemoryToggleRow } from "../memory-controls"
+import { GatedGroup, MemoryToggleRow, SliderRow } from "../memory-controls"
 import { RecallPreview } from "../recall-preview"
 import { RetrievalModeAlert } from "../retrieval-mode-alert"
 
@@ -15,52 +14,6 @@ export interface RetrievalPanelProps {
   config: MemoryConfig
   update: (patch: Partial<MemoryConfig>) => void
   insights: MemoryInsights
-}
-
-/** A labelled slider whose numeric readout sits inline with the label. */
-function SliderRow({
-  id,
-  label,
-  description,
-  value,
-  min,
-  max,
-  step,
-  format,
-  onChange,
-}: {
-  id: string
-  label: string
-  description: string
-  value: number
-  min: number
-  max: number
-  step: number
-  format?: (value: number) => string
-  onChange: (value: number) => void
-}) {
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <Label htmlFor={id} className="text-sm font-medium">
-          {label}
-        </Label>
-        <span className="text-xs tabular-nums text-muted-foreground" data-testid={`${id}-value`}>
-          {format ? format(value) : value}
-        </span>
-      </div>
-      <Slider
-        id={id}
-        aria-label={label}
-        value={[value]}
-        min={min}
-        max={max}
-        step={step}
-        onValueChange={([next]) => onChange(next)}
-      />
-      <p className="text-[11px] leading-relaxed text-muted-foreground">{description}</p>
-    </div>
-  )
 }
 
 export function RetrievalPanel({ config, update, insights }: RetrievalPanelProps) {
@@ -104,6 +57,20 @@ export function RetrievalPanel({ config, update, insights }: RetrievalPanelProps
             checked={config.enableQueryExpansion ?? false}
             onCheckedChange={(v) => update({ enableQueryExpansion: v })}
           />
+          <MemoryToggleRow
+            id="mem-session-recall"
+            label={t("sessionRecall.label")}
+            description={t("sessionRecall.description")}
+            checked={config.sessionRecallRouting ?? false}
+            onCheckedChange={(v) => update({ sessionRecallRouting: v })}
+          />
+          <MemoryToggleRow
+            id="mem-llm-rerank"
+            label={t("llmRerank.label")}
+            description={t("llmRerank.description")}
+            checked={config.llmRerank ?? false}
+            onCheckedChange={(v) => update({ llmRerank: v })}
+          />
         </div>
 
         <RecallPreview
@@ -144,6 +111,18 @@ export function RetrievalPanel({ config, update, insights }: RetrievalPanelProps
           step={0.05}
           format={(v) => v.toFixed(2)}
           onChange={(v) => update({ relevanceFloor: v })}
+        />
+
+        <SliderRow
+          id="mem-belief-weight"
+          label={t("beliefWeight.label")}
+          description={t("beliefWeight.description")}
+          value={config.beliefRankingWeight ?? 0}
+          min={0}
+          max={2}
+          step={0.1}
+          format={(v) => (v === 0 ? t("beliefWeight.off") : v.toFixed(1))}
+          onChange={(v) => update({ beliefRankingWeight: Math.round(v * 10) / 10 })}
         />
 
         <div className="space-y-1.5">

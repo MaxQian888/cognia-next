@@ -21,6 +21,11 @@ export interface AssembleProceduralOptions {
   maxTokens?: number
   /** Section heading. Default "## Working preferences you've learned". */
   heading?: string
+  /**
+   * One line rendered under the heading (e.g. a precedence note). Counted in
+   * the token budget; omitted along with the heading when nothing fits.
+   */
+  preamble?: string
 }
 
 const DEFAULT_MAX_TOKENS = 600
@@ -45,7 +50,9 @@ export function assembleProceduralContext(
   const procedural = memories.filter((m) => m.type === "procedural" && m.status === "active")
   if (procedural.length === 0) return { text: null, memories: [] }
 
-  const heading = options.heading ?? DEFAULT_HEADING
+  const heading = options.preamble
+    ? `${options.heading ?? DEFAULT_HEADING}\n${options.preamble}`
+    : (options.heading ?? DEFAULT_HEADING)
   const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS
   const ctx = createContextManager({ maxTokens })
 

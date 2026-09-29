@@ -1662,7 +1662,7 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
     {
       title: "Search Cognia's long-term memory",
       description:
-        "Hybrid (BM25 + vector) relevance search over what Cognia remembers about the user. Returns scored memory rows. Default OFF; gate via Settings → External Bridge → memory:read.",
+        "Hybrid (BM25 + vector) relevance search over what Cognia remembers about the user. Returns scored memory rows. Pass asOf to search what was remembered at a past instant (earlier wordings included; lexical only). Default OFF; gate via Settings → External Bridge → memory:read.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -1684,6 +1684,12 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         agentId: z.string().optional().describe("Include this private agent layer"),
         branch: z.string().optional().describe("Exact branch context"),
         path: z.string().optional().describe("Workspace-relative path context"),
+        asOf: z
+          .union([z.number().int().positive(), z.string()])
+          .optional()
+          .describe(
+            "Search memory as it was at this instant (epoch ms or ISO 8601). Hits whose text was an earlier wording carry revisionId/validFrom/validTo."
+          ),
       },
     },
     async (args, extra) =>
@@ -1701,6 +1707,7 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
             agentId: args.agentId,
             branch: args.branch,
             path: args.path,
+            asOf: args.asOf,
           }),
       })
   )

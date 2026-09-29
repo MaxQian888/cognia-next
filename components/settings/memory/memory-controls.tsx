@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { Label } from "@/components/ui/label"
+import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 
 export interface MemoryToggleRowProps {
@@ -103,6 +104,52 @@ export function GatedGroup({ gated, reason, children, className }: GatedGroupPro
       >
         {children}
       </motion.div>
+    </div>
+  )
+}
+
+/** A labelled slider whose numeric readout sits inline with the label. */
+export function SliderRow({
+  id,
+  label,
+  description,
+  value,
+  min,
+  max,
+  step,
+  format,
+  onChange,
+}: {
+  id: string
+  label: string
+  description: string
+  value: number
+  min: number
+  max: number
+  step: number
+  format?: (value: number) => string
+  onChange: (value: number) => void
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <Label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </Label>
+        <span className="text-xs tabular-nums text-muted-foreground" data-testid={`${id}-value`}>
+          {format ? format(value) : value}
+        </span>
+      </div>
+      <Slider
+        id={id}
+        aria-label={label}
+        value={[value]}
+        min={min}
+        max={max}
+        step={step}
+        onValueChange={([next]) => onChange(next)}
+      />
+      <p className="text-[11px] leading-relaxed text-muted-foreground">{description}</p>
     </div>
   )
 }

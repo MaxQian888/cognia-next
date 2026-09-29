@@ -86,3 +86,47 @@ it("skips oversized instructions while preserving smaller complete rows and thei
   expect(result.text).toContain("- Use pnpm")
   expect(result.memories).toEqual([small])
 })
+
+describe("preamble option", () => {
+  it("renders the preamble on the line under the heading", () => {
+    const block = assembleProceduralBlock([mem("Use pnpm")], { preamble: "Follow the user." })!
+    expect(block.split("\n").slice(0, 3)).toEqual([
+      "## Working preferences you've learned",
+      "Follow the user.",
+      "- Use pnpm",
+    ])
+  })
+
+  it("works with a custom heading", () => {
+    const block = assembleProceduralBlock([mem("x")], { heading: "## H", preamble: "P" })!
+    expect(block.startsWith("## H\nP\n- x")).toBe(true)
+  })
+
+  it("renders no preamble line when it is empty", () => {
+    const block = assembleProceduralBlock([mem("x")], { preamble: "" })!
+    expect(block).toBe("## Working preferences you've learned\n- x")
+  })
+
+  it("counts the preamble in the token budget", () => {
+    const many = Array.from({ length: 50 }, (_, i) => mem(`Preference ${i} padded with words`))
+    const without = assembleProceduralContext(many, { maxTokens: 80 })
+    const withPreamble = assembleProceduralContext(many, {
+      maxTokens: 80,
+      preamble: "A long precedence note that takes a meaningful share of the token budget.",
+    })
+    expect(withPreamble.memories.length).toBeLessThan(without.memories.length)
+  })
+
+  it("omits heading and preamble when no row fits", () => {
+    const result = assembleProceduralContext([mem("a long instruction that cannot fit")], {
+      maxTokens: 5,
+      preamble: "note",
+    })
+    expect(result.text).toBeNull()
+    expect(result.memories).toEqual([])
+  })
+
+  it("returns null without procedural rows even with a preamble", () => {
+    expect(assembleProceduralBlock([], { preamble: "note" })).toBeNull()
+  })
+})

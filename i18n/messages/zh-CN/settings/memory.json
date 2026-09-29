@@ -102,6 +102,34 @@
       }
     }
   },
+  "maintenance": {
+    "coldThreshold": {
+      "description": "保留分数低于该值的情节视为冷记忆。数值越高，处理的记忆越多。",
+      "label": "冷阈值"
+    },
+    "compaction": {
+      "description": "把冷情节缩短为第一句话，以及其中提到的文件路径、错误码和标识符。",
+      "label": "压缩冷情节"
+    },
+    "dedup": {
+      "description": "把内容几乎相同的冷情节合并到你最常用的那一条，并保留其中任意一条提到的路径和标识符。",
+      "label": "合并近似重复的情节",
+      "noVectors": "需要开启混合检索并允许使用嵌入后端；在此之前会跳过这一步。"
+    },
+    "forgetting": {
+      "title": "遗忘"
+    },
+    "reinforcement": {
+      "description": "达到每个范围的上限时，你经常召回的记忆会更晚被遗忘。它只会让记忆保留更久，不会改变召回排序。",
+      "label": "访问强化",
+      "off": "关闭"
+    },
+    "sweep": {
+      "description": "每天处理一次很久没被用到的情节记忆。它从不删除：之前的文本保留在每条记忆的历史中，可以随时恢复。",
+      "gatedReason": "开启压缩或重复合并后才能使用清理。",
+      "title": "生命周期清理"
+    }
+  },
   "manage": "管理记忆",
   "maxIdle": {
     "label": "未使用后遗忘天数（0 为永不）"
@@ -231,6 +259,11 @@
     "label": "最低召回相关度"
   },
   "retrieval": {
+    "beliefWeight": {
+      "description": "让在多次对话中得到印证的记忆排得更靠前。关闭时排序不考虑佐证，但记忆检查器中仍会显示。",
+      "label": "佐证权重",
+      "off": "关闭"
+    },
     "gates": {
       "memoryOff": "请先开启长期记忆，再编辑检索控制项。",
       "recallOff": "请先开启记忆召回，再编辑这些控制项。"
@@ -243,6 +276,10 @@
       "description": "结合语义向量检索与关键词匹配。",
       "label": "混合检索"
     },
+    "llmRerank": {
+      "description": "每轮让工具模型对召回的前若干条记忆（最多 30 条）重新排序一次。发送前会先对查询脱敏；任何失败都会保留本地排序。",
+      "label": "使用工具模型重排"
+    },
     "queryExpansion": {
       "description": "使用相关词扩展关键词查询。",
       "label": "查询扩展"
@@ -250,6 +287,10 @@
     "relevanceFloor": {
       "description": "排除相关度分数低于此值的记忆。",
       "label": "最低相关度"
+    },
+    "sessionRecall": {
+      "description": "当你询问之前的对话（「上次」「last time」）时，优先召回情节记忆而不是一般事实。",
+      "label": "过往会话路由"
     },
     "tokenBudget": {
       "description": "每轮最多可注入的记忆 Token 数。",

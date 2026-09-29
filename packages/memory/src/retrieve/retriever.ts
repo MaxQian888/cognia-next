@@ -37,6 +37,10 @@ import {
   scoreMemories,
   veracityFor,
 } from "./scoring"
+import { isSessionRecallQuery, SESSION_RECALL_EPISODIC_BOOST } from "./session-recall-intent"
+import { applyRerank, RERANK_MAX_CANDIDATES, type MemoryReranker } from "./llm-rerank"
+import { beliefStrength } from "../lifecycle/belief"
+import { memoryIdentity, textEffectiveFrom, wasLiveAt } from "../lifecycle/revision"
 
 /**
  * Terms too common to signal topical relevance. The BM25 leg returns *any* doc
@@ -202,6 +206,32 @@ export interface MemoryRetrieverDeps {
   /** Mark hits accessed (recency). Optional; failures are swallowed by the caller. */
   touch?: (memoryIds: string[]) => Promise<void>
   /**
+   * Every row visible to the reader WHATEVER its status, revision snapshots
+   * included — the corpus `asOf` recall filters down to what was live at a
+   * past instant. Absent means the host cannot answer historical questions, and
+   * an `asOf` recall returns nothing rather than silently answering from the
+   * present.
+   */
+  loadHistoricalCandidates?: (reader?: MemoryReaderContext | string) => Promise<Memory[]>
+  /**
+   * Bounded LLM reranker (`./llm-rerank`). Used only when the request sets
+   * `rerank`; absent, or answering `null`, keeps the local order.
+   */
+  rerank?: MemoryReranker
+  /** Rerank deadline; the reranker's own default (20 s) when absent. */
+  rerankTimeoutMs?: number
+  /**
+   * The user's recall preferences, applied to every request built on these
+   * deps unless the request sets the field itself. The dep builder fills this
+   * from `MemoryConfig`, so the dozen recall surfaces (chat, team, pet, workflow,
+   * connectors, plugin/MCP search …) honour one setting without each threading
+   * it; a caller that must opt out — consolidation's similarity lookup — passes
+   * `false` explicitly.
+   */
+  defaults?: Partial<
+    Pick<RetrieveMemoriesInput, "sessionRecallRouting" | "beliefRankingWeight" | "rerank">
+  >
+  /**
    * The shared rollout kill switch. Same name and shape as
    * `RetrievalKernelDependencies.killSwitchEngaged`, because it is the same
    * concept rather than a new one.
@@ -283,6 +313,20 @@ export interface RetrieveMemoriesInput {
   recencyHalfLifeDays?: number
   /** Stable clock for expiry and score tests. */
   now?: number
+  /**
+   * Answer as of this instant (epoch ms): only text that was live then is
+   * searched — earlier wordings come back from their revision snapshots,
+   * memories created later or already forgotten by then are excluded. Lexical
+   * only (snapshots carry no vectors, and today's vectors describe today's
+   * text), never touches access counters, never reranks.
+   */
+  asOf?: number
+  /** Boost episodic hits when the query asks about a past conversation. */
+  sessionRecallRouting?: boolean
+  /** Weight of belief strength in the final score; 0/absent leaves ranking unchanged. */
+  beliefRankingWeight?: number
+  /** Run `deps.rerank` over the top of the local ranking. */
+  rerank?: boolean
 }
 
 export interface RetrievedMemory {
@@ -349,10 +393,41 @@ export function isMemoryEligibleForRetrieval(memory: Memory, now: number = Date.
   if (memory.expiresAt !== null && memory.expiresAt !== undefined && memory.expiresAt <= now) {
     return false
   }
+  return passesGovernanceExclusions(memory)
+}
+
+/** The hard exclusions shared by live and historical recall. */
+function passesGovernanceExclusions(memory: Memory): boolean {
   if (memory.staleness === "expired" || memory.trustState === "quarantined") return false
   if (memory.reviewStatus === "conflict") return false
   if (memory.type === "procedural" && memory.reviewStatus !== "verified") return false
   return true
+}
+
+/**
+ * Eligibility for `asOf` recall: the row's text was live at `asOf`
+ * (`wasLiveAt`) and it passed the same governance exclusions. A snapshot
+ * carries the governance state its memory had while that text was live.
+ */
+export function isMemoryEligibleAt(memory: Memory, asOf: number): boolean {
+  return wasLiveAt(memory, asOf) && passesGovernanceExclusions(memory)
+}
+
+/**
+ * At most one row per memory identity. Live windows of one memory's revisions
+ * never overlap, so this only matters for a corrupted chain — where the most
+ * recently effective text wins.
+ */
+function onePerIdentity(rows: Memory[]): Memory[] {
+  const byIdentity = new Map<string, Memory>()
+  for (const row of rows) {
+    const identity = memoryIdentity(row)
+    const existing = byIdentity.get(identity)
+    if (!existing || textEffectiveFrom(row) > textEffectiveFrom(existing)) {
+      byIdentity.set(identity, row)
+    }
+  }
+  return [...byIdentity.values()]
 }
 
 /**
@@ -366,10 +441,25 @@ export async function retrieveMemories(
   return (await retrieveMemoriesWithOutcome(input, deps)).hits
 }
 
-export async function retrieveMemoriesWithOutcome(
+/** Request fields win; a field the request leaves undefined falls back to `deps.defaults`. */
+function withRecallDefaults(
   input: RetrieveMemoriesInput,
+  defaults: MemoryRetrieverDeps["defaults"]
+): RetrieveMemoriesInput {
+  if (!defaults) return input
+  return {
+    ...input,
+    sessionRecallRouting: input.sessionRecallRouting ?? defaults.sessionRecallRouting,
+    beliefRankingWeight: input.beliefRankingWeight ?? defaults.beliefRankingWeight,
+    rerank: input.rerank ?? defaults.rerank,
+  }
+}
+
+export async function retrieveMemoriesWithOutcome(
+  rawInput: RetrieveMemoriesInput,
   deps: MemoryRetrieverDeps
 ): Promise<MemoryRetrievalOutcome> {
+  const input = withRecallDefaults(rawInput, deps.defaults)
   const now = deps.telemetry?.now ?? Date.now
   const startedAt = now()
   const reasons: RetrievalDegradeReason[] = []
@@ -438,9 +528,21 @@ export async function retrieveMemoriesWithOutcome(
     return finish([], [], [], query)
   }
 
-  let candidates = (await deps.loadCandidates(reader)).filter((memory) =>
-    isMemoryEligibleForRetrieval(memory, input.now)
-  )
+  const asOf =
+    typeof input.asOf === "number" && Number.isFinite(input.asOf) ? input.asOf : undefined
+  let candidates: Memory[]
+  if (asOf !== undefined) {
+    if (!deps.loadHistoricalCandidates) return finish([], [], [], query)
+    candidates = onePerIdentity(
+      (await deps.loadHistoricalCandidates(reader)).filter((memory) =>
+        isMemoryEligibleAt(memory, asOf)
+      )
+    )
+  } else {
+    candidates = (await deps.loadCandidates(reader)).filter((memory) =>
+      isMemoryEligibleForRetrieval(memory, input.now)
+    )
+  }
   if (input.types) {
     const allow = new Set(input.types)
     candidates = candidates.filter((m) => allow.has(m.type))
@@ -468,7 +570,7 @@ export async function retrieveMemoriesWithOutcome(
   )
     .slice()
     .sort()
-    .join(",")}::${input.claimFilter ?? "all"}`
+    .join(",")}::${input.claimFilter ?? "all"}${asOf !== undefined ? "::historical" : ""}`
   cacheHit = matchesCorpus(memoryBm25Cache.get(cacheKey), candidates)
   const bm25 = getMemoryBm25Index(cacheKey, candidates)
   const keywordQuery = input.enableQueryExpansion ? buildExpandedKeywordQuery(query) : query
@@ -491,7 +593,12 @@ export async function retrieveMemoriesWithOutcome(
           return false
         })
 
-  const vectorOutcome = await retrieveVectorLeg(query, [...byVectorDocId.keys()], input, deps)
+  // Historical recall is lexical by contract: a vector describes a row's
+  // CURRENT text, so scoring a past wording with it would rank the present.
+  const vectorOutcome =
+    asOf !== undefined
+      ? { hits: [], reasons: [] }
+      : await retrieveVectorLeg(query, [...byVectorDocId.keys()], input, deps)
   reasons.push(...vectorOutcome.reasons)
   const vectorHits = vectorOutcome.hits.flatMap((hit) => {
     const memory = byVectorDocId.get(hit.id)
@@ -526,6 +633,16 @@ export async function retrieveMemoriesWithOutcome(
   // stated fact outranks a stale, inbound one of equal relevance. `veracityFor`
   // is a ranking signal only — the provenance injection gate stays in the reader.
   const baseHalfLife = input.recencyHalfLifeDays ?? DEFAULT_MEMORY_CONFIG.decayHalfLifeDays
+  const scoreNow = input.now ?? Date.now()
+  // Session-recall routing: a question about a past conversation wants an
+  // episode, which plain relevance ranks no higher than a general fact.
+  const recallIntent = input.sessionRecallRouting === true && isSessionRecallQuery(query)
+  const beliefWeight =
+    typeof input.beliefRankingWeight === "number" &&
+    Number.isFinite(input.beliefRankingWeight) &&
+    input.beliefRankingWeight > 0
+      ? input.beliefRankingWeight
+      : 0
   const scorable = floored
     .map((n) => byId.get(n.id))
     .filter((m): m is Memory => m !== undefined)
@@ -535,9 +652,27 @@ export async function retrieveMemoriesWithOutcome(
       halfLifeDays: recencyHalfLifeDaysForType(m.type, baseHalfLife),
       veracity: veracityFor(m),
       governance: governanceScoreFor(m),
+      ...(beliefWeight > 0
+        ? {
+            belief:
+              beliefStrength(m.beliefInputs, {
+                liveContradictions: m.conflictWithIds?.length ?? 0,
+                now: scoreNow,
+              }) ?? 0,
+          }
+        : {}),
+      ...(recallIntent && m.type === "episodic" ? { boost: SESSION_RECALL_EPISODIC_BOOST } : {}),
     }))
 
-  const ranked = scoreMemories(scorable, { now: input.now }).slice(0, input.topK)
+  const locallyRanked = scoreMemories(scorable, {
+    now: input.now,
+    weights: { belief: beliefWeight },
+  })
+  const ranked =
+    input.rerank && deps.rerank && asOf === undefined
+      ? await rerankRanked(query, locallyRanked, input, deps)
+      : locallyRanked
+  ranked.splice(input.topK)
 
   const result: RetrievedMemory[] = ranked.map((r) => ({
     memory: byId.get(r.memory.id)!,
@@ -550,7 +685,7 @@ export async function retrieveMemoriesWithOutcome(
     if (!selected.has(row.id)) exclusions.push({ id: row.id, reason: "over_topk" })
   }
 
-  if (deps.touch && result.length > 0) {
+  if (deps.touch && result.length > 0 && asOf === undefined) {
     try {
       void Promise.resolve(deps.touch(result.map((r) => r.memory.id))).catch(() => undefined)
     } catch {
@@ -559,6 +694,38 @@ export async function retrieveMemoriesWithOutcome(
   }
 
   return finish(result, candidateIds, scoreTrace(), query)
+}
+
+/**
+ * Rerank the top of the local ranking. The window is `max(topK, min(3·topK,
+ * 30))` — the same over-fetch ai-memory uses — so the model can promote
+ * something the local score put just below the cut. Everything outside the
+ * window keeps its local position after the reranked prefix.
+ */
+async function rerankRanked<T extends { memory: Memory }>(
+  query: string,
+  ranked: T[],
+  input: RetrieveMemoriesInput,
+  deps: MemoryRetrieverDeps
+): Promise<T[]> {
+  const windowSize = Math.max(input.topK, Math.min(input.topK * 3, RERANK_MAX_CANDIDATES))
+  const window = ranked.slice(0, windowSize)
+  if (window.length < 2) return ranked
+  let judged: Map<string, number> | null = null
+  try {
+    judged = await deps.rerank!(
+      query,
+      window.map((entry) => ({ id: entry.memory.id, text: entry.memory.text })),
+      { signal: input.signal, timeoutMs: deps.rerankTimeoutMs }
+    )
+  } catch {
+    judged = null
+  }
+  const reordered = applyRerank(
+    window.map((entry) => ({ id: entry.memory.id, entry })),
+    judged
+  ).map((item) => item.entry)
+  return [...reordered, ...ranked.slice(windowSize)]
 }
 
 interface VectorLegOutcome {

@@ -136,7 +136,17 @@ export type ConsolidationOp =
       candidate: ConsolidationCandidate
       reason: QuarantineReason
     }
-  | { op: "NOOP" }
+  | {
+      op: "NOOP"
+      /**
+       * The existing memory the judge said already captures the candidate, when
+       * it named a valid one. Not a mutation — `consolidationOpMemoryId` stays
+       * `undefined` for NOOP — but a restatement in a new session is
+       * corroboration, so callers attach the turn's evidence to this row (see
+       * `consolidationCorroboratedId`) and its belief strength grows.
+       */
+      targetId?: string
+    }
 
 /** Why a candidate was quarantined rather than merged. */
 export type QuarantineReason =
@@ -165,6 +175,16 @@ export function consolidationOpMemoryId(op: ConsolidationOp): string | undefined
     case "NOOP":
       return undefined
   }
+}
+
+/**
+ * The memory a NOOP op corroborated, if the judge named one. Kept separate from
+ * `consolidationOpMemoryId` on purpose: that id drives governance patches
+ * (review status reset, audit "revised"), and a restatement must not reset a
+ * verified memory back to unreviewed.
+ */
+export function consolidationCorroboratedId(op: ConsolidationOp): string | undefined {
+  return op.op === "NOOP" ? op.targetId : undefined
 }
 
 export interface ConsolidateInput {
@@ -244,7 +264,8 @@ function buildDecidePrompt(candidate: MemoryCandidate, similar: Memory[]): strin
     `  false (give that memory's id; the candidate will be added fresh).`,
     `- CONFLICT: the candidate contradicts an existing memory but the source is`,
     `  not authoritative enough to decide which is true (give that memory's id).`,
-    `- NOOP: the candidate is already fully captured.`,
+    `- NOOP: the candidate is already fully captured (give the id of the memory that`,
+    `  captures it).`,
     `Return JSON: {"op":"ADD|UPDATE|DELETE|CONFLICT|NOOP","targetId?":"<id>","mergedText?":"<text>"}.`,
   ].join("\n")
 }
@@ -422,7 +443,7 @@ export async function consolidate(
       await deps.markConflict?.(targetId, memory.id)
       applied.push({ op: "CONFLICT", memory, targetId, candidate })
     } else if (op === "NOOP") {
-      applied.push({ op: "NOOP" })
+      applied.push(targetId ? { op: "NOOP", targetId } : { op: "NOOP" })
     } else if (op === "ADD") {
       const memory = await persistCandidate(candidate, input, deps)
       applied.push({ op: "ADD", memory, candidate })

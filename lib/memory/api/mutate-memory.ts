@@ -98,7 +98,9 @@ export async function updateExternalMemory(
 
   const memDb = await import("@/lib/db/memories")
   const existing = await memDb.getMemory(id)
-  if (!existing) return { ok: false, reason: "not_found" }
+  // A revision snapshot is history, not a memory: it cannot be edited or
+  // forgotten on its own (deleting its owner removes it).
+  if (!existing || existing.revisionOf !== undefined) return { ok: false, reason: "not_found" }
 
   const caller = context.caller
   if (caller?.namespaces && !memoryRowWithinNamespaces(existing, caller.namespaces)) {
@@ -210,7 +212,9 @@ export async function forgetExternalMemory(
 
   const memDb = await import("@/lib/db/memories")
   const existing = await memDb.getMemory(id)
-  if (!existing) return { ok: false, reason: "not_found" }
+  // A revision snapshot is history, not a memory: it cannot be edited or
+  // forgotten on its own (deleting its owner removes it).
+  if (!existing || existing.revisionOf !== undefined) return { ok: false, reason: "not_found" }
 
   const caller = context.caller
   if (caller?.namespaces && !memoryRowWithinNamespaces(existing, caller.namespaces)) {
