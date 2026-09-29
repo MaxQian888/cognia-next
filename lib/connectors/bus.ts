@@ -52,7 +52,12 @@ import { isReactionSystemEvent, recordInboundReaction } from "@/lib/connectors/r
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { appendAudit } from "./audit"
 import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
-import { evaluatePolicy, rateBucketKey, type PolicyEvalState } from "./policy-eval"
+import {
+  evaluatePolicy,
+  rateBucketKey,
+  senderTriggerRefusal,
+  type PolicyEvalState,
+} from "./policy-eval"
 import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
 import { routeInboundFromComposition, toRouteDecision, type RouteDecision } from "./mode-router"
 import { resolveImEffectiveConfig } from "./effective-config"
@@ -1537,6 +1542,25 @@ export class ConnectorBus {
    * is their strongest available scoping. When both a scoped and a legacy
    * row match, the fully-scoped row wins.
    */
+  /**
+   * The sender half of the conversation's trigger policy, applied to a card
+   * click (`senderTriggerRefusal`). Resolved exactly as Step 5 resolves it for
+   * an inbound message, so the two can never disagree about a person.
+   */
+  private async issueActionSenderRefusal(
+    event: ConnectorCallbackEvent,
+    adapterRow: AdapterInstanceRow,
+    conversationKey: string | null
+  ): Promise<string | null> {
+    const override = conversationKey ? ((await readForResolution(conversationKey)) ?? null) : null
+    const charId = override?.characterDisabled
+      ? undefined
+      : (override?.characterId ?? adapterRow.defaultCharacterId)
+    const character = charId ? ((await getCharacter(charId)) ?? null) : null
+    const { trigger } = resolveBinding({ adapter: adapterRow, character, override })
+    return senderTriggerRefusal(trigger, event.user.id)
+  }
+
   private async findStoredPlatformMessage(
     event: NormalizedInboundEvent,
     replaces: string
@@ -2655,6 +2679,26 @@ export class ConnectorBus {
     // the same guards the desktop board uses and answered with a tight reply
     // or a refreshed card — no model digest turn. See `lib/issues/im/`.
     if (resolvedBinding?.kind === "issue_action") {
+      // A button can start a run, so it answers to the same sender rules a
+      // message does: someone the bot ignores, or does not list when it only
+      // answers a list, cannot move or run an issue by clicking either. The
+      // policy is the layered one an inbound turn gets (bot → character →
+      // conversation override). No bot row to read means no policy to check
+      // against, and a run is not started on an unknown policy.
+      const refusal = adapterRow
+        ? await this.issueActionSenderRefusal(event, adapterRow, resolvedConversationKey)
+        : "policy-unavailable"
+      if (refusal) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "issue.card_action_denied",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: refusal,
+          fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
+        })
+        return true
+      }
       try {
         const { handleIssueActionCallback } = await import("@/lib/issues/im/callback-handler")
         await handleIssueActionCallback({

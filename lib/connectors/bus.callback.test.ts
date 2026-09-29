@@ -504,6 +504,7 @@ describe("ConnectorBus.dispatchConnectorCallback — wf_approve / wf_cancel kind
 describe("ConnectorBus.dispatchConnectorCallback — issue_action kind", () => {
   it("routes an issue card click to the issue handler with the binding, never the generic handler", async () => {
     mockHandleIssueAction.mockResolvedValueOnce({ kind: "moved" })
+    await seedUnguardedAdapter()
     const conversationKey = "telegram:adp_tg:c1"
     await recordCallbackBinding({
       adapterId: "adp_tg",
@@ -542,6 +543,7 @@ describe("ConnectorBus.dispatchConnectorCallback — issue_action kind", () => {
 
   it("audits and swallows a handler failure instead of falling through to the model", async () => {
     mockHandleIssueAction.mockRejectedValueOnce(new Error("engine down"))
+    await seedUnguardedAdapter()
     const conversationKey = "telegram:adp_tg:c1"
     await recordCallbackBinding({
       adapterId: "adp_tg",
@@ -561,6 +563,91 @@ describe("ConnectorBus.dispatchConnectorCallback — issue_action kind", () => {
     const audit = await getDb().connectorAudit.toArray()
     const denied = audit.find((r) => r.kind === "issue.card_action_denied")
     expect(denied).toMatchObject({ reason: "Error", message: "engine down" })
+  })
+
+  async function bindRun(conversationKey: string) {
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "a2ui:issue:3:run:run",
+      kind: "issue_action",
+      surfaceId: "issue:3",
+      conversationKey,
+      payload: { action: "run", issueId: "iss-3" },
+    })
+  }
+
+  async function clickRun(conversationKey: string) {
+    await getBus().dispatchConnectorCallback(
+      makeEvent({ triggerId: "a2ui:issue:3:run:run", value: "run", conversationKey })
+    )
+  }
+
+  async function deniedReason() {
+    const audit = await getDb().connectorAudit.toArray()
+    return audit.find((r) => r.kind === "issue.card_action_denied")?.reason
+  }
+
+  it("refuses a click from a sender the bot's blocklist ignores", async () => {
+    const conversationKey = "telegram:adp_tg:c1"
+    await seedUnguardedAdapter()
+    await getDb().adapterInstances.update("adp_tg", {
+      trigger: {
+        rules: [{ kind: "self-mention" }],
+        blockers: [{ kind: "user-blocklist", userIds: [sender.id] }],
+        storeUnmatchedInDraftMode: false,
+      },
+    })
+    await bindRun(conversationKey)
+    await clickRun(conversationKey)
+    expect(mockHandleIssueAction).not.toHaveBeenCalled()
+    expect(await deniedReason()).toBe("user-blocklist")
+  })
+
+  it("refuses an unlisted sender when the bot only answers an allowlist", async () => {
+    const conversationKey = "telegram:adp_tg:c1"
+    await seedUnguardedAdapter()
+    await getDb().adapterInstances.update("adp_tg", {
+      trigger: {
+        rules: [{ kind: "user-allowlist", userIds: ["someone-else"] }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      },
+    })
+    await bindRun(conversationKey)
+    await clickRun(conversationKey)
+    expect(mockHandleIssueAction).not.toHaveBeenCalled()
+    expect(await deniedReason()).toBe("user-allowlist")
+  })
+
+  it("applies the conversation override's trigger, as an inbound turn would", async () => {
+    const conversationKey = "telegram:adp_tg:c1"
+    await seedUnguardedAdapter()
+    // The bot alone would refuse this sender; the conversation lets them in.
+    await getDb().adapterInstances.update("adp_tg", {
+      trigger: {
+        rules: [{ kind: "user-allowlist", userIds: ["someone-else"] }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      },
+    })
+    const { upsertByConversationKey } = await import("@/lib/db/conversation-overrides")
+    await upsertByConversationKey({
+      conversationKey,
+      sessionId: "sess-1",
+      trigger: { rules: [{ kind: "user-allowlist", userIds: [sender.id] }] },
+    } as never)
+    await bindRun(conversationKey)
+    await clickRun(conversationKey)
+    expect(mockHandleIssueAction).toHaveBeenCalledTimes(1)
+    expect(await deniedReason()).toBeUndefined()
+  })
+
+  it("refuses when the bot's row is gone, since there is no policy to check", async () => {
+    const conversationKey = "telegram:adp_tg:c1"
+    await bindRun(conversationKey)
+    await clickRun(conversationKey)
+    expect(mockHandleIssueAction).not.toHaveBeenCalled()
+    expect(await deniedReason()).toBe("policy-unavailable")
   })
 })
 

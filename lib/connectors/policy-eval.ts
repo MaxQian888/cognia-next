@@ -169,6 +169,43 @@ function checkBlocker(
  *                  Blockers are AND-NOT — any match → `blocked = true`.
  *                  Matched and blocked are evaluated independently.
  */
+/**
+ * Would this sender be refused a turn by the SENDER half of the policy?
+ *
+ * For an action that is not a message (a card button that starts a run), so
+ * there is no text, mention or channel to evaluate. The question it answers
+ * is "could this person have started a turn here by writing to the bot?":
+ *
+ * - a `user-blocklist` naming them refuses (`"user-blocklist"`);
+ * - when EVERY rule is a `user-allowlist`, the bot only answers the people it
+ *   lists, so anyone else is refused (`"user-allowlist"`);
+ * - any other rule (a mention, a reply, a keyword, a channel or private-chat
+ *   rule) is one a sender can meet by writing, so it restricts no one, and a
+ *   policy with no rules says nothing about who.
+ *
+ * Channel, keyword and rate blockers are deliberately out of scope: they
+ * judge a message, not a person.
+ */
+export function senderTriggerRefusal(
+  policy: TriggerPolicy,
+  senderId: string
+): "user-blocklist" | "user-allowlist" | null {
+  for (const blocker of policy.blockers) {
+    if (blocker.kind === "user-blocklist" && blocker.userIds.includes(senderId)) {
+      return "user-blocklist"
+    }
+  }
+  const allowlistOnly =
+    policy.rules.length > 0 && policy.rules.every((rule) => rule.kind === "user-allowlist")
+  if (
+    allowlistOnly &&
+    !policy.rules.some((rule) => rule.kind === "user-allowlist" && rule.userIds.includes(senderId))
+  ) {
+    return "user-allowlist"
+  }
+  return null
+}
+
 export function evaluatePolicy(
   policy: TriggerPolicy,
   event: NormalizedInboundEvent,

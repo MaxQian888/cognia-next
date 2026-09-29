@@ -7,7 +7,12 @@
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { TriggerPolicy } from "@/types/connectors/policy"
-import { evaluatePolicy, type PolicyEvalState, rateBucketKey } from "./policy-eval"
+import {
+  evaluatePolicy,
+  type PolicyEvalState,
+  rateBucketKey,
+  senderTriggerRefusal,
+} from "./policy-eval"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -494,5 +499,45 @@ describe("rate-limit tenant bucket", () => {
     }
 
     expect(evaluatePolicy(policy, larkEvent("u2", "c2", "tk_a"), state, now).blocked).toBe(false)
+  })
+})
+
+describe("senderTriggerRefusal", () => {
+  it("refuses a sender a user-blocklist names, whatever the rules", () => {
+    const policy: TriggerPolicy = {
+      rules: [{ kind: "self-mention" }],
+      blockers: [{ kind: "user-blocklist", userIds: ["u_bob"] }],
+      storeUnmatchedInDraftMode: false,
+    }
+    expect(senderTriggerRefusal(policy, "u_bob")).toBe("user-blocklist")
+    expect(senderTriggerRefusal(policy, "u_alice")).toBeNull()
+  })
+
+  it("restricts to the listed people only when every rule is an allowlist", () => {
+    const allowlistOnly = noBlockPolicy([
+      { kind: "user-allowlist", userIds: ["u_alice"] },
+      { kind: "user-allowlist", userIds: ["u_carol"] },
+    ])
+    expect(senderTriggerRefusal(allowlistOnly, "u_carol")).toBeNull()
+    expect(senderTriggerRefusal(allowlistOnly, "u_bob")).toBe("user-allowlist")
+    // A mention rule is one anyone can meet by writing, so the list no longer
+    // decides who may start a turn.
+    const mixed = noBlockPolicy([
+      { kind: "user-allowlist", userIds: ["u_alice"] },
+      { kind: "self-mention" },
+    ])
+    expect(senderTriggerRefusal(mixed, "u_bob")).toBeNull()
+  })
+
+  it("ignores blockers that judge a message rather than a person", () => {
+    const policy: TriggerPolicy = {
+      rules: [],
+      blockers: [
+        { kind: "keyword-blocklist", words: ["spam"] },
+        { kind: "channel-blocklist", channelIds: ["ch_group"] },
+      ],
+      storeUnmatchedInDraftMode: false,
+    }
+    expect(senderTriggerRefusal(policy, "u_bob")).toBeNull()
   })
 })
