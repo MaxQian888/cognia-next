@@ -173,7 +173,8 @@
       "coordinator": "Coordinator",
       "threads": "Threads",
       "effort": "{role} effort",
-      "useDefault": "Use default"
+      "useDefault": "Use default",
+      "appDefault": "App default"
     }
   },
   "continue": {

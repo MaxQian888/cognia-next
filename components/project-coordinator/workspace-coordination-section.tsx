@@ -314,6 +314,7 @@ function ModelDefaultsFields({ project }: { project: Project }) {
               onSelect={({ providerId, modelId }) =>
                 write(role, { ...choice, modelId, providerId })
               }
+              placeholder={t("models.appDefault")}
               className="h-8 min-w-0 flex-1"
             />
             <Select

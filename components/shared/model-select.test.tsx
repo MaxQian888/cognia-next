@@ -169,6 +169,19 @@ describe("ModelSelect", () => {
   })
 })
 
+describe("ModelSelect placeholder", () => {
+  it("names the fallback when no model is set, and yields to a real one", () => {
+    seedSettings()
+    const { unmount } = renderSelect({ model: "", provider: "", placeholder: "App default" })
+    expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent("App default")
+    unmount()
+    renderSelect({ placeholder: "App default" })
+    expect(screen.getByRole("button", { name: /switch model/i })).not.toHaveTextContent(
+      "App default"
+    )
+  })
+})
+
 describe("ModelSelect shells", () => {
   it("opens an anchored panel carrying the overlay tier on a desktop pane", () => {
     renderSelect({ onSelectAuto: undefined })

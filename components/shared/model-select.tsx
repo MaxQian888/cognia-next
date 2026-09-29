@@ -130,6 +130,12 @@ export interface ModelSelectProps {
   onOpen?: () => void
   /** Whether auto-routing is enabled app-wide; drives the Auto row's hint copy. */
   autoEnabled?: boolean
+  /**
+   * Trigger text when `model` names nothing, e.g. a settings field whose value
+   * falls back to an app default that is itself unset. Without it the chip
+   * would render an icon and an empty label.
+   */
+  placeholder?: string
   disabled?: boolean
   /** Applied to the trigger button. */
   className?: string
@@ -236,6 +242,7 @@ export function ModelSelect({
   leadingNotice,
   onOpen,
   autoEnabled = false,
+  placeholder,
   disabled,
   className,
   align = "center",
@@ -318,8 +325,11 @@ export function ModelSelect({
                   {t("autoBadge")}
                 </span>
               ) : null}
-              <span className="min-w-0 truncate" title={model}>
-                {activeModelName}
+              <span
+                className={cn("min-w-0 truncate", !model && placeholder && "text-muted-foreground")}
+                title={model || placeholder}
+              >
+                {activeModelName || placeholder}
               </span>
               <ChevronsUpDownIcon className="size-3 opacity-50" />
             </Button>

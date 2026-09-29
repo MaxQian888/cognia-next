@@ -28386,6 +28386,7 @@
       "maxConcurrentThreads": "Threads running at once",
       "memoryLink": "Open this workspace's memory",
       "models": {
+        "appDefault": "App default",
         "coordinator": "Coordinator",
         "description": "What new coordinator and thread conversations start with. Each conversation can still switch.",
         "effort": "{role} effort",

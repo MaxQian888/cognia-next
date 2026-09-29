@@ -28386,6 +28386,7 @@
       "maxConcurrentThreads": "同时运行的线程数",
       "memoryLink": "打开此工作区的记忆",
       "models": {
+        "appDefault": "应用默认",
         "coordinator": "协调者",
         "description": "新建的协调者和线程对话默认使用的模型。每个对话仍可自行切换。",
         "effort": "{role}思考强度",

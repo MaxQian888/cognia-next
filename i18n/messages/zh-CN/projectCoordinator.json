@@ -173,7 +173,8 @@
       "coordinator": "协调者",
       "threads": "线程",
       "effort": "{role}思考强度",
-      "useDefault": "使用默认"
+      "useDefault": "使用默认",
+      "appDefault": "应用默认"
     }
   },
   "continue": {
