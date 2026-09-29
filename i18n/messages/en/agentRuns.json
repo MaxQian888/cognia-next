@@ -33,7 +33,12 @@
     "approved": "Approved",
     "denied": "Denied",
     "expired": "Expired",
-    "pending": "Pending"
+    "pending": "Pending",
+    "fusionApproval": {
+      "scope_expansion": "Router + Fusion: allow edits outside the planned paths",
+      "workspace_apply": "Router + Fusion: apply the verified patch to your workspace",
+      "other": "Router + Fusion approval"
+    }
   },
   "changeKind": {
     "any": "Changed",

@@ -17,9 +17,20 @@
     "panel": "多个模型分别作答，由裁判比较后返回通过校验的答案。",
     "delegate": "把工作交给有界的 worker 图，在沙箱中验证其结果；需要工作区。"
   },
+  "delivery": {
+    "label": "交付方式",
+    "values": {
+      "patch_only": "仅补丁",
+      "workspace_updated": "应用到工作区"
+    },
+    "hints": {
+      "patch_only": "通过验证的改动以补丁形式返回，不会改动你的文件。",
+      "workspace_updated": "检查通过后，会请你批准这一份确切的补丁；批准后才会写入项目文件夹，且仅当文件夹自那时起没有变化。"
+    }
+  },
   "errors": {
     "surfaceOff": "Router + Fusion 的智能体与工作流开关已关闭，此处按自动路由执行。可在「设置 → AI 连接 → 路由」中开启。",
     "modeDormant": "该动作在本版本中尚不可用。",
-    "workspaceRequired": "委派需要改动文件，因此必须有工作区。"
+    "workspaceRequired": "委派需要改动文件，因此所属项目必须有可工作的文件夹。"
   }
 }

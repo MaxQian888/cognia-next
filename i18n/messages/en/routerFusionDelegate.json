@@ -108,7 +108,7 @@
         "workspace_apply": "The verified patch is ready to be written into your workspace. Approving applies it only while your workspace is still at the base revision; if it moved, nothing is written."
       }
     },
-    "applyElsewhere": "This run delivered a patch only. Applying it into your workspace needs a run that asks for it, so that the write goes through the same approval and conflict check.",
+    "applyElsewhere": "This run delivered a patch only. To have a delegation write its change into your workspace, set its delivery to “Apply to workspace” (on the workflow step or Squad member, or `x-cognia.delegate_delivery` on a Run API request): the write then waits for your approval of exactly that patch and is refused if the workspace moved.",
     "loading": "Reading the delegation record…",
     "notDelegate": "",
     "title": "Delegation review",

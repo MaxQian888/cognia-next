@@ -33,7 +33,12 @@
     "approved": "已批准",
     "denied": "已拒绝",
     "expired": "已过期",
-    "pending": "待处理"
+    "pending": "待处理",
+    "fusionApproval": {
+      "scope_expansion": "Router + Fusion：允许改动计划范围之外的路径",
+      "workspace_apply": "Router + Fusion：将通过验证的补丁应用到工作区",
+      "other": "Router + Fusion 审批"
+    }
   },
   "changeKind": {
     "any": "已变更",

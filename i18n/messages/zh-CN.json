@@ -2270,6 +2270,11 @@
       "approved": "已批准",
       "denied": "已拒绝",
       "expired": "已过期",
+      "fusionApproval": {
+        "other": "Router + Fusion 审批",
+        "scope_expansion": "Router + Fusion：允许改动计划范围之外的路径",
+        "workspace_apply": "Router + Fusion：将通过验证的补丁应用到工作区"
+      },
       "pending": "待处理"
     },
     "botApproval": {
@@ -12985,6 +12990,10 @@
       "resourceLimit": {
         "hint": "此主机已达到智能体进程数上限——请结束或关闭一个后重试。",
         "label": "智能体会话过多"
+      },
+      "routerFusionBypassed": {
+        "hint": "Router + Fusion 未能为一次后台模型调用预留额度，该调用已按原路径执行，其费用未计入账本。连续失败会暂停该入口；请检查「设置 → AI 连接 → 路由」。",
+        "label": "模型调用未记账"
       },
       "routerFusionRefused": {
         "hint": "没有满足本轮预算、限制或数据规则的路由——请在「设置 → AI 连接 → 路由」中提高运行上限或更换模型。",
@@ -28377,6 +28386,13 @@
     "select": "环境",
     "setup": "初始化脚本",
     "setupPlaceholder": "例如：pnpm install",
+    "setupReuse": "无变化时复用初始化",
+    "setupReuseDescription": "当此根目录上一次初始化成功、定义与输入文件均未变化且所有输出仍存在时，跳过初始化。",
+    "setupReuseInputs": "输入文件（每行一个）",
+    "setupReuseInputsPlaceholder": "pnpm-lock.yaml",
+    "setupReuseManualNote": "下方的“运行初始化”总会实际执行，可用它刷新被复用的初始化（例如轮换密钥之后）。",
+    "setupReuseOutputs": "必需的输出（每行一个）",
+    "setupReuseOutputsPlaceholder": "node_modules",
     "status": "上次初始化：{status}",
     "success": "环境命令已完成。",
     "title": "项目环境",
@@ -30546,6 +30562,11 @@
       "body": "连续失败（{reason}）。在「设置 → AI 连接 → 路由」中重新启用前，所有轮次都走原路径且不计入账本。",
       "title": "Router + Fusion 已暂停：{surface}"
     },
+    "bypass": {
+      "agentsWorkflows": "Router + Fusion 不可用（{code}），一次智能体或工作流模型调用（{feature}）未预留额度便已执行，其费用未计入账本。",
+      "other": "Router + Fusion 不可用（{code}），一次模型调用（{feature}）未预留额度便已执行，其费用未计入账本。",
+      "utilityLedger": "Router + Fusion 不可用（{code}），一次后台模型调用（{feature}）未预留额度便已执行，其费用未计入账本。"
+    },
     "grant": {
       "body": "本轮最多预留 {cap}，但你的费用预算只剩 {available}。批准一次性授权 {shortfall}，仅用于本次运行。",
       "title": "批准这次 Router + Fusion 运行？"
@@ -30576,6 +30597,7 @@
     "refusal": {
       "ATTEMPTS_EXHAUSTED": "该调用已用完允许的传输重试次数。",
       "BUDGET_FROZEN": "本次运行花费超出上限，已被停止。",
+      "CALL_FAILED": "一次模型调用失败且无法重试，本次运行已停止，没有给出答案。",
       "CALL_OUTCOME_UNKNOWN": "有一次模型调用的结果未知，为避免重复付费，运行已停止。",
       "CANCELLED": "运行已取消。",
       "CONTEXT_BUDGET_EXHAUSTED": "对话过长，在本次运行的上限内无法压缩。",
@@ -30584,19 +30606,25 @@
       "DEADLINE_EXCEEDED": "本次运行已到截止时间。",
       "DECLINED_GRANT": "一次性预算授权被拒绝，本轮未运行。",
       "DEPLOYMENT_NOT_IN_SNAPSHOT": "严格预算不允许调用本次路由之外的模型。",
+      "DEPLOYMENT_UNKNOWN": "模型调用指定的模型无法按本次运行的数据规则进行核验，因此未发送。",
       "DISPATCH_FAILED": "该轮次未能发送给模型。",
+      "FENCED": "另一个执行者接管了本次运行，此窗口已停止处理它。",
       "FORMAT_INVALID": "模型的回答不符合要求的格式。",
       "FUSION_INSUFFICIENT_CANDIDATES": "留存下来的评审团回答太少，无法比较。",
       "FUSION_TEXT_ONLY": "级联和评审团运行只读取文本。请移除图片，或将本对话切换为直接模式。",
       "INTERNAL": "Router + Fusion 发生内部错误。",
       "JUDGE_OUTPUT_INVALID": "无法读取裁判的报告。",
       "MAX_MODEL_CALLS": "本次运行已达到模型调用次数上限。",
+      "NOT_PREPARED": "模型调用在即将发送时已不再持有预留额度，因此未发送。",
       "PII_BLOCKED": "本对话包含个人数据或密钥（邮箱地址、证件号码或密钥），因此没有发送给级联或评审团模型。",
+      "POLICY_REFUSAL": "模型拒绝回答此请求。",
       "PRICE_UNKNOWN": "严格预算不允许使用没有审计价格的模型。",
       "PROVIDER_UNAVAILABLE": "本轮进行中服务商被关闭或凭据失效。",
+      "REFUSED": "Router + Fusion 拒绝了一次模型调用，但没有给出原因。",
       "RESERVATION_NOT_ACTIVE": "该调用的预留已经结算或释放。",
       "RESTRICTED_NOT_GRANTED": "受限数据不得发送给该服务商。",
       "REVOKED": "本轮进行中对该模型的访问被撤销。",
+      "ROLE_UNRESOLVABLE": "此模式所需的某个角色没有可用模型，本次运行无法开始。",
       "ROUTER_FUSION_DISABLED": "本轮进行中 Router + Fusion（聊天）被关闭。",
       "ROUTER_FUSION_UNAVAILABLE": "Router + Fusion 当前不可用，这次级联或评审团轮次没有运行。",
       "ROUTE_EXPIRED": "为这条消息选定的路由在发送前已过期，请重新发送。",
@@ -30643,6 +30671,7 @@
       "costStatusParenthesized": "（{status}）",
       "details": "运行详情",
       "estimatedCap": "估算上限：该模型没有审计价格，本次运行可能超出上限。",
+      "estimatedCapEnvelope": "估算上限：Claude Agent SDK 自行决定每次模型调用的规模，本次运行只能在调用之间检查，可能超出上限。",
       "frozen": "已在上限处停止",
       "fusion": {
         "candidates": "候选回答",
@@ -30762,7 +30791,6 @@
         },
         "builtin": "内置",
         "custom": "自定义",
-        "delegateDormant": "委派运行需要沙箱和验收检查，将在后续版本提供。此动作不会被选中。",
         "delete": "删除",
         "desc": "每种模式运行的内容：各角色使用的模型别名、回答的检查方式以及运行上限。每次修改都会为动作生成新的配置哈希；运行会保留其执行时的哈希。",
         "edit": "编辑 {id}",
@@ -30789,6 +30817,7 @@
         "panelSizeDesc": "三名成员需要设置评审团成员 C 角色。",
         "profile": "验证方式",
         "profileDesc": {
+          "code_fixture": "改动必须在沙箱中通过项目已批准的测试命令，并以该命令生成的报告作为判定依据。",
           "evidence_review": "每条论断都必须有裁判可核查的证据支持。",
           "schema_fixture": "回答必须符合请求的 JSON 结构。",
           "text_basic": "只检查回答的格式，不验证内容。",
@@ -31073,7 +31102,7 @@
       "turns": "工作者轮次"
     },
     "review": {
-      "applyElsewhere": "本次运行只交付了补丁。要把它写入工作区，需要由一次明确请求写入的运行来完成，这样写入才会经过同样的批准与冲突检查。",
+      "applyElsewhere": "本次运行只交付了补丁。要让委派把改动写入工作区，请把它的交付方式设为「应用到工作区」（在工作流步骤或 Squad 成员上设置，或在 Run API 请求中使用 `x-cognia.delegate_delivery`）：写入会先等待你批准这一份确切的补丁，且工作区若已变化则会被拒绝。",
       "approval": {
         "apply": "应用到工作区",
         "approve": "批准",
@@ -31251,10 +31280,21 @@
       "direct": "直接",
       "panel": "评审团"
     },
+    "delivery": {
+      "hints": {
+        "patch_only": "通过验证的改动以补丁形式返回，不会改动你的文件。",
+        "workspace_updated": "检查通过后，会请你批准这一份确切的补丁；批准后才会写入项目文件夹，且仅当文件夹自那时起没有变化。"
+      },
+      "label": "交付方式",
+      "values": {
+        "patch_only": "仅补丁",
+        "workspace_updated": "应用到工作区"
+      }
+    },
     "errors": {
       "modeDormant": "该动作在本版本中尚不可用。",
       "surfaceOff": "Router + Fusion 的智能体与工作流开关已关闭，此处按自动路由执行。可在「设置 → AI 连接 → 路由」中开启。",
-      "workspaceRequired": "委派需要改动文件，因此必须有工作区。"
+      "workspaceRequired": "委派需要改动文件，因此所属项目必须有可工作的文件夹。"
     },
     "field": {
       "label": "Router + Fusion 动作"
@@ -32324,6 +32364,23 @@
     "runLevelUser": "用户",
     "runMissedOnStartup": "启动时补跑错过任务",
     "runNow": "立即运行",
+    "runPhases": {
+      "names": {
+        "environment-setup": "环境初始化",
+        "executor-load": "加载执行器",
+        "fire-delay": "触发延迟",
+        "first-response": "首次响应",
+        "send-options": "智能体选项",
+        "session": "会话",
+        "turn": "智能体回合",
+        "workspace-lease": "工作区"
+      },
+      "outcome": {
+        "joined": "已合并",
+        "reused": "已复用"
+      },
+      "title": "耗时分布"
+    },
     "runRow": {
       "daysAgo": "{count} 天前",
       "hoursAgo": "{count} 小时前",

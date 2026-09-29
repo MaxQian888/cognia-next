@@ -3,6 +3,11 @@
     "title": "批准这次 Router + Fusion 运行？",
     "body": "本轮最多预留 {cap}，但你的费用预算只剩 {available}。批准一次性授权 {shortfall}，仅用于本次运行。"
   },
+  "bypass": {
+    "utilityLedger": "Router + Fusion 不可用（{code}），一次后台模型调用（{feature}）未预留额度便已执行，其费用未计入账本。",
+    "agentsWorkflows": "Router + Fusion 不可用（{code}），一次智能体或工作流模型调用（{feature}）未预留额度便已执行，其费用未计入账本。",
+    "other": "Router + Fusion 不可用（{code}），一次模型调用（{feature}）未预留额度便已执行，其费用未计入账本。"
+  },
   "breakerToast": {
     "title": "Router + Fusion 已暂停：{surface}",
     "body": "连续失败（{reason}）。在「设置 → AI 连接 → 路由」中重新启用前，所有轮次都走原路径且不计入账本。"
@@ -10,6 +15,7 @@
   "refusal": {
     "ATTEMPTS_EXHAUSTED": "该调用已用完允许的传输重试次数。",
     "BUDGET_FROZEN": "本次运行花费超出上限，已被停止。",
+    "CALL_FAILED": "一次模型调用失败且无法重试，本次运行已停止，没有给出答案。",
     "CALL_OUTCOME_UNKNOWN": "有一次模型调用的结果未知，为避免重复付费，运行已停止。",
     "CANCELLED": "运行已取消。",
     "CONTEXT_BUDGET_EXHAUSTED": "对话过长，在本次运行的上限内无法压缩。",
@@ -18,19 +24,25 @@
     "DEADLINE_EXCEEDED": "本次运行已到截止时间。",
     "DECLINED_GRANT": "一次性预算授权被拒绝，本轮未运行。",
     "DEPLOYMENT_NOT_IN_SNAPSHOT": "严格预算不允许调用本次路由之外的模型。",
+    "DEPLOYMENT_UNKNOWN": "模型调用指定的模型无法按本次运行的数据规则进行核验，因此未发送。",
     "DISPATCH_FAILED": "该轮次未能发送给模型。",
+    "FENCED": "另一个执行者接管了本次运行，此窗口已停止处理它。",
     "FORMAT_INVALID": "模型的回答不符合要求的格式。",
     "FUSION_INSUFFICIENT_CANDIDATES": "留存下来的评审团回答太少，无法比较。",
     "FUSION_TEXT_ONLY": "级联和评审团运行只读取文本。请移除图片，或将本对话切换为直接模式。",
     "INTERNAL": "Router + Fusion 发生内部错误。",
     "JUDGE_OUTPUT_INVALID": "无法读取裁判的报告。",
     "MAX_MODEL_CALLS": "本次运行已达到模型调用次数上限。",
+    "NOT_PREPARED": "模型调用在即将发送时已不再持有预留额度，因此未发送。",
     "PII_BLOCKED": "本对话包含个人数据或密钥（邮箱地址、证件号码或密钥），因此没有发送给级联或评审团模型。",
+    "POLICY_REFUSAL": "模型拒绝回答此请求。",
     "PRICE_UNKNOWN": "严格预算不允许使用没有审计价格的模型。",
     "PROVIDER_UNAVAILABLE": "本轮进行中服务商被关闭或凭据失效。",
+    "REFUSED": "Router + Fusion 拒绝了一次模型调用，但没有给出原因。",
     "RESERVATION_NOT_ACTIVE": "该调用的预留已经结算或释放。",
     "RESTRICTED_NOT_GRANTED": "受限数据不得发送给该服务商。",
     "REVOKED": "本轮进行中对该模型的访问被撤销。",
+    "ROLE_UNRESOLVABLE": "此模式所需的某个角色没有可用模型，本次运行无法开始。",
     "ROUTER_FUSION_DISABLED": "本轮进行中 Router + Fusion（聊天）被关闭。",
     "ROUTER_FUSION_UNAVAILABLE": "Router + Fusion 当前不可用，这次级联或评审团轮次没有运行。",
     "ROUTE_EXPIRED": "为这条消息选定的路由在发送前已过期，请重新发送。",
@@ -84,6 +96,7 @@
     },
     "costStatusParenthesized": "（{status}）",
     "estimatedCap": "估算上限：该模型没有审计价格，本次运行可能超出上限。",
+    "estimatedCapEnvelope": "估算上限：Claude Agent SDK 自行决定每次模型调用的规模，本次运行只能在调用之间检查，可能超出上限。",
     "calls": "模型调用",
     "overspend": "超出上限 {amount}",
     "frozen": "已在上限处停止",
@@ -298,7 +311,6 @@
       "mode": {
         "delegate": "委派"
       },
-      "delegateDormant": "委派运行需要沙箱和验收检查，将在后续版本提供。此动作不会被选中。",
       "roles": "角色",
       "rolesDesc": "每个角色使用 「路由 → 模型映射」 中的一个模型别名。评审团成员需要使用不同的模型版本。",
       "roleUnused": "不使用",
@@ -314,7 +326,8 @@
         "text_basic": "只检查回答的格式，不验证内容。",
         "text_review": "由复核模型对照请求检查回答。",
         "schema_fixture": "回答必须符合请求的 JSON 结构。",
-        "evidence_review": "每条论断都必须有裁判可核查的证据支持。"
+        "evidence_review": "每条论断都必须有裁判可核查的证据支持。",
+        "code_fixture": "改动必须在沙箱中通过项目已批准的测试命令，并以该命令生成的报告作为判定依据。"
       },
       "profileDormant": "需要运行时验证器，将在后续版本提供；在此之前路由不会选择此动作。",
       "runCap": "运行上限（美元）",

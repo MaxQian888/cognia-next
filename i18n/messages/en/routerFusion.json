@@ -3,6 +3,11 @@
     "title": "Approve this Router + Fusion run?",
     "body": "This turn reserves up to {cap}, but your cost budget only has {available} left. Approve a one-time grant of {shortfall} for this run only."
   },
+  "bypass": {
+    "utilityLedger": "A background model call ({feature}) ran without a ledger reservation because Router + Fusion was unavailable ({code}). Its cost is not in the ledger.",
+    "agentsWorkflows": "An Agent or workflow model call ({feature}) ran without a ledger reservation because Router + Fusion was unavailable ({code}). Its cost is not in the ledger.",
+    "other": "A model call ({feature}) ran without a ledger reservation because Router + Fusion was unavailable ({code}). Its cost is not in the ledger."
+  },
   "breakerToast": {
     "title": "Router + Fusion paused for {surface}",
     "body": "Repeated failures ({reason}). Turns use the original path and are not ledgered until you re-arm it in Settings → AI connections → Routing."
@@ -10,6 +15,7 @@
   "refusal": {
     "ATTEMPTS_EXHAUSTED": "This call already used every transport attempt it was allowed.",
     "BUDGET_FROZEN": "The run spent past its cap and was stopped.",
+    "CALL_FAILED": "A model call failed and could not be retried, so the run stopped without an answer.",
     "CALL_OUTCOME_UNKNOWN": "A model call's outcome is unknown, so the run stopped rather than pay for it twice.",
     "CANCELLED": "The run was cancelled.",
     "CONTEXT_BUDGET_EXHAUSTED": "The conversation is too long to compact within this run's cap.",
@@ -18,19 +24,25 @@
     "DEADLINE_EXCEEDED": "The run reached its deadline.",
     "DECLINED_GRANT": "The one-time budget grant was declined, so the turn did not run.",
     "DEPLOYMENT_NOT_IN_SNAPSHOT": "The strict budget does not allow a model outside this run's route.",
+    "DEPLOYMENT_UNKNOWN": "A model call named a model this run cannot check against its data rules, so it was not sent.",
     "DISPATCH_FAILED": "The turn could not be sent to the model.",
+    "FENCED": "Another worker took over this run, so this window stopped working on it.",
     "FORMAT_INVALID": "The model's answer was not in the required format.",
     "FUSION_INSUFFICIENT_CANDIDATES": "Too few panel answers survived to compare.",
     "FUSION_TEXT_ONLY": "Cascade and panel runs read text only. Remove the images or switch this conversation to Direct.",
     "INTERNAL": "Router + Fusion hit an internal error.",
     "JUDGE_OUTPUT_INVALID": "The judge's report could not be read.",
     "MAX_MODEL_CALLS": "The run reached its model-call limit.",
+    "NOT_PREPARED": "The model call was no longer reserved when it was about to be sent, so it was not sent.",
     "PII_BLOCKED": "This conversation contains personal data or a secret (an email address, an ID number or a key), so it was not sent to the cascade or panel models.",
+    "POLICY_REFUSAL": "The model declined to answer this request.",
     "PRICE_UNKNOWN": "The strict budget does not allow a model without an audited price.",
     "PROVIDER_UNAVAILABLE": "The provider was switched off or lost its credentials during the turn.",
+    "REFUSED": "Router + Fusion refused a model call without giving a reason.",
     "RESERVATION_NOT_ACTIVE": "The reservation for this call was already settled or released.",
     "RESTRICTED_NOT_GRANTED": "Restricted data may not be sent to this provider.",
     "REVOKED": "Access to this model was revoked during the turn.",
+    "ROLE_UNRESOLVABLE": "No model is available for one of the roles this mode needs, so the run could not start.",
     "ROUTER_FUSION_DISABLED": "Router + Fusion for chat was switched off during the turn.",
     "ROUTER_FUSION_UNAVAILABLE": "Router + Fusion is unavailable right now, so this cascade or panel turn did not run.",
     "ROUTE_EXPIRED": "The route chosen for this message expired before it was sent. Send it again.",
@@ -84,6 +96,7 @@
     },
     "costStatusParenthesized": "({status})",
     "estimatedCap": "Estimated cap: this model has no audited price, so the run may overspend its cap.",
+    "estimatedCapEnvelope": "Estimated cap: the Claude Agent SDK sizes its own model calls, so the run is checked between calls and may overspend its cap.",
     "calls": "Model calls",
     "overspend": "Over cap by {amount}",
     "frozen": "Stopped at the cap",
@@ -298,7 +311,6 @@
       "mode": {
         "delegate": "Delegate"
       },
-      "delegateDormant": "Delegate runs need a sandbox and acceptance checks, which arrive in a later release. This action is never chosen.",
       "roles": "Roles",
       "rolesDesc": "Each role runs on a model alias from Routing → Model mappings. A panel needs different model revisions for its members.",
       "roleUnused": "Not used",
@@ -314,7 +326,8 @@
         "text_basic": "The answer is checked for format only; its content is not verified.",
         "text_review": "A reviewer model checks the answer against the request.",
         "schema_fixture": "The answer must match the requested JSON schema.",
-        "evidence_review": "Every claim must be backed by evidence the judge can check."
+        "evidence_review": "Every claim must be backed by evidence the judge can check.",
+        "code_fixture": "The change must pass the project's approved test command in a sandbox, which produces the report it is judged by."
       },
       "profileDormant": "Needs a runtime verifier, which arrives in a later release; the router does not choose this action until then.",
       "runCap": "Run cap (USD)",

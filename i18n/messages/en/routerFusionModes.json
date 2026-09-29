@@ -17,9 +17,20 @@
     "panel": "Several models answer, a judge compares them, and the checked answer is returned.",
     "delegate": "Hand the work to a bounded worker graph that proves its result in a sandbox. Needs a workspace."
   },
+  "delivery": {
+    "label": "Delivery",
+    "values": {
+      "patch_only": "Patch only",
+      "workspace_updated": "Apply to workspace"
+    },
+    "hints": {
+      "patch_only": "The verified change comes back as a patch; your files are not touched.",
+      "workspace_updated": "After the checks pass, you are asked to approve this exact patch; only then is it written into the project folder, and only if the folder has not changed since."
+    }
+  },
   "errors": {
     "surfaceOff": "Router + Fusion is off for agents and workflows, so this runs as Auto. Turn it on in Settings → AI connections → Routing.",
     "modeDormant": "This action is not available in this release.",
-    "workspaceRequired": "Delegate edits files, so it needs a workspace."
+    "workspaceRequired": "Delegate edits files, so it needs a project with a folder to work in."
   }
 }
