@@ -1297,6 +1297,8 @@ async function memorySearchRpc(payload: Record<string, unknown>): Promise<unknow
   if (typeof query !== "string" || query.trim().length === 0) {
     throw new Error("memory_search.query is required")
   }
+  const { parseMemoryAsOf } = await import("@/lib/memory/api/as-of")
+  const asOf = parseMemoryAsOf(payload.asOf as number | string | undefined)
   const { searchMemoriesExternal } = await import("@/lib/memory/api/search-memory")
   const { companionCaller } = await import("@/lib/memory/api/caller")
   const result = await searchMemoriesExternal(
@@ -1309,6 +1311,7 @@ async function memorySearchRpc(payload: Record<string, unknown>): Promise<unknow
       agentId: payload.agentId as string | undefined,
       branch: payload.branch as string | undefined,
       path: payload.path as string | undefined,
+      ...(asOf !== undefined ? { asOf } : {}),
     },
     companionCaller(payload.callerDeviceId as string | undefined)
   )

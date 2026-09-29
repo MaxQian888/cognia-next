@@ -82439,6 +82439,14 @@ paths:
                   type: string
                 path:
                   type: string
+                asOf:
+                  description: Search memory as it was at this instant (epoch milliseconds or ISO 8601). Hits whose text was an earlier
+                    wording carry revisionId/validFrom/validTo.
+                  oneOf:
+                    - type: integer
+                      minimum: 1
+                    - type: string
+                      minLength: 1
               additionalProperties: false
       responses:
         "200":

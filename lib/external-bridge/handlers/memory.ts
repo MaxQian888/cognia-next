@@ -19,6 +19,7 @@
 
 import type { MemoryScope, MemoryType } from "@/types/memory/memory"
 import { searchMemoriesExternal } from "@/lib/memory/api/search-memory"
+import { parseMemoryAsOf } from "@/lib/memory/api/as-of"
 import { listMemoriesExternal, type MemoryReadDenyReason } from "@/lib/memory/api/read-memory"
 import { mcpCaller } from "@/lib/memory/api/caller"
 import { storeExternalMemory, type StoreMemoryCoreResult } from "@/lib/memory/api/store-memory"
@@ -60,16 +61,6 @@ export interface MemorySearchInput {
    * history); memories created later or already forgotten are excluded.
    */
   asOf?: number | string
-}
-
-/** Parse an `asOf` argument; throws on anything that is not a real instant. */
-export function parseMemoryAsOf(value: number | string | undefined): number | undefined {
-  if (value === undefined) return undefined
-  const instant = typeof value === "number" ? value : Date.parse(value)
-  if (!Number.isFinite(instant) || instant <= 0) {
-    throw new Error("asOf must be epoch milliseconds or an ISO 8601 timestamp")
-  }
-  return instant
 }
 
 export type MemorySearchResult =

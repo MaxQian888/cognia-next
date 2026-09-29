@@ -1947,6 +1947,33 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
     expect(result.hits[0].memory.vectorDocId).toBeUndefined()
   })
 
+  it("memory_search forwards a valid asOf as epoch milliseconds", async () => {
+    mockMemorySearch.mockResolvedValue({ ok: true, hits: [] })
+    await dispatchCommand("memory_search", { query: "pnpm", asOf: "2024-01-02T00:00:00Z" })
+    expect(mockMemorySearch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: "pnpm", asOf: Date.UTC(2024, 0, 2) }),
+      expect.objectContaining({ transport: "companion" })
+    )
+    await dispatchCommand("memory_search", { query: "pnpm", asOf: 1_700_000_000_000 })
+    expect(mockMemorySearch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ asOf: 1_700_000_000_000 }),
+      expect.anything()
+    )
+    await dispatchCommand("memory_search", { query: "pnpm" })
+    expect(mockMemorySearch.mock.lastCall?.[0]).not.toHaveProperty("asOf")
+  })
+
+  it("memory_search rejects an invalid asOf before searching", async () => {
+    mockMemorySearch.mockClear()
+    await expect(
+      dispatchCommand("memory_search", { query: "pnpm", asOf: "not a date" })
+    ).rejects.toThrow(/asOf must be epoch milliseconds or an ISO 8601 timestamp/)
+    await expect(dispatchCommand("memory_search", { query: "pnpm", asOf: 0 })).rejects.toThrow(
+      /asOf must be/
+    )
+    expect(mockMemorySearch).not.toHaveBeenCalled()
+  })
+
   it("memory_search passes policy blocks through unchanged", async () => {
     mockMemorySearch.mockResolvedValue({ ok: false, reason: "disabled" })
     expect(await dispatchCommand("memory_search", { query: "q" })).toEqual({
